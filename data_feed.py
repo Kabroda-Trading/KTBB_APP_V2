@@ -1,12 +1,13 @@
 import requests
 from typing import List, Dict, Tuple
+from datetime import datetime, timezone, timedelta
 
 BINANCE_BASE_URL = "https://api.binance.us"
 
 
 def fetch_klines(symbol: str, interval: str, limit: int) -> List[Dict[str, float]]:
     """
-    Fetch OHLCV candles from Binance.
+    Fetch OHLCV candles from Binance US.
 
     interval examples:
       - "1m", "5m", "15m", "30m"
@@ -24,7 +25,7 @@ def fetch_klines(symbol: str, interval: str, limit: int) -> List[Dict[str, float
         # 0 open time, 1 open, 2 high, 3 low, 4 close, 5 volume, ...
         klines.append(
             {
-                "open_time": k[0],
+                "open_time": int(k[0]),
                 "open": float(k[1]),
                 "high": float(k[2]),
                 "low": float(k[3]),
@@ -33,6 +34,11 @@ def fetch_klines(symbol: str, interval: str, limit: int) -> List[Dict[str, float
             }
         )
     return klines
+
+
+def ms_to_utc(ms: int) -> datetime:
+    """Convert Binance millisecond timestamp to a UTC datetime."""
+    return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
 
 
 def compute_volume_profile(
@@ -133,29 +139,140 @@ def compute_volume_profile(
     return float(val_price), float(poc_price), float(vah_price)
 
 
+def find_last_pivot_high(highs: List[float], left: int, right: int) -> float | None:
+    """
+    Find the last confirmed pivot high in a list of highs.
+
+    Pivot definition (similar to Pine ta.pivothigh):
+      - The pivot index i must have `left` bars before and `right` bars after it.
+      - high[i] must be strictly greater than the highs of the `left` bars before it.
+      - high[i] must be greater than or equal to the highs of the `right` bars after it.
+
+    We scan from the most recent *confirmed* bar backwards, so we return
+    the latest pivot, just like your Pine script does with lastSupply4h etc.
+    """
+    n = len(highs)
+    if n == 0:
+        return None
+
+    # We can't confirm a pivot on the last `right` bars.
+    # Start from n - 1 - right and move backwards.
+    for i in range(n - 1 - right, left - 1, -1):
+        candidate = highs[i]
+
+        # Check left side: strictly greater than `left` previous highs
+        ok_left = True
+        for j in range(i - left, i):
+            if candidate <= highs[j]:
+                ok_left = False
+                break
+
+        if not ok_left:
+            continue
+
+        # Check right side: greater or equal than `right` next highs
+        ok_right = True
+        for j in range(i + 1, i + 1 + right):
+            if j >= n or candidate < highs[j]:
+                ok_right = False
+                break
+
+        if ok_right:
+            return candidate
+
+    return None
+
+
+def find_last_pivot_low(lows: List[float], left: int, right: int) -> float | None:
+    """
+    Mirror of find_last_pivot_high for lows.
+
+    Pivot low:
+      - low[i] must be strictly lower than the `left` lows before it.
+      - low[i] must be lower than or equal to the `right` lows after it.
+    """
+    n = len(lows)
+    if n == 0:
+        return None
+
+    for i in range(n - 1 - right, left - 1, -1):
+        candidate = lows[i]
+
+        ok_left = True
+        for j in range(i - left, i):
+            if candidate >= lows[j]:
+                ok_left = False
+                break
+
+        if not ok_left:
+            continue
+
+        ok_right = True
+        for j in range(i + 1, i + 1 + right):
+            if j >= n or candidate > lows[j]:
+                ok_right = False
+                break
+
+        if ok_right:
+            return candidate
+
+    return None
+
+
 def build_auto_inputs_for_btc() -> Dict[str, float]:
     """
     Build the exact inputs your compute_dm_levels() expects, using live BTCUSDT data.
 
-    Design choices (simple v1, we can refine later):
-      - Weekly VRVP: last 168 x 1h candles (~7 days)
-      - 24h FRVP:    last 96 x 15m candles (24h)
-      - Morning FRVP:last 16 x 15m candles (~4h window before 'now')
-      - 4H shelves:  high/low of last 12 x 4h candles
-      - 1H shelves:  high/low of last 24 x 1h candles
-      - 30m range:   high/low of latest 30m candle
+    Time-window rules (in UTC, so DST & user timezone don't matter):
+
+      - 24h FRVP:
+            previous 12:00 UTC  --> current 12:00 UTC
+        (this corresponds to 6:00–6:00 CST in winter)
+
+      - 30m Opening Range:
+            current day 12:30–13:00 UTC
+        (this corresponds to 6:30–7:00 CST in winter)
+
+      - Morning FRVP:
+            last 4h inside that 24h window (i.e. 16x 15m candles).
+
+      - HTF shelves:
+            4H / 1H supply & demand from last confirmed pivot highs/lows
+            with left=3, right=3 bars (matching the KTBB HTF Shelf Helper).
     """
     symbol = "BTCUSDT"
 
-    # Weekly VRVP from last ~7 days of 1h candles
-    weekly_kl = fetch_klines(symbol, "1h", 168)
+    now_utc = datetime.now(timezone.utc)
+
+    # ---- Anchor for the 24h window at 12:00 UTC ----
+    # If it's before today's 12:00 UTC, we use yesterday 12:00 as the END.
+    anchor_today = now_utc.replace(hour=12, minute=0, second=0, microsecond=0)
+    if now_utc < anchor_today:
+        fr24_end = anchor_today - timedelta(days=1)
+    else:
+        fr24_end = anchor_today
+    fr24_start = fr24_end - timedelta(days=1)  # 24 hours earlier
+
+    # ---- Weekly VRVP: simple rolling 7 days of 1h ----
+    weekly_kl = fetch_klines(symbol, "1h", 24 * 7)
     weekly_val, weekly_poc, weekly_vah = compute_volume_profile(weekly_kl)
 
-    # 24h FRVP from last 24h of 15m candles
-    f24_kl = fetch_klines(symbol, "15m", 96)
+    # ---- 24h FRVP anchored to 12:00 UTC ----
+    # Pull ~3 days of 15m candles, then filter to our 24h window.
+    all_15m = fetch_klines(symbol, "15m", 24 * 4 * 3)  # 3 days * 24h * 4 candles/h
+    f24_kl = [
+        k
+        for k in all_15m
+        if fr24_start <= ms_to_utc(k["open_time"]) < fr24_end
+    ]
+
+    if len(f24_kl) < 10:
+        # If something weird happens, fall back to last 24h worth of 15m candles
+        f24_kl = all_15m[-96:]
+
     f24_val, f24_poc, f24_vah = compute_volume_profile(f24_kl)
 
-    # Morning FRVP: last 4h worth of 15m candles
+    # ---- Morning FRVP: last 4 hours (16x 15m candles) inside that same 24h window ----
     if len(f24_kl) >= 16:
         morn_kl = f24_kl[-16:]
     else:
@@ -167,35 +284,65 @@ def build_auto_inputs_for_btc() -> Dict[str, float]:
         # Fallback: reuse 24h FRVP if morning subset is degenerate
         morn_val, morn_poc, morn_vah = f24_val, f24_poc, f24_vah
 
-    # 4H shelves: extremes of recent 4h candles
-    h4_kl = fetch_klines(symbol, "4h", 12)
+    # ---- 4H & 1H shelves using pivot logic (KTBB Shelf Helper v2) ----
+    LEFT_BARS = 3
+    RIGHT_BARS = 3
+
+    # 4H shelves: use enough history to find pivots
+    h4_kl = fetch_klines(symbol, "4h", 200)
     h4_highs = [k["high"] for k in h4_kl]
     h4_lows = [k["low"] for k in h4_kl]
-    h4_supply = max(h4_highs) if h4_highs else 0.0
-    h4_demand = min(h4_lows) if h4_lows else 0.0
 
-    # 1H shelves: extremes of recent 1h candles
-    h1_kl = fetch_klines(symbol, "1h", 24)
+    h4_supply_pivot = find_last_pivot_high(h4_highs, LEFT_BARS, RIGHT_BARS)
+    h4_demand_pivot = find_last_pivot_low(h4_lows, LEFT_BARS, RIGHT_BARS)
+
+    if h4_supply_pivot is None and h4_highs:
+        h4_supply_pivot = max(h4_highs)
+    if h4_demand_pivot is None and h4_lows:
+        h4_demand_pivot = min(h4_lows)
+
+    h4_supply = h4_supply_pivot or 0.0
+    h4_demand = h4_demand_pivot or 0.0
+
+    # 1H shelves
+    h1_kl = fetch_klines(symbol, "1h", 400)
     h1_highs = [k["high"] for k in h1_kl]
     h1_lows = [k["low"] for k in h1_kl]
-    h1_supply = max(h1_highs) if h1_highs else 0.0
-    h1_demand = min(h1_lows) if h1_lows else 0.0
 
-    # 30m opening range: latest 30m candle
-    r30_kl = fetch_klines(symbol, "30m", 1)
-    if r30_kl:
-        r30_high = r30_kl[-1]["high"]
-        r30_low = r30_kl[-1]["low"]
-    else:
-        # Fallback to last 15m candle if 30m missing
-        if f24_kl:
-            r30_high = f24_kl[-1]["high"]
-            r30_low = f24_kl[-1]["low"]
+    h1_supply_pivot = find_last_pivot_high(h1_highs, LEFT_BARS, RIGHT_BARS)
+    h1_demand_pivot = find_last_pivot_low(h1_lows, LEFT_BARS, RIGHT_BARS)
+
+    if h1_supply_pivot is None and h1_highs:
+        h1_supply_pivot = max(h1_highs)
+    if h1_demand_pivot is None and h1_lows:
+        h1_demand_pivot = min(h1_lows)
+
+    h1_supply = h1_supply_pivot or 0.0
+    h1_demand = h1_demand_pivot or 0.0
+
+    # ---- 30m opening range: 12:30–13:00 UTC on same "fr24_end" day ----
+    or_start = fr24_end.replace(hour=12, minute=30, second=0, microsecond=0)
+    or_end = fr24_end.replace(hour=13, minute=0, second=0, microsecond=0)
+
+    all_30m = fetch_klines(symbol, "30m", 96)  # ~2 days
+    r30_candle = None
+    for k in all_30m:
+        t = ms_to_utc(k["open_time"])
+        if or_start <= t < or_end:
+            r30_candle = k
+            break
+
+    if r30_candle is None:
+        # Fallback: just use the latest 30m candle
+        if all_30m:
+            r30_candle = all_30m[-1]
         else:
-            r30_high = 0.0
-            r30_low = 0.0
+            r30_candle = {"high": 0.0, "low": 0.0}
 
-        # helper for rounding to 1 decimal
+    r30_high = r30_candle["high"]
+    r30_low = r30_candle["low"]
+
+    # ---- Small helper to round levels to 1 decimal for display ----
     def r(x: float) -> float:
         return round(float(x), 1)
 
@@ -216,4 +363,3 @@ def build_auto_inputs_for_btc() -> Dict[str, float]:
         "r30_high": r(r30_high),
         "r30_low": r(r30_low),
     }
-
