@@ -1,5 +1,6 @@
 from typing import Dict, Any
 from datetime import datetime
+import os
 
 from fastapi import FastAPI, Form, Depends, Request, Response, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -25,6 +26,15 @@ from auth import (
     delete_session,
 )
 
+# Optional GPT client (only used if openai is installed + API key set)
+try:
+    from openai import OpenAI  # type: ignore
+except ImportError:
+    OpenAI = None  # type: ignore
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai_client = OpenAI(api_key=OPENAI_API_KEY) if (OPENAI_API_KEY and OpenAI) else None
+
 # -------------------------------------------------------------------
 # FASTAPI APP
 # -------------------------------------------------------------------
@@ -39,7 +49,7 @@ init_db()
 # -------------------------------------------------------------------
 @app.get("/health")
 async def health() -> Dict[str, Any]:
-    return {"status": "ok", "service": "ktbb", "version": "0.6.3"}
+    return {"status": "ok", "service": "ktbb", "version": "0.7.0"}
 
 
 # -------------------------------------------------------------------
@@ -74,6 +84,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class AssistantChatRequest(BaseModel):
+    symbol: str
+    question: str
+
+
 # -------------------------------------------------------------------
 # MAIN DASHBOARD UI (HTML)
 # -------------------------------------------------------------------
@@ -89,7 +104,6 @@ async def show_form(user: User = Depends(get_current_user)):
         user_label = user.email
         tier_label = user.tier.value
 
-    # Plain string; we inject USER_LABEL / TIER_LABEL at the end via .replace().
     html = """
 <!DOCTYPE html>
 <html lang="en">
@@ -332,6 +346,24 @@ async def show_form(user: User = Depends(get_current_user)):
         font-weight: 700;
         color: #f97316;
       }
+      textarea {
+        width: 100%;
+        min-height: 60px;
+        max-height: 140px;
+        resize: vertical;
+        box-sizing: border-box;
+        background: #020617;
+        border-radius: 10px;
+        border: 1px solid #1f2937;
+        padding: 6px 8px;
+        color: #e5e7eb;
+        font-size: 0.85rem;
+      }
+      textarea:focus {
+        outline: none;
+        border-color: #60a5fa;
+        box-shadow: 0 0 0 1px #60a5fa33;
+      }
     </style>
   </head>
   <body>
@@ -469,49 +501,64 @@ async def show_form(user: User = Depends(get_current_user)):
         </div>
 
         <!-- RIGHT: AUTO DMR PANEL -->
-        <div class="card">
-          <h3>Auto DMR - Selected Symbol</h3>
-          <p class="status-line">
-            Status:
-            <span id="auto-status" class="status-line">waiting...</span>
-          </p>
+        <div>
+          <div class="card">
+            <h3>Auto DMR - Selected Symbol</h3>
+            <p class="status-line">
+              Status:
+              <span id="auto-status" class="status-line">waiting...</span>
+            </p>
 
-          <!-- Compact numeric summary -->
-          <div id="summary-block" class="summary-block" style="display:none;">
-            <div class="summary-grid">
-              <div>
-                <div class="summary-label">Symbol</div>
-                <div class="summary-value" id="summary-symbol">-</div>
-              </div>
-              <div>
-                <div class="summary-label">Bias</div>
-                <div class="summary-value summary-value-strong" id="summary-bias">-</div>
-              </div>
-              <div>
-                <div class="summary-label">Daily Support</div>
-                <div class="summary-value" id="summary-support">-</div>
-              </div>
-              <div>
-                <div class="summary-label">Daily Resistance</div>
-                <div class="summary-value" id="summary-resistance">-</div>
-              </div>
-              <div>
-                <div class="summary-label">Breakout</div>
-                <div class="summary-value" id="summary-breakout">-</div>
-              </div>
-              <div>
-                <div class="summary-label">Breakdown</div>
-                <div class="summary-value" id="summary-breakdown">-</div>
-              </div>
-              <div>
-                <div class="summary-label">30m Range</div>
-                <div class="summary-value" id="summary-range">-</div>
+            <!-- Compact numeric summary -->
+            <div id="summary-block" class="summary-block" style="display:none;">
+              <div class="summary-grid">
+                <div>
+                  <div class="summary-label">Symbol</div>
+                  <div class="summary-value" id="summary-symbol">-</div>
+                </div>
+                <div>
+                  <div class="summary-label">Bias</div>
+                  <div class="summary-value summary-value-strong" id="summary-bias">-</div>
+                </div>
+                <div>
+                  <div class="summary-label">Daily Support</div>
+                  <div class="summary-value" id="summary-support">-</div>
+                </div>
+                <div>
+                  <div class="summary-label">Daily Resistance</div>
+                  <div class="summary-value" id="summary-resistance">-</div>
+                </div>
+                <div>
+                  <div class="summary-label">Breakout</div>
+                  <div class="summary-value" id="summary-breakout">-</div>
+                </div>
+                <div>
+                  <div class="summary-label">Breakdown</div>
+                  <div class="summary-value" id="summary-breakdown">-</div>
+                </div>
+                <div>
+                  <div class="summary-label">30m Range</div>
+                  <div class="summary-value" id="summary-range">-</div>
+                </div>
               </div>
             </div>
+
+            <!-- Full text report -->
+            <pre id="auto-output" class="mono">Select a symbol and click "Run Auto DMR" to pull shelves, FRVPs and levels from Binance US.</pre>
           </div>
 
-          <!-- Full text report -->
-          <pre id="auto-output" class="mono">Select a symbol and click "Run Auto DMR" to pull shelves, FRVPs and levels from Binance US.</pre>
+          <!-- KTBB Assistant (Tier 3) -->
+          <div class="card" style="margin-top:16px;">
+            <h3>KTBB Assistant (Tier 3)</h3>
+            <p class="status-line">
+              Ask a question about today's DMR. Tier 3 unlocks GPT-powered coaching; lower tiers will see a membership message.
+            </p>
+            <textarea id="assistant-question" placeholder="Example: Where is the highest-probability long setup today?"></textarea>
+            <div class="button-row">
+              <button type="button" class="btn-accent" onclick="askKtbbAssistant()">Ask KTBB</button>
+            </div>
+            <pre id="assistant-output" class="mono">KTBB Assistant is standing by. Type a question and click "Ask KTBB".</pre>
+          </div>
         </div>
       </div>
     </div>
@@ -620,7 +667,7 @@ async def show_form(user: User = Depends(get_current_user)):
                   "  1H Demand: " + htf.support[1].level
                 );
 
-          const text = "--- DMR Report ---\\n\\n" + fullReport;
+          const text = fullReport;
           outEl.textContent = text;
         } catch (err) {
           statusEl.textContent = "error";
@@ -692,6 +739,51 @@ async def show_form(user: User = Depends(get_current_user)):
           statusEl.textContent = "error on auto-fill";
           statusEl.className = "status-line status-error";
           outEl.textContent = "Exception while auto-filling:\\n" + err;
+        }
+      };
+
+      // KTBB Assistant – Tier 3 GPT (or fallback)
+      window.askKtbbAssistant = async function() {
+        const qEl = document.getElementById("assistant-question");
+        const outEl = document.getElementById("assistant-output");
+        const symbol = getSelectedSymbol();
+        const question = (qEl && qEl.value || "").trim();
+
+        if (!question) {
+          outEl.textContent = "Please type a question for KTBB Assistant first.";
+          return;
+        }
+
+        outEl.textContent = "KTBB Assistant is thinking...";
+
+        try {
+          const res = await fetch("/api/assistant/dmr-chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ symbol: symbol, question: question })
+          });
+
+          if (res.status === 403) {
+            let msg = "KTBB Assistant is available on Tier 3 only.";
+            try {
+              const data = await res.json();
+              if (data && data.detail) msg = data.detail;
+            } catch (e) {}
+            outEl.textContent =
+              msg + "\\n\\nClick the 'Upgrade' link in the top bar to change your plan.";
+            return;
+          }
+
+          if (!res.ok) {
+            const txt = await res.text();
+            outEl.textContent = "Assistant request failed (" + res.status + ").\\n" + txt;
+            return;
+          }
+
+          const data = await res.json();
+          outEl.textContent = data.answer || "No answer returned from KTBB Assistant.";
+        } catch (err) {
+          outEl.textContent = "Error contacting KTBB Assistant:\\n" + err;
         }
       };
     </script>
@@ -925,6 +1017,124 @@ async def api_run_dmr_auto(
             status_code=500,
             content={"status": "error", "detail": str(e)},
         )
+
+
+# -------------------------------------------------------------------
+# KTBB Assistant – GPT-powered Q&A (Tier 3 only)
+# -------------------------------------------------------------------
+@app.post("/api/assistant/dmr-chat")
+async def api_assistant_dmr_chat(
+    req: AssistantChatRequest,
+    user: User = Depends(get_current_user),
+):
+    # Tier gating: only Tier 3 gets the assistant
+    if user.tier != Tier.TIER3_MULTI_GPT:
+        raise HTTPException(
+            status_code=403,
+            detail="KTBB Assistant is available on Tier 3 only.",
+        )
+
+    symbol_short = req.symbol.upper()
+    binance_symbol = resolve_symbol(symbol_short)
+    inp = build_auto_inputs(symbol_short)
+
+    # Compute levels the same way as Auto DMR
+    result = compute_dm_levels(
+        inp["h4_supply"], inp["h4_demand"],
+        inp["h1_supply"], inp["h1_demand"],
+        inp["weekly_val"], inp["weekly_poc"], inp["weekly_vah"],
+        inp["f24_val"], inp["f24_poc"], inp["f24_vah"],
+        inp["morn_val"], inp["morn_poc"], inp["morn_vah"],
+        inp["r30_high"], inp["r30_low"],
+    )
+    htf_shelves = {
+        "resistance": result["htf_resistance"],
+        "support": result["htf_support"],
+    }
+    range_30m = {
+        "high": inp["r30_high"],
+        "low": inp["r30_low"],
+    }
+
+    report = generate_dmr_report(
+        symbol=binance_symbol,
+        date_str=datetime.utcnow().strftime("%Y-%m-%d"),
+        inputs=inp,
+        levels={
+            "daily_support": result["daily_support"],
+            "daily_resistance": result["daily_resistance"],
+            "breakout_trigger": result["breakout_trigger"],
+            "breakdown_trigger": result["breakdown_trigger"],
+        },
+        htf_shelves=htf_shelves,
+        range_30m=range_30m,
+    )
+
+    # If GPT client isn't configured yet, return a deterministic fallback
+    if openai_client is None:
+        fallback_answer = (
+            "KTBB Assistant is currently running in offline mode because the OpenAI API key "
+            "is not configured on the server.\n\n"
+            "Here is the latest deterministic DMR report for context:\n\n"
+            f"{report['full_text']}"
+        )
+        return {
+            "status": "success",
+            "mode": "fallback",
+            "answer": fallback_answer,
+            "bias": report["bias"],
+        }
+
+    # Build a compact context summary for GPT
+    levels_ctx = (
+        f"Daily Support: {result['daily_support']:.1f}\n"
+        f"Daily Resistance: {result['daily_resistance']:.1f}\n"
+        f"Breakout Trigger: {result['breakout_trigger']:.1f}\n"
+        f"Breakdown Trigger: {result['breakdown_trigger']:.1f}\n"
+        f"30m Range: {range_30m['low']:.1f} - {range_30m['high']:.1f}\n"
+    )
+
+    system_msg = (
+        "You are the KTBB (Kabroda Trading Battle Box) assistant, a professional intraday "
+        "trading coach. You are given a deterministic Daily Market Review that already "
+        "contains all levels, FRVPs, and shelves. You MUST NOT invent new price levels.\n\n"
+        "When you answer, you:\n"
+        "- reference the actual numeric levels provided\n"
+        "- talk like an experienced trader (clear, concise, practical)\n"
+        "- focus on risk management and scenario planning\n"
+        "- avoid hype or guarantees.\n"
+    )
+
+    user_msg = (
+        f"Symbol: {binance_symbol}\n"
+        f"Date: {datetime.utcnow().strftime('%Y-%m-%d')}\n"
+        f"Bias: {report['bias']} (confidence: {report.get('bias_confidence','n/a')})\n\n"
+        "Key levels:\n"
+        f"{levels_ctx}\n"
+        "Full DMR report:\n"
+        f"{report['full_text']}\n\n"
+        f"Trader question:\n{req.question}\n\n"
+        "Please answer in 2–5 short paragraphs, with clear structure and numbered bullets "
+        "if helpful. Use the provided levels exactly; do not change them."
+    )
+
+    completion = openai_client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg},
+        ],
+        temperature=0.4,
+        max_tokens=900,
+    )
+
+    answer = completion.choices[0].message.content
+    return {
+        "status": "success",
+        "mode": "gpt",
+        "answer": answer,
+        "bias": report["bias"],
+    }
 
 
 # -------------------------------------------------------------------
