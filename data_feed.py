@@ -4,6 +4,25 @@ from datetime import datetime, timezone, timedelta
 
 BINANCE_BASE_URL = "https://api.binance.us"
 
+# KTBB symbols → Binance US symbols
+KTBB_SYMBOLS: Dict[str, str] = {
+    "BTC": "BTCUSDT",
+    "ETH": "ETHUSDT",
+    "XRP": "XRPUSDT",
+    "SOL": "SOLUSDT",
+}
+
+
+def resolve_symbol(symbol: str) -> str:
+    """
+    Map a short KTBB symbol (BTC, ETH, XRP, SOL) to the corresponding
+    Binance US symbol (BTCUSDT, ETHUSDT, ...).
+
+    If the symbol is already a full Binance-style symbol, it is returned as-is.
+    """
+    sym = symbol.upper()
+    return KTBB_SYMBOLS.get(sym, sym)
+
 
 def fetch_klines(symbol: str, interval: str, limit: int) -> List[Dict[str, float]]:
     """
@@ -219,29 +238,31 @@ def find_last_pivot_low(lows: List[float], left: int, right: int) -> float | Non
     return None
 
 
-def build_auto_inputs_for_btc() -> Dict[str, float]:
+def build_auto_inputs(symbol: str) -> Dict[str, float]:
     """
-    Build the exact inputs your compute_dm_levels() expects, using live BTCUSDT data.
+    Build the exact inputs compute_dm_levels() expects, using live data
+    for the requested symbol.
 
-    Time-window rules (in UTC, so DST & user timezone don't matter):
+    `symbol` can be either:
+      - Short KTBB symbol: "BTC", "ETH", "XRP", "SOL"
+      - Or a full Binance symbol: "BTCUSDT", "ETHUSDT", ...
+
+    Time-window rules (in UTC):
 
       - 24h FRVP:
             previous 12:00 UTC  --> current 12:00 UTC
-        (this corresponds to 6:00–6:00 CST in winter)
 
       - 30m Opening Range:
             current day 12:30–13:00 UTC
-        (this corresponds to 6:30–7:00 CST in winter)
 
       - Morning FRVP:
-            last 4h inside that 24h window (i.e. 16x 15m candles).
+            last 4h inside that 24h window (16x 15m candles).
 
       - HTF shelves:
             4H / 1H supply & demand from last confirmed pivot highs/lows
             with left=3, right=3 bars (matching the KTBB HTF Shelf Helper).
     """
-    symbol = "BTCUSDT"
-
+    symbol = resolve_symbol(symbol)
     now_utc = datetime.now(timezone.utc)
 
     # ---- Anchor for the 24h window at 12:00 UTC ----
@@ -284,7 +305,7 @@ def build_auto_inputs_for_btc() -> Dict[str, float]:
         # Fallback: reuse 24h FRVP if morning subset is degenerate
         morn_val, morn_poc, morn_vah = f24_val, f24_poc, f24_vah
 
-    # ---- 4H & 1H shelves using pivot logic (KTBB Shelf Helper v2) ----
+    # ---- 4H & 1H shelves using pivot logic ----
     LEFT_BARS = 3
     RIGHT_BARS = 3
 
@@ -363,3 +384,10 @@ def build_auto_inputs_for_btc() -> Dict[str, float]:
         "r30_high": r(r30_high),
         "r30_low": r(r30_low),
     }
+
+
+def build_auto_inputs_for_btc() -> Dict[str, float]:
+    """
+    Backwards-compatible helper for BTC only.
+    """
+    return build_auto_inputs("BTCUSDT")
