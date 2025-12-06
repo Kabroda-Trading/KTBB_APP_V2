@@ -4,3 +4,4 @@ python-multipart==0.0.9
 requests==2.31.0
 sqlalchemy
 passlib[bcrypt]
+openai>=1.0.0

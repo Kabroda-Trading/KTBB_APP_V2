@@ -2,19 +2,28 @@ from typing import Dict, Any
 from datetime import datetime
 import os
 
-from fastapi import FastAPI, Form, Depends, Request, Response, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import (
+    FastAPI,
+    Form,
+    Depends,
+    Request,
+    Response,
+    HTTPException,
+    status,
+)
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from sse_engine import compute_dm_levels          # KTBB SSE ENGINE
+from sse_engine import compute_dm_levels              # KTBB SSE ENGINE
 from data_feed import build_auto_inputs, resolve_symbol   # BINANCE AUTO INPUTS
-from dmr_report import generate_dmr_report        # DMR text generator
+from dmr_report import generate_dmr_report            # DMR text generator
 from membership import (
     User,
     Tier,
     ensure_can_use_auto,
     ensure_can_use_symbol_auto,
+    ensure_can_use_gpt,
 )
 from database import init_db
 from auth import (
@@ -29,32 +38,26 @@ from auth import (
 # Optional GPT client (only used if openai is installed + API key set)
 try:
     from openai import OpenAI  # type: ignore
-except ImportError:
+except ImportError:  # pragma: no cover - optional dependency
     OpenAI = None  # type: ignore
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if (OPENAI_API_KEY and OpenAI) else None
 
 # -------------------------------------------------------------------
-# FASTAPI APP
+# FASTAPI APP + DB INIT
 # -------------------------------------------------------------------
+
 app = FastAPI(title="KTBB – Trading Battle Box API")
 
 # Create DB tables on startup
 init_db()
 
-
-# -------------------------------------------------------------------
-# HEALTH CHECK
-# -------------------------------------------------------------------
-@app.get("/health")
-async def health() -> Dict[str, Any]:
-    return {"status": "ok", "service": "ktbb", "version": "0.7.0"}
-
-
 # -------------------------------------------------------------------
 # Pydantic models
 # -------------------------------------------------------------------
+
+
 class ManualDMRRequest(BaseModel):
     h4_supply: float
     h4_demand: float
@@ -90,16 +93,114 @@ class AssistantChatRequest(BaseModel):
 
 
 # -------------------------------------------------------------------
+# Helpers
+# -------------------------------------------------------------------
+
+
+def _short_symbol(symbol: str) -> str:
+    """
+    Try to map a symbol into a short KTBB-style symbol for gating.
+    """
+    sym = symbol.upper()
+    if sym.endswith("USDT"):
+        return sym[:-4]
+    return sym
+
+
+def _compute_dmr_result(symbol: str, inputs: Dict[str, float]) -> Dict[str, Any]:
+    """
+    Shared helper for manual + auto DMR:
+    - runs SSE engine
+    - builds HTF shelves / 30m range
+    - calls DMR narrative engine
+    Returns a dict shaped exactly how the frontend JS expects.
+    """
+    # 1) Run SSE engine
+    levels_full = compute_dm_levels(
+        h4_supply=inputs["h4_supply"],
+        h4_demand=inputs["h4_demand"],
+        h1_supply=inputs["h1_supply"],
+        h1_demand=inputs["h1_demand"],
+        weekly_val=inputs["weekly_val"],
+        weekly_poc=inputs["weekly_poc"],
+        weekly_vah=inputs["weekly_vah"],
+        f24_val=inputs["f24_val"],
+        f24_poc=inputs["f24_poc"],
+        f24_vah=inputs["f24_vah"],
+        morn_val=inputs["morn_val"],
+        morn_poc=inputs["morn_poc"],
+        morn_vah=inputs["morn_vah"],
+        r30_high=inputs["r30_high"],
+        r30_low=inputs["r30_low"],
+    )
+
+    # Split HTF shelves out of levels dict for nicer JSON
+    htf_shelves = {
+        "resistance": levels_full.get("htf_resistance", []),
+        "support": levels_full.get("htf_support", []),
+    }
+    levels = {
+        k: v
+        for k, v in levels_full.items()
+        if not k.startswith("htf_")
+    }
+
+    # 30m OR as a separate sub-dict
+    range_30m = {
+        "high": inputs["r30_high"],
+        "low": inputs["r30_low"],
+    }
+
+    # 2) DMR narrative engine
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    binance_symbol = resolve_symbol(symbol)
+    report = generate_dmr_report(
+        symbol=binance_symbol,
+        date_str=today,
+        inputs=inputs,
+        levels=levels,
+        htf_shelves=htf_shelves,
+        range_30m=range_30m,
+    )
+
+    return {
+        "symbol": binance_symbol,
+        "symbol_short": _short_symbol(symbol),
+        "inputs": inputs,
+        "levels": levels,
+        "htf_shelves": htf_shelves,
+        "range_30m": range_30m,
+        "report": report,
+        "date": today,
+    }
+
+
+# -------------------------------------------------------------------
+# HEALTH CHECK
+# -------------------------------------------------------------------
+
+
+@app.get("/health")
+async def health() -> Dict[str, Any]:
+    return {"status": "ok", "service": "ktbb", "version": "0.8.0"}
+
+
+# -------------------------------------------------------------------
 # MAIN DASHBOARD UI (HTML)
 # -------------------------------------------------------------------
+
+
 @app.get("/", response_class=HTMLResponse)
 async def show_form(user: User = Depends(get_current_user)):
-    """Main dashboard: three-panel layout (inputs / DMR / Assistant)."""
+    """
+    Main dashboard: three-panel layout (inputs / DMR / Assistant).
 
-    # Simple label for the header
+    NOTE: This is a pure string HTML template; we just swap in the user label.
+    """
+
     if user.id == 0:
-        user_label = "Anonymous (Tier3 dev default)"
-        tier_label = "Tier3_MULTI_GPT"
+        user_label = "Anonymous (dev default Tier3)"
+        tier_label = "tier3_multi_gpt"
     else:
         user_label = user.email
         tier_label = user.tier.value
@@ -118,20 +219,20 @@ async def show_form(user: User = Depends(get_current_user)):
         color: #e5e7eb;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
+      a { color: #93c5fd; text-decoration: none; font-size: 0.8rem; }
+      a:hover { text-decoration: underline; }
+
       .shell {
         max-width: 1280px;
         margin: 0 auto;
         padding: 24px 16px 40px;
       }
+
       .app-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 10px 18px;
-        border-radius: 16px;
-        background: linear-gradient(90deg, #0284c7, #0ea5e9, #22c55e);
-        box-shadow: 0 12px 40px rgba(15,23,42,0.8);
-        margin-bottom: 18px;
+        margin-bottom: 16px;
       }
       .app-header-left {
         display: flex;
@@ -139,142 +240,126 @@ async def show_form(user: User = Depends(get_current_user)):
         gap: 10px;
       }
       .logo-pill {
-        width: 40px;
-        height: 40px;
-        border-radius: 999px;
-        border: 2px solid #e5e7eb;
+        width: 32px;
+        height: 32px;
+        border-radius: 9999px;
+        background: linear-gradient(135deg, #3b82f6, #22c55e);
         display: flex;
         align-items: center;
         justify-content: center;
         font-weight: 700;
         font-size: 0.9rem;
-        color: #e5e7eb;
-        background: rgba(15,23,42,0.25);
       }
       .brand-lines {
         display: flex;
         flex-direction: column;
       }
       .brand-main {
-        font-size: 1.05rem;
-        font-weight: 700;
-        letter-spacing: 0.06em;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        font-size: 0.9rem;
       }
       .brand-sub {
-        font-size: 0.8rem;
-        opacity: 0.9;
+        font-size: 0.78rem;
+        color: #9ca3af;
       }
       .app-header-right {
         text-align: right;
         font-size: 0.8rem;
       }
-      .app-header-right a {
-        color: #e5e7eb;
-        text-decoration: none;
-        margin-left: 8px;
-      }
-      .app-header-right a:hover {
-        text-decoration: underline;
-      }
       .badge-tier {
         display: inline-block;
-        padding: 2px 8px;
-        border-radius: 999px;
-        border: 1px solid rgba(15,23,42,0.6);
-        background: rgba(15,23,42,0.35);
-        font-size: 0.75rem;
+        padding: 2px 6px;
+        border-radius: 9999px;
+        background: #111827;
+        border: 1px solid #1f2937;
         margin-left: 4px;
+        font-size: 0.7rem;
       }
 
       h1 {
-        font-size: 1.6rem;
-        margin-bottom: 2px;
+        margin: 4px 0 2px;
+        font-size: 1.3rem;
       }
       h2 {
-        font-size: 1.0rem;
-        margin-top: 0;
-        margin-bottom: 10px;
-        color: #9ca3af;
-        font-weight: 500;
-      }
-      p {
-        margin-top: 4px;
-        margin-bottom: 6px;
+        margin: 0 0 14px;
+        font-weight: 400;
         color: #9ca3af;
         font-size: 0.9rem;
       }
 
-      /* 3-column layout */
       .layout {
         display: grid;
-        grid-template-columns: 280px minmax(0, 2.4fr) minmax(0, 1.7fr);
-        gap: 16px;
-        align-items: flex-start;
-        margin-top: 4px;
+        grid-template-columns: 1.1fr 1.5fr 1.1fr;
+        gap: 14px;
+      }
+      @media (max-width: 1024px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
       }
 
       .card {
         background: #020617;
-        border-radius: 16px;
-        border: 1px solid #111827;
-        padding: 14px 16px 16px;
-        box-shadow: 0 12px 40px rgba(15,23,42,0.8);
+        border-radius: 14px;
+        border: 1px solid #1f2937;
+        padding: 12px 12px 14px;
+        box-shadow: 0 10px 25px rgba(15,23,42,0.6);
       }
 
       label {
-        display: block;
-        font-size: 0.8rem;
+        font-size: 0.78rem;
         color: #9ca3af;
+        display: block;
         margin-bottom: 2px;
       }
-      input[type="number"] {
+      input[type="number"],
+      select {
         width: 100%;
         box-sizing: border-box;
         background: #020617;
         border-radius: 10px;
         border: 1px solid #1f2937;
-        padding: 6px 8px;
+        padding: 5px 7px;
         color: #e5e7eb;
-        font-size: 0.85rem;
+        font-size: 0.82rem;
       }
-      input[type="number"]:focus {
+      input:focus,
+      select:focus {
         outline: none;
         border-color: #60a5fa;
         box-shadow: 0 0 0 1px #60a5fa33;
       }
 
-      select.symbol-select {
-        width: 100%;
-        background: #020617;
-        color: #e5e7eb;
-        border-radius: 10px;
-        border: 1px solid #1f2937;
-        padding: 6px 8px;
-        font-size: 0.85rem;
+      .symbol-select {
+        margin-top: 4px;
+        margin-bottom: 8px;
       }
 
       .row {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 8px;
+        display: flex;
+        gap: 6px;
+      }
+      .row > div {
+        flex: 1;
       }
       .row-2 {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 8px;
+        gap: 6px;
       }
 
       button {
-        border-radius: 999px;
-        border: none;
-        padding: 7px 14px;
         font-size: 0.8rem;
+        border-radius: 9999px;
+        border: none;
         cursor: pointer;
-        font-weight: 500;
+        padding: 6px 12px;
       }
       .btn-primary {
-        background: #22c55e;
-        color: #022c22;
+        background: #60a5fa;
+        color: #020617;
+        font-weight: 600;
       }
       .btn-secondary {
         background: #111827;
@@ -282,15 +367,16 @@ async def show_form(user: User = Depends(get_current_user)):
         border: 1px solid #1f2937;
       }
       .btn-accent {
-        background: #3b82f6;
-        color: #e5e7eb;
+        background: #22c55e;
+        color: #022c22;
+        font-weight: 600;
       }
-      .btn-primary:hover { background: #16a34a; }
+      .btn-primary:hover { background: #3b82f6; }
       .btn-secondary:hover { background: #020617; }
-      .btn-accent:hover { background: #2563eb; }
+      .btn-accent:hover { background: #16a34a; }
 
       .button-row {
-        margin-top: 12px;
+        margin-top: 10px;
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
@@ -310,14 +396,13 @@ async def show_form(user: User = Depends(get_current_user)):
       }
 
       .status-line {
-        font-size: 0.8rem;
+        font-size: 0.78rem;
         color: #9ca3af;
         margin-top: 2px;
       }
       .status-ok { color: #22c55e; }
       .status-error { color: #f97316; }
 
-      /* Summary block */
       .summary-block {
         background: #020617;
         border-radius: 12px;
@@ -332,15 +417,13 @@ async def show_form(user: User = Depends(get_current_user)):
         align-items: baseline;
         margin-bottom: 4px;
       }
-      .summary-title {
-        font-weight: 600;
-      }
       .summary-bias {
         font-weight: 700;
       }
       .summary-bias-bullish { color: #22c55e; }
       .summary-bias-bearish { color: #f97316; }
       .summary-bias-neutral { color: #eab308; }
+
       .summary-grid {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -354,7 +437,6 @@ async def show_form(user: User = Depends(get_current_user)):
         font-weight: 600;
       }
 
-      /* Accordion-style DMR sections */
       .dmr-section {
         border-radius: 10px;
         border: 1px solid #1f2937;
@@ -420,9 +502,7 @@ async def show_form(user: User = Depends(get_current_user)):
         font-size: 0.8rem;
         font-weight: 600;
       }
-      details summary::-webkit-details-marker {
-        display: none;
-      }
+      details summary::-webkit-details-marker { display: none; }
       details summary::before {
         content: "▾ ";
         color: #9ca3af;
@@ -434,7 +514,6 @@ async def show_form(user: User = Depends(get_current_user)):
   </head>
   <body>
     <div class="shell">
-      <!-- Kabroda header -->
       <div class="app-header">
         <div class="app-header-left">
           <div class="logo-pill">KT</div>
@@ -462,7 +541,7 @@ async def show_form(user: User = Depends(get_current_user)):
       <h2>Shelves, FRVPs and Auto DMR pulled directly from Binance US.</h2>
 
       <div class="layout">
-        <!-- LEFT COLUMN: SYMBOL + INPUTS -->
+        <!-- LEFT: inputs -->
         <div class="card">
           <label for="symbol-select">Symbol</label>
           <select id="symbol-select" class="symbol-select">
@@ -473,11 +552,11 @@ async def show_form(user: User = Depends(get_current_user)):
           </select>
 
           <form id="dmr-form" method="post" action="/run-dmr">
-            <div class="button-row" style="margin-top:10px;">
+            <div class="button-row">
               <button type="button" class="btn-secondary" onclick="autoFillFromBTC()">Auto-fill</button>
               <button type="button" class="btn-accent" onclick="runAutoDMR()">Run Auto DMR</button>
             </div>
-            <div class="button-row" style="margin-top:6px;">
+            <div class="button-row">
               <button type="submit" class="btn-primary">Run Manual DMR</button>
             </div>
 
@@ -575,14 +654,13 @@ async def show_form(user: User = Depends(get_current_user)):
           </form>
         </div>
 
-        <!-- CENTER COLUMN: SUMMARY + DMR -->
+        <!-- CENTER: DMR summary + sections -->
         <div class="card">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <h3 style="margin:0; font-size:1rem;">Auto DMR – Selected Symbol</h3>
-            <span id="auto-status" class="status-line">status: waiting...</span>
+            <span id="auto-status" class="status-line">status: waiting.</span>
           </div>
 
-          <!-- Summary -->
           <div id="summary-block" class="summary-block" style="display:none;">
             <div class="summary-header">
               <div class="summary-title">
@@ -617,7 +695,6 @@ async def show_form(user: User = Depends(get_current_user)):
             </div>
           </div>
 
-          <!-- Accordion DMR sections -->
           <div id="dmr-sections">
             <div class="dmr-section">
               <div class="dmr-section-header" onclick="toggleSection('dmr-sec1')">
@@ -635,7 +712,7 @@ async def show_form(user: User = Depends(get_current_user)):
             </div>
             <div class="dmr-section">
               <div class="dmr-section-header" onclick="toggleSection('dmr-sec3')">
-                <div class="dmr-section-title">3) Key Structure & Levels</div>
+                <div class="dmr-section-title">3) Key Structure &amp; Levels</div>
                 <div class="dmr-toggle">toggle</div>
               </div>
               <div id="dmr-sec3" class="dmr-section-body"></div>
@@ -656,7 +733,6 @@ async def show_form(user: User = Depends(get_current_user)):
             </div>
           </div>
 
-          <!-- Full report + YAML + copy buttons -->
           <div class="button-row" style="margin-top:10px;">
             <button type="button" class="btn-secondary" onclick="copyFullDMR()">Copy full DMR</button>
             <button type="button" class="btn-secondary" onclick="copyYaml()">Copy YAML</button>
@@ -669,7 +745,7 @@ async def show_form(user: User = Depends(get_current_user)):
           <pre id="dmr-yaml" class="mono">YAML will appear here after Auto DMR runs.</pre>
         </div>
 
-        <!-- RIGHT COLUMN: KTBB Assistant -->
+        <!-- RIGHT: KTBB Assistant -->
         <div class="card">
           <h3 style="margin-top:0;">KTBB Assistant (Tier 3)</h3>
           <p class="status-line">
@@ -751,7 +827,6 @@ async def show_form(user: User = Depends(get_current_user)):
         return true;
       }
 
-      // Copy helpers
       function copyFullDMR() {
         const el = document.getElementById("auto-output");
         if (!el) return;
@@ -775,7 +850,7 @@ async def show_form(user: User = Depends(get_current_user)):
         const outEl = document.getElementById("auto-output");
         const yamlEl = document.getElementById("dmr-yaml");
         const symbol = getSelectedSymbol();
-        statusEl.textContent = "running...";
+        statusEl.textContent = "running.";
         statusEl.className = "status-line";
 
         try {
@@ -793,7 +868,6 @@ async def show_form(user: User = Depends(get_current_user)):
           statusEl.textContent = "ok - last run just now";
           statusEl.className = "status-line status-ok";
 
-          const lev = data.levels;
           const htf = data.htf_shelves;
           const r30 = data.range_30m;
           const bias = data.report && data.report.bias ? data.report.bias : "neutral";
@@ -801,7 +875,6 @@ async def show_form(user: User = Depends(get_current_user)):
 
           updateSummary(data, bias, displaySymbol, r30);
 
-          // Sections
           const sections = (data.report && data.report.sections) || {};
           const secIds = [
             ["market_momentum", "dmr-sec1"],
@@ -826,10 +899,10 @@ async def show_form(user: User = Depends(get_current_user)):
               ? data.report.full_text
               : (
                   "HTF Shelves:\\n" +
-                  "  4H Supply: " + htf.resistance[0].level + "\\n" +
-                  "  4H Demand: " + htf.support[0].level + "\\n" +
-                  "  1H Supply: " + htf.resistance[1].level + "\\n" +
-                  "  1H Demand: " + htf.support[1].level
+                  "  4H Supply: " + (htf.resistance?.[0]?.level ?? "-") + "\\n" +
+                  "  4H Demand: " + (htf.support?.[0]?.level ?? "-") + "\\n" +
+                  "  1H Supply: " + (htf.resistance?.[1]?.level ?? "-") + "\\n" +
+                  "  1H Demand: " + (htf.support?.[1]?.level ?? "-")
                 );
           outEl.textContent = fullReport;
 
@@ -850,7 +923,7 @@ async def show_form(user: User = Depends(get_current_user)):
         const statusEl = document.getElementById("auto-status");
         const outEl = document.getElementById("auto-output");
         const symbol = getSelectedSymbol();
-        statusEl.textContent = "auto-filling...";
+        statusEl.textContent = "auto-filling.";
         statusEl.className = "status-line";
 
         try {
@@ -907,7 +980,7 @@ async def show_form(user: User = Depends(get_current_user)):
         }
       };
 
-      // KTBB Assistant (same as before)
+      // KTBB Assistant
       window.askKtbbAssistant = async function() {
         const qEl = document.getElementById("assistant-question");
         const outEl = document.getElementById("assistant-output");
@@ -959,3 +1032,388 @@ async def show_form(user: User = Depends(get_current_user)):
     html = html.replace("{{USER_LABEL}}", user_label).replace("{{TIER_LABEL}}", tier_label)
     return HTMLResponse(content=html)
 
+
+# -------------------------------------------------------------------
+# MANUAL DMR (form POST)
+# -------------------------------------------------------------------
+
+
+@app.post("/run-dmr", response_class=HTMLResponse)
+async def run_manual_dmr(
+    request: Request,
+    h4_supply: float = Form(...),
+    h4_demand: float = Form(...),
+    h1_supply: float = Form(...),
+    h1_demand: float = Form(...),
+    weekly_val: float = Form(...),
+    weekly_poc: float = Form(...),
+    weekly_vah: float = Form(...),
+    f24_val: float = Form(...),
+    f24_poc: float = Form(...),
+    f24_vah: float = Form(...),
+    morn_val: float = Form(...),
+    morn_poc: float = Form(...),
+    morn_vah: float = Form(...),
+    r30_high: float = Form(...),
+    r30_low: float = Form(...),
+):
+    """
+    Simple manual DMR path.
+    Renders a minimal result page; primary UX is Auto DMR.
+    """
+    symbol = "BTC"  # manual form currently doesn't send symbol; default BTC
+    inputs = {
+        "h4_supply": h4_supply,
+        "h4_demand": h4_demand,
+        "h1_supply": h1_supply,
+        "h1_demand": h1_demand,
+        "weekly_val": weekly_val,
+        "weekly_poc": weekly_poc,
+        "weekly_vah": weekly_vah,
+        "f24_val": f24_val,
+        "f24_poc": f24_poc,
+        "f24_vah": f24_vah,
+        "morn_val": morn_val,
+        "morn_poc": morn_poc,
+        "morn_vah": morn_vah,
+        "r30_high": r30_high,
+        "r30_low": r30_low,
+    }
+
+    result = _compute_dmr_result(symbol, inputs)
+    report = result["report"]
+    levels = result["levels"]
+
+    html = f"""
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>KTBB Manual DMR Result</title>
+      </head>
+      <body style="background:#020617; color:#e5e7eb; font-family:system-ui;">
+        <div style="max-width:800px; margin:32px auto;">
+          <h2>Manual DMR Result – {result['symbol_short']} ({result['symbol']})</h2>
+          <p>Daily Support: {levels['daily_support']}</p>
+          <p>Daily Resistance: {levels['daily_resistance']}</p>
+          <p>Breakout Trigger: {levels['breakout_trigger']}</p>
+          <p>Breakdown Trigger: {levels['breakdown_trigger']}</p>
+          <pre style="background:#020617; border:1px solid #1f2937; border-radius:8px; padding:10px; white-space:pre-wrap;">
+{report.get('full_text', '')}
+          </pre>
+          <p><a href="/" style="color:#93c5fd;">← Back to dashboard</a></p>
+        </div>
+      </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+
+# -------------------------------------------------------------------
+# AUTO DMR API
+# -------------------------------------------------------------------
+
+
+@app.get("/api/dmr/auto-inputs")
+async def api_auto_inputs(
+    symbol: str = "BTC",
+    user: User = Depends(get_current_user),
+):
+    """
+    Pull shelves/FRVPs/OR from Binance and return the raw inputs
+    used by SSE engine.
+    """
+    ensure_can_use_auto(user)
+    ensure_can_use_symbol_auto(user, _short_symbol(symbol))
+
+    try:
+        inputs = build_auto_inputs(symbol)
+    except Exception as exc:  # broad but we want to surface errors cleanly
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error fetching data for {symbol}: {exc}",
+        ) from exc
+
+    return {
+        "symbol": resolve_symbol(symbol),
+        "symbol_short": _short_symbol(symbol),
+        "inputs": inputs,
+    }
+
+
+@app.post("/api/dmr/run-auto")
+async def api_run_auto_dmr(
+    symbol: str = "BTC",
+    user: User = Depends(get_current_user),
+):
+    """
+    Full auto DMR pipeline:
+      - fetch inputs from Binance
+      - run SSE engine
+      - run DMR narrative generator
+    """
+    ensure_can_use_auto(user)
+    ensure_can_use_symbol_auto(user, _short_symbol(symbol))
+
+    try:
+        inputs = build_auto_inputs(symbol)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error fetching data for {symbol}: {exc}",
+        ) from exc
+
+    result = _compute_dmr_result(symbol, inputs)
+    return JSONResponse(result)
+
+
+# -------------------------------------------------------------------
+# KTBB ASSISTANT (GPT)
+# -------------------------------------------------------------------
+
+
+@app.post("/api/assistant/dmr-chat")
+async def api_dmr_chat(
+    payload: AssistantChatRequest,
+    user: User = Depends(get_current_user),
+):
+    """
+    GPT-powered assistant. Uses today's DMR as context.
+    """
+    ensure_can_use_gpt(user)
+
+    if openai_client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="KTBB Assistant is not configured (missing OPENAI_API_KEY or openai package).",
+        )
+
+    symbol = payload.symbol or "BTC"
+    question = payload.question.strip()
+    if not question:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Question is required.",
+        )
+
+    # Compute a fresh DMR snapshot as context
+    try:
+        inputs = build_auto_inputs(symbol)
+        dmr = _compute_dmr_result(symbol, inputs)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error building DMR context for assistant: {exc}",
+        ) from exc
+
+    dmr_text = dmr["report"].get("full_text", "")
+    today = dmr.get("date") or datetime.utcnow().strftime("%Y-%m-%d")
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are KTBB Assistant, a professional trading coach. "
+                "Use the Daily Market Review (DMR) provided to answer questions. "
+                "Be clear, concise and practical. Do not give investment, tax or legal advice; "
+                "focus on interpreting the DMR structure, levels and trade posture."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Symbol: {dmr['symbol_short']} ({dmr['symbol']})\\n"
+                f"Date: {today}\\n\\n"
+                f"Here is today's full DMR:\\n\\n{dmr_text}\\n\\n"
+                f"Trader's question: {question}"
+            ),
+        },
+    ]
+
+    try:
+        completion = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.7,
+        )
+        answer = completion.choices[0].message.content  # type: ignore[assignment]
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error calling KTBB Assistant model: {exc}",
+        ) from exc
+
+    return {"answer": answer}
+
+
+# -------------------------------------------------------------------
+# AUTH JSON API (for future frontend)
+# -------------------------------------------------------------------
+
+
+@app.post("/auth/register")
+async def register_user(
+    payload: RegisterRequest,
+    db: Session = Depends(get_db),
+):
+    tier = payload.tier or Tier.TIER2_SINGLE_AUTO
+    user_model = create_user(db, payload.email, payload.password, tier=tier)
+    return {
+        "id": user_model.id,
+        "email": user_model.email,
+        "tier": user_model.tier,
+    }
+
+
+@app.post("/auth/login")
+async def login_user(
+    payload: LoginRequest,
+    db: Session = Depends(get_db),
+):
+    user_model = authenticate_user(db, payload.email, payload.password)
+    if not user_model:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password.",
+        )
+
+    token = create_session_token(db, user_model.id)
+    resp = JSONResponse(
+        {
+            "message": "logged in",
+            "email": user_model.email,
+            "tier": user_model.tier,
+        }
+    )
+    # 7 days for now
+    resp.set_cookie(
+        "ktbb_session",
+        token,
+        httponly=True,
+        max_age=60 * 60 * 24 * 7,
+        samesite="lax",
+    )
+    return resp
+
+
+@app.post("/auth/logout")
+async def logout_user(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    token = request.cookies.get("ktbb_session")
+    if token:
+        delete_session(db, token)
+    resp = JSONResponse({"message": "logged out"})
+    resp.delete_cookie("ktbb_session")
+    return resp
+
+
+# -------------------------------------------------------------------
+# Very simple auth UIs so header links don't 404
+# -------------------------------------------------------------------
+
+
+@app.get("/auth/login-ui", response_class=HTMLResponse)
+async def login_ui():
+    html = """
+    <html><body style="background:#020617; color:#e5e7eb; font-family:system-ui;">
+      <div style="max-width:360px; margin:40px auto;">
+        <h2>Login</h2>
+        <form method="post" action="/auth/login-ui">
+          <div><label>Email</label><input name="email" type="email" required /></div>
+          <div><label>Password</label><input name="password" type="password" required /></div>
+          <button type="submit">Login</button>
+        </form>
+        <p style="margin-top:12px;"><a href="/" style="color:#93c5fd;">Back to dashboard</a></p>
+      </div>
+    </body></html>
+    """
+    return HTMLResponse(html)
+
+
+@app.post("/auth/login-ui")
+async def login_ui_post(
+    email: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user_model = authenticate_user(db, email, password)
+    if not user_model:
+        return HTMLResponse(
+            "<html><body>Invalid credentials. <a href=\"/auth/login-ui\">Try again</a>.</body></html>",
+            status_code=401,
+        )
+
+    token = create_session_token(db, user_model.id)
+    resp = RedirectResponse(url="/", status_code=302)
+    resp.set_cookie(
+        "ktbb_session",
+        token,
+        httponly=True,
+        max_age=60 * 60 * 24 * 7,
+        samesite="lax",
+    )
+    return resp
+
+
+@app.get("/auth/register-ui", response_class=HTMLResponse)
+async def register_ui():
+    html = """
+    <html><body style="background:#020617; color:#e5e7eb; font-family:system-ui;">
+      <div style="max-width:360px; margin:40px auto;">
+        <h2>Register (defaults to Tier 2)</h2>
+        <form method="post" action="/auth/register-ui">
+          <div><label>Email</label><input name="email" type="email" required /></div>
+          <div><label>Password</label><input name="password" type="password" required /></div>
+          <button type="submit">Create account</button>
+        </form>
+        <p style="margin-top:12px;"><a href="/" style="color:#93c5fd;">Back to dashboard</a></p>
+      </div>
+    </body></html>
+    """
+    return HTMLResponse(html)
+
+
+@app.post("/auth/register-ui")
+async def register_ui_post(
+    email: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        create_user(db, email, password, tier=Tier.TIER2_SINGLE_AUTO)
+    except HTTPException as exc:
+        return HTMLResponse(
+            f"<html><body>Error: {exc.detail}. "
+            f'<a href="/auth/register-ui">Try again</a>.</body></html>',
+            status_code=exc.status_code,
+        )
+    return RedirectResponse(url="/auth/login-ui", status_code=302)
+
+
+@app.get("/auth/logout-ui")
+async def logout_ui(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    token = request.cookies.get("ktbb_session")
+    if token:
+        delete_session(db, token)
+    resp = RedirectResponse(url="/", status_code=302)
+    resp.delete_cookie("ktbb_session")
+    return resp
+
+
+@app.get("/billing/upgrade-ui", response_class=HTMLResponse)
+async def upgrade_ui():
+    html = """
+    <html><body style="background:#020617; color:#e5e7eb; font-family:system-ui;">
+      <div style="max-width:480px; margin:40px auto;">
+        <h2>Upgrade (placeholder)</h2>
+        <p>This is where Stripe / billing flows will live.</p>
+        <p>For now, upgrades can be handled manually.</p>
+        <p><a href="/" style="color:#93c5fd;">Back to dashboard</a></p>
+      </div>
+    </body></html>
+    """
+    return HTMLResponse(html)
