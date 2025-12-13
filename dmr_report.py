@@ -124,6 +124,31 @@ def _deterministic_narrative(symbol: str, date_str: str, levels: Dict[str, Any],
     lines.append(_build_yaml_block(levels, r30))
     return "\n".join(lines)
 
+def _compute_bias_label(inputs: Dict[str, Any]) -> str:
+    """
+    Deterministic bias from price location vs value references.
+    Returns: "bullish" | "bearish" | "neutral"
+    """
+    px = _pick(inputs, "last_price")
+    if px is None:
+        return "neutral"
+
+    weekly_poc = _pick(inputs, "weekly_poc")
+    f24_poc = _pick(inputs, "f24_poc")
+    morn_poc = _pick(inputs, "morn_poc")
+
+    refs = [v for v in (weekly_poc, f24_poc, morn_poc) if v is not None]
+    if not refs:
+        return "neutral"
+
+    above = sum(1 for r in refs if px > r)
+    below = sum(1 for r in refs if px < r)
+
+    if above >= 2:
+        return "bullish"
+    if below >= 2:
+        return "bearish"
+    return "neutral"
 
 def compute_dmr(symbol: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -131,6 +156,7 @@ def compute_dmr(symbol: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
     `inputs` is produced by data_feed.build_auto_inputs().
     """
     date_str = datetime.utcnow().strftime("%Y-%m-%d")
+    bias_label = _compute_bias_label(inputs)
 
     h4_supply = _pick(inputs, "h4_supply")
     h4_demand = _pick(inputs, "h4_demand")
@@ -156,15 +182,13 @@ def compute_dmr(symbol: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
     try:
         from trade_logic_v2 import build_trade_logic_summary
 
-        bias_label = "neutral"  # deterministic placeholder (no bias engine wired yet)
-
         # trade_logic_v2 expects floats; filter out Nones defensively
         clean_levels = {k: float(v) for k, v in levels.items() if v is not None}
 
         trade_logic = build_trade_logic_summary(
             symbol=symbol,
             levels=clean_levels,
-            bias_label=bias_label,
+            bias_label=bias_label,      # <-- use computed bias
             htf_shelves=htf_shelves,
             range_30m=range_30m,
         )
@@ -179,6 +203,7 @@ def compute_dmr(symbol: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
         "levels": levels,
         "range_30m": range_30m,
         "htf_shelves": htf_shelves,
+        "bias_label": bias_label,          # helpful to expose in JSON/UI
         "trade_logic": trade_logic,
         "trade_logic_error": trade_logic_error,
         "report_text": report_text,
