@@ -142,7 +142,7 @@ def compute_dmr(symbol: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
     levels = {
         "daily_resistance": h4_supply,
         "daily_support": h4_demand,
-        # These triggers are consistent with your strategy: OR high/low act as triggers
+        # OR high/low act as triggers
         "breakout_trigger": r30_high,
         "breakdown_trigger": r30_low,
     }
@@ -154,6 +154,21 @@ def compute_dmr(symbol: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
 
     htf_shelves = _build_htf_shelves(inputs)
 
+    # NEW: compute strategy-aware KTBB summary (S0–S8 bridge)
+    trade_logic = None
+    try:
+        from trade_logic_v2 import build_trade_logic_summary
+        trade_logic = build_trade_logic_summary(
+            symbol=symbol,
+            inputs=inputs,
+            levels=levels,
+            range_30m=range_30m,
+            htf_shelves=htf_shelves,
+        )
+    except Exception:
+        # Keep deterministic system stable even if trade logic evolves
+        trade_logic = None
+
     report_text = _deterministic_narrative(symbol, date_str, levels, range_30m, htf_shelves, inputs)
 
     return {
@@ -161,9 +176,11 @@ def compute_dmr(symbol: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
         "levels": levels,
         "range_30m": range_30m,
         "htf_shelves": htf_shelves,
+        "trade_logic": trade_logic,  # <— added
         # For backward compatibility with older UI code
         "report_text": report_text,
         "report": report_text,
         "date": date_str,
         "symbol": symbol,
     }
+

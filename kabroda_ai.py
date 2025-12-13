@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 from typing import Any, Dict
 
@@ -95,26 +96,111 @@ USER QUESTION:
 {question}
 """.strip()
 
-def generate_daily_market_review(symbol: str, date_str: str, dmr_payload: Dict[str, Any]) -> str:
-    c = _client()
-    resp = c.chat.completions.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        temperature=0.2,
+def generate_daily_market_review(symbol: str, date_str: str, dmr_payload: dict) -> str:
+    """
+    KTBB DMR writer (Execution Anchor v4.2 compliant).
+    Uses trade_logic summary when available for Strategy Outlook.
+    """
+    client = _client()
+    model = os.getenv("OPENAI_DMR_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
+
+    # Only pass what the model is allowed to reference
+    context = {
+        "symbol": symbol,
+        "date": date_str,
+        "levels": dmr_payload.get("levels", {}) or {},
+        "range_30m": dmr_payload.get("range_30m", {}) or {},
+        "htf_shelves": dmr_payload.get("htf_shelves", {}) or {},
+        "trade_logic": dmr_payload.get("trade_logic", None),
+    }
+
+    system = (
+        "You are Kabroda Trading BattleBox (KTBB).\n"
+        "Hard rules:\n"
+        "1) Use ONLY the provided context. Do NOT invent prices/levels.\n"
+        "2) Levels are immutable. Do NOT modify or reinterpret them.\n"
+        "3) Follow the Execution Anchor v4.2 8-section template lock:\n"
+        "   1) Market Momentum Summary (exactly 4 bullets: 4H, 1H, 15M, 5M)\n"
+        "   2) Sentiment Snapshot\n"
+        "   3) Key Support & Resistance\n"
+        "   4) Trade Strategy Outlook (use KTBB S0–S8 language; prefer context.trade_logic if present)\n"
+        "   5) News-Based Risk Alert (if no news provided, state: 'No scheduled news injected today')\n"
+        "   6) Execution Considerations\n"
+        "   7) Weekly Zone Reference\n"
+        "   8) YAML Key Level Output Block\n"
+        "4) No filler. No textbook explanations. No disclaimers."
+    )
+
+    user = f"""
+Context JSON (source of truth):
+{json.dumps(context, ensure_ascii=False)}
+
+Output requirements:
+- Headings must be numbered 1–8 exactly as the template lock.
+- Section 1 MUST be exactly 4 bullets labeled: 4H:, 1H:, 15M:, 5M:.
+- In Section 4, if context.trade_logic exists, incorporate it (especially any outlook_text).
+- YAML block must include:
+  triggers.breakout, triggers.breakdown, daily_resistance, daily_support,
+  range_30m.high, range_30m.low.
+
+Now output the KTBB DMR.
+""".strip()
+
+    resp = client.chat.completions.create(
+        model=model,
         messages=[
-            {"role": "system", "content": _strict_system_policy()},
-            {"role": "user", "content": _dmr_user_prompt(symbol, date_str, dmr_payload)},
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
         ],
+        temperature=float(os.getenv("OPENAI_DMR_TEMPERATURE", "0.35")),
     )
     return (resp.choices[0].message.content or "").strip()
+def answer_coach_question(symbol: str, date_str: str, dmr_payload: dict, question: str) -> str:
+    """
+    KTBB Elite coach — strategy-aware, level-anchored, no drift.
+    """
+    client = _client()
+    model = os.getenv("OPENAI_COACH_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
 
-def answer_coach_question(symbol: str, date_str: str, dmr_payload: Dict[str, Any], question: str) -> str:
-    c = _client()
-    resp = c.chat.completions.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        temperature=0.2,
+    context = {
+        "symbol": symbol,
+        "date": date_str,
+        "levels": dmr_payload.get("levels", {}) or {},
+        "range_30m": dmr_payload.get("range_30m", {}) or {},
+        "htf_shelves": dmr_payload.get("htf_shelves", {}) or {},
+        "trade_logic": dmr_payload.get("trade_logic", None),
+        "question": (question or "").strip(),
+    }
+
+    system = (
+        "You are Kabroda Trading BattleBox (KTBB) Coach.\n"
+        "Rules:\n"
+        "- Use ONLY the provided context; do NOT invent prices/levels.\n"
+        "- Anchor answers to breakout/breakdown triggers + daily S/R + OR.\n"
+        "- If strategy is asked, map to KTBB S0–S8 using context.trade_logic when present.\n"
+        "- Be concise and actionable.\n"
+        "- No disclaimers."
+    )
+
+    user = f"""
+Context JSON:
+{json.dumps(context, ensure_ascii=False)}
+
+Answer format:
+1) Direct answer (2–6 bullets)
+2) Strategy mapping (S#) + why
+3) Execution guardrails (risk anchor + invalidation)
+
+User question:
+{context["question"]}
+""".strip()
+
+    resp = client.chat.completions.create(
+        model=model,
         messages=[
-            {"role": "system", "content": _strict_system_policy()},
-            {"role": "user", "content": _coach_user_prompt(symbol, date_str, dmr_payload, question)},
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
         ],
+        temperature=float(os.getenv("OPENAI_COACH_TEMPERATURE", "0.4")),
     )
     return (resp.choices[0].message.content or "").strip()
