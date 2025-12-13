@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Account</h1>
+<p class="muted">{{ user.email }} • {{ tier_label }}</p>
+
+<div class="card">
+  <h3>Session Timezone (DST-safe)</h3>
+  <form method="post" action="/account/session-timezone" class="row">
+    <input name="tz" value="{{ user.session_tz }}" placeholder="America/New_York" />
+    <button class="btn primary" type="submit">Save</button>
+  </form>
+  <p class="muted">Examples: America/New_York, America/Chicago, Europe/London</p>
+</div>
+
+<div class="card">
+  <h3>Billing</h3>
+  <p class="muted">Upgrade via Stripe Checkout:</p>
+  <div class="row">
+    <a class="btn primary" href="/billing/checkout?tier=tactical">Upgrade Tactical</a>
+    <a class="btn primary" href="/billing/checkout?tier=elite">Upgrade Elite</a>
+  </div>
+</div>
+{% endblock %}

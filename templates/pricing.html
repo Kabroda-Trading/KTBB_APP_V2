@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Pricing</h1>
+
+<div class="grid">
+  <div class="card">
+    <h3>KABRODA BattleBox Tactical</h3>
+    <p class="price">$49/mo</p>
+    <ul>
+      <li>Automated Daily Market Review (BTC)</li>
+      <li>Key levels + narrative</li>
+      <li>No Kabroda AI Coach chat</li>
+    </ul>
+    <button class="btn primary" onclick="startPlan('tactical')">Start Tactical</button>
+  </div>
+
+  <div class="card">
+    <h3>KABRODA BattleBox Elite</h3>
+    <p class="price">$99/mo</p>
+    <ul>
+      <li>Automated Daily Market Review (multi-symbol)</li>
+      <li>Key levels + narrative</li>
+      <li>Kabroda AI Coach chat coaching</li>
+    </ul>
+    <button class="btn primary" onclick="startPlan('elite')">Start Elite</button>
+  </div>
+</div>
+
+<script>
+async function startPlan(tier){
+  const r = await fetch("/billing/checkout", {
+    method:"POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ tier })
+  });
+
+  // If not logged in, redirect to login
+  if (r.status === 401 || r.status === 403) {
+    window.location.href = "/login";
+    return;
+  }
+
+  if(!r.ok){
+    const t = await r.text();
+    alert("Checkout failed: " + t);
+    return;
+  }
+
+  const data = await r.json();
+  window.location.href = data.url;
+}
+</script>
+{% endblock %}

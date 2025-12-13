@@ -1,0 +1,33 @@
+<!-- templates/base.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Kabroda BattleBox Suite</title>
+  <link rel="stylesheet" href="/static/site.css"/>
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="/">
+        <span class="brand-mark">Kabroda</span>
+      </a>
+      <nav class="links">
+        <a href="/pricing">Pricing</a>
+        <a href="/about">About</a>
+        <a class="pill" href="/suite">Suite</a>
+        <a href="/login">Login</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="shell">
+    {% block content %}{% endblock %}
+  </main>
+
+  <div class="footer shell muted">
+    © 2025 Kabroda. Risk disclaimer: trading is risky.
+  </div>
+</body>
+</html>

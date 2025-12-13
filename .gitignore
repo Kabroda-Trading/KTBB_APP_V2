@@ -1,0 +1,28 @@
+@"
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.venv_v2/
+.env
+.env.*
+*.env
+
+# Local secrets / notes
+*key*.txt
+*secret*.txt
+secrets/
+etc/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# OS/Editor
+.DS_Store
+.vscode/
+"@ | Out-File -Encoding utf8 .gitignore

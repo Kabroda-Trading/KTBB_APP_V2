@@ -1,0 +1,248 @@
+/* =========================
+   Kabroda BattleBox Suite
+   Unified Product CSS
+   ========================= */
+
+:root {
+  --bg: #0b1220;
+  --card: #0f1a2d;
+  --card-soft: #101c33;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --accent: #60a5fa;
+  --accent-strong: #3b82f6;
+  --border: rgba(255,255,255,.08);
+  --radius: 14px;
+}
+
+/* Reset / base */
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: radial-gradient(1200px 600px at 50% -200px, #142040, var(--bg));
+  color: var(--text);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  line-height: 1.45;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+/* Layout shell */
+.shell {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* =========================
+   Top Navigation
+   ========================= */
+.topbar {
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(15,26,45,.85), rgba(15,26,45,.65));
+  backdrop-filter: blur(6px);
+}
+
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+}
+
+.brand {
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: .4px;
+  color: var(--text);
+}
+.brand-mark {
+  color: var(--accent);
+}
+
+.links {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+.links a {
+  color: var(--text);
+  opacity: .85;
+}
+.links a:hover { opacity: 1; }
+
+.links .pill {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.04);
+}
+
+/* =========================
+   Typography
+   ========================= */
+h1 {
+  font-size: 34px;
+  margin: 0 0 10px;
+  letter-spacing: -.4px;
+}
+h2 {
+  font-size: 22px;
+  margin: 0 0 8px;
+}
+h3 {
+  font-size: 18px;
+  margin: 0 0 6px;
+}
+
+.lead {
+  font-size: 16px;
+  color: var(--muted);
+  max-width: 760px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* =========================
+   Cards / Grid
+   ========================= */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.card {
+  background: linear-gradient(180deg, var(--card), var(--card-soft));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+}
+
+/* =========================
+   Buttons / Controls
+   ========================= */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.05);
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+
+.btn:hover {
+  background: rgba(255,255,255,.09);
+}
+
+.btn.primary {
+  background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+  color: #061428;
+  border: none;
+}
+.btn.primary:hover {
+  filter: brightness(1.05);
+}
+
+.btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+/* =========================
+   Forms
+   ========================= */
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.form {
+  max-width: 460px;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #050a14;
+  color: var(--text);
+  outline: none;
+}
+
+input:focus,
+select:focus {
+  border-color: var(--accent);
+}
+
+/* =========================
+   Preformatted / Output
+   ========================= */
+pre,
+.pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #050a14;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #d1d5db;
+}
+
+/* =========================
+   Status / Errors
+   ========================= */
+.error {
+  color: #fca5a5;
+  font-size: 14px;
+}
+
+.success {
+  color: #86efac;
+}
+
+/* =========================
+   Footer
+   ========================= */
+.footer {
+  margin: 40px auto 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* =========================
+   Responsive
+   ========================= */
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  h1 {
+    font-size: 28px;
+  }
+}
