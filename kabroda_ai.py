@@ -64,86 +64,27 @@ TRADE LOGIC MODULE (strategy/outlook rules; do not mutate levels):
 """.strip()
 
 
-def generate_daily_market_review(symbol: str, date_str: str, dmr_payload: dict) -> str:
-    """
-    KTBB DMR writer (Execution Anchor v4.2 compliant).
-    Forces trade_logic.outlook_text into Section 4 when present.
-    """
-    client = _client()
-    model = os.getenv("OPENAI_DMR_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
+resp = client.chat.completions.create(
+    model=model,
+    messages=[
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ],
+    temperature=float(os.getenv("OPENAI_DMR_TEMPERATURE", "0.35")),
+)
 
-    # Pull trade logic (if any)
-    trade_logic = dmr_payload.get("trade_logic") or {}
-    outlook_text = (trade_logic.get("outlook_text") or "").strip()
+text = (resp.choices[0].message.content or "").strip()
 
-    # Normalize outlook_text so it doesn't duplicate "4) Trade Strategy Outlook"
-    if outlook_text.startswith("4) Trade Strategy Outlook"):
-        parts = outlook_text.split("\n", 1)
-        outlook_text = parts[1].lstrip() if len(parts) > 1 else ""
-
-    # Only pass what the model is allowed to reference
-    context = {
-        "symbol": symbol,
-        "date": date_str,
-        "bias_label": dmr_payload.get("bias_label", None),
-        "levels": dmr_payload.get("levels", {}) or {},
-        "range_30m": dmr_payload.get("range_30m", {}) or {},
-        "htf_shelves": dmr_payload.get("htf_shelves", {}) or {},
-        "trade_logic": trade_logic if trade_logic else None,
-        "trade_logic_outlook_text": outlook_text if outlook_text else None,
-        # If/when you add news later:
-        "news_events": (dmr_payload.get("inputs", {}) or {}).get("news_events", []),
-    }
-
-    system = _strict_system_policy()
-
-    user = f"""
-INTENT: DMR
-
-Context JSON (source of truth):
-{json.dumps(context, ensure_ascii=False)}
-
-TRADE LOGIC OUTLOOK (MUST BE USED IN SECTION 4 VERBATIM IF PRESENT):
-{outlook_text if outlook_text else "(none)"}
-
-OUTPUT REQUIREMENTS:
-- Use the Execution Anchor v4.2 DMR Template Lock EXACTLY (8 sections).
-- Headings must be numbered 1) through 8) exactly.
-- Section 1 MUST be exactly 4 bullets labeled: 4H:, 1H:, 15M:, 5M:
-  Each bullet must be 2–3 sentences (mini paragraph) describing what matters and what to watch next.
-- Sections 2,3,6,7 must be 2–4 sentences each (no one-liners).
-- Section 3 should explain WHY the levels matter (shelf behavior, trigger behavior, failure/trap risk),
-  NOT just restate numbers already shown in the UI.
-- Section 4:
-  If the TRADE LOGIC OUTLOOK above is present, Section 4 MUST begin by pasting it verbatim.
-  Then add 2–4 sentences adapting it to today's breakout/breakdown triggers using only provided levels.
-- Section 5:
-  If no news_events provided, say exactly: "No scheduled news injected today."
-- Section 8 must be YAML only.
-
-Now write today’s Daily Market Review for {symbol} on {date_str}.
-""".strip()
-
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        temperature=float(os.getenv("OPENAI_DMR_TEMPERATURE", "0.35")),
-    )
-
-    text = (resp.choices[0].message.content or "").strip()
-
-    # Seatbelt: if outlook exists but model ignored it, force it into Section 4.
-    if outlook_text and (outlook_text.splitlines()[0] not in text):
+# SEATBELT: if we have outlook_text but it didn't appear, inject it under Section 4.
+if outlook_text:
+    if outlook_text.splitlines()[0] not in text:
         text = text.replace(
             "4) Trade Strategy Outlook",
             "4) Trade Strategy Outlook\n" + outlook_text.strip() + "\n",
             1,
         )
 
-    return text
+return text
 
 
 def answer_coach_question(symbol: str, date_str: str, dmr_payload: dict, question: str) -> str:
