@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from database import UserModel, SessionModel, get_db
 
-# Argon2 first (new hashes), bcrypt still supported for verifying old hashes.
+
 pwd_context = CryptContext(
     schemes=["argon2", "bcrypt"],
     deprecated="auto",
@@ -20,7 +20,6 @@ pwd_context = CryptContext(
 def _hash_password(password: str) -> str:
     if not password or len(password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
-    # Argon2 does NOT have the bcrypt 72-byte limit
     return pwd_context.hash(password)
 
 
@@ -91,24 +90,16 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Not logged in.")
 
     # Convert to membership.User if available
-    try:
-        from membership import User as MembershipUser, Tier
-        try:
-            tier_enum = Tier(u.tier)
-        except Exception:
-            tier_enum = Tier.TIER2_SINGLE_AUTO
+    from membership import User as MembershipUser, Tier
 
-        return MembershipUser(
-            id=u.id,
-            email=u.email,
-            tier=tier_enum,
-            session_tz=getattr(u, "session_tz", "UTC"),
-        )
+    try:
+        tier_enum = Tier(u.tier)
     except Exception:
-        class _U: pass
-        out = _U()
-        out.id = u.id
-        out.email = u.email
-        out.tier = u.tier
-        out.session_tz = getattr(u, "session_tz", "UTC")
-        return out
+        tier_enum = Tier.TIER2_SINGLE_AUTO
+
+    return MembershipUser(
+        id=u.id,
+        email=u.email,
+        tier=tier_enum,
+        session_tz=getattr(u, "session_tz", "UTC"),
+    )

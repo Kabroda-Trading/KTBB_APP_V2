@@ -1,6 +1,6 @@
 # billing.py
 import os
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 import stripe
 from fastapi import HTTPException, Request
@@ -14,17 +14,19 @@ PRICE_TACTICAL = os.getenv("STRIPE_PRICE_TACTICAL", "")
 PRICE_ELITE = os.getenv("STRIPE_PRICE_ELITE", "")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 
+
 def _require_stripe():
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe not configured (missing STRIPE_SECRET_KEY).")
+
 
 def tier_for_price(price_id: str) -> Tier:
     if price_id == PRICE_ELITE:
         return Tier.TIER3_MULTI_GPT
     if price_id == PRICE_TACTICAL:
         return Tier.TIER2_SINGLE_AUTO
-    # Unknown price -> safest fallback
     return Tier.TIER2_SINGLE_AUTO
+
 
 def price_for_tier(tier: str) -> str:
     if tier in ("elite", "tier3_multi_gpt", "tier3_elite_gpt"):
@@ -37,6 +39,7 @@ def price_for_tier(tier: str) -> str:
         return PRICE_TACTICAL
     raise HTTPException(status_code=400, detail="Invalid tier")
 
+
 def ensure_customer(db: Session, user_model) -> str:
     _require_stripe()
     if getattr(user_model, "stripe_customer_id", None):
@@ -46,6 +49,7 @@ def ensure_customer(db: Session, user_model) -> str:
     user_model.stripe_customer_id = cust["id"]
     db.commit()
     return cust["id"]
+
 
 def create_checkout_session(db: Session, user_model, tier_slug: str) -> str:
     _require_stripe()
@@ -67,6 +71,7 @@ def create_checkout_session(db: Session, user_model, tier_slug: str) -> str:
     )
     return sess["url"]
 
+
 def create_billing_portal(db: Session, user_model) -> str:
     _require_stripe()
     customer_id = ensure_customer(db, user_model)
@@ -75,6 +80,7 @@ def create_billing_portal(db: Session, user_model) -> str:
         return_url=f"{PUBLIC_BASE_URL}/suite",
     )
     return portal["url"]
+
 
 def handle_webhook(request: Request, payload: bytes, sig_header: str, db: Session, UserModel):
     secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
@@ -89,9 +95,7 @@ def handle_webhook(request: Request, payload: bytes, sig_header: str, db: Sessio
     etype = event["type"]
     obj = event["data"]["object"]
 
-    # We primarily care about subscription lifecycle
     if etype in ("checkout.session.completed",):
-        # Subscription may not be fully expanded; rely on subscription.updated for tier
         return {"ok": True}
 
     if etype in ("customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"):
@@ -99,7 +103,6 @@ def handle_webhook(request: Request, payload: bytes, sig_header: str, db: Sessio
         status = obj.get("status")
         sub_id = obj.get("id")
 
-        # price id is on the subscription items
         items = obj.get("items", {}).get("data", [])
         price_id = None
         if items and items[0].get("price"):
@@ -116,7 +119,6 @@ def handle_webhook(request: Request, payload: bytes, sig_header: str, db: Sessio
         u.stripe_price_id = price_id
         u.subscription_status = status
 
-        # Determine tier
         if etype == "customer.subscription.deleted" or status in ("canceled", "unpaid", "incomplete_expired"):
             u.tier = Tier.TIER2_SINGLE_AUTO.value
         else:
