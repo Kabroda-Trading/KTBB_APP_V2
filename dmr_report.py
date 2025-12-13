@@ -132,53 +132,42 @@ def compute_dmr(symbol: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
     """
     date_str = datetime.utcnow().strftime("%Y-%m-%d")
 
-    # Pull the common inputs we’ve been using
     h4_supply = _pick(inputs, "h4_supply")
     h4_demand = _pick(inputs, "h4_demand")
     r30_high = _pick(inputs, "r30_high", "r30_hi", "range_30m_high", "opening_range_30_high")
     r30_low = _pick(inputs, "r30_low", "r30_lo", "range_30m_low", "opening_range_30_low")
 
-    # Define the core levels
+    # Core levels (plus the extra keys trade_logic_v2 expects)
     levels = {
         "daily_resistance": h4_supply,
         "daily_support": h4_demand,
-        # OR high/low act as triggers
         "breakout_trigger": r30_high,
         "breakdown_trigger": r30_low,
+        "range30m_high": r30_high,
+        "range30m_low": r30_low,
     }
 
-    range_30m = {
-        "high": r30_high,
-        "low": r30_low,
-    }
-
+    range_30m = {"high": r30_high, "low": r30_low}
     htf_shelves = _build_htf_shelves(inputs)
 
     # Strategy-aware KTBB summary (S0–S8 bridge)
     trade_logic = None
     trade_logic_error = None
-
     try:
         from trade_logic_v2 import build_trade_logic_summary
 
-        try:
-            # Preferred signature (what we intended)
-            trade_logic = build_trade_logic_summary(
-                symbol=symbol,
-                inputs=inputs,
-                levels=levels,
-                range_30m=range_30m,
-                htf_shelves=htf_shelves,
-            )
-        except TypeError:
-            # Fallback signature in case your function differs
-            trade_logic = build_trade_logic_summary(
-                inputs=inputs,
-                levels=levels,
-                range_30m=range_30m,
-                htf_shelves=htf_shelves,
-            )
+        bias_label = "neutral"  # deterministic placeholder (no bias engine wired yet)
 
+        # trade_logic_v2 expects floats; filter out Nones defensively
+        clean_levels = {k: float(v) for k, v in levels.items() if v is not None}
+
+        trade_logic = build_trade_logic_summary(
+            symbol=symbol,
+            levels=clean_levels,
+            bias_label=bias_label,
+            htf_shelves=htf_shelves,
+            range_30m=range_30m,
+        )
     except Exception as e:
         trade_logic = None
         trade_logic_error = f"{type(e).__name__}: {e}"
@@ -192,11 +181,8 @@ def compute_dmr(symbol: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
         "htf_shelves": htf_shelves,
         "trade_logic": trade_logic,
         "trade_logic_error": trade_logic_error,
-        # For backward compatibility with older UI code
         "report_text": report_text,
         "report": report_text,
         "date": date_str,
         "symbol": symbol,
     }
-
-
