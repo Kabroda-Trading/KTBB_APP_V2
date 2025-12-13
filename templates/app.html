@@ -200,7 +200,7 @@ async function runDMR(){
   btn.disabled = true;
 
   // Elite uses AI-written report; Tactical uses deterministic report builder
-  const endpoint = IS_ELITE ? "/api/dmr/run-auto-ai" : "/api/dmr/run-auto";
+  const endpoint = "/api/dmr/run-auto-ai";
 
   try{
     const r = await fetch(endpoint, {

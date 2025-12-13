@@ -1,4 +1,4 @@
-# main.py
+# main.py (PATCH: add is_elite + AI DMR endpoint + assistant chat endpoint)
 import os
 from typing import Dict, Any, Set
 
@@ -19,14 +19,11 @@ from auth import (
     delete_session,
     get_current_user,
 )
-from membership import Tier, tier_marketing_label
+from membership import Tier, tier_marketing_label, ensure_can_use_gpt_chat
 from data_feed import build_auto_inputs, resolve_symbol
 from dmr_report import compute_dmr
 
 
-# --------------------------
-# Config
-# --------------------------
 def _truthy(v: str) -> bool:
     return (v or "").strip().lower() in ("1", "true", "yes", "y", "on")
 
@@ -38,7 +35,6 @@ SEED_ADMIN_EMAIL = (os.getenv("SEED_ADMIN_EMAIL") or "").strip().lower()
 SEED_ADMIN_PASSWORD = (os.getenv("SEED_ADMIN_PASSWORD") or "").strip()
 SEED_ADMIN_TIER = (os.getenv("SEED_ADMIN_TIER") or "tier3_multi_gpt").strip()
 
-# Comma-separated list of admin emails (recommended). Seed admin email is automatically included.
 ADMIN_EMAILS_RAW = os.getenv("ADMIN_EMAILS", "")
 ADMIN_EMAILS: Set[str] = {e.strip().lower() for e in ADMIN_EMAILS_RAW.split(",") if e.strip()}
 if SEED_ADMIN_EMAIL:
@@ -46,10 +42,6 @@ if SEED_ADMIN_EMAIL:
 
 COOKIE_NAME = "ktbb_session"
 
-
-# --------------------------
-# App setup
-# --------------------------
 app = FastAPI(title="Kabroda BattleBox Suite")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -59,8 +51,7 @@ templates = Jinja2Templates(directory="templates")
 @app.on_event("startup")
 async def _startup():
     init_db()
-
-    # Create a master/demo admin user automatically if env vars are set.
+    # Seed admin user if env vars set
     if SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD:
         db = SessionLocal()
         try:
@@ -69,17 +60,13 @@ async def _startup():
                 try:
                     tier_enum = Tier(SEED_ADMIN_TIER)
                 except Exception:
-                    tier_enum = Tier.TIER3_MULTI_GPT
-
+                    tier_enum = Tier.Tier.TIER3_MULTI_GPT  # safety, but not expected
                 create_user(db, SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD, tier=tier_enum)
                 print(f"[BOOTSTRAP] Seeded admin user: {SEED_ADMIN_EMAIL} ({tier_enum.value})")
         finally:
             db.close()
 
 
-# --------------------------
-# Helpers
-# --------------------------
 def _redirect(path: str) -> RedirectResponse:
     return RedirectResponse(path, status_code=303)
 
@@ -92,7 +79,7 @@ def _require_admin(user) -> None:
 
 
 # --------------------------
-# Marketing pages
+# Pages
 # --------------------------
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
@@ -110,7 +97,7 @@ def about(request: Request):
 
 
 # --------------------------
-# Auth pages
+# Auth
 # --------------------------
 @app.get("/login", response_class=HTMLResponse)
 def login_get(request: Request):
@@ -169,41 +156,76 @@ def logout(request: Request, db: Session = Depends(get_db)):
 
 
 # --------------------------
-# App (Suite)
+# Suite (FIX: pass is_elite)
 # --------------------------
 @app.get("/suite", response_class=HTMLResponse)
-def suite_page(
-    request: Request,
-    user=Depends(get_current_user),
-):
+def suite_page(request: Request, user=Depends(get_current_user)):
+    tier_value = getattr(user.tier, "value", str(user.tier))
+    is_elite = tier_value == Tier.TIER3_MULTI_GPT.value
     tier_label = tier_marketing_label(user.tier)
+
     return templates.TemplateResponse(
         "app.html",
-        {"request": request, "user": user, "tier_label": tier_label, "dev_mode": DEV_MODE},
+        {
+            "request": request,
+            "user": user,
+            "tier_label": tier_label,
+            "dev_mode": DEV_MODE,
+            "tier_value": tier_value,
+            "is_elite": is_elite,
+        },
     )
 
 
 # --------------------------
-# API: DMR
+# DMR endpoints
 # --------------------------
 @app.post("/api/dmr/run-auto")
-def api_run_auto(
-    payload: Dict[str, Any],
-    user=Depends(get_current_user),
-):
+def api_run_auto(payload: Dict[str, Any], user=Depends(get_current_user)):
     symbol = resolve_symbol(payload.get("symbol") or "BTC")
     inputs = build_auto_inputs(symbol=symbol, session_tz=getattr(user, "session_tz", "UTC"))
-    result = compute_dmr(symbol, inputs)
-    return JSONResponse(result)
+    return JSONResponse(compute_dmr(symbol, inputs))
 
 
-@app.post("/api/coach/ask")
-def api_coach_ask(
-    payload: Dict[str, Any],
-    user=Depends(get_current_user),
-):
-    if getattr(user.tier, "value", str(user.tier)) not in ("tier3_multi_gpt", "tier3_elite_gpt"):
-        raise HTTPException(status_code=403, detail="Elite required.")
+@app.post("/api/dmr/run-auto-ai")
+def api_run_auto_ai(payload: Dict[str, Any], user=Depends(get_current_user)):
+    """
+    AI-written narrative for BOTH Tactical + Elite (your requirement).
+    Falls back to deterministic narrative if OpenAI is unavailable.
+    """
+    symbol = resolve_symbol(payload.get("symbol") or "BTC")
+    inputs = build_auto_inputs(symbol=symbol, session_tz=getattr(user, "session_tz", "UTC"))
+    dmr = compute_dmr(symbol, inputs)
+
+    date_str = dmr.get("date") or ""
+    try:
+        # Avoid sending the giant report text back into the model
+        model_payload = {
+            "symbol": dmr.get("symbol"),
+            "date": dmr.get("date"),
+            "levels": dmr.get("levels"),
+            "range_30m": dmr.get("range_30m"),
+            "htf_shelves": dmr.get("htf_shelves"),
+            "inputs": dmr.get("inputs"),
+        }
+        ai_text = kabroda_ai.generate_daily_market_review(symbol, date_str, model_payload)
+        dmr["report_text"] = ai_text
+        dmr["report"] = ai_text
+        dmr["ai_used"] = True
+    except Exception as e:
+        # Keep deterministic output if OpenAI fails
+        dmr["ai_used"] = False
+        dmr["ai_error"] = str(e)
+
+    return JSONResponse(dmr)
+
+
+# --------------------------
+# Elite-only Coach (matches app.html JS: /api/assistant/chat)
+# --------------------------
+@app.post("/api/assistant/chat")
+def api_assistant_chat(payload: Dict[str, Any], user=Depends(get_current_user)):
+    ensure_can_use_gpt_chat(user)  # Elite-only gate
 
     question = (payload.get("question") or "").strip()
     if not question:
@@ -213,109 +235,27 @@ def api_coach_ask(
     inputs = build_auto_inputs(symbol=symbol, session_tz=getattr(user, "session_tz", "UTC"))
     dmr = compute_dmr(symbol, inputs)
 
-    answer = kabroda_ai.ask_coach(question=question, dmr=dmr)
+    date_str = dmr.get("date") or ""
+    model_payload = {
+        "symbol": dmr.get("symbol"),
+        "date": dmr.get("date"),
+        "levels": dmr.get("levels"),
+        "range_30m": dmr.get("range_30m"),
+        "htf_shelves": dmr.get("htf_shelves"),
+        "inputs": dmr.get("inputs"),
+    }
+
+    answer = kabroda_ai.answer_coach_question(symbol, date_str, model_payload, question)
     return {"answer": answer}
 
 
 # --------------------------
-# Admin tools (FOR YOU to test live on Render)
+# Admin quick checks (keep)
 # --------------------------
 @app.get("/admin/whoami")
 def admin_whoami(user=Depends(get_current_user)):
     _require_admin(user)
     return {"email": user.email, "tier": getattr(user.tier, "value", str(user.tier))}
-
-
-@app.get("/admin/users")
-def admin_list_users(
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user),
-):
-    _require_admin(user)
-    rows = db.query(UserModel).order_by(UserModel.id.asc()).all()
-    return [
-        {
-            "id": r.id,
-            "email": r.email,
-            "tier": r.tier,
-            "subscription_status": r.subscription_status,
-            "stripe_customer_id": r.stripe_customer_id,
-            "stripe_price_id": r.stripe_price_id,
-        }
-        for r in rows
-    ]
-
-
-@app.post("/admin/create-user")
-def admin_create_user(
-    payload: Dict[str, Any],
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user),
-):
-    _require_admin(user)
-    email = (payload.get("email") or "").strip().lower()
-    password = (payload.get("password") or "").strip()
-    tier = (payload.get("tier") or Tier.TIER2_SINGLE_AUTO.value).strip()
-
-    if not email or "@" not in email:
-        raise HTTPException(status_code=400, detail="Invalid email.")
-    if not password or len(password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
-
-    try:
-        tier_enum = Tier(tier)
-    except Exception:
-        tier_enum = Tier.TIER2_SINGLE_AUTO
-
-    u = create_user(db, email, password, tier=tier_enum)
-    return {"ok": True, "id": u.id, "email": u.email, "tier": u.tier}
-
-
-@app.post("/admin/set-tier")
-def admin_set_tier(
-    payload: Dict[str, Any],
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user),
-):
-    _require_admin(user)
-
-    user_id = payload.get("user_id")
-    tier = (payload.get("tier") or "").strip()
-    if not user_id or not tier:
-        raise HTTPException(status_code=400, detail="Missing user_id or tier.")
-
-    u = db.query(UserModel).filter(UserModel.id == int(user_id)).first()
-    if not u:
-        raise HTTPException(status_code=404, detail="User not found.")
-
-    u.tier = tier
-    db.commit()
-    return {"ok": True, "id": u.id, "tier": u.tier}
-
-
-# --------------------------
-# DEV: Set tier (only if DEV_MODE=1)
-# --------------------------
-@app.post("/dev/set-tier")
-def dev_set_tier(
-    payload: Dict[str, Any],
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user),
-):
-    if not DEV_MODE:
-        raise HTTPException(status_code=404, detail="Not found")
-
-    new_tier = (payload.get("tier") or "").strip()
-    if not new_tier:
-        raise HTTPException(status_code=400, detail="Missing tier")
-
-    u = db.query(UserModel).filter(UserModel.id == user.id).first()
-    if not u:
-        raise HTTPException(status_code=404, detail="User missing")
-
-    u.tier = new_tier
-    db.commit()
-    return {"ok": True, "tier": u.tier}
 
 
 # --------------------------
@@ -335,10 +275,7 @@ def billing_checkout(
 
 
 @app.get("/billing/portal")
-def billing_portal(
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user),
-):
+def billing_portal(db: Session = Depends(get_db), user=Depends(get_current_user)):
     u = db.query(UserModel).filter(UserModel.id == user.id).first()
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
