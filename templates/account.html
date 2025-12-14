@@ -5,20 +5,51 @@
 
 <div class="card">
   <h3>Session Timezone (DST-safe)</h3>
-  <form method="post" action="/account/session-timezone" class="row">
-    <input name="tz" value="{{ user.session_tz }}" placeholder="America/Chicago" />
+  <p class="muted" style="margin-top:6px;">
+    Choose your timezone so the system pulls the correct session candle and opening range.
+  </p>
+
+  <form method="post" action="/account/session-timezone" class="row" style="gap:10px;">
+    <input
+      name="tz"
+      value="{{ user.session_tz }}"
+      list="tzlist"
+      placeholder="Start typing… e.g. America/Chicago"
+      style="flex:1;"
+    />
     <button class="btn primary" type="submit">Save</button>
   </form>
-  <p class="muted">Examples: America/Chicago, America/New_York, Europe/London</p>
+
+  <datalist id="tzlist">
+    <option value="America/New_York"></option>
+    <option value="America/Chicago"></option>
+    <option value="America/Denver"></option>
+    <option value="America/Los_Angeles"></option>
+    <option value="America/Phoenix"></option>
+    <option value="Europe/London"></option>
+    <option value="Europe/Paris"></option>
+    <option value="Europe/Berlin"></option>
+    <option value="Asia/Tokyo"></option>
+    <option value="Asia/Singapore"></option>
+    <option value="Australia/Sydney"></option>
+  </datalist>
+
+  <p class="muted" style="margin-top:10px;">
+    Tip: you can type any IANA timezone — your browser will autocomplete common ones.
+  </p>
 </div>
 
 <div class="card">
   <h3>Billing</h3>
-  <p class="muted">Upgrade via Stripe Checkout or manage your subscription:</p>
+  <p class="muted">Manage your subscription or upgrade your tier.</p>
 
   <div class="row" style="gap:10px; flex-wrap:wrap;">
-    <button class="btn primary" onclick="startCheckout('tactical')">Upgrade Tactical</button>
-    <button class="btn primary" onclick="startCheckout('elite')">Upgrade Elite</button>
+    {% if not is_elite %}
+      <button class="btn primary" onclick="startCheckout('elite')">Upgrade to Elite</button>
+    {% else %}
+      <button class="btn" disabled title="You already have Elite" style="opacity:.7;">Elite Active ✅</button>
+    {% endif %}
+
     <a class="btn" href="/billing/portal">Manage Billing</a>
     <a class="btn" href="/suite" style="margin-left:auto;">Back to Suite</a>
   </div>
@@ -42,6 +73,7 @@ async function startCheckout(tier){
     window.location = data.url;
   }catch(e){
     s.textContent = "Billing error: " + e.message;
+    alert("Checkout failed: " + e.message);
   }
 }
 </script>

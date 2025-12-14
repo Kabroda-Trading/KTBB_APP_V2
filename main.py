@@ -1,6 +1,7 @@
-# main.py — CLEAN REWRITE (stable auth, timezone, DMR, billing, elite chat)
+# main.py — production-clean single-file FastAPI app
 import os
-from typing import Dict, Any, Set, Optional
+import traceback
+from typing import Dict, Any, Set
 
 from fastapi import FastAPI, Request, Depends, Form, HTTPException, Body
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -32,6 +33,8 @@ def _truthy(v: str) -> bool:
 DEV_MODE = _truthy(os.getenv("DEV_MODE", "0"))
 DISABLE_REGISTRATION = _truthy(os.getenv("DISABLE_REGISTRATION", "0"))
 
+PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+
 SEED_ADMIN_EMAIL = (os.getenv("SEED_ADMIN_EMAIL") or "").strip().lower()
 SEED_ADMIN_PASSWORD = (os.getenv("SEED_ADMIN_PASSWORD") or "").strip()
 SEED_ADMIN_TIER = (os.getenv("SEED_ADMIN_TIER") or "tier3_multi_gpt").strip()
@@ -48,11 +51,29 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 
+# ---------- global errors (so frontend can display real message) ----------
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    # Never leak secrets; do return a readable message for your own UI.
+    # Render logs will still show the stack trace.
+    print("[ERROR]", request.method, request.url)
+    traceback.print_exc()
+
+    # If it's an HTTPException, let FastAPI handle it normally
+    if isinstance(exc, HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error", "error": str(exc)},
+    )
+
+
 @app.on_event("startup")
 async def _startup():
     init_db()
 
-    # Seed admin user if env vars set
+    # Seed admin user (only if env vars are set)
     if SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD:
         db = SessionLocal()
         try:
@@ -62,7 +83,6 @@ async def _startup():
                     tier_enum = Tier(SEED_ADMIN_TIER)
                 except Exception:
                     tier_enum = Tier.TIER3_MULTI_GPT
-                # Store a safe default tz; app.html auto-detect will overwrite via POST once logged in.
                 create_user(db, SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD, tier=tier_enum, session_tz="UTC")
                 print(f"[BOOTSTRAP] Seeded admin user: {SEED_ADMIN_EMAIL} ({tier_enum.value})")
         finally:
@@ -73,22 +93,14 @@ def _redirect(path: str) -> RedirectResponse:
     return RedirectResponse(path, status_code=303)
 
 
-def _require_admin(user) -> None:
-    email = (getattr(user, "email", "") or "").strip().lower()
-    if email and email in ADMIN_EMAILS:
-        return
-    raise HTTPException(status_code=403, detail="Admin access required.")
-
-
 def _validate_tz(tz: str) -> str:
     tz = (tz or "").strip()
     if not tz:
         raise HTTPException(status_code=400, detail="Missing timezone.")
-    # Validates IANA tz string (DST-safe)
     try:
         ZoneInfo(tz)
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid timezone. Use IANA format like America/Chicago.")
+        raise HTTPException(status_code=400, detail="Invalid timezone. Use e.g. America/Chicago.")
     return tz
 
 
@@ -105,10 +117,15 @@ def pricing(request: Request):
     return templates.TemplateResponse("pricing.html", {"request": request})
 
 
+@app.get("/about", response_class=HTMLResponse)
+def about(request: Request):
+    return templates.TemplateResponse("about.html", {"request": request})
+
+
 @app.get("/suite", response_class=HTMLResponse)
 def suite(request: Request, user=Depends(get_current_user)):
     tier_label = tier_marketing_label(user.tier)
-    is_elite = user.tier == Tier.TIER3_MULTI_GPT
+    is_elite = (user.tier == Tier.TIER3_MULTI_GPT)
     return templates.TemplateResponse(
         "app.html",
         {
@@ -124,9 +141,10 @@ def suite(request: Request, user=Depends(get_current_user)):
 @app.get("/account", response_class=HTMLResponse)
 def account(request: Request, user=Depends(get_current_user)):
     tier_label = tier_marketing_label(user.tier)
+    is_elite = (user.tier == Tier.TIER3_MULTI_GPT)
     return templates.TemplateResponse(
         "account.html",
-        {"request": request, "user": user, "tier_label": tier_label},
+        {"request": request, "user": user, "tier_label": tier_label, "is_elite": is_elite},
     )
 
 
@@ -147,10 +165,7 @@ def login_post(
 ):
     u = authenticate_user(db, email, password)
     if not u:
-        return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Invalid email or password."},
-        )
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid email or password."})
 
     token = create_session_token(db, u.id)
     resp = _redirect("/suite")
@@ -175,7 +190,6 @@ def register_post(
     if DISABLE_REGISTRATION and not DEV_MODE:
         return _redirect("/login")
 
-    # Default new users to Tactical tier (your pricing/Stripe can upgrade)
     try:
         u = create_user(db, email, password, tier=Tier.TIER2_SINGLE_AUTO, session_tz="UTC")
     except HTTPException as e:
@@ -216,44 +230,34 @@ def set_session_timezone(
 
 
 # --------------------------
-# Dev tools (optional)
-# --------------------------
-@app.post("/dev/set-tier")
-def dev_set_tier(
-    tier: str = Form(...),
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user),
-):
-    if not DEV_MODE:
-        raise HTTPException(status_code=404, detail="Not found")
-    try:
-        Tier(tier)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid tier")
-
-    u = db.query(UserModel).filter(UserModel.id == user.id).first()
-    if not u:
-        raise HTTPException(status_code=404, detail="User not found")
-    u.tier = tier
-    db.commit()
-    return _redirect("/suite")
-
-
-# --------------------------
-# AI DMR (matches app.html JS: /api/dmr/run-auto-ai)
+# DMR: AI narrative + deterministic fallback
 # --------------------------
 @app.post("/api/dmr/run-auto-ai")
 def api_dmr_run_auto_ai(payload: Dict[str, Any], user=Depends(get_current_user)):
     symbol = resolve_symbol(payload.get("symbol") or "BTC")
-
-    # Build inputs using user’s DST-safe timezone
     session_tz = getattr(user, "session_tz", "UTC") or "UTC"
-    inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
 
-    dmr = compute_dmr(symbol, inputs)
+    # Step 1: build inputs (can fail if exchange unreachable)
+    try:
+        inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Market data fetch failed: {str(e)}",
+        )
+
+    # Step 2: compute deterministic DMR payload
+    try:
+        dmr = compute_dmr(symbol, inputs)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"DMR compute failed: {str(e)}",
+        )
+
     date_str = dmr.get("date") or ""
 
-    # Ask OpenAI to narrate using the computed levels (no “inventing”)
+    # Step 3: AI narrative (fallback if OpenAI fails)
     try:
         model_payload = {
             "symbol": dmr.get("symbol"),
@@ -268,6 +272,7 @@ def api_dmr_run_auto_ai(payload: Dict[str, Any], user=Depends(get_current_user))
         dmr["report"] = ai_text
         dmr["ai_used"] = True
     except Exception as e:
+        # keep deterministic report text inside dmr_report.compute_dmr
         dmr["ai_used"] = False
         dmr["ai_error"] = str(e)
 
@@ -275,11 +280,11 @@ def api_dmr_run_auto_ai(payload: Dict[str, Any], user=Depends(get_current_user))
 
 
 # --------------------------
-# Elite-only Coach (matches app.html JS: /api/assistant/chat)
+# Elite-only Coach
 # --------------------------
 @app.post("/api/assistant/chat")
 def api_assistant_chat(payload: Dict[str, Any], user=Depends(get_current_user)):
-    ensure_can_use_gpt_chat(user)  # Elite-only gate
+    ensure_can_use_gpt_chat(user)
 
     question = (payload.get("question") or "").strip()
     if not question:
@@ -287,8 +292,12 @@ def api_assistant_chat(payload: Dict[str, Any], user=Depends(get_current_user)):
 
     symbol = resolve_symbol(payload.get("symbol") or "BTC")
     session_tz = getattr(user, "session_tz", "UTC") or "UTC"
-    inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
-    dmr = compute_dmr(symbol, inputs)
+
+    try:
+        inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
+        dmr = compute_dmr(symbol, inputs)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Market/DMR failed: {str(e)}")
 
     date_str = dmr.get("date") or ""
     model_payload = {
@@ -305,16 +314,7 @@ def api_assistant_chat(payload: Dict[str, Any], user=Depends(get_current_user)):
 
 
 # --------------------------
-# Admin quick checks
-# --------------------------
-@app.get("/admin/whoami")
-def admin_whoami(user=Depends(get_current_user)):
-    _require_admin(user)
-    return {"email": user.email, "tier": getattr(user.tier, "value", str(user.tier))}
-
-
-# --------------------------
-# Billing (Stripe)
+# Billing
 # --------------------------
 @app.post("/billing/checkout")
 def billing_checkout(
@@ -325,7 +325,12 @@ def billing_checkout(
     u = db.query(UserModel).filter(UserModel.id == user.id).first()
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
-    url = billing.create_checkout_session(db, u, tier_slug=tier)
+
+    try:
+        url = billing.create_checkout_session(db, u, tier_slug=tier)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Checkout failed: {str(e)}")
+
     return {"url": url}
 
 
@@ -334,7 +339,12 @@ def billing_portal(db: Session = Depends(get_db), user=Depends(get_current_user)
     u = db.query(UserModel).filter(UserModel.id == user.id).first()
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
-    url = billing.create_billing_portal(db, u)
+
+    try:
+        url = billing.create_billing_portal(db, u)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Billing portal failed: {str(e)}")
+
     return RedirectResponse(url, status_code=303)
 
 

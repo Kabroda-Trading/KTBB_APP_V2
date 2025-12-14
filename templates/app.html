@@ -4,30 +4,20 @@
 <h1>Kabroda BattleBox Suite</h1>
 <p class="muted">Logged in as {{ user.email }} • {{ tier_label }}</p>
 
-{% if dev_mode %}
-<form method="POST" action="/dev/set-tier" class="row" style="margin:10px 0; gap:10px;">
-  <select name="tier">
-    <option value="tier2_single_auto" {% if user.tier.value == "tier2_single_auto" %}selected{% endif %}>Tactical</option>
-    <option value="tier3_multi_gpt" {% if user.tier.value == "tier3_multi_gpt" %}selected{% endif %}>Elite (GPT)</option>
-  </select>
-  <button type="submit" class="btn primary">Dev: Apply Tier</button>
-</form>
-{% endif %}
-
 <div class="card">
   <h3>Run Daily Market Review</h3>
   <p class="muted" style="margin-top:6px;">
     Generate today’s structure levels, opening range, HTF shelves, and a clean narrative.
   </p>
 
-  <div class="row">
-    <select id="symbol">
+  <div class="row" style="gap:10px; align-items:center;">
+    <select id="symbol" style="flex:1;">
       <option value="BTC">BTC</option>
       <option value="ETH">ETH</option>
     </select>
 
     <button class="btn primary" id="runBtn" onclick="runDMR()">Generate Review</button>
-    <a class="btn" href="/account" style="margin-left:auto;">Account</a>
+    <a class="btn" href="/account">Account</a>
   </div>
 
   <div id="status" class="muted" style="margin-top:10px;">Idle</div>
@@ -52,7 +42,6 @@
     </div>
   </div>
 
-  <!-- Daily Market Review -->
   <div class="card" style="margin-top:16px;">
     <div class="row" style="justify-content:space-between; align-items:center;">
       <h3 style="margin:0;">Daily Market Review</h3>
@@ -62,7 +51,7 @@
     <div id="dmrNarrative" class="dmr-box"></div>
 
     <div class="row" style="margin-top:12px; gap:10px;">
-      <button class="btn primary" id="toggleYamlBtn" onclick="toggleYaml()" style="display:none;">Show TradingView YAML</button>
+      <button class="btn primary" id="toggleYamlBtn" onclick="toggleYaml()" style="display:none;">Show YAML</button>
       <button class="btn" id="copyYamlBtn" onclick="copyYaml()" style="display:none;">Copy YAML</button>
       <div class="muted" id="copyStatus" style="margin-left:auto;"></div>
     </div>
@@ -70,13 +59,12 @@
     <pre id="dmrYaml" class="pre" style="white-space:pre-wrap; display:none; margin-top:10px;"></pre>
   </div>
 
-  <!-- Kabroda AI Coach -->
   <div class="card" style="margin-top:16px;">
     <h3>Kabroda AI Coach</h3>
 
     {% if is_elite %}
       <div class="muted" style="margin-top:6px;">
-        Ask questions about <strong>today’s</strong> levels and scenarios. I stay anchored to the numbers on screen.
+        Ask questions anchored to today’s levels (Elite only).
       </div>
 
       <div id="chat" class="chat-shell">
@@ -95,10 +83,9 @@
       </div>
     {% else %}
       <div class="muted" style="margin-top:8px;">
-        Tactical includes the full Daily Market Review and levels.
+        Upgrade to Elite to unlock the AI Coach chat.
         <div style="margin-top:10px;">
-          <a class="btn primary" href="/pricing">Upgrade to Elite</a>
-          <span class="muted" style="margin-left:8px;">Unlock Kabroda AI chat coaching (Q&A locked to today’s levels).</span>
+          <a class="btn primary" href="/pricing">See Pricing</a>
         </div>
       </div>
     {% endif %}
@@ -106,33 +93,30 @@
 </div>
 
 <style>
-  /* Button polish so nothing looks "disabled white" */
-  .btn { background: rgba(255,255,255,06); border: 1px solid rgba(255,255,255,12); }
-  .btn:hover { background: rgba(255,255,255,10); }
-  .btn.primary { background: #60a5fa; border-color: rgba(96,165,250,45); color:#0b1220; font-weight: 700; }
+  .btn { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); }
+  .btn:hover { background: rgba(255,255,255,.10); }
+  .btn.primary { background: #60a5fa; border-color: rgba(96,165,250,.45); color:#0b1220; font-weight: 700; }
   .btn.primary:hover { filter: brightness(1.05); }
 
   .dmr-box{
     margin-top:12px;
     padding:14px;
     border-radius:16px;
-    background: rgba(0,0,0,28);
-    border: 1px solid rgba(255,255,255,08);
-    color: rgba(255,255,255,92);
+    background: rgba(0,0,0,.28);
+    border: 1px solid rgba(255,255,255,.08);
+    color: rgba(255,255,255,.92);
     line-height: 1.55;
     white-space: pre-line;
-    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
     font-size: 15px;
   }
 
-  .chat-shell{ margin-top:10px; }
   .chat-log{
     max-height: 320px;
     overflow:auto;
     padding: 10px;
     border-radius: 16px;
-    background: rgba(0,0,0,25);
-    border: 1px solid rgba(255,255,255,08);
+    background: rgba(0,0,0,.25);
+    border: 1px solid rgba(255,255,255,.08);
   }
   .chat-msg{ display:flex; margin: 10px 0; }
   .chat-user{ justify-content:flex-end; }
@@ -141,13 +125,13 @@
     max-width: 78%;
     padding: 10px 12px;
     border-radius: 16px;
-    border: 1px solid rgba(255,255,255,10);
-    background: rgba(255,255,255,06);
+    border: 1px solid rgba(255,255,255,.10);
+    background: rgba(255,255,255,.06);
     white-space: pre-wrap;
   }
   .chat-user .chat-bubble{
     background: rgba(96, 165, 250, .18);
-    border-color: rgba(96,165,250,35);
+    border-color: rgba(96,165,250,.35);
   }
 </style>
 
@@ -156,25 +140,16 @@ const IS_ELITE = {{ "true" if is_elite else "false" }};
 const USER_SESSION_TZ = {{ (user.session_tz or "UTC")|tojson }};
 let _lastYaml = "";
 
-/**
- * Auto-detect timezone (DST-safe) and persist it if user is still on UTC.
- * This prevents the “wrong 30m candle” problem when the backend builds session inputs.
- *
- * - We only auto-save if session_tz is empty/UTC-ish to avoid overwriting a user’s explicit choice.
- * - Uses IANA tz IDs like "America/Chicago".
- */
+// Auto-set timezone once if still UTC
 async function ensureUserTimezone(){
   try{
     const guessed = Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (!guessed) return;
-
     const current = (USER_SESSION_TZ || "").trim();
     const isUnset = (!current || current.toUpperCase() === "UTC");
+    if (!isUnset) return;
+    if (guessed === "UTC") return;
 
-    if (!isUnset) return;             // user already set a real tz
-    if (guessed === "UTC") return;     // no point saving UTC
-
-    // Persist via same endpoint your Account page uses (form POST).
     const body = new URLSearchParams();
     body.set("tz", guessed);
 
@@ -185,18 +160,8 @@ async function ensureUserTimezone(){
       credentials: "same-origin",
       redirect: "follow"
     });
-
-    // Optional: show a tiny hint. Keep it subtle.
-    const status = document.getElementById("status");
-    if (status && status.textContent === "Idle"){
-      status.textContent = `Timezone set to ${guessed} ✅`;
-      setTimeout(()=>{ status.textContent = "Idle"; }, 1200);
-    }
-  }catch(e){
-    // Silent fail: never block the suite if browser blocks Intl/Fetch.
-  }
+  }catch(e){}
 }
-
 document.addEventListener("DOMContentLoaded", ensureUserTimezone);
 
 function fmt(x){
@@ -207,31 +172,19 @@ function fmt(x){
 
 function normalizeReportText(data){
   const reportVal = (data.report_text !== undefined) ? data.report_text : data.report;
-
-  const reportText =
-    (typeof reportVal === "string") ? reportVal :
-    (reportVal && typeof reportVal.full_text === "string") ? reportVal.full_text :
-    (reportVal && typeof reportVal.text === "string") ? reportVal.text :
-    JSON.stringify(reportVal ?? "(No report returned.)", null, 2);
-
-  return reportText;
+  if (typeof reportVal === "string") return reportVal;
+  if (reportVal && typeof reportVal.full_text === "string") return reportVal.full_text;
+  if (reportVal && typeof reportVal.text === "string") return reportVal.text;
+  return JSON.stringify(reportVal ?? "(No report returned.)", null, 2);
 }
 
 function splitNarrativeAndYaml(reportText){
-  const markers = [
-    "\nYAML Block (for TradingView / scripting):",
-    "\nYAML Key Level Output Block",
-    "\nYAML Block",
-    "\nYAML",
-  ];
-
-  for (const m of markers){
-    const idx = reportText.indexOf(m);
-    if (idx !== -1){
-      const narrative = reportText.slice(0, idx).trim();
-      const yaml = reportText.slice(idx).trim();
-      return { narrative, yaml };
-    }
+  const idx = reportText.indexOf("```yaml");
+  if (idx !== -1){
+    return {
+      narrative: reportText.slice(0, idx).trim(),
+      yaml: reportText.slice(idx).trim()
+    };
   }
   return { narrative: reportText.trim(), yaml: "" };
 }
@@ -244,23 +197,20 @@ async function runDMR(){
   status.textContent = "Running…";
   btn.disabled = true;
 
-  // Your backend already routes this to AI narrative w/ deterministic fallback.
-  const endpoint = "/api/dmr/run-auto-ai";
-
   try{
-    const r = await fetch(endpoint, {
+    const r = await fetch("/api/dmr/run-auto-ai", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({symbol: sym})
+      body: JSON.stringify({symbol: sym}),
+      credentials: "same-origin"
     });
 
-    const text = await r.text();
-    let data = null;
-    try { data = JSON.parse(text); } catch(e){}
+    const data = await r.json();
 
     if (!r.ok){
-      status.textContent = `Error (${r.status})`;
-      alert((data && (data.error || data.detail)) ? (data.error || data.detail) : text);
+      const msg = data.detail || data.error || "Request failed";
+      status.textContent = "Error";
+      alert(msg);
       return;
     }
 
@@ -278,7 +228,6 @@ function renderDMR(data){
   document.getElementById("reportWrap").style.display = "block";
   document.getElementById("copyStatus").textContent = "";
 
-  // Levels
   const levels = data.levels || {};
   const ul = document.getElementById("levelsList");
   ul.innerHTML = "";
@@ -287,7 +236,6 @@ function renderDMR(data){
   ul.innerHTML += `<li><strong>Breakout Trigger:</strong> ${fmt(levels.breakout_trigger)}</li>`;
   ul.innerHTML += `<li><strong>Breakdown Trigger:</strong> ${fmt(levels.breakdown_trigger)}</li>`;
 
-  // OR
   const r30 = data.range_30m || {};
   document.getElementById("orBox").innerHTML = `
     High: <strong>${fmt(r30.high)}</strong><br>
@@ -296,7 +244,6 @@ function renderDMR(data){
   document.getElementById("orMeta").textContent =
     (typeof r30.high === "number" && typeof r30.low === "number") ? `Range: ${fmt(r30.high - r30.low)}` : "";
 
-  // HTF shelves
   const htf = data.htf_shelves || {};
   const res = (htf.resistance || []).map(x => `• ${x.tf}: ${fmt(x.level)}${x.primary ? " (primary)" : ""}`).join("\n");
   const sup = (htf.support || []).map(x => `• ${x.tf}: ${fmt(x.level)}${x.primary ? " (primary)" : ""}`).join("\n");
@@ -305,19 +252,15 @@ function renderDMR(data){
     <div><strong>Support</strong><pre class="pre" style="white-space:pre-wrap;">${sup || "—"}</pre></div>
   `;
 
-  // Meta
   const meta = [];
   if (data.symbol) meta.push(data.symbol);
   if (data.date) meta.push(data.date);
   document.getElementById("dmrMeta").textContent = meta.join(" • ");
 
-  // Report text
   const reportText = normalizeReportText(data);
   const parts = splitNarrativeAndYaml(reportText);
-
   document.getElementById("dmrNarrative").textContent = parts.narrative || "(No narrative returned.)";
 
-  // YAML toggle/copy
   _lastYaml = parts.yaml || "";
   const toggleBtn = document.getElementById("toggleYamlBtn");
   const copyBtn = document.getElementById("copyYamlBtn");
@@ -328,7 +271,7 @@ function renderDMR(data){
     copyBtn.style.display = "inline-block";
     yamlPre.textContent = _lastYaml;
     yamlPre.style.display = "none";
-    toggleBtn.textContent = "Show TradingView YAML";
+    toggleBtn.textContent = "Show YAML";
   } else {
     toggleBtn.style.display = "none";
     copyBtn.style.display = "none";
@@ -342,10 +285,10 @@ function toggleYaml(){
   const btn = document.getElementById("toggleYamlBtn");
   if (yamlPre.style.display === "none"){
     yamlPre.style.display = "block";
-    btn.textContent = "Hide TradingView YAML";
+    btn.textContent = "Hide YAML";
   } else {
     yamlPre.style.display = "none";
-    btn.textContent = "Show TradingView YAML";
+    btn.textContent = "Show YAML";
   }
 }
 
@@ -364,11 +307,9 @@ function addChat(role, text){
   const log = document.getElementById("chatLog");
   const row = document.createElement("div");
   row.className = "chat-msg " + (role === "user" ? "chat-user" : "chat-assistant");
-
   const bub = document.createElement("div");
   bub.className = "chat-bubble";
   bub.textContent = text;
-
   row.appendChild(bub);
   log.appendChild(row);
   log.scrollTop = log.scrollHeight;
@@ -376,7 +317,6 @@ function addChat(role, text){
 
 async function sendChat(){
   if (!IS_ELITE) return;
-
   const sym = document.getElementById("symbol").value;
   const input = document.getElementById("chatInput");
   const btn = document.getElementById("sendBtn");
@@ -385,33 +325,20 @@ async function sendChat(){
 
   input.value = "";
   addChat("user", q);
-
   btn.disabled = true;
-  addChat("assistant", "Thinking…");
 
   try{
     const r = await fetch("/api/assistant/chat", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({symbol: sym, question: q})
+      body: JSON.stringify({symbol: sym, question: q}),
+      credentials: "same-origin"
     });
     const data = await r.json();
-
-    // replace last "Thinking…" bubble with real answer
-    const log = document.getElementById("chatLog");
-    const last = log.lastElementChild;
-    if (last) last.remove();
-
-    if (!r.ok){
-      addChat("assistant", (data && (data.error || data.detail)) ? (data.error || data.detail) : "Chat failed.");
-      return;
-    }
+    if (!r.ok) throw new Error(data.detail || "Chat failed");
     addChat("assistant", data.answer || "(No answer)");
   }catch(e){
-    const log = document.getElementById("chatLog");
-    const last = log.lastElementChild;
-    if (last) last.remove();
-    addChat("assistant", String(e));
+    addChat("assistant", "Error: " + e.message);
   }finally{
     btn.disabled = false;
   }
