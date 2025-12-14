@@ -1,254 +1,223 @@
 # sse_engine.py
-
-"""
-Structural & level engine for KTBB – Execution Anchor v4.2 / SSE v2.0.
-
-Takes:
-  - 4H / 1H HTF shelves (supply / demand)
-  - Weekly VRVP (VAL / POC / VAH)
-  - 24h FRVP (VAL / POC / VAH)
-  - Morning FRVP (VAL / POC / VAH)
-  - 30m Opening Range (high / low)
-
-Outputs:
-  - daily_support
-  - daily_resistance
-  - breakout_trigger
-  - breakdown_trigger
-  - htf_resistance: [ { tf, level, strength, primary }, ... ]
-  - htf_support:    [ { tf, level, strength, primary }, ... ]
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Any, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
-@dataclass
+@dataclass(frozen=True)
 class Shelf:
     tf: str
     level: float
     kind: str  # "supply" or "demand"
+    strength: float
     primary: bool = False
-    strength: float = 0.0
 
 
-def _htf_shelves_from_inputs(
+def _pct(x: float, p: float) -> float:
+    return x * p
+
+
+def _spacing_ok(a: float, b: float, min_pct: float) -> bool:
+    if a <= 0 or b <= 0:
+        return True
+    return abs(a - b) >= min(a, b) * min_pct
+
+
+def _clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
+
+
+def _build_htf_shelves(
     h4_supply: float,
     h4_demand: float,
     h1_supply: float,
     h1_demand: float,
 ) -> Tuple[List[Shelf], List[Shelf]]:
-    """
-    Build HTF shelf objects from the four raw HTF levels.
-    """
     resistance: List[Shelf] = []
     support: List[Shelf] = []
 
-    if h4_supply > 0:
-        resistance.append(
-            Shelf(tf="4H", level=h4_supply, kind="supply", primary=True, strength=8.0)
-        )
-    if h1_supply > 0:
-        resistance.append(
-            Shelf(tf="1H", level=h1_supply, kind="supply", primary=False, strength=6.0)
-        )
+    if h4_supply and h4_supply > 0:
+        resistance.append(Shelf(tf="4H", level=float(h4_supply), kind="supply", strength=8.0, primary=True))
+    if h1_supply and h1_supply > 0:
+        resistance.append(Shelf(tf="1H", level=float(h1_supply), kind="supply", strength=6.0, primary=False))
 
-    if h4_demand > 0:
-        support.append(
-            Shelf(tf="4H", level=h4_demand, kind="demand", primary=True, strength=8.0)
-        )
-    if h1_demand > 0:
-        support.append(
-            Shelf(tf="1H", level=h1_demand, kind="demand", primary=False, strength=6.0)
-        )
+    if h4_demand and h4_demand > 0:
+        support.append(Shelf(tf="4H", level=float(h4_demand), kind="demand", strength=8.0, primary=True))
+    if h1_demand and h1_demand > 0:
+        support.append(Shelf(tf="1H", level=float(h1_demand), kind="demand", strength=6.0, primary=False))
 
-    # sort by level ascending for support, descending for resistance
-    support.sort(key=lambda s: s.level)
-    resistance.sort(key=lambda s: s.level)
-
+    # deterministic ordering
+    resistance = sorted(resistance, key=lambda s: s.level)
+    support = sorted(support, key=lambda s: s.level)
     return resistance, support
 
 
-def _select_daily_band(
-    resistance: List[Shelf],
-    support: List[Shelf],
-) -> Tuple[float, float, List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """
-    Choose daily_support and daily_resistance from HTF shelves only.
-    """
+def _select_daily_levels(resistance: List[Shelf], support: List[Shelf]) -> Tuple[float, float, Dict[str, Any]]:
     if not resistance or not support:
-        # Failsafe — no shelves: return flat band that will later be adjusted.
-        return (
-            0.0,
-            0.0,
-            [],
-            [],
-        )
+        return 0.0, 0.0, {"resistance": [], "support": []}
 
-    # Daily support = strongest demand (prefer 4H)
-    sup_choice = max(
-        support,
-        key=lambda s: (1 if s.tf == "4H" else 0, s.strength),
-    )
-    # Daily resistance = strongest supply (prefer 4H)
-    res_choice = max(
-        resistance,
-        key=lambda s: (1 if s.tf == "4H" else 0, s.strength),
-    )
+    # Pick strongest; prefer 4H when tied.
+    ds = max(support, key=lambda s: ((1 if s.tf == "4H" else 0), s.strength)).level
+    dr = max(resistance, key=lambda s: ((1 if s.tf == "4H" else 0), s.strength)).level
 
-    daily_support = float(min(sup_choice.level, res_choice.level))
-    daily_resistance = float(max(sup_choice.level, res_choice.level))
+    # Ensure ds < dr (defensive)
+    daily_support = float(min(ds, dr))
+    daily_resistance = float(max(ds, dr))
 
-    # Mark primary shelves in the ladders
-    htf_resistance = [
-        {
-            "tf": s.tf,
-            "level": float(s.level),
-            "strength": float(s.strength),
-            "primary": (s.level == res_choice.level),
-        }
-        for s in resistance
-    ]
-    htf_support = [
-        {
-            "tf": s.tf,
-            "level": float(s.level),
-            "strength": float(s.strength),
-            "primary": (s.level == sup_choice.level),
-        }
-        for s in support
-    ]
-
-    return daily_support, daily_resistance, htf_resistance, htf_support
+    htf_out = {
+        "resistance": [
+            {"tf": s.tf, "level": float(s.level), "strength": float(s.strength), "primary": (s.level == dr)}
+            for s in resistance
+        ],
+        "support": [
+            {"tf": s.tf, "level": float(s.level), "strength": float(s.strength), "primary": (s.level == ds)}
+            for s in support
+        ],
+    }
+    return daily_support, daily_resistance, htf_out
 
 
-def _select_triggers(
+def _pick_trigger_candidates(
+    *,
+    px: float,
     daily_support: float,
     daily_resistance: float,
-    f24_val: float,
-    f24_poc: float,
-    f24_vah: float,
-    morn_val: float,
-    morn_poc: float,
-    morn_vah: float,
     r30_high: float,
     r30_low: float,
-) -> Tuple[float, float]:
-    """
-    Pick breakdown_trigger / breakout_trigger between daily_support and
-    daily_resistance, using FRVP and 30m OR as guide. This is a deterministic
-    approximation of the full SSE spec.
-    """
-
-    if daily_support == 0 and daily_resistance == 0:
-        return 0.0, 0.0
-
-    band_width = max(1.0, daily_resistance - daily_support)
-    min_spacing_pct = 0.002  # 0.2% gaps at minimum
-    min_spacing = band_width * min_spacing_pct
-
-    price_anchor = f24_poc or morn_poc or (r30_high + r30_low) / 2.0
-    if price_anchor <= 0:
-        price_anchor = (daily_support + daily_resistance) / 2.0
-
-    # start with mid-band
-    mid = (daily_support + daily_resistance) / 2.0
-
-    # default positions: slightly above / below mid
-    base_gap = max(band_width * 0.05, min_spacing * 2.0)
-    tentative_breakdown = mid - base_gap
-    tentative_breakout = mid + base_gap
-
-    # bias triggers toward FRVP / OR edges, but keep them inside the band
-    upper_edge = max(f24_vah, r30_high, morn_vah)
-    lower_edge = min(f24_val, r30_low, morn_val)
-
-    if lower_edge > 0:
-        tentative_breakdown = max(lower_edge, daily_support + min_spacing)
-    if upper_edge > 0:
-        tentative_breakout = min(upper_edge, daily_resistance - min_spacing)
-
-    # Enforce ordering + spacing
-    breakdown = max(
-        daily_support + min_spacing,
-        min(tentative_breakdown, daily_resistance - 2.0 * min_spacing),
-    )
-    breakout = max(
-        breakdown + min_spacing,
-        min(tentative_breakout, daily_resistance - min_spacing),
-    )
-
-    return breakdown, breakout
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
-def compute_dm_levels(
-    h4_supply: float,
-    h4_demand: float,
-    h1_supply: float,
-    h1_demand: float,
-    weekly_val: float,
-    weekly_poc: float,
-    weekly_vah: float,
-    f24_val: float,
-    f24_poc: float,
     f24_vah: float,
-    morn_val: float,
-    morn_poc: float,
-    morn_vah: float,
-    r30_high: float,
-    r30_low: float,
-) -> Dict[str, Any]:
+    f24_val: float,
+) -> Tuple[float, float, Dict[str, Any]]:
     """
-    Main entry point used by FastAPI (see main.py).
-
-    Inputs: HTF shelves, weekly VRVP, 24h FRVP, morning FRVP, 30m OR.
-
-    Returns a dict with:
-      - daily_support
-      - daily_resistance
-      - breakout_trigger
-      - breakdown_trigger
-      - htf_resistance: [ { tf, level, strength, primary }, ... ]
-      - htf_support:    [ { tf, level, strength, primary }, ... ]
+    Deterministic approximation consistent with Execution Anchor constraints:
+    - triggers between daily S/R
+    - breakout above OR high and near/above 24h VAH (soft)
+    - breakdown below OR low and near/below 24h VAL (soft)
+    - >=0.5% away from price
     """
+    # Hard min distance from price (0.5%)
+    min_from_px = 0.005
 
-    # 1) HTF shelves → daily band
-    resistance, support = _htf_shelves_from_inputs(
-        h4_supply=h4_supply,
-        h4_demand=h4_demand,
-        h1_supply=h1_supply,
-        h1_demand=h1_demand,
-    )
-    daily_support, daily_resistance, htf_resistance, htf_support = _select_daily_band(
-        resistance, support
+    # Hard spacing between levels (0.15%)
+    min_level_spacing = 0.0015
+
+    # Candidate breakout: prefer max(r30_high, f24_vah) but must be above px
+    bo_base = max([v for v in [r30_high, f24_vah] if v and v > 0] or [0.0])
+    bd_base = min([v for v in [r30_low, f24_val] if v and v > 0] or [0.0])
+
+    # If those are missing, fall back to mid-band expansions
+    if bo_base <= 0:
+        bo_base = daily_support + 0.7 * (daily_resistance - daily_support)
+    if bd_base <= 0:
+        bd_base = daily_support + 0.3 * (daily_resistance - daily_support)
+
+    # Enforce "away from price"
+    bo = max(bo_base, px * (1 + min_from_px))
+    bd = min(bd_base, px * (1 - min_from_px))
+
+    # Clamp within daily band interior (don’t touch DS/DR)
+    inner_lo = daily_support + _pct(daily_support, min_level_spacing)
+    inner_hi = daily_resistance - _pct(daily_resistance, min_level_spacing)
+    bo = _clamp(bo, inner_lo, inner_hi)
+    bd = _clamp(bd, inner_lo, inner_hi)
+
+    # Enforce ordering ds < bd < bo < dr
+    if not (daily_support < bd < bo < daily_resistance):
+        # deterministic re-center inside band around price
+        mid = _clamp(px, inner_lo, inner_hi)
+        span = max((daily_resistance - daily_support) * 0.12, px * 0.01)  # at least ~1% band or 12% of daily
+        bd = _clamp(mid - span / 2, inner_lo, inner_hi)
+        bo = _clamp(mid + span / 2, inner_lo, inner_hi)
+
+        # still enforce "away from price"
+        if bo < px * (1 + min_from_px):
+            bo = _clamp(px * (1 + min_from_px), inner_lo, inner_hi)
+        if bd > px * (1 - min_from_px):
+            bd = _clamp(px * (1 - min_from_px), inner_lo, inner_hi)
+
+        # final sanity
+        if not (daily_support < bd < bo < daily_resistance):
+            # last resort: fixed quartiles
+            bd = daily_support + 0.4 * (daily_resistance - daily_support)
+            bo = daily_support + 0.6 * (daily_resistance - daily_support)
+
+    # Spacing constraints
+    # Ensure bd and bo are not too close to DS/DR or each other.
+    def bump_up(x: float, ref: float) -> float:
+        return max(x, ref + ref * min_level_spacing)
+
+    def bump_down(x: float, ref: float) -> float:
+        return min(x, ref - ref * min_level_spacing)
+
+    if not _spacing_ok(bd, daily_support, min_level_spacing):
+        bd = bump_up(bd, daily_support)
+    if not _spacing_ok(bo, daily_resistance, min_level_spacing):
+        bo = bump_down(bo, daily_resistance)
+    if not _spacing_ok(bo, bd, min_level_spacing):
+        bo = bump_up(bo, bd)
+
+    intraday = {
+        "breakout_side": [{"level": float(bo_base), "strength": 6.0}],
+        "breakdown_side": [{"level": float(bd_base), "strength": 6.0}],
+    }
+    return float(bo), float(bd), intraday
+
+
+def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Single deterministic output for:
+      daily_support, daily_resistance, breakout_trigger, breakdown_trigger
+    plus: htf_shelves, intraday_shelves
+    """
+    def f(k: str, default: float = 0.0) -> float:
+        try:
+            v = inputs.get(k, default)
+            return float(v) if v is not None else float(default)
+        except Exception:
+            return float(default)
+
+    px = f("last_price", 0.0)
+
+    resistance, support = _build_htf_shelves(
+        h4_supply=f("h4_supply"),
+        h4_demand=f("h4_demand"),
+        h1_supply=f("h1_supply"),
+        h1_demand=f("h1_demand"),
     )
 
-    # 2) FRVP + OR → triggers
-    breakdown, breakout = _select_triggers(
+    daily_support, daily_resistance, htf_out = _select_daily_levels(resistance, support)
+
+    # If price missing, triggers will still be computed but less strict.
+    if px <= 0:
+        px = (f("f24_poc") or f("weekly_poc") or (daily_support + daily_resistance) / 2.0)
+
+    bo, bd, intraday = _pick_trigger_candidates(
+        px=px,
         daily_support=daily_support,
         daily_resistance=daily_resistance,
-        f24_val=f24_val,
-        f24_poc=f24_poc,
-        f24_vah=f24_vah,
-        morn_val=morn_val,
-        morn_poc=morn_poc,
-        morn_vah=morn_vah,
-        r30_high=r30_high,
-        r30_low=r30_low,
+        r30_high=f("r30_high"),
+        r30_low=f("r30_low"),
+        f24_vah=f("f24_vah"),
+        f24_val=f("f24_val"),
     )
 
+    # Hard ordering guarantee (Execution Anchor)
+    # ds < bd < bo < dr
+    if not (daily_support < bd < bo < daily_resistance):
+        # deterministic fallback inside band
+        band = max(daily_resistance - daily_support, 1.0)
+        bd = daily_support + 0.45 * band
+        bo = daily_support + 0.55 * band
+
     return {
-        "daily_support": float(daily_support),
-        "daily_resistance": float(daily_resistance),
-        "breakout_trigger": float(breakout),
-        "breakdown_trigger": float(breakdown),
-        "htf_resistance": htf_resistance,
-        "htf_support": htf_support,
+        "levels": {
+            "daily_support": float(daily_support),
+            "daily_resistance": float(daily_resistance),
+            "breakout_trigger": float(bo),
+            "breakdown_trigger": float(bd),
+            "range30m_high": float(f("r30_high")),
+            "range30m_low": float(f("r30_low")),
+        },
+        "htf_shelves": htf_out,
+        "intraday_shelves": intraday,
     }

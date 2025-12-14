@@ -2,212 +2,118 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-
-def _n(x: Any) -> Optional[float]:
-    """Coerce to float if possible, else None."""
-    try:
-        if x is None:
-            return None
-        return float(x)
-    except Exception:
-        return None
+from sse_engine import compute_sse_levels
+from trade_logic_v2 import build_trade_logic_summary
 
 
 def _fmt(x: Optional[float]) -> str:
     if x is None:
         return "—"
-    # 1 decimal is enough for crypto tape; keep consistent
-    return f"{x:,.1f}"
+    return f"{float(x):,.1f}"
 
 
-def _pick(inputs: Dict[str, Any], *keys: str) -> Optional[float]:
-    for k in keys:
-        if k in inputs:
-            v = _n(inputs.get(k))
-            if v is not None:
-                return v
-    return None
+def _yaml_block(d: Dict[str, Any]) -> str:
+    import yaml  # pyyaml should already exist; if not, replace with manual yaml string builder
+    return "```yaml\n" + yaml.safe_dump(d, sort_keys=False).strip() + "\n```"
 
-
-def _build_htf_shelves(inputs: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Maps the common input keys we've been using into HTF shelves.
-    We treat H4 as primary shelf by default.
-    """
-    h4_supply = _pick(inputs, "h4_supply", "H4_supply", "h4_resistance")
-    h4_demand = _pick(inputs, "h4_demand", "H4_demand", "h4_support")
-    h1_supply = _pick(inputs, "h1_supply", "H1_supply", "h1_resistance")
-    h1_demand = _pick(inputs, "h1_demand", "H1_demand", "h1_support")
-
-    resistance = []
-    support = []
-
-    if h1_supply is not None:
-        resistance.append({"tf": "1H", "level": h1_supply, "strength": 6, "primary": False})
-    if h4_supply is not None:
-        resistance.append({"tf": "4H", "level": h4_supply, "strength": 8, "primary": True})
-
-    if h4_demand is not None:
-        support.append({"tf": "4H", "level": h4_demand, "strength": 8, "primary": True})
-    if h1_demand is not None:
-        support.append({"tf": "1H", "level": h1_demand, "strength": 6, "primary": False})
-
-    return {"resistance": resistance, "support": support}
-
-
-def _build_yaml_block(levels: Dict[str, Any], r30: Dict[str, Any]) -> str:
-    return (
-        "YAML Block (for TradingView / scripting):\n"
-        "triggers:\n"
-        f"  breakout: {levels.get('breakout_trigger', '—')}\n"
-        f"  breakdown: {levels.get('breakdown_trigger', '—')}\n\n"
-        f"daily_resistance: {levels.get('daily_resistance', '—')}\n"
-        f"daily_support: {levels.get('daily_support', '—')}\n\n"
-        "range_30m:\n"
-        f"  high: {r30.get('high', '—')}\n"
-        f"  low: {r30.get('low', '—')}\n"
-    )
-
-
-def _deterministic_narrative(symbol: str, date_str: str, levels: Dict[str, Any], r30: Dict[str, Any], htf: Dict[str, Any], inputs: Dict[str, Any]) -> str:
-    """
-    Tactical baseline narrative. Elite will replace this with AI content.
-    Keep it clean and human-readable. YAML block is appended (hidden behind toggle in UI).
-    """
-    dr = _n(levels.get("daily_resistance"))
-    ds = _n(levels.get("daily_support"))
-    bo = _n(levels.get("breakout_trigger"))
-    bd = _n(levels.get("breakdown_trigger"))
-    rhi = _n(r30.get("high"))
-    rlo = _n(r30.get("low"))
-
-    width_pct = None
-    if dr is not None and ds is not None and ds != 0:
-        width_pct = abs((dr - ds) / ds) * 100.0
-
-    # Light regime guess (deterministic)
-    regime = "balanced rotation"
-    if width_pct is not None and width_pct < 2.0:
-        regime = "compression / coil"
-    if width_pct is not None and width_pct > 5.0:
-        regime = "wide rotation"
-
-    lines = []
-    lines.append("--- Daily Market Review ---")
-    lines.append(f"Kabroda — Daily Market Review ({symbol}) — {date_str}")
-    lines.append("")
-    lines.append("1) Market Momentum Summary")
-    lines.append(f"- Structure: daily support near {_fmt(ds)} and daily resistance near {_fmt(dr)}.")
-    if width_pct is not None:
-        lines.append(f"- Daily band width: ~{width_pct:.1f}% → {regime}.")
-    else:
-        lines.append(f"- Regime: {regime}.")
-    lines.append("")
-    lines.append("2) Key Levels")
-    lines.append(f"- Daily Support: {_fmt(ds)}")
-    lines.append(f"- Daily Resistance: {_fmt(dr)}")
-    lines.append(f"- Breakout Trigger: {_fmt(bo)}")
-    lines.append(f"- Breakdown Trigger: {_fmt(bd)}")
-    lines.append(f"- 30m Opening Range: {_fmt(rlo)} → {_fmt(rhi)}")
-    lines.append("")
-    lines.append("3) Plan")
-    lines.append("- Primary idea: treat price as rotation until a clean trigger break confirms expansion.")
-    lines.append("- If breakout confirms: look for pullback + continuation setups (risk anchored to OR or invalidation).")
-    lines.append("- If breakdown confirms: favor short-side continuation or mean-reversion failures back into value.")
-    lines.append("")
-    lines.append("4) Execution Notes")
-    lines.append("- Keep risk anchored to the opposite side of the 30m Opening Range or the invalidation trigger.")
-    lines.append("- Avoid over-trading chop between triggers; best R:R often appears on expansion away from the center zone.")
-    lines.append("")
-    lines.append(_build_yaml_block(levels, r30))
-    return "\n".join(lines)
-
-def _compute_bias_label(inputs: Dict[str, Any]) -> str:
-    """
-    Deterministic bias from price location vs value references.
-    Returns: "bullish" | "bearish" | "neutral"
-    """
-    px = _pick(inputs, "last_price")
-    if px is None:
-        return "neutral"
-
-    weekly_poc = _pick(inputs, "weekly_poc")
-    f24_poc = _pick(inputs, "f24_poc")
-    morn_poc = _pick(inputs, "morn_poc")
-
-    refs = [v for v in (weekly_poc, f24_poc, morn_poc) if v is not None]
-    if not refs:
-        return "neutral"
-
-    above = sum(1 for r in refs if px > r)
-    below = sum(1 for r in refs if px < r)
-
-    if above >= 2:
-        return "bullish"
-    if below >= 2:
-        return "bearish"
-    return "neutral"
 
 def compute_dmr(symbol: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Deterministic DMR compute.
-    `inputs` is produced by data_feed.build_auto_inputs().
-    """
     date_str = datetime.utcnow().strftime("%Y-%m-%d")
-    bias_label = _compute_bias_label(inputs)
 
-    h4_supply = _pick(inputs, "h4_supply")
-    h4_demand = _pick(inputs, "h4_demand")
-    r30_high = _pick(inputs, "r30_high", "r30_hi", "range_30m_high", "opening_range_30_high")
-    r30_low = _pick(inputs, "r30_low", "r30_lo", "range_30m_low", "opening_range_30_low")
+    sse = compute_sse_levels(inputs)
+    levels = sse["levels"]
+    htf_shelves = sse.get("htf_shelves") or {}
+    intraday_shelves = sse.get("intraday_shelves") or {}
 
-    # Core levels (plus the extra keys trade_logic_v2 expects)
-    levels = {
-        "daily_resistance": h4_supply,
-        "daily_support": h4_demand,
-        "breakout_trigger": r30_high,
-        "breakdown_trigger": r30_low,
-        "range30m_high": r30_high,
-        "range30m_low": r30_low,
-    }
-
-    range_30m = {"high": r30_high, "low": r30_low}
-    htf_shelves = _build_htf_shelves(inputs)
-
-    # Strategy-aware KTBB summary (S0–S8 bridge)
-    trade_logic = None
-    trade_logic_error = None
+    # Bias label (simple, deterministic): price vs weekly POC
+    px = inputs.get("last_price")
+    weekly_poc = inputs.get("weekly_poc")
+    bias_label = "neutral"
     try:
-        from trade_logic_v2 import build_trade_logic_summary
+        if px is not None and weekly_poc is not None:
+            if float(px) > float(weekly_poc):
+                bias_label = "bullish"
+            elif float(px) < float(weekly_poc):
+                bias_label = "bearish"
+    except Exception:
+        bias_label = "neutral"
 
-        # trade_logic_v2 expects floats; filter out Nones defensively
-        clean_levels = {k: float(v) for k, v in levels.items() if v is not None}
+    # Trade logic summary (Section 4 “outlook_text” comes from here)
+    trade_logic = build_trade_logic_summary(
+        levels=levels,
+        bias_label=bias_label,
+        htf_shelves=htf_shelves,
+        range_30m={"high": inputs.get("r30_high"), "low": inputs.get("r30_low")},
+    )
 
-        trade_logic = build_trade_logic_summary(
-            symbol=symbol,
-            levels=clean_levels,
-            bias_label=bias_label,      # <-- use computed bias
-            htf_shelves=htf_shelves,
-            range_30m=range_30m,
-        )
-    except Exception as e:
-        trade_logic = None
-        trade_logic_error = f"{type(e).__name__}: {e}"
-
-    report_text = _deterministic_narrative(symbol, date_str, levels, range_30m, htf_shelves, inputs)
+    # Deterministic fallback narrative (AI can overwrite this via /run-auto-ai)
+    report = []
+    report.append(f"Daily Market Review")
+    report.append(f"{symbol} • {date_str}")
+    report.append("")
+    report.append("1) Market Momentum Summary")
+    report.append(f"- 4H: Watching primary HTF shelves; daily resistance {_fmt(levels['daily_resistance'])} / support {_fmt(levels['daily_support'])}.")
+    report.append(f"- 1H: Respect shelves into triggers; breakout {_fmt(levels['breakout_trigger'])} / breakdown {_fmt(levels['breakdown_trigger'])}.")
+    report.append(f"- 15M: Two-close confirmation required at triggers; avoid chop between them.")
+    report.append(f"- 5M: Execution filter lives on pullbacks after 15M confirmation; hard-exit rule applies.")
+    report.append("")
+    report.append("2) Sentiment Snapshot")
+    report.append(f"Bias: {bias_label}. Compression between triggers implies potential expansion once confirmed.")
+    report.append("")
+    report.append("3) Key Support & Resistance")
+    report.append(
+        f"Daily Support {_fmt(levels['daily_support'])} < Breakdown {_fmt(levels['breakdown_trigger'])} < "
+        f"Breakout {_fmt(levels['breakout_trigger'])} < Daily Resistance {_fmt(levels['daily_resistance'])}."
+    )
+    report.append("")
+    report.append("4) Trade Strategy Outlook")
+    report.append(trade_logic.get("outlook_text", "(none)"))
+    report.append("")
+    report.append("5) News-Based Risk Alert")
+    report.append("No scheduled news injected today.")
+    report.append("")
+    report.append("6) Execution Considerations")
+    report.append("Anchor risk to OR invalidation + the opposite trigger; avoid overtrading inside the trigger box.")
+    report.append("")
+    report.append("7) Weekly Zone Reference")
+    report.append(
+        f"Weekly VAL {_fmt(inputs.get('weekly_val'))} • POC {_fmt(inputs.get('weekly_poc'))} • VAH {_fmt(inputs.get('weekly_vah'))}"
+    )
+    report.append("")
+    report.append("8) YAML Key Level Output Block")
+    report.append(_yaml_block({
+        "symbol": symbol,
+        "date": date_str,
+        "levels": {
+            "daily_resistance": levels["daily_resistance"],
+            "daily_support": levels["daily_support"],
+            "breakout_trigger": levels["breakout_trigger"],
+            "breakdown_trigger": levels["breakdown_trigger"],
+            "range30m_high": levels["range30m_high"],
+            "range30m_low": levels["range30m_low"],
+        },
+        "range_30m": {"high": inputs.get("r30_high"), "low": inputs.get("r30_low")},
+        "htf_shelves": htf_shelves,
+        "intraday_shelves": intraday_shelves,
+        "weekly": {
+            "val": inputs.get("weekly_val"),
+            "poc": inputs.get("weekly_poc"),
+            "vah": inputs.get("weekly_vah"),
+        },
+    }))
 
     return {
-        "inputs": inputs,
-        "levels": levels,
-        "range_30m": range_30m,
-        "htf_shelves": htf_shelves,
-        "bias_label": bias_label,          # helpful to expose in JSON/UI
-        "trade_logic": trade_logic,
-        "trade_logic_error": trade_logic_error,
-        "report_text": report_text,
-        "report": report_text,
-        "date": date_str,
         "symbol": symbol,
+        "date": date_str,
+        "inputs": inputs,
+        "bias_label": bias_label,
+        "levels": levels,
+        "range_30m": {"high": inputs.get("r30_high"), "low": inputs.get("r30_low")},
+        "htf_shelves": htf_shelves,
+        "intraday_shelves": intraday_shelves,
+        "trade_logic": trade_logic,
+        "report_text": "\n".join(report),
+        "report": "\n".join(report),
     }

@@ -56,5 +56,4 @@ def ensure_can_use_gpt_chat(user: User) -> None:
 
 
 def can_use_gpt_report(user: User) -> bool:
-    # Tactical + Elite get GPT-polished DMR narrative (no chat unless Elite)
     return user.tier in (Tier.TIER2_SINGLE_AUTO, Tier.TIER3_MULTI_GPT)

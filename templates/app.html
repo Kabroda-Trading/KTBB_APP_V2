@@ -27,6 +27,7 @@
     </select>
 
     <button class="btn primary" id="runBtn" onclick="runDMR()">Generate Review</button>
+    <a class="btn" href="/account" style="margin-left:auto;">Account</a>
   </div>
 
   <div id="status" class="muted" style="margin-top:10px;">Idle</div>
@@ -106,18 +107,18 @@
 
 <style>
   /* Button polish so nothing looks "disabled white" */
-  .btn { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); }
-  .btn:hover { background: rgba(255,255,255,.10); }
-  .btn.primary { background: #60a5fa; border-color: rgba(96,165,250,.45); color:#0b1220; font-weight: 700; }
+  .btn { background: rgba(255,255,255,06); border: 1px solid rgba(255,255,255,12); }
+  .btn:hover { background: rgba(255,255,255,10); }
+  .btn.primary { background: #60a5fa; border-color: rgba(96,165,250,45); color:#0b1220; font-weight: 700; }
   .btn.primary:hover { filter: brightness(1.05); }
 
   .dmr-box{
     margin-top:12px;
     padding:14px;
     border-radius:16px;
-    background: rgba(0,0,0,.28);
-    border: 1px solid rgba(255,255,255,.08);
-    color: rgba(255,255,255,.92);
+    background: rgba(0,0,0,28);
+    border: 1px solid rgba(255,255,255,08);
+    color: rgba(255,255,255,92);
     line-height: 1.55;
     white-space: pre-line;
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
@@ -130,8 +131,8 @@
     overflow:auto;
     padding: 10px;
     border-radius: 16px;
-    background: rgba(0,0,0,.25);
-    border: 1px solid rgba(255,255,255,.08);
+    background: rgba(0,0,0,25);
+    border: 1px solid rgba(255,255,255,08);
   }
   .chat-msg{ display:flex; margin: 10px 0; }
   .chat-user{ justify-content:flex-end; }
@@ -140,19 +141,63 @@
     max-width: 78%;
     padding: 10px 12px;
     border-radius: 16px;
-    border: 1px solid rgba(255,255,255,.10);
-    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,10);
+    background: rgba(255,255,255,06);
     white-space: pre-wrap;
   }
   .chat-user .chat-bubble{
     background: rgba(96, 165, 250, .18);
-    border-color: rgba(96,165,250,.35);
+    border-color: rgba(96,165,250,35);
   }
 </style>
 
 <script>
 const IS_ELITE = {{ "true" if is_elite else "false" }};
+const USER_SESSION_TZ = {{ (user.session_tz or "UTC")|tojson }};
 let _lastYaml = "";
+
+/**
+ * Auto-detect timezone (DST-safe) and persist it if user is still on UTC.
+ * This prevents the “wrong 30m candle” problem when the backend builds session inputs.
+ *
+ * - We only auto-save if session_tz is empty/UTC-ish to avoid overwriting a user’s explicit choice.
+ * - Uses IANA tz IDs like "America/Chicago".
+ */
+async function ensureUserTimezone(){
+  try{
+    const guessed = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!guessed) return;
+
+    const current = (USER_SESSION_TZ || "").trim();
+    const isUnset = (!current || current.toUpperCase() === "UTC");
+
+    if (!isUnset) return;             // user already set a real tz
+    if (guessed === "UTC") return;     // no point saving UTC
+
+    // Persist via same endpoint your Account page uses (form POST).
+    const body = new URLSearchParams();
+    body.set("tz", guessed);
+
+    await fetch("/account/session-timezone", {
+      method: "POST",
+      headers: {"Content-Type":"application/x-www-form-urlencoded"},
+      body: body.toString(),
+      credentials: "same-origin",
+      redirect: "follow"
+    });
+
+    // Optional: show a tiny hint. Keep it subtle.
+    const status = document.getElementById("status");
+    if (status && status.textContent === "Idle"){
+      status.textContent = `Timezone set to ${guessed} ✅`;
+      setTimeout(()=>{ status.textContent = "Idle"; }, 1200);
+    }
+  }catch(e){
+    // Silent fail: never block the suite if browser blocks Intl/Fetch.
+  }
+}
+
+document.addEventListener("DOMContentLoaded", ensureUserTimezone);
 
 function fmt(x){
   if (x === null || x === undefined) return "—";
@@ -199,7 +244,7 @@ async function runDMR(){
   status.textContent = "Running…";
   btn.disabled = true;
 
-  // Elite uses AI-written report; Tactical uses deterministic report builder
+  // Your backend already routes this to AI narrative w/ deterministic fallback.
   const endpoint = "/api/dmr/run-auto-ai";
 
   try{

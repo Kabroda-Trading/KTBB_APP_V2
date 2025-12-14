@@ -34,7 +34,6 @@ async function startPlan(tier){
     body: JSON.stringify({ tier })
   });
 
-  // If not logged in, redirect to login
   if (r.status === 401 || r.status === 403) {
     window.location.href = "/login";
     return;

@@ -10,11 +10,7 @@ from sqlalchemy.orm import Session
 
 from database import UserModel, SessionModel, get_db
 
-
-pwd_context = CryptContext(
-    schemes=["argon2", "bcrypt"],
-    deprecated="auto",
-)
+pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
 
 
 def _hash_password(password: str) -> str:
@@ -30,7 +26,7 @@ def _verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_user(db: Session, email: str, password: str, tier) -> UserModel:
+def create_user(db: Session, email: str, password: str, tier, session_tz: str = "auto") -> UserModel:
     email = (email or "").strip().lower()
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="Invalid email.")
@@ -43,7 +39,7 @@ def create_user(db: Session, email: str, password: str, tier) -> UserModel:
         email=email,
         password_hash=_hash_password(password),
         tier=getattr(tier, "value", str(tier)),
-        session_tz="UTC",
+        session_tz=(session_tz or "auto"),
     )
     db.add(u)
     db.commit()
@@ -89,7 +85,6 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
     if not u:
         raise HTTPException(status_code=401, detail="Not logged in.")
 
-    # Convert to membership.User if available
     from membership import User as MembershipUser, Tier
 
     try:
@@ -101,5 +96,5 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
         id=u.id,
         email=u.email,
         tier=tier_enum,
-        session_tz=getattr(u, "session_tz", "UTC"),
+        session_tz=getattr(u, "session_tz", "auto"),
     )

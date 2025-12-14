@@ -1,149 +1,157 @@
+# kabroda_ai.py
 from __future__ import annotations
 
-import os
 import json
-from pathlib import Path
-from typing import Any, Dict
+import os
+from typing import Any, Dict, Optional
 
-# OpenAI SDK (new style) pip: openai>=1.0.0
-try:
-    from openai import OpenAI
-except Exception:
-    OpenAI = None
-
-ROOT = Path(__file__).resolve().parent
-
-ANCHOR_PATHS = [
-    ROOT / "ktbb_execution_anchor_v_4.2.md",
-]
-LOGIC_PATHS = [
-    ROOT / "ktbb_trade_logic_module_v_2_0.md",
-    ROOT / "ktbb_trade_logic_module_v_1.6.md",
-]
+from openai import OpenAI
 
 
-def _read_first_existing(paths):
-    for p in paths:
-        try:
-            p = Path(str(p))
-            if p.exists():
-                return p.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            pass
-    return ""
-
-
-EXEC_ANCHOR_TEXT = _read_first_existing(ANCHOR_PATHS)
-TRADE_LOGIC_TEXT = _read_first_existing(LOGIC_PATHS)
-
-
-def _client():
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY")
+def _client() -> OpenAI:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set.")
-    if OpenAI is None:
-        raise RuntimeError("OpenAI SDK not installed or import failed. Ensure openai>=1.0.0.")
+        raise RuntimeError("Missing OPENAI_API_KEY")
     return OpenAI(api_key=api_key)
 
 
 def _strict_system_policy() -> str:
-    return f"""
-You are Kabroda AI for the Kabroda BattleBox Suite.
-
-NON-NEGOTIABLE RULES:
-- Never invent, alter, or “improve” price levels. Use only the provided numbers.
-- If inputs are missing or unclear: output a missing-input checklist and a blank scaffold; do not guess.
-- Stay deterministic and anchored: same inputs -> same conclusions (no drift).
-- Respect separation of concerns: levels are produced upstream; you only interpret them.
-
-EXECUTION ANCHOR (policy + template lock):
-{EXEC_ANCHOR_TEXT}
-
-TRADE LOGIC MODULE (strategy/outlook rules; do not mutate levels):
-{TRADE_LOGIC_TEXT}
-""".strip()
-
-
-resp = client.chat.completions.create(
-    model=model,
-    messages=[
-        {"role": "system", "content": system},
-        {"role": "user", "content": user},
-    ],
-    temperature=float(os.getenv("OPENAI_DMR_TEMPERATURE", "0.35")),
-)
-
-text = (resp.choices[0].message.content or "").strip()
-
-# SEATBELT: if we have outlook_text but it didn't appear, inject it under Section 4.
-if outlook_text:
-    if outlook_text.splitlines()[0] not in text:
-        text = text.replace(
-            "4) Trade Strategy Outlook",
-            "4) Trade Strategy Outlook\n" + outlook_text.strip() + "\n",
-            1,
-        )
-
-return text
-
-
-def answer_coach_question(symbol: str, date_str: str, dmr_payload: dict, question: str) -> str:
-    """
-    KTBB Elite coach — strategy-aware, level-anchored, no drift.
-    """
-    client = _client()
-    model = os.getenv("OPENAI_COACH_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
-
-    trade_logic = dmr_payload.get("trade_logic") or {}
-    outlook_text = (trade_logic.get("outlook_text") or "").strip()
-    if outlook_text.startswith("4) Trade Strategy Outlook"):
-        parts = outlook_text.split("\n", 1)
-        outlook_text = parts[1].lstrip() if len(parts) > 1 else ""
-
-    context = {
-        "symbol": symbol,
-        "date": date_str,
-        "bias_label": dmr_payload.get("bias_label", None),
-        "levels": dmr_payload.get("levels", {}) or {},
-        "range_30m": dmr_payload.get("range_30m", {}) or {},
-        "htf_shelves": dmr_payload.get("htf_shelves", {}) or {},
-        "trade_logic": trade_logic if trade_logic else None,
-        "trade_logic_outlook_text": outlook_text if outlook_text else None,
-        "question": (question or "").strip(),
-    }
-
-    system = (
-        _strict_system_policy()
-        + "\n\nYou are the Kabroda Trading BattleBox (KTBB) Coach.\n"
-          "Rules:\n"
-          "- Use ONLY the provided context; do NOT invent prices/levels.\n"
-          "- Anchor answers to breakout/breakdown triggers + daily S/R + OR.\n"
-          "- If strategy is asked, map to KTBB S0–S8 using context.trade_logic when present.\n"
-          "- Be concise and actionable.\n"
-          "- No disclaimers."
+    # Keep this tight: you want deterministic structure + no hallucinations.
+    return (
+        "You are the Kabroda Trading BattleBox (KTBB) engine.\n"
+        "Hard rules:\n"
+        "- Use ONLY the provided JSON context.\n"
+        "- NEVER invent prices/levels/news.\n"
+        "- If an input is missing, say it is missing.\n"
+        "- Output must follow the required DMR template exactly.\n"
+        "- Section 1 must be exactly four bullets labeled: 4H:, 1H:, 15M:, 5M:.\n"
+        "- Section 5: if no news items are provided, say 'No scheduled news injected today.'\n"
+        "- Keep it actionable, not verbose.\n"
     )
 
-    user = f"""
-INTENT: Coach
 
-Context JSON:
-{json.dumps(context, ensure_ascii=False)}
+def _dmr_skeleton() -> str:
+    return """1) Market Momentum Summary
+- 4H: <...>
+- 1H: <...>
+- 15M: <...>
+- 5M: <...>
 
-Answer format:
-1) Direct answer (2–6 bullets)
-2) Strategy mapping (S#) + why
-3) Execution guardrails (risk anchor + invalidation)
+2) Sentiment Snapshot
+<...>
 
-User question:
-{context["question"]}
-""".strip()
+3) Key Support & Resistance
+<...>
 
-    resp = client.chat.completions.create(
+4) Trade Strategy Outlook
+<...>
+
+5) News-Based Risk Alert
+<...>
+
+6) Execution Considerations
+<...>
+
+7) Weekly Zone Reference
+<...>
+
+8) YAML Key Level Output Block
+```yaml
+<...>
+```"""
+
+
+def generate_daily_market_review(symbol: str, date_str: str, dmr_payload: Dict[str, Any]) -> str:
+    """
+    Writes the 8-section DMR narrative using the deterministic SSE + trade logic output.
+    """
+    ctx = {
+        "symbol": symbol,
+        "date": date_str,
+        "bias_label": dmr_payload.get("bias_label"),
+        "levels": dmr_payload.get("levels") or {},
+        "range_30m": dmr_payload.get("range_30m") or {},
+        "htf_shelves": dmr_payload.get("htf_shelves") or {},
+        "intraday_shelves": dmr_payload.get("intraday_shelves") or {},
+        "trade_logic": dmr_payload.get("trade_logic") or {},
+        "inputs": dmr_payload.get("inputs") or {},
+        "news": dmr_payload.get("news") or [],
+    }
+
+    system = _strict_system_policy()
+
+    user = (
+        "INTENT: DMR\n\n"
+        "SOURCE OF TRUTH JSON:\n"
+        f"{json.dumps(ctx, ensure_ascii=False)}\n\n"
+        "REQUIREMENTS:\n"
+        "- Output MUST match the 8-section skeleton exactly.\n"
+        "- Use ONLY the JSON.\n"
+        "- Do NOT restate numbers without meaning; explain interaction and plan.\n"
+        "- Section 8 must output YAML with the key levels.\n\n"
+        "SKELETON:\n"
+        f"{_dmr_skeleton()}\n"
+    )
+
+    model = os.getenv("OPENAI_DMR_MODEL", "gpt-4o-mini").strip()
+    temperature = float(os.getenv("OPENAI_DMR_TEMPERATURE", "0.2"))
+
+    resp = _client().chat.completions.create(
         model=model,
+        temperature=temperature,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        temperature=float(os.getenv("OPENAI_COACH_TEMPERATURE", "0.4")),
+    )
+    return (resp.choices[0].message.content or "").strip()
+
+
+def answer_coach_question(
+    symbol: str,
+    date_str: str,
+    dmr_payload: Dict[str, Any],
+    question: str,
+) -> str:
+    """
+    Elite coach chat. Must stay anchored to SSE levels + trade logic.
+    """
+    ctx = {
+        "symbol": symbol,
+        "date": date_str,
+        "bias_label": dmr_payload.get("bias_label"),
+        "levels": dmr_payload.get("levels") or {},
+        "range_30m": dmr_payload.get("range_30m") or {},
+        "htf_shelves": dmr_payload.get("htf_shelves") or {},
+        "intraday_shelves": dmr_payload.get("intraday_shelves") or {},
+        "trade_logic": dmr_payload.get("trade_logic") or {},
+        "inputs": dmr_payload.get("inputs") or {},
+        "news": dmr_payload.get("news") or [],
+        "question": question.strip(),
+    }
+
+    system = (
+        _strict_system_policy()
+        + "\nCoach rules:\n"
+        "- Be concise.\n"
+        "- Reference: daily_support, daily_resistance, breakout_trigger, breakdown_trigger, OR.\n"
+        "- If asked for a plan, map to the strategy IDs already present in trade_logic.\n"
+    )
+
+    user = (
+        "Answer the user's question using ONLY the JSON.\n\n"
+        f"{json.dumps(ctx, ensure_ascii=False)}"
+    )
+
+    model = os.getenv("OPENAI_COACH_MODEL", "gpt-4o-mini").strip()
+    temperature = float(os.getenv("OPENAI_COACH_TEMPERATURE", "0.2"))
+
+    resp = _client().chat.completions.create(
+        model=model,
+        temperature=temperature,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
     )
     return (resp.choices[0].message.content or "").strip()
