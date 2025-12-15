@@ -24,6 +24,18 @@ from auth import (
 from membership import Tier, tier_marketing_label, ensure_can_use_gpt_chat
 from data_feed import build_auto_inputs, resolve_symbol
 from dmr_report import compute_dmr
+from fastapi.responses import RedirectResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    # If a browser is navigating (Accept: text/html) and we hit 401, redirect to login
+    accept = (request.headers.get("accept") or "").lower()
+    if exc.status_code == 401 and "text/html" in accept:
+        next_url = request.url.path
+        return RedirectResponse(url=f"/login?next={next_url}", status_code=303)
+    # default JSON for API callers
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 def _truthy(v: str) -> bool:
@@ -232,6 +244,24 @@ def set_session_timezone(
 # --------------------------
 # DMR: AI narrative + deterministic fallback
 # --------------------------
+import traceback
+
+@app.post("/api/dmr/run")
+def api_run_dmr(request: Request, payload: Dict[str, Any] = Body(...), db: Session = Depends(get_db), user=Depends(get_current_user)):
+    try:
+        symbol = resolve_symbol(payload.get("symbol") or "BTC")
+        inputs = build_auto_inputs(symbol=symbol, session_tz=user.session_tz)
+        dmr_payload = compute_dmr(symbol=symbol, inputs=inputs)
+        return dmr_payload
+    except Exception as e:
+        if DEV_MODE:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": f"DMR compute failed: {type(e).__name__}: {e}", "trace": traceback.format_exc()},
+            )
+        raise HTTPException(status_code=500, detail=f"DMR compute failed: {type(e).__name__}: {e}")
+
+
 @app.post("/api/dmr/run-auto-ai")
 def api_dmr_run_auto_ai(payload: Dict[str, Any], user=Depends(get_current_user)):
     symbol = resolve_symbol(payload.get("symbol") or "BTC")
