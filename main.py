@@ -1,27 +1,32 @@
 # main.py
 import os
 import traceback
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.status import HTTP_303_SEE_OTHER
 
+from auth import (
+    COOKIE_NAME,
+    authenticate_email_password,
+    clear_session,
+    get_current_user,
+    require_user,
+    set_session_user,
+)
 
-# -----------------------------
-# App / middleware
-# -----------------------------
 app = FastAPI()
 
 DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
-SESSION_SECRET = os.environ.get("SESSION_SECRET", "dev-secret-change-me")
 
+SESSION_SECRET = os.environ.get("SESSION_SECRET", "dev-secret-change-me")
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
+    session_cookie=COOKIE_NAME,  # <-- this is why COOKIE_NAME must exist
     same_site="lax",
     https_only=bool(os.environ.get("SESSION_HTTPS_ONLY", "")),
 )
@@ -30,114 +35,70 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 
-# -----------------------------
-# Auth (single source of truth)
-# -----------------------------
-from auth import COOKIE_NAME, get_current_user, require_user  # noqa: F401
-
-
-# -----------------------------
-# Helpers
-# -----------------------------
-def _wants_html(request: Request) -> bool:
-    accept = (request.headers.get("accept") or "").lower()
-    return "text/html" in accept
-
 def _json_error(status: int, message: str, exc: Optional[BaseException] = None):
     payload: Dict[str, Any] = {"detail": message}
     if DEBUG and exc is not None:
         payload["traceback"] = traceback.format_exc()
     return JSONResponse(payload, status_code=status)
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    # Redirect browsers to login on 401 for page navigation
-    if exc.status_code == 401 and _wants_html(request):
-        return RedirectResponse(url="/login", status_code=HTTP_303_SEE_OTHER)
-    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
-
-
-def _call_first_available(module_name: str, candidates: Tuple[str, ...], *args, **kwargs):
-    """
-    Tries module.<candidate>(*args, **kwargs) for the first function that exists.
-    Allows your dmr_report.py / kabroda_ai.py to evolve without breaking main.py.
-    """
-    try:
-        mod = __import__(module_name)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed importing {module_name}: {e}")
-
-    last_err: Optional[BaseException] = None
-    for fname in candidates:
-        fn = getattr(mod, fname, None)
-        if callable(fn):
-            try:
-                return fn(*args, **kwargs)
-            except Exception as e:
-                last_err = e
-                continue
-
-    if last_err:
-        raise HTTPException(
-            status_code=500,
-            detail=f"{module_name} callable found but failed: {last_err}",
-        )
-    raise HTTPException(
-        status_code=500,
-        detail=f"No callable found in {module_name}. Tried: {', '.join(candidates)}",
-    )
-
 
 # -----------------------------
 # Pages
 # -----------------------------
-@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    return templates.TemplateResponse("home.html", {"request": request})
+    return templates.TemplateResponse("home.html", {"request": request, "user": get_current_user(request)})
+
 
 @app.get("/about", response_class=HTMLResponse)
 def about(request: Request):
-    return templates.TemplateResponse("about.html", {"request": request})
+    return templates.TemplateResponse("about.html", {"request": request, "user": get_current_user(request)})
+
 
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing(request: Request):
-    return templates.TemplateResponse("pricing.html", {"request": request})
+    return templates.TemplateResponse("pricing.html", {"request": request, "user": get_current_user(request)})
+
 
 @app.get("/login", response_class=HTMLResponse)
 def login_get(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse("login.html", {"request": request, "user": get_current_user(request)})
+
 
 @app.post("/login")
 async def login_post(request: Request):
     """
-    Minimal login handler:
-    - expects form fields: email, password
-    - you can swap this to your DB auth later, but it unblocks the flow now
+    Supports either form-post or JSON.
+    Your login.html likely POSTs form fields.
     """
-    form = await request.form()
-    email = (form.get("email") or "").strip()
-    password = (form.get("password") or "").strip()
+    try:
+        ctype = request.headers.get("content-type", "")
+        if "application/json" in ctype:
+            data = await request.json()
+        else:
+            form = await request.form()
+            data = dict(form)
 
-    if not email or not password:
-        return RedirectResponse("/login", status_code=HTTP_303_SEE_OTHER)
+        email = (data.get("email") or "").strip()
+        password = data.get("password") or ""
 
-    # If you have real auth in database.py, plug it in here.
-    # For now, accept the seeded admin (or any) and store session.
-    # Tier defaults to Elite to match your screenshots.
-    request.session["user"] = {  # type: ignore[index]
-        "email": email,
-        "tier": "elite",
-        "timezone": request.session.get("timezone"),  # type: ignore[attr-defined]
-    }
-    return RedirectResponse("/suite", status_code=HTTP_303_SEE_OTHER)
+        user = authenticate_email_password(email, password)
+        if not user:
+            # back to login with a simple flag
+            return RedirectResponse(url="/login?error=1", status_code=303)
+
+        set_session_user(request, user)
+        return RedirectResponse(url="/suite", status_code=303)
+
+    except Exception as e:
+        return _json_error(500, "Login failed", e)
+
 
 @app.post("/logout")
 def logout(request: Request):
-    try:
-        request.session.clear()  # type: ignore[attr-defined]
-    except Exception:
-        pass
-    return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    clear_session(request)
+    return RedirectResponse(url="/", status_code=303)
+
 
 @app.get("/suite", response_class=HTMLResponse)
 def suite(request: Request, user=Depends(require_user)):
@@ -145,121 +106,98 @@ def suite(request: Request, user=Depends(require_user)):
 
 
 # -----------------------------
-# Account utilities expected by frontend
+# Account helpers expected by the UI
 # -----------------------------
 @app.post("/account/session-timezone")
 async def set_session_timezone(request: Request, user=Depends(require_user)):
     """
-    Frontend calls this (your logs show 404 previously).
-    Accepts JSON like {"timezone": "America/Chicago"}.
-    Stores it in session and in the user dict.
+    UI is POSTing here and expects 200.
+    Accepts JSON: { "timezone": "America/Chicago" } (or similar).
     """
     try:
-        payload = await request.json()
-    except Exception:
-        payload = {}
+        data = await request.json()
+        tz = (data.get("timezone") or "").strip()
+        if not tz:
+            raise HTTPException(status_code=400, detail="timezone required")
 
-    tz = payload.get("timezone") or payload.get("tz")
-    if not tz:
-        raise HTTPException(status_code=400, detail="timezone required")
-
-    request.session["timezone"] = tz  # type: ignore[index]
-    # also mirror into user
-    user["timezone"] = tz
-    request.session["user"] = user  # type: ignore[index]
-    return {"ok": True, "timezone": tz}
+        # store on session user
+        user["timezone"] = tz
+        request.session["user"] = user
+        return {"ok": True, "timezone": tz}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _json_error(500, "Failed to set timezone", e)
 
 
 # -----------------------------
-# DMR API (match frontend route names)
+# DMR endpoint expected by your frontend (matches your Render logs)
 # -----------------------------
 @app.post("/api/dmr/run-auto-ai")
-async def api_dmr_run_auto_ai(request: Request, user=Depends(require_user)):
+async def run_dmr_auto_ai(request: Request, user=Depends(require_user)):
     """
-    This is the endpoint your UI is calling.
+    This matches the frontend call that was 404'ing:
+      POST /api/dmr/run-auto-ai
     """
     try:
         payload = await request.json()
-    except Exception:
-        payload = {}
+        symbol = (payload.get("symbol") or "").strip()
+        if not symbol:
+            raise HTTPException(status_code=400, detail="symbol required")
 
-    symbol = payload.get("symbol") or payload.get("ticker")
-    if not symbol:
-        raise HTTPException(status_code=400, detail="symbol required")
+        # Try your project's dmr_report module in a few common shapes
+        import dmr_report  # type: ignore
 
-    tz = user.get("timezone") or request.session.get("timezone")  # type: ignore[attr-defined]
+        tz = user.get("timezone")
 
-    try:
-        result = _call_first_available(
-            "dmr_report",
-            ("run_dmr", "generate_dmr", "build_dmr", "dmr_for_symbol", "compute_dmr"),
-            symbol,
-            tz,
-        )
-    except TypeError:
-        # if your function only accepts (symbol) not (symbol, tz)
-        result = _call_first_available(
-            "dmr_report",
-            ("run_dmr", "generate_dmr", "build_dmr", "dmr_for_symbol", "compute_dmr"),
-            symbol,
-        )
+        if hasattr(dmr_report, "run_auto_ai"):
+            dmr = dmr_report.run_auto_ai(symbol=symbol, user_timezone=tz)  # type: ignore
+        elif hasattr(dmr_report, "generate_dmr"):
+            dmr = dmr_report.generate_dmr(symbol=symbol, user_timezone=tz)  # type: ignore
+        elif hasattr(dmr_report, "run_dmr"):
+            dmr = dmr_report.run_dmr(symbol=symbol, user_timezone=tz)  # type: ignore
+        else:
+            raise RuntimeError("dmr_report is missing run_auto_ai/generate_dmr/run_dmr")
+
+        return {"ok": True, "dmr": dmr}
+
+    except HTTPException:
+        raise
     except Exception as e:
         return _json_error(500, "DMR generation failed", e)
 
-    # Normalize output so frontend always has something stable
-    if isinstance(result, str):
-        return {"ok": True, "symbol": symbol, "dmr": {"report": result}}
-    if isinstance(result, dict):
-        return {"ok": True, "symbol": symbol, "dmr": result}
-    return {"ok": True, "symbol": symbol, "dmr": {"data": result}}
-
-
-# Backward-compatible alias (if older JS hits this)
-@app.post("/api/run_dmr")
-async def api_run_dmr_alias(request: Request, user=Depends(require_user)):
-    return await api_dmr_run_auto_ai(request, user)
-
 
 # -----------------------------
-# AI Coach API
+# AI Coach endpoint (optional, but keeps UI from breaking if it calls it)
 # -----------------------------
-@app.post("/api/ai_coach")
-async def api_ai_coach(request: Request, user=Depends(require_user)):
+@app.post("/api/ai/chat")
+async def ai_chat(request: Request, user=Depends(require_user)):
+    """
+    Safe default: expects { message, dmr } and returns { reply }.
+    """
     try:
         payload = await request.json()
-    except Exception:
-        payload = {}
+        msg = payload.get("message")
+        dmr = payload.get("dmr")
+        if not msg:
+            raise HTTPException(status_code=400, detail="message required")
 
-    message = payload.get("message") or payload.get("text")
-    dmr = payload.get("dmr") or payload.get("context")
+        import kabroda_ai  # type: ignore
 
-    if not message:
-        raise HTTPException(status_code=400, detail="message required")
-    if not dmr:
-        raise HTTPException(status_code=400, detail="dmr required")
+        if hasattr(kabroda_ai, "chat"):
+            reply = kabroda_ai.chat(message=msg, dmr=dmr, user=user)  # type: ignore
+        elif hasattr(kabroda_ai, "run_ai_coach"):
+            reply = kabroda_ai.run_ai_coach(user_message=msg, dmr_context=dmr, tier=user.get("tier"))  # type: ignore
+        else:
+            # fallback “normal assistant” response if the module doesn’t match
+            reply = "Hi — ask me about today’s DMR and I’ll help you build a plan."
 
-    try:
-        reply = _call_first_available(
-            "kabroda_ai",
-            ("run_ai_coach", "ai_coach_reply", "chat_with_kabroda", "coach_chat"),
-            message,
-            dmr,
-            user.get("tier"),
-        )
-    except TypeError:
-        # try simpler signatures
-        reply = _call_first_available(
-            "kabroda_ai",
-            ("run_ai_coach", "ai_coach_reply", "chat_with_kabroda", "coach_chat"),
-            message,
-            dmr,
-        )
+        return {"reply": reply}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        return _json_error(500, "AI coach failed", e)
-
-    if isinstance(reply, dict):
-        return {"ok": True, "reply": reply.get("reply") or reply}
-    return {"ok": True, "reply": reply}
+        return _json_error(500, "AI chat failed", e)
 
 
 @app.get("/health")
