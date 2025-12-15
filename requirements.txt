@@ -3,13 +3,11 @@ uvicorn[standard]==0.30.0
 python-multipart==0.0.9
 requests==2.31.0
 sqlalchemy==2.0.32
-passlib[bcrypt]==1.7.4
 jinja2==3.1.4
 stripe==10.12.0
 openai>=1.0.0
 argon2-cffi==23.1.0
+passlib[bcrypt]==1.7.4
 tzdata==2025.1
-passlib[bcrypt]
-argon2-cffi
-tzdata
 ccxt
+itsdangerous
