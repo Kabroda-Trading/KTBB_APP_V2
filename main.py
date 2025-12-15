@@ -1,4 +1,4 @@
-# main.py — CLEAN, COMPLETE VERSION (no patchwork)
+# main.py — CLEAN, COMPLETE VERSION
 import os
 import traceback
 from typing import Dict, Any, Set
@@ -57,9 +57,8 @@ templates = Jinja2Templates(directory="templates")
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """
-    If a user clicks a page in the browser and they're not logged in,
-    we redirect them to /login instead of dumping JSON like {"detail":"Not logged in"}.
-    API calls (fetch) will still get JSON.
+    Browser page navigation should redirect to login on 401.
+    API fetch calls should still receive JSON.
     """
     accept = (request.headers.get("accept") or "").lower()
     wants_html = "text/html" in accept
@@ -73,14 +72,16 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    # Always print the stack to Render logs
     print("[UNHANDLED ERROR]", request.method, request.url)
     traceback.print_exc()
 
     if DEV_MODE:
         return JSONResponse(
             status_code=500,
-            content={"detail": f"{type(exc).__name__}: {str(exc)}", "trace": traceback.format_exc()},
+            content={
+                "detail": f"{type(exc).__name__}: {str(exc)}",
+                "trace": traceback.format_exc(),
+            },
         )
     return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
@@ -123,6 +124,26 @@ def _validate_tz(tz: str) -> str:
     return tz
 
 
+def _dmr_model_payload(dmr: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Single canonical payload for AI DMR + Coach.
+    Keep this centralized so the contract never drifts.
+    """
+    inputs = dmr.get("inputs") or {}
+    return {
+        "symbol": dmr.get("symbol"),
+        "date": dmr.get("date"),
+        "bias_label": inputs.get("bias_label"),
+        "levels": dmr.get("levels"),
+        "range_30m": dmr.get("range_30m"),
+        "htf_shelves": dmr.get("htf_shelves"),
+        "intraday_shelves": inputs.get("intraday_shelves"),
+        "trade_logic": dmr.get("trade_logic"),
+        "inputs": inputs,
+        "news": inputs.get("news") or [],
+    }
+
+
 # --------------------------
 # Pages
 # --------------------------
@@ -163,7 +184,12 @@ def account(request: Request, user=Depends(get_current_user)):
     is_elite = (user.tier == Tier.TIER3_MULTI_GPT)
     return templates.TemplateResponse(
         "account.html",
-        {"request": request, "user": user, "tier_label": tier_label, "is_elite": is_elite},
+        {
+            "request": request,
+            "user": user,
+            "tier_label": tier_label,
+            "is_elite": is_elite,
+        },
     )
 
 
@@ -260,11 +286,8 @@ def set_session_timezone(
 def api_dmr_run_auto_ai(payload: Dict[str, Any], user=Depends(get_current_user)):
     symbol = resolve_symbol(payload.get("symbol") or "BTC")
     session_tz = getattr(user, "session_tz", "UTC") or "UTC"
-    "intraday_shelves": dmr.get("inputs", {}).get("intraday_shelves")
-    "bias_label": dmr.get("inputs", {}).get("bias_label")
-    "trade_logic": dmr.get("trade_logic")
 
-    # 1) market data
+    # 1) market inputs (your build_auto_inputs should attach SSE outputs now)
     inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
 
     # 2) deterministic compute
@@ -272,14 +295,7 @@ def api_dmr_run_auto_ai(payload: Dict[str, Any], user=Depends(get_current_user))
 
     # 3) AI narrative (fallback to deterministic if AI fails)
     date_str = dmr.get("date") or ""
-    model_payload = {
-        "symbol": dmr.get("symbol"),
-        "date": dmr.get("date"),
-        "levels": dmr.get("levels"),
-        "range_30m": dmr.get("range_30m"),
-        "htf_shelves": dmr.get("htf_shelves"),
-        "inputs": dmr.get("inputs"),
-    }
+    model_payload = _dmr_model_payload(dmr)
 
     try:
         ai_text = kabroda_ai.generate_daily_market_review(symbol, date_str, model_payload)
@@ -299,9 +315,6 @@ def api_dmr_run_auto_ai(payload: Dict[str, Any], user=Depends(get_current_user))
 @app.post("/api/assistant/chat")
 def api_assistant_chat(payload: Dict[str, Any], user=Depends(get_current_user)):
     ensure_can_use_gpt_chat(user)
-    "intraday_shelves": dmr.get("inputs", {}).get("intraday_shelves")
-    "bias_label": dmr.get("inputs", {}).get("bias_label")
-    "trade_logic": dmr.get("trade_logic")
 
     question = (payload.get("question") or "").strip()
     if not question:
@@ -314,14 +327,7 @@ def api_assistant_chat(payload: Dict[str, Any], user=Depends(get_current_user)):
     dmr = compute_dmr(symbol=symbol, inputs=inputs)
 
     date_str = dmr.get("date") or ""
-    model_payload = {
-        "symbol": dmr.get("symbol"),
-        "date": dmr.get("date"),
-        "levels": dmr.get("levels"),
-        "range_30m": dmr.get("range_30m"),
-        "htf_shelves": dmr.get("htf_shelves"),
-        "inputs": dmr.get("inputs"),
-    }
+    model_payload = _dmr_model_payload(dmr)
 
     answer = kabroda_ai.answer_coach_question(symbol, date_str, model_payload, question)
     return {"answer": answer}
