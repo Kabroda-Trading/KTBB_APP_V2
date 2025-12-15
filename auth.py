@@ -8,9 +8,9 @@ from fastapi import Depends, HTTPException, Request
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-from database import SessionModel, UserModel, get_db
+from database import UserModel, SessionModel, get_db
 
-# Single source of truth for the login session cookie name
+# Single source of truth — use this everywhere
 COOKIE_NAME = "ktbb_session"
 
 pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
@@ -76,6 +76,7 @@ def delete_session(db: Session, token: str) -> None:
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)):
+    # IMPORTANT: use COOKIE_NAME, not a hardcoded string
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(status_code=401, detail="Not logged in.")
@@ -88,8 +89,8 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
     if not u:
         raise HTTPException(status_code=401, detail="Not logged in.")
 
-    # Convert DB user → membership.User (what your app expects)
-    from membership import Tier, User as MembershipUser
+    # Convert DB user -> membership.User (your app expects this shape)
+    from membership import User as MembershipUser, Tier
 
     try:
         tier_enum = Tier(u.tier)
@@ -102,3 +103,8 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
         tier=tier_enum,
         session_tz=getattr(u, "session_tz", "auto"),
     )
+
+
+def require_user(request: Request, db: Session = Depends(get_db)):
+    # Convenience dependency some main.py variants import
+    return get_current_user(request, db)
