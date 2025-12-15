@@ -8,9 +8,9 @@ from fastapi import Depends, HTTPException, Request
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-from database import UserModel, SessionModel, get_db
+from database import SessionModel, UserModel, get_db
 
-# One cookie name used everywhere (main.py + auth.py)
+# Single source of truth for the login session cookie name
 COOKIE_NAME = "ktbb_session"
 
 pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
@@ -88,7 +88,8 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
     if not u:
         raise HTTPException(status_code=401, detail="Not logged in.")
 
-    from membership import User as MembershipUser, Tier
+    # Convert DB user → membership.User (what your app expects)
+    from membership import Tier, User as MembershipUser
 
     try:
         tier_enum = Tier(u.tier)
@@ -101,8 +102,3 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
         tier=tier_enum,
         session_tz=getattr(u, "session_tz", "auto"),
     )
-
-
-# Optional helper some versions of main.py expect
-def require_user(request: Request, db: Session = Depends(get_db)):
-    return get_current_user(request, db)
