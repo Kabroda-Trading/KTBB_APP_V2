@@ -260,6 +260,9 @@ def set_session_timezone(
 def api_dmr_run_auto_ai(payload: Dict[str, Any], user=Depends(get_current_user)):
     symbol = resolve_symbol(payload.get("symbol") or "BTC")
     session_tz = getattr(user, "session_tz", "UTC") or "UTC"
+    "intraday_shelves": dmr.get("inputs", {}).get("intraday_shelves")
+    "bias_label": dmr.get("inputs", {}).get("bias_label")
+    "trade_logic": dmr.get("trade_logic")
 
     # 1) market data
     inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
@@ -296,6 +299,9 @@ def api_dmr_run_auto_ai(payload: Dict[str, Any], user=Depends(get_current_user))
 @app.post("/api/assistant/chat")
 def api_assistant_chat(payload: Dict[str, Any], user=Depends(get_current_user)):
     ensure_can_use_gpt_chat(user)
+    "intraday_shelves": dmr.get("inputs", {}).get("intraday_shelves")
+    "bias_label": dmr.get("inputs", {}).get("bias_label")
+    "trade_logic": dmr.get("trade_logic")
 
     question = (payload.get("question") or "").strip()
     if not question:
