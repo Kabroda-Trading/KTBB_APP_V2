@@ -1,12 +1,9 @@
 # auth.py
 import os
-import sqlite3
-from typing import Any, Dict, Optional
-
 from fastapi import HTTPException, Request
 
-# Single place for the session cookie name
-COOKIE_NAME = os.environ.get("COOKIE_NAME", "ktbb_session")
+# ---- Compatibility constants (used by older main.py versions) ----
+COOKIE_NAME = os.getenv("COOKIE_NAME", "ktbb_session")
 
 # If you already have a DB layer, we'll try to use it.
 # If not, we fall back to a tiny sqlite lookup that won't crash imports.
@@ -70,24 +67,24 @@ def _as_user_dict(u: Any) -> Optional[Dict[str, Any]]:
     return out or None
 
 
-def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
+def get_current_user(request: Request):
     """
-    Uses SessionMiddleware.
-    Stores user dict at request.session["user"].
+    If your auth.py already has this, keep yours and delete this stub.
+    This stub supports SessionMiddleware-based login.
     """
     try:
-        user = request.session.get("user")
-        if isinstance(user, dict) and user.get("email"):
-            return user
+        return request.session.get("user")
     except Exception:
         return None
-    return None
 
-
-def require_user(request: Request) -> Dict[str, Any]:
+def require_user(request: Request):
+    """
+    Dependency helper used by main.py. If your auth.py already has this,
+    keep yours and delete this stub.
+    """
     user = get_current_user(request)
     if not user:
-        raise HTTPException(status_code=401, detail="Not logged in.")
+        raise HTTPException(status_code=401, detail="Not logged in")
     return user
 
 

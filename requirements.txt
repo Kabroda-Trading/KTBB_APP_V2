@@ -11,4 +11,4 @@ passlib[bcrypt]==1.7.4
 tzdata==2025.1
 ccxt
 itsdangerous==2.2.0
-starlette
+starlette==0.38.6
