@@ -1,4 +1,4 @@
-# main.py — production-clean single-file FastAPI app
+# main.py — CLEAN, COMPLETE VERSION (no patchwork)
 import os
 import traceback
 from typing import Dict, Any, Set
@@ -9,6 +9,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from zoneinfo import ZoneInfo
+
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import billing
 import kabroda_ai
@@ -24,18 +26,6 @@ from auth import (
 from membership import Tier, tier_marketing_label, ensure_can_use_gpt_chat
 from data_feed import build_auto_inputs, resolve_symbol
 from dmr_report import compute_dmr
-from fastapi.responses import RedirectResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
-
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    # If a browser is navigating (Accept: text/html) and we hit 401, redirect to login
-    accept = (request.headers.get("accept") or "").lower()
-    if exc.status_code == 401 and "text/html" in accept:
-        next_url = request.url.path
-        return RedirectResponse(url=f"/login?next={next_url}", status_code=303)
-    # default JSON for API callers
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 def _truthy(v: str) -> bool:
@@ -44,8 +34,6 @@ def _truthy(v: str) -> bool:
 
 DEV_MODE = _truthy(os.getenv("DEV_MODE", "0"))
 DISABLE_REGISTRATION = _truthy(os.getenv("DISABLE_REGISTRATION", "0"))
-
-PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
 
 SEED_ADMIN_EMAIL = (os.getenv("SEED_ADMIN_EMAIL") or "").strip().lower()
 SEED_ADMIN_PASSWORD = (os.getenv("SEED_ADMIN_PASSWORD") or "").strip()
@@ -63,29 +51,47 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 
-# ---------- global errors (so frontend can display real message) ----------
+# --------------------------
+# Exception handling
+# --------------------------
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """
+    If a user clicks a page in the browser and they're not logged in,
+    we redirect them to /login instead of dumping JSON like {"detail":"Not logged in"}.
+    API calls (fetch) will still get JSON.
+    """
+    accept = (request.headers.get("accept") or "").lower()
+    wants_html = "text/html" in accept
+
+    if exc.status_code == 401 and wants_html:
+        next_url = request.url.path
+        return RedirectResponse(url=f"/login?next={next_url}", status_code=303)
+
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 @app.exception_handler(Exception)
-async def _global_exception_handler(request: Request, exc: Exception):
-    # Never leak secrets; do return a readable message for your own UI.
-    # Render logs will still show the stack trace.
-    print("[ERROR]", request.method, request.url)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    # Always print the stack to Render logs
+    print("[UNHANDLED ERROR]", request.method, request.url)
     traceback.print_exc()
 
-    # If it's an HTTPException, let FastAPI handle it normally
-    if isinstance(exc, HTTPException):
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal Server Error", "error": str(exc)},
-    )
+    if DEV_MODE:
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"{type(exc).__name__}: {str(exc)}", "trace": traceback.format_exc()},
+        )
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 
+# --------------------------
+# Startup
+# --------------------------
 @app.on_event("startup")
 async def _startup():
     init_db()
 
-    # Seed admin user (only if env vars are set)
     if SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD:
         db = SessionLocal()
         try:
@@ -95,6 +101,7 @@ async def _startup():
                     tier_enum = Tier(SEED_ADMIN_TIER)
                 except Exception:
                     tier_enum = Tier.TIER3_MULTI_GPT
+
                 create_user(db, SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD, tier=tier_enum, session_tz="UTC")
                 print(f"[BOOTSTRAP] Seeded admin user: {SEED_ADMIN_EMAIL} ({tier_enum.value})")
         finally:
@@ -164,23 +171,27 @@ def account(request: Request, user=Depends(get_current_user)):
 # Auth
 # --------------------------
 @app.get("/login", response_class=HTMLResponse)
-def login_get(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+def login_get(request: Request, next: str = "/suite"):
+    return templates.TemplateResponse("login.html", {"request": request, "error": None, "next": next})
 
 
-@app.post("/login", response_class=HTMLResponse)
+@app.post("/login")
 def login_post(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
+    next: str = Form("/suite"),
     db: Session = Depends(get_db),
 ):
     u = authenticate_user(db, email, password)
     if not u:
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid email or password."})
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Invalid email or password.", "next": next},
+        )
 
     token = create_session_token(db, u.id)
-    resp = _redirect("/suite")
+    resp = _redirect(next or "/suite")
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax")
     return resp
 
@@ -192,7 +203,7 @@ def register_get(request: Request):
     return templates.TemplateResponse("register.html", {"request": request, "error": None})
 
 
-@app.post("/register", response_class=HTMLResponse)
+@app.post("/register")
 def register_post(
     request: Request,
     email: str = Form(...),
@@ -203,6 +214,7 @@ def register_post(
         return _redirect("/login")
 
     try:
+        # default new users to Tactical
         u = create_user(db, email, password, tier=Tier.TIER2_SINGLE_AUTO, session_tz="UTC")
     except HTTPException as e:
         return templates.TemplateResponse("register.html", {"request": request, "error": e.detail})
@@ -242,67 +254,36 @@ def set_session_timezone(
 
 
 # --------------------------
-# DMR: AI narrative + deterministic fallback
+# DMR endpoints
 # --------------------------
-import traceback
-
-@app.post("/api/dmr/run")
-def api_run_dmr(request: Request, payload: Dict[str, Any] = Body(...), db: Session = Depends(get_db), user=Depends(get_current_user)):
-    try:
-        symbol = resolve_symbol(payload.get("symbol") or "BTC")
-        inputs = build_auto_inputs(symbol=symbol, session_tz=user.session_tz)
-        dmr_payload = compute_dmr(symbol=symbol, inputs=inputs)
-        return dmr_payload
-    except Exception as e:
-        if DEV_MODE:
-            return JSONResponse(
-                status_code=500,
-                content={"detail": f"DMR compute failed: {type(e).__name__}: {e}", "trace": traceback.format_exc()},
-            )
-        raise HTTPException(status_code=500, detail=f"DMR compute failed: {type(e).__name__}: {e}")
-
-
 @app.post("/api/dmr/run-auto-ai")
 def api_dmr_run_auto_ai(payload: Dict[str, Any], user=Depends(get_current_user)):
     symbol = resolve_symbol(payload.get("symbol") or "BTC")
     session_tz = getattr(user, "session_tz", "UTC") or "UTC"
 
-    # Step 1: build inputs (can fail if exchange unreachable)
-    try:
-        inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Market data fetch failed: {str(e)}",
-        )
+    # 1) market data
+    inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
 
-    # Step 2: compute deterministic DMR payload
-    try:
-        dmr = compute_dmr(symbol, inputs)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"DMR compute failed: {str(e)}",
-        )
+    # 2) deterministic compute
+    dmr = compute_dmr(symbol=symbol, inputs=inputs)
 
+    # 3) AI narrative (fallback to deterministic if AI fails)
     date_str = dmr.get("date") or ""
+    model_payload = {
+        "symbol": dmr.get("symbol"),
+        "date": dmr.get("date"),
+        "levels": dmr.get("levels"),
+        "range_30m": dmr.get("range_30m"),
+        "htf_shelves": dmr.get("htf_shelves"),
+        "inputs": dmr.get("inputs"),
+    }
 
-    # Step 3: AI narrative (fallback if OpenAI fails)
     try:
-        model_payload = {
-            "symbol": dmr.get("symbol"),
-            "date": dmr.get("date"),
-            "levels": dmr.get("levels"),
-            "range_30m": dmr.get("range_30m"),
-            "htf_shelves": dmr.get("htf_shelves"),
-            "inputs": dmr.get("inputs"),
-        }
         ai_text = kabroda_ai.generate_daily_market_review(symbol, date_str, model_payload)
         dmr["report_text"] = ai_text
         dmr["report"] = ai_text
         dmr["ai_used"] = True
     except Exception as e:
-        # keep deterministic report text inside dmr_report.compute_dmr
         dmr["ai_used"] = False
         dmr["ai_error"] = str(e)
 
@@ -323,11 +304,8 @@ def api_assistant_chat(payload: Dict[str, Any], user=Depends(get_current_user)):
     symbol = resolve_symbol(payload.get("symbol") or "BTC")
     session_tz = getattr(user, "session_tz", "UTC") or "UTC"
 
-    try:
-        inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
-        dmr = compute_dmr(symbol, inputs)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Market/DMR failed: {str(e)}")
+    inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
+    dmr = compute_dmr(symbol=symbol, inputs=inputs)
 
     date_str = dmr.get("date") or ""
     model_payload = {
@@ -355,12 +333,7 @@ def billing_checkout(
     u = db.query(UserModel).filter(UserModel.id == user.id).first()
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
-
-    try:
-        url = billing.create_checkout_session(db, u, tier_slug=tier)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Checkout failed: {str(e)}")
-
+    url = billing.create_checkout_session(db, u, tier_slug=tier)
     return {"url": url}
 
 
@@ -369,12 +342,7 @@ def billing_portal(db: Session = Depends(get_db), user=Depends(get_current_user)
     u = db.query(UserModel).filter(UserModel.id == user.id).first()
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
-
-    try:
-        url = billing.create_billing_portal(db, u)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Billing portal failed: {str(e)}")
-
+    url = billing.create_billing_portal(db, u)
     return RedirectResponse(url, status_code=303)
 
 

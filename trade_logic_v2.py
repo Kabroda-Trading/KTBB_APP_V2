@@ -1,51 +1,15 @@
 """
-KTBB Trade Logic Module v2.0 (backend implementation stub)
+KTBB Trade Logic Module v2.1 (hardened + backward-compatible)
 
-This module is a *consumer* of the structural levels coming out of the
-Execution Anchor (SSE). It does **not** invent or mutate levels.
+- Consumes structural levels from Execution Anchor (SSE); does NOT invent levels.
+- Produces a deterministic "plan" summary for the Daily Market Review (DMR).
+- Not a live signal engine; intraday confirmations are described as requirements.
 
-Inputs (from backend):
-
-    levels: {
-        "daily_support": float,
-        "daily_resistance": float,
-        "breakout_trigger": float,
-        "breakdown_trigger": float,
-        "range30m_high": float,
-        "range30m_low": float,
-    }
-
-    bias_label: "bullish" | "bearish" | "neutral"
-    htf_shelves: optional HTF shelf ladders (same shape as SSE output)
-    range_30m: { "high": float, "low": float }
-
-Outputs (high-level summary for DMR + future Battle Box UI):
-
-    {
-        "analysis_bias": "long" | "short" | "neutral",
-        "regime": "trend" | "range" | "pre-breakout",
-        "primary_side": "long" | "short" | "neutral",
-        "primary_strategies": [ { id, name, direction, summary } ],
-        "secondary_strategies": [ ... ],
-        "targets_hint": {
-            "long": {
-                "primary_htf": float,
-                "htf_extensions": [float],
-                "intraday_steps": [float],
-            } | null,
-            "short": {
-                "primary_htf": float,
-                "htf_extensions": [float],
-                "intraday_steps": [float],
-            } | null,
-        },
-        "outlook_text": str,  # text block for DMR Section 4
-    }
-
-This implementation intentionally keeps *entry_conditions_met* and
-*exit_conditions_met* out of scope, because those require live 15m/5m
-candle state and EMAs, which the current backend does not supply.
-The DMR is a **pre-session plan**, not a live signal engine.
+This hardened version fixes:
+- Missing 'symbol' crashes by deriving symbol from inputs or defaulting safely.
+- Missing 'bias_label' by deriving from inputs or falling back to "neutral".
+- Indentation / formatting issues in outlook text builder.
+- Backward compatibility for older call sites.
 """
 
 from __future__ import annotations
@@ -57,12 +21,12 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 Side = Literal["long", "short", "neutral"]
 
 
-@dataclass
+@dataclass(frozen=True)
 class StrategyDescriptor:
-    id: str           # e.g. "S0"
-    name: str         # human label
-    direction: Side   # long / short / neutral (for range tactics)
-    summary: str      # one-line description for UI / logs
+    id: str
+    name: str
+    direction: Side
+    summary: str
 
 
 # ----------------------------------------------------------------------
@@ -168,7 +132,7 @@ STRATEGIES: Dict[str, StrategyDescriptor] = {
         name="Value Rotation",
         direction="neutral",
         summary=(
-            "Trade rotations from VAH back to VAL (and vice versa) when 24h value is balanced and "
+            "Trade rotations from VAH back to VAL (and vice versa) when value is balanced and "
             "HTF shelves are not dominant."
         ),
     ),
@@ -214,31 +178,43 @@ STRATEGIES: Dict[str, StrategyDescriptor] = {
 
 
 # ----------------------------------------------------------------------
-# Helper utilities
+# Helpers
 # ----------------------------------------------------------------------
+
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    try:
+        return float(val)
+    except Exception:
+        return default
 
 
 def _safe_get_float(d: Dict[str, Any], key: str) -> float:
-    try:
-        return float(d.get(key, 0.0))
-    except Exception:
-        return 0.0
+    return _safe_float((d or {}).get(key, 0.0), 0.0)
 
 
-def _pick_regime(
-    levels: Dict[str, float],
-    bias_label: str,
-) -> Tuple[str, Side]:
-    """
-    Rough regime classification based purely on anchors:
+def _normalize_symbol(symbol: Optional[str], inputs: Optional[Dict[str, Any]]) -> str:
+    if symbol and str(symbol).strip():
+        return str(symbol).strip().upper()
+    if inputs:
+        s = inputs.get("symbol") or inputs.get("ticker") or inputs.get("market") or ""
+        if str(s).strip():
+            return str(s).strip().upper()
+    return "BTC"
 
-      - "trend" when bias is strongly directional and triggers are reasonably wide
-      - "range" when triggers are very wide and value is expected to rotate
-      - "pre-breakout" when triggers are compressed
 
-    For now we don't have direct band_width here, so we use distances
-    between daily S/R and triggers as a proxy.
-    """
+def _normalize_bias_label(bias_label: Optional[str], inputs: Optional[Dict[str, Any]]) -> str:
+    if bias_label and str(bias_label).strip():
+        b = str(bias_label).strip().lower()
+        if b in ("bullish", "bearish", "neutral"):
+            return b
+    if inputs:
+        b = (inputs.get("bias_label") or inputs.get("bias") or inputs.get("analysis_bias") or "").strip().lower()
+        if b in ("bullish", "bearish", "neutral"):
+            return b
+    return "neutral"
+
+
+def _pick_regime(levels: Dict[str, float], bias_label: str) -> Tuple[str, Side]:
     ds = _safe_get_float(levels, "daily_support")
     dr = _safe_get_float(levels, "daily_resistance")
     bt = _safe_get_float(levels, "breakout_trigger")
@@ -266,9 +242,6 @@ def _pick_regime(
 
 
 def _pick_strategy_ids(regime: str, primary_side: Side) -> Tuple[List[str], List[str]]:
-    """
-    Map regime + side into primary/secondary strategy sets (ids inside STRATEGIES).
-    """
     primary: List[str] = []
     secondary: List[str] = []
 
@@ -280,13 +253,14 @@ def _pick_strategy_ids(regime: str, primary_side: Side) -> Tuple[List[str], List
             primary = ["S0_short", "S7_short"]
             secondary = ["S1_short", "S2_short", "S3_short", "S8_short"]
         else:
-            # neutral bias in trend regime → stay focused on range tactics
             primary = ["S4_neutral"]
             secondary = ["S5_neutral", "S6_neutral"]
+
     elif regime == "range":
         primary = ["S5_neutral"]
         secondary = ["S4_neutral", "S6_neutral"]
-    else:  # "pre-breakout"
+
+    else:  # pre-breakout
         if primary_side == "long":
             primary = ["S7_long", "S0_long"]
             secondary = ["S1_long", "S2_long", "S5_neutral"]
@@ -297,24 +271,12 @@ def _pick_strategy_ids(regime: str, primary_side: Side) -> Tuple[List[str], List
             primary = ["S4_neutral"]
             secondary = ["S5_neutral", "S6_neutral"]
 
-    # filter out any ids that aren't in STRATEGIES (defensive)
     primary = [sid for sid in primary if sid in STRATEGIES]
     secondary = [sid for sid in secondary if sid in STRATEGIES]
-
     return primary, secondary
 
 
-def _build_targets_hint(
-    levels: Dict[str, float],
-    htf_shelves: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """
-    Approximate target ladders based on Execution Anchor rules.
-
-    - Longs: daily_resistance + up to 2 HTF shelves above/below, plus
-      up to 3 intraday shelves on breakout side (if present).
-    - Shorts: daily_support + same idea on downside.
-    """
+def _build_targets_hint(levels: Dict[str, float], htf_shelves: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     ds = _safe_get_float(levels, "daily_support")
     dr = _safe_get_float(levels, "daily_resistance")
 
@@ -322,32 +284,29 @@ def _build_targets_hint(
     res_shelves = htf_shelves.get("resistance") or []
     sup_shelves = htf_shelves.get("support") or []
 
-    def pick_levels(entries: List[Dict[str, Any]], base: float) -> List[float]:
+    def _pick_closest(entries: List[Dict[str, Any]], base: float) -> List[float]:
         lvls: List[float] = []
         for e in entries:
-            try:
-                lvls.append(float(e.get("level")))
-            except Exception:
-                continue
-        # Keep the 2 closest to base
+            lvl = _safe_float((e or {}).get("level"), None)
+            if lvl is not None:
+                lvls.append(lvl)
         lvls = sorted(lvls, key=lambda x: abs(x - base))
         return lvls[:2]
 
     long_hint = None
     short_hint = None
 
-    if dr > 0.0:
+    if dr > 0:
         long_hint = {
             "primary_htf": dr,
-            "htf_extensions": pick_levels(res_shelves, dr),
-            # intraday shelves not wired yet → empty until backend exposes them
+            "htf_extensions": _pick_closest(res_shelves, dr),
             "intraday_steps": [],
         }
 
-    if ds > 0.0:
+    if ds > 0:
         short_hint = {
             "primary_htf": ds,
-            "htf_extensions": pick_levels(sup_shelves, ds),
+            "htf_extensions": _pick_closest(sup_shelves, ds),
             "intraday_steps": [],
         }
 
@@ -361,94 +320,75 @@ def _build_outlook_text(
     primary_strats: List[StrategyDescriptor],
     secondary_strats: List[StrategyDescriptor],
 ) -> str:
-    """
-    Human-readable text block for DMR Section 4, describing
-    the *idea* of the day using the strategy labels.
-    """
     lines: List[str] = ["4) Trade Strategy Outlook"]
 
     if primary_side == "long":
-        bias_sentence = (
-            f"- Primary idea: favor long setups in {symbol}, "
-            f"treating dips as opportunities to join strength as long as the "
-            f"structural anchors remain intact."
+        lines.append(
+            f"- Primary idea: favor long setups in {symbol}. If price confirms above the breakout trigger, "
+            "treat pullbacks as opportunities while structural support holds."
         )
     elif primary_side == "short":
-        bias_sentence = (
-            f"- Primary idea: favor short setups in {symbol}, "
-            f"selling rips back into resistance while the downside structure remains valid."
+        lines.append(
+            f"- Primary idea: favor short setups in {symbol}. If price confirms below the breakdown trigger, "
+            "sell pullbacks into resistance while downside structure holds."
         )
     else:
-        bias_sentence = (
-            f"- Primary idea: treat {symbol} as a rotation / range environment until "
-            "a clear break of the triggers forces a new trend."
+        lines.append(
+            f"- Primary idea: treat {symbol} as rotational until a clean trigger break creates directional flow."
         )
 
-    lines.append(bias_sentence)
-
-    # Regime commentary
     if regime == "trend":
-        lines.append(
-            "- Regime: trend – expect directional follow-through once triggers confirm; "
-            "be careful fading strength/weakness."
-        )
+        lines.append("- Regime: trend – prioritize trigger-based continuation; avoid fading strong momentum.")
     elif regime == "range":
-        lines.append(
-            "- Regime: range – expect repeated tests of daily support/resistance and value edges; "
-            "mean-reversion tactics take priority over chasing breakouts."
-        )
+        lines.append("- Regime: range – prioritize mean-reversion at edges; avoid chasing breakouts.")
     else:
-        lines.append(
-            "- Regime: pre-breakout – triggers are compressed; expect fake-outs and liquidity hunts "
-            "around both sides before a sustained move."
-        )
+        lines.append("- Regime: pre-breakout – triggers are compressed; expect fake-outs before commitment.")
 
-        # Strategy lists
-        if primary_strats:
-        # Show only human-readable strategy names (hide S0/S1/etc.)
-            primary_labels = ", ".join(s.name for s in primary_strats)
-            lines.append(f"- Primary playbook: {primary_labels}.")
+    if primary_strats:
+        primary_labels = ", ".join(s.name for s in primary_strats)
+        lines.append(f"- Primary playbook: {primary_labels}.")
 
-        if secondary_strats:
-            secondary_labels = ", ".join(s.name for s in secondary_strats)
-            lines.append(f"- Secondary / tactical plays: {secondary_labels}.")
+    if secondary_strats:
+        secondary_labels = ", ".join(s.name for s in secondary_strats)
+        lines.append(f"- Secondary / tactical plays: {secondary_labels}.")
 
-
-    lines.append(
-        "- Remember: all entries still require the intraday checklist "
-        "(15m trigger confirmation + 5m trend alignment + oscillator reset)."
-    )
-
+    lines.append("- Execution note: entries still require intraday confirmation (15m trigger + 5m alignment).")
     return "\n".join(lines) + "\n"
 
 
 # ----------------------------------------------------------------------
-# Public entrypoint
+# Public entrypoint (backward-compatible)
 # ----------------------------------------------------------------------
 
-
 def build_trade_logic_summary(
-    symbol: str,
-    levels: Dict[str, float],
-    bias_label: str,
+    symbol: Optional[str] = None,
+    levels: Optional[Dict[str, Any]] = None,
+    bias_label: Optional[str] = None,
     htf_shelves: Optional[Dict[str, Any]] = None,
-    range_30m: Optional[Dict[str, float]] = None,  # reserved for future refinements
+    range_30m: Optional[Dict[str, Any]] = None,
+    inputs: Optional[Dict[str, Any]] = None,
+    **_ignored: Any,
 ) -> Dict[str, Any]:
     """
-    Main function used by dmr_report.generate_dmr_report.
-
-    It does NOT look at candles directly; it only consumes the structural
-    levels, the pre-session bias, and (optionally) the SSE shelf ladders.
+    Backward compatible:
+    - Old: build_trade_logic_summary(symbol, levels, bias_label, htf_shelves, range_30m)
+    - New: build_trade_logic_summary(levels=..., range_30m=..., htf_shelves=..., inputs=...)
     """
-    regime, primary_side = _pick_regime(levels, bias_label)
+    symbol_n = _normalize_symbol(symbol, inputs)
+    bias_n = _normalize_bias_label(bias_label, inputs)
+    levels_n = (levels or {})  # do not mutate
+    htf_n = htf_shelves or {}
+    _ = range_30m  # reserved for future refinements
+
+    regime, primary_side = _pick_regime(levels_n, bias_n)
     primary_ids, secondary_ids = _pick_strategy_ids(regime, primary_side)
 
     primary_strats = [STRATEGIES[sid] for sid in primary_ids]
     secondary_strats = [STRATEGIES[sid] for sid in secondary_ids]
 
-    targets_hint = _build_targets_hint(levels, htf_shelves)
+    targets_hint = _build_targets_hint(levels_n, htf_n)
     outlook_text = _build_outlook_text(
-        symbol=symbol,
+        symbol=symbol_n,
         regime=regime,
         primary_side=primary_side,
         primary_strats=primary_strats,
@@ -460,21 +400,11 @@ def build_trade_logic_summary(
         "regime": regime,
         "primary_side": primary_side,
         "primary_strategies": [
-            {
-                "id": s.id,
-                "name": s.name,
-                "direction": s.direction,
-                "summary": s.summary,
-            }
+            {"id": s.id, "name": s.name, "direction": s.direction, "summary": s.summary}
             for s in primary_strats
         ],
         "secondary_strategies": [
-            {
-                "id": s.id,
-                "name": s.name,
-                "direction": s.direction,
-                "summary": s.summary,
-            }
+            {"id": s.id, "name": s.name, "direction": s.direction, "summary": s.summary}
             for s in secondary_strats
         ],
         "targets_hint": targets_hint,
