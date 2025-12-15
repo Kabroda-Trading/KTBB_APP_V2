@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session
 
 from database import UserModel, SessionModel, get_db
 
+# One cookie name used everywhere (main.py + auth.py)
+COOKIE_NAME = "ktbb_session"
+
 pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
 
 
@@ -73,7 +76,7 @@ def delete_session(db: Session, token: str) -> None:
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)):
-    token = request.cookies.get("ktbb_session")
+    token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(status_code=401, detail="Not logged in.")
 
@@ -98,3 +101,8 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
         tier=tier_enum,
         session_tz=getattr(u, "session_tz", "auto"),
     )
+
+
+# Optional helper some versions of main.py expect
+def require_user(request: Request, db: Session = Depends(get_db)):
+    return get_current_user(request, db)
