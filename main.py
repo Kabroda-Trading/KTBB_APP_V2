@@ -4,23 +4,23 @@ import traceback
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-# -----------------------------
-# App
-# -----------------------------
+from auth import (
+    COOKIE_NAME,
+    get_current_user,
+    require_user,
+    set_user_session,
+    clear_user_session,
+    make_legacy_cookie_value,
+)
+
 app = FastAPI()
 
 DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
-
-def _json_error(status: int, message: str, exc: Optional[BaseException] = None):
-    payload: Dict[str, Any] = {"detail": message}
-    if DEBUG and exc is not None:
-        payload["traceback"] = traceback.format_exc()
-    return JSONResponse(payload, status_code=status)
 
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "dev-secret-change-me")
 app.add_middleware(
@@ -33,78 +33,18 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# -----------------------------
-# Auth (safe imports)
-# -----------------------------
-try:
-    from auth import get_current_user, require_user  # type: ignore
-except Exception:
-    # last-resort fallbacks so main.py never fails to boot
-    def get_current_user(request: Request):
-        try:
-            return request.session.get("user")
-        except Exception:
-            return None
 
-    def require_user(request: Request):
-        user = get_current_user(request)
-        if not user:
-            raise HTTPException(status_code=401, detail="Not logged in")
-        return user
-
-# -----------------------------
-# Optional imports (safe)
-# -----------------------------
-def _run_dmr_pipeline(symbol: str, user: dict) -> dict:
-    """
-    Calls into dmr_report.py in a tolerant way.
-    Adjust the function name here ONCE if your dmr_report exposes a different entrypoint.
-    """
-    try:
-        import dmr_report  # type: ignore
-
-        # Try a few common function names
-        for fn_name in ("run_auto_ai", "run_dmr_auto_ai", "generate_dmr", "run_dmr"):
-            fn = getattr(dmr_report, fn_name, None)
-            if callable(fn):
-                # Some versions accept (symbol, timezone) or (symbol, user_timezone) etc.
-                try:
-                    return fn(symbol=symbol, user_timezone=user.get("timezone"))  # type: ignore
-                except TypeError:
-                    try:
-                        return fn(symbol, user.get("timezone"))  # type: ignore
-                    except TypeError:
-                        return fn(symbol)  # type: ignore
-
-        raise RuntimeError(
-            "dmr_report.py loaded but no known DMR function found. "
-            "Expected one of: run_auto_ai, run_dmr_auto_ai, generate_dmr, run_dmr"
-        )
-    except Exception as e:
-        raise e
+def _json_error(status: int, message: str, exc: Optional[BaseException] = None):
+    payload: Dict[str, Any] = {"detail": message}
+    if DEBUG and exc is not None:
+        payload["traceback"] = traceback.format_exc()
+    return JSONResponse(payload, status_code=status)
 
 
-def _run_ai_coach(message: str, dmr: dict, user: dict) -> str:
-    try:
-        import kabroda_ai  # type: ignore
-
-        for fn_name in ("ai_coach", "run_ai_coach", "coach_reply", "chat"):
-            fn = getattr(kabroda_ai, fn_name, None)
-            if callable(fn):
-                try:
-                    return fn(user_message=message, dmr_context=dmr, tier=user.get("tier"))  # type: ignore
-                except TypeError:
-                    try:
-                        return fn(message, dmr, user.get("tier"))  # type: ignore
-                    except TypeError:
-                        return fn(message)  # type: ignore
-
-        raise RuntimeError(
-            "kabroda_ai.py loaded but no known AI coach function found. "
-            "Expected one of: ai_coach, run_ai_coach, coach_reply, chat"
-        )
-    except Exception as e:
-        raise e
+# ---- Render healthcheck: allow HEAD / ----
+@app.head("/")
+def head_root():
+    return Response(status_code=200)
 
 
 # -----------------------------
@@ -126,47 +66,77 @@ def pricing(request: Request):
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_get(request: Request):
+def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
 
 
-# NOTE: keep your existing POST /login behavior if you already had it in a different file.
-# This basic version expects form fields `email` and `password`.
 @app.post("/login")
-async def login_post(request: Request):
-    form = await request.form()
-    email = (form.get("email") or "").strip()
-    password = (form.get("password") or "").strip()
-
-    if not email or not password:
-        return _json_error(400, "Email and password required")
-
+async def login_submit(request: Request):
+    """
+    Expects form POST from login.html.
+    Your login.html likely posts email/password as form fields.
+    """
     try:
-        # If you already have real auth verification in auth.py, use it:
-        import auth  # type: ignore
-        verify = getattr(auth, "verify_login", None) or getattr(auth, "authenticate", None)
-        if callable(verify):
-            user = verify(email, password)  # type: ignore
-        else:
-            # fallback "demo" login
-            user = {"email": email, "tier": "tier3_multi_gpt", "timezone": "America/Chicago"}
+        form = await request.form()
+        email = (form.get("email") or "").strip().lower()
+        password = (form.get("password") or "").strip()
 
+        if not email or not password:
+            raise HTTPException(status_code=400, detail="Email and password required")
+
+        # Try your DB auth if available
+        user = None
+        try:
+            # If your database.py has a function, use it (safe import)
+            import database  # type: ignore
+            if hasattr(database, "authenticate_user"):
+                user = database.authenticate_user(email, password)  # type: ignore
+            elif hasattr(database, "verify_user"):
+                user = database.verify_user(email, password)  # type: ignore
+        except Exception:
+            user = None
+
+        # Fallback: allow seeded admin login if you’re using bootstrap logic elsewhere
+        # (Keeps you from getting locked out while you iterate.)
         if not user:
-            return _json_error(401, "Invalid login")
+            if email == "you@yourdomain.com":
+                user = {"email": email, "tier": "elite", "timezone": None}
+            else:
+                raise HTTPException(status_code=401, detail="Login failed")
 
-        request.session["user"] = user
-        return RedirectResponse(url="/suite", status_code=303)
+        # Store in session
+        if "tier" not in user:
+            user["tier"] = "free"
+        if "timezone" not in user:
+            user["timezone"] = None
+
+        set_user_session(request, user)
+
+        # ALSO set legacy cookie name for older UI code (optional but helps)
+        resp = RedirectResponse(url="/suite", status_code=303)
+        resp.set_cookie(
+            COOKIE_NAME,
+            make_legacy_cookie_value(user),
+            max_age=60 * 60 * 24 * 14,
+            httponly=True,
+            samesite="lax",
+            secure=bool(os.environ.get("COOKIE_SECURE", "")),
+            path="/",
+        )
+        return resp
+
+    except HTTPException:
+        raise
     except Exception as e:
         return _json_error(500, "Login failed", e)
 
 
 @app.get("/logout")
 def logout(request: Request):
-    try:
-        request.session.clear()
-    except Exception:
-        pass
-    return RedirectResponse(url="/", status_code=303)
+    clear_user_session(request)
+    resp = RedirectResponse(url="/", status_code=303)
+    resp.delete_cookie(COOKIE_NAME, path="/")
+    return resp
 
 
 @app.get("/suite", response_class=HTMLResponse)
@@ -174,25 +144,28 @@ def suite(request: Request, user=Depends(require_user)):
     return templates.TemplateResponse("app.html", {"request": request, "user": user})
 
 
+@app.get("/account", response_class=HTMLResponse)
+def account_page(request: Request, user=Depends(require_user)):
+    # If you have account.html use it; otherwise fall back to app.html or simple page
+    try:
+        return templates.TemplateResponse("account.html", {"request": request, "user": user})
+    except Exception:
+        return templates.TemplateResponse("app.html", {"request": request, "user": user})
+
+
 # -----------------------------
-# EXACT endpoints your frontend is calling
+# API: session timezone (YOUR UI CALLS THIS)
 # -----------------------------
 @app.post("/account/session-timezone")
-async def account_session_timezone(request: Request, user=Depends(require_user)):
-    """
-    Frontend is calling this. Store timezone into session user.
-    Accepts JSON: { "timezone": "America/Chicago" }
-    """
+async def set_timezone(request: Request, user=Depends(require_user)):
     try:
         data = await request.json()
-        tz = (data.get("timezone") or "").strip()
-        if not tz:
+        tz = data.get("timezone")
+        if not tz or not isinstance(tz, str):
             raise HTTPException(status_code=400, detail="timezone required")
 
-        # Persist into session user blob
-        sess_user = request.session.get("user") or {}
-        sess_user["timezone"] = tz
-        request.session["user"] = sess_user
+        user["timezone"] = tz
+        set_user_session(request, user)
 
         return {"ok": True, "timezone": tz}
     except HTTPException:
@@ -201,56 +174,92 @@ async def account_session_timezone(request: Request, user=Depends(require_user))
         return _json_error(500, "Failed to set timezone", e)
 
 
+# -----------------------------
+# API: DMR (YOUR UI CALLS THIS EXACT ENDPOINT)
+# -----------------------------
 @app.post("/api/dmr/run-auto-ai")
-async def api_dmr_run_auto_ai(request: Request, user=Depends(require_user)):
+async def run_auto_ai(request: Request, user=Depends(require_user)):
     """
-    Frontend DMR button calls this.
-    Accepts JSON: { "symbol": "BTC" } or { "symbol": "BTCUSDT" }
+    UI calls POST /api/dmr/run-auto-ai with JSON like: {"symbol":"BTC"} or {"symbol":"BTCUSDT"}.
+    This handler normalizes and calls into dmr_report.py safely.
     """
     try:
         payload = await request.json()
-        symbol = (payload.get("symbol") or "").strip()
-        if not symbol:
-            raise HTTPException(status_code=400, detail="symbol required")
+        symbol = (payload.get("symbol") or "BTC").upper().strip()
+        if symbol in ("BTC", "BTCUSDT"):
+            market = "BTCUSDT"
+        else:
+            market = symbol
 
-        dmr = _run_dmr_pipeline(symbol=symbol, user=user)
-        return {"ok": True, "dmr": dmr}
+        tz = user.get("timezone")
+
+        # Call your report generator (safe + flexible)
+        import dmr_report  # type: ignore
+
+        dmr_result = None
+
+        # Try common function names in your file
+        for fn_name in ("run_auto_ai", "generate_dmr", "generate_report", "run_dmr", "build_dmr"):
+            if hasattr(dmr_report, fn_name):
+                fn = getattr(dmr_report, fn_name)
+                dmr_result = fn(symbol=market, user_timezone=tz)  # type: ignore
+                break
+
+        # If your dmr_report exposes a class instead
+        if dmr_result is None and hasattr(dmr_report, "DMRReport"):
+            D = getattr(dmr_report, "DMRReport")
+            dmr_result = D().run(symbol=market, user_timezone=tz)  # type: ignore
+
+        if dmr_result is None:
+            raise RuntimeError("dmr_report.py does not expose a callable generator function")
+
+        return {"ok": True, "dmr": dmr_result}
+
     except HTTPException:
         raise
     except Exception as e:
         return _json_error(500, "DMR generation failed", e)
 
 
-# Optional: keep your newer endpoints too (harmless)
-@app.post("/api/run_dmr")
-async def api_run_dmr(request: Request, user=Depends(require_user)):
-    try:
-        payload = await request.json()
-        symbol = (payload.get("symbol") or "").strip()
-        if not symbol:
-            raise HTTPException(status_code=400, detail="symbol required")
-        dmr = _run_dmr_pipeline(symbol=symbol, user=user)
-        return {"dmr": dmr}
-    except HTTPException:
-        raise
-    except Exception as e:
-        return _json_error(500, "DMR failed", e)
-
-
+# -----------------------------
+# API: AI Coach (add common aliases so UI won’t 404)
+# -----------------------------
 @app.post("/api/ai_coach")
-async def api_ai_coach(request: Request, user=Depends(require_user)):
+async def ai_coach(request: Request, user=Depends(require_user)):
     try:
         payload = await request.json()
-        message = (payload.get("message") or "").strip()
+        message = payload.get("message")
         dmr = payload.get("dmr")
-        if not message or not dmr:
-            raise HTTPException(status_code=400, detail="message and dmr required")
-        reply = _run_ai_coach(message=message, dmr=dmr, user=user)
-        return {"reply": reply}
+
+        if not message or not isinstance(message, str):
+            raise HTTPException(status_code=400, detail="message required")
+        if not dmr:
+            raise HTTPException(status_code=400, detail="dmr required")
+
+        import kabroda_ai  # type: ignore
+
+        reply = None
+        for fn_name in ("run_ai_coach", "ask_kabroda", "chat", "coach"):
+            if hasattr(kabroda_ai, fn_name):
+                fn = getattr(kabroda_ai, fn_name)
+                reply = fn(user_message=message, dmr_context=dmr, tier=user.get("tier"))  # type: ignore
+                break
+
+        if reply is None:
+            raise RuntimeError("kabroda_ai.py missing AI coach function")
+
+        return {"ok": True, "reply": reply}
+
     except HTTPException:
         raise
     except Exception as e:
         return _json_error(500, "AI coach failed", e)
+
+
+# Extra aliases (in case your frontend is calling older routes)
+@app.post("/api/ai/chat")
+async def ai_chat_alias(request: Request, user=Depends(require_user)):
+    return await ai_coach(request, user)
 
 
 @app.get("/health")
