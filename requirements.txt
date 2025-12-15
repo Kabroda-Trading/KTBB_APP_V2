@@ -10,4 +10,5 @@ argon2-cffi==23.1.0
 passlib[bcrypt]==1.7.4
 tzdata==2025.1
 ccxt
-itsdangerous
+itsdangerous==2.2.0
+starlette
