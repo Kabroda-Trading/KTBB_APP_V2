@@ -238,6 +238,10 @@ def run_auto_ai(symbol: str, user_timezone: Optional[str] = None) -> Dict[str, A
     intraday_shelves = sse.get("intraday_shelves") or {}
 
     # 2) Multi-timeframe computed facts (NO screenshots)
+    tf_facts = {}
+momentum = {}
+
+try:
     tf_facts = {
         "4h": _tf_facts(market, "4h"),
         "1h": _tf_facts(market, "1h"),
@@ -245,6 +249,16 @@ def run_auto_ai(symbol: str, user_timezone: Optional[str] = None) -> Dict[str, A
         "5m": _tf_facts(market, "5m"),
     }
     momentum = _momentum_bullets(tf_facts)
+except Exception as e:
+    # HARD GUARANTEE: DMR never fails due to candle fetch
+    tf_facts = {}
+    momentum = {
+        "4H": "Momentum unavailable (data fetch error)",
+        "1H": "Momentum unavailable (data fetch error)",
+        "15M": "Momentum unavailable (data fetch error)",
+        "5M": "Momentum unavailable (data fetch error)",
+    }
+
 
     # 3) Trade logic (your deterministic strategy engine)
     range_30m = inputs.get("range_30m") or {
