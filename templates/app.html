@@ -1,168 +1,111 @@
 {% extends "base.html" %}
 {% block content %}
 
-<h1>Kabroda BattleBox Suite</h1>
-<p class="muted">Logged in as {{ user.email }} • {{ tier_label }}</p>
-
-<div class="card">
-  <h3>Run Daily Market Review</h3>
-  <p class="muted" style="margin-top:6px;">
-    Generate today’s structure levels, opening range, HTF shelves, and a clean narrative.
-  </p>
-
-  <div class="row" style="gap:10px; align-items:center;">
-    <select id="symbol" style="flex:1;">
-      <option value="BTC">BTC</option>
-      <option value="ETH">ETH</option>
-    </select>
-
-    <button class="btn primary" id="runBtn" onclick="runDMR()">Generate Review</button>
-    <a class="btn" href="/account">Account</a>
+<div class="container">
+  <div class="hero">
+    <h1>Kabroda BattleBox Suite</h1>
+    <p class="muted">Generate today’s structure levels, opening range, HTF shelves, and a clean narrative.</p>
+    <p class="muted">Logged in as {{ user.email }} • {{ user.tier|capitalize }}</p>
   </div>
 
-  <div id="status" class="muted" style="margin-top:10px;">Idle</div>
-</div>
+  <div class="card">
+    <h3>Run Daily Market Review</h3>
+    <p class="muted">Generate today’s structure levels, opening range, HTF shelves, and a clean narrative.</p>
 
-<div id="reportWrap" style="display:none; margin-top:16px;">
-  <div class="grid">
-    <div class="card">
-      <h3>Key Levels</h3>
-      <ul id="levelsList"></ul>
+    <div class="row">
+      <select id="symbol" class="input" style="flex:1;">
+        <option value="BTCUSDT">BTC</option>
+        <option value="ETHUSDT">ETH</option>
+      </select>
+
+      <button id="runBtn" class="btn primary" onclick="runDMR()">Generate Review</button>
+      <a class="btn" href="/account">Account</a>
     </div>
 
-    <div class="card">
-      <h3>30m Opening Range</h3>
-      <div id="orBox" class="lead"></div>
-      <div class="muted" id="orMeta" style="margin-top:6px;"></div>
-    </div>
-
-    <div class="card">
-      <h3>HTF Shelves</h3>
-      <div id="htfBox"></div>
-    </div>
+    <div id="status" class="muted" style="margin-top:10px;">Ready.</div>
   </div>
 
-  <div class="card" style="margin-top:16px;">
-    <div class="row" style="justify-content:space-between; align-items:center;">
-      <h3 style="margin:0;">Daily Market Review</h3>
-      <div class="muted" id="dmrMeta"></div>
+  <div class="card" style="margin-top:14px;">
+    <h3>Daily Market Review</h3>
+
+    <div class="grid" style="margin-top:10px;">
+      <div class="pill"><span class="muted">Daily Support</span><div id="lv_ds">—</div></div>
+      <div class="pill"><span class="muted">Daily Resistance</span><div id="lv_dr">—</div></div>
+      <div class="pill"><span class="muted">Breakout Trigger</span><div id="lv_bo">—</div></div>
+      <div class="pill"><span class="muted">Breakdown Trigger</span><div id="lv_bd">—</div></div>
+      <div class="pill"><span class="muted">30m High</span><div id="lv_30h">—</div></div>
+      <div class="pill"><span class="muted">30m Low</span><div id="lv_30l">—</div></div>
     </div>
 
-    <div id="dmrNarrative" class="dmr-box"></div>
+    <pre id="dmrText" class="report" style="margin-top:12px; white-space:pre-wrap;">(Run DMR to generate…)</pre>
 
-    <div class="row" style="margin-top:12px; gap:10px;">
-      <button class="btn primary" id="toggleYamlBtn" onclick="toggleYaml()" style="display:none;">Show YAML</button>
-      <button class="btn" id="copyYamlBtn" onclick="copyYaml()" style="display:none;">Copy YAML</button>
-      <div class="muted" id="copyStatus" style="margin-left:auto;"></div>
+    <div class="row" style="margin-top:10px;">
+      <button id="toggleYamlBtn" class="btn" style="display:none;" onclick="toggleYaml()">Show YAML</button>
+      <button id="copyYamlBtn" class="btn" style="display:none;" onclick="copyYaml()">Copy YAML</button>
+      <div id="copyStatus" class="muted" style="margin-left:10px;"></div>
     </div>
 
-    <pre id="dmrYaml" class="pre" style="white-space:pre-wrap; display:none; margin-top:10px;"></pre>
+    <pre id="dmrYaml" class="report" style="display:none; margin-top:10px;"></pre>
   </div>
 
-  <div class="card" style="margin-top:16px;">
+  {% if is_elite %}
+  <div class="card" style="margin-top:14px;">
     <h3>Kabroda AI Coach</h3>
+    <p class="muted">Ask questions anchored to today’s levels (Elite only).</p>
 
-    {% if is_elite %}
-      <div class="muted" style="margin-top:6px;">
-        Ask questions anchored to today’s levels (Elite only).
-      </div>
+    <div id="chatLog" class="chat-log"></div>
 
-      <div id="chat" class="chat-shell">
-        <div id="chatLog" class="chat-log">
-          <div class="chat-msg chat-assistant">
-            <div class="chat-bubble">
-              Start with: “What’s the primary plan if we break the breakout trigger?”
-            </div>
-          </div>
-        </div>
-
-        <div class="row" style="gap:10px; margin-top:10px;">
-          <input id="chatInput" placeholder="Ask Kabroda…" style="flex:1;" onkeydown="if(event.key==='Enter'){ sendChat(); }" />
-          <button class="btn primary" id="sendBtn" onclick="sendChat()">Send</button>
-        </div>
-
-        <div class="muted" id="chatHint" style="margin-top:8px;"></div>
-      </div>
-    {% else %}
-      <div class="muted" style="margin-top:8px;">
-        Upgrade to Elite to unlock the AI Coach chat.
-        <div style="margin-top:10px;">
-          <a class="btn primary" href="/pricing">See Pricing</a>
-        </div>
-      </div>
-    {% endif %}
+    <div class="row" style="margin-top:10px;">
+      <input id="chatInput" class="input" style="flex:1;" placeholder="Ask Kabroda..." onkeydown="if(event.key==='Enter'){sendChat()}"/>
+      <button id="sendBtn" class="btn primary" onclick="sendChat()">Send</button>
+    </div>
   </div>
+  {% endif %}
 </div>
 
 <style>
-  .btn { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); }
-  .btn:hover { background: rgba(255,255,255,.10); }
-  .btn.primary { background: #60a5fa; border-color: rgba(96,165,250,.45); color:#0b1220; font-weight: 700; }
-  .btn.primary:hover { filter: brightness(1.05); }
-
-  .dmr-box{
-    margin-top:12px;
-    padding:14px;
-    border-radius:16px;
-    background: rgba(0,0,0,.28);
-    border: 1px solid rgba(255,255,255,.08);
-    color: rgba(255,255,255,.92);
-    line-height: 1.55;
-    white-space: pre-line;
-    font-size: 15px;
-  }
-
-  .chat-log{
-    max-height: 320px;
-    overflow:auto;
-    padding: 10px;
-    border-radius: 16px;
-    background: rgba(0,0,0,.25);
-    border: 1px solid rgba(255,255,255,.08);
-  }
-  .chat-msg{ display:flex; margin: 10px 0; }
-  .chat-user{ justify-content:flex-end; }
-  .chat-assistant{ justify-content:flex-start; }
-  .chat-bubble{
-    max-width: 78%;
-    padding: 10px 12px;
-    border-radius: 16px;
-    border: 1px solid rgba(255,255,255,.10);
-    background: rgba(255,255,255,.06);
-    white-space: pre-wrap;
-  }
-  .chat-user .chat-bubble{
-    background: rgba(96, 165, 250, .18);
-    border-color: rgba(96,165,250,.35);
-  }
+  .container{max-width:1000px;margin:0 auto;padding:22px;}
+  .hero{margin-bottom:14px;}
+  .card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:18px;padding:16px;}
+  .row{display:flex;gap:10px;align-items:center;}
+  .input{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.25);color:#fff;}
+  .btn{padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;text-decoration:none;cursor:pointer;}
+  .btn.primary{background:rgba(96,165,250,.25);border-color:rgba(96,165,250,.4);}
+  .muted{opacity:.75;}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .pill{padding:10px;border-radius:14px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.22);}
+  .report{border-radius:16px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.25);padding:12px;}
+  .chat-log{max-height:320px;overflow:auto;border:1px solid rgba(255,255,255,.10);border-radius:16px;padding:10px;background:rgba(0,0,0,.18);}
+  .chat-msg{display:flex;margin:8px 0;}
+  .chat-user{justify-content:flex-end;}
+  .chat-assistant{justify-content:flex-start;}
+  .chat-bubble{max-width:80%;padding:10px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.06);white-space:pre-wrap;}
+  .chat-user .chat-bubble{background:rgba(96,165,250,.18);border-color:rgba(96,165,250,.35);}
 </style>
 
 <script>
 const IS_ELITE = {{ "true" if is_elite else "false" }};
 const USER_SESSION_TZ = {{ (user.session_tz or "UTC")|tojson }};
-
 let _lastYaml = "";
-let _lastDMR = null; // ✅ store the most recent DMR payload for Elite chat context
+let _lastDmrPayload = null;
 
 // Auto-set timezone once if still UTC
 async function ensureUserTimezone(){
   try{
     const guessed = Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (!guessed) return;
+
     const current = (USER_SESSION_TZ || "").trim();
     const isUnset = (!current || current.toUpperCase() === "UTC");
     if (!isUnset) return;
     if (guessed === "UTC") return;
 
-    const body = new URLSearchParams();
-    body.set("tz", guessed);
-
+    // IMPORTANT: backend expects JSON {"timezone": "..."} (not form data)
     await fetch("/account/session-timezone", {
       method: "POST",
-      headers: {"Content-Type":"application/x-www-form-urlencoded"},
-      body: body.toString(),
-      credentials: "same-origin",
-      redirect: "follow"
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ timezone: guessed }),
+      credentials: "same-origin"
     });
   }catch(e){}
 }
@@ -174,8 +117,8 @@ function fmt(x){
   return String(x);
 }
 
-function normalizeReportText(data){
-  const reportVal = (data.report_text !== undefined) ? data.report_text : data.report;
+function normalizeReportText(payload){
+  const reportVal = (payload.report_text !== undefined) ? payload.report_text : payload.report;
   if (typeof reportVal === "string") return reportVal;
   if (reportVal && typeof reportVal.full_text === "string") return reportVal.full_text;
   if (reportVal && typeof reportVal.text === "string") return reportVal.text;
@@ -185,93 +128,28 @@ function normalizeReportText(data){
 function splitNarrativeAndYaml(reportText){
   const idx = reportText.indexOf("```yaml");
   if (idx !== -1){
-    return {
-      narrative: reportText.slice(0, idx).trim(),
-      yaml: reportText.slice(idx).trim()
-    };
+    return { narrative: reportText.slice(0, idx).trim(), yaml: reportText.slice(idx).trim() };
   }
   return { narrative: reportText.trim(), yaml: "" };
 }
 
-function setChatHint(msg){
-  const el = document.getElementById("chatHint");
-  if (!el) return;
-  el.textContent = msg || "";
-}
+function renderDMR(payload){
+  _lastDmrPayload = payload;
 
-async function runDMR(){
-  const sym = document.getElementById("symbol").value;
-  const status = document.getElementById("status");
-  const btn = document.getElementById("runBtn");
+  const levels = payload.levels || {};
+  const r30 = payload.range_30m || {};
 
-  status.textContent = "Running…";
-  btn.disabled = true;
+  document.getElementById("lv_ds").textContent  = fmt(levels.daily_support);
+  document.getElementById("lv_dr").textContent  = fmt(levels.daily_resistance);
+  document.getElementById("lv_bo").textContent  = fmt(levels.breakout_trigger);
+  document.getElementById("lv_bd").textContent  = fmt(levels.breakdown_trigger);
+  document.getElementById("lv_30h").textContent = fmt(r30.high);
+  document.getElementById("lv_30l").textContent = fmt(r30.low);
 
-  try{
-    const r = await fetch("/api/dmr/run-auto-ai", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({symbol: sym}),
-      credentials: "same-origin"
-    });
-
-    const data = await r.json();
-
-    if (!r.ok){
-      const msg = data.detail || data.error || "Request failed";
-      status.textContent = "Error";
-      alert(msg);
-      return;
-    }
-
-    _lastDMR = data;              // ✅ critical: keep the DMR payload for chat anchoring
-    renderDMR(data);
-    setChatHint("");              // clear any “run DMR first” warning
-    status.textContent = "Done ✅";
-  }catch(err){
-    status.textContent = "Request failed";
-    alert(String(err));
-  }finally{
-    btn.disabled = false;
-  }
-}
-
-function renderDMR(data){
-  document.getElementById("reportWrap").style.display = "block";
-  document.getElementById("copyStatus").textContent = "";
-
-  const levels = data.levels || {};
-  const ul = document.getElementById("levelsList");
-  ul.innerHTML = "";
-  ul.innerHTML += `<li><strong>Daily Resistance:</strong> ${fmt(levels.daily_resistance)}</li>`;
-  ul.innerHTML += `<li><strong>Daily Support:</strong> ${fmt(levels.daily_support)}</li>`;
-  ul.innerHTML += `<li><strong>Breakout Trigger:</strong> ${fmt(levels.breakout_trigger)}</li>`;
-  ul.innerHTML += `<li><strong>Breakdown Trigger:</strong> ${fmt(levels.breakdown_trigger)}</li>`;
-
-  const r30 = data.range_30m || {};
-  document.getElementById("orBox").innerHTML = `
-    High: <strong>${fmt(r30.high)}</strong><br>
-    Low: <strong>${fmt(r30.low)}</strong>
-  `;
-  document.getElementById("orMeta").textContent =
-    (typeof r30.high === "number" && typeof r30.low === "number") ? `Range: ${fmt(r30.high - r30.low)}` : "";
-
-  const htf = data.htf_shelves || {};
-  const res = (htf.resistance || []).map(x => `• ${x.tf}: ${fmt(x.level)}${x.primary ? " (primary)" : ""}`).join("\n");
-  const sup = (htf.support || []).map(x => `• ${x.tf}: ${fmt(x.level)}${x.primary ? " (primary)" : ""}`).join("\n");
-  document.getElementById("htfBox").innerHTML = `
-    <div><strong>Resistance</strong><pre class="pre" style="white-space:pre-wrap;">${res || "—"}</pre></div>
-    <div><strong>Support</strong><pre class="pre" style="white-space:pre-wrap;">${sup || "—"}</pre></div>
-  `;
-
-  const meta = [];
-  if (data.symbol) meta.push(data.symbol);
-  if (data.date) meta.push(data.date);
-  document.getElementById("dmrMeta").textContent = meta.join(" • ");
-
-  const reportText = normalizeReportText(data);
+  const reportText = normalizeReportText(payload);
   const parts = splitNarrativeAndYaml(reportText);
-  document.getElementById("dmrNarrative").textContent = parts.narrative || "(No narrative returned.)";
+
+  document.getElementById("dmrText").textContent = parts.narrative || "(No narrative returned.)";
 
   _lastYaml = parts.yaml || "";
   const toggleBtn = document.getElementById("toggleYamlBtn");
@@ -314,6 +192,44 @@ async function copyYaml(){
   }
 }
 
+async function runDMR(){
+  const sym = document.getElementById("symbol").value;
+  const status = document.getElementById("status");
+  const btn = document.getElementById("runBtn");
+
+  status.textContent = "Running…";
+  btn.disabled = true;
+
+  try{
+    const r = await fetch("/api/dmr/run-auto-ai", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({symbol: sym}),
+      credentials: "same-origin"
+    });
+
+    const data = await r.json();
+
+    if (!r.ok){
+      const msg = data.detail || data.error || "Request failed";
+      status.textContent = "Error";
+      alert(msg);
+      return;
+    }
+
+    // IMPORTANT: support either {ok:true, dmr:{...}} or a flat payload
+    const payload = data.dmr || data;
+    renderDMR(payload);
+
+    status.textContent = "Done ✅";
+  }catch(err){
+    status.textContent = "Request failed";
+    alert(String(err));
+  }finally{
+    btn.disabled = false;
+  }
+}
+
 /* Elite chat */
 function addChat(role, text){
   const log = document.getElementById("chatLog");
@@ -329,35 +245,30 @@ function addChat(role, text){
 
 async function sendChat(){
   if (!IS_ELITE) return;
-  const sym = document.getElementById("symbol").value;
+  if (!_lastDmrPayload){
+    addChat("assistant", "Run the DMR first so I have today’s levels.");
+    return;
+  }
+
   const input = document.getElementById("chatInput");
   const btn = document.getElementById("sendBtn");
   const q = (input.value || "").trim();
   if (!q) return;
-
-  // ✅ Hard guard: require a DMR run first so the assistant is anchored
-  if (!_lastDMR){
-    setChatHint("Run “Generate Review” first so Kabroda can anchor to today’s levels.");
-    addChat("assistant", "Please run “Generate Review” first so I can anchor my answer to today’s computed levels.");
-    return;
-  }
 
   input.value = "";
   addChat("user", q);
   btn.disabled = true;
 
   try{
-    const r = await fetch("/api/assistant/chat", {
+    const r = await fetch("/api/ai_coach", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      // ✅ this is the critical contract fix:
-      // backend needs DMR context to answer anchored (and our new main.py requires it)
-      body: JSON.stringify({symbol: sym, question: q, dmr: _lastDMR}),
+      body: JSON.stringify({ message: q, dmr: _lastDmrPayload }),
       credentials: "same-origin"
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "Chat failed");
-    addChat("assistant", data.answer || "(No answer)");
+    addChat("assistant", data.reply || "(No answer)");
   }catch(e){
     addChat("assistant", "Error: " + (e && e.message ? e.message : String(e)));
   }finally{
