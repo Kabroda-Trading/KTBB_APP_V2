@@ -16,6 +16,7 @@
       list="tzlist"
       placeholder="Start typing… e.g. America/Chicago"
       style="flex:1;"
+      required
     />
     <button class="btn primary" type="submit">Save</button>
   </form>
@@ -38,43 +39,4 @@
     Tip: you can type any IANA timezone — your browser will autocomplete common ones.
   </p>
 </div>
-
-<div class="card">
-  <h3>Billing</h3>
-  <p class="muted">Manage your subscription or upgrade your tier.</p>
-
-  <div class="row" style="gap:10px; flex-wrap:wrap;">
-    {% if not is_elite %}
-      <button class="btn primary" onclick="startCheckout('elite')">Upgrade to Elite</button>
-    {% else %}
-      <button class="btn" disabled title="You already have Elite" style="opacity:.7;">Elite Active ✅</button>
-    {% endif %}
-
-    <a class="btn" href="/billing/portal">Manage Billing</a>
-    <a class="btn" href="/suite" style="margin-left:auto;">Back to Suite</a>
-  </div>
-
-  <div id="billStatus" class="muted" style="margin-top:10px;"></div>
-</div>
-
-<script>
-async function startCheckout(tier){
-  const s = document.getElementById("billStatus");
-  s.textContent = "Opening Stripe Checkout…";
-  try{
-    const res = await fetch("/billing/checkout", {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      credentials: "same-origin",
-      body: JSON.stringify({tier})
-    });
-    const data = await res.json();
-    if(!res.ok) throw new Error(data.detail || "Checkout failed");
-    window.location = data.url;
-  }catch(e){
-    s.textContent = "Billing error: " + e.message;
-    alert("Checkout failed: " + e.message);
-  }
-}
-</script>
 {% endblock %}

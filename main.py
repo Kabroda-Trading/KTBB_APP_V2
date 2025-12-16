@@ -1,6 +1,7 @@
 # main.py
 import os
 import traceback
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -11,7 +12,6 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from auth import (
     COOKIE_NAME,
-    get_current_user,
     require_user,
     set_user_session,
     clear_user_session,
@@ -41,9 +41,48 @@ def _json_error(status: int, message: str, exc: Optional[BaseException] = None):
     return JSONResponse(payload, status_code=status)
 
 
-# ---- Render healthcheck: allow HEAD / ----
+def _normalize_user(user: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Your templates expect:
+      - user.email
+      - user.tier
+      - user.session_tz
+    Some older code used 'timezone'. We keep both for compatibility.
+    """
+    if "tier" not in user:
+        user["tier"] = "free"
+
+    # Accept either key, but ensure session_tz exists.
+    tz = user.get("session_tz") or user.get("timezone") or "UTC"
+    if not isinstance(tz, str) or not tz.strip():
+        tz = "UTC"
+    user["session_tz"] = tz
+    user["timezone"] = tz  # legacy alias
+
+    return user
+
+
+def _tier_label(tier: str) -> str:
+    t = (tier or "free").strip().lower()
+    if t == "elite":
+        return "Elite"
+    if t == "tactical":
+        return "Tactical"
+    return "Free"
+
+
+def _is_elite(user: Dict[str, Any]) -> bool:
+    return (user.get("tier") or "").strip().lower() == "elite"
+
+
+# ---- Render healthchecks ----
 @app.head("/")
 def head_root():
+    return Response(status_code=200)
+
+
+@app.head("/suite")
+def head_suite():
     return Response(status_code=200)
 
 
@@ -72,23 +111,22 @@ def login_page(request: Request):
 
 @app.post("/login")
 async def login_submit(request: Request):
-    """
-    Expects form POST from login.html.
-    Your login.html likely posts email/password as form fields.
-    """
     try:
         form = await request.form()
         email = (form.get("email") or "").strip().lower()
         password = (form.get("password") or "").strip()
 
         if not email or not password:
-            raise HTTPException(status_code=400, detail="Email and password required")
+            return templates.TemplateResponse(
+                "login.html",
+                {"request": request, "error": "Email and password required"},
+                status_code=400,
+            )
 
-        # Try your DB auth if available
         user = None
         try:
-            # If your database.py has a function, use it (safe import)
             import database  # type: ignore
+
             if hasattr(database, "authenticate_user"):
                 user = database.authenticate_user(email, password)  # type: ignore
             elif hasattr(database, "verify_user"):
@@ -96,23 +134,20 @@ async def login_submit(request: Request):
         except Exception:
             user = None
 
-        # Fallback: allow seeded admin login if you’re using bootstrap logic elsewhere
-        # (Keeps you from getting locked out while you iterate.)
         if not user:
+            # If you want to keep a bootstrap admin while iterating:
             if email == "you@yourdomain.com":
-                user = {"email": email, "tier": "elite", "timezone": None}
+                user = {"email": email, "tier": "elite", "session_tz": "UTC"}
             else:
-                raise HTTPException(status_code=401, detail="Login failed")
+                return templates.TemplateResponse(
+                    "login.html",
+                    {"request": request, "error": "Login failed"},
+                    status_code=401,
+                )
 
-        # Store in session
-        if "tier" not in user:
-            user["tier"] = "free"
-        if "timezone" not in user:
-            user["timezone"] = None
-
+        user = _normalize_user(user)
         set_user_session(request, user)
 
-        # ALSO set legacy cookie name for older UI code (optional but helps)
         resp = RedirectResponse(url="/suite", status_code=303)
         resp.set_cookie(
             COOKIE_NAME,
@@ -125,8 +160,6 @@ async def login_submit(request: Request):
         )
         return resp
 
-    except HTTPException:
-        raise
     except Exception as e:
         return _json_error(500, "Login failed", e)
 
@@ -141,33 +174,63 @@ def logout(request: Request):
 
 @app.get("/suite", response_class=HTMLResponse)
 def suite(request: Request, user=Depends(require_user)):
-    return templates.TemplateResponse("app.html", {"request": request, "user": user})
+    user = _normalize_user(user)
+    ctx = {
+        "request": request,
+        "user": user,
+        "is_elite": _is_elite(user),
+        "tier_label": _tier_label(user.get("tier", "free")),
+    }
+    return templates.TemplateResponse("app.html", ctx)
 
 
 @app.get("/account", response_class=HTMLResponse)
 def account_page(request: Request, user=Depends(require_user)):
-    # If you have account.html use it; otherwise fall back to app.html or simple page
-    try:
-        return templates.TemplateResponse("account.html", {"request": request, "user": user})
-    except Exception:
-        return templates.TemplateResponse("app.html", {"request": request, "user": user})
+    user = _normalize_user(user)
+    ctx = {
+        "request": request,
+        "user": user,
+        "is_elite": _is_elite(user),
+        "tier_label": _tier_label(user.get("tier", "free")),
+    }
+    return templates.TemplateResponse("account.html", ctx)
 
 
 # -----------------------------
-# API: session timezone (YOUR UI CALLS THIS)
+# API: session timezone (YOUR UI POSTS form tz=...)
 # -----------------------------
 @app.post("/account/session-timezone")
 async def set_timezone(request: Request, user=Depends(require_user)):
     try:
-        data = await request.json()
-        tz = data.get("timezone")
-        if not tz or not isinstance(tz, str):
+        user = _normalize_user(user)
+        tz: Optional[str] = None
+
+        # 1) Try JSON
+        try:
+            data = await request.json()
+            if isinstance(data, dict):
+                tz = data.get("tz") or data.get("timezone") or data.get("session_tz")
+        except Exception:
+            pass
+
+        # 2) Try form
+        if not tz:
+            try:
+                form = await request.form()
+                tz = form.get("tz") or form.get("timezone") or form.get("session_tz")
+            except Exception:
+                pass
+
+        tz = (tz or "").strip()
+        if not tz:
             raise HTTPException(status_code=400, detail="timezone required")
 
-        user["timezone"] = tz
+        user["session_tz"] = tz
+        user["timezone"] = tz  # legacy alias
         set_user_session(request, user)
 
-        return {"ok": True, "timezone": tz}
+        return {"ok": True, "session_tz": tz}
+
     except HTTPException:
         raise
     except Exception as e:
@@ -175,45 +238,38 @@ async def set_timezone(request: Request, user=Depends(require_user)):
 
 
 # -----------------------------
-# API: DMR (YOUR UI CALLS THIS EXACT ENDPOINT)
+# API: DMR (UI calls this exact endpoint)
+# IMPORTANT: return FLAT payload (levels/range_30m/etc at top level),
+# because app.html renderDMR() reads data.levels directly. :contentReference[oaicite:8]{index=8}
 # -----------------------------
 @app.post("/api/dmr/run-auto-ai")
 async def run_auto_ai(request: Request, user=Depends(require_user)):
-    """
-    UI calls POST /api/dmr/run-auto-ai with JSON like: {"symbol":"BTC"} or {"symbol":"BTCUSDT"}.
-    This handler normalizes and calls into dmr_report.py safely.
-    """
     try:
+        user = _normalize_user(user)
+
         payload = await request.json()
         symbol = (payload.get("symbol") or "BTC").upper().strip()
-        if symbol in ("BTC", "BTCUSDT"):
-            market = "BTCUSDT"
-        else:
-            market = symbol
+        market = "BTCUSDT" if symbol in ("BTC", "BTCUSDT") else symbol
 
-        tz = user.get("timezone")
-
-        # Call your report generator (safe + flexible)
         import dmr_report  # type: ignore
 
-        dmr_result = None
+        # This function is now guaranteed by our rewritten dmr_report.py
+        dmr = dmr_report.run_auto_ai(symbol=market, user_timezone=user["session_tz"])  # type: ignore
 
-        # Try common function names in your file
-        for fn_name in ("run_auto_ai", "generate_dmr", "generate_report", "run_dmr", "build_dmr"):
-            if hasattr(dmr_report, fn_name):
-                fn = getattr(dmr_report, fn_name)
-                dmr_result = fn(symbol=market, user_timezone=tz)  # type: ignore
-                break
+        # Optional AI narrative: only if key is set (never crash the endpoint)
+        try:
+            if (os.getenv("OPENAI_API_KEY") or "").strip():
+                from kabroda_ai import generate_daily_market_review  # type: ignore
 
-        # If your dmr_report exposes a class instead
-        if dmr_result is None and hasattr(dmr_report, "DMRReport"):
-            D = getattr(dmr_report, "DMRReport")
-            dmr_result = D().run(symbol=market, user_timezone=tz)  # type: ignore
+                dmr["report_text"] = generate_daily_market_review(
+                    symbol=dmr.get("symbol") or market,
+                    date_str=dmr.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                    context=dmr,
+                )
+        except Exception:
+            pass
 
-        if dmr_result is None:
-            raise RuntimeError("dmr_report.py does not expose a callable generator function")
-
-        return {"ok": True, "dmr": dmr_result}
+        return dmr
 
     except HTTPException:
         raise
@@ -222,44 +278,54 @@ async def run_auto_ai(request: Request, user=Depends(require_user)):
 
 
 # -----------------------------
-# API: AI Coach (add common aliases so UI won’t 404)
+# API: Assistant chat (YOUR UI calls /api/assistant/chat with {symbol, question})
+# :contentReference[oaicite:9]{index=9}
 # -----------------------------
-@app.post("/api/ai_coach")
-async def ai_coach(request: Request, user=Depends(require_user)):
+@app.post("/api/assistant/chat")
+async def assistant_chat(request: Request, user=Depends(require_user)):
     try:
+        user = _normalize_user(user)
+        if not _is_elite(user):
+            raise HTTPException(status_code=403, detail="Elite required")
+
         payload = await request.json()
-        message = payload.get("message")
+        symbol = (payload.get("symbol") or "BTCUSDT").upper().strip()
+        question = (payload.get("question") or payload.get("message") or "").strip()
         dmr = payload.get("dmr")
 
-        if not message or not isinstance(message, str):
-            raise HTTPException(status_code=400, detail="message required")
-        if not dmr:
-            raise HTTPException(status_code=400, detail="dmr required")
+        # If UI didn’t send DMR context, we can’t anchor answers.
+        if not question:
+            raise HTTPException(status_code=400, detail="question required")
+        if not dmr or not isinstance(dmr, dict):
+            raise HTTPException(status_code=400, detail="dmr context required")
 
         import kabroda_ai  # type: ignore
 
-        reply = None
-        for fn_name in ("run_ai_coach", "ask_kabroda", "chat", "coach"):
-            if hasattr(kabroda_ai, fn_name):
-                fn = getattr(kabroda_ai, fn_name)
-                reply = fn(user_message=message, dmr_context=dmr, tier=user.get("tier"))  # type: ignore
-                break
+        # Use new wrapper (guaranteed by rewritten kabroda_ai.py)
+        answer = kabroda_ai.run_ai_coach(user_message=question, dmr_context=dmr, tier=user.get("tier"))  # type: ignore
 
-        if reply is None:
-            raise RuntimeError("kabroda_ai.py missing AI coach function")
-
-        return {"ok": True, "reply": reply}
+        return {"answer": answer}
 
     except HTTPException:
         raise
     except Exception as e:
-        return _json_error(500, "AI coach failed", e)
+        return _json_error(500, "Assistant chat failed", e)
 
 
-# Extra aliases (in case your frontend is calling older routes)
+# Aliases (helps if you have older frontend calls)
+@app.post("/api/ai_coach")
+async def ai_coach_alias(request: Request, user=Depends(require_user)):
+    # Expect {message, dmr} but also allow {question, dmr}
+    payload = await request.json()
+    return await assistant_chat(
+        request=request,
+        user=user,
+    )
+
+
 @app.post("/api/ai/chat")
 async def ai_chat_alias(request: Request, user=Depends(require_user)):
-    return await ai_coach(request, user)
+    return await assistant_chat(request=request, user=user)
 
 
 @app.get("/health")

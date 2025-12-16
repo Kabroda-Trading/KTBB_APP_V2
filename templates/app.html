@@ -80,6 +80,8 @@
           <input id="chatInput" placeholder="Ask Kabroda…" style="flex:1;" onkeydown="if(event.key==='Enter'){ sendChat(); }" />
           <button class="btn primary" id="sendBtn" onclick="sendChat()">Send</button>
         </div>
+
+        <div class="muted" id="chatHint" style="margin-top:8px;"></div>
       </div>
     {% else %}
       <div class="muted" style="margin-top:8px;">
@@ -138,7 +140,9 @@
 <script>
 const IS_ELITE = {{ "true" if is_elite else "false" }};
 const USER_SESSION_TZ = {{ (user.session_tz or "UTC")|tojson }};
+
 let _lastYaml = "";
+let _lastDMR = null; // ✅ store the most recent DMR payload for Elite chat context
 
 // Auto-set timezone once if still UTC
 async function ensureUserTimezone(){
@@ -189,6 +193,12 @@ function splitNarrativeAndYaml(reportText){
   return { narrative: reportText.trim(), yaml: "" };
 }
 
+function setChatHint(msg){
+  const el = document.getElementById("chatHint");
+  if (!el) return;
+  el.textContent = msg || "";
+}
+
 async function runDMR(){
   const sym = document.getElementById("symbol").value;
   const status = document.getElementById("status");
@@ -214,7 +224,9 @@ async function runDMR(){
       return;
     }
 
+    _lastDMR = data;              // ✅ critical: keep the DMR payload for chat anchoring
     renderDMR(data);
+    setChatHint("");              // clear any “run DMR first” warning
     status.textContent = "Done ✅";
   }catch(err){
     status.textContent = "Request failed";
@@ -323,6 +335,13 @@ async function sendChat(){
   const q = (input.value || "").trim();
   if (!q) return;
 
+  // ✅ Hard guard: require a DMR run first so the assistant is anchored
+  if (!_lastDMR){
+    setChatHint("Run “Generate Review” first so Kabroda can anchor to today’s levels.");
+    addChat("assistant", "Please run “Generate Review” first so I can anchor my answer to today’s computed levels.");
+    return;
+  }
+
   input.value = "";
   addChat("user", q);
   btn.disabled = true;
@@ -331,14 +350,16 @@ async function sendChat(){
     const r = await fetch("/api/assistant/chat", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({symbol: sym, question: q}),
+      // ✅ this is the critical contract fix:
+      // backend needs DMR context to answer anchored (and our new main.py requires it)
+      body: JSON.stringify({symbol: sym, question: q, dmr: _lastDMR}),
       credentials: "same-origin"
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "Chat failed");
     addChat("assistant", data.answer || "(No answer)");
   }catch(e){
-    addChat("assistant", "Error: " + e.message);
+    addChat("assistant", "Error: " + (e && e.message ? e.message : String(e)));
   }finally{
     btn.disabled = false;
   }

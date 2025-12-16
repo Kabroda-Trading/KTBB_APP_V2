@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import json
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from openai import OpenAI
@@ -48,7 +49,11 @@ Rules:
 
 def generate_daily_market_review(symbol: str, date_str: str, context: Dict[str, Any]) -> str:
     c = _client()
-    user_msg = f"SYMBOL: {symbol}\nDATE: {date_str}\nCONTEXT(JSON, do not repeat):\n{json.dumps(context)}\n\nWrite the Daily Market Review now."
+    user_msg = (
+        f"SYMBOL: {symbol}\nDATE: {date_str}\n"
+        f"CONTEXT(JSON, do not repeat):\n{json.dumps(context)}\n\n"
+        "Write the Daily Market Review now."
+    )
     resp = c.chat.completions.create(
         model=os.getenv("OPENAI_MODEL_DMR", "gpt-4o-mini"),
         messages=[
@@ -79,3 +84,12 @@ def answer_coach_question(symbol: str, date_str: str, context: Dict[str, Any], q
         temperature=0.4,
     )
     return resp.choices[0].message.content.strip()
+
+
+def run_ai_coach(user_message: str, dmr_context: Dict[str, Any], tier: str = "free") -> str:
+    """
+    Wrapper expected by main.py.
+    """
+    symbol = (dmr_context.get("symbol") or "BTCUSDT")
+    date_str = (dmr_context.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    return answer_coach_question(symbol=symbol, date_str=date_str, context=dmr_context, question=user_message)
