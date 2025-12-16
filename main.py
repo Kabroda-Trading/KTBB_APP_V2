@@ -2,7 +2,7 @@
 import os
 import traceback
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -20,45 +20,73 @@ from auth import (
 
 app = FastAPI()
 
+# -----------------------------
+# Settings / flags
+# -----------------------------
 DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
+DEBUG_ERRORS = os.environ.get("DEBUG_ERRORS", "").lower() in ("1", "true", "yes")
 
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "dev-secret-change-me")
+
+# Render is always HTTPS at the edge; cookies can still be secure.
+HTTPS_ONLY = bool(os.environ.get("SESSION_HTTPS_ONLY", "")) or bool(os.environ.get("RENDER", ""))
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
     same_site="lax",
-    https_only=bool(os.environ.get("SESSION_HTTPS_ONLY", "")),
+    https_only=HTTPS_ONLY,
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 
-def _json_error(status: int, message: str, exc: Optional[BaseException] = None):
+# -----------------------------
+# Helpers
+# -----------------------------
+def _json_error(status: int, message: str, exc: Optional[BaseException] = None) -> JSONResponse:
     payload: Dict[str, Any] = {"detail": message}
-    if DEBUG and exc is not None:
-        payload["traceback"] = traceback.format_exc()
+
+    # Always print traceback to server logs (Render log is your source of truth)
+    if exc is not None:
+        print("ERROR:", repr(exc))
+        traceback.print_exc()
+
+    # Optionally expose trace to client
+    if (DEBUG or DEBUG_ERRORS) and exc is not None:
+        payload["trace"] = traceback.format_exc()
+        payload["error"] = str(exc)
+
     return JSONResponse(payload, status_code=status)
+
+
+async def _safe_json(request: Request) -> Dict[str, Any]:
+    try:
+        data = await request.json()
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
 
 def _normalize_user(user: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Your templates expect:
+    Templates expect:
       - user.email
       - user.tier
       - user.session_tz
-    Some older code used 'timezone'. We keep both for compatibility.
+    We also keep user.timezone as legacy alias.
     """
     if "tier" not in user:
         user["tier"] = "free"
 
-    # Accept either key, but ensure session_tz exists.
     tz = user.get("session_tz") or user.get("timezone") or "UTC"
     if not isinstance(tz, str) or not tz.strip():
         tz = "UTC"
-    user["session_tz"] = tz
-    user["timezone"] = tz  # legacy alias
 
+    tz = tz.strip()
+    user["session_tz"] = tz
+    user["timezone"] = tz
     return user
 
 
@@ -75,7 +103,18 @@ def _is_elite(user: Dict[str, Any]) -> bool:
     return (user.get("tier") or "").strip().lower() == "elite"
 
 
-# ---- Render healthchecks ----
+def _normalize_symbol(symbol: str) -> str:
+    s = (symbol or "").strip().upper()
+    if s in ("BTC", "BTCUSDT"):
+        return "BTCUSDT"
+    if s in ("ETH", "ETHUSDT"):
+        return "ETHUSDT"
+    return s or "BTCUSDT"
+
+
+# -----------------------------
+# Render healthchecks
+# -----------------------------
 @app.head("/")
 def head_root():
     return Response(status_code=200)
@@ -84,6 +123,11 @@ def head_root():
 @app.head("/suite")
 def head_suite():
     return Response(status_code=200)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 # -----------------------------
@@ -134,8 +178,8 @@ async def login_submit(request: Request):
         except Exception:
             user = None
 
+        # Bootstrap admin (optional)
         if not user:
-            # If you want to keep a bootstrap admin while iterating:
             if email == "you@yourdomain.com":
                 user = {"email": email, "tier": "elite", "session_tz": "UTC"}
             else:
@@ -155,7 +199,7 @@ async def login_submit(request: Request):
             max_age=60 * 60 * 24 * 14,
             httponly=True,
             samesite="lax",
-            secure=bool(os.environ.get("COOKIE_SECURE", "")),
+            secure=bool(os.environ.get("COOKIE_SECURE", "")) or bool(os.environ.get("RENDER", "")),
             path="/",
         )
         return resp
@@ -197,36 +241,32 @@ def account_page(request: Request, user=Depends(require_user)):
 
 
 # -----------------------------
-# API: session timezone (YOUR UI POSTS form tz=...)
+# API: session timezone
+# Accepts JSON {timezone: "..."} as primary, plus legacy keys.
 # -----------------------------
 @app.post("/account/session-timezone")
 async def set_timezone(request: Request, user=Depends(require_user)):
     try:
         user = _normalize_user(user)
+
         tz: Optional[str] = None
 
-        # 1) Try JSON
-        try:
-            data = await request.json()
-            if isinstance(data, dict):
-                tz = data.get("tz") or data.get("timezone") or data.get("session_tz")
-        except Exception:
-            pass
+        data = await _safe_json(request)
+        tz = data.get("timezone") or data.get("session_tz") or data.get("tz")
 
-        # 2) Try form
         if not tz:
             try:
                 form = await request.form()
-                tz = form.get("tz") or form.get("timezone") or form.get("session_tz")
+                tz = form.get("timezone") or form.get("session_tz") or form.get("tz")
             except Exception:
-                pass
+                tz = None
 
         tz = (tz or "").strip()
         if not tz:
             raise HTTPException(status_code=400, detail="timezone required")
 
         user["session_tz"] = tz
-        user["timezone"] = tz  # legacy alias
+        user["timezone"] = tz
         set_user_session(request, user)
 
         return {"ok": True, "session_tz": tz}
@@ -238,38 +278,42 @@ async def set_timezone(request: Request, user=Depends(require_user)):
 
 
 # -----------------------------
-# API: DMR (UI calls this exact endpoint)
-# IMPORTANT: return FLAT payload (levels/range_30m/etc at top level),
-# because app.html renderDMR() reads data.levels directly. :contentReference[oaicite:8]{index=8}
+# API: DMR
+# Returns BOTH:
+#   - nested {ok:true, dmr:{...}}
+#   - AND flat top-level keys (compat for older app.html renderers)
 # -----------------------------
 @app.post("/api/dmr/run-auto-ai")
 async def run_auto_ai(request: Request, user=Depends(require_user)):
     try:
         user = _normalize_user(user)
+        payload = await _safe_json(request)
 
-        payload = await request.json()
-        symbol = (payload.get("symbol") or "BTC").upper().strip()
-        market = "BTCUSDT" if symbol in ("BTC", "BTCUSDT") else symbol
+        symbol = _normalize_symbol(payload.get("symbol") or "BTCUSDT")
 
         import dmr_report  # type: ignore
 
-        # This function is now guaranteed by our rewritten dmr_report.py
-        dmr = dmr_report.run_auto_ai(symbol=market, user_timezone=user["session_tz"])  # type: ignore
+        dmr = dmr_report.run_auto_ai(symbol=symbol, user_timezone=user["session_tz"])  # type: ignore
+        if not isinstance(dmr, dict):
+            raise RuntimeError("DMR generator returned non-dict")
 
-        # Optional AI narrative: only if key is set (never crash the endpoint)
+        # Optional AI narrative: never allow OpenAI to crash DMR
         try:
             if (os.getenv("OPENAI_API_KEY") or "").strip():
                 from kabroda_ai import generate_daily_market_review  # type: ignore
 
                 dmr["report_text"] = generate_daily_market_review(
-                    symbol=dmr.get("symbol") or market,
+                    symbol=dmr.get("symbol") or symbol,
                     date_str=dmr.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                     context=dmr,
                 )
-        except Exception:
-            pass
+        except Exception as ai_exc:
+            # keep deterministic output even if AI fails
+            print("AI narrative failed:", repr(ai_exc))
+            traceback.print_exc()
 
-        return dmr
+        # Return both shapes for max frontend compatibility
+        return {"ok": True, "dmr": dmr, **dmr}
 
     except HTTPException:
         raise
@@ -278,56 +322,56 @@ async def run_auto_ai(request: Request, user=Depends(require_user)):
 
 
 # -----------------------------
-# API: Assistant chat (YOUR UI calls /api/assistant/chat with {symbol, question})
-# :contentReference[oaicite:9]{index=9}
+# Chat core (so aliases don't re-read the body)
 # -----------------------------
+async def _assistant_chat_core(payload: Dict[str, Any], user: Dict[str, Any]) -> Dict[str, Any]:
+    user = _normalize_user(user)
+    if not _is_elite(user):
+        raise HTTPException(status_code=403, detail="Elite required")
+
+    symbol = _normalize_symbol(payload.get("symbol") or "BTCUSDT")
+    question = (payload.get("question") or payload.get("message") or "").strip()
+    dmr = payload.get("dmr")
+
+    if not question:
+        raise HTTPException(status_code=400, detail="question required")
+    if not dmr or not isinstance(dmr, dict):
+        raise HTTPException(status_code=400, detail="dmr context required")
+
+    import kabroda_ai  # type: ignore
+    answer = kabroda_ai.run_ai_coach(user_message=question, dmr_context=dmr, tier=user.get("tier"))  # type: ignore
+    return {"answer": answer}
+
+
 @app.post("/api/assistant/chat")
 async def assistant_chat(request: Request, user=Depends(require_user)):
     try:
-        user = _normalize_user(user)
-        if not _is_elite(user):
-            raise HTTPException(status_code=403, detail="Elite required")
-
-        payload = await request.json()
-        symbol = (payload.get("symbol") or "BTCUSDT").upper().strip()
-        question = (payload.get("question") or payload.get("message") or "").strip()
-        dmr = payload.get("dmr")
-
-        # If UI didn’t send DMR context, we can’t anchor answers.
-        if not question:
-            raise HTTPException(status_code=400, detail="question required")
-        if not dmr or not isinstance(dmr, dict):
-            raise HTTPException(status_code=400, detail="dmr context required")
-
-        import kabroda_ai  # type: ignore
-
-        # Use new wrapper (guaranteed by rewritten kabroda_ai.py)
-        answer = kabroda_ai.run_ai_coach(user_message=question, dmr_context=dmr, tier=user.get("tier"))  # type: ignore
-
-        return {"answer": answer}
-
+        payload = await _safe_json(request)
+        return await _assistant_chat_core(payload, user)
     except HTTPException:
         raise
     except Exception as e:
         return _json_error(500, "Assistant chat failed", e)
 
 
-# Aliases (helps if you have older frontend calls)
+# Aliases (accept {message, dmr} or {question, dmr})
 @app.post("/api/ai_coach")
 async def ai_coach_alias(request: Request, user=Depends(require_user)):
-    # Expect {message, dmr} but also allow {question, dmr}
-    payload = await request.json()
-    return await assistant_chat(
-        request=request,
-        user=user,
-    )
+    try:
+        payload = await _safe_json(request)
+        return await _assistant_chat_core(payload, user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _json_error(500, "Assistant chat failed", e)
 
 
 @app.post("/api/ai/chat")
 async def ai_chat_alias(request: Request, user=Depends(require_user)):
-    return await assistant_chat(request=request, user=user)
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+    try:
+        payload = await _safe_json(request)
+        return await _assistant_chat_core(payload, user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _json_error(500, "Assistant chat failed", e)
