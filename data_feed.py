@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple, List
 
 import requests
 from zoneinfo import ZoneInfo
-import time
 
 from volume_profile import compute_volume_profile_from_candles
 
@@ -41,6 +41,11 @@ def _today0_in_tz(tz: str) -> datetime:
     z = ZoneInfo(tz)
     now_local = datetime.now(z)
     return now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _debug_timing_enabled() -> bool:
+    v = (os.getenv("DEBUG_TIMING") or "").strip().lower()
+    return v in ("1", "true", "yes", "y", "on")
 
 
 # ----------------------------
@@ -81,7 +86,6 @@ class BinanceUS:
         )
         out: List[Candle] = []
         for row in j:
-            # [ openTime, open, high, low, close, volume, ...]
             out.append(
                 Candle(
                     open_time_ms=int(row[0]),
@@ -120,7 +124,7 @@ class CoinbaseExchange:
             f"/products/{prod}/candles",
             {"granularity": granularity_sec, "start": start.isoformat(), "end": end.isoformat()},
         )
-        # returns [time, low, high, open, close, volume] newest-first
+        # Coinbase returns newest-first: [time, low, high, open, close, volume]
         out: List[Candle] = []
         for row in reversed(j):
             t = datetime.fromtimestamp(int(row[0]), tz=timezone.utc)
@@ -155,9 +159,7 @@ def _session_open_dt(session_tz: str, session_open_hhmm: str) -> datetime:
 
 
 def _session_30m_window(session_tz: str, session_open_hhmm: str = "06:00") -> Tuple[datetime, datetime]:
-    """
-    Target candle = 06:30–07:00 (session_tz), converted to UTC for queries.
-    """
+    # Target candle = 06:30–07:00 (session_tz), converted to UTC
     open_dt = _session_open_dt(session_tz, session_open_hhmm)
     start_local = open_dt + timedelta(minutes=30)
     end_local = open_dt + timedelta(minutes=60)
@@ -165,9 +167,7 @@ def _session_30m_window(session_tz: str, session_open_hhmm: str = "06:00") -> Tu
 
 
 def _morning_window(session_tz: str, session_open_hhmm: str = "06:00") -> Tuple[datetime, datetime]:
-    """
-    Morning FRVP = 4 hours before session open → session open, in session_tz.
-    """
+    # Morning FRVP = 4 hours before open → open
     open_dt = _session_open_dt(session_tz, session_open_hhmm)
     start_local = open_dt - timedelta(hours=4)
     end_local = open_dt
@@ -181,7 +181,9 @@ def _pick_candle_by_open(candles: List[Candle], target_open_ms: int) -> Optional
     return None
 
 
-def _fetch_window_candles(prov: Any, symbol: str, start_utc: datetime, end_utc: datetime, granularity: str) -> List[Candle]:
+def _fetch_window_candles(
+    prov: Any, symbol: str, start_utc: datetime, end_utc: datetime, granularity: str
+) -> List[Candle]:
     if isinstance(prov, BinanceUS):
         return prov.klines(symbol, granularity, start_ms=_ms(start_utc), end_ms=_ms(end_utc), limit=1000)
 
@@ -201,30 +203,33 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
 
     prov = _provider()
 
+    timing_on = _debug_timing_enabled()
     t0 = time.perf_counter()
-    def mark(name):
+
+    def mark(name: str) -> None:
+        if not timing_on:
+            return
         dt = time.perf_counter() - t0
-        print(f"[data_feed] {name} @ {dt:.2f}s")
+        print(f"[data_feed] {symbol} {name} @ {dt:.2f}s")
+
     mark("start")
-    mark("price_ok")
-    mark("or_ok")
-    mark("morning_ok")
-    mark("f24_ok")
-    mark("weekly_ok")
-    mark("h1h4_ok")
-    mark("done")
+
     # last price
     try:
         last_price = float(prov.price(symbol))
     except Exception:
         last_price = float(CoinbaseExchange().price(symbol))
+    mark("price_ok")
 
     # 30m session candle (06:30–07:00 session_tz)
     start_utc, end_utc = _session_30m_window(session_tz=session_tz, session_open_hhmm=session_open)
     range_high = range_low = None
     try:
-        candles = _fetch_window_candles(prov, symbol, start_utc, end_utc, "30m") if isinstance(prov, BinanceUS) else _fetch_window_candles(prov, symbol, start_utc, end_utc, "15m")
-        # Binance: candle open time equals start_utc
+        candles = (
+            _fetch_window_candles(prov, symbol, start_utc, end_utc, "30m")
+            if isinstance(prov, BinanceUS)
+            else _fetch_window_candles(prov, symbol, start_utc, end_utc, "15m")
+        )
         c = _pick_candle_by_open(candles, _ms(start_utc))
         if c:
             range_high, range_low = c.h, c.l
@@ -232,6 +237,9 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
             range_high, range_low = candles[0].h, candles[0].l
     except Exception:
         pass
+    mark("or_ok")
+
+    now = _utc_now()
 
     # Morning FRVP (4h pre-open)
     morn_start, morn_end = _morning_window(session_tz=session_tz, session_open_hhmm=session_open)
@@ -243,11 +251,10 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
             morn_candles = _fetch_window_candles(CoinbaseExchange(), symbol, morn_start, morn_end, "5m")
         except Exception:
             morn_candles = []
-
     morn_vp = compute_volume_profile_from_candles(morn_candles) if morn_candles else None
+    mark("morning_ok")
 
     # Fixed 24h FRVP
-    now = _utc_now()
     f24_start = now - timedelta(hours=24)
     f24_candles: List[Candle] = []
     try:
@@ -257,8 +264,8 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
             f24_candles = _fetch_window_candles(CoinbaseExchange(), symbol, f24_start, now, "15m")
         except Exception:
             f24_candles = []
-
     f24_vp = compute_volume_profile_from_candles(f24_candles) if f24_candles else None
+    mark("f24_ok")
 
     # Weekly “VRVP-ish” (last 7d)
     wk_start = now - timedelta(days=7)
@@ -270,8 +277,8 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
             wk_candles = _fetch_window_candles(CoinbaseExchange(), symbol, wk_start, now, "1h")
         except Exception:
             wk_candles = []
-
     wk_vp = compute_volume_profile_from_candles(wk_candles) if wk_candles else None
+    mark("weekly_ok")
 
     # H1/H4 anchors: quick swing hi/lo (kept as HTF shelves input to SSE)
     h1_supply = h1_demand = None
@@ -292,6 +299,8 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
             h4_demand = min(c.l for c in h4)
     except Exception:
         pass
+    mark("h1h4_ok")
+    mark("done")
 
     return {
         "date": datetime.now(ZoneInfo(session_tz)).strftime("%Y-%m-%d"),
