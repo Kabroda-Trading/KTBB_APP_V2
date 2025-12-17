@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, Tuple, List
 
 import requests
 from zoneinfo import ZoneInfo
+import time
 
 from volume_profile import compute_volume_profile_from_candles
 
@@ -200,6 +201,18 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
 
     prov = _provider()
 
+    t0 = time.perf_counter()
+    def mark(name):
+    dt = time.perf_counter() - t0
+    print(f"[data_feed] {name} @ {dt:.2f}s")
+    mark("start")
+    mark("price_ok")
+    mark("or_ok")
+    mark("morning_ok")
+    mark("f24_ok")
+    mark("weekly_ok")
+    mark("h1h4_ok")
+    mark("done")
     # last price
     try:
         last_price = float(prov.price(symbol))

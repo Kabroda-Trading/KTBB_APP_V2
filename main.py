@@ -78,7 +78,7 @@ def _membership_user(u: UserModel) -> MembershipUser:
 # -----------------------------
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status":"ok", "openai_configured": bool(os.getenv("OPENAI_API_KEY"))}
 
 
 # -----------------------------

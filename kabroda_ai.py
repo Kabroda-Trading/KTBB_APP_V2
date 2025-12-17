@@ -10,6 +10,7 @@ from openai import OpenAI
 
 _CLIENT: OpenAI | None = None
 
+print(f"[kabroda_ai] Calling OpenAI model={model} symbol={symbol} date={date_str}")
 
 def _client() -> OpenAI:
     global _CLIENT
