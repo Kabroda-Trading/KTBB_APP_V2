@@ -10,7 +10,6 @@ from openai import OpenAI
 
 _CLIENT: OpenAI | None = None
 
-print(f"[kabroda_ai] Calling OpenAI model={model} symbol={symbol} date={date_str}")
 
 def _client() -> OpenAI:
     global _CLIENT
@@ -21,6 +20,15 @@ def _client() -> OpenAI:
         raise RuntimeError("OPENAI_API_KEY is not set")
     _CLIENT = OpenAI(api_key=key)
     return _CLIENT
+
+
+def _log(msg: str) -> None:
+    # Lightweight safe logging, won’t crash if env missing
+    try:
+        if (os.getenv("DEBUG_AI") or "").strip().lower() in ("1", "true", "yes", "on"):
+            print(msg)
+    except Exception:
+        pass
 
 
 DMR_SYSTEM = """
@@ -94,6 +102,9 @@ Answer rules:
 def generate_daily_market_review(symbol: str, date_str: str, context: Dict[str, Any]) -> str:
     c = _client()
     model = os.getenv("OPENAI_MODEL_DMR", "gpt-4o-mini")
+
+    _log(f"[kabroda_ai] DMR call model={model} symbol={symbol} date={date_str}")
+
     user_msg = (
         f"SYMBOL: {symbol}\nDATE: {date_str}\n"
         f"CONTEXT_JSON:\n{json.dumps(context, ensure_ascii=False)}\n\n"
@@ -114,6 +125,8 @@ def answer_coach_question(symbol: str, date_str: str, context: Dict[str, Any], q
     c = _client()
     model = os.getenv("OPENAI_MODEL_COACH", "gpt-4o-mini")
     q = (question or "").strip()
+
+    _log(f"[kabroda_ai] COACH call model={model} symbol={symbol} date={date_str}")
 
     user_msg = (
         f"SYMBOL: {symbol}\nDATE: {date_str}\n"
