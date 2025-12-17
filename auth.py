@@ -1,71 +1,98 @@
-# auth.py
+# auth.py — DB-backed auth (no drift)
+
+from __future__ import annotations
+
 import os
-import json
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from fastapi import Request, HTTPException
-from itsdangerous import URLSafeTimedSerializer, BadSignature
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
+from fastapi import HTTPException, status, Request
+from sqlalchemy.orm import Session
 
-# Cookie name used by older versions / some UI code
-COOKIE_NAME = os.environ.get("COOKIE_NAME", "ktbb_session")
+from database import UserModel
 
-# Used to sign legacy cookie if needed
-SESSION_SECRET = os.environ.get("SESSION_SECRET", "dev-secret-change-me")
-SERIALIZER_SALT = os.environ.get("SESSION_SALT", "ktbb-session")
 
-def _serializer() -> URLSafeTimedSerializer:
-    return URLSafeTimedSerializer(SESSION_SECRET, salt=SERIALIZER_SALT)
+_ph = PasswordHasher()
 
-def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
-    """
-    Primary source of truth: Starlette SessionMiddleware (request.session).
-    Fallback: legacy signed cookie COOKIE_NAME.
-    """
-    # 1) SessionMiddleware user
+
+def _norm_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def hash_password(password: str) -> str:
+    pw = (password or "").strip()
+    if len(pw) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+    return _ph.hash(pw)
+
+
+def verify_password(password: str, password_hash: str) -> bool:
     try:
-        user = request.session.get("user")  # type: ignore[attr-defined]
-        if isinstance(user, dict) and user.get("email"):
-            return user
+        return _ph.verify(password_hash, (password or "").strip())
+    except VerifyMismatchError:
+        return False
     except Exception:
-        pass
+        return False
 
-    # 2) Legacy cookie fallback
-    raw = request.cookies.get(COOKIE_NAME)
-    if not raw:
+
+def get_user_by_email(db: Session, email: str) -> Optional[UserModel]:
+    return db.query(UserModel).filter(UserModel.email == _norm_email(email)).first()
+
+
+def create_user(db: Session, email: str, password: str) -> UserModel:
+    email_n = _norm_email(email)
+    if not email_n or "@" not in email_n:
+        raise HTTPException(status_code=400, detail="Invalid email.")
+
+    if get_user_by_email(db, email_n):
+        raise HTTPException(status_code=400, detail="Email already registered.")
+
+    u = UserModel(
+        email=email_n,
+        password_hash=hash_password(password),
+        tier="tier1_manual",      # start free/manual
+        session_tz="UTC",
+    )
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
+
+
+def authenticate_user(db: Session, email: str, password: str) -> Optional[UserModel]:
+    u = get_user_by_email(db, email)
+    if not u:
         return None
-
-    try:
-        data = _serializer().loads(raw, max_age=60 * 60 * 24 * 14)  # 14 days
-        if isinstance(data, dict) and data.get("email"):
-            # Hydrate session for future requests
-            try:
-                request.session["user"] = data  # type: ignore[attr-defined]
-            except Exception:
-                pass
-            return data
-    except BadSignature:
+    if not verify_password(password, u.password_hash):
         return None
-    except Exception:
-        return None
+    return u
 
-    return None
 
-def require_user(request: Request) -> Dict[str, Any]:
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not logged in")
-    return user
+def set_user_session(request: Request, user: UserModel, is_admin: bool = False) -> None:
+    request.session["user"] = {
+        "id": int(user.id),
+        "email": user.email,
+        "tier": user.tier,
+        "session_tz": user.session_tz,
+        "is_admin": bool(is_admin),
+    }
 
-def set_user_session(request: Request, user: Dict[str, Any]) -> None:
-    """Store in SessionMiddleware session."""
-    request.session["user"] = user  # type: ignore[attr-defined]
 
 def clear_user_session(request: Request) -> None:
     try:
-        request.session.pop("user", None)  # type: ignore[attr-defined]
+        request.session.clear()
     except Exception:
         pass
 
-def make_legacy_cookie_value(user: Dict[str, Any]) -> str:
-    """If you still want to set COOKIE_NAME for older UI code."""
-    return _serializer().dumps(user)
+
+def require_session_user(request: Request) -> Dict[str, Any]:
+    u = request.session.get("user")
+    if not isinstance(u, dict) or not u.get("email"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not logged in")
+    return u
+
+
+def registration_disabled() -> bool:
+    v = os.getenv("DISABLE_REGISTRATION", "").strip().lower()
+    return v in ("1", "true", "yes", "y", "on")
