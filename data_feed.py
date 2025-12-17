@@ -203,8 +203,8 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
 
     t0 = time.perf_counter()
     def mark(name):
-    dt = time.perf_counter() - t0
-    print(f"[data_feed] {name} @ {dt:.2f}s")
+        dt = time.perf_counter() - t0
+        print(f"[data_feed] {name} @ {dt:.2f}s")
     mark("start")
     mark("price_ok")
     mark("or_ok")
