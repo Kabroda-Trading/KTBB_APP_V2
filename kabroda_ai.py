@@ -6,19 +6,21 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+import os
 from openai import OpenAI
-
-_CLIENT: OpenAI | None = None
 
 
 def _client() -> OpenAI:
     global _CLIENT
     if _CLIENT is not None:
         return _CLIENT
+
     key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not key:
         raise RuntimeError("OPENAI_API_KEY is not set")
-    _CLIENT = OpenAI(api_key=key)
+
+    timeout_s = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
+    _CLIENT = OpenAI(api_key=key, timeout=timeout_s, max_retries=2)
     return _CLIENT
 
 

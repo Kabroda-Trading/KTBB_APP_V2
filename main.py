@@ -1,6 +1,8 @@
 # main.py
 from __future__ import annotations
 
+import asyncio  # add near the top of main.py
+
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -330,26 +332,37 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     return JSONResponse(raw)
 
 
+
 @app.post("/api/dmr/run-auto-ai")
 async def dmr_run_auto_ai(request: Request, db: Session = Depends(get_db)):
-    # Step 1: compute raw (numbers) - unchanged
-    await dmr_run_raw(request, db)  # type: ignore
+    await dmr_run_raw(request, db)  # unchanged
 
     sess_raw = request.session.get("last_dmr_raw")
     if not isinstance(sess_raw, dict):
         raise HTTPException(status_code=500, detail="Missing DMR context")
 
-    # Step 2: narrative (OpenAI) - doctrine applied
     _apply_doctrine_to_kabroda_prompts()
 
-    report_text = kabroda_ai.generate_daily_market_review(
-        symbol=sess_raw.get("symbol", "BTCUSDT"),
-        date_str=sess_raw.get("date", ""),
-        context=sess_raw,
-    )
+    try:
+        # Run blocking OpenAI call in a worker thread + enforce timeout
+        report_text = await asyncio.wait_for(
+            asyncio.to_thread(
+                kabroda_ai.generate_daily_market_review,
+                symbol=sess_raw.get("symbol", "BTCUSDT"),
+                date_str=sess_raw.get("date", ""),
+                context=sess_raw,
+            ),
+            timeout=int(os.getenv("DMR_AI_TIMEOUT_SECONDS", "75")),
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="AI generation timed out. Try again.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI generation failed: {e}")
+
     sess_raw["report_text"] = report_text
     request.session["last_dmr_full"] = sess_raw
     return JSONResponse(sess_raw)
+
 
 
 # -----------------------------
