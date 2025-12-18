@@ -12,3 +12,4 @@ tzdata==2025.1
 ccxt
 itsdangerous==2.2.0
 starlette==0.38.6
+psycopg[binary]>=3.2.0
