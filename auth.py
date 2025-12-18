@@ -5,13 +5,12 @@ from typing import Optional, Dict, Any
 from fastapi import Request, HTTPException
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 
-# Optional password verification (only used if you pass db/UserModel and user has a hash)
+# Optional password verification (only used if DB auth is enabled)
 try:
     from passlib.context import CryptContext
     _PWD_CTX = CryptContext(schemes=["bcrypt"], deprecated="auto")
 except Exception:
     _PWD_CTX = None
-
 
 # Cookie name used by older versions / some UI code
 COOKIE_NAME = os.environ.get("COOKIE_NAME", "ktbb_session")
@@ -26,7 +25,7 @@ def _serializer() -> URLSafeTimedSerializer:
 
 
 # -----------------------------------------------------------------------------
-# Session helpers (your existing behavior)
+# Session helpers (existing behavior)
 # -----------------------------------------------------------------------------
 def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
     """
@@ -88,51 +87,83 @@ def make_legacy_cookie_value(user: Dict[str, Any]) -> str:
 
 
 # -----------------------------------------------------------------------------
-# Compatibility wrappers (so main.py can call older names safely)
+# Compatibility wrappers (older main.py names)
 # -----------------------------------------------------------------------------
 def require_session_user(request: Request) -> Dict[str, Any]:
-    # older name used by some versions of main.py
     return require_user(request)
 
 
 def set_session_user(request: Request, user: Dict[str, Any]) -> None:
-    # older name used by some versions of main.py
     set_user_session(request, user)
 
 
 # -----------------------------------------------------------------------------
-# DB auth helpers (ONLY used if caller passes db + UserModel)
+# DB auth helpers + seed-admin fallback (this is what fixes your login)
 # -----------------------------------------------------------------------------
 def _normalize_email(email: str) -> str:
     return (email or "").strip().lower()
 
 
-def get_user_by_email(*, db=None, email: str = "", UserModel=None, **_kwargs):
+def get_user_by_email(*args, **kwargs):
+    """
+    Supports both:
+      - get_user_by_email(db=db, email=..., UserModel=UserModel)
+      - get_user_by_email(db, email, UserModel)
+    """
+    db = kwargs.get("db")
+    email = kwargs.get("email")
+    UserModel = kwargs.get("UserModel") or kwargs.get("user_model")
+
+    # positional fallback: (db, email, UserModel)
+    if db is None and len(args) >= 1:
+        db = args[0]
+    if email is None and len(args) >= 2:
+        email = args[1]
+    if UserModel is None and len(args) >= 3:
+        UserModel = args[2]
+
     if db is None or UserModel is None:
         return None
+
     try:
-        return db.query(UserModel).filter(UserModel.email == _normalize_email(email)).first()
+        return db.query(UserModel).filter(UserModel.email == _normalize_email(str(email or ""))).first()
     except Exception:
         return None
 
 
+def _seed_admin_auth(email: str, password: str) -> Optional[Dict[str, Any]]:
+    """
+    Works even if DB is down / main.py isn't passing db/UserModel.
+    """
+    seed_email = _normalize_email(os.getenv("SEED_ADMIN_EMAIL", ""))
+    seed_pw = os.getenv("SEED_ADMIN_PASSWORD", "") or ""
+
+    if not seed_email or not seed_pw:
+        return None
+
+    if _normalize_email(email) == seed_email and password == seed_pw:
+        return {
+            "email": seed_email,
+            "tier": os.getenv("SEED_ADMIN_TIER", "Elite"),
+            "id": "seed-admin",
+            "is_admin": True,
+        }
+    return None
+
+
 def authenticate_user(*args, **kwargs) -> Optional[Dict[str, Any]]:
     """
-    Flexible signature on purpose.
-    Supports calls like:
+    Backward compatible on purpose. Supports:
       - authenticate_user(email=..., password=...)
       - authenticate_user(email=..., password=..., db=db, UserModel=UserModel)
       - authenticate_user(db=db, email=..., password=..., UserModel=UserModel)
-
-    Returns a SAFE dict if authenticated, else None.
-    Never raises (so login route won't 500).
+      - authenticate_user(db, email, password)
     """
     try:
         email = kwargs.get("email")
         password = kwargs.get("password")
 
-        # Support positional legacy patterns if they exist
-        # e.g. authenticate_user(db, email, password)
+        # positional legacy: (db, email, password)
         if (email is None or password is None) and len(args) >= 3:
             email = args[1]
             password = args[2]
@@ -143,10 +174,19 @@ def authenticate_user(*args, **kwargs) -> Optional[Dict[str, Any]]:
         if not email or not password:
             return None
 
-        db = kwargs.get("db", None)
-        UserModel = kwargs.get("UserModel", None) or kwargs.get("user_model", None)
+        # 1) Always allow seed-admin login (prevents 401 drift)
+        seed_user = _seed_admin_auth(email, password)
+        if seed_user:
+            return seed_user
 
-        # If no DB provided, we can't validate here (seed-admin is handled in main.py)
+        # 2) DB auth if provided
+        db = kwargs.get("db")
+        UserModel = kwargs.get("UserModel") or kwargs.get("user_model")
+
+        # positional db fallback: authenticate_user(db, email=..., password=...)
+        if db is None and len(args) >= 1:
+            db = args[0]
+
         if db is None or UserModel is None:
             return None
 
@@ -155,14 +195,17 @@ def authenticate_user(*args, **kwargs) -> Optional[Dict[str, Any]]:
             return None
 
         # Try common hash field names
-        hash_val = getattr(u, "password_hash", None) or getattr(u, "hashed_password", None) or getattr(u, "password", None)
+        hash_val = (
+            getattr(u, "password_hash", None)
+            or getattr(u, "hashed_password", None)
+            or getattr(u, "password", None)
+        )
         if not hash_val or _PWD_CTX is None:
             return None
 
         if not _PWD_CTX.verify(password, str(hash_val)):
             return None
 
-        # Return safe fields only
         return {
             "email": getattr(u, "email", email),
             "tier": getattr(u, "tier", "Free"),
@@ -174,5 +217,4 @@ def authenticate_user(*args, **kwargs) -> Optional[Dict[str, Any]]:
 
 
 def registration_disabled() -> bool:
-    # If you later want to disable signups without code changes
     return (os.getenv("REGISTRATION_DISABLED") or "").strip().lower() in ("1", "true", "yes", "on")
