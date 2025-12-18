@@ -1,146 +1,56 @@
 # database.py
-from __future__ import annotations
-
 import os
-import sqlite3
-from typing import Generator
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-from sqlalchemy import (
-    create_engine,
-    Column,
-    Integer,
-    String,
-    DateTime,
-    func,
+Base = declarative_base()
+
+def _normalize_database_url(url: str) -> str:
+    """
+    Render often provides DATABASE_URL starting with 'postgres://' (legacy).
+    SQLAlchemy expects 'postgresql://'.
+    We also force psycopg (v3) driver: 'postgresql+psycopg://'
+    """
+    if not url:
+        return ""
+
+    # Render legacy scheme
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+
+    # Force psycopg v3 driver if it's plain postgresql://
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    return url
+
+
+DATABASE_URL = _normalize_database_url(os.getenv("DATABASE_URL", "").strip())
+
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set. Add it in Render environment variables.")
+
+# For Postgres, no sqlite connect_args needed
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    future=True,
 )
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
+SessionLocal = sessionmaker(
+    bind=engine,
+    autoflush=False,
+    autocommit=False,
+    future=True,
+)
 
-# Database URL
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ktbb_app.db")
-
-# Render Postgres URLs are often "postgresql://..." (or sometimes "postgres://...")
-# Tell SQLAlchemy to use psycopg (v3) explicitly.
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
-elif DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
-
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-
-engine = create_engine(DATABASE_URL, connect_args=connect_args, future=True)
-
-
-# -------------------------
-# Models
-# -------------------------
-class UserModel(Base):
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, index=True)
-
-    email = Column(String, unique=True, nullable=False, index=True)
-    password_hash = Column(String, nullable=False)
-
-    # Tier values are stored as strings like: tier2_single_auto / tier3_multi_gpt
-    tier = Column(String, nullable=False, server_default="tier2_single_auto")
-
-    # Session timezone key (IANA), e.g. "America/New_York"
-    session_tz = Column(String, nullable=False, server_default="UTC")
-
-    # --- Stripe fields (IMPORTANT: must be in the ORM model, not just migrations)
-    stripe_customer_id = Column(String, nullable=True)
-    stripe_subscription_id = Column(String, nullable=True)
-    stripe_price_id = Column(String, nullable=True)
-    subscription_status = Column(String, nullable=True)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-
-class SessionModel(Base):
-    __tablename__ = "sessions"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, nullable=False, index=True)
-    token = Column(String, unique=True, nullable=False, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-
-# -------------------------
-# FastAPI dependency
-# -------------------------
-def get_db() -> Generator[Session, None, None]:
+def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-
-# -------------------------
-# Lightweight migrations (SQLite)
-# -------------------------
-def _sqlite_column_exists(table: str, col: str) -> bool:
-    if not DATABASE_URL.startswith("sqlite"):
-        return False
-
-    db_path = DATABASE_URL.replace("sqlite:///", "")
-    if db_path.startswith("./"):
-        db_path = db_path[2:]
-
-    if not os.path.exists(db_path):
-        return False
-
-    conn = sqlite3.connect(db_path)
-    try:
-        cur = conn.execute(f"PRAGMA table_info({table});")
-        cols = [r[1] for r in cur.fetchall()]
-        return col in cols
-    finally:
-        conn.close()
-
-
-def _sqlite_add_column(table: str, ddl: str) -> None:
-    if not DATABASE_URL.startswith("sqlite"):
-        return
-
-    db_path = DATABASE_URL.replace("sqlite:///", "")
-    if db_path.startswith("./"):
-        db_path = db_path[2:]
-
-    if not os.path.exists(db_path):
-        return
-
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl};")
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def init_db() -> None:
-    """
-    Create tables + apply minimal migrations so older ktbb_app.db files keep working.
-    """
+def init_db():
+    # Creates tables if they don't exist
     Base.metadata.create_all(bind=engine)
-
-    # Minimal migrations for older DBs
-    if _sqlite_column_exists("users", "tier") is False:
-        _sqlite_add_column("users", "tier TEXT NOT NULL DEFAULT 'tier2_single_auto'")
-
-    if _sqlite_column_exists("users", "session_tz") is False:
-        _sqlite_add_column("users", "session_tz TEXT NOT NULL DEFAULT 'UTC'")
-
-    # Stripe columns
-    if _sqlite_column_exists("users", "stripe_customer_id") is False:
-        _sqlite_add_column("users", "stripe_customer_id TEXT")
-
-    if _sqlite_column_exists("users", "stripe_subscription_id") is False:
-        _sqlite_add_column("users", "stripe_subscription_id TEXT")
-
-    if _sqlite_column_exists("users", "stripe_price_id") is False:
-        _sqlite_add_column("users", "stripe_price_id TEXT")
-
-    if _sqlite_column_exists("users", "subscription_status") is False:
-        _sqlite_add_column("users", "subscription_status TEXT")
