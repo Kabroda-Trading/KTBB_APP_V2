@@ -16,17 +16,19 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 
-# -------------------------
 # Database URL
-# -------------------------
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ktbb_app.db")
+
+# Render Postgres URLs are often "postgresql://..." (or sometimes "postgres://...")
+# Tell SQLAlchemy to use psycopg (v3) explicitly.
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
 engine = create_engine(DATABASE_URL, connect_args=connect_args, future=True)
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
-
-Base = declarative_base()
 
 
 # -------------------------
