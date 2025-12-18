@@ -53,48 +53,6 @@ app.add_middleware(
     same_site="lax",
 )
 
-# main.py
-
-def _slim_dmr(raw: dict) -> dict:
-    # Keep only what the UI + AI actually needs.
-    keep = [
-        "symbol", "date",
-        "levels",
-        "htf_shelves", "intraday_shelves",
-        "tf_facts", "momentum_summary",
-        "trade_logic", "execution_rules",
-    ]
-    return {k: raw.get(k) for k in keep if k in raw}
-
-@app.post("/api/dmr/run-raw")
-async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
-    ...
-    raw = dmr_report.run_auto_raw(symbol=symbol, session_tz=tz)
-    slim = _slim_dmr(raw)
-    request.session["last_dmr_raw"] = slim
-    return JSONResponse(slim)
-
-@app.post("/api/dmr/run-auto-ai")
-async def dmr_run_auto_ai(request: Request, db: Session = Depends(get_db)):
-    ...
-    raw = dmr_report.run_auto_raw(symbol=symbol, session_tz=tz)
-    slim = _slim_dmr(raw)
-
-    _apply_doctrine_to_kabroda_prompts()
-
-    report_text = kabroda_ai.generate_daily_market_review(
-        symbol=slim.get("symbol", "BTCUSDT"),
-        date_str=slim.get("date", ""),
-        context=slim,
-    )
-    slim["report_text"] = report_text
-
-    # If you want, store only the slim version:
-    request.session["last_dmr_full"] = slim
-
-    return JSONResponse(slim)
-
-
 # -------------------------------------------------------------------
 # Doctrine injection (non-invasive, does NOT touch numbers pipeline)
 # -------------------------------------------------------------------
