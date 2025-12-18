@@ -192,6 +192,25 @@ def _fetch_window_candles(
     sec = g_map.get(granularity, 900)
     return prov.candles(symbol, sec, start=start_utc, end=end_utc)
 
+# data_feed.py
+from typing import Any, Dict, Optional
+import sse_engine
+
+def get_inputs(*, symbol: str, date: Optional[str] = None, session_tz: str = "UTC") -> Dict[str, Any]:
+    """
+    Backward-compatible API expected by dmr_report.py.
+    We ignore `date` for now (kept only for compatibility).
+    """
+    # 1) Pull raw inputs using the function you already have
+    #    (If your function name is different, replace build_auto_inputs with the correct one.)
+    inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
+
+    # 2) Compute deterministic SSE outputs (levels + shelves) and attach them
+    sse = sse_engine.compute_sse_levels(inputs)
+    inputs.update(sse)
+
+    return inputs
+
 
 # ----------------------------
 # Public builder used by DMR pipeline
