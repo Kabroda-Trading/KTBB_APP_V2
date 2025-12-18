@@ -410,3 +410,27 @@ def build_trade_logic_summary(
         "targets_hint": targets_hint,
         "outlook_text": outlook_text,
     }
+# -------------------------------------------------------------------
+# Public API shim (stable function name expected by dmr_report.py)
+# -------------------------------------------------------------------
+
+def compute_trade_logic(*args, **kwargs):
+    """
+    Stable entrypoint expected by dmr_report.py.
+    This is a thin wrapper so we don't change the locked trade-logic internals.
+    """
+    # If your module already has a main function, route to it here.
+    # Common candidates (pick the one that exists in your file):
+    if "run" in globals() and callable(globals()["run"]):
+        return globals()["run"](*args, **kwargs)
+
+    if "build_trade_logic" in globals() and callable(globals()["build_trade_logic"]):
+        return globals()["build_trade_logic"](*args, **kwargs)
+
+    if "compute" in globals() and callable(globals()["compute"]):
+        return globals()["compute"](*args, **kwargs)
+
+    raise AttributeError(
+        "trade_logic_v2.compute_trade_logic is expected, but no internal function "
+        "was found to wrap (run/build_trade_logic/compute)."
+    )
