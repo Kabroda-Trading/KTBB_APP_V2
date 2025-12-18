@@ -6,9 +6,9 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-import os
 from openai import OpenAI
 
+_CLIENT: OpenAI | None = None
 
 def _client() -> OpenAI:
     global _CLIENT
@@ -22,6 +22,7 @@ def _client() -> OpenAI:
     timeout_s = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
     _CLIENT = OpenAI(api_key=key, timeout=timeout_s, max_retries=2)
     return _CLIENT
+
 
 
 def _log(msg: str) -> None:
