@@ -344,20 +344,19 @@ async def dmr_run_auto_ai(request: Request, db: Session = Depends(get_db)):
     _apply_doctrine_to_kabroda_prompts()
 
     try:
-        # Run blocking OpenAI call in a worker thread + enforce timeout
-        report_text = await asyncio.wait_for(
-            asyncio.to_thread(
-                kabroda_ai.generate_daily_market_review,
-                symbol=sess_raw.get("symbol", "BTCUSDT"),
-                date_str=sess_raw.get("date", ""),
-                context=sess_raw,
-            ),
-            timeout=int(os.getenv("DMR_AI_TIMEOUT_SECONDS", "75")),
-        )
+    report_text = await asyncio.wait_for(
+        asyncio.to_thread(
+            kabroda_ai.generate_daily_market_review,
+            symbol=sess_raw.get("symbol", "BTCUSDT"),
+            date_str=sess_raw.get("date", ""),
+            context=sess_raw,
+        ),
+        timeout=int(os.getenv("DMR_AI_TIMEOUT_SECONDS", "75")),
+    )
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="AI generation timed out. Try again.")
+    raise HTTPException(status_code=504, detail="AI generation timed out. Try again.")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI generation failed: {e}")
+    raise HTTPException(status_code=500, detail=f"AI generation failed: {e}")
 
     sess_raw["report_text"] = report_text
     request.session["last_dmr_full"] = sess_raw
