@@ -1,5 +1,4 @@
 # auth.py — DB-backed auth (no drift)
-
 from __future__ import annotations
 
 import os
@@ -11,7 +10,6 @@ from fastapi import HTTPException, status, Request
 from sqlalchemy.orm import Session
 
 from database import UserModel
-
 
 _ph = PasswordHasher()
 
@@ -51,8 +49,13 @@ def create_user(db: Session, email: str, password: str) -> UserModel:
     u = UserModel(
         email=email_n,
         password_hash=hash_password(password),
-        tier="tier1_manual",      # start free/manual
+        # Legacy column: do NOT use for gating. Keep stable to avoid DB errors.
+        tier="stripe",
         session_tz="UTC",
+        stripe_customer_id=None,
+        stripe_subscription_id=None,
+        stripe_price_id=None,
+        subscription_status=None,
     )
     db.add(u)
     db.commit()
@@ -69,13 +72,14 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[UserMo
     return u
 
 
-def set_user_session(request: Request, user: UserModel, is_admin: bool = False) -> None:
+def set_user_session(request: Request, user: UserModel) -> None:
+    """
+    Session stores identity only.
+    Membership/plan is derived from DB on each request (Stripe-authoritative).
+    """
     request.session["user"] = {
         "id": int(user.id),
         "email": user.email,
-        "tier": user.tier,
-        "session_tz": user.session_tz,
-        "is_admin": bool(is_admin),
     }
 
 
@@ -88,7 +92,7 @@ def clear_user_session(request: Request) -> None:
 
 def require_session_user(request: Request) -> Dict[str, Any]:
     u = request.session.get("user")
-    if not isinstance(u, dict) or not u.get("email"):
+    if not isinstance(u, dict) or not u.get("id"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not logged in")
     return u
 

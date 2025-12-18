@@ -18,12 +18,12 @@ import dmr_report
 import kabroda_ai
 from database import init_db, get_db, UserModel
 from membership import (
-    Tier,
-    User as MembershipUser,
-    ensure_can_use_auto,
-    ensure_can_use_symbol_auto,
-    ensure_can_use_gpt_chat,
-    tier_marketing_label,
+    get_membership_state,
+    require_paid_access,
+    ensure_symbol_allowed,
+    ensure_coach_allowed,
+    PRICE_TACTICAL,
+    PRICE_ELITE,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -60,13 +60,8 @@ _DOCTRINE_APPLIED = False
 
 
 def _load_doctrine_markdown() -> str:
-    """
-    Loads all doctrine markdown under ./doctrine/**.md and returns a single string.
-    Safe: if folder missing/empty, returns "".
-    """
     if not DOCTRINE_DIR.exists():
         return ""
-
     md_files = sorted(DOCTRINE_DIR.rglob("*.md"))
     if not md_files:
         return ""
@@ -86,10 +81,6 @@ def _load_doctrine_markdown() -> str:
 
 
 def _apply_doctrine_to_kabroda_prompts() -> None:
-    """
-    Append doctrine text to kabroda_ai's system prompts.
-    This changes ONLY narrative/coach behavior, not computed levels.
-    """
     global _DOCTRINE_APPLIED
     if _DOCTRINE_APPLIED:
         return
@@ -140,21 +131,45 @@ def _db_user_from_session(db: Session, sess: Dict[str, Any]) -> UserModel:
     return u
 
 
-def _membership_user(u: UserModel) -> MembershipUser:
-    return MembershipUser(email=u.email, tier=Tier(u.tier), session_tz=(u.session_tz or "UTC"))
+def _plan_flags(u: UserModel) -> Dict[str, Any]:
+    ms = get_membership_state(u)
+    return {
+        "is_paid": ms.is_paid,
+        "plan": ms.plan,
+        "plan_label": ms.label,
+        "is_elite": bool(ms.is_paid and ms.plan == "elite"),
+        "is_tactical": bool(ms.is_paid and ms.plan == "tactical"),
+    }
 
 
 # -------------------------------------------------------------------
-# Routes
+# Public routes
 # -------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    sess = _session_user_dict(request)
-    if sess:
-        return RedirectResponse(url="/suite", status_code=303)
     return templates.TemplateResponse("home.html", {"request": request})
 
 
+@app.get("/about", response_class=HTMLResponse)
+def about(request: Request):
+    return templates.TemplateResponse("about.html", {"request": request})
+
+
+@app.get("/pricing", response_class=HTMLResponse)
+def pricing(request: Request):
+    sess = _session_user_dict(request)
+    return templates.TemplateResponse(
+        "pricing.html",
+        {
+            "request": request,
+            "is_logged_in": bool(sess),
+        },
+    )
+
+
+# -------------------------------------------------------------------
+# Suite (paywalled)
+# -------------------------------------------------------------------
 @app.get("/suite", response_class=HTMLResponse)
 def suite(request: Request, db: Session = Depends(get_db)):
     sess = _session_user_dict(request)
@@ -162,14 +177,26 @@ def suite(request: Request, db: Session = Depends(get_db)):
         return RedirectResponse(url="/login", status_code=303)
 
     u = _db_user_from_session(db, sess)
-    mu = _membership_user(u)
+
+    # Paywall: must have active/trialing subscription
+    try:
+        require_paid_access(u)
+    except HTTPException:
+        return RedirectResponse(url="/pricing?paywall=1", status_code=303)
+
+    flags = _plan_flags(u)
 
     return templates.TemplateResponse(
         "app.html",
         {
             "request": request,
-            "user": {"email": mu.email, "tier": mu.tier.value, "session_tz": mu.session_tz},
-            "is_elite": (mu.tier == Tier.TIER3_MULTI_GPT),
+            "user": {
+                "email": u.email,
+                "session_tz": (u.session_tz or "UTC"),
+                "plan_label": flags["plan_label"],
+                "plan": flags["plan"] or "",
+            },
+            "is_elite": flags["is_elite"],
         },
     )
 
@@ -181,21 +208,43 @@ def account(request: Request, db: Session = Depends(get_db)):
         return RedirectResponse(url="/login", status_code=303)
 
     u = _db_user_from_session(db, sess)
-    mu = _membership_user(u)
+    flags = _plan_flags(u)
 
     return templates.TemplateResponse(
         "account.html",
         {
             "request": request,
-            "user": {"email": mu.email, "tier": mu.tier.value, "session_tz": mu.session_tz},
-            "tier_label": tier_marketing_label(mu.tier),
+            "user": {"email": u.email, "session_tz": (u.session_tz or "UTC")},
+            "tier_label": flags["plan_label"],  # template expects tier_label; we supply plan label
         },
     )
 
 
-# -----------------------------
-# Auth (LEAVE WORKING LOGIN FLOW)
-# -----------------------------
+@app.post("/account/session-timezone")
+async def account_set_timezone(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+
+    tz = None
+    # Support JSON {"timezone": "..."} and form field "tz"
+    try:
+        payload = await request.json()
+        tz = (payload.get("timezone") or payload.get("tz") or "").strip()
+    except Exception:
+        form = await request.form()
+        tz = (form.get("timezone") or form.get("tz") or "").strip()
+
+    if not tz:
+        raise HTTPException(status_code=400, detail="Missing timezone")
+
+    u.session_tz = tz
+    db.commit()
+    return {"ok": True, "timezone": tz}
+
+
+# -------------------------------------------------------------------
+# Auth
+# -------------------------------------------------------------------
 @app.get("/login", response_class=HTMLResponse)
 def login_get(request: Request):
     return templates.TemplateResponse("login.html", {"request": request, "error": None})
@@ -208,26 +257,15 @@ def login_post(
     email: str = Form(...),
     password: str = Form(...),
 ):
-    # 1) DB auth (UNCHANGED)
     u = auth.authenticate_user(db, email=email, password=password)
-
-    # 2) Seed admin fallback (UNCHANGED)
     if not u:
-        seed_email = (os.getenv("SEED_ADMIN_EMAIL") or "").strip().lower()
-        seed_pw = (os.getenv("SEED_ADMIN_PASSWORD") or "").strip()
-        if seed_email and seed_pw and email.strip().lower() == seed_email and password == seed_pw:
-            u = auth.get_user_by_email(db, seed_email)
-            if not u:
-                u = auth.create_user(db, seed_email, seed_pw)
-                u.tier = os.getenv("SEED_ADMIN_TIER", "tier3_multi_gpt")
-                u.session_tz = "UTC"
-                db.commit()
-                db.refresh(u)
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Invalid credentials"},
+            status_code=401,
+        )
 
-    if not u:
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"}, status_code=401)
-
-    auth.set_user_session(request, u, is_admin=False)
+    auth.set_user_session(request, u)
     return RedirectResponse(url="/suite", status_code=303)
 
 
@@ -254,52 +292,40 @@ def register_post(
     if auth.registration_disabled():
         raise HTTPException(status_code=403, detail="Registration disabled")
 
-    u = auth.create_user(db, email=email, password=password)
-    auth.set_user_session(request, u, is_admin=False)
-    return RedirectResponse(url="/suite", status_code=303)
+    try:
+        u = auth.create_user(db, email=email, password=password)
+    except HTTPException as e:
+        return templates.TemplateResponse(
+            "register.html",
+            {"request": request, "error": str(e.detail)},
+            status_code=e.status_code,
+        )
+
+    auth.set_user_session(request, u)
+    # Account created, but Suite is paywalled until subscription is active
+    return RedirectResponse(url="/pricing?new=1", status_code=303)
 
 
-# -----------------------------
-# Account timezone (accept JSON or form)
-# -----------------------------
-@app.post("/account/session-timezone")
-async def set_session_timezone(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-
-    tz = None
-    ctype = (request.headers.get("content-type") or "").lower()
-    if "application/json" in ctype:
-        payload = await request.json()
-        tz = payload.get("tz") or payload.get("timezone")
-    else:
-        form = await request.form()
-        tz = form.get("tz")
-
-    tz = (tz or "UTC").strip() or "UTC"
-    u.session_tz = tz
-    db.commit()
-    db.refresh(u)
-
-    auth.set_user_session(request, u, is_admin=bool(sess.get("is_admin")))
-    return {"ok": True, "tz": tz}
-
-
-# -----------------------------
-# DMR endpoints
-# -----------------------------
+# -------------------------------------------------------------------
+# DMR APIs (paywalled)
+# -------------------------------------------------------------------
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-    mu = _membership_user(u)
 
-    ensure_can_use_symbol_auto(mu)
+    # Must be paid
+    require_paid_access(u)
 
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
 
-    raw = dmr_report.run_auto_raw(symbol=symbol, session_tz=mu.session_tz)
+    # Plan-based symbol gating (Tactical BTC only)
+    ensure_symbol_allowed(u, symbol)
+
+    tz = (u.session_tz or "UTC").strip() or "UTC"
+    raw = dmr_report.run_auto_raw(symbol=symbol, session_tz=tz)
+
     request.session["last_dmr_raw"] = raw
     return JSONResponse(raw)
 
@@ -333,9 +359,9 @@ async def dmr_run_auto_ai(request: Request, db: Session = Depends(get_db)):
 async def ai_coach(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-    mu = _membership_user(u)
 
-    ensure_can_use_gpt_chat(mu)
+    # Must be paid + elite
+    ensure_coach_allowed(u)
 
     payload = await request.json()
     message = (payload.get("message") or "").strip()
@@ -348,12 +374,12 @@ async def ai_coach(request: Request, db: Session = Depends(get_db)):
 
     _apply_doctrine_to_kabroda_prompts()
 
-    reply = kabroda_ai.run_ai_coach(user_message=message, dmr_context=dmr_ctx, tier=mu.tier.value)
+    reply = kabroda_ai.run_ai_coach(user_message=message, dmr_context=dmr_ctx, tier="elite")
     return {"reply": reply}
 
 
 # -----------------------------
-# Billing / Stripe (unchanged)
+# Billing / Stripe
 # -----------------------------
 @app.post("/billing/checkout")
 async def billing_checkout(request: Request, db: Session = Depends(get_db)):
@@ -361,11 +387,11 @@ async def billing_checkout(request: Request, db: Session = Depends(get_db)):
     u = _db_user_from_session(db, sess)
 
     payload = await request.json()
-    tier = (payload.get("tier") or "").strip().lower()
-    if tier not in ("tactical", "elite"):
-        raise HTTPException(status_code=400, detail="Invalid tier")
+    plan = (payload.get("tier") or payload.get("plan") or "").strip().lower()
+    if plan not in ("tactical", "elite"):
+        raise HTTPException(status_code=400, detail="Invalid plan")
 
-    url = billing.create_checkout_session(db=db, user_model=u, tier_slug=tier)
+    url = billing.create_checkout_session(db=db, user_model=u, plan=plan)
     return {"url": url}
 
 
@@ -374,5 +400,12 @@ async def billing_portal(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
 
-    url = billing.create_portal_session(db=db, user_model=u)
+    url = billing.create_billing_portal(db=db, user_model=u)
     return {"url": url}
+
+
+@app.post("/billing/webhook")
+async def billing_webhook(request: Request, db: Session = Depends(get_db)):
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    return billing.handle_webhook(payload=payload, sig_header=sig, db=db, UserModel=UserModel)
