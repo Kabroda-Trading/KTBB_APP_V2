@@ -371,6 +371,45 @@ async def dmr_run_auto_ai(request: Request, db: Session = Depends(get_db)):
     request.session["last_dmr_full"] = sess_raw
     return JSONResponse(sess_raw)
 
+@app.post("/api/dmr/generate-ai")
+async def dmr_generate_ai(request: Request, db: Session = Depends(get_db)):
+    # Auth + paywall
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    require_paid_access(u)
+
+    # Must already have raw computed (stored by /api/dmr/run-raw)
+    sess_raw = request.session.get("last_dmr_raw")
+    if not isinstance(sess_raw, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="Run 'Calibrate the Battlefield' first to generate today's levels."
+        )
+
+    _apply_doctrine_to_kabroda_prompts()
+
+    try:
+        report_text = await asyncio.wait_for(
+            asyncio.to_thread(
+                kabroda_ai.generate_daily_market_review,
+                symbol=sess_raw.get("symbol", "BTCUSDT"),
+                date_str=sess_raw.get("date", ""),
+                context=sess_raw,
+            ),
+            timeout=int(os.getenv("DMR_AI_TIMEOUT_SECONDS", "75")),
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="AI generation timed out. Try again.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI generation failed: {e}")
+
+    # Save full context for coach + UI refreshes
+    full = {**sess_raw, "report_text": report_text}
+    request.session["last_dmr_full"] = full
+
+    # Return only what the UI needs for step 2
+    return JSONResponse({"report_text": report_text})
+
 
 # -----------------------------
 # AI Coach (Elite-only)

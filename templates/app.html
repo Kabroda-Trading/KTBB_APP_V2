@@ -10,7 +10,7 @@
 
   <div class="card">
     <h3>Run Daily Market Review</h3>
-    <p class="muted">Generate today’s structure levels, opening range, HTF shelves, and a clean narrative.</p>
+    <p class="muted">Step 1 builds today’s levels. Step 2 deploys the narrative.</p>
 
     <div class="row">
       <select id="symbol" class="input" style="flex:1;">
@@ -18,7 +18,9 @@
         <option value="ETHUSDT">ETH</option>
       </select>
 
-      <button id="runBtn" class="btn primary" onclick="runDMR()">Generate Review</button>
+      <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()">Calibrate the Battlefield</button>
+      <button id="reviewBtn" class="btn" onclick="deployDailyReview()" disabled>Deploy the Daily Review</button>
+
       <a class="btn" href="/account">Account</a>
     </div>
 
@@ -37,7 +39,7 @@
       <div class="pill"><span class="muted">30m Low</span><div id="lv_30l">—</div></div>
     </div>
 
-    <pre id="dmrText" class="report" style="margin-top:12px; white-space:pre-wrap;">(Run DMR to generate…)</pre>
+    <pre id="dmrText" class="report" style="margin-top:12px; white-space:pre-wrap;">(Calibrate the Battlefield to generate levels…)</pre>
 
     <div class="row" style="margin-top:10px;">
       <button id="toggleYamlBtn" class="btn" style="display:none;" onclick="toggleYaml()">Show YAML</button>
@@ -69,10 +71,11 @@
   .container{max-width:1000px;margin:0 auto;padding:22px;}
   .hero{margin-bottom:14px;}
   .card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:18px;padding:16px;}
-  .row{display:flex;gap:10px;align-items:center;}
-  .input{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.25);color:#fff;}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .input{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.25);color:#fff;min-width:160px;}
   .btn{padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;text-decoration:none;cursor:pointer;}
   .btn.primary{background:rgba(96,165,250,.25);border-color:rgba(96,165,250,.4);}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
   .muted{opacity:.75;}
   .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
   .pill{padding:10px;border-radius:14px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.22);}
@@ -97,7 +100,6 @@
     return String(x);
   }
 
-  // Robust parse: read text first so non-JSON errors don't break the UI
   async function fetchJsonSafe(url, options){
     const r = await fetch(url, options);
     const text = await r.text();
@@ -128,14 +130,6 @@
   }
   document.addEventListener("DOMContentLoaded", ensureUserTimezone);
 
-  function normalizeReportText(payload){
-    const reportVal = (payload.report_text !== undefined) ? payload.report_text : payload.report;
-    if (typeof reportVal === "string") return reportVal;
-    if (reportVal && typeof reportVal.full_text === "string") return reportVal.full_text;
-    if (reportVal && typeof reportVal.text === "string") return reportVal.text;
-    return JSON.stringify(reportVal ?? "(No report returned.)", null, 2);
-  }
-
   function splitNarrativeAndYaml(reportText){
     const idx = reportText.indexOf("```yaml");
     if (idx !== -1){
@@ -144,7 +138,7 @@
     return { narrative: reportText.trim(), yaml: "" };
   }
 
-  function renderDMR(payload){
+  function renderLevelsOnly(payload){
     _lastDmrPayload = payload;
 
     const levels = payload.levels || {};
@@ -156,10 +150,10 @@
     document.getElementById("lv_bd").textContent  = fmt(levels.breakdown_trigger);
     document.getElementById("lv_30h").textContent = fmt(r30.high);
     document.getElementById("lv_30l").textContent = fmt(r30.low);
+  }
 
-    const reportText = normalizeReportText(payload);
-    const parts = splitNarrativeAndYaml(reportText);
-
+  function setNarrativeText(reportText){
+    const parts = splitNarrativeAndYaml(reportText || "");
     document.getElementById("dmrText").textContent = parts.narrative || "(No narrative returned.)";
 
     _lastYaml = parts.yaml || "";
@@ -203,57 +197,93 @@
     }
   }
 
-  async function runDMR(){
+  async function calibrateBattlefield(){
     const sym = document.getElementById("symbol").value;
     const status = document.getElementById("status");
-    const btn = document.getElementById("runBtn");
+    const levelsBtn = document.getElementById("levelsBtn");
+    const reviewBtn = document.getElementById("reviewBtn");
 
-    status.textContent = "Running…";
-    btn.disabled = true;
+    status.textContent = "Calibrating battlefield…";
+    levelsBtn.disabled = true;
+    reviewBtn.disabled = true;
 
-    // Live timer (prevents "it froze?" perception)
-    const t0 = performance.now();
-    const tick = setInterval(() => {
-      const secs = ((performance.now() - t0) / 1000).toFixed(1);
-      status.textContent = `Running… (${secs}s)`;
-    }, 250);
-
-    // Client-side timeout guard
-    const timeoutMs = 90_000;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    // Clear narrative area, keep UI honest
+    document.getElementById("dmrText").textContent = "(Generating levels…)";
+    setNarrativeText(""); // hides YAML controls
 
     try{
-      const { r, data } = await fetchJsonSafe("/api/dmr/run-auto-ai", {
+      const { r, data } = await fetchJsonSafe("/api/dmr/run-raw", {
         method: "POST",
         headers: {"Content-Type":"application/json"},
         body: JSON.stringify({ symbol: sym }),
-        credentials: "same-origin",
-        signal: controller.signal
+        credentials: "same-origin"
       });
 
       if (!r.ok){
-        const msg = data.detail || data.error || `Request failed (${r.status})`;
+        const msg = data.detail || data.error || `Levels failed (${r.status})`;
         status.textContent = "Error";
         alert(msg);
         return;
       }
 
-      const payload = data.dmr || data;
-      renderDMR(payload);
-      status.textContent = "Done ✅";
-    }catch(err){
-      if (err && err.name === "AbortError"){
-        status.textContent = "Timed out";
-        alert("DMR request timed out (client-side). Try again.");
+      renderLevelsOnly(data);
+      status.textContent = "Battlefield calibrated ✅";
+      reviewBtn.disabled = false; // now allow AI
+      document.getElementById("dmrText").textContent = "(Levels ready. Deploy the Daily Review when you want the narrative.)";
+    }catch(e){
+      status.textContent = "Request failed";
+      alert(e && e.message ? e.message : String(e));
+    }finally{
+      levelsBtn.disabled = false;
+    }
+  }
+
+  async function deployDailyReview(){
+    const status = document.getElementById("status");
+    const reviewBtn = document.getElementById("reviewBtn");
+    const levelsBtn = document.getElementById("levelsBtn");
+
+    // Require levels first
+    if (!_lastDmrPayload){
+      alert("Run 'Calibrate the Battlefield' first.");
+      return;
+    }
+
+    status.textContent = "Deploying daily review…";
+    reviewBtn.disabled = true;
+    levelsBtn.disabled = true;
+
+    // Optional: show progress
+    const t0 = performance.now();
+    const tick = setInterval(() => {
+      const secs = ((performance.now() - t0) / 1000).toFixed(1);
+      status.textContent = `Deploying daily review… (${secs}s)`;
+    }, 250);
+
+    try{
+      const { r, data } = await fetchJsonSafe("/api/dmr/generate-ai", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({}),
+        credentials: "same-origin"
+      });
+
+      if (!r.ok){
+        const msg = data.detail || data.error || `AI failed (${r.status})`;
+        status.textContent = "Error";
+        alert(msg);
         return;
       }
+
+      setNarrativeText(data.report_text || "");
+      status.textContent = "Daily review deployed ✅";
+    }catch(e){
       status.textContent = "Request failed";
-      alert(err && err.message ? err.message : String(err));
+      alert(e && e.message ? e.message : String(e));
     }finally{
       clearInterval(tick);
-      clearTimeout(timeoutId);
-      btn.disabled = false;
+      reviewBtn.disabled = false;
+      levelsBtn.disabled = false;
     }
   }
 
@@ -275,7 +305,7 @@
     if (!IS_ELITE) return;
 
     if (!_lastDmrPayload){
-      addChat("assistant", "Run the DMR first so I have today’s levels.");
+      addChat("assistant", "Run 'Calibrate the Battlefield' first so I have today’s levels.");
       return;
     }
 
