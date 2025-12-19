@@ -1,8 +1,7 @@
 # main.py
 from __future__ import annotations
 
-import asyncio  # add near the top of main.py
-
+import asyncio
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -10,9 +9,9 @@ from typing import Any, Dict, Optional
 from fastapi import FastAPI, Request, Form, HTTPException, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.templating import Jinja2Templates
-from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.templating import Jinja2Templates
 
 import auth
 import billing
@@ -147,6 +146,12 @@ def _plan_flags(u: UserModel) -> Dict[str, Any]:
 # -------------------------------------------------------------------
 # Public routes
 # -------------------------------------------------------------------
+@app.head("/")
+def head_root():
+    # Render health checks commonly use HEAD /
+    return {"ok": True}
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse("home.html", {"request": request})
@@ -165,6 +170,9 @@ def pricing(request: Request):
         {
             "request": request,
             "is_logged_in": bool(sess),
+            # You can pass these if your template ever wants them:
+            "price_tactical_set": bool(PRICE_TACTICAL),
+            "price_elite_set": bool(PRICE_ELITE),
         },
     )
 
@@ -217,7 +225,7 @@ def account(request: Request, db: Session = Depends(get_db)):
         {
             "request": request,
             "user": {"email": u.email, "session_tz": (u.session_tz or "UTC")},
-            "tier_label": flags["plan_label"],  # template expects tier_label; we supply plan label
+            "tier_label": flags["plan_label"],  # template expects tier_label
         },
     )
 
@@ -227,8 +235,8 @@ async def account_set_timezone(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
 
-    tz = None
-    # Support JSON {"timezone": "..."} and form field "tz"
+    tz = ""
+    # Support JSON {"timezone": "..."} and form field "tz"/"timezone"
     try:
         payload = await request.json()
         tz = (payload.get("timezone") or payload.get("tz") or "").strip()
@@ -332,10 +340,10 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     return JSONResponse(raw)
 
 
-
 @app.post("/api/dmr/run-auto-ai")
 async def dmr_run_auto_ai(request: Request, db: Session = Depends(get_db)):
-    await dmr_run_raw(request, db)  # unchanged
+    # First run raw and stash in session
+    await dmr_run_raw(request, db)
 
     sess_raw = request.session.get("last_dmr_raw")
     if not isinstance(sess_raw, dict):
@@ -344,24 +352,24 @@ async def dmr_run_auto_ai(request: Request, db: Session = Depends(get_db)):
     _apply_doctrine_to_kabroda_prompts()
 
     try:
-    report_text = await asyncio.wait_for(
-        asyncio.to_thread(
-            kabroda_ai.generate_daily_market_review,
-            symbol=sess_raw.get("symbol", "BTCUSDT"),
-            date_str=sess_raw.get("date", ""),
-            context=sess_raw,
-        ),
-        timeout=int(os.getenv("DMR_AI_TIMEOUT_SECONDS", "75")),
-    )
+        # Run blocking OpenAI call in a worker thread + enforce timeout
+        report_text = await asyncio.wait_for(
+            asyncio.to_thread(
+                kabroda_ai.generate_daily_market_review,
+                symbol=sess_raw.get("symbol", "BTCUSDT"),
+                date_str=sess_raw.get("date", ""),
+                context=sess_raw,
+            ),
+            timeout=int(os.getenv("DMR_AI_TIMEOUT_SECONDS", "75")),
+        )
     except asyncio.TimeoutError:
-    raise HTTPException(status_code=504, detail="AI generation timed out. Try again.")
+        raise HTTPException(status_code=504, detail="AI generation timed out. Try again.")
     except Exception as e:
-    raise HTTPException(status_code=500, detail=f"AI generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"AI generation failed: {e}")
 
     sess_raw["report_text"] = report_text
     request.session["last_dmr_full"] = sess_raw
     return JSONResponse(sess_raw)
-
 
 
 # -----------------------------
