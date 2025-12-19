@@ -10,7 +10,7 @@
 
   <div class="card">
     <h3>Run Daily Market Review</h3>
-    <p class="muted">Step 1 builds today’s levels. Step 2 deploys the narrative.</p>
+    <p class="muted">Step 1 calibrates today’s levels. Step 2 deploys the narrative (optional).</p>
 
     <div class="row">
       <select id="symbol" class="input" style="flex:1;">
@@ -24,7 +24,7 @@
       <a class="btn" href="/account">Account</a>
     </div>
 
-    <div id="status" class="muted" style="margin-top:10px;">Ready.</div>
+    <div id="status" class="muted" style="margin-top:10px;">Ready — calibrate levels to begin.</div>
   </div>
 
   <div class="card" style="margin-top:14px;">
@@ -39,7 +39,7 @@
       <div class="pill"><span class="muted">30m Low</span><div id="lv_30l">—</div></div>
     </div>
 
-    <pre id="dmrText" class="report" style="margin-top:12px; white-space:pre-wrap;">(Calibrate the Battlefield to generate levels…)</pre>
+    <pre id="dmrText" class="report" style="margin-top:12px; white-space:pre-wrap;">(Calibrate the Battlefield to load levels. Deploy the Daily Review when you want the narrative.)</pre>
 
     <div class="row" style="margin-top:10px;">
       <button id="toggleYamlBtn" class="btn" style="display:none;" onclick="toggleYaml()">Show YAML</button>
@@ -203,7 +203,7 @@
     const levelsBtn = document.getElementById("levelsBtn");
     const reviewBtn = document.getElementById("reviewBtn");
 
-    status.textContent = "Calibrating battlefield…";
+    status.textContent = "Calibrating the battlefield…";
     levelsBtn.disabled = true;
     reviewBtn.disabled = true;
 
@@ -227,7 +227,7 @@
       }
 
       renderLevelsOnly(data);
-      status.textContent = "Battlefield calibrated ✅";
+      status.textContent = "Battlefield calibrated ✅ (levels ready)";
       reviewBtn.disabled = false; // now allow AI
       document.getElementById("dmrText").textContent = "(Levels ready. Deploy the Daily Review when you want the narrative.)";
     }catch(e){
@@ -245,11 +245,11 @@
 
     // Require levels first
     if (!_lastDmrPayload){
-      alert("Run 'Calibrate the Battlefield' first.");
+      alert("Calibrate the Battlefield first — then Deploy the Daily Review.");
       return;
     }
 
-    status.textContent = "Deploying daily review…";
+    status.textContent = "Deploying the Daily Review…";
     reviewBtn.disabled = true;
     levelsBtn.disabled = true;
 
@@ -276,7 +276,7 @@
       }
 
       setNarrativeText(data.report_text || "");
-      status.textContent = "Daily review deployed ✅";
+      status.textContent = "Daily Review deployed ✅";
     }catch(e){
       status.textContent = "Request failed";
       alert(e && e.message ? e.message : String(e));
