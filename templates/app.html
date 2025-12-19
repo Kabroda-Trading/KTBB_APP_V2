@@ -243,9 +243,8 @@
     const reviewBtn = document.getElementById("reviewBtn");
     const levelsBtn = document.getElementById("levelsBtn");
 
-    // Require levels first
     if (!_lastDmrPayload){
-      alert("Calibrate the Battlefield first — then Deploy the Daily Review.");
+      alert("Run 'Calibrate the Battlefield' first to generate today's levels.");
       return;
     }
 
@@ -253,7 +252,6 @@
     reviewBtn.disabled = true;
     levelsBtn.disabled = true;
 
-    // Optional: show progress
     const t0 = performance.now();
     const tick = setInterval(() => {
       const secs = ((performance.now() - t0) / 1000).toFixed(1);
@@ -264,7 +262,8 @@
       const { r, data } = await fetchJsonSafe("/api/dmr/generate-ai", {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({}),
+        // ✅ Send raw payload back to server (no session-cookie dependence)
+        body: JSON.stringify({ dmr_raw: _lastDmrPayload }),
         credentials: "same-origin"
       });
 
