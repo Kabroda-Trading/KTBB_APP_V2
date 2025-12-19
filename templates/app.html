@@ -56,7 +56,9 @@
     <div id="chatLog" class="chat-log"></div>
 
     <div class="row" style="margin-top:10px;">
-      <input id="chatInput" class="input" style="flex:1;" placeholder="Ask Kabroda..." onkeydown="if(event.key==='Enter'){sendChat()}"/>
+      <input id="chatInput" class="input" style="flex:1;"
+             placeholder="Ask Kabroda..."
+             onkeydown="if(event.key==='Enter'){sendChat()}"/>
       <button id="sendBtn" class="btn primary" onclick="sendChat()">Send</button>
     </div>
   </div>
@@ -84,197 +86,224 @@
 </style>
 
 <script>
-const IS_ELITE = {{ "true" if is_elite else "false" }};
-const USER_SESSION_TZ = {{ (user.session_tz or "UTC")|tojson }};
-let _lastYaml = "";
-let _lastDmrPayload = null;
+  const IS_ELITE = {{ "true" if is_elite else "false" }};
+  const USER_SESSION_TZ = {{ (user.session_tz or "UTC")|tojson }};
+  let _lastYaml = "";
+  let _lastDmrPayload = null;
 
-// Auto-set timezone once if still UTC
-async function ensureUserTimezone(){
-  try{
-    const guessed = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (!guessed) return;
-
-    const current = (USER_SESSION_TZ || "").trim();
-    const isUnset = (!current || current.toUpperCase() === "UTC");
-    if (!isUnset) return;
-    if (guessed === "UTC") return;
-
-    // IMPORTANT: backend expects JSON {"timezone": "..."} (not form data)
-    await fetch("/account/session-timezone", {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ timezone: guessed }),
-      credentials: "same-origin"
-    });
-  }catch(e){}
-}
-document.addEventListener("DOMContentLoaded", ensureUserTimezone);
-
-function fmt(x){
-  if (x === null || x === undefined) return "—";
-  if (typeof x === "number") return x.toLocaleString(undefined, {maximumFractionDigits: 1});
-  return String(x);
-}
-
-function normalizeReportText(payload){
-  const reportVal = (payload.report_text !== undefined) ? payload.report_text : payload.report;
-  if (typeof reportVal === "string") return reportVal;
-  if (reportVal && typeof reportVal.full_text === "string") return reportVal.full_text;
-  if (reportVal && typeof reportVal.text === "string") return reportVal.text;
-  return JSON.stringify(reportVal ?? "(No report returned.)", null, 2);
-}
-
-function splitNarrativeAndYaml(reportText){
-  const idx = reportText.indexOf("```yaml");
-  if (idx !== -1){
-    return { narrative: reportText.slice(0, idx).trim(), yaml: reportText.slice(idx).trim() };
+  function fmt(x){
+    if (x === null || x === undefined) return "—";
+    if (typeof x === "number") return x.toLocaleString(undefined, {maximumFractionDigits: 1});
+    return String(x);
   }
-  return { narrative: reportText.trim(), yaml: "" };
-}
 
-function renderDMR(payload){
-  _lastDmrPayload = payload;
-
-  const levels = payload.levels || {};
-  const r30 = payload.range_30m || {};
-
-  document.getElementById("lv_ds").textContent  = fmt(levels.daily_support);
-  document.getElementById("lv_dr").textContent  = fmt(levels.daily_resistance);
-  document.getElementById("lv_bo").textContent  = fmt(levels.breakout_trigger);
-  document.getElementById("lv_bd").textContent  = fmt(levels.breakdown_trigger);
-  document.getElementById("lv_30h").textContent = fmt(r30.high);
-  document.getElementById("lv_30l").textContent = fmt(r30.low);
-
-  const reportText = normalizeReportText(payload);
-  const parts = splitNarrativeAndYaml(reportText);
-
-  document.getElementById("dmrText").textContent = parts.narrative || "(No narrative returned.)";
-
-  _lastYaml = parts.yaml || "";
-  const toggleBtn = document.getElementById("toggleYamlBtn");
-  const copyBtn = document.getElementById("copyYamlBtn");
-  const yamlPre = document.getElementById("dmrYaml");
-
-  if (_lastYaml){
-    toggleBtn.style.display = "inline-block";
-    copyBtn.style.display = "inline-block";
-    yamlPre.textContent = _lastYaml;
-    yamlPre.style.display = "none";
-    toggleBtn.textContent = "Show YAML";
-  } else {
-    toggleBtn.style.display = "none";
-    copyBtn.style.display = "none";
-    yamlPre.style.display = "none";
-    yamlPre.textContent = "";
+  // Robust parse: read text first so non-JSON errors don't break the UI
+  async function fetchJsonSafe(url, options){
+    const r = await fetch(url, options);
+    const text = await r.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; }
+    catch { data = { detail: text || "Non-JSON response from server." }; }
+    return { r, data };
   }
-}
 
-function toggleYaml(){
-  const yamlPre = document.getElementById("dmrYaml");
-  const btn = document.getElementById("toggleYamlBtn");
-  if (yamlPre.style.display === "none"){
-    yamlPre.style.display = "block";
-    btn.textContent = "Hide YAML";
-  } else {
-    yamlPre.style.display = "none";
-    btn.textContent = "Show YAML";
+  // Auto-set timezone once if still UTC
+  async function ensureUserTimezone(){
+    try{
+      const guessed = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (!guessed) return;
+
+      const current = (USER_SESSION_TZ || "").trim();
+      const isUnset = (!current || current.toUpperCase() === "UTC");
+      if (!isUnset) return;
+      if (guessed === "UTC") return;
+
+      await fetchJsonSafe("/account/session-timezone", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ timezone: guessed }),
+        credentials: "same-origin",
+      });
+    }catch(e){}
   }
-}
+  document.addEventListener("DOMContentLoaded", ensureUserTimezone);
 
-async function copyYaml(){
-  try{
-    await navigator.clipboard.writeText(_lastYaml || "");
-    document.getElementById("copyStatus").textContent = "Copied ✅";
-    setTimeout(()=>document.getElementById("copyStatus").textContent="", 1400);
-  }catch(e){
-    document.getElementById("copyStatus").textContent = "Copy failed";
+  function normalizeReportText(payload){
+    const reportVal = (payload.report_text !== undefined) ? payload.report_text : payload.report;
+    if (typeof reportVal === "string") return reportVal;
+    if (reportVal && typeof reportVal.full_text === "string") return reportVal.full_text;
+    if (reportVal && typeof reportVal.text === "string") return reportVal.text;
+    return JSON.stringify(reportVal ?? "(No report returned.)", null, 2);
   }
-}
 
-async function runDMR(){
-  const sym = document.getElementById("symbol").value;
-  const status = document.getElementById("status");
-  const btn = document.getElementById("runBtn");
+  function splitNarrativeAndYaml(reportText){
+    const idx = reportText.indexOf("```yaml");
+    if (idx !== -1){
+      return { narrative: reportText.slice(0, idx).trim(), yaml: reportText.slice(idx).trim() };
+    }
+    return { narrative: reportText.trim(), yaml: "" };
+  }
 
-  status.textContent = "Running…";
-  btn.disabled = true;
+  function renderDMR(payload){
+    _lastDmrPayload = payload;
 
-  try{
-    const r = await fetch("/api/dmr/run-auto-ai", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({symbol: sym}),
-      credentials: "same-origin"
-    });
+    const levels = payload.levels || {};
+    const r30 = payload.range_30m || {};
 
-    const data = await r.json();
+    document.getElementById("lv_ds").textContent  = fmt(levels.daily_support);
+    document.getElementById("lv_dr").textContent  = fmt(levels.daily_resistance);
+    document.getElementById("lv_bo").textContent  = fmt(levels.breakout_trigger);
+    document.getElementById("lv_bd").textContent  = fmt(levels.breakdown_trigger);
+    document.getElementById("lv_30h").textContent = fmt(r30.high);
+    document.getElementById("lv_30l").textContent = fmt(r30.low);
 
-    if (!r.ok){
-      const msg = data.detail || data.error || "Request failed";
-      status.textContent = "Error";
-      alert(msg);
+    const reportText = normalizeReportText(payload);
+    const parts = splitNarrativeAndYaml(reportText);
+
+    document.getElementById("dmrText").textContent = parts.narrative || "(No narrative returned.)";
+
+    _lastYaml = parts.yaml || "";
+    const toggleBtn = document.getElementById("toggleYamlBtn");
+    const copyBtn = document.getElementById("copyYamlBtn");
+    const yamlPre = document.getElementById("dmrYaml");
+
+    if (_lastYaml){
+      toggleBtn.style.display = "inline-block";
+      copyBtn.style.display = "inline-block";
+      yamlPre.textContent = _lastYaml;
+      yamlPre.style.display = "none";
+      toggleBtn.textContent = "Show YAML";
+    } else {
+      toggleBtn.style.display = "none";
+      copyBtn.style.display = "none";
+      yamlPre.style.display = "none";
+      yamlPre.textContent = "";
+    }
+  }
+
+  function toggleYaml(){
+    const yamlPre = document.getElementById("dmrYaml");
+    const btn = document.getElementById("toggleYamlBtn");
+    if (yamlPre.style.display === "none"){
+      yamlPre.style.display = "block";
+      btn.textContent = "Hide YAML";
+    } else {
+      yamlPre.style.display = "none";
+      btn.textContent = "Show YAML";
+    }
+  }
+
+  async function copyYaml(){
+    try{
+      await navigator.clipboard.writeText(_lastYaml || "");
+      document.getElementById("copyStatus").textContent = "Copied ✅";
+      setTimeout(()=>document.getElementById("copyStatus").textContent="", 1400);
+    }catch(e){
+      document.getElementById("copyStatus").textContent = "Copy failed";
+    }
+  }
+
+  async function runDMR(){
+    const sym = document.getElementById("symbol").value;
+    const status = document.getElementById("status");
+    const btn = document.getElementById("runBtn");
+
+    status.textContent = "Running…";
+    btn.disabled = true;
+
+    // Live timer (prevents "it froze?" perception)
+    const t0 = performance.now();
+    const tick = setInterval(() => {
+      const secs = ((performance.now() - t0) / 1000).toFixed(1);
+      status.textContent = `Running… (${secs}s)`;
+    }, 250);
+
+    // Client-side timeout guard
+    const timeoutMs = 90_000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try{
+      const { r, data } = await fetchJsonSafe("/api/dmr/run-auto-ai", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ symbol: sym }),
+        credentials: "same-origin",
+        signal: controller.signal
+      });
+
+      if (!r.ok){
+        const msg = data.detail || data.error || `Request failed (${r.status})`;
+        status.textContent = "Error";
+        alert(msg);
+        return;
+      }
+
+      const payload = data.dmr || data;
+      renderDMR(payload);
+      status.textContent = "Done ✅";
+    }catch(err){
+      if (err && err.name === "AbortError"){
+        status.textContent = "Timed out";
+        alert("DMR request timed out (client-side). Try again.");
+        return;
+      }
+      status.textContent = "Request failed";
+      alert(err && err.message ? err.message : String(err));
+    }finally{
+      clearInterval(tick);
+      clearTimeout(timeoutId);
+      btn.disabled = false;
+    }
+  }
+
+  // Elite chat
+  function addChat(role, text){
+    const log = document.getElementById("chatLog");
+    if (!log) return;
+    const row = document.createElement("div");
+    row.className = "chat-msg " + (role === "user" ? "chat-user" : "chat-assistant");
+    const bub = document.createElement("div");
+    bub.className = "chat-bubble";
+    bub.textContent = text;
+    row.appendChild(bub);
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function sendChat(){
+    if (!IS_ELITE) return;
+
+    if (!_lastDmrPayload){
+      addChat("assistant", "Run the DMR first so I have today’s levels.");
       return;
     }
 
-    // IMPORTANT: support either {ok:true, dmr:{...}} or a flat payload
-    const payload = data.dmr || data;
-    renderDMR(payload);
+    const input = document.getElementById("chatInput");
+    const btn = document.getElementById("sendBtn");
+    const q = (input.value || "").trim();
+    if (!q) return;
 
-    status.textContent = "Done ✅";
-  }catch(err){
-    status.textContent = "Request failed";
-    alert(String(err));
-  }finally{
-    btn.disabled = false;
+    input.value = "";
+    addChat("user", q);
+    btn.disabled = true;
+
+    try{
+      const { r, data } = await fetchJsonSafe("/api/ai_coach", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ message: q, dmr: _lastDmrPayload }),
+        credentials: "same-origin"
+      });
+
+      if (!r.ok) throw new Error(data.detail || "Chat failed");
+      addChat("assistant", data.reply || "(No answer)");
+    }catch(e){
+      addChat("assistant", "Error: " + (e && e.message ? e.message : String(e)));
+    }finally{
+      btn.disabled = false;
+    }
   }
-}
-
-/* Elite chat */
-function addChat(role, text){
-  const log = document.getElementById("chatLog");
-  const row = document.createElement("div");
-  row.className = "chat-msg " + (role === "user" ? "chat-user" : "chat-assistant");
-  const bub = document.createElement("div");
-  bub.className = "chat-bubble";
-  bub.textContent = text;
-  row.appendChild(bub);
-  log.appendChild(row);
-  log.scrollTop = log.scrollHeight;
-}
-
-async function sendChat(){
-  if (!IS_ELITE) return;
-  if (!_lastDmrPayload){
-    addChat("assistant", "Run the DMR first so I have today’s levels.");
-    return;
-  }
-
-  const input = document.getElementById("chatInput");
-  const btn = document.getElementById("sendBtn");
-  const q = (input.value || "").trim();
-  if (!q) return;
-
-  input.value = "";
-  addChat("user", q);
-  btn.disabled = true;
-
-  try{
-    const r = await fetch("/api/ai_coach", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ message: q, dmr: _lastDmrPayload }),
-      credentials: "same-origin"
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || "Chat failed");
-    addChat("assistant", data.reply || "(No answer)");
-  }catch(e){
-    addChat("assistant", "Error: " + (e && e.message ? e.message : String(e)));
-  }finally{
-    btn.disabled = false;
-  }
-}
 </script>
 
 {% endblock %}
