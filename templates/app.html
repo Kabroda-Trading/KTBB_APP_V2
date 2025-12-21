@@ -95,10 +95,13 @@
   let _lastYaml = "";
   let _lastDmrPayload = null;
 
+  // 1. SAFE FORMATTING HELPER (Fixes "Crazy Decimals")
   function fmt(x){
     if (x === null || x === undefined) return "—";
-    if (typeof x === "number") return x.toLocaleString(undefined, {maximumFractionDigits: 1});
-    return String(x);
+    const n = parseFloat(x);
+    if (isNaN(n)) return String(x);
+    // Returns 88912.2 (1 decimal) to keep it clean
+    return n.toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 2});
   }
 
   async function fetchJsonSafe(url, options){
@@ -110,17 +113,59 @@
     return { r, data };
   }
 
-  // Auto-set timezone once if still UTC
+  // 2. RENDER LEVELS (Fixes "Blank UI")
+  function renderLevelsOnly(payload){
+    _lastDmrPayload = payload;
+
+    const levels = payload.levels || {};
+    const r30 = payload.range_30m || {};
+
+    // Safely update text only if elements exist
+    if(document.getElementById("lv_ds")) document.getElementById("lv_ds").textContent  = fmt(levels.daily_support);
+    if(document.getElementById("lv_dr")) document.getElementById("lv_dr").textContent  = fmt(levels.daily_resistance);
+    if(document.getElementById("lv_bo")) document.getElementById("lv_bo").textContent  = fmt(levels.breakout_trigger);
+    if(document.getElementById("lv_bd")) document.getElementById("lv_bd").textContent  = fmt(levels.breakdown_trigger);
+    if(document.getElementById("lv_30h")) document.getElementById("lv_30h").textContent = fmt(r30.high);
+    if(document.getElementById("lv_30l")) document.getElementById("lv_30l").textContent = fmt(r30.low);
+
+    // Show the "Copy" button now that data is ready
+    const btn = document.getElementById("tvCopyBtn");
+    if(btn) btn.style.display = "inline-flex";
+  }
+
+  // 3. SMART COPY FUNCTION (For the new Pine Script)
+  async function copyForTV(){
+    if (!_lastDmrPayload || !_lastDmrPayload.levels) return;
+    
+    const l = _lastDmrPayload.levels;
+    
+    // FORMAT: BO,BD,R,S (Comma separated, clean numbers)
+    // Example: "88912.24,87960.33,90268.05,84583.57"
+    const text = `${parseFloat(l.breakout_trigger).toFixed(2)},${parseFloat(l.breakdown_trigger).toFixed(2)},${parseFloat(l.daily_resistance).toFixed(2)},${parseFloat(l.daily_support).toFixed(2)}`;
+    
+    try {
+      await navigator.clipboard.writeText(text);
+      const btn = document.getElementById("tvCopyBtn");
+      const originalText = btn.textContent;
+      btn.textContent = "Copied! ✅";
+      setTimeout(() => btn.textContent = originalText, 2000);
+    } catch (err) {
+      alert("Could not copy: " + err);
+    }
+  }
+
+  // ... (Keep the rest of your standard functions like calibrateBattlefield, etc.) ...
+  
+  // Re-paste the standard functions below so you have the COMPLETE block:
+
   async function ensureUserTimezone(){
     try{
       const guessed = Intl.DateTimeFormat().resolvedOptions().timeZone;
       if (!guessed) return;
-
       const current = (USER_SESSION_TZ || "").trim();
       const isUnset = (!current || current.toUpperCase() === "UTC");
       if (!isUnset) return;
       if (guessed === "UTC") return;
-
       await fetchJsonSafe("/account/session-timezone", {
         method: "POST",
         headers: {"Content-Type":"application/json"},
@@ -139,23 +184,10 @@
     return { narrative: reportText.trim(), yaml: "" };
   }
 
-  function renderLevelsOnly(payload){
-    _lastDmrPayload = payload;
-
-    const levels = payload.levels || {};
-    const r30 = payload.range_30m || {};
-
-    document.getElementById("lv_ds").textContent  = fmt(levels.daily_support);
-    document.getElementById("lv_dr").textContent  = fmt(levels.daily_resistance);
-    document.getElementById("lv_bo").textContent  = fmt(levels.breakout_trigger);
-    document.getElementById("lv_bd").textContent  = fmt(levels.breakdown_trigger);
-    document.getElementById("lv_30h").textContent = fmt(r30.high);
-    document.getElementById("lv_30l").textContent = fmt(r30.low);
-  }
-
   function setNarrativeText(reportText){
     const parts = splitNarrativeAndYaml(reportText || "");
-    document.getElementById("dmrText").textContent = parts.narrative || "(No narrative returned.)";
+    const dmrEl = document.getElementById("dmrText");
+    if(dmrEl) dmrEl.textContent = parts.narrative || "(No narrative returned.)";
 
     _lastYaml = parts.yaml || "";
     const toggleBtn = document.getElementById("toggleYamlBtn");
@@ -163,16 +195,20 @@
     const yamlPre = document.getElementById("dmrYaml");
 
     if (_lastYaml){
-      toggleBtn.style.display = "inline-block";
-      copyBtn.style.display = "inline-block";
-      yamlPre.textContent = _lastYaml;
-      yamlPre.style.display = "none";
-      toggleBtn.textContent = "Show YAML";
+      if(toggleBtn) toggleBtn.style.display = "inline-block";
+      if(copyBtn) copyBtn.style.display = "inline-block";
+      if(yamlPre) {
+        yamlPre.textContent = _lastYaml;
+        yamlPre.style.display = "none";
+      }
+      if(toggleBtn) toggleBtn.textContent = "Show YAML";
     } else {
-      toggleBtn.style.display = "none";
-      copyBtn.style.display = "none";
-      yamlPre.style.display = "none";
-      yamlPre.textContent = "";
+      if(toggleBtn) toggleBtn.style.display = "none";
+      if(copyBtn) copyBtn.style.display = "none";
+      if(yamlPre) {
+        yamlPre.style.display = "none";
+        yamlPre.textContent = "";
+      }
     }
   }
 
@@ -199,18 +235,19 @@
   }
 
   async function calibrateBattlefield(){
-    const sym = document.getElementById("symbol").value;
+    const symEl = document.getElementById("symbol");
     const status = document.getElementById("status");
     const levelsBtn = document.getElementById("levelsBtn");
     const reviewBtn = document.getElementById("reviewBtn");
+
+    const sym = symEl ? symEl.value : "BTCUSDT";
 
     status.textContent = "Calibrating the battlefield…";
     levelsBtn.disabled = true;
     reviewBtn.disabled = true;
 
-    // Clear narrative area, keep UI honest
-    document.getElementById("dmrText").textContent = "(Generating levels…)";
-    setNarrativeText(""); // hides YAML controls
+    if(document.getElementById("dmrText")) document.getElementById("dmrText").textContent = "(Generating levels…)";
+    setNarrativeText(""); 
 
     try{
       const { r, data } = await fetchJsonSafe("/api/dmr/run-raw", {
@@ -229,8 +266,8 @@
 
       renderLevelsOnly(data);
       status.textContent = "Battlefield calibrated ✅ (levels ready)";
-      reviewBtn.disabled = false; // now allow AI
-      document.getElementById("dmrText").textContent = "(Levels ready. Deploy the Daily Review when you want the narrative.)";
+      reviewBtn.disabled = false;
+      if(document.getElementById("dmrText")) document.getElementById("dmrText").textContent = "(Levels ready. Deploy the Daily Review when you want the narrative.)";
     }catch(e){
       status.textContent = "Request failed";
       alert(e && e.message ? e.message : String(e));
@@ -263,7 +300,6 @@
       const { r, data } = await fetchJsonSafe("/api/dmr/generate-ai", {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        // ✅ Send raw payload back to server (no session-cookie dependence)
         body: JSON.stringify({ dmr_raw: _lastDmrPayload }),
         credentials: "same-origin"
       });
@@ -287,7 +323,7 @@
     }
   }
 
-  // Elite chat
+  // ELITE CHAT (Keep existing code)
   function addChat(role, text){
     const log = document.getElementById("chatLog");
     if (!log) return;
@@ -303,12 +339,10 @@
 
   async function sendChat(){
     if (!IS_ELITE) return;
-
     if (!_lastDmrPayload){
       addChat("assistant", "Run 'Calibrate the Battlefield' first so I have today’s levels.");
       return;
     }
-
     const input = document.getElementById("chatInput");
     const btn = document.getElementById("sendBtn");
     const q = (input.value || "").trim();
@@ -334,36 +368,6 @@
       btn.disabled = false;
     }
   }
-  // Add this to the <script> block in app.html
-
-async function copyForTV(){
-  if (!_lastDmrPayload || !_lastDmrPayload.levels) return;
-  
-  const l = _lastDmrPayload.levels;
-  
-  // Format: "BO: 67000 | BD: 66000 | R: 68000 | S: 65000"
-  // This is clean and easy to read while pasting.
-  const text = `BO: ${l.breakout_trigger} | BD: ${l.breakdown_trigger} | R: ${l.daily_resistance} | S: ${l.daily_support}`;
-  
-  try {
-    await navigator.clipboard.writeText(text);
-    const btn = document.getElementById("tvCopyBtn");
-    const originalText = btn.textContent;
-    btn.textContent = "Copied! ✅";
-    setTimeout(() => btn.textContent = originalText, 2000);
-  } catch (err) {
-    alert("Could not copy: " + err);
-  }
-}
-
-// UPDATE existing renderLevelsOnly function to show the button
-function renderLevelsOnly(payload){
-    _lastDmrPayload = payload;
-    // ... (existing code setting textContent for lv_ds, lv_dr, etc.) ...
-    
-    // Add this line at the end:
-    document.getElementById("tvCopyBtn").style.display = "inline-flex"; 
-}
 </script>
 
 {% endblock %}
