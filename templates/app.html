@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
 <div class="shell" style="padding-top:20px; padding-bottom:40px;">
 
@@ -15,7 +16,6 @@
     </p>
 
     <div class="row" style="align-items: flex-end; gap: 16px;">
-      
       <div style="flex: 1; max-width: 280px;">
         <label class="label" style="margin-bottom:8px; display:block;">Target Asset</label>
         <select id="symbol" class="input" style="cursor:pointer;">
@@ -38,11 +38,6 @@
       <span style="color:var(--accent-primary)">●</span> System Ready. Awaiting command.
     </div>
   </div>
-    
-    <div id="status" class="muted" style="margin-top:12px; font-style:italic;">
-      Ready. Awaiting command.
-    </div>
-  </div>
 
   <div class="card" style="margin-bottom:24px;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -52,33 +47,33 @@
       </button>
     </div>
 
-    <div class="grid" style="margin-top:0; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px;">
+    <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 16px;">
       
-      <div style="background:rgba(255,255,255,0.03); padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.05);">
-        <div class="label" style="color:var(--accent-primary)">Daily Resistance</div>
-        <div id="lv_dr" style="font-size:20px; font-weight:700; color:#fff;">—</div>
-      </div>
-      <div style="background:rgba(255,255,255,0.03); padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.05);">
-        <div class="label" style="color:var(--accent-primary)">Daily Support</div>
-        <div id="lv_ds" style="font-size:20px; font-weight:700; color:#fff;">—</div>
-      </div>
-
-      <div style="background:rgba(16, 185, 129, 0.1); padding:12px; border-radius:12px; border:1px solid rgba(16, 185, 129, 0.2);">
-        <div class="label" style="color:#10b981;">Breakout Trigger</div>
-        <div id="lv_bo" style="font-size:20px; font-weight:700; color:#fff;">—</div>
-      </div>
-      <div style="background:rgba(168, 85, 247, 0.1); padding:12px; border-radius:12px; border:1px solid rgba(168, 85, 247, 0.2);">
-        <div class="label" style="color:#a855f7;">Breakdown Trigger</div>
-        <div id="lv_bd" style="font-size:20px; font-weight:700; color:#fff;">—</div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div style="background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.2); padding:16px; border-radius:12px; text-align:center;">
+          <div class="label" style="color:#f87171; font-size:12px; text-transform:uppercase;">Daily Resistance</div>
+          <div id="lv_dr" style="font-size:24px; font-weight:800; color:#fff;">—</div>
+        </div>
+        <div style="background:rgba(16, 185, 129, 0.1); border:1px solid rgba(16, 185, 129, 0.2); padding:16px; border-radius:12px; text-align:center;">
+          <div class="label" style="color:#34d399; font-size:12px; text-transform:uppercase;">Breakout Trigger</div>
+          <div id="lv_bo" style="font-size:24px; font-weight:800; color:#fff;">—</div>
+        </div>
       </div>
 
-      <div style="background:rgba(255,255,255,0.03); padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.05);">
-        <div class="label">30m Range High</div>
-        <div id="lv_30h" style="font-size:20px; font-weight:700; color:#cbd5e1;">—</div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div style="background:rgba(168, 85, 247, 0.1); border:1px solid rgba(168, 85, 247, 0.2); padding:16px; border-radius:12px; text-align:center;">
+          <div class="label" style="color:#c084fc; font-size:12px; text-transform:uppercase;">Breakdown Trigger</div>
+          <div id="lv_bd" style="font-size:24px; font-weight:800; color:#fff;">—</div>
+        </div>
+        <div style="background:rgba(59, 130, 246, 0.1); border:1px solid rgba(59, 130, 246, 0.2); padding:16px; border-radius:12px; text-align:center;">
+          <div class="label" style="color:#60a5fa; font-size:12px; text-transform:uppercase;">Daily Support</div>
+          <div id="lv_ds" style="font-size:24px; font-weight:800; color:#fff;">—</div>
+        </div>
       </div>
-      <div style="background:rgba(255,255,255,0.03); padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.05);">
-        <div class="label">30m Range Low</div>
-        <div id="lv_30l" style="font-size:20px; font-weight:700; color:#cbd5e1;">—</div>
+      
+      <div style="display: flex; justify-content: space-between; background:rgba(255,255,255,0.03); padding:12px 24px; border-radius:12px; border:1px solid rgba(255,255,255,0.05);">
+        <span class="muted" style="font-size:13px;">30m High: <strong id="lv_30h" style="color:#e2e8f0; margin-left:6px;">—</strong></span>
+        <span class="muted" style="font-size:13px;">30m Low: <strong id="lv_30l" style="color:#e2e8f0; margin-left:6px;">—</strong></span>
       </div>
 
     </div>
@@ -98,9 +93,11 @@
     </div>
 
     {% if is_elite %}
-      <pre id="dmrText" class="pre" style="min-height:120px; font-family:'Courier New', monospace; font-size:14px; line-height:1.6;">(Calibrate the Battlefield above to initialize structure levels. Then deploy the narrative.)</pre>
+      <div id="dmrText" style="min-height:120px; font-size:15px; line-height:1.7; color:#e2e8f0;">
+        <span class="muted" style="font-family:'Courier New', monospace;">(Calibrate the Battlefield above to initialize structure levels. Then deploy the narrative.)</span>
+      </div>
       
-      <div class="row" style="margin-top:10px;">
+      <div class="row" style="margin-top:20px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;">
         <button id="toggleYamlBtn" class="btn" style="display:none; font-size:12px;" onclick="toggleYaml()">Show Raw Data</button>
         <button id="copyYamlBtn" class="btn" style="display:none; font-size:12px;" onclick="copyYaml()">Copy Raw Data</button>
         <span id="copyStatus" class="muted" style="margin-left:10px;"></span>
@@ -154,14 +151,11 @@
     return { r, data };
   }
 
-  // RENDER LEVELS (The Fix: Ensuring all IDs exist)
   function renderLevelsOnly(payload){
     _lastDmrPayload = payload;
-
     const levels = payload.levels || {};
     const r30 = payload.range_30m || {};
 
-    // Safely update all 6 boxes
     if(document.getElementById("lv_ds")) document.getElementById("lv_ds").textContent  = fmt(levels.daily_support);
     if(document.getElementById("lv_dr")) document.getElementById("lv_dr").textContent  = fmt(levels.daily_resistance);
     if(document.getElementById("lv_bo")) document.getElementById("lv_bo").textContent  = fmt(levels.breakout_trigger);
@@ -169,7 +163,6 @@
     if(document.getElementById("lv_30h")) document.getElementById("lv_30h").textContent = fmt(r30.high);
     if(document.getElementById("lv_30l")) document.getElementById("lv_30l").textContent = fmt(r30.low);
 
-    // Show Copy Button
     const btn = document.getElementById("tvCopyBtn");
     if(btn) btn.style.display = "inline-flex";
   }
@@ -177,18 +170,14 @@
   async function copyForTV(){
     if (!_lastDmrPayload || !_lastDmrPayload.levels) return;
     const l = _lastDmrPayload.levels;
-    // Format: BO,BD,R,S
     const text = `${parseFloat(l.breakout_trigger).toFixed(2)},${parseFloat(l.breakdown_trigger).toFixed(2)},${parseFloat(l.daily_resistance).toFixed(2)},${parseFloat(l.daily_support).toFixed(2)}`;
-    
     try {
       await navigator.clipboard.writeText(text);
       const btn = document.getElementById("tvCopyBtn");
       const originalText = btn.textContent;
       btn.textContent = "Copied! ✅";
       setTimeout(() => btn.textContent = originalText, 2000);
-    } catch (err) {
-      alert("Could not copy: " + err);
-    }
+    } catch (err) { alert("Could not copy: " + err); }
   }
 
   async function calibrateBattlefield(){
@@ -203,14 +192,12 @@
     levelsBtn.disabled = true;
     if(reviewBtn) reviewBtn.disabled = true;
 
-    if(document.getElementById("dmrText")) document.getElementById("dmrText").textContent = "(Calculating structure levels…)";
+    if(document.getElementById("dmrText")) document.getElementById("dmrText").innerHTML = '<span class="muted">(Calculating structure levels…)</span>';
 
     try{
       const { r, data } = await fetchJsonSafe("/api/dmr/run-raw", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ symbol: sym }),
-        credentials: "same-origin"
+        method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ symbol: sym }), credentials: "same-origin"
       });
 
       if (!r.ok){
@@ -223,7 +210,7 @@
       renderLevelsOnly(data);
       status.textContent = "Battlefield calibrated ✅ (Levels Ready)";
       if(reviewBtn) reviewBtn.disabled = false;
-      if(document.getElementById("dmrText")) document.getElementById("dmrText").textContent = "(Levels ready. Deploy the Daily Review when you want the narrative.)";
+      if(document.getElementById("dmrText")) document.getElementById("dmrText").innerHTML = '<span class="muted">(Levels ready. Deploy the Daily Review when you want the narrative.)</span>';
     }catch(e){
       status.textContent = "System Error";
       alert(e && e.message ? e.message : String(e));
@@ -254,10 +241,8 @@
 
     try{
       const { r, data } = await fetchJsonSafe("/api/dmr/generate-ai", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ dmr_raw: _lastDmrPayload }),
-        credentials: "same-origin"
+        method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ dmr_raw: _lastDmrPayload }), credentials: "same-origin"
       });
 
       if (!r.ok){
@@ -279,7 +264,7 @@
     }
   }
 
-  // --- Utility Functions (Keep as-is) ---
+  // --- UPDATED UTILITIES (THE BLOB FIX) ---
   function splitNarrativeAndYaml(reportText){
     const idx = reportText.indexOf("```yaml");
     if (idx !== -1){
@@ -291,7 +276,9 @@
   function setNarrativeText(reportText){
     const parts = splitNarrativeAndYaml(reportText || "");
     const dmrEl = document.getElementById("dmrText");
-    if(dmrEl) dmrEl.textContent = parts.narrative || "(No narrative returned.)";
+    
+    // THE FIX: Use marked.parse to render Markdown HTML
+    if(dmrEl) dmrEl.innerHTML = marked.parse(parts.narrative || "(No narrative returned.)");
 
     _lastYaml = parts.yaml || "";
     const toggleBtn = document.getElementById("toggleYamlBtn");
@@ -338,7 +325,6 @@
     }catch(e){}
   }
 
-  // Chat Logic
   function addChat(role, text){
     const log = document.getElementById("chatLog");
     if (!log) return;
@@ -346,7 +332,14 @@
     row.className = "chat-msg " + (role === "user" ? "chat-user" : "chat-assistant");
     const bub = document.createElement("div");
     bub.className = "chat-bubble";
-    bub.textContent = text;
+    
+    // THE FIX: Parse Markdown for Assistant, plain text for User
+    if (role === "user") {
+        bub.textContent = text;
+    } else {
+        bub.innerHTML = marked.parse(text);
+    }
+    
     row.appendChild(bub);
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
@@ -384,7 +377,6 @@
     }
   }
 
-  // Timezone Auto-Detect
   async function ensureUserTimezone(){
     try{
       const guessed = Intl.DateTimeFormat().resolvedOptions().timeZone;
