@@ -1,82 +1,136 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="container">
-  <div class="hero">
-    <h1>Kabroda BattleBox Suite</h1>
-    <p class="muted">Generate today’s structure levels, opening range, HTF shelves, and a clean narrative.</p>
-    <p class="muted">Logged in as {{ user.email }} • {{ user.plan_label }}</p>
+<div class="shell" style="padding-top:20px; padding-bottom:40px;">
+
+  <div class="text-center" style="margin-bottom:32px;">
+    <h1>BattleBox Command</h1>
+    <p class="muted">Logged in as <strong style="color:var(--accent-primary)">{{ user.email }}</strong> • {{ user.plan_label }}</p>
   </div>
 
-  <div class="card">
+  <div class="card" style="margin-bottom:24px;">
+    <h3>1. Calibrate the Battlefield</h3>
+    <p class="muted" style="margin-bottom:20px; max-width:600px;">
+      Initialize the session. Pull structure levels, 30m opening range, and set execution triggers.
+    </p>
+
+    <div class="row" style="align-items: flex-end; gap: 16px;">
+      
+      <div style="flex: 1; max-width: 280px;">
+        <label class="label" style="margin-bottom:8px; display:block;">Target Asset</label>
+        <select id="symbol" class="input" style="cursor:pointer;">
+          <option value="BTCUSDT">BTC (Bitcoin)</option>
+          {% if is_elite %}
+          <option value="ETHUSDT">ETH (Ethereum)</option>
+          <option value="SOLUSDT">SOL (Solana)</option>
+          {% endif %}
+        </select>
+      </div>
+
+      <div style="flex: 0 0 auto;">
+        <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="min-width:180px;">
+          Calibrate Levels
+        </button>
+      </div>
+    </div>
+    
+    <div id="status" class="muted" style="margin-top:16px; font-size:13px; border-top:1px solid rgba(255,255,255,0.05); padding-top:12px;">
+      <span style="color:var(--accent-primary)">●</span> System Ready. Awaiting command.
+    </div>
+  </div>
+    
+    <div id="status" class="muted" style="margin-top:12px; font-style:italic;">
+      Ready. Awaiting command.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:24px;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <h3>Battlefield Calibration</h3>
-      <button id="tvCopyBtn" class="btn" onclick="copyForTV()" style="display:none; padding:6px 12px; font-size:13px;">
-         Wait...
+      <h3>Battlefield Levels</h3>
+      <button id="tvCopyBtn" class="btn" onclick="copyForTV()" style="display:none; font-size:13px; padding:6px 14px; border-color:var(--accent-primary);">
+        Copy for TradingView
       </button>
     </div>
 
-    <div class="row">
-      <select id="symbol" class="input" style="flex:1;">
-        <option value="BTCUSDT">BTC</option>
-        {% if is_elite %}
-        <option value="ETHUSDT">ETH</option>
-        <option value="SOLUSDT">SOL</option>
-        {% endif %}
-      </select>
-      <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()">1. Calibrate Levels</button>
+    <div class="grid" style="margin-top:0; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px;">
+      
+      <div style="background:rgba(255,255,255,0.03); padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.05);">
+        <div class="label" style="color:var(--accent-primary)">Daily Resistance</div>
+        <div id="lv_dr" style="font-size:20px; font-weight:700; color:#fff;">—</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.03); padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.05);">
+        <div class="label" style="color:var(--accent-primary)">Daily Support</div>
+        <div id="lv_ds" style="font-size:20px; font-weight:700; color:#fff;">—</div>
+      </div>
+
+      <div style="background:rgba(16, 185, 129, 0.1); padding:12px; border-radius:12px; border:1px solid rgba(16, 185, 129, 0.2);">
+        <div class="label" style="color:#10b981;">Breakout Trigger</div>
+        <div id="lv_bo" style="font-size:20px; font-weight:700; color:#fff;">—</div>
+      </div>
+      <div style="background:rgba(168, 85, 247, 0.1); padding:12px; border-radius:12px; border:1px solid rgba(168, 85, 247, 0.2);">
+        <div class="label" style="color:#a855f7;">Breakdown Trigger</div>
+        <div id="lv_bd" style="font-size:20px; font-weight:700; color:#fff;">—</div>
+      </div>
+
+      <div style="background:rgba(255,255,255,0.03); padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.05);">
+        <div class="label">30m Range High</div>
+        <div id="lv_30h" style="font-size:20px; font-weight:700; color:#cbd5e1;">—</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.03); padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.05);">
+        <div class="label">30m Range Low</div>
+        <div id="lv_30l" style="font-size:20px; font-weight:700; color:#cbd5e1;">—</div>
+      </div>
+
     </div>
-    
-    <div class="grid" style="margin-top:24px; gap:12px; grid-template-columns: repeat(2, 1fr);">
-       <div style="background:rgba(0,0,0,0.3); padding:12px; border-radius:8px;">
-          <div class="label">Breakout Trigger</div><div id="lv_bo" style="font-size:18px; font-weight:700; color:#10b981;">—</div>
-       </div>
-       <div style="background:rgba(0,0,0,0.3); padding:12px; border-radius:8px;">
-          <div class="label">Breakdown Trigger</div><div id="lv_bd" style="font-size:18px; font-weight:700; color:#a855f7;">—</div>
-       </div>
-       </div>
   </div>
 
-  <div class="card" style="margin-top:24px;">
-    <div style="display:flex; justify-content:space-between; align-items:center;">
-       <h3>Daily Market Review</h3>
-       {% if is_elite %}
-         <button id="reviewBtn" class="btn" onclick="deployDailyReview()" disabled>2. Deploy Narrative</button>
-       {% else %}
-         <span class="pill-badge">Elite Only</span>
-       {% endif %}
+  <div class="card" style="margin-bottom:24px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h3>2. Daily Market Review</h3>
+      
+      {% if is_elite %}
+        <button id="reviewBtn" class="btn" onclick="deployDailyReview()" disabled>
+           Deploy the Daily Review
+        </button>
+      {% else %}
+        <span class="pill-badge">Elite Only</span>
+      {% endif %}
     </div>
 
     {% if is_elite %}
-      <pre id="dmrText" class="report" style="margin-top:16px;">(Calibrate levels first...)</pre>
+      <pre id="dmrText" class="pre" style="min-height:120px; font-family:'Courier New', monospace; font-size:14px; line-height:1.6;">(Calibrate the Battlefield above to initialize structure levels. Then deploy the narrative.)</pre>
+      
+      <div class="row" style="margin-top:10px;">
+        <button id="toggleYamlBtn" class="btn" style="display:none; font-size:12px;" onclick="toggleYaml()">Show Raw Data</button>
+        <button id="copyYamlBtn" class="btn" style="display:none; font-size:12px;" onclick="copyYaml()">Copy Raw Data</button>
+        <span id="copyStatus" class="muted" style="margin-left:10px;"></span>
+      </div>
+      <pre id="dmrYaml" class="pre" style="display:none; margin-top:10px; font-size:12px;"></pre>
+
     {% else %}
-      <div style="padding:20px; text-align:center; color:var(--text-muted);">
-        <p>Tactical Plan active. Structural levels are loaded above.</p>
-        <a href="/pricing" style="color:var(--accent-primary);">Upgrade to Elite</a> to unlock the full AI Situation Report.
+      <div style="padding:32px; text-align:center; background:rgba(0,0,0,0.2); border-radius:12px;">
+        <p class="muted" style="font-size:16px;">Tactical Plan Active. Levels loaded successfully.</p>
+        <p style="margin-top:8px;"><a href="/pricing">Upgrade to Elite</a> to unlock the AI Situation Report.</p>
       </div>
     {% endif %}
   </div>
 
-<style>
-  .container{max-width:1000px;margin:0 auto;padding:22px;}
-  .hero{margin-bottom:14px;}
-  .card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:18px;padding:16px;}
-  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
-  .input{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.25);color:#fff;min-width:160px;}
-  .btn{padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;text-decoration:none;cursor:pointer;}
-  .btn.primary{background:rgba(96,165,250,.25);border-color:rgba(96,165,250,.4);}
-  .btn:disabled{opacity:.5;cursor:not-allowed;}
-  .muted{opacity:.75;}
-  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
-  .pill{padding:10px;border-radius:14px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.22);}
-  .report{border-radius:16px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.25);padding:12px;}
-  .chat-log{max-height:320px;overflow:auto;border:1px solid rgba(255,255,255,.10);border-radius:16px;padding:10px;background:rgba(0,0,0,.18);}
-  .chat-msg{display:flex;margin:8px 0;}
-  .chat-user{justify-content:flex-end;}
-  .chat-assistant{justify-content:flex-start;}
-  .chat-bubble{max-width:80%;padding:10px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.06);white-space:pre-wrap;}
-  .chat-user .chat-bubble{background:rgba(96,165,250,.18);border-color:rgba(96,165,250,.35);}
-</style>
+  {% if is_elite %}
+  <div class="card">
+    <h3>3. Kabroda AI Coach</h3>
+    <p class="muted">Interactive guidance locked to today's levels.</p>
+
+    <div id="chatLog" class="chat-log" style="height:300px; overflow-y:auto; background:rgba(0,0,0,0.3); border:1px solid var(--glass-border); border-radius:12px; padding:16px; margin:16px 0;">
+       </div>
+
+    <div class="row">
+      <input id="chatInput" class="input" style="flex:1;" placeholder="Ask Kabroda..." onkeydown="if(event.key==='Enter'){sendChat()}"/>
+      <button id="sendBtn" class="btn primary" onclick="sendChat()">Send</button>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
 
 <script>
   const IS_ELITE = {{ "true" if is_elite else "false" }};
@@ -84,12 +138,10 @@
   let _lastYaml = "";
   let _lastDmrPayload = null;
 
-  // 1. SAFE FORMATTING HELPER (Fixes "Crazy Decimals")
   function fmt(x){
     if (x === null || x === undefined) return "—";
     const n = parseFloat(x);
     if (isNaN(n)) return String(x);
-    // Returns 88912.2 (1 decimal) to keep it clean
     return n.toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 2});
   }
 
@@ -102,14 +154,14 @@
     return { r, data };
   }
 
-  // 2. RENDER LEVELS (Fixes "Blank UI")
+  // RENDER LEVELS (The Fix: Ensuring all IDs exist)
   function renderLevelsOnly(payload){
     _lastDmrPayload = payload;
 
     const levels = payload.levels || {};
     const r30 = payload.range_30m || {};
 
-    // Safely update text only if elements exist
+    // Safely update all 6 boxes
     if(document.getElementById("lv_ds")) document.getElementById("lv_ds").textContent  = fmt(levels.daily_support);
     if(document.getElementById("lv_dr")) document.getElementById("lv_dr").textContent  = fmt(levels.daily_resistance);
     if(document.getElementById("lv_bo")) document.getElementById("lv_bo").textContent  = fmt(levels.breakout_trigger);
@@ -117,19 +169,15 @@
     if(document.getElementById("lv_30h")) document.getElementById("lv_30h").textContent = fmt(r30.high);
     if(document.getElementById("lv_30l")) document.getElementById("lv_30l").textContent = fmt(r30.low);
 
-    // Show the "Copy" button now that data is ready
+    // Show Copy Button
     const btn = document.getElementById("tvCopyBtn");
     if(btn) btn.style.display = "inline-flex";
   }
 
-  // 3. SMART COPY FUNCTION (For the new Pine Script)
   async function copyForTV(){
     if (!_lastDmrPayload || !_lastDmrPayload.levels) return;
-    
     const l = _lastDmrPayload.levels;
-    
-    // FORMAT: BO,BD,R,S (Comma separated, clean numbers)
-    // Example: "88912.24,87960.33,90268.05,84583.57"
+    // Format: BO,BD,R,S
     const text = `${parseFloat(l.breakout_trigger).toFixed(2)},${parseFloat(l.breakdown_trigger).toFixed(2)},${parseFloat(l.daily_resistance).toFixed(2)},${parseFloat(l.daily_support).toFixed(2)}`;
     
     try {
@@ -143,28 +191,95 @@
     }
   }
 
-  // ... (Keep the rest of your standard functions like calibrateBattlefield, etc.) ...
-  
-  // Re-paste the standard functions below so you have the COMPLETE block:
+  async function calibrateBattlefield(){
+    const symEl = document.getElementById("symbol");
+    const status = document.getElementById("status");
+    const levelsBtn = document.getElementById("levelsBtn");
+    const reviewBtn = document.getElementById("reviewBtn");
 
-  async function ensureUserTimezone(){
+    const sym = symEl ? symEl.value : "BTCUSDT";
+
+    status.textContent = "Calibrating the battlefield…";
+    levelsBtn.disabled = true;
+    if(reviewBtn) reviewBtn.disabled = true;
+
+    if(document.getElementById("dmrText")) document.getElementById("dmrText").textContent = "(Calculating structure levels…)";
+
     try{
-      const guessed = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (!guessed) return;
-      const current = (USER_SESSION_TZ || "").trim();
-      const isUnset = (!current || current.toUpperCase() === "UTC");
-      if (!isUnset) return;
-      if (guessed === "UTC") return;
-      await fetchJsonSafe("/account/session-timezone", {
+      const { r, data } = await fetchJsonSafe("/api/dmr/run-raw", {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ timezone: guessed }),
-        credentials: "same-origin",
+        body: JSON.stringify({ symbol: sym }),
+        credentials: "same-origin"
       });
-    }catch(e){}
-  }
-  document.addEventListener("DOMContentLoaded", ensureUserTimezone);
 
+      if (!r.ok){
+        const msg = data.detail || data.error || `Failed (${r.status})`;
+        status.textContent = "Calibration Failed: " + msg;
+        alert(msg);
+        return;
+      }
+
+      renderLevelsOnly(data);
+      status.textContent = "Battlefield calibrated ✅ (Levels Ready)";
+      if(reviewBtn) reviewBtn.disabled = false;
+      if(document.getElementById("dmrText")) document.getElementById("dmrText").textContent = "(Levels ready. Deploy the Daily Review when you want the narrative.)";
+    }catch(e){
+      status.textContent = "System Error";
+      alert(e && e.message ? e.message : String(e));
+    }finally{
+      levelsBtn.disabled = false;
+    }
+  }
+
+  async function deployDailyReview(){
+    const status = document.getElementById("status");
+    const reviewBtn = document.getElementById("reviewBtn");
+    const levelsBtn = document.getElementById("levelsBtn");
+
+    if (!_lastDmrPayload){
+      alert("System Empty. Run 'Calibrate the Battlefield' first.");
+      return;
+    }
+
+    status.textContent = "Deploying the Daily Review…";
+    reviewBtn.disabled = true;
+    levelsBtn.disabled = true;
+
+    const t0 = performance.now();
+    const tick = setInterval(() => {
+      const secs = ((performance.now() - t0) / 1000).toFixed(1);
+      status.textContent = `Deploying daily review… (${secs}s)`;
+    }, 250);
+
+    try{
+      const { r, data } = await fetchJsonSafe("/api/dmr/generate-ai", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ dmr_raw: _lastDmrPayload }),
+        credentials: "same-origin"
+      });
+
+      if (!r.ok){
+        const msg = data.detail || data.error || `AI Failed (${r.status})`;
+        status.textContent = "Deployment Failed";
+        alert(msg);
+        return;
+      }
+
+      setNarrativeText(data.report_text || "");
+      status.textContent = "Daily Review Deployed ✅";
+    }catch(e){
+      status.textContent = "System Error";
+      alert(e && e.message ? e.message : String(e));
+    }finally{
+      clearInterval(tick);
+      reviewBtn.disabled = false;
+      levelsBtn.disabled = false;
+    }
+  }
+
+  // --- Utility Functions (Keep as-is) ---
   function splitNarrativeAndYaml(reportText){
     const idx = reportText.indexOf("```yaml");
     if (idx !== -1){
@@ -190,7 +305,7 @@
         yamlPre.textContent = _lastYaml;
         yamlPre.style.display = "none";
       }
-      if(toggleBtn) toggleBtn.textContent = "Show YAML";
+      if(toggleBtn) toggleBtn.textContent = "Show Raw Data";
     } else {
       if(toggleBtn) toggleBtn.style.display = "none";
       if(copyBtn) copyBtn.style.display = "none";
@@ -206,113 +321,24 @@
     const btn = document.getElementById("toggleYamlBtn");
     if (yamlPre.style.display === "none"){
       yamlPre.style.display = "block";
-      btn.textContent = "Hide YAML";
+      btn.textContent = "Hide Raw Data";
     } else {
       yamlPre.style.display = "none";
-      btn.textContent = "Show YAML";
+      btn.textContent = "Show Raw Data";
     }
   }
 
   async function copyYaml(){
     try{
       await navigator.clipboard.writeText(_lastYaml || "");
-      document.getElementById("copyStatus").textContent = "Copied ✅";
-      setTimeout(()=>document.getElementById("copyStatus").textContent="", 1400);
-    }catch(e){
-      document.getElementById("copyStatus").textContent = "Copy failed";
-    }
+      const btn = document.getElementById("copyYamlBtn");
+      const orig = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(()=>btn.textContent=orig, 1400);
+    }catch(e){}
   }
 
-  async function calibrateBattlefield(){
-    const symEl = document.getElementById("symbol");
-    const status = document.getElementById("status");
-    const levelsBtn = document.getElementById("levelsBtn");
-    const reviewBtn = document.getElementById("reviewBtn");
-
-    const sym = symEl ? symEl.value : "BTCUSDT";
-
-    status.textContent = "Calibrating the battlefield…";
-    levelsBtn.disabled = true;
-    reviewBtn.disabled = true;
-
-    if(document.getElementById("dmrText")) document.getElementById("dmrText").textContent = "(Generating levels…)";
-    setNarrativeText(""); 
-
-    try{
-      const { r, data } = await fetchJsonSafe("/api/dmr/run-raw", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ symbol: sym }),
-        credentials: "same-origin"
-      });
-
-      if (!r.ok){
-        const msg = data.detail || data.error || `Levels failed (${r.status})`;
-        status.textContent = "Error";
-        alert(msg);
-        return;
-      }
-
-      renderLevelsOnly(data);
-      status.textContent = "Battlefield calibrated ✅ (levels ready)";
-      reviewBtn.disabled = false;
-      if(document.getElementById("dmrText")) document.getElementById("dmrText").textContent = "(Levels ready. Deploy the Daily Review when you want the narrative.)";
-    }catch(e){
-      status.textContent = "Request failed";
-      alert(e && e.message ? e.message : String(e));
-    }finally{
-      levelsBtn.disabled = false;
-    }
-  }
-
-  async function deployDailyReview(){
-    const status = document.getElementById("status");
-    const reviewBtn = document.getElementById("reviewBtn");
-    const levelsBtn = document.getElementById("levelsBtn");
-
-    if (!_lastDmrPayload){
-      alert("Run 'Calibrate the Battlefield' first to generate today's levels.");
-      return;
-    }
-
-    status.textContent = "Deploying the Daily Review…";
-    reviewBtn.disabled = true;
-    levelsBtn.disabled = true;
-
-    const t0 = performance.now();
-    const tick = setInterval(() => {
-      const secs = ((performance.now() - t0) / 1000).toFixed(1);
-      status.textContent = `Deploying daily review… (${secs}s)`;
-    }, 250);
-
-    try{
-      const { r, data } = await fetchJsonSafe("/api/dmr/generate-ai", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ dmr_raw: _lastDmrPayload }),
-        credentials: "same-origin"
-      });
-
-      if (!r.ok){
-        const msg = data.detail || data.error || `AI failed (${r.status})`;
-        status.textContent = "Error";
-        alert(msg);
-        return;
-      }
-
-      setNarrativeText(data.report_text || "");
-      status.textContent = "Daily Review deployed ✅";
-    }catch(e){
-      status.textContent = "Request failed";
-      alert(e && e.message ? e.message : String(e));
-    }finally{
-      clearInterval(tick);
-      reviewBtn.disabled = false;
-      levelsBtn.disabled = false;
-    }
-  }
-
-  // ELITE CHAT (Keep existing code)
+  // Chat Logic
   function addChat(role, text){
     const log = document.getElementById("chatLog");
     if (!log) return;
@@ -329,7 +355,7 @@
   async function sendChat(){
     if (!IS_ELITE) return;
     if (!_lastDmrPayload){
-      addChat("assistant", "Run 'Calibrate the Battlefield' first so I have today’s levels.");
+      addChat("assistant", "Initialize the battlefield first.");
       return;
     }
     const input = document.getElementById("chatInput");
@@ -357,6 +383,24 @@
       btn.disabled = false;
     }
   }
+
+  // Timezone Auto-Detect
+  async function ensureUserTimezone(){
+    try{
+      const guessed = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (!guessed) return;
+      const current = (USER_SESSION_TZ || "").trim();
+      if (!current || current.toUpperCase() === "UTC"){
+        if (guessed !== "UTC"){
+          await fetchJsonSafe("/account/session-timezone", {
+            method: "POST", headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({ timezone: guessed }), credentials: "same-origin"
+          });
+        }
+      }
+    }catch(e){}
+  }
+  document.addEventListener("DOMContentLoaded", ensureUserTimezone);
 </script>
 
 {% endblock %}
