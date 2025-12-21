@@ -1,248 +1,118 @@
 /* =========================
-   Kabroda BattleBox Suite
-   Unified Product CSS
+   Kabroda BattleBox Suite - Phase 2 Polish
+   Theme: "Glass Armor" (Deep Navy & Strategic Blue)
    ========================= */
 
 :root {
-  --bg: #0b1220;
-  --card: #0f1a2d;
-  --card-soft: #101c33;
-  --text: #e5e7eb;
-  --muted: #9ca3af;
-  --accent: #60a5fa;
-  --accent-strong: #3b82f6;
-  --border: rgba(255,255,255,.08);
-  --radius: 14px;
+  --bg-depth: #050a14;
+  --bg-surface: #0f1a2d;
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-highlight: rgba(255, 255, 255, 0.03);
+  --text-main: #f3f4f6;
+  --text-muted: #9ca3af;
+  --accent-primary: #3b82f6; /* Strategic Blue */
+  --accent-glow: rgba(59, 130, 246, 0.3);
+  --success: #10b981;
+  --radius: 16px;
+  --font-stack: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
-/* Reset / base */
+/* Base Reset */
 * { box-sizing: border-box; }
 html, body {
-  margin: 0;
-  padding: 0;
-  background: radial-gradient(1200px 600px at 50% -200px, #142040, var(--bg));
-  color: var(--text);
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-  line-height: 1.45;
+  margin: 0; padding: 0;
+  background-color: var(--bg-depth);
+  background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, var(--bg-depth) 60%);
+  color: var(--text-main);
+  font-family: var(--font-stack);
+  line-height: 1.6;
+  min-height: 100vh;
 }
 
-a {
-  color: var(--accent);
-  text-decoration: none;
-}
-a:hover { text-decoration: underline; }
+a { color: var(--accent-primary); text-decoration: none; transition: 0.2s; }
+a:hover { color: #60a5fa; text-shadow: 0 0 8px var(--accent-glow); }
 
-/* Layout shell */
+/* Layout Shell */
 .shell {
-  max-width: 1120px;
+  max-width: 1080px;
   margin: 0 auto;
-  padding: 0 20px;
+  padding: 0 24px;
 }
 
-/* =========================
-   Top Navigation
-   ========================= */
+/* Navigation */
 .topbar {
-  border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(15,26,45,.85), rgba(15,26,45,.65));
-  backdrop-filter: blur(6px);
+  background: rgba(15, 26, 45, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--glass-border);
+  position: sticky; top: 0; z-index: 100;
 }
-
 .topbar-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 64px;
+  display: flex; align-items: center; justify-content: space-between;
+  height: 72px;
+}
+.brand { font-weight: 800; font-size: 20px; letter-spacing: -0.5px; display: flex; align-items: center; gap: 8px;}
+.brand-mark { color: var(--accent-primary); }
+
+.links { display: flex; gap: 24px; font-size: 14px; font-weight: 500; }
+.links a { color: var(--text-muted); }
+.links a:hover { color: var(--text-main); }
+.links .cta { 
+  color: #fff; background: var(--accent-primary); 
+  padding: 6px 16px; border-radius: 99px; 
 }
 
-.brand {
-  font-weight: 800;
-  font-size: 18px;
-  letter-spacing: .4px;
-  color: var(--text);
-}
-.brand-mark {
-  color: var(--accent);
-}
+/* Typography & Hero */
+h1 { font-size: 42px; line-height: 1.1; font-weight: 800; letter-spacing: -1px; margin-bottom: 16px; }
+h2 { font-size: 28px; font-weight: 700; margin-bottom: 12px; }
+h3 { font-size: 18px; font-weight: 600; color: #fff; margin: 0 0 8px 0; }
+.hero { text-align: center; padding: 80px 20px 60px; max-width: 800px; margin: 0 auto; }
+.lead { font-size: 18px; color: var(--text-muted); margin-bottom: 32px; max-width: 600px; margin-left: auto; margin-right: auto; }
 
-.links {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-}
-.links a {
-  color: var(--text);
-  opacity: .85;
-}
-.links a:hover { opacity: 1; }
-
-.links .pill {
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,.04);
-}
-
-/* =========================
-   Typography
-   ========================= */
-h1 {
-  font-size: 34px;
-  margin: 0 0 10px;
-  letter-spacing: -.4px;
-}
-h2 {
-  font-size: 22px;
-  margin: 0 0 8px;
-}
-h3 {
-  font-size: 18px;
-  margin: 0 0 6px;
-}
-
-.lead {
-  font-size: 16px;
-  color: var(--muted);
-  max-width: 760px;
-}
-
-.muted {
-  color: var(--muted);
-  font-size: 14px;
-}
-
-/* =========================
-   Cards / Grid
-   ========================= */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-  margin-top: 18px;
-}
-
+/* Cards & Grid ("Glass Armor" Effect) */
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; margin: 40px 0; }
 .card {
-  background: linear-gradient(180deg, var(--card), var(--card-soft));
-  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 26, 45, 0.4) 100%);
+  border: 1px solid var(--glass-border);
+  border-top: 1px solid rgba(255,255,255,0.12); /* Highlight top edge */
   border-radius: var(--radius);
-  padding: 16px;
-  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  padding: 32px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  transition: transform 0.2s ease, border-color 0.2s;
 }
+.card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.15); }
 
-/* =========================
-   Buttons / Controls
-   ========================= */
+/* Buttons */
 .btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 10px 16px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,.05);
-  color: var(--text);
-  font-weight: 600;
-  cursor: pointer;
-  transition: all .15s ease;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 12px 24px; border-radius: 12px; font-weight: 600; font-size: 15px;
+  border: 1px solid var(--glass-border); background: rgba(255,255,255,0.05);
+  color: #fff; cursor: pointer; transition: all 0.2s;
 }
-
-.btn:hover {
-  background: rgba(255,255,255,.09);
-}
-
+.btn:hover { background: rgba(255,255,255,0.1); }
 .btn.primary {
-  background: linear-gradient(180deg, var(--accent), var(--accent-strong));
-  color: #061428;
-  border: none;
+  background: var(--accent-primary); border-color: transparent;
+  box-shadow: 0 0 15px var(--accent-glow);
 }
-.btn.primary:hover {
-  filter: brightness(1.05);
-}
+.btn.primary:hover { filter: brightness(1.1); box-shadow: 0 0 25px var(--accent-glow); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(1); }
 
-.btn:disabled {
-  opacity: .45;
-  cursor: not-allowed;
+/* Forms & Inputs */
+input, select {
+  width: 100%; padding: 12px 16px; border-radius: 12px;
+  border: 1px solid var(--glass-border); background: rgba(0,0,0,0.3);
+  color: #fff; font-family: inherit; font-size: 15px; outline: none;
+  transition: border-color 0.2s;
 }
+input:focus, select:focus { border-color: var(--accent-primary); }
+.label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; }
 
-/* =========================
-   Forms
-   ========================= */
-.row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.form {
-  max-width: 460px;
-}
-
-input,
-select {
-  width: 100%;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: #050a14;
-  color: var(--text);
-  outline: none;
-}
-
-input:focus,
-select:focus {
-  border-color: var(--accent);
-}
-
-/* =========================
-   Preformatted / Output
-   ========================= */
-pre,
-.pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: #050a14;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px;
-  font-size: 13px;
-  line-height: 1.4;
-  color: #d1d5db;
-}
-
-/* =========================
-   Status / Errors
-   ========================= */
-.error {
-  color: #fca5a5;
-  font-size: 14px;
-}
-
-.success {
-  color: #86efac;
-}
-
-/* =========================
-   Footer
-   ========================= */
-.footer {
-  margin: 40px auto 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-  text-align: center;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-/* =========================
-   Responsive
-   ========================= */
-@media (max-width: 900px) {
-  .grid {
-    grid-template-columns: 1fr;
-  }
-  h1 {
-    font-size: 28px;
-  }
+/* Utilities */
+.muted { color: var(--text-muted); font-size: 14px; }
+.text-center { text-align: center; }
+.pill-badge { 
+  display: inline-block; padding: 4px 12px; border-radius: 99px; 
+  font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+  background: rgba(255,255,255,0.1); color: var(--text-muted); margin-bottom: 12px;
 }

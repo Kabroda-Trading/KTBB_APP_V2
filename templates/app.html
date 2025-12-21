@@ -9,64 +9,53 @@
   </div>
 
   <div class="card">
-    <h3>Run Daily Market Review</h3>
-    <p class="muted">Step 1 calibrates today’s levels. Step 2 deploys the narrative (optional).</p>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h3>Battlefield Calibration</h3>
+      <button id="tvCopyBtn" class="btn" onclick="copyForTV()" style="display:none; padding:6px 12px; font-size:13px;">
+         Wait...
+      </button>
+    </div>
 
     <div class="row">
       <select id="symbol" class="input" style="flex:1;">
         <option value="BTCUSDT">BTC</option>
+        {% if is_elite %}
         <option value="ETHUSDT">ETH</option>
+        <option value="SOLUSDT">SOL</option>
+        {% endif %}
       </select>
-
-      <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()">Calibrate the Battlefield</button>
-      <button id="reviewBtn" class="btn" onclick="deployDailyReview()" disabled>Deploy the Daily Review</button>
-
-      <a class="btn" href="/account">Account</a>
+      <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()">1. Calibrate Levels</button>
     </div>
-
-    <div id="status" class="muted" style="margin-top:10px;">Ready — calibrate levels to begin.</div>
+    
+    <div class="grid" style="margin-top:24px; gap:12px; grid-template-columns: repeat(2, 1fr);">
+       <div style="background:rgba(0,0,0,0.3); padding:12px; border-radius:8px;">
+          <div class="label">Breakout Trigger</div><div id="lv_bo" style="font-size:18px; font-weight:700; color:#10b981;">—</div>
+       </div>
+       <div style="background:rgba(0,0,0,0.3); padding:12px; border-radius:8px;">
+          <div class="label">Breakdown Trigger</div><div id="lv_bd" style="font-size:18px; font-weight:700; color:#a855f7;">—</div>
+       </div>
+       </div>
   </div>
 
-  <div class="card" style="margin-top:14px;">
-    <h3>Daily Market Review</h3>
-
-    <div class="grid" style="margin-top:10px;">
-      <div class="pill"><span class="muted">Daily Support</span><div id="lv_ds">—</div></div>
-      <div class="pill"><span class="muted">Daily Resistance</span><div id="lv_dr">—</div></div>
-      <div class="pill"><span class="muted">Breakout Trigger</span><div id="lv_bo">—</div></div>
-      <div class="pill"><span class="muted">Breakdown Trigger</span><div id="lv_bd">—</div></div>
-      <div class="pill"><span class="muted">30m High</span><div id="lv_30h">—</div></div>
-      <div class="pill"><span class="muted">30m Low</span><div id="lv_30l">—</div></div>
+  <div class="card" style="margin-top:24px;">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+       <h3>Daily Market Review</h3>
+       {% if is_elite %}
+         <button id="reviewBtn" class="btn" onclick="deployDailyReview()" disabled>2. Deploy Narrative</button>
+       {% else %}
+         <span class="pill-badge">Elite Only</span>
+       {% endif %}
     </div>
 
-    <pre id="dmrText" class="report" style="margin-top:12px; white-space:pre-wrap;">(Calibrate the Battlefield to load levels. Deploy the Daily Review when you want the narrative.)</pre>
-
-    <div class="row" style="margin-top:10px;">
-      <button id="tvCopyBtn" class="btn" onclick="copyForTV()" style="display:none;">Copy for TradingView</button>
-      <button id="toggleYamlBtn" class="btn" style="display:none;" onclick="toggleYaml()">Show YAML</button>
-      <button id="copyYamlBtn" class="btn" style="display:none;" onclick="copyYaml()">Copy YAML</button>
-      <div id="copyStatus" class="muted" style="margin-left:10px;"></div>
-    </div>
-
-    <pre id="dmrYaml" class="report" style="display:none; margin-top:10px;"></pre>
+    {% if is_elite %}
+      <pre id="dmrText" class="report" style="margin-top:16px;">(Calibrate levels first...)</pre>
+    {% else %}
+      <div style="padding:20px; text-align:center; color:var(--text-muted);">
+        <p>Tactical Plan active. Structural levels are loaded above.</p>
+        <a href="/pricing" style="color:var(--accent-primary);">Upgrade to Elite</a> to unlock the full AI Situation Report.
+      </div>
+    {% endif %}
   </div>
-
-  {% if is_elite %}
-  <div class="card" style="margin-top:14px;">
-    <h3>Kabroda AI Coach</h3>
-    <p class="muted">Ask questions anchored to today’s levels (Elite only).</p>
-
-    <div id="chatLog" class="chat-log"></div>
-
-    <div class="row" style="margin-top:10px;">
-      <input id="chatInput" class="input" style="flex:1;"
-             placeholder="Ask Kabroda..."
-             onkeydown="if(event.key==='Enter'){sendChat()}"/>
-      <button id="sendBtn" class="btn primary" onclick="sendChat()">Send</button>
-    </div>
-  </div>
-  {% endif %}
-</div>
 
 <style>
   .container{max-width:1000px;margin:0 auto;padding:22px;}

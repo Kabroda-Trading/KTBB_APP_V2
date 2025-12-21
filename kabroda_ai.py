@@ -1,153 +1,76 @@
 # kabroda_ai.py
 from __future__ import annotations
-
-import json
-import os
+import json, os
 from datetime import datetime, timezone
 from typing import Any, Dict
-
 from openai import OpenAI
 
 _CLIENT: OpenAI | None = None
 
 def _client() -> OpenAI:
     global _CLIENT
-    if _CLIENT is not None:
-        return _CLIENT
-
+    if _CLIENT: return _CLIENT
     key = (os.getenv("OPENAI_API_KEY") or "").strip()
-    if not key:
-        raise RuntimeError("OPENAI_API_KEY is not set")
-
-    timeout_s = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
-    _CLIENT = OpenAI(api_key=key, timeout=timeout_s, max_retries=2)
+    if not key: raise RuntimeError("OPENAI_API_KEY missing")
+    _CLIENT = OpenAI(api_key=key, timeout=60, max_retries=2)
     return _CLIENT
 
+# --- THE DOCTRINE CORE ---
+# This is the "Base Personality" that enforces your voice files.
+BASE_INSTRUCTION = """
+You are KABRODA. You are not a generic assistant. You are a disciplined Trading Operating System.
 
+CORE VOICE DOCTRINE:
+1. CALM & PRECISE: Never use hype. Never say "Moon" or "Crash." Use "Expansion" and "Failure."
+2. CONDITIONAL: Never predict. Say "If acceptance confirms X, then Y becomes permitted."
+3. GUARDRAILS: If the user is emotional, stabilize them. If structure is unclear, command "Stand Down."
+4. STRUCTURE FIRST: Reference the provided Levels (Daily S/R, Triggers) as the absolute source of truth.
 
-def _log(msg: str) -> None:
-    # Lightweight safe logging, won’t crash if env missing
-    try:
-        if (os.getenv("DEBUG_AI") or "").strip().lower() in ("1", "true", "yes", "on"):
-            print(msg)
-    except Exception:
-        pass
-
-
-DMR_SYSTEM = """
-You are Kabroda Trading BattleBox.
-
-You MUST produce a Daily Market Review that matches the KTBB format and uses ONLY the provided computed context.
-No screenshots, no external browsing, no invented indicators.
-
-OUTPUT: EXACTLY 8 sections in this order using markdown headings:
-
-1) Market Momentum Summary
-   - Exactly 4 bullets labeled 4H, 1H, 15M, 5M
-   - Use context.momentum_summary values verbatim where possible.
-   - If context.tf_facts exists, explain momentum relative to VP zones and triggers (do not invent).
-
-2) Sentiment Snapshot
-   - Use context.tf_facts (weekly/f24/morning VP) and explicitly reference whether price is above/below POC/VAH/VAL when values exist.
-
-3) Key Support & Resistance
-   - Use ONLY context.levels and context.htf_shelves / intraday_shelves.
-
-4) Trade Strategy Outlook
-   - Use context.trade_logic outputs as the source of truth.
-   - If trade_logic includes ranked strategies / primary / secondary, reflect them.
-   - DO NOT recommend entries without the trigger-confirm-then-execute rule.
-
-5) News-Based Risk Alert
-   - You do not have a news feed; therefore keep this minimal and generic:
-     "No integrated news feed; check major macro releases and crypto headlines before entries."
-
-6) Execution Considerations
-   - Enforce execution rules from context.execution_rules:
-     - Confirmation requires TWO consecutive 15m closes beyond trigger.
-     - After confirmation: require 5m alignment for entry timing.
-     - Hard exit: 5m close through 21 SMA (directional).
-   - Include invalidation logic tied to breakdown/breakout triggers.
-
-7) Weekly Zone Reference
-   - If weekly zones exist in context.htf_shelves or context.trade_logic, use them.
-   - If not present, say "Weekly zones not available in current feed."
-
-8) YAML Key Level Output Block
-   - Provide YAML for: daily_support, daily_resistance, breakout_trigger, breakdown_trigger, range_30m_high, range_30m_low
-
-Hard constraints:
-- Never invent values.
-- If a value is missing in context, write "unknown" for that field.
+You define the "No-Trade Zone" (Balance) vs "Discovery" (Trend).
 """
-
-
-COACH_SYSTEM = """
-You are Kabroda AI Coach.
-
-You receive CONTEXT(JSON) that includes today’s computed levels, shelves, multi-timeframe facts, trade_logic, and execution_rules.
-That JSON is INTERNAL. Never print the JSON.
-
-If the user's question is vague (e.g. "help me", "what now?"), ask ONE clarifying question first.
-Then still provide the required (a)-(d) structure beneath it.
-
-Answer rules:
-- Always anchor to context.trade_logic and context.execution_rules.
-- Always provide:
-  (a) Primary plan
-  (b) Invalidation plan
-  (c) Trigger-confirm-then-execute sequence (2×15m closes then 5m alignment)
-  (d) Hard exit rule (5m close vs 21 SMA)
-- Do NOT produce generic advice that contradicts the execution_rules.
-"""
-
 
 def generate_daily_market_review(symbol: str, date_str: str, context: Dict[str, Any]) -> str:
     c = _client()
-    model = os.getenv("OPENAI_MODEL_DMR", "gpt-4o-mini")
-
-    _log(f"[kabroda_ai] DMR call model={model} symbol={symbol} date={date_str}")
-
-    user_msg = (
-        f"SYMBOL: {symbol}\nDATE: {date_str}\n"
-        f"CONTEXT_JSON:\n{json.dumps(context, ensure_ascii=False)}\n\n"
-        "Write the Daily Market Review now."
-    )
+    # The context contains the raw SSE numbers. We feed them to the AI.
+    system_prompt = BASE_INSTRUCTION + """
+    \nTASK: Write the Daily Market Review (DMR).
+    - Use the provided JSON context for all levels. Do not invent numbers.
+    - Section 1: Momentum (Bullets).
+    - Section 2: Regime Call (Balance vs Discovery).
+    - Section 3: Execution Guardrails (Strict 2-close confirmation rules).
+    
+    Output Format: Clean Markdown. No fluff.
+    """
+    
+    user_msg = f"SYMBOL: {symbol}\nDATE: {date_str}\nCONTEXT: {json.dumps(context)}"
+    
     resp = c.chat.completions.create(
-        model=model,
+        model="gpt-4o", # Or gpt-3.5-turbo if cost is a concern
         messages=[
-            {"role": "system", "content": DMR_SYSTEM},
-            {"role": "user", "content": user_msg},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_msg}
         ],
-        temperature=0.25,
+        temperature=0.3 # Keep it low for consistency
     )
     return resp.choices[0].message.content.strip()
 
-
-def answer_coach_question(symbol: str, date_str: str, context: Dict[str, Any], question: str) -> str:
+def run_ai_coach(user_message: str, dmr_context: Dict[str, Any], tier: str = "elite") -> str:
+    # Coach Logic: Interactive Q&A locked to today's levels
     c = _client()
-    model = os.getenv("OPENAI_MODEL_COACH", "gpt-4o-mini")
-    q = (question or "").strip()
-
-    _log(f"[kabroda_ai] COACH call model={model} symbol={symbol} date={date_str}")
-
-    user_msg = (
-        f"SYMBOL: {symbol}\nDATE: {date_str}\n"
-        f"CONTEXT_JSON:\n{json.dumps(context, ensure_ascii=False)}\n\n"
-        f"QUESTION:\n{q}"
-    )
+    system_prompt = BASE_INSTRUCTION + """
+    \nTASK: Act as the Intraday Coach.
+    - Answer the user's question using the DMR Context provided.
+    - If they ask for a trade, ask: "Has price confirmed acceptance beyond the trigger?"
+    - Enforce the "Stand Down" rule if they sound emotional (FOMO, Fear).
+    """
+    
+    user_msg = f"CONTEXT: {json.dumps(dmr_context)}\nUSER QUESTION: {user_message}"
+    
     resp = c.chat.completions.create(
-        model=model,
+        model="gpt-4o",
         messages=[
-            {"role": "system", "content": COACH_SYSTEM},
-            {"role": "user", "content": user_msg},
-        ],
-        temperature=0.35,
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_msg}
+        ]
     )
     return resp.choices[0].message.content.strip()
-
-
-def run_ai_coach(user_message: str, dmr_context: Dict[str, Any], tier: str = "free") -> str:
-    symbol = (dmr_context.get("symbol") or "BTCUSDT")
-    date_str = (dmr_context.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-    return answer_coach_question(symbol=symbol, date_str=date_str, context=dmr_context, question=user_message)
