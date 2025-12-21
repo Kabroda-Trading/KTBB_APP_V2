@@ -42,6 +42,7 @@
     <pre id="dmrText" class="report" style="margin-top:12px; white-space:pre-wrap;">(Calibrate the Battlefield to load levels. Deploy the Daily Review when you want the narrative.)</pre>
 
     <div class="row" style="margin-top:10px;">
+      <button id="tvCopyBtn" class="btn" onclick="copyForTV()" style="display:none;">Copy for TradingView</button>
       <button id="toggleYamlBtn" class="btn" style="display:none;" onclick="toggleYaml()">Show YAML</button>
       <button id="copyYamlBtn" class="btn" style="display:none;" onclick="copyYaml()">Copy YAML</button>
       <div id="copyStatus" class="muted" style="margin-left:10px;"></div>
@@ -333,6 +334,36 @@
       btn.disabled = false;
     }
   }
+  // Add this to the <script> block in app.html
+
+async function copyForTV(){
+  if (!_lastDmrPayload || !_lastDmrPayload.levels) return;
+  
+  const l = _lastDmrPayload.levels;
+  
+  // Format: "BO: 67000 | BD: 66000 | R: 68000 | S: 65000"
+  // This is clean and easy to read while pasting.
+  const text = `BO: ${l.breakout_trigger} | BD: ${l.breakdown_trigger} | R: ${l.daily_resistance} | S: ${l.daily_support}`;
+  
+  try {
+    await navigator.clipboard.writeText(text);
+    const btn = document.getElementById("tvCopyBtn");
+    const originalText = btn.textContent;
+    btn.textContent = "Copied! ✅";
+    setTimeout(() => btn.textContent = originalText, 2000);
+  } catch (err) {
+    alert("Could not copy: " + err);
+  }
+}
+
+// UPDATE existing renderLevelsOnly function to show the button
+function renderLevelsOnly(payload){
+    _lastDmrPayload = payload;
+    // ... (existing code setting textContent for lv_ds, lv_dr, etc.) ...
+    
+    // Add this line at the end:
+    document.getElementById("tvCopyBtn").style.display = "inline-flex"; 
+}
 </script>
 
 {% endblock %}

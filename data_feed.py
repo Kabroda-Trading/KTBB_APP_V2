@@ -159,12 +159,36 @@ def _session_open_dt(session_tz: str, session_open_hhmm: str) -> datetime:
 
 
 def _session_30m_window(session_tz: str, session_open_hhmm: str = "06:00") -> Tuple[datetime, datetime]:
-    # Target candle = 06:30–07:00 (session_tz), converted to UTC
-    open_dt = _session_open_dt(session_tz, session_open_hhmm)
-    start_local = open_dt + timedelta(minutes=30)
-    end_local = open_dt + timedelta(minutes=60)
+    """
+    DETERMINISTIC SESSION ANCHOR:
+    Locks the 'Session Candle' to a specific 30m window that only rolls over
+    once the NEW session has actually closed.
+    """
+    z = ZoneInfo(session_tz)
+    now_in_tz = datetime.now(z)
+    
+    # 1. Parse the target open time (e.g., 08:00)
+    hh, mm = map(int, session_open_hhmm.split(":"))
+    
+    # 2. Establish 'Today's' potential session open
+    candidate_open = now_in_tz.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    
+    # 3. Define the 'Lock Point' (Open + 30m)
+    #    The session is not 'valid' for analysis until the first 30m candle CLOSES.
+    lock_point = candidate_open + timedelta(minutes=30)
+    
+    # 4. The Pivot Logic:
+    #    If we are BEFORE the lock point (e.g., it's 7:55 AM and open is 8:00 AM),
+    #    we cannot show today's levels yet. We must show YESTERDAY'S levels.
+    if now_in_tz < lock_point:
+        candidate_open -= timedelta(days=1)
+        
+    # 5. Calculate the specific 30-minute window (Open+30m to Open+60m)
+    #    This is the 'Signal Candle' for your SSE Engine.
+    start_local = candidate_open + timedelta(minutes=30)
+    end_local = candidate_open + timedelta(minutes=60)
+    
     return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
-
 
 def _morning_window(session_tz: str, session_open_hhmm: str = "06:00") -> Tuple[datetime, datetime]:
     # Morning FRVP = 4 hours before open → open

@@ -330,19 +330,25 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
 
-    # Plan-based symbol gating (Tactical BTC only)
+    # Plan-based symbol gating
     ensure_symbol_allowed(u, symbol)
 
     tz = (u.session_tz or "UTC").strip() or "UTC"
-    raw = dmr_report.run_auto_raw(symbol=symbol, session_tz=tz)
+    
+    # --- NON-BLOCKING FIX ---
+    # Move the slow data fetch to a background thread so the server stays responsive.
+    raw = await asyncio.to_thread(
+        dmr_report.run_auto_raw,
+        symbol=symbol,
+        session_tz=tz
+    )
+    # ------------------------
 
-    # Cookie-backed session: store only small meta to avoid overflow.
     request.session["last_dmr_meta"] = {
-    "symbol": raw.get("symbol", symbol),
-    "date": raw.get("date", ""),
+        "symbol": raw.get("symbol", symbol),
+        "date": raw.get("date", ""),
     }
     return JSONResponse(raw)
-
 
 @app.post("/api/dmr/generate-ai")
 async def dmr_generate_ai(request: Request, db: Session = Depends(get_db)):
