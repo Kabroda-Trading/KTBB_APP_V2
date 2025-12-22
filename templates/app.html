@@ -100,6 +100,8 @@
       <div class="row" style="margin-top:20px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;">
         <button id="toggleYamlBtn" class="btn" style="display:none; font-size:12px;" onclick="toggleYaml()">Show Raw Data</button>
         <button id="copyYamlBtn" class="btn" style="display:none; font-size:12px;" onclick="copyYaml()">Copy Raw Data</button>
+        <button id="copyGptBtn" class="btn" style="display:none; font-size:12px;" onclick="copyForGPT()">Copy for BattleBox GPT</button>
+        <a id="openGptLink" class="btn" style="display:none; font-size:12px;" href="#" target="_blank" rel="noopener">Open BattleBox GPT</a>
         <span id="copyStatus" class="muted" style="margin-left:10px;"></span>
       </div>
       <pre id="dmrYaml" class="pre" style="display:none; margin-top:10px; font-size:12px;"></pre>
@@ -132,6 +134,8 @@
 <script>
   const IS_ELITE = {{ "true" if is_elite else "false" }};
   const USER_SESSION_TZ = {{ (user.session_tz or "UTC")|tojson }};
+  const BATTLEBOX_GPT_URL = "PASTE_YOUR_GPT_URL_HERE";
+
   let _lastYaml = "";
   let _lastDmrPayload = null;
 
@@ -165,7 +169,14 @@
 
     const btn = document.getElementById("tvCopyBtn");
     if(btn) btn.style.display = "inline-flex";
-  }
+    const gbtn = document.getElementById("copyGptBtn");
+    if (gbtn) gbtn.style.display = "inline-flex";
+
+    const glink = document.getElementById("openGptLink");
+    if (glink) {
+      glink.style.display = "inline-flex";
+      glink.href = BATTLEBOX_GPT_URL;
+    }
 
   async function copyForTV(){
     if (!_lastDmrPayload || !_lastDmrPayload.levels) return;
@@ -321,6 +332,80 @@
       btn.textContent = "Show Raw Data";
     }
   }
+  function buildGptContractV1(raw){
+  const inputs = raw.inputs || {};
+  const levels = raw.levels || {};
+  const r30 = raw.range_30m || raw.range30m || {};
+
+  const profiles = {
+    weekly: {
+      vah: (raw.profiles && raw.profiles.weekly && raw.profiles.weekly.vah) ?? inputs.weekly_vah ?? null,
+      val: (raw.profiles && raw.profiles.weekly && raw.profiles.weekly.val) ?? inputs.weekly_val ?? null,
+      poc: (raw.profiles && raw.profiles.weekly && raw.profiles.weekly.poc) ?? inputs.weekly_poc ?? null
+    },
+    f24: {
+      vah: (raw.profiles && raw.profiles.f24 && raw.profiles.f24.vah) ?? inputs.f24_vah ?? null,
+      val: (raw.profiles && raw.profiles.f24 && raw.profiles.f24.val) ?? inputs.f24_val ?? null,
+      poc: (raw.profiles && raw.profiles.f24 && raw.profiles.f24.poc) ?? inputs.f24_poc ?? null
+    },
+    morning: {
+      vah: (raw.profiles && raw.profiles.morning && raw.profiles.morning.vah) ?? inputs.morn_vah ?? null,
+      val: (raw.profiles && raw.profiles.morning && raw.profiles.morning.val) ?? inputs.morn_val ?? null,
+      poc: (raw.profiles && raw.profiles.morning && raw.profiles.morning.poc) ?? inputs.morn_poc ?? null
+    }
+  };
+
+  return {
+    contract_version: "1.0",
+    generated_at: new Date().toISOString(),
+
+    date: raw.date || inputs.date || null,
+    symbol: raw.symbol || inputs.symbol || "BTCUSDT",
+    session_tz: raw.session_tz || inputs.session_tz || "UTC",
+    last_price: raw.last_price ?? inputs.last_price ?? null,
+
+    levels: {
+      daily_support: levels.daily_support ?? null,
+      daily_resistance: levels.daily_resistance ?? null,
+      breakout_trigger: levels.breakout_trigger ?? null,
+      breakdown_trigger: levels.breakdown_trigger ?? null
+    },
+
+    range_30m: {
+      high: r30.high ?? inputs.range30m_high ?? inputs.r30_high ?? null,
+      low:  r30.low  ?? inputs.range30m_low  ?? inputs.r30_low  ?? null
+    },
+
+    profiles,
+
+    htf_shelves: raw.htf_shelves || { resistance: [], support: [] },
+    intraday_shelves: raw.intraday_shelves || { breakout_side: [], breakdown_side: [] },
+    trade_logic: raw.trade_logic || null,
+
+    events: raw.events || [],
+    news: raw.news || inputs.news || [],
+    sentiment: raw.sentiment ?? inputs.sentiment ?? null,
+
+    source: { app: "kabroda_site", endpoint: "/api/dmr/run-raw" }
+  };
+}
+
+async function copyForGPT(){
+  if (!_lastDmrPayload) return;
+
+  const obj = buildGptContractV1(_lastDmrPayload);
+  const text = JSON.stringify(obj, null, 2);
+
+  try {
+    await navigator.clipboard.writeText(text);
+    const btn = document.getElementById("copyGptBtn");
+    const orig = btn.textContent;
+    btn.textContent = "Copied! ✅";
+    setTimeout(()=>btn.textContent = orig, 2000);
+  } catch (err) {
+    alert("Could not copy: " + err);
+  }
+}
 
   async function copyYaml(){
     try{
