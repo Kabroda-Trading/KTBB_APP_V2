@@ -7,9 +7,8 @@ from typing import Optional
 
 from fastapi import HTTPException, status
 
-# Stripe price IDs (source of truth for plan)
-PRICE_TACTICAL = (os.getenv("STRIPE_PRICE_TACTICAL") or "").strip()
-PRICE_ELITE = (os.getenv("STRIPE_PRICE_ELITE") or "").strip()
+# Single-plan Stripe price ID (source of truth)
+PRICE_KTBB = (os.getenv("STRIPE_PRICE_KTBB") or "").strip()
 
 ACTIVE_STATUSES = {"active", "trialing"}
 
@@ -19,46 +18,28 @@ class MembershipState:
     """
     Stripe-authoritative membership state.
 
-    We do NOT use any internal tiering model for gating.
-    Plan is derived exclusively from stripe_price_id.
-    Paid access is derived exclusively from subscription_status.
+    - Paid access is derived exclusively from subscription_status.
+    - Plan/tier is intentionally collapsed into ONE product.
     """
     is_paid: bool
-    plan: Optional[str]  # "tactical" | "elite" | None
+    plan: Optional[str]  # "ktbb" | None
     label: str
 
 
-def _plan_from_price_id(price_id: Optional[str]) -> Optional[str]:
-    if not price_id:
-        return None
-    pid = price_id.strip()
-    if PRICE_ELITE and pid == PRICE_ELITE:
-        return "elite"
-    if PRICE_TACTICAL and pid == PRICE_TACTICAL:
-        return "tactical"
-    return None
-
-
 def get_membership_state(user_model) -> MembershipState:
-    """
-    Accepts the SQLAlchemy UserModel.
-    """
     sub_status = (getattr(user_model, "subscription_status", None) or "").strip().lower()
     price_id = (getattr(user_model, "stripe_price_id", None) or "").strip()
 
     is_paid = sub_status in ACTIVE_STATUSES
-    plan = _plan_from_price_id(price_id)
-
     if not is_paid:
         return MembershipState(is_paid=False, plan=None, label="No active subscription")
 
-    # Paid but unknown price -> treat as paid but unknown plan (safe default = no elite features)
-    if plan == "elite":
-        return MembershipState(is_paid=True, plan="elite", label="KABRODA BattleBox Elite")
-    if plan == "tactical":
-        return MembershipState(is_paid=True, plan="tactical", label="KABRODA BattleBox Tactical")
+    # If you want to strictly enforce the exact Stripe price ID, keep this check.
+    # If you want to allow any active subscription, remove the PRICE_KTBB check.
+    if PRICE_KTBB and price_id != PRICE_KTBB:
+        return MembershipState(is_paid=True, plan=None, label="Active subscription (Unrecognized plan)")
 
-    return MembershipState(is_paid=True, plan=None, label="Active subscription (Unknown plan)")
+    return MembershipState(is_paid=True, plan="ktbb", label="Kabroda Trading BattleBox")
 
 
 def require_paid_access(user_model) -> MembershipState:
@@ -66,47 +47,24 @@ def require_paid_access(user_model) -> MembershipState:
     if not ms.is_paid:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Subscription required. Please choose Tactical or Elite to unlock the Suite.",
+            detail="Subscription required to unlock the Suite.",
+        )
+    # If strict plan enforcement is enabled and plan is unknown, block suite.
+    if ms.plan is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Subscription not recognized. Please contact support.",
         )
     return ms
 
 
-def is_elite(user_model) -> bool:
-    ms = get_membership_state(user_model)
-    return bool(ms.is_paid and ms.plan == "elite")
-
-
 def ensure_symbol_allowed(user_model, symbol: str) -> None:
     """
-    Tactical: BTC only.
-    Elite: multi-symbol.
-    Symbol canonical format for this app is like BTCUSDT / ETHUSDT.
+    Single plan: allow whichever symbols your engine supports.
+    Keep this as a simple guard (still requires paid access).
     """
-    ms = require_paid_access(user_model)
+    require_paid_access(user_model)
 
-    # Unknown plan while paid: safest behavior is restrict to BTC only.
-    if ms.plan not in ("tactical", "elite"):
-        sym = (symbol or "").upper()
-        if sym != "BTCUSDT":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Plan not recognized. Please contact support or re-check subscription.",
-            )
-        return
-
-    if ms.plan == "tactical":
-        sym = (symbol or "").upper()
-        if sym != "BTCUSDT":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Tactical includes Auto DMR for BTC only. Upgrade to Elite for multi-symbol.",
-            )
-
-
-def ensure_coach_allowed(user_model) -> None:
-    ms = require_paid_access(user_model)
-    if ms.plan != "elite":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Kabroda AI Coach is Elite-only. Upgrade to unlock.",
-        )
+    sym = (symbol or "").upper().strip()
+    if not sym:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing symbol")

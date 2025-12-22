@@ -1,142 +1,105 @@
 {% extends "base.html" %}
 {% block content %}
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
 <div class="shell" style="padding-top:20px; padding-bottom:40px;">
 
-  <div class="text-center" style="margin-bottom:32px;">
-    <h1>BattleBox Command</h1>
-    <p class="muted">Logged in as <strong style="color:var(--accent-primary)">{{ user.email }}</strong> • {{ user.plan_label }}</p>
+  <div class="text-center" style="margin-bottom:28px;">
+    <h1>BattleBox Suite</h1>
+    <p class="muted">
+      Logged in as <strong style="color:var(--accent-primary)">{{ user.email }}</strong>
+      • {{ user.plan_label }}
+    </p>
   </div>
 
-  <div class="card" style="margin-bottom:24px;">
-    <h3>1. Calibrate the Battlefield</h3>
-    <p class="muted" style="margin-bottom:20px; max-width:600px;">
-      Initialize the session. Pull structure levels, 30m opening range, and set execution triggers.
+  <!-- Step 1 -->
+  <div class="card" style="margin-bottom:18px;">
+    <h3>1) Calibrate Levels</h3>
+    <p class="muted" style="margin-bottom:18px; max-width:760px;">
+      Generate today’s battlefield levels. Then copy levels into TradingView, or copy the BattleBox payload to the GPT.
     </p>
 
     <div class="row" style="align-items: flex-end; gap: 16px;">
-      <div style="flex: 1; max-width: 280px;">
+      <div style="flex: 1; max-width: 320px;">
         <label class="label" style="margin-bottom:8px; display:block;">Target Asset</label>
         <select id="symbol" class="input" style="cursor:pointer;">
           <option value="BTCUSDT">BTC (Bitcoin)</option>
-          {% if is_elite %}
           <option value="ETHUSDT">ETH (Ethereum)</option>
           <option value="SOLUSDT">SOL (Solana)</option>
-          {% endif %}
         </select>
       </div>
 
       <div style="flex: 0 0 auto;">
-        <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="min-width:180px;">
+        <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="min-width:190px;">
           Calibrate Levels
         </button>
       </div>
     </div>
-    
-    <div id="status" class="muted" style="margin-top:16px; font-size:13px; border-top:1px solid rgba(255,255,255,0.05); padding-top:12px;">
+
+    <div id="status" class="muted" style="margin-top:14px; font-size:13px; border-top:1px solid rgba(255,255,255,0.05); padding-top:12px;">
       <span style="color:var(--accent-primary)">●</span> System Ready. Awaiting command.
     </div>
   </div>
 
-  <div class="card" style="margin-bottom:24px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+  <!-- Step 2 -->
+  <div class="card" style="margin-bottom:18px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
       <h3>Battlefield Levels</h3>
-      <button id="tvCopyBtn" class="btn" onclick="copyForTV()" style="display:none; font-size:13px; padding:6px 14px; border-color:var(--accent-primary);">
-        Copy for TradingView
-      </button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button id="tvCopyBtn" class="btn" onclick="copyForTV()" style="display:none; font-size:13px; padding:8px 14px; border-color:var(--accent-primary);">
+          Copy for TradingView
+        </button>
+        <button id="copyGptBtn" class="btn" onclick="copyForGPT()" style="display:none; font-size:13px; padding:8px 14px;">
+          Copy for BattleBox GPT
+        </button>
+        <a id="openGptLink" class="btn" style="display:none; font-size:13px; padding:8px 14px;" href="#" target="_blank" rel="noopener">
+          Open BattleBox GPT
+        </a>
+      </div>
     </div>
 
-    <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 16px;">
-      
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-        <div style="background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.2); padding:16px; border-radius:12px; text-align:center;">
+    <div style="display:flex; flex-direction:column; gap: 14px;">
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div style="background:rgba(239, 68, 68, 0.10); border:1px solid rgba(239, 68, 68, 0.20); padding:14px; border-radius:12px; text-align:center;">
           <div class="label" style="color:#f87171; font-size:12px; text-transform:uppercase;">Daily Resistance</div>
-          <div id="lv_dr" style="font-size:24px; font-weight:800; color:#fff;">—</div>
+          <div id="lv_dr" style="font-size:22px; font-weight:800; color:#fff;">—</div>
         </div>
-        <div style="background:rgba(16, 185, 129, 0.1); border:1px solid rgba(16, 185, 129, 0.2); padding:16px; border-radius:12px; text-align:center;">
+        <div style="background:rgba(16, 185, 129, 0.10); border:1px solid rgba(16, 185, 129, 0.20); padding:14px; border-radius:12px; text-align:center;">
           <div class="label" style="color:#34d399; font-size:12px; text-transform:uppercase;">Breakout Trigger</div>
-          <div id="lv_bo" style="font-size:24px; font-weight:800; color:#fff;">—</div>
+          <div id="lv_bo" style="font-size:22px; font-weight:800; color:#fff;">—</div>
         </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-        <div style="background:rgba(168, 85, 247, 0.1); border:1px solid rgba(168, 85, 247, 0.2); padding:16px; border-radius:12px; text-align:center;">
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div style="background:rgba(168, 85, 247, 0.10); border:1px solid rgba(168, 85, 247, 0.20); padding:14px; border-radius:12px; text-align:center;">
           <div class="label" style="color:#c084fc; font-size:12px; text-transform:uppercase;">Breakdown Trigger</div>
-          <div id="lv_bd" style="font-size:24px; font-weight:800; color:#fff;">—</div>
+          <div id="lv_bd" style="font-size:22px; font-weight:800; color:#fff;">—</div>
         </div>
-        <div style="background:rgba(59, 130, 246, 0.1); border:1px solid rgba(59, 130, 246, 0.2); padding:16px; border-radius:12px; text-align:center;">
+        <div style="background:rgba(59, 130, 246, 0.10); border:1px solid rgba(59, 130, 246, 0.20); padding:14px; border-radius:12px; text-align:center;">
           <div class="label" style="color:#60a5fa; font-size:12px; text-transform:uppercase;">Daily Support</div>
-          <div id="lv_ds" style="font-size:24px; font-weight:800; color:#fff;">—</div>
+          <div id="lv_ds" style="font-size:22px; font-weight:800; color:#fff;">—</div>
         </div>
       </div>
-      
-      <div style="display: flex; justify-content: space-between; background:rgba(255,255,255,0.03); padding:12px 24px; border-radius:12px; border:1px solid rgba(255,255,255,0.05);">
+
+      <div style="display:flex; justify-content:space-between; gap: 12px; background:rgba(255,255,255,0.03); padding:12px 18px; border-radius:12px; border:1px solid rgba(255,255,255,0.05); flex-wrap:wrap;">
         <span class="muted" style="font-size:13px;">30m High: <strong id="lv_30h" style="color:#e2e8f0; margin-left:6px;">—</strong></span>
         <span class="muted" style="font-size:13px;">30m Low: <strong id="lv_30l" style="color:#e2e8f0; margin-left:6px;">—</strong></span>
       </div>
 
+      <div class="muted" style="font-size:13px; margin-top:4px;">
+        <strong style="color:#e5e7eb;">Workflow:</strong>
+        1) Calibrate → 2) Copy for TradingView → 3) Copy for GPT → 4) Open GPT → Paste → Execute.
+      </div>
+
     </div>
   </div>
-
-  <div class="card" style="margin-bottom:24px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <h3>2. Daily Market Review</h3>
-      
-      {% if is_elite %}
-        <button id="reviewBtn" class="btn" onclick="deployDailyReview()" disabled>
-           Deploy the Daily Review
-        </button>
-      {% else %}
-        <span class="pill-badge">Elite Only</span>
-      {% endif %}
-    </div>
-
-    {% if is_elite %}
-      <div id="dmrText" style="min-height:120px; font-size:15px; line-height:1.7; color:#e2e8f0;">
-        <span class="muted" style="font-family:'Courier New', monospace;">(Calibrate the Battlefield above to initialize structure levels. Then deploy the narrative.)</span>
-      </div>
-      
-      <div class="row" style="margin-top:20px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;">
-        <button id="toggleYamlBtn" class="btn" style="display:none; font-size:12px;" onclick="toggleYaml()">Show Raw Data</button>
-        <button id="copyYamlBtn" class="btn" style="display:none; font-size:12px;" onclick="copyYaml()">Copy Raw Data</button>
-        <button id="copyGptBtn" class="btn" style="display:none; font-size:12px;" onclick="copyForGPT()">Copy for BattleBox GPT</button>
-        <a id="openGptLink" class="btn" style="display:none; font-size:12px;" href="#" target="_blank" rel="noopener">Open BattleBox GPT</a>
-        <span id="copyStatus" class="muted" style="margin-left:10px;"></span>
-      </div>
-      <pre id="dmrYaml" class="pre" style="display:none; margin-top:10px; font-size:12px;"></pre>
-
-    {% else %}
-      <div style="padding:32px; text-align:center; background:rgba(0,0,0,0.2); border-radius:12px;">
-        <p class="muted" style="font-size:16px;">Tactical Plan Active. Levels loaded successfully.</p>
-        <p style="margin-top:8px;"><a href="/pricing">Upgrade to Elite</a> to unlock the AI Situation Report.</p>
-      </div>
-    {% endif %}
-  </div>
-
-  {% if is_elite %}
-  <div class="card">
-    <h3>3. Kabroda AI Coach</h3>
-    <p class="muted">Interactive guidance locked to today's levels.</p>
-
-    <div id="chatLog" class="chat-log" style="height:300px; overflow-y:auto; background:rgba(0,0,0,0.3); border:1px solid var(--glass-border); border-radius:12px; padding:16px; margin:16px 0;">
-       </div>
-
-    <div class="row">
-      <input id="chatInput" class="input" style="flex:1;" placeholder="Ask Kabroda..." onkeydown="if(event.key==='Enter'){sendChat()}"/>
-      <button id="sendBtn" class="btn primary" onclick="sendChat()">Send</button>
-    </div>
-  </div>
-  {% endif %}
 
 </div>
 
 <script>
-  const IS_ELITE = {{ "true" if is_elite else "false" }};
   const USER_SESSION_TZ = {{ (user.session_tz or "UTC")|tojson }};
-  const BATTLEBOX_GPT_URL = "PASTE_YOUR_GPT_URL_HERE";
+  const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
 
-  let _lastYaml = "";
   let _lastDmrPayload = null;
 
   function fmt(x){
@@ -157,65 +120,41 @@
 
   function renderLevelsOnly(payload){
     _lastDmrPayload = payload;
+
     const levels = payload.levels || {};
     const r30 = payload.range_30m || {};
 
-    if(document.getElementById("lv_ds")) document.getElementById("lv_ds").textContent  = fmt(levels.daily_support);
-    if(document.getElementById("lv_dr")) document.getElementById("lv_dr").textContent  = fmt(levels.daily_resistance);
-    if(document.getElementById("lv_bo")) document.getElementById("lv_bo").textContent  = fmt(levels.breakout_trigger);
-    if(document.getElementById("lv_bd")) document.getElementById("lv_bd").textContent  = fmt(levels.breakdown_trigger);
-    if(document.getElementById("lv_30h")) document.getElementById("lv_30h").textContent = fmt(r30.high);
-    if(document.getElementById("lv_30l")) document.getElementById("lv_30l").textContent = fmt(r30.low);
+    document.getElementById("lv_ds").textContent  = fmt(levels.daily_support);
+    document.getElementById("lv_dr").textContent  = fmt(levels.daily_resistance);
+    document.getElementById("lv_bo").textContent  = fmt(levels.breakout_trigger);
+    document.getElementById("lv_bd").textContent  = fmt(levels.breakdown_trigger);
+    document.getElementById("lv_30h").textContent = fmt(r30.high);
+    document.getElementById("lv_30l").textContent = fmt(r30.low);
 
-    const btn = document.getElementById("tvCopyBtn");
-    if(btn) btn.style.display = "inline-flex";
-    const gbtn = document.getElementById("copyGptBtn");
-    if (gbtn) gbtn.style.display = "inline-flex";
+    document.getElementById("tvCopyBtn").style.display = "inline-flex";
+    document.getElementById("copyGptBtn").style.display = "inline-flex";
 
     const glink = document.getElementById("openGptLink");
-    if (glink) {
-      glink.style.display = "inline-flex";
-      glink.href = BATTLEBOX_GPT_URL;
-    }
-  }
-  async function copyForTV(){
-    if (!_lastDmrPayload || !_lastDmrPayload.levels) return;
-    const l = _lastDmrPayload.levels;
-    const r = _lastDmrPayload.range_30m || {};
-    
-    // NEW FORMAT: BO, BD, R, S, 30H, 30L
-    // We send 6 numbers now instead of 4
-    const text = `${parseFloat(l.breakout_trigger).toFixed(2)},${parseFloat(l.breakdown_trigger).toFixed(2)},${parseFloat(l.daily_resistance).toFixed(2)},${parseFloat(l.daily_support).toFixed(2)},${parseFloat(r.high).toFixed(2)},${parseFloat(r.low).toFixed(2)}`;
-    
-    try {
-      await navigator.clipboard.writeText(text);
-      const btn = document.getElementById("tvCopyBtn");
-      const originalText = btn.textContent;
-      btn.textContent = "Copied! ✅";
-      setTimeout(() => btn.textContent = originalText, 2000);
-    } catch (err) {
-      alert("Could not copy: " + err);
-    }
+    glink.style.display = "inline-flex";
+    glink.href = BATTLEBOX_GPT_URL;
   }
 
   async function calibrateBattlefield(){
     const symEl = document.getElementById("symbol");
     const status = document.getElementById("status");
     const levelsBtn = document.getElementById("levelsBtn");
-    const reviewBtn = document.getElementById("reviewBtn");
 
     const sym = symEl ? symEl.value : "BTCUSDT";
 
-    status.textContent = "Calibrating the battlefield…";
+    status.textContent = "Calibrating levels…";
     levelsBtn.disabled = true;
-    if(reviewBtn) reviewBtn.disabled = true;
-
-    if(document.getElementById("dmrText")) document.getElementById("dmrText").innerHTML = '<span class="muted">(Calculating structure levels…)</span>';
 
     try{
       const { r, data } = await fetchJsonSafe("/api/dmr/run-raw", {
-        method: "POST", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ symbol: sym }), credentials: "same-origin"
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ symbol: sym }),
+        credentials: "same-origin"
       });
 
       if (!r.ok){
@@ -227,8 +166,6 @@
 
       renderLevelsOnly(data);
       status.textContent = "Battlefield calibrated ✅ (Levels Ready)";
-      if(reviewBtn) reviewBtn.disabled = false;
-      if(document.getElementById("dmrText")) document.getElementById("dmrText").innerHTML = '<span class="muted">(Levels ready. Deploy the Daily Review when you want the narrative.)</span>';
     }catch(e){
       status.textContent = "System Error";
       alert(e && e.message ? e.message : String(e));
@@ -237,254 +174,86 @@
     }
   }
 
-  async function deployDailyReview(){
-    const status = document.getElementById("status");
-    const reviewBtn = document.getElementById("reviewBtn");
-    const levelsBtn = document.getElementById("levelsBtn");
+  async function copyForTV(){
+    if (!_lastDmrPayload || !_lastDmrPayload.levels) return;
 
-    if (!_lastDmrPayload){
-      alert("System Empty. Run 'Calibrate the Battlefield' first.");
-      return;
-    }
+    const l = _lastDmrPayload.levels;
+    const r = _lastDmrPayload.range_30m || {};
 
-    status.textContent = "Deploying the Daily Review…";
-    reviewBtn.disabled = true;
-    levelsBtn.disabled = true;
+    // BO, BD, R, S, 30H, 30L
+    const text =
+      `${parseFloat(l.breakout_trigger).toFixed(2)},` +
+      `${parseFloat(l.breakdown_trigger).toFixed(2)},` +
+      `${parseFloat(l.daily_resistance).toFixed(2)},` +
+      `${parseFloat(l.daily_support).toFixed(2)},` +
+      `${parseFloat(r.high).toFixed(2)},` +
+      `${parseFloat(r.low).toFixed(2)}`;
 
-    const t0 = performance.now();
-    const tick = setInterval(() => {
-      const secs = ((performance.now() - t0) / 1000).toFixed(1);
-      status.textContent = `Deploying daily review… (${secs}s)`;
-    }, 250);
-
-    try{
-      const { r, data } = await fetchJsonSafe("/api/dmr/generate-ai", {
-        method: "POST", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ dmr_raw: _lastDmrPayload }), credentials: "same-origin"
-      });
-
-      if (!r.ok){
-        const msg = data.detail || data.error || `AI Failed (${r.status})`;
-        status.textContent = "Deployment Failed";
-        alert(msg);
-        return;
-      }
-
-      setNarrativeText(data.report_text || "");
-      status.textContent = "Daily Review Deployed ✅";
-    }catch(e){
-      status.textContent = "System Error";
-      alert(e && e.message ? e.message : String(e));
-    }finally{
-      clearInterval(tick);
-      reviewBtn.disabled = false;
-      levelsBtn.disabled = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      const btn = document.getElementById("tvCopyBtn");
+      const originalText = btn.textContent;
+      btn.textContent = "Copied! ✅";
+      setTimeout(() => btn.textContent = originalText, 1600);
+    } catch (err) {
+      alert("Could not copy: " + err);
     }
   }
 
-  // --- UPDATED UTILITIES (THE BLOB FIX) ---
-  function splitNarrativeAndYaml(reportText){
-    const idx = reportText.indexOf("```yaml");
-    if (idx !== -1){
-      return { narrative: reportText.slice(0, idx).trim(), yaml: reportText.slice(idx).trim() };
-    }
-    return { narrative: reportText.trim(), yaml: "" };
-  }
-
-  function setNarrativeText(reportText){
-    const parts = splitNarrativeAndYaml(reportText || "");
-    const dmrEl = document.getElementById("dmrText");
-    
-    // THE FIX: Use marked.parse to render Markdown HTML
-    if(dmrEl) dmrEl.innerHTML = marked.parse(parts.narrative || "(No narrative returned.)");
-
-    _lastYaml = parts.yaml || "";
-    const toggleBtn = document.getElementById("toggleYamlBtn");
-    const copyBtn = document.getElementById("copyYamlBtn");
-    const yamlPre = document.getElementById("dmrYaml");
-
-    if (_lastYaml){
-      if(toggleBtn) toggleBtn.style.display = "inline-block";
-      if(copyBtn) copyBtn.style.display = "inline-block";
-      if(yamlPre) {
-        yamlPre.textContent = _lastYaml;
-        yamlPre.style.display = "none";
-      }
-      if(toggleBtn) toggleBtn.textContent = "Show Raw Data";
-    } else {
-      if(toggleBtn) toggleBtn.style.display = "none";
-      if(copyBtn) copyBtn.style.display = "none";
-      if(yamlPre) {
-        yamlPre.style.display = "none";
-        yamlPre.textContent = "";
-      }
-    }
-  }
-
-  function toggleYaml(){
-    const yamlPre = document.getElementById("dmrYaml");
-    const btn = document.getElementById("toggleYamlBtn");
-    if (yamlPre.style.display === "none"){
-      yamlPre.style.display = "block";
-      btn.textContent = "Hide Raw Data";
-    } else {
-      yamlPre.style.display = "none";
-      btn.textContent = "Show Raw Data";
-    }
-  }
   function buildGptContractV1(raw){
-  const inputs = raw.inputs || {};
-  const levels = raw.levels || {};
-  const r30 = raw.range_30m || raw.range30m || {};
+    const levels = raw.levels || {};
+    const r30 = raw.range_30m || {};
 
-  const profiles = {
-    weekly: {
-      vah: (raw.profiles && raw.profiles.weekly && raw.profiles.weekly.vah) ?? inputs.weekly_vah ?? null,
-      val: (raw.profiles && raw.profiles.weekly && raw.profiles.weekly.val) ?? inputs.weekly_val ?? null,
-      poc: (raw.profiles && raw.profiles.weekly && raw.profiles.weekly.poc) ?? inputs.weekly_poc ?? null
-    },
-    f24: {
-      vah: (raw.profiles && raw.profiles.f24 && raw.profiles.f24.vah) ?? inputs.f24_vah ?? null,
-      val: (raw.profiles && raw.profiles.f24 && raw.profiles.f24.val) ?? inputs.f24_val ?? null,
-      poc: (raw.profiles && raw.profiles.f24 && raw.profiles.f24.poc) ?? inputs.f24_poc ?? null
-    },
-    morning: {
-      vah: (raw.profiles && raw.profiles.morning && raw.profiles.morning.vah) ?? inputs.morn_vah ?? null,
-      val: (raw.profiles && raw.profiles.morning && raw.profiles.morning.val) ?? inputs.morn_val ?? null,
-      poc: (raw.profiles && raw.profiles.morning && raw.profiles.morning.poc) ?? inputs.morn_poc ?? null
-    }
-  };
+    return {
+      contract_version: "1.0",
+      generated_at: new Date().toISOString(),
 
-  return {
-    contract_version: "1.0",
-    generated_at: new Date().toISOString(),
+      date: raw.date || null,
+      symbol: raw.symbol || "BTCUSDT",
+      session_tz: raw.session_tz || USER_SESSION_TZ || "UTC",
+      last_price: raw.last_price ?? null,
 
-    date: raw.date || inputs.date || null,
-    symbol: raw.symbol || inputs.symbol || "BTCUSDT",
-    session_tz: raw.session_tz || inputs.session_tz || "UTC",
-    last_price: raw.last_price ?? inputs.last_price ?? null,
+      levels: {
+        daily_support: levels.daily_support ?? null,
+        daily_resistance: levels.daily_resistance ?? null,
+        breakout_trigger: levels.breakout_trigger ?? null,
+        breakdown_trigger: levels.breakdown_trigger ?? null
+      },
 
-    levels: {
-      daily_support: levels.daily_support ?? null,
-      daily_resistance: levels.daily_resistance ?? null,
-      breakout_trigger: levels.breakout_trigger ?? null,
-      breakdown_trigger: levels.breakdown_trigger ?? null
-    },
+      range_30m: {
+        high: r30.high ?? null,
+        low:  r30.low  ?? null
+      },
 
-    range_30m: {
-      high: r30.high ?? inputs.range30m_high ?? inputs.r30_high ?? null,
-      low:  r30.low  ?? inputs.range30m_low  ?? inputs.r30_low  ?? null
-    },
+      profiles: raw.profiles || {},
+      htf_shelves: raw.htf_shelves || { resistance: [], support: [] },
+      intraday_shelves: raw.intraday_shelves || { breakout_side: [], breakdown_side: [] },
+      trade_logic: raw.trade_logic || null,
 
-    profiles,
+      events: raw.events || [],
+      news: raw.news || [],
+      sentiment: raw.sentiment ?? null,
 
-    htf_shelves: raw.htf_shelves || { resistance: [], support: [] },
-    intraday_shelves: raw.intraday_shelves || { breakout_side: [], breakdown_side: [] },
-    trade_logic: raw.trade_logic || null,
-
-    events: raw.events || [],
-    news: raw.news || inputs.news || [],
-    sentiment: raw.sentiment ?? inputs.sentiment ?? null,
-
-    source: { app: "kabroda_site", endpoint: "/api/dmr/run-raw" }
-  };
-}
-
-async function copyForGPT(){
-  if (!_lastDmrPayload) return;
-
-  const obj = buildGptContractV1(_lastDmrPayload);
-  const text = JSON.stringify(obj, null, 2);
-
-  try {
-    await navigator.clipboard.writeText(text);
-    const btn = document.getElementById("copyGptBtn");
-    const orig = btn.textContent;
-    btn.textContent = "Copied! ✅";
-    setTimeout(()=>btn.textContent = orig, 2000);
-  } catch (err) {
-    alert("Could not copy: " + err);
+      source: raw.source || { app: "kabroda_site", endpoint: "/api/dmr/run-raw" }
+    };
   }
-}
 
-  async function copyYaml(){
-    try{
-      await navigator.clipboard.writeText(_lastYaml || "");
-      const btn = document.getElementById("copyYamlBtn");
+  async function copyForGPT(){
+    if (!_lastDmrPayload) return;
+
+    const obj = buildGptContractV1(_lastDmrPayload);
+    const text = JSON.stringify(obj, null, 2);
+
+    try {
+      await navigator.clipboard.writeText(text);
+      const btn = document.getElementById("copyGptBtn");
       const orig = btn.textContent;
-      btn.textContent = "Copied!";
-      setTimeout(()=>btn.textContent=orig, 1400);
-    }catch(e){}
-  }
-
-  function addChat(role, text){
-    const log = document.getElementById("chatLog");
-    if (!log) return;
-    const row = document.createElement("div");
-    row.className = "chat-msg " + (role === "user" ? "chat-user" : "chat-assistant");
-    const bub = document.createElement("div");
-    bub.className = "chat-bubble";
-    
-    // THE FIX: Parse Markdown for Assistant, plain text for User
-    if (role === "user") {
-        bub.textContent = text;
-    } else {
-        bub.innerHTML = marked.parse(text);
-    }
-    
-    row.appendChild(bub);
-    log.appendChild(row);
-    log.scrollTop = log.scrollHeight;
-  }
-
-  async function sendChat(){
-    if (!IS_ELITE) return;
-    if (!_lastDmrPayload){
-      addChat("assistant", "Initialize the battlefield first.");
-      return;
-    }
-    const input = document.getElementById("chatInput");
-    const btn = document.getElementById("sendBtn");
-    const q = (input.value || "").trim();
-    if (!q) return;
-
-    input.value = "";
-    addChat("user", q);
-    btn.disabled = true;
-
-    try{
-      const { r, data } = await fetchJsonSafe("/api/ai_coach", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ message: q, dmr: _lastDmrPayload }),
-        credentials: "same-origin"
-      });
-
-      if (!r.ok) throw new Error(data.detail || "Chat failed");
-      addChat("assistant", data.reply || "(No answer)");
-    }catch(e){
-      addChat("assistant", "Error: " + (e && e.message ? e.message : String(e)));
-    }finally{
-      btn.disabled = false;
+      btn.textContent = "Copied! ✅";
+      setTimeout(()=>btn.textContent = orig, 1600);
+    } catch (err) {
+      alert("Could not copy: " + err);
     }
   }
-
-  async function ensureUserTimezone(){
-    try{
-      const guessed = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (!guessed) return;
-      const current = (USER_SESSION_TZ || "").trim();
-      if (!current || current.toUpperCase() === "UTC"){
-        if (guessed !== "UTC"){
-          await fetchJsonSafe("/account/session-timezone", {
-            method: "POST", headers: {"Content-Type":"application/json"},
-            body: JSON.stringify({ timezone: guessed }), credentials: "same-origin"
-          });
-        }
-      }
-    }catch(e){}
-  }
-  document.addEventListener("DOMContentLoaded", ensureUserTimezone);
 </script>
 
 {% endblock %}

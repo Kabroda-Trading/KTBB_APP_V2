@@ -22,10 +22,8 @@ from membership import (
     get_membership_state,
     require_paid_access,
     ensure_symbol_allowed,
-    ensure_coach_allowed,
-    PRICE_TACTICAL,
-    PRICE_ELITE,
 )
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOCTRINE_DIR = Path(BASE_DIR) / "doctrine"
@@ -138,8 +136,6 @@ def _plan_flags(u: UserModel) -> Dict[str, Any]:
         "is_paid": ms.is_paid,
         "plan": ms.plan,
         "plan_label": ms.label,
-        "is_elite": bool(ms.is_paid and ms.plan == "elite"),
-        "is_tactical": bool(ms.is_paid and ms.plan == "tactical"),
     }
 
 
@@ -169,10 +165,7 @@ def pricing(request: Request):
         "pricing.html",
         {
             "request": request,
-            "is_logged_in": bool(sess),
-            # You can pass these if your template ever wants them:
-            "price_tactical_set": bool(PRICE_TACTICAL),
-            "price_elite_set": bool(PRICE_ELITE),
+            "is_logged_in": bool(sess),                     
         },
     )
 
@@ -197,18 +190,18 @@ def suite(request: Request, db: Session = Depends(get_db)):
     flags = _plan_flags(u)
 
     return templates.TemplateResponse(
-        "app.html",
-        {
-            "request": request,
-            "user": {
-                "email": u.email,
-                "session_tz": (u.session_tz or "UTC"),
-                "plan_label": flags["plan_label"],
-                "plan": flags["plan"] or "",
-            },
-            "is_elite": flags["is_elite"],
+    "app.html",
+    {
+        "request": request,
+        "user": {
+            "email": u.email,
+            "session_tz": (u.session_tz or "UTC"),
+            "plan_label": flags["plan_label"],
+            "plan": flags["plan"] or "",
         },
-    )
+    },
+)
+
 
 
 @app.get("/account", response_class=HTMLResponse)
@@ -350,84 +343,6 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     }
     return JSONResponse(raw)
 
-@app.post("/api/dmr/generate-ai")
-async def dmr_generate_ai(request: Request, db: Session = Depends(get_db)):
-    # Auth + paywall
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-
-    # Accept raw from client (reliable) and fall back to session meta only
-    try:
-        payload = await request.json()
-    except Exception:
-        payload = {}
-
-    dmr_raw = payload.get("dmr_raw")
-    if not isinstance(dmr_raw, dict):
-        raise HTTPException(
-            status_code=400,
-            detail="Run 'Calibrate the Battlefield' first (levels), then deploy the review."
-        )
-
-    symbol = (dmr_raw.get("symbol") or "BTCUSDT").strip().upper()
-    ensure_symbol_allowed(u, symbol)
-
-    _apply_doctrine_to_kabroda_prompts()
-
-    try:
-        report_text = await asyncio.wait_for(
-            asyncio.to_thread(
-                kabroda_ai.generate_daily_market_review,
-                symbol=symbol,
-                date_str=dmr_raw.get("date", ""),
-                context=dmr_raw,
-            ),
-            timeout=int(os.getenv("DMR_AI_TIMEOUT_SECONDS", "75")),
-        )
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="AI generation timed out. Try again.")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI generation failed: {e}")
-
-    # Save only small "full" context in session (optional)
-    request.session["last_dmr_full"] = {
-        "symbol": symbol,
-        "date": dmr_raw.get("date", ""),
-        "levels": dmr_raw.get("levels"),
-        "range_30m": dmr_raw.get("range_30m"),
-        "report_text": report_text,
-    }
-
-    return JSONResponse({"report_text": report_text})
-
-
-
-# -----------------------------
-# AI Coach (Elite-only)
-# -----------------------------
-@app.post("/api/ai_coach")
-async def ai_coach(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-
-    # Must be paid + elite
-    ensure_coach_allowed(u)
-
-    payload = await request.json()
-    message = (payload.get("message") or "").strip()
-    if not message:
-        raise HTTPException(status_code=400, detail="Missing message")
-
-    dmr_ctx = payload.get("dmr") or request.session.get("last_dmr_full") or request.session.get("last_dmr_raw")
-    if not isinstance(dmr_ctx, dict):
-        raise HTTPException(status_code=400, detail="Run the DMR first so coach has today’s context.")
-
-    _apply_doctrine_to_kabroda_prompts()
-
-    reply = kabroda_ai.run_ai_coach(user_message=message, dmr_context=dmr_ctx, tier="elite")
-    return {"reply": reply}
-
 
 # -----------------------------
 # Billing / Stripe
@@ -437,13 +352,11 @@ async def billing_checkout(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
 
-    payload = await request.json()
-    plan = (payload.get("tier") or payload.get("plan") or "").strip().lower()
-    if plan not in ("tactical", "elite"):
-        raise HTTPException(status_code=400, detail="Invalid plan")
-
-    url = billing.create_checkout_session(db=db, user_model=u, plan=plan)
+    # Single plan checkout (Kabroda Trading BattleBox)
+    # No tier/plan selection needed.
+    url = billing.create_checkout_session(db=db, user_model=u)
     return {"url": url}
+
 
 
 @app.post("/billing/portal")
