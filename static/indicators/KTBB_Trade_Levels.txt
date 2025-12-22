@@ -1,0 +1,113 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Kabroda / KTBB
+//@version=5
+indicator("KTBB Brain1 Hybrid (Pure Data + Full Manual)", "KTBB Hybrid V2.2", overlay=true, max_labels_count=200, max_lines_count=300, max_boxes_count=50)
+
+// ───────────────────────────────
+// 1. DATA INPUTS
+// ───────────────────────────────
+grp_man = "DATA INPUT"
+// Paste format: "BO, BD, R, S, 30H, 30L"
+pasteData = input.string("", "PASTE DATA", group=grp_man, tooltip="Paste the 6-number string from the Kabroda App.")
+
+// Fallback Manual Inputs (NOW COMPLETE)
+man_BO  = input.float(0.0, "OR Manual Breakout", group=grp_man)
+man_BD  = input.float(0.0, "OR Manual Breakdown", group=grp_man)
+man_Res = input.float(0.0, "OR Manual Resistance", group=grp_man)
+man_Sup = input.float(0.0, "OR Manual Support", group=grp_man)
+// Added these two:
+man_30H = input.float(0.0, "OR Manual 30m High", group=grp_man)
+man_30L = input.float(0.0, "OR Manual 30m Low", group=grp_man)
+
+// ───────────────────────────────
+// LOGIC: PARSE PASTE STRING
+// ───────────────────────────────
+var float p_BO = na
+var float p_BD = na
+var float p_Res = na
+var float p_Sup = na
+var float p_30H = na
+var float p_30L = na
+
+if barstate.islast or barstate.isrealtime
+    if pasteData != ""
+        string[] parts = str.split(pasteData, ",")
+        // Parse Triggers & Daily
+        if array.size(parts) >= 4
+            p_BO  := str.tonumber(array.get(parts, 0))
+            p_BD  := str.tonumber(array.get(parts, 1))
+            p_Res := str.tonumber(array.get(parts, 2))
+            p_Sup := str.tonumber(array.get(parts, 3))
+        // Parse 30m Range (Spot)
+        if array.size(parts) >= 6
+            p_30H := str.tonumber(array.get(parts, 4))
+            p_30L := str.tonumber(array.get(parts, 5))
+
+// PURE DATA MAPPING (Paste Priority -> Manual Fallback)
+float final_BO  = not na(p_BO)  ? p_BO  : man_BO
+float final_BD  = not na(p_BD)  ? p_BD  : man_BD
+float final_Res = not na(p_Res) ? p_Res : man_Res
+float final_Sup = not na(p_Sup) ? p_Sup : man_Sup
+// Use pasted Spot 30m OR manual inputs
+float final_30H = not na(p_30H) ? p_30H : man_30H
+float final_30L = not na(p_30L) ? p_30L : man_30L
+
+// ───────────────────────────────
+// 2. VISUALS
+// ───────────────────────────────
+grp_vis = "VISUALS"
+c_BO    = input.color(color.green,  "Breakout Color", group=grp_vis)
+c_BD    = input.color(color.purple, "Breakdown Color", group=grp_vis)
+c_Res   = input.color(color.red,    "Resistance Color", group=grp_vis)
+c_Sup   = input.color(color.blue,   "Support Color", group=grp_vis)
+s_Trig  = input.string("Solid",  "Trigger Style", options=["Solid", "Dashed", "Dotted"], group=grp_vis)
+s_Daily = input.string("Dashed", "Daily Style",   options=["Solid", "Dashed", "Dotted"], group=grp_vis)
+w_Line  = input.int(2, "Line Width", minval=1, maxval=4, group=grp_vis)
+
+// ───────────────────────────────
+// 3. TIME ALIGNMENT (Visual Only)
+// ───────────────────────────────
+grp_auto = "AUTO 30M RANGE"
+sessionTZ     = input.string("America/Chicago", "Session Timezone", group=grp_auto)
+sessionHour   = input.int(6, "Session Start Hour", 0, 23, group=grp_auto)
+// Default to 30 so the box draws on the 2nd candle (06:30)
+sessionMinute = input.int(30, "Session Start Minute", 0, 59, group=grp_auto)
+
+f_sessionStartTs(string _tz, int _h, int _m) =>
+    int startToday = timestamp(_tz, year(time, _tz), month(time, _tz), dayofmonth(time, _tz), _h, _m)
+    startToday := time < startToday ? startToday - 24 * 60 * 60 * 1000 : startToday
+    startToday
+
+// ───────────────────────────────
+// DRAWING
+// ───────────────────────────────
+f_getStyle(string s) =>
+    s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
+
+f_drawLine(float y, color c, string styleOpt) =>
+    var line l = na
+    if not na(y) and y > 0
+        if na(l)
+            l := line.new(time, y, time + 86400000, y, xloc=xloc.bar_time, extend=extend.both, color=c, width=w_Line, style=f_getStyle(styleOpt))
+        else
+            line.set_y1(l, y)
+            line.set_y2(l, y)
+            line.set_color(l, c)
+            line.set_style(l, f_getStyle(styleOpt))
+            line.set_width(l, w_Line)
+    l 
+
+f_drawLine(final_BO,  c_BO,  s_Trig)
+f_drawLine(final_BD,  c_BD,  s_Trig)
+f_drawLine(final_Res, c_Res, s_Daily)
+f_drawLine(final_Sup, c_Sup, s_Daily)
+
+// Draw 30m Box (Using Pure Data)
+show30Box = input.bool(true, "Show 30m Box", group=grp_auto)
+var box box30 = na
+
+if show30Box and not na(final_30H) and not na(final_30L) and final_30H > 0
+    box.delete(box30)
+    int sessStart = f_sessionStartTs(sessionTZ, sessionHour, sessionMinute)
+    // Draw box from 06:30 to 07:00 using the pasted/manual Spot Prices
+    box30 := box.new(sessStart, final_30H, sessStart + 1800000, final_30L, xloc=xloc.bar_time, extend=extend.none, bgcolor=color.new(color.orange, 85), border_color=color.new(color.orange, 80))

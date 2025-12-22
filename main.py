@@ -202,6 +202,28 @@ def suite(request: Request, db: Session = Depends(get_db)):
     },
 )
 
+@app.get("/indicators", response_class=HTMLResponse)
+def indicators(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+
+    # Paid-only gating
+    require_paid_access(u)
+
+    flags = _plan_flags(u)
+    return templates.TemplateResponse(
+        "indicators.html",
+        {
+            "request": request,
+            "is_logged_in": True,
+            "user": {
+                "email": u.email,
+                "session_tz": (u.session_tz or "UTC"),
+                "plan_label": flags.get("plan_label", ""),
+                "plan": flags.get("plan") or "",
+            },
+        },
+    )
 
 
 @app.get("/account", response_class=HTMLResponse)

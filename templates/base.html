@@ -1,33 +1,45 @@
-<!-- templates/base.html -->
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Kabroda BattleBox Suite</title>
-  <link rel="stylesheet" href="/static/site.css"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Kabroda Trading BattleBox</title>
+  <link rel="stylesheet" href="/static/site.css" />
 </head>
+
 <body>
   <header class="topbar">
-    <div class="shell topbar-inner">
+    <div class="topbar-inner">
       <a class="brand" href="/">
-        <span class="brand-mark">Kabroda</span>
+        <span class="brand-mark"></span>
+        <span class="brand-name">Kabroda Trading BattleBox</span>
       </a>
-      <nav class="links">
-        <a href="/pricing">Pricing</a>
-        <a href="/about">About</a>
-        <a class="pill" href="/suite">Suite</a>
-        <a href="/login">Login</a>
+
+      <nav class="nav">
+        {% if is_logged_in %}
+          <a class="nav-link" href="/suite">Suite</a>
+          <a class="nav-link" href="/indicators">Indicators</a>
+          <a class="nav-link" href="/account">Account</a>
+          <a class="nav-link" href="/logout">Logout</a>
+        {% else %}
+          <a class="nav-link" href="/about">About</a>
+          <a class="nav-link" href="/pricing">Pricing</a>
+          <a class="nav-link" href="/login">Login</a>
+        {% endif %}
       </nav>
     </div>
   </header>
 
-  <main class="shell">
-    {% block content %}{% endblock %}
+  <main class="page">
+    <div class="page-inner">
+      {% block content %}{% endblock %}
+    </div>
   </main>
 
-  <div class="footer shell muted">
-    © 2025 Kabroda. Risk disclaimer: trading is risky.
-  </div>
+  <footer class="footer">
+    <div class="footer-inner">
+      <span class="muted">© {{ year if year else "2026" }} Kabroda Trading BattleBox</span>
+    </div>
+  </footer>
 </body>
 </html>

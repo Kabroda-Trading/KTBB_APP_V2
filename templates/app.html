@@ -1,99 +1,119 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="shell" style="padding-top:20px; padding-bottom:40px;">
-
-  <div class="text-center" style="margin-bottom:28px;">
-    <h1>BattleBox Suite</h1>
-    <p class="muted">
-      Logged in as <strong style="color:var(--accent-primary)">{{ user.email }}</strong>
-      • {{ user.plan_label }}
-    </p>
+<div class="hero">
+  <div class="hero-title">BattleBox Suite</div>
+  <div class="hero-sub">Calibrate the battlefield. Sync TradingView. Launch BattleBox GPT.</div>
+  <div class="hero-meta">
+    Logged in as <strong>{{ user.email }}</strong> • <span class="pill">{{ user.plan_label }}</span>
   </div>
+</div>
 
-  <!-- Step 1 -->
-  <div class="card" style="margin-bottom:18px;">
-    <h3>1) Calibrate Levels</h3>
-    <p class="muted" style="margin-bottom:18px; max-width:760px;">
-      Generate today’s battlefield levels. Then copy levels into TradingView, or copy the BattleBox payload to the GPT.
-    </p>
-
-    <div class="row" style="align-items: flex-end; gap: 16px;">
-      <div style="flex: 1; max-width: 320px;">
-        <label class="label" style="margin-bottom:8px; display:block;">Target Asset</label>
-        <select id="symbol" class="input" style="cursor:pointer;">
-          <option value="BTCUSDT">BTC (Bitcoin)</option>
-          <option value="ETHUSDT">ETH (Ethereum)</option>
-          <option value="SOLUSDT">SOL (Solana)</option>
-        </select>
-      </div>
-
-      <div style="flex: 0 0 auto;">
-        <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="min-width:190px;">
-          Calibrate Levels
-        </button>
+<!-- Premium onboarding card -->
+<div class="card onboarding">
+  <div class="onboard-grid">
+    <div class="onboard-step">
+      <div class="onboard-icon">①</div>
+      <div>
+        <div class="onboard-title">Calibrate Levels</div>
+        <div class="muted">Generate today’s battlefield structure.</div>
       </div>
     </div>
 
-    <div id="status" class="muted" style="margin-top:14px; font-size:13px; border-top:1px solid rgba(255,255,255,0.05); padding-top:12px;">
-      <span style="color:var(--accent-primary)">●</span> System Ready. Awaiting command.
+    <div class="onboard-step">
+      <div class="onboard-icon">②</div>
+      <div>
+        <div class="onboard-title">Sync TradingView</div>
+        <div class="muted">Copy today’s numbers into your KTBB Levels indicator.</div>
+      </div>
+    </div>
+
+    <div class="onboard-step">
+      <div class="onboard-icon">③</div>
+      <div>
+        <div class="onboard-title">Launch BattleBox GPT</div>
+        <div class="muted">Copy the session data → paste into GPT → get your desk brief.</div>
+      </div>
     </div>
   </div>
+</div>
 
-  <!-- Step 2 -->
-  <div class="card" style="margin-bottom:18px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-      <h3>Battlefield Levels</h3>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button id="tvCopyBtn" class="btn" onclick="copyForTV()" style="display:none; font-size:13px; padding:8px 14px; border-color:var(--accent-primary);">
-          Copy for TradingView
-        </button>
-        <button id="copyGptBtn" class="btn" onclick="copyForGPT()" style="display:none; font-size:13px; padding:8px 14px;">
-          Copy for BattleBox GPT
-        </button>
-        <a id="openGptLink" class="btn" style="display:none; font-size:13px; padding:8px 14px;" href="#" target="_blank" rel="noopener">
-          Open BattleBox GPT
-        </a>
-      </div>
+<!-- Calibrate -->
+<div class="card">
+  <div class="card-head">
+    <div>
+      <div class="card-title">Calibrate</div>
+      <div class="muted">Generate your daily levels and triggers in seconds.</div>
+    </div>
+    <div id="statusPill" class="pill pill-live">Ready</div>
+  </div>
+
+  <div class="row" style="gap:14px; align-items:flex-end;">
+    <div style="flex:1; min-width:220px;">
+      <label class="label">Target Asset</label>
+      <select id="symbol" class="input" style="cursor:pointer;">
+        <option value="BTCUSDT">BTC (Bitcoin)</option>
+        <option value="ETHUSDT">ETH (Ethereum)</option>
+        <option value="SOLUSDT">SOL (Solana)</option>
+      </select>
     </div>
 
-    <div style="display:flex; flex-direction:column; gap: 14px;">
-
-      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
-        <div style="background:rgba(239, 68, 68, 0.10); border:1px solid rgba(239, 68, 68, 0.20); padding:14px; border-radius:12px; text-align:center;">
-          <div class="label" style="color:#f87171; font-size:12px; text-transform:uppercase;">Daily Resistance</div>
-          <div id="lv_dr" style="font-size:22px; font-weight:800; color:#fff;">—</div>
-        </div>
-        <div style="background:rgba(16, 185, 129, 0.10); border:1px solid rgba(16, 185, 129, 0.20); padding:14px; border-radius:12px; text-align:center;">
-          <div class="label" style="color:#34d399; font-size:12px; text-transform:uppercase;">Breakout Trigger</div>
-          <div id="lv_bo" style="font-size:22px; font-weight:800; color:#fff;">—</div>
-        </div>
-      </div>
-
-      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
-        <div style="background:rgba(168, 85, 247, 0.10); border:1px solid rgba(168, 85, 247, 0.20); padding:14px; border-radius:12px; text-align:center;">
-          <div class="label" style="color:#c084fc; font-size:12px; text-transform:uppercase;">Breakdown Trigger</div>
-          <div id="lv_bd" style="font-size:22px; font-weight:800; color:#fff;">—</div>
-        </div>
-        <div style="background:rgba(59, 130, 246, 0.10); border:1px solid rgba(59, 130, 246, 0.20); padding:14px; border-radius:12px; text-align:center;">
-          <div class="label" style="color:#60a5fa; font-size:12px; text-transform:uppercase;">Daily Support</div>
-          <div id="lv_ds" style="font-size:22px; font-weight:800; color:#fff;">—</div>
-        </div>
-      </div>
-
-      <div style="display:flex; justify-content:space-between; gap: 12px; background:rgba(255,255,255,0.03); padding:12px 18px; border-radius:12px; border:1px solid rgba(255,255,255,0.05); flex-wrap:wrap;">
-        <span class="muted" style="font-size:13px;">30m High: <strong id="lv_30h" style="color:#e2e8f0; margin-left:6px;">—</strong></span>
-        <span class="muted" style="font-size:13px;">30m Low: <strong id="lv_30l" style="color:#e2e8f0; margin-left:6px;">—</strong></span>
-      </div>
-
-      <div class="muted" style="font-size:13px; margin-top:4px;">
-        <strong style="color:#e5e7eb;">Workflow:</strong>
-        1) Calibrate → 2) Copy for TradingView → 3) Copy for GPT → 4) Open GPT → Paste → Execute.
-      </div>
-
+    <div style="flex:0 0 auto;">
+      <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="min-width:200px;">
+        Calibrate Levels
+      </button>
     </div>
   </div>
 
+  <div id="status" class="muted" style="margin-top:12px;">
+    System ready. Awaiting command.
+  </div>
+</div>
+
+<!-- Levels + actions -->
+<div class="card">
+  <div class="card-head">
+    <div>
+      <div class="card-title">Battlefield Levels</div>
+      <div class="muted">Compact, operational, and built for execution.</div>
+    </div>
+    <div class="btn-row">
+      <button id="tvCopyBtn" class="btn" onclick="copyForTV()" style="display:none;">Copy for TradingView</button>
+      <button id="copyGptBtn" class="btn" onclick="copyForGPT()" style="display:none;">Copy for BattleBox GPT</button>
+      <a id="openGptLink" class="btn" style="display:none;" href="#" target="_blank" rel="noopener">Open BattleBox GPT</a>
+    </div>
+  </div>
+
+  <div class="levels-grid">
+    <div class="lvl-card lvl-red">
+      <div class="lvl-label">Daily Resistance</div>
+      <div id="lv_dr" class="lvl-value">—</div>
+    </div>
+    <div class="lvl-card lvl-green">
+      <div class="lvl-label">Breakout Trigger</div>
+      <div id="lv_bo" class="lvl-value">—</div>
+    </div>
+    <div class="lvl-card lvl-purple">
+      <div class="lvl-label">Breakdown Trigger</div>
+      <div id="lv_bd" class="lvl-value">—</div>
+    </div>
+    <div class="lvl-card lvl-blue">
+      <div class="lvl-label">Daily Support</div>
+      <div id="lv_ds" class="lvl-value">—</div>
+    </div>
+  </div>
+
+  <div class="levels-mini">
+    <div>30m High <strong id="lv_30h">—</strong></div>
+    <div>30m Low <strong id="lv_30l">—</strong></div>
+  </div>
+
+  <div class="callout">
+    <div class="callout-title">What happens next</div>
+    <div class="callout-text">
+      After calibration, sync TradingView first (so your chart matches the day). Then copy the BattleBox GPT data and paste it into the GPT for your desk-grade Daily Market Review and Battle Plan.
+    </div>
+  </div>
 </div>
 
 <script>
@@ -116,6 +136,24 @@
     try { data = text ? JSON.parse(text) : {}; }
     catch { data = { detail: text || "Non-JSON response from server." }; }
     return { r, data };
+  }
+
+  function setPill(state){
+    const pill = document.getElementById("statusPill");
+    if(!pill) return;
+
+    pill.classList.remove("pill-live","pill-warn","pill-ok");
+
+    if(state === "ready"){
+      pill.textContent = "Ready";
+      pill.classList.add("pill-live");
+    } else if(state === "work"){
+      pill.textContent = "Calibrating…";
+      pill.classList.add("pill-warn");
+    } else if(state === "ok"){
+      pill.textContent = "Updated";
+      pill.classList.add("pill-ok");
+    }
   }
 
   function renderLevelsOnly(payload){
@@ -147,6 +185,7 @@
     const sym = symEl ? symEl.value : "BTCUSDT";
 
     status.textContent = "Calibrating levels…";
+    setPill("work");
     levelsBtn.disabled = true;
 
     try{
@@ -159,15 +198,18 @@
 
       if (!r.ok){
         const msg = data.detail || data.error || `Failed (${r.status})`;
-        status.textContent = "Calibration Failed: " + msg;
+        status.textContent = "Calibration failed: " + msg;
+        setPill("ready");
         alert(msg);
         return;
       }
 
       renderLevelsOnly(data);
-      status.textContent = "Battlefield calibrated ✅ (Levels Ready)";
+      status.textContent = "Battlefield calibrated ✅";
+      setPill("ok");
     }catch(e){
-      status.textContent = "System Error";
+      status.textContent = "System error";
+      setPill("ready");
       alert(e && e.message ? e.message : String(e));
     }finally{
       levelsBtn.disabled = false;
@@ -193,8 +235,8 @@
       await navigator.clipboard.writeText(text);
       const btn = document.getElementById("tvCopyBtn");
       const originalText = btn.textContent;
-      btn.textContent = "Copied! ✅";
-      setTimeout(() => btn.textContent = originalText, 1600);
+      btn.textContent = "Copied ✅";
+      setTimeout(() => btn.textContent = originalText, 1200);
     } catch (err) {
       alert("Could not copy: " + err);
     }
@@ -207,33 +249,24 @@
     return {
       contract_version: "1.0",
       generated_at: new Date().toISOString(),
-
       date: raw.date || null,
       symbol: raw.symbol || "BTCUSDT",
       session_tz: raw.session_tz || USER_SESSION_TZ || "UTC",
       last_price: raw.last_price ?? null,
-
       levels: {
         daily_support: levels.daily_support ?? null,
         daily_resistance: levels.daily_resistance ?? null,
         breakout_trigger: levels.breakout_trigger ?? null,
         breakdown_trigger: levels.breakdown_trigger ?? null
       },
-
-      range_30m: {
-        high: r30.high ?? null,
-        low:  r30.low  ?? null
-      },
-
+      range_30m: { high: r30.high ?? null, low: r30.low ?? null },
       profiles: raw.profiles || {},
       htf_shelves: raw.htf_shelves || { resistance: [], support: [] },
       intraday_shelves: raw.intraday_shelves || { breakout_side: [], breakdown_side: [] },
       trade_logic: raw.trade_logic || null,
-
       events: raw.events || [],
       news: raw.news || [],
       sentiment: raw.sentiment ?? null,
-
       source: raw.source || { app: "kabroda_site", endpoint: "/api/dmr/run-raw" }
     };
   }
@@ -248,12 +281,14 @@
       await navigator.clipboard.writeText(text);
       const btn = document.getElementById("copyGptBtn");
       const orig = btn.textContent;
-      btn.textContent = "Copied! ✅";
-      setTimeout(()=>btn.textContent = orig, 1600);
+      btn.textContent = "Copied ✅";
+      setTimeout(()=>btn.textContent = orig, 1200);
     } catch (err) {
       alert("Could not copy: " + err);
     }
   }
+
+  setPill("ready");
 </script>
 
 {% endblock %}
