@@ -170,14 +170,21 @@
   async function copyForTV(){
     if (!_lastDmrPayload || !_lastDmrPayload.levels) return;
     const l = _lastDmrPayload.levels;
-    const text = `${parseFloat(l.breakout_trigger).toFixed(2)},${parseFloat(l.breakdown_trigger).toFixed(2)},${parseFloat(l.daily_resistance).toFixed(2)},${parseFloat(l.daily_support).toFixed(2)}`;
+    const r = _lastDmrPayload.range_30m || {};
+    
+    // NEW FORMAT: BO, BD, R, S, 30H, 30L
+    // We send 6 numbers now instead of 4
+    const text = `${parseFloat(l.breakout_trigger).toFixed(2)},${parseFloat(l.breakdown_trigger).toFixed(2)},${parseFloat(l.daily_resistance).toFixed(2)},${parseFloat(l.daily_support).toFixed(2)},${parseFloat(r.high).toFixed(2)},${parseFloat(r.low).toFixed(2)}`;
+    
     try {
       await navigator.clipboard.writeText(text);
       const btn = document.getElementById("tvCopyBtn");
       const originalText = btn.textContent;
       btn.textContent = "Copied! ✅";
       setTimeout(() => btn.textContent = originalText, 2000);
-    } catch (err) { alert("Could not copy: " + err); }
+    } catch (err) {
+      alert("Could not copy: " + err);
+    }
   }
 
   async function calibrateBattlefield(){
