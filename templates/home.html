@@ -1,76 +1,47 @@
 {% extends "base.html" %}
 {% block content %}
 
-<section class="hero-section text-center">
-  <div class="pill-badge glow">Kabroda Trading BattleBox</div>
-  <h1 class="display-title">
-    Execution <span class="gradient-text">Without Noise.</span>
-  </h1>
+<section class="text-center">
+  <div class="pill">Kabroda Trading BattleBox</div>
+  <h1 class="display-title">Stop Trading Feelings.<br>Start Trading Structure.</h1>
   <p class="lead-text">
-    The only operating system that anchors your charts to institutional spot data. 
-    Eliminate emotional variance with pre-calculated session structures, 
-    precision triggers, and execution guardrails.
+    The only system that anchors your charts to institutional spot data. 
+    Eliminate variance with pre-calculated execution anchors.
   </p>
   <div class="hero-actions">
-    <a class="btn primary glow-effect" href="/pricing">Deploy BattleBox</a>
-    <a class="btn secondary" href="/about">Read the Doctrine</a>
+    <a class="btn primary" href="/pricing">Deploy BattleBox</a>
+    <a class="btn secondary" href="/about">How It Works</a>
   </div>
 </section>
 
 <section class="bento-grid">
-  
-  <div class="bento-card large">
-    <div class="icon-box purple">⚡</div>
+  <div class="bento-card">
+    <div class="icon-box">⚡</div>
     <h3>Institutional Data Engine</h3>
-    <p>
-      Your charts lie. Futures data is noisy. Kabroda bypasses the noise by pulling 
-      <strong>Spot-Derived Levels</strong> directly from the source. We calculate the 
-      Breakout and Breakdown triggers based on the true asset price, not the derivative wick.
-    </p>
+    <p>We bypass futures noise by pulling Spot Levels directly from the source. The truth is in the asset, not the wick.</p>
   </div>
 
   <div class="bento-card">
-    <div class="icon-box blue">⚓</div>
+    <div class="icon-box">⚓</div>
     <h3>The 30m Anchor</h3>
-    <p>
-      We lock the first 30 minutes of the session to define the "No-Trade Zone." 
-      If price accepts outside this range, we enter Discovery. If it stays inside, we sit on our hands.
-    </p>
+    <p>We lock the session's opening balance. If price accepts outside, we execute. If inside, we wait.</p>
   </div>
 
   <div class="bento-card">
-    <div class="icon-box green">👁️</div>
-    <h3>Visual Synchronization</h3>
-    <p>
-      One click syncs your entire battlefield to TradingView. No manual drawing. 
-      No human error. Your chart becomes a clean surface for execution.
-    </p>
+    <div class="icon-box">👁️</div>
+    <h3>One-Click Sync</h3>
+    <p>Push your daily levels to TradingView instantly. No manual drawing. No human error.</p>
   </div>
 
-  <div class="bento-card wide">
-    <div class="row" style="align-items: center; gap: 20px;">
-      <div style="flex: 1;">
-        <h3>BattleBox AI Command</h3>
-        <p>
-          Don't just look at levels—interact with them. Copy your session data into the 
-          <strong>Kabroda GPT</strong> to get a desk-grade Daily Market Review. 
-          It analyzes regime (Trend vs. Balance), momentum, and risk in seconds.
-        </p>
-      </div>
-      <div style="flex: 0 0 auto;">
-        <span class="pill-badge">Elite Feature</span>
-      </div>
+  <div class="bento-card wide" style="display:flex; align-items:center; gap:24px;">
+    <div style="flex:1;">
+      <h3>BattleBox AI Command</h3>
+      <p>Interact with your levels. Copy session data into the Kabroda GPT for a desk-grade market review.</p>
+    </div>
+    <div>
+      <a href="/pricing" class="btn secondary" style="font-size:13px; padding:8px 16px;">View Plans</a>
     </div>
   </div>
-
-</section>
-
-<section class="cta-section text-center">
-  <h2>Stop Trading Feelings. Start Trading Structure.</h2>
-  <p class="muted" style="max-width: 600px; margin: 0 auto 24px;">
-    Join the traders who have replaced "guessing" with a calibrated daily process.
-  </p>
-  <a class="btn primary" href="/pricing">Get Full Access - $79/mo</a>
 </section>
 
 {% endblock %}

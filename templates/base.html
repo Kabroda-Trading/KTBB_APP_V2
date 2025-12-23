@@ -5,41 +5,46 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Kabroda Trading BattleBox</title>
   <link rel="stylesheet" href="/static/site.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
 </head>
 
 <body>
-  <header class="topbar">
-    <div class="topbar-inner">
+  <header class="glass-nav">
+    <div class="nav-container">
       <a class="brand" href="/">
-        <span class="brand-mark"></span>
-        <span class="brand-name">Kabroda Trading BattleBox</span>
+        <div class="brand-logo"></div>
+        <span class="brand-text">KABRODA</span>
       </a>
 
-      <nav class="nav">
+      <nav class="nav-links">
         {% if is_logged_in and not force_public_nav %}
-          <a class="nav-link" href="/suite">Suite</a>
-          <a class="nav-link" href="/indicators">Indicators</a>
-          <a class="nav-link" href="/account">Account</a>
-          <a class="nav-link" href="/logout">Logout</a>
+          <a href="/suite" class="nav-item active">Suite</a>
+          <a href="/indicators" class="nav-item">Indicators</a>
+          <a href="/account" class="nav-item">Account</a>
+          <a href="/logout" class="nav-item muted">Logout</a>
         {% else %}
-          <a class="nav-link" href="/about">About</a>
-          <a class="nav-link" href="/pricing">Pricing</a>
-          <a class="nav-link" href="/login">Login</a>
+          <a href="/about" class="nav-item">How It Works</a>
+          <a href="/pricing" class="nav-item">Pricing</a>
+          <a href="/login" class="nav-item">Login</a>
+          <a href="/register" class="btn-sm primary">Start Trial</a>
         {% endif %}
-
       </nav>
     </div>
   </header>
 
-  <main class="page">
-    <div class="page-inner">
-      {% block content %}{% endblock %}
-    </div>
+  <main class="page-wrapper">
+    {% block content %}{% endblock %}
   </main>
 
   <footer class="footer">
-    <div class="footer-inner">
-      <span class="muted">© {{ year if year else "2026" }} Kabroda Trading BattleBox</span>
+    <div class="footer-content">
+      <span class="muted">© 2026 Kabroda Trading BattleBox</span>
+      <div class="footer-links">
+        <a href="/about">Methodology</a>
+        <a href="/pricing">Pricing</a>
+      </div>
     </div>
   </footer>
 </body>

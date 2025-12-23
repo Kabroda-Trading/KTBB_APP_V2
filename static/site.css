@@ -1,118 +1,125 @@
-/* =========================================
-   KABRODA GLASS TERMINAL THEME (2025)
-   ========================================= */
+/* KABRODA FINTECH THEME V2 (Corrected) */
 
 :root {
-  --bg-deep: #02040a;
-  --bg-surface: #0b101b;
+  --bg-deep: #050505; /* True Black */
+  --bg-subtle: #0a0a0a;
+  --glass: rgba(255, 255, 255, 0.03);
   --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-highlight: rgba(255, 255, 255, 0.04);
-  
-  --primary: #7c3aed;  /* Electric Violet */
-  --primary-glow: rgba(124, 58, 237, 0.4);
-  
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
-  
-  --radius-lg: 24px;
-  --radius-md: 16px;
-  --radius-sm: 8px;
+  --primary: #6d28d9; /* Deep Violet */
+  --primary-bright: #8b5cf6;
+  --text-main: #ffffff;
+  --text-muted: #a1a1aa;
 }
 
 body {
   background-color: var(--bg-deep);
+  /* Subtle mesh gradient background */
   background-image: 
-    radial-gradient(circle at 15% 0%, rgba(124, 58, 237, 0.15), transparent 40%),
-    radial-gradient(circle at 85% 30%, rgba(56, 189, 248, 0.1), transparent 40%);
+    radial-gradient(circle at 50% 0%, rgba(109, 40, 217, 0.15), transparent 40%);
   color: var(--text-main);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Inter', sans-serif;
   margin: 0;
-  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* --- TYPOGRAPHY --- */
-h1, h2, h3 { margin: 0; font-weight: 800; letter-spacing: -0.03em; }
-.display-title { font-size: 56px; line-height: 1.1; margin-bottom: 24px; }
-.gradient-text {
-  background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+/* --- NAVIGATION (Fixed) --- */
+.glass-nav {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: 70px; z-index: 100;
+  backdrop-filter: blur(12px);
+  background: rgba(5, 5, 5, 0.7);
+  border-bottom: 1px solid var(--glass-border);
+  display: flex; align-items: center; justify-content: center;
+}
+.nav-container {
+  width: 100%; max-width: 1100px; padding: 0 24px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.brand-logo {
+  width: 20px; height: 20px; background: var(--primary-bright);
+  border-radius: 4px; box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+}
+.brand-text { font-weight: 800; letter-spacing: 0.05em; color: #fff; font-size: 14px; }
+
+.nav-links { display: flex; align-items: center; gap: 24px; }
+.nav-item {
+  font-size: 14px; color: var(--text-muted); text-decoration: none; font-weight: 500;
+  transition: color 0.2s;
+}
+.nav-item:hover, .nav-item.active { color: #fff; }
+.btn-sm {
+  padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600;
+  background: var(--primary); color: white; text-decoration: none;
+}
+
+/* --- LAYOUT --- */
+.page-wrapper {
+  padding-top: 100px; /* Space for fixed nav */
+  padding-bottom: 60px;
+  max-width: 1100px; margin: 0 auto; padding-left: 20px; padding-right: 20px;
+}
+.text-center { text-align: center; }
+
+/* --- HERO TEXT --- */
+.display-title {
+  font-size: 48px; font-weight: 800; letter-spacing: -0.02em;
+  margin-bottom: 16px; line-height: 1.1;
 }
 .lead-text {
-  font-size: 20px; color: var(--text-muted); max-width: 680px; margin: 0 auto 40px;
+  font-size: 18px; color: var(--text-muted); max-width: 600px;
+  margin: 0 auto 32px; line-height: 1.6;
 }
+.hero-actions { display: flex; gap: 16px; justify-content: center; margin-bottom: 60px; }
 
-/* --- LAYOUT UTILS --- */
-.page-inner { max-width: 1100px; margin: 0 auto; padding: 0 20px; }
-.text-center { text-align: center; }
-.row { display: flex; }
-
-/* --- COMPONENTS: CARDS & BENTO --- */
+/* --- CARDS & BENTO --- */
 .bento-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 24px;
-  margin: 60px 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px; margin-bottom: 60px;
 }
 .bento-card {
-  background: rgba(11, 16, 27, 0.6);
+  background: var(--glass);
   border: 1px solid var(--glass-border);
-  backdrop-filter: blur(12px);
-  padding: 32px;
-  border-radius: var(--radius-lg);
-  transition: transform 0.3s ease, border-color 0.3s ease;
-  position: relative;
-  overflow: hidden;
+  padding: 24px; border-radius: 12px;
+  transition: border-color 0.2s;
 }
-.bento-card:hover {
-  transform: translateY(-4px);
-  border-color: rgba(255, 255, 255, 0.15);
-}
-.bento-card.large { grid-column: span 2; } /* Spans 2 columns on desktop */
-.bento-card.wide { grid-column: 1 / -1; }   /* Spans full width */
+.bento-card:hover { border-color: rgba(255,255,255,0.2); }
+.bento-card.wide { grid-column: 1 / -1; }
+.bento-card h3 { font-size: 16px; margin-bottom: 8px; color: #fff; }
+.bento-card p { font-size: 14px; color: var(--text-muted); margin: 0; line-height: 1.5; }
 
-/* --- COMPONENTS: BUTTONS & BADGES --- */
+/* --- BUTTONS --- */
 .btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 14px 28px; font-weight: 600; border-radius: 99px;
-  text-decoration: none; transition: all 0.2s; font-size: 15px;
+  display: inline-block; padding: 12px 24px; border-radius: 8px;
+  font-weight: 600; text-decoration: none; font-size: 15px;
+  transition: transform 0.1s;
 }
 .btn.primary {
   background: var(--primary); color: white;
-  box-shadow: 0 0 20px var(--primary-glow);
-  border: 1px solid rgba(255,255,255,0.2);
+  box-shadow: 0 4px 20px rgba(109, 40, 217, 0.4);
 }
-.btn.primary:hover {
-  box-shadow: 0 0 30px var(--primary-glow);
-  filter: brightness(1.1);
-}
+.btn.primary:hover { background: var(--primary-bright); transform: translateY(-1px); }
 .btn.secondary {
-  background: rgba(255,255,255,0.05); color: var(--text-main);
-  border: 1px solid var(--glass-border);
+  background: transparent; border: 1px solid var(--glass-border); color: #fff;
 }
-.btn.secondary:hover { background: rgba(255,255,255,0.1); }
+.btn.secondary:hover { border-color: #fff; }
 
-.pill-badge {
-  display: inline-block; padding: 6px 16px; border-radius: 99px;
-  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
-  background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border);
-  margin-bottom: 24px; color: var(--text-muted);
+/* --- UTILS --- */
+.pill {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--primary-bright); border: 1px solid rgba(139, 92, 246, 0.3);
+  padding: 4px 10px; border-radius: 20px; margin-bottom: 16px; display: inline-block;
 }
-.pill-badge.glow {
-  border-color: var(--primary); color: #fff;
-  box-shadow: 0 0 15px rgba(124, 58, 237, 0.2);
-}
-
-/* --- ICONS & DETAILS --- */
 .icon-box {
-  width: 48px; height: 48px; border-radius: 12px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 24px; margin-bottom: 20px;
-  background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border);
+  width: 32px; height: 32px; background: rgba(255,255,255,0.05);
+  border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  margin-bottom: 16px; border: 1px solid var(--glass-border);
 }
 
-/* Mobile Tweaks */
-@media (max-width: 768px) {
-  .display-title { font-size: 40px; }
-  .bento-card.large { grid-column: span 1; }
+.footer { border-top: 1px solid var(--glass-border); padding: 40px 0; margin-top: 60px; }
+.footer-content {
+  max-width: 1100px; margin: 0 auto; padding: 0 20px;
+  display: flex; justify-content: space-between; font-size: 13px; color: var(--text-muted);
 }
+.footer-links a { color: var(--text-muted); text-decoration: none; margin-left: 20px; }
+.footer-links a:hover { color: #fff; }
