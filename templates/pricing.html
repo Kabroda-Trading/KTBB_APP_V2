@@ -1,53 +1,83 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="text-center" style="margin-bottom: 60px;">
-  <h1 class="display-title">Operational <span class="gradient-text">Superiority</span></h1>
-  <p class="lead-text">One tier. Total access. Everything you need to trade structure instead of feelings.</p>
-</div>
+<div style="display: flex; flex-wrap: wrap; gap: 60px; align-items: center; justify-content: center; min-height: 70vh;">
 
-<div class="row" style="justify-content: center; margin-bottom: 80px;">
-  
-  <div class="bento-card" style="max-width: 500px; width: 100%; border-color: var(--primary); box-shadow: 0 0 40px rgba(14, 165, 233, 0.15);">
-    <div style="text-align: center; margin-bottom: 30px; border-bottom: 1px solid var(--glass-border); padding-bottom: 30px;">
-      <h2 style="margin-bottom: 10px;">BattleBox Access</h2>
-      <div style="font-size: 64px; font-weight: 900; color: #fff; line-height: 1;">
-        $79<span style="font-size: 20px; color: var(--text-muted); font-weight: 500;">/mo</span>
-      </div>
-      <p style="color: var(--primary-bright); font-weight: 600; margin-top: 16px;">Full Commercial License</p>
+  <div style="flex: 1; min-width: 320px; max-width: 550px;">
+    <div class="pill">OPERATIONAL SUPERIORITY</div>
+    <h1 class="display-title" style="font-size: 48px; margin-bottom: 24px;">One System.<br>Total Clarity.</h1>
+    <p class="lead-text" style="text-align: left; margin: 0; font-size: 18px; color: var(--text-muted);">
+      Most traders pay for five different subscriptions—news, charting, journals, data feeds, and signals.
+      <br><br>
+      <strong>Kabroda replaces them all.</strong>
+      <br><br>
+      We consolidate the institutional spot data, the execution logic, and the daily analysis into a single, calibrated workflow.
+    </p>
+
+    <div style="margin-top: 40px; border-top: 1px solid var(--glass-border); padding-top: 30px;">
+      <h4 style="color: #fff; margin-bottom: 16px;">THE DOCTRINE INCLUDES:</h4>
+      <ul style="list-style: none; padding: 0; color: var(--text-muted); font-size: 15px; line-height: 2;">
+        <li>✅ <strong>No Upsells.</strong> One tier for everything.</li>
+        <li>✅ <strong>Commercial License.</strong> Use the data for your desk.</li>
+        <li>✅ <strong>Cancel Anytime.</strong> You control the subscription.</li>
+      </ul>
     </div>
+  </div>
 
-    <ul style="list-style: none; padding: 0; margin-bottom: 40px;">
-      <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
-        <span style="color: var(--primary-bright); font-size: 20px;">⚡</span>
-        <span><strong>Institutional Data Feed</strong> (Spot & Futures Sync)</span>
-      </li>
-      <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
-        <span style="color: var(--primary-bright); font-size: 20px;">🧠</span>
-        <span><strong>BattleBox GPT Link</strong> (Desk-Grade Analysis)</span>
-      </li>
-      <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
-        <span style="color: var(--primary-bright); font-size: 20px;">📊</span>
-        <span><strong>Full Indicator Suite</strong> (TradingView Scripts)</span>
-      </li>
-      <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
-        <span style="color: var(--primary-bright); font-size: 20px;">🛡️</span>
-        <span><strong>Execution Guardrails</strong> (Daily S/R + Triggers)</span>
-      </li>
-    </ul>
+  <div style="flex: 0 0 auto; width: 100%; max-width: 480px;">
+    <div class="bento-card" style="border-color: var(--primary); box-shadow: 0 0 50px rgba(14, 165, 233, 0.1);">
+      
+      <div style="text-align: center; border-bottom: 1px solid var(--glass-border); padding-bottom: 30px; margin-bottom: 30px;">
+        <h2 style="font-size: 24px; margin-bottom: 10px;">BattleBox Access</h2>
+        <div style="font-size: 72px; font-weight: 900; color: #fff; line-height: 1; letter-spacing: -2px;">
+          $79<span style="font-size: 20px; color: var(--text-muted); font-weight: 500; letter-spacing: 0;">/mo</span>
+        </div>
+        <div style="margin-top: 16px; display: inline-block; padding: 6px 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 4px; color: #6ee7b7; font-size: 12px; font-weight: 700; letter-spacing: 0.05em;">
+          FULL SUITE UNLOCKED
+        </div>
+      </div>
 
-    <button class="btn primary" style="width: 100%; font-size: 16px;" onclick="startPlan()">Deploy System</button>
-    <p class="text-center" style="font-size: 12px; margin-top: 16px; color: var(--text-muted);">Secure Stripe Processing. Cancel Anytime.</p>
+      <ul style="list-style: none; padding: 0; margin-bottom: 40px;">
+        <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
+          <span style="color: var(--primary-bright); font-size: 20px;">⚡</span>
+          <span style="color: #fff; font-weight: 500;">Institutional Data Feed</span>
+        </li>
+        <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
+          <span style="color: var(--primary-bright); font-size: 20px;">🧠</span>
+          <span style="color: #fff; font-weight: 500;">BattleBox AI Command</span>
+        </li>
+        <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
+          <span style="color: var(--primary-bright); font-size: 20px;">📊</span>
+          <span style="color: #fff; font-weight: 500;">TradingView Indicator Suite</span>
+        </li>
+        <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
+          <span style="color: var(--primary-bright); font-size: 20px;">🛡️</span>
+          <span style="color: #fff; font-weight: 500;">Execution Guardrails</span>
+        </li>
+      </ul>
+
+      <button id="buyBtn" class="btn primary" style="width: 100%; font-size: 18px; padding: 18px;" onclick="startPlan()">
+        Deploy System
+      </button>
+      <p class="text-center" style="font-size: 12px; margin-top: 16px; color: var(--text-muted);">
+        Secure processing via Stripe.
+      </p>
+    </div>
   </div>
 
 </div>
 
 <script>
 async function startPlan(){
-  // Check if user is logged in (we can infer this if the server sends a specific header, or just try the checkout)
-  const btn = document.querySelector('button');
+  const btn = document.getElementById('buyBtn');
   const originalText = btn.innerText;
   btn.innerText = "Initializing...";
+  btn.style.opacity = "0.8";
+
+  // LOGIC:
+  // 1. Try to start checkout (Backend checks session).
+  // 2. If 401 (Not Logged In), send to Register.
+  // 3. If Success, send to Stripe.
   
   try {
     const r = await fetch("/billing/checkout", {
@@ -57,10 +87,7 @@ async function startPlan(){
     });
 
     if (r.status === 401) {
-      // USER IS NOT LOGGED IN.
-      // Redirect to REGISTER, not Login, because they are likely new.
-      // We add ?next=checkout to tell the register page to forward them later (if we built that logic),
-      // but for now, just getting them to register is the priority.
+      // User is new -> Send to Register
       window.location.href = "/register"; 
       return; 
     }
@@ -69,11 +96,11 @@ async function startPlan(){
     if(data.url) {
       window.location.href = data.url;
     } else {
-      alert("Error initializing checkout. Please contact support.");
+      alert("System Error: Could not initiate checkout.");
       btn.innerText = originalText;
     }
   } catch (e) {
-    // If fetch fails entirely
+    // If fetch fails, assume they need to register/login
     window.location.href = "/register";
   }
 }
