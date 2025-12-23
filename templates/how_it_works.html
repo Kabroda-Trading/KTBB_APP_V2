@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="text-center" style="margin-bottom: 60px;">
+  <div class="pill">THE OPERATING SYSTEM</div>
+  <h1 class="display-title">From Chaos to <span class="gradient-text">Clarity</span></h1>
+  <p class="lead-text">Three steps to eliminate emotional variance from your trading desk.</p>
+</div>
+
+<div class="bento-card wide" style="display: flex; flex-wrap: wrap; align-items: center; gap: 40px; margin-bottom: 40px;">
+  <div style="flex: 1; min-width: 300px;">
+    <div style="font-size: 64px; font-weight: 900; color: rgba(255,255,255,0.05); line-height: 1;">01</div>
+    <h2 style="color: var(--primary-bright); margin-bottom: 16px;">Calibrate the Battlefield</h2>
+    <p style="color: var(--text-muted); line-height: 1.6;">
+      Every morning, the <strong>Institutional Data Engine</strong> pulls the raw Spot Price (the "Truth") and calculates your execution levels:
+    </p>
+    <ul style="color: var(--text-muted); line-height: 1.8; margin-top: 16px;">
+      <li>⚡ <strong>Daily Support/Resistance:</strong> The hard walls where institutions bid.</li>
+      <li>⚡ <strong>Breakout Triggers:</strong> The exact price where "Range" becomes "Trend."</li>
+      <li>⚡ <strong>30m Anchor:</strong> We lock the Opening Range to define the day's bias.</li>
+    </ul>
+  </div>
+  <div style="flex: 1; min-width: 300px; background: rgba(0,0,0,0.3); padding: 30px; border-radius: 12px; border: 1px solid var(--glass-border);">
+    <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 10px;">SYSTEM OUTPUT:</div>
+    <div style="font-family: monospace; color: var(--success); margin-bottom: 8px;">> BREAKOUT_TRIGGER: 94,250.00</div>
+    <div style="font-family: monospace; color: var(--danger); margin-bottom: 8px;">> BREAKDOWN_TRIGGER: 92,100.50</div>
+    <div style="font-family: monospace; color: var(--primary-bright);">> REGIME: NEUTRAL_RANGE</div>
+  </div>
+</div>
+
+<div class="bento-card wide" style="display: flex; flex-wrap: wrap; align-items: center; gap: 40px; margin-bottom: 40px; flex-direction: row-reverse;">
+  <div style="flex: 1; min-width: 300px;">
+    <div style="font-size: 64px; font-weight: 900; color: rgba(255,255,255,0.05); line-height: 1;">02</div>
+    <h2 style="color: var(--primary-bright); margin-bottom: 16px;">Sync to TradingView</h2>
+    <p style="color: var(--text-muted); line-height: 1.6;">
+      Stop drawing lines by hand. With one click, you push the calibrated levels directly to your <strong>KTBB Indicator Suite</strong>.
+    </p>
+    <p style="color: var(--text-muted); line-height: 1.6; margin-top: 16px;">
+      Your chart becomes a clean surface for execution. No clutter. Just the levels that matter today.
+    </p>
+  </div>
+  <div style="flex: 1; min-width: 300px; background: rgba(0,0,0,0.3); padding: 30px; border-radius: 12px; border: 1px solid var(--glass-border); text-align: center;">
+    <div style="font-size: 40px; margin-bottom: 16px;">📊</div>
+    <div class="btn secondary" style="pointer-events: none;">One-Click Sync Active</div>
+  </div>
+</div>
+
+<div class="bento-card wide" style="display: flex; flex-wrap: wrap; align-items: center; gap: 40px; margin-bottom: 60px;">
+  <div style="flex: 1; min-width: 300px;">
+    <div style="font-size: 64px; font-weight: 900; color: rgba(255,255,255,0.05); line-height: 1;">03</div>
+    <h2 style="color: var(--primary-bright); margin-bottom: 16px;">AI Command & Execute</h2>
+    <p style="color: var(--text-muted); line-height: 1.6;">
+      Copy the session data into the <strong>Kabroda GPT</strong>. It acts as your desk partner, analyzing the structure and giving you a "Battle Plan" for the session.
+    </p>
+    <p style="color: var(--text-muted); line-height: 1.6; margin-top: 16px;">
+      Then, you wait. You execute <strong>only</strong> when price interacts with your triggers. No guessing.
+    </p>
+  </div>
+  <div style="flex: 1; min-width: 300px; background: rgba(0,0,0,0.3); padding: 30px; border-radius: 12px; border: 1px solid var(--glass-border);">
+    <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 10px;">AI BATTLE PLAN:</div>
+    <div style="color: #fff; line-height: 1.5; font-size: 14px;">
+      "Primary focus is Long on a reclaim of 94,250. We are currently in a Pre-Breakout Regime. Avoid fading the upper rail..."
+    </div>
+  </div>
+</div>
+
+<div class="text-center" style="margin-top: 80px;">
+  <h2>Ready to calibrate?</h2>
+  <div style="margin-top: 24px;">
+    <a href="/pricing" class="btn primary" style="font-size: 18px; padding: 16px 32px;">Deploy System</a>
+  </div>
+</div>
+
+{% endblock %}
