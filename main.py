@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, Form, HTTPException, Depends
@@ -16,7 +15,6 @@ from starlette.templating import Jinja2Templates
 import auth
 import billing
 import dmr_report
-import kabroda_ai
 from database import init_db, get_db, UserModel
 from membership import (
     get_membership_state,
@@ -24,9 +22,7 @@ from membership import (
     ensure_symbol_allowed,
 )
 
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DOCTRINE_DIR = Path(BASE_DIR) / "doctrine"
 
 app = FastAPI()
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
@@ -40,7 +36,7 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return v.strip().lower() in ("1", "true", "yes", "y", "on")
 
 
-SESSION_SECRET = os.getenv("SESSION_SECRET") or os.getenv("SECRET_KEY") or "dev-session-secret-change-me"
+SESSION_SECRET = os.getenv("SESSION_SECRET") or os.getenv("SECRET_KEY") or "dev-session-secret"
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
 IS_HTTPS = PUBLIC_BASE_URL.startswith("https://")
 SESSION_HTTPS_ONLY = _bool_env("SESSION_HTTPS_ONLY", default=IS_HTTPS)
@@ -52,61 +48,9 @@ app.add_middleware(
     same_site="lax",
 )
 
-# -------------------------------------------------------------------
-# Doctrine injection (non-invasive, does NOT touch numbers pipeline)
-# -------------------------------------------------------------------
-_DOCTRINE_APPLIED = False
-
-
-def _load_doctrine_markdown() -> str:
-    if not DOCTRINE_DIR.exists():
-        return ""
-    md_files = sorted(DOCTRINE_DIR.rglob("*.md"))
-    if not md_files:
-        return ""
-
-    chunks: list[str] = []
-    for p in md_files:
-        try:
-            rel = p.relative_to(DOCTRINE_DIR)
-            text = p.read_text(encoding="utf-8", errors="ignore").strip()
-            if not text:
-                continue
-            chunks.append(f"\n\n---\n\n# DOCTRINE FILE: {rel.as_posix()}\n\n{text}\n")
-        except Exception:
-            continue
-
-    return "".join(chunks).strip()
-
-
-def _apply_doctrine_to_kabroda_prompts() -> None:
-    global _DOCTRINE_APPLIED
-    if _DOCTRINE_APPLIED:
-        return
-
-    doctrine = _load_doctrine_markdown()
-    if doctrine:
-        appendix = (
-            "\n\n"
-            "====================\n"
-            "KABRODA DOCTRINE (AUTHORITATIVE)\n"
-            "Use this doctrine to choose wording, structure, and coaching behavior.\n"
-            "Do NOT invent numbers.\n"
-            "Do NOT override computed levels.\n"
-            "====================\n\n"
-            f"{doctrine}\n"
-        )
-        kabroda_ai.DMR_SYSTEM = (getattr(kabroda_ai, "DMR_SYSTEM", "") or "") + appendix
-        kabroda_ai.COACH_SYSTEM = (getattr(kabroda_ai, "COACH_SYSTEM", "") or "") + appendix
-
-    _DOCTRINE_APPLIED = True
-
-
 @app.on_event("startup")
 def _startup():
     init_db()
-    _apply_doctrine_to_kabroda_prompts()
-
 
 # -------------------------------------------------------------------
 # Session helpers
@@ -115,10 +59,8 @@ def _session_user_dict(request: Request) -> Optional[Dict[str, Any]]:
     u = request.session.get("user")
     return u if isinstance(u, dict) else None
 
-
 def _require_session_user(request: Request) -> Dict[str, Any]:
     return auth.require_session_user(request)
-
 
 def _db_user_from_session(db: Session, sess: Dict[str, Any]) -> UserModel:
     uid = sess.get("id")
@@ -129,7 +71,6 @@ def _db_user_from_session(db: Session, sess: Dict[str, Any]) -> UserModel:
         raise HTTPException(status_code=401, detail="User not found")
     return u
 
-
 def _plan_flags(u: UserModel) -> Dict[str, Any]:
     ms = get_membership_state(u)
     return {
@@ -138,15 +79,12 @@ def _plan_flags(u: UserModel) -> Dict[str, Any]:
         "plan_label": ms.label,
     }
 
-
 # -------------------------------------------------------------------
 # Public routes
 # -------------------------------------------------------------------
 @app.head("/")
 def head_root():
-    # Render health checks commonly use HEAD /
     return {"ok": True}
-
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
@@ -162,15 +100,12 @@ def about(request: Request):
         {"request": request, "is_logged_in": False, "force_public_nav": True},
     )
 
-
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing(request: Request):
     return templates.TemplateResponse(
         "pricing.html",
         {"request": request, "is_logged_in": False, "force_public_nav": True},
     )
-
-
 
 # -------------------------------------------------------------------
 # Suite (paywalled)
@@ -182,15 +117,12 @@ def suite(request: Request, db: Session = Depends(get_db)):
         return RedirectResponse(url="/login", status_code=303)
 
     u = _db_user_from_session(db, sess)
-
-    # Paywall: must have active/trialing subscription
     try:
         require_paid_access(u)
     except HTTPException:
         return RedirectResponse(url="/pricing?paywall=1", status_code=303)
 
     flags = _plan_flags(u)
-
     return templates.TemplateResponse(
         "app.html",
         {
@@ -209,8 +141,6 @@ def suite(request: Request, db: Session = Depends(get_db)):
 def indicators(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-
-    # Paid-only gating
     require_paid_access(u)
 
     flags = _plan_flags(u)
@@ -228,16 +158,12 @@ def indicators(request: Request, db: Session = Depends(get_db)):
         },
     )
 
-
 @app.get("/account", response_class=HTMLResponse)
 def account(request: Request, db: Session = Depends(get_db)):
     sess = _session_user_dict(request)
-    if not sess:
-        return RedirectResponse(url="/login", status_code=303)
-
+    if not sess: return RedirectResponse(url="/login", status_code=303)
     u = _db_user_from_session(db, sess)
     flags = _plan_flags(u)
-
     return templates.TemplateResponse(
         "account.html",
         {
@@ -252,9 +178,6 @@ def account(request: Request, db: Session = Depends(get_db)):
 async def account_set_timezone(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-
-    tz = ""
-    # Support JSON {"timezone": "..."} and form field "tz"/"timezone"
     try:
         payload = await request.json()
         tz = (payload.get("timezone") or payload.get("tz") or "").strip()
@@ -262,13 +185,10 @@ async def account_set_timezone(request: Request, db: Session = Depends(get_db)):
         form = await request.form()
         tz = (form.get("timezone") or form.get("tz") or "").strip()
 
-    if not tz:
-        raise HTTPException(status_code=400, detail="Missing timezone")
-
+    if not tz: raise HTTPException(status_code=400, detail="Missing timezone")
     u.session_tz = tz
     db.commit()
     return {"ok": True, "timezone": tz}
-
 
 # -------------------------------------------------------------------
 # Auth
@@ -277,22 +197,11 @@ async def account_set_timezone(request: Request, db: Session = Depends(get_db)):
 def login_get(request: Request):
     return templates.TemplateResponse("login.html", {"request": request, "error": None})
 
-
 @app.post("/login")
-def login_post(
-    request: Request,
-    db: Session = Depends(get_db),
-    email: str = Form(...),
-    password: str = Form(...),
-):
+def login_post(request: Request, db: Session = Depends(get_db), email: str = Form(...), password: str = Form(...)):
     u = auth.authenticate_user(db, email=email, password=password)
     if not u:
-        return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Invalid credentials"},
-            status_code=401,
-        )
-
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"}, status_code=401)
     auth.set_user_session(request, u)
     return RedirectResponse(url="/suite", status_code=303)
 
@@ -301,102 +210,62 @@ def logout_get(request: Request):
     auth.clear_user_session(request)
     return RedirectResponse(url="/", status_code=303)
 
-
 @app.post("/logout")
 def logout(request: Request):
     auth.clear_user_session(request)
     return RedirectResponse(url="/", status_code=303)
 
-
 @app.get("/register", response_class=HTMLResponse)
 def register_get(request: Request):
-    if auth.registration_disabled():
-        return RedirectResponse(url="/login", status_code=303)
+    if auth.registration_disabled(): return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("register.html", {"request": request, "error": None})
 
-
 @app.post("/register")
-def register_post(
-    request: Request,
-    db: Session = Depends(get_db),
-    email: str = Form(...),
-    password: str = Form(...),
-):
-    if auth.registration_disabled():
-        raise HTTPException(status_code=403, detail="Registration disabled")
-
+def register_post(request: Request, db: Session = Depends(get_db), email: str = Form(...), password: str = Form(...)):
+    if auth.registration_disabled(): raise HTTPException(status_code=403, detail="Registration disabled")
     try:
         u = auth.create_user(db, email=email, password=password)
     except HTTPException as e:
-        return templates.TemplateResponse(
-            "register.html",
-            {"request": request, "error": str(e.detail)},
-            status_code=e.status_code,
-        )
-
+        return templates.TemplateResponse("register.html", {"request": request, "error": str(e.detail)}, status_code=e.status_code)
     auth.set_user_session(request, u)
-    # Account created, but Suite is paywalled until subscription is active
     return RedirectResponse(url="/pricing?new=1", status_code=303)
 
-
 # -------------------------------------------------------------------
-# DMR APIs (paywalled)
+# DMR API (Pure Data)
 # -------------------------------------------------------------------
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-
-    # Must be paid
     require_paid_access(u)
 
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-
-    # Plan-based symbol gating
     ensure_symbol_allowed(u, symbol)
-
     tz = (u.session_tz or "UTC").strip() or "UTC"
     
-    # --- NON-BLOCKING FIX ---
-    # Move the slow data fetch to a background thread so the server stays responsive.
-    raw = await asyncio.to_thread(
-        dmr_report.run_auto_raw,
-        symbol=symbol,
-        session_tz=tz
-    )
-    # ------------------------
-
-    request.session["last_dmr_meta"] = {
-        "symbol": raw.get("symbol", symbol),
-        "date": raw.get("date", ""),
-    }
+    # Run data pipeline in background thread
+    raw = await asyncio.to_thread(dmr_report.run_auto_raw, symbol=symbol, session_tz=tz)
+    
+    request.session["last_dmr_meta"] = {"symbol": raw.get("symbol", symbol), "date": raw.get("date", "")}
     return JSONResponse(raw)
 
-
 # -----------------------------
-# Billing / Stripe
+# Billing
 # -----------------------------
 @app.post("/billing/checkout")
 async def billing_checkout(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-
-    # Single plan checkout (Kabroda Trading BattleBox)
-    # No tier/plan selection needed.
     url = billing.create_checkout_session(db=db, user_model=u)
     return {"url": url}
-
-
 
 @app.post("/billing/portal")
 async def billing_portal(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-
     url = billing.create_billing_portal(db=db, user_model=u)
     return {"url": url}
-
 
 @app.post("/billing/webhook")
 async def billing_webhook(request: Request, db: Session = Depends(get_db)):

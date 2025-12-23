@@ -9,7 +9,6 @@
   </div>
 </div>
 
-<!-- Premium onboarding card -->
 <div class="card onboarding">
   <div class="onboard-grid">
     <div class="onboard-step">
@@ -19,7 +18,6 @@
         <div class="muted">Generate today’s battlefield structure.</div>
       </div>
     </div>
-
     <div class="onboard-step">
       <div class="onboard-icon">②</div>
       <div>
@@ -27,7 +25,6 @@
         <div class="muted">Copy today’s numbers into your KTBB Levels indicator.</div>
       </div>
     </div>
-
     <div class="onboard-step">
       <div class="onboard-icon">③</div>
       <div>
@@ -38,11 +35,10 @@
   </div>
 </div>
 
-<!-- Calibrate -->
 <div class="card">
   <div class="card-head">
     <div>
-      <div class="card-title">Calibrate</div>
+      <div class="card-title">1. Calibrate</div>
       <div class="muted">Generate your daily levels and triggers in seconds.</div>
     </div>
     <div id="statusPill" class="pill pill-live">Ready</div>
@@ -57,24 +53,19 @@
         <option value="SOLUSDT">SOL (Solana)</option>
       </select>
     </div>
-
     <div style="flex:0 0 auto;">
       <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="min-width:200px;">
         Calibrate Levels
       </button>
     </div>
   </div>
-
-  <div id="status" class="muted" style="margin-top:12px;">
-    System ready. Awaiting command.
-  </div>
+  <div id="status" class="muted" style="margin-top:12px;">System ready. Awaiting command.</div>
 </div>
 
-<!-- Levels + actions -->
 <div class="card">
   <div class="card-head">
     <div>
-      <div class="card-title">Battlefield Levels</div>
+      <div class="card-title">2. Battlefield Levels</div>
       <div class="muted">Compact, operational, and built for execution.</div>
     </div>
     <div class="btn-row">
@@ -107,12 +98,17 @@
     <div>30m High <strong id="lv_30h">—</strong></div>
     <div>30m Low <strong id="lv_30l">—</strong></div>
   </div>
+</div>
 
-  <div class="callout">
-    <div class="callout-title">What happens next</div>
-    <div class="callout-text">
-      After calibration, sync TradingView first (so your chart matches the day). Then copy the BattleBox GPT data and paste it into the GPT for your desk-grade Daily Market Review and Battle Plan.
+<div class="card" id="newsCard" style="display:none;">
+  <div class="card-head">
+    <div>
+      <div class="card-title">3. Market Intelligence</div>
+      <div class="muted">Live headlines included in your GPT payload.</div>
     </div>
+  </div>
+  <div style="background:rgba(0,0,0,0.2); padding:16px; border-radius:12px; border:1px solid rgba(255,255,255,0.06);">
+    <ul id="newsList" style="margin:0; padding-left:20px; color:rgba(234,240,255,0.8); font-size:14px; line-height:1.6;"></ul>
   </div>
 </div>
 
@@ -141,27 +137,20 @@
   function setPill(state){
     const pill = document.getElementById("statusPill");
     if(!pill) return;
-
     pill.classList.remove("pill-live","pill-warn","pill-ok");
-
-    if(state === "ready"){
-      pill.textContent = "Ready";
-      pill.classList.add("pill-live");
-    } else if(state === "work"){
-      pill.textContent = "Calibrating…";
-      pill.classList.add("pill-warn");
-    } else if(state === "ok"){
-      pill.textContent = "Updated";
-      pill.classList.add("pill-ok");
-    }
+    if(state === "ready"){ pill.textContent = "Ready"; pill.classList.add("pill-live"); }
+    else if(state === "work"){ pill.textContent = "Calibrating…"; pill.classList.add("pill-warn"); }
+    else if(state === "ok"){ pill.textContent = "Updated"; pill.classList.add("pill-ok"); }
   }
 
   function renderLevelsOnly(payload){
     _lastDmrPayload = payload;
-
     const levels = payload.levels || {};
     const r30 = payload.range_30m || {};
+    const news = payload.news || [];
+    const events = payload.events || [];
 
+    // Levels
     document.getElementById("lv_ds").textContent  = fmt(levels.daily_support);
     document.getElementById("lv_dr").textContent  = fmt(levels.daily_resistance);
     document.getElementById("lv_bo").textContent  = fmt(levels.breakout_trigger);
@@ -169,9 +158,27 @@
     document.getElementById("lv_30h").textContent = fmt(r30.high);
     document.getElementById("lv_30l").textContent = fmt(r30.low);
 
+    // News
+    const list = document.getElementById("newsList");
+    if(list){
+        list.innerHTML = "";
+        events.forEach(e => {
+            const li = document.createElement("li");
+            li.textContent = "📅 " + e.replace("- ", "");
+            li.style.color = "var(--accent-cyan)";
+            list.appendChild(li);
+        });
+        news.forEach(n => {
+            const li = document.createElement("li");
+            li.textContent = n.replace("- ", "");
+            list.appendChild(li);
+        });
+        document.getElementById("newsCard").style.display = "block";
+    }
+
+    // Buttons
     document.getElementById("tvCopyBtn").style.display = "inline-flex";
     document.getElementById("copyGptBtn").style.display = "inline-flex";
-
     const glink = document.getElementById("openGptLink");
     glink.style.display = "inline-flex";
     glink.href = BATTLEBOX_GPT_URL;
@@ -181,7 +188,6 @@
     const symEl = document.getElementById("symbol");
     const status = document.getElementById("status");
     const levelsBtn = document.getElementById("levelsBtn");
-
     const sym = symEl ? symEl.value : "BTCUSDT";
 
     status.textContent = "Calibrating levels…";
@@ -190,12 +196,9 @@
 
     try{
       const { r, data } = await fetchJsonSafe("/api/dmr/run-raw", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ symbol: sym }),
-        credentials: "same-origin"
+        method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ symbol: sym }), credentials: "same-origin"
       });
-
       if (!r.ok){
         const msg = data.detail || data.error || `Failed (${r.status})`;
         status.textContent = "Calibration failed: " + msg;
@@ -203,7 +206,6 @@
         alert(msg);
         return;
       }
-
       renderLevelsOnly(data);
       status.textContent = "Battlefield calibrated ✅";
       setPill("ok");
@@ -218,77 +220,47 @@
 
   async function copyForTV(){
     if (!_lastDmrPayload || !_lastDmrPayload.levels) return;
-
     const l = _lastDmrPayload.levels;
     const r = _lastDmrPayload.range_30m || {};
-
-    // BO, BD, R, S, 30H, 30L
-    const text =
-      `${parseFloat(l.breakout_trigger).toFixed(2)},` +
-      `${parseFloat(l.breakdown_trigger).toFixed(2)},` +
-      `${parseFloat(l.daily_resistance).toFixed(2)},` +
-      `${parseFloat(l.daily_support).toFixed(2)},` +
-      `${parseFloat(r.high).toFixed(2)},` +
-      `${parseFloat(r.low).toFixed(2)}`;
-
+    const text = `${parseFloat(l.breakout_trigger).toFixed(2)},${parseFloat(l.breakdown_trigger).toFixed(2)},${parseFloat(l.daily_resistance).toFixed(2)},${parseFloat(l.daily_support).toFixed(2)},${parseFloat(r.high).toFixed(2)},${parseFloat(r.low).toFixed(2)}`;
     try {
       await navigator.clipboard.writeText(text);
       const btn = document.getElementById("tvCopyBtn");
-      const originalText = btn.textContent;
+      const orig = btn.textContent;
       btn.textContent = "Copied ✅";
-      setTimeout(() => btn.textContent = originalText, 1200);
-    } catch (err) {
-      alert("Could not copy: " + err);
-    }
+      setTimeout(() => btn.textContent = orig, 1200);
+    } catch (err) { alert("Could not copy: " + err); }
   }
 
+  // UPDATED: Now includes news in the JSON payload
   function buildGptContractV1(raw){
-    const levels = raw.levels || {};
-    const r30 = raw.range_30m || {};
-
     return {
-      contract_version: "1.0",
+      contract_version: "1.1",
       generated_at: new Date().toISOString(),
-      date: raw.date || null,
-      symbol: raw.symbol || "BTCUSDT",
-      session_tz: raw.session_tz || USER_SESSION_TZ || "UTC",
-      last_price: raw.last_price ?? null,
-      levels: {
-        daily_support: levels.daily_support ?? null,
-        daily_resistance: levels.daily_resistance ?? null,
-        breakout_trigger: levels.breakout_trigger ?? null,
-        breakdown_trigger: levels.breakdown_trigger ?? null
-      },
-      range_30m: { high: r30.high ?? null, low: r30.low ?? null },
-      profiles: raw.profiles || {},
-      htf_shelves: raw.htf_shelves || { resistance: [], support: [] },
-      intraday_shelves: raw.intraday_shelves || { breakout_side: [], breakdown_side: [] },
-      trade_logic: raw.trade_logic || null,
-      events: raw.events || [],
-      news: raw.news || [],
-      sentiment: raw.sentiment ?? null,
-      source: raw.source || { app: "kabroda_site", endpoint: "/api/dmr/run-raw" }
+      symbol: raw.symbol,
+      last_price: raw.last_price,
+      levels: raw.levels,
+      range_30m: raw.range_30m,
+      news_headlines: raw.news || [],
+      calendar_events: raw.events || [],
+      htf_shelves: raw.htf_shelves,
+      intraday_shelves: raw.intraday_shelves
     };
   }
 
   async function copyForGPT(){
     if (!_lastDmrPayload) return;
-
     const obj = buildGptContractV1(_lastDmrPayload);
     const text = JSON.stringify(obj, null, 2);
-
     try {
       await navigator.clipboard.writeText(text);
       const btn = document.getElementById("copyGptBtn");
       const orig = btn.textContent;
       btn.textContent = "Copied ✅";
       setTimeout(()=>btn.textContent = orig, 1200);
-    } catch (err) {
-      alert("Could not copy: " + err);
-    }
+    } catch (err) { alert("Could not copy: " + err); }
   }
 
   setPill("ready");
 </script>
-
 {% endblock %}
