@@ -97,5 +97,40 @@ h1, h2, h3 { margin: 0; font-weight: 800; letter-spacing: -0.02em; color: #fff; 
 .c-purple { border-color: rgba(168, 85, 247, 0.3); color: #d8b4fe; } .c-purple .lvl-val { color: #d8b4fe; }
 .c-blue { border-color: rgba(59, 130, 246, 0.3); color: #93c5fd; } .c-blue .lvl-val { color: #93c5fd; }
 
+/* --- SPECIAL NAV TRIAL BUTTON --- */
+.btn-nav-trial {
+  background: linear-gradient(135deg, var(--primary), var(--primary-bright));
+  color: #000;
+  font-weight: 800;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 10px 20px;
+  border-radius: 6px;
+  text-decoration: none;
+  box-shadow: 0 0 15px var(--primary-glow);
+  transition: all 0.2s ease;
+  border: 1px solid rgba(255,255,255,0.2);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-nav-trial:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 30px var(--primary-bright);
+  filter: brightness(1.1);
+}
+
+/* Optional: Make the lightning bolt pulsate */
+@keyframes pulse-bolt {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+.btn-nav-trial span {
+  display: flex; align-items: center; gap: 6px;
+}
+
 /* --- FOOTER --- */
 .footer { border-top: 1px solid var(--glass-border); padding: 40px 0; margin-top: 80px; text-align: center; color: var(--text-muted); font-size: 13px; }
