@@ -150,24 +150,26 @@ def head_root():
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    return templates.TemplateResponse("home.html", {"request": request})
-
+    return templates.TemplateResponse(
+        "home.html",
+        {"request": request, "is_logged_in": False, "force_public_nav": True},
+    )
 
 @app.get("/about", response_class=HTMLResponse)
 def about(request: Request):
-    return templates.TemplateResponse("about.html", {"request": request})
+    return templates.TemplateResponse(
+        "about.html",
+        {"request": request, "is_logged_in": False, "force_public_nav": True},
+    )
 
 
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing(request: Request):
-    sess = _session_user_dict(request)
     return templates.TemplateResponse(
         "pricing.html",
-        {
-            "request": request,
-            "is_logged_in": bool(sess),                     
-        },
+        {"request": request, "is_logged_in": False, "force_public_nav": True},
     )
+
 
 
 # -------------------------------------------------------------------
@@ -190,17 +192,18 @@ def suite(request: Request, db: Session = Depends(get_db)):
     flags = _plan_flags(u)
 
     return templates.TemplateResponse(
-    "app.html",
-    {
-        "request": request,
-        "user": {
-            "email": u.email,
-            "session_tz": (u.session_tz or "UTC"),
-            "plan_label": flags["plan_label"],
-            "plan": flags["plan"] or "",
+        "app.html",
+        {
+            "request": request,
+            "is_logged_in": True,
+            "user": {
+                "email": u.email,
+                "session_tz": (u.session_tz or "UTC"),
+                "plan_label": flags.get("plan_label", ""),
+                "plan": flags.get("plan") or "",
+            },
         },
-    },
-)
+    )
 
 @app.get("/indicators", response_class=HTMLResponse)
 def indicators(request: Request, db: Session = Depends(get_db)):
@@ -239,11 +242,11 @@ def account(request: Request, db: Session = Depends(get_db)):
         "account.html",
         {
             "request": request,
+            "is_logged_in": True,
             "user": {"email": u.email, "session_tz": (u.session_tz or "UTC")},
-            "tier_label": flags["plan_label"],  # template expects tier_label
+            "tier_label": flags["plan_label"],
         },
     )
-
 
 @app.post("/account/session-timezone")
 async def account_set_timezone(request: Request, db: Session = Depends(get_db)):
@@ -292,6 +295,11 @@ def login_post(
 
     auth.set_user_session(request, u)
     return RedirectResponse(url="/suite", status_code=303)
+
+@app.get("/logout")
+def logout_get(request: Request):
+    auth.clear_user_session(request)
+    return RedirectResponse(url="/", status_code=303)
 
 
 @app.post("/logout")

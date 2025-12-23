@@ -16,7 +16,7 @@
       </a>
 
       <nav class="nav">
-        {% if is_logged_in %}
+        {% if is_logged_in and not force_public_nav %}
           <a class="nav-link" href="/suite">Suite</a>
           <a class="nav-link" href="/indicators">Indicators</a>
           <a class="nav-link" href="/account">Account</a>
@@ -26,6 +26,7 @@
           <a class="nav-link" href="/pricing">Pricing</a>
           <a class="nav-link" href="/login">Login</a>
         {% endif %}
+
       </nav>
     </div>
   </header>
