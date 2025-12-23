@@ -1,50 +1,57 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="text-center" style="margin: 60px 0 34px;">
-  <h1>Kabroda Trading BattleBox</h1>
-  <p class="lead">One membership. One operating system. Levels → Copy → Execute.</p>
+<div class="text-center" style="margin-bottom: 60px;">
+  <h1 class="display-title">Operational <span class="gradient-text">Superiority</span></h1>
+  <p class="lead-text">One tier. Total access. Everything you need to trade structure instead of feelings.</p>
 </div>
 
-<div class="grid" style="max-width: 900px; margin: 0 auto;">
-  <div class="card" style="border-top: 4px solid var(--accent-primary);">
-    <div class="pill-badge" style="background:var(--accent-primary); color:#fff; margin-bottom:8px;">
-      Full Access
+<div class="row" style="justify-content: center; margin-bottom: 80px;">
+  
+  <div class="bento-card" style="max-width: 500px; width: 100%; border-color: var(--primary); box-shadow: 0 0 40px rgba(14, 165, 233, 0.15);">
+    <div style="text-align: center; margin-bottom: 30px; border-bottom: 1px solid var(--glass-border); padding-bottom: 30px;">
+      <h2 style="margin-bottom: 10px;">BattleBox Access</h2>
+      <div style="font-size: 64px; font-weight: 900; color: #fff; line-height: 1;">
+        $79<span style="font-size: 20px; color: var(--text-muted); font-weight: 500;">/mo</span>
+      </div>
+      <p style="color: var(--primary-bright); font-weight: 600; margin-top: 16px;">Full Commercial License</p>
     </div>
 
-    <h3>BattleBox Membership</h3>
-
-    <p class="muted" style="margin-top:10px; max-width: 680px;">
-      The Suite generates your daily battlefield levels and prepares a clean payload for the Kabroda Trading BattleBox GPT.
-    </p>
-
-    <ul style="list-style: none; padding: 0; margin: 22px 0; color: #fff; font-size: 15px;">
-      <li style="margin-bottom:12px;">✅ <strong>Auto-Calibrated Levels</strong> (Daily S/R + Triggers + 30m Range)</li>
-      <li style="margin-bottom:12px;">✅ <strong>Copy-to-TradingView</strong> (One-click indicator sync)</li>
-      <li style="margin-bottom:12px;">✅ <strong>Copy for BattleBox GPT</strong> (One-click session payload)</li>
-      <li style="margin-bottom:12px;">✅ <strong>Open BattleBox GPT</strong> (direct launch)</li>
+    <ul style="list-style: none; padding: 0; margin-bottom: 40px;">
+      <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
+        <span style="color: var(--primary-bright); font-size: 20px;">⚡</span>
+        <span><strong>Institutional Data Feed</strong> (Spot & Futures Sync)</span>
+      </li>
+      <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
+        <span style="color: var(--primary-bright); font-size: 20px;">🧠</span>
+        <span><strong>BattleBox GPT Link</strong> (Desk-Grade Analysis)</span>
+      </li>
+      <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
+        <span style="color: var(--primary-bright); font-size: 20px;">📊</span>
+        <span><strong>Full Indicator Suite</strong> (TradingView Scripts)</span>
+      </li>
+      <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
+        <span style="color: var(--primary-bright); font-size: 20px;">🛡️</span>
+        <span><strong>Execution Guardrails</strong> (Daily S/R + Triggers)</span>
+      </li>
     </ul>
 
-    <button class="btn primary" style="width:100%" onclick="startPlan()">Start Membership</button>
-
-    <p class="muted" style="font-size:12px; margin-top:14px;">
-      Subscriptions are managed via Stripe Billing Portal.
-    </p>
+    <button class="btn primary" style="width: 100%; font-size: 16px;" onclick="startPlan()">Deploy System</button>
+    <p class="text-center" style="font-size: 12px; margin-top: 16px; color: var(--text-muted);">Secure Stripe Processing. Cancel Anytime.</p>
   </div>
+
 </div>
 
 <script>
 async function startPlan(){
+  const btn = document.querySelector('button');
+  btn.innerText = "Processing...";
   const r = await fetch("/billing/checkout", {
-    method:"POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({})
+    method:"POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({})
   });
   if (r.status === 401) { window.location.href = "/login"; return; }
   const data = await r.json();
   if(data.url) window.location.href = data.url;
-  else alert("Error starting checkout");
 }
 </script>
-
 {% endblock %}

@@ -1,102 +1,74 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="hero">
-  <div class="hero-title">BattleBox Suite</div>
-  <div class="hero-sub">Calibrate the battlefield. Sync TradingView. Launch BattleBox GPT.</div>
-  <div class="hero-meta">
-    Logged in as <strong>{{ user.email }}</strong> • <span class="pill">{{ user.plan_label }}</span>
+<div class="bento-grid" style="align-items: center; margin-bottom: 40px;">
+  <div>
+    <h1 class="display-title" style="font-size: 42px; margin-bottom: 8px;">BattleBox Suite</h1>
+    <div style="color: var(--text-muted);">Operative: <strong style="color: #fff;">{{ user.email }}</strong></div>
+  </div>
+  <div style="text-align: right;">
+    <div style="display: inline-block; padding: 6px 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 4px; color: #6ee7b7; font-size: 12px; font-weight: 700; letter-spacing: 0.1em;">SYSTEM ACTIVE</div>
   </div>
 </div>
 
-<div class="card onboarding">
-  <div class="onboard-grid">
-    <div class="onboard-step">
-      <div class="onboard-icon">①</div>
-      <div>
-        <div class="onboard-title">Calibrate Levels</div>
-        <div class="muted">Generate today’s battlefield structure.</div>
-      </div>
-    </div>
-    <div class="onboard-step">
-      <div class="onboard-icon">②</div>
-      <div>
-        <div class="onboard-title">Sync TradingView</div>
-        <div class="muted">Copy today’s numbers into your KTBB Levels indicator.</div>
-      </div>
-    </div>
-    <div class="onboard-step">
-      <div class="onboard-icon">③</div>
-      <div>
-        <div class="onboard-title">Launch BattleBox GPT</div>
-        <div class="muted">Copy the session data → paste into GPT → get your desk brief.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-head">
-    <div>
-      <div class="card-title">1. Calibrate</div>
-      <div class="muted">Generate your daily levels and triggers in seconds.</div>
-    </div>
-    <div id="statusPill" class="pill pill-live">Ready</div>
-  </div>
-
-  <div class="row" style="gap:14px; align-items:flex-end;">
-    <div style="flex:1; min-width:220px;">
-      <label class="label">Target Asset</label>
-      <select id="symbol" class="input" style="cursor:pointer;">
+<div class="bento-card wide" style="margin-bottom: 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px;">
+    
+    <div style="flex: 1; min-width: 250px;">
+      <label class="label">1. Target Asset</label>
+      <select id="symbol" class="input" style="cursor:pointer; font-weight: 700;">
         <option value="BTCUSDT">BTC (Bitcoin)</option>
         <option value="ETHUSDT">ETH (Ethereum)</option>
         <option value="SOLUSDT">SOL (Solana)</option>
       </select>
     </div>
-    <div style="flex:0 0 auto;">
-      <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="min-width:200px;">
-        Calibrate Levels
+
+    <div style="flex: 0 0 auto;">
+      <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="min-width: 220px;">
+        ⚡ Calibrate Levels
       </button>
     </div>
   </div>
-  <div id="status" class="muted" style="margin-top:12px;">System ready. Awaiting command.</div>
+  <div id="status" style="margin-top: 16px; font-size: 13px; color: var(--text-muted); text-align: right;">System Ready.</div>
 </div>
 
-<div class="card">
-  <div class="card-head">
-    <div>
-      <div class="card-title">2. Battlefield Levels</div>
-      <div class="muted">Compact, operational, and built for execution.</div>
-    </div>
-    <div class="btn-row">
-      <button id="tvCopyBtn" class="btn" onclick="copyForTV()" style="display:none;">Copy for TradingView</button>
-      <button id="copyGptBtn" class="btn" onclick="copyForGPT()" style="display:none;">Copy for BattleBox GPT</button>
-      <a id="openGptLink" class="btn" style="display:none;" href="#" target="_blank" rel="noopener">Open BattleBox GPT</a>
+<div class="bento-card wide">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+    <h3>2. Battlefield Data</h3>
+    <div style="display: flex; gap: 10px;">
+      <button id="tvCopyBtn" class="btn secondary" onclick="copyForTV()" style="display:none; padding: 10px 16px; font-size: 12px;">Copy for TradingView</button>
+      <button id="copyGptBtn" class="btn secondary" onclick="copyForGPT()" style="display:none; padding: 10px 16px; font-size: 12px;">Copy for GPT</button>
+      <a id="openGptLink" class="btn primary" href="#" target="_blank" style="display:none; padding: 10px 16px; font-size: 12px;">Launch GPT</a>
     </div>
   </div>
 
-  <div class="levels-grid">
-    <div class="lvl-card lvl-red">
-      <div class="lvl-label">Daily Resistance</div>
-      <div id="lv_dr" class="lvl-value">—</div>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
+    
+    <div class="lvl-card c-red">
+      <div class="lvl-lbl">Daily Resistance</div>
+      <div id="lv_dr" class="lvl-val">—</div>
     </div>
-    <div class="lvl-card lvl-green">
-      <div class="lvl-label">Breakout Trigger</div>
-      <div id="lv_bo" class="lvl-value">—</div>
+    
+    <div class="lvl-card c-green">
+      <div class="lvl-lbl">Breakout Trigger</div>
+      <div id="lv_bo" class="lvl-val">—</div>
     </div>
-    <div class="lvl-card lvl-purple">
-      <div class="lvl-label">Breakdown Trigger</div>
-      <div id="lv_bd" class="lvl-value">—</div>
+    
+    <div class="lvl-card c-purple">
+      <div class="lvl-lbl">Breakdown Trigger</div>
+      <div id="lv_bd" class="lvl-val">—</div>
     </div>
-    <div class="lvl-card lvl-blue">
-      <div class="lvl-label">Daily Support</div>
-      <div id="lv_ds" class="lvl-value">—</div>
+    
+    <div class="lvl-card c-blue">
+      <div class="lvl-lbl">Daily Support</div>
+      <div id="lv_ds" class="lvl-val">—</div>
     </div>
+
   </div>
 
-  <div class="levels-mini">
-    <div>30m High <strong id="lv_30h">—</strong></div>
-    <div>30m Low <strong id="lv_30l">—</strong></div>
+  <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; color: var(--text-muted); font-size: 13px;">
+    <span>30m High: <strong id="lv_30h" style="color: #fff;">—</strong></span>
+    <span>30m Low: <strong id="lv_30l" style="color: #fff;">—</strong></span>
   </div>
 </div>
 
@@ -109,128 +81,75 @@
   function fmt(x){
     if (x === null || x === undefined) return "—";
     const n = parseFloat(x);
-    if (isNaN(n)) return String(x);
-    return n.toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 2});
-  }
-
-  async function fetchJsonSafe(url, options){
-    const r = await fetch(url, options);
-    const text = await r.text();
-    let data = {};
-    try { data = text ? JSON.parse(text) : {}; }
-    catch { data = { detail: text || "Non-JSON response from server." }; }
-    return { r, data };
-  }
-
-  function setPill(state){
-    const pill = document.getElementById("statusPill");
-    if(!pill) return;
-    pill.classList.remove("pill-live","pill-warn","pill-ok");
-    if(state === "ready"){ pill.textContent = "Ready"; pill.classList.add("pill-live"); }
-    else if(state === "work"){ pill.textContent = "Calibrating…"; pill.classList.add("pill-warn"); }
-    else if(state === "ok"){ pill.textContent = "Updated"; pill.classList.add("pill-ok"); }
-  }
-
-  function renderLevelsOnly(payload){
-    _lastDmrPayload = payload;
-    const levels = payload.levels || {};
-    const r30 = payload.range_30m || {};
-    
-    // Render Levels
-    document.getElementById("lv_ds").textContent  = fmt(levels.daily_support);
-    document.getElementById("lv_dr").textContent  = fmt(levels.daily_resistance);
-    document.getElementById("lv_bo").textContent  = fmt(levels.breakout_trigger);
-    document.getElementById("lv_bd").textContent  = fmt(levels.breakdown_trigger);
-    document.getElementById("lv_30h").textContent = fmt(r30.high);
-    document.getElementById("lv_30l").textContent = fmt(r30.low);
-
-    // Show Buttons
-    document.getElementById("tvCopyBtn").style.display = "inline-flex";
-    document.getElementById("copyGptBtn").style.display = "inline-flex";
-    const glink = document.getElementById("openGptLink");
-    glink.style.display = "inline-flex";
-    glink.href = BATTLEBOX_GPT_URL;
+    return isNaN(n) ? String(x) : n.toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 2});
   }
 
   async function calibrateBattlefield(){
     const symEl = document.getElementById("symbol");
     const status = document.getElementById("status");
-    const levelsBtn = document.getElementById("levelsBtn");
-    const sym = symEl ? symEl.value : "BTCUSDT";
-
-    status.textContent = "Calibrating levels…";
-    setPill("work");
-    levelsBtn.disabled = true;
+    const btn = document.getElementById("levelsBtn");
+    
+    status.textContent = "Connecting to Institutional Feed...";
+    btn.disabled = true; btn.style.opacity = "0.7";
 
     try{
-      const { r, data } = await fetchJsonSafe("/api/dmr/run-raw", {
+      const r = await fetch("/api/dmr/run-raw", {
         method: "POST", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ symbol: sym }), credentials: "same-origin"
+        body: JSON.stringify({ symbol: symEl.value })
       });
-      if (!r.ok){
-        const msg = data.detail || data.error || `Failed (${r.status})`;
-        status.textContent = "Calibration failed: " + msg;
-        setPill("ready");
-        alert(msg);
-        return;
-      }
-      renderLevelsOnly(data);
-      status.textContent = "Battlefield calibrated ✅";
-      setPill("ok");
+      const data = await r.json();
+      
+      if (!r.ok) throw new Error(data.detail || "Connection Error");
+
+      _lastDmrPayload = data;
+      const l = data.levels || {};
+      const r30 = data.range_30m || {};
+
+      document.getElementById("lv_ds").innerText = fmt(l.daily_support);
+      document.getElementById("lv_dr").innerText = fmt(l.daily_resistance);
+      document.getElementById("lv_bo").innerText = fmt(l.breakout_trigger);
+      document.getElementById("lv_bd").innerText = fmt(l.breakdown_trigger);
+      document.getElementById("lv_30h").innerText = fmt(r30.high);
+      document.getElementById("lv_30l").innerText = fmt(r30.low);
+
+      document.getElementById("tvCopyBtn").style.display = "inline-flex";
+      document.getElementById("copyGptBtn").style.display = "inline-flex";
+      const gptLink = document.getElementById("openGptLink");
+      gptLink.style.display = "inline-flex";
+      gptLink.href = BATTLEBOX_GPT_URL;
+
+      status.textContent = "Calibration Complete. Ready to execute.";
     }catch(e){
-      status.textContent = "System error";
-      setPill("ready");
-      alert(e && e.message ? e.message : String(e));
+      alert(e.message);
+      status.textContent = "Error: " + e.message;
     }finally{
-      levelsBtn.disabled = false;
+      btn.disabled = false; btn.style.opacity = "1";
     }
   }
 
   async function copyForTV(){
-    if (!_lastDmrPayload || !_lastDmrPayload.levels) return;
+    if (!_lastDmrPayload) return;
     const l = _lastDmrPayload.levels;
-    const r = _lastDmrPayload.range_30m || {};
+    const r = _lastDmrPayload.range_30m;
     const text = `${parseFloat(l.breakout_trigger).toFixed(2)},${parseFloat(l.breakdown_trigger).toFixed(2)},${parseFloat(l.daily_resistance).toFixed(2)},${parseFloat(l.daily_support).toFixed(2)},${parseFloat(r.high).toFixed(2)},${parseFloat(r.low).toFixed(2)}`;
-    try {
-      await navigator.clipboard.writeText(text);
-      const btn = document.getElementById("tvCopyBtn");
-      const orig = btn.textContent;
-      btn.textContent = "Copied ✅";
-      setTimeout(() => btn.textContent = orig, 1200);
-    } catch (err) { alert("Could not copy: " + err); }
-  }
-
-  // GPT PAYLOAD BUILDER
-  // Hidden Feature: Includes 'news' and 'events' from backend, but never shows them on UI.
-  function buildGptContractV1(raw){
-    return {
-      contract_version: "1.1",
-      generated_at: new Date().toISOString(),
-      symbol: raw.symbol,
-      last_price: raw.last_price,
-      levels: raw.levels,
-      range_30m: raw.range_30m,
-      // Pass the data silently
-      news_headlines: raw.news || [],
-      calendar_events: raw.events || [],
-      htf_shelves: raw.htf_shelves,
-      intraday_shelves: raw.intraday_shelves
-    };
+    await navigator.clipboard.writeText(text);
+    alert("Copied to clipboard!");
   }
 
   async function copyForGPT(){
     if (!_lastDmrPayload) return;
-    const obj = buildGptContractV1(_lastDmrPayload);
-    const text = JSON.stringify(obj, null, 2);
-    try {
-      await navigator.clipboard.writeText(text);
-      const btn = document.getElementById("copyGptBtn");
-      const orig = btn.textContent;
-      btn.textContent = "Copied ✅";
-      setTimeout(()=>btn.textContent = orig, 1200);
-    } catch (err) { alert("Could not copy: " + err); }
+    // Build clean payload with hidden news data
+    const payload = {
+      date: new Date().toISOString(),
+      symbol: _lastDmrPayload.symbol,
+      price: _lastDmrPayload.last_price,
+      levels: _lastDmrPayload.levels,
+      range_30m: _lastDmrPayload.range_30m,
+      news: _lastDmrPayload.news || [],
+      events: _lastDmrPayload.events || []
+    };
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    alert("Session Payload Copied!");
   }
-
-  setPill("ready");
 </script>
 {% endblock %}

@@ -1,15 +1,39 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="card" style="max-width:520px;margin:24px auto;">
-    <h3>Login</h3>
-    {% if error %}<div class="error" style="margin-bottom:10px;">{{ error }}</div>{% endif %}
-    <form method="post" action="/login" class="row" style="flex-direction:column;align-items:stretch;gap:10px;">
-      <label class="muted">Email</label>
-      <input name="email" type="email" required />
-      <label class="muted">Password</label>
-      <input name="password" type="password" required />
-      <button class="btn primary" type="submit">Login</button>
-      <div class="muted">No account? <a href="/register">Create one</a></div>
+
+<div style="min-height: 60vh; display: flex; align-items: center; justify-content: center;">
+  
+  <div class="bento-card" style="max-width: 420px; width: 100%; padding: 40px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
+    <div class="text-center" style="margin-bottom: 32px;">
+      <h3>System Access</h3>
+      <p style="color: var(--text-muted); font-size: 14px;">Enter your credentials.</p>
+    </div>
+
+    {% if error %}
+    <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid var(--danger); color: #fca5a5; padding: 12px; border-radius: 8px; margin-bottom: 24px; font-size: 13px; text-align: center;">
+      {{ error }}
+    </div>
+    {% endif %}
+
+    <form method="post" action="/login" style="display: flex; flex-direction: column; gap: 20px;">
+      <div>
+        <label class="label">Email Identity</label>
+        <input name="email" type="email" class="input" required placeholder="operative@domain.com" />
+      </div>
+      
+      <div>
+        <label class="label">Access Key</label>
+        <input name="password" type="password" class="input" required placeholder="••••••••" />
+      </div>
+
+      <button class="btn primary" type="submit" style="margin-top: 12px;">Authenticate</button>
     </form>
+
+    <div class="text-center" style="margin-top: 32px; font-size: 13px; padding-top: 24px; border-top: 1px solid var(--glass-border);">
+      <span style="color: var(--text-muted);">New Operator?</span> 
+      <a href="/register" style="color: var(--primary-bright); text-decoration: none; font-weight: 700; margin-left: 5px;">Initialize Account</a>
+    </div>
   </div>
+
+</div>
 {% endblock %}

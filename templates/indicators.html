@@ -1,140 +1,52 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="hero">
-  <div class="hero-title">Indicators</div>
-  <div class="hero-sub">
-    Install once. Then your daily workflow becomes: calibrate → copy → execute.
-  </div>
-  <div class="hero-meta">
-    Logged in as <strong>{{ user.email }}</strong> • <span class="pill">{{ user.plan_label }}</span>
-  </div>
+<div class="text-center" style="margin-bottom: 60px;">
+  <h1 class="display-title">Indicator <span class="gradient-text">Armory</span></h1>
+  <p class="lead-text">Install once. Calibrate daily. Execute forever.</p>
 </div>
 
-<div class="grid-2">
+<div class="bento-grid">
 
-  <!-- KTBB Levels -->
-  <div class="card">
-    <div class="card-head">
-      <div>
-        <div class="card-title">KTBB Levels</div>
-        <div class="muted">Daily support/resistance, triggers, and 30m range integration.</div>
-      </div>
-      <button class="btn" onclick="copyIndicator('/static/indicators/ktbb_trade_levels.pine', this)">
-        Copy Pine Script
-      </button>
+  <div class="bento-card">
+    <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
+      <h3 style="color:var(--success);">KTBB Execution Levels</h3>
+      <span style="font-size:24px;">⚡</span>
     </div>
-
-    <div class="steps">
-      <div class="step">
-        <div class="step-num">1</div>
-        <div>
-          <div class="step-title">Open TradingView → Pine Editor</div>
-          <div class="muted">Create a new script, then paste.</div>
-        </div>
-      </div>
-
-      <div class="step">
-        <div class="step-num">2</div>
-        <div>
-          <div class="step-title">Paste + Save</div>
-          <div class="muted">Save the script and add it to your chart.</div>
-        </div>
-      </div>
-
-      <div class="step">
-        <div class="step-num">3</div>
-        <div>
-          <div class="step-title">Use the Suite “Copy for TradingView” numbers</div>
-          <div class="muted">
-            Each day, calibrate levels in the Suite and copy the formatted numbers into the indicator input.
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <details class="accordion">
-      <summary>Troubleshooting</summary>
-      <div class="accordion-body">
-        <p><strong>Indicator doesn’t show?</strong> Confirm it’s added to the chart, and the symbol matches what you calibrated.</p>
-        <p><strong>Paste fails?</strong> Use a desktop browser. If clipboard permissions block copy, click into Pine Editor and paste manually.</p>
-        <p><strong>Numbers look wrong?</strong> Re-run calibration and copy again. Don’t reuse yesterday’s values.</p>
-      </div>
-    </details>
+    <p style="margin-bottom:24px; color:var(--text-muted); font-size:14px;">
+      The core engine. Draws your Daily Support, Resistance, Triggers, and the 30m Anchor Box.
+    </p>
+    <button class="btn secondary" style="width:100%" onclick="copyIndicator('/static/indicators/ktbb_trade_levels.pine', this)">
+      Copy Source Code
+    </button>
   </div>
 
-  <!-- HTF Supply & Demand -->
-  <div class="card">
-    <div class="card-head">
-      <div>
-        <div class="card-title">KTBB HTF Supply & Demand</div>
-        <div class="muted">Higher timeframe shelves for context and decision support.</div>
-      </div>
-      <button class="btn" onclick="copyIndicator('/static/indicators/kttb_htf_supply_and_demand.pine', this)">
-        Copy Pine Script
-      </button>
+  <div class="bento-card">
+    <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
+      <h3 style="color:var(--primary-bright);">HTF Supply & Demand</h3>
+      <span style="font-size:24px;">📊</span>
     </div>
-
-    <div class="steps">
-      <div class="step">
-        <div class="step-num">1</div>
-        <div>
-          <div class="step-title">Open TradingView → Pine Editor</div>
-          <div class="muted">Create a new script, then paste.</div>
-        </div>
-      </div>
-
-      <div class="step">
-        <div class="step-num">2</div>
-        <div>
-          <div class="step-title">Paste + Save</div>
-          <div class="muted">Save the script and add it to your chart.</div>
-        </div>
-      </div>
-
-      <div class="step">
-        <div class="step-num">3</div>
-        <div>
-          <div class="step-title">Use shelves as context</div>
-          <div class="muted">
-            HTF shelves are structure. Let them constrain behavior, not force a prediction.
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <details class="accordion">
-      <summary>Troubleshooting</summary>
-      <div class="accordion-body">
-        <p><strong>Too many zones?</strong> Reduce sensitivity/strength filters in indicator settings.</p>
-        <p><strong>No zones?</strong> Ensure the script is enabled and your chart timeframe supports the logic.</p>
-      </div>
-    </details>
+    <p style="margin-bottom:24px; color:var(--text-muted); font-size:14px;">
+      Automatically maps 4H and 1H supply/demand zones. Provides context for your intraday execution.
+    </p>
+    <button class="btn secondary" style="width:100%" onclick="copyIndicator('/static/indicators/kttb_htf_supply_and_demand.pine', this)">
+      Copy Source Code
+    </button>
   </div>
 
 </div>
 
 <script>
 async function copyIndicator(url, btn){
-  const original = btn.textContent;
-  btn.textContent = "Loading…";
-  btn.disabled = true;
-
+  const original = btn.innerText;
+  btn.innerText = "Extracting...";
   try {
-    const res = await fetch(url, { cache: "no-store" });
-    if(!res.ok) throw new Error("Could not load indicator file.");
-    const text = await res.text();
-
-    await navigator.clipboard.writeText(text);
-    btn.textContent = "Copied ✅";
-    setTimeout(()=> btn.textContent = original, 1400);
-  } catch (e) {
-    alert(e.message || String(e));
-    btn.textContent = original;
-  } finally {
-    btn.disabled = false;
-  }
+    const r = await fetch(url);
+    const t = await r.text();
+    await navigator.clipboard.writeText(t);
+    btn.innerText = "Extracted to Clipboard";
+    setTimeout(() => btn.innerText = original, 2000);
+  } catch(e) { alert("Error"); btn.innerText = original; }
 }
 </script>
-
 {% endblock %}
