@@ -44,14 +44,38 @@
 
 <script>
 async function startPlan(){
+  // Check if user is logged in (we can infer this if the server sends a specific header, or just try the checkout)
   const btn = document.querySelector('button');
-  btn.innerText = "Processing...";
-  const r = await fetch("/billing/checkout", {
-    method:"POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({})
-  });
-  if (r.status === 401) { window.location.href = "/login"; return; }
-  const data = await r.json();
-  if(data.url) window.location.href = data.url;
+  const originalText = btn.innerText;
+  btn.innerText = "Initializing...";
+  
+  try {
+    const r = await fetch("/billing/checkout", {
+      method:"POST", 
+      headers: {"Content-Type":"application/json"}, 
+      body: JSON.stringify({})
+    });
+
+    if (r.status === 401) {
+      // USER IS NOT LOGGED IN.
+      // Redirect to REGISTER, not Login, because they are likely new.
+      // We add ?next=checkout to tell the register page to forward them later (if we built that logic),
+      // but for now, just getting them to register is the priority.
+      window.location.href = "/register"; 
+      return; 
+    }
+
+    const data = await r.json();
+    if(data.url) {
+      window.location.href = data.url;
+    } else {
+      alert("Error initializing checkout. Please contact support.");
+      btn.innerText = originalText;
+    }
+  } catch (e) {
+    // If fetch fails entirely
+    window.location.href = "/register";
+  }
 }
 </script>
 {% endblock %}
