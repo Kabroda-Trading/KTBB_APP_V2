@@ -100,18 +100,6 @@
   </div>
 </div>
 
-<div class="card" id="newsCard" style="display:none;">
-  <div class="card-head">
-    <div>
-      <div class="card-title">3. Market Intelligence</div>
-      <div class="muted">Live headlines included in your GPT payload.</div>
-    </div>
-  </div>
-  <div style="background:rgba(0,0,0,0.2); padding:16px; border-radius:12px; border:1px solid rgba(255,255,255,0.06);">
-    <ul id="newsList" style="margin:0; padding-left:20px; color:rgba(234,240,255,0.8); font-size:14px; line-height:1.6;"></ul>
-  </div>
-</div>
-
 <script>
   const USER_SESSION_TZ = {{ (user.session_tz or "UTC")|tojson }};
   const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
@@ -147,10 +135,8 @@
     _lastDmrPayload = payload;
     const levels = payload.levels || {};
     const r30 = payload.range_30m || {};
-    const news = payload.news || [];
-    const events = payload.events || [];
-
-    // Levels
+    
+    // Render Levels
     document.getElementById("lv_ds").textContent  = fmt(levels.daily_support);
     document.getElementById("lv_dr").textContent  = fmt(levels.daily_resistance);
     document.getElementById("lv_bo").textContent  = fmt(levels.breakout_trigger);
@@ -158,25 +144,7 @@
     document.getElementById("lv_30h").textContent = fmt(r30.high);
     document.getElementById("lv_30l").textContent = fmt(r30.low);
 
-    // News
-    const list = document.getElementById("newsList");
-    if(list){
-        list.innerHTML = "";
-        events.forEach(e => {
-            const li = document.createElement("li");
-            li.textContent = "📅 " + e.replace("- ", "");
-            li.style.color = "var(--accent-cyan)";
-            list.appendChild(li);
-        });
-        news.forEach(n => {
-            const li = document.createElement("li");
-            li.textContent = n.replace("- ", "");
-            list.appendChild(li);
-        });
-        document.getElementById("newsCard").style.display = "block";
-    }
-
-    // Buttons
+    // Show Buttons
     document.getElementById("tvCopyBtn").style.display = "inline-flex";
     document.getElementById("copyGptBtn").style.display = "inline-flex";
     const glink = document.getElementById("openGptLink");
@@ -232,7 +200,8 @@
     } catch (err) { alert("Could not copy: " + err); }
   }
 
-  // UPDATED: Now includes news in the JSON payload
+  // GPT PAYLOAD BUILDER
+  // Hidden Feature: Includes 'news' and 'events' from backend, but never shows them on UI.
   function buildGptContractV1(raw){
     return {
       contract_version: "1.1",
@@ -241,6 +210,7 @@
       last_price: raw.last_price,
       levels: raw.levels,
       range_30m: raw.range_30m,
+      // Pass the data silently
       news_headlines: raw.news || [],
       calendar_events: raw.events || [],
       htf_shelves: raw.htf_shelves,
