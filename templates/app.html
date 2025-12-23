@@ -1,74 +1,85 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="bento-grid" style="align-items: center; margin-bottom: 40px;">
+<div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 40px; border-bottom: 1px solid var(--glass-border); padding-bottom: 20px;">
   <div>
-    <h1 class="display-title" style="font-size: 42px; margin-bottom: 8px;">BattleBox Suite</h1>
-    <div style="color: var(--text-muted);">Operative: <strong style="color: #fff;">{{ user.email }}</strong></div>
+    <div class="pill">BATTLEBOX COMMAND</div>
+    <h1 style="font-size: 32px; margin: 0; text-transform: uppercase; letter-spacing: 0.05em;">Session <span class="gradient-text">Control</span></h1>
   </div>
   <div style="text-align: right;">
-    <div style="display: inline-block; padding: 6px 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 4px; color: #6ee7b7; font-size: 12px; font-weight: 700; letter-spacing: 0.1em;">SYSTEM ACTIVE</div>
+    <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">OPERATIVE ID</div>
+    <div style="font-family: monospace; color: var(--primary-bright); letter-spacing: 0.1em;">{{ user.email }}</div>
   </div>
 </div>
 
-<div class="bento-card wide" style="margin-bottom: 24px;">
+<div class="bento-card wide" style="margin-bottom: 24px; border-left: 4px solid var(--primary);">
   <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px;">
     
     <div style="flex: 1; min-width: 250px;">
-      <label class="label">1. Target Asset</label>
-      <select id="symbol" class="input" style="cursor:pointer; font-weight: 700;">
-        <option value="BTCUSDT">BTC (Bitcoin)</option>
-        <option value="ETHUSDT">ETH (Ethereum)</option>
-        <option value="SOLUSDT">SOL (Solana)</option>
-      </select>
+      <label class="label" style="color: var(--primary-bright);">TARGET ASSET</label>
+      <div style="position: relative;">
+        <select id="symbol" class="input" style="cursor:pointer; font-weight: 700; appearance: none; padding-right: 40px; text-transform: uppercase;">
+          <option value="BTCUSDT">BTC (Bitcoin Perpetual)</option>
+          <option value="ETHUSDT">ETH (Ethereum Perpetual)</option>
+          <option value="SOLUSDT">SOL (Solana Perpetual)</option>
+        </select>
+        <span style="position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: var(--primary-bright); pointer-events: none;">▼</span>
+      </div>
     </div>
 
     <div style="flex: 0 0 auto;">
-      <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="min-width: 220px;">
-        ⚡ Calibrate Levels
+      <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="min-width: 200px; height: 50px;">
+        <span style="margin-right: 8px;">⚡</span> INITIATE CALIBRATION
       </button>
     </div>
   </div>
-  <div id="status" style="margin-top: 16px; font-size: 13px; color: var(--text-muted); text-align: right;">System Ready.</div>
+  <div id="status" style="margin-top: 16px; font-size: 12px; font-family: monospace; color: var(--text-muted); text-align: right;">
+    > SYSTEM STANDBY...
+  </div>
 </div>
 
-<div class="bento-card wide">
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-    <h3>2. Battlefield Data</h3>
+<div class="bento-card wide" style="position: relative; overflow: hidden;">
+  <div style="position: absolute; inset: 0; background-image: radial-gradient(var(--glass-border) 1px, transparent 1px); background-size: 20px 20px; opacity: 0.1; pointer-events: none;"></div>
+
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; position: relative;">
+    <h3 style="display: flex; align-items: center; gap: 10px;">
+      <span style="width: 8px; height: 8px; background: var(--success); border-radius: 50%; box-shadow: 0 0 10px var(--success);"></span>
+      BATTLEFIELD TELEMETRY
+    </h3>
     <div style="display: flex; gap: 10px;">
-      <button id="tvCopyBtn" class="btn secondary" onclick="copyForTV()" style="display:none; padding: 10px 16px; font-size: 12px;">Copy for TradingView</button>
-      <button id="copyGptBtn" class="btn secondary" onclick="copyForGPT()" style="display:none; padding: 10px 16px; font-size: 12px;">Copy for GPT</button>
-      <a id="openGptLink" class="btn primary" href="#" target="_blank" style="display:none; padding: 10px 16px; font-size: 12px;">Launch GPT</a>
+      <button id="tvCopyBtn" class="btn secondary" onclick="copyForTV()" style="display:none; font-size: 11px; padding: 8px 16px;">COPY INDICATOR DATA</button>
+      <button id="copyGptBtn" class="btn secondary" onclick="copyForGPT()" style="display:none; font-size: 11px; padding: 8px 16px;">COPY GPT PAYLOAD</button>
+      <a id="openGptLink" class="btn primary" href="#" target="_blank" style="display:none; font-size: 11px; padding: 8px 16px;">LAUNCH AI COMMAND</a>
     </div>
   </div>
 
-  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; position: relative;">
     
-    <div class="lvl-card c-red">
-      <div class="lvl-lbl">Daily Resistance</div>
-      <div id="lv_dr" class="lvl-val">—</div>
+    <div class="lvl-card c-red" style="background: rgba(239, 68, 68, 0.05);">
+      <div class="lvl-lbl">DAILY RESISTANCE</div>
+      <div id="lv_dr" class="lvl-val" style="font-family: monospace;">—</div>
     </div>
     
-    <div class="lvl-card c-green">
-      <div class="lvl-lbl">Breakout Trigger</div>
-      <div id="lv_bo" class="lvl-val">—</div>
+    <div class="lvl-card c-green" style="background: rgba(16, 185, 129, 0.05);">
+      <div class="lvl-lbl">BREAKOUT TRIGGER</div>
+      <div id="lv_bo" class="lvl-val" style="font-family: monospace;">—</div>
     </div>
     
-    <div class="lvl-card c-purple">
-      <div class="lvl-lbl">Breakdown Trigger</div>
-      <div id="lv_bd" class="lvl-val">—</div>
+    <div class="lvl-card c-purple" style="background: rgba(168, 85, 247, 0.05);">
+      <div class="lvl-lbl">BREAKDOWN TRIGGER</div>
+      <div id="lv_bd" class="lvl-val" style="font-family: monospace;">—</div>
     </div>
     
-    <div class="lvl-card c-blue">
-      <div class="lvl-lbl">Daily Support</div>
-      <div id="lv_ds" class="lvl-val">—</div>
+    <div class="lvl-card c-blue" style="background: rgba(59, 130, 246, 0.05);">
+      <div class="lvl-lbl">DAILY SUPPORT</div>
+      <div id="lv_ds" class="lvl-val" style="font-family: monospace;">—</div>
     </div>
 
   </div>
 
-  <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; color: var(--text-muted); font-size: 13px;">
-    <span>30m High: <strong id="lv_30h" style="color: #fff;">—</strong></span>
-    <span>30m Low: <strong id="lv_30l" style="color: #fff;">—</strong></span>
+  <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--glass-border); display: flex; justify-content: space-between; color: var(--text-muted); font-size: 12px; font-family: monospace;">
+    <span>30M ANCHOR HIGH: <strong id="lv_30h" style="color: #fff;">—</strong></span>
+    <span>30M ANCHOR LOW: <strong id="lv_30l" style="color: #fff;">—</strong></span>
   </div>
 </div>
 
@@ -89,7 +100,8 @@
     const status = document.getElementById("status");
     const btn = document.getElementById("levelsBtn");
     
-    status.textContent = "Connecting to Institutional Feed...";
+    status.innerHTML = "> ESTABLISHING UPLINK TO INSTITUTIONAL FEED...";
+    status.style.color = "var(--primary-bright)";
     btn.disabled = true; btn.style.opacity = "0.7";
 
     try{
@@ -118,10 +130,12 @@
       gptLink.style.display = "inline-flex";
       gptLink.href = BATTLEBOX_GPT_URL;
 
-      status.textContent = "Calibration Complete. Ready to execute.";
+      status.innerHTML = "> CALIBRATION COMPLETE. READY TO EXECUTE.";
+      status.style.color = "var(--success)";
     }catch(e){
       alert(e.message);
-      status.textContent = "Error: " + e.message;
+      status.innerHTML = "> ERROR: " + e.message;
+      status.style.color = "var(--danger)";
     }finally{
       btn.disabled = false; btn.style.opacity = "1";
     }
@@ -133,12 +147,11 @@
     const r = _lastDmrPayload.range_30m;
     const text = `${parseFloat(l.breakout_trigger).toFixed(2)},${parseFloat(l.breakdown_trigger).toFixed(2)},${parseFloat(l.daily_resistance).toFixed(2)},${parseFloat(l.daily_support).toFixed(2)},${parseFloat(r.high).toFixed(2)},${parseFloat(r.low).toFixed(2)}`;
     await navigator.clipboard.writeText(text);
-    alert("Copied to clipboard!");
+    alert("COPIED: Paste into TradingView Indicator Inputs");
   }
 
   async function copyForGPT(){
     if (!_lastDmrPayload) return;
-    // Build clean payload with hidden news data
     const payload = {
       date: new Date().toISOString(),
       symbol: _lastDmrPayload.symbol,
@@ -149,7 +162,7 @@
       events: _lastDmrPayload.events || []
     };
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-    alert("Session Payload Copied!");
+    alert("COPIED: Paste into BattleBox GPT");
   }
 </script>
 {% endblock %}

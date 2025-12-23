@@ -1,42 +1,101 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Account</h1>
-<p class="muted">{{ user.email }} • {{ tier_label }}</p>
 
-<div class="card">
-  <h3>Session Timezone (DST-safe)</h3>
-  <p class="muted" style="margin-top:6px;">
-    Choose your timezone so the system pulls the correct session candle and opening range.
-  </p>
-
-  <form method="post" action="/account/session-timezone" class="row" style="gap:10px;">
-    <input
-      name="tz"
-      value="{{ user.session_tz }}"
-      list="tzlist"
-      placeholder="Start typing… e.g. America/Chicago"
-      style="flex:1;"
-      required
-    />
-    <button class="btn primary" type="submit">Save</button>
-  </form>
-
-  <datalist id="tzlist">
-    <option value="America/New_York"></option>
-    <option value="America/Chicago"></option>
-    <option value="America/Denver"></option>
-    <option value="America/Los_Angeles"></option>
-    <option value="America/Phoenix"></option>
-    <option value="Europe/London"></option>
-    <option value="Europe/Paris"></option>
-    <option value="Europe/Berlin"></option>
-    <option value="Asia/Tokyo"></option>
-    <option value="Asia/Singapore"></option>
-    <option value="Australia/Sydney"></option>
-  </datalist>
-
-  <p class="muted" style="margin-top:10px;">
-    Tip: you can type any IANA timezone — your browser will autocomplete common ones.
-  </p>
+<div class="text-center" style="margin-bottom: 40px;">
+  <div class="pill">OPERATIVE PROFILE</div>
+  <h1 class="display-title" style="font-size: 32px;">Command <span class="gradient-text">Settings</span></h1>
 </div>
+
+<div class="bento-grid">
+
+  <div class="bento-card">
+    <div style="margin-bottom: 20px;">
+      <h3 style="color: #fff; margin-bottom: 4px;">Operative Identity</h3>
+      <p style="font-size: 13px; color: var(--text-muted);">Your unique system credentials.</p>
+    </div>
+    
+    <div style="margin-bottom: 16px;">
+      <label class="label">Operative Email</label>
+      <input class="input" value="{{ user.email }}" disabled style="opacity: 0.7; cursor: not-allowed;">
+    </div>
+
+    <div style="padding: 12px; background: rgba(255,255,255,0.05); border-radius: 6px; border: 1px solid var(--glass-border);">
+      <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">CLEARANCE LEVEL</div>
+      <div style="font-size: 16px; font-weight: 900; color: var(--primary-bright); margin-top: 4px;">
+        {{ tier_label|default('STANDARD ACCESS') }}
+      </div>
+      <div style="margin-top: 8px;">
+        <a href="/pricing" style="font-size: 12px; color: var(--text-muted); text-decoration: underline;">Manage Subscription</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="bento-card">
+    <div style="margin-bottom: 20px;">
+      <h3 style="color: #fff; margin-bottom: 4px;">Temporal Alignment</h3>
+      <p style="font-size: 13px; color: var(--text-muted);">Sync the system to your local market time.</p>
+    </div>
+
+    <div style="margin-bottom: 16px;">
+      <label class="label">Session Timezone</label>
+      <input list="timezones" name="timezone" id="tzInput" class="input" placeholder="Search (e.g. New York)..." value="{{ user.session_tz }}">
+      <datalist id="timezones">
+        <option value="America/New_York">
+        <option value="America/Chicago">
+        <option value="America/Denver">
+        <option value="America/Los_Angeles">
+        <option value="Europe/London">
+        <option value="Asia/Tokyo">
+        <option value="Australia/Sydney">
+        <option value="UTC">
+      </datalist>
+      <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+        *Controls your Opening Range calculations.
+      </div>
+    </div>
+
+    <button id="saveTzBtn" class="btn primary" onclick="saveTimezone()" style="width: 100%;">
+      UPDATE ALIGNMENT
+    </button>
+    <div id="tzMsg" style="margin-top: 10px; font-size: 12px; text-align: center; height: 16px;"></div>
+  </div>
+
+</div>
+
+<div class="text-center" style="margin-top: 60px;">
+  <form action="/logout" method="post">
+    <button type="submit" class="btn secondary" style="border-color: var(--danger); color: var(--danger);">
+      TERMINATE SESSION (LOGOUT)
+    </button>
+  </form>
+</div>
+
+<script>
+async function saveTimezone(){
+  const tz = document.getElementById('tzInput').value;
+  const btn = document.getElementById('saveTzBtn');
+  const msg = document.getElementById('tzMsg');
+
+  if(!tz) return;
+  btn.innerText = "UPDATING...";
+  
+  try {
+    const r = await fetch("/account/session-timezone", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ timezone: tz })
+    });
+    if(r.ok){
+      msg.style.color = "var(--success)";
+      msg.innerText = "ALIGNMENT UPDATED";
+      btn.innerText = "UPDATE ALIGNMENT";
+    } else {
+      throw new Error("Failed");
+    }
+  } catch(e) {
+    msg.style.color = "var(--danger)";
+    msg.innerText = "ERROR UPDATING";
+    btn.innerText = "RETRY";
+  }
+}
+</script>
 {% endblock %}
