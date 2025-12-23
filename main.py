@@ -48,9 +48,47 @@ app.add_middleware(
     same_site="lax",
 )
 
+# ... imports ...
+from sqlalchemy import text # Make sure this is imported
+
+# 1. UPDATE THE STARTUP FUNCTION (To safely add the column)
 @app.on_event("startup")
 def _startup():
     init_db()
+    # Auto-migration: Check if username column exists, if not, add it.
+    # This prevents you from having to delete your database.
+    try:
+        with get_db() as db:
+            db.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR"))
+            db.commit()
+            print("--- DATABASE UPGRADED: Added username column ---")
+    except Exception:
+        # Column likely already exists, ignore error
+        pass
+
+# ... existing routes ...
+
+# 2. ADD THIS NEW ROUTE (For saving the Callsign)
+@app.post("/account/profile")
+async def account_update_profile(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    
+    try:
+        payload = await request.json()
+        new_name = payload.get("username", "").strip()
+    except:
+        form = await request.form()
+        new_name = form.get("username", "").strip()
+
+    # Save to DB
+    u.username = new_name
+    db.commit()
+    
+    # Update session so the header updates immediately
+    request.session["user"]["username"] = new_name
+    
+    return {"ok": True, "username": new_name}
 
 # -------------------------------------------------------------------
 # Session helpers
@@ -137,6 +175,7 @@ def suite(request: Request, db: Session = Depends(get_db)):
             "is_logged_in": True,
             "user": {
                 "email": u.email,
+                "username": u.username,  # <--- ADD THIS LINE
                 "session_tz": (u.session_tz or "UTC"),
                 "plan_label": flags.get("plan_label", ""),
                 "plan": flags.get("plan") or "",
@@ -158,6 +197,7 @@ def indicators(request: Request, db: Session = Depends(get_db)):
             "is_logged_in": True,
             "user": {
                 "email": u.email,
+                "username": u.username,  # <--- ADD THIS LINE
                 "session_tz": (u.session_tz or "UTC"),
                 "plan_label": flags.get("plan_label", ""),
                 "plan": flags.get("plan") or "",
@@ -176,7 +216,11 @@ def account(request: Request, db: Session = Depends(get_db)):
         {
             "request": request,
             "is_logged_in": True,
-            "user": {"email": u.email, "session_tz": (u.session_tz or "UTC")},
+            "user": {
+                "email": u.email, 
+                "username": u.username, # <--- ADD THIS LINE
+                "session_tz": (u.session_tz or "UTC")
+            },
             "tier_label": flags["plan_label"],
         },
     )

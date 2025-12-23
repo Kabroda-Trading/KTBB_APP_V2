@@ -8,8 +8,9 @@
   </div>
   <div style="text-align: right;">
     <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">OPERATIVE ID</div>
-    <div style="font-family: monospace; color: var(--primary-bright); letter-spacing: 0.1em;">{{ user.email }}</div>
-  </div>
+    <div style="font-family: monospace; color: var(--primary-bright); letter-spacing: 0.1em; text-transform: uppercase;">
+      {{ user.username if user.username else user.email }}
+    </div>
 </div>
 
 <div class="bento-card wide" style="margin-bottom: 24px; border-left: 4px solid var(--primary);">
