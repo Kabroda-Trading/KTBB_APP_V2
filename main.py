@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request, Form, HTTPException, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from sqlalchemy import text # Important import
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.templating import Jinja2Templates
 
@@ -48,47 +49,29 @@ app.add_middleware(
     same_site="lax",
 )
 
-# ... imports ...
-from sqlalchemy import text # Make sure this is imported
-
-# 1. UPDATE THE STARTUP FUNCTION (To safely add the column)
+# -------------------------------------------------------------------
+# STARTUP EVENT (DATABASE MIGRATION FIX)
+# -------------------------------------------------------------------
 @app.on_event("startup")
 def _startup():
     init_db()
-    # Auto-migration: Check if username column exists, if not, add it.
-    # This prevents you from having to delete your database.
+    
+    # CORRECTED MIGRATION LOGIC:
+    # We must manually get the session using next() because get_db is a generator.
+    print("--- CHECKING DATABASE SCHEMA ---")
+    db = next(get_db()) 
     try:
-        with get_db() as db:
-            db.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR"))
-            db.commit()
-            print("--- DATABASE UPGRADED: Added username column ---")
-    except Exception:
-        # Column likely already exists, ignore error
-        pass
-
-# ... existing routes ...
-
-# 2. ADD THIS NEW ROUTE (For saving the Callsign)
-@app.post("/account/profile")
-async def account_update_profile(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    
-    try:
-        payload = await request.json()
-        new_name = payload.get("username", "").strip()
-    except:
-        form = await request.form()
-        new_name = form.get("username", "").strip()
-
-    # Save to DB
-    u.username = new_name
-    db.commit()
-    
-    # Update session so the header updates immediately
-    request.session["user"]["username"] = new_name
-    
-    return {"ok": True, "username": new_name}
+        # Attempt to add the column. 
+        # If it exists, Postgres will throw an error, which we catch.
+        db.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR"))
+        db.commit()
+        print("--- SUCCESS: Added 'username' column to database ---")
+    except Exception as e:
+        # If this fails, it usually means the column already exists.
+        # We print the error to logs just in case, but continue safely.
+        print(f"--- NOTE: Column check skipped (likely exists already): {e}")
+    finally:
+        db.close()
 
 # -------------------------------------------------------------------
 # Session helpers
@@ -175,7 +158,7 @@ def suite(request: Request, db: Session = Depends(get_db)):
             "is_logged_in": True,
             "user": {
                 "email": u.email,
-                "username": u.username,  # <--- ADD THIS LINE
+                "username": u.username, 
                 "session_tz": (u.session_tz or "UTC"),
                 "plan_label": flags.get("plan_label", ""),
                 "plan": flags.get("plan") or "",
@@ -197,7 +180,7 @@ def indicators(request: Request, db: Session = Depends(get_db)):
             "is_logged_in": True,
             "user": {
                 "email": u.email,
-                "username": u.username,  # <--- ADD THIS LINE
+                "username": u.username, 
                 "session_tz": (u.session_tz or "UTC"),
                 "plan_label": flags.get("plan_label", ""),
                 "plan": flags.get("plan") or "",
@@ -218,12 +201,34 @@ def account(request: Request, db: Session = Depends(get_db)):
             "is_logged_in": True,
             "user": {
                 "email": u.email, 
-                "username": u.username, # <--- ADD THIS LINE
+                "username": u.username,
                 "session_tz": (u.session_tz or "UTC")
             },
             "tier_label": flags["plan_label"],
         },
     )
+
+@app.post("/account/profile")
+async def account_update_profile(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    
+    try:
+        payload = await request.json()
+        new_name = payload.get("username", "").strip()
+    except:
+        form = await request.form()
+        new_name = form.get("username", "").strip()
+
+    # Save to DB
+    u.username = new_name
+    db.commit()
+    
+    # Update session so the header updates immediately
+    if "user" in request.session:
+        request.session["user"]["username"] = new_name
+    
+    return {"ok": True, "username": new_name}
 
 @app.post("/account/session-timezone")
 async def account_set_timezone(request: Request, db: Session = Depends(get_db)):
@@ -283,8 +288,7 @@ def register_post(request: Request, db: Session = Depends(get_db), email: str = 
     # 1. Log the new user in immediately
     auth.set_user_session(request, u)
     
-    # 2. AUTO-REDIRECT TO STRIPE: Create the session and bounce them there.
-    # This removes the friction of "Register -> Pricing -> Buy".
+    # 2. AUTO-REDIRECT TO STRIPE
     try:
         checkout_url = billing.create_checkout_session(db=db, user_model=u)
         return RedirectResponse(url=checkout_url, status_code=303)
