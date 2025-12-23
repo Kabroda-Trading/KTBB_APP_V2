@@ -1,125 +1,183 @@
-/* KABRODA FINTECH THEME V2 (Corrected) */
+/* KABRODA ELECTRIC THEME (Aligned to YouTube Brand) */
 
 :root {
-  --bg-deep: #050505; /* True Black */
-  --bg-subtle: #0a0a0a;
-  --glass: rgba(255, 255, 255, 0.03);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --primary: #6d28d9; /* Deep Violet */
-  --primary-bright: #8b5cf6;
+  --bg-deep: #020617; /* Ink Black */
+  --bg-subtle: #0f172a;
+  
+  /* THE KABRODA BLUE */
+  --primary: #0ea5e9; /* Electric Sky Blue */
+  --primary-bright: #38bdf8; /* Cyan Highlight */
+  --primary-glow: rgba(14, 165, 233, 0.5); /* Strong Glow */
+  
+  --glass: rgba(15, 23, 42, 0.6);
+  --glass-border: rgba(56, 189, 248, 0.2); /* Blue-tinted glass border */
+  
   --text-main: #ffffff;
-  --text-muted: #a1a1aa;
+  --text-muted: #cbd5e1; /* Lighter gray for better readability */
 }
 
 body {
   background-color: var(--bg-deep);
-  /* Subtle mesh gradient background */
+  /* The "Nebula" Background - Visible Blue Glow */
   background-image: 
-    radial-gradient(circle at 50% 0%, rgba(109, 40, 217, 0.15), transparent 40%);
+    radial-gradient(circle at 50% 0%, rgba(14, 165, 233, 0.25), transparent 60%),
+    radial-gradient(circle at 85% 30%, rgba(56, 189, 248, 0.08), transparent 50%);
   color: var(--text-main);
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   margin: 0;
   -webkit-font-smoothing: antialiased;
 }
 
-/* --- NAVIGATION (Fixed) --- */
+/* --- NAVIGATION (Bigger & Bolder) --- */
 .glass-nav {
   position: fixed; top: 0; left: 0; right: 0;
-  height: 70px; z-index: 100;
-  backdrop-filter: blur(12px);
-  background: rgba(5, 5, 5, 0.7);
-  border-bottom: 1px solid var(--glass-border);
+  height: 80px; /* Taller */
+  z-index: 100;
+  backdrop-filter: blur(16px);
+  background: rgba(2, 6, 23, 0.85);
+  border-bottom: 1px solid var(--primary-glow); /* Electric Border */
   display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 30px rgba(0,0,0,0.5);
 }
 .nav-container {
-  width: 100%; max-width: 1100px; padding: 0 24px;
+  width: 100%; max-width: 1200px; padding: 0 32px;
   display: flex; justify-content: space-between; align-items: center;
 }
-.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.brand { display: flex; align-items: center; gap: 14px; text-decoration: none; }
 .brand-logo {
-  width: 20px; height: 20px; background: var(--primary-bright);
-  border-radius: 4px; box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+  /* The Logo Mark */
+  width: 28px; height: 28px; 
+  background: linear-gradient(135deg, var(--primary), var(--primary-bright));
+  border-radius: 6px; 
+  box-shadow: 0 0 15px var(--primary-glow); /* Glowing Cube */
 }
-.brand-text { font-weight: 800; letter-spacing: 0.05em; color: #fff; font-size: 14px; }
+.brand-text { 
+  font-family: 'Inter', sans-serif; 
+  font-weight: 900; 
+  letter-spacing: 0.1em; 
+  color: #fff; 
+  font-size: 18px; /* Bigger Text */
+  text-transform: uppercase;
+}
 
-.nav-links { display: flex; align-items: center; gap: 24px; }
+.nav-links { display: flex; align-items: center; gap: 32px; }
 .nav-item {
-  font-size: 14px; color: var(--text-muted); text-decoration: none; font-weight: 500;
-  transition: color 0.2s;
+  font-size: 15px; color: var(--text-muted); text-decoration: none; font-weight: 600;
+  transition: all 0.2s;
+  text-transform: uppercase; letter-spacing: 0.05em;
 }
-.nav-item:hover, .nav-item.active { color: #fff; }
-.btn-sm {
-  padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600;
-  background: var(--primary); color: white; text-decoration: none;
+.nav-item:hover, .nav-item.active { 
+  color: var(--primary-bright); 
+  text-shadow: 0 0 10px var(--primary-glow);
+}
+
+/* --- BUTTONS (High Voltage) --- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 14px 28px; border-radius: 8px;
+  font-weight: 700; text-decoration: none; font-size: 15px;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  transition: all 0.2s ease-out;
+}
+.btn.primary {
+  background: var(--primary); color: #000; /* Black text on Cyan pops */
+  border: 1px solid var(--primary-bright);
+  box-shadow: 0 0 20px rgba(14, 165, 233, 0.3);
+}
+.btn.primary:hover { 
+  background: var(--primary-bright); 
+  box-shadow: 0 0 40px var(--primary-glow); /* MASSIVE GLOW */
+  transform: translateY(-2px);
+}
+.btn.secondary {
+  background: transparent; 
+  border: 1px solid var(--glass-border); 
+  color: var(--primary-bright);
+}
+.btn.secondary:hover { 
+  border-color: var(--primary-bright); 
+  background: rgba(14, 165, 233, 0.1);
+  box-shadow: 0 0 15px rgba(14, 165, 233, 0.2);
 }
 
 /* --- LAYOUT --- */
 .page-wrapper {
-  padding-top: 100px; /* Space for fixed nav */
-  padding-bottom: 60px;
-  max-width: 1100px; margin: 0 auto; padding-left: 20px; padding-right: 20px;
+  padding-top: 120px; /* More space for header */
+  padding-bottom: 80px;
+  max-width: 1200px; margin: 0 auto; padding-left: 24px; padding-right: 24px;
 }
 .text-center { text-align: center; }
 
 /* --- HERO TEXT --- */
 .display-title {
-  font-size: 48px; font-weight: 800; letter-spacing: -0.02em;
-  margin-bottom: 16px; line-height: 1.1;
+  font-size: 64px; font-weight: 900; letter-spacing: -0.03em;
+  margin-bottom: 24px; line-height: 1.05; text-transform: uppercase;
 }
 .lead-text {
-  font-size: 18px; color: var(--text-muted); max-width: 600px;
-  margin: 0 auto 32px; line-height: 1.6;
+  font-size: 20px; color: var(--text-muted); max-width: 680px;
+  margin: 0 auto 40px; line-height: 1.6; font-weight: 400;
 }
-.hero-actions { display: flex; gap: 16px; justify-content: center; margin-bottom: 60px; }
 
-/* --- CARDS & BENTO --- */
+/* --- BENTO CARDS (Tech Panels) --- */
 .bento-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 16px; margin-bottom: 60px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px; margin-bottom: 80px;
 }
 .bento-card {
-  background: var(--glass);
+  background: rgba(2, 6, 23, 0.7); /* Darker */
   border: 1px solid var(--glass-border);
-  padding: 24px; border-radius: 12px;
-  transition: border-color 0.2s;
+  padding: 32px; border-radius: 16px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative; overflow: hidden;
 }
-.bento-card:hover { border-color: rgba(255,255,255,0.2); }
+/* The "Tech Scanner" hover effect */
+.bento-card::after {
+  content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  background: linear-gradient(180deg, transparent, rgba(14, 165, 233, 0.05), transparent);
+  transform: translateY(-100%); transition: transform 0.5s;
+}
+.bento-card:hover::after { transform: translateY(100%); }
+.bento-card:hover { 
+  border-color: var(--primary); 
+  box-shadow: 0 0 30px rgba(14, 165, 233, 0.15);
+  transform: translateY(-4px);
+}
 .bento-card.wide { grid-column: 1 / -1; }
-.bento-card h3 { font-size: 16px; margin-bottom: 8px; color: #fff; }
-.bento-card p { font-size: 14px; color: var(--text-muted); margin: 0; line-height: 1.5; }
 
-/* --- BUTTONS --- */
-.btn {
-  display: inline-block; padding: 12px 24px; border-radius: 8px;
-  font-weight: 600; text-decoration: none; font-size: 15px;
-  transition: transform 0.1s;
+.bento-card h3 { 
+  font-size: 18px; margin-bottom: 12px; color: #fff; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em;
 }
-.btn.primary {
-  background: var(--primary); color: white;
-  box-shadow: 0 4px 20px rgba(109, 40, 217, 0.4);
-}
-.btn.primary:hover { background: var(--primary-bright); transform: translateY(-1px); }
-.btn.secondary {
-  background: transparent; border: 1px solid var(--glass-border); color: #fff;
-}
-.btn.secondary:hover { border-color: #fff; }
+.bento-card p { font-size: 15px; color: var(--text-muted); margin: 0; line-height: 1.6; }
 
 /* --- UTILS --- */
 .pill {
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
-  color: var(--primary-bright); border: 1px solid rgba(139, 92, 246, 0.3);
-  padding: 4px 10px; border-radius: 20px; margin-bottom: 16px; display: inline-block;
+  font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.15em;
+  color: var(--primary-bright); border: 1px solid var(--primary-glow);
+  background: rgba(14, 165, 233, 0.1);
+  padding: 6px 16px; border-radius: 4px; /* Tech corners */
+  margin-bottom: 24px; display: inline-block;
+  box-shadow: 0 0 15px rgba(14, 165, 233, 0.2);
 }
 .icon-box {
-  width: 32px; height: 32px; background: rgba(255,255,255,0.05);
+  width: 48px; height: 48px; 
+  background: linear-gradient(135deg, rgba(14,165,233,0.1), transparent);
   border-radius: 8px; display: flex; align-items: center; justify-content: center;
-  margin-bottom: 16px; border: 1px solid var(--glass-border);
+  margin-bottom: 20px; border: 1px solid var(--glass-border);
+  font-size: 24px; color: var(--primary-bright);
 }
 
-.footer { border-top: 1px solid var(--glass-border); padding: 40px 0; margin-top: 60px; }
+.footer { border-top: 1px solid var(--glass-border); padding: 60px 0; margin-top: 80px; }
 .footer-content {
-  max-width: 1100px; margin: 0 auto; padding: 0 20px;
-  display: flex; justify-content: space-between; font-size: 13px; color: var(--text-muted);
+  max-width: 1200px; margin: 0 auto; padding: 0 32px;
+  display: flex; justify-content: space-between; font-size: 14px; color: var(--text-muted);
 }
-.footer-links a { color: var(--text-muted); text-decoration: none; margin-left: 20px; }
-.footer-links a:hover { color: #fff; }
+.footer-links a { color: var(--text-muted); text-decoration: none; margin-left: 32px; transition: color 0.2s; }
+.footer-links a:hover { color: var(--primary-bright); }
+
+/* --- MOBILE --- */
+@media (max-width: 768px) {
+  .display-title { font-size: 42px; }
+  .nav-links { display: none; } /* Mobile menu simplified for now */
+  .brand-text { display: block; }
+}
