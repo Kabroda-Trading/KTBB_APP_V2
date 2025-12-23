@@ -100,7 +100,7 @@ def about(request: Request):
         {"request": request, "is_logged_in": False, "force_public_nav": True},
     )
 
-@app.get("/how-it-works", response_class=HTMLResponse)
+@app.get("/how_it_works", response_class=HTMLResponse)
 def how_it_works(request: Request):
     return templates.TemplateResponse(
         "how_it_works.html",
