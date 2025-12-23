@@ -203,6 +203,7 @@ def login_post(request: Request, db: Session = Depends(get_db), email: str = For
     if not u:
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"}, status_code=401)
     auth.set_user_session(request, u)
+    # If they log in but haven't paid, /suite will bounce them to /pricing automatically.
     return RedirectResponse(url="/suite", status_code=303)
 
 @app.get("/logout")
@@ -227,8 +228,18 @@ def register_post(request: Request, db: Session = Depends(get_db), email: str = 
         u = auth.create_user(db, email=email, password=password)
     except HTTPException as e:
         return templates.TemplateResponse("register.html", {"request": request, "error": str(e.detail)}, status_code=e.status_code)
+    
+    # 1. Log the new user in immediately
     auth.set_user_session(request, u)
-    return RedirectResponse(url="/pricing?new=1", status_code=303)
+    
+    # 2. AUTO-REDIRECT TO STRIPE: Create the session and bounce them there.
+    # This removes the friction of "Register -> Pricing -> Buy".
+    try:
+        checkout_url = billing.create_checkout_session(db=db, user_model=u)
+        return RedirectResponse(url=checkout_url, status_code=303)
+    except Exception:
+        # Fallback if Stripe is down or misconfigured: send them to pricing
+        return RedirectResponse(url="/pricing?new=1", status_code=303)
 
 # -------------------------------------------------------------------
 # DMR API (Pure Data)
