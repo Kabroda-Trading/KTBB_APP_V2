@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request, Form, HTTPException, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-from sqlalchemy import text # Important import
+from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.templating import Jinja2Templates
 
@@ -29,13 +29,11 @@ app = FastAPI()
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
-
 def _bool_env(name: str, default: bool = False) -> bool:
     v = os.getenv(name)
     if v is None:
         return default
     return v.strip().lower() in ("1", "true", "yes", "y", "on")
-
 
 SESSION_SECRET = os.getenv("SESSION_SECRET") or os.getenv("SECRET_KEY") or "dev-session-secret"
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
@@ -50,26 +48,33 @@ app.add_middleware(
 )
 
 # -------------------------------------------------------------------
-# STARTUP EVENT (DATABASE MIGRATION FIX)
+# STARTUP EVENT (AUTO-FIX DATABASE)
 # -------------------------------------------------------------------
 @app.on_event("startup")
 def _startup():
     init_db()
     
-    # CORRECTED MIGRATION LOGIC:
-    # We must manually get the session using next() because get_db is a generator.
     print("--- CHECKING DATABASE SCHEMA ---")
     db = next(get_db()) 
     try:
-        # Attempt to add the column. 
-        # If it exists, Postgres will throw an error, which we catch.
-        db.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR"))
-        db.commit()
-        print("--- SUCCESS: Added 'username' column to database ---")
+        # 1. Fix Username Column
+        try:
+            db.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR"))
+            db.commit()
+            print("--- ADDED 'username' COLUMN ---")
+        except Exception:
+            db.rollback()
+
+        # 2. Fix TradingView ID Column (NEW)
+        try:
+            db.execute(text("ALTER TABLE users ADD COLUMN tradingview_id VARCHAR"))
+            db.commit()
+            print("--- ADDED 'tradingview_id' COLUMN ---")
+        except Exception:
+            db.rollback()
+            
     except Exception as e:
-        # If this fails, it usually means the column already exists.
-        # We print the error to logs just in case, but continue safely.
-        print(f"--- NOTE: Column check skipped (likely exists already): {e}")
+        print(f"--- SCHEMA CHECK NOTE: {e}")
     finally:
         db.close()
 
@@ -109,31 +114,19 @@ def head_root():
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    return templates.TemplateResponse(
-        "home.html",
-        {"request": request, "is_logged_in": False, "force_public_nav": True},
-    )
+    return templates.TemplateResponse("home.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
 
 @app.get("/about", response_class=HTMLResponse)
 def about(request: Request):
-    return templates.TemplateResponse(
-        "about.html",
-        {"request": request, "is_logged_in": False, "force_public_nav": True},
-    )
+    return templates.TemplateResponse("about.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
 
 @app.get("/how-it-works", response_class=HTMLResponse)
 def how_it_works(request: Request):
-    return templates.TemplateResponse(
-        "how_it_works.html",
-        {"request": request, "is_logged_in": False, "force_public_nav": True},
-    )
+    return templates.TemplateResponse("how_it_works.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
 
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing(request: Request):
-    return templates.TemplateResponse(
-        "pricing.html",
-        {"request": request, "is_logged_in": False, "force_public_nav": True},
-    )
+    return templates.TemplateResponse("pricing.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
 
 # -------------------------------------------------------------------
 # Suite (paywalled)
@@ -141,52 +134,26 @@ def pricing(request: Request):
 @app.get("/suite", response_class=HTMLResponse)
 def suite(request: Request, db: Session = Depends(get_db)):
     sess = _session_user_dict(request)
-    if not sess:
-        return RedirectResponse(url="/login", status_code=303)
-
+    if not sess: return RedirectResponse(url="/login", status_code=303)
     u = _db_user_from_session(db, sess)
-    try:
-        require_paid_access(u)
-    except HTTPException:
-        return RedirectResponse(url="/pricing?paywall=1", status_code=303)
-
+    try: require_paid_access(u)
+    except HTTPException: return RedirectResponse(url="/pricing?paywall=1", status_code=303)
     flags = _plan_flags(u)
-    return templates.TemplateResponse(
-        "app.html",
-        {
-            "request": request,
-            "is_logged_in": True,
-            "user": {
-                "email": u.email,
-                "username": u.username, 
-                "session_tz": (u.session_tz or "UTC"),
-                "plan_label": flags.get("plan_label", ""),
-                "plan": flags.get("plan") or "",
-            },
-        },
-    )
+    return templates.TemplateResponse("app.html", {
+        "request": request, "is_logged_in": True,
+        "user": {"email": u.email, "username": u.username, "session_tz": (u.session_tz or "UTC"), "plan_label": flags.get("plan_label", ""), "plan": flags.get("plan") or ""}
+    })
 
 @app.get("/indicators", response_class=HTMLResponse)
 def indicators(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
     require_paid_access(u)
-
     flags = _plan_flags(u)
-    return templates.TemplateResponse(
-        "indicators.html",
-        {
-            "request": request,
-            "is_logged_in": True,
-            "user": {
-                "email": u.email,
-                "username": u.username, 
-                "session_tz": (u.session_tz or "UTC"),
-                "plan_label": flags.get("plan_label", ""),
-                "plan": flags.get("plan") or "",
-            },
-        },
-    )
+    return templates.TemplateResponse("indicators.html", {
+        "request": request, "is_logged_in": True,
+        "user": {"email": u.email, "username": u.username, "session_tz": (u.session_tz or "UTC"), "plan_label": flags.get("plan_label", ""), "plan": flags.get("plan") or ""}
+    })
 
 @app.get("/account", response_class=HTMLResponse)
 def account(request: Request, db: Session = Depends(get_db)):
@@ -194,60 +161,58 @@ def account(request: Request, db: Session = Depends(get_db)):
     if not sess: return RedirectResponse(url="/login", status_code=303)
     u = _db_user_from_session(db, sess)
     flags = _plan_flags(u)
-    return templates.TemplateResponse(
-        "account.html",
-        {
-            "request": request,
-            "is_logged_in": True,
-            "user": {
-                "email": u.email, 
-                "username": u.username,
-                "session_tz": (u.session_tz or "UTC")
-            },
-            "tier_label": flags["plan_label"],
-        },
-    )
+    return templates.TemplateResponse("account.html", {
+        "request": request, "is_logged_in": True,
+        "user": {"email": u.email, "username": u.username, "tradingview_id": u.tradingview_id, "session_tz": (u.session_tz or "UTC")},
+        "tier_label": flags["plan_label"],
+    })
 
 @app.post("/account/profile")
 async def account_update_profile(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-    
-    try:
-        payload = await request.json()
-        new_name = payload.get("username", "").strip()
-    except:
-        form = await request.form()
-        new_name = form.get("username", "").strip()
-
-    # Save to DB
+    try: payload = await request.json()
+    except: payload = {}
+    new_name = payload.get("username", "").strip()
     u.username = new_name
     db.commit()
-    
-    # Update session so the header updates immediately
-    if "user" in request.session:
-        request.session["user"]["username"] = new_name
-    
+    if "user" in request.session: request.session["user"]["username"] = new_name
     return {"ok": True, "username": new_name}
 
 @app.post("/account/session-timezone")
 async def account_set_timezone(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-    try:
-        payload = await request.json()
-        tz = (payload.get("timezone") or payload.get("tz") or "").strip()
-    except Exception:
-        form = await request.form()
-        tz = (form.get("timezone") or form.get("tz") or "").strip()
-
+    try: payload = await request.json()
+    except: payload = {}
+    tz = (payload.get("timezone") or "").strip()
     if not tz: raise HTTPException(status_code=400, detail="Missing timezone")
     u.session_tz = tz
     db.commit()
     return {"ok": True, "timezone": tz}
 
 # -------------------------------------------------------------------
-# Auth
+# NEW: TradingView ID Save Route (With Alert)
+# -------------------------------------------------------------------
+@app.post("/account/tradingview-id")
+async def account_save_tvid(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    
+    try: payload = await request.json()
+    except: payload = {}
+    
+    tv_id = (payload.get("tradingview_id") or "").strip()
+    u.tradingview_id = tv_id
+    db.commit()
+    
+    # 🚨 NOTIFICATION LOG
+    print(f"🚨 ACTIVATION REQUEST: User {u.email} -> TradingView ID: {tv_id}")
+    
+    return {"ok": True}
+
+# -------------------------------------------------------------------
+# Auth & Billing Routes
 # -------------------------------------------------------------------
 @app.get("/login", response_class=HTMLResponse)
 def login_get(request: Request):
@@ -256,10 +221,8 @@ def login_get(request: Request):
 @app.post("/login")
 def login_post(request: Request, db: Session = Depends(get_db), email: str = Form(...), password: str = Form(...)):
     u = auth.authenticate_user(db, email=email, password=password)
-    if not u:
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"}, status_code=401)
+    if not u: return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"}, status_code=401)
     auth.set_user_session(request, u)
-    # If they log in but haven't paid, /suite will bounce them to /pricing automatically.
     return RedirectResponse(url="/suite", status_code=303)
 
 @app.get("/logout")
@@ -284,54 +247,37 @@ def register_post(request: Request, db: Session = Depends(get_db), email: str = 
         u = auth.create_user(db, email=email, password=password)
     except HTTPException as e:
         return templates.TemplateResponse("register.html", {"request": request, "error": str(e.detail)}, status_code=e.status_code)
-    
-    # 1. Log the new user in immediately
     auth.set_user_session(request, u)
-    
-    # 2. AUTO-REDIRECT TO STRIPE
-    try:
-        checkout_url = billing.create_checkout_session(db=db, user_model=u)
-        return RedirectResponse(url=checkout_url, status_code=303)
-    except Exception:
-        # Fallback if Stripe is down or misconfigured: send them to pricing
-        return RedirectResponse(url="/pricing?new=1", status_code=303)
+    try: return RedirectResponse(url=billing.create_checkout_session(db=db, user_model=u), status_code=303)
+    except: return RedirectResponse(url="/pricing?new=1", status_code=303)
 
 # -------------------------------------------------------------------
-# DMR API (Pure Data)
+# API & Billing
 # -------------------------------------------------------------------
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
     require_paid_access(u)
-
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     ensure_symbol_allowed(u, symbol)
     tz = (u.session_tz or "UTC").strip() or "UTC"
-    
-    # Run data pipeline in background thread
     raw = await asyncio.to_thread(dmr_report.run_auto_raw, symbol=symbol, session_tz=tz)
-    
     request.session["last_dmr_meta"] = {"symbol": raw.get("symbol", symbol), "date": raw.get("date", "")}
     return JSONResponse(raw)
 
-# -----------------------------
-# Billing
-# -----------------------------
 @app.post("/billing/checkout")
 async def billing_checkout(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-    url = billing.create_checkout_session(db=db, user_model=u)
-    return {"url": url}
+    return {"url": billing.create_checkout_session(db=db, user_model=u)}
 
 @app.post("/billing/portal")
 async def billing_portal(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-    url = billing.create_billing_portal(db=db, user_model=u)
-    return {"url": url}
+    return {"url": billing.create_billing_portal(db=db, user_model=u)}
 
 @app.post("/billing/webhook")
 async def billing_webhook(request: Request, db: Session = Depends(get_db)):

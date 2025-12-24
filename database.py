@@ -12,7 +12,6 @@ if not DATABASE_URL:
     DATABASE_URL = "sqlite:///./kabroda.db"
 
 # FIX FOR RENDER: Use 'postgresql+psycopg://' to match the installed driver (v3)
-# The default 'postgresql://' looks for psycopg2, which you don't have.
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
 elif DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
@@ -32,10 +31,11 @@ class UserModel(Base):
 
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
-
-    # --- NEW COLUMN ---
     username = Column(String, nullable=True)
-    # ------------------
+
+    # --- NEW: TradingView Access ---
+    tradingview_id = Column(String, nullable=True)
+    # -------------------------------
 
     # Membership fields
     tier = Column(String, default="tier1_manual", nullable=False)
