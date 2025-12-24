@@ -47,7 +47,6 @@ def _build_htf_shelves(
     if h1_demand and h1_demand > 0:
         support.append(Shelf(tf="1H", level=float(h1_demand), kind="demand", strength=6.0, primary=False))
 
-    # deterministic ordering
     resistance = sorted(resistance, key=lambda s: s.level)
     support = sorted(support, key=lambda s: s.level)
     return resistance, support
@@ -57,11 +56,9 @@ def _select_daily_levels(resistance: List[Shelf], support: List[Shelf]) -> Tuple
     if not resistance or not support:
         return 0.0, 0.0, {"resistance": [], "support": []}
 
-    # Pick strongest; prefer 4H when tied.
     ds = max(support, key=lambda s: ((1 if s.tf == "4H" else 0), s.strength)).level
     dr = max(resistance, key=lambda s: ((1 if s.tf == "4H" else 0), s.strength)).level
 
-    # Ensure ds < dr (defensive)
     daily_support = float(min(ds, dr))
     daily_resistance = float(max(ds, dr))
 
@@ -80,7 +77,7 @@ def _select_daily_levels(resistance: List[Shelf], support: List[Shelf]) -> Tuple
 
 def _pick_trigger_candidates(
     *,
-    px: float,
+    px: float,  # This is the ANCHOR price (Session Open), not live price
     daily_support: float,
     daily_resistance: float,
     r30_high: float,
@@ -89,60 +86,48 @@ def _pick_trigger_candidates(
     f24_val: float,
 ) -> Tuple[float, float, Dict[str, Any]]:
     """
-    Deterministic approximation consistent with Execution Anchor constraints:
-    - triggers between daily S/R
-    - breakout above OR high and near/above 24h VAH (soft)
-    - breakdown below OR low and near/below 24h VAL (soft)
-    - >=0.5% away from price
+    DETERMINISTIC ANCHOR LOGIC:
+    Calculates triggers based on the ANCHOR price (px).
+    Triggers are set at Open and do NOT move with live price.
     """
-    # Hard min distance from price (0.5%)
+    # Min distance from ANCHOR (0.5%)
     min_from_px = 0.005
-
-    # Hard spacing between levels (0.15%)
     min_level_spacing = 0.0015
 
-    # Candidate breakout: prefer max(r30_high, f24_vah) but must be above px
     bo_base = max([v for v in [r30_high, f24_vah] if v and v > 0] or [0.0])
     bd_base = min([v for v in [r30_low, f24_val] if v and v > 0] or [0.0])
 
-    # If those are missing, fall back to mid-band expansions
     if bo_base <= 0:
         bo_base = daily_support + 0.7 * (daily_resistance - daily_support)
     if bd_base <= 0:
         bd_base = daily_support + 0.3 * (daily_resistance - daily_support)
 
-    # Enforce "away from price"
+    # Enforce "away from ANCHOR" (Not current price)
+    # This locks the trigger relative to the Session Open.
     bo = max(bo_base, px * (1 + min_from_px))
     bd = min(bd_base, px * (1 - min_from_px))
 
-    # Clamp within daily band interior (don’t touch DS/DR)
     inner_lo = daily_support + _pct(daily_support, min_level_spacing)
     inner_hi = daily_resistance - _pct(daily_resistance, min_level_spacing)
     bo = _clamp(bo, inner_lo, inner_hi)
     bd = _clamp(bd, inner_lo, inner_hi)
 
-    # Enforce ordering ds < bd < bo < dr
     if not (daily_support < bd < bo < daily_resistance):
-        # deterministic re-center inside band around price
+        # deterministic re-center inside band around ANCHOR
         mid = _clamp(px, inner_lo, inner_hi)
-        span = max((daily_resistance - daily_support) * 0.12, px * 0.01)  # at least ~1% band or 12% of daily
+        span = max((daily_resistance - daily_support) * 0.12, px * 0.01)
         bd = _clamp(mid - span / 2, inner_lo, inner_hi)
         bo = _clamp(mid + span / 2, inner_lo, inner_hi)
 
-        # still enforce "away from price"
         if bo < px * (1 + min_from_px):
             bo = _clamp(px * (1 + min_from_px), inner_lo, inner_hi)
         if bd > px * (1 - min_from_px):
             bd = _clamp(px * (1 - min_from_px), inner_lo, inner_hi)
 
-        # final sanity
         if not (daily_support < bd < bo < daily_resistance):
-            # last resort: fixed quartiles
             bd = daily_support + 0.4 * (daily_resistance - daily_support)
             bo = daily_support + 0.6 * (daily_resistance - daily_support)
 
-    # Spacing constraints
-    # Ensure bd and bo are not too close to DS/DR or each other.
     def bump_up(x: float, ref: float) -> float:
         return max(x, ref + ref * min_level_spacing)
 
@@ -164,11 +149,6 @@ def _pick_trigger_candidates(
 
 
 def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Single deterministic output for:
-      daily_support, daily_resistance, breakout_trigger, breakdown_trigger
-    plus: htf_shelves, intraday_shelves
-    """
     def f(k: str, default: float = 0.0) -> float:
         try:
             v = inputs.get(k, default)
@@ -176,7 +156,13 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             return float(default)
 
+    # 1. Try to get the Session Open Price (The Anchor)
+    # 2. If missing, fall back to Last Price (px)
     px = f("last_price", 0.0)
+    anchor_px = f("session_open_price", 0.0)
+    
+    # CRITICAL FIX: If we have an anchor, use it. If not, use last price.
+    reference_price = anchor_px if anchor_px > 0 else px
 
     resistance, support = _build_htf_shelves(
         h4_supply=f("h4_supply"),
@@ -187,12 +173,13 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
 
     daily_support, daily_resistance, htf_out = _select_daily_levels(resistance, support)
 
-    # If price missing, triggers will still be computed but less strict.
-    if px <= 0:
-        px = (f("f24_poc") or f("weekly_poc") or (daily_support + daily_resistance) / 2.0)
+    if reference_price <= 0:
+        # Fallback if literally zero data
+        reference_price = (f("f24_poc") or f("weekly_poc") or (daily_support + daily_resistance) / 2.0)
 
+    # Pass 'reference_price' (The Anchor) instead of live price
     bo, bd, intraday = _pick_trigger_candidates(
-        px=px,
+        px=reference_price, 
         daily_support=daily_support,
         daily_resistance=daily_resistance,
         r30_high=f("r30_high"),
@@ -201,10 +188,7 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
         f24_val=f("f24_val"),
     )
 
-    # Hard ordering guarantee (Execution Anchor)
-    # ds < bd < bo < dr
     if not (daily_support < bd < bo < daily_resistance):
-        # deterministic fallback inside band
         band = max(daily_resistance - daily_support, 1.0)
         bd = daily_support + 0.45 * band
         bo = daily_support + 0.55 * band

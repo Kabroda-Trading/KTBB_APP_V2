@@ -161,39 +161,23 @@ def _session_open_dt(session_tz: str, session_open_hhmm: str) -> datetime:
 
 
 def _session_30m_window(session_tz: str, session_open_hhmm: str = "06:00") -> Tuple[datetime, datetime]:
-    """
-    DETERMINISTIC SESSION ANCHOR:
-    Locks the 'Session Candle' to a specific 30m window that only rolls over
-    once the NEW session has actually closed.
-    """
     z = ZoneInfo(session_tz)
     now_in_tz = datetime.now(z)
     
-    # 1. Parse the target open time (e.g., 08:00)
     hh, mm = map(int, session_open_hhmm.split(":"))
-    
-    # 2. Establish 'Today's' potential session open
     candidate_open = now_in_tz.replace(hour=hh, minute=mm, second=0, microsecond=0)
     
-    # 3. Define the 'Lock Point' (Open + 30m)
-    #    The session is not 'valid' for analysis until the first 30m candle CLOSES.
     lock_point = candidate_open + timedelta(minutes=30)
     
-    # 4. The Pivot Logic:
-    #    If we are BEFORE the lock point (e.g., it's 7:55 AM and open is 8:00 AM),
-    #    we cannot show today's levels yet. We must show YESTERDAY'S levels.
     if now_in_tz < lock_point:
         candidate_open -= timedelta(days=1)
         
-    # 5. Calculate the specific 30-minute window (Open+30m to Open+60m)
-    #    This is the 'Signal Candle' for your SSE Engine.
     start_local = candidate_open + timedelta(minutes=30)
     end_local = candidate_open + timedelta(minutes=60)
     
     return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
 def _morning_window(session_tz: str, session_open_hhmm: str = "06:00") -> Tuple[datetime, datetime]:
-    # Morning FRVP = 4 hours before open → open
     open_dt = _session_open_dt(session_tz, session_open_hhmm)
     start_local = open_dt - timedelta(hours=4)
     end_local = open_dt
@@ -213,7 +197,6 @@ def _fetch_window_candles(
     if isinstance(prov, BinanceUS):
         return prov.klines(symbol, granularity, start_ms=_ms(start_utc), end_ms=_ms(end_utc), limit=1000)
 
-    # Coinbase granularities: 300, 900, 3600, 21600, 86400
     g_map = {"5m": 300, "15m": 900, "1h": 3600, "6h": 21600}
     sec = g_map.get(granularity, 900)
     return prov.candles(symbol, sec, start=start_utc, end=end_utc)
@@ -223,33 +206,22 @@ def _fetch_window_candles(
 # News / Calendar Fetcher
 # ----------------------------
 def _fetch_crypto_news(limit: int = 5) -> List[str]:
-    """
-    Fetches latest headlines from CoinTelegraph RSS (public/free).
-    """
     url = "https://cointelegraph.com/rss"
     out = []
     try:
         feed = feedparser.parse(url)
-        # Check if feed parsed correctly
         if feed.bozo and not feed.entries:
             return ["- (News feed unavailable)"]
-            
         for entry in feed.entries[:limit]:
             title = entry.title.strip()
-            # Basic cleanup
             title = re.sub(r'<[^>]+>', '', title)
             out.append(f"- {title}")
     except Exception:
         out.append("- (News fetch failed)")
-    
     return out
 
 
 def _fetch_calendar_stub() -> List[str]:
-    """
-    Placeholder for high-impact events. 
-    Real calendar APIs are expensive/complex.
-    """
     return [
         "- Check ForexFactory for High Impact USD Events (CPI/FOMC/NFP).",
         "- Check CryptoCraft for major protocol unlocks."
@@ -260,14 +232,10 @@ def _fetch_calendar_stub() -> List[str]:
 # Main Pipeline
 # ----------------------------
 def get_inputs(*, symbol: str, date: Optional[str] = None, session_tz: str = "UTC") -> Dict[str, Any]:
-    # 1) Pull raw inputs
     inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
-
-    # 2) Compute deterministic SSE outputs (levels + shelves) and attach them
     import sse_engine
     sse = sse_engine.compute_sse_levels(inputs)
     inputs.update(sse)
-
     return inputs
 
 
@@ -282,8 +250,7 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
     t0 = time.perf_counter()
 
     def mark(name: str) -> None:
-        if not timing_on:
-            return
+        if not timing_on: return
         dt = time.perf_counter() - t0
         print(f"[data_feed] {symbol} {name} @ {dt:.2f}s")
 
@@ -296,9 +263,11 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
         last_price = float(CoinbaseExchange().price(symbol))
     mark("price_ok")
 
-    # 30m session candle (06:30–07:00 session_tz)
+    # 30m session candle
     start_utc, end_utc = _session_30m_window(session_tz=session_tz, session_open_hhmm=session_open)
     range_high = range_low = None
+    session_open_price = None  # <--- NEW: Capture the exact Open Price
+
     try:
         candles = (
             _fetch_window_candles(prov, symbol, start_utc, end_utc, "30m")
@@ -308,15 +277,17 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
         c = _pick_candle_by_open(candles, _ms(start_utc))
         if c:
             range_high, range_low = c.h, c.l
+            session_open_price = c.o  # Capture Open
         elif candles:
             range_high, range_low = candles[0].h, candles[0].l
+            session_open_price = candles[0].o  # Fallback Open
     except Exception:
         pass
     mark("or_ok")
 
     now = _utc_now()
 
-    # Morning FRVP (4h pre-open)
+    # Morning FRVP
     morn_start, morn_end = _morning_window(session_tz=session_tz, session_open_hhmm=session_open)
     morn_candles: List[Candle] = []
     try:
@@ -342,7 +313,7 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
     f24_vp = compute_volume_profile_from_candles(f24_candles) if f24_candles else None
     mark("f24_ok")
 
-    # Weekly “VRVP-ish” (last 7d)
+    # Weekly “VRVP-ish”
     wk_start = now - timedelta(days=7)
     wk_candles: List[Candle] = []
     try:
@@ -355,7 +326,7 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
     wk_vp = compute_volume_profile_from_candles(wk_candles) if wk_candles else None
     mark("weekly_ok")
 
-    # H1/H4 anchors: quick swing hi/lo (kept as HTF shelves input to SSE)
+    # H1/H4 anchors
     h1_supply = h1_demand = None
     h4_supply = h4_demand = None
     try:
@@ -386,21 +357,22 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
         "symbol": symbol,
         "session_tz": session_tz,
         "last_price": last_price,
+        
+        # --- NEW: THE ANCHOR ---
+        "session_open_price": session_open_price,
+        # -----------------------
 
-        # Opening range keys (keep both new + legacy)
         "r30_high": range_high,
         "r30_low": range_low,
         "range30m_high": range_high,
         "range30m_low": range_low,
         "range_30m": {"high": range_high, "low": range_low},
 
-        # HTF shelves inputs for SSE
         "h1_supply": h1_supply,
         "h1_demand": h1_demand,
         "h4_supply": h4_supply,
         "h4_demand": h4_demand,
 
-        # Profiles
         "weekly_vah": wk_vp.vah if wk_vp else None,
         "weekly_val": wk_vp.val if wk_vp else None,
         "weekly_poc": wk_vp.poc if wk_vp else None,
@@ -413,7 +385,6 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
         "morn_val": morn_vp.val if morn_vp else None,
         "morn_poc": morn_vp.poc if morn_vp else None,
 
-        # NEW KEYS (Silently passed)
         "news": news_headlines,
         "events": calendar_events,
         "sentiment": None,
