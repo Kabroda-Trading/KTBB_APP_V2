@@ -1,9 +1,28 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="text-center" style="margin-bottom: 60px;">
+<div class="text-center" style="margin-bottom: 40px;">
   <h1 class="display-title">Indicator <span class="gradient-text">Armory</span></h1>
-  <p class="lead-text">Calibrated execution tools. Delivered securely via TradingView.</p>
+  <p class="lead-text">Your institutional execution suite.</p>
+</div>
+
+<div class="bento-card wide" style="background: linear-gradient(145deg, rgba(16, 185, 129, 0.1), rgba(0,0,0,0)); border: 1px solid var(--success); margin-bottom: 60px;">
+  <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px;">
+    <div style="flex: 1; min-width: 300px;">
+      <h3 style="color: #fff; display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 24px;">🔓</span> 
+        Unlock Your Access
+      </h3>
+      <p style="color: var(--text-muted); margin-top: 8px; line-height: 1.5;">
+        These tools are <strong>Invite-Only</strong>. To use them, you must link your TradingView username to your Kabroda account.
+      </p>
+    </div>
+    <div>
+      <a href="/account" class="btn primary" style="background: var(--success); color: #000; border: none; font-weight: 800;">
+        LINK TRADINGVIEW ID &rarr;
+      </a>
+    </div>
+  </div>
 </div>
 
 <div class="bento-grid">
@@ -13,11 +32,16 @@
       <h3 style="color:var(--success);">KTBB Command</h3>
       <span style="font-size:24px;">⚡</span>
     </div>
-    <p style="margin-bottom:16px; color:var(--text-muted); font-size:14px; line-height: 1.6;">
-      <strong>Market Structure & Session Range.</strong> The core engine. Draws your Daily Support, Resistance, Volatility Triggers, and the 30m Anchor Box based on institutional Spot Data.
+    <p style="margin-bottom:20px; color:var(--text-muted); font-size:14px; line-height: 1.6;">
+      <strong>Market Structure & Session Range.</strong> The core engine. Draws Daily Support, Resistance, Triggers, and the 30m Anchor Box.
     </p>
-    <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid var(--success); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 12px; text-align: center;">
-      STATUS: INVITE-ONLY
+    <div style="display: grid; gap: 10px;">
+      <a href="https://www.tradingview.com/script/lsQUt9TW-KTBB-Command-Market-Structure-Session-Range-Kabroda/" target="_blank" class="btn secondary" style="justify-content: center;">
+        View on TradingView ↗
+      </a>
+      <div style="font-size: 11px; color: var(--text-muted); text-align: center;">
+        Status: Invite-Only (Requires Activation)
+      </div>
     </div>
   </div>
 
@@ -26,65 +50,32 @@
       <h3 style="color:var(--primary-bright);">KTBB Intel</h3>
       <span style="font-size:24px;">📊</span>
     </div>
-    <p style="margin-bottom:16px; color:var(--text-muted); font-size:14px; line-height: 1.6;">
-      <strong>Multi-Timeframe Context.</strong> Automatically maps 4H and 1H supply/demand zones directly onto your execution chart. Provides instant structural awareness without switching timeframes.
+    <p style="margin-bottom:20px; color:var(--text-muted); font-size:14px; line-height: 1.6;">
+      <strong>Multi-Timeframe Context.</strong> Automatically maps 4H and 1H supply/demand zones directly onto your execution chart.
     </p>
-    <div style="background: rgba(14, 165, 233, 0.1); border: 1px solid var(--primary-bright); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 12px; text-align: center;">
-      STATUS: INVITE-ONLY
+    <div style="display: grid; gap: 10px;">
+      <a href="https://www.tradingview.com/script/89uF7cV1-KTBB-Intel-Multi-Timeframe-Context-Kabroda/" target="_blank" class="btn secondary" style="justify-content: center;">
+        View on TradingView ↗
+      </a>
+      <div style="font-size: 11px; color: var(--text-muted); text-align: center;">
+        Status: Invite-Only (Requires Activation)
+      </div>
     </div>
   </div>
 
-</div>
-
-<div class="bento-card wide" style="margin-bottom: 60px; margin-top: 40px;">
-  <div style="border-bottom: 1px solid var(--glass-border); padding-bottom: 24px; margin-bottom: 32px;">
-    <h3>Activation Protocol</h3>
-    <p class="lead-text" style="font-size: 16px; margin: 8px 0 0 0; max-width: 100%;">
-      Follow this sequence to unlock the indicators on your TradingView account.
-    </p>
-  </div>
-
-  <div class="bento-grid" style="gap: 16px; margin-bottom: 0; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
-    
-    <div style="background: rgba(255,255,255,0.03); padding: 24px; border-radius: 12px; border: 1px solid var(--glass-border);">
-      <div style="color: var(--primary-bright); font-weight: 900; font-size: 12px; letter-spacing: 0.1em; margin-bottom: 12px;">STEP 01</div>
-      <h4 style="color: #fff; margin-bottom: 8px;">Link Identity</h4>
-      <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
-        Go to your <strong><a href="/account" style="color: var(--primary-bright);">Account Settings</a></strong> and enter your TradingView username in the "BattleBox Activation" field.
-      </p>
-    </div>
-
-    <div style="background: rgba(255,255,255,0.03); padding: 24px; border-radius: 12px; border: 1px solid var(--glass-border);">
-      <div style="color: var(--primary-bright); font-weight: 900; font-size: 12px; letter-spacing: 0.1em; margin-bottom: 12px;">STEP 02</div>
-      <h4 style="color: #fff; margin-bottom: 8px;">Wait for Sync</h4>
-      <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
-        Our team manually verifies every account. Please allow up to <strong>12 hours</strong> for activation (usually faster).
-      </p>
-    </div>
-
-    <div style="background: rgba(255,255,255,0.03); padding: 24px; border-radius: 12px; border: 1px solid var(--glass-border);">
-      <div style="color: var(--primary-bright); font-weight: 900; font-size: 12px; letter-spacing: 0.1em; margin-bottom: 12px;">STEP 03</div>
-      <h4 style="color: #fff; margin-bottom: 8px;">Load Indicators</h4>
-      <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
-        On your chart, click <strong>Indicators</strong> → <strong>Invite-only scripts</strong>. You will see the KTBB suite unlocked.
-      </p>
-    </div>
-
-  </div>
 </div>
 
 <div class="bento-card wide" style="margin-top: 40px; border-top: 1px solid var(--glass-border);">
-  <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px;">
+  <h3 style="margin-bottom: 16px;">Installation Protocol</h3>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; color: var(--text-muted); font-size: 14px;">
     <div>
-      <h3 style="margin-bottom: 8px;">Need a Walkthrough?</h3>
-      <p style="color: var(--text-muted); font-size: 14px; margin: 0;">
-        Watch the daily calibration guide to see these tools in action.
-      </p>
+      <strong style="color: #fff;">Step 1:</strong> Click "Link TradingView ID" above and enter your username.
     </div>
     <div>
-      <a href="https://www.youtube.com/@Kabroda" target="_blank" class="btn secondary">
-        <span style="margin-right: 8px;">📺</span> ACCESS VIDEO ARCHIVE
-      </a>
+      <strong style="color: #fff;">Step 2:</strong> Wait for activation (check back in ~12 hours).
+    </div>
+    <div>
+      <strong style="color: #fff;">Step 3:</strong> Click the "View on TradingView" buttons above to Add to Favorites.
     </div>
   </div>
 </div>
