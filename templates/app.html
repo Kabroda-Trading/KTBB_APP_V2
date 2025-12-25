@@ -22,7 +22,7 @@
     
     <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-end; justify-content: space-between;">
       
-      <div style="flex: 1; min-width: 280px;">
+      <div style="flex: 1; min-width: 240px;">
         <label class="label" style="color: var(--primary-bright);">TARGET ASSET</label>
         <div style="position: relative;">
           <select id="symbol" class="input" style="cursor:pointer; font-weight: 700; appearance: none; padding-right: 40px; text-transform: uppercase; width: 100%;">
@@ -34,6 +34,21 @@
         </div>
       </div>
 
+      <div style="flex: 1; min-width: 240px;">
+        <label class="label" style="color: var(--success);">TARGET SESSION</label>
+        <div style="position: relative;">
+          <select id="sessionTz" class="input" style="cursor:pointer; font-weight: 700; appearance: none; padding-right: 40px; border-color: rgba(16, 185, 129, 0.4); width: 100%;">
+            <option value="America/New_York">🇺🇸 NY EQUITY (09:30 ET)</option>
+            <option value="America/New_York_Early">🇺🇸 NY FUTURES (08:30 ET)</option>
+            <option value="Europe/London">🇬🇧 LONDON (08:00 GMT)</option>
+            <option value="Asia/Tokyo">🇯🇵 TOKYO (09:00 JST)</option>
+            <option value="Australia/Sydney">🇦🇺 SYDNEY (10:00 AEDT)</option>
+            <option value="UTC">🌐 UTC (CRYPTO DEFAULT)</option>
+          </select>
+          <span style="position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: var(--success); pointer-events: none;">▼</span>
+        </div>
+      </div>
+
       <div style="flex: 0 0 auto;">
         <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="height: 50px; padding: 0 30px; white-space: nowrap;">
           <span style="margin-right: 8px;">⚡</span> INITIATE CALIBRATION
@@ -42,7 +57,7 @@
     </div>
 
     <div id="status" style="border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px; font-size: 12px; font-family: monospace; color: var(--text-muted); text-align: right;">
-      > SYSTEM STANDBY... AWAITING TARGET
+      > SYSTEM STANDBY... SELECT TARGET
     </div>
   </div>
 
@@ -95,10 +110,26 @@
 </div>
 
 <script>
-  const USER_SESSION_TZ = {{ (user.session_tz or "UTC")|tojson }};
-  const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
+  // CONFIG: Define Session Open Times (In UTC Hours) for Visual Feedback
+  const SESSIONS = {
+    "America/New_York":       { openUtc: 13, openMin: 30 },
+    "America/New_York_Early": { openUtc: 12, openMin: 30 },
+    "Europe/London":          { openUtc: 7,  openMin: 0  },
+    "Asia/Tokyo":             { openUtc: 0,  openMin: 0  },
+    "Australia/Sydney":       { openUtc: 22, openMin: 0  },
+    "UTC":                    { openUtc: 0,  openMin: 0  }
+  };
 
+  const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
   let _lastDmrPayload = null;
+
+  function updateSessionStatus() {
+    const tzSelect = document.getElementById("sessionTz");
+    const statusEl = document.getElementById("status");
+    const txt = tzSelect.options[tzSelect.selectedIndex].text;
+    statusEl.innerHTML = `> TARGET LOCKED: ${txt} | READY TO CALIBRATE`;
+    statusEl.style.color = "var(--text-muted)";
+  }
 
   function fmt(x){
     if (x === null || x === undefined) return "—";
@@ -108,17 +139,21 @@
 
   async function calibrateBattlefield(){
     const symEl = document.getElementById("symbol");
+    const tzEl = document.getElementById("sessionTz"); 
     const status = document.getElementById("status");
     const btn = document.getElementById("levelsBtn");
     
-    status.innerHTML = "> ESTABLISHING UPLINK TO INSTITUTIONAL FEED...";
+    status.innerHTML = "> ESTABLISHING UPLINK TO " + tzEl.options[tzEl.selectedIndex].text + "...";
     status.style.color = "var(--primary-bright)";
     btn.disabled = true; btn.style.opacity = "0.7";
 
     try{
       const r = await fetch("/api/dmr/run-raw", {
         method: "POST", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ symbol: symEl.value })
+        body: JSON.stringify({ 
+          symbol: symEl.value,
+          session_tz: tzEl.value 
+        })
       });
       const data = await r.json();
       
@@ -141,8 +176,9 @@
       gptLink.style.display = "inline-flex";
       gptLink.href = BATTLEBOX_GPT_URL;
 
-      status.innerHTML = "> CALIBRATION COMPLETE. READY TO EXECUTE.";
+      status.innerHTML = `> CALIBRATION COMPLETE. ANCHOR: ${data.date}`;
       status.style.color = "var(--success)";
+      
     }catch(e){
       alert(e.message);
       status.innerHTML = "> ERROR: " + e.message;
@@ -175,5 +211,9 @@
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
     alert("COPIED: Paste into BattleBox GPT");
   }
+
+  document.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("sessionTz").addEventListener("change", updateSessionStatus);
+  });
 </script>
 {% endblock %}

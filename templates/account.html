@@ -51,53 +51,28 @@
     <div id="tvMsg" style="margin-top: 10px; font-size: 12px; text-align: center; height: 16px;"></div>
   </div>
 
-  <div style="display: flex; flex-direction: column; gap: 24px;">
-    
-    <div class="bento-card">
-      <div style="margin-bottom: 16px;">
-        <h3 style="color: #fff; margin-bottom: 4px;">Temporal Alignment</h3>
-        <p style="font-size: 13px; color: var(--text-muted);">Sync the system to your local market time.</p>
+  <div class="bento-card" style="border: 1px solid rgba(255,255,255,0.1);">
+    <div style="margin-bottom: 16px;">
+      <h3 style="color: #fff; margin-bottom: 4px;">Subscription Control</h3>
+      <div style="font-size: 12px; font-weight: 700; color: var(--success); letter-spacing: 0.1em; margin-bottom: 8px;">
+        STATUS: {{ tier_label|default('ACTIVE') }}
       </div>
-      <div style="display: flex; gap: 10px;">
-        <input list="timezones" id="tzInput" class="input" placeholder="Search (e.g. New York)..." value="{{ user.session_tz }}">
-        <datalist id="timezones">
-          <option value="America/New_York">
-          <option value="America/Chicago">
-          <option value="America/Denver">
-          <option value="America/Los_Angeles">
-          <option value="Europe/London">
-          <option value="Asia/Tokyo">
-          <option value="Australia/Sydney">
-          <option value="UTC">
-        </datalist>
-        <button id="saveTzBtn" class="btn secondary" onclick="saveTimezone()">SAVE</button>
-      </div>
-      <div id="tzMsg" style="margin-top: 10px; font-size: 12px; height: 16px;"></div>
     </div>
 
-    <div class="bento-card" style="border: 1px solid rgba(255,255,255,0.1);">
-      <div style="margin-bottom: 16px;">
-        <h3 style="color: #fff; margin-bottom: 4px;">Subscription Control</h3>
-        <div style="font-size: 12px; font-weight: 700; color: var(--success); letter-spacing: 0.1em; margin-bottom: 8px;">
-          STATUS: {{ tier_label|default('ACTIVE') }}
-        </div>
-      </div>
-
-      <div style="display: grid; gap: 12px;">
-        <button onclick="openPortal()" class="btn secondary" style="width: 100%; justify-content: center;">
-          Update Payment Method
-        </button>
-        
-        <button onclick="openPortal()" class="btn secondary" style="width: 100%; justify-content: center; border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;">
-          Cancel Subscription
-        </button>
-      </div>
-      <p style="text-align: center; font-size: 11px; color: var(--text-muted); margin-top: 12px;">
-        Redirects to secure Stripe Portal.
-      </p>
+    <div style="display: grid; gap: 12px;">
+      <button onclick="openPortal()" class="btn secondary" style="width: 100%; justify-content: center;">
+        Update Payment Method
+      </button>
+      
+      <button onclick="openPortal()" class="btn secondary" style="width: 100%; justify-content: center; border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;">
+        Cancel Subscription
+      </button>
     </div>
-
+    <p style="text-align: center; font-size: 11px; color: var(--text-muted); margin-top: 12px;">
+      Redirects to secure Stripe Portal.
+    </p>
   </div>
+
 </div>
 
 <div class="text-center" style="margin-top: 60px;">
@@ -109,23 +84,7 @@
 </div>
 
 <script>
-// --- 1. TIMEZONE LOGIC ---
-async function saveTimezone(){
-  const tz = document.getElementById('tzInput').value;
-  const btn = document.getElementById('saveTzBtn');
-  const msg = document.getElementById('tzMsg');
-  if(!tz) return;
-  btn.innerText = "...";
-  try {
-    const r = await fetch("/account/session-timezone", {
-      method: "POST", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ timezone: tz })
-    });
-    if(r.ok){ msg.style.color = "var(--success)"; msg.innerText = "SAVED"; btn.innerText = "SAVE"; }
-  } catch(e) { msg.innerText = "ERROR"; }
-}
-
-// --- 2. PROFILE/CALLSIGN LOGIC ---
+// --- 1. PROFILE/CALLSIGN LOGIC ---
 async function saveProfile(){
   const name = document.getElementById('usernameInput').value;
   const btn = document.getElementById('saveProfileBtn');
@@ -149,7 +108,7 @@ async function saveProfile(){
   }
 }
 
-// --- 3. TRADINGVIEW ACTIVATION LOGIC (NEW) ---
+// --- 2. TRADINGVIEW ACTIVATION LOGIC ---
 async function saveTvId(){
   const tv = document.getElementById('tvInput').value;
   const btn = document.getElementById('saveTvBtn');
@@ -164,7 +123,6 @@ async function saveTvId(){
   btn.disabled = true;
   
   try {
-    // Note: Ensure you added the /account/tradingview-id route to your Python app!
     const r = await fetch("/account/tradingview-id", {
       method: "POST", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({ tradingview_id: tv })
@@ -185,7 +143,7 @@ async function saveTvId(){
   }
 }
 
-// --- 4. BILLING PORTAL LOGIC ---
+// --- 3. BILLING PORTAL LOGIC ---
 async function openPortal(){
   const r = await fetch("/billing/portal", {method:"POST"});
   const d = await r.json();

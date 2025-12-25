@@ -191,9 +191,6 @@ async def account_set_timezone(request: Request, db: Session = Depends(get_db)):
     db.commit()
     return {"ok": True, "timezone": tz}
 
-# -------------------------------------------------------------------
-# NEW: TradingView ID Save Route (With Alert)
-# -------------------------------------------------------------------
 @app.post("/account/tradingview-id")
 async def account_save_tvid(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -259,11 +256,27 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
     require_paid_access(u)
+    
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
+    
+    # --------------------------------------------------------
+    # UPDATED: CHECK FOR SESSION OVERRIDE FROM DASHBOARD
+    # --------------------------------------------------------
+    requested_session = payload.get("session_tz")
+    
+    if requested_session:
+        # Use the specific selection (e.g., "America/New_York_Early")
+        final_session = requested_session.strip()
+    else:
+        # Fallback to saved user preference (Legacy)
+        final_session = (u.session_tz or "UTC").strip()
+
     ensure_symbol_allowed(u, symbol)
-    tz = (u.session_tz or "UTC").strip() or "UTC"
-    raw = await asyncio.to_thread(dmr_report.run_auto_raw, symbol=symbol, session_tz=tz)
+    
+    # Run the report with the final_session
+    raw = await asyncio.to_thread(dmr_report.run_auto_raw, symbol=symbol, session_tz=final_session)
+    
     request.session["last_dmr_meta"] = {"symbol": raw.get("symbol", symbol), "date": raw.get("date", "")}
     return JSONResponse(raw)
 

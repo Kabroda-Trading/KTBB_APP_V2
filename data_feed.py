@@ -14,6 +14,17 @@ from zoneinfo import ZoneInfo
 
 from volume_profile import compute_volume_profile_from_candles
 
+# ----------------------------
+# 1. SESSION CONFIGURATION (NEW)
+# ----------------------------
+SESSION_SPECS = {
+    "America/New_York":       {"tz": "America/New_York", "open": "09:30"}, # NY Equity (Standard)
+    "America/New_York_Early": {"tz": "America/New_York", "open": "08:30"}, # NY Futures (Data Drop)
+    "Europe/London":          {"tz": "Europe/London",    "open": "08:00"}, # London Open
+    "Asia/Tokyo":             {"tz": "Asia/Tokyo",       "open": "09:00"}, # Tokyo Open
+    "Australia/Sydney":       {"tz": "Australia/Sydney", "open": "10:00"}, # Sydney Open
+    "UTC":                    {"tz": "UTC",              "open": "00:00"}, # Crypto Default
+}
 
 # ----------------------------
 # Symbol normalization
@@ -241,8 +252,19 @@ def get_inputs(*, symbol: str, date: Optional[str] = None, session_tz: str = "UT
 
 def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[str, Any]:
     symbol = resolve_symbol(symbol)
-    session_tz = (session_tz or "UTC").strip() or "UTC"
-    session_open = os.getenv("SESSION_OPEN", "06:00")
+    
+    # ------------------------------------------------------------
+    # NEW LOGIC: Use SESSION_SPECS to find precise Open Time
+    # ------------------------------------------------------------
+    spec = SESSION_SPECS.get(session_tz)
+    
+    if spec:
+        target_tz = spec["tz"]
+        target_open = spec["open"]
+    else:
+        # Fallback for legacy calls or pure UTC
+        target_tz = (session_tz or "UTC").strip()
+        target_open = os.getenv("SESSION_OPEN", "06:00")
 
     prov = _provider()
 
@@ -263,10 +285,10 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
         last_price = float(CoinbaseExchange().price(symbol))
     mark("price_ok")
 
-    # 30m session candle
-    start_utc, end_utc = _session_30m_window(session_tz=session_tz, session_open_hhmm=session_open)
+    # 30m session candle (Using updated Target Zone & Open Time)
+    start_utc, end_utc = _session_30m_window(session_tz=target_tz, session_open_hhmm=target_open)
     range_high = range_low = None
-    session_open_price = None  # <--- NEW: Capture the exact Open Price
+    session_open_price = None
 
     try:
         candles = (
@@ -277,18 +299,18 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
         c = _pick_candle_by_open(candles, _ms(start_utc))
         if c:
             range_high, range_low = c.h, c.l
-            session_open_price = c.o  # Capture Open
+            session_open_price = c.o
         elif candles:
             range_high, range_low = candles[0].h, candles[0].l
-            session_open_price = candles[0].o  # Fallback Open
+            session_open_price = candles[0].o
     except Exception:
         pass
     mark("or_ok")
 
     now = _utc_now()
 
-    # Morning FRVP
-    morn_start, morn_end = _morning_window(session_tz=session_tz, session_open_hhmm=session_open)
+    # Morning FRVP (Using updated Target Zone)
+    morn_start, morn_end = _morning_window(session_tz=target_tz, session_open_hhmm=target_open)
     morn_candles: List[Candle] = []
     try:
         morn_candles = _fetch_window_candles(prov, symbol, morn_start, morn_end, "5m")
@@ -353,14 +375,11 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
     calendar_events = _fetch_calendar_stub()
 
     return {
-        "date": datetime.now(ZoneInfo(session_tz)).strftime("%Y-%m-%d"),
+        "date": datetime.now(ZoneInfo(target_tz)).strftime("%Y-%m-%d"),
         "symbol": symbol,
-        "session_tz": session_tz,
+        "session_tz": session_tz, # Passed back for reference
         "last_price": last_price,
-        
-        # --- NEW: THE ANCHOR ---
         "session_open_price": session_open_price,
-        # -----------------------
 
         "r30_high": range_high,
         "r30_low": range_low,
