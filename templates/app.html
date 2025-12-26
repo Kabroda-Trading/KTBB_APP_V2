@@ -124,96 +124,105 @@
   const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
   let _lastDmrPayload = null;
 
-  // --- TRAFFIC LIGHT ENGINE (SEASON PROOF) ---
+  // --- TRAFFIC LIGHT ENGINE (CLARITY + SAFETY) ---
   function updateSessionStatus() {
     const tzSelect = document.getElementById("sessionTz");
     const statusEl = document.getElementById("status");
     const btn = document.getElementById("levelsBtn");
     
-    // 1. Identify Target Market
+    // 1. Identify Target Market & Get Current Time
     const selectedKey = tzSelect.value;
     const target = MARKET_OPENS[selectedKey] || MARKET_OPENS["UTC"];
-    
-    // 2. Get "Now" and Target Open in UTC
     const now = new Date();
     
-    // Create a date object for the Target Open TODAY
-    // We use "toLocaleString" to simulate being in that timezone
-    // allowing the browser to handle DST math for us.
+    // 2. Calculate Today's Open Time in UTC for the target zone
+    // We use the browser's ability to "think" in that timezone to handle DST/Summer time automatically.
     const targetZone = selectedKey === "America/New_York_Early" ? "America/New_York" : (selectedKey === "UTC" ? "UTC" : selectedKey);
-    
     let openDate = new Date();
+    
     try {
-        // Find the UTC time where the Target Zone says it is Target Hour:Minute
         const str = now.toLocaleString('en-US', { timeZone: targetZone });
         const targetLocalNow = new Date(str); 
         
-        // Calculate the diff between "Now" and "Target Time" in that zone
+        // Build "Today's Open" in that local time
         const openToday = new Date(targetLocalNow);
         openToday.setHours(target.h, target.m, 0, 0);
         
-        // Adjust the real UTC 'openDate' by the difference
+        // Find the difference and adjust UTC "now"
         const diffMs = openToday - targetLocalNow;
         openDate = new Date(now.getTime() + diffMs);
         
     } catch(e) {
-        // Fallback for old browsers
+        // Fallback for very old browsers (unlikely to be hit)
         openDate.setUTCHours(target.h + 5, target.m, 0, 0); 
     }
 
-    // 3. Compare Times
+    // 3. Compare Times to Determine State
     const msUntilOpen = openDate - now;
     const msSinceOpen = now - openDate;
     const msIn30m = 30 * 60 * 1000;
-    const msInDay = 24 * 60 * 60 * 1000;
+    const msIn12h = 12 * 60 * 60 * 1000;
 
     let msg = "";
     let color = "var(--text-muted)";
-    let isWaiting = false;
-
-    // Handle "Tomorrow" logic (if open is > 12 hours away, we probably calculated for today but missed it)
-    if (msUntilOpen < -msInDay/2) {
-       // It opened yesterday, so we are waiting for tomorrow? 
-       // Actually, for this tool, if it opened yesterday, we are "Ready" (Review Mode).
-    }
+    let btnLabel = "⚡ INITIATE CALIBRATION";
+    let isReviewMode = false;
 
     if (msUntilOpen > 0) {
-      // CASE: PRE-MARKET (Future)
+      // CASE 1: PRE-MARKET (Waiting for Next Session)
       const h = Math.floor(msUntilOpen / (1000 * 60 * 60));
       const m = Math.floor((msUntilOpen % (1000 * 60 * 60)) / (1000 * 60));
       
+      // Calculate local time for user display
       const localTimeStr = openDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 
-      msg = `> ⚠️ PRE-MARKET: OPENS IN ${h}H ${m}M (${localTimeStr} LOCAL) | DATA: PREVIOUS SESSION`;
-      color = "var(--primary-bright)"; 
-      isWaiting = true;
+      msg = `> ⚠️ NEXT SESSION OPENS IN ${h}H ${m}M (${localTimeStr} LOCAL). BUTTON RUNS PREVIOUS SESSION (FOR REVIEW).`;
+      color = "var(--primary-bright)"; // Cyan
+      btnLabel = "RUN PREVIOUS SESSION"; // Explicitly tell them it's old data
+      isReviewMode = true;
 
     } else if (msSinceOpen >= 0 && msSinceOpen < msIn30m) {
-      // CASE: CALIBRATING (Live)
+      // CASE 2: CALIBRATING (Live - First 30 mins)
       const minsLeft = 30 - Math.floor(msSinceOpen / 60000);
-      msg = `> 🟡 MARKET OPEN | CALIBRATING LIVE DATA... READY IN ${minsLeft} MINS`;
-      color = "var(--success)";
-      isWaiting = true;
+      msg = `> 🟡 MARKET OPEN | CALIBRATING LIVE DATA... READY IN ${minsLeft} MINS.`;
+      color = "var(--warning)"; // Yellow
 
+    } else if (msSinceOpen < msIn12h) {
+      // CASE 3: ACTIVE SESSION (Fresh Data)
+      msg = `> 🟢 ACTIVE SESSION: ${target.label} | CALIBRATION COMPLETE | READY TO TRADE.`;
+      color = "var(--success)"; // Green
+      
     } else {
-      // CASE: ACTIVE/CLOSED (Ready)
-      msg = `> 🟢 TARGET LOCKED: ${target.label} | SESSION COMPLETE | READY TO EXECUTE`;
-      color = "var(--success)";
-      isWaiting = false;
+      // CASE 4: MARKET CLOSED (Old Data for Review)
+      msg = `> 🔵 MARKET CLOSED: ${target.label} | COMPLETED SESSION DATA (FOR REVIEW).`;
+      color = "var(--text-muted)"; // Gray/Blue
+      btnLabel = "RUN REVIEW SESSION";
+      isReviewMode = true;
     }
 
     statusEl.innerHTML = msg;
     statusEl.style.color = color;
     
-    if(isWaiting) {
+    // Update Button Appearance based on Mode
+    btn.innerText = btnLabel;
+    
+    if (isReviewMode) {
         btn.style.border = "1px solid var(--primary-bright)";
-        btn.innerText = "RUN PREVIOUS SESSION";
-    } else {
+        btn.style.boxShadow = "none";
+    } else if (color === "var(--success)") {
         btn.style.border = "1px solid var(--success)";
-        btn.innerText = "⚡ INITIATE CALIBRATION";
+        btn.style.boxShadow = "0 0 20px rgba(16, 185, 129, 0.2)";
+    } else {
+        // Calibration Mode
+        btn.style.border = "1px solid var(--warning)";
+        btn.style.boxShadow = "none";
     }
+    
+    btn.disabled = false;
+    btn.style.opacity = "1";
   }
 
+  // Check status every second
   setInterval(updateSessionStatus, 1000); 
 
   // --- STANDARD FUNCTIONS ---
@@ -262,6 +271,7 @@
       gptLink.style.display = "inline-flex";
       gptLink.href = BATTLEBOX_GPT_URL;
 
+      // Force an update to reset the text back to "Active/Review"
       updateSessionStatus();
       
     }catch(e){
