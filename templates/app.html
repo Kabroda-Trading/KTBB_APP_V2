@@ -61,6 +61,40 @@
     </div>
   </div>
 
+  <div class="bento-card wide" style="padding: 24px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05);">
+    <h3 style="font-size: 14px; color: var(--text-muted); margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.1em;">
+      MISSION TIMELINE (LOCAL SYNC)
+    </h3>
+    
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; position: relative;">
+      
+      <div style="background: rgba(255,255,255,0.03); border-left: 2px solid var(--text-muted); padding: 16px; border-radius: 0 8px 8px 0;">
+        <div style="font-size: 10px; color: var(--text-muted); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">PHASE 1: RECON</div>
+        <div id="time_recon" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Assess Volatility. Hold Fire.</div>
+      </div>
+
+      <div style="background: rgba(16, 185, 129, 0.05); border-left: 2px solid var(--success); padding: 16px; border-radius: 0 8px 8px 0;">
+        <div style="font-size: 10px; color: var(--success); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">PHASE 2: DEPLOY</div>
+        <div id="time_deploy" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
+        <div style="font-size: 11px; color: var(--success); margin-top: 4px;"><strong>INITIATE CALIBRATION.</strong></div>
+      </div>
+
+      <div style="background: rgba(56, 189, 248, 0.05); border-left: 2px solid var(--primary-bright); padding: 16px; border-radius: 0 8px 8px 0;">
+        <div style="font-size: 10px; color: var(--primary-bright); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">PHASE 3: ENGAGE</div>
+        <div id="time_engage" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
+        <div style="font-size: 11px; color: var(--primary-bright); margin-top: 4px;">Execute Strategy.</div>
+      </div>
+
+      <div style="background: rgba(168, 85, 247, 0.05); border-left: 2px solid var(--purple); padding: 16px; border-radius: 0 8px 8px 0;">
+        <div style="font-size: 10px; color: var(--purple); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">PHASE 4: DEBRIEF</div>
+        <div id="time_debrief" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
+        <div style="font-size: 11px; color: var(--purple); margin-top: 4px;">Review & Log Performance.</div>
+      </div>
+
+    </div>
+  </div>
+
   <div class="bento-card wide" style="position: relative; overflow: hidden; min-height: 300px;">
     <div style="position: absolute; inset: 0; background-image: radial-gradient(var(--glass-border) 1px, transparent 1px); background-size: 20px 20px; opacity: 0.1; pointer-events: none;"></div>
 
@@ -111,20 +145,34 @@
 
 <script>
   // CONFIG: Institutional Market Opens (Local Market Time)
-  // We define the LOCAL time the bell rings. The system calculates UTC automatically.
   const MARKET_OPENS = {
-    "America/New_York":       { label: "NY EQUITY",  h: 9,  m: 30 }, // Always 9:30 AM ET
-    "America/New_York_Early": { label: "NY FUTURES", h: 8,  m: 30 }, // Always 8:30 AM ET
-    "Europe/London":          { label: "LONDON",     h: 8,  m: 0  }, // Always 8:00 AM UK
-    "Asia/Tokyo":             { label: "TOKYO",      h: 9,  m: 0  }, // Always 9:00 AM JST
-    "Australia/Sydney":       { label: "SYDNEY",     h: 10, m: 0  }, // Always 10:00 AM Local
+    "America/New_York":       { label: "NY EQUITY",  h: 9,  m: 30 }, 
+    "America/New_York_Early": { label: "NY FUTURES", h: 8,  m: 30 }, 
+    "Europe/London":          { label: "LONDON",     h: 8,  m: 0  }, 
+    "Asia/Tokyo":             { label: "TOKYO",      h: 9,  m: 0  }, 
+    "Australia/Sydney":       { label: "SYDNEY",     h: 10, m: 0  }, 
     "UTC":                    { label: "UTC CORE",   h: 0,  m: 0  }
   };
 
   const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
   let _lastDmrPayload = null;
 
-  // --- TRAFFIC LIGHT ENGINE (CLARITY + SAFETY) ---
+  // --- TIMELINE ENGINE ---
+  // Calculates specific timeline milestones based on User's Local Time
+  function updateTimeline(openDate) {
+    const t_recon = new Date(openDate); // Opens
+    const t_deploy = new Date(openDate.getTime() + 30*60000); // +30m
+    const t_engage = new Date(openDate.getTime() + 35*60000); // +35m (Buffer)
+    const t_debrief = new Date(openDate.getTime() + 7*60*60000); // +7h (Approx Close/Fade)
+
+    const opt = {hour: '2-digit', minute:'2-digit'};
+    document.getElementById("time_recon").innerText = t_recon.toLocaleTimeString([], opt);
+    document.getElementById("time_deploy").innerText = t_deploy.toLocaleTimeString([], opt);
+    document.getElementById("time_engage").innerText = t_engage.toLocaleTimeString([], opt) + " +";
+    document.getElementById("time_debrief").innerText = t_debrief.toLocaleTimeString([], opt);
+  }
+
+  // --- TRAFFIC LIGHT ENGINE ---
   function updateSessionStatus() {
     const tzSelect = document.getElementById("sessionTz");
     const statusEl = document.getElementById("status");
@@ -135,29 +183,25 @@
     const target = MARKET_OPENS[selectedKey] || MARKET_OPENS["UTC"];
     const now = new Date();
     
-    // 2. Calculate Today's Open Time in UTC for the target zone
-    // We use the browser's ability to "think" in that timezone to handle DST/Summer time automatically.
+    // 2. Calculate Today's Open Time
     const targetZone = selectedKey === "America/New_York_Early" ? "America/New_York" : (selectedKey === "UTC" ? "UTC" : selectedKey);
     let openDate = new Date();
     
     try {
         const str = now.toLocaleString('en-US', { timeZone: targetZone });
         const targetLocalNow = new Date(str); 
-        
-        // Build "Today's Open" in that local time
         const openToday = new Date(targetLocalNow);
         openToday.setHours(target.h, target.m, 0, 0);
-        
-        // Find the difference and adjust UTC "now"
         const diffMs = openToday - targetLocalNow;
         openDate = new Date(now.getTime() + diffMs);
-        
     } catch(e) {
-        // Fallback for very old browsers (unlikely to be hit)
         openDate.setUTCHours(target.h + 5, target.m, 0, 0); 
     }
 
-    // 3. Compare Times to Determine State
+    // UPDATE VISUAL TIMELINE
+    updateTimeline(openDate);
+
+    // 3. Compare Times
     const msUntilOpen = openDate - now;
     const msSinceOpen = now - openDate;
     const msIn30m = 30 * 60 * 1000;
@@ -169,33 +213,31 @@
     let isReviewMode = false;
 
     if (msUntilOpen > 0) {
-      // CASE 1: PRE-MARKET (Waiting for Next Session)
+      // CASE 1: PRE-MARKET
       const h = Math.floor(msUntilOpen / (1000 * 60 * 60));
       const m = Math.floor((msUntilOpen % (1000 * 60 * 60)) / (1000 * 60));
-      
-      // Calculate local time for user display
       const localTimeStr = openDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 
-      msg = `> ⚠️ NEXT SESSION OPENS IN ${h}H ${m}M (${localTimeStr} LOCAL). BUTTON RUNS PREVIOUS SESSION (FOR REVIEW).`;
-      color = "var(--primary-bright)"; // Cyan
-      btnLabel = "RUN PREVIOUS SESSION"; // Explicitly tell them it's old data
+      msg = `> ⚠️ NEXT SESSION OPENS IN ${h}H ${m}M. BUTTON RUNS PREVIOUS SESSION (FOR REVIEW).`;
+      color = "var(--primary-bright)"; 
+      btnLabel = "RUN PREVIOUS SESSION";
       isReviewMode = true;
 
     } else if (msSinceOpen >= 0 && msSinceOpen < msIn30m) {
-      // CASE 2: CALIBRATING (Live - First 30 mins)
+      // CASE 2: CALIBRATING
       const minsLeft = 30 - Math.floor(msSinceOpen / 60000);
       msg = `> 🟡 MARKET OPEN | CALIBRATING LIVE DATA... READY IN ${minsLeft} MINS.`;
-      color = "var(--warning)"; // Yellow
+      color = "var(--warning)";
 
     } else if (msSinceOpen < msIn12h) {
-      // CASE 3: ACTIVE SESSION (Fresh Data)
+      // CASE 3: ACTIVE
       msg = `> 🟢 ACTIVE SESSION: ${target.label} | CALIBRATION COMPLETE | READY TO TRADE.`;
-      color = "var(--success)"; // Green
+      color = "var(--success)";
       
     } else {
-      // CASE 4: MARKET CLOSED (Old Data for Review)
+      // CASE 4: CLOSED
       msg = `> 🔵 MARKET CLOSED: ${target.label} | COMPLETED SESSION DATA (FOR REVIEW).`;
-      color = "var(--text-muted)"; // Gray/Blue
+      color = "var(--text-muted)";
       btnLabel = "RUN REVIEW SESSION";
       isReviewMode = true;
     }
@@ -203,7 +245,6 @@
     statusEl.innerHTML = msg;
     statusEl.style.color = color;
     
-    // Update Button Appearance based on Mode
     btn.innerText = btnLabel;
     
     if (isReviewMode) {
@@ -213,7 +254,6 @@
         btn.style.border = "1px solid var(--success)";
         btn.style.boxShadow = "0 0 20px rgba(16, 185, 129, 0.2)";
     } else {
-        // Calibration Mode
         btn.style.border = "1px solid var(--warning)";
         btn.style.boxShadow = "none";
     }
@@ -222,7 +262,6 @@
     btn.style.opacity = "1";
   }
 
-  // Check status every second
   setInterval(updateSessionStatus, 1000); 
 
   // --- STANDARD FUNCTIONS ---
@@ -271,7 +310,6 @@
       gptLink.style.display = "inline-flex";
       gptLink.href = BATTLEBOX_GPT_URL;
 
-      // Force an update to reset the text back to "Active/Review"
       updateSessionStatus();
       
     }catch(e){
