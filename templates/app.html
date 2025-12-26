@@ -172,19 +172,14 @@
     document.getElementById("time_debrief").innerText = t_debrief.toLocaleTimeString([], opt);
   }
 
-  // --- TRAFFIC LIGHT ENGINE ---
-  function updateSessionStatus() {
+  // --- CONTEXT & TRAFFIC LIGHT ENGINE ---
+  function getSessionContext() {
     const tzSelect = document.getElementById("sessionTz");
-    const statusEl = document.getElementById("status");
-    const btn = document.getElementById("levelsBtn");
-    
-    // 1. Identify Target Market & Get Current Time
     const selectedKey = tzSelect.value;
     const target = MARKET_OPENS[selectedKey] || MARKET_OPENS["UTC"];
-    const now = new Date();
     
-    // 2. Calculate Today's Open Time
-    const targetZone = selectedKey === "America/New_York_Early" ? "America/New_York" : (selectedKey === "UTC" ? "UTC" : selectedKey);
+    const now = new Date();
+    const targetZone = selectedKey.includes("New_York") ? "America/New_York" : (selectedKey === "UTC" ? "UTC" : selectedKey);
     let openDate = new Date();
     
     try {
@@ -201,61 +196,64 @@
     // UPDATE VISUAL TIMELINE
     updateTimeline(openDate);
 
-    // 3. Compare Times
-    const msUntilOpen = openDate - now;
     const msSinceOpen = now - openDate;
-    const msIn30m = 30 * 60 * 1000;
-    const msIn12h = 12 * 60 * 60 * 1000;
+    const minsSinceOpen = Math.floor(msSinceOpen / 60000);
 
-    let msg = "";
-    let color = "var(--text-muted)";
+    // Determine Phase for GPT
+    let phase = "PRE_MARKET";
+    if (minsSinceOpen >= 0 && minsSinceOpen < 30) phase = "CALIBRATION_OPEN (NO TRADE)";
+    else if (minsSinceOpen >= 30 && minsSinceOpen < 90) phase = "INITIAL_BALANCE (AM_EXPANSION)";
+    else if (minsSinceOpen >= 90 && minsSinceOpen < 240) phase = "MID_DAY_REVERSAL_WATCH";
+    else if (minsSinceOpen >= 240) phase = "SESSION_CLOSE / POST_MARKET";
+    
+    // Determine UI Status
+    let uiMsg = "", uiColor = "";
     let btnLabel = "⚡ INITIATE CALIBRATION";
     let isReviewMode = false;
 
-    if (msUntilOpen > 0) {
-      // CASE 1: PRE-MARKET
-      const h = Math.floor(msUntilOpen / (1000 * 60 * 60));
-      const m = Math.floor((msUntilOpen % (1000 * 60 * 60)) / (1000 * 60));
-      const localTimeStr = openDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    if (minsSinceOpen < 0) {
+       // PRE-MARKET
+       const h = Math.abs(Math.floor(minsSinceOpen / 60));
+       const m = Math.abs(minsSinceOpen % 60);
+       const localTimeStr = openDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+       
+       uiMsg = `> ⚠️ PRE-MARKET: OPENS IN ${h}H ${m}M (${localTimeStr} LOCAL). RUNS PREVIOUS SESSION.`;
+       uiColor = "var(--primary-bright)";
+       btnLabel = "RUN PREVIOUS SESSION";
+       isReviewMode = true;
 
-      msg = `> ⚠️ NEXT SESSION OPENS IN ${h}H ${m}M. BUTTON RUNS PREVIOUS SESSION (FOR REVIEW).`;
-      color = "var(--primary-bright)"; 
-      btnLabel = "RUN PREVIOUS SESSION";
-      isReviewMode = true;
+    } else if (minsSinceOpen >= 0 && minsSinceOpen < 30) {
+       // CALIBRATING
+       const minsLeft = 30 - minsSinceOpen;
+       uiMsg = `> 🟡 MARKET OPEN | CALIBRATING LIVE DATA... READY IN ${minsLeft} MINS`;
+       uiColor = "var(--warning)";
 
-    } else if (msSinceOpen >= 0 && msSinceOpen < msIn30m) {
-      // CASE 2: CALIBRATING
-      const minsLeft = 30 - Math.floor(msSinceOpen / 60000);
-      msg = `> 🟡 MARKET OPEN | CALIBRATING LIVE DATA... READY IN ${minsLeft} MINS.`;
-      color = "var(--warning)";
-
-    } else if (msSinceOpen < msIn12h) {
-      // CASE 3: ACTIVE
-      msg = `> 🟢 ACTIVE SESSION: ${target.label} | CALIBRATION COMPLETE | READY TO TRADE.`;
-      color = "var(--success)";
-      
     } else {
-      // CASE 4: CLOSED
-      msg = `> 🔵 MARKET CLOSED: ${target.label} | COMPLETED SESSION DATA (FOR REVIEW).`;
-      color = "var(--text-muted)";
-      btnLabel = "RUN REVIEW SESSION";
-      isReviewMode = true;
+       // ACTIVE / CLOSED
+       uiMsg = `> 🟢 TARGET LOCKED: ${target.label} | SESSION COMPLETE | READY TO EXECUTE`;
+       uiColor = "var(--success)";
     }
 
-    statusEl.innerHTML = msg;
-    statusEl.style.color = color;
+    return { 
+        phase, uiMsg, uiColor, btnLabel, isReviewMode, targetLabel: target.label 
+    };
+  }
+
+  function updateSessionStatus() {
+    const ctx = getSessionContext();
+    const statusEl = document.getElementById("status");
+    const btn = document.getElementById("levelsBtn");
+
+    statusEl.innerHTML = ctx.uiMsg;
+    statusEl.style.color = ctx.uiColor;
     
-    btn.innerText = btnLabel;
-    
-    if (isReviewMode) {
+    btn.innerText = ctx.btnLabel;
+    if (ctx.isReviewMode) {
         btn.style.border = "1px solid var(--primary-bright)";
-        btn.style.boxShadow = "none";
-    } else if (color === "var(--success)") {
+    } else if (ctx.uiColor === "var(--success)") {
         btn.style.border = "1px solid var(--success)";
-        btn.style.boxShadow = "0 0 20px rgba(16, 185, 129, 0.2)";
     } else {
         btn.style.border = "1px solid var(--warning)";
-        btn.style.boxShadow = "none";
     }
     
     btn.disabled = false;
@@ -264,7 +262,6 @@
 
   setInterval(updateSessionStatus, 1000); 
 
-  // --- STANDARD FUNCTIONS ---
   function fmt(x){
     if (x === null || x === undefined) return "—";
     const n = parseFloat(x);
@@ -330,19 +327,64 @@
     alert("COPIED: Paste into TradingView Indicator Inputs");
   }
 
+  // --- THE SUPERCHARGED GPT PAYLOAD (CONTRACT v1.0) ---
   async function copyForGPT(){
-    if (!_lastDmrPayload) return;
+    if (!_lastDmrPayload) {
+        alert("⚠️ Run Calibration First.");
+        return;
+    }
+    
+    const ctx = getSessionContext(); // Gets "Pre-Market" vs "Mid-Day" status
+    
+    // Construct the payload exactly as defined in 'KTBB Payload Contract v1.0'
     const payload = {
-      date: new Date().toISOString(),
+      contract_version: "1.0",
+      generated_at: new Date().toISOString(),
+      
+      // 1. Session Core
+      date: _lastDmrPayload.date,
       symbol: _lastDmrPayload.symbol,
-      price: _lastDmrPayload.last_price,
+      session_tz: _lastDmrPayload.session_tz, // e.g. "America/New_York_Early"
+      last_price: _lastDmrPayload.last_price,
+      
+      // 2. Levels (The Battle Box)
       levels: _lastDmrPayload.levels,
       range_30m: _lastDmrPayload.range_30m,
-      news: _lastDmrPayload.news || [],
-      events: _lastDmrPayload.events || []
+      
+      // 3. Profiles (Context)
+      profiles: {
+        weekly:  { poc: _lastDmrPayload.weekly_poc, val: _lastDmrPayload.weekly_val, vah: _lastDmrPayload.weekly_vah },
+        f24:     { poc: _lastDmrPayload.f24_poc,    val: _lastDmrPayload.f24_val,    vah: _lastDmrPayload.f24_vah },
+        morning: { poc: _lastDmrPayload.morn_poc,   val: _lastDmrPayload.morn_val,   vah: _lastDmrPayload.morn_vah }
+      },
+
+      // 4. Structure (The "Feast" for the GPT)
+      htf_shelves: _lastDmrPayload.htf_shelves || { resistance: [], support: [] },
+      intraday_shelves: _lastDmrPayload.intraday_shelves || { breakout_side: [], breakdown_side: [] },
+      
+      // 5. Strategy Logic (The Brain)
+      // This passes the S0/S1 strategies your backend calculated
+      trade_logic: _lastDmrPayload.trade_logic || null,
+
+      // 6. Context & Risk
+      session_context: {
+        phase: ctx.phase,           // e.g. "MID_DAY_REVERSAL_WATCH"
+        target: ctx.targetLabel,    // e.g. "NY FUTURES"
+        is_review: ctx.isReviewMode
+      },
+      
+      // 7. Events (The Calendar Stub we just fixed)
+      news: _lastDmrPayload.news || ["(No high impact events detected)"]
     };
+
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-    alert("COPIED: Paste into BattleBox GPT");
+    
+    // Visual Confirmation
+    const btn = document.getElementById("copyGptBtn");
+    const originalText = btn.innerText;
+    btn.innerText = "✅ DOSSIER COPIED";
+    btn.style.borderColor = "var(--success)";
+    setTimeout(() => { btn.innerText = originalText; btn.style.borderColor = ""; }, 2000);
   }
 
   document.addEventListener("DOMContentLoaded", () => {

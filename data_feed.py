@@ -215,26 +215,15 @@ def _fetch_window_candles(
 # ----------------------------
 # News / Calendar Fetcher
 # ----------------------------
-def _fetch_crypto_news(limit: int = 5) -> List[str]:
-    url = "https://cointelegraph.com/rss"
-    out = []
-    try:
-        feed = feedparser.parse(url)
-        if feed.bozo and not feed.entries:
-            return ["- (News feed unavailable)"]
-        for entry in feed.entries[:limit]:
-            title = entry.title.strip()
-            title = re.sub(r'<[^>]+>', '', title)
-            out.append(f"- {title}")
-    except Exception:
-        out.append("- (News fetch failed)")
-    return out
-
-
 def _fetch_calendar_stub() -> List[str]:
+    """
+    Returns a static checklist of High Impact times.
+    The GPT will use this to remind the user to check specific data drops.
+    """
     return [
-        "- Check ForexFactory for High Impact USD Events (CPI/FOMC/NFP).",
-        "- Check CryptoCraft for major protocol unlocks."
+        "⚠️ 08:30 ET: USD High Impact Data (CPI / NFP / PPI)",
+        "⚠️ 14:00 ET: FOMC / Rates Decision (If scheduled)",
+        "ℹ️ Monitor 10:00 ET for secondary reversal"
     ]
 
 
@@ -316,17 +305,11 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
     morn_vp = compute_volume_profile_from_candles(morn_candles) if morn_candles else None
     mark("morning_ok")
 
-    # ------------------------------------------------------------------
-    # FIXED: ANCHOR THE 24H VOLUME PROFILE TO THE SESSION OPEN
-    # This prevents the levels from shifting if you run the report late at night.
-    # ------------------------------------------------------------------
-    # We use 'start_utc' (The Session Open) as the anchor point.
+    # Fixed 24h FRVP (Anchored to Session Open)
     f24_end = start_utc 
     f24_start = f24_end - timedelta(hours=24)
-    
     f24_candles: List[Candle] = []
     try:
-        # Fetch data leading UP TO the open, excluding live intraday data
         f24_candles = _fetch_window_candles(prov, symbol, f24_start, f24_end, "15m")
     except Exception:
         try:
@@ -336,7 +319,7 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
     f24_vp = compute_volume_profile_from_candles(f24_candles) if f24_candles else None
     mark("f24_ok")
 
-    # Weekly “VRVP-ish” (Uses 'now' to keep macro context fresh)
+    # Weekly “VRVP-ish”
     wk_start = now - timedelta(days=7)
     wk_candles: List[Candle] = []
     try:
@@ -371,7 +354,7 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
     mark("h1h4_ok")
     mark("done")
 
-    news_headlines = _fetch_crypto_news()
+    # Use the Stub instead of the broken RSS
     calendar_events = _fetch_calendar_stub()
 
     return {
@@ -404,7 +387,7 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
         "morn_val": morn_vp.val if morn_vp else None,
         "morn_poc": morn_vp.poc if morn_vp else None,
 
-        "news": news_headlines,
+        "news": calendar_events, # Send Calendar data in the news slot
         "events": calendar_events,
         "sentiment": None,
     }
