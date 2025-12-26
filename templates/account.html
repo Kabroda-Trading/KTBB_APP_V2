@@ -31,26 +31,6 @@
     <div id="profileMsg" style="margin-top: 10px; font-size: 12px; text-align: center; height: 16px;"></div>
   </div>
 
-  <div class="bento-card" style="border: 1px solid var(--success);">
-    <div style="margin-bottom: 20px;">
-      <h3 style="color: #fff; margin-bottom: 4px;">BattleBox Activation</h3>
-      <p style="font-size: 13px; color: var(--text-muted);">Link your TradingView account for indicator access.</p>
-    </div>
-
-    <div style="margin-bottom: 16px;">
-      <label class="label" style="color: var(--success);">TradingView Username</label>
-      <input id="tvInput" class="input" placeholder="e.g. TraderJoe99" value="{{ user.tradingview_id or '' }}" style="border-color: rgba(16, 185, 129, 0.4);">
-      <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
-        Enter your exact username. We will activate your "Invite-Only" access within 12 hours.
-      </div>
-    </div>
-
-    <button id="saveTvBtn" class="btn secondary" onclick="saveTvId()" style="width: 100%; color: #fff; border-color: var(--success);">
-      REQUEST ACTIVATION
-    </button>
-    <div id="tvMsg" style="margin-top: 10px; font-size: 12px; text-align: center; height: 16px;"></div>
-  </div>
-
   <div class="bento-card" style="border: 1px solid rgba(255,255,255,0.1);">
     <div style="margin-bottom: 16px;">
       <h3 style="color: #fff; margin-bottom: 4px;">Subscription Control</h3>
@@ -108,42 +88,7 @@ async function saveProfile(){
   }
 }
 
-// --- 2. TRADINGVIEW ACTIVATION LOGIC ---
-async function saveTvId(){
-  const tv = document.getElementById('tvInput').value;
-  const btn = document.getElementById('saveTvBtn');
-  const msg = document.getElementById('tvMsg');
-  
-  if(!tv) {
-    alert("Please enter a username.");
-    return;
-  }
-  
-  btn.innerText = "SENDING REQUEST...";
-  btn.disabled = true;
-  
-  try {
-    const r = await fetch("/account/tradingview-id", {
-      method: "POST", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ tradingview_id: tv })
-    });
-    
-    if(r.ok){ 
-      msg.style.color = "var(--success)"; 
-      msg.innerText = "REQUEST SENT. STATUS: PENDING"; 
-      btn.innerText = "REQUEST SENT";
-    } else {
-      throw new Error("Failed");
-    }
-  } catch(e) { 
-    msg.style.color = "var(--danger)"; 
-    msg.innerText = "ERROR SAVING ID"; 
-    btn.innerText = "RETRY";
-    btn.disabled = false;
-  }
-}
-
-// --- 3. BILLING PORTAL LOGIC ---
+// --- 2. BILLING PORTAL LOGIC ---
 async function openPortal(){
   const r = await fetch("/billing/portal", {method:"POST"});
   const d = await r.json();
