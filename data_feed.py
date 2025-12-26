@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from volume_profile import compute_volume_profile_from_candles
 
 # ----------------------------
-# 1. SESSION CONFIGURATION (NEW)
+# 1. SESSION CONFIGURATION
 # ----------------------------
 SESSION_SPECS = {
     "America/New_York":       {"tz": "America/New_York", "open": "09:30"}, # NY Equity (Standard)
@@ -137,7 +137,6 @@ class CoinbaseExchange:
             f"/products/{prod}/candles",
             {"granularity": granularity_sec, "start": start.isoformat(), "end": end.isoformat()},
         )
-        # Coinbase returns newest-first: [time, low, high, open, close, volume]
         out: List[Candle] = []
         for row in reversed(j):
             t = datetime.fromtimestamp(int(row[0]), tz=timezone.utc)
@@ -253,16 +252,12 @@ def get_inputs(*, symbol: str, date: Optional[str] = None, session_tz: str = "UT
 def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[str, Any]:
     symbol = resolve_symbol(symbol)
     
-    # ------------------------------------------------------------
-    # NEW LOGIC: Use SESSION_SPECS to find precise Open Time
-    # ------------------------------------------------------------
     spec = SESSION_SPECS.get(session_tz)
     
     if spec:
         target_tz = spec["tz"]
         target_open = spec["open"]
     else:
-        # Fallback for legacy calls or pure UTC
         target_tz = (session_tz or "UTC").strip()
         target_open = os.getenv("SESSION_OPEN", "06:00")
 
@@ -278,14 +273,13 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
 
     mark("start")
 
-    # last price
     try:
         last_price = float(prov.price(symbol))
     except Exception:
         last_price = float(CoinbaseExchange().price(symbol))
     mark("price_ok")
 
-    # 30m session candle (Using updated Target Zone & Open Time)
+    # 30m session candle
     start_utc, end_utc = _session_30m_window(session_tz=target_tz, session_open_hhmm=target_open)
     range_high = range_low = None
     session_open_price = None
@@ -309,7 +303,7 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
 
     now = _utc_now()
 
-    # Morning FRVP (Using updated Target Zone)
+    # Morning FRVP
     morn_start, morn_end = _morning_window(session_tz=target_tz, session_open_hhmm=target_open)
     morn_candles: List[Candle] = []
     try:
@@ -322,20 +316,27 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
     morn_vp = compute_volume_profile_from_candles(morn_candles) if morn_candles else None
     mark("morning_ok")
 
-    # Fixed 24h FRVP
-    f24_start = now - timedelta(hours=24)
+    # ------------------------------------------------------------------
+    # FIXED: ANCHOR THE 24H VOLUME PROFILE TO THE SESSION OPEN
+    # This prevents the levels from shifting if you run the report late at night.
+    # ------------------------------------------------------------------
+    # We use 'start_utc' (The Session Open) as the anchor point.
+    f24_end = start_utc 
+    f24_start = f24_end - timedelta(hours=24)
+    
     f24_candles: List[Candle] = []
     try:
-        f24_candles = _fetch_window_candles(prov, symbol, f24_start, now, "15m")
+        # Fetch data leading UP TO the open, excluding live intraday data
+        f24_candles = _fetch_window_candles(prov, symbol, f24_start, f24_end, "15m")
     except Exception:
         try:
-            f24_candles = _fetch_window_candles(CoinbaseExchange(), symbol, f24_start, now, "15m")
+            f24_candles = _fetch_window_candles(CoinbaseExchange(), symbol, f24_start, f24_end, "15m")
         except Exception:
             f24_candles = []
     f24_vp = compute_volume_profile_from_candles(f24_candles) if f24_candles else None
     mark("f24_ok")
 
-    # Weekly “VRVP-ish”
+    # Weekly “VRVP-ish” (Uses 'now' to keep macro context fresh)
     wk_start = now - timedelta(days=7)
     wk_candles: List[Candle] = []
     try:
@@ -370,14 +371,13 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
     mark("h1h4_ok")
     mark("done")
 
-    # NEW: Fetch News & Calendar
     news_headlines = _fetch_crypto_news()
     calendar_events = _fetch_calendar_stub()
 
     return {
         "date": datetime.now(ZoneInfo(target_tz)).strftime("%Y-%m-%d"),
         "symbol": symbol,
-        "session_tz": session_tz, # Passed back for reference
+        "session_tz": session_tz, 
         "last_price": last_price,
         "session_open_price": session_open_price,
 
