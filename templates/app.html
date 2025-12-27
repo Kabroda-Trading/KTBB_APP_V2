@@ -19,7 +19,6 @@
   </div>
 
   <div class="bento-card wide" style="border-left: 4px solid var(--primary); display: flex; flex-direction: column; gap: 20px;">
-    
     <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-end; justify-content: space-between;">
       
       <div style="flex: 1; min-width: 240px;">
@@ -38,8 +37,8 @@
         <label class="label" style="color: var(--success);">TARGET SESSION</label>
         <div style="position: relative;">
           <select id="sessionTz" class="input" style="cursor:pointer; font-weight: 700; appearance: none; padding-right: 40px; border-color: rgba(16, 185, 129, 0.4); width: 100%;">
-            <option value="America/New_York">🇺🇸 NY EQUITY (09:30 ET)</option>
             <option value="America/New_York_Early">🇺🇸 NY FUTURES (08:30 ET)</option>
+            <option value="America/New_York">🇺🇸 NY EQUITY (09:30 ET)</option>
             <option value="Europe/London">🇬🇧 LONDON (08:00 GMT)</option>
             <option value="Asia/Tokyo">🇯🇵 TOKYO (09:00 JST)</option>
             <option value="Australia/Sydney">🇦🇺 SYDNEY (10:00 AEDT)</option>
@@ -65,31 +64,30 @@
     <h3 style="font-size: 14px; color: var(--text-muted); margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.1em;">
       MISSION TIMELINE (LOCAL SYNC)
     </h3>
-    
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; position: relative;">
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
       
       <div style="background: rgba(255,255,255,0.03); border-left: 2px solid var(--text-muted); padding: 16px; border-radius: 0 8px 8px 0;">
-        <div style="font-size: 10px; color: var(--text-muted); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">PHASE 1: RECON</div>
-        <div id="time_recon" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Assess Volatility. Hold Fire.</div>
+        <div style="font-size: 10px; color: var(--text-muted); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">MARKET OPEN</div>
+        <div id="time_open" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Session Start</div>
       </div>
 
-      <div style="background: rgba(16, 185, 129, 0.05); border-left: 2px solid var(--success); padding: 16px; border-radius: 0 8px 8px 0;">
-        <div style="font-size: 10px; color: var(--success); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">PHASE 2: DEPLOY</div>
-        <div id="time_deploy" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-        <div style="font-size: 11px; color: var(--success); margin-top: 4px;"><strong>INITIATE CALIBRATION.</strong></div>
+      <div style="background: rgba(16, 185, 129, 0.05); border-left: 2px solid var(--warning); padding: 16px; border-radius: 0 8px 8px 0;">
+        <div style="font-size: 10px; color: var(--warning); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">CALIBRATION</div>
+        <div id="time_calib" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
+        <div style="font-size: 11px; color: var(--warning); margin-top: 4px;">Initial Balance (30m)</div>
       </div>
 
-      <div style="background: rgba(56, 189, 248, 0.05); border-left: 2px solid var(--primary-bright); padding: 16px; border-radius: 0 8px 8px 0;">
-        <div style="font-size: 10px; color: var(--primary-bright); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">PHASE 3: ENGAGE</div>
-        <div id="time_engage" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-        <div style="font-size: 11px; color: var(--primary-bright); margin-top: 4px;">Execute Strategy.</div>
+      <div style="background: rgba(56, 189, 248, 0.05); border-left: 2px solid var(--success); padding: 16px; border-radius: 0 8px 8px 0;">
+        <div style="font-size: 10px; color: var(--success); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">EXECUTION</div>
+        <div id="time_exec" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
+        <div style="font-size: 11px; color: var(--success); margin-top: 4px;">Strategy Active</div>
       </div>
 
       <div style="background: rgba(168, 85, 247, 0.05); border-left: 2px solid var(--purple); padding: 16px; border-radius: 0 8px 8px 0;">
-        <div style="font-size: 10px; color: var(--purple); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">PHASE 4: DEBRIEF</div>
-        <div id="time_debrief" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-        <div style="font-size: 11px; color: var(--purple); margin-top: 4px;">Review & Log Performance.</div>
+        <div style="font-size: 10px; color: var(--purple); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">CLOSE</div>
+        <div id="time_close" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
+        <div style="font-size: 11px; color: var(--purple); margin-top: 4px;">Session End</div>
       </div>
 
     </div>
@@ -112,27 +110,22 @@
     </div>
 
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; position: relative;">
-      
       <div class="lvl-card c-red" style="background: rgba(239, 68, 68, 0.05);">
         <div class="lvl-lbl">DAILY RESISTANCE</div>
         <div id="lv_dr" class="lvl-val" style="font-family: monospace;">—</div>
       </div>
-      
       <div class="lvl-card c-green" style="background: rgba(16, 185, 129, 0.05);">
         <div class="lvl-lbl">BREAKOUT TRIGGER</div>
         <div id="lv_bo" class="lvl-val" style="font-family: monospace;">—</div>
       </div>
-      
       <div class="lvl-card c-purple" style="background: rgba(168, 85, 247, 0.05);">
         <div class="lvl-lbl">BREAKDOWN TRIGGER</div>
         <div id="lv_bd" class="lvl-val" style="font-family: monospace;">—</div>
       </div>
-      
       <div class="lvl-card c-blue" style="background: rgba(59, 130, 246, 0.05);">
         <div class="lvl-lbl">DAILY SUPPORT</div>
         <div id="lv_ds" class="lvl-val" style="font-family: monospace;">—</div>
       </div>
-
     </div>
 
     <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--glass-border); display: flex; justify-content: space-between; color: var(--text-muted); font-size: 12px; font-family: monospace;">
@@ -144,151 +137,125 @@
 </div>
 
 <script>
-  // CONFIG: Institutional Market Opens (Local Market Time)
-  const MARKET_OPENS = {
-    "America/New_York":       { label: "NY EQUITY",  h: 9,  m: 30 }, 
-    "America/New_York_Early": { label: "NY FUTURES", h: 8,  m: 30 }, 
-    "Europe/London":          { label: "LONDON",     h: 8,  m: 0  }, 
-    "Asia/Tokyo":             { label: "TOKYO",      h: 9,  m: 0  }, 
-    "Australia/Sydney":       { label: "SYDNEY",     h: 10, m: 0  }, 
-    "UTC":                    { label: "UTC CORE",   h: 0,  m: 0  }
+  const SPECS = {
+    "America/New_York_Early": { tz: "America/New_York", h: 8, m: 30, label: "NY FUTURES" },
+    "America/New_York":       { tz: "America/New_York", h: 9, m: 30, label: "NY EQUITY" },
+    "Europe/London":          { tz: "Europe/London",    h: 8, m: 0,  label: "LONDON" },
+    "Asia/Tokyo":             { tz: "Asia/Tokyo",       h: 9, m: 0,  label: "TOKYO" },
+    "Australia/Sydney":       { tz: "Australia/Sydney", h: 10, m: 0, label: "SYDNEY" },
+    "UTC":                    { tz: "UTC",              h: 0, m: 0,  label: "UTC CORE" }
   };
 
   const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
   let _lastDmrPayload = null;
 
-  // --- TIMELINE ENGINE ---
-  // Calculates specific timeline milestones based on User's Local Time
-  function updateTimeline(openDate) {
-    const t_recon = new Date(openDate); // Opens
-    const t_deploy = new Date(openDate.getTime() + 30*60000); // +30m
-    const t_engage = new Date(openDate.getTime() + 35*60000); // +35m (Buffer)
-    const t_debrief = new Date(openDate.getTime() + 7*60*60000); // +7h (Approx Close/Fade)
-
-    const opt = {hour: '2-digit', minute:'2-digit'};
-    document.getElementById("time_recon").innerText = t_recon.toLocaleTimeString([], opt);
-    document.getElementById("time_deploy").innerText = t_deploy.toLocaleTimeString([], opt);
-    document.getElementById("time_engage").innerText = t_engage.toLocaleTimeString([], opt) + " +";
-    document.getElementById("time_debrief").innerText = t_debrief.toLocaleTimeString([], opt);
-  }
-
-  // --- CONTEXT & TRAFFIC LIGHT ENGINE ---
-  function getSessionContext() {
-    const tzSelect = document.getElementById("sessionTz");
-    const selectedKey = tzSelect.value;
-    const target = MARKET_OPENS[selectedKey] || MARKET_OPENS["UTC"];
-    
-    const now = new Date();
-    const targetZone = selectedKey.includes("New_York") ? "America/New_York" : (selectedKey === "UTC" ? "UTC" : selectedKey);
-    let openDate = new Date();
-    
-    try {
-        const str = now.toLocaleString('en-US', { timeZone: targetZone });
-        const targetLocalNow = new Date(str); 
-        const openToday = new Date(targetLocalNow);
-        openToday.setHours(target.h, target.m, 0, 0);
-        const diffMs = openToday - targetLocalNow;
-        openDate = new Date(now.getTime() + diffMs);
-    } catch(e) {
-        openDate.setUTCHours(target.h + 5, target.m, 0, 0); 
-    }
-
-    // UPDATE VISUAL TIMELINE
-    updateTimeline(openDate);
-
-    const msSinceOpen = now - openDate;
-    const minsSinceOpen = Math.floor(msSinceOpen / 60000);
-
-    // Determine Phase for GPT
-    let phase = "PRE_MARKET";
-    if (minsSinceOpen >= 0 && minsSinceOpen < 30) phase = "CALIBRATION_OPEN (NO TRADE)";
-    else if (minsSinceOpen >= 30 && minsSinceOpen < 90) phase = "INITIAL_BALANCE (AM_EXPANSION)";
-    else if (minsSinceOpen >= 90 && minsSinceOpen < 240) phase = "MID_DAY_REVERSAL_WATCH";
-    else if (minsSinceOpen >= 240) phase = "SESSION_CLOSE / POST_MARKET";
-    
-    // Determine UI Status
-    let uiMsg = "", uiColor = "";
-    let btnLabel = "⚡ INITIATE CALIBRATION";
-    let isReviewMode = false;
-
-    if (minsSinceOpen < 0) {
-       // PRE-MARKET
-       const h = Math.abs(Math.floor(minsSinceOpen / 60));
-       const m = Math.abs(minsSinceOpen % 60);
-       const localTimeStr = openDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-       
-       uiMsg = `> ⚠️ PRE-MARKET: OPENS IN ${h}H ${m}M (${localTimeStr} LOCAL). RUNS PREVIOUS SESSION.`;
-       uiColor = "var(--primary-bright)";
-       btnLabel = "RUN PREVIOUS SESSION";
-       isReviewMode = true;
-
-    } else if (minsSinceOpen >= 0 && minsSinceOpen < 30) {
-       // CALIBRATING
-       const minsLeft = 30 - minsSinceOpen;
-       uiMsg = `> 🟡 MARKET OPEN | CALIBRATING LIVE DATA... READY IN ${minsLeft} MINS`;
-       uiColor = "var(--warning)";
-
-    } else {
-       // ACTIVE / CLOSED
-       uiMsg = `> 🟢 TARGET LOCKED: ${target.label} | SESSION COMPLETE | READY TO EXECUTE`;
-       uiColor = "var(--success)";
-    }
-
-    return { 
-        phase, uiMsg, uiColor, btnLabel, isReviewMode, targetLabel: target.label 
-    };
-  }
-
+  // --- ROBUST TIMING ENGINE ---
   function updateSessionStatus() {
-    const ctx = getSessionContext();
+    const key = document.getElementById("sessionTz").value;
+    const spec = SPECS[key] || SPECS["UTC"];
+    const now = new Date();
+
+    // 1. Get Wall Clock Time in Target City
+    const targetTimeStr = now.toLocaleString("en-US", {timeZone: spec.tz, hour12: false});
+    const targetDate = new Date(targetTimeStr); 
+    const currentH = targetDate.getHours();
+    const currentM = targetDate.getMinutes();
+    const currentMins = (currentH * 60) + currentM;
+
+    // 2. Get Open Time
+    const openMins = (spec.h * 60) + spec.m;
+    
+    // 3. Calc Diff
+    let diff = currentMins - openMins;
+    
+    // Wrap around midnight
+    if (diff > 1200) diff -= 1440; 
+    if (diff < -1200) diff += 1440;
+
     const statusEl = document.getElementById("status");
     const btn = document.getElementById("levelsBtn");
-
-    statusEl.innerHTML = ctx.uiMsg;
-    statusEl.style.color = ctx.uiColor;
     
-    btn.innerText = ctx.btnLabel;
-    if (ctx.isReviewMode) {
-        btn.style.border = "1px solid var(--primary-bright)";
-    } else if (ctx.uiColor === "var(--success)") {
-        btn.style.border = "1px solid var(--success)";
-    } else {
-        btn.style.border = "1px solid var(--warning)";
+    let msg = "", col = "", btnTxt = "⚡ INITIATE CALIBRATION";
+    let isReview = false;
+
+    // --- LOGIC FIX: TIGHTER WINDOWS ---
+    // Pre-Market: anything before open
+    if (diff < 0) {
+      const m = Math.abs(diff % 60);
+      const h = Math.floor(Math.abs(diff) / 60);
+      msg = `> ⚠️ PRE-MARKET: OPENS IN ${h}H ${m}M. BUTTON RUNS PREVIOUS SESSION.`;
+      col = "var(--primary-bright)";
+      btnTxt = "RUN PREVIOUS SESSION";
+      isReview = true;
+    } 
+    // Calibration: 0 to 30 mins
+    else if (diff >= 0 && diff < 30) {
+      msg = `> 🟡 MARKET OPEN | CALIBRATING LIVE DATA... READY IN ${30 - diff} MINS.`;
+      col = "var(--warning)";
+    } 
+    // Active: 30 mins to 8 HOURS (480 mins)
+    else if (diff >= 30 && diff < 480) { 
+      msg = `> 🟢 ACTIVE SESSION: ${spec.label} | EXECUTION PHASE ONLINE.`;
+      col = "var(--success)";
+    } 
+    // Closed: After 8 hours
+    else {
+      msg = `> 🔵 MARKET CLOSED. PREPARING NEXT SESSION.`;
+      col = "var(--text-muted)";
+      btnTxt = "RUN REVIEW SESSION";
+      isReview = true;
     }
+
+    statusEl.innerHTML = msg;
+    statusEl.style.color = col;
+    btn.innerText = btnTxt;
     
-    btn.disabled = false;
-    btn.style.opacity = "1";
+    if(isReview) {
+       btn.style.border = "1px solid rgba(255,255,255,0.2)";
+       btn.style.boxShadow = "none";
+    } else if (col === "var(--success)") {
+       btn.style.border = "1px solid var(--success)";
+       btn.style.boxShadow = "0 0 20px rgba(16, 185, 129, 0.2)";
+    } else {
+       btn.style.border = "1px solid var(--warning)";
+       btn.style.boxShadow = "none";
+    }
+
+    updateTimelineVisuals(now, diff);
   }
 
-  setInterval(updateSessionStatus, 1000); 
+  function updateTimelineVisuals(now, diffMins) {
+    const openTime = new Date(now.getTime() - (diffMins * 60000));
+    const t_calib = new Date(openTime.getTime() + 30*60000);
+    const t_exec  = new Date(openTime.getTime() + 30*60000); 
+    const t_close = new Date(openTime.getTime() + 8*60*60000); // +8h Close
 
-  function fmt(x){
-    if (x === null || x === undefined) return "—";
-    const n = parseFloat(x);
-    return isNaN(n) ? String(x) : n.toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 2});
+    const opt = {hour:'2-digit', minute:'2-digit'};
+    document.getElementById("time_open").innerText = openTime.toLocaleTimeString([], opt);
+    document.getElementById("time_calib").innerText = openTime.toLocaleTimeString([], opt) + " - " + t_calib.toLocaleTimeString([], opt);
+    document.getElementById("time_exec").innerText = t_exec.toLocaleTimeString([], opt) + " +";
+    document.getElementById("time_close").innerText = t_close.toLocaleTimeString([], opt);
   }
+
+  // --- API & COPY ---
+  function fmt(x){ return x ? parseFloat(x).toFixed(2) : "—"; }
 
   async function calibrateBattlefield(){
-    const symEl = document.getElementById("symbol");
-    const tzEl = document.getElementById("sessionTz");
+    const sym = document.getElementById("symbol").value;
+    const tz = document.getElementById("sessionTz").value;
     const status = document.getElementById("status");
     const btn = document.getElementById("levelsBtn");
     
-    status.innerHTML = "> ESTABLISHING UPLINK TO " + tzEl.options[tzEl.selectedIndex].text + "...";
-    status.style.color = "var(--primary-bright)";
-    btn.disabled = true; btn.style.opacity = "0.7";
+    btn.innerText = "CALIBRATING...";
+    btn.disabled = true;
 
-    try{
+    try {
       const r = await fetch("/api/dmr/run-raw", {
         method: "POST", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ 
-          symbol: symEl.value,
-          session_tz: tzEl.value 
-        })
+        body: JSON.stringify({ symbol: sym, session_tz: tz })
       });
       const data = await r.json();
-      
-      if (!r.ok) throw new Error(data.detail || "Connection Error");
+      if (!r.ok) throw new Error(data.detail || "Error");
 
       _lastDmrPayload = data;
       const l = data.levels || {};
@@ -303,18 +270,15 @@
 
       document.getElementById("tvCopyBtn").style.display = "inline-flex";
       document.getElementById("copyGptBtn").style.display = "inline-flex";
-      const gptLink = document.getElementById("openGptLink");
-      gptLink.style.display = "inline-flex";
-      gptLink.href = BATTLEBOX_GPT_URL;
-
-      updateSessionStatus();
+      document.getElementById("openGptLink").style.display = "inline-flex";
+      document.getElementById("openGptLink").href = BATTLEBOX_GPT_URL;
       
-    }catch(e){
-      alert(e.message);
-      status.innerHTML = "> ERROR: " + e.message;
+      updateSessionStatus();
+    } catch(e) {
+      status.innerText = "> ERROR: " + e.message;
       status.style.color = "var(--danger)";
-    }finally{
-      btn.disabled = false; btn.style.opacity = "1";
+    } finally {
+      btn.disabled = false;
     }
   }
 
@@ -322,74 +286,28 @@
     if (!_lastDmrPayload) return;
     const l = _lastDmrPayload.levels;
     const r = _lastDmrPayload.range_30m;
-    const text = `${parseFloat(l.breakout_trigger).toFixed(2)},${parseFloat(l.breakdown_trigger).toFixed(2)},${parseFloat(l.daily_resistance).toFixed(2)},${parseFloat(l.daily_support).toFixed(2)},${parseFloat(r.high).toFixed(2)},${parseFloat(r.low).toFixed(2)}`;
+    const text = `${fmt(l.breakout_trigger)},${fmt(l.breakdown_trigger)},${fmt(l.daily_resistance)},${fmt(l.daily_support)},${fmt(r.high)},${fmt(r.low)}`;
+    
     await navigator.clipboard.writeText(text);
-    alert("COPIED: Paste into TradingView Indicator Inputs");
+    alert("COPIED: " + text + "\nPaste this into the indicator settings.");
   }
 
-  // --- THE SUPERCHARGED GPT PAYLOAD (CONTRACT v1.0) ---
   async function copyForGPT(){
-    if (!_lastDmrPayload) {
-        alert("⚠️ Run Calibration First.");
-        return;
-    }
-    
-    const ctx = getSessionContext(); // Gets "Pre-Market" vs "Mid-Day" status
-    
-    // Construct the payload exactly as defined in 'KTBB Payload Contract v1.0'
+    if (!_lastDmrPayload) return;
     const payload = {
-      contract_version: "1.0",
-      generated_at: new Date().toISOString(),
-      
-      // 1. Session Core
-      date: _lastDmrPayload.date,
+      date: new Date().toISOString(),
       symbol: _lastDmrPayload.symbol,
-      session_tz: _lastDmrPayload.session_tz, // e.g. "America/New_York_Early"
-      last_price: _lastDmrPayload.last_price,
-      
-      // 2. Levels (The Battle Box)
+      price: _lastDmrPayload.last_price,
       levels: _lastDmrPayload.levels,
       range_30m: _lastDmrPayload.range_30m,
-      
-      // 3. Profiles (Context)
-      profiles: {
-        weekly:  { poc: _lastDmrPayload.weekly_poc, val: _lastDmrPayload.weekly_val, vah: _lastDmrPayload.weekly_vah },
-        f24:     { poc: _lastDmrPayload.f24_poc,    val: _lastDmrPayload.f24_val,    vah: _lastDmrPayload.f24_vah },
-        morning: { poc: _lastDmrPayload.morn_poc,   val: _lastDmrPayload.morn_val,   vah: _lastDmrPayload.morn_vah }
-      },
-
-      // 4. Structure (The "Feast" for the GPT)
-      htf_shelves: _lastDmrPayload.htf_shelves || { resistance: [], support: [] },
-      intraday_shelves: _lastDmrPayload.intraday_shelves || { breakout_side: [], breakdown_side: [] },
-      
-      // 5. Strategy Logic (The Brain)
-      // This passes the S0/S1 strategies your backend calculated
-      trade_logic: _lastDmrPayload.trade_logic || null,
-
-      // 6. Context & Risk
-      session_context: {
-        phase: ctx.phase,           // e.g. "MID_DAY_REVERSAL_WATCH"
-        target: ctx.targetLabel,    // e.g. "NY FUTURES"
-        is_review: ctx.isReviewMode
-      },
-      
-      // 7. Events (The Calendar Stub we just fixed)
-      news: _lastDmrPayload.news || ["(No high impact events detected)"]
+      news: _lastDmrPayload.news || []
     };
-
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-    
-    // Visual Confirmation
-    const btn = document.getElementById("copyGptBtn");
-    const originalText = btn.innerText;
-    btn.innerText = "✅ DOSSIER COPIED";
-    btn.style.borderColor = "var(--success)";
-    setTimeout(() => { btn.innerText = originalText; btn.style.borderColor = ""; }, 2000);
+    alert("COPIED: Paste into BattleBox GPT");
   }
 
-  document.addEventListener("DOMContentLoaded", () => {
-      updateSessionStatus();
-      document.getElementById("sessionTz").addEventListener("change", updateSessionStatus);
-  });
+  setInterval(updateSessionStatus, 1000);
+  document.addEventListener("DOMContentLoaded", updateSessionStatus);
+  document.getElementById("sessionTz").addEventListener("change", updateSessionStatus);
 </script>
 {% endblock %}
