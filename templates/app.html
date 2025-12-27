@@ -137,6 +137,7 @@
 </div>
 
 <script>
+  // CONFIG: Institutional Opens
   const SPECS = {
     "America/New_York_Early": { tz: "America/New_York", h: 8, m: 30, label: "NY FUTURES" },
     "America/New_York":       { tz: "America/New_York", h: 9, m: 30, label: "NY EQUITY" },
@@ -149,71 +150,72 @@
   const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
   let _lastDmrPayload = null;
 
-  // --- ROBUST TIMING ENGINE ---
-  function updateSessionStatus() {
+  // --- HYBRID CONTEXT LOGIC (PHASE + UI) ---
+  function getSessionContext() {
     const key = document.getElementById("sessionTz").value;
     const spec = SPECS[key] || SPECS["UTC"];
     const now = new Date();
 
-    // 1. Get Wall Clock Time in Target City
     const targetTimeStr = now.toLocaleString("en-US", {timeZone: spec.tz, hour12: false});
     const targetDate = new Date(targetTimeStr); 
-    const currentH = targetDate.getHours();
-    const currentM = targetDate.getMinutes();
-    const currentMins = (currentH * 60) + currentM;
-
-    // 2. Get Open Time
+    const currentMins = (targetDate.getHours() * 60) + targetDate.getMinutes();
     const openMins = (spec.h * 60) + spec.m;
     
-    // 3. Calc Diff
     let diff = currentMins - openMins;
-    
-    // Wrap around midnight
     if (diff > 1200) diff -= 1440; 
     if (diff < -1200) diff += 1440;
 
-    const statusEl = document.getElementById("status");
-    const btn = document.getElementById("levelsBtn");
-    
-    let msg = "", col = "", btnTxt = "⚡ INITIATE CALIBRATION";
+    let phase = "PRE_MARKET";
+    let uiMsg = "", uiColor = "var(--text-muted)";
+    let btnLabel = "⚡ INITIATE CALIBRATION";
     let isReview = false;
 
-    // --- LOGIC FIX: TIGHTER WINDOWS ---
-    // Pre-Market: anything before open
+    // Phase Logic: -infinity to 0 (Pre), 0 to 30 (Calib), 30 to 480 (Active/8 Hours), 480+ (Closed)
     if (diff < 0) {
-      const m = Math.abs(diff % 60);
-      const h = Math.floor(Math.abs(diff) / 60);
-      msg = `> ⚠️ PRE-MARKET: OPENS IN ${h}H ${m}M. BUTTON RUNS PREVIOUS SESSION.`;
-      col = "var(--primary-bright)";
-      btnTxt = "RUN PREVIOUS SESSION";
-      isReview = true;
-    } 
-    // Calibration: 0 to 30 mins
-    else if (diff >= 0 && diff < 30) {
-      msg = `> 🟡 MARKET OPEN | CALIBRATING LIVE DATA... READY IN ${30 - diff} MINS.`;
-      col = "var(--warning)";
-    } 
-    // Active: 30 mins to 8 HOURS (480 mins)
-    else if (diff >= 30 && diff < 480) { 
-      msg = `> 🟢 ACTIVE SESSION: ${spec.label} | EXECUTION PHASE ONLINE.`;
-      col = "var(--success)";
-    } 
-    // Closed: After 8 hours
-    else {
-      msg = `> 🔵 MARKET CLOSED. PREPARING NEXT SESSION.`;
-      col = "var(--text-muted)";
-      btnTxt = "RUN REVIEW SESSION";
-      isReview = true;
+       phase = "PRE_MARKET";
+       const h = Math.floor(Math.abs(diff) / 60);
+       const m = Math.abs(diff % 60);
+       uiMsg = `> ⚠️ PRE-MARKET: OPENS IN ${h}H ${m}M. BUTTON RUNS PREVIOUS SESSION.`;
+       uiColor = "var(--primary-bright)";
+       btnLabel = "RUN PREVIOUS SESSION";
+       isReview = true;
+    } else if (diff >= 0 && diff < 30) {
+       phase = "CALIBRATION_OPEN";
+       uiMsg = `> 🟡 MARKET OPEN | CALIBRATING LIVE DATA... READY IN ${30 - diff} MINS.`;
+       uiColor = "var(--warning)";
+    } else if (diff >= 30 && diff < 90) {
+       phase = "INITIAL_BALANCE_EXPANSION";
+       uiMsg = `> 🟢 ACTIVE SESSION: ${spec.label} | INITIAL BALANCE | EXECUTION ONLINE.`;
+       uiColor = "var(--success)";
+    } else if (diff >= 90 && diff < 480) { // 8 Hours Active
+       phase = "MID_DAY_TREND";
+       uiMsg = `> 🟢 ACTIVE SESSION: ${spec.label} | MID-SESSION | EXECUTION ONLINE.`;
+       uiColor = "var(--success)";
+    } else {
+       phase = "SESSION_CLOSED";
+       uiMsg = `> 🔵 MARKET CLOSED. PREPARING NEXT SESSION.`;
+       uiColor = "var(--text-muted)";
+       btnLabel = "RUN REVIEW SESSION";
+       isReview = true;
     }
 
-    statusEl.innerHTML = msg;
-    statusEl.style.color = col;
-    btn.innerText = btnTxt;
+    return { phase, uiMsg, uiColor, btnLabel, isReview, spec, diff, now };
+  }
+
+  function updateSessionStatus() {
+    const ctx = getSessionContext();
+    const statusEl = document.getElementById("status");
+    const btn = document.getElementById("levelsBtn");
+
+    statusEl.innerHTML = ctx.uiMsg;
+    statusEl.style.color = ctx.uiColor;
     
-    if(isReview) {
+    btn.innerText = ctx.btnLabel;
+    
+    if(ctx.isReview) {
        btn.style.border = "1px solid rgba(255,255,255,0.2)";
        btn.style.boxShadow = "none";
-    } else if (col === "var(--success)") {
+    } else if (ctx.uiColor === "var(--success)") {
        btn.style.border = "1px solid var(--success)";
        btn.style.boxShadow = "0 0 20px rgba(16, 185, 129, 0.2)";
     } else {
@@ -221,23 +223,22 @@
        btn.style.boxShadow = "none";
     }
 
-    updateTimelineVisuals(now, diff);
+    updateTimelineVisuals(ctx.now, ctx.diff);
   }
 
   function updateTimelineVisuals(now, diffMins) {
     const openTime = new Date(now.getTime() - (diffMins * 60000));
     const t_calib = new Date(openTime.getTime() + 30*60000);
-    const t_exec  = new Date(openTime.getTime() + 30*60000); 
-    const t_close = new Date(openTime.getTime() + 8*60*60000); // +8h Close
-
+    const t_close = new Date(openTime.getTime() + 8*60*60000); // 8 Hours Close
     const opt = {hour:'2-digit', minute:'2-digit'};
+    
     document.getElementById("time_open").innerText = openTime.toLocaleTimeString([], opt);
     document.getElementById("time_calib").innerText = openTime.toLocaleTimeString([], opt) + " - " + t_calib.toLocaleTimeString([], opt);
-    document.getElementById("time_exec").innerText = t_exec.toLocaleTimeString([], opt) + " +";
+    document.getElementById("time_exec").innerText = t_calib.toLocaleTimeString([], opt) + " +";
     document.getElementById("time_close").innerText = t_close.toLocaleTimeString([], opt);
   }
 
-  // --- API & COPY ---
+  // --- API, CALIBRATE & COPY ---
   function fmt(x){ return x ? parseFloat(x).toFixed(2) : "—"; }
 
   async function calibrateBattlefield(){
@@ -292,18 +293,51 @@
     alert("COPIED: " + text + "\nPaste this into the indicator settings.");
   }
 
+  // --- THE SMART PAYLOAD (With Phase, News, Context) ---
   async function copyForGPT(){
-    if (!_lastDmrPayload) return;
+    if (!_lastDmrPayload) { alert("⚠️ Calibrate First"); return; }
+    
+    const ctx = getSessionContext();
+    
     const payload = {
-      date: new Date().toISOString(),
+      contract_version: "1.1",
+      generated_at: new Date().toISOString(),
+      
+      // 1. Core Data
+      date: _lastDmrPayload.date,
       symbol: _lastDmrPayload.symbol,
-      price: _lastDmrPayload.last_price,
+      price: _lastDmrPayload.last_price,  // Backend now guarantees this
+      session_tz: _lastDmrPayload.session_tz,
+
+      // 2. The Levels
       levels: _lastDmrPayload.levels,
       range_30m: _lastDmrPayload.range_30m,
-      news: _lastDmrPayload.news || []
+      
+      // 3. Profiles (Weekly/Daily context)
+      profiles: {
+          weekly_poc: _lastDmrPayload.weekly_poc,
+          f24_poc: _lastDmrPayload.f24_poc,
+          morn_poc: _lastDmrPayload.morn_poc
+      },
+      
+      // 4. Session Context (Critical for GPT Advice)
+      session_context: {
+        phase: ctx.phase,          // e.g. "MID_DAY_TREND"
+        target: ctx.spec.label,    // e.g. "NY FUTURES"
+        is_review: ctx.isReview
+      },
+      
+      // 5. Events & News (Calendar Stub)
+      news: _lastDmrPayload.news || ["(No high impact events detected)"]
     };
+
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-    alert("COPIED: Paste into BattleBox GPT");
+    
+    const btn = document.getElementById("copyGptBtn");
+    const originalText = btn.innerText;
+    btn.innerText = "✅ DOSSIER COPIED";
+    btn.style.borderColor = "var(--success)";
+    setTimeout(() => { btn.innerText = originalText; btn.style.borderColor = ""; }, 2000);
   }
 
   setInterval(updateSessionStatus, 1000);
