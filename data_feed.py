@@ -11,7 +11,6 @@ from zoneinfo import ZoneInfo
 # ----------------------------
 # 1. CONFIGURATION
 # ----------------------------
-# Options: 'kraken', 'coinbase', 'binance', 'mexc', 'kucoin'
 DEFAULT_EXCHANGE_ID = "kraken" 
 
 SESSION_SPECS = {
@@ -41,10 +40,11 @@ class Candle:
     o: float; h: float; l: float; c: float; v: float
 
 def _fetch_calendar_stub() -> List[str]:
+    # STATIC DIRECTIVE - Forces user to check real source
     return [
-        "⚠️ 08:30 ET: USD High Impact Data (CPI / NFP / PPI)",
-        "⚠️ 14:00 ET: FOMC / Rates Decision (If scheduled)",
-        "ℹ️ Monitor 10:00 ET for secondary reversal"
+        "ℹ️ CRITICAL: Verify Impact Events before execution.",
+        "🔗 SOURCE: https://www.forexfactory.com/calendar",
+        "⚠️ ACTION: Do not trade 5 mins before/after High Impact (Red) news."
     ]
 
 # ----------------------------
@@ -100,39 +100,32 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
     last_price = 0.0
     range_high = range_low = session_open = None
     
-    # Context Data Holders
     h1_supply = h1_demand = 0.0
     h4_supply = h4_demand = 0.0
     
     try:
-        # A. Fetch Ticker
         try:
             ticker = exchange.fetch_ticker(raw_symbol)
             last_price = float(ticker['last'])
         except: pass
 
-        # B. Fetch 30m Candle (Exact Window)
         start_utc, end_utc = _session_window(spec["tz"], spec["open"])
         start_ms = _ms(start_utc)
         
-        # C. Fetch Historical Context (H1 & H4) - THIS WAS MISSING
-        # Fetch last 7 days of 4H data for macro levels
         since_4h = _ms(datetime.now(timezone.utc) - timedelta(days=7))
         ohlcv_4h = exchange.fetch_ohlcv(raw_symbol, timeframe='4h', since=since_4h, limit=50)
         
         if ohlcv_4h:
-            h4_supply = max(c[2] for c in ohlcv_4h) # Max High
-            h4_demand = min(c[3] for c in ohlcv_4h) # Min Low
+            h4_supply = max(c[2] for c in ohlcv_4h)
+            h4_demand = min(c[3] for c in ohlcv_4h)
 
-        # Fetch last 24 hours of 1H data for intraday structure
         since_1h = _ms(datetime.now(timezone.utc) - timedelta(hours=24))
         ohlcv_1h = exchange.fetch_ohlcv(raw_symbol, timeframe='1h', since=since_1h, limit=24)
         
         if ohlcv_1h:
-            h1_supply = max(c[2] for c in ohlcv_1h) # Max High
-            h1_demand = min(c[3] for c in ohlcv_1h) # Min Low
+            h1_supply = max(c[2] for c in ohlcv_1h)
+            h1_demand = min(c[3] for c in ohlcv_1h)
 
-        # D. Fetch 30m Session Candle
         ohlcv_30m = exchange.fetch_ohlcv(raw_symbol, timeframe='30m', since=start_ms, limit=3)
         target_candle = next((c for c in ohlcv_30m if c[0] == start_ms), None)
         
@@ -159,7 +152,6 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
         "r30_high": range_high, "r30_low": range_low,
         "range_30m": {"high": range_high, "low": range_low},
         
-        # REAL CONTEXT DATA (Fixes the dashed lines)
         "weekly_poc": None, 
         "f24_poc": None, 
         "morn_poc": None,
