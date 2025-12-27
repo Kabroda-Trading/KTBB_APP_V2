@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import os
-import re
-import ccxt # Universal Crypto Library
+import ccxt
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, List
@@ -13,7 +12,6 @@ from zoneinfo import ZoneInfo
 # 1. CONFIGURATION
 # ----------------------------
 # Options: 'kraken', 'coinbase', 'binance', 'mexc', 'kucoin'
-# We default to 'kraken' because it is a reliable Global Spot reference.
 DEFAULT_EXCHANGE_ID = "kraken" 
 
 SESSION_SPECS = {
@@ -27,11 +25,9 @@ SESSION_SPECS = {
 
 def resolve_symbol(symbol: str, exchange_id: str) -> str:
     s = (symbol or "").strip().upper()
-    # Exchange-specific normalizations
     if exchange_id == "kraken" and s == "BTCUSDT": return "BTC/USDT"
     if exchange_id == "coinbase" and s == "BTCUSDT": return "BTC/USD"
     
-    # Generic CCXT format
     if "USDT" in s and "/" not in s: return s.replace("USDT", "/USDT")
     if "USD" in s and "/" not in s and "USDT" not in s: return s.replace("USD", "/USD")
         
@@ -61,29 +57,24 @@ def get_exchange_client(exchange_id: str):
     exchange_class = getattr(ccxt, exchange_id)
     exchange = exchange_class({
         'enableRateLimit': True,
-        'options': {'defaultType': 'spot'} # Always Spot ("The Truth")
+        'options': {'defaultType': 'spot'} 
     })
     return exchange
 
 # ----------------------------
-# 3. FIXED TIME WINDOW LOGIC
+# 3. TIME WINDOW LOGIC
 # ----------------------------
 def _session_window(tz_name, open_hhmm):
     z = ZoneInfo(tz_name)
     now = datetime.now(z)
     hh, mm = map(int, open_hhmm.split(":"))
     
-    # 1. Target Open Time Today
     candidate_open = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-    
-    # 2. Check if the 30m candle has closed yet
     lock_point = candidate_open + timedelta(minutes=30)
     
-    # 3. If NOT closed, use yesterday's session
     if now < lock_point:
         candidate_open -= timedelta(days=1)
     
-    # 4. Define Window (NO OFFSET - Exact Open Time)
     start_local = candidate_open
     end_local = candidate_open + timedelta(minutes=30)
     
@@ -100,16 +91,18 @@ def get_inputs(*, symbol: str, date: Optional[str] = None, session_tz: str = "UT
     return inputs
 
 def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[str, Any]:
-    # 1. Setup
     exchange_id = os.getenv("EXCHANGE_ID", DEFAULT_EXCHANGE_ID).lower()
     raw_symbol = resolve_symbol(symbol, exchange_id)
     spec = SESSION_SPECS.get(session_tz, SESSION_SPECS["UTC"])
     
-    # 2. Initialize Exchange
     exchange = get_exchange_client(exchange_id)
     
     last_price = 0.0
     range_high = range_low = session_open = None
+    
+    # Context Data Holders
+    h1_supply = h1_demand = 0.0
+    h4_supply = h4_demand = 0.0
     
     try:
         # A. Fetch Ticker
@@ -122,22 +115,35 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
         start_utc, end_utc = _session_window(spec["tz"], spec["open"])
         start_ms = _ms(start_utc)
         
-        # Fetch 3 candles starting from our time to ensure match
-        ohlcv = exchange.fetch_ohlcv(raw_symbol, timeframe='30m', since=start_ms, limit=3)
+        # C. Fetch Historical Context (H1 & H4) - THIS WAS MISSING
+        # Fetch last 7 days of 4H data for macro levels
+        since_4h = _ms(datetime.now(timezone.utc) - timedelta(days=7))
+        ohlcv_4h = exchange.fetch_ohlcv(raw_symbol, timeframe='4h', since=since_4h, limit=50)
         
-        # Find exact timestamp match
-        target_candle = next((c for c in ohlcv if c[0] == start_ms), None)
+        if ohlcv_4h:
+            h4_supply = max(c[2] for c in ohlcv_4h) # Max High
+            h4_demand = min(c[3] for c in ohlcv_4h) # Min Low
+
+        # Fetch last 24 hours of 1H data for intraday structure
+        since_1h = _ms(datetime.now(timezone.utc) - timedelta(hours=24))
+        ohlcv_1h = exchange.fetch_ohlcv(raw_symbol, timeframe='1h', since=since_1h, limit=24)
+        
+        if ohlcv_1h:
+            h1_supply = max(c[2] for c in ohlcv_1h) # Max High
+            h1_demand = min(c[3] for c in ohlcv_1h) # Min Low
+
+        # D. Fetch 30m Session Candle
+        ohlcv_30m = exchange.fetch_ohlcv(raw_symbol, timeframe='30m', since=start_ms, limit=3)
+        target_candle = next((c for c in ohlcv_30m if c[0] == start_ms), None)
         
         if target_candle:
-            # CCXT Format: [timestamp, open, high, low, close, volume]
             session_open = target_candle[1]
             range_high = target_candle[2]
             range_low = target_candle[3]
-        elif ohlcv:
-            # Fallback
-            session_open = ohlcv[0][1]
-            range_high = ohlcv[0][2]
-            range_low = ohlcv[0][3]
+        elif ohlcv_30m:
+            session_open = ohlcv_30m[0][1]
+            range_high = ohlcv_30m[0][2]
+            range_low = ohlcv_30m[0][3]
             
     except Exception as e:
         print(f"CCXT Error ({exchange_id}): {e}")
@@ -153,12 +159,14 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
         "r30_high": range_high, "r30_low": range_low,
         "range_30m": {"high": range_high, "low": range_low},
         
-        # Context Stubs
-        "weekly_poc": None, "weekly_val": None, "weekly_vah": None,
-        "f24_poc": None, "f24_val": None, "f24_vah": None,
-        "morn_poc": None, "morn_val": None, "morn_vah": None,
-        "h1_supply": None, "h1_demand": None,
-        "h4_supply": None, "h4_demand": None,
+        # REAL CONTEXT DATA (Fixes the dashed lines)
+        "weekly_poc": None, 
+        "f24_poc": None, 
+        "morn_poc": None,
+        "h1_supply": h1_supply,
+        "h1_demand": h1_demand,
+        "h4_supply": h4_supply,
+        "h4_demand": h4_demand,
         
         "news": _fetch_calendar_stub(),
         "events": _fetch_calendar_stub()
