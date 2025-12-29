@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div style="width: 100%; max-width: 1100px; margin: 0 auto;">
+
+  <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 1px solid var(--glass-border);">
+    <div>
+      <div class="pill">LONG TERM HORIZON</div>
+      <h1 class="display-title" style="font-size: 32px; margin-top: 8px;">
+        Wealth <span class="gradient-text">Operating System</span>
+      </h1>
+      <p style="color: var(--text-muted);">Macro Cycle Analysis & Position Sizing Calculator</p>
+    </div>
+    <div style="text-align: right;">
+        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Current Regime</div>
+        <div id="regimeDisplay" style="font-size: 24px; font-weight: 800; color: #fff;">LOADING...</div>
+    </div>
+  </div>
+
+  <div class="bento-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));">
+    
+    <div class="bento-card">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+            <div class="icon-box">🌍</div>
+            <h3>Macro Environment</h3>
+        </div>
+        
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+            <div style="display: flex; justify-content: space-between;">
+                <span class="label">Bitcoin Price</span>
+                <span id="btcPrice" style="color: #fff; font-weight: 700;">---</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+                <span class="label">Cycle State</span>
+                <span id="cycleState" style="color: var(--primary-bright); font-weight: 700;">---</span>
+            </div>
+            <div class="divider" style="height: 1px; background: var(--glass-border);"></div>
+            <div style="display: flex; justify-content: space-between;">
+                <span class="label">Kill Switch (50%)</span>
+                <span id="lvlKill" style="color: var(--danger);">---</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+                <span class="label">Buy Zone (61.8%)</span>
+                <span id="lvlBuy" style="color: var(--success);">---</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="bento-card" style="border-top: 4px solid var(--primary);">
+        <div style="margin-bottom: 20px;">
+            <h3>"What-If" Calculator</h3>
+            <p style="font-size: 13px; color: var(--text-muted);">Enter available capital to see suggested deployment.</p>
+        </div>
+
+        <form id="calcForm" onsubmit="runCalc(event)">
+            <div style="margin-bottom: 16px;">
+                <label class="label">Available Capital (USD)</label>
+                <input type="number" id="capitalInput" class="input" placeholder="5000" value="5000">
+            </div>
+
+            <div style="margin-bottom: 24px;">
+                <label class="label">Operative Profile</label>
+                <select id="profileInput" class="input" style="cursor: pointer;">
+                    <option value="vault">The Vault (Accumulate Only)</option>
+                    <option value="compounder">The Compounder (Trim Tops)</option>
+                    <option value="sentinel">The Sentinel (Confirmation)</option>
+                </select>
+            </div>
+
+            <button type="submit" class="btn primary" style="width: 100%;">Run Analysis</button>
+        </form>
+    </div>
+
+    <div class="bento-card" id="resultCard" style="display: none; background: rgba(16, 185, 129, 0.05); border: 1px solid var(--success);">
+        <div style="text-align: center; margin-bottom: 20px;">
+            <div class="pill" style="background: var(--success); color: #000;">RECOMMENDED ACTION</div>
+        </div>
+        
+        <div style="text-align: center;">
+            <h2 id="resAction" style="font-size: 36px; margin: 10px 0; color: #fff;">BUY THE DIP</h2>
+            <div id="resAmount" style="font-size: 24px; font-weight: 700; color: var(--success);">$3,000</div>
+            <div id="resPct" style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">(60% Allocation)</div>
+        </div>
+
+        <div style="background: rgba(0,0,0,0.3); padding: 16px; border-radius: 8px;">
+            <p id="resReason" style="font-size: 14px; line-height: 1.5; color: var(--text-muted); margin: 0;">
+                Analysis complete. Waiting for input...
+            </p>
+        </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// Load Macro Data on Page Load
+document.addEventListener('DOMContentLoaded', async () => {
+    const r = await fetch('/api/wealth/macro');
+    if(r.ok) {
+        const data = await r.json();
+        renderMacro(data);
+    }
+});
+
+function renderMacro(data) {
+    document.getElementById('btcPrice').innerText = '$' + data.price.toLocaleString();
+    document.getElementById('cycleState').innerText = data.state;
+    document.getElementById('regimeDisplay').innerText = data.regime + " REGIME";
+    document.getElementById('regimeDisplay').style.color = data.regime === "BULL" ? "var(--primary-bright)" : "var(--text-muted)";
+    
+    if(data.levels) {
+        document.getElementById('lvlKill').innerText = '$' + data.levels.kill_switch.toLocaleString();
+        document.getElementById('lvlBuy').innerText = '$' + data.levels.buy_zone;
+    }
+}
+
+async function runCalc(e) {
+    e.preventDefault();
+    const cap = document.getElementById('capitalInput').value;
+    const prof = document.getElementById('profileInput').value;
+    const resultCard = document.getElementById('resultCard');
+    
+    // Simulate loading
+    const btn = e.target.querySelector('button');
+    btn.innerText = "Processing...";
+    
+    const r = await fetch('/api/wealth/calc', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ capital: cap, profile: prof })
+    });
+    
+    if(r.ok) {
+        const res = await r.json();
+        
+        document.getElementById('resAction').innerText = res.action;
+        document.getElementById('resAmount').innerText = '$' + parseFloat(res.amount).toLocaleString();
+        document.getElementById('resPct').innerText = `(${res.pct_display} Allocation)`;
+        document.getElementById('resReason').innerText = res.reasoning;
+        
+        resultCard.style.display = 'block';
+        
+        // Color coding based on action
+        if(res.action === "WAIT" || res.action === "HOLD") {
+            resultCard.style.borderColor = "var(--text-muted)";
+            resultCard.style.background = "rgba(255,255,255,0.02)";
+            document.getElementById('resAmount').style.color = "var(--text-muted)";
+        } else if(res.action === "TRIM") {
+            resultCard.style.borderColor = "var(--purple)";
+            resultCard.style.background = "rgba(168, 85, 247, 0.05)";
+            document.getElementById('resAmount').style.color = "var(--purple)";
+        } else {
+            resultCard.style.borderColor = "var(--success)";
+            resultCard.style.background = "rgba(16, 185, 129, 0.05)";
+            document.getElementById('resAmount').style.color = "var(--success)";
+        }
+    }
+    btn.innerText = "Run Analysis";
+}
+</script>
+{% endblock %}

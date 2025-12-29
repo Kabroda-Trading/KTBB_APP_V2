@@ -1,6 +1,8 @@
 # main.py
 from __future__ import annotations
 
+import wealth_engine
+
 import asyncio
 import os
 from typing import Any, Dict, Optional
@@ -297,3 +299,39 @@ async def billing_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
     return billing.handle_webhook(payload=payload, sig_header=sig, db=db, UserModel=UserModel)
+
+# --- WEALTH OS ROUTES ---
+
+@app.get("/wealth", response_class=HTMLResponse)
+async def wealth_page(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    # Check paid access if required
+    # require_paid_access(u) 
+    return templates.TemplateResponse("wealth.html", {"request": request, "user": u})
+
+@app.get("/api/wealth/macro")
+async def api_wealth_macro(request: Request):
+    # Verify user session for API security
+    _require_session_user(request)
+    
+    # Fetch data (cached in a real app, direct for now)
+    df = await wealth_engine.fetch_daily_history("BTC/USDT")
+    data = wealth_engine.analyze_macro_cycle(df)
+    return JSONResponse(data)
+
+@app.post("/api/wealth/calc")
+async def api_wealth_calc(request: Request):
+    _require_session_user(request)
+    payload = await request.json()
+    
+    # Re-fetch macro state to ensure freshness (or cache it)
+    df = await wealth_engine.fetch_daily_history("BTC/USDT")
+    macro_data = wealth_engine.analyze_macro_cycle(df)
+    
+    result = wealth_engine.run_wealth_scenario(
+        capital=float(payload.get("capital", 0)),
+        profile_key=payload.get("profile", "vault"),
+        macro_data=macro_data
+    )
+    return JSONResponse(result)
