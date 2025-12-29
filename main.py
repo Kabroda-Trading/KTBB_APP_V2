@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import wealth_engine
+import wealth_lab
 
 import asyncio
 import os
@@ -317,13 +318,29 @@ async def billing_webhook(request: Request, db: Session = Depends(get_db)):
 
 # --- WEALTH OS ROUTES ---
 
+# main.py (Update ONLY this route)
+
 @app.get("/wealth", response_class=HTMLResponse)
 async def wealth_page(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
+    sess = _session_user_dict(request)
+    if not sess: return RedirectResponse(url="/login", status_code=303)
+    
     u = _db_user_from_session(db, sess)
-    # Check paid access if required
-    # require_paid_access(u) 
-    return templates.TemplateResponse("wealth.html", {"request": request, "user": u})
+    
+    # FIX: We must calculate plan flags and pass 'is_logged_in=True'
+    flags = _plan_flags(u)
+    
+    return templates.TemplateResponse("wealth.html", {
+        "request": request, 
+        "is_logged_in": True,  # <--- THIS WAS MISSING
+        "user": {
+            "email": u.email, 
+            "username": u.username, 
+            "session_tz": (u.session_tz or "UTC"),
+            "plan_label": flags.get("plan_label", ""),
+            "plan": flags.get("plan")
+        }
+    })
 
 @app.get("/api/wealth/macro")
 async def api_wealth_macro(request: Request):
@@ -349,4 +366,18 @@ async def api_wealth_calc(request: Request):
         profile_key=payload.get("profile", "vault"),
         macro_data=macro_data
     )
+    return JSONResponse(result)
+@app.get("/api/wealth/test-grid")
+def test_grid_logic():
+    # Example: User has $10k, BTC is $90k, wants to deploy 50%
+    cfg = wealth_lab.GridConfig(
+        asset_price=90000, 
+        total_capital=10000,
+        deploy_pct=50,     # $5,000 total deployment
+        max_buys=10,       # 10 levels
+        grid_step_pct=2.0, # Buy every -2% drop
+        size_mult=1.6      # Buy 60% more each level
+    )
+
+    result = wealth_lab.run_grid_simulation(cfg)
     return JSONResponse(result)
