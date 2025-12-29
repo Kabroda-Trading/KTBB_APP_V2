@@ -286,7 +286,22 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
 async def billing_checkout(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-    return {"url": billing.create_checkout_session(db=db, user_model=u)}
+    
+    # Parse the plan from the request body
+    try:
+        payload = await request.json()
+    except:
+        payload = {}
+        
+    plan_key = payload.get("plan", "monthly") # Default to monthly
+    
+    return {"url": billing.create_checkout_session(db=db, user_model=u, plan_key=plan_key)}
+
+@app.get("/network", response_class=HTMLResponse)
+def network_page(request: Request):
+    # Public page, no login required
+    return templates.TemplateResponse("community.html", {"request": request, "is_logged_in": False})
+
 
 @app.post("/billing/portal")
 async def billing_portal(request: Request, db: Session = Depends(get_db)):

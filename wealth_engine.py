@@ -1,143 +1,82 @@
 # wealth_engine.py
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-import ccxt.async_support as ccxt  # Use async ccxt to not block main thread
 import pandas as pd
+import ccxt
 import asyncio
+from datetime import datetime, timedelta
 
-# 1. THE WEALTH PROFILES (The "Personalities")
-PROFILES = {
-    "vault": {
-        "name": "The Vault",
-        "desc": "Maximum Accumulation. Never Sell.",
-        "alloc_matrix": {"winter": 2.0, "summer": 1.0, "trim": 0.0}
-    },
-    "compounder": {
-        "name": "The Compounder",
-        "desc": "Growth & Harvesting. Trims Tops.",
-        "alloc_matrix": {"winter": 1.5, "summer": 0.8, "trim": 0.15}
-    },
-    "sentinel": {
-        "name": "The Sentinel",
-        "desc": "Capital Preservation. Confirms Trends.",
-        "alloc_matrix": {"winter": 0.0, "summer": 1.2, "trim": 0.50}
-    }
-}
+# Re-use the Universal Feed logic concept, but simplified for Macro Analysis
+def get_exchange():
+    return ccxt.kraken({'enableRateLimit': True})
 
-# 2. DATA FETCHING (Isolated to avoid touching data_feed.py)
-async def fetch_daily_history(symbol: str = "BTC/USDT", limit: int = 730) -> pd.DataFrame:
+async def fetch_daily_history(symbol: str = "BTC/USDT", days: int = 365):
     """
-    Fetches 2 years of daily data specifically for Macro Analysis.
-    Independent of the BattleBox intraday feed.
+    Fetches daily candles for Macro Analysis.
     """
-    exchange = ccxt.kraken() # Or binance, based on preference
     try:
-        # Check if we need to map symbol
-        if symbol == "BTCUSDT": symbol = "BTC/USDT"
+        exch = get_exchange()
+        # Normalize symbol for Kraken if needed
+        if "BTC" in symbol and "USDT" in symbol: symbol = "BTC/USDT"
         
-        ohlcv = await exchange.fetch_ohlcv(symbol, timeframe='1d', limit=limit)
-        df = pd.DataFrame(ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'vol'])
-        df['time'] = pd.to_datetime(df['time'], unit='ms')
+        since = exch.milliseconds() - (days * 24 * 60 * 60 * 1000)
+        ohlcv = await asyncio.to_thread(exch.fetch_ohlcv, symbol, '1d', since)
+        
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['date'] = pd.to_datetime(df['timestamp'], unit='ms')
         return df
-    finally:
-        await exchange.close()
+    except Exception as e:
+        print(f"Wealth Engine Error: {e}")
+        return pd.DataFrame()
 
-# 3. MACRO ANALYSIS (The "Navigator")
-def analyze_macro_cycle(df: pd.DataFrame) -> Dict[str, Any]:
+def analyze_macro_cycle(df: pd.DataFrame):
+    """
+    Determines if we are in Accumulation, Bull, or Bear based on 200 SMA.
+    """
     if df.empty:
-        return {"state": "UNKNOWN", "price": 0}
+        return {"phase": "NEUTRAL", "trend": "FLAT", "sma_200": 0, "current": 0}
 
-    # Calculate EMAs manually to avoid heavy dependencies
-    df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-    df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
+    df['sma_50'] = df['close'].rolling(window=50).mean()
+    df['sma_200'] = df['close'].rolling(window=200).mean()
+    
+    last = df.iloc[-1]
+    price = last['close']
+    sma200 = last['sma_200'] if not pd.isna(last['sma_200']) else price
+    sma50 = last['sma_50'] if not pd.isna(last['sma_50']) else price
 
-    current_price = df['close'].iloc[-1]
-    is_bull = df['ema21'].iloc[-1] > df['ema200'].iloc[-1]
-    
-    # Identify Cycle High/Low (Simple logic: Rolling 1-year max/min)
-    # In production, you might want more complex "pivot" logic here.
-    cycle_high = df['high'].rolling(365, min_periods=1).max().iloc[-1]
-    
-    # Find the "Winter Low" (Lowest low since last Death Cross)
-    # Simplified for robust execution: use 1-year low
-    cycle_low = df['low'].rolling(365, min_periods=1).min().iloc[-1]
+    # Logic: Where are we relative to the 200 Day MA?
+    phase = "ACCUMULATION"
+    if price > sma200:
+        phase = "BULL_MARKET" if price > sma50 else "RECOVERY"
+    else:
+        phase = "BEAR_MARKET" if price < sma50 else "DISTRIBUTION"
 
-    # Calculate Zones
-    rng = cycle_high - cycle_low
-    kill_switch = cycle_high - (rng * 0.5)
-    buy_zone_top = cycle_high - (rng * 0.5)
-    buy_zone_bot = cycle_high - (rng * 0.618)
-    ext_1618 = cycle_high + (rng * 0.618)
-    
-    # Determine State
-    state = "MOMENTUM"
-    regime = "BULL"
-    
-    if not is_bull: 
-        state = "WINTER"
-        regime = "BEAR"
-    elif current_price < kill_switch:
-        state = "DANGER" # Bullish EMAs but price collapsed below 50%
-    elif buy_zone_bot <= current_price <= buy_zone_top:
-        state = "DISCOUNT"
-    elif current_price >= ext_1618:
-        state = "OVERHEATED"
-        
     return {
-        "price": current_price,
-        "regime": regime,
-        "state": state,
-        "levels": {
-            "floor": cycle_low,
-            "ceiling": cycle_high,
-            "kill_switch": kill_switch,
-            "buy_zone": f"{buy_zone_bot:.0f} - {buy_zone_top:.0f}",
-            "extension": ext_1618
-        }
+        "phase": phase,
+        "current_price": price,
+        "sma_200": sma200,
+        "distance_to_200": round(((price - sma200) / sma200) * 100, 2)
     }
 
-# 4. THE CALCULATOR (The "What-If" Engine)
-def run_wealth_scenario(capital: float, profile_key: str, macro_data: Dict) -> Dict:
-    profile = PROFILES.get(profile_key, PROFILES["vault"])
-    state = macro_data.get("state", "UNKNOWN")
+def run_wealth_scenario(capital: float, profile_key: str, macro_data: dict):
+    """
+    Projects growth based on Kabroda Conservative Multipliers.
+    """
+    # Conservative annual estimates based on Bitcoin historic cycle lows vs highs
+    multipliers = {
+        "vault": 1.5,   # Conservative (Hold)
+        "growth": 2.5,  # Moderate (DCA)
+        "alpha": 4.0    # Aggressive (Cycle Trading)
+    }
     
-    action = "HOLD"
-    pct = 0.0
-    reasoning = "Standard Hold."
-    
-    if state == "WINTER":
-        pct = 0.5 * profile["alloc_matrix"]["winter"]
-        action = "ACCUMULATE" if pct > 0 else "WAIT"
-        reasoning = "Market is in Winter. " + ("Deploy reserves." if pct > 0 else "Preserve capital.")
-        
-    elif state == "DISCOUNT":
-        pct = 0.6 * profile["alloc_matrix"]["summer"]
-        action = "BUY THE DIP"
-        reasoning = "Price is in the Green Zone (Micro Pullback)."
-        
-    elif state == "MOMENTUM":
-        pct = 0.2 * profile["alloc_matrix"]["summer"]
-        action = "DCA"
-        reasoning = "Trend is healthy. Standard allocation."
-        
-    elif state == "OVERHEATED":
-        pct = -1.0 * profile["alloc_matrix"]["trim"]
-        action = "TRIM" if pct < 0 else "HOLD"
-        reasoning = "Market hit 1.618 Extension."
-        
-    elif state == "DANGER":
-        pct = 0.0
-        action = "WAIT"
-        reasoning = "Price lost the 50% level. Wait for reclaim."
-
-    amount = capital * abs(pct)
+    mult = multipliers.get(profile_key, 1.5)
+    projected = capital * mult
+    profit = projected - capital
     
     return {
-        "profile": profile["name"],
-        "action": action,
-        "amount": amount,
-        "pct_display": f"{pct*100:.0f}%",
-        "reasoning": reasoning,
-        "state": state
+        "scenario": profile_key.upper(),
+        "input_capital": capital,
+        "multiplier": mult,
+        "projected_value": projected,
+        "profit": profit,
+        "macro_context": macro_data
     }

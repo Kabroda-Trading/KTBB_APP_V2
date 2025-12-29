@@ -1,107 +1,80 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div style="display: flex; flex-wrap: wrap; gap: 60px; align-items: center; justify-content: center; min-height: 70vh;">
+<div class="text-center" style="margin-bottom: 50px;">
+  <div class="pill">OPERATIONAL ACCESS</div>
+  <h1 class="display-title">Choose Your <span class="gradient-text">Commitment</span></h1>
+  <p class="lead-text">
+    All plans include the <strong>7-Day Free Trial</strong>. Zero risk. Cancel anytime.
+  </p>
+</div>
 
-  <div style="flex: 1; min-width: 320px; max-width: 550px;">
-    <div class="pill">OPERATIONAL SUPERIORITY</div>
-    <h1 class="display-title" style="font-size: 48px; margin-bottom: 24px;">One System.<br>Total Clarity.</h1>
-    <p class="lead-text" style="text-align: left; margin: 0; font-size: 18px; color: var(--text-muted);">
-      Most traders pay for five different subscriptions—news, charting, journals, data feeds, and signals.
-      <br><br>
-      <strong>Kabroda replaces them all.</strong>
-      <br><br>
-      We consolidate the institutional spot data, the execution logic, and the daily analysis into a single, calibrated workflow.
-    </p>
+<div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 24px; max-width: 1200px; margin: 0 auto;">
 
-    <div style="margin-top: 40px; border-top: 1px solid var(--glass-border); padding-top: 30px;">
-      <h4 style="color: #fff; margin-bottom: 16px;">THE DOCTRINE INCLUDES:</h4>
-      <ul style="list-style: none; padding: 0; color: var(--text-muted); font-size: 15px; line-height: 2;">
-        <li>✅ <strong>No Upsells.</strong> One tier for everything.</li>
-        <li>✅ <strong>Commercial License.</strong> Use the data for your desk.</li>
-        <li>✅ <strong>Cancel Anytime.</strong> You control the subscription.</li>
+  <div class="bento-card" style="flex: 1; min-width: 300px; border-top: 4px solid var(--text-muted); display: flex; flex-direction: column;">
+    <div style="margin-bottom: 20px;">
+      <h3 style="color: var(--text-muted); font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em;">Standard</h3>
+      <div style="font-size: 42px; font-weight: 900; color: #fff; margin-top: 10px;">$89<span style="font-size: 16px; color: var(--text-muted); font-weight: 500;">/mo</span></div>
+      <p style="font-size: 14px; color: var(--text-muted);">Total flexibility. Month to month.</p>
+    </div>
+    <div style="flex: 1;">
+      <ul style="list-style: none; padding: 0; line-height: 2; font-size: 14px; color: #e2e8f0;">
+        <li>✅ Full Institutional Data Feed</li>
+        <li>✅ 30m Execution Anchor</li>
+        <li>✅ BattleBox AI Command</li>
       </ul>
     </div>
+    <button onclick="startPlan('monthly')" class="btn secondary" style="width: 100%; margin-top: 24px;">Start Monthly Trial</button>
   </div>
 
-  <div style="flex: 0 0 auto; width: 100%; max-width: 480px;">
-    <div class="bento-card" style="border-color: var(--primary); box-shadow: 0 0 50px rgba(14, 165, 233, 0.15); position: relative; overflow: visible;">
-      
-      <div style="
-        position: absolute; top: -15px; left: 50%; transform: translateX(-50%);
-        background: #10b981; color: #000; 
-        font-weight: 800; font-size: 12px; letter-spacing: 0.1em;
-        padding: 6px 16px; border-radius: 20px;
-        box-shadow: 0 0 20px rgba(16, 185, 129, 0.6);
-        text-transform: uppercase; white-space: nowrap;
-      ">
-        7-Day Free Trial Active
-      </div>
-
-      <div style="text-align: center; border-bottom: 1px solid var(--glass-border); padding-bottom: 30px; margin-bottom: 30px; margin-top: 10px;">
-        <h2 style="font-size: 20px; margin-bottom: 10px; color: var(--text-muted);">BattleBox Access</h2>
-        
-        <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
-          <div style="font-size: 64px; font-weight: 900; color: #fff; line-height: 1;">
-            $0<span style="font-size: 18px; color: var(--text-muted); font-weight: 500;"> due today</span>
-          </div>
-          <div style="font-size: 14px; color: var(--text-muted);">
-            Then $79/mo after 7 days
-          </div>
-        </div>
-      </div>
-
-      <ul style="list-style: none; padding: 0; margin-bottom: 40px;">
-        <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
-          <span style="color: var(--primary-bright); font-size: 20px;">⚡</span>
-          <span style="color: #fff; font-weight: 500;">Institutional Data Feed</span>
-        </li>
-        <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
-          <span style="color: var(--primary-bright); font-size: 20px;">🧠</span>
-          <span style="color: #fff; font-weight: 500;">BattleBox AI Command</span>
-        </li>
-        <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
-          <span style="color: var(--primary-bright); font-size: 20px;">📊</span>
-          <span style="color: #fff; font-weight: 500;">TradingView Indicator Suite</span>
-        </li>
-        <li style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center;">
-          <span style="color: var(--primary-bright); font-size: 20px;">🛡️</span>
-          <span style="color: #fff; font-weight: 500;">Execution Guardrails</span>
-        </li>
-      </ul>
-
-      <button id="buyBtn" class="btn primary" style="width: 100%; font-size: 18px; padding: 18px;" onclick="startPlan()">
-        Start My Free 7 Days
-      </button>
-      <p class="text-center" style="font-size: 12px; margin-top: 16px; color: var(--text-muted);">
-        Cancel anytime inside the app. No lock-ins.
-      </p>
+  <div class="bento-card" style="flex: 1; min-width: 300px; border: 2px solid var(--primary); background: linear-gradient(180deg, rgba(14,165,233,0.1) 0%, rgba(0,0,0,0) 100%); transform: scale(1.05); z-index: 10; display: flex; flex-direction: column;">
+    <div style="position: absolute; top: 0; right: 0; background: var(--primary); color: #000; font-size: 10px; font-weight: 800; padding: 4px 12px; border-bottom-left-radius: 8px;">BEST VALUE</div>
+    <div style="margin-bottom: 20px;">
+      <h3 style="color: var(--primary-bright); font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em;">Annual</h3>
+      <div style="font-size: 42px; font-weight: 900; color: #fff; margin-top: 10px;">$890<span style="font-size: 16px; color: var(--text-muted); font-weight: 500;">/yr</span></div>
+      <div style="font-size: 13px; color: var(--success); font-weight: 700; margin-top: 4px;">SAVE $178 (2 MONTHS FREE)</div>
     </div>
+    <div style="flex: 1;">
+      <ul style="list-style: none; padding: 0; line-height: 2; font-size: 14px; color: #fff;">
+        <li>✅ <strong>Everything in Standard</strong></li>
+        <li>✅ Priority Support Access</li>
+        <li>✅ Locked-in Rate for 12 Months</li>
+      </ul>
+    </div>
+    <button onclick="startPlan('annual')" class="btn primary" style="width: 100%; margin-top: 24px;">Start Annual Trial</button>
+  </div>
+
+  <div class="bento-card" style="flex: 1; min-width: 300px; border-top: 4px solid var(--success); display: flex; flex-direction: column;">
+    <div style="margin-bottom: 20px;">
+      <h3 style="color: var(--success); font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em;">Semi-Annual</h3>
+      <div style="font-size: 42px; font-weight: 900; color: #fff; margin-top: 10px;">$499<span style="font-size: 16px; color: var(--text-muted); font-weight: 500;">/6mo</span></div>
+      <div style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Save ~$35 vs Monthly</div>
+    </div>
+    <div style="flex: 1;">
+      <ul style="list-style: none; padding: 0; line-height: 2; font-size: 14px; color: #e2e8f0;">
+        <li>✅ Full Institutional Data Feed</li>
+        <li>✅ 30m Execution Anchor</li>
+        <li>✅ BattleBox AI Command</li>
+      </ul>
+    </div>
+    <button onclick="startPlan('semi')" class="btn secondary" style="width: 100%; margin-top: 24px;">Start 6-Month Trial</button>
   </div>
 
 </div>
 
 <script>
-async function startPlan(){
-  const btn = document.getElementById('buyBtn');
-  const originalText = btn.innerText;
-  btn.innerText = "Initializing...";
-  btn.style.opacity = "0.8";
+async function startPlan(planKey){
+  const btns = document.querySelectorAll('button');
+  btns.forEach(b => b.disabled = true); // Prevent double click
 
-  // LOGIC:
-  // 1. Try to start checkout (Backend checks session).
-  // 2. If 401 (Not Logged In), send to Register.
-  // 3. If Success, send to Stripe.
-  
   try {
     const r = await fetch("/billing/checkout", {
       method:"POST", 
       headers: {"Content-Type":"application/json"}, 
-      body: JSON.stringify({})
+      body: JSON.stringify({ plan: planKey }) // SEND PLAN KEY
     });
 
     if (r.status === 401) {
-      // User is new -> Send to Register
       window.location.href = "/register"; 
       return; 
     }
@@ -111,10 +84,9 @@ async function startPlan(){
       window.location.href = data.url;
     } else {
       alert("System Error: Could not initiate checkout.");
-      btn.innerText = originalText;
+      btns.forEach(b => b.disabled = false);
     }
   } catch (e) {
-    // If fetch fails, assume they need to register/login
     window.location.href = "/register";
   }
 }
