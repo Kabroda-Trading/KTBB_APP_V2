@@ -1,113 +1,215 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="text-center" style="margin-bottom: 40px;">
-  <div class="pill">KABRODA WEALTH ENGINE</div>
-  <h1 class="display-title">Long Term <span class="gradient-text">Structure</span></h1>
-  <p class="lead-text">
-    Trading generates cash flow. Structure generates wealth. <br>
-    Align your capital with the macro cycle.
-  </p>
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+
+<style>
+  /* Dashboard Layout */
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: 300px 1fr; /* Sidebar | Chart */
+    gap: 20px;
+    height: 75vh;
+    margin-top: 20px;
+  }
+  
+  /* Sidebar Styling */
+  .control-panel {
+    background: var(--card-bg); 
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+
+  .metric-card {
+    background: rgba(255,255,255,0.03);
+    padding: 15px;
+    border-radius: 6px;
+    border-left: 3px solid #555;
+  }
+  .metric-label { font-size: 11px; text-transform: uppercase; color: #888; letter-spacing: 1px; }
+  .metric-value { font-size: 18px; font-weight: 700; color: #fff; margin-top: 5px; }
+  
+  /* Chart Container */
+  .chart-container {
+    background: #000;
+    border: 1px solid #333;
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Status Colors */
+  .status-bullish { border-left-color: #00E396; color: #00E396; }
+  .status-bearish { border-left-color: #FF4560; color: #FF4560; }
+  .status-neutral { border-left-color: #FEB019; color: #FEB019; }
+</style>
+
+<div class="text-center">
+  <div class="pill">S JAN INVESTING SUITE</div>
+  <h1 class="display-title">Market <span class="gradient-text">Structure Map</span></h1>
 </div>
 
-<div class="bento-grid">
-
-  <div class="bento-card wide" style="border-left: 4px solid var(--success); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px;">
+<div class="dashboard-grid">
+  
+  <div class="control-panel">
+    
     <div>
-      <h3 style="font-size: 14px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px;">MACRO CYCLE STATUS</h3>
-      <div id="macro-phase" style="font-size: 32px; font-weight: 900; color: #fff;">CALCULATING...</div>
-      <div id="macro-detail" style="font-size: 13px; color: var(--success); margin-top: 4px;">--</div>
-    </div>
-    <div style="text-align: right;">
-      <div style="font-size: 11px; color: var(--text-muted);">BTC/USD REFERENCE</div>
-      <div id="macro-price" style="font-size: 24px; font-weight: 700; color: #fff; font-family: monospace;">$--,---</div>
-    </div>
-  </div>
-
-  <div class="bento-card">
-    <h3 style="margin-bottom: 20px;">Capital Injection</h3>
-    <div style="margin-bottom: 16px;">
-      <label class="label">Available Capital (USD)</label>
-      <input type="number" id="capitalInput" class="input" placeholder="10000" value="10000">
-    </div>
-    
-    <div style="margin-bottom: 24px;">
-      <label class="label">Strategy Profile</label>
-      <select id="profileSelect" class="input">
-        <option value="vault">🛡️ Vault (Spot Hold)</option>
-        <option value="growth">📈 Growth (DCA Strategy)</option>
-        <option value="alpha">🚀 Alpha (Cycle Trading)</option>
-      </select>
-    </div>
-
-    <button onclick="runSimulation()" class="btn primary" style="width: 100%;">RUN SIMULATION</button>
-  </div>
-
-  <div class="bento-card" style="border: 1px dashed var(--glass-border);">
-    <h3 style="margin-bottom: 20px; color: var(--text-muted);">Cycle Projection (4 Year)</h3>
-    
-    <div style="margin-bottom: 16px;">
-      <div class="label">PROJECTED VALUE</div>
-      <div id="res-total" style="font-size: 36px; font-weight: 900; color: #fff;">$0</div>
-    </div>
-
-    <div style="display: flex; gap: 20px;">
-      <div>
-        <div class="label">NET PROFIT</div>
-        <div id="res-profit" style="font-size: 18px; color: var(--success); font-weight: 700;">$0</div>
-      </div>
-      <div>
-        <div class="label">MULTIPLIER</div>
-        <div id="res-mult" style="font-size: 18px; color: var(--primary-bright); font-weight: 700;">0x</div>
+      <label class="label">Asset Ticker</label>
+      <div style="display: flex; gap: 10px;">
+        <input type="text" id="tickerInput" class="input" value="BTC/USDT" style="text-transform: uppercase;">
+        <button onclick="loadAnalysis()" class="btn primary">MAP IT</button>
       </div>
     </div>
+
+    <hr style="border-color: #333;">
+
+    <div id="scorecard" style="display: none; flex-direction: column; gap: 10px;">
+      
+      <div class="metric-card" id="bias-card">
+        <div class="metric-label">Structural Bias</div>
+        <div class="metric-value" id="bias-val">--</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label">Structure Grade</div>
+        <div class="metric-value" id="grade-val" style="color: #fff;">--</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label">Nearest Supply (Sell)</div>
+        <div class="metric-value" id="sup-val" style="color: #FF4560;">--</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label">Nearest Demand (Buy)</div>
+        <div class="metric-value" id="dem-val" style="color: #00E396;">--</div>
+      </div>
+
+    </div>
     
-    <p style="font-size: 11px; color: var(--text-muted); margin-top: 24px; line-height: 1.4;">
-      *Projections based on historical Bitcoin cycle halving data. Not financial advice. Past performance does not guarantee future results.
-    </p>
+    <div id="loading-msg" style="text-align: center; color: #666; margin-top: 20px; display: none;">
+      Running S Jan Logic...
+    </div>
+
   </div>
+
+  <div id="chart-mount" class="chart-container"></div>
 
 </div>
 
 <script>
-  async function loadMacro() {
+  // 1. Initialize Chart
+  const container = document.getElementById('chart-mount');
+  const chart = LightweightCharts.createChart(container, {
+    layout: { background: { color: '#111' }, textColor: '#DDD' },
+    grid: { vertLines: { color: '#222' }, horzLines: { color: '#222' } },
+    rightPriceScale: { borderColor: '#333' },
+    timeScale: { borderColor: '#333', timeVisible: true },
+  });
+
+  // Create Series (Candles)
+  const candleSeries = chart.addCandlestickSeries({
+    upColor: '#00E396', downColor: '#FF4560', 
+    borderVisible: false, 
+    wickUpColor: '#00E396', wickDownColor: '#FF4560'
+  });
+
+  // Resize Observer to handle window resizing
+  new ResizeObserver(entries => {
+    if (entries.length === 0 || entries[0].target !== container) { return; }
+    const newRect = entries[0].contentRect;
+    chart.applyOptions({ width: newRect.width, height: newRect.height });
+  }).observe(container);
+
+
+  // 2. Fetch & Render Function
+  async function loadAnalysis() {
+    const ticker = document.getElementById('tickerInput').value;
+    const loader = document.getElementById('loading-msg');
+    const scorecard = document.getElementById('scorecard');
+    
+    // UI Reset
+    scorecard.style.display = 'none';
+    loader.style.display = 'block';
+    
     try {
-      const r = await fetch("/api/wealth/macro");
-      const d = await r.json();
+      // API Call - THIS IS THE CRITICAL NEW ROUTE
+      const response = await fetch('/api/analyze-s-jan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: ticker })
+      });
       
-      document.getElementById("macro-phase").innerText = d.phase.replace("_", " ");
-      document.getElementById("macro-price").innerText = "$" + d.current_price.toLocaleString();
+      const json = await response.json();
       
-      const dist = d.distance_to_200;
-      const msg = dist > 0 ? `+${dist}% Above 200 DMA` : `${dist}% Below 200 DMA`;
-      document.getElementById("macro-detail").innerText = msg;
+      // A. Plot Candles
+      if (json.candles && json.candles.length > 0) {
+        // Sort candles by time just to be safe
+        const sortedCandles = json.candles.sort((a, b) => a.time - b.time);
+        candleSeries.setData(sortedCandles);
+      }
+
+      // B. Update Scorecard Data
+      const structure = json.structure;
+      const map = json.map;
       
-      // Color logic
-      const el = document.getElementById("macro-phase");
-      if(d.phase.includes("BEAR")) el.style.color = "var(--danger)";
-      else if(d.phase.includes("ACCUMULATION")) el.style.color = "var(--warning)";
-      else el.style.color = "var(--success)";
+      scorecard.style.display = 'flex';
+      loader.style.display = 'none';
       
-    } catch(e) {
-      console.log(e);
+      const biasEl = document.getElementById('bias-val');
+      const biasCard = document.getElementById('bias-card');
+      
+      biasEl.innerText = structure.bias.replace('_', ' ');
+      document.getElementById('grade-val').innerText = structure.grade;
+      document.getElementById('sup-val').innerText = structure.nearest_supply_level ? '$' + structure.nearest_supply_level.toFixed(2) : 'None';
+      document.getElementById('dem-val').innerText = structure.nearest_demand_level ? '$' + structure.nearest_demand_level.toFixed(2) : 'None';
+
+      // C. Color Logic for Scorecard
+      biasCard.className = 'metric-card'; 
+      if(structure.bias.includes('BULL')) biasCard.classList.add('status-bullish');
+      else if(structure.bias.includes('BEAR')) biasCard.classList.add('status-bearish');
+      else biasCard.classList.add('status-neutral');
+
+      // D. Draw Zones (Price Lines)
+      // Draw Supply (Red)
+      if(map.supply_zones) {
+          map.supply_zones.forEach(zone => {
+            candleSeries.createPriceLine({
+              price: zone.level,
+              color: '#FF4560',
+              lineWidth: 2,
+              lineStyle: LightweightCharts.LineStyle.Solid,
+              axisLabelVisible: true,
+              title: `Supply (${zone.tf})`,
+            });
+          });
+      }
+
+      // Draw Demand (Green)
+      if(map.demand_zones) {
+          map.demand_zones.forEach(zone => {
+            candleSeries.createPriceLine({
+              price: zone.level,
+              color: '#00E396',
+              lineWidth: 2,
+              lineStyle: LightweightCharts.LineStyle.Solid,
+              axisLabelVisible: true,
+              title: `Demand (${zone.tf})`,
+            });
+          });
+      }
+      
+      // Fit content to screen
+      chart.timeScale().fitContent();
+
+    } catch (err) {
+      console.error(err);
+      loader.innerText = "Error loading data. Check console.";
     }
   }
-
-  async function runSimulation() {
-    const cap = document.getElementById("capitalInput").value;
-    const prof = document.getElementById("profileSelect").value;
-    
-    const r = await fetch("/api/wealth/calc", {
-      method: "POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ capital: cap, profile: prof })
-    });
-    const d = await r.json();
-    
-    document.getElementById("res-total").innerText = "$" + d.projected_value.toLocaleString(undefined, {maximumFractionDigits:0});
-    document.getElementById("res-profit").innerText = "+$" + d.profit.toLocaleString(undefined, {maximumFractionDigits:0});
-    document.getElementById("res-mult").innerText = d.multiplier + "x";
-  }
-
-  document.addEventListener("DOMContentLoaded", loadMacro);
 </script>
 {% endblock %}

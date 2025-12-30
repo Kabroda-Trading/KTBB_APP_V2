@@ -166,10 +166,12 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
 # ----------------------------
 # 5. NEW: INVESTING DATA FEED (S Jan)
 # ----------------------------
+# In data_feed.py
+
 def get_investing_inputs(symbol: str) -> Dict[str, Any]:
     """
     Fetches Long-Term data (Monthly/Weekly) for the S Jan Investing Engine.
-    Reuses the existing exchange connection logic.
+    INCLUDES TIMESTAMPS for plotting.
     """
     exchange_id = os.getenv("EXCHANGE_ID", DEFAULT_EXCHANGE_ID).lower()
     raw_symbol = resolve_symbol(symbol, exchange_id)
@@ -181,29 +183,26 @@ def get_investing_inputs(symbol: str) -> Dict[str, Any]:
     current_price = 0.0
     
     try:
-        # 1. Get Current Price
         ticker = exchange.fetch_ticker(raw_symbol)
         current_price = float(ticker['last'])
         
-        # 2. Fetch Monthly Data (1M) - Need ~24 months for context
-        # 2 years = ~24 candles
+        # Fetch Monthly (Limit 24)
         ohlcv_m = exchange.fetch_ohlcv(raw_symbol, timeframe='1M', limit=24)
         monthly_candles = [
-            {'open': c[1], 'high': c[2], 'low': c[3], 'close': c[4]} 
+            # time must be in seconds for Lightweight Charts
+            {'time': int(c[0]/1000), 'open': c[1], 'high': c[2], 'low': c[3], 'close': c[4]} 
             for c in ohlcv_m
         ]
         
-        # 3. Fetch Weekly Data (1w) - Need ~52 weeks for context
-        # 1 year = ~52 candles
+        # Fetch Weekly (Limit 52)
         ohlcv_w = exchange.fetch_ohlcv(raw_symbol, timeframe='1w', limit=52)
         weekly_candles = [
-            {'open': c[1], 'high': c[2], 'low': c[3], 'close': c[4]} 
+            {'time': int(c[0]/1000), 'open': c[1], 'high': c[2], 'low': c[3], 'close': c[4]} 
             for c in ohlcv_w
         ]
         
     except Exception as e:
         print(f"Data Feed Error (Investing): {e}")
-        # Return empty lists so the engine handles it gracefully rather than crashing
     
     return {
         "symbol": symbol,
