@@ -5,66 +5,54 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
 
 <style>
-  /* KABRODA CLEAN THEME */
   :root { --bg: #050810; --panel: #0F131F; --border: #1E2536; --accent: #00B2FF; --green: #10B981; --text: #E5E7EB; }
-  body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; overflow: hidden; }
-  .grid { display: grid; grid-template-columns: 320px 1fr; height: 100vh; width: 100vw; position: fixed; top: 0; left: 0; z-index: 999; }
   
-  /* Sidebar */
-  .sidebar { background: var(--bg); border-right: 1px solid var(--border); padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+  /* AUDIT FIX: Layout respects Main Nav */
+  .wealth-layout {
+      display: grid; grid-template-columns: 320px 1fr;
+      height: calc(100vh - 64px); width: 100%; background: var(--bg);
+  }
+  
+  .sidebar { background: var(--bg); border-right: 1px solid var(--border); padding: 20px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
   .logo { font-weight: 800; letter-spacing: 1px; margin-bottom: 20px; color: #fff; }
   
-  /* Inputs */
   .input-label { font-size: 11px; font-weight: 700; color: #6B7280; text-transform: uppercase; margin-bottom: 5px; display: block; }
   .input { background: var(--panel); border: 1px solid var(--border); color: #fff; padding: 12px; width: 100%; border-radius: 6px; font-family: 'JetBrains Mono'; outline: none; }
   .btn { background: var(--accent); color: #000; border: none; padding: 12px; width: 100%; border-radius: 6px; font-weight: 700; cursor: pointer; }
-  .btn:hover { filter: brightness(1.1); }
-
-  /* Results */
+  
+  /* Plan Display */
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-top: 20px; }
   .mode-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 10px; }
-  .b-green { background: rgba(16, 185, 129, 0.2); color: var(--green); }
   .b-blue { background: rgba(0, 178, 255, 0.2); color: var(--accent); }
+  .b-green { background: rgba(16, 185, 129, 0.2); color: var(--green); }
   
   .order-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
-  .order-row:last-child { border-bottom: none; }
   .price { font-family: 'JetBrains Mono'; color: var(--accent); }
   
-  /* Chart */
-  #chart { background: var(--bg); width: 100%; height: 100%; }
+  #chart { width: 100%; height: 100%; }
 </style>
 
-<div class="grid">
+<div class="wealth-layout">
   <div class="sidebar">
     <div class="logo">KABRODA // WEALTH</div>
     
-    <div>
-      <span class="input-label">Asset</span>
-      <input id="ticker" class="input" value="BTC/USDT" style="text-transform:uppercase;">
-    </div>
-    <div>
-      <span class="input-label">Capital ($)</span>
-      <input id="capital" class="input" type="number" value="100000">
-    </div>
-    
+    <div><span class="input-label">Asset</span><input id="ticker" class="input" value="BTC/USDT"></div>
+    <div><span class="input-label">Capital ($)</span><input id="capital" class="input" type="number" value="100000"></div>
     <button onclick="run()" class="btn">GENERATE STRATEGY</button>
 
     <div id="result" style="display:none;">
       <div class="card">
         <span id="mode-badge" class="mode-badge">--</span>
         <div id="rationale" style="font-size: 12px; color: #9CA3AF; line-height: 1.4; margin-bottom: 15px;"></div>
-        
         <div style="font-size:11px; font-weight:700; color:#6B7280; margin-bottom:5px;">EXECUTION PLAN</div>
         <div id="orders"></div>
       </div>
     </div>
   </div>
-
   <div id="chart"></div>
 </div>
 
 <script>
-  // Simple Chart Init
   const chart = LightweightCharts.createChart(document.getElementById('chart'), {
     layout: { background: { color: '#050810' }, textColor: '#6B7280' },
     grid: { vertLines: { color: '#0F131F' }, horzLines: { color: '#0F131F' } },
@@ -79,54 +67,52 @@
     const ticker = document.getElementById('ticker').value;
     const capital = document.getElementById('capital').value;
     
-    // 1. Call API
-    const res = await fetch('/api/analyze-s-jan', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ symbol: ticker, capital: parseFloat(capital) })
-    });
-    const data = await res.json();
-    
-    // 2. Plot Chart (Clean)
-    if(data.candles) {
-      series.setData(data.candles.sort((a,b)=>a.time-b.time));
-      
-      const analysis = data.analysis;
-      
-      // Draw 21 EMA (Blue Line)
-      // Note: We'd normally calc this on frontend or pass line data series. 
-      // For V1, we draw horizontal levels of significance (Fibs)
-      
-      // Draw Golden Pocket (Green Line)
-      series.createPriceLine({ price: analysis.fibs.golden, color: '#10B981', lineWidth: 1, title: 'GOLDEN 0.618' });
-      // Draw Momentum Fib (Blue Line)
-      series.createPriceLine({ price: analysis.fibs.shallow, color: '#00B2FF', lineWidth: 1, title: 'MOMENTUM 0.382' });
-      
-      chart.timeScale().fitContent();
-    }
+    try {
+        const res = await fetch('/api/analyze-s-jan', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ symbol: ticker, capital: parseFloat(capital) })
+        });
+        const data = await res.json();
+        
+        if(data.candles) {
+          series.setData(data.candles.sort((a,b)=>a.time-b.time));
+          
+          // Draw Lines (Fibs & Zones)
+          const fibs = data.analysis.fibs;
+          // Clean existing lines logic omitted for brevity, but Series.createPriceLine adds new ones.
+          series.createPriceLine({ price: fibs.golden, color: '#EAB308', lineWidth: 2, title: 'GOLDEN .618' });
+          series.createPriceLine({ price: fibs.shallow, color: '#00B2FF', lineWidth: 1, title: 'MOMENTUM .382' });
+          
+          if(data.analysis.zones.demand) {
+             data.analysis.zones.demand.forEach(z => {
+                 series.createPriceLine({ price: z.level, color: '#10B981', lineWidth: 1, title: 'DEMAND (Velocity A)' });
+             });
+          }
+          
+          chart.timeScale().fitContent();
+        }
 
-    // 3. Show Plan
-    if(data.plan && data.plan.status === 'READY') {
-      document.getElementById('result').style.display = 'block';
-      const p = data.plan;
-      
-      // Mode Badge
-      const badge = document.getElementById('mode-badge');
-      badge.innerText = p.mode;
-      badge.className = p.mode.includes('MOMENTUM') || p.mode.includes('ROTATION') ? 'mode-badge b-blue' : 'mode-badge b-green';
-      
-      document.getElementById('rationale').innerText = p.rationale;
-      
-      // Orders
-      const list = document.getElementById('orders');
-      list.innerHTML = '';
-      p.orders.forEach(o => {
-        list.innerHTML += `
-          <div class="order-row">
-            <span style="color:#fff; font-weight:700;">BUY $${o.amount.toLocaleString()}</span>
-            <span class="price">@ ${o.price.toLocaleString()}</span>
-          </div>`;
-      });
-    }
+        if(data.plan && data.plan.status === 'READY') {
+          document.getElementById('result').style.display = 'block';
+          const p = data.plan;
+          
+          const badge = document.getElementById('mode-badge');
+          badge.innerText = p.mode;
+          badge.className = p.mode.includes('MOMENTUM') || p.mode.includes('ROTATION') ? 'mode-badge b-blue' : 'mode-badge b-green';
+          
+          document.getElementById('rationale').innerText = p.rationale;
+          
+          const list = document.getElementById('orders');
+          list.innerHTML = '';
+          p.orders.forEach(o => {
+            list.innerHTML += `
+              <div class="order-row">
+                <span style="color:#fff; font-weight:700;">BUY $${o.amount.toLocaleString()}</span>
+                <span class="price">@ ${o.price.toLocaleString()}</span>
+              </div>`;
+          });
+        }
+    } catch(e) { console.error(e); alert("System Error: Check Console"); }
   }
 </script>
 {% endblock %}

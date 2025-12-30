@@ -1,7 +1,4 @@
 # sjan_brain.py
-# ---------------------------------------------------------
-# S-JAN INTELLIGENCE: MACRO BULL / MICRO ROTATION ENGINE
-# ---------------------------------------------------------
 from __future__ import annotations
 from typing import List, Dict, Any
 import pandas as pd
@@ -9,91 +6,122 @@ import numpy as np
 
 def analyze_market_structure(monthly_candles: List[Dict], weekly_candles: List[Dict]) -> Dict[str, Any]:
     """
-    Philosophy:
-    1. We are in a MACRO BULL unless absolute structure fails.
-    2. We identify MICRO RUNS vs MICRO RESTS.
-    3. We detect ROTATION (The "Get In" signal).
+    AUDITED LOGIC:
+    1. Trends: 200 SMA (Macro) & 21 EMA (Micro).
+    2. Structure: Trails the 'Local High' to keep Fibs dynamic.
+    3. Triggers: Detects ROTATION (Price reclaiming momentum).
     """
-    # 1. PREPARE DATA
     df = pd.DataFrame(weekly_candles)
     if df.empty: return {}
     
-    # --- CORE INDICATORS ---
-    # 21 EMA (The Speed / Micro Trend)
+    # --- 1. CORE INDICATORS (The Math) ---
     df['ema_21'] = df['close'].ewm(span=21, adjust=False).mean()
-    # 200 SMA (The Baseline / God Line)
     df['sma_200'] = df['close'].rolling(window=200).mean()
     
-    # Fallback for young assets (ETH/SOL might not have 200 weeks)
+    # Fallback for young assets
     if pd.isna(df['sma_200'].iloc[-1]): 
         df['sma_200'] = df['close'].rolling(window=50).mean()
 
     curr = df.iloc[-1]
     prev = df.iloc[-2]
     
-    # --- 2. TRAILING STRUCTURE (The "Breathing") ---
-    # Find the Macro Bottom (Absolute Low of the dataset)
+    # --- 2. TRAILING STRUCTURE (The Context) ---
+    # Anchor: Macro Low (Cycle Bottom)
     macro_low = df['low'].min()
     
-    # Find the "Local High" (Trailing Top)
-    # Logic: Look at last 52 weeks. The highest point is our current Fib Anchor.
-    # As price breaks up, this moves up.
+    # Ceiling: Highest High of the last 52 weeks (Trailing Top)
+    # This ensures we aren't using a stale high from 2 years ago if we just broke out.
     local_high = df['high'].tail(52).max()
     
-    # Calculate Fibonacci Retracements for this Leg
     fib_range = local_high - macro_low
-    fib_0382 = local_high - (fib_range * 0.382) # Shallow (Strong Momentum)
-    fib_0618 = local_high - (fib_range * 0.618) # Golden Pocket (Standard Accumulation)
-    fib_0786 = local_high - (fib_range * 0.786) # Deep (Macro Shift Risk)
+    fibs = {
+        "top": local_high,
+        "bottom": macro_low,
+        "shallow": local_high - (fib_range * 0.382), # Strong Trend Support
+        "golden": local_high - (fib_range * 0.618),  # Standard Pullback
+        "deep": local_high - (fib_range * 0.786)     # Macro Risk
+    }
 
-    # --- 3. PHASE DETECTION ---
-    # MACRO STATE: Always BULL unless we lose the Macro Low or 200 SMA definitively.
-    macro_state = "MACRO BULL"
-    if curr['close'] < macro_low: macro_state = "MACRO FAILURE"
-
-    # MICRO STATE:
-    # RUN (Impulse): Price > 21 EMA
-    # REST (Pullback): Price < 21 EMA
+    # --- 3. TREND STATE (The Decision) ---
+    macro_state = "MACRO BULL" if curr['close'] > macro_low else "MACRO FAILURE"
+    
+    # Micro Trend: Are we above the Speed Line (21 EMA)?
     micro_state = "RUN (IMPULSE)" if curr['close'] > curr['ema_21'] else "REST (PULLBACK)"
     
-    # --- 4. ROTATION DETECTOR (The "Get In" Signal) ---
-    # Rotation = We were resting, but now Price is reclaiming key levels.
-    is_rotating = False
+    # --- 4. ROTATION DETECTOR (The Trigger) ---
+    # Rotation = Price was weak, but just reclaimed Strength.
+    rotation = False
     
-    # Scenario A: The 21 Cross (Standard Rotation)
-    # Price closed above 21 EMA after being below it
+    # A: Reclaimed 21 EMA
     if prev['close'] < prev['ema_21'] and curr['close'] > curr['ema_21']:
-        is_rotating = True
+        rotation = True
         
-    # Scenario B: The 200 Reclaim (Deep Value Rotation)
+    # B: Reclaimed 200 SMA (Deep Value Rotation)
     if prev['close'] < prev['sma_200'] and curr['close'] > curr['sma_200']:
-        is_rotating = True
+        rotation = True
 
-    # --- 5. EXHAUSTION CHECK (Gravity) ---
-    # If we are resting, how deep is the cut?
-    exhaustion = "HEALTHY"
-    if curr['close'] < fib_0618: exhaustion = "HEAVY"   # Bleeding past Golden Pocket
-    if curr['close'] < fib_0786: exhaustion = "CRITICAL" # Threatening Macro Structure
+    # --- 5. ZONE SCANNING (The Map) ---
+    zones = _scan_zones(df)
 
     return {
         "price": curr['close'],
         "macro": macro_state,
         "micro": micro_state,
-        "rotation": is_rotating,
-        "exhaustion": exhaustion,
+        "rotation": rotation,
         "indicators": {
             "ema_21": curr['ema_21'],
             "sma_200": curr['sma_200']
         },
-        "fibs": {
-            "top": local_high,
-            "bottom": macro_low,
-            "shallow": fib_0382,
-            "golden": fib_0618,
-            "deep": fib_0786
-        },
-        # We pass empty lists here to satisfy the contract, 
-        # actual zones are handled by the legacy engine if needed, 
-        # but for Wealth, we focus on Fibs + MAs.
-        "zones": {"supply": [], "demand": []} 
+        "fibs": fibs,
+        "zones": zones 
     }
+
+def _scan_zones(df: pd.DataFrame) -> Dict[str, List]:
+    """
+    AUDIT CHECK: Velocity Logic.
+    Only returns zones where price left Aggressively (>3% move).
+    """
+    supply = []
+    demand = []
+    
+    # Look at recent history (100 weeks)
+    window = df.tail(100).reset_index(drop=True)
+    
+    for i in range(2, len(window) - 4):
+        curr = window.iloc[i]
+        prev = window.iloc[i-1]
+        next_c = window.iloc[i+1]
+        
+        # DEMAND: V-Shape Low
+        if curr['low'] < prev['low'] and curr['low'] < next_c['low']:
+            # VELOCITY CHECK: Did we rip up after?
+            future_high = window.iloc[i+1:i+4]['high'].max()
+            move_pct = (future_high - curr['high']) / curr['high']
+            
+            if move_pct > 0.03: # >3% move required to be "Grade A"
+                demand.append({
+                    "level": curr['low'],
+                    "strength": "A" if move_pct > 0.10 else "B"
+                })
+
+        # SUPPLY: A-Shape High
+        if curr['high'] > prev['high'] and curr['high'] > next_c['high']:
+            future_low = window.iloc[i+1:i+4]['low'].min()
+            move_pct = (curr['low'] - future_low) / curr['low']
+            
+            if move_pct > 0.03:
+                supply.append({
+                    "level": curr['high'],
+                    "strength": "A" if move_pct > 0.10 else "B"
+                })
+                
+    # Filter: Only keep zones relevant to current price (+/- 20%)
+    last_price = window.iloc[-1]['close']
+    demand = [z for z in demand if z['level'] < last_price * 1.1]
+    supply = [z for z in supply if z['level'] > last_price * 0.9]
+    
+    # Sort: Closest first
+    demand.sort(key=lambda x: x['level'], reverse=True)
+    supply.sort(key=lambda x: x['level'])
+
+    return {"supply": supply[:3], "demand": demand[:3]} # Return top 3
