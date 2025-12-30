@@ -1,14 +1,6 @@
 # main.py
 from __future__ import annotations
 
-import wealth_engine
-import wealth_lab
-
-# main.py imports section
-import sse_engine  # Make sure this is imported
-import data_feed   # Make sure this is imported
-# ... existing imports ...
-
 import asyncio
 import os
 from typing import Any, Dict, Optional
@@ -21,9 +13,15 @@ from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.templating import Jinja2Templates
 
+# --- IMPORTS ---
 import auth
 import billing
 import dmr_report
+import data_feed   # <--- KEEP
+import sse_engine  # <--- KEEP
+# DELETED: import wealth_engine (The culprit)
+# DELETED: import wealth_lab
+
 from database import init_db, get_db, UserModel
 from membership import (
     get_membership_state,
@@ -73,7 +71,7 @@ def _startup():
         except Exception:
             db.rollback()
 
-        # 2. Fix TradingView ID Column (NEW)
+        # 2. Fix TradingView ID Column
         try:
             db.execute(text("ALTER TABLE users ADD COLUMN tradingview_id VARCHAR"))
             db.commit()
@@ -210,10 +208,7 @@ async def account_save_tvid(request: Request, db: Session = Depends(get_db)):
     tv_id = (payload.get("tradingview_id") or "").strip()
     u.tradingview_id = tv_id
     db.commit()
-    
-    # 🚨 NOTIFICATION LOG
     print(f"🚨 ACTIVATION REQUEST: User {u.email} -> TradingView ID: {tv_id}")
-    
     return {"ok": True}
 
 # -------------------------------------------------------------------
@@ -268,21 +263,15 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     
-    # --------------------------------------------------------
-    # UPDATED: CHECK FOR SESSION OVERRIDE FROM DASHBOARD
-    # --------------------------------------------------------
     requested_session = payload.get("session_tz")
     
     if requested_session:
-        # Use the specific selection (e.g., "America/New_York_Early")
         final_session = requested_session.strip()
     else:
-        # Fallback to saved user preference (Legacy)
         final_session = (u.session_tz or "UTC").strip()
 
     ensure_symbol_allowed(u, symbol)
     
-    # Run the report with the final_session
     raw = await asyncio.to_thread(dmr_report.run_auto_raw, symbol=symbol, session_tz=final_session)
     
     request.session["last_dmr_meta"] = {"symbol": raw.get("symbol", symbol), "date": raw.get("date", "")}
@@ -292,22 +281,14 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
 async def billing_checkout(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-    
-    # Parse the plan from the request body
-    try:
-        payload = await request.json()
-    except:
-        payload = {}
-        
-    plan_key = payload.get("plan", "monthly") # Default to monthly
-    
+    try: payload = await request.json()
+    except: payload = {}
+    plan_key = payload.get("plan", "monthly")
     return {"url": billing.create_checkout_session(db=db, user_model=u, plan_key=plan_key)}
 
 @app.get("/network", response_class=HTMLResponse)
 def network_page(request: Request):
-    # Public page, no login required
     return templates.TemplateResponse("community.html", {"request": request, "is_logged_in": False})
-
 
 @app.post("/billing/portal")
 async def billing_portal(request: Request, db: Session = Depends(get_db)):
@@ -321,9 +302,9 @@ async def billing_webhook(request: Request, db: Session = Depends(get_db)):
     sig = request.headers.get("stripe-signature", "")
     return billing.handle_webhook(payload=payload, sig_header=sig, db=db, UserModel=UserModel)
 
-# --- WEALTH OS ROUTES ---
-
-# main.py (Update ONLY this route)
+# -------------------------------------------------------------------
+# NEW: S JAN / WEALTH ROUTES (Cleaned)
+# -------------------------------------------------------------------
 
 @app.get("/wealth", response_class=HTMLResponse)
 async def wealth_page(request: Request, db: Session = Depends(get_db)):
@@ -331,13 +312,11 @@ async def wealth_page(request: Request, db: Session = Depends(get_db)):
     if not sess: return RedirectResponse(url="/login", status_code=303)
     
     u = _db_user_from_session(db, sess)
-    
-    # FIX: We must calculate plan flags and pass 'is_logged_in=True'
     flags = _plan_flags(u)
     
     return templates.TemplateResponse("wealth.html", {
         "request": request, 
-        "is_logged_in": True,  # <--- THIS WAS MISSING
+        "is_logged_in": True,
         "user": {
             "email": u.email, 
             "username": u.username, 
@@ -347,58 +326,14 @@ async def wealth_page(request: Request, db: Session = Depends(get_db)):
         }
     })
 
-@app.get("/api/wealth/macro")
-async def api_wealth_macro(request: Request):
-    # Verify user session for API security
-    _require_session_user(request)
-    
-    # Fetch data (cached in a real app, direct for now)
-    df = await wealth_engine.fetch_daily_history("BTC/USDT")
-    data = wealth_engine.analyze_macro_cycle(df)
-    return JSONResponse(data)
-
-@app.post("/api/wealth/calc")
-async def api_wealth_calc(request: Request):
-    _require_session_user(request)
-    payload = await request.json()
-    
-    # Re-fetch macro state to ensure freshness (or cache it)
-    df = await wealth_engine.fetch_daily_history("BTC/USDT")
-    macro_data = wealth_engine.analyze_macro_cycle(df)
-    
-    result = wealth_engine.run_wealth_scenario(
-        capital=float(payload.get("capital", 0)),
-        profile_key=payload.get("profile", "vault"),
-        macro_data=macro_data
-    )
-    return JSONResponse(result)
-@app.get("/api/wealth/test-grid")
-def test_grid_logic():
-    # Example: User has $10k, BTC is $90k, wants to deploy 50%
-    cfg = wealth_lab.GridConfig(
-        asset_price=90000, 
-        total_capital=10000,
-        deploy_pct=50,     # $5,000 total deployment
-        max_buys=10,       # 10 levels
-        grid_step_pct=2.0, # Buy every -2% drop
-        size_mult=1.6      # Buy 60% more each level
-    )
-
-    result = wealth_lab.run_grid_simulation(cfg)
-    return JSONResponse(result)
-# -------------------------------------------------------------------
-# NEW: S Jan Investing API
-# -------------------------------------------------------------------
 @app.post("/api/analyze-s-jan")
 async def api_analyze_s_jan(request: Request, db: Session = Depends(get_db)):
     """
-    The new brain for Long-Term Structure.
-    Connects Data Feed -> SSE Engine (Investing Mode) -> Frontend.
+    The Full S Jan API.
+    Returns: Logic Results AND Candle History for plotting.
     """
-    # 1. Security: Ensure user is logged in
-    sess = _require_session_user(request)
+    _require_session_user(request)
     
-    # 2. Get User Input
     try:
         payload = await request.json()
     except:
@@ -406,11 +341,16 @@ async def api_analyze_s_jan(request: Request, db: Session = Depends(get_db)):
     
     symbol = (payload.get("symbol") or "BTC/USDT").strip().upper()
     
-    # 3. Data Feed: Fetch Monthly/Weekly Candles (Using the new function in data_feed.py)
-    # We use asyncio.to_thread because CCXT is synchronous
+    # 1. Fetch Data (Includes Candles with Timestamps)
     inputs = await asyncio.to_thread(data_feed.get_investing_inputs, symbol)
     
-    # 4. The Engine: Calculate Zones & Grades (Using the new code in sse_engine.py)
+    # 2. Run Engine
     result = sse_engine.compute_investing_levels(inputs)
     
-    return JSONResponse(result)
+    # 3. Merge Candles into Response
+    return JSONResponse({
+        "status": "success",
+        "map": result["map"],
+        "structure": result["structure"],
+        "candles": inputs["weekly_candles"]
+    })
