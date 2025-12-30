@@ -1,12 +1,12 @@
 # main.py
+# ---------------------------------------------------------
+# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v3.1
+# ---------------------------------------------------------
 from __future__ import annotations
 
 import asyncio
 import os
 from typing import Any, Dict, Optional
-
-import sjan_brain
-import wealth_allocator
 
 from fastapi import FastAPI, Request, Form, HTTPException, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -16,14 +16,16 @@ from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.templating import Jinja2Templates
 
-# --- IMPORTS ---
+# --- CORE IMPORTS ---
 import auth
 import billing
 import dmr_report
-import data_feed   # <--- KEEP
-import sse_engine  # <--- KEEP
-# DELETED: import wealth_engine (The culprit)
-# DELETED: import wealth_lab
+import data_feed
+import sse_engine
+
+# --- WEALTH IMPORTS (Isolated) ---
+import sjan_brain
+import wealth_allocator
 
 from database import init_db, get_db, UserModel
 from membership import (
@@ -40,8 +42,7 @@ app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), na
 
 def _bool_env(name: str, default: bool = False) -> bool:
     v = os.getenv(name)
-    if v is None:
-        return default
+    if v is None: return default
     return v.strip().lower() in ("1", "true", "yes", "y", "on")
 
 SESSION_SECRET = os.getenv("SESSION_SECRET") or os.getenv("SECRET_KEY") or "dev-session-secret"
@@ -57,38 +58,30 @@ app.add_middleware(
 )
 
 # -------------------------------------------------------------------
-# STARTUP EVENT (AUTO-FIX DATABASE)
+# STARTUP EVENT: DATABASE CALIBRATION
 # -------------------------------------------------------------------
 @app.on_event("startup")
 def _startup():
     init_db()
-    
-    print("--- CHECKING DATABASE SCHEMA ---")
     db = next(get_db()) 
     try:
-        # 1. Fix Username Column
+        # Auto-migration for missing operative columns
         try:
             db.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR"))
             db.commit()
-            print("--- ADDED 'username' COLUMN ---")
-        except Exception:
-            db.rollback()
-
-        # 2. Fix TradingView ID Column
+        except Exception: db.rollback()
+        
         try:
             db.execute(text("ALTER TABLE users ADD COLUMN tradingview_id VARCHAR"))
             db.commit()
-            print("--- ADDED 'tradingview_id' COLUMN ---")
-        except Exception:
-            db.rollback()
-            
+        except Exception: db.rollback()
     except Exception as e:
-        print(f"--- SCHEMA CHECK NOTE: {e}")
+        print(f"--- STARTUP SCHEMA LOG: {e}")
     finally:
         db.close()
 
 # -------------------------------------------------------------------
-# Session helpers
+# SESSION & MEMBERSHIP HELPERS
 # -------------------------------------------------------------------
 def _session_user_dict(request: Request) -> Optional[Dict[str, Any]]:
     u = request.session.get("user")
@@ -99,28 +92,18 @@ def _require_session_user(request: Request) -> Dict[str, Any]:
 
 def _db_user_from_session(db: Session, sess: Dict[str, Any]) -> UserModel:
     uid = sess.get("id")
-    if not uid:
-        raise HTTPException(status_code=401, detail="Invalid session")
+    if not uid: raise HTTPException(status_code=401, detail="Invalid session")
     u = db.query(UserModel).filter(UserModel.id == uid).first()
-    if not u:
-        raise HTTPException(status_code=401, detail="User not found")
+    if not u: raise HTTPException(status_code=401, detail="User not found")
     return u
 
 def _plan_flags(u: UserModel) -> Dict[str, Any]:
     ms = get_membership_state(u)
-    return {
-        "is_paid": ms.is_paid,
-        "plan": ms.plan,
-        "plan_label": ms.label,
-    }
+    return {"is_paid": ms.is_paid, "plan": ms.plan, "plan_label": ms.label}
 
 # -------------------------------------------------------------------
-# Public routes
+# PUBLIC ROUTES (No Auth Required)
 # -------------------------------------------------------------------
-@app.head("/")
-def head_root():
-    return {"ok": True}
-
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse("home.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
@@ -137,8 +120,12 @@ def how_it_works(request: Request):
 def pricing(request: Request):
     return templates.TemplateResponse("pricing.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
 
+@app.get("/network", response_class=HTMLResponse)
+def network_page(request: Request):
+    return templates.TemplateResponse("community.html", {"request": request, "is_logged_in": False})
+
 # -------------------------------------------------------------------
-# Suite (paywalled)
+# DAY TRADING SUITE: BATTLEBOX COMMAND
 # -------------------------------------------------------------------
 @app.get("/suite", response_class=HTMLResponse)
 def suite(request: Request, db: Session = Depends(get_db)):
@@ -153,6 +140,17 @@ def suite(request: Request, db: Session = Depends(get_db)):
         "user": {"email": u.email, "username": u.username, "session_tz": (u.session_tz or "UTC"), "plan_label": flags.get("plan_label", ""), "plan": flags.get("plan") or ""}
     })
 
+@app.post("/api/dmr/run-raw")
+async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    require_paid_access(u)
+    payload = await request.json()
+    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
+    ensure_symbol_allowed(u, symbol)
+    raw = await asyncio.to_thread(dmr_report.run_auto_raw, symbol=symbol, session_tz=u.session_tz or "UTC")
+    return JSONResponse(raw)
+
 @app.get("/indicators", response_class=HTMLResponse)
 def indicators(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -164,6 +162,43 @@ def indicators(request: Request, db: Session = Depends(get_db)):
         "user": {"email": u.email, "username": u.username, "session_tz": (u.session_tz or "UTC"), "plan_label": flags.get("plan_label", ""), "plan": flags.get("plan") or ""}
     })
 
+# -------------------------------------------------------------------
+# WEALTH OS: INVESTING & ACCUMULATION
+# -------------------------------------------------------------------
+@app.get("/wealth", response_class=HTMLResponse)
+async def wealth_page(request: Request, db: Session = Depends(get_db)):
+    sess = _session_user_dict(request)
+    if not sess: return RedirectResponse(url="/login", status_code=303)
+    u = _db_user_from_session(db, sess)
+    require_paid_access(u)
+    flags = _plan_flags(u)
+    return templates.TemplateResponse("wealth.html", {
+        "request": request, "is_logged_in": True,
+        "user": {"email": u.email, "username": u.username, "plan_label": flags.get("plan_label", "")}
+    })
+
+@app.post("/api/analyze-s-jan")
+async def api_analyze_s_jan(request: Request, db: Session = Depends(get_db)):
+    _require_session_user(request)
+    try: payload = await request.json()
+    except: payload = {}
+    symbol = (payload.get("symbol") or "BTC/USDT").strip().upper()
+    capital = float(payload.get("capital") or 0)
+    
+    # 1. Fetch Investing Inputs (Isolated Feed)
+    inputs = await asyncio.to_thread(data_feed.get_investing_inputs, symbol)
+    
+    # 2. Run the Dynamic Brain (Trailing Structure + Rotation)
+    analysis = sjan_brain.analyze_market_structure(inputs["monthly_candles"], inputs["weekly_candles"])
+    
+    # 3. Generate the Gear Shifting Plan
+    plan = wealth_allocator.generate_dynamic_plan(capital, analysis) if capital > 0 else {}
+
+    return JSONResponse({"status": "success", "candles": inputs["weekly_candles"], "analysis": analysis, "plan": plan})
+
+# -------------------------------------------------------------------
+# ACCOUNT & AUTHENTICATION
+# -------------------------------------------------------------------
 @app.get("/account", response_class=HTMLResponse)
 def account(request: Request, db: Session = Depends(get_db)):
     sess = _session_user_dict(request)
@@ -176,47 +211,6 @@ def account(request: Request, db: Session = Depends(get_db)):
         "tier_label": flags["plan_label"],
     })
 
-@app.post("/account/profile")
-async def account_update_profile(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    try: payload = await request.json()
-    except: payload = {}
-    new_name = payload.get("username", "").strip()
-    u.username = new_name
-    db.commit()
-    if "user" in request.session: request.session["user"]["username"] = new_name
-    return {"ok": True, "username": new_name}
-
-@app.post("/account/session-timezone")
-async def account_set_timezone(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    try: payload = await request.json()
-    except: payload = {}
-    tz = (payload.get("timezone") or "").strip()
-    if not tz: raise HTTPException(status_code=400, detail="Missing timezone")
-    u.session_tz = tz
-    db.commit()
-    return {"ok": True, "timezone": tz}
-
-@app.post("/account/tradingview-id")
-async def account_save_tvid(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    
-    try: payload = await request.json()
-    except: payload = {}
-    
-    tv_id = (payload.get("tradingview_id") or "").strip()
-    u.tradingview_id = tv_id
-    db.commit()
-    print(f"🚨 ACTIVATION REQUEST: User {u.email} -> TradingView ID: {tv_id}")
-    return {"ok": True}
-
-# -------------------------------------------------------------------
-# Auth & Billing Routes
-# -------------------------------------------------------------------
 @app.get("/login", response_class=HTMLResponse)
 def login_get(request: Request):
     return templates.TemplateResponse("login.html", {"request": request, "error": None})
@@ -229,11 +223,6 @@ def login_post(request: Request, db: Session = Depends(get_db), email: str = For
     return RedirectResponse(url="/suite", status_code=303)
 
 @app.get("/logout")
-def logout_get(request: Request):
-    auth.clear_user_session(request)
-    return RedirectResponse(url="/", status_code=303)
-
-@app.post("/logout")
 def logout(request: Request):
     auth.clear_user_session(request)
     return RedirectResponse(url="/", status_code=303)
@@ -246,40 +235,15 @@ def register_get(request: Request):
 @app.post("/register")
 def register_post(request: Request, db: Session = Depends(get_db), email: str = Form(...), password: str = Form(...)):
     if auth.registration_disabled(): raise HTTPException(status_code=403, detail="Registration disabled")
-    try:
-        u = auth.create_user(db, email=email, password=password)
-    except HTTPException as e:
-        return templates.TemplateResponse("register.html", {"request": request, "error": str(e.detail)}, status_code=e.status_code)
+    try: u = auth.create_user(db, email=email, password=password)
+    except HTTPException as e: return templates.TemplateResponse("register.html", {"request": request, "error": str(e.detail)}, status_code=e.status_code)
     auth.set_user_session(request, u)
     try: return RedirectResponse(url=billing.create_checkout_session(db=db, user_model=u), status_code=303)
     except: return RedirectResponse(url="/pricing?new=1", status_code=303)
 
 # -------------------------------------------------------------------
-# API & Billing
+# BILLING & STRIPE INTEGRATION
 # -------------------------------------------------------------------
-@app.post("/api/dmr/run-raw")
-async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-    
-    payload = await request.json()
-    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    
-    requested_session = payload.get("session_tz")
-    
-    if requested_session:
-        final_session = requested_session.strip()
-    else:
-        final_session = (u.session_tz or "UTC").strip()
-
-    ensure_symbol_allowed(u, symbol)
-    
-    raw = await asyncio.to_thread(dmr_report.run_auto_raw, symbol=symbol, session_tz=final_session)
-    
-    request.session["last_dmr_meta"] = {"symbol": raw.get("symbol", symbol), "date": raw.get("date", "")}
-    return JSONResponse(raw)
-
 @app.post("/billing/checkout")
 async def billing_checkout(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -288,10 +252,6 @@ async def billing_checkout(request: Request, db: Session = Depends(get_db)):
     except: payload = {}
     plan_key = payload.get("plan", "monthly")
     return {"url": billing.create_checkout_session(db=db, user_model=u, plan_key=plan_key)}
-
-@app.get("/network", response_class=HTMLResponse)
-def network_page(request: Request):
-    return templates.TemplateResponse("community.html", {"request": request, "is_logged_in": False})
 
 @app.post("/billing/portal")
 async def billing_portal(request: Request, db: Session = Depends(get_db)):
@@ -304,77 +264,3 @@ async def billing_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
     return billing.handle_webhook(payload=payload, sig_header=sig, db=db, UserModel=UserModel)
-
-# -------------------------------------------------------------------
-# NEW: S JAN / WEALTH ROUTES (Cleaned)
-# -------------------------------------------------------------------
-
-@app.get("/wealth", response_class=HTMLResponse)
-async def wealth_page(request: Request, db: Session = Depends(get_db)):
-    sess = _session_user_dict(request)
-    if not sess: return RedirectResponse(url="/login", status_code=303)
-    
-    u = _db_user_from_session(db, sess)
-    flags = _plan_flags(u)
-    
-    return templates.TemplateResponse("wealth.html", {
-        "request": request, 
-        "is_logged_in": True,
-        "user": {
-            "email": u.email, 
-            "username": u.username, 
-            "session_tz": (u.session_tz or "UTC"),
-            "plan_label": flags.get("plan_label", ""),
-            "plan": flags.get("plan")
-        }
-    })
-
-# main.py
-# ... (Keep existing imports) ...
-import sjan_brain      # <--- NEW
-import wealth_allocator # <--- NEW
-
-# ... (Keep existing startup/auth/billing code) ...
-
-# -------------------------------------------------------------------
-# NEW: S JAN / WEALTH ROUTES
-# -------------------------------------------------------------------
-
-@app.get("/wealth", response_class=HTMLResponse)
-async def wealth_page(request: Request, db: Session = Depends(get_db)):
-    sess = _session_user_dict(request)
-    if not sess: return RedirectResponse(url="/login", status_code=303)
-    u = _db_user_from_session(db, sess)
-    flags = _plan_flags(u)
-    return templates.TemplateResponse("wealth.html", {
-        "request": request, "is_logged_in": True,
-        "user": {"email": u.email, "username": u.username, "plan_label": flags.get("plan_label", ""), "plan": flags.get("plan")}
-    })
-
-@app.post("/api/analyze-s-jan")
-async def api_analyze_s_jan(request: Request, db: Session = Depends(get_db)):
-    _require_session_user(request)
-    
-    try: payload = await request.json()
-    except: payload = {}
-    
-    symbol = (payload.get("symbol") or "BTC/USDT").strip().upper()
-    capital = float(payload.get("capital") or 0)
-    
-    # 1. Fetch Data
-    inputs = await asyncio.to_thread(data_feed.get_investing_inputs, symbol)
-    
-    # 2. RUN BRAIN
-    analysis = sjan_brain.analyze_market_structure(inputs["monthly_candles"], inputs["weekly_candles"])
-    
-    # 3. RUN ALLOCATOR
-    plan = {}
-    if capital > 0:
-        plan = wealth_allocator.generate_dynamic_plan(capital, analysis)
-
-    return JSONResponse({
-        "status": "success",
-        "candles": inputs["weekly_candles"],
-        "analysis": analysis,
-        "plan": plan
-    })
