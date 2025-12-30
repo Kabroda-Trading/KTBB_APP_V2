@@ -4,215 +4,200 @@
 <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 
 <style>
+  /* TERMINAL THEME */
   :root {
-    --glass-bg: rgba(20, 20, 25, 0.7);
-    --glass-border: 1px solid rgba(255, 255, 255, 0.1);
-    --accent-green: #00E396;
-    --accent-red: #FF4560;
-    --accent-blue: #008FFB;
+    --bg-dark: #131722;
+    --panel-bg: #1E222D;
+    --border: 1px solid #2A2E39;
+    --text-main: #D9D9D9;
+    --text-muted: #787B86;
+    --accent-green: #089981;
+    --accent-red: #F23645;
+    --accent-blue: #2962FF;
   }
 
-  /* Main Layout */
-  .dashboard-container {
+  body { background-color: var(--bg-dark); }
+
+  /* Grid Layout */
+  .terminal-grid {
     display: grid;
-    grid-template-columns: 320px 1fr;
-    gap: 24px;
-    height: 80vh;
-    padding: 20px;
-    max-width: 1600px;
-    margin: 0 auto;
+    grid-template-columns: 280px 1fr;
+    grid-template-rows: 60px 1fr;
+    height: calc(100vh - 80px); /* Adjust for nav */
+    max-width: 100%;
+    overflow: hidden;
   }
 
-  /* Sidebar styling (The "Cockpit") */
-  .cockpit {
-    background: var(--glass-bg);
-    backdrop-filter: blur(10px);
-    border: var(--glass-border);
-    border-radius: 12px;
-    padding: 24px;
+  /* 1. Top Bar (Header) */
+  .terminal-header {
+    grid-column: 1 / -1;
+    background: var(--panel-bg);
+    border-bottom: var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    justify-content: space-between;
+  }
+
+  .ticker-display {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .ticker-main { font-size: 20px; font-weight: 700; color: #fff; letter-spacing: 1px; }
+  .price-live { font-family: 'Roboto Mono', monospace; color: var(--accent-green); font-size: 16px; }
+
+  /* 2. Sidebar (Controls) */
+  .terminal-sidebar {
+    background: var(--panel-bg);
+    border-right: var(--border);
+    padding: 20px;
     display: flex;
     flex-direction: column;
     gap: 20px;
   }
 
-  /* Input Group */
-  .input-group {
+  /* Input Styling */
+  .search-box {
     display: flex;
-    gap: 10px;
+    gap: 5px;
   }
-  
-  .ticker-input {
-    background: rgba(0,0,0,0.3);
-    border: 1px solid #444;
+  .input-dark {
+    background: #2A2E39;
+    border: 1px solid #434651;
     color: #fff;
-    padding: 12px;
-    border-radius: 6px;
+    padding: 8px;
+    border-radius: 4px;
     width: 100%;
     font-family: 'Roboto Mono', monospace;
     text-transform: uppercase;
-    font-size: 14px;
-    letter-spacing: 1px;
   }
-  
-  .btn-map {
+  .btn-run {
     background: var(--accent-blue);
     color: #fff;
     border: none;
-    border-radius: 6px;
-    padding: 0 20px;
-    font-weight: 700;
+    border-radius: 4px;
+    padding: 0 15px;
+    font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
   }
-  .btn-map:hover { filter: brightness(1.1); }
+  .btn-run:hover { background: #1e53e5; }
 
-  /* Scorecard Grid */
-  .score-grid {
+  /* Data Table Styling */
+  .data-table {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 2px;
   }
+  .data-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px;
+    background: rgba(255,255,255,0.02);
+    font-size: 13px;
+  }
+  .data-label { color: var(--text-muted); text-transform: uppercase; font-size: 11px; }
+  .data-val { color: var(--text-main); font-family: 'Roboto Mono', monospace; font-weight: 600; }
 
-  .metric-card {
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.05);
-    border-left: 3px solid #555;
-    padding: 16px;
-    border-radius: 6px;
-    transition: transform 0.2s;
-  }
-  
-  .metric-label {
-    font-size: 10px;
-    text-transform: uppercase;
-    color: #888;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
-  }
-  
-  .metric-value {
-    font-size: 18px;
-    font-weight: 600;
-    color: #eee;
-    font-family: 'Roboto Mono', monospace;
-  }
+  /* Bias Badges */
+  .badge { padding: 4px 8px; border-radius: 3px; font-size: 11px; font-weight: 700; }
+  .b-bull { background: rgba(8, 153, 129, 0.2); color: var(--accent-green); }
+  .b-bear { background: rgba(242, 54, 69, 0.2); color: var(--accent-red); }
+  .b-neu { background: rgba(255, 255, 255, 0.1); color: #ccc; }
 
-  /* Status Indicators */
-  .status-bullish { border-left-color: var(--accent-green); box-shadow: -4px 0 15px -5px rgba(0, 227, 150, 0.3); }
-  .status-bearish { border-left-color: var(--accent-red); box-shadow: -4px 0 15px -5px rgba(255, 69, 96, 0.3); }
-  .status-neutral { border-left-color: #FEB019; }
-
-  /* Chart Area */
-  .chart-wrapper {
-    background: #0b0b0f;
-    border: var(--glass-border);
-    border-radius: 12px;
+  /* 3. Chart Area */
+  .terminal-chart {
+    background: var(--bg-dark);
     position: relative;
-    overflow: hidden;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-  }
-
-  /* Header Typography */
-  .header-pill {
-    background: rgba(0, 143, 251, 0.15);
-    color: var(--accent-blue);
-    padding: 6px 12px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    display: inline-block;
-    margin-bottom: 10px;
-  }
-
-  .display-title {
-    font-size: 28px;
-    font-weight: 700;
-    color: #fff;
-    margin-bottom: 5px;
+    width: 100%;
+    height: 100%;
   }
 </style>
 
-<div style="padding: 20px 40px 0;">
-  <div class="header-pill">S JAN SUITE</div>
-  <h1 class="display-title">Market Structure Map</h1>
-</div>
-
-<div class="dashboard-container">
+<div class="terminal-grid">
   
-  <div class="cockpit">
-    <label style="font-size: 12px; color: #666; font-weight: 600;">ASSET TICKER</label>
-    <div class="input-group">
-      <input type="text" id="tickerInput" class="ticker-input" value="BTC/USDT">
-      <button onclick="loadAnalysis()" class="btn-map">MAP</button>
+  <div class="terminal-header">
+    <div class="ticker-display">
+      <span class="ticker-main" id="display-ticker">BTC/USDT</span>
+      <span class="price-live" id="display-price">--</span>
+    </div>
+    <div style="font-size: 12px; color: #666;">S JAN MARKET STRUCTURE MAP</div>
+  </div>
+
+  <div class="terminal-sidebar">
+    <div class="search-box">
+      <input type="text" id="tickerInput" class="input-dark" value="BTC/USDT">
+      <button onclick="loadAnalysis()" class="btn-run">GO</button>
     </div>
 
-    <hr style="border-color: rgba(255,255,255,0.1); margin: 10px 0;">
+    <div style="height: 1px; background: #2A2E39; margin: 10px 0;"></div>
 
-    <div id="loader" style="text-align: center; color: #666; display: none;">
-      <span style="font-size: 12px;">CALCULATING ZONES...</span>
-    </div>
-
-    <div id="scorecard" class="score-grid" style="display: none;">
+    <div class="data-table" id="scorecard" style="display: none;">
       
-      <div class="metric-card" id="bias-card">
-        <div class="metric-label">Structural Bias</div>
-        <div class="metric-value" id="bias-val">--</div>
+      <div class="data-row">
+        <span class="data-label">BIAS</span>
+        <span id="bias-badge" class="badge b-neu">--</span>
       </div>
 
-      <div class="metric-card">
-        <div class="metric-label">Grade</div>
-        <div class="metric-value" id="grade-val">--</div>
+      <div class="data-row">
+        <span class="data-label">GRADE</span>
+        <span class="data-val" id="grade-val">--</span>
       </div>
 
-      <div class="metric-card">
-        <div class="metric-label">Nearest Supply</div>
-        <div class="metric-value" id="sup-val" style="color: var(--accent-red);">--</div>
+      <div class="data-row">
+        <span class="data-label">SUPPLY</span>
+        <span class="data-val" id="sup-val" style="color: var(--accent-red);">--</span>
       </div>
 
-      <div class="metric-card">
-        <div class="metric-label">Nearest Demand</div>
-        <div class="metric-value" id="dem-val" style="color: var(--accent-green);">--</div>
+      <div class="data-row">
+        <span class="data-label">DEMAND</span>
+        <span class="data-val" id="dem-val" style="color: var(--accent-green);">--</span>
       </div>
 
+    </div>
+
+    <div id="loader" style="color: #666; font-size: 12px; text-align: center; margin-top: 20px;">
+      READY TO SCAN
     </div>
   </div>
 
-  <div id="chart-mount" class="chart-wrapper"></div>
+  <div id="chart-mount" class="terminal-chart"></div>
 
 </div>
 
 <script>
-  // 1. SETUP CHART
+  // 1. SETUP CHART (Professional Theme)
   const container = document.getElementById('chart-mount');
   const chart = LightweightCharts.createChart(container, {
-    layout: { background: { color: '#0b0b0f' }, textColor: '#666' },
-    grid: { vertLines: { color: '#1a1a1a' }, horzLines: { color: '#1a1a1a' } },
-    rightPriceScale: { borderColor: '#333' },
-    timeScale: { borderColor: '#333', timeVisible: true },
+    layout: { background: { color: '#131722' }, textColor: '#787B86' },
+    grid: { vertLines: { color: '#1E222D' }, horzLines: { color: '#1E222D' } },
+    rightPriceScale: { borderColor: '#2A2E39', scaleMargins: { top: 0.1, bottom: 0.1 } },
+    timeScale: { borderColor: '#2A2E39', timeVisible: true },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   });
 
   const candleSeries = chart.addCandlestickSeries({
-    upColor: '#00E396', downColor: '#FF4560', 
-    borderVisible: false, wickUpColor: '#00E396', wickDownColor: '#FF4560'
+    upColor: '#089981', downColor: '#F23645', 
+    borderVisible: false, wickUpColor: '#089981', wickDownColor: '#F23645'
   });
 
+  // Responsive Resize
   new ResizeObserver(entries => {
     if (entries.length === 0 || entries[0].target !== container) { return; }
     const newRect = entries[0].contentRect;
     chart.applyOptions({ width: newRect.width, height: newRect.height });
   }).observe(container);
 
-  // 2. FETCH DATA
+  // 2. LOGIC
   async function loadAnalysis() {
     const ticker = document.getElementById('tickerInput').value;
     const loader = document.getElementById('loader');
     const scorecard = document.getElementById('scorecard');
     
+    loader.innerText = "SCANNING MARKET...";
     loader.style.display = 'block';
     scorecard.style.display = 'none';
-    
+
     try {
       const response = await fetch('/api/analyze-s-jan', {
         method: 'POST',
@@ -222,39 +207,47 @@
       
       const json = await response.json();
       
-      // Plot Candles
+      // Update Header
+      document.getElementById('display-ticker').innerText = ticker.toUpperCase();
+      
+      // Plot Candles (Check if data exists)
       if (json.candles && json.candles.length > 0) {
         const sorted = json.candles.sort((a, b) => a.time - b.time);
         candleSeries.setData(sorted);
+        chart.timeScale().fitContent();
+        
+        // Update Price in Header
+        const lastClose = sorted[sorted.length - 1].close;
+        document.getElementById('display-price').innerText = '$' + lastClose.toFixed(2);
+      } else {
+        loader.innerText = "NO DATA FOUND (Try valid symbol)";
+        return;
       }
 
-      // Update UI
+      // Update Scorecard
       const s = json.structure;
       const m = json.map;
       
       loader.style.display = 'none';
       scorecard.style.display = 'flex';
       
-      const biasCard = document.getElementById('bias-card');
-      const biasVal = document.getElementById('bias-val');
-      
-      biasVal.innerText = s.bias.replace('_', ' ');
-      document.getElementById('grade-val').innerText = s.grade;
-      document.getElementById('sup-val').innerText = s.nearest_supply_level ? '$' + s.nearest_supply_level.toFixed(2) : 'None';
-      document.getElementById('dem-val').innerText = s.nearest_demand_level ? '$' + s.nearest_demand_level.toFixed(2) : 'None';
+      // Badges
+      const biasBadge = document.getElementById('bias-badge');
+      biasBadge.innerText = s.bias.replace('_', ' ');
+      biasBadge.className = 'badge';
+      if(s.bias.includes('BULL')) biasBadge.classList.add('b-bull');
+      else if(s.bias.includes('BEAR')) biasBadge.classList.add('b-bear');
+      else biasBadge.classList.add('b-neu');
 
-      // Style Logic
-      biasCard.className = 'metric-card'; 
-      if(s.bias.includes('BULL')) biasCard.classList.add('status-bullish');
-      else if(s.bias.includes('BEAR')) biasCard.classList.add('status-bearish');
-      else biasCard.classList.add('status-neutral');
+      document.getElementById('grade-val').innerText = s.grade;
+      document.getElementById('sup-val').innerText = s.nearest_supply_level ? s.nearest_supply_level.toFixed(2) : '--';
+      document.getElementById('dem-val').innerText = s.nearest_demand_level ? s.nearest_demand_level.toFixed(2) : '--';
 
       // Draw Lines
-      // (Clear old lines first in production, simplified here)
       if(m.supply_zones) {
         m.supply_zones.forEach(z => {
            candleSeries.createPriceLine({
-             price: z.level, color: '#FF4560', lineWidth: 2, 
+             price: z.level, color: '#F23645', lineWidth: 2, 
              title: `SUPPLY (${z.tf})`, axisLabelVisible: true 
            });
         });
@@ -262,17 +255,15 @@
       if(m.demand_zones) {
         m.demand_zones.forEach(z => {
            candleSeries.createPriceLine({
-             price: z.level, color: '#00E396', lineWidth: 2, 
+             price: z.level, color: '#089981', lineWidth: 2, 
              title: `DEMAND (${z.tf})`, axisLabelVisible: true 
            });
         });
       }
-      
-      chart.timeScale().fitContent();
 
     } catch (err) {
       console.error(err);
-      loader.innerText = "Connection Error";
+      loader.innerText = "API ERROR";
     }
   }
 </script>
