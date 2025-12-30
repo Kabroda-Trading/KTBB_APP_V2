@@ -1,283 +1,226 @@
 {% extends "base.html" %}
 {% block content %}
 
-<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Roboto+Mono:wght@500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 
 <style>
-  /* --- TITANIUM THEME --- */
   :root {
-    --bg-core: #0D0E12;       /* Deepest Black/Blue */
-    --bg-panel: #161920;      /* Secondary Panel */
-    --border-subtle: #252830; /* Dark Borders */
-    --text-primary: #E1E3E6;
-    --text-secondary: #7F8491;
-    --accent-blue: #2962FF;
-    --accent-green: #00C076;  /* TradingView Green */
-    --accent-red: #FF3B30;    /* TradingView Red */
-    --glow-blue: 0 0 15px rgba(41, 98, 255, 0.2);
+    --bg-core: #0D0E12;
+    --bg-panel: #171B26; /* Slightly lighter panel */
+    --border-color: #2B3040;
+    --text-primary: #E6E8EB;
+    --text-muted: #838896;
+    --accent-blue: #3E7BFA;
+    --accent-green: #00D68F;
+    --accent-red: #FF4B55;
+    --font-mono: 'SF Mono', 'Roboto Mono', Menlo, monospace;
+    --font-sans: 'Inter', -apple-system, sans-serif;
   }
 
-  body {
-    background-color: var(--bg-core);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    overflow: hidden; /* Lock scrollbar for app-feel */
-  }
+  body { background-color: var(--bg-core); font-family: var(--font-sans); overflow: hidden; }
 
-  /* APP LAYOUT */
-  .app-grid {
+  /* Grid Layout */
+  .app-frame {
     display: grid;
-    grid-template-columns: 320px 1fr;
-    grid-template-rows: 60px 1fr;
+    grid-template-columns: 300px 1fr;
+    grid-template-rows: 56px 1fr;
     height: 100vh;
     width: 100vw;
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 999; /* Overlay default site nav if needed, or adjust top */
-    padding-top: 60px; /* Assuming your main nav is ~60px */
+    position: fixed; top: 0; left: 0; z-index: 9999;
   }
 
-  /* 1. SIDEBAR (The Control Center) */
-  .sidebar {
+  /* Header */
+  .app-header {
+    grid-column: 1 / -1;
+    background: var(--bg-core);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    justify-content: space-between;
+  }
+  .brand { font-size: 14px; font-weight: 700; color: #fff; letter-spacing: 1px; }
+  .live-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--accent-green); }
+  .pulse { width: 6px; height: 6px; background: var(--accent-green); border-radius: 50%; box-shadow: 0 0 8px var(--accent-green); }
+
+  /* Sidebar */
+  .app-sidebar {
     background: var(--bg-panel);
-    border-right: 1px solid var(--border-subtle);
+    border-right: 1px solid var(--border-color);
+    padding: 24px;
     display: flex;
     flex-direction: column;
-    padding: 24px;
-    gap: 30px;
-    box-shadow: 5px 0 20px rgba(0,0,0,0.3);
+    gap: 24px;
   }
 
-  .sidebar-header {
-    margin-bottom: 10px;
-  }
-  .app-label {
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 2px;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    display: block;
-    margin-bottom: 4px;
-  }
-  .app-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: #fff;
-    letter-spacing: -0.5px;
-  }
-  .highlight { color: var(--accent-blue); }
-
-  /* Controls */
-  .control-group { display: flex; flex-direction: column; gap: 8px; }
-  .input-wrapper { display: flex; gap: 8px; }
+  /* Inputs */
+  .input-label { font-size: 10px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; margin-bottom: 6px; display: block; }
+  .input-row { display: flex; gap: 8px; }
   
-  .input-field {
-    background: var(--bg-core);
-    border: 1px solid var(--border-subtle);
+  .terminal-input {
+    background: #000;
+    border: 1px solid var(--border-color);
     color: #fff;
-    padding: 12px 16px;
+    font-family: var(--font-mono);
+    padding: 10px 12px;
     border-radius: 4px;
-    font-family: 'Roboto Mono', monospace;
-    font-size: 14px;
     width: 100%;
+    font-size: 13px;
     text-transform: uppercase;
-    transition: border 0.2s;
   }
-  .input-field:focus { outline: none; border-color: var(--accent-blue); }
-  
-  .btn-exec {
+  .terminal-input:focus { border-color: var(--accent-blue); outline: none; }
+
+  .btn-primary {
     background: var(--accent-blue);
     color: #fff;
     border: none;
     border-radius: 4px;
-    padding: 0 20px;
+    padding: 0 16px;
     font-weight: 600;
+    font-size: 12px;
     cursor: pointer;
-    box-shadow: var(--glow-blue);
-    transition: all 0.2s;
+    transition: filter 0.2s;
   }
-  .btn-exec:hover { filter: brightness(1.1); transform: translateY(-1px); }
+  .btn-primary:hover { filter: brightness(1.2); }
 
-  /* Data Cards */
-  .telemetry-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .data-card {
-    background: rgba(255,255,255,0.02);
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
-    padding: 16px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+  /* Data Display */
+  .telemetry-stack { display: flex; flex-direction: column; gap: 1px; background: var(--border-color); border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; }
+  
+  .telemetry-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px;
+    background: var(--bg-panel);
   }
   
-  .data-meta { display: flex; flex-direction: column; gap: 4px; }
-  .label-sm { font-size: 10px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; letter-spacing: 0.5px; }
-  .value-lg { font-family: 'Roboto Mono', monospace; font-size: 16px; color: var(--text-primary); font-weight: 500; }
+  .t-label { font-size: 11px; color: var(--text-muted); }
+  .t-val { font-family: var(--font-mono); font-size: 14px; color: var(--text-primary); font-weight: 500; }
   
-  /* Status Indicators */
-  .status-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: #333;
-    box-shadow: 0 0 0 2px rgba(255,255,255,0.05);
-  }
-  .dot-green { background: var(--accent-green); box-shadow: 0 0 10px var(--accent-green); }
-  .dot-red { background: var(--accent-red); box-shadow: 0 0 10px var(--accent-red); }
+  /* Badges */
+  .badge { padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+  .b-bull { background: rgba(0, 214, 143, 0.15); color: var(--accent-green); }
+  .b-bear { background: rgba(255, 75, 85, 0.15); color: var(--accent-red); }
+  .b-neu { background: rgba(255, 255, 255, 0.1); color: var(--text-muted); }
 
-  /* 2. CHART AREA (Maximized) */
-  .chart-area {
-    background: var(--bg-core);
-    position: relative;
-    width: 100%;
-    height: 100%;
-  }
-  
+  /* Chart */
+  .app-stage { background: var(--bg-core); position: relative; width: 100%; height: 100%; }
   .chart-overlay {
-    position: absolute;
-    top: 20px; left: 20px;
-    z-index: 10;
-    display: flex;
-    gap: 20px;
-    background: rgba(13, 14, 18, 0.8);
+    position: absolute; top: 16px; left: 16px; z-index: 10;
+    background: rgba(13, 14, 18, 0.85);
+    border: 1px solid var(--border-color);
+    padding: 8px 12px; border-radius: 4px;
     backdrop-filter: blur(4px);
-    padding: 8px 16px;
-    border-radius: 4px;
-    border: 1px solid var(--border-subtle);
   }
-  .overlay-item { display: flex; gap: 8px; align-items: baseline; }
-  .overlay-label { font-size: 11px; color: var(--text-secondary); }
-  .overlay-value { font-family: 'Roboto Mono', monospace; font-size: 14px; color: #fff; }
+  .overlay-ticker { font-weight: 700; color: #fff; font-size: 14px; margin-right: 12px; }
+  .overlay-price { font-family: var(--font-mono); color: var(--accent-blue); font-size: 14px; }
 
-  /* Utility */
-  #loader-bar {
-    height: 2px; width: 0%; background: var(--accent-blue);
-    position: absolute; top: 0; left: 0; transition: width 0.3s;
-  }
 </style>
 
-<div class="app-grid">
+<div class="app-frame">
   
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <span class="app-label">Wealth OS // v2.4</span>
-      <div class="app-title">Structure <span class="highlight">Map</span></div>
-    </div>
+  <header class="app-header">
+    <div class="brand">KABRODA // WEALTH OS</div>
+    <div class="live-status"><div class="pulse"></div>SYSTEM ACTIVE</div>
+  </header>
 
-    <div class="control-group">
-      <label class="label-sm">Target Asset</label>
-      <div class="input-wrapper">
-        <input type="text" id="tickerInput" class="input-field" value="BTC/USDT">
-        <button onclick="runScan()" class="btn-exec">SCAN</button>
+  <aside class="app-sidebar">
+    
+    <div>
+      <span class="input-label">Target Asset</span>
+      <div class="input-row">
+        <input type="text" id="tickerInput" class="terminal-input" value="BTC/USDT">
+        <button onclick="runScan()" class="btn-primary">SCAN</button>
       </div>
     </div>
 
-    <div style="height: 1px; background: var(--border-subtle); margin: 10px 0;"></div>
-
-    <div id="scorecard" class="telemetry-grid" style="opacity: 0.5; pointer-events: none;">
+    <div id="telemetry" class="telemetry-stack" style="opacity: 0.4;">
       
-      <div class="data-card">
-        <div class="data-meta">
-          <span class="label-sm">Structural Bias</span>
-          <span class="value-lg" id="bias-val">--</span>
-        </div>
-        <div id="bias-dot" class="status-dot"></div>
+      <div class="telemetry-row">
+        <span class="t-label">STRUCTURE</span>
+        <span class="badge b-neu" id="bias-badge">--</span>
       </div>
 
-      <div class="data-card">
-        <div class="data-meta">
-          <span class="label-sm">Quality Grade</span>
-          <span class="value-lg" id="grade-val" style="color: #fff;">--</span>
-        </div>
+      <div class="telemetry-row">
+        <span class="t-label">GRADE</span>
+        <span class="t-val" id="grade-val">--</span>
       </div>
 
-      <div class="data-card" style="border-left: 3px solid var(--accent-red);">
-        <div class="data-meta">
-          <span class="label-sm">Supply Zone</span>
-          <span class="value-lg" id="sup-val">--</span>
-        </div>
+      <div class="telemetry-row">
+        <span class="t-label">SUPPLY</span>
+        <span class="t-val" id="sup-val" style="color: var(--accent-red);">--</span>
       </div>
 
-      <div class="data-card" style="border-left: 3px solid var(--accent-green);">
-        <div class="data-meta">
-          <span class="label-sm">Demand Zone</span>
-          <span class="value-lg" id="dem-val">--</span>
-        </div>
+      <div class="telemetry-row">
+        <span class="t-label">DEMAND</span>
+        <span class="t-val" id="dem-val" style="color: var(--accent-green);">--</span>
       </div>
 
     </div>
 
-    <div id="status-msg" style="margin-top: auto; font-size: 11px; color: var(--text-secondary); text-align: center;">
-      SYSTEM READY
+    <div id="sys-msg" style="margin-top: auto; text-align: center; font-size: 10px; color: var(--text-muted);">
+      WAITING FOR COMMAND
     </div>
+
   </aside>
 
-  <main class="chart-area">
-    <div id="loader-bar"></div>
-    
+  <main class="app-stage">
     <div class="chart-overlay">
-      <div class="overlay-item">
-        <span class="overlay-value" id="chart-ticker" style="font-weight: 700;">BTC/USDT</span>
-      </div>
-      <div class="overlay-item">
-        <span class="overlay-label">PRICE</span>
-        <span class="overlay-value" id="chart-price" style="color: var(--accent-blue);">--</span>
-      </div>
+      <span class="overlay-ticker" id="chart-ticker">BTC/USDT</span>
+      <span class="overlay-price" id="chart-price">--</span>
     </div>
-
-    <div id="tv-mount" style="width: 100%; height: 100%;"></div>
+    <div id="chart-mount" style="width: 100%; height: 100%;"></div>
   </main>
 
 </div>
 
 <script>
-  // 1. INITIALIZE CHART
-  const domElement = document.getElementById('tv-mount');
-  const chart = LightweightCharts.createChart(domElement, {
-    layout: { background: { color: '#0D0E12' }, textColor: '#7F8491' },
-    grid: { vertLines: { color: '#161920' }, horzLines: { color: '#161920' } },
-    rightPriceScale: { borderColor: '#252830', scaleMargins: { top: 0.1, bottom: 0.1 } },
-    timeScale: { borderColor: '#252830', timeVisible: true },
-    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-  });
+  // --- SAFE INITIALIZATION BLOCK ---
+  let chart;
+  let mainSeries;
+  const domElement = document.getElementById('chart-mount');
 
-  const mainSeries = chart.addCandlestickSeries({
-    upColor: '#00C076', downColor: '#FF3B30', 
-    borderVisible: false, wickUpColor: '#00C076', wickDownColor: '#FF3B30'
-  });
+  try {
+    // 1. Create Chart
+    chart = LightweightCharts.createChart(domElement, {
+      layout: { background: { color: '#0D0E12' }, textColor: '#838896' },
+      grid: { vertLines: { color: '#171B26' }, horzLines: { color: '#171B26' } },
+      rightPriceScale: { borderColor: '#2B3040' },
+      timeScale: { borderColor: '#2B3040', timeVisible: true },
+    });
 
-  // Responsive
-  new ResizeObserver(entries => {
-    if (entries.length === 0 || entries[0].target !== domElement) return;
-    const { width, height } = entries[0].contentRect;
-    chart.applyOptions({ width, height });
-  }).observe(domElement);
+    // 2. Create Series (Correct V4 Method)
+    mainSeries = chart.addCandlestickSeries({
+      upColor: '#00D68F', downColor: '#FF4B55',
+      borderVisible: false, wickUpColor: '#00D68F', wickDownColor: '#FF4B55'
+    });
 
-  // 2. CORE LOGIC
+    // 3. Responsive Resize
+    new ResizeObserver(entries => {
+      if (entries.length === 0 || entries[0].target !== domElement) return;
+      const { width, height } = entries[0].contentRect;
+      chart.applyOptions({ width, height });
+    }).observe(domElement);
+
+  } catch (err) {
+    console.error("CRITICAL: Chart Lib Failed", err);
+    document.getElementById('sys-msg').innerText = "FATAL: CHART ENGINE ERROR";
+    document.getElementById('sys-msg').style.color = "red";
+  }
+
+
+  // --- LOGIC BLOCK ---
   async function runScan() {
-    const ticker = document.getElementById('tickerInput').value;
-    const ui = {
-      card: document.getElementById('scorecard'),
-      bar: document.getElementById('loader-bar'),
-      msg: document.getElementById('status-msg'),
-      bias: document.getElementById('bias-val'),
-      biasDot: document.getElementById('bias-dot'),
-      grade: document.getElementById('grade-val'),
-      sup: document.getElementById('sup-val'),
-      dem: document.getElementById('dem-val'),
-      chartTicker: document.getElementById('chart-ticker'),
-      chartPrice: document.getElementById('chart-price'),
-    };
+    // Safety Check: If chart failed, don't run
+    if (!mainSeries) {
+      alert("Chart Engine is offline. Refresh page.");
+      return;
+    }
 
-    // Reset UI
-    ui.bar.style.width = "50%";
-    ui.msg.innerText = "ESTABLISHING UPLINK...";
-    ui.card.style.opacity = "0.5";
+    const ticker = document.getElementById('tickerInput').value;
+    const msg = document.getElementById('sys-msg');
+    const tel = document.getElementById('telemetry');
+    
+    msg.innerText = "EXECUTING SCAN...";
+    msg.style.color = "var(--accent-blue)";
 
     try {
       const res = await fetch('/api/analyze-s-jan', {
@@ -288,50 +231,48 @@
       
       const data = await res.json();
 
+      // Check Data Integrity
       if (!data.candles || data.candles.length === 0) {
-        ui.bar.style.width = "0%";
-        ui.msg.innerText = "ERROR: NO DATA FEED";
-        ui.msg.style.color = "#FF3B30";
+        msg.innerText = "ERROR: NO DATA FEED";
+        msg.style.color = "var(--accent-red)";
         return;
       }
 
-      // SUCCESS: Render Data
-      ui.bar.style.width = "100%";
-      setTimeout(() => { ui.bar.style.width = "0%"; }, 500);
-
-      // A. Plot Chart
-      const candles = data.candles.sort((a,b) => a.time - b.time);
-      mainSeries.setData(candles);
+      // 1. Plot Candles
+      const sorted = data.candles.sort((a,b) => a.time - b.time);
+      mainSeries.setData(sorted);
       chart.timeScale().fitContent();
 
-      // B. Update Overlay
-      ui.chartTicker.innerText = ticker.toUpperCase();
-      ui.chartPrice.innerText = candles[candles.length - 1].close.toFixed(2);
+      // 2. Update Overlay
+      document.getElementById('chart-ticker').innerText = ticker.toUpperCase();
+      document.getElementById('chart-price').innerText = sorted[sorted.length-1].close.toFixed(2);
 
-      // C. Update Scorecard
+      // 3. Update Telemetry
       const s = data.structure;
       const m = data.map;
       
-      ui.card.style.opacity = "1";
-      ui.card.style.pointerEvents = "auto";
-      ui.msg.innerText = "ANALYSIS COMPLETE";
-      ui.msg.style.color = "#00C076";
+      tel.style.opacity = "1";
+      msg.innerText = "SCAN COMPLETE";
+      msg.style.color = "var(--accent-green)";
 
-      ui.bias.innerText = s.bias.replace(/_/g, " ");
-      ui.grade.innerText = s.grade;
-      ui.sup.innerText = s.nearest_supply_level ? s.nearest_supply_level.toFixed(2) : "UNCLAIMED";
-      ui.dem.innerText = s.nearest_demand_level ? s.nearest_demand_level.toFixed(2) : "UNCLAIMED";
+      // Bias Badge
+      const bb = document.getElementById('bias-badge');
+      bb.innerText = s.bias.replace(/_/g, " ");
+      bb.className = 'badge';
+      if (s.bias.includes('BULL')) bb.classList.add('b-bull');
+      else if (s.bias.includes('BEAR')) bb.classList.add('b-bear');
+      else bb.classList.add('b-neu');
 
-      // Status Dot Logic
-      ui.biasDot.className = 'status-dot'; // reset
-      if (s.bias.includes('BULL')) ui.biasDot.classList.add('dot-green');
-      else if (s.bias.includes('BEAR')) ui.biasDot.classList.add('dot-red');
+      document.getElementById('grade-val').innerText = s.grade;
+      document.getElementById('sup-val').innerText = s.nearest_supply_level ? s.nearest_supply_level.toFixed(2) : '--';
+      document.getElementById('dem-val').innerText = s.nearest_demand_level ? s.nearest_demand_level.toFixed(2) : '--';
 
-      // D. Draw Levels (Clean previous lines first if you want, V1 simply adds)
+      // 4. Draw Zones
+      // Clear old lines? (Simple add for now)
       if (m.supply_zones) {
         m.supply_zones.forEach(z => {
           mainSeries.createPriceLine({
-            price: z.level, color: '#FF3B30', lineWidth: 2, 
+            price: z.level, color: '#FF4B55', lineWidth: 2, 
             lineStyle: LightweightCharts.LineStyle.Solid, 
             axisLabelVisible: true, title: `SUPPLY (${z.tf})`
           });
@@ -340,7 +281,7 @@
       if (m.demand_zones) {
         m.demand_zones.forEach(z => {
           mainSeries.createPriceLine({
-            price: z.level, color: '#00C076', lineWidth: 2, 
+            price: z.level, color: '#00D68F', lineWidth: 2, 
             lineStyle: LightweightCharts.LineStyle.Solid, 
             axisLabelVisible: true, title: `DEMAND (${z.tf})`
           });
@@ -349,9 +290,8 @@
 
     } catch (e) {
       console.error(e);
-      ui.msg.innerText = "CONNECTION FAILURE";
-      ui.msg.style.color = "#FF3B30";
-      ui.bar.style.width = "0%";
+      msg.innerText = "CONNECTION FAILURE";
+      msg.style.color = "var(--accent-red)";
     }
   }
 </script>
