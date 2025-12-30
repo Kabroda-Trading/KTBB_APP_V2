@@ -2,268 +2,356 @@
 {% block content %}
 
 <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Roboto+Mono:wght@500&display=swap" rel="stylesheet">
 
 <style>
-  /* TERMINAL THEME */
+  /* --- TITANIUM THEME --- */
   :root {
-    --bg-dark: #131722;
-    --panel-bg: #1E222D;
-    --border: 1px solid #2A2E39;
-    --text-main: #D9D9D9;
-    --text-muted: #787B86;
-    --accent-green: #089981;
-    --accent-red: #F23645;
+    --bg-core: #0D0E12;       /* Deepest Black/Blue */
+    --bg-panel: #161920;      /* Secondary Panel */
+    --border-subtle: #252830; /* Dark Borders */
+    --text-primary: #E1E3E6;
+    --text-secondary: #7F8491;
     --accent-blue: #2962FF;
+    --accent-green: #00C076;  /* TradingView Green */
+    --accent-red: #FF3B30;    /* TradingView Red */
+    --glow-blue: 0 0 15px rgba(41, 98, 255, 0.2);
   }
 
-  body { background-color: var(--bg-dark); }
+  body {
+    background-color: var(--bg-core);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    overflow: hidden; /* Lock scrollbar for app-feel */
+  }
 
-  /* Grid Layout */
-  .terminal-grid {
+  /* APP LAYOUT */
+  .app-grid {
     display: grid;
-    grid-template-columns: 280px 1fr;
+    grid-template-columns: 320px 1fr;
     grid-template-rows: 60px 1fr;
-    height: calc(100vh - 80px); /* Adjust for nav */
-    max-width: 100%;
-    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 999; /* Overlay default site nav if needed, or adjust top */
+    padding-top: 60px; /* Assuming your main nav is ~60px */
   }
 
-  /* 1. Top Bar (Header) */
-  .terminal-header {
-    grid-column: 1 / -1;
-    background: var(--panel-bg);
-    border-bottom: var(--border);
-    display: flex;
-    align-items: center;
-    padding: 0 20px;
-    justify-content: space-between;
-  }
-
-  .ticker-display {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-  }
-  .ticker-main { font-size: 20px; font-weight: 700; color: #fff; letter-spacing: 1px; }
-  .price-live { font-family: 'Roboto Mono', monospace; color: var(--accent-green); font-size: 16px; }
-
-  /* 2. Sidebar (Controls) */
-  .terminal-sidebar {
-    background: var(--panel-bg);
-    border-right: var(--border);
-    padding: 20px;
+  /* 1. SIDEBAR (The Control Center) */
+  .sidebar {
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border-subtle);
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    padding: 24px;
+    gap: 30px;
+    box-shadow: 5px 0 20px rgba(0,0,0,0.3);
   }
 
-  /* Input Styling */
-  .search-box {
-    display: flex;
-    gap: 5px;
+  .sidebar-header {
+    margin-bottom: 10px;
   }
-  .input-dark {
-    background: #2A2E39;
-    border: 1px solid #434651;
-    color: #fff;
-    padding: 8px;
-    border-radius: 4px;
-    width: 100%;
-    font-family: 'Roboto Mono', monospace;
+  .app-label {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    color: var(--text-secondary);
     text-transform: uppercase;
+    display: block;
+    margin-bottom: 4px;
   }
-  .btn-run {
+  .app-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.5px;
+  }
+  .highlight { color: var(--accent-blue); }
+
+  /* Controls */
+  .control-group { display: flex; flex-direction: column; gap: 8px; }
+  .input-wrapper { display: flex; gap: 8px; }
+  
+  .input-field {
+    background: var(--bg-core);
+    border: 1px solid var(--border-subtle);
+    color: #fff;
+    padding: 12px 16px;
+    border-radius: 4px;
+    font-family: 'Roboto Mono', monospace;
+    font-size: 14px;
+    width: 100%;
+    text-transform: uppercase;
+    transition: border 0.2s;
+  }
+  .input-field:focus { outline: none; border-color: var(--accent-blue); }
+  
+  .btn-exec {
     background: var(--accent-blue);
     color: #fff;
     border: none;
     border-radius: 4px;
-    padding: 0 15px;
+    padding: 0 20px;
     font-weight: 600;
     cursor: pointer;
+    box-shadow: var(--glow-blue);
+    transition: all 0.2s;
   }
-  .btn-run:hover { background: #1e53e5; }
+  .btn-exec:hover { filter: brightness(1.1); transform: translateY(-1px); }
 
-  /* Data Table Styling */
-  .data-table {
+  /* Data Cards */
+  .telemetry-grid {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 12px;
   }
-  .data-row {
+
+  .data-card {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    padding: 16px;
     display: flex;
     justify-content: space-between;
-    padding: 10px;
-    background: rgba(255,255,255,0.02);
-    font-size: 13px;
+    align-items: center;
   }
-  .data-label { color: var(--text-muted); text-transform: uppercase; font-size: 11px; }
-  .data-val { color: var(--text-main); font-family: 'Roboto Mono', monospace; font-weight: 600; }
+  
+  .data-meta { display: flex; flex-direction: column; gap: 4px; }
+  .label-sm { font-size: 10px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; letter-spacing: 0.5px; }
+  .value-lg { font-family: 'Roboto Mono', monospace; font-size: 16px; color: var(--text-primary); font-weight: 500; }
+  
+  /* Status Indicators */
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #333;
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.05);
+  }
+  .dot-green { background: var(--accent-green); box-shadow: 0 0 10px var(--accent-green); }
+  .dot-red { background: var(--accent-red); box-shadow: 0 0 10px var(--accent-red); }
 
-  /* Bias Badges */
-  .badge { padding: 4px 8px; border-radius: 3px; font-size: 11px; font-weight: 700; }
-  .b-bull { background: rgba(8, 153, 129, 0.2); color: var(--accent-green); }
-  .b-bear { background: rgba(242, 54, 69, 0.2); color: var(--accent-red); }
-  .b-neu { background: rgba(255, 255, 255, 0.1); color: #ccc; }
-
-  /* 3. Chart Area */
-  .terminal-chart {
-    background: var(--bg-dark);
+  /* 2. CHART AREA (Maximized) */
+  .chart-area {
+    background: var(--bg-core);
     position: relative;
     width: 100%;
     height: 100%;
   }
+  
+  .chart-overlay {
+    position: absolute;
+    top: 20px; left: 20px;
+    z-index: 10;
+    display: flex;
+    gap: 20px;
+    background: rgba(13, 14, 18, 0.8);
+    backdrop-filter: blur(4px);
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: 1px solid var(--border-subtle);
+  }
+  .overlay-item { display: flex; gap: 8px; align-items: baseline; }
+  .overlay-label { font-size: 11px; color: var(--text-secondary); }
+  .overlay-value { font-family: 'Roboto Mono', monospace; font-size: 14px; color: #fff; }
+
+  /* Utility */
+  #loader-bar {
+    height: 2px; width: 0%; background: var(--accent-blue);
+    position: absolute; top: 0; left: 0; transition: width 0.3s;
+  }
 </style>
 
-<div class="terminal-grid">
+<div class="app-grid">
   
-  <div class="terminal-header">
-    <div class="ticker-display">
-      <span class="ticker-main" id="display-ticker">BTC/USDT</span>
-      <span class="price-live" id="display-price">--</span>
-    </div>
-    <div style="font-size: 12px; color: #666;">S JAN MARKET STRUCTURE MAP</div>
-  </div>
-
-  <div class="terminal-sidebar">
-    <div class="search-box">
-      <input type="text" id="tickerInput" class="input-dark" value="BTC/USDT">
-      <button onclick="loadAnalysis()" class="btn-run">GO</button>
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <span class="app-label">Wealth OS // v2.4</span>
+      <div class="app-title">Structure <span class="highlight">Map</span></div>
     </div>
 
-    <div style="height: 1px; background: #2A2E39; margin: 10px 0;"></div>
+    <div class="control-group">
+      <label class="label-sm">Target Asset</label>
+      <div class="input-wrapper">
+        <input type="text" id="tickerInput" class="input-field" value="BTC/USDT">
+        <button onclick="runScan()" class="btn-exec">SCAN</button>
+      </div>
+    </div>
 
-    <div class="data-table" id="scorecard" style="display: none;">
+    <div style="height: 1px; background: var(--border-subtle); margin: 10px 0;"></div>
+
+    <div id="scorecard" class="telemetry-grid" style="opacity: 0.5; pointer-events: none;">
       
-      <div class="data-row">
-        <span class="data-label">BIAS</span>
-        <span id="bias-badge" class="badge b-neu">--</span>
+      <div class="data-card">
+        <div class="data-meta">
+          <span class="label-sm">Structural Bias</span>
+          <span class="value-lg" id="bias-val">--</span>
+        </div>
+        <div id="bias-dot" class="status-dot"></div>
       </div>
 
-      <div class="data-row">
-        <span class="data-label">GRADE</span>
-        <span class="data-val" id="grade-val">--</span>
+      <div class="data-card">
+        <div class="data-meta">
+          <span class="label-sm">Quality Grade</span>
+          <span class="value-lg" id="grade-val" style="color: #fff;">--</span>
+        </div>
       </div>
 
-      <div class="data-row">
-        <span class="data-label">SUPPLY</span>
-        <span class="data-val" id="sup-val" style="color: var(--accent-red);">--</span>
+      <div class="data-card" style="border-left: 3px solid var(--accent-red);">
+        <div class="data-meta">
+          <span class="label-sm">Supply Zone</span>
+          <span class="value-lg" id="sup-val">--</span>
+        </div>
       </div>
 
-      <div class="data-row">
-        <span class="data-label">DEMAND</span>
-        <span class="data-val" id="dem-val" style="color: var(--accent-green);">--</span>
+      <div class="data-card" style="border-left: 3px solid var(--accent-green);">
+        <div class="data-meta">
+          <span class="label-sm">Demand Zone</span>
+          <span class="value-lg" id="dem-val">--</span>
+        </div>
       </div>
 
     </div>
 
-    <div id="loader" style="color: #666; font-size: 12px; text-align: center; margin-top: 20px;">
-      READY TO SCAN
+    <div id="status-msg" style="margin-top: auto; font-size: 11px; color: var(--text-secondary); text-align: center;">
+      SYSTEM READY
     </div>
-  </div>
+  </aside>
 
-  <div id="chart-mount" class="terminal-chart"></div>
+  <main class="chart-area">
+    <div id="loader-bar"></div>
+    
+    <div class="chart-overlay">
+      <div class="overlay-item">
+        <span class="overlay-value" id="chart-ticker" style="font-weight: 700;">BTC/USDT</span>
+      </div>
+      <div class="overlay-item">
+        <span class="overlay-label">PRICE</span>
+        <span class="overlay-value" id="chart-price" style="color: var(--accent-blue);">--</span>
+      </div>
+    </div>
+
+    <div id="tv-mount" style="width: 100%; height: 100%;"></div>
+  </main>
 
 </div>
 
 <script>
-  // 1. SETUP CHART (Professional Theme)
-  const container = document.getElementById('chart-mount');
-  const chart = LightweightCharts.createChart(container, {
-    layout: { background: { color: '#131722' }, textColor: '#787B86' },
-    grid: { vertLines: { color: '#1E222D' }, horzLines: { color: '#1E222D' } },
-    rightPriceScale: { borderColor: '#2A2E39', scaleMargins: { top: 0.1, bottom: 0.1 } },
-    timeScale: { borderColor: '#2A2E39', timeVisible: true },
+  // 1. INITIALIZE CHART
+  const domElement = document.getElementById('tv-mount');
+  const chart = LightweightCharts.createChart(domElement, {
+    layout: { background: { color: '#0D0E12' }, textColor: '#7F8491' },
+    grid: { vertLines: { color: '#161920' }, horzLines: { color: '#161920' } },
+    rightPriceScale: { borderColor: '#252830', scaleMargins: { top: 0.1, bottom: 0.1 } },
+    timeScale: { borderColor: '#252830', timeVisible: true },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   });
 
-  const candleSeries = chart.addCandlestickSeries({
-    upColor: '#089981', downColor: '#F23645', 
-    borderVisible: false, wickUpColor: '#089981', wickDownColor: '#F23645'
+  const mainSeries = chart.addCandlestickSeries({
+    upColor: '#00C076', downColor: '#FF3B30', 
+    borderVisible: false, wickUpColor: '#00C076', wickDownColor: '#FF3B30'
   });
 
-  // Responsive Resize
+  // Responsive
   new ResizeObserver(entries => {
-    if (entries.length === 0 || entries[0].target !== container) { return; }
-    const newRect = entries[0].contentRect;
-    chart.applyOptions({ width: newRect.width, height: newRect.height });
-  }).observe(container);
+    if (entries.length === 0 || entries[0].target !== domElement) return;
+    const { width, height } = entries[0].contentRect;
+    chart.applyOptions({ width, height });
+  }).observe(domElement);
 
-  // 2. LOGIC
-  async function loadAnalysis() {
+  // 2. CORE LOGIC
+  async function runScan() {
     const ticker = document.getElementById('tickerInput').value;
-    const loader = document.getElementById('loader');
-    const scorecard = document.getElementById('scorecard');
-    
-    loader.innerText = "SCANNING MARKET...";
-    loader.style.display = 'block';
-    scorecard.style.display = 'none';
+    const ui = {
+      card: document.getElementById('scorecard'),
+      bar: document.getElementById('loader-bar'),
+      msg: document.getElementById('status-msg'),
+      bias: document.getElementById('bias-val'),
+      biasDot: document.getElementById('bias-dot'),
+      grade: document.getElementById('grade-val'),
+      sup: document.getElementById('sup-val'),
+      dem: document.getElementById('dem-val'),
+      chartTicker: document.getElementById('chart-ticker'),
+      chartPrice: document.getElementById('chart-price'),
+    };
+
+    // Reset UI
+    ui.bar.style.width = "50%";
+    ui.msg.innerText = "ESTABLISHING UPLINK...";
+    ui.card.style.opacity = "0.5";
 
     try {
-      const response = await fetch('/api/analyze-s-jan', {
+      const res = await fetch('/api/analyze-s-jan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol: ticker })
       });
       
-      const json = await response.json();
-      
-      // Update Header
-      document.getElementById('display-ticker').innerText = ticker.toUpperCase();
-      
-      // Plot Candles (Check if data exists)
-      if (json.candles && json.candles.length > 0) {
-        const sorted = json.candles.sort((a, b) => a.time - b.time);
-        candleSeries.setData(sorted);
-        chart.timeScale().fitContent();
-        
-        // Update Price in Header
-        const lastClose = sorted[sorted.length - 1].close;
-        document.getElementById('display-price').innerText = '$' + lastClose.toFixed(2);
-      } else {
-        loader.innerText = "NO DATA FOUND (Try valid symbol)";
+      const data = await res.json();
+
+      if (!data.candles || data.candles.length === 0) {
+        ui.bar.style.width = "0%";
+        ui.msg.innerText = "ERROR: NO DATA FEED";
+        ui.msg.style.color = "#FF3B30";
         return;
       }
 
-      // Update Scorecard
-      const s = json.structure;
-      const m = json.map;
-      
-      loader.style.display = 'none';
-      scorecard.style.display = 'flex';
-      
-      // Badges
-      const biasBadge = document.getElementById('bias-badge');
-      biasBadge.innerText = s.bias.replace('_', ' ');
-      biasBadge.className = 'badge';
-      if(s.bias.includes('BULL')) biasBadge.classList.add('b-bull');
-      else if(s.bias.includes('BEAR')) biasBadge.classList.add('b-bear');
-      else biasBadge.classList.add('b-neu');
+      // SUCCESS: Render Data
+      ui.bar.style.width = "100%";
+      setTimeout(() => { ui.bar.style.width = "0%"; }, 500);
 
-      document.getElementById('grade-val').innerText = s.grade;
-      document.getElementById('sup-val').innerText = s.nearest_supply_level ? s.nearest_supply_level.toFixed(2) : '--';
-      document.getElementById('dem-val').innerText = s.nearest_demand_level ? s.nearest_demand_level.toFixed(2) : '--';
+      // A. Plot Chart
+      const candles = data.candles.sort((a,b) => a.time - b.time);
+      mainSeries.setData(candles);
+      chart.timeScale().fitContent();
 
-      // Draw Lines
-      if(m.supply_zones) {
+      // B. Update Overlay
+      ui.chartTicker.innerText = ticker.toUpperCase();
+      ui.chartPrice.innerText = candles[candles.length - 1].close.toFixed(2);
+
+      // C. Update Scorecard
+      const s = data.structure;
+      const m = data.map;
+      
+      ui.card.style.opacity = "1";
+      ui.card.style.pointerEvents = "auto";
+      ui.msg.innerText = "ANALYSIS COMPLETE";
+      ui.msg.style.color = "#00C076";
+
+      ui.bias.innerText = s.bias.replace(/_/g, " ");
+      ui.grade.innerText = s.grade;
+      ui.sup.innerText = s.nearest_supply_level ? s.nearest_supply_level.toFixed(2) : "UNCLAIMED";
+      ui.dem.innerText = s.nearest_demand_level ? s.nearest_demand_level.toFixed(2) : "UNCLAIMED";
+
+      // Status Dot Logic
+      ui.biasDot.className = 'status-dot'; // reset
+      if (s.bias.includes('BULL')) ui.biasDot.classList.add('dot-green');
+      else if (s.bias.includes('BEAR')) ui.biasDot.classList.add('dot-red');
+
+      // D. Draw Levels (Clean previous lines first if you want, V1 simply adds)
+      if (m.supply_zones) {
         m.supply_zones.forEach(z => {
-           candleSeries.createPriceLine({
-             price: z.level, color: '#F23645', lineWidth: 2, 
-             title: `SUPPLY (${z.tf})`, axisLabelVisible: true 
-           });
+          mainSeries.createPriceLine({
+            price: z.level, color: '#FF3B30', lineWidth: 2, 
+            lineStyle: LightweightCharts.LineStyle.Solid, 
+            axisLabelVisible: true, title: `SUPPLY (${z.tf})`
+          });
         });
       }
-      if(m.demand_zones) {
+      if (m.demand_zones) {
         m.demand_zones.forEach(z => {
-           candleSeries.createPriceLine({
-             price: z.level, color: '#089981', lineWidth: 2, 
-             title: `DEMAND (${z.tf})`, axisLabelVisible: true 
-           });
+          mainSeries.createPriceLine({
+            price: z.level, color: '#00C076', lineWidth: 2, 
+            lineStyle: LightweightCharts.LineStyle.Solid, 
+            axisLabelVisible: true, title: `DEMAND (${z.tf})`
+          });
         });
       }
 
-    } catch (err) {
-      console.error(err);
-      loader.innerText = "API ERROR";
+    } catch (e) {
+      console.error(e);
+      ui.msg.innerText = "CONNECTION FAILURE";
+      ui.msg.style.color = "#FF3B30";
+      ui.bar.style.width = "0%";
     }
   }
 </script>
