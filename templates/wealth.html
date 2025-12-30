@@ -2,296 +2,130 @@
 {% block content %}
 
 <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
 
 <style>
-  :root {
-    --bg-core: #0D0E12;
-    --bg-panel: #171B26; /* Slightly lighter panel */
-    --border-color: #2B3040;
-    --text-primary: #E6E8EB;
-    --text-muted: #838896;
-    --accent-blue: #3E7BFA;
-    --accent-green: #00D68F;
-    --accent-red: #FF4B55;
-    --font-mono: 'SF Mono', 'Roboto Mono', Menlo, monospace;
-    --font-sans: 'Inter', -apple-system, sans-serif;
-  }
-
-  body { background-color: var(--bg-core); font-family: var(--font-sans); overflow: hidden; }
-
-  /* Grid Layout */
-  .app-frame {
-    display: grid;
-    grid-template-columns: 300px 1fr;
-    grid-template-rows: 56px 1fr;
-    height: 100vh;
-    width: 100vw;
-    position: fixed; top: 0; left: 0; z-index: 9999;
-  }
-
-  /* Header */
-  .app-header {
-    grid-column: 1 / -1;
-    background: var(--bg-core);
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    align-items: center;
-    padding: 0 24px;
-    justify-content: space-between;
-  }
-  .brand { font-size: 14px; font-weight: 700; color: #fff; letter-spacing: 1px; }
-  .live-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--accent-green); }
-  .pulse { width: 6px; height: 6px; background: var(--accent-green); border-radius: 50%; box-shadow: 0 0 8px var(--accent-green); }
-
+  /* KABRODA CLEAN THEME */
+  :root { --bg: #050810; --panel: #0F131F; --border: #1E2536; --accent: #00B2FF; --green: #10B981; --text: #E5E7EB; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; overflow: hidden; }
+  .grid { display: grid; grid-template-columns: 320px 1fr; height: 100vh; width: 100vw; position: fixed; top: 0; left: 0; z-index: 999; }
+  
   /* Sidebar */
-  .app-sidebar {
-    background: var(--bg-panel);
-    border-right: 1px solid var(--border-color);
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-  }
-
+  .sidebar { background: var(--bg); border-right: 1px solid var(--border); padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+  .logo { font-weight: 800; letter-spacing: 1px; margin-bottom: 20px; color: #fff; }
+  
   /* Inputs */
-  .input-label { font-size: 10px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; margin-bottom: 6px; display: block; }
-  .input-row { display: flex; gap: 8px; }
-  
-  .terminal-input {
-    background: #000;
-    border: 1px solid var(--border-color);
-    color: #fff;
-    font-family: var(--font-mono);
-    padding: 10px 12px;
-    border-radius: 4px;
-    width: 100%;
-    font-size: 13px;
-    text-transform: uppercase;
-  }
-  .terminal-input:focus { border-color: var(--accent-blue); outline: none; }
+  .input-label { font-size: 11px; font-weight: 700; color: #6B7280; text-transform: uppercase; margin-bottom: 5px; display: block; }
+  .input { background: var(--panel); border: 1px solid var(--border); color: #fff; padding: 12px; width: 100%; border-radius: 6px; font-family: 'JetBrains Mono'; outline: none; }
+  .btn { background: var(--accent); color: #000; border: none; padding: 12px; width: 100%; border-radius: 6px; font-weight: 700; cursor: pointer; }
+  .btn:hover { filter: brightness(1.1); }
 
-  .btn-primary {
-    background: var(--accent-blue);
-    color: #fff;
-    border: none;
-    border-radius: 4px;
-    padding: 0 16px;
-    font-weight: 600;
-    font-size: 12px;
-    cursor: pointer;
-    transition: filter 0.2s;
-  }
-  .btn-primary:hover { filter: brightness(1.2); }
-
-  /* Data Display */
-  .telemetry-stack { display: flex; flex-direction: column; gap: 1px; background: var(--border-color); border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; }
+  /* Results */
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-top: 20px; }
+  .mode-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 10px; }
+  .b-green { background: rgba(16, 185, 129, 0.2); color: var(--green); }
+  .b-blue { background: rgba(0, 178, 255, 0.2); color: var(--accent); }
   
-  .telemetry-row {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 12px 16px;
-    background: var(--bg-panel);
-  }
+  .order-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .order-row:last-child { border-bottom: none; }
+  .price { font-family: 'JetBrains Mono'; color: var(--accent); }
   
-  .t-label { font-size: 11px; color: var(--text-muted); }
-  .t-val { font-family: var(--font-mono); font-size: 14px; color: var(--text-primary); font-weight: 500; }
-  
-  /* Badges */
-  .badge { padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
-  .b-bull { background: rgba(0, 214, 143, 0.15); color: var(--accent-green); }
-  .b-bear { background: rgba(255, 75, 85, 0.15); color: var(--accent-red); }
-  .b-neu { background: rgba(255, 255, 255, 0.1); color: var(--text-muted); }
-
   /* Chart */
-  .app-stage { background: var(--bg-core); position: relative; width: 100%; height: 100%; }
-  .chart-overlay {
-    position: absolute; top: 16px; left: 16px; z-index: 10;
-    background: rgba(13, 14, 18, 0.85);
-    border: 1px solid var(--border-color);
-    padding: 8px 12px; border-radius: 4px;
-    backdrop-filter: blur(4px);
-  }
-  .overlay-ticker { font-weight: 700; color: #fff; font-size: 14px; margin-right: 12px; }
-  .overlay-price { font-family: var(--font-mono); color: var(--accent-blue); font-size: 14px; }
-
+  #chart { background: var(--bg); width: 100%; height: 100%; }
 </style>
 
-<div class="app-frame">
-  
-  <header class="app-header">
-    <div class="brand">KABRODA // WEALTH OS</div>
-    <div class="live-status"><div class="pulse"></div>SYSTEM ACTIVE</div>
-  </header>
-
-  <aside class="app-sidebar">
+<div class="grid">
+  <div class="sidebar">
+    <div class="logo">KABRODA // WEALTH</div>
     
     <div>
-      <span class="input-label">Target Asset</span>
-      <div class="input-row">
-        <input type="text" id="tickerInput" class="terminal-input" value="BTC/USDT">
-        <button onclick="runScan()" class="btn-primary">SCAN</button>
+      <span class="input-label">Asset</span>
+      <input id="ticker" class="input" value="BTC/USDT" style="text-transform:uppercase;">
+    </div>
+    <div>
+      <span class="input-label">Capital ($)</span>
+      <input id="capital" class="input" type="number" value="100000">
+    </div>
+    
+    <button onclick="run()" class="btn">GENERATE STRATEGY</button>
+
+    <div id="result" style="display:none;">
+      <div class="card">
+        <span id="mode-badge" class="mode-badge">--</span>
+        <div id="rationale" style="font-size: 12px; color: #9CA3AF; line-height: 1.4; margin-bottom: 15px;"></div>
+        
+        <div style="font-size:11px; font-weight:700; color:#6B7280; margin-bottom:5px;">EXECUTION PLAN</div>
+        <div id="orders"></div>
       </div>
     </div>
+  </div>
 
-    <div id="telemetry" class="telemetry-stack" style="opacity: 0.4;">
-      
-      <div class="telemetry-row">
-        <span class="t-label">STRUCTURE</span>
-        <span class="badge b-neu" id="bias-badge">--</span>
-      </div>
-
-      <div class="telemetry-row">
-        <span class="t-label">GRADE</span>
-        <span class="t-val" id="grade-val">--</span>
-      </div>
-
-      <div class="telemetry-row">
-        <span class="t-label">SUPPLY</span>
-        <span class="t-val" id="sup-val" style="color: var(--accent-red);">--</span>
-      </div>
-
-      <div class="telemetry-row">
-        <span class="t-label">DEMAND</span>
-        <span class="t-val" id="dem-val" style="color: var(--accent-green);">--</span>
-      </div>
-
-    </div>
-
-    <div id="sys-msg" style="margin-top: auto; text-align: center; font-size: 10px; color: var(--text-muted);">
-      WAITING FOR COMMAND
-    </div>
-
-  </aside>
-
-  <main class="app-stage">
-    <div class="chart-overlay">
-      <span class="overlay-ticker" id="chart-ticker">BTC/USDT</span>
-      <span class="overlay-price" id="chart-price">--</span>
-    </div>
-    <div id="chart-mount" style="width: 100%; height: 100%;"></div>
-  </main>
-
+  <div id="chart"></div>
 </div>
 
 <script>
-  // --- SAFE INITIALIZATION BLOCK ---
-  let chart;
-  let mainSeries;
-  const domElement = document.getElementById('chart-mount');
+  // Simple Chart Init
+  const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+    layout: { background: { color: '#050810' }, textColor: '#6B7280' },
+    grid: { vertLines: { color: '#0F131F' }, horzLines: { color: '#0F131F' } },
+    rightPriceScale: { borderColor: '#1E2536' },
+    timeScale: { borderColor: '#1E2536' }
+  });
+  const series = chart.addCandlestickSeries({ upColor: '#10B981', downColor: '#EF4444', borderVisible:false, wickUpColor:'#10B981', wickDownColor:'#EF4444' });
+  
+  new ResizeObserver(e => chart.applyOptions({ width: e[0].contentRect.width, height: e[0].contentRect.height })).observe(document.getElementById('chart'));
 
-  try {
-    // 1. Create Chart
-    chart = LightweightCharts.createChart(domElement, {
-      layout: { background: { color: '#0D0E12' }, textColor: '#838896' },
-      grid: { vertLines: { color: '#171B26' }, horzLines: { color: '#171B26' } },
-      rightPriceScale: { borderColor: '#2B3040' },
-      timeScale: { borderColor: '#2B3040', timeVisible: true },
+  async function run() {
+    const ticker = document.getElementById('ticker').value;
+    const capital = document.getElementById('capital').value;
+    
+    // 1. Call API
+    const res = await fetch('/api/analyze-s-jan', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ symbol: ticker, capital: parseFloat(capital) })
     });
-
-    // 2. Create Series (Correct V4 Method)
-    mainSeries = chart.addCandlestickSeries({
-      upColor: '#00D68F', downColor: '#FF4B55',
-      borderVisible: false, wickUpColor: '#00D68F', wickDownColor: '#FF4B55'
-    });
-
-    // 3. Responsive Resize
-    new ResizeObserver(entries => {
-      if (entries.length === 0 || entries[0].target !== domElement) return;
-      const { width, height } = entries[0].contentRect;
-      chart.applyOptions({ width, height });
-    }).observe(domElement);
-
-  } catch (err) {
-    console.error("CRITICAL: Chart Lib Failed", err);
-    document.getElementById('sys-msg').innerText = "FATAL: CHART ENGINE ERROR";
-    document.getElementById('sys-msg').style.color = "red";
-  }
-
-
-  // --- LOGIC BLOCK ---
-  async function runScan() {
-    // Safety Check: If chart failed, don't run
-    if (!mainSeries) {
-      alert("Chart Engine is offline. Refresh page.");
-      return;
+    const data = await res.json();
+    
+    // 2. Plot Chart (Clean)
+    if(data.candles) {
+      series.setData(data.candles.sort((a,b)=>a.time-b.time));
+      
+      const analysis = data.analysis;
+      
+      // Draw 21 EMA (Blue Line)
+      // Note: We'd normally calc this on frontend or pass line data series. 
+      // For V1, we draw horizontal levels of significance (Fibs)
+      
+      // Draw Golden Pocket (Green Line)
+      series.createPriceLine({ price: analysis.fibs.golden, color: '#10B981', lineWidth: 1, title: 'GOLDEN 0.618' });
+      // Draw Momentum Fib (Blue Line)
+      series.createPriceLine({ price: analysis.fibs.shallow, color: '#00B2FF', lineWidth: 1, title: 'MOMENTUM 0.382' });
+      
+      chart.timeScale().fitContent();
     }
 
-    const ticker = document.getElementById('tickerInput').value;
-    const msg = document.getElementById('sys-msg');
-    const tel = document.getElementById('telemetry');
-    
-    msg.innerText = "EXECUTING SCAN...";
-    msg.style.color = "var(--accent-blue)";
-
-    try {
-      const res = await fetch('/api/analyze-s-jan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: ticker })
+    // 3. Show Plan
+    if(data.plan && data.plan.status === 'READY') {
+      document.getElementById('result').style.display = 'block';
+      const p = data.plan;
+      
+      // Mode Badge
+      const badge = document.getElementById('mode-badge');
+      badge.innerText = p.mode;
+      badge.className = p.mode.includes('MOMENTUM') || p.mode.includes('ROTATION') ? 'mode-badge b-blue' : 'mode-badge b-green';
+      
+      document.getElementById('rationale').innerText = p.rationale;
+      
+      // Orders
+      const list = document.getElementById('orders');
+      list.innerHTML = '';
+      p.orders.forEach(o => {
+        list.innerHTML += `
+          <div class="order-row">
+            <span style="color:#fff; font-weight:700;">BUY $${o.amount.toLocaleString()}</span>
+            <span class="price">@ ${o.price.toLocaleString()}</span>
+          </div>`;
       });
-      
-      const data = await res.json();
-
-      // Check Data Integrity
-      if (!data.candles || data.candles.length === 0) {
-        msg.innerText = "ERROR: NO DATA FEED";
-        msg.style.color = "var(--accent-red)";
-        return;
-      }
-
-      // 1. Plot Candles
-      const sorted = data.candles.sort((a,b) => a.time - b.time);
-      mainSeries.setData(sorted);
-      chart.timeScale().fitContent();
-
-      // 2. Update Overlay
-      document.getElementById('chart-ticker').innerText = ticker.toUpperCase();
-      document.getElementById('chart-price').innerText = sorted[sorted.length-1].close.toFixed(2);
-
-      // 3. Update Telemetry
-      const s = data.structure;
-      const m = data.map;
-      
-      tel.style.opacity = "1";
-      msg.innerText = "SCAN COMPLETE";
-      msg.style.color = "var(--accent-green)";
-
-      // Bias Badge
-      const bb = document.getElementById('bias-badge');
-      bb.innerText = s.bias.replace(/_/g, " ");
-      bb.className = 'badge';
-      if (s.bias.includes('BULL')) bb.classList.add('b-bull');
-      else if (s.bias.includes('BEAR')) bb.classList.add('b-bear');
-      else bb.classList.add('b-neu');
-
-      document.getElementById('grade-val').innerText = s.grade;
-      document.getElementById('sup-val').innerText = s.nearest_supply_level ? s.nearest_supply_level.toFixed(2) : '--';
-      document.getElementById('dem-val').innerText = s.nearest_demand_level ? s.nearest_demand_level.toFixed(2) : '--';
-
-      // 4. Draw Zones
-      // Clear old lines? (Simple add for now)
-      if (m.supply_zones) {
-        m.supply_zones.forEach(z => {
-          mainSeries.createPriceLine({
-            price: z.level, color: '#FF4B55', lineWidth: 2, 
-            lineStyle: LightweightCharts.LineStyle.Solid, 
-            axisLabelVisible: true, title: `SUPPLY (${z.tf})`
-          });
-        });
-      }
-      if (m.demand_zones) {
-        m.demand_zones.forEach(z => {
-          mainSeries.createPriceLine({
-            price: z.level, color: '#00D68F', lineWidth: 2, 
-            lineStyle: LightweightCharts.LineStyle.Solid, 
-            axisLabelVisible: true, title: `DEMAND (${z.tf})`
-          });
-        });
-      }
-
-    } catch (e) {
-      console.error(e);
-      msg.innerText = "CONNECTION FAILURE";
-      msg.style.color = "var(--accent-red)";
     }
   }
 </script>

@@ -326,31 +326,64 @@ async def wealth_page(request: Request, db: Session = Depends(get_db)):
         }
     })
 
+# main.py
+# ... (Keep existing imports) ...
+import sjan_brain      # <--- NEW
+import wealth_allocator # <--- NEW
+
+# ... (Keep existing startup/auth/billing code) ...
+
+# -------------------------------------------------------------------
+# NEW: S JAN / WEALTH ROUTES
+# -------------------------------------------------------------------
+
+@app.get("/wealth", response_class=HTMLResponse)
+async def wealth_page(request: Request, db: Session = Depends(get_db)):
+    sess = _session_user_dict(request)
+    if not sess: return RedirectResponse(url="/login", status_code=303)
+    
+    u = _db_user_from_session(db, sess)
+    flags = _plan_flags(u)
+    
+    return templates.TemplateResponse("wealth.html", {
+        "request": request, 
+        "is_logged_in": True,
+        "user": {
+            "email": u.email, 
+            "username": u.username, 
+            "session_tz": (u.session_tz or "UTC"),
+            "plan_label": flags.get("plan_label", ""),
+            "plan": flags.get("plan")
+        }
+    })
+
 @app.post("/api/analyze-s-jan")
 async def api_analyze_s_jan(request: Request, db: Session = Depends(get_db)):
-    """
-    The Full S Jan API.
-    Returns: Logic Results AND Candle History for plotting.
-    """
     _require_session_user(request)
     
-    try:
-        payload = await request.json()
-    except:
-        payload = {}
+    try: payload = await request.json()
+    except: payload = {}
     
     symbol = (payload.get("symbol") or "BTC/USDT").strip().upper()
+    capital = float(payload.get("capital") or 0)
     
-    # 1. Fetch Data (Includes Candles with Timestamps)
+    # 1. Fetch Data
     inputs = await asyncio.to_thread(data_feed.get_investing_inputs, symbol)
     
-    # 2. Run Engine
-    result = sse_engine.compute_investing_levels(inputs)
+    # 2. RUN NEW BRAIN (Context)
+    analysis = sjan_brain.analyze_market_structure(
+        inputs["monthly_candles"], 
+        inputs["weekly_candles"]
+    )
     
-    # 3. Merge Candles into Response
+    # 3. RUN NEW ALLOCATOR (Plan)
+    plan = {}
+    if capital > 0:
+        plan = wealth_allocator.generate_dynamic_plan(capital, analysis)
+
     return JSONResponse({
         "status": "success",
-        "map": result["map"],
-        "structure": result["structure"],
-        "candles": inputs["weekly_candles"]
+        "candles": inputs["weekly_candles"], # For Chart
+        "analysis": analysis, # For drawing Fibs/MAs
+        "plan": plan          # For Sidebar
     })
