@@ -4,6 +4,11 @@ from __future__ import annotations
 import wealth_engine
 import wealth_lab
 
+# main.py imports section
+import sse_engine  # Make sure this is imported
+import data_feed   # Make sure this is imported
+# ... existing imports ...
+
 import asyncio
 import os
 from typing import Any, Dict, Optional
@@ -380,4 +385,32 @@ def test_grid_logic():
     )
 
     result = wealth_lab.run_grid_simulation(cfg)
+    return JSONResponse(result)
+# -------------------------------------------------------------------
+# NEW: S Jan Investing API
+# -------------------------------------------------------------------
+@app.post("/api/analyze-s-jan")
+async def api_analyze_s_jan(request: Request, db: Session = Depends(get_db)):
+    """
+    The new brain for Long-Term Structure.
+    Connects Data Feed -> SSE Engine (Investing Mode) -> Frontend.
+    """
+    # 1. Security: Ensure user is logged in
+    sess = _require_session_user(request)
+    
+    # 2. Get User Input
+    try:
+        payload = await request.json()
+    except:
+        payload = {}
+    
+    symbol = (payload.get("symbol") or "BTC/USDT").strip().upper()
+    
+    # 3. Data Feed: Fetch Monthly/Weekly Candles (Using the new function in data_feed.py)
+    # We use asyncio.to_thread because CCXT is synchronous
+    inputs = await asyncio.to_thread(data_feed.get_investing_inputs, symbol)
+    
+    # 4. The Engine: Calculate Zones & Grades (Using the new code in sse_engine.py)
+    result = sse_engine.compute_investing_levels(inputs)
+    
     return JSONResponse(result)

@@ -163,3 +163,51 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
         "news": _fetch_calendar_stub(),
         "events": _fetch_calendar_stub()
     }
+# ----------------------------
+# 5. NEW: INVESTING DATA FEED (S Jan)
+# ----------------------------
+def get_investing_inputs(symbol: str) -> Dict[str, Any]:
+    """
+    Fetches Long-Term data (Monthly/Weekly) for the S Jan Investing Engine.
+    Reuses the existing exchange connection logic.
+    """
+    exchange_id = os.getenv("EXCHANGE_ID", DEFAULT_EXCHANGE_ID).lower()
+    raw_symbol = resolve_symbol(symbol, exchange_id)
+    
+    exchange = get_exchange_client(exchange_id)
+    
+    monthly_candles = []
+    weekly_candles = []
+    current_price = 0.0
+    
+    try:
+        # 1. Get Current Price
+        ticker = exchange.fetch_ticker(raw_symbol)
+        current_price = float(ticker['last'])
+        
+        # 2. Fetch Monthly Data (1M) - Need ~24 months for context
+        # 2 years = ~24 candles
+        ohlcv_m = exchange.fetch_ohlcv(raw_symbol, timeframe='1M', limit=24)
+        monthly_candles = [
+            {'open': c[1], 'high': c[2], 'low': c[3], 'close': c[4]} 
+            for c in ohlcv_m
+        ]
+        
+        # 3. Fetch Weekly Data (1w) - Need ~52 weeks for context
+        # 1 year = ~52 candles
+        ohlcv_w = exchange.fetch_ohlcv(raw_symbol, timeframe='1w', limit=52)
+        weekly_candles = [
+            {'open': c[1], 'high': c[2], 'low': c[3], 'close': c[4]} 
+            for c in ohlcv_w
+        ]
+        
+    except Exception as e:
+        print(f"Data Feed Error (Investing): {e}")
+        # Return empty lists so the engine handles it gracefully rather than crashing
+    
+    return {
+        "symbol": symbol,
+        "current_price": current_price,
+        "monthly_candles": monthly_candles,
+        "weekly_candles": weekly_candles
+    }

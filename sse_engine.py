@@ -4,6 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+# -------------------------------------------------------------------------
+# SHARED CORE: Data Structures & Math Helpers
+# -------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class Shelf:
@@ -12,6 +15,9 @@ class Shelf:
     kind: str  # "supply" or "demand"
     strength: float
     primary: bool = False
+    # New optional fields for the Investing Engine (won't break existing code)
+    zone_top: Optional[float] = None
+    zone_bottom: Optional[float] = None
 
 
 def _pct(x: float, p: float) -> float:
@@ -27,6 +33,10 @@ def _spacing_ok(a: float, b: float, min_pct: float) -> bool:
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
+
+# -------------------------------------------------------------------------
+# PART 1: EXISTING DAY TRADING ENGINE (The SSE Suite)
+# -------------------------------------------------------------------------
 
 def _build_htf_shelves(
     h4_supply: float,
@@ -77,7 +87,7 @@ def _select_daily_levels(resistance: List[Shelf], support: List[Shelf]) -> Tuple
 
 def _pick_trigger_candidates(
     *,
-    px: float,  # This is the ANCHOR price (Session Open), not live price
+    px: float,
     daily_support: float,
     daily_resistance: float,
     r30_high: float,
@@ -85,11 +95,6 @@ def _pick_trigger_candidates(
     f24_vah: float,
     f24_val: float,
 ) -> Tuple[float, float, Dict[str, Any]]:
-    """
-    DETERMINISTIC ANCHOR LOGIC:
-    Calculates triggers based on the ANCHOR price (px).
-    Triggers are set at Open and do NOT move with live price.
-    """
     # Min distance from ANCHOR (0.5%)
     min_from_px = 0.005
     min_level_spacing = 0.0015
@@ -102,8 +107,6 @@ def _pick_trigger_candidates(
     if bd_base <= 0:
         bd_base = daily_support + 0.3 * (daily_resistance - daily_support)
 
-    # Enforce "away from ANCHOR" (Not current price)
-    # This locks the trigger relative to the Session Open.
     bo = max(bo_base, px * (1 + min_from_px))
     bd = min(bd_base, px * (1 - min_from_px))
 
@@ -113,7 +116,6 @@ def _pick_trigger_candidates(
     bd = _clamp(bd, inner_lo, inner_hi)
 
     if not (daily_support < bd < bo < daily_resistance):
-        # deterministic re-center inside band around ANCHOR
         mid = _clamp(px, inner_lo, inner_hi)
         span = max((daily_resistance - daily_support) * 0.12, px * 0.01)
         bd = _clamp(mid - span / 2, inner_lo, inner_hi)
@@ -149,6 +151,10 @@ def _pick_trigger_candidates(
 
 
 def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    ORIGINAL FUNCTION: Used for the Day Trading Suite.
+    Does not use automated candle scanning. Relies on inputs.
+    """
     def f(k: str, default: float = 0.0) -> float:
         try:
             v = inputs.get(k, default)
@@ -156,12 +162,8 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             return float(default)
 
-    # 1. Try to get the Session Open Price (The Anchor)
-    # 2. If missing, fall back to Last Price (px)
     px = f("last_price", 0.0)
     anchor_px = f("session_open_price", 0.0)
-    
-    # CRITICAL FIX: If we have an anchor, use it. If not, use last price.
     reference_price = anchor_px if anchor_px > 0 else px
 
     resistance, support = _build_htf_shelves(
@@ -174,10 +176,8 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
     daily_support, daily_resistance, htf_out = _select_daily_levels(resistance, support)
 
     if reference_price <= 0:
-        # Fallback if literally zero data
         reference_price = (f("f24_poc") or f("weekly_poc") or (daily_support + daily_resistance) / 2.0)
 
-    # Pass 'reference_price' (The Anchor) instead of live price
     bo, bd, intraday = _pick_trigger_candidates(
         px=reference_price, 
         daily_support=daily_support,
@@ -204,4 +204,157 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
         },
         "htf_shelves": htf_out,
         "intraday_shelves": intraday,
+    }
+
+
+# -------------------------------------------------------------------------
+# PART 2: NEW INVESTING ENGINE (The "S Jan" Suite)
+# -------------------------------------------------------------------------
+
+def _find_smart_zones(candles: List[Dict[str, float]], timeframe: str) -> List[Shelf]:
+    """
+    Scans raw OHLCV candle data to identify Pivot-based Supply and Demand zones.
+    Logic: Looks for a 3-candle Fractal (High > Left and High > Right).
+    """
+    zones = []
+    if not candles or len(candles) < 3:
+        return zones
+
+    # Strength Mapping
+    # Monthly = 10.0 (King), Weekly = 9.0 (Queen)
+    base_strength = 10.0 if "M" in timeframe else 9.0
+
+    # Lookback logic: Standard 3-candle fractal (1 left, 1 right)
+    for i in range(1, len(candles) - 1):
+        prev = candles[i - 1]
+        curr = candles[i]
+        next_c = candles[i + 1]
+
+        # 1. DETECT SUPPLY (Pivot High)
+        if curr['high'] > prev['high'] and curr['high'] > next_c['high']:
+            # Zone Definition: Top = Wick High, Bottom = Body Top (Open or Close)
+            # This is the "Order Block" logic.
+            zone_top = curr['high']
+            zone_bottom = max(curr['open'], curr['close'])
+            
+            # Create Shelf
+            zones.append(Shelf(
+                tf=timeframe,
+                level=zone_bottom, # We track the "entrance" to the zone as the level
+                kind="supply",
+                strength=base_strength,
+                primary=True,
+                zone_top=zone_top,
+                zone_bottom=zone_bottom
+            ))
+
+        # 2. DETECT DEMAND (Pivot Low)
+        if curr['low'] < prev['low'] and curr['low'] < next_c['low']:
+            # Zone Definition: Top = Body Bottom, Bottom = Wick Low
+            zone_top = min(curr['open'], curr['close'])
+            zone_bottom = curr['low']
+
+            zones.append(Shelf(
+                tf=timeframe,
+                level=zone_top, # Entrance level
+                kind="demand",
+                strength=base_strength,
+                primary=True,
+                zone_top=zone_top,
+                zone_bottom=zone_bottom
+            ))
+            
+    return zones
+
+
+def _grade_market_structure(price: float, supply_zones: List[Shelf], demand_zones: List[Shelf]) -> Dict[str, Any]:
+    """
+    Determines the 'Grade' or 'Bias' based on current price location relative to zones.
+    """
+    # Sort zones by proximity to current price
+    active_supply = [z for z in supply_zones if z.level > price]
+    active_demand = [z for z in demand_zones if z.level < price]
+
+    # Find nearest zones
+    nearest_supply = min(active_supply, key=lambda z: z.level) if active_supply else None
+    nearest_demand = max(active_demand, key=lambda z: z.level) if active_demand else None
+
+    # Basic Grading Logic
+    bias = "NEUTRAL"
+    grade = "C"
+
+    if nearest_supply and nearest_demand:
+        range_dist = nearest_supply.level - nearest_demand.level
+        pos_in_range = (price - nearest_demand.level) / range_dist if range_dist > 0 else 0.5
+        
+        if pos_in_range > 0.8:
+            bias = "BEARISH_TEST"  # Testing Supply
+            grade = "B+"
+        elif pos_in_range < 0.2:
+            bias = "BULLISH_TEST"  # Testing Demand
+            grade = "B+"
+        else:
+            bias = "RANGING"
+            grade = "C"
+            
+    # Check for breakouts (if price is above the last known supply pivot)
+    # This assumes 'supply_zones' contains historical pivots.
+    # If price > nearest_supply.zone_top (the wick), it's a Break of Structure (BOS)
+    
+    return {
+        "bias": bias,
+        "grade": grade,
+        "nearest_supply_level": nearest_supply.level if nearest_supply else None,
+        "nearest_demand_level": nearest_demand.level if nearest_demand else None
+    }
+
+
+def compute_investing_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    NEW FUNCTION: S Jan Investing Engine.
+    Takes raw candle data, finds zones automatically, and grades the structure.
+    
+    Expected Inputs:
+      - 'monthly_candles': List of dicts {'open', 'high', 'low', 'close'}
+      - 'weekly_candles': List of dicts
+      - 'current_price': float
+    """
+    monthly_data = inputs.get("monthly_candles", [])
+    weekly_data = inputs.get("weekly_candles", [])
+    current_price = float(inputs.get("current_price", 0.0))
+
+    # 1. Automate the Search (The "Map")
+    m_zones = _find_smart_zones(monthly_data, "Monthly")
+    w_zones = _find_smart_zones(weekly_data, "Weekly")
+    
+    all_supply = [z for z in m_zones + w_zones if z.kind == "supply"]
+    all_demand = [z for z in m_zones + w_zones if z.kind == "demand"]
+
+    # 2. Grade the Structure
+    grading = _grade_market_structure(current_price, all_supply, all_demand)
+
+    # 3. Format Output for Frontend (JSON)
+    # We convert Shelf objects to simple dicts for the API response
+    def to_dict(shelves):
+        return [
+            {
+                "tf": s.tf,
+                "level": s.level,
+                "strength": s.strength,
+                "top": s.zone_top,
+                "bottom": s.zone_bottom
+            } 
+            for s in sorted(shelves, key=lambda x: x.level)
+        ]
+
+    return {
+        "map": {
+            "supply_zones": to_dict(all_supply),
+            "demand_zones": to_dict(all_demand)
+        },
+        "structure": grading,
+        "meta": {
+            "engine": "S_Jan_v1",
+            "zones_found": len(all_supply) + len(all_demand)
+        }
     }
