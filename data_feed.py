@@ -11,7 +11,8 @@ from zoneinfo import ZoneInfo
 # ----------------------------
 # 1. CONFIGURATION
 # ----------------------------
-DEFAULT_EXCHANGE_ID = "kraken" 
+# SWITCH: We now default to KuCoin for better historical data (1M candles)
+DEFAULT_EXCHANGE_ID = "kucoin" 
 
 SESSION_SPECS = {
     "America/New_York":       {"tz": "America/New_York", "open": "09:30"},
@@ -24,12 +25,11 @@ SESSION_SPECS = {
 
 def resolve_symbol(symbol: str, exchange_id: str) -> str:
     s = (symbol or "").strip().upper()
-    if exchange_id == "kraken" and s == "BTCUSDT": return "BTC/USDT"
-    if exchange_id == "coinbase" and s == "BTCUSDT": return "BTC/USD"
-    
+    # KuCoin prefers "BTC/USDT" format
     if "USDT" in s and "/" not in s: return s.replace("USDT", "/USDT")
     if "USD" in s and "/" not in s and "USDT" not in s: return s.replace("USD", "/USD")
-        
+    
+    # Fallback to standard slash format if not present
     return s if "/" in s else f"{s}/USDT"
 
 def _ms(dt: datetime) -> int: return int(dt.timestamp() * 1000)
@@ -40,7 +40,6 @@ class Candle:
     o: float; h: float; l: float; c: float; v: float
 
 def _fetch_calendar_stub() -> List[str]:
-    # STATIC DIRECTIVE - Forces user to check real source
     return [
         "ℹ️ CRITICAL: Verify Impact Events before execution.",
         "🔗 SOURCE: https://www.forexfactory.com/calendar",
@@ -52,7 +51,9 @@ def _fetch_calendar_stub() -> List[str]:
 # ----------------------------
 def get_exchange_client(exchange_id: str):
     if not hasattr(ccxt, exchange_id):
-        raise ValueError(f"Exchange '{exchange_id}' not found in CCXT")
+        # Fallback to KuCoin if the requested ID is invalid
+        print(f"⚠️ Exchange '{exchange_id}' not found. Defaulting to KuCoin.")
+        exchange_id = 'kucoin'
     
     exchange_class = getattr(ccxt, exchange_id)
     exchange = exchange_class({
@@ -81,7 +82,7 @@ def _session_window(tz_name, open_hhmm):
     return (start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc))
 
 # ----------------------------
-# 4. MAIN PIPELINE
+# 4. MAIN PIPELINE (Day Trading)
 # ----------------------------
 def get_inputs(*, symbol: str, date: Optional[str] = None, session_tz: str = "UTC") -> Dict[str, Any]:
     inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
@@ -99,9 +100,7 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
     
     last_price = 0.0
     range_high = range_low = session_open = None
-    
-    h1_supply = h1_demand = 0.0
-    h4_supply = h4_demand = 0.0
+    h1_supply = h1_demand = h4_supply = h4_demand = 0.0
     
     try:
         try:
@@ -140,7 +139,6 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
             
     except Exception as e:
         print(f"CCXT Error ({exchange_id}): {e}")
-        pass
 
     return {
         "date": datetime.now(ZoneInfo(spec["tz"])).strftime("%Y-%m-%d"),
@@ -152,28 +150,21 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
         "r30_high": range_high, "r30_low": range_low,
         "range_30m": {"high": range_high, "low": range_low},
         
-        "weekly_poc": None, 
-        "f24_poc": None, 
-        "morn_poc": None,
-        "h1_supply": h1_supply,
-        "h1_demand": h1_demand,
-        "h4_supply": h4_supply,
-        "h4_demand": h4_demand,
-        
-        "news": _fetch_calendar_stub(),
-        "events": _fetch_calendar_stub()
+        "weekly_poc": None, "f24_poc": None, "morn_poc": None,
+        "h1_supply": h1_supply, "h1_demand": h1_demand,
+        "h4_supply": h4_supply, "h4_demand": h4_demand,
+        "news": _fetch_calendar_stub(), "events": _fetch_calendar_stub()
     }
+
 # ----------------------------
 # 5. NEW: INVESTING DATA FEED (S Jan)
 # ----------------------------
-# In data_feed.py
-
 def get_investing_inputs(symbol: str) -> Dict[str, Any]:
     """
-    Fetches Long-Term data (Monthly/Weekly) for the S Jan Investing Engine.
-    INCLUDES TIMESTAMPS for plotting.
+    Fetches Long-Term data for the S Jan Investing Engine.
+    USING KUCOIN allows us to fetch true '1M' (Monthly) candles.
     """
-    exchange_id = os.getenv("EXCHANGE_ID", DEFAULT_EXCHANGE_ID).lower()
+    exchange_id = "kucoin" # Force KuCoin for this specific heavy lifting
     raw_symbol = resolve_symbol(symbol, exchange_id)
     
     exchange = get_exchange_client(exchange_id)
@@ -186,15 +177,14 @@ def get_investing_inputs(symbol: str) -> Dict[str, Any]:
         ticker = exchange.fetch_ticker(raw_symbol)
         current_price = float(ticker['last'])
         
-        # Fetch Monthly (Limit 24)
+        # 1. Fetch Monthly (1M) - KuCoin supports this!
         ohlcv_m = exchange.fetch_ohlcv(raw_symbol, timeframe='1M', limit=24)
         monthly_candles = [
-            # time must be in seconds for Lightweight Charts
             {'time': int(c[0]/1000), 'open': c[1], 'high': c[2], 'low': c[3], 'close': c[4]} 
             for c in ohlcv_m
         ]
         
-        # Fetch Weekly (Limit 52)
+        # 2. Fetch Weekly (1w)
         ohlcv_w = exchange.fetch_ohlcv(raw_symbol, timeframe='1w', limit=52)
         weekly_candles = [
             {'time': int(c[0]/1000), 'open': c[1], 'high': c[2], 'low': c[3], 'close': c[4]} 
@@ -202,7 +192,7 @@ def get_investing_inputs(symbol: str) -> Dict[str, Any]:
         ]
         
     except Exception as e:
-        print(f"Data Feed Error (Investing): {e}")
+        print(f"Data Feed Error (Investing): {exchange_id} {e}")
     
     return {
         "symbol": symbol,
