@@ -40,25 +40,52 @@
         <button class="primary-btn" onclick="runBacktest()">RUN SIMULATION</button>
     </div>
 
-    <div id="resultsArea" style="display:none; margin-top: 30px;">
+    <div id="retroBox" style="display:none; margin-top: 40px; border-top: 1px solid #333; padding-top: 20px;">
+        <h3 style="color: #00e5ff; margin-bottom: 10px;">SESSION REPLAY: <span id="replayDate" style="color: #fff;">SELECT A DATE BELOW</span></h3>
         
+        <div class="telemetry-grid">
+            <div class="telemetry-card" style="border-color: rgba(255, 77, 77, 0.3);">
+                <div class="label" style="color: #ff4d4d;">DAILY RESISTANCE</div>
+                <div class="value" id="retro_res">---</div>
+            </div>
+
+            <div class="telemetry-card" style="border-color: rgba(0, 255, 157, 0.3);">
+                <div class="label" style="color: #00ff9d;">BREAKOUT TRIGGER</div>
+                <div class="value" id="retro_bo">---</div>
+            </div>
+
+            <div class="telemetry-card" style="border-color: rgba(179, 157, 219, 0.3);">
+                <div class="label" style="color: #b39ddb;">BREAKDOWN TRIGGER</div>
+                <div class="value" id="retro_bd">---</div>
+            </div>
+
+            <div class="telemetry-card" style="border-color: rgba(56, 126, 245, 0.3);">
+                <div class="label" style="color: #387ef5;">DAILY SUPPORT</div>
+                <div class="value" id="retro_sup">---</div>
+            </div>
+        </div>
+        <div style="text-align: right; margin-top: 10px;">
+            <button onclick="copyRetroLevels()" style="background: #333; color: #fff; border: 1px solid #555; padding: 5px 15px; cursor: pointer;">COPY THIS SESSION</button>
+        </div>
+    </div>
+
+    <div id="resultsArea" style="display:none; margin-top: 30px;">
         <div class="telemetry-grid" style="grid-template-columns: 1fr 2fr; margin-bottom: 30px;">
             <div class="telemetry-card">
-                <h3>PERFORMANCE BREAKDOWN</h3>
+                <h3>WIN RATE</h3>
                 <canvas id="performanceChart"></canvas>
             </div>
+            
             <div class="telemetry-card">
-                <h3>SESSION LOG</h3>
+                <h3>SESSION LOG (CLICK ROW TO VIEW)</h3>
                 <div style="max-height: 400px; overflow-y: auto;">
                     <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
                         <thead style="border-bottom: 1px solid #333; color: #888;">
                             <tr>
                                 <th style="padding: 10px;">DATE</th>
-                                <th>BREAKOUT</th>
-                                <th>BREAKDOWN</th>
+                                <th>TRIGGER</th>
                                 <th>OUTCOME</th>
-                                <th>MAX RUN</th>
-                                <th>ACTION</th>
+                                <th>RUN</th>
                             </tr>
                         </thead>
                         <tbody id="historyTableBody"></tbody>
@@ -66,13 +93,13 @@
                 </div>
             </div>
         </div>
-
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 let perfChart = null;
+let currentRetroLevels = null;
 
 async function runBacktest() {
     const btn = document.querySelector('.primary-btn');
@@ -91,12 +118,40 @@ async function runBacktest() {
             body: JSON.stringify(payload)
         });
         const data = await res.json();
-        renderResults(data.history);
+        
         document.getElementById('resultsArea').style.display = 'block';
+        document.getElementById('retroBox').style.display = 'block';
+        
+        renderResults(data.history);
+        
+        // Auto-select the most recent day
+        if(data.history.length > 0) {
+            loadRetroBox(data.history[0]);
+        }
+
     } catch (e) {
-        alert("Simulation Error: " + e);
+        console.error(e);
+        alert("Simulation Error: Check console for details.");
     }
     btn.textContent = "RUN SIMULATION";
+}
+
+function loadRetroBox(row) {
+    // Populate the big boxes at the top
+    document.getElementById('replayDate').textContent = row.date;
+    
+    // SAFE ACCESS: Use || 0 to prevent crashes if data is missing
+    const res = row.levels.daily_resistance || 0;
+    const bo  = row.levels.breakout_trigger || 0;
+    const bd  = row.levels.breakdown_trigger || 0;
+    const sup = row.levels.daily_support || 0;
+
+    document.getElementById('retro_res').textContent = res.toFixed(2);
+    document.getElementById('retro_bo').textContent = bo.toFixed(2);
+    document.getElementById('retro_bd').textContent = bd.toFixed(2);
+    document.getElementById('retro_sup').textContent = sup.toFixed(2);
+    
+    currentRetroLevels = { res, bo, bd, sup };
 }
 
 function renderResults(history) {
@@ -106,31 +161,38 @@ function renderResults(history) {
     let stats = { breakout: 0, breakdown: 0, chop: 0 };
     
     history.forEach(row => {
-        // Stats
+        // Count stats
         if (row.outcome.status === "BREAKOUT") stats.breakout++;
         else if (row.outcome.status === "BREAKDOWN") stats.breakdown++;
         else stats.chop++;
 
-        // Table Row
         const tr = document.createElement('tr');
         tr.style.borderBottom = "1px solid #222";
+        tr.style.cursor = "pointer";
         
-        let statusColor = "#888"; // Chop
-        if (row.outcome.status === "BREAKOUT") statusColor = "#00ff9d";
-        if (row.outcome.status === "BREAKDOWN") statusColor = "#ff4d4d";
+        // Hover effect logic handled via CSS usually, but simple JS here:
+        tr.onmouseover = function() { this.style.backgroundColor = "#222"; };
+        tr.onmouseout = function() { this.style.backgroundColor = "transparent"; };
+        
+        // ON CLICK: Load this day into the top boxes
+        tr.onclick = function() { loadRetroBox(row); };
+
+        let statusColor = "#888";
+        let triggerPrice = "---";
+        
+        if (row.outcome.status === "BREAKOUT") {
+            statusColor = "#00ff9d";
+            triggerPrice = (row.levels.breakout_trigger || 0).toFixed(2);
+        } else if (row.outcome.status === "BREAKDOWN") {
+            statusColor = "#ff4d4d";
+            triggerPrice = (row.levels.breakdown_trigger || 0).toFixed(2);
+        }
 
         tr.innerHTML = `
             <td style="padding: 12px; color: #ccc;">${row.date}</td>
-            <td style="color: #00ff9d;">$${row.levels.breakout_trigger.toFixed(2)}</td>
-            <td style="color: #ff4d4d;">$${row.levels.breakdown_trigger.toFixed(2)}</td>
+            <td style="color: #fff;">${triggerPrice}</td>
             <td style="color: ${statusColor}; font-weight: bold;">${row.outcome.status}</td>
-            <td style="color: #fff;">$${row.outcome.max_run.toFixed(2)}</td>
-            <td>
-                <button onclick='copyLevels(${JSON.stringify(row.levels)})' 
-                        style="background: #333; border: none; color: #fff; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-size: 0.8rem;">
-                    COPY
-                </button>
-            </td>
+            <td style="color: #fff;">$${(row.outcome.max_run || 0).toFixed(2)}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -145,7 +207,7 @@ function renderChart(stats) {
     perfChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
-            labels: ['Breakout', 'Breakdown', 'Range/Chop'],
+            labels: ['Long Wins', 'Short Wins', 'Range/Chop'],
             datasets: [{
                 data: [stats.breakout, stats.breakdown, stats.chop],
                 backgroundColor: ['#00ff9d', '#ff4d4d', '#444'],
@@ -161,10 +223,11 @@ function renderChart(stats) {
     });
 }
 
-function copyLevels(levels) {
-    const txt = `BO: ${levels.breakout_trigger} | BD: ${levels.breakdown_trigger} | Res: ${levels.daily_resistance} | Sup: ${levels.daily_support}`;
+function copyRetroLevels() {
+    if(!currentRetroLevels) return;
+    const txt = `📅 SESSION REPLAY\nRES: ${currentRetroLevels.res.toFixed(2)}\nBO:  ${currentRetroLevels.bo.toFixed(2)}\nBD:  ${currentRetroLevels.bd.toFixed(2)}\nSUP: ${currentRetroLevels.sup.toFixed(2)}`;
     navigator.clipboard.writeText(txt);
-    alert("Levels copied to clipboard!");
+    alert("Session data copied!");
 }
 </script>
 {% endblock %}
