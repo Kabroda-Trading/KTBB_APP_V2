@@ -1,185 +1,53 @@
-# data_feed.py
-from __future__ import annotations
+import ccxt.async_support as ccxt
+import pandas as pd
+import asyncio
 
-import os
-import ccxt
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, List
-from zoneinfo import ZoneInfo
+# Configure exchange
+exchange = ccxt.binanceus({'enableRateLimit': True})
 
-# ----------------------------
-# 1. CONFIGURATION
-# ----------------------------
-DEFAULT_EXCHANGE_ID = "kraken" 
-
-SESSION_SPECS = {
-    "America/New_York":       {"tz": "America/New_York", "open": "09:30"},
-    "America/New_York_Early": {"tz": "America/New_York", "open": "08:30"},
-    "Europe/London":          {"tz": "Europe/London",    "open": "08:00"},
-    "Asia/Tokyo":             {"tz": "Asia/Tokyo",       "open": "09:00"},
-    "Australia/Sydney":       {"tz": "Australia/Sydney", "open": "10:00"},
-    "UTC":                    {"tz": "UTC",              "open": "00:00"},
-}
-
-def resolve_symbol(symbol: str, exchange_id: str) -> str:
-    s = (symbol or "").strip().upper()
-    if exchange_id == "kraken" and s == "BTCUSDT": return "BTC/USDT"
-    if exchange_id == "coinbase" and s == "BTCUSDT": return "BTC/USD"
-    
-    if "USDT" in s and "/" not in s: return s.replace("USDT", "/USDT")
-    if "USD" in s and "/" not in s and "USDT" not in s: return s.replace("USD", "/USD")
-        
-    return s if "/" in s else f"{s}/USDT"
-
-def _ms(dt: datetime) -> int: return int(dt.timestamp() * 1000)
-
-def _fetch_calendar_stub() -> List[str]:
-    return [
-        "ℹ️ CRITICAL: Verify Impact Events.",
-        "🔗 SOURCE: ForexFactory",
-        "⚠️ ACTION: No trade 5m before Red News."
-    ]
-
-# ----------------------------
-# 2. UNIVERSAL CCXT PROVIDER
-# ----------------------------
-def get_exchange_client(exchange_id: str):
-    if not hasattr(ccxt, exchange_id):
-        exchange_id = 'kucoin'
-    
-    exchange_class = getattr(ccxt, exchange_id)
-    exchange = exchange_class({
-        'enableRateLimit': True,
-        'options': {'defaultType': 'spot'} 
-    })
-    return exchange
-
-# ----------------------------
-# 3. DAY TRADING LOGIC (BattleBox)
-# ----------------------------
-def _session_window(tz_name, open_hhmm):
-    z = ZoneInfo(tz_name)
-    now = datetime.now(z)
-    hh, mm = map(int, open_hhmm.split(":"))
-    
-    candidate_open = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-    lock_point = candidate_open + timedelta(minutes=30)
-    
-    if now < lock_point:
-        candidate_open -= timedelta(days=1)
-    
-    start_local = candidate_open
-    end_local = candidate_open + timedelta(minutes=30)
-    
-    return (start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc))
-
-def get_inputs(*, symbol: str, date: Optional[str] = None, session_tz: str = "UTC") -> Dict[str, Any]:
-    inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
-    import sse_engine
-    sse = sse_engine.compute_sse_levels(inputs)
-    inputs.update(sse)
-    return inputs
-
-def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[str, Any]:
-    exchange_id = os.getenv("EXCHANGE_ID", DEFAULT_EXCHANGE_ID).lower()
-    raw_symbol = resolve_symbol(symbol, exchange_id)
-    spec = SESSION_SPECS.get(session_tz, SESSION_SPECS["UTC"])
-    
-    exchange = get_exchange_client(exchange_id)
-    
-    last_price = 0.0
-    range_high = range_low = session_open = None
-    h1_supply = h1_demand = h4_supply = h4_demand = 0.0
-    
+async def fetch_candles(symbol: str, timeframe: str, limit: int = 1000):
     try:
-        try:
-            ticker = exchange.fetch_ticker(raw_symbol)
-            last_price = float(ticker['last'])
-        except: pass
-
-        start_utc, end_utc = _session_window(spec["tz"], spec["open"])
-        start_ms = _ms(start_utc)
+        # Map common symbols if needed
+        if symbol == "BTC/USDT":
+            symbol = "BTC/USDT"
         
-        since_4h = _ms(datetime.now(timezone.utc) - timedelta(days=7))
-        ohlcv_4h = exchange.fetch_ohlcv(raw_symbol, timeframe='4h', since=since_4h, limit=50)
+        # CCXT fetch
+        candles = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         
-        if ohlcv_4h:
-            h4_supply = max(c[2] for c in ohlcv_4h)
-            h4_demand = min(c[3] for c in ohlcv_4h)
-
-        since_1h = _ms(datetime.now(timezone.utc) - timedelta(hours=24))
-        ohlcv_1h = exchange.fetch_ohlcv(raw_symbol, timeframe='1h', since=since_1h, limit=24)
-        
-        if ohlcv_1h:
-            h1_supply = max(c[2] for c in ohlcv_1h)
-            h1_demand = min(c[3] for c in ohlcv_1h)
-
-        ohlcv_30m = exchange.fetch_ohlcv(raw_symbol, timeframe='30m', since=start_ms, limit=3)
-        target_candle = next((c for c in ohlcv_30m if c[0] == start_ms), None)
-        
-        if target_candle:
-            session_open = target_candle[1]
-            range_high = target_candle[2]
-            range_low = target_candle[3]
-        elif ohlcv_30m:
-            session_open = ohlcv_30m[0][1]
-            range_high = ohlcv_30m[0][2]
-            range_low = ohlcv_30m[0][3]
-            
+        data = []
+        for c in candles:
+            data.append({
+                "time": int(c[0] / 1000), # Unix timestamp
+                "open": float(c[1]),
+                "high": float(c[2]),
+                "low": float(c[3]),
+                "close": float(c[4]),
+                "volume": float(c[5])
+            })
+        return data
     except Exception as e:
-        print(f"CCXT Error ({exchange_id}): {e}")
+        print(f"Error fetching {symbol} {timeframe}: {e}")
+        return []
 
-    return {
-        "date": datetime.now(ZoneInfo(spec["tz"])).strftime("%Y-%m-%d"),
-        "symbol": symbol, 
-        "exchange": exchange_id, 
-        "session_tz": session_tz,
-        "last_price": last_price,
-        "session_open_price": session_open,
-        "r30_high": range_high, "r30_low": range_low,
-        "range_30m": {"high": range_high, "low": range_low},
-        "weekly_poc": None, "f24_poc": None, "morn_poc": None,
-        "h1_supply": h1_supply, "h1_demand": h1_demand,
-        "h4_supply": h4_supply, "h4_demand": h4_demand,
-        "news": _fetch_calendar_stub(), "events": _fetch_calendar_stub()
-    }
-
-# ----------------------------
-# 4. WEALTH OS PIPELINE (Deep History)
-# ----------------------------
-def fetch_candles_safe(exchange, symbol: str, timeframe: str, limit: int) -> List[Dict]:
-    """Robust fetcher for Wealth OS (Weekly/Monthly) with deep history."""
+def get_investing_inputs(symbol: str):
+    """
+    Synchronous wrapper to fetch data for Wealth OS.
+    Fetches Monthly (Macro) and Weekly (Micro) candles.
+    """
+    # 1. DEFINITION RESTORED: Create the Event Loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     try:
-        # Try primary symbol
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
-        if not ohlcv: raise ValueError("Empty")
-        return [{'time': int(c[0]/1000), 'open': c[1], 'high': c[2], 'low': c[3], 'close': c[4]} for c in ohlcv]
-    except:
-        try:
-            # Fallback format (e.g. BTC-USDT)
-            alt_sym = symbol.replace("/", "-")
-            ohlcv = exchange.fetch_ohlcv(alt_sym, timeframe=timeframe, limit=limit)
-            if ohlcv:
-                return [{'time': int(c[0]/1000), 'open': c[1], 'high': c[2], 'low': c[3], 'close': c[4]} for c in ohlcv]
-        except: pass
-    return []
-
-def get_investing_inputs(symbol: str) -> Dict[str, Any]:
-    exchange_id = "kucoin" # Good historical data
-    raw_symbol = resolve_symbol(symbol, exchange_id)
-    exchange = get_exchange_client(exchange_id)
-    
-    # 1. Fetch "Monthly" Context (Using Weekly Data deep fetch)
-    # 400 weeks = ~7.5 years. This captures the 2022 and 2020 Cycle Lows.
-    monthly_candles = fetch_candles_safe(exchange, raw_symbol, '1w', 400)
-    
-    # 2. Fetch "Weekly" Trends (Using Daily Data for MAs)
-    # 350 weeks = ~7 years. Needed for accurate 200 SMA calculation.
-    weekly = loop.run_until_complete(fetch_candles(symbol, "1w", 350)) # 7 years
-    
-    return {
-        "symbol": symbol,
-        "monthly_candles": monthly_candles,
-        "weekly_candles": weekly_candles
-    }
+        # 2. Run the async tasks synchronously
+        # Monthly: 200 months (~16 years) covers all macro cycles
+        monthly = loop.run_until_complete(fetch_candles(symbol, "1M", 200))
+        
+        # Weekly: 350 weeks (~7 years) - The specific limit you requested
+        weekly = loop.run_until_complete(fetch_candles(symbol, "1w", 350))
+        
+    finally:
+        # 3. Clean up
+        loop.close()
+        
+    return {"monthly_candles": monthly, "weekly_candles": weekly}
