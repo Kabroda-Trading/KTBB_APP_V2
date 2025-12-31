@@ -1,85 +1,131 @@
 # wealth_allocator.py
 from typing import Dict, Any
 
-def generate_dynamic_plan(capital: float, analysis: Dict[str, Any]) -> Dict[str, Any]:
+def generate_dynamic_plan(capital: float, strategy: str, analysis: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Generates orders based on User Strategy Profile.
+    Strategies: 'ACCUMULATOR', 'CYCLE', 'HYBRID'
+    """
     phase = analysis['phase']
     price = analysis['price']
-    fibs = analysis['fibs']
+    zones = analysis['zones']
     trend = analysis['indicators']
     
     orders = []
+    mode = f"{strategy} PROTOCOL ({phase})"
+    rationale = "Analyzing battlefield structure..."
     
-    # STRATEGY: ROTATION (The "Get In" Signal)
-    if "ROTATION" in phase:
-        orders.append({
-            "type": "MARKET ENTRY",
-            "price": price,
-            "pct": 0.60,
-            "note": "Rotation Confirmed (21 EMA Reclaim). Deploying 60%."
-        })
-        orders.append({
-            "type": "TRAIL SUPPORT",
-            "price": trend['ema_21'],
-            "pct": 0.30,
-            "note": "21 EMA Retest Bid."
-        })
+    # --- STRATEGY 1: THE ASSET ACCUMULATOR (Fortress) ---
+    if strategy == 'ACCUMULATOR':
+        rationale = "Mission: Maximum BTC exposure. Ignoring Extraction Signals. Bidding deep value."
+        
+        # Action: Deploy into Value
+        if phase in ["BULL_PULLBACK", "MACRO_WINTER"]:
+            rationale += " Price in Deployment Zone. Establishing positions."
+            for i, level in enumerate(zones['deploy']['levels']):
+                orders.append({
+                    "note": f"DEPLOYMENT GRID {i+1}",
+                    "type": "BUY_BTC",
+                    "price": level,
+                    "pct": 0.25
+                })
+        
+        # Action: Rotation (Add on strength)
+        elif phase == "ROTATION_IGNITION":
+            rationale += " 21/200 Cross Confirmed. Momentum shift. Deploying reserves."
+            orders.append({"note": "MARKET ENTRY", "type": "BUY_BTC", "price": price, "pct": 0.50})
+            orders.append({"note": "TRAIL SUPPORT (21 EMA)", "type": "BUY_BTC", "price": trend['ema_21'], "pct": 0.50})
 
-    # STRATEGY: MOMENTUM (Running)
-    elif "IMPULSE" in phase:
-        orders.append({
-            "type": "DYNAMIC SUPPORT",
-            "price": trend['ema_21'],
-            "pct": 0.40,
-            "note": "Trend Floor (21 EMA)"
-        })
-        orders.append({
-            "type": "SHALLOW FIB",
-            "price": fibs['shallow'],
-            "pct": 0.40,
-            "note": "0.382 Fib (Momentum)"
-        })
+    # --- STRATEGY 2: THE CYCLE INVESTOR (Merchant) ---
+    elif strategy == 'CYCLE':
+        rationale = "Mission: Compound wealth by Extracting at Tops and Deploying at Bottoms."
+        
+        # Action: Extract Cash (Premium)
+        if price >= zones['extract']['bottom']:
+            rationale += " Price inside Extraction Zone. Selling BTC for CASH reserves."
+            for i, level in enumerate(zones['extract']['levels']):
+                if level >= price * 0.98: 
+                    orders.append({
+                        "note": f"EXTRACTION GRID {i+1}",
+                        "type": "SELL_BTC_TO_CASH",
+                        "price": level,
+                        "pct": 0.0 # User discretionary
+                    })
+        
+        # Action: Deploy Cash (Discount)
+        elif phase in ["BULL_PULLBACK", "MACRO_WINTER"]:
+            rationale += " Price in Deployment Zone. Utilizing Cash Reserves."
+            for i, level in enumerate(zones['deploy']['levels']):
+                orders.append({
+                    "note": f"DEPLOYMENT GRID {i+1}",
+                    "type": "BUY_BTC",
+                    "price": level,
+                    "pct": 0.20
+                })
 
-    # STRATEGY: PULLBACK (Resting)
-    elif "PULLBACK" in phase:
-        orders.append({
-            "type": "GOLDEN POCKET",
-            "price": fibs['golden'],
-            "pct": 0.50,
-            "note": "0.618 Fib (High Probability)"
-        })
-        if analysis['zones']:
+    # --- STRATEGY 3: THE HYBRID (Hunter) ---
+    elif strategy == 'HYBRID':
+        rationale = "Mission: Use BTC strength to hunt High-Beta assets. Cash out Alts at the top."
+        
+        # Action: Risk ON (Rotation/Expansion)
+        if phase in ["MOMENTUM_RUN", "ROTATION_IGNITION"]:
+            rationale += " BTC Strength Confirmed (21>200). SIGNAL: Accumulate High-Beta Alts."
             orders.append({
-                "type": "INSTITUTIONAL ZONE",
-                "price": analysis['zones'][0]['level'],
-                "pct": 0.30,
-                "note": "Grade A Velocity Zone"
+                "note": "BETA ENTRY (MKT)",
+                "type": "BUY_ALTS",
+                "price": price, 
+                "pct": 0.40
             })
+            orders.append({
+                "note": "BETA LIMIT (21 EMA)",
+                "type": "BUY_ALTS",
+                "price": trend['ema_21'], 
+                "pct": 0.60
+            })
+            
+        # Action: Risk OFF (Extraction Zone)
+        elif price >= zones['extract']['bottom']:
+            rationale += " BTC hitting Extraction Perimeter. SIGNAL: Liquidate Alts to CASH immediately. Do not buy BTC."
+            orders.append({
+                "note": "FULL LIQUIDATION",
+                "type": "SELL_ALTS_TO_CASH",
+                "price": price,
+                "pct": 0.0
+            })
+            
+        # Action: Macro Bottom (Winter)
+        elif phase == "MACRO_WINTER":
+             rationale += " Macro Bottom. Only buying BTC here. Alts are too risky."
+             for i, level in enumerate(zones['deploy']['levels']):
+                orders.append({
+                    "note": f"BTC ACCUMULATION {i+1}",
+                    "type": "BUY_BTC",
+                    "price": level,
+                    "pct": 0.25
+                })
 
-    # STRATEGY: TAKE PROFIT (Premium)
-    if price > fibs['premium_zone']:
-        orders = [] # Clear buys
-        orders.append({
-            "type": "TAKE PROFIT",
-            "price": price,
-            "pct": 0.0,
-            "note": "Price in Premium Zone. Consider grading out 10-20%."
-        })
-
+    # Calc Amounts
     final_orders = []
     for o in orders:
-        if o['pct'] > 0:
+        if o['pct'] > 0 and 'BUY' in o['type']:
             amt = capital * o['pct']
             final_orders.append({
                 "note": o['note'],
+                "action": o['type'],
                 "price": round(o['price'], 2),
                 "amount": round(amt, 2)
             })
         else:
-            final_orders.append(o)
+            final_orders.append({
+                "note": o['note'],
+                "action": o['type'],
+                "price": round(o['price'], 2),
+                "amount": "---"
+            })
 
     return {
         "status": "READY",
-        "mode": phase,
-        "rationale": analysis['action'],
+        "mode": mode,
+        "rationale": rationale,
         "orders": final_orders
     }

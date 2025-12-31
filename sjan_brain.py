@@ -6,20 +6,20 @@ import numpy as np
 
 def analyze_market_structure(monthly_candles: List[Dict], weekly_candles: List[Dict]) -> Dict[str, Any]:
     """
-    S-JAN WEALTH LOGIC v3.0:
-    1. Macro Structure: Finds Cycle Low (Crypto Winter) from deep history.
-    2. Trend Protocol: 200 SMA (River) vs 21 EMA (Speed).
-    3. Rotation: Detects the 'Get in the Water' moment.
+    S-JAN WEALTH LOGIC v3.3: BATTLEFIELD ZONES
+    1. Trends: 200 SMA (River) vs 21 EMA (Speed).
+    2. Structure: defines 'Deployment' (Buy) and 'Extraction' (Sell) Zones.
+    3. Rotation: Detects Momentum shifts for Hybrid triggers.
     """
     # --- 1. MACRO CONTEXT (The River) ---
     df_macro = pd.DataFrame(monthly_candles)
     if df_macro.empty: return {}
     
-    # Absolute Cycle Low of the last ~7 years
+    # Absolute Cycle Low/High (Deep History)
     macro_low = float(df_macro['low'].min())
     
     # --- 2. MICRO CONTEXT (The Speed) ---
-    df = pd.DataFrame(weekly_candles) # Daily candles
+    df = pd.DataFrame(weekly_candles)
     if df.empty: return {}
     
     # Indicators
@@ -29,43 +29,47 @@ def analyze_market_structure(monthly_candles: List[Dict], weekly_candles: List[D
     curr = df.iloc[-1]
     prev = df.iloc[-2]
     
-    # --- 3. DYNAMIC STRUCTURE (Living Pivots) ---
-    # Find local high of the current run (last 6 months)
+    # --- 3. TACTICAL ZONES (The Geometry) ---
+    # We use a localized high to define the current "Battlefield"
     local_high = float(df['high'].tail(180).max())
+    rng = local_high - macro_low
     
-    fib_range = local_high - macro_low
-    fibs = {
+    # EXTRACTION ZONE: The Premium Area (Top 15% of range)
+    # Target: Liquidate positions / Extract Cash
+    extraction_zone = {
         "top": local_high,
-        "premium_zone": local_high - (fib_range * 0.1), # Top 10% (Take Profit)
-        "shallow": local_high - (fib_range * 0.382),    # Momentum Buy
-        "golden": local_high - (fib_range * 0.618),     # Value Buy
-        "bottom": macro_low
+        "bottom": local_high - (rng * 0.15),
+        "levels": []
     }
+    step_s = (extraction_zone['top'] - extraction_zone['bottom']) / 3
+    extraction_zone['levels'] = [extraction_zone['bottom'] + (step_s * i) for i in range(4)]
+
+    # DEPLOYMENT ZONE: The Discount Area (0.618 - 0.786)
+    # Target: Deploy Capital / Enter Positions
+    deployment_zone = {
+        "top": local_high - (rng * 0.618),
+        "bottom": local_high - (rng * 0.786),
+        "levels": []
+    }
+    step_b = (deployment_zone['top'] - deployment_zone['bottom']) / 3
+    deployment_zone['levels'] = [deployment_zone['top'] - (step_b * i) for i in range(4)]
 
     # --- 4. PHASE DETECTION ---
-    # FORCE BOOLEAN TYPE (Fixes JSON Error)
     is_macro_bull = bool(curr['close'] > curr['sma_200'])
     is_micro_bull = bool(curr['close'] > curr['ema_21'])
-    
-    # Rotation: Price was Resting (below 21), now Running (above 21)
     is_rotating = bool((prev['close'] < prev['ema_21']) and (curr['close'] > curr['ema_21']))
     
     phase = "UNKNOWN"
-    action = "HOLD"
     
     if not is_macro_bull:
-        phase = "MACRO BEAR / ACCUMULATION"
-        action = "DCA DEEP VALUE" 
+        phase = "MACRO_WINTER" # Bear Market
     elif is_macro_bull and is_micro_bull:
-        phase = "MOMENTUM RUN (IMPULSE)"
-        action = "ADD ON SHALLOW DIPS"
+        phase = "MOMENTUM_RUN" # Expansion
     elif is_macro_bull and not is_micro_bull:
-        phase = "BULL MARKET PULLBACK (REST)"
-        action = "BUILD POSITIONS AT FIB LEVELS"
+        phase = "BULL_PULLBACK" # Correction in Uptrend
     
     if is_rotating and is_macro_bull:
-        phase = "ROTATION (ACCELERATION)"
-        action = "DEPLOY HEAVY (CONFIRMED)"
+        phase = "ROTATION_IGNITION"
 
     # --- 5. EXPORT ---
     charts = {
@@ -76,35 +80,11 @@ def analyze_market_structure(monthly_candles: List[Dict], weekly_candles: List[D
     return {
         "price": float(curr['close']),
         "phase": phase,
-        "action": action,
         "rotation": is_rotating,
-        "fibs": fibs,
+        "zones": {"deploy": deployment_zone, "extract": extraction_zone},
         "indicators": {
             "ema_21": float(curr['ema_21']) if not pd.isna(curr['ema_21']) else 0.0, 
             "sma_200": float(curr['sma_200']) if not pd.isna(curr['sma_200']) else 0.0
         },
-        "charts": charts,
-        "zones": _scan_velocity_zones(df)
+        "charts": charts
     }
-
-def _scan_velocity_zones(df: pd.DataFrame) -> List[Dict]:
-    """Finds zones where price ripped away (>3% move in 3 days)."""
-    zones = []
-    subset = df.tail(365).reset_index(drop=True)
-    
-    for i in range(5, len(subset)-5):
-        row = subset.iloc[i]
-        # Fractal Low pattern
-        if row['low'] < subset.iloc[i-1]['low'] and row['low'] < subset.iloc[i+1]['low']:
-            # Check Velocity
-            future_price = subset.iloc[i+3]['close']
-            move_pct = (future_price - row['high']) / row['high']
-            
-            if move_pct > 0.03: 
-                zones.append({
-                    "level": float(row['low']), 
-                    "strength": "A" if move_pct > 0.08 else "B"
-                })
-    
-    zones.sort(key=lambda x: x['level'], reverse=True)
-    return zones[:3]
