@@ -1,6 +1,6 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v5.2
+# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.1 (Async Fix)
 # ---------------------------------------------------------
 from __future__ import annotations
 
@@ -57,9 +57,6 @@ app.add_middleware(
     same_site="lax",
 )
 
-# -------------------------------------------------------------------
-# STARTUP EVENT
-# -------------------------------------------------------------------
 @app.on_event("startup")
 def _startup():
     init_db()
@@ -78,9 +75,7 @@ def _startup():
     finally:
         db.close()
 
-# -------------------------------------------------------------------
-# HELPERS
-# -------------------------------------------------------------------
+# --- HELPERS ---
 def _session_user_dict(request: Request) -> Optional[Dict[str, Any]]:
     u = request.session.get("user")
     return u if isinstance(u, dict) else None
@@ -99,9 +94,7 @@ def _plan_flags(u: UserModel) -> Dict[str, Any]:
     ms = get_membership_state(u)
     return {"is_paid": ms.is_paid, "plan": ms.plan, "plan_label": ms.label}
 
-# -------------------------------------------------------------------
-# PUBLIC ROUTES
-# -------------------------------------------------------------------
+# --- PUBLIC ROUTES ---
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse("home.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
@@ -122,9 +115,7 @@ def how_it_works(request: Request):
 def network_page(request: Request):
     return templates.TemplateResponse("community.html", {"request": request, "is_logged_in": False})
 
-# -------------------------------------------------------------------
-# DAY TRADING SUITE
-# -------------------------------------------------------------------
+# --- DAY TRADING SUITE ---
 @app.get("/suite", response_class=HTMLResponse)
 def suite(request: Request, db: Session = Depends(get_db)):
     sess = _session_user_dict(request)
@@ -146,18 +137,19 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    
-    # --- FIX: Prioritize Dropdown Selection ---
-    # If the frontend sends a specific timezone (e.g. "Europe/London"), use it.
-    # Otherwise, fall back to the user's account default.
     requested_tz = payload.get("session_tz")
     if not requested_tz:
         requested_tz = u.session_tz or "UTC"
         
     ensure_symbol_allowed(u, symbol)
     
-    # Run the report using the CORRECT timezone
-    raw = await asyncio.to_thread(dmr_report.run_auto_raw, symbol=symbol, session_tz=requested_tz)
+    # 1. Fetch Inputs ASYNC (No more Event Loop errors)
+    inputs = await data_feed.get_inputs(symbol=symbol, session_tz=requested_tz)
+    
+    # 2. Process Sync Logic
+    # We pass the pre-fetched inputs directly to the logic to avoid blocking
+    raw = await asyncio.to_thread(dmr_report.generate_report_from_inputs, inputs, requested_tz)
+    
     return JSONResponse(raw)
 
 @app.get("/indicators", response_class=HTMLResponse)
@@ -171,9 +163,7 @@ def indicators(request: Request, db: Session = Depends(get_db)):
         "user": {"email": u.email, "username": u.username, "session_tz": (u.session_tz or "UTC"), "plan_label": flags.get("plan_label", ""), "plan": flags.get("plan") or ""}
     })
 
-# -------------------------------------------------------------------
-# WEALTH OS ROUTES (Corrected)
-# -------------------------------------------------------------------
+# --- WEALTH OS ROUTES ---
 @app.get("/wealth", response_class=HTMLResponse)
 async def wealth_page(request: Request, db: Session = Depends(get_db)):
     sess = _session_user_dict(request)
@@ -195,9 +185,10 @@ async def api_analyze_s_jan(request: Request, db: Session = Depends(get_db)):
     symbol = (payload.get("symbol") or "BTC/USDT").strip().upper()
     capital = float(payload.get("capital") or 0)
     strategy = (payload.get("strategy") or "ACCUMULATOR").strip().upper()
-    overrides = payload.get("overrides") or {} # CAPTURE MANUAL INPUTS
+    overrides = payload.get("overrides") or {}
     
-    inputs = await asyncio.to_thread(data_feed.get_investing_inputs, symbol)
+    # FETCH ASYNC (Direct await)
+    inputs = await data_feed.get_investing_inputs(symbol)
     
     # Pass Overrides to Brain
     analysis = sjan_brain.analyze_market_structure(
@@ -217,9 +208,7 @@ async def api_analyze_s_jan(request: Request, db: Session = Depends(get_db)):
         "plan": plan
     })
 
-# -------------------------------------------------------------------
-# ACCOUNT & AUTH
-# -------------------------------------------------------------------
+# --- ACCOUNT & AUTH ---
 @app.get("/account", response_class=HTMLResponse)
 def account(request: Request, db: Session = Depends(get_db)):
     sess = _session_user_dict(request)
@@ -262,9 +251,7 @@ def register_post(request: Request, db: Session = Depends(get_db), email: str = 
     try: return RedirectResponse(url=billing.create_checkout_session(db=db, user_model=u), status_code=303)
     except: return RedirectResponse(url="/pricing?new=1", status_code=303)
 
-# -------------------------------------------------------------------
-# BILLING
-# -------------------------------------------------------------------
+# --- BILLING ---
 @app.post("/billing/checkout")
 async def billing_checkout(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)

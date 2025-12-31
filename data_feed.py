@@ -9,17 +9,16 @@ exchange = ccxt.binanceus({'enableRateLimit': True})
 
 async def fetch_candles(symbol: str, timeframe: str, limit: int = 1000):
     try:
-        # Fallback mapping
         if symbol == "BTC/USDT":
             symbol = "BTC/USDT"
         
-        # CCXT fetch
+        # Async fetch directly
         candles = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         
         data = []
         for c in candles:
             data.append({
-                "time": int(c[0] / 1000), # Unix timestamp
+                "time": int(c[0] / 1000), 
                 "open": float(c[1]),
                 "high": float(c[2]),
                 "low": float(c[3]),
@@ -32,52 +31,44 @@ async def fetch_candles(symbol: str, timeframe: str, limit: int = 1000):
         return []
 
 # ---------------------------------------------------------
-# 1. WEALTH OS DATA FEED (Macro/Weekly)
+# 1. WEALTH OS DATA FEED (Async)
 # ---------------------------------------------------------
-def get_investing_inputs(symbol: str):
+async def get_investing_inputs(symbol: str):
     """
-    Fetches Monthly and Weekly data for Wealth OS analysis.
+    Async fetch for Wealth OS. 
+    Waits for both Monthly and Weekly data concurrently.
     """
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
     try:
-        # Monthly: ~16 years (Macro Cycle)
-        monthly = loop.run_until_complete(fetch_candles(symbol, "1M", 200))
-        
-        # Weekly: ~7 years (Micro/Stair-Step)
-        weekly = loop.run_until_complete(fetch_candles(symbol, "1w", 350))
-        
-    finally:
-        loop.close()
-        
-    return {"monthly_candles": monthly, "weekly_candles": weekly}
+        # Run both fetches at the same time for speed
+        monthly, weekly = await asyncio.gather(
+            fetch_candles(symbol, "1M", 200),
+            fetch_candles(symbol, "1w", 350)
+        )
+        return {"monthly_candles": monthly, "weekly_candles": weekly}
+    except Exception as e:
+        print(f"Wealth Feed Error: {e}")
+        return {"monthly_candles": [], "weekly_candles": []}
 
 # ---------------------------------------------------------
-# 2. BATTLEBOX SUITE DATA FEED (Daily/Intraday)
+# 2. BATTLEBOX SUITE DATA FEED (Async)
 # ---------------------------------------------------------
-def get_inputs(symbol: str, date=None, session_tz="UTC"):
+async def get_inputs(symbol: str, date=None, session_tz="UTC"):
     """
-    Fetches Daily and 30m data for Day Trading Session analysis.
-    Restored to fix AttributeError.
+    Async fetch for Day Trading Suite.
     """
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
     try:
-        # Daily: Used for Support/Resistance levels
-        daily = loop.run_until_complete(fetch_candles(symbol, "1d", 100))
+        daily, intraday = await asyncio.gather(
+            fetch_candles(symbol, "1d", 100),
+            fetch_candles(symbol, "30m", 200)
+        )
         
-        # 30m: Used for Session High/Low calculations
-        # We fetch enough to cover the last few days of sessions
-        intraday = loop.run_until_complete(fetch_candles(symbol, "30m", 200))
+        current_price = intraday[-1]['close'] if intraday else 0.0
         
-    finally:
-        loop.close()
-    
-    # Structure matching dmr_report expectations
-    return {
-        "daily_candles": daily,
-        "intraday_candles": intraday,
-        "current_price": intraday[-1]['close'] if intraday else 0.0
-    }
+        return {
+            "daily_candles": daily,
+            "intraday_candles": intraday,
+            "current_price": current_price
+        }
+    except Exception as e:
+        print(f"Suite Feed Error: {e}")
+        return {"daily_candles": [], "intraday_candles": [], "current_price": 0.0}
