@@ -1,29 +1,252 @@
-// ... [Standard Setup] ...
+{% extends "base.html" %}
+{% block content %}
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 
-async function runAnalysis() {
-    // ... [Fetch Logic] ...
-    
-    // Draw Key Elements Only
-    // 1. The Clouds (The Result of the Synthesis)
-    zones.deploy.levels.forEach((lvl, i) => {
-        primitives.push(candles.createPriceLine({ 
-            price: lvl, color: '#10b981', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: `DEPLOY ${i+1}` 
-        }));
-    });
-    
-    zones.extract.levels.forEach((lvl, i) => {
-        primitives.push(candles.createPriceLine({ 
-            price: lvl, color: '#ef4444', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: `EXTRACT ${i+1}` 
-        }));
-    });
-
-    // 2. The Cycle Breaker (Macro 0.5)
-    primitives.push(candles.createPriceLine({ 
-        price: data.analysis.fibs.macro_50, 
-        color: '#f97316', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: '⚠️ CYCLE BREAKER (0.5)' 
-    }));
-
-    // 3. Trends (21/200)
-    emaSeries.setData(data.analysis.charts.ema_21);
-    smaSeries.setData(data.analysis.charts.sma_200);
+<style>
+.spinner {
+   width: 40px; height: 40px;
+   border: 4px solid var(--glass-border);
+   border-top: 4px solid var(--primary);
+   border-radius: 50%;
+   animation: spin 1s linear infinite;
+   margin: 0 auto;
 }
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+.pulse-btn { animation: pulse 2s infinite; }
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+</style>
+
+<div class="text-center" style="margin-bottom: 40px;">
+  <div class="pill">INSTITUTIONAL GRADE</div>
+  <h1 class="display-title">Wealth <span class="gradient-text">OS</span></h1>
+  <p class="lead-text" style="max-width: 600px; margin: 10px auto; color: var(--text-muted);">
+    Macro Cycle Alignment + Micro Stair-Step Execution.
+  </p>
+</div>
+
+<div class="bento-grid">
+  
+  <div class="bento-card">
+    <div style="margin-bottom: 20px;">
+      <h3 style="color: #fff; margin-bottom: 4px;"><span class="gradient-text">Step 1:</span> Tactical Setup</h3>
+      <p style="font-size: 13px; color: var(--text-muted);">Select your strategy profile.</p>
+    </div>
+
+    <div style="margin-bottom: 16px;">
+      <label class="label">STRATEGIC PROFILE</label>
+      <select id="strategy" class="input" style="cursor: pointer; font-weight: 700; border-left: 4px solid var(--primary);">
+        <option value="ACCUMULATOR">🛡️ ASSET ACCUMULATOR (Pure HODL)</option>
+        <option value="CYCLE">🔄 CYCLE INVESTOR (Grid Extraction)</option>
+        <option value="HYBRID">🚀 HYBRID (Alt-Beta Hunter)</option>
+      </select>
+      <div style="font-size: 11px; color: var(--text-muted); margin-top: 5px; line-height: 1.4;">
+        <strong>Accumulator:</strong> Never sells. Buys dips.<br>
+        <strong>Cycle:</strong> Sells tops to reload cash for bottoms.<br>
+        <strong>Hybrid:</strong> Uses BTC trends to trade High-Beta Alts.
+      </div>
+    </div>
+
+    <div style="margin-bottom: 16px;">
+      <label class="label">TARGET ASSET</label>
+      <input id="ticker" class="input" value="BTC/USDT" style="text-transform: uppercase; letter-spacing: 1px; font-weight: 700;">
+    </div>
+    
+    <div style="margin-bottom: 25px;">
+      <label class="label">DEPLOYABLE CAPITAL ($)</label>
+      <input id="capital" class="input" type="number" value="50000" style="font-family: monospace; font-weight: 700;">
+    </div>
+
+    <button onclick="runAnalysis()" id="run-btn" class="btn primary pulse-btn" style="width: 100%; display: flex; justify-content: center; align-items: center; gap: 10px; padding: 16px;">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+      <span style="font-weight: 800; letter-spacing: 1px;">INITIALIZE ENGINE</span>
+    </button>
+  </div>
+
+  <div class="bento-card" id="results-panel" style="display: none; border-left: 4px solid var(--glass-border);">
+    <div style="margin-bottom: 15px;">
+      <h3 style="color: #fff; margin-bottom: 4px;"><span class="gradient-text">Step 2:</span> Execution Protocol</h3>
+    </div>
+    
+    <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <span class="label" style="margin:0;">DETECTED PHASE</span>
+            <div id="badge-mode" style="padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 800; text-transform: uppercase; background: var(--glass-border); color: #fff; letter-spacing: 0.5px;">--</div>
+        </div>
+        <p id="rationale" style="font-size: 14px; color: #fff; line-height: 1.5; margin: 0;">--</p>
+    </div>
+
+    <div>
+        <div class="label" style="margin-bottom: 10px;">TACTICAL ORDERS</div>
+        <div id="orders-list" style="display: grid; gap: 8px;"></div>
+    </div>
+    
+    <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.05); text-align: center; color: var(--text-muted); font-size: 11px;">
+      Recommended Refresh: Weekly (Sunday Close)
+    </div>
+  </div>
+
+  <div class="bento-card wide" style="height: 550px; padding: 0; overflow: hidden; position: relative; background: #020617;">
+     
+     <div id="chart-placeholder" style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: radial-gradient(circle at center, rgba(16, 185, 129, 0.1) 0%, rgba(2, 6, 23, 1) 70%);">
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.5; margin-bottom: 20px;"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+        <div style="font-weight: 700; color: #fff; letter-spacing: 2px; font-size: 18px;">ENGINE STANDBY</div>
+        <div style="color: var(--text-muted); font-size: 13px; margin-top: 5px;">Select Profile & Capital to Begin.</div>
+     </div>
+
+     <div id="chart-loader" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 10;">
+        <div class="spinner"></div>
+        <div style="margin-top: 20px; font-weight: 700; color: #fff; letter-spacing: 1px; font-size: 14px;">PROCESSING MACRO DATA...</div>
+        <div style="color: var(--text-muted); font-size: 12px; margin-top: 5px;">Scanning 4-Year Structure & Micro-Cycles</div>
+     </div>
+
+     <div id="chart-mount" style="width: 100%; height: 100%; visibility: hidden; position: absolute; top: 0; left: 0;"></div>
+  </div>
+
+</div>
+
+<script>
+  // --- 1. CHART SETUP ---
+  const chart = LightweightCharts.createChart(document.getElementById('chart-mount'), {
+    layout: { background: { type: 'solid', color: '#020617' }, textColor: '#94a3b8' },
+    grid: { vertLines: { color: 'rgba(30, 41, 59, 0.5)' }, horzLines: { color: 'rgba(30, 41, 59, 0.5)' } },
+    rightPriceScale: { borderColor: '#334155' },
+    timeScale: { borderColor: '#334155', timeVisible: true },
+  });
+
+  const candles = chart.addCandlestickSeries({ upColor: '#10b981', downColor: '#ef4444', borderVisible: false });
+  const emaSeries = chart.addLineSeries({ color: '#38bdf8', lineWidth: 2, title: '21 EMA (Speed)' });
+  const smaSeries = chart.addLineSeries({ color: 'rgba(255,255,255,0.5)', lineWidth: 1, lineStyle: 2, title: '200 SMA (River)' });
+
+  new ResizeObserver(e => chart.applyOptions({ width: e[0].contentRect.width, height: e[0].contentRect.height }))
+    .observe(document.getElementById('chart-mount'));
+
+  let primitives = []; 
+
+  // --- 2. EXECUTION LOGIC ---
+  async function runAnalysis() {
+    const ticker = document.getElementById('ticker').value;
+    const capital = document.getElementById('capital').value;
+    const strategy = document.getElementById('strategy').value;
+    const btn = document.getElementById('run-btn');
+    const placeholder = document.getElementById('chart-placeholder');
+    const loader = document.getElementById('chart-loader');
+    const chartMount = document.getElementById('chart-mount');
+    const resultsPanel = document.getElementById('results-panel');
+    
+    // SWITCH TO "PROCESSING STATE"
+    btn.innerHTML = 'PROCESSING...';
+    btn.disabled = true;
+    btn.classList.remove('pulse-btn'); 
+    placeholder.style.display = 'none'; 
+    loader.style.display = 'block'; 
+    resultsPanel.style.display = 'none'; 
+    
+    // Clear old drawings
+    primitives.forEach(p => candles.removePriceLine(p));
+    primitives = [];
+
+    try {
+      const res = await fetch('/api/analyze-s-jan', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ symbol: ticker, capital: parseFloat(capital), strategy: strategy })
+      });
+      
+      if (!res.ok) throw new Error(`Server Error: ${res.status}`);
+      const data = await res.json();
+
+      // SWITCH TO "ACTIVE STATE"
+      loader.style.display = 'none'; 
+      chartMount.style.visibility = 'visible'; 
+
+      // A. Populate Chart
+      if(data.candles) {
+        candles.setData(data.candles.sort((a,b)=>a.time-b.time));
+        emaSeries.setData(data.analysis.charts.ema_21);
+        smaSeries.setData(data.analysis.charts.sma_200);
+        
+        const zones = data.analysis.zones;
+        const fibs = data.analysis.fibs;
+
+        // Deployment Grids (Green) - Always show buy zones
+        zones.deploy.levels.forEach((lvl, i) => {
+            primitives.push(candles.createPriceLine({ 
+                price: lvl, color: '#10b981', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: `DEPLOY ${i+1}` 
+            }));
+        });
+
+        // Extraction Grids (Red) - Only if not accumulator
+        if (strategy !== 'ACCUMULATOR') {
+            zones.extract.levels.forEach((lvl, i) => {
+                primitives.push(candles.createPriceLine({ 
+                    price: lvl, color: '#ef4444', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: `EXTRACT ${i+1}` 
+                }));
+            });
+        }
+
+        // Macro Safety Line (Orange)
+        primitives.push(candles.createPriceLine({ 
+            price: fibs.macro_50, color: '#f97316', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: '⚠️ CYCLE BREAKER (0.5)' 
+        }));
+
+        chart.timeScale().fitContent();
+      }
+
+      // B. Populate Results Panel
+      if(data.plan) {
+        const p = data.plan;
+        resultsPanel.style.display = 'block';
+        
+        const badge = document.getElementById('badge-mode');
+        badge.innerText = p.mode;
+        let badgeColor = 'var(--glass-border)';
+        if (p.mode.includes('STAIR_STEP') || p.mode.includes('CLIMB')) badgeColor = '#10b981';
+        if (p.mode.includes('WARNING') || p.mode.includes('BREAKDOWN')) badgeColor = '#ef4444';
+        badge.style.background = badgeColor;
+
+        document.getElementById('rationale').innerText = p.rationale;
+        
+        const list = document.getElementById('orders-list');
+        list.innerHTML = '';
+        
+        p.orders.forEach(o => {
+            let color = '#10b981'; // Green (Deploy)
+            if (o.action && (o.action.includes('SELL') || o.action.includes('EXTRACT'))) color = '#ef4444';
+            if (o.action && o.action.includes('ALT')) color = '#a855f7'; // Purple (Hybrid)
+            if (o.action && o.action.includes('HOLD')) color = '#f97316'; // Orange (Warning/Hold)
+
+            list.innerHTML += `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 6px; border-left: 3px solid ${color};">
+              <div>
+                <div style="font-size:10px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">${o.note}</div>
+                <div style="font-weight:700; color:#fff; font-size:14px; margin-top:2px;">
+                    <span style="color:${color};">${o.action.replace(/_/g, ' ')}</span> 
+                    ${o.amount !== '---' ? '$'+o.amount.toLocaleString() : ''}
+                </div>
+              </div>
+              <div style="font-family:monospace; color:var(--primary-bright); font-size:14px; font-weight:700;">@ ${o.price.toLocaleString()}</div>
+            </div>`;
+        });
+      }
+
+    } catch(e) { 
+      console.error(e); 
+      alert("Analysis Error: " + e.message);
+      placeholder.style.display = 'flex';
+      chartMount.style.visibility = 'hidden';
+    } 
+    finally { 
+      loader.style.display = 'none';
+      btn.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+      <span style="font-weight: 800; letter-spacing: 1px;">INITIALIZE ENGINE</span>`;
+      btn.disabled = false; 
+      btn.classList.add('pulse-btn'); 
+    }
+  }
+</script>
+{% endblock %}
