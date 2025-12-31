@@ -9,9 +9,9 @@ from typing import Any, Dict, Optional, List
 from zoneinfo import ZoneInfo
 
 # ----------------------------
-# 1. SHARED CONFIGURATION
+# 1. CONFIGURATION
 # ----------------------------
-DEFAULT_EXCHANGE_ID = "kucoin" 
+DEFAULT_EXCHANGE_ID = "kraken" 
 
 SESSION_SPECS = {
     "America/New_York":       {"tz": "America/New_York", "open": "09:30"},
@@ -24,6 +24,12 @@ SESSION_SPECS = {
 
 def resolve_symbol(symbol: str, exchange_id: str) -> str:
     s = (symbol or "").strip().upper()
+    if exchange_id == "kraken" and s == "BTCUSDT": return "BTC/USDT"
+    if exchange_id == "coinbase" and s == "BTCUSDT": return "BTC/USD"
+    
+    if "USDT" in s and "/" not in s: return s.replace("USDT", "/USDT")
+    if "USD" in s and "/" not in s and "USDT" not in s: return s.replace("USD", "/USD")
+        
     return s if "/" in s else f"{s}/USDT"
 
 def _ms(dt: datetime) -> int: return int(dt.timestamp() * 1000)
@@ -39,8 +45,7 @@ def _fetch_calendar_stub() -> List[str]:
 # 2. UNIVERSAL CCXT PROVIDER
 # ----------------------------
 def get_exchange_client(exchange_id: str):
-    # Fallback to KuCoin if the requested ID is invalid or missing
-    if not exchange_id or not hasattr(ccxt, exchange_id):
+    if not hasattr(ccxt, exchange_id):
         exchange_id = 'kucoin'
     
     exchange_class = getattr(ccxt, exchange_id)
@@ -51,7 +56,7 @@ def get_exchange_client(exchange_id: str):
     return exchange
 
 # ----------------------------
-# 3. DAY TRADING ENGINE (Restored)
+# 3. DAY TRADING LOGIC (BattleBox)
 # ----------------------------
 def _session_window(tz_name, open_hhmm):
     z = ZoneInfo(tz_name)
@@ -68,6 +73,13 @@ def _session_window(tz_name, open_hhmm):
     end_local = candidate_open + timedelta(minutes=30)
     
     return (start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc))
+
+def get_inputs(*, symbol: str, date: Optional[str] = None, session_tz: str = "UTC") -> Dict[str, Any]:
+    inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
+    import sse_engine
+    sse = sse_engine.compute_sse_levels(inputs)
+    inputs.update(sse)
+    return inputs
 
 def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[str, Any]:
     exchange_id = os.getenv("EXCHANGE_ID", DEFAULT_EXCHANGE_ID).lower()
@@ -111,7 +123,6 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
             range_high = target_candle[2]
             range_low = target_candle[3]
         elif ohlcv_30m:
-            # Fallback if exact timestamp miss
             session_open = ohlcv_30m[0][1]
             range_high = ohlcv_30m[0][2]
             range_low = ohlcv_30m[0][3]
@@ -128,81 +139,47 @@ def build_auto_inputs(symbol: str = "BTCUSDT", session_tz: str = "UTC") -> Dict[
         "session_open_price": session_open,
         "r30_high": range_high, "r30_low": range_low,
         "range_30m": {"high": range_high, "low": range_low},
-        
         "weekly_poc": None, "f24_poc": None, "morn_poc": None,
         "h1_supply": h1_supply, "h1_demand": h1_demand,
         "h4_supply": h4_supply, "h4_demand": h4_demand,
         "news": _fetch_calendar_stub(), "events": _fetch_calendar_stub()
     }
 
-def get_inputs(*, symbol: str, date: Optional[str] = None, session_tz: str = "UTC") -> Dict[str, Any]:
-    """
-    Main Entry Point for Day Trading Suite (DMR Report).
-    """
-    inputs = build_auto_inputs(symbol=symbol, session_tz=session_tz)
-    
-    # Import here to avoid circular dependency issues
-    import sse_engine
-    
-    # Compute the Day Trading Levels
-    sse = sse_engine.compute_sse_levels(inputs)
-    inputs.update(sse)
-    return inputs
-
 # ----------------------------
-# 4. INVESTING ENGINE (Wealth OS)
+# 4. WEALTH OS PIPELINE (Deep History)
 # ----------------------------
 def fetch_candles_safe(exchange, symbol: str, timeframe: str, limit: int) -> List[Dict]:
-    """
-    Tries multiple symbol formats to ensure we get data.
-    """
-    candidates = [symbol, symbol.replace("/", "-"), symbol.replace("/", "")]
-    
-    for s in candidates:
+    """Robust fetcher for Wealth OS (Weekly/Monthly) with deep history."""
+    try:
+        # Try primary symbol
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+        if not ohlcv: raise ValueError("Empty")
+        return [{'time': int(c[0]/1000), 'open': c[1], 'high': c[2], 'low': c[3], 'close': c[4]} for c in ohlcv]
+    except:
         try:
-            ohlcv = exchange.fetch_ohlcv(s, timeframe=timeframe, limit=limit)
-            if ohlcv and len(ohlcv) > 0:
-                # print(f"✅ Data Feed: Found {len(ohlcv)} candles for {s} ({timeframe})")
-                return [
-                    {'time': int(c[0]/1000), 'open': c[1], 'high': c[2], 'low': c[3], 'close': c[4]} 
-                    for c in ohlcv
-                ]
-        except Exception:
-            continue
+            # Fallback format (e.g. BTC-USDT)
+            alt_sym = symbol.replace("/", "-")
+            ohlcv = exchange.fetch_ohlcv(alt_sym, timeframe=timeframe, limit=limit)
+            if ohlcv:
+                return [{'time': int(c[0]/1000), 'open': c[1], 'high': c[2], 'low': c[3], 'close': c[4]} for c in ohlcv]
+        except: pass
     return []
 
 def get_investing_inputs(symbol: str) -> Dict[str, Any]:
-    """
-    Main Entry Point for Wealth OS (S Jan).
-    """
-    exchange_id = "kucoin"
+    exchange_id = "kucoin" # Good historical data
     raw_symbol = resolve_symbol(symbol, exchange_id)
     exchange = get_exchange_client(exchange_id)
     
-    monthly_candles = []
-    weekly_candles = []
-    current_price = 0.0
+    # 1. Fetch "Monthly" Context (Using Weekly Data deep fetch)
+    # 400 weeks = ~7.5 years. This captures the 2022 and 2020 Cycle Lows.
+    monthly_candles = fetch_candles_safe(exchange, raw_symbol, '1w', 400)
     
-    try:
-        try:
-            ticker = exchange.fetch_ticker(raw_symbol)
-            current_price = float(ticker['last'])
-        except:
-            ticker = exchange.fetch_ticker(raw_symbol.replace("/", "-"))
-            current_price = float(ticker['last'])
-
-        # 1. Fetch "Monthly" (Uses 1w as proxy)
-        monthly_candles = fetch_candles_safe(exchange, raw_symbol, '1w', 100)
-        
-        # 2. Fetch "Weekly" (Uses 1d as proxy)
-        weekly_candles = fetch_candles_safe(exchange, raw_symbol, '1d', 365)
-        
-    except Exception as e:
-        print(f"Data Feed Error (Investing): {e}")
+    # 2. Fetch "Weekly" Trends (Using Daily Data for MAs)
+    # 500 days = ~1.5 years. Needed for accurate 200 SMA calculation.
+    weekly_candles = fetch_candles_safe(exchange, raw_symbol, '1d', 500)
     
     return {
         "symbol": symbol,
-        "current_price": current_price,
         "monthly_candles": monthly_candles,
         "weekly_candles": weekly_candles
     }

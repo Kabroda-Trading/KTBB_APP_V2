@@ -51,6 +51,7 @@
       sma200.setData(data.analysis.charts.sma_200);
       const fib = data.analysis.fibs;
       series.createPriceLine({ price: fib.golden, color: '#eab308', lineWidth: 2, title: '0.618 GOLDEN' });
+      series.createPriceLine({ price: fib.premium_zone, color: '#ef4444', lineWidth: 1, lineStyle: 2, title: 'PREMIUM (TAKE PROFIT)' });
       chart.timeScale().fitContent();
     }
     if(data.plan.status === 'READY') {
@@ -62,7 +63,8 @@
       list.innerHTML = '';
       p.orders.forEach(o => {
         list.innerHTML += `<div style="display:flex; justify-content:space-between; font-size:13px; padding: 12px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
-          <span>BUY $${o.amount.toLocaleString()}</span><span style="font-family:monospace; color:var(--primary-bright);">@ ${o.price.toLocaleString()}</span></div>`;
+          <span>${o.note.includes('TAKE PROFIT') ? 'SELL' : 'BUY'} $${o.amount ? o.amount.toLocaleString() : '---'}</span>
+          <span style="font-family:monospace; color:var(--primary-bright);">@ ${o.price.toLocaleString()}</span></div>`;
       });
     }
   }

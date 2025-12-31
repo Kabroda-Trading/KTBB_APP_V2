@@ -2,40 +2,84 @@
 from typing import Dict, Any
 
 def generate_dynamic_plan(capital: float, analysis: Dict[str, Any]) -> Dict[str, Any]:
-    """Allocates capital based on market Gear Shifting (Impulse, Rest, Rotation)."""
-    micro = analysis['micro']
-    rotation = analysis['rotation']
-    trend = analysis['indicators']
+    phase = analysis['phase']
+    price = analysis['price']
     fibs = analysis['fibs']
+    trend = analysis['indicators']
     
     orders = []
-    mode = "UNKNOWN"; rationale = ""; reserve_pct = 0.0
     
-    if rotation:
-        mode = "ROTATION ENTRY"
-        rationale = "Reclaiming 21 EMA / 200 SMA. Pullback complete. Deploying heavy capital."
-        reserve_pct = 0.05
-        orders.append({"price": analysis['price'], "weight": 1.0, "note": "Market/Limit Entry"})
+    # STRATEGY: ROTATION (The "Get In" Signal)
+    if "ROTATION" in phase:
+        orders.append({
+            "type": "MARKET ENTRY",
+            "price": price,
+            "pct": 0.60,
+            "note": "Rotation Confirmed (21 EMA Reclaim). Deploying 60%."
+        })
+        orders.append({
+            "type": "TRAIL SUPPORT",
+            "price": trend['ema_21'],
+            "pct": 0.30,
+            "note": "21 EMA Retest Bid."
+        })
 
-    elif micro == "RUN (IMPULSE)":
-        mode = "AGGRESSIVE ACCUMULATION"
-        rationale = "Impulse run active (>21 EMA). Buying momentum floors to capture run."
-        reserve_pct = 0.10
-        orders.append({"price": trend['ema_21'], "weight": 0.4, "note": "21 EMA (Dynamic Support)"})
-        orders.append({"price": fibs['shallow'], "weight": 0.6, "note": "0.382 Fib Momentum Zone"})
+    # STRATEGY: MOMENTUM (Running)
+    elif "IMPULSE" in phase:
+        orders.append({
+            "type": "DYNAMIC SUPPORT",
+            "price": trend['ema_21'],
+            "pct": 0.40,
+            "note": "Trend Floor (21 EMA)"
+        })
+        orders.append({
+            "type": "SHALLOW FIB",
+            "price": fibs['shallow'],
+            "pct": 0.40,
+            "note": "0.382 Fib (Momentum)"
+        })
 
-    else: # REST (PULLBACK)
-        mode = "STANDARD ACCUMULATION"
-        rationale = "Healthy rest period. Bidding high-probability Fibonacci targets."
-        reserve_pct = 0.20
-        orders.append({"price": fibs['golden'], "weight": 0.6, "note": "0.618 Fib Golden Pocket"})
-        orders.append({"price": fibs['deep'], "weight": 0.4, "note": "0.786 Fib Deep Cycle Support"})
+    # STRATEGY: PULLBACK (Resting)
+    elif "PULLBACK" in phase:
+        orders.append({
+            "type": "GOLDEN POCKET",
+            "price": fibs['golden'],
+            "pct": 0.50,
+            "note": "0.618 Fib (High Probability)"
+        })
+        if analysis['zones']:
+            orders.append({
+                "type": "INSTITUTIONAL ZONE",
+                "price": analysis['zones'][0]['level'],
+                "pct": 0.30,
+                "note": "Grade A Velocity Zone"
+            })
 
-    active_cap = capital * (1 - reserve_pct)
-    final_orders = [{"price": round(o['price'], 2), "amount": round(active_cap * o['weight'], 2), "note": o['note']} for o in orders]
+    # STRATEGY: TAKE PROFIT (Premium)
+    if price > fibs['premium_zone']:
+        orders = [] # Clear buys
+        orders.append({
+            "type": "TAKE PROFIT",
+            "price": price,
+            "pct": 0.0,
+            "note": "Price in Premium Zone. Consider grading out 10-20%."
+        })
+
+    final_orders = []
+    for o in orders:
+        if o['pct'] > 0:
+            amt = capital * o['pct']
+            final_orders.append({
+                "note": o['note'],
+                "price": round(o['price'], 2),
+                "amount": round(amt, 2)
+            })
+        else:
+            final_orders.append(o)
 
     return {
-        "status": "READY", "mode": mode, "rationale": rationale,
-        "summary": {"deployed": sum(x['amount'] for x in final_orders), "reserve": capital * reserve_pct},
+        "status": "READY",
+        "mode": phase,
+        "rationale": analysis['action'],
         "orders": final_orders
     }
