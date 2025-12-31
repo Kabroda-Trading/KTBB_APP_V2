@@ -1,159 +1,29 @@
-{% extends "base.html" %}
-{% block content %}
-<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+// ... [Standard Setup] ...
 
-<div class="text-center" style="margin-bottom: 40px;">
-  <div class="pill">INSTITUTIONAL GRADE</div>
-  <h1 class="display-title">Wealth <span class="gradient-text">OS</span></h1>
-</div>
-
-<div class="bento-grid">
-  
-  <div class="bento-card">
-    <div style="margin-bottom: 20px;">
-      <h3 style="color: #fff; margin-bottom: 4px;">Configuration</h3>
-      <p style="font-size: 13px; color: var(--text-muted);">Define tactical intent.</p>
-    </div>
-
-    <div style="margin-bottom: 16px;">
-      <label class="label">STRATEGIC PROFILE</label>
-      <select id="strategy" class="input" style="cursor: pointer; font-weight: 700;">
-        <option value="ACCUMULATOR">🛡️ ASSET ACCUMULATOR (Pure HODL)</option>
-        <option value="CYCLE">🔄 CYCLE INVESTOR (Grid Extraction)</option>
-        <option value="HYBRID">🚀 HYBRID (Alt-Beta Hunter)</option>
-      </select>
-    </div>
-
-    <div style="margin-bottom: 16px;">
-      <label class="label">TARGET ASSET</label>
-      <input id="ticker" class="input" value="BTC/USDT" style="text-transform: uppercase;">
-    </div>
+async function runAnalysis() {
+    // ... [Fetch Logic] ...
     
-    <div style="margin-bottom: 20px;">
-      <label class="label">DEPLOYABLE CAPITAL ($)</label>
-      <input id="capital" class="input" type="number" value="100000">
-    </div>
-
-    <button onclick="runAnalysis()" id="run-btn" class="btn primary" style="width: 100%;">RUN CYCLE ANALYSIS</button>
-  </div>
-
-  <div class="bento-card" id="results-panel" style="display: none; border-left: 4px solid var(--glass-border);">
-    <div style="margin-bottom: 15px;">
-      <h3 style="color: #fff;">Execution Protocol</h3>
-    </div>
+    // Draw Key Elements Only
+    // 1. The Clouds (The Result of the Synthesis)
+    zones.deploy.levels.forEach((lvl, i) => {
+        primitives.push(candles.createPriceLine({ 
+            price: lvl, color: '#10b981', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: `DEPLOY ${i+1}` 
+        }));
+    });
     
-    <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <span class="label" style="margin:0;">MODE</span>
-            <div id="badge-mode" style="padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 800; text-transform: uppercase; background: var(--glass-border); color: #fff;">--</div>
-        </div>
-        <p id="rationale" style="font-size: 14px; color: #fff; line-height: 1.5; margin: 0;">--</p>
-    </div>
+    zones.extract.levels.forEach((lvl, i) => {
+        primitives.push(candles.createPriceLine({ 
+            price: lvl, color: '#ef4444', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: `EXTRACT ${i+1}` 
+        }));
+    });
 
-    <div class="label" style="margin-bottom: 10px;">TACTICAL ORDERS</div>
-    <div id="orders-list" style="display: grid; gap: 8px;"></div>
-  </div>
+    // 2. The Cycle Breaker (Macro 0.5)
+    primitives.push(candles.createPriceLine({ 
+        price: data.analysis.fibs.macro_50, 
+        color: '#f97316', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: '⚠️ CYCLE BREAKER (0.5)' 
+    }));
 
-  <div class="bento-card wide" style="height: 550px; padding: 0; overflow: hidden;">
-     <div id="chart-mount" style="width: 100%; height: 100%;"></div>
-  </div>
-
-</div>
-
-<script>
-  const chart = LightweightCharts.createChart(document.getElementById('chart-mount'), {
-    layout: { background: { type: 'solid', color: '#020617' }, textColor: '#94a3b8' },
-    grid: { vertLines: { color: 'rgba(30, 41, 59, 0.5)' }, horzLines: { color: 'rgba(30, 41, 59, 0.5)' } },
-    rightPriceScale: { borderColor: '#334155' },
-    timeScale: { borderColor: '#334155', timeVisible: true },
-  });
-
-  const candles = chart.addCandlestickSeries({ upColor: '#10b981', downColor: '#ef4444', borderVisible: false });
-  const emaSeries = chart.addLineSeries({ color: '#38bdf8', lineWidth: 2, title: '21 EMA' });
-  const smaSeries = chart.addLineSeries({ color: 'rgba(255,255,255,0.5)', lineWidth: 1, lineStyle: 2, title: '200 SMA' });
-
-  new ResizeObserver(e => chart.applyOptions({ width: e[0].contentRect.width, height: e[0].contentRect.height }))
-    .observe(document.getElementById('chart-mount'));
-
-  let primitives = []; 
-
-  async function runAnalysis() {
-    const ticker = document.getElementById('ticker').value;
-    const capital = document.getElementById('capital').value;
-    const strategy = document.getElementById('strategy').value;
-    const btn = document.getElementById('run-btn');
-    
-    btn.innerHTML = 'ANALYZING BATTLEFIELD...';
-    btn.disabled = true;
-    
-    // Clear drawings
-    primitives.forEach(p => candles.removePriceLine(p));
-    primitives = [];
-
-    try {
-      const res = await fetch('/api/analyze-s-jan', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ symbol: ticker, capital: parseFloat(capital), strategy: strategy })
-      });
-      const data = await res.json();
-
-      if(data.candles) {
-        candles.setData(data.candles.sort((a,b)=>a.time-b.time));
-        emaSeries.setData(data.analysis.charts.ema_21);
-        smaSeries.setData(data.analysis.charts.sma_200);
-        
-        const zones = data.analysis.zones;
-        
-        // DEPLOYMENT ZONE (Green)
-        zones.deploy.levels.forEach((lvl, i) => {
-            primitives.push(candles.createPriceLine({ 
-                price: lvl, color: '#10b981', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: `DEPLOY ${i+1}` 
-            }));
-        });
-
-        // EXTRACTION ZONE (Red) - Only if not accumulator
-        if (strategy !== 'ACCUMULATOR') {
-            zones.extract.levels.forEach((lvl, i) => {
-                primitives.push(candles.createPriceLine({ 
-                    price: lvl, color: '#ef4444', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: `EXTRACT ${i+1}` 
-                }));
-            });
-        }
-        chart.timeScale().fitContent();
-      }
-
-      if(data.plan) {
-        const p = data.plan;
-        document.getElementById('results-panel').style.display = 'block';
-        document.getElementById('badge-mode').innerText = p.mode;
-        document.getElementById('rationale').innerText = p.rationale;
-        
-        const list = document.getElementById('orders-list');
-        list.innerHTML = '';
-        
-        p.orders.forEach(o => {
-            let color = '#10b981'; // Green (Deploy)
-            if (o.action && o.action.includes('SELL') || o.action.includes('EXTRACT')) color = '#ef4444'; // Red
-            if (o.action && o.action.includes('ALT')) color = '#a855f7'; // Purple (Hybrid High-Beta)
-
-            list.innerHTML += `
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 6px; border-left: 3px solid ${color};">
-              <div>
-                <div style="font-size:10px; color:var(--text-muted); font-weight:700;">${o.note}</div>
-                <div style="font-weight:700; color:#fff; font-size:14px;">
-                    <span style="color:${color};">${o.action.replace(/_/g, ' ')}</span> 
-                    ${o.amount !== '---' ? '$'+o.amount.toLocaleString() : ''}
-                </div>
-              </div>
-              <div style="font-family:monospace; color:var(--primary-bright); font-size:14px;">@ ${o.price.toLocaleString()}</div>
-            </div>`;
-        });
-      }
-
-    } catch(e) { console.error(e); alert("Analysis failed."); } 
-    finally { btn.innerHTML = 'RUN CYCLE ANALYSIS'; btn.disabled = false; }
-  }
-
-  window.addEventListener('DOMContentLoaded', () => { runAnalysis(); });
-</script>
-{% endblock %}
+    // 3. Trends (21/200)
+    emaSeries.setData(data.analysis.charts.ema_21);
+    smaSeries.setData(data.analysis.charts.sma_200);
+}
