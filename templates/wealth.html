@@ -3,6 +3,13 @@
 <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 
 <style>
+/* --- ANIMATIONS --- */
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+@keyframes scan { 0% { top: 0%; opacity: 0; } 50% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+@keyframes pulse-glow { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
+@keyframes slide-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* --- COMPONENTS --- */
 .spinner {
    width: 40px; height: 40px;
    border: 4px solid var(--glass-border);
@@ -11,14 +18,28 @@
    animation: spin 1s linear infinite;
    margin: 0 auto;
 }
-@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-.pulse-btn { animation: pulse 2s infinite; }
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-  70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+.pulse-btn { animation: pulse-glow 2s infinite; }
+
+.radar-grid {
+    background-image: 
+        linear-gradient(rgba(56, 189, 248, 0.1) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(56, 189, 248, 0.1) 1px, transparent 1px);
+    background-size: 40px 40px;
+    width: 100%; height: 100%;
+    position: relative;
+    overflow: hidden;
 }
+
+.radar-scan {
+    position: absolute; width: 100%; height: 4px;
+    background: linear-gradient(90deg, transparent, var(--success), transparent);
+    box-shadow: 0 0 15px var(--success);
+    animation: scan 3s ease-in-out infinite;
+    top: 0; left: 0;
+}
+
+.results-enter { animation: slide-in 0.5s ease-out forwards; }
 </style>
 
 <div class="text-center" style="margin-bottom: 40px;">
@@ -34,7 +55,7 @@
   <div class="bento-card">
     <div style="margin-bottom: 20px;">
       <h3 style="color: #fff; margin-bottom: 4px;"><span class="gradient-text">Step 1:</span> Tactical Setup</h3>
-      <p style="font-size: 13px; color: var(--text-muted);">Define intent and capital parameters.</p>
+      <p style="font-size: 13px; color: var(--text-muted);">Define intent and capital.</p>
     </div>
 
     <div style="margin-bottom: 16px;">
@@ -58,7 +79,7 @@
     
     <div style="margin-bottom: 25px;">
       <label class="label">DEPLOYABLE CAPITAL ($)</label>
-      <input id="capital" class="input" type="number" value="100000" style="font-family: monospace; font-weight: 700;">
+      <input id="capital" class="input" type="number" value="50000" style="font-family: monospace; font-weight: 700;">
     </div>
 
     <button onclick="runAnalysis()" id="run-btn" class="btn primary pulse-btn" style="width: 100%; display: flex; justify-content: center; align-items: center; gap: 10px; padding: 16px;">
@@ -75,16 +96,17 @@
     <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <span class="label" style="margin:0;">DETECTED PHASE</span>
-            <div id="badge-mode" style="padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 800; text-transform: uppercase; background: var(--glass-border); color: #fff; letter-spacing: 0.5px;">AWAITING DATA</div>
+            <div id="badge-mode" style="padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 800; text-transform: uppercase; background: var(--glass-border); color: #fff; letter-spacing: 0.5px;">SYSTEM STANDBY</div>
         </div>
-        <p id="rationale" style="font-size: 14px; color: #fff; line-height: 1.5; margin: 0;">System standby. Please initialize analysis.</p>
+        <p id="rationale" style="font-size: 14px; color: #fff; line-height: 1.5; margin: 0;">Awaiting strategic profile initialization...</p>
     </div>
 
     <div>
         <div class="label" style="margin-bottom: 10px;">TACTICAL ORDERS</div>
         <div id="orders-list" style="display: grid; gap: 8px;">
-            <div style="padding: 12px; background: rgba(255,255,255,0.01); border-radius: 6px; border: 1px dashed var(--glass-border); text-align: center; color: var(--text-muted); font-size: 12px;">
-               Orders will appear here after calculation.
+            <div style="padding: 20px; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px dashed var(--glass-border); text-align: center;">
+               <div style="font-size: 24px; opacity: 0.3; margin-bottom: 5px;">📋</div>
+               <div style="color: var(--text-muted); font-size: 11px;">Orders will generate here.</div>
             </div>
         </div>
     </div>
@@ -92,10 +114,12 @@
 
   <div class="bento-card wide" style="height: 550px; padding: 0; overflow: hidden; position: relative; background: #020617;">
      
-     <div id="chart-placeholder" style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: radial-gradient(circle at center, rgba(16, 185, 129, 0.1) 0%, rgba(2, 6, 23, 1) 70%);">
-        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.5; margin-bottom: 20px;"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
-        <div style="font-weight: 700; color: #fff; letter-spacing: 2px; font-size: 18px;">ENGINE STANDBY</div>
-        <div style="color: var(--text-muted); font-size: 13px; margin-top: 5px;">Select Profile & Capital to Begin.</div>
+     <div id="chart-placeholder" class="radar-grid" style="display: flex; flex-direction: column; justify-content: center; align-items: center;">
+        <div class="radar-scan"></div>
+        <div style="z-index: 5; text-align: center; background: rgba(2,6,23,0.8); padding: 20px; border-radius: 12px; border: 1px solid var(--glass-border); backdrop-filter: blur(4px);">
+            <div style="font-weight: 700; color: #fff; letter-spacing: 2px; font-size: 18px; margin-bottom: 5px;">MARKET SCANNER ACTIVE</div>
+            <div style="color: var(--text-muted); font-size: 12px;">Monitoring Macro Structures...</div>
+        </div>
      </div>
 
      <div id="chart-loader" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 10;">
@@ -130,18 +154,20 @@
     const ticker = document.getElementById('ticker').value;
     const capital = document.getElementById('capital').value;
     const strategy = document.getElementById('strategy').value;
+    
     const btn = document.getElementById('run-btn');
     const placeholder = document.getElementById('chart-placeholder');
     const loader = document.getElementById('chart-loader');
     const chartMount = document.getElementById('chart-mount');
     
-    // UI LOADING STATE
+    // UI TRANSITION: Processing
     btn.innerHTML = 'PROCESSING...';
     btn.disabled = true;
     btn.classList.remove('pulse-btn'); 
-    placeholder.style.display = 'none'; 
-    loader.style.display = 'block'; 
+    placeholder.style.display = 'none'; // Hide Radar
+    loader.style.display = 'block';     // Show Spinner
     
+    // Clear old lines
     primitives.forEach(p => candles.removePriceLine(p));
     primitives = [];
 
@@ -154,9 +180,11 @@
       if (!res.ok) throw new Error(`Server Error: ${res.status}`);
       const data = await res.json();
 
+      // UI TRANSITION: Active
       loader.style.display = 'none'; 
       chartMount.style.visibility = 'visible'; 
 
+      // 1. Chart Data
       if(data.candles) {
         candles.setData(data.candles.sort((a,b)=>a.time-b.time));
         emaSeries.setData(data.analysis.charts.ema_21);
@@ -165,14 +193,14 @@
         const zones = data.analysis.zones;
         const fibs = data.analysis.fibs;
 
-        // Draw Deploy Zones (Green)
+        // Deploy Zones (Green)
         zones.deploy.levels.forEach((lvl, i) => {
             primitives.push(candles.createPriceLine({ 
                 price: lvl, color: '#10b981', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: `DEPLOY ${i+1}` 
             }));
         });
 
-        // Draw Extract Zones (Red) - Only if not Accumulator
+        // Extract Zones (Red) - Conditional
         if (strategy !== 'ACCUMULATOR') {
             zones.extract.levels.forEach((lvl, i) => {
                 primitives.push(candles.createPriceLine({ 
@@ -189,29 +217,34 @@
         chart.timeScale().fitContent();
       }
 
+      // 2. Results Data (Animated Entry)
       if(data.plan) {
         const p = data.plan;
-        
         const badge = document.getElementById('badge-mode');
-        badge.innerText = p.mode;
+        
+        // Visual Feedback based on Mode
         let badgeColor = 'var(--glass-border)';
         if (p.mode.includes('STAIR_STEP') || p.mode.includes('CLIMB')) badgeColor = '#10b981';
         if (p.mode.includes('WARNING') || p.mode.includes('BREAKDOWN')) badgeColor = '#ef4444';
+        
+        badge.innerText = p.mode;
         badge.style.background = badgeColor;
+        badge.classList.add('results-enter'); // Add slide-in animation
 
         document.getElementById('rationale').innerText = p.rationale;
         
         const list = document.getElementById('orders-list');
-        list.innerHTML = '';
+        list.innerHTML = ''; // Clear placeholder
+        list.classList.add('results-enter'); // Add slide-in animation
         
         p.orders.forEach(o => {
-            let color = '#10b981'; // Green
+            let color = '#10b981'; 
             if (o.action && (o.action.includes('SELL') || o.action.includes('EXTRACT'))) color = '#ef4444';
             if (o.action && o.action.includes('ALT')) color = '#a855f7'; 
             if (o.action && o.action.includes('HOLD')) color = '#f97316'; 
 
             list.innerHTML += `
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 6px; border-left: 3px solid ${color};">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 6px; border-left: 3px solid ${color}; margin-bottom: 8px;">
               <div>
                 <div style="font-size:10px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">${o.note}</div>
                 <div style="font-weight:700; color:#fff; font-size:14px; margin-top:2px;">
@@ -227,7 +260,7 @@
     } catch(e) { 
       console.error(e); 
       alert("Analysis Error: " + e.message);
-      placeholder.style.display = 'flex';
+      placeholder.style.display = 'flex'; // Restore Radar on error
       chartMount.style.visibility = 'hidden';
     } 
     finally { 
