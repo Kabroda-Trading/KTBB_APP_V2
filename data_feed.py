@@ -175,8 +175,8 @@ def get_investing_inputs(symbol: str) -> Dict[str, Any]:
     monthly_candles = fetch_candles_safe(exchange, raw_symbol, '1w', 400)
     
     # 2. Fetch "Weekly" Trends (Using Daily Data for MAs)
-    # 500 days = ~1.5 years. Needed for accurate 200 SMA calculation.
-    weekly_candles = fetch_candles_safe(exchange, raw_symbol, '1d', 500)
+    # 350 weeks = ~7 years. Needed for accurate 200 SMA calculation.
+    weekly = loop.run_until_complete(fetch_candles(symbol, "1w", 350)) # 7 years
     
     return {
         "symbol": symbol,

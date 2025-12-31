@@ -194,16 +194,18 @@ async def api_analyze_s_jan(request: Request, db: Session = Depends(get_db)):
     
     symbol = (payload.get("symbol") or "BTC/USDT").strip().upper()
     capital = float(payload.get("capital") or 0)
-    # FIX: Extract Strategy or default
     strategy = (payload.get("strategy") or "ACCUMULATOR").strip().upper()
+    overrides = payload.get("overrides") or {} # CAPTURE MANUAL INPUTS
     
-    # 1. Fetch Inputs
     inputs = await asyncio.to_thread(data_feed.get_investing_inputs, symbol)
     
-    # 2. Analyze Structure
-    analysis = sjan_brain.analyze_market_structure(inputs["monthly_candles"], inputs["weekly_candles"])
+    # Pass Overrides to Brain
+    analysis = sjan_brain.analyze_market_structure(
+        inputs["monthly_candles"], 
+        inputs["weekly_candles"],
+        overrides=overrides
+    )
     
-    # 3. Generate Plan (FIX: Pass strategy here)
     plan = {}
     if capital > 0:
         plan = wealth_allocator.generate_dynamic_plan(capital, strategy, analysis)
