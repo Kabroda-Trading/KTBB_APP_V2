@@ -9,8 +9,13 @@ exchange = ccxt.binanceus({'enableRateLimit': True})
 
 async def fetch_candles(symbol: str, timeframe: str, limit: int = 1000):
     try:
-        if symbol == "BTC/USDT":
+        # --- SYMBOL NORMALIZER ---
+        # Forces common formats into the required "BTC/USDT" format
+        s = symbol.upper().strip()
+        if s == "BTC" or s == "BTCUSDT":
             symbol = "BTC/USDT"
+        elif s == "ETH" or s == "ETHUSDT":
+            symbol = "ETH/USDT"
         
         # Async fetch directly
         candles = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
@@ -36,10 +41,8 @@ async def fetch_candles(symbol: str, timeframe: str, limit: int = 1000):
 async def get_investing_inputs(symbol: str):
     """
     Async fetch for Wealth OS. 
-    Waits for both Monthly and Weekly data concurrently.
     """
     try:
-        # Run both fetches at the same time for speed
         monthly, weekly = await asyncio.gather(
             fetch_candles(symbol, "1M", 200),
             fetch_candles(symbol, "1w", 350)
