@@ -143,10 +143,21 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
     require_paid_access(u)
+    
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
+    
+    # --- FIX: Prioritize Dropdown Selection ---
+    # If the frontend sends a specific timezone (e.g. "Europe/London"), use it.
+    # Otherwise, fall back to the user's account default.
+    requested_tz = payload.get("session_tz")
+    if not requested_tz:
+        requested_tz = u.session_tz or "UTC"
+        
     ensure_symbol_allowed(u, symbol)
-    raw = await asyncio.to_thread(dmr_report.run_auto_raw, symbol=symbol, session_tz=u.session_tz or "UTC")
+    
+    # Run the report using the CORRECT timezone
+    raw = await asyncio.to_thread(dmr_report.run_auto_raw, symbol=symbol, session_tz=requested_tz)
     return JSONResponse(raw)
 
 @app.get("/indicators", response_class=HTMLResponse)
