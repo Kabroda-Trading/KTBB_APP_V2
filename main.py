@@ -27,6 +27,9 @@ import sse_engine
 import sjan_brain
 import wealth_allocator
 
+# --- Research Lab ---
+import research_lab
+
 from database import init_db, get_db, UserModel
 from membership import (
     get_membership_state,
@@ -272,3 +275,38 @@ async def billing_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
     return billing.handle_webhook(payload=payload, sig_header=sig, db=db, UserModel=UserModel)
+
+# --- NEW ROUTE (Add under other HTML routes) ---
+@app.get("/research", response_class=HTMLResponse)
+def research_page(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    require_paid_access(u)
+    flags = _plan_flags(u)
+    return templates.TemplateResponse("research.html", {
+        "request": request, "is_logged_in": True,
+        "user": {"email": u.email, "username": u.username, "plan_label": flags.get("plan_label", "")}
+    })
+
+# --- NEW API (Add under other API routes) ---
+@app.post("/api/dmr/history")
+async def dmr_history(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    require_paid_access(u)
+    
+    payload = await request.json()
+    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
+    session_key = payload.get("session_tz") or "America/New_York_Early"
+    days_back = int(payload.get("days") or 7)
+    
+    # Fetch Data
+    inputs = await data_feed.get_inputs(symbol=symbol)
+    
+    # Run Lab
+    history = await asyncio.to_thread(
+        research_lab.run_historical_analysis, 
+        inputs, session_key, days_back
+    )
+    
+    return JSONResponse({"history": history})

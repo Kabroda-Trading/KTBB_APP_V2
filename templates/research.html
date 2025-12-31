@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}Research Lab | Kabroda{% endblock %}
+
+{% block content %}
+<div class="app-container">
+    <div class="header-section" style="margin-bottom: 30px;">
+        <h1>RESEARCH LAB</h1>
+        <p class="subtitle">Historical Verification & Backtesting Engine</p>
+    </div>
+
+    <div class="control-panel">
+        <div class="input-group">
+            <label>TARGET ASSET</label>
+            <select id="symbolSelect">
+                <option value="BTCUSDT" selected>BTC (BITCOIN)</option>
+                <option value="ETHUSDT">ETH (ETHEREUM)</option>
+                <option value="SOLUSDT">SOL (SOLANA)</option>
+            </select>
+        </div>
+
+        <div class="input-group">
+            <label>TARGET SESSION</label>
+            <select id="sessionSelect">
+                <option value="America/New_York_Early" selected>🇺🇸 NY FUTURES (08:30 ET)</option>
+                <option value="Europe/London">🇬🇧 LONDON (08:00 GMT)</option>
+                <option value="Asia/Tokyo">🇯🇵 TOKYO (09:00 JST)</option>
+            </select>
+        </div>
+        
+        <div class="input-group">
+            <label>HISTORY DEPTH</label>
+            <select id="daysSelect">
+                <option value="5">Last 5 Sessions</option>
+                <option value="10">Last 10 Sessions</option>
+                <option value="20" selected>Last 20 Sessions</option>
+            </select>
+        </div>
+
+        <button class="primary-btn" onclick="runBacktest()">RUN SIMULATION</button>
+    </div>
+
+    <div id="resultsArea" style="display:none; margin-top: 30px;">
+        
+        <div class="telemetry-grid" style="grid-template-columns: 1fr 2fr; margin-bottom: 30px;">
+            <div class="telemetry-card">
+                <h3>PERFORMANCE BREAKDOWN</h3>
+                <canvas id="performanceChart"></canvas>
+            </div>
+            <div class="telemetry-card">
+                <h3>SESSION LOG</h3>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+                        <thead style="border-bottom: 1px solid #333; color: #888;">
+                            <tr>
+                                <th style="padding: 10px;">DATE</th>
+                                <th>BREAKOUT</th>
+                                <th>BREAKDOWN</th>
+                                <th>OUTCOME</th>
+                                <th>MAX RUN</th>
+                                <th>ACTION</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+let perfChart = null;
+
+async function runBacktest() {
+    const btn = document.querySelector('.primary-btn');
+    btn.textContent = "PROCESSING...";
+    
+    const payload = {
+        symbol: document.getElementById('symbolSelect').value,
+        session_tz: document.getElementById('sessionSelect').value,
+        days: document.getElementById('daysSelect').value
+    };
+
+    try {
+        const res = await fetch('/api/dmr/history', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        renderResults(data.history);
+        document.getElementById('resultsArea').style.display = 'block';
+    } catch (e) {
+        alert("Simulation Error: " + e);
+    }
+    btn.textContent = "RUN SIMULATION";
+}
+
+function renderResults(history) {
+    const tbody = document.getElementById('historyTableBody');
+    tbody.innerHTML = '';
+    
+    let stats = { breakout: 0, breakdown: 0, chop: 0 };
+    
+    history.forEach(row => {
+        // Stats
+        if (row.outcome.status === "BREAKOUT") stats.breakout++;
+        else if (row.outcome.status === "BREAKDOWN") stats.breakdown++;
+        else stats.chop++;
+
+        // Table Row
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = "1px solid #222";
+        
+        let statusColor = "#888"; // Chop
+        if (row.outcome.status === "BREAKOUT") statusColor = "#00ff9d";
+        if (row.outcome.status === "BREAKDOWN") statusColor = "#ff4d4d";
+
+        tr.innerHTML = `
+            <td style="padding: 12px; color: #ccc;">${row.date}</td>
+            <td style="color: #00ff9d;">$${row.levels.breakout_trigger.toFixed(2)}</td>
+            <td style="color: #ff4d4d;">$${row.levels.breakdown_trigger.toFixed(2)}</td>
+            <td style="color: ${statusColor}; font-weight: bold;">${row.outcome.status}</td>
+            <td style="color: #fff;">$${row.outcome.max_run.toFixed(2)}</td>
+            <td>
+                <button onclick='copyLevels(${JSON.stringify(row.levels)})' 
+                        style="background: #333; border: none; color: #fff; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-size: 0.8rem;">
+                    COPY
+                </button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    renderChart(stats);
+}
+
+function renderChart(stats) {
+    const ctx = document.getElementById('performanceChart').getContext('2d');
+    if (perfChart) perfChart.destroy();
+    
+    perfChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Breakout', 'Breakdown', 'Range/Chop'],
+            datasets: [{
+                data: [stats.breakout, stats.breakdown, stats.chop],
+                backgroundColor: ['#00ff9d', '#ff4d4d', '#444'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'bottom', labels: { color: '#ccc' } }
+            }
+        }
+    });
+}
+
+function copyLevels(levels) {
+    const txt = `BO: ${levels.breakout_trigger} | BD: ${levels.breakdown_trigger} | Res: ${levels.daily_resistance} | Sup: ${levels.daily_support}`;
+    navigator.clipboard.writeText(txt);
+    alert("Levels copied to clipboard!");
+}
+</script>
+{% endblock %}
