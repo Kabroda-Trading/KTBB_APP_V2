@@ -16,7 +16,7 @@ def analyze_market_structure(monthly_candles: List[Dict], weekly_candles: List[D
     if df_macro.empty: return {}
     
     # Absolute Cycle Low of the last ~7 years
-    macro_low = df_macro['low'].min() 
+    macro_low = float(df_macro['low'].min())
     
     # --- 2. MICRO CONTEXT (The Speed) ---
     df = pd.DataFrame(weekly_candles) # Daily candles
@@ -31,7 +31,7 @@ def analyze_market_structure(monthly_candles: List[Dict], weekly_candles: List[D
     
     # --- 3. DYNAMIC STRUCTURE (Living Pivots) ---
     # Find local high of the current run (last 6 months)
-    local_high = df['high'].tail(180).max()
+    local_high = float(df['high'].tail(180).max())
     
     fib_range = local_high - macro_low
     fibs = {
@@ -43,11 +43,12 @@ def analyze_market_structure(monthly_candles: List[Dict], weekly_candles: List[D
     }
 
     # --- 4. PHASE DETECTION ---
-    is_macro_bull = curr['close'] > curr['sma_200']
-    is_micro_bull = curr['close'] > curr['ema_21']
+    # FORCE BOOLEAN TYPE (Fixes JSON Error)
+    is_macro_bull = bool(curr['close'] > curr['sma_200'])
+    is_micro_bull = bool(curr['close'] > curr['ema_21'])
     
     # Rotation: Price was Resting (below 21), now Running (above 21)
-    is_rotating = (prev['close'] < prev['ema_21']) and (curr['close'] > curr['ema_21'])
+    is_rotating = bool((prev['close'] < prev['ema_21']) and (curr['close'] > curr['ema_21']))
     
     phase = "UNKNOWN"
     action = "HOLD"
@@ -68,17 +69,20 @@ def analyze_market_structure(monthly_candles: List[Dict], weekly_candles: List[D
 
     # --- 5. EXPORT ---
     charts = {
-        "ema_21": [{"time": int(r['time']), "value": r['ema_21']} for _, r in df.iterrows() if not pd.isna(r['ema_21'])],
-        "sma_200": [{"time": int(r['time']), "value": r['sma_200']} for _, r in df.iterrows() if not pd.isna(r['sma_200'])]
+        "ema_21": [{"time": int(r['time']), "value": float(r['ema_21'])} for _, r in df.iterrows() if not pd.isna(r['ema_21'])],
+        "sma_200": [{"time": int(r['time']), "value": float(r['sma_200'])} for _, r in df.iterrows() if not pd.isna(r['sma_200'])]
     }
 
     return {
-        "price": curr['close'],
+        "price": float(curr['close']),
         "phase": phase,
         "action": action,
         "rotation": is_rotating,
         "fibs": fibs,
-        "indicators": {"ema_21": curr['ema_21'], "sma_200": curr['sma_200']},
+        "indicators": {
+            "ema_21": float(curr['ema_21']) if not pd.isna(curr['ema_21']) else 0.0, 
+            "sma_200": float(curr['sma_200']) if not pd.isna(curr['sma_200']) else 0.0
+        },
         "charts": charts,
         "zones": _scan_velocity_zones(df)
     }
@@ -98,7 +102,7 @@ def _scan_velocity_zones(df: pd.DataFrame) -> List[Dict]:
             
             if move_pct > 0.03: 
                 zones.append({
-                    "level": row['low'], 
+                    "level": float(row['low']), 
                     "strength": "A" if move_pct > 0.08 else "B"
                 })
     

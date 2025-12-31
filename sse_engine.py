@@ -77,7 +77,7 @@ def _select_daily_levels(resistance: List[Shelf], support: List[Shelf]) -> Tuple
 
 def _pick_trigger_candidates(
     *,
-    px: float,  # This is the ANCHOR price (Session Open), not live price
+    px: float,  # NOW: This is the ANCHOR price (Session Open)
     daily_support: float,
     daily_resistance: float,
     r30_high: float,
@@ -162,6 +162,7 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
     anchor_px = f("session_open_price", 0.0)
     
     # CRITICAL FIX: If we have an anchor, use it. If not, use last price.
+    # This prevents levels from "drifting" as price moves during the session.
     reference_price = anchor_px if anchor_px > 0 else px
 
     resistance, support = _build_htf_shelves(
