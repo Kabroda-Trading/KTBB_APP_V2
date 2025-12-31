@@ -2,99 +2,98 @@
 from __future__ import annotations
 from typing import Any, Dict
 from datetime import datetime
+import pytz
 import trade_logic_v2
-import sse_engine  # <--- THE MISSING LINK
+import sse_engine
 
-def _extract_sse_inputs(daily_candles, intraday_candles, current_price):
-    """
-    Bridge function: Maps Raw Candles -> SSE Engine Inputs.
-    Since we don't have a separate H4 scanner running, we map 
-    Daily High/Low to Structural Supply/Demand to feed the engine valid data.
-    """
-    # 1. Get Previous Day (for Macro Structure)
-    prev_day = daily_candles[-2] if len(daily_candles) > 1 else {}
+def _get_session_config(session_key: str):
+    """Maps Session Key to Market Timezone and Open Hour"""
+    key = session_key.lower()
+    if "london" in key: return "Europe/London", 8, 0
+    if "york_early" in key or "futures" in key: return "America/New_York", 8, 30
+    if "york" in key: return "America/New_York", 9, 30
+    if "tokyo" in key: return "Asia/Tokyo", 9, 0
+    if "sydney" in key: return "Australia/Sydney", 7, 0
+    return "UTC", 0, 0
+
+def _find_anchor_index(intraday_candles: list, session_key: str) -> int:
+    """Finds the array index of the Session Anchor Candle"""
+    if not intraday_candles: return -1
     
-    # 2. Get Last Completed 30m Candle (for Session Anchor)
-    # This represents the "Initial Balance" or current session anchor
-    last_30m = intraday_candles[-2] if len(intraday_candles) > 1 else {}
-
-    return {
-        "last_price": current_price,
-        "session_open_price": last_30m.get("open", 0.0),
+    tz_name, h, m = _get_session_config(session_key)
+    try: market_tz = pytz.timezone(tz_name)
+    except: market_tz = pytz.UTC
         
-        # Session Range Inputs
-        "r30_high": last_30m.get("high", 0.0),
-        "r30_low": last_30m.get("low", 0.0),
-        
-        # Structural Inputs (Mapped from Daily to satisfy SSE requirements)
-        # The SSE Engine will use these to determine Daily Support/Resistance
-        "h4_supply": prev_day.get("high", 0.0),
-        "h4_demand": prev_day.get("low", 0.0),
-        
-        # Optional: Can add H1 proxies here if available, else 0
-        "h1_supply": 0.0,
-        "h1_demand": 0.0,
-        
-        # Value Area Proxies (Optional fallback)
-        "f24_vah": prev_day.get("high", 0.0),
-        "f24_val": prev_day.get("low", 0.0),
-    }
+    # Scan backwards for the latest occurrence of the Open Time
+    for i in range(len(intraday_candles) - 1, -1, -1):
+        c = intraday_candles[i]
+        utc_dt = datetime.fromtimestamp(c['time'], tz=pytz.UTC)
+        market_dt = utc_dt.astimezone(market_tz)
+        if market_dt.hour == h and market_dt.minute == m:
+            return i
+            
+    return len(intraday_candles) - 1 # Fallback
 
 def generate_report_from_inputs(inputs: Dict[str, Any], session_tz: str = "UTC") -> Dict[str, Any]:
-    """
-    1. Receives Raw Data (Async Fetch)
-    2. Prepares Data for SSE Engine
-    3. Runs SSE Engine (Ferrari Mode)
-    4. Runs Trade Logic
-    """
     symbol = inputs.get("symbol", "BTCUSDT")
-    daily_data = inputs.get("daily_candles", [])
-    intraday_data = inputs.get("intraday_candles", [])
-    current_price = inputs.get("current_price") or inputs.get("last_price") or 0.0
+    raw_15m = inputs.get("intraday_candles", [])
     
-    # --- STEP 1: PREPARE DATA FOR SSE ---
-    sse_input_data = _extract_sse_inputs(daily_data, intraday_data, current_price)
+    # 1. Locate Anchor
+    idx = _find_anchor_index(raw_15m, session_tz)
     
-    # --- STEP 2: RUN THE SSE ENGINE ---
-    # This replaces the simple math with your advanced logic
-    computed_data = sse_engine.compute_sse_levels(sse_input_data)
-    
-    # --- STEP 3: HYDRATE INPUTS ---
-    # Merge the sophisticated levels back into the main inputs object
-    inputs["levels"] = computed_data["levels"]
-    inputs["htf_shelves"] = computed_data["htf_shelves"]
-    inputs["intraday_shelves"] = computed_data["intraday_shelves"]
-    
-    # Ensure range_30m exists for frontend display
-    inputs["range_30m"] = {
-        "high": computed_data["levels"].get("range30m_high", 0.0),
-        "low": computed_data["levels"].get("range30m_low", 0.0)
+    if idx >= 0:
+        anchor_candle = raw_15m[idx]
+        
+        # 2. Create Fixed Range Slices (Compartmentalized Data)
+        # 24H Slice = 96 candles back from anchor
+        start_24 = max(0, idx - 96)
+        slice_24h = raw_15m[start_24 : idx]
+        
+        # 4H Slice = 16 candles back from anchor
+        start_4 = max(0, idx - 16)
+        slice_4h = raw_15m[start_4 : idx]
+    else:
+        anchor_candle = raw_15m[-1] if raw_15m else {}
+        slice_24h = []
+        slice_4h = []
+
+    # 3. Package for Engine
+    sse_input = {
+        "raw_15m_candles": raw_15m, # Full history for Pivots
+        "slice_24h": slice_24h,     # Fixed Range for VRVP
+        "slice_4h": slice_4h,       # Fixed Range for VRVP
+        "session_open_price": anchor_candle.get("open", 0.0),
+        "r30_high": anchor_candle.get("high", 0.0),
+        "r30_low": anchor_candle.get("low", 0.0),
+        "last_price": inputs.get("current_price", 0.0)
     }
 
-    # --- STEP 4: RUN TRADE LOGIC ---
-    # Now Trade Logic has the high-quality SSE levels to work with
+    # 4. Compute Levels
+    computed = sse_engine.compute_sse_levels(sse_input)
+    
+    # 5. Output
+    inputs["levels"] = computed["levels"]
+    inputs["htf_shelves"] = computed["htf_shelves"]
+    inputs["range_30m"] = {
+        "high": computed["levels"]["range30m_high"],
+        "low": computed["levels"]["range30m_low"]
+    }
+    
     trade_logic = trade_logic_v2.compute_trade_logic(symbol=symbol, inputs=inputs)
-
-    # --- STEP 5: OUTPUT ---
-    out: Dict[str, Any] = {
+    
+    return {
         "symbol": symbol,
-        "date": inputs.get("date") or datetime.now().strftime("%Y-%m-%d"),
-        "last_price": current_price,
+        "date": inputs.get("date"),
+        "last_price": inputs.get("current_price"),
         "session_tz": session_tz,
-        
-        # High-Quality Data from SSE
-        "levels": computed_data["levels"],
+        "levels": computed["levels"],
         "range_30m": inputs["range_30m"],
         "trade_logic": trade_logic,
-        
-        # Passthroughs
         "inputs": inputs,
-        "htf_shelves": inputs["htf_shelves"],
-        "intraday_shelves": inputs["intraday_shelves"],
+        "htf_shelves": computed["htf_shelves"],
+        "intraday_shelves": {},
         "news": inputs.get("news", []),
         "events": inputs.get("events", [])
     }
-    return out
 
-# Backward compatibility alias
 run_auto_raw = generate_report_from_inputs
