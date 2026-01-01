@@ -1,6 +1,6 @@
-# src/main.py
+# main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.1 (Restored & Audited)
+# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.1 (Async Fix)
 # ---------------------------------------------------------
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ import data_feed
 import sse_engine
 
 # --- WEALTH IMPORTS ---
-# Ensure sjan_brain.py and wealth_allocator.py exist in your src folder
+# This reconnects the logic that was "broken" when we switched files
 import sjan_brain
 import wealth_allocator
 
@@ -54,7 +54,6 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
 IS_HTTPS = PUBLIC_BASE_URL.startswith("https://")
 SESSION_HTTPS_ONLY = _bool_env("SESSION_HTTPS_ONLY", default=IS_HTTPS)
 
-# --- MIDDLEWARE (The Missing Piece Restored) ---
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
@@ -134,6 +133,29 @@ def suite(request: Request, db: Session = Depends(get_db)):
         "user": {"email": u.email, "username": u.username, "session_tz": (u.session_tz or "UTC"), "plan_label": flags.get("plan_label", ""), "plan": flags.get("plan") or ""}
     })
 
+@app.post("/api/dmr/run-raw")
+async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    require_paid_access(u)
+    
+    payload = await request.json()
+    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
+    requested_tz = payload.get("session_tz")
+    if not requested_tz:
+        requested_tz = u.session_tz or "UTC"
+        
+    ensure_symbol_allowed(u, symbol)
+    
+    # 1. Fetch Inputs ASYNC (No more Event Loop errors)
+    inputs = await data_feed.get_inputs(symbol=symbol, session_tz=requested_tz)
+    
+    # 2. Process Sync Logic
+    # We pass the pre-fetched inputs directly to the logic to avoid blocking
+    raw = await asyncio.to_thread(dmr_report.generate_report_from_inputs, inputs, requested_tz)
+    
+    return JSONResponse(raw)
+
 @app.get("/indicators", response_class=HTMLResponse)
 def indicators(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -143,18 +165,6 @@ def indicators(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse("indicators.html", {
         "request": request, "is_logged_in": True,
         "user": {"email": u.email, "username": u.username, "session_tz": (u.session_tz or "UTC"), "plan_label": flags.get("plan_label", ""), "plan": flags.get("plan") or ""}
-    })
-
-# --- RESEARCH LAB (New Feature Integrated) ---
-@app.get("/research", response_class=HTMLResponse)
-def research_page(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-    flags = _plan_flags(u)
-    return templates.TemplateResponse("research.html", {
-        "request": request, "is_logged_in": True,
-        "user": {"email": u.email, "username": u.username, "plan_label": flags.get("plan_label", "")}
     })
 
 # --- WEALTH OS ROUTES ---
@@ -168,6 +178,38 @@ async def wealth_page(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse("wealth.html", {
         "request": request, "is_logged_in": True,
         "user": {"email": u.email, "username": u.username, "plan_label": flags.get("plan_label", "")}
+    })
+
+@app.post("/api/analyze-s-jan")
+async def api_analyze_s_jan(request: Request, db: Session = Depends(get_db)):
+    _require_session_user(request)
+    try: payload = await request.json()
+    except: payload = {}
+    
+    symbol = (payload.get("symbol") or "BTC/USDT").strip().upper()
+    capital = float(payload.get("capital") or 0)
+    strategy = (payload.get("strategy") or "ACCUMULATOR").strip().upper()
+    overrides = payload.get("overrides") or {}
+    
+    # FETCH ASYNC (Direct await)
+    inputs = await data_feed.get_investing_inputs(symbol)
+    
+    # Pass Overrides to Brain
+    analysis = sjan_brain.analyze_market_structure(
+        inputs["monthly_candles"], 
+        inputs["weekly_candles"],
+        overrides=overrides
+    )
+    
+    plan = {}
+    if capital > 0:
+        plan = wealth_allocator.generate_dynamic_plan(capital, strategy, analysis)
+
+    return JSONResponse({
+        "status": "success", 
+        "candles": inputs["weekly_candles"], 
+        "analysis": analysis, 
+        "plan": plan
     })
 
 # --- ACCOUNT & AUTH ---
@@ -213,7 +255,7 @@ def register_post(request: Request, db: Session = Depends(get_db), email: str = 
     try: return RedirectResponse(url=billing.create_checkout_session(db=db, user_model=u), status_code=303)
     except: return RedirectResponse(url="/pricing?new=1", status_code=303)
 
-# --- BILLING API ---
+# --- BILLING ---
 @app.post("/billing/checkout")
 async def billing_checkout(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -235,29 +277,19 @@ async def billing_webhook(request: Request, db: Session = Depends(get_db)):
     sig = request.headers.get("stripe-signature", "")
     return billing.handle_webhook(payload=payload, sig_header=sig, db=db, UserModel=UserModel)
 
-# --- DMR & RESEARCH API ---
-@app.post("/api/dmr/run-raw")
-async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
+# --- NEW ROUTE (Add under other HTML routes) ---
+@app.get("/research", response_class=HTMLResponse)
+def research_page(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
     require_paid_access(u)
-    
-    payload = await request.json()
-    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    requested_tz = payload.get("session_tz")
-    if not requested_tz:
-        requested_tz = u.session_tz or "UTC"
-        
-    ensure_symbol_allowed(u, symbol)
-    
-    # 1. Fetch Inputs ASYNC (No more Event Loop errors)
-    inputs = await data_feed.get_inputs(symbol=symbol, session_tz=requested_tz)
-    
-    # 2. Process Sync Logic
-    raw = await asyncio.to_thread(dmr_report.generate_report_from_inputs, inputs, requested_tz)
-    
-    return JSONResponse(raw)
+    flags = _plan_flags(u)
+    return templates.TemplateResponse("research.html", {
+        "request": request, "is_logged_in": True,
+        "user": {"email": u.email, "username": u.username, "plan_label": flags.get("plan_label", "")}
+    })
 
+# --- NEW API (Add under other API routes) ---
 @app.post("/api/dmr/history")
 async def dmr_history(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -279,36 +311,3 @@ async def dmr_history(request: Request, db: Session = Depends(get_db)):
     )
     
     return JSONResponse({"history": history})
-
-# --- WEALTH API ---
-@app.post("/api/analyze-s-jan")
-async def api_analyze_s_jan(request: Request, db: Session = Depends(get_db)):
-    _require_session_user(request)
-    try: payload = await request.json()
-    except: payload = {}
-    
-    symbol = (payload.get("symbol") or "BTC/USDT").strip().upper()
-    capital = float(payload.get("capital") or 0)
-    strategy = (payload.get("strategy") or "ACCUMULATOR").strip().upper()
-    overrides = payload.get("overrides") or {}
-    
-    # FETCH ASYNC
-    inputs = await data_feed.get_investing_inputs(symbol)
-    
-    # Pass Overrides to Brain (Using Old Modules as requested)
-    analysis = sjan_brain.analyze_market_structure(
-        inputs["monthly_candles"], 
-        inputs["weekly_candles"],
-        overrides=overrides
-    )
-    
-    plan = {}
-    if capital > 0:
-        plan = wealth_allocator.generate_dynamic_plan(capital, strategy, analysis)
-
-    return JSONResponse({
-        "status": "success", 
-        "candles": inputs["weekly_candles"], 
-        "analysis": analysis, 
-        "plan": plan
-    })
