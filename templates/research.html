@@ -1,233 +1,235 @@
 {% extends "base.html" %}
 
-{% block title %}Research Lab | Kabroda{% endblock %}
+{% block title %}Kabroda Lab | Command Center{% endblock %}
 
 {% block content %}
 <div class="app-container">
-    <div class="header-section" style="margin-bottom: 30px;">
-        <h1>RESEARCH LAB</h1>
-        <p class="subtitle">Historical Verification & Backtesting Engine</p>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h1 style="font-size: 1.5rem; margin: 0;">RESEARCH COMMAND</h1>
+        <a href="/suite" class="nav-item" style="font-size: 0.8rem; color: #888; text-decoration: none;">&larr; BACK TO SUITE</a>
     </div>
 
-    <div class="control-panel">
-        <div class="input-group">
-            <label>TARGET ASSET</label>
-            <select id="symbolSelect">
-                <option value="BTCUSDT" selected>BTC (BITCOIN)</option>
-                <option value="ETHUSDT">ETH (ETHEREUM)</option>
-                <option value="SOLUSDT">SOL (SOLANA)</option>
-            </select>
-        </div>
-
-        <div class="input-group">
-            <label>TARGET SESSION</label>
-            <select id="sessionSelect">
-                <option value="America/New_York_Early" selected>🇺🇸 NY FUTURES (08:30 ET)</option>
-                <option value="Europe/London">🇬🇧 LONDON (08:00 GMT)</option>
-                <option value="Asia/Tokyo">🇯🇵 TOKYO (09:00 JST)</option>
-            </select>
-        </div>
+    <div style="display: grid; grid-template-columns: 250px 1fr; gap: 20px;">
         
-        <div class="input-group">
-            <label>HISTORY DEPTH</label>
-            <select id="daysSelect">
-                <option value="5">Last 5 Sessions</option>
-                <option value="10">Last 10 Sessions</option>
-                <option value="20" selected>Last 20 Sessions</option>
-            </select>
-        </div>
-
-        <button class="primary-btn" onclick="runBacktest()">RUN SIMULATION</button>
-    </div>
-
-    <div id="retroBox" style="display:none; margin-top: 40px; border-top: 1px solid #333; padding-top: 20px;">
-        <h3 style="color: #00e5ff; margin-bottom: 10px;">SESSION REPLAY: <span id="replayDate" style="color: #fff;">SELECT A DATE BELOW</span></h3>
-        
-        <div class="telemetry-grid">
-            <div class="telemetry-card" style="border-color: rgba(255, 77, 77, 0.3);">
-                <div class="label" style="color: #ff4d4d;">DAILY RESISTANCE</div>
-                <div class="value" id="retro_res">---</div>
-            </div>
-
-            <div class="telemetry-card" style="border-color: rgba(0, 255, 157, 0.3);">
-                <div class="label" style="color: #00ff9d;">BREAKOUT TRIGGER</div>
-                <div class="value" id="retro_bo">---</div>
-            </div>
-
-            <div class="telemetry-card" style="border-color: rgba(179, 157, 219, 0.3);">
-                <div class="label" style="color: #b39ddb;">BREAKDOWN TRIGGER</div>
-                <div class="value" id="retro_bd">---</div>
-            </div>
-
-            <div class="telemetry-card" style="border-color: rgba(56, 126, 245, 0.3);">
-                <div class="label" style="color: #387ef5;">DAILY SUPPORT</div>
-                <div class="value" id="retro_sup">---</div>
-            </div>
-        </div>
-        <div style="text-align: right; margin-top: 10px;">
-            <button onclick="copyRetroLevels()" style="background: #333; color: #fff; border: 1px solid #555; padding: 5px 15px; cursor: pointer;">COPY THIS SESSION</button>
-        </div>
-    </div>
-
-    <div id="resultsArea" style="display:none; margin-top: 30px;">
-        <div class="telemetry-grid" style="grid-template-columns: 1fr 2fr; margin-bottom: 30px;">
-            <div class="telemetry-card">
-                <h3>WIN RATE</h3>
-                <canvas id="performanceChart"></canvas>
+        <div class="telemetry-card" style="height: fit-content;">
+            <h3 style="color: #00e5ff; margin-bottom: 15px;">CONFIG</h3>
+            
+            <div class="input-group">
+                <label>ASSET</label>
+                <select id="symbolSelect"><option value="BTCUSDT">BTC (BITCOIN)</option><option value="ETHUSDT">ETH (ETHEREUM)</option></select>
             </div>
             
-            <div class="telemetry-card">
-                <h3>SESSION LOG (CLICK ROW TO VIEW)</h3>
-                <div style="max-height: 400px; overflow-y: auto;">
-                    <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
-                        <thead style="border-bottom: 1px solid #333; color: #888;">
-                            <tr>
-                                <th style="padding: 10px;">DATE</th>
-                                <th>TRIGGER</th>
-                                <th>OUTCOME</th>
-                                <th>RUN</th>
-                            </tr>
-                        </thead>
-                        <tbody id="historyTableBody"></tbody>
-                    </table>
+            <div class="input-group" style="margin-top:15px;">
+                <label>SESSIONS</label>
+                <div style="background: #111; padding: 8px; border-radius: 4px; display: flex; flex-direction: column; gap: 5px;">
+                    <label style="font-size: 0.75rem;"><input type="checkbox" value="America/New_York" checked> NY FUTURES</label>
+                    <label style="font-size: 0.75rem;"><input type="checkbox" value="Europe/London"> LONDON</label>
+                    <label style="font-size: 0.75rem;"><input type="checkbox" value="Asia/Tokyo"> TOKYO</label>
                 </div>
             </div>
+
+            <div class="input-group" style="margin-top:15px;">
+                <label>SIMULATION</label>
+                <input type="number" id="levInput" placeholder="Lev (10x)" value="10" style="width:100%; margin-bottom:5px; background:#111; border:1px solid #333; color:#fff; padding:5px;">
+                <input type="number" id="capInput" placeholder="Cap ($1000)" value="1000" style="width:100%; background:#111; border:1px solid #333; color:#fff; padding:5px;">
+            </div>
+
+            <button class="primary-btn" onclick="runLab()" style="margin-top: 20px; width: 100%;">RUN LAB</button>
+        </div>
+
+        <div>
+            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                <button class="tab-btn active" onclick="switchTab('stats')">SYSTEM STATS</button>
+                <button class="tab-btn" onclick="switchTab('sim')">STRATEGY SIM</button>
+                <button class="tab-btn" onclick="switchTab('replay')">LEVEL REPLAY</button>
+            </div>
+
+            <div id="view-stats" class="tab-view">
+                <div class="telemetry-grid" style="grid-template-columns: 1fr 1fr 1fr 1fr; margin-bottom: 20px;">
+                    <div class="telemetry-card" style="text-align: center;">
+                        <div class="label" style="color:#00ff9d">BREAKOUT RATE</div>
+                        <div class="value" id="stat-bo">--%</div>
+                    </div>
+                    <div class="telemetry-card" style="text-align: center;">
+                        <div class="label" style="color:#ff4d4d">BREAKDOWN RATE</div>
+                        <div class="value" id="stat-bd">--%</div>
+                    </div>
+                    <div class="telemetry-card" style="text-align: center;">
+                        <div class="label" style="color:#ff4d4d">RES HIT RATE</div>
+                        <div class="value" id="stat-res">--%</div>
+                    </div>
+                    <div class="telemetry-card" style="text-align: center;">
+                        <div class="label" style="color:#387ef5">SUP HIT RATE</div>
+                        <div class="value" id="stat-sup">--%</div>
+                    </div>
+                </div>
+                <div class="telemetry-card" style="display:flex; justify-content:center; align-items:center; height: 250px;">
+                    <p style="color:#666;">Select sessions and click RUN LAB to calculate probabilities.</p>
+                </div>
+            </div>
+
+            <div id="view-sim" class="tab-view" style="display:none;">
+                <div class="telemetry-grid" style="grid-template-columns: 1fr 3fr;">
+                    <div class="telemetry-card">
+                        <h3 style="font-size: 0.9rem;">NET PNL</h3>
+                        <div id="sim-pnl" style="font-size: 1.8rem; font-weight: bold; margin-top: 10px;">$0.00</div>
+                        <div style="height: 150px; margin-top: 10px;"><canvas id="pnlChart"></canvas></div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div style="max-height: 300px; overflow-y: auto;">
+                            <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
+                                <thead style="color:#666; border-bottom:1px solid #333;">
+                                    <tr><th>DATE</th><th>SETUP</th><th>ENTRY</th><th>RESULT</th><th>PNL</th></tr>
+                                </thead>
+                                <tbody id="sim-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-replay" class="tab-view" style="display:none;">
+                <div class="telemetry-card" style="margin-bottom: 20px;">
+                    <h3 style="color:#00e5ff;">SELECTED: <span id="replay-date" style="color:#fff">---</span></h3>
+                    <div class="telemetry-grid" style="margin-top:10px;">
+                        <div><span style="color:#ff4d4d">RES:</span> <span id="rep-res" style="color:#fff">---</span></div>
+                        <div><span style="color:#00ff9d">BO:</span> <span id="rep-bo" style="color:#fff">---</span></div>
+                        <div><span style="color:#b39ddb">BD:</span> <span id="rep-bd" style="color:#fff">---</span></div>
+                        <div><span style="color:#387ef5">SUP:</span> <span id="rep-sup" style="color:#fff">---</span></div>
+                    </div>
+                    <button onclick="copyReplay()" style="margin-top:10px; background:#333; color:#fff; border:none; padding:5px 10px; font-size:0.7rem;">COPY LEVELS</button>
+                </div>
+                <div class="telemetry-card">
+                    <div style="max-height: 200px; overflow-y: auto;">
+                        <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
+                            <tbody id="replay-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 </div>
 
+<style>
+.tab-btn { background: #111; border: 1px solid #333; color: #888; padding: 10px 20px; cursor: pointer; flex: 1; }
+.tab-btn.active { background: #00e5ff; color: #000; font-weight: bold; border-color: #00e5ff; }
+.value { font-size: 1.5rem; font-weight: bold; color: #fff; margin-top: 5px; }
+</style>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-let perfChart = null;
-let currentRetroLevels = null;
+let chartInstance = null;
+let currentReplay = null;
 
-async function runBacktest() {
+function switchTab(viewId) {
+    document.querySelectorAll('.tab-view').forEach(el => el.style.display = 'none');
+    document.getElementById('view-' + viewId).style.display = 'block';
+    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    event.target.classList.add('active');
+}
+
+async function runLab() {
     const btn = document.querySelector('.primary-btn');
     btn.textContent = "PROCESSING...";
     
-    const payload = {
-        symbol: document.getElementById('symbolSelect').value,
-        session_tz: document.getElementById('sessionSelect').value,
-        days: document.getElementById('daysSelect').value
-    };
-
+    const sessions = [];
+    document.querySelectorAll('input[type="checkbox"]:checked').forEach(c => sessions.push(c.value));
+    
     try {
         const res = await fetch('/api/dmr/history', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(payload)
+            body: JSON.stringify({
+                symbol: document.getElementById('symbolSelect').value,
+                sessions: sessions,
+                leverage: document.getElementById('levInput').value,
+                capital: document.getElementById('capInput').value
+            })
         });
         const data = await res.json();
         
-        document.getElementById('resultsArea').style.display = 'block';
-        document.getElementById('retroBox').style.display = 'block';
+        // 1. UPDATE STATS
+        document.getElementById('stat-bo').textContent = data.stats.bo_rate + "%";
+        document.getElementById('stat-bd').textContent = data.stats.bd_rate + "%";
+        document.getElementById('stat-res').textContent = data.stats.res_hit_rate + "%";
+        document.getElementById('stat-sup').textContent = data.stats.sup_hit_rate + "%";
         
-        renderResults(data.history);
+        // 2. UPDATE SIMULATOR
+        renderSim(data.history);
         
-        // Auto-select the most recent day
-        if(data.history.length > 0) {
-            loadRetroBox(data.history[0]);
-        }
-
-    } catch (e) {
-        console.error(e);
-        alert("Simulation Error: Check console for details.");
-    }
-    btn.textContent = "RUN SIMULATION";
+        // 3. UPDATE REPLAY LIST
+        renderReplayList(data.history);
+        
+    } catch(e) { alert("Error: " + e); }
+    btn.textContent = "RUN LAB";
 }
 
-function loadRetroBox(row) {
-    // Populate the big boxes at the top
-    document.getElementById('replayDate').textContent = row.date;
-    
-    // SAFE ACCESS: Use || 0 to prevent crashes if data is missing
-    const res = row.levels.daily_resistance || 0;
-    const bo  = row.levels.breakout_trigger || 0;
-    const bd  = row.levels.breakdown_trigger || 0;
-    const sup = row.levels.daily_support || 0;
-
-    document.getElementById('retro_res').textContent = res.toFixed(2);
-    document.getElementById('retro_bo').textContent = bo.toFixed(2);
-    document.getElementById('retro_bd').textContent = bd.toFixed(2);
-    document.getElementById('retro_sup').textContent = sup.toFixed(2);
-    
-    currentRetroLevels = { res, bo, bd, sup };
-}
-
-function renderResults(history) {
-    const tbody = document.getElementById('historyTableBody');
+function renderSim(history) {
+    const tbody = document.getElementById('sim-body');
     tbody.innerHTML = '';
-    
-    let stats = { breakout: 0, breakdown: 0, chop: 0 };
-    
+    let totalPnl = 0; let wins = 0; let losses = 0;
+
     history.forEach(row => {
-        // Count stats
-        if (row.outcome.status === "BREAKOUT") stats.breakout++;
-        else if (row.outcome.status === "BREAKDOWN") stats.breakdown++;
-        else stats.chop++;
-
+        const s = row.strategy;
+        totalPnl += s.pnl;
+        if(s.pnl > 0) wins++;
+        if(s.pnl < 0) losses++;
+        
         const tr = document.createElement('tr');
-        tr.style.borderBottom = "1px solid #222";
-        tr.style.cursor = "pointer";
-        
-        // Hover effect logic handled via CSS usually, but simple JS here:
-        tr.onmouseover = function() { this.style.backgroundColor = "#222"; };
-        tr.onmouseout = function() { this.style.backgroundColor = "transparent"; };
-        
-        // ON CLICK: Load this day into the top boxes
-        tr.onclick = function() { loadRetroBox(row); };
-
-        let statusColor = "#888";
-        let triggerPrice = "---";
-        
-        if (row.outcome.status === "BREAKOUT") {
-            statusColor = "#00ff9d";
-            triggerPrice = (row.levels.breakout_trigger || 0).toFixed(2);
-        } else if (row.outcome.status === "BREAKDOWN") {
-            statusColor = "#ff4d4d";
-            triggerPrice = (row.levels.breakdown_trigger || 0).toFixed(2);
-        }
-
+        let col = s.pnl >= 0 ? '#00ff9d' : '#ff4d4d';
         tr.innerHTML = `
-            <td style="padding: 12px; color: #ccc;">${row.date}</td>
-            <td style="color: #fff;">${triggerPrice}</td>
-            <td style="color: ${statusColor}; font-weight: bold;">${row.outcome.status}</td>
-            <td style="color: #fff;">$${(row.outcome.max_run || 0).toFixed(2)}</td>
+            <td style="padding:5px; color:#aaa;">${row.date}</td>
+            <td style="color:#fff;">${s.status}</td>
+            <td style="color:#aaa;">${s.entry.toFixed(0)}</td>
+            <td style="color:${col}; font-weight:bold;">${s.pct}%</td>
+            <td style="color:${col};">$${s.pnl.toFixed(0)}</td>
         `;
         tbody.appendChild(tr);
     });
-
-    renderChart(stats);
-}
-
-function renderChart(stats) {
-    const ctx = document.getElementById('performanceChart').getContext('2d');
-    if (perfChart) perfChart.destroy();
     
-    perfChart = new Chart(ctx, {
+    document.getElementById('sim-pnl').textContent = "$" + totalPnl.toFixed(2);
+    document.getElementById('sim-pnl').style.color = totalPnl >= 0 ? "#00ff9d" : "#ff4d4d";
+    
+    // Chart
+    const ctx = document.getElementById('pnlChart').getContext('2d');
+    if(chartInstance) chartInstance.destroy();
+    chartInstance = new Chart(ctx, {
         type: 'doughnut',
-        data: {
-            labels: ['Long Wins', 'Short Wins', 'Range/Chop'],
-            datasets: [{
-                data: [stats.breakout, stats.breakdown, stats.chop],
-                backgroundColor: ['#00ff9d', '#ff4d4d', '#444'],
-                borderWidth: 0
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: { position: 'bottom', labels: { color: '#ccc' } }
-            }
-        }
+        data: { labels: ['Win', 'Loss'], datasets: [{ data: [wins, losses], backgroundColor: ['#00ff9d', '#ff4d4d'], borderWidth: 0 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
     });
 }
 
-function copyRetroLevels() {
-    if(!currentRetroLevels) return;
-    const txt = `📅 SESSION REPLAY\nRES: ${currentRetroLevels.res.toFixed(2)}\nBO:  ${currentRetroLevels.bo.toFixed(2)}\nBD:  ${currentRetroLevels.bd.toFixed(2)}\nSUP: ${currentRetroLevels.sup.toFixed(2)}`;
+function renderReplayList(history) {
+    const list = document.getElementById('replay-list');
+    list.innerHTML = '';
+    history.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.style.cursor = "pointer";
+        tr.onclick = () => loadReplay(row);
+        tr.innerHTML = `<td style="padding:8px; border-bottom:1px solid #222; color:#ccc;">${row.date} <span style="color:#666; font-size:0.7rem;">${row.session}</span></td>`;
+        list.appendChild(tr);
+    });
+    if(history.length > 0) loadReplay(history[0]);
+}
+
+function loadReplay(row) {
+    currentReplay = row;
+    document.getElementById('replay-date').textContent = row.date;
+    document.getElementById('rep-res').textContent = (row.levels.daily_resistance||0).toFixed(2);
+    document.getElementById('rep-bo').textContent = (row.levels.breakout_trigger||0).toFixed(2);
+    document.getElementById('rep-bd').textContent = (row.levels.breakdown_trigger||0).toFixed(2);
+    document.getElementById('rep-sup').textContent = (row.levels.daily_support||0).toFixed(2);
+}
+
+function copyReplay() {
+    if(!currentReplay) return;
+    const l = currentReplay.levels;
+    const txt = `REPLAY ${currentReplay.date}\nR: ${l.daily_resistance}\nBO: ${l.breakout_trigger}\nBD: ${l.breakdown_trigger}\nS: ${l.daily_support}`;
     navigator.clipboard.writeText(txt);
-    alert("Session data copied!");
+    alert("Copied!");
 }
 </script>
 {% endblock %}
