@@ -1,99 +1,87 @@
-# dmr_report.py
-from __future__ import annotations
-from typing import Any, Dict
-from datetime import datetime
+import ccxt.async_support as ccxt
+import pandas as pd
+import asyncio
+from datetime import datetime, timedelta
 import pytz
-import trade_logic_v2
-import sse_engine
 
-def _get_session_config(session_key: str):
-    """Maps Session Key to Market Timezone and Open Hour"""
-    key = session_key.lower()
-    if "london" in key: return "Europe/London", 8, 0
-    if "york_early" in key or "futures" in key: return "America/New_York", 8, 30
-    if "york" in key: return "America/New_York", 9, 30
-    if "tokyo" in key: return "Asia/Tokyo", 9, 0
-    if "sydney" in key: return "Australia/Sydney", 7, 0
-    return "UTC", 0, 0
-
-def _find_anchor_index(intraday_candles: list, session_key: str) -> int:
-    """Finds the array index of the Session Anchor Candle"""
-    if not intraday_candles: return -1
-    
-    tz_name, h, m = _get_session_config(session_key)
-    try: market_tz = pytz.timezone(tz_name)
-    except: market_tz = pytz.UTC
-        
-    # Scan backwards for the latest occurrence of the Open Time
-    for i in range(len(intraday_candles) - 1, -1, -1):
-        c = intraday_candles[i]
-        utc_dt = datetime.fromtimestamp(c['time'], tz=pytz.UTC)
-        market_dt = utc_dt.astimezone(market_tz)
-        if market_dt.hour == h and market_dt.minute == m:
-            return i
-            
-    return len(intraday_candles) - 1 # Fallback
-
-def generate_report_from_inputs(inputs: Dict[str, Any], session_tz: str = "UTC") -> Dict[str, Any]:
-    symbol = inputs.get("symbol", "BTCUSDT")
-    raw_15m = inputs.get("intraday_candles", [])
-    
-    # 1. Locate Anchor
-    idx = _find_anchor_index(raw_15m, session_tz)
-    
-    if idx >= 0:
-        anchor_candle = raw_15m[idx]
-        
-        # 2. Create Fixed Range Slices (Compartmentalized Data)
-        # 24H Slice = 96 candles back from anchor
-        start_24 = max(0, idx - 96)
-        slice_24h = raw_15m[start_24 : idx]
-        
-        # 4H Slice = 16 candles back from anchor
-        start_4 = max(0, idx - 16)
-        slice_4h = raw_15m[start_4 : idx]
-    else:
-        anchor_candle = raw_15m[-1] if raw_15m else {}
-        slice_24h = []
-        slice_4h = []
-
-    # 3. Package for Engine
-    sse_input = {
-        "raw_15m_candles": raw_15m, # Full history for Pivots
-        "slice_24h": slice_24h,     # Fixed Range for VRVP
-        "slice_4h": slice_4h,       # Fixed Range for VRVP
-        "session_open_price": anchor_candle.get("open", 0.0),
-        "r30_high": anchor_candle.get("high", 0.0),
-        "r30_low": anchor_candle.get("low", 0.0),
-        "last_price": inputs.get("current_price", 0.0)
+# ---------------------------------------------------------
+# CONFIGURE EXCHANGE: GLOBAL LIQUIDITY (KUCOIN)
+# ---------------------------------------------------------
+# We use KuCoin because it offers Global USDT pricing that matches
+# TradingView charts better than the isolated Binance.US feed.
+exchange = ccxt.kucoin({
+    'enableRateLimit': True,
+    'options': {
+        'defaultType': 'spot', 
     }
+})
 
-    # 4. Compute Levels
-    computed = sse_engine.compute_sse_levels(sse_input)
-    
-    # 5. Output
-    inputs["levels"] = computed["levels"]
-    inputs["htf_shelves"] = computed["htf_shelves"]
-    inputs["range_30m"] = {
-        "high": computed["levels"]["range30m_high"],
-        "low": computed["levels"]["range30m_low"]
-    }
-    
-    trade_logic = trade_logic_v2.compute_trade_logic(symbol=symbol, inputs=inputs)
-    
-    return {
-        "symbol": symbol,
-        "date": inputs.get("date"),
-        "last_price": inputs.get("current_price"),
-        "session_tz": session_tz,
-        "levels": computed["levels"],
-        "range_30m": inputs["range_30m"],
-        "trade_logic": trade_logic,
-        "inputs": inputs,
-        "htf_shelves": computed["htf_shelves"],
-        "intraday_shelves": {},
-        "news": inputs.get("news", []),
-        "events": inputs.get("events", [])
-    }
+async def fetch_candles(symbol: str, timeframe: str, limit: int = 1000):
+    try:
+        # --- SYMBOL NORMALIZER ---
+        s = symbol.upper().strip()
+        # KuCoin requires strict "BTC/USDT" format
+        if s == "BTC" or s == "BTCUSDT":
+            symbol = "BTC/USDT"
+        elif s == "ETH" or s == "ETHUSDT":
+            symbol = "ETH/USDT"
+        
+        # Async fetch directly
+        candles = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        
+        data = []
+        for c in candles:
+            data.append({
+                "time": int(c[0] / 1000), 
+                "open": float(c[1]),
+                "high": float(c[2]),
+                "low": float(c[3]),
+                "close": float(c[4]),
+                "volume": float(c[5])
+            })
+        return data
+    except Exception as e:
+        print(f"Error fetching {symbol} {timeframe} from KuCoin: {e}")
+        return []
 
-run_auto_raw = generate_report_from_inputs
+# ---------------------------------------------------------
+# 1. WEALTH OS DATA FEED (Daily Switch)
+# ---------------------------------------------------------
+async def get_investing_inputs(symbol: str):
+    """
+    Fetches Monthly (Macro) and Daily (Execution).
+    """
+    try:
+        monthly, daily = await asyncio.gather(
+            fetch_candles(symbol, "1M", 200),
+            fetch_candles(symbol, "1d", 1000) 
+        )
+        return {"monthly_candles": monthly, "weekly_candles": daily}
+    except Exception as e:
+        print(f"Wealth Feed Error: {e}")
+        return {"monthly_candles": [], "weekly_candles": []}
+
+# ---------------------------------------------------------
+# 2. BATTLEBOX SUITE DATA FEED (Async)
+# ---------------------------------------------------------
+async def get_inputs(symbol: str, date=None, session_tz="UTC"):
+    """
+    Async fetch for Day Trading Suite.
+    Fetches 1000 candles of 15m data to support Weekly VRVP calculation.
+    """
+    try:
+        daily, intraday = await asyncio.gather(
+            fetch_candles(symbol, "1d", 100),
+            fetch_candles(symbol, "15m", 1000) 
+        )
+        
+        current_price = intraday[-1]['close'] if intraday else 0.0
+        
+        return {
+            "daily_candles": daily,
+            "intraday_candles": intraday,
+            "current_price": current_price
+        }
+    except Exception as e:
+        print(f"Suite Feed Error: {e}")
+        return {"daily_candles": [], "intraday_candles": [], "current_price": 0.0}
