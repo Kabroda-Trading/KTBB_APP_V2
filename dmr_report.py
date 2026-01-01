@@ -32,6 +32,7 @@ def _find_anchor_index(intraday_candles: list, session_key: str) -> int:
 def generate_report_from_inputs(inputs: Dict[str, Any], session_tz: str = "UTC") -> Dict[str, Any]:
     symbol = inputs.get("symbol", "BTCUSDT")
     raw_15m = inputs.get("intraday_candles", [])
+    raw_daily = inputs.get("daily_candles", [])
     
     idx = _find_anchor_index(raw_15m, session_tz)
     
@@ -48,6 +49,7 @@ def generate_report_from_inputs(inputs: Dict[str, Any], session_tz: str = "UTC")
 
     sse_input = {
         "raw_15m_candles": raw_15m,
+        "raw_daily_candles": raw_daily, # Passed for HTF Trend
         "slice_24h": slice_24h,
         "slice_4h": slice_4h,
         "session_open_price": anchor_candle.get("open", 0.0),
@@ -62,10 +64,10 @@ def generate_report_from_inputs(inputs: Dict[str, Any], session_tz: str = "UTC")
     # HYDRATE INPUTS
     inputs["levels"] = computed["levels"]
     inputs["htf_shelves"] = computed["htf_shelves"]
-    inputs["bias_model"] = computed["bias_model"] # New v1.2 Field
-    inputs["context"] = computed["context"]       # New v1.2 Field
+    inputs["bias_model"] = computed["bias_model"]
+    inputs["context"] = computed["context"]
     
-    # Legacy Compatibility
+    # Legacy
     inputs["range_30m"] = {
         "high": computed["levels"]["range30m_high"], 
         "low": computed["levels"]["range30m_low"]
@@ -81,8 +83,8 @@ def generate_report_from_inputs(inputs: Dict[str, Any], session_tz: str = "UTC")
         "session_tz": session_tz,
         "levels": computed["levels"],
         "range_30m": inputs["range_30m"],
-        "bias_model": computed["bias_model"], # Pass to Frontend/GPT
-        "context": computed["context"],       # Pass to Frontend/GPT
+        "bias_model": computed["bias_model"],
+        "context": computed["context"],
         "trade_logic": trade_logic,
         "inputs": inputs,
         "htf_shelves": computed["htf_shelves"],

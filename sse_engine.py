@@ -1,5 +1,6 @@
 # sse_engine.py
 from __future__ import annotations
+from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 import math
 
@@ -12,15 +13,12 @@ def _pct(x: float, p: float) -> float:
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
-def _safe_get(arr: List, idx: int, default: float = 0.0) -> float:
-    try: return float(arr[idx])
-    except: return default
-
 def _calculate_sma(prices: List[float], period: int) -> float:
     if len(prices) < period: return 0.0
     return sum(prices[-period:]) / period
 
 def _calculate_atr(candles: List[Dict], period: int = 14) -> float:
+    """Calculates Average True Range for volatility scoring."""
     if len(candles) < period + 1: return 0.0
     tr_sum = 0.0
     for i in range(1, period + 1):
@@ -31,6 +29,14 @@ def _calculate_atr(candles: List[Dict], period: int = 14) -> float:
         lc = abs(c['low'] - p['close'])
         tr_sum += max(hl, hc, lc)
     return tr_sum / period
+
+@dataclass(frozen=True)
+class Shelf:
+    tf: str
+    level: float
+    kind: str
+    strength: float
+    primary: bool = False
 
 # ---------------------------------------------------------
 # 2. VRVP ENGINE (Preserved)
@@ -77,8 +83,28 @@ def _calculate_vrvp(candles: List[Dict[str, Any]], row_size_pct: float = 0.001) 
     return {"poc": poc, "vah": min_p + (up * row_size), "val": min_p + (down * row_size)}
 
 # ---------------------------------------------------------
-# 3. PIVOT ENGINE (Preserved)
+# 3. PIVOT & SHELF ENGINE (Enhanced with Strength)
 # ---------------------------------------------------------
+def _build_htf_shelves(h4_supply, h4_demand, h1_supply, h1_demand):
+    res = []; sup = []
+    # Strength is now explicitly assigned (0.0 - 1.0)
+    if h4_supply > 0: res.append(Shelf("4H", float(h4_supply), "supply", 0.8, True))
+    if h1_supply > 0: res.append(Shelf("1H", float(h1_supply), "supply", 0.6, False))
+    if h4_demand > 0: sup.append(Shelf("4H", float(h4_demand), "demand", 0.8, True))
+    if h1_demand > 0: sup.append(Shelf("1H", float(h1_demand), "demand", 0.6, False))
+    return sorted(res, key=lambda s: s.level), sorted(sup, key=lambda s: s.level)
+
+def _select_daily_levels(resistance, support):
+    if not resistance or not support: return 0.0, 0.0, {"resistance": [], "support": []}
+    dr = max(resistance, key=lambda s: s.strength).level
+    ds = max(support, key=lambda s: s.strength).level
+    
+    htf_out = {
+        "resistance": [{"level": s.level, "tf": s.tf, "strength": s.strength} for s in resistance],
+        "support": [{"level": s.level, "tf": s.tf, "strength": s.strength} for s in support]
+    }
+    return float(ds), float(dr), htf_out
+
 def _resample_candles(candles_15m: List[Dict], timeframe_minutes: int) -> List[Dict]:
     if not candles_15m: return []
     resampled = []
@@ -110,11 +136,9 @@ def _find_pivots(candles: List[Dict], left: int = 3, right: int = 3) -> Tuple[fl
     
     for i in range(left, len(candles) - right):
         curr = candles[i]
-        # Supply
         if all(candles[i-j]['high'] <= curr['high'] for j in range(1, left+1)) and \
            all(candles[i+j]['high'] < curr['high'] for j in range(1, right+1)):
             last_supply = curr['high']
-        # Demand
         if all(candles[i-j]['low'] >= curr['low'] for j in range(1, left+1)) and \
            all(candles[i+j]['low'] > curr['low'] for j in range(1, right+1)):
             last_demand = curr['low']
@@ -124,25 +148,11 @@ def _find_pivots(candles: List[Dict], left: int = 3, right: int = 3) -> Tuple[fl
 # ---------------------------------------------------------
 # 4. TRIGGER LOGIC (Preserved)
 # ---------------------------------------------------------
-def _pick_trigger_candidates(px, r30_h, r30_l, vrvp_24h, vrvp_4h):
-    bo_base = r30_h
-    bd_base = r30_l
+def _pick_trigger_candidates(px, r30_h, r30_l, vrvp_24h, vrvp_4h, daily_sup, daily_res):
+    bo_base = max(r30_h, vrvp_24h.get("vah", 0)) if r30_h > 0 else daily_res
+    bd_base = min(r30_l, vrvp_24h.get("val", 0)) if r30_l > 0 else daily_sup
     
-    # 4H VRVP Confluence
-    h4_vah = vrvp_4h.get("vah", 0.0)
-    h4_val = vrvp_4h.get("val", 0.0)
-    
-    if h4_vah > 0 and abs(h4_vah - bo_base)/bo_base < 0.003: bo_base = h4_vah
-    if h4_val > 0 and abs(h4_val - bd_base)/bd_base < 0.003: bd_base = h4_val
-
-    # 24H VRVP Context
-    f24_vah = vrvp_24h.get("vah", 0.0)
-    f24_val = vrvp_24h.get("val", 0.0)
-    
-    if f24_vah > bo_base: bo_base = f24_vah
-    if f24_val > 0 and f24_val < bd_base: bd_base = f24_val
-
-    # Safety
+    # Minimal Safety Buffer (0.2%)
     min_dist = px * 0.002
     bo = max(bo_base, px + min_dist)
     bd = min(bd_base, px - min_dist)
@@ -150,93 +160,129 @@ def _pick_trigger_candidates(px, r30_h, r30_l, vrvp_24h, vrvp_4h):
     return float(bo), float(bd)
 
 # ---------------------------------------------------------
-# 5. NEW: CONTEXT & BIAS ENGINE (The Upgrade)
+# 5. CONTEXT & BIAS ENGINE (v1.3 Evidence Based)
 # ---------------------------------------------------------
-def _build_context(px: float, daily_res: float, daily_sup: float, bo: float, bd: float, 
-                  f24_poc: float, f24_vah: float, f24_val: float, raw_15m: List[Dict]) -> Dict:
+def _calculate_shelf_imbalance(px: float, shelves: Dict[str, List[Dict]]) -> float:
+    """
+    Calculates pressure from nearby shelves.
+    Closer & Stronger shelves exert more 'repelling' force.
+    """
+    k = 100.0 # dampening factor
+    eps = 1e-9
     
-    # 1. HTF Trend (Slope of SMA)
-    trend_4h = "range"
+    pressure_up = 0.0 # Resistance pressure (pushes price DOWN)
+    for s in shelves.get("resistance", []):
+        dist = abs(s["level"] - px)
+        pressure_up += (s["strength"] / (dist + k))
+        
+    pressure_down = 0.0 # Support pressure (pushes price UP)
+    for s in shelves.get("support", []):
+        dist = abs(px - s["level"])
+        pressure_down += (s["strength"] / (dist + k))
+        
+    # If Support Pressure > Resistance Pressure -> Bullish Lean (+1)
+    # Formula: (Support - Resistance) / Total
+    total = pressure_down + pressure_up + eps
+    return _clamp((pressure_down - pressure_up) / total, -1.0, 1.0)
+
+def _build_context(px: float, bo: float, bd: float, 
+                  f24_poc: float, f24_vah: float, f24_val: float, 
+                  raw_15m: List[Dict], daily_candles: List[Dict]) -> Dict:
+    
+    # 1. HTF Trend (Daily + 4H)
     trend_1d = "range"
+    trend_4h = "range"
     slope_score = 0.0
     
-    if len(raw_15m) > 100:
+    # Daily Trend (SMA 20 vs 50 on Daily)
+    if len(daily_candles) > 50:
+        d_closes = [c['close'] for c in daily_candles]
+        d_sma20 = _calculate_sma(d_closes, 20)
+        d_sma50 = _calculate_sma(d_closes, 50)
+        if d_sma20 > d_sma50: trend_1d = "up"; slope_score += 0.5
+        elif d_sma20 < d_sma50: trend_1d = "down"; slope_score -= 0.5
+        
+    # 4H Trend (SMA 50 vs 200 on 15m)
+    if len(raw_15m) > 200:
         closes = [c['close'] for c in raw_15m]
         sma_50 = _calculate_sma(closes, 50)
         sma_200 = _calculate_sma(closes, 200)
-        
-        if sma_50 > sma_200: 
-            trend_4h = "up"
-            slope_score = 1.0
-        elif sma_50 < sma_200: 
-            trend_4h = "down"
-            slope_score = -1.0
+        if sma_50 > sma_200: trend_4h = "up"; slope_score += 0.5
+        elif sma_50 < sma_200: trend_4h = "down"; slope_score -= 0.5
+
+    slope_score = _clamp(slope_score, -1.0, 1.0)
             
     # 2. Location
     loc = "in_value"
     if px > f24_vah: loc = "above_value"
     elif px < f24_val: loc = "below_value"
     
-    # 3. Volatility
+    # 3. Volatility & Auction
     atr = _calculate_atr(raw_15m)
     comp_score = 0.0
     if atr > 0:
-        # Simple compression metric: Current Range vs ATR
-        curr_rng = bo - bd
-        if curr_rng < atr * 0.5: comp_score = 0.8 # Highly Compressed
+        curr_rng = max(bo - bd, 1.0)
+        if curr_rng < atr * 0.5: comp_score = 0.8 # Compressed
         elif curr_rng < atr: comp_score = 0.5
         
     return {
-        "htf": {
-            "trend_4h": trend_4h,
-            "trend_1d": trend_1d, # Placeholder for now
-            "slope_score": slope_score
-        },
+        "htf": { "trend_1d": trend_1d, "trend_4h": trend_4h, "slope_score": slope_score },
         "location": {
             "opening_location": loc,
             "vs_f24_poc": px - f24_poc,
             "distance_to_breakout": bo - px,
             "distance_to_breakdown": px - bd
         },
-        "volatility": {
-            "atr_14": atr,
-            "compression_score": comp_score
+        "volatility": { "atr_14": atr, "compression_score": comp_score },
+        "auction": { 
+            "overnight_direction": "balanced" # Placeholder for future logic
         }
     }
 
-def _calculate_bias_model(ctx: Dict, px: float, bo: float, bd: float) -> Dict:
+def _calculate_bias_model(ctx: Dict, px: float, bo: float, bd: float, shelves: Dict) -> Dict:
     drivers = []
     score = 0.0
     
-    # Driver 1: HTF Trend (Weight 0.25)
+    # 1. HTF TREND (Weight 0.25)
     trend_val = ctx["htf"]["slope_score"]
-    drivers.append({"id": "HTF_TREND", "weight": 0.25, "value": trend_val, "note": f"4H Trend is {ctx['htf']['trend_4h']}"})
+    drivers.append({"id": "HTF_TREND", "weight": 0.25, "value": trend_val, "note": f"Daily:{ctx['htf']['trend_1d']}, 4H:{ctx['htf']['trend_4h']}"})
     score += (trend_val * 0.25)
     
-    # Driver 2: Location Value (Weight 0.30)
+    # 2. LOCATION VALUE (Weight 0.20)
     loc_val = 0.0
     if ctx["location"]["opening_location"] == "above_value": loc_val = 1.0
     elif ctx["location"]["opening_location"] == "below_value": loc_val = -1.0
-    drivers.append({"id": "LOCATION_VALUE", "weight": 0.30, "value": loc_val, "note": f"Opening {ctx['location']['opening_location']}"})
-    score += (loc_val * 0.30)
+    drivers.append({"id": "LOCATION_VALUE", "weight": 0.20, "value": loc_val, "note": f"Opening {ctx['location']['opening_location']}"})
+    score += (loc_val * 0.20)
     
-    # Driver 3: Trigger Asymmetry (Weight 0.25)
+    # 3. TRIGGER ASYMMETRY (Weight 0.20)
+    # Which trigger is closer?
     d_bo = abs(ctx["location"]["distance_to_breakout"])
     d_bd = abs(ctx["location"]["distance_to_breakdown"])
     max_d = max(d_bo, d_bd, 1.0)
-    asym_val = _clamp((d_bd - d_bo) / max_d, -1.0, 1.0)
-    drivers.append({"id": "TRIGGER_ASYMMETRY", "weight": 0.25, "value": asym_val, "note": "Proximity to Triggers"})
-    score += (asym_val * 0.25)
+    asym_val = _clamp((d_bd - d_bo) / max_d, -1.0, 1.0) # Breakdown further away = Bullish
+    drivers.append({"id": "TRIGGER_ASYMMETRY", "weight": 0.20, "value": asym_val, "note": "Proximity to Breakout vs Breakdown"})
+    score += (asym_val * 0.20)
     
-    # Compression Penalty
-    conf_penalty = ctx["volatility"]["compression_score"]
-    
-    # Final Calculation
+    # 4. SHELF IMBALANCE (Weight 0.25)
+    # Calculated pressure from support/resistance structure
+    shelf_val = _calculate_shelf_imbalance(px, shelves)
+    drivers.append({"id": "SHELF_IMBALANCE", "weight": 0.25, "value": shelf_val, "note": "Support vs Resistance Structure Pressure"})
+    score += (shelf_val * 0.25)
+
+    # 5. OVERNIGHT/PRIOR (Weight 0.10) - Simplified
+    # If we are above value, assume overnight was bullish/neutral
+    overnight_val = 0.5 if loc_val > 0 else (-0.5 if loc_val < 0 else 0)
+    drivers.append({"id": "OVERNIGHT_DIRECTION", "weight": 0.10, "value": overnight_val, "note": "Context Carry"})
+    score += (overnight_val * 0.10)
+
+    # FINAL SCORING
     direction = "neutral"
     if score > 0.15: direction = "long"
     elif score < -0.15: direction = "short"
     
-    confidence = min(0.85, abs(score)) * (1.0 - (conf_penalty * 0.5)) * 100
+    conf_penalty = ctx["volatility"]["compression_score"]
+    confidence = min(0.90, abs(score)) * (1.0 - (conf_penalty * 0.6)) * 100
     
     return {
         "daily_lean": {
@@ -244,12 +290,13 @@ def _calculate_bias_model(ctx: Dict, px: float, bo: float, bd: float) -> Dict:
             "score": round(score, 2),
             "confidence": round(confidence, 1),
             "drivers": drivers,
-            "summary": f"Lean {direction.upper()} ({int(confidence)}% Conf)"
+            "summary": f"Lean {direction.upper()} ({int(confidence)}% Conf) | Drivers: {len(drivers)}"
         },
         "permission_state": {
-            "state": "HOLD_FIRE", # Default
+            "state": "HOLD_FIRE",
             "active_side": "none",
-            "earned_by": ["15m_acceptance", "5m_alignment"]
+            "earned_by": ["15m_acceptance", "5m_alignment"],
+            "evidence": { "reclaim_detected": False }
         }
     }
 
@@ -257,44 +304,47 @@ def _calculate_bias_model(ctx: Dict, px: float, bo: float, bd: float) -> Dict:
 # 6. MAIN COMPUTE
 # ---------------------------------------------------------
 def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    def f(k, d=0.0): return float(inputs.get(k) or d)
+    
     raw_15m = inputs.get("raw_15m_candles", [])
+    daily_candles = inputs.get("raw_daily_candles", []) # Needed for HTF Trend
     slice_24h = inputs.get("slice_24h", [])
     slice_4h = inputs.get("slice_4h", [])
     
-    # 1. Pivots (Support/Resistance)
+    # 1. PIVOTS & SHELVES (Now with Strength)
     candles_4h = _resample_candles(raw_15m, 240)
     candles_1h = _resample_candles(raw_15m, 60)
     sup_4h, dem_4h = _find_pivots(candles_4h)
     sup_1h, dem_1h = _find_pivots(candles_1h)
     
-    dr = sup_4h if sup_4h > 0 else (sup_1h if sup_1h > 0 else (max(c['high'] for c in raw_15m[-96:]) if raw_15m else 0))
-    ds = dem_4h if dem_4h > 0 else (dem_1h if dem_1h > 0 else (min(c['low'] for c in raw_15m[-96:]) if raw_15m else 0))
+    res_list, sup_list = _build_htf_shelves(sup_4h, dem_4h, sup_1h, dem_1h)
+    ds, dr, htf_out = _select_daily_levels(res_list, sup_list)
+    
+    # Fallback
+    if dr == 0 and raw_15m: dr = max(c['high'] for c in raw_15m[-96:])
+    if ds == 0 and raw_15m: ds = min(c['low'] for c in raw_15m[-96:])
 
     # 2. VRVP
     vrvp_24h = _calculate_vrvp(slice_24h)
     vrvp_4h = _calculate_vrvp(slice_4h)
     
-    # 3. Triggers
-    px = inputs.get("last_price", 0.0)
-    r30_h = inputs.get("r30_high", 0.0)
-    r30_l = inputs.get("r30_low", 0.0)
+    # 3. TRIGGERS
+    px = f("last_price")
+    r30_h = f("r30_high")
+    r30_l = f("r30_low")
+    bo, bd = _pick_trigger_candidates(px, r30_h, r30_l, vrvp_24h, vrvp_4h, ds, dr)
     
-    bo, bd = _pick_trigger_candidates(px, r30_h, r30_l, vrvp_24h, vrvp_4h)
+    # 4. CONTEXT (v1.3)
+    ctx = _build_context(px, bo, bd, vrvp_24h["poc"], vrvp_24h["vah"], vrvp_24h["val"], raw_15m, daily_candles)
     
-    # 4. CONTEXT & BIAS (New)
-    ctx = _build_context(px, dr, ds, bo, bd, vrvp_24h["poc"], vrvp_24h["vah"], vrvp_24h["val"], raw_15m)
-    bias = _calculate_bias_model(ctx, px, bo, bd)
+    # 5. BIAS MODEL (v1.3) - Now passing Shelves for Pressure Calculation
+    bias = _calculate_bias_model(ctx, px, bo, bd, htf_out)
     
-    # 5. EXECUTION PERMISSION (Gatekeeper Logic)
+    # 6. PERMISSION
     perm = bias["permission_state"]
-    if px > bo: 
-        perm["state"] = "DIRECTIONAL_LONG"
-        perm["active_side"] = "long"
-    elif px < bd: 
-        perm["state"] = "DIRECTIONAL_SHORT"
-        perm["active_side"] = "short"
-    elif abs(bias["daily_lean"]["score"]) < 0.2: 
-        perm["state"] = "ROTATIONAL_PERMITTED"
+    if px > bo: perm["state"] = "DIRECTIONAL_LONG"; perm["active_side"] = "long"
+    elif px < bd: perm["state"] = "DIRECTIONAL_SHORT"; perm["active_side"] = "short"
+    elif abs(bias["daily_lean"]["score"]) < 0.2: perm["state"] = "ROTATIONAL_PERMITTED"
 
     return {
         "levels": {
@@ -303,11 +353,8 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
             "range30m_high": r30_h, "range30m_low": r30_l,
             "f24_poc": vrvp_24h["poc"], "f24_vah": vrvp_24h["vah"], "f24_val": vrvp_24h["val"]
         },
-        "bias_model": bias, # v1.2 Contract
-        "context": ctx,     # v1.2 Contract
-        "htf_shelves": {
-            "resistance": [{"level": sup_4h, "tf": "4H", "strength": 0.8}, {"level": sup_1h, "tf": "1H", "strength": 0.6}],
-            "support": [{"level": dem_4h, "tf": "4H", "strength": 0.8}, {"level": dem_1h, "tf": "1H", "strength": 0.6}]
-        },
+        "bias_model": bias,
+        "context": ctx,
+        "htf_shelves": htf_out,
         "intraday_shelves": {}
     }
