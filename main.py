@@ -13,8 +13,8 @@ import asyncio
 from database import get_db, init_db, UserModel
 import data_feed
 import dmr_report
-import wealth_os
-import research_lab  # <--- ENSURE THIS IS IMPORTED
+import research_lab
+import wealth_os  # <--- WE KEEP THIS. We will fix the missing file next.
 
 app = FastAPI()
 
@@ -43,7 +43,6 @@ def _require_session_user(request: Request):
 def require_paid_access(u: UserModel):
     if not u: raise HTTPException(status_code=401)
     if u.tier not in ["tier1_manual", "tier2_stripe"]:
-        # In a real app, you might redirect to billing
         pass 
     return True
 
@@ -107,7 +106,6 @@ def account_page(request: Request, db: Session = Depends(get_db)):
         "user": {"email": u.email, "username": u.username, "plan_label": flags.get("plan_label", "")}
     })
 
-# --- RESEARCH LAB PAGE ---
 @app.get("/research", response_class=HTMLResponse)
 def research_page(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -128,19 +126,13 @@ async def login_post(request: Request, db: Session = Depends(get_db)):
     email = form.get("email")
     password = form.get("password")
     
-    # Simple hardcoded check for MVP or DB check
     user = db.query(UserModel).filter(UserModel.email == email).first()
     if not user:
-        # Auto-create for demo if you want, OR reject
-        # For now, let's reject if not found, or auto-create test user
         if email == "demo@kabroda.com" and password == "future":
-            # ensure demo user exists
             return RedirectResponse("/suite", status_code=303)
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
     
-    # In real app: verify_password(password, user.password_hash)
-    # Here we assume simple pass for demo or verify hash
-    if user.password_hash == password: # Plaintext for MVP, hash in prod
+    if user.password_hash == password:
         request.session["user_id"] = user.id
         return RedirectResponse("/suite", status_code=303)
     
@@ -152,24 +144,20 @@ def logout(request: Request):
     return RedirectResponse("/", status_code=303)
 
 # ---------------------------------------------------------
-# API ROUTES (THE ENGINE)
+# API ROUTES
 # ---------------------------------------------------------
 @app.post("/api/dmr/run-raw")
 async def run_dmr_raw(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
     require_paid_access(u)
-
+    
     payload = await request.json()
     symbol = payload.get("symbol", "BTCUSDT")
-    session_tz = payload.get("session_tz", "America/New_York_Early") # Default
+    session_tz = payload.get("session_tz", "America/New_York_Early")
     
-    # 1. Fetch Data
     inputs = await data_feed.get_inputs(symbol, session_tz=session_tz)
-    
-    # 2. Run Report Logic
     report = dmr_report.generate_report_from_inputs(inputs, session_tz)
-    
     return JSONResponse(report)
 
 @app.post("/api/wealth/run")
@@ -181,15 +169,14 @@ async def run_wealth_os(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     symbol = payload.get("symbol", "BTCUSDT")
     
-    # 1. Fetch
+    # 1. Fetch Investing Data (Monthly/Weekly)
     inputs = await data_feed.get_investing_inputs(symbol)
     
-    # 2. Run Brain
+    # 2. Run Brain (Using the restored module)
     report = wealth_os.run_wealth_brain(inputs)
     
     return JSONResponse(report)
 
-# --- RESEARCH LAB API (FIXED) ---
 @app.post("/api/dmr/history")
 async def dmr_history(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -202,13 +189,7 @@ async def dmr_history(request: Request, db: Session = Depends(get_db)):
     leverage = float(payload.get("leverage") or 1.0)
     capital = float(payload.get("capital") or 1000.0)
     
-    # 1. Fetch Data
     inputs = await data_feed.get_inputs(symbol=symbol)
-    
-    # 2. Run the Research Lab
-    # FIX: We DIRECTLY await the function because it is now defined as 'async def'
-    history = await research_lab.run_historical_analysis(
-        inputs, session_list, leverage, capital
-    )
+    history = await research_lab.run_historical_analysis(inputs, session_list, leverage, capital)
     
     return JSONResponse({"history": history})
