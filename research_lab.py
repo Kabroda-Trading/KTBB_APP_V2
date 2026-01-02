@@ -31,12 +31,20 @@ def calculate_stoch(highs, lows, closes, period=14):
     return k_line.fillna(50).tolist()
 
 # ---------------------------------------------------------
-# 2. STRATEGY ENGINE
+# 2. STRATEGY ENGINE (A/B Test Capable)
 # ---------------------------------------------------------
-def run_breakout_strategy(levels: Dict, candles_15m: List[Dict], candles_5m: List[Dict], leverage: float, capital: float):
-    bo_level = levels["breakout_trigger"]
-    bd_level = levels["breakdown_trigger"]
-    if not bo_level or not bd_level: return {"pnl": 0, "status": "NO_LEVELS"}
+def run_breakout_strategy(
+    bo_level: float, 
+    bd_level: float, 
+    candles_15m: List[Dict], 
+    candles_5m: List[Dict], 
+    leverage: float, 
+    capital: float
+):
+    """
+    Generic runner that accepts ANY trigger levels (Safe or Aggressive).
+    """
+    if not bo_level or not bd_level: return {"pnl": 0, "pct": 0, "status": "NO_LEVELS", "entry": 0, "exit": 0}
     
     direction = "NONE"
     confirm_idx = -1
@@ -44,16 +52,21 @@ def run_breakout_strategy(levels: Dict, candles_15m: List[Dict], candles_5m: Lis
     # Scan for 15m Break/Confirm
     for i in range(len(candles_15m) - 3):
         c = candles_15m[i]
+        # LONG Logic
         if c['close'] > bo_level and c['open'] < bo_level:
+            # Confirmation: Next 2 candles must hold above level
             if candles_15m[i+1]['close'] > bo_level and candles_15m[i+2]['close'] > bo_level:
                 direction = "LONG"; confirm_idx = i + 2; break
+        
+        # SHORT Logic
         elif c['close'] < bd_level and c['open'] > bd_level:
+            # Confirmation: Next 2 candles must hold below level
             if candles_15m[i+1]['close'] < bd_level and candles_15m[i+2]['close'] < bd_level:
                 direction = "SHORT"; confirm_idx = i + 2; break
 
-    if direction == "NONE": return {"pnl": 0, "status": "NO_SETUP", "entry": 0, "exit": 0}
+    if direction == "NONE": return {"pnl": 0, "pct": 0, "status": "NO_SETUP", "entry": 0, "exit": 0}
 
-    # 5m Entry/Exit
+    # 5m Entry/Exit Logic (Pullback to EMA)
     confirm_time = candles_15m[confirm_idx]['time']
     c5_closes = [c['close'] for c in candles_5m]
     c5_highs = [c['high'] for c in candles_5m]
@@ -65,16 +78,19 @@ def run_breakout_strategy(levels: Dict, candles_15m: List[Dict], candles_5m: Lis
     
     entry_price = 0.0; exit_price = 0.0; entry_idx = -1
     
+    # ENTRY HUNT
     for j in range(len(candles_5m)):
         if candles_5m[j]['time'] < confirm_time: continue
         if entry_price == 0.0:
-            if direction == "LONG" and rsi_14[j] < 45 and stoch_k[j] < 25:
+            # Simple Oversold/Overbought Pullback Entry
+            if direction == "LONG" and rsi_14[j] < 50: # Relaxed RSI for testing
                 entry_price = candles_5m[j]['close']; entry_idx = j; break
-            elif direction == "SHORT" and rsi_14[j] > 55 and stoch_k[j] > 75:
+            elif direction == "SHORT" and rsi_14[j] > 50:
                 entry_price = candles_5m[j]['close']; entry_idx = j; break
     
-    if entry_price == 0.0: return {"pnl": 0, "status": "MISSED_ENTRY", "entry": 0, "exit": 0}
+    if entry_price == 0.0: return {"pnl": 0, "pct": 0, "status": "MISSED_ENTRY", "entry": 0, "exit": 0}
         
+    # EXIT HUNT (Cross of EMA)
     for k in range(entry_idx + 1, len(candles_5m)):
         if direction == "LONG" and candles_5m[k]['close'] < ema_21[k]:
             exit_price = candles_5m[k]['close']; break
@@ -85,7 +101,14 @@ def run_breakout_strategy(levels: Dict, candles_15m: List[Dict], candles_5m: Lis
     
     pct_move = (exit_price - entry_price) / entry_price if direction == "LONG" else (entry_price - exit_price) / entry_price
     pnl = capital * (pct_move * leverage)
-    return {"pnl": round(pnl, 2), "pct": round(pct_move * leverage * 100, 2), "status": f"{direction}_WIN" if pnl > 0 else f"{direction}_LOSS", "entry": entry_price, "exit": exit_price}
+    
+    return {
+        "pnl": round(pnl, 2), 
+        "pct": round(pct_move * leverage * 100, 2), 
+        "status": f"{direction}_WIN" if pnl > 0 else f"{direction}_LOSS", 
+        "entry": entry_price, 
+        "exit": exit_price
+    }
 
 # ---------------------------------------------------------
 # 3. MAIN RUNNER (Orchestrator)
@@ -94,7 +117,6 @@ exchange_kucoin = ccxt.kucoin({'enableRateLimit': True})
 
 async def fetch_5m_granular(symbol: str):
     try:
-        # Fetch 5m data for granular execution testing
         return [
             {"time": int(c[0]/1000), "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])}
             for c in await exchange_kucoin.fetch_ohlcv(symbol, '5m', limit=1400)
@@ -103,19 +125,20 @@ async def fetch_5m_granular(symbol: str):
 
 async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str], leverage: float = 1, capital: float = 1000) -> Dict[str, Any]:
     raw_15m = inputs.get("intraday_candles", [])
-    raw_daily = inputs.get("daily_candles", []) # NEW: Must ingest daily for Bias Engine
-    
+    raw_daily = inputs.get("daily_candles", [])
     symbol = inputs.get("symbol", "BTCUSDT")
     raw_5m = await fetch_5m_granular(symbol)
     
     history = []
     
+    # Timezone Mapping
     tz_map = {
         "London": ("Europe/London", 8, 0),
         "New_York": ("America/New_York", 8, 30),
         "Tokyo": ("Asia/Tokyo", 9, 0)
     }
     
+    # 1. Identify Sessions in History
     for s_key in session_keys:
         target = (0,0,0)
         for k,v in tz_map.items():
@@ -128,19 +151,17 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             dt = datetime.fromtimestamp(raw_15m[i]['time'], tz=pytz.UTC).astimezone(market_tz)
             if dt.hour == target[1] and dt.minute == target[2]:
                 indices.append(i)
-            if len(indices) >= 10: break # Last 10 Sessions
+            if len(indices) >= 10: break # Max 10 sessions back
         
+        # 2. Run Simulation for Each Session
         for idx in indices:
             anchor = raw_15m[idx]
+            valid_dailies = [d for d in raw_daily if d['time'] < anchor['time']]
             
-            # Find the "Daily" context relative to this 15m timestamp
-            # We filter daily candles to only include those BEFORE this session
-            current_sim_time = anchor['time']
-            valid_dailies = [d for d in raw_daily if d['time'] < current_sim_time]
-            
+            # Prepare Inputs for Engine
             sse_input = {
                 "raw_15m_candles": raw_15m[:idx], 
-                "raw_daily_candles": valid_dailies, # NEW: Pass historical daily context
+                "raw_daily_candles": valid_dailies,
                 "slice_24h": raw_15m[max(0, idx-96):idx],
                 "slice_4h": raw_15m[max(0, idx-16):idx],
                 "session_open_price": anchor.get("open", 0.0),
@@ -149,31 +170,49 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
                 "last_price": anchor.get("close", 0.0)
             }
             
-            # This now uses the v1.3 Engine with Bias!
+            # --- COMPUTE LEVELS (Safe) ---
             computed = sse_engine.compute_sse_levels(sse_input)
             levels = computed["levels"]
-            bias = computed["bias_model"]["daily_lean"] # Capture Bias for stats
+            bias = computed["bias_model"]["daily_lean"]
+            
+            # --- DEFINE AGGRESSIVE LEVELS (Raw 30m) ---
+            # Aggressive = Raw 30m High/Low + 0.05% tiny buffer (to avoid noise)
+            agg_bo = levels["range30m_high"] * 1.0005
+            agg_bd = levels["range30m_low"] * 0.9995
             
             # Future Data for Verification
             future_15m = raw_15m[idx:]
             future_5m = [c for c in raw_5m if c['time'] >= anchor['time']]
             
-            # Run Strategy
-            strat_res = run_breakout_strategy(levels, future_15m, future_5m, leverage, capital)
+            # --- RUN A/B TEST ---
             
-            # Stats (Did it hit?)
-            session_max = max([c['high'] for c in future_15m[:32]], default=0) # Next 8 hours
+            # Simulation A: SAFE (Engine Levels)
+            res_safe = run_breakout_strategy(
+                levels["breakout_trigger"], levels["breakdown_trigger"], 
+                future_15m, future_5m, leverage, capital
+            )
+            
+            # Simulation B: AGGRESSIVE (Raw Levels)
+            res_agg = run_breakout_strategy(
+                agg_bo, agg_bd, 
+                future_15m, future_5m, leverage, capital
+            )
+            
+            # Stats (Did price hit daily levels?)
+            session_max = max([c['high'] for c in future_15m[:32]], default=0) 
             session_min = min([c['low'] for c in future_15m[:32]], default=0)
             
             history.append({
                 "session": s_key.replace("America/", "").replace("Europe/", ""),
                 "date": datetime.fromtimestamp(anchor["time"]).strftime("%Y-%m-%d"),
-                "levels": levels,
-                "bias_score": bias["score"], # Record the score!
-                "strategy": strat_res,
+                "bias_score": bias["score"],
+                "bias_dir": bias["direction"],
+                
+                # STORE BOTH RESULTS
+                "strategy": res_safe,        # Default display
+                "strategy_agg": res_agg,     # For comparison
+                
                 "stats": {
-                    "bo": session_max > levels['breakout_trigger'], 
-                    "bd": session_min < levels['breakdown_trigger'],
                     "hit_res": session_max >= levels['daily_resistance'], 
                     "hit_sup": session_min <= levels['daily_support']
                 }
@@ -181,15 +220,26 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             
     history.sort(key=lambda x: x['date'], reverse=True)
     
-    # AGGREGATE STATS
+    # 3. AGGREGATE COMPARISON STATS
     if not history: return {"history": [], "stats": {}}
     
-    count = len(history)
+    # Helper to sum PnL
+    def sum_pnl(key): return sum(h[key]['pnl'] for h in history)
+    def win_rate(key): 
+        wins = sum(1 for h in history if h[key]['pnl'] > 0)
+        total = sum(1 for h in history if h[key]['status'] != "NO_SETUP")
+        return int((wins/total)*100) if total > 0 else 0
+
     stats_out = {
-        "bo_rate": int((sum(1 for h in history if h['stats']['bo']) / count) * 100),
-        "bd_rate": int((sum(1 for h in history if h['stats']['bd']) / count) * 100),
-        "res_hit_rate": int((sum(1 for h in history if h['stats']['hit_res']) / count) * 100),
-        "sup_hit_rate": int((sum(1 for h in history if h['stats']['hit_sup']) / count) * 100)
+        # Comparison Metrics
+        "safe_pnl": sum_pnl('strategy'),
+        "agg_pnl": sum_pnl('strategy_agg'),
+        "safe_win_rate": win_rate('strategy'),
+        "agg_win_rate": win_rate('strategy_agg'),
+        
+        # General Stats
+        "res_hit_rate": int((sum(1 for h in history if h['stats']['hit_res']) / len(history)) * 100),
+        "sup_hit_rate": int((sum(1 for h in history if h['stats']['hit_sup']) / len(history)) * 100)
     }
     
     return {"history": history, "stats": stats_out}
