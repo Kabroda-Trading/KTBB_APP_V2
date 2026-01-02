@@ -41,9 +41,6 @@ def run_breakout_strategy(
     leverage: float, 
     capital: float
 ):
-    """
-    Generic runner that accepts ANY trigger levels (Safe or Aggressive).
-    """
     if not bo_level or not bd_level: return {"pnl": 0, "pct": 0, "status": "NO_LEVELS", "entry": 0, "exit": 0}
     
     direction = "NONE"
@@ -54,13 +51,11 @@ def run_breakout_strategy(
         c = candles_15m[i]
         # LONG Logic
         if c['close'] > bo_level and c['open'] < bo_level:
-            # Confirmation: Next 2 candles must hold above level
             if candles_15m[i+1]['close'] > bo_level and candles_15m[i+2]['close'] > bo_level:
                 direction = "LONG"; confirm_idx = i + 2; break
         
         # SHORT Logic
         elif c['close'] < bd_level and c['open'] > bd_level:
-            # Confirmation: Next 2 candles must hold below level
             if candles_15m[i+1]['close'] < bd_level and candles_15m[i+2]['close'] < bd_level:
                 direction = "SHORT"; confirm_idx = i + 2; break
 
@@ -82,8 +77,7 @@ def run_breakout_strategy(
     for j in range(len(candles_5m)):
         if candles_5m[j]['time'] < confirm_time: continue
         if entry_price == 0.0:
-            # Simple Oversold/Overbought Pullback Entry
-            if direction == "LONG" and rsi_14[j] < 50: # Relaxed RSI for testing
+            if direction == "LONG" and rsi_14[j] < 50: 
                 entry_price = candles_5m[j]['close']; entry_idx = j; break
             elif direction == "SHORT" and rsi_14[j] > 50:
                 entry_price = candles_5m[j]['close']; entry_idx = j; break
@@ -176,7 +170,6 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             bias = computed["bias_model"]["daily_lean"]
             
             # --- DEFINE AGGRESSIVE LEVELS (Raw 30m) ---
-            # Aggressive = Raw 30m High/Low + 0.05% tiny buffer (to avoid noise)
             agg_bo = levels["range30m_high"] * 1.0005
             agg_bd = levels["range30m_low"] * 0.9995
             
@@ -185,14 +178,11 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             future_5m = [c for c in raw_5m if c['time'] >= anchor['time']]
             
             # --- RUN A/B TEST ---
-            
-            # Simulation A: SAFE (Engine Levels)
             res_safe = run_breakout_strategy(
                 levels["breakout_trigger"], levels["breakdown_trigger"], 
                 future_15m, future_5m, leverage, capital
             )
             
-            # Simulation B: AGGRESSIVE (Raw Levels)
             res_agg = run_breakout_strategy(
                 agg_bo, agg_bd, 
                 future_15m, future_5m, leverage, capital
@@ -208,9 +198,11 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
                 "bias_score": bias["score"],
                 "bias_dir": bias["direction"],
                 
-                # STORE BOTH RESULTS
-                "strategy": res_safe,        # Default display
-                "strategy_agg": res_agg,     # For comparison
+                # FIXED: NOW INCLUDING LEVELS
+                "levels": levels, 
+                
+                "strategy": res_safe,       
+                "strategy_agg": res_agg,    
                 
                 "stats": {
                     "hit_res": session_max >= levels['daily_resistance'], 
@@ -223,7 +215,6 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
     # 3. AGGREGATE COMPARISON STATS
     if not history: return {"history": [], "stats": {}}
     
-    # Helper to sum PnL
     def sum_pnl(key): return sum(h[key]['pnl'] for h in history)
     def win_rate(key): 
         wins = sum(1 for h in history if h[key]['pnl'] > 0)
@@ -231,13 +222,10 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
         return int((wins/total)*100) if total > 0 else 0
 
     stats_out = {
-        # Comparison Metrics
         "safe_pnl": sum_pnl('strategy'),
         "agg_pnl": sum_pnl('strategy_agg'),
         "safe_win_rate": win_rate('strategy'),
         "agg_win_rate": win_rate('strategy_agg'),
-        
-        # General Stats
         "res_hit_rate": int((sum(1 for h in history if h['stats']['hit_res']) / len(history)) * 100),
         "sup_hit_rate": int((sum(1 for h in history if h['stats']['hit_sup']) / len(history)) * 100)
     }
