@@ -31,7 +31,7 @@ def calculate_stoch(highs, lows, closes, period=14):
     return k_line.fillna(50).tolist()
 
 # ---------------------------------------------------------
-# 2. STRATEGY ENGINE (Breakout + Pullback)
+# 2. STRATEGY ENGINE
 # ---------------------------------------------------------
 def run_breakout_strategy(levels: Dict, candles_15m: List[Dict], candles_5m: List[Dict], leverage: float, capital: float):
     bo_level = levels["breakout_trigger"]
@@ -88,40 +88,13 @@ def run_breakout_strategy(levels: Dict, candles_15m: List[Dict], candles_5m: Lis
     return {"pnl": round(pnl, 2), "pct": round(pct_move * leverage * 100, 2), "status": f"{direction}_WIN" if pnl > 0 else f"{direction}_LOSS", "entry": entry_price, "exit": exit_price}
 
 # ---------------------------------------------------------
-# 3. STATS ENGINE (System Health) - NEW!
-# ---------------------------------------------------------
-def run_system_stats(history: List[Dict]) -> Dict:
-    """Calculates win rates and trigger probabilities."""
-    total = len(history)
-    if total == 0: return {}
-    
-    triggered_bo = 0
-    triggered_bd = 0
-    hit_resistance = 0
-    hit_support = 0
-    
-    for row in history:
-        # Check if price action HIT levels
-        # We need to look at future candles stored in the strategy result or re-scan
-        # For efficiency, we'll assume the strategy engine passed the 'future_15m' max/min
-        # But since we don't have that easily, let's look at the 'status' from the breakout checker
-        pass 
-        # Actually, let's do a quick scan of the High/Low vs Levels
-        # (This requires passing the candles back, but for now we will infer from strategy status 
-        # OR we can update the main loop to store 'session_high' and 'session_low')
-        
-    return {
-        "breakout_pct": 0, # Placeholder until we wire up the max/min
-        "breakdown_pct": 0
-    }
-
-# ---------------------------------------------------------
-# 4. MAIN RUNNER (Orchestrator)
+# 3. MAIN RUNNER (Orchestrator)
 # ---------------------------------------------------------
 exchange_kucoin = ccxt.kucoin({'enableRateLimit': True})
 
 async def fetch_5m_granular(symbol: str):
     try:
+        # Fetch 5m data for granular execution testing
         return [
             {"time": int(c[0]/1000), "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])}
             for c in await exchange_kucoin.fetch_ohlcv(symbol, '5m', limit=1400)
@@ -130,6 +103,8 @@ async def fetch_5m_granular(symbol: str):
 
 async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str], leverage: float = 1, capital: float = 1000) -> Dict[str, Any]:
     raw_15m = inputs.get("intraday_candles", [])
+    raw_daily = inputs.get("daily_candles", []) # NEW: Must ingest daily for Bias Engine
+    
     symbol = inputs.get("symbol", "BTCUSDT")
     raw_5m = await fetch_5m_granular(symbol)
     
@@ -153,12 +128,19 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             dt = datetime.fromtimestamp(raw_15m[i]['time'], tz=pytz.UTC).astimezone(market_tz)
             if dt.hour == target[1] and dt.minute == target[2]:
                 indices.append(i)
-            if len(indices) >= 10: break # Depth
+            if len(indices) >= 10: break # Last 10 Sessions
         
         for idx in indices:
             anchor = raw_15m[idx]
+            
+            # Find the "Daily" context relative to this 15m timestamp
+            # We filter daily candles to only include those BEFORE this session
+            current_sim_time = anchor['time']
+            valid_dailies = [d for d in raw_daily if d['time'] < current_sim_time]
+            
             sse_input = {
                 "raw_15m_candles": raw_15m[:idx], 
+                "raw_daily_candles": valid_dailies, # NEW: Pass historical daily context
                 "slice_24h": raw_15m[max(0, idx-96):idx],
                 "slice_4h": raw_15m[max(0, idx-16):idx],
                 "session_open_price": anchor.get("open", 0.0),
@@ -166,8 +148,11 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
                 "r30_low": anchor.get("low", 0.0),
                 "last_price": anchor.get("close", 0.0)
             }
+            
+            # This now uses the v1.3 Engine with Bias!
             computed = sse_engine.compute_sse_levels(sse_input)
             levels = computed["levels"]
+            bias = computed["bias_model"]["daily_lean"] # Capture Bias for stats
             
             # Future Data for Verification
             future_15m = raw_15m[idx:]
@@ -176,29 +161,27 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             # Run Strategy
             strat_res = run_breakout_strategy(levels, future_15m, future_5m, leverage, capital)
             
-            # Verification Stats (Did it hit?)
+            # Stats (Did it hit?)
             session_max = max([c['high'] for c in future_15m[:32]], default=0) # Next 8 hours
             session_min = min([c['low'] for c in future_15m[:32]], default=0)
             
-            did_breakout = session_max > levels['breakout_trigger']
-            did_breakdown = session_min < levels['breakdown_trigger']
-            did_hit_res = session_max >= levels['daily_resistance']
-            did_hit_sup = session_min <= levels['daily_support']
-
             history.append({
                 "session": s_key.replace("America/", "").replace("Europe/", ""),
                 "date": datetime.fromtimestamp(anchor["time"]).strftime("%Y-%m-%d"),
                 "levels": levels,
+                "bias_score": bias["score"], # Record the score!
                 "strategy": strat_res,
                 "stats": {
-                    "bo": did_breakout, "bd": did_breakdown,
-                    "hit_res": did_hit_res, "hit_sup": did_hit_sup
+                    "bo": session_max > levels['breakout_trigger'], 
+                    "bd": session_min < levels['breakdown_trigger'],
+                    "hit_res": session_max >= levels['daily_resistance'], 
+                    "hit_sup": session_min <= levels['daily_support']
                 }
             })
             
     history.sort(key=lambda x: x['date'], reverse=True)
     
-    # CALCULATE AGGREGATE STATS
+    # AGGREGATE STATS
     if not history: return {"history": [], "stats": {}}
     
     count = len(history)
