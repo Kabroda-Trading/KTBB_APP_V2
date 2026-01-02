@@ -1,6 +1,6 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.1 (Async Fix)
+# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.2
 # ---------------------------------------------------------
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ import data_feed
 import sse_engine
 
 # --- WEALTH IMPORTS ---
-# This reconnects the logic that was "broken" when we switched files
 import sjan_brain
 import wealth_allocator
 
@@ -147,11 +146,7 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
         
     ensure_symbol_allowed(u, symbol)
     
-    # 1. Fetch Inputs ASYNC (No more Event Loop errors)
     inputs = await data_feed.get_inputs(symbol=symbol, session_tz=requested_tz)
-    
-    # 2. Process Sync Logic
-    # We pass the pre-fetched inputs directly to the logic to avoid blocking
     raw = await asyncio.to_thread(dmr_report.generate_report_from_inputs, inputs, requested_tz)
     
     return JSONResponse(raw)
@@ -191,10 +186,8 @@ async def api_analyze_s_jan(request: Request, db: Session = Depends(get_db)):
     strategy = (payload.get("strategy") or "ACCUMULATOR").strip().upper()
     overrides = payload.get("overrides") or {}
     
-    # FETCH ASYNC (Direct await)
     inputs = await data_feed.get_investing_inputs(symbol)
     
-    # Pass Overrides to Brain
     analysis = sjan_brain.analyze_market_structure(
         inputs["monthly_candles"], 
         inputs["weekly_candles"],
@@ -277,7 +270,7 @@ async def billing_webhook(request: Request, db: Session = Depends(get_db)):
     sig = request.headers.get("stripe-signature", "")
     return billing.handle_webhook(payload=payload, sig_header=sig, db=db, UserModel=UserModel)
 
-# --- NEW ROUTE (Add under other HTML routes) ---
+# --- NEW ROUTE (Research Lab) ---
 @app.get("/research", response_class=HTMLResponse)
 def research_page(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -289,7 +282,7 @@ def research_page(request: Request, db: Session = Depends(get_db)):
         "user": {"email": u.email, "username": u.username, "plan_label": flags.get("plan_label", "")}
     })
 
-# --- NEW API (Add under other API routes) ---
+# --- RESEARCH API (FIXED) ---
 @app.post("/api/dmr/history")
 async def dmr_history(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -298,16 +291,27 @@ async def dmr_history(request: Request, db: Session = Depends(get_db)):
     
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    session_key = payload.get("session_tz") or "America/New_York_Early"
-    days_back = int(payload.get("days") or 7)
+    
+    # Handle list of sessions (frontend sends array) or single string
+    raw_sessions = payload.get("sessions") or payload.get("session_tz")
+    if isinstance(raw_sessions, str):
+        session_keys = [raw_sessions]
+    else:
+        session_keys = raw_sessions or ["America/New_York"]
+        
+    try:
+        leverage = float(payload.get("leverage", 1.0))
+        capital = float(payload.get("capital", 1000.0))
+    except:
+        leverage = 1.0; capital = 1000.0
     
     # Fetch Data
     inputs = await data_feed.get_inputs(symbol=symbol)
     
-    # Run Lab
-    history = await asyncio.to_thread(
-        research_lab.run_historical_analysis, 
-        inputs, session_key, days_back
+    # FIX: Directly await the async function. Do not use to_thread.
+    # This solves the "Coroutine not JSON serializable" error.
+    history = await research_lab.run_historical_analysis(
+        inputs, session_keys, leverage, capital
     )
     
-    return JSONResponse({"history": history})
+    return JSONResponse(history)
