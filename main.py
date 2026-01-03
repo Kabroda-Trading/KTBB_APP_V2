@@ -115,6 +115,12 @@ def pricing(request: Request):
 def about(request: Request):
     return templates.TemplateResponse("about.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
 
+# main.py
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy_page(request: Request):
+    return templates.TemplateResponse("privacy.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
+
 @app.get("/how-it-works", response_class=HTMLResponse)
 def how_it_works(request: Request):
     return templates.TemplateResponse("how_it_works.html", {"request": request, "is_logged_in": False, "force_public_nav": True})

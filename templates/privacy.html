@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Privacy Policy | Kabroda{% endblock %}
+
+{% block content %}
+<div class="app-container" style="max-width: 800px; margin: 0 auto; color: #ccc;">
+    <h1 style="color: #fff; border-bottom: 2px solid var(--primary); padding-bottom: 10px;">Privacy Policy</h1>
+    <p style="font-size: 0.8rem; color: #888;">Last Updated: January 3, 2026</p>
+
+    <div style="background: #111; padding: 30px; border-radius: 8px; border: 1px solid #333; margin-top: 20px;">
+        
+        <h3>1. Introduction</h3>
+        <p>Welcome to Kabroda ("we," "our," or "us"). We are committed to protecting your personal information and your right to privacy. This policy explains how we collect, use, and safeguard your data when you visit our website (kabroda.com) and use our services, including our integration with OpenAI's ChatGPT.</p>
+
+        <h3>2. Information We Collect</h3>
+        <p>We collect minimal information necessary to provide our services:</p>
+        <ul>
+            <li><strong>Account Information:</strong> Email address and encrypted password (or authentication tokens) when you register.</li>
+            <li><strong>Usage Data:</strong> Information about your interactions with our trading tools, research lab, and API endpoints.</li>
+            <li><strong>Payment Data:</strong> Payment processing is handled entirely by Stripe. We do not store full credit card numbers on our servers.</li>
+        </ul>
+
+        <h3>3. How We Use Your Information</h3>
+        <p>We use your information to:</p>
+        <ul>
+            <li>Authenticate your identity and grant access to member-only tools.</li>
+            <li>Facilitate the connection between the Kabroda Platform and the Kabroda Trading BattleBox GPT.</li>
+            <li>Process subscription payments via Stripe.</li>
+            <li>Improve system performance and debugging.</li>
+        </ul>
+
+        <h3>4. OpenAI Integration (GPT Actions)</h3>
+        <p>Our platform integrates with OpenAI's ChatGPT services ("Kabroda Trading BattleBox GPT"). When you use this GPT:</p>
+        <ul>
+            <li>You authorize OpenAI to send requests to our API on your behalf.</li>
+            <li>We return specific trading session data (levels, analysis logs) to the GPT to generate responses for you.</li>
+            <li>We do <strong>not</strong> share your password or payment details with OpenAI.</li>
+            <li>The interaction is governed by this policy and OpenAI's Privacy Policy.</li>
+        </ul>
+
+        <h3>5. Data Security</h3>
+        <p>We implement appropriate technical and organizational security measures to protect your personal information. However, no electronic transmission over the Internet is 100% secure, so we cannot guarantee absolute security.</p>
+
+        <h3>6. Data Sharing</h3>
+        <p>We do not sell, trade, or rent your personal information to third parties. We may share generic aggregated demographic information not linked to any personal identification regarding visitors and users with our business partners.</p>
+
+        <h3>7. Contact Us</h3>
+        <p>If you have questions about this Privacy Policy, please contact us at: support@kabroda.com</p>
+
+    </div>
+</div>
+{% endblock %}
