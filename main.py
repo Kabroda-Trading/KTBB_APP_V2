@@ -121,6 +121,13 @@ def about(request: Request):
 def privacy_page(request: Request):
     return templates.TemplateResponse("privacy.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
 
+@app.get("/gpt-guide", response_class=HTMLResponse)
+def gpt_guide_page(request: Request):
+    # This page is public/private depending on preference. 
+    # Let's make it public so people can see what they get.
+    is_logged_in = _session_user_dict(request) is not None
+    return templates.TemplateResponse("gpt-guide.html", {"request": request, "is_logged_in": is_logged_in})
+
 @app.get("/how-it-works", response_class=HTMLResponse)
 def how_it_works(request: Request):
     return templates.TemplateResponse("how_it_works.html", {"request": request, "is_logged_in": False, "force_public_nav": True})

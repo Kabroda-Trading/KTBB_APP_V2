@@ -41,7 +41,6 @@
             <option value="America/New_York">🇺🇸 NY EQUITY (09:30 ET)</option>
             <option value="Europe/London">🇬🇧 LONDON (08:00 GMT)</option>
             <option value="Asia/Tokyo">🇯🇵 TOKYO (09:00 JST)</option>
-            <option value="Australia/Sydney">🇦🇺 SYDNEY (10:00 AEDT)</option>
             <option value="UTC">🌐 UTC (CRYPTO DEFAULT)</option>
           </select>
           <span style="position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: var(--success); pointer-events: none;">▼</span>
@@ -60,43 +59,10 @@
     </div>
   </div>
 
-  <div class="bento-card wide" style="padding: 24px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05);">
-    <h3 style="font-size: 14px; color: var(--text-muted); margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.1em;">
-      MISSION TIMELINE (LOCAL SYNC)
-    </h3>
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
-      
-      <div style="background: rgba(255,255,255,0.03); border-left: 2px solid var(--text-muted); padding: 16px; border-radius: 0 8px 8px 0;">
-        <div style="font-size: 10px; color: var(--text-muted); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">MARKET OPEN</div>
-        <div id="time_open" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Session Start</div>
-      </div>
-
-      <div style="background: rgba(16, 185, 129, 0.05); border-left: 2px solid var(--warning); padding: 16px; border-radius: 0 8px 8px 0;">
-        <div style="font-size: 10px; color: var(--warning); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">CALIBRATION</div>
-        <div id="time_calib" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-        <div style="font-size: 11px; color: var(--warning); margin-top: 4px;">Initial Balance (30m)</div>
-      </div>
-
-      <div style="background: rgba(56, 189, 248, 0.05); border-left: 2px solid var(--success); padding: 16px; border-radius: 0 8px 8px 0;">
-        <div style="font-size: 10px; color: var(--success); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">EXECUTION</div>
-        <div id="time_exec" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-        <div style="font-size: 11px; color: var(--success); margin-top: 4px;">Strategy Active</div>
-      </div>
-
-      <div style="background: rgba(168, 85, 247, 0.05); border-left: 2px solid var(--purple); padding: 16px; border-radius: 0 8px 8px 0;">
-        <div style="font-size: 10px; color: var(--purple); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">CLOSE</div>
-        <div id="time_close" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-        <div style="font-size: 11px; color: var(--purple); margin-top: 4px;">Session End</div>
-      </div>
-
-    </div>
-  </div>
-
   <div class="bento-card wide" style="position: relative; overflow: hidden; min-height: 300px;">
     <div style="position: absolute; inset: 0; background-image: radial-gradient(var(--glass-border) 1px, transparent 1px); background-size: 20px 20px; opacity: 0.1; pointer-events: none;"></div>
 
-    <div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; align-items: center; margin-bottom: 32px; position: relative;">
+    <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; margin-bottom: 32px; position: relative;">
       <h3 style="display: flex; align-items: center; gap: 10px; margin: 0;">
         <span style="width: 8px; height: 8px; background: var(--success); border-radius: 50%; box-shadow: 0 0 10px var(--success);"></span>
         BATTLEFIELD TELEMETRY
@@ -104,8 +70,10 @@
       
       <div style="display: flex; gap: 10px; flex-wrap: wrap;">
         <button id="tvCopyBtn" class="btn secondary" onclick="copyForTV()" style="display:none; font-size: 11px; padding: 8px 16px;">COPY INDICATOR DATA</button>
-        <button id="copyGptBtn" class="btn secondary" onclick="copyForGPT()" style="display:none; font-size: 11px; padding: 8px 16px;">COPY GPT PAYLOAD</button>
-        <a id="openGptLink" class="btn primary" href="#" target="_blank" style="display:none; font-size: 11px; padding: 8px 16px;">LAUNCH AI COMMAND</a>
+        
+        <a id="openGptLink" class="btn primary" href="#" target="_blank" style="display:none; font-size: 11px; padding: 8px 16px; border: 1px solid var(--primary-bright); background: linear-gradient(45deg, #111, #222);">
+          🚀 LAUNCH AI COMMAND
+        </a>
       </div>
     </div>
 
@@ -127,124 +95,23 @@
         <div id="lv_ds" class="lvl-val" style="font-family: monospace;">—</div>
       </div>
     </div>
-
-    <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--glass-border); display: flex; justify-content: space-between; color: var(--text-muted); font-size: 12px; font-family: monospace;">
-      <span>30M ANCHOR HIGH: <strong id="lv_30h" style="color: #fff;">—</strong></span>
-      <span>30M ANCHOR LOW: <strong id="lv_30l" style="color: #fff;">—</strong></span>
-    </div>
   </div>
 
 </div>
 
 <script>
-  const SPECS = {
-    "America/New_York_Early": { tz: "America/New_York", h: 8, m: 30, label: "NY FUTURES" },
-    "America/New_York":       { tz: "America/New_York", h: 9, m: 30, label: "NY EQUITY" },
-    "Europe/London":          { tz: "Europe/London",    h: 8, m: 0,  label: "LONDON" },
-    "Asia/Tokyo":             { tz: "Asia/Tokyo",       h: 9, m: 0,  label: "TOKYO" },
-    "Australia/Sydney":       { tz: "Australia/Sydney", h: 10, m: 0, label: "SYDNEY" },
-    "UTC":                    { tz: "UTC",              h: 0, m: 0,  label: "UTC CORE" }
-  };
-
+  // YOUR GPT URL (Ensure this is correct!)
   const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
+  
   let _lastDmrPayload = null;
 
-  // --- ROBUST TIMING ENGINE (8 HOURS ACTIVE) ---
-  function getSessionContext() {
-    const key = document.getElementById("sessionTz").value;
-    const spec = SPECS[key] || SPECS["UTC"];
-    const now = new Date();
-
-    const targetTimeStr = now.toLocaleString("en-US", {timeZone: spec.tz, hour12: false});
-    const targetDate = new Date(targetTimeStr); 
-    const currentMins = (targetDate.getHours() * 60) + targetDate.getMinutes();
-    const openMins = (spec.h * 60) + spec.m;
-    
-    let diff = currentMins - openMins;
-    if (diff > 1200) diff -= 1440; 
-    if (diff < -1200) diff += 1440;
-
-    let phase = "PRE_MARKET";
-    let uiMsg = "", uiColor = "var(--text-muted)";
-    let btnLabel = "⚡ INITIATE CALIBRATION";
-    let isReview = false;
-
-    // --- PHASE LOGIC REFINED ---
-    if (diff < 0) {
-       phase = "PRE_MARKET";
-       const h = Math.floor(Math.abs(diff) / 60);
-       const m = Math.abs(diff % 60);
-       uiMsg = `> ⚠️ PRE-MARKET: OPENS IN ${h}H ${m}M. BUTTON RUNS PREVIOUS SESSION.`;
-       uiColor = "var(--primary-bright)";
-       btnLabel = "RUN PREVIOUS SESSION";
-       isReview = true;
-    } else if (diff >= 0 && diff < 30) {
-       phase = "OPENING_VOLATILITY";
-       uiMsg = `> 🟡 MARKET OPEN | CALIBRATING LIVE DATA... READY IN ${30 - diff} MINS.`;
-       uiColor = "var(--warning)";
-    } else if (diff >= 30 && diff < 90) {
-       phase = "INITIAL_BALANCE";
-       uiMsg = `> 🟢 ACTIVE SESSION: ${spec.label} | INITIAL BALANCE | EXECUTION ONLINE.`;
-       uiColor = "var(--success)";
-    } else if (diff >= 90 && diff < 480) { // 90m to 8h
-       phase = "AM_SESSION_FLOW"; // Replaces "MID_DAY_TREND"
-       uiMsg = `> 🟢 ACTIVE SESSION: ${spec.label} | SESSION FLOW | EXECUTION ONLINE.`;
-       uiColor = "var(--success)";
-    } else {
-       phase = "SESSION_CLOSED";
-       uiMsg = `> 🔵 MARKET CLOSED. PREPARING NEXT SESSION.`;
-       uiColor = "var(--text-muted)";
-       btnLabel = "RUN REVIEW SESSION";
-       isReview = true;
-    }
-
-    return { phase, uiMsg, uiColor, btnLabel, isReview, spec, diff, now };
-  }
-
-  function updateSessionStatus() {
-    const ctx = getSessionContext();
-    const statusEl = document.getElementById("status");
-    const btn = document.getElementById("levelsBtn");
-
-    statusEl.innerHTML = ctx.uiMsg;
-    statusEl.style.color = ctx.uiColor;
-    
-    btn.innerText = ctx.btnLabel;
-    
-    if(ctx.isReview) {
-       btn.style.border = "1px solid rgba(255,255,255,0.2)";
-       btn.style.boxShadow = "none";
-    } else if (ctx.uiColor === "var(--success)") {
-       btn.style.border = "1px solid var(--success)";
-       btn.style.boxShadow = "0 0 20px rgba(16, 185, 129, 0.2)";
-    } else {
-       btn.style.border = "1px solid var(--warning)";
-       btn.style.boxShadow = "none";
-    }
-
-    updateTimelineVisuals(ctx.now, ctx.diff);
-  }
-
-  function updateTimelineVisuals(now, diffMins) {
-    const openTime = new Date(now.getTime() - (diffMins * 60000));
-    const t_calib = new Date(openTime.getTime() + 30*60000);
-    const t_close = new Date(openTime.getTime() + 8*60*60000); // 8 Hours Close
-    
-    const opt = {hour:'2-digit', minute:'2-digit'};
-    document.getElementById("time_open").innerText = openTime.toLocaleTimeString([], opt);
-    document.getElementById("time_calib").innerText = openTime.toLocaleTimeString([], opt) + " - " + t_calib.toLocaleTimeString([], opt);
-    document.getElementById("time_exec").innerText = t_calib.toLocaleTimeString([], opt) + " +";
-    document.getElementById("time_close").innerText = t_close.toLocaleTimeString([], opt);
-  }
-
-  // --- API & COPY ---
   function fmt(x){ return x ? parseFloat(x).toFixed(2) : "—"; }
 
   async function calibrateBattlefield(){
     const sym = document.getElementById("symbol").value;
     const tz = document.getElementById("sessionTz").value;
-    const status = document.getElementById("status");
     const btn = document.getElementById("levelsBtn");
+    const status = document.getElementById("status");
     
     btn.innerText = "CALIBRATING...";
     btn.disabled = true;
@@ -255,30 +122,30 @@
         body: JSON.stringify({ symbol: sym, session_tz: tz })
       });
       const data = await r.json();
-      if (!r.ok) throw new Error(data.detail || "Error");
-
       _lastDmrPayload = data;
-      const l = data.levels || {};
-      const r30 = data.range_30m || {};
 
+      // Update UI Levels
+      const l = data.levels || {};
       document.getElementById("lv_ds").innerText = fmt(l.daily_support);
       document.getElementById("lv_dr").innerText = fmt(l.daily_resistance);
       document.getElementById("lv_bo").innerText = fmt(l.breakout_trigger);
       document.getElementById("lv_bd").innerText = fmt(l.breakdown_trigger);
-      document.getElementById("lv_30h").innerText = fmt(r30.high);
-      document.getElementById("lv_30l").innerText = fmt(r30.low);
 
+      // Show Buttons
       document.getElementById("tvCopyBtn").style.display = "inline-flex";
-      document.getElementById("copyGptBtn").style.display = "inline-flex";
-      document.getElementById("openGptLink").style.display = "inline-flex";
-      document.getElementById("openGptLink").href = BATTLEBOX_GPT_URL;
-      document.getElementById("openGptLink").target = "_blank";
       
-      updateSessionStatus();
+      // Setup GPT Link
+      const gptLink = document.getElementById("openGptLink");
+      gptLink.style.display = "inline-flex";
+      gptLink.href = BATTLEBOX_GPT_URL; 
+      
+      status.innerText = "> SYSTEM READY. DATA SYNCED.";
+      status.style.color = "var(--success)";
+      
     } catch(e) {
       status.innerText = "> ERROR: " + e.message;
-      status.style.color = "var(--danger)";
     } finally {
+      btn.innerText = "⚡ INITIATE CALIBRATION";
       btn.disabled = false;
     }
   }
@@ -288,64 +155,8 @@
     const l = _lastDmrPayload.levels;
     const r = _lastDmrPayload.range_30m;
     const text = `${fmt(l.breakout_trigger)},${fmt(l.breakdown_trigger)},${fmt(l.daily_resistance)},${fmt(l.daily_support)},${fmt(r.high)},${fmt(r.low)}`;
-    
     await navigator.clipboard.writeText(text);
-    alert("COPIED: " + text + "\nPaste this into the indicator settings.");
+    alert("COPIED for Indicator: " + text);
   }
-
-  async function copyForGPT(){
-    if (!_lastDmrPayload) { alert("⚠️ Calibrate First"); return; }
-    
-    const ctx = getSessionContext();
-    
-    const payload = {
-      contract_version: "1.1",
-      generated_at: new Date().toISOString(),
-      
-      // 1. Core Data
-      date: _lastDmrPayload.date,
-      symbol: _lastDmrPayload.symbol,
-      price: _lastDmrPayload.last_price,
-      session_tz: _lastDmrPayload.session_tz,
-
-      // 2. Levels
-      levels: _lastDmrPayload.levels,
-      range_30m: _lastDmrPayload.range_30m,
-      
-      // 3. Profiles
-      profiles: {
-          weekly_poc: _lastDmrPayload.weekly_poc,
-          f24_poc: _lastDmrPayload.f24_poc,
-          morn_poc: _lastDmrPayload.morn_poc
-      },
-      
-      // 4. Context & Phase
-      session_context: {
-        phase: ctx.phase,          // e.g. "AM_SESSION_FLOW"
-        target: ctx.spec.label,    // e.g. "NY FUTURES"
-        is_review: ctx.isReview
-      },
-      
-      // 5. Structure (Hoisted)
-      htf_shelves: _lastDmrPayload.htf_shelves || {},
-      intraday_shelves: _lastDmrPayload.intraday_shelves || {},
-      trade_logic: _lastDmrPayload.trade_logic || {},
-
-      // 6. News (STATIC DIRECTIVE)
-      news: _lastDmrPayload.news || ["(No high impact events detected)"]
-    };
-
-    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-    
-    const btn = document.getElementById("copyGptBtn");
-    const originalText = btn.innerText;
-    btn.innerText = "✅ DOSSIER COPIED";
-    btn.style.borderColor = "var(--success)";
-    setTimeout(() => { btn.innerText = originalText; btn.style.borderColor = ""; }, 2000);
-  }
-
-  setInterval(updateSessionStatus, 1000);
-  document.addEventListener("DOMContentLoaded", updateSessionStatus);
-  document.getElementById("sessionTz").addEventListener("change", updateSessionStatus);
 </script>
 {% endblock %}

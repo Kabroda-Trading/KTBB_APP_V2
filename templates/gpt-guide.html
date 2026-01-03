@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}BattleBox AI Guide | Kabroda{% endblock %}
+
+{% block content %}
+<div class="app-container" style="max-width: 800px; margin: 0 auto; color: #ccc;">
+    
+    <h1 style="color: #fff; margin-bottom: 10px;">BATTLEBOX AI COMMAND</h1>
+    <p style="font-size: 1.1rem; color: #00ff9d; margin-bottom: 30px;">Your Personal Market Structure Analyst</p>
+
+    <div style="background: #111; padding: 30px; border-radius: 8px; border: 1px solid #333;">
+        
+        <h3 style="color: #fff;">1. How to Connect</h3>
+        <p>The BattleBox AI is a private GPT that connects directly to your Kabroda account data. It does not require copying or pasting.</p>
+        <ol style="line-height: 1.8; margin-bottom: 20px;">
+            <li>Click <strong>"Launch AI Command"</strong> from the Suite.</li>
+            <li>In ChatGPT, click <strong>"Start"</strong> or type a command like "Run Numbers".</li>
+            <li>You will see a button: <strong>"Sign in with kabroda.com"</strong>.</li>
+            <li>Click it to authorize the secure link. This verifies your membership.</li>
+        </ol>
+
+        <h3 style="color: #fff;">2. Voice Commands</h3>
+        <p>Once connected, you can talk to the AI naturally. Try these commands:</p>
+        <ul style="background: #000; padding: 15px; border-radius: 4px; font-family: monospace; list-style: none;">
+            <li style="margin-bottom: 10px;">👉 <strong>"Run the numbers for today."</strong> <span style="color:#666">(Defaults to NY Session)</span></li>
+            <li style="margin-bottom: 10px;">👉 <strong>"Analyze the London Session."</strong> <span style="color:#666">(Forces London Timezone)</span></li>
+            <li style="margin-bottom: 10px;">👉 <strong>"What is the plan for BTC?"</strong> <span style="color:#666">(Reads the Bias & Levels)</span></li>
+            <li>👉 <strong>"Show me the best historical example of this setup."</strong></li>
+        </ul>
+
+        <h3 style="color: #fff;">3. Troubleshooting</h3>
+        <p>If the AI says "Error talking to Kabroda":</p>
+        <ul>
+            <li>Ensure your subscription is active.</li>
+            <li>Try typing "Log out" in ChatGPT to reset the connection.</li>
+            <li>Click the "Launch" button again from the Kabroda Suite to refresh the link.</li>
+        </ul>
+
+        <div style="margin-top: 30px;">
+            <a href="/suite" class="primary-btn" style="background: var(--primary); color: #000; padding: 12px 24px; text-decoration: none; font-weight: bold;">GO TO SUITE</a>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
