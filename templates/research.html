@@ -16,25 +16,43 @@
             
             <div class="input-group">
                 <label>ASSET</label>
-                <select id="symbolSelect"><option value="BTCUSDT">BTC (BITCOIN)</option><option value="ETHUSDT">ETH (ETHEREUM)</option></select>
+                <select id="symbolSelect" style="width:100%; padding: 8px; background: #111; color: #fff; border: 1px solid #333;">
+                    <option value="BTCUSDT">BTC (BITCOIN)</option>
+                    <option value="ETHUSDT">ETH (ETHEREUM)</option>
+                </select>
             </div>
             
             <div class="input-group" style="margin-top:15px;">
                 <label>SESSIONS</label>
                 <div style="background: #111; padding: 8px; border-radius: 4px; display: flex; flex-direction: column; gap: 5px;">
-                    <label style="font-size: 0.75rem;"><input type="checkbox" value="America/New_York" checked> NY FUTURES</label>
-                    <label style="font-size: 0.75rem;"><input type="checkbox" value="Europe/London"> LONDON</label>
-                    <label style="font-size: 0.75rem;"><input type="checkbox" value="Asia/Tokyo"> TOKYO</label>
+                    <label style="font-size: 0.75rem;"><input type="checkbox" value="America/New_York" checked> NY FUTURES (08:30)</label>
+                    <label style="font-size: 0.75rem;"><input type="checkbox" value="Europe/London"> LONDON (08:00)</label>
                 </div>
             </div>
 
             <div class="input-group" style="margin-top:15px;">
+                <label>STRATEGY PROTOCOL</label>
+                <select id="stratSelect" style="width:100%; padding: 8px; background: #111; color: #fff; border: 1px solid #333;">
+                    <option value="S0">S0 - HOLD FIRE (Safety)</option>
+                    <option value="S1">S1 - BREAKOUT ACCEPTANCE (Long)</option>
+                    <option value="S2">S2 - BREAKDOWN ACCEPTANCE (Short)</option>
+                    <option value="S3">S3 - FAILED BREAKOUT (Reversal)</option>
+                    <option value="S4">S4 - MID-BAND FADE (Rotational)</option>
+                    <option value="S5">S5 - RANGE EXTREMES (Reversion)</option>
+                    <option value="S6">S6 - VALUE ROTATION (Ping Pong)</option>
+                    <option value="S7">S7 - TREND PULLBACK (Continuation)</option>
+                    <option value="S8">S8 - MOMENTUM EXPANSION (Impulse)</option>
+                    <option value="S9">S9 - EXHAUSTION REVERSAL (Counter)</option>
+                </select>
+            </div>
+
+            <div class="input-group" style="margin-top:15px;">
                 <label>SIMULATION</label>
-                <input type="number" id="levInput" placeholder="Lev (10x)" value="10" style="width:100%; margin-bottom:5px; background:#111; border:1px solid #333; color:#fff; padding:5px;">
+                <input type="number" id="levInput" placeholder="Lev (1x)" value="1" style="width:100%; margin-bottom:5px; background:#111; border:1px solid #333; color:#fff; padding:5px;">
                 <input type="number" id="capInput" placeholder="Cap ($1000)" value="1000" style="width:100%; background:#111; border:1px solid #333; color:#fff; padding:5px;">
             </div>
 
-            <button class="primary-btn" onclick="runLab()" style="margin-top: 20px; width: 100%;">RUN LAB</button>
+            <button class="primary-btn" onclick="runLab()" style="margin-top: 20px; width: 100%; padding: 12px; background: var(--primary); border: none; font-weight: bold; cursor: pointer;">RUN LAB</button>
         </div>
 
         <div>
@@ -45,62 +63,62 @@
             </div>
 
             <div id="view-stats" class="tab-view">
-                <div class="telemetry-grid" style="grid-template-columns: 1fr 1fr 1fr 1fr; margin-bottom: 20px;">
-                    <div class="telemetry-card" style="text-align: center;">
-                        <div class="label" style="color:#00ff9d">BREAKOUT RATE</div>
-                        <div class="value" id="stat-bo">--%</div>
+                <div class="telemetry-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;">
+                    <div class="telemetry-card" style="text-align: center; background: rgba(0,255,157,0.1); border: 1px solid rgba(0,255,157,0.3);">
+                        <div class="label" style="color:#00ff9d; font-size: 0.7rem;">WIN RATE</div>
+                        <div class="value" id="stat-win">--%</div>
                     </div>
                     <div class="telemetry-card" style="text-align: center;">
-                        <div class="label" style="color:#ff4d4d">BREAKDOWN RATE</div>
-                        <div class="value" id="stat-bd">--%</div>
+                        <div class="label" style="color:#aaa; font-size: 0.7rem;">TOTAL PNL</div>
+                        <div class="value" id="stat-pnl">--</div>
                     </div>
                     <div class="telemetry-card" style="text-align: center;">
-                        <div class="label" style="color:#ff4d4d">RES HIT RATE</div>
-                        <div class="value" id="stat-res">--%</div>
+                        <div class="label" style="color:#aaa; font-size: 0.7rem;">VALID TRADES</div>
+                        <div class="value" id="stat-trades">--</div>
                     </div>
                     <div class="telemetry-card" style="text-align: center;">
-                        <div class="label" style="color:#387ef5">SUP HIT RATE</div>
-                        <div class="value" id="stat-sup">--%</div>
+                        <div class="label" style="color:#aaa; font-size: 0.7rem;">SESSIONS</div>
+                        <div class="value" id="stat-sessions">--</div>
                     </div>
-                </div>
-                <div class="telemetry-card" style="display:flex; justify-content:center; align-items:center; height: 250px;">
-                    <p style="color:#666;">Select sessions and click RUN LAB to calculate probabilities.</p>
                 </div>
             </div>
 
             <div id="view-sim" class="tab-view" style="display:none;">
-                <div class="telemetry-grid" style="grid-template-columns: 1fr 3fr;">
-                    <div class="telemetry-card">
-                        <h3 style="font-size: 0.9rem;">NET PNL</h3>
-                        <div id="sim-pnl" style="font-size: 1.8rem; font-weight: bold; margin-top: 10px;">$0.00</div>
-                        <div style="height: 150px; margin-top: 10px;"><canvas id="pnlChart"></canvas></div>
+                <div class="telemetry-card">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                        <h3>TRADE LOG</h3>
+                        <div style="font-size: 0.8rem; color: #888;">Recent 20 Sessions</div>
                     </div>
-                    <div class="telemetry-card">
-                        <div style="max-height: 300px; overflow-y: auto;">
-                            <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
-                                <thead style="color:#666; border-bottom:1px solid #333;">
-                                    <tr><th>DATE</th><th>SETUP</th><th>ENTRY</th><th>RESULT</th><th>PNL</th></tr>
-                                </thead>
-                                <tbody id="sim-body"></tbody>
-                            </table>
-                        </div>
+                    <div style="max-height: 400px; overflow-y: auto;">
+                        <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
+                            <thead style="text-align: left; color: #666; border-bottom: 1px solid #333;">
+                                <tr>
+                                    <th style="padding: 8px;">DATE</th>
+                                    <th>STATUS</th>
+                                    <th>ENTRY</th>
+                                    <th>EXIT</th>
+                                    <th>PNL</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sim-body"></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
 
             <div id="view-replay" class="tab-view" style="display:none;">
                 <div class="telemetry-card" style="margin-bottom: 20px;">
-                    <h3 style="color:#00e5ff;">SELECTED: <span id="replay-date" style="color:#fff">---</span></h3>
-                    <div class="telemetry-grid" style="margin-top:10px;">
+                    <h3 style="color:#00e5ff; margin-bottom: 10px;">SELECTED: <span id="replay-date" style="color:#fff">---</span></h3>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-family: monospace;">
                         <div><span style="color:#ff4d4d">RES:</span> <span id="rep-res" style="color:#fff">---</span></div>
                         <div><span style="color:#00ff9d">BO:</span> <span id="rep-bo" style="color:#fff">---</span></div>
                         <div><span style="color:#b39ddb">BD:</span> <span id="rep-bd" style="color:#fff">---</span></div>
                         <div><span style="color:#387ef5">SUP:</span> <span id="rep-sup" style="color:#fff">---</span></div>
                     </div>
-                    <button onclick="copyReplay()" style="margin-top:10px; background:#333; color:#fff; border:none; padding:5px 10px; font-size:0.7rem;">COPY LEVELS</button>
+                    <button onclick="copyReplay()" style="margin-top:15px; background:#333; color:#fff; border:none; padding:8px 16px; cursor: pointer; border-radius: 4px;">COPY LEVELS TO CLIPBOARD</button>
                 </div>
                 <div class="telemetry-card">
-                    <div style="max-height: 200px; overflow-y: auto;">
+                    <div style="max-height: 300px; overflow-y: auto;">
                         <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
                             <tbody id="replay-list"></tbody>
                         </table>
@@ -114,13 +132,12 @@
 
 <style>
 .tab-btn { background: #111; border: 1px solid #333; color: #888; padding: 10px 20px; cursor: pointer; flex: 1; }
-.tab-btn.active { background: #00e5ff; color: #000; font-weight: bold; border-color: #00e5ff; }
+.tab-btn.active { background: var(--primary); color: #000; font-weight: bold; border-color: var(--primary); }
 .value { font-size: 1.5rem; font-weight: bold; color: #fff; margin-top: 5px; }
+tr { border-bottom: 1px solid #222; }
 </style>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-let chartInstance = null;
 let currentReplay = null;
 
 function switchTab(viewId) {
@@ -132,7 +149,8 @@ function switchTab(viewId) {
 
 async function runLab() {
     const btn = document.querySelector('.primary-btn');
-    btn.textContent = "PROCESSING...";
+    btn.innerText = "PROCESSING...";
+    btn.disabled = true;
     
     const sessions = [];
     document.querySelectorAll('input[type="checkbox"]:checked').forEach(c => sessions.push(c.value));
@@ -145,16 +163,20 @@ async function runLab() {
                 symbol: document.getElementById('symbolSelect').value,
                 sessions: sessions,
                 leverage: document.getElementById('levInput').value,
-                capital: document.getElementById('capInput').value
+                capital: document.getElementById('capInput').value,
+                strategy: document.getElementById('stratSelect').value // SEND SELECTED STRATEGY
             })
         });
         const data = await res.json();
         
         // 1. UPDATE STATS
-        document.getElementById('stat-bo').textContent = data.stats.bo_rate + "%";
-        document.getElementById('stat-bd').textContent = data.stats.bd_rate + "%";
-        document.getElementById('stat-res').textContent = data.stats.res_hit_rate + "%";
-        document.getElementById('stat-sup').textContent = data.stats.sup_hit_rate + "%";
+        document.getElementById('stat-win').innerText = (data.stats.win_rate || 0) + "%";
+        document.getElementById('stat-pnl').innerText = "$" + (data.stats.total_pnl || 0).toFixed(0);
+        document.getElementById('stat-trades').innerText = (data.stats.valid_trades || 0);
+        document.getElementById('stat-sessions').innerText = (data.stats.total_sessions || 0);
+        
+        // Color PnL
+        document.getElementById('stat-pnl').style.color = data.stats.total_pnl >= 0 ? "#00ff9d" : "#ff4d4d";
         
         // 2. UPDATE SIMULATOR
         renderSim(data.history);
@@ -162,43 +184,33 @@ async function runLab() {
         // 3. UPDATE REPLAY LIST
         renderReplayList(data.history);
         
-    } catch(e) { alert("Error: " + e); }
-    btn.textContent = "RUN LAB";
+    } catch(e) { 
+        alert("Error: " + e); 
+        console.error(e);
+    } finally {
+        btn.innerText = "RUN LAB";
+        btn.disabled = false;
+    }
 }
 
 function renderSim(history) {
     const tbody = document.getElementById('sim-body');
     tbody.innerHTML = '';
-    let totalPnl = 0; let wins = 0; let losses = 0;
 
     history.forEach(row => {
         const s = row.strategy;
-        totalPnl += s.pnl;
-        if(s.pnl > 0) wins++;
-        if(s.pnl < 0) losses++;
-        
         const tr = document.createElement('tr');
         let col = s.pnl >= 0 ? '#00ff9d' : '#ff4d4d';
+        if (s.status.includes("NO_") || s.status.includes("S0")) col = "#666"; 
+
         tr.innerHTML = `
-            <td style="padding:5px; color:#aaa;">${row.date}</td>
+            <td style="padding:10px; color:#aaa;">${row.date}</td>
             <td style="color:#fff;">${s.status}</td>
-            <td style="color:#aaa;">${s.entry.toFixed(0)}</td>
-            <td style="color:${col}; font-weight:bold;">${s.pct}%</td>
-            <td style="color:${col};">$${s.pnl.toFixed(0)}</td>
+            <td style="color:#aaa;">${s.entry ? s.entry.toFixed(1) : '-'}</td>
+            <td style="color:#aaa;">${s.exit ? s.exit.toFixed(1) : '-'}</td>
+            <td style="color:${col}; font-weight:bold;">$${s.pnl.toFixed(0)}</td>
         `;
         tbody.appendChild(tr);
-    });
-    
-    document.getElementById('sim-pnl').textContent = "$" + totalPnl.toFixed(2);
-    document.getElementById('sim-pnl').style.color = totalPnl >= 0 ? "#00ff9d" : "#ff4d4d";
-    
-    // Chart
-    const ctx = document.getElementById('pnlChart').getContext('2d');
-    if(chartInstance) chartInstance.destroy();
-    chartInstance = new Chart(ctx, {
-        type: 'doughnut',
-        data: { labels: ['Win', 'Loss'], datasets: [{ data: [wins, losses], backgroundColor: ['#00ff9d', '#ff4d4d'], borderWidth: 0 }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
     });
 }
 
@@ -209,7 +221,9 @@ function renderReplayList(history) {
         const tr = document.createElement('tr');
         tr.style.cursor = "pointer";
         tr.onclick = () => loadReplay(row);
-        tr.innerHTML = `<td style="padding:8px; border-bottom:1px solid #222; color:#ccc;">${row.date} <span style="color:#666; font-size:0.7rem;">${row.session}</span></td>`;
+        tr.innerHTML = `<td style="padding:10px; color:#ccc; transition:0.2s;">${row.date} <span style="color:#666; font-size:0.7rem; margin-left:10px;">${row.session}</span></td>`;
+        tr.onmouseover = () => tr.style.background = "#222";
+        tr.onmouseout = () => tr.style.background = "transparent";
         list.appendChild(tr);
     });
     if(history.length > 0) loadReplay(history[0]);
@@ -217,19 +231,20 @@ function renderReplayList(history) {
 
 function loadReplay(row) {
     currentReplay = row;
-    document.getElementById('replay-date').textContent = row.date;
-    document.getElementById('rep-res').textContent = (row.levels.daily_resistance||0).toFixed(2);
-    document.getElementById('rep-bo').textContent = (row.levels.breakout_trigger||0).toFixed(2);
-    document.getElementById('rep-bd').textContent = (row.levels.breakdown_trigger||0).toFixed(2);
-    document.getElementById('rep-sup').textContent = (row.levels.daily_support||0).toFixed(2);
+    const l = row.levels;
+    document.getElementById('replay-date').innerText = row.date;
+    document.getElementById('rep-res').innerText = (l.daily_resistance||0).toFixed(2);
+    document.getElementById('rep-bo').innerText = (l.breakout_trigger||0).toFixed(2);
+    document.getElementById('rep-bd').innerText = (l.breakdown_trigger||0).toFixed(2);
+    document.getElementById('rep-sup').innerText = (l.daily_support||0).toFixed(2);
 }
 
 function copyReplay() {
     if(!currentReplay) return;
     const l = currentReplay.levels;
-    const txt = `REPLAY ${currentReplay.date}\nR: ${l.daily_resistance}\nBO: ${l.breakout_trigger}\nBD: ${l.breakdown_trigger}\nS: ${l.daily_support}`;
+    const txt = `${l.breakout_trigger.toFixed(2)},${l.breakdown_trigger.toFixed(2)},${l.daily_resistance.toFixed(2)},${l.daily_support.toFixed(2)}`;
     navigator.clipboard.writeText(txt);
-    alert("Copied!");
+    alert("Copied Levels: " + txt);
 }
 </script>
 {% endblock %}

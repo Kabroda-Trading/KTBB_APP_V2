@@ -1,6 +1,6 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.2
+# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.3
 # ---------------------------------------------------------
 from __future__ import annotations
 
@@ -282,7 +282,7 @@ def research_page(request: Request, db: Session = Depends(get_db)):
         "user": {"email": u.email, "username": u.username, "plan_label": flags.get("plan_label", "")}
     })
 
-# --- RESEARCH API (FIXED) ---
+# --- RESEARCH API (UPDATED) ---
 @app.post("/api/dmr/history")
 async def dmr_history(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -291,27 +291,18 @@ async def dmr_history(request: Request, db: Session = Depends(get_db)):
     
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
+    session_keys = payload.get("sessions") or ["America/New_York"]
+    leverage = float(payload.get("leverage", 1.0))
+    capital = float(payload.get("capital", 1000.0))
     
-    # Handle list of sessions (frontend sends array) or single string
-    raw_sessions = payload.get("sessions") or payload.get("session_tz")
-    if isinstance(raw_sessions, str):
-        session_keys = [raw_sessions]
-    else:
-        session_keys = raw_sessions or ["America/New_York"]
-        
-    try:
-        leverage = float(payload.get("leverage", 1.0))
-        capital = float(payload.get("capital", 1000.0))
-    except:
-        leverage = 1.0; capital = 1000.0
+    # NEW: Capture Strategy Selection
+    strategy_mode = payload.get("strategy", "S0")
     
-    # Fetch Data
     inputs = await data_feed.get_inputs(symbol=symbol)
     
-    # FIX: Directly await the async function. Do not use to_thread.
-    # This solves the "Coroutine not JSON serializable" error.
+    # Pass strategy mode to logic
     history = await research_lab.run_historical_analysis(
-        inputs, session_keys, leverage, capital
+        inputs, session_keys, leverage, capital, strategy_mode
     )
     
     return JSONResponse(history)
