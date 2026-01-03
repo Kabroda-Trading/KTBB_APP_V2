@@ -21,7 +21,7 @@ def run_mtf_strategy(
     bo_level: float, 
     bd_level: float, 
     candles_15m: List[Dict], 
-    candles_5m: List[Dict],
+    candles_5m: List[Dict], # Expects pre-filtered 5m data for this session
     leverage: float, 
     capital: float
 ):
@@ -33,7 +33,9 @@ def run_mtf_strategy(
     setup_time = 0
     
     # We need 3 candles: Trigger + Conf1 + Conf2
-    for i in range(len(candles_15m) - 3):
+    scan_limit = min(32, len(candles_15m)-3) # Scan first 8 hours
+    
+    for i in range(scan_limit):
         c1 = candles_15m[i]
         c2 = candles_15m[i+1]
         c3 = candles_15m[i+2]
@@ -54,9 +56,10 @@ def run_mtf_strategy(
         return {"pnl": 0, "pct": 0, "status": "NO_15M_SETUP", "entry": 0, "exit": 0}
 
     # 2. EXECUTE ON 5M (The "Entry Gate")
-    # We only look at 5m candles happening AFTER the setup confirmed
-    
-    # Calculate 5m EMA first
+    if not candles_5m:
+         return {"pnl": 0, "pct": 0, "status": "NO_5M_DATA", "entry": 0, "exit": 0}
+
+    # Calculate 5m EMA 
     c5_closes = [c['close'] for c in candles_5m]
     ema_21 = calculate_ema(c5_closes, 21)
     
@@ -68,22 +71,23 @@ def run_mtf_strategy(
     # FIND ENTRY
     for i in range(len(candles_5m)):
         c = candles_5m[i]
-        if c['time'] < setup_time: continue # Skip data before the 15m setup
+        # Skip until AFTER setup time
+        if c['time'] < setup_time: continue 
         
-        # Current EMA Value
+        # Ensure EMA exists
         if i >= len(ema_21): break
         ema = ema_21[i]
         
         if direction == "LONG":
-            # ENTRY RULE: Price must be ABOVE 21 EMA
+            # ENTRY RULE: Price > 21 EMA
             if c['close'] > ema:
-                entry_price = c['close'] # Enter on the Close/Next Open
+                entry_price = c['close'] 
                 entry_idx = i
                 status = "IN_TRADE"
                 break
                 
         elif direction == "SHORT":
-            # ENTRY RULE: Price must be BELOW 21 EMA
+            # ENTRY RULE: Price < 21 EMA
             if c['close'] < ema:
                 entry_price = c['close']
                 entry_idx = i
@@ -94,20 +98,17 @@ def run_mtf_strategy(
         return {"pnl": 0, "pct": 0, "status": "NO_5M_ENTRY", "entry": 0, "exit": 0}
 
     # 3. MANAGE EXIT (5m EMA Cross)
-    exit_price = candles_5m[-1]['close'] # Default to end of data
+    exit_price = candles_5m[-1]['close'] # Default mark to market
     
     for i in range(entry_idx + 1, len(candles_5m)):
         c = candles_5m[i]
         ema = ema_21[i]
         
         if direction == "LONG":
-            # EXIT RULE: 5m Candle Closes BELOW 21 EMA
             if c['close'] < ema:
                 exit_price = c['close']
                 break
-                
         elif direction == "SHORT":
-            # EXIT RULE: 5m Candle Closes ABOVE 21 EMA
             if c['close'] > ema:
                 exit_price = c['close']
                 break
@@ -136,7 +137,7 @@ exchange_kucoin = ccxt.kucoin({'enableRateLimit': True})
 
 async def fetch_5m_granular(symbol: str):
     try:
-        # Fetch max available 5m candles (approx 5 days)
+        # Fetch max 5m candles (approx 5 days)
         return [
             {"time": int(c[0]/1000), "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])}
             for c in await exchange_kucoin.fetch_ohlcv(symbol, '5m', limit=1440) 
@@ -148,11 +149,10 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
     raw_daily = inputs.get("daily_candles", [])
     symbol = inputs.get("symbol", "BTCUSDT")
     
-    # We need 5m data for this specific strategy
+    # FETCH 5M DATA (Global)
     raw_5m = await fetch_5m_granular(symbol)
     
     history = []
-    
     tz_map = {
         "London": ("Europe/London", 8, 0),
         "New_York": ("America/New_York", 8, 30),
@@ -177,6 +177,7 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             anchor = raw_15m[idx]
             valid_dailies = [d for d in raw_daily if d['time'] < anchor['time']]
             
+            # SSE Calculation (Locked to Anchor)
             sse_input = {
                 "raw_15m_candles": raw_15m[:idx], 
                 "raw_daily_candles": valid_dailies,
@@ -187,72 +188,58 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
                 "r30_low": anchor.get("low", 0.0),
                 "last_price": anchor.get("close", 0.0)
             }
-            
             computed = sse_engine.compute_sse_levels(sse_input)
             levels = computed["levels"]
             
-            # Future Data: 15m for Setup, 5m for Execution
+            # Future Data
             future_15m = raw_15m[idx : idx+64] 
-            # Filter 5m candles to only those happening AFTER the anchor
-            future_5m = [c for c in raw_5m if c['time'] >= anchor['time']]
             
-            # --- RUN MTF STRATEGY ---
+            # Filter 5m data relative to session start
+            # We fetch a bit of buffer BEFORE the anchor to let EMA warm up
+            buffer_time = anchor['time'] - (300 * 50) # 50 candles back
+            future_5m = [c for c in raw_5m if c['time'] >= buffer_time]
             
-            # 1. Safe Levels (Engine)
+            # --- RUN STRATEGY ---
             res_safe = run_mtf_strategy(
                 levels["breakout_trigger"], levels["breakdown_trigger"], 
                 future_15m, future_5m, leverage, capital
             )
             
-            # 2. Aggressive Levels (Raw 30m)
-            agg_bo = levels["range30m_high"] * 1.0005
-            agg_bd = levels["range30m_low"] * 0.9995
-            
-            res_agg = run_mtf_strategy(
-                agg_bo, agg_bd, 
-                future_15m, future_5m, leverage, capital
-            )
-            
+            # --- CALCULATE RAW STATS (Did price break levels?) ---
             session_max = max([c['high'] for c in future_15m[:32]], default=0) 
             session_min = min([c['low'] for c in future_15m[:32]], default=0)
+            
+            did_bo = session_max > levels['breakout_trigger']
+            did_bd = session_min < levels['breakdown_trigger']
+            did_res = session_max >= levels['daily_resistance']
+            did_sup = session_min <= levels['daily_support']
             
             history.append({
                 "session": s_key.replace("America/", "").replace("Europe/", ""),
                 "date": datetime.fromtimestamp(anchor["time"]).strftime("%Y-%m-%d"),
                 "levels": levels, 
                 "strategy": res_safe,
-                "strategy_agg": res_agg,
                 "stats": {
-                    "bo": session_max > levels['breakout_trigger'], 
-                    "bd": session_min < levels['breakdown_trigger'],
-                    "hit_res": session_max >= levels['daily_resistance'], 
-                    "hit_sup": session_min <= levels['daily_support']
+                    "bo": did_bo, "bd": did_bd,
+                    "hit_res": did_res, "hit_sup": did_sup
                 }
             })
             
     history.sort(key=lambda x: x['date'], reverse=True)
     
-    # AGGREGATE
+    # 3. AGGREGATE STATS (FIXED MAPPING)
     if not history: return {"history": [], "stats": {}}
     
     count = len(history)
-    def sum_pnl(key): return sum(h[key]['pnl'] for h in history)
-    def win_rate(key): 
-        wins = sum(1 for h in history if h[key]['pnl'] > 0)
-        total = sum(1 for h in history if h[key]['status'] != "NO_15M_SETUP")
-        return int((wins/total)*100) if total > 0 else 0
-
+    
+    # FIX: Map 'bo_rate' to the raw 'stats.bo' flag, NOT the strategy PnL
     stats_out = {
-        "safe_pnl": sum_pnl('strategy'),
-        "agg_pnl": sum_pnl('strategy_agg'),
-        "safe_win_rate": win_rate('strategy'),
-        "agg_win_rate": win_rate('strategy_agg'),
+        "bo_rate": int((sum(1 for h in history if h['stats']['bo']) / count) * 100),
+        "bd_rate": int((sum(1 for h in history if h['stats']['bd']) / count) * 100),
         "res_hit_rate": int((sum(1 for h in history if h['stats']['hit_res']) / count) * 100),
         "sup_hit_rate": int((sum(1 for h in history if h['stats']['hit_sup']) / count) * 100),
         
-        # Compatible Keys for Frontend
-        "bo_rate": win_rate('strategy'),
-        "bd_rate": win_rate('strategy_agg')
+        "safe_win_rate": int((sum(1 for h in history if h['strategy']['pnl'] > 0) / count) * 100)
     }
     
     return {"history": history, "stats": stats_out}
