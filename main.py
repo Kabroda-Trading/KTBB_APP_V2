@@ -30,6 +30,9 @@ import wealth_allocator
 # --- Research Lab ---
 import research_lab
 
+# --- NEW IMPORT ---
+import gpt_bridge
+
 from database import init_db, get_db, UserModel
 from membership import (
     get_membership_state,
@@ -40,6 +43,8 @@ from membership import (
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = FastAPI()
+# --- CONNECT THE BRIDGE ---
+app.include_router(gpt_bridge.router)
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
