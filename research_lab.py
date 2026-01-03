@@ -136,13 +136,21 @@ def run_mtf_strategy(
 exchange_kucoin = ccxt.kucoin({'enableRateLimit': True})
 
 async def fetch_5m_granular(symbol: str):
+    # NORMALIZE SYMBOL (The Fix)
+    s = symbol.upper().replace("BTCUSDT", "BTC/USDT").replace("ETHUSDT", "ETH/USDT")
+    
     try:
         # Fetch max 5m candles (approx 5 days)
+        # Note: Some exchanges support up to 1500 or more in one go
+        candles = await exchange_kucoin.fetch_ohlcv(s, '5m', limit=1440)
+        
         return [
             {"time": int(c[0]/1000), "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])}
-            for c in await exchange_kucoin.fetch_ohlcv(symbol, '5m', limit=1440) 
+            for c in candles
         ]
-    except: return []
+    except Exception as e:
+        print(f"Research Lab 5m Fetch Error for {s}: {e}")
+        return []
 
 async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str], leverage: float = 1, capital: float = 1000) -> Dict[str, Any]:
     raw_15m = inputs.get("intraday_candles", [])
@@ -195,8 +203,7 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             future_15m = raw_15m[idx : idx+64] 
             
             # Filter 5m data relative to session start
-            # We fetch a bit of buffer BEFORE the anchor to let EMA warm up
-            buffer_time = anchor['time'] - (300 * 50) # 50 candles back
+            buffer_time = anchor['time'] - (300 * 50) 
             future_5m = [c for c in raw_5m if c['time'] >= buffer_time]
             
             # --- RUN STRATEGY ---
@@ -232,7 +239,6 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
     
     count = len(history)
     
-    # FIX: Map 'bo_rate' to the raw 'stats.bo' flag, NOT the strategy PnL
     stats_out = {
         "bo_rate": int((sum(1 for h in history if h['stats']['bo']) / count) * 100),
         "bd_rate": int((sum(1 for h in history if h['stats']['bd']) / count) * 100),
