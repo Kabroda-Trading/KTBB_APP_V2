@@ -1,149 +1,134 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div style="width: 100%; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px;">
+<div style="width: 100%; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 30px;">
 
   <div style="display: flex; justify-content: space-between; align-items: flex-end; padding-bottom: 20px; border-bottom: 1px solid var(--glass-border);">
     <div>
-      <div class="pill">BATTLEBOX COMMAND</div>
-      <h1 style="font-size: 32px; margin: 0; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1.2;">
+      <div class="pill" style="margin-bottom: 8px; font-size: 11px; letter-spacing: 2px;">BATTLEBOX COMMAND</div>
+      <h1 style="font-size: 36px; margin: 0; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1; text-shadow: 0 0 30px rgba(0,255,157,0.15);">
         Session <span class="gradient-text">Control</span>
       </h1>
     </div>
     <div style="text-align: right;">
-      <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Operative ID</div>
-      <div style="font-family: monospace; color: var(--primary-bright); letter-spacing: 0.1em; font-weight: 700; text-transform: uppercase;">
+      <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 2px;">Operative ID</div>
+      <div style="font-family: monospace; color: var(--primary-bright); font-size: 16px; letter-spacing: 0.1em; font-weight: 700; text-transform: uppercase;">
         {{ user.username if user.username else user.email }}
       </div>
     </div>
   </div>
 
-  <div class="bento-card wide" style="border-left: 4px solid var(--primary); display: flex; flex-direction: column; gap: 20px;">
-    <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-end; justify-content: space-between;">
+  <div class="bento-card wide" style="border-left: 4px solid var(--primary); display: flex; flex-direction: column; gap: 24px; padding: 30px;">
+    <div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-end; justify-content: space-between;">
       
       <div style="flex: 1; min-width: 240px;">
-        <label class="label" style="color: var(--primary-bright);">TARGET ASSET</label>
+        <label class="label" style="color: var(--primary-bright); font-size: 12px; margin-bottom: 8px; letter-spacing: 1px;">TARGET ASSET</label>
         <div style="position: relative;">
-          <select id="symbol" class="input" style="cursor:pointer; font-weight: 700; appearance: none; padding-right: 40px; text-transform: uppercase; width: 100%;">
+          <select id="symbol" class="input" style="cursor:pointer; font-weight: 700; font-size: 16px; height: 55px; appearance: none; padding-right: 40px; text-transform: uppercase; width: 100%;">
             <option value="BTCUSDT">BTC (Bitcoin)</option>
             <option value="ETHUSDT">ETH (Ethereum)</option>
             <option value="SOLUSDT">SOL (Solana)</option>
           </select>
-          <span style="position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: var(--primary-bright); pointer-events: none;">▼</span>
+          <span style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: var(--primary-bright); pointer-events: none;">▼</span>
         </div>
       </div>
 
       <div style="flex: 1; min-width: 240px;">
-        <label class="label" style="color: var(--success);">TARGET SESSION</label>
+        <label class="label" style="color: var(--success); font-size: 12px; margin-bottom: 8px; letter-spacing: 1px;">TARGET SESSION</label>
         <div style="position: relative;">
-          <select id="sessionTz" class="input" style="cursor:pointer; font-weight: 700; appearance: none; padding-right: 40px; border-color: rgba(16, 185, 129, 0.4); width: 100%;">
+          <select id="sessionTz" class="input" style="cursor:pointer; font-weight: 700; font-size: 16px; height: 55px; appearance: none; padding-right: 40px; border-color: rgba(16, 185, 129, 0.4); width: 100%;">
             <option value="America/New_York_Early">🇺🇸 NY FUTURES (08:30 ET)</option>
             <option value="America/New_York">🇺🇸 NY EQUITY (09:30 ET)</option>
             <option value="Europe/London">🇬🇧 LONDON (08:00 GMT)</option>
             <option value="Asia/Tokyo">🇯🇵 TOKYO (09:00 JST)</option>
-            <option value="Australia/Sydney">🇦🇺 SYDNEY (10:00 AEDT)</option>
             <option value="UTC">🌐 UTC (CRYPTO DEFAULT)</option>
           </select>
-          <span style="position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: var(--success); pointer-events: none;">▼</span>
+          <span style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: var(--success); pointer-events: none;">▼</span>
         </div>
       </div>
 
       <div style="flex: 0 0 auto;">
-        <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="height: 50px; padding: 0 30px; white-space: nowrap;">
-          <span style="margin-right: 8px;">⚡</span> INITIATE CALIBRATION
+        <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="height: 55px; padding: 0 32px; font-size: 14px; font-weight: 800; letter-spacing: 1px; white-space: nowrap; box-shadow: 0 0 20px rgba(0,255,157,0.2);">
+          <span style="margin-right: 8px;">⚡</span> INITIATE SEQUENCE
         </button>
       </div>
     </div>
 
-    <div id="status" style="border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px; font-size: 12px; font-family: monospace; color: var(--text-muted); text-align: right;">
+    <div id="status" style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 15px; font-size: 13px; font-family: monospace; color: var(--text-muted); text-align: right;">
       > SYSTEM STANDBY... SELECT TARGET
     </div>
   </div>
 
-  <div class="bento-card wide" style="padding: 24px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05);">
-    <h3 style="font-size: 14px; color: var(--text-muted); margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.1em;">
-      MISSION TIMELINE (LOCAL SYNC)
+  <div class="bento-card wide" style="padding: 30px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
+    <h3 style="font-size: 14px; color: var(--text-muted); margin-bottom: 25px; text-transform: uppercase; letter-spacing: 0.15em; display:flex; align-items:center; gap:10px;">
+      <span style="width:6px; height:6px; background:#fff; border-radius:50%; opacity:0.5;"></span> MISSION TIMELINE <span style="opacity:0.3; font-size:11px;">(LOCAL SYNC)</span>
     </h3>
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
-      
-      <div style="background: rgba(255,255,255,0.03); border-left: 2px solid var(--text-muted); padding: 16px; border-radius: 0 8px 8px 0;">
-        <div style="font-size: 10px; color: var(--text-muted); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">MARKET OPEN</div>
-        <div id="time_open" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Session Start</div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+      <div style="background: rgba(255,255,255,0.03); border-left: 3px solid var(--text-muted); padding: 20px; border-radius: 0 8px 8px 0;">
+        <div style="font-size: 11px; color: var(--text-muted); font-weight: 800; letter-spacing: 0.1em; margin-bottom: 6px;">MARKET OPEN</div>
+        <div id="time_open" style="font-size: 22px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Session Start</div>
       </div>
-
-      <div style="background: rgba(16, 185, 129, 0.05); border-left: 2px solid var(--warning); padding: 16px; border-radius: 0 8px 8px 0;">
-        <div style="font-size: 10px; color: var(--warning); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">CALIBRATION</div>
-        <div id="time_calib" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-        <div style="font-size: 11px; color: var(--warning); margin-top: 4px;">Initial Balance (30m)</div>
+      <div style="background: rgba(16, 185, 129, 0.05); border-left: 3px solid var(--warning); padding: 20px; border-radius: 0 8px 8px 0;">
+        <div style="font-size: 11px; color: var(--warning); font-weight: 800; letter-spacing: 0.1em; margin-bottom: 6px;">CALIBRATION</div>
+        <div id="time_calib" style="font-size: 22px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
+        <div style="font-size: 12px; color: var(--warning); margin-top: 4px;">Initial Balance (30m)</div>
       </div>
-
-      <div style="background: rgba(56, 189, 248, 0.05); border-left: 2px solid var(--success); padding: 16px; border-radius: 0 8px 8px 0;">
-        <div style="font-size: 10px; color: var(--success); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">EXECUTION</div>
-        <div id="time_exec" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-        <div style="font-size: 11px; color: var(--success); margin-top: 4px;">Strategy Active</div>
+      <div style="background: rgba(56, 189, 248, 0.05); border-left: 3px solid var(--success); padding: 20px; border-radius: 0 8px 8px 0;">
+        <div style="font-size: 11px; color: var(--success); font-weight: 800; letter-spacing: 0.1em; margin-bottom: 6px;">EXECUTION</div>
+        <div id="time_exec" style="font-size: 22px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
+        <div style="font-size: 12px; color: var(--success); margin-top: 4px;">Strategy Active</div>
       </div>
-
-      <div style="background: rgba(168, 85, 247, 0.05); border-left: 2px solid var(--purple); padding: 16px; border-radius: 0 8px 8px 0;">
-        <div style="font-size: 10px; color: var(--purple); font-weight: 700; letter-spacing: 0.1em; margin-bottom: 4px;">CLOSE</div>
-        <div id="time_close" style="font-size: 18px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-        <div style="font-size: 11px; color: var(--purple); margin-top: 4px;">Session End</div>
+      <div style="background: rgba(168, 85, 247, 0.05); border-left: 3px solid var(--purple); padding: 20px; border-radius: 0 8px 8px 0;">
+        <div style="font-size: 11px; color: var(--purple); font-weight: 800; letter-spacing: 0.1em; margin-bottom: 6px;">CLOSE</div>
+        <div id="time_close" style="font-size: 22px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
+        <div style="font-size: 12px; color: var(--purple); margin-top: 4px;">Session End</div>
       </div>
-
     </div>
   </div>
 
-  <div class="bento-card wide" style="position: relative; overflow: hidden; min-height: 300px;">
+  <div class="bento-card wide" style="position: relative; overflow: hidden; min-height: 320px; padding: 30px;">
     <div style="position: absolute; inset: 0; background-image: radial-gradient(var(--glass-border) 1px, transparent 1px); background-size: 20px 20px; opacity: 0.1; pointer-events: none;"></div>
 
-    <div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; position: relative;">
+    <div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; position: relative;">
       
       <div>
-        <h3 style="display: flex; align-items: center; gap: 10px; margin: 0 0 5px 0;">
-          <span style="width: 8px; height: 8px; background: var(--success); border-radius: 50%; box-shadow: 0 0 10px var(--success);"></span>
+        <h3 style="display: flex; align-items: center; gap: 12px; margin: 0 0 8px 0; font-size: 18px;">
+          <span style="width: 10px; height: 10px; background: var(--success); border-radius: 50%; box-shadow: 0 0 10px var(--success);"></span>
           BATTLEFIELD TELEMETRY
         </h3>
-        <p style="font-size: 0.8rem; color: #666; margin: 0;">Live Structural Levels & Triggers</p>
+        <p style="font-size: 13px; color: #888; margin: 0;">Live Structural Levels & Triggers</p>
       </div>
       
-      <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 10px;">
+      <div style="display: flex; gap: 12px;">
+        <button id="tvCopyBtn" class="btn secondary" onclick="copyForTV()" style="display:none; font-size: 12px; padding: 12px 20px; font-weight:700;">COPY INDICATOR DATA</button>
         
-        <div style="display: flex; gap: 10px;">
-          <button id="tvCopyBtn" class="btn secondary" onclick="copyForTV()" style="display:none; font-size: 11px; padding: 8px 16px;">COPY INDICATOR DATA</button>
-          
-          <a id="openGptLink" href="#" target="_blank" style="display:none; text-decoration: none; align-items: center; justify-content: center; background: #00ff9d; color: #000; font-weight: 900; font-size: 12px; padding: 10px 20px; border-radius: 4px; box-shadow: 0 0 15px rgba(0, 255, 157, 0.4); text-transform: uppercase; letter-spacing: 1px;">
-            🚀 LAUNCH BATTLEBOX AI
-          </a>
-        </div>
-
-        <div id="ai-verbiage" style="display: none; text-align: right; font-size: 0.75rem; color: #888; max-width: 300px; line-height: 1.4;">
-          <span style="color: #00ff9d;">● NEURAL LINK ACTIVE</span><br>
-          Direct uplink established. Click launch to have the AI analyze these levels, check regime context, and identify the S-Strategy for you.
-        </div>
-
+        <button id="openGptBtn" onclick="openLaunchModal()" style="display:none; cursor: pointer; background: #00ff9d; color: #000; font-weight: 900; font-size: 12px; padding: 12px 24px; border: none; border-radius: 4px; box-shadow: 0 0 20px rgba(0, 255, 157, 0.4); text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s;">
+          🚀 LAUNCH BATTLEBOX AI
+        </button>
       </div>
     </div>
 
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; position: relative;">
-      <div class="lvl-card c-red" style="background: rgba(239, 68, 68, 0.05);">
-        <div class="lvl-lbl">DAILY RESISTANCE</div>
-        <div id="lv_dr" class="lvl-val" style="font-family: monospace;">—</div>
+      <div class="lvl-card c-red" style="background: rgba(239, 68, 68, 0.05); padding: 20px;">
+        <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px;">DAILY RESISTANCE</div>
+        <div id="lv_dr" class="lvl-val" style="font-family: monospace; font-size: 24px;">—</div>
       </div>
-      <div class="lvl-card c-green" style="background: rgba(16, 185, 129, 0.05);">
-        <div class="lvl-lbl">BREAKOUT TRIGGER</div>
-        <div id="lv_bo" class="lvl-val" style="font-family: monospace;">—</div>
+      <div class="lvl-card c-green" style="background: rgba(16, 185, 129, 0.05); padding: 20px;">
+        <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px;">BREAKOUT TRIGGER</div>
+        <div id="lv_bo" class="lvl-val" style="font-family: monospace; font-size: 24px;">—</div>
       </div>
-      <div class="lvl-card c-purple" style="background: rgba(168, 85, 247, 0.05);">
-        <div class="lvl-lbl">BREAKDOWN TRIGGER</div>
-        <div id="lv_bd" class="lvl-val" style="font-family: monospace;">—</div>
+      <div class="lvl-card c-purple" style="background: rgba(168, 85, 247, 0.05); padding: 20px;">
+        <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px;">BREAKDOWN TRIGGER</div>
+        <div id="lv_bd" class="lvl-val" style="font-family: monospace; font-size: 24px;">—</div>
       </div>
-      <div class="lvl-card c-blue" style="background: rgba(59, 130, 246, 0.05);">
-        <div class="lvl-lbl">DAILY SUPPORT</div>
-        <div id="lv_ds" class="lvl-val" style="font-family: monospace;">—</div>
+      <div class="lvl-card c-blue" style="background: rgba(59, 130, 246, 0.05); padding: 20px;">
+        <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px;">DAILY SUPPORT</div>
+        <div id="lv_ds" class="lvl-val" style="font-family: monospace; font-size: 24px;">—</div>
       </div>
     </div>
 
-    <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--glass-border); display: flex; justify-content: space-between; color: var(--text-muted); font-size: 12px; font-family: monospace;">
+    <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--glass-border); display: flex; justify-content: space-between; color: var(--text-muted); font-size: 13px; font-family: monospace;">
       <span>30M ANCHOR HIGH: <strong id="lv_30h" style="color: #fff;">—</strong></span>
       <span>30M ANCHOR LOW: <strong id="lv_30l" style="color: #fff;">—</strong></span>
     </div>
@@ -151,10 +136,31 @@
 
 </div>
 
+<div id="launchModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); backdrop-filter:blur(5px); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:#111; border:1px solid #333; padding:40px; border-radius:12px; max-width:500px; width:90%; text-align:center; box-shadow:0 0 50px rgba(0,0,0,0.8);">
+        
+        <h2 style="color:#fff; margin-bottom:10px; font-size:24px;">NEURAL LINK ESTABLISHED</h2>
+        <div style="height:2px; width:50px; background:#00ff9d; margin:0 auto 30px auto;"></div>
+        
+        <div style="text-align:left; background:#000; padding:20px; border-radius:8px; border:1px solid #222; margin-bottom:30px;">
+            <div style="color:#00ff9d; font-size:12px; font-weight:bold; margin-bottom:5px;">✓ COMMAND COPIED TO CLIPBOARD</div>
+            <div style="font-family:monospace; color:#ccc; font-size:14px;">"Run full analysis for this session"</div>
+        </div>
+
+        <p style="color:#888; font-size:14px; margin-bottom:30px; line-height:1.5;">
+            The BattleBox AI will open in a new tab.<br>
+            <strong>Paste (Ctrl+V)</strong> the command into the chat to begin.
+        </p>
+
+        <div style="display:flex; gap:10px; justify-content:center;">
+            <button onclick="closeLaunchModal()" style="background:transparent; border:1px solid #444; color:#888; padding:12px 24px; cursor:pointer; font-weight:bold; border-radius:4px;">CANCEL</button>
+            <button onclick="proceedToAI()" style="background:#00ff9d; color:#000; border:none; padding:12px 30px; cursor:pointer; font-weight:900; border-radius:4px;">PROCEED TO TERMINAL &rarr;</button>
+        </div>
+    </div>
+</div>
+
 <script>
-  // YOUR GPT URL
   const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
-  
   const SPECS = {
     "America/New_York_Early": { tz: "America/New_York", h: 8, m: 30, label: "NY FUTURES" },
     "America/New_York":       { tz: "America/New_York", h: 9, m: 30, label: "NY EQUITY" },
@@ -165,30 +171,40 @@
   };
 
   let _lastDmrPayload = null;
-
   function fmt(x){ return x ? parseFloat(x).toFixed(2) : "—"; }
 
-  // --- RESTORED: Session Logic ---
+  // --- MODAL LOGIC ---
+  function openLaunchModal() {
+      // 1. Copy Command
+      navigator.clipboard.writeText("Run full analysis for this session");
+      // 2. Show Modal
+      document.getElementById('launchModal').style.display = 'flex';
+  }
+  
+  function closeLaunchModal() {
+      document.getElementById('launchModal').style.display = 'none';
+  }
+  
+  function proceedToAI() {
+      window.open(BATTLEBOX_GPT_URL, "_blank");
+      closeLaunchModal();
+  }
+
+  // --- SESSION LOGIC ---
   function getSessionContext() {
     const key = document.getElementById("sessionTz").value;
     const spec = SPECS[key] || SPECS["UTC"];
     const now = new Date();
-
     const targetTimeStr = now.toLocaleString("en-US", {timeZone: spec.tz, hour12: false});
     const targetDate = new Date(targetTimeStr); 
     const currentMins = (targetDate.getHours() * 60) + targetDate.getMinutes();
     const openMins = (spec.h * 60) + spec.m;
-    
     let diff = currentMins - openMins;
     if (diff > 1200) diff -= 1440; 
     if (diff < -1200) diff += 1440;
 
-    let phase = "PRE_MARKET";
-    let uiMsg = "", uiColor = "var(--text-muted)";
-    let btnLabel = "⚡ INITIATE CALIBRATION";
-    let isReview = false;
+    let uiMsg = "", uiColor = "var(--text-muted)", btnLabel = "⚡ INITIATE CALIBRATION", isReview = false;
 
-    // Phase Logic
     if (diff < 0) {
        const h = Math.floor(Math.abs(diff) / 60);
        const m = Math.abs(diff % 60);
@@ -202,7 +218,7 @@
     } else if (diff >= 30 && diff < 90) {
        uiMsg = `> 🟢 ACTIVE SESSION: ${spec.label} | INITIAL BALANCE | EXECUTION ONLINE.`;
        uiColor = "var(--success)";
-    } else if (diff >= 90 && diff < 480) { // 90m to 8h
+    } else if (diff >= 90 && diff < 480) { 
        uiMsg = `> 🟢 ACTIVE SESSION: ${spec.label} | SESSION FLOW | EXECUTION ONLINE.`;
        uiColor = "var(--success)";
     } else {
@@ -211,42 +227,35 @@
        btnLabel = "RUN REVIEW SESSION";
        isReview = true;
     }
-
     return { uiMsg, uiColor, btnLabel, isReview, now, diff };
   }
 
   function updateSessionStatus() {
     const ctx = getSessionContext();
-    const statusEl = document.getElementById("status");
     const btn = document.getElementById("levelsBtn");
-
-    statusEl.innerHTML = ctx.uiMsg;
-    statusEl.style.color = ctx.uiColor;
+    document.getElementById("status").innerHTML = ctx.uiMsg;
+    document.getElementById("status").style.color = ctx.uiColor;
     
-    // Only update button text if not currently loading
     if(btn.innerText !== "CALIBRATING...") {
         btn.innerText = ctx.btnLabel;
+        if(ctx.isReview) {
+           btn.style.border = "1px solid rgba(255,255,255,0.2)";
+           btn.style.boxShadow = "none";
+        } else if (ctx.uiColor.includes("success")) {
+           btn.style.border = "1px solid var(--success)";
+           btn.style.boxShadow = "0 0 20px rgba(16, 185, 129, 0.2)";
+        } else {
+           btn.style.border = "1px solid var(--warning)";
+           btn.style.boxShadow = "none";
+        }
     }
-    
-    if(ctx.isReview) {
-       btn.style.border = "1px solid rgba(255,255,255,0.2)";
-       btn.style.boxShadow = "none";
-    } else if (ctx.uiColor.includes("success")) {
-       btn.style.border = "1px solid var(--success)";
-       btn.style.boxShadow = "0 0 20px rgba(16, 185, 129, 0.2)";
-    } else {
-       btn.style.border = "1px solid var(--warning)";
-       btn.style.boxShadow = "none";
-    }
-
     updateTimelineVisuals(ctx.now, ctx.diff);
   }
 
   function updateTimelineVisuals(now, diffMins) {
     const openTime = new Date(now.getTime() - (diffMins * 60000));
     const t_calib = new Date(openTime.getTime() + 30*60000);
-    const t_close = new Date(openTime.getTime() + 8*60*60000); // 8 Hours Close
-    
+    const t_close = new Date(openTime.getTime() + 8*60*60000); 
     const opt = {hour:'2-digit', minute:'2-digit'};
     document.getElementById("time_open").innerText = openTime.toLocaleTimeString([], opt);
     document.getElementById("time_calib").innerText = openTime.toLocaleTimeString([], opt) + " - " + t_calib.toLocaleTimeString([], opt);
@@ -258,7 +267,7 @@
     const sym = document.getElementById("symbol").value;
     const tz = document.getElementById("sessionTz").value;
     const btn = document.getElementById("levelsBtn");
-    const status = document.getElementById("status");
+    const prevText = btn.innerText;
     
     btn.innerText = "CALIBRATING...";
     btn.disabled = true;
@@ -271,7 +280,6 @@
       const data = await r.json();
       _lastDmrPayload = data;
 
-      // Update UI Levels
       const l = data.levels || {};
       const r30 = data.range_30m || {};
       document.getElementById("lv_ds").innerText = fmt(l.daily_support);
@@ -281,23 +289,17 @@
       document.getElementById("lv_30h").innerText = fmt(r30.high);
       document.getElementById("lv_30l").innerText = fmt(r30.low);
 
-      // SHOW BUTTONS & VERBIAGE
       document.getElementById("tvCopyBtn").style.display = "inline-flex";
-      
-      const gptLink = document.getElementById("openGptLink");
-      gptLink.style.display = "inline-flex";
-      gptLink.href = BATTLEBOX_GPT_URL; 
-      
-      document.getElementById("ai-verbiage").style.display = "block";
-      
-      status.innerText = "> SYSTEM READY. DATA SYNCED.";
-      status.style.color = "var(--success)";
+      document.getElementById("openGptBtn").style.display = "inline-flex"; 
+      document.getElementById("status").innerText = "> SYSTEM READY. DATA SYNCED.";
+      document.getElementById("status").style.color = "var(--success)";
       
     } catch(e) {
-      status.innerText = "> ERROR: " + e.message;
+      document.getElementById("status").innerText = "> ERROR: " + e.message;
     } finally {
       btn.disabled = false;
-      updateSessionStatus(); // Restore correct button label
+      btn.innerText = prevText;
+      updateSessionStatus();
     }
   }
 
@@ -310,7 +312,6 @@
     alert("COPIED for Indicator: " + text);
   }
 
-  // Init
   setInterval(updateSessionStatus, 1000);
   document.addEventListener("DOMContentLoaded", updateSessionStatus);
   document.getElementById("sessionTz").addEventListener("change", updateSessionStatus);
