@@ -1,103 +1,151 @@
 {% extends "base.html" %}
 
-{% block title %}Kabroda Lab | Command Center{% endblock %}
+{% block title %}Kabroda Lab | Strategy Codex{% endblock %}
 
 {% block content %}
 <div class="app-container">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1 style="font-size: 1.5rem; margin: 0;">RESEARCH COMMAND</h1>
+        <div>
+            <h1 style="font-size: 1.5rem; margin: 0; color: #fff;">RESEARCH COMMAND</h1>
+            <div style="font-size: 0.8rem; color: #666; letter-spacing: 1px;">BEHAVIORAL ANALYSIS & PROOF</div>
+        </div>
         <a href="/suite" class="nav-item" style="font-size: 0.8rem; color: #888; text-decoration: none;">&larr; BACK TO SUITE</a>
     </div>
 
-    <div style="display: grid; grid-template-columns: 250px 1fr; gap: 20px;">
+    <div style="display: grid; grid-template-columns: 260px 1fr; gap: 20px;">
         
-        <div class="telemetry-card" style="height: fit-content;">
-            <h3 style="color: #00e5ff; margin-bottom: 15px;">CONFIG</h3>
+        <div class="telemetry-card" style="height: fit-content; border-top: 2px solid var(--primary);">
+            <h3 style="color: #fff; margin-bottom: 15px; font-size: 0.9rem;">SIMULATION CONFIG</h3>
             
             <div class="input-group">
-                <label>ASSET</label>
-                <select id="symbolSelect" style="width:100%; padding: 8px; background: #111; color: #fff; border: 1px solid #333;">
+                <label>TARGET ASSET</label>
+                <select id="symbolSelect" style="width:100%; padding: 10px; background: #0a0a0a; color: #fff; border: 1px solid #333; font-family: monospace;">
                     <option value="BTCUSDT">BTC (BITCOIN)</option>
                     <option value="ETHUSDT">ETH (ETHEREUM)</option>
                 </select>
             </div>
             
             <div class="input-group" style="margin-top:15px;">
-                <label>SESSIONS</label>
-                <div style="background: #111; padding: 8px; border-radius: 4px; display: flex; flex-direction: column; gap: 5px;">
-                    <label style="font-size: 0.75rem;"><input type="checkbox" value="America/New_York" checked> NY FUTURES (08:30)</label>
-                    <label style="font-size: 0.75rem;"><input type="checkbox" value="Europe/London"> LONDON (08:00)</label>
+                <label>SESSIONS (FILTER)</label>
+                <div style="background: #0a0a0a; padding: 10px; border: 1px solid #333; border-radius: 4px; display: flex; flex-direction: column; gap: 8px;">
+                    <label style="font-size: 0.75rem; display: flex; align-items: center; gap: 8px; color: #ccc;">
+                        <input type="checkbox" value="America/New_York" checked> 
+                        <span>NY FUTURES <span style="color:#666">(08:30)</span></span>
+                    </label>
+                    <label style="font-size: 0.75rem; display: flex; align-items: center; gap: 8px; color: #ccc;">
+                        <input type="checkbox" value="Europe/London"> 
+                        <span>LONDON <span style="color:#666">(08:00)</span></span>
+                    </label>
                 </div>
             </div>
 
             <div class="input-group" style="margin-top:15px;">
                 <label>STRATEGY PROTOCOL</label>
-                <select id="stratSelect" style="width:100%; padding: 8px; background: #111; color: #fff; border: 1px solid #333;">
+                <select id="stratSelect" style="width:100%; padding: 10px; background: #0a0a0a; color: var(--primary); border: 1px solid #333; font-weight: bold; font-family: monospace;">
                     <option value="S0">S0 - HOLD FIRE (Safety)</option>
-                    <option value="S1">S1 - BREAKOUT ACCEPTANCE (Long)</option>
-                    <option value="S2">S2 - BREAKDOWN ACCEPTANCE (Short)</option>
-                    <option value="S3">S3 - FAILED BREAKOUT (Reversal)</option>
-                    <option value="S4">S4 - MID-BAND FADE (Rotational)</option>
-                    <option value="S5">S5 - RANGE EXTREMES (Reversion)</option>
+                    <option value="S1">S1 - BREAKOUT ACCEPTANCE</option>
+                    <option value="S2">S2 - BREAKDOWN ACCEPTANCE</option>
+                    <option value="S3">S3 - FAILED BREAKOUT (Trap)</option>
+                    <option value="S4">S4 - MID-BAND FADE (Rotation)</option>
+                    <option value="S5">S5 - RANGE EXTREMES (Fade)</option>
                     <option value="S6">S6 - VALUE ROTATION (Ping Pong)</option>
-                    <option value="S7">S7 - TREND PULLBACK (Continuation)</option>
-                    <option value="S8">S8 - MOMENTUM EXPANSION (Impulse)</option>
-                    <option value="S9">S9 - EXHAUSTION REVERSAL (Counter)</option>
+                    <option value="S7">S7 - TREND PULLBACK</option>
+                    <option value="S8">S8 - MOMENTUM EXPANSION</option>
+                    <option value="S9">S9 - EXHAUSTION REVERSAL</option>
                 </select>
             </div>
 
             <div class="input-group" style="margin-top:15px;">
-                <label>SIMULATION</label>
-                <input type="number" id="levInput" placeholder="Lev (1x)" value="1" style="width:100%; margin-bottom:5px; background:#111; border:1px solid #333; color:#fff; padding:5px;">
-                <input type="number" id="capInput" placeholder="Cap ($1000)" value="1000" style="width:100%; background:#111; border:1px solid #333; color:#fff; padding:5px;">
+                <label>CAPITAL / LEVERAGE</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <input type="number" id="levInput" placeholder="1x" value="1" style="background:#0a0a0a; border:1px solid #333; color:#fff; padding:8px; text-align: center;">
+                    <input type="number" id="capInput" placeholder="$1000" value="1000" style="background:#0a0a0a; border:1px solid #333; color:#fff; padding:8px; text-align: center;">
+                </div>
             </div>
 
-            <button class="primary-btn" onclick="runLab()" style="margin-top: 20px; width: 100%; padding: 12px; background: var(--primary); border: none; font-weight: bold; cursor: pointer;">RUN LAB</button>
+            <button class="primary-btn" onclick="runLab()" style="margin-top: 20px; width: 100%; padding: 14px; background: var(--primary); border: none; font-weight: 900; letter-spacing: 1px; cursor: pointer; color: #000;">RUN SIMULATION</button>
         </div>
 
         <div>
-            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                <button class="tab-btn active" onclick="switchTab('stats')">SYSTEM STATS</button>
-                <button class="tab-btn" onclick="switchTab('sim')">STRATEGY SIM</button>
+            <div id="exemplar-box" class="telemetry-card" style="display: none; margin-bottom: 20px; border: 1px solid #444; background: linear-gradient(90deg, #111 0%, #0d1a15 100%);">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="font-size: 0.7rem; color: #00ff9d; font-weight: bold; margin-bottom: 5px;">BEST TEACHING EXEMPLAR DETECTED</div>
+                        <div style="font-size: 1.1rem; color: #fff;">
+                            Session: <span id="ex-date" style="font-weight: bold;">--</span> 
+                            <span style="color: #666; font-size: 0.9rem; margin-left: 10px;">(<span id="ex-pnl">--</span>)</span>
+                        </div>
+                        <div style="font-size: 0.8rem; color: #aaa; margin-top: 5px;">
+                            Market Regime: <span id="ex-regime" style="color: #fff; border: 1px solid #333; padding: 2px 6px; border-radius: 4px;">--</span>
+                        </div>
+                    </div>
+                    <button onclick="loadExemplar()" style="background: #00ff9d; color: #000; border: none; padding: 8px 16px; font-weight: bold; cursor: pointer; border-radius: 2px;">LOAD EXEMPLAR</button>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 2px; margin-bottom: 20px; background: #111; padding: 4px; border-radius: 4px; width: fit-content;">
+                <button class="tab-btn active" onclick="switchTab('stats')">PERFORMANCE STORY</button>
+                <button class="tab-btn" onclick="switchTab('sim')">TRADE LOG</button>
                 <button class="tab-btn" onclick="switchTab('replay')">LEVEL REPLAY</button>
             </div>
 
             <div id="view-stats" class="tab-view">
-                <div class="telemetry-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;">
-                    <div class="telemetry-card" style="text-align: center; background: rgba(0,255,157,0.1); border: 1px solid rgba(0,255,157,0.3);">
-                        <div class="label" style="color:#00ff9d; font-size: 0.7rem;">WIN RATE</div>
-                        <div class="value" id="stat-win">--%</div>
+                <div class="telemetry-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px;">
+                    <div class="telemetry-card" style="text-align: center; border-top: 2px solid #666;">
+                        <div class="label" style="color:#888; font-size: 0.7rem; margin-bottom: 5px;">TOTAL SESSIONS</div>
+                        <div class="value" id="stat-sessions" style="font-size: 1.4rem;">--</div>
                     </div>
-                    <div class="telemetry-card" style="text-align: center;">
-                        <div class="label" style="color:#aaa; font-size: 0.7rem;">TOTAL PNL</div>
-                        <div class="value" id="stat-pnl">--</div>
+                    <div class="telemetry-card" style="text-align: center; border-top: 2px solid #666;">
+                        <div class="label" style="color:#888; font-size: 0.7rem; margin-bottom: 5px;">VALID SETUPS</div>
+                        <div class="value" id="stat-trades" style="font-size: 1.4rem;">--</div>
                     </div>
-                    <div class="telemetry-card" style="text-align: center;">
-                        <div class="label" style="color:#aaa; font-size: 0.7rem;">VALID TRADES</div>
-                        <div class="value" id="stat-trades">--</div>
+                    <div class="telemetry-card" style="text-align: center; border-top: 2px solid var(--primary);">
+                        <div class="label" style="color:var(--primary); font-size: 0.7rem; margin-bottom: 5px;">WIN RATE</div>
+                        <div class="value" id="stat-win" style="font-size: 1.4rem;">--%</div>
                     </div>
-                    <div class="telemetry-card" style="text-align: center;">
-                        <div class="label" style="color:#aaa; font-size: 0.7rem;">SESSIONS</div>
-                        <div class="value" id="stat-sessions">--</div>
+                    <div class="telemetry-card" style="text-align: center; border-top: 2px solid #fff;">
+                        <div class="label" style="color:#fff; font-size: 0.7rem; margin-bottom: 5px;">NET PNL</div>
+                        <div class="value" id="stat-pnl" style="font-size: 1.4rem;">--</div>
+                    </div>
+                </div>
+
+                <h3 style="color: #fff; font-size: 0.9rem; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">PERFORMANCE BY MARKET REGIME</h3>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+                    <div class="telemetry-card" style="background: #0d0d0d;">
+                        <div style="font-size: 0.7rem; color: #aaa; margin-bottom: 5px;">ROTATIONAL</div>
+                        <div id="reg-rot" style="font-size: 1.2rem; font-weight: bold; color: #fff;">--%</div>
+                        <div class="progress-bar"><div id="bar-rot" style="width: 0%"></div></div>
+                    </div>
+                    <div class="telemetry-card" style="background: #0d0d0d;">
+                        <div style="font-size: 0.7rem; color: #aaa; margin-bottom: 5px;">DIRECTIONAL</div>
+                        <div id="reg-dir" style="font-size: 1.2rem; font-weight: bold; color: #fff;">--%</div>
+                        <div class="progress-bar"><div id="bar-dir" style="width: 0%"></div></div>
+                    </div>
+                    <div class="telemetry-card" style="background: #0d0d0d;">
+                        <div style="font-size: 0.7rem; color: #aaa; margin-bottom: 5px;">COMPRESSED</div>
+                        <div id="reg-com" style="font-size: 1.2rem; font-weight: bold; color: #fff;">--%</div>
+                        <div class="progress-bar"><div id="bar-com" style="width: 0%"></div></div>
+                    </div>
+                    <div class="telemetry-card" style="background: #0d0d0d;">
+                        <div style="font-size: 0.7rem; color: #aaa; margin-bottom: 5px;">VOLATILE</div>
+                        <div id="reg-vol" style="font-size: 1.2rem; font-weight: bold; color: #fff;">--%</div>
+                        <div class="progress-bar"><div id="bar-vol" style="width: 0%"></div></div>
                     </div>
                 </div>
             </div>
 
             <div id="view-sim" class="tab-view" style="display:none;">
-                <div class="telemetry-card">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                        <h3>TRADE LOG</h3>
-                        <div style="font-size: 0.8rem; color: #888;">Recent 20 Sessions</div>
-                    </div>
-                    <div style="max-height: 400px; overflow-y: auto;">
+                <div class="telemetry-card" style="padding: 0;">
+                    <div style="max-height: 500px; overflow-y: auto;">
                         <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
-                            <thead style="text-align: left; color: #666; border-bottom: 1px solid #333;">
+                            <thead style="text-align: left; background: #111; color: #888; position: sticky; top: 0;">
                                 <tr>
-                                    <th style="padding: 8px;">DATE</th>
+                                    <th style="padding: 12px;">DATE</th>
+                                    <th>REGIME</th>
                                     <th>STATUS</th>
                                     <th>ENTRY</th>
                                     <th>EXIT</th>
-                                    <th>PNL</th>
+                                    <th style="text-align: right; padding-right: 12px;">PNL</th>
                                 </tr>
                             </thead>
                             <tbody id="sim-body"></tbody>
@@ -107,18 +155,20 @@
             </div>
 
             <div id="view-replay" class="tab-view" style="display:none;">
-                <div class="telemetry-card" style="margin-bottom: 20px;">
-                    <h3 style="color:#00e5ff; margin-bottom: 10px;">SELECTED: <span id="replay-date" style="color:#fff">---</span></h3>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-family: monospace;">
+                <div class="telemetry-card" style="margin-bottom: 20px; border: 1px solid #333;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <h3 style="color:#00e5ff; margin: 0;">SELECTED: <span id="replay-date" style="color:#fff">---</span></h3>
+                        <button onclick="copyReplay()" style="background:#333; color:#fff; border:1px solid #555; padding:6px 12px; cursor: pointer; font-size: 0.7rem;">COPY LEVELS</button>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; font-family: monospace; margin-top: 15px;">
                         <div><span style="color:#ff4d4d">RES:</span> <span id="rep-res" style="color:#fff">---</span></div>
                         <div><span style="color:#00ff9d">BO:</span> <span id="rep-bo" style="color:#fff">---</span></div>
                         <div><span style="color:#b39ddb">BD:</span> <span id="rep-bd" style="color:#fff">---</span></div>
                         <div><span style="color:#387ef5">SUP:</span> <span id="rep-sup" style="color:#fff">---</span></div>
                     </div>
-                    <button onclick="copyReplay()" style="margin-top:15px; background:#333; color:#fff; border:none; padding:8px 16px; cursor: pointer; border-radius: 4px;">COPY LEVELS TO CLIPBOARD</button>
                 </div>
-                <div class="telemetry-card">
-                    <div style="max-height: 300px; overflow-y: auto;">
+                <div class="telemetry-card" style="padding: 0;">
+                    <div style="max-height: 400px; overflow-y: auto;">
                         <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
                             <tbody id="replay-list"></tbody>
                         </table>
@@ -131,14 +181,17 @@
 </div>
 
 <style>
-.tab-btn { background: #111; border: 1px solid #333; color: #888; padding: 10px 20px; cursor: pointer; flex: 1; }
-.tab-btn.active { background: var(--primary); color: #000; font-weight: bold; border-color: var(--primary); }
-.value { font-size: 1.5rem; font-weight: bold; color: #fff; margin-top: 5px; }
-tr { border-bottom: 1px solid #222; }
+.tab-btn { background: transparent; border: none; color: #666; padding: 8px 16px; cursor: pointer; font-weight: bold; font-size: 0.8rem; }
+.tab-btn.active { background: #222; color: #fff; border-radius: 3px; }
+.progress-bar { height: 4px; background: #222; margin-top: 5px; border-radius: 2px; }
+.progress-bar div { height: 100%; background: var(--primary); border-radius: 2px; }
+tr { border-bottom: 1px solid #1a1a1a; }
+td { padding: 10px 12px; }
 </style>
 
 <script>
 let currentReplay = null;
+let bestExemplar = null;
 
 function switchTab(viewId) {
     document.querySelectorAll('.tab-view').forEach(el => el.style.display = 'none');
@@ -149,7 +202,7 @@ function switchTab(viewId) {
 
 async function runLab() {
     const btn = document.querySelector('.primary-btn');
-    btn.innerText = "PROCESSING...";
+    btn.innerText = "CALCULATING REGIMES...";
     btn.disabled = true;
     
     const sessions = [];
@@ -164,7 +217,7 @@ async function runLab() {
                 sessions: sessions,
                 leverage: document.getElementById('levInput').value,
                 capital: document.getElementById('capInput').value,
-                strategy: document.getElementById('stratSelect').value // SEND SELECTED STRATEGY
+                strategy: document.getElementById('stratSelect').value
             })
         });
         const data = await res.json();
@@ -174,29 +227,50 @@ async function runLab() {
         document.getElementById('stat-pnl').innerText = "$" + (data.stats.total_pnl || 0).toFixed(0);
         document.getElementById('stat-trades').innerText = (data.stats.valid_trades || 0);
         document.getElementById('stat-sessions').innerText = (data.stats.total_sessions || 0);
-        
-        // Color PnL
         document.getElementById('stat-pnl').style.color = data.stats.total_pnl >= 0 ? "#00ff9d" : "#ff4d4d";
+
+        // 2. UPDATE REGIME HEATMAP
+        updateRegime('rot', data.stats.regime_breakdown.ROTATIONAL);
+        updateRegime('dir', data.stats.regime_breakdown.DIRECTIONAL);
+        updateRegime('com', data.stats.regime_breakdown.COMPRESSED);
+        updateRegime('vol', data.stats.regime_breakdown.VOLATILE);
+
+        // 3. SHOW EXEMPLAR (TEACHER)
+        if(data.stats.exemplar) {
+            bestExemplar = data.stats.exemplar;
+            document.getElementById('exemplar-box').style.display = 'block';
+            document.getElementById('ex-date').innerText = bestExemplar.date;
+            document.getElementById('ex-pnl').innerText = "+$" + bestExemplar.strategy.pnl.toFixed(0);
+            document.getElementById('ex-pnl').style.color = "#00ff9d";
+            document.getElementById('ex-regime').innerText = bestExemplar.regime;
+        } else {
+            document.getElementById('exemplar-box').style.display = 'none';
+        }
         
-        // 2. UPDATE SIMULATOR
+        // 4. UPDATE SIMULATOR & REPLAY
         renderSim(data.history);
-        
-        // 3. UPDATE REPLAY LIST
         renderReplayList(data.history);
         
     } catch(e) { 
         alert("Error: " + e); 
-        console.error(e);
     } finally {
-        btn.innerText = "RUN LAB";
+        btn.innerText = "RUN SIMULATION";
         btn.disabled = false;
     }
+}
+
+function updateRegime(key, val) {
+    if(val === undefined) val = 0;
+    document.getElementById('reg-' + key).innerText = val + "%";
+    document.getElementById('bar-' + key).style.width = val + "%";
+    // Color code based on success
+    const color = val > 50 ? "#00ff9d" : (val > 0 ? "#ffcc00" : "#333");
+    document.getElementById('bar-' + key).style.backgroundColor = color;
 }
 
 function renderSim(history) {
     const tbody = document.getElementById('sim-body');
     tbody.innerHTML = '';
-
     history.forEach(row => {
         const s = row.strategy;
         const tr = document.createElement('tr');
@@ -204,11 +278,12 @@ function renderSim(history) {
         if (s.status.includes("NO_") || s.status.includes("S0")) col = "#666"; 
 
         tr.innerHTML = `
-            <td style="padding:10px; color:#aaa;">${row.date}</td>
+            <td style="color:#ccc;">${row.date}</td>
+            <td style="color:#888; font-size:0.7rem;">${row.regime || '-'}</td>
             <td style="color:#fff;">${s.status}</td>
-            <td style="color:#aaa;">${s.entry ? s.entry.toFixed(1) : '-'}</td>
-            <td style="color:#aaa;">${s.exit ? s.exit.toFixed(1) : '-'}</td>
-            <td style="color:${col}; font-weight:bold;">$${s.pnl.toFixed(0)}</td>
+            <td style="color:#666;">${s.entry ? s.entry.toFixed(1) : '-'}</td>
+            <td style="color:#666;">${s.exit ? s.exit.toFixed(1) : '-'}</td>
+            <td style="color:${col}; font-weight:bold; text-align:right;">$${s.pnl.toFixed(0)}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -221,8 +296,8 @@ function renderReplayList(history) {
         const tr = document.createElement('tr');
         tr.style.cursor = "pointer";
         tr.onclick = () => loadReplay(row);
-        tr.innerHTML = `<td style="padding:10px; color:#ccc; transition:0.2s;">${row.date} <span style="color:#666; font-size:0.7rem; margin-left:10px;">${row.session}</span></td>`;
-        tr.onmouseover = () => tr.style.background = "#222";
+        tr.innerHTML = `<td style="color:#ccc; transition:0.2s;">${row.date} <span style="color:#444; font-size:0.7rem; margin-left:10px;">${row.regime || ''}</span></td>`;
+        tr.onmouseover = () => tr.style.background = "#1a1a1a";
         tr.onmouseout = () => tr.style.background = "transparent";
         list.appendChild(tr);
     });
@@ -239,12 +314,23 @@ function loadReplay(row) {
     document.getElementById('rep-sup').innerText = (l.daily_support||0).toFixed(2);
 }
 
+function loadExemplar() {
+    if(bestExemplar) {
+        loadReplay(bestExemplar);
+        switchTab('replay');
+        alert("Loaded Best Example: " + bestExemplar.date + ". Levels ready to copy.");
+    }
+}
+
 function copyReplay() {
     if(!currentReplay) return;
     const l = currentReplay.levels;
     const txt = `${l.breakout_trigger.toFixed(2)},${l.breakdown_trigger.toFixed(2)},${l.daily_resistance.toFixed(2)},${l.daily_support.toFixed(2)}`;
     navigator.clipboard.writeText(txt);
-    alert("Copied Levels: " + txt);
+    const btn = event.target;
+    const orig = btn.innerText;
+    btn.innerText = "COPIED!";
+    setTimeout(() => btn.innerText = orig, 1000);
 }
 </script>
 {% endblock %}
