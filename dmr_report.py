@@ -1,6 +1,6 @@
 # dmr_report.py
 from __future__ import annotations
-from typing import Any, Dict, List
+from typing import Any, Dict
 from datetime import datetime, timedelta, timezone
 import pytz
 import trade_logic_v2
@@ -53,6 +53,12 @@ def _get_anchor_times(raw_15m: list, session_key: str):
     target_anchor = last_anchor.replace(hour=config['h'], minute=config['m'], second=0, microsecond=0)
     return -1, target_anchor, config
 
+# Backward compatibility wrapper (Just in case)
+def _find_anchor_index(intraday_candles: list, session_key: str) -> int:
+    norm = _normalize_session_key(session_key)
+    idx, _, _ = _get_anchor_times(intraday_candles, norm)
+    return idx
+
 def generate_report_from_inputs(inputs: Dict[str, Any], session_tz_key: str = "UTC") -> Dict[str, Any]:
     symbol = inputs.get("symbol", "BTCUSDT")
     raw_15m = inputs.get("intraday_candles", [])
@@ -66,22 +72,42 @@ def generate_report_from_inputs(inputs: Dict[str, Any], session_tz_key: str = "U
     calib_start = anchor_dt
     calib_end = anchor_dt + timedelta(minutes=30)
     
+    # Mode Logic Variables
+    is_locked = False
+    locked_at = datetime.now(timezone.utc)
+    current_mode = "calibration"
+
     if idx >= 0:
+        # DATA SLICING (CRITICAL - DO NOT REMOVE)
         anchor_candle = raw_15m[idx]
         start_24 = max(0, idx - 96)
         slice_24h = raw_15m[start_24 : idx]
         start_4 = max(0, idx - 16)
         slice_4h = raw_15m[start_4 : idx]
+        
+        # Lock Logic
         is_locked = True
-        locked_at = calib_end  # Conceptual lock time
+        locked_at = calib_end 
+        
+        # COMBAT VS DEBRIEF LOGIC
+        now_utc = datetime.now(timezone.utc)
+        anchor_utc = anchor_dt.astimezone(timezone.utc)
+        elapsed = now_utc - anchor_utc
+        
+        if elapsed < timedelta(hours=10):
+            current_mode = "active_combat"  # <--- THIS IS THE FIX
+        else:
+            current_mode = "debrief"
+            
     else:
+        # Pre-market or Missing Data
         anchor_candle = raw_15m[-1] if raw_15m else {}
         slice_24h = raw_15m[-96:] if raw_15m else []
         slice_4h = raw_15m[-16:] if raw_15m else []
         is_locked = False
-        locked_at = datetime.now(timezone.utc)
+        current_mode = "calibration"
 
-    # 2. Run Math Engine (SSE)
+    # 2. Run Math Engine (SSE) - PRESERVED
     sse_input = {
         "raw_15m_candles": raw_15m,
         "raw_daily_candles": raw_daily,
@@ -95,25 +121,21 @@ def generate_report_from_inputs(inputs: Dict[str, Any], session_tz_key: str = "U
     
     computed = sse_engine.compute_sse_levels(sse_input)
     
-    # 3. Resolve Conflicts & Permission
+    # 3. Resolve Conflicts & Permission (Metadata Enhancement)
     bias_model = computed["bias_model"]
-    
-    # Add 'requirements_remaining' to permission_state for explainability
     perm = bias_model["permission_state"]
     reqs = []
     if perm["state"] in ["DIRECTIONAL_LONG", "DIRECTIONAL_SHORT"]:
-        # Simple logic derivation: if we have direction but no 5m alignment mentioned, imply it's needed
         if not perm.get("evidence", {}).get("alignment_5m", False):
             reqs.append("5m_alignment")
     perm["requirements_remaining"] = reqs
     
-    # 4. Generate Trade Logic & Rename Conflicting Fields
+    # 4. Generate Trade Logic (S0-S8) - PRESERVED
     trade_logic = trade_logic_v2.compute_trade_logic(symbol=symbol, inputs={**inputs, **computed})
     
-    # RENAME regime -> playbook_regime_label to avoid overriding bias_model
+    # CLEANUP: Rename conflicting fields to let Bias Model be the Truth
     if "regime" in trade_logic:
         trade_logic["playbook_regime_label"] = trade_logic.pop("regime")
-    # REMOVE analysis_bias from trade_logic to ensure bias_model is sole truth
     if "analysis_bias" in trade_logic:
         del trade_logic["analysis_bias"]
 
@@ -129,7 +151,7 @@ def generate_report_from_inputs(inputs: Dict[str, Any], session_tz_key: str = "U
         "price": inputs.get("current_price"),
         
         "session": {
-            "session_key": session_key,  # The Immutable ID
+            "session_key": session_key,
             "session_id": session_id,
             "label": config["label"],
             "anchor_tz": config["tz"],
@@ -142,24 +164,17 @@ def generate_report_from_inputs(inputs: Dict[str, Any], session_tz_key: str = "U
                 "locked": is_locked,
                 "locked_at_utc": _to_iso_z(locked_at) if is_locked else None
             },
-            "mode": "debrief" if is_locked else "live"
+            "mode": current_mode  # Now explicitly "active_combat" during the day
         },
         
-        # Source of Truth: Execution & Bias
         "bias_model": bias_model,
-        
-        # Source of Truth: Levels
         "levels": computed["levels"],
         "range_30m": {
             "high": computed["levels"]["range30m_high"], 
             "low": computed["levels"]["range30m_low"]
         },
         "htf_shelves": computed["htf_shelves"],
-        
-        # Source of Truth: Strategy Playbook (Renamed conflicts)
         "trade_logic": trade_logic,
-        
-        # Context
         "context": computed["context"]
     }
     
