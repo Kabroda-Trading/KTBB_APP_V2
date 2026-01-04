@@ -1,6 +1,6 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.3
+# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.4
 # ---------------------------------------------------------
 from __future__ import annotations
 
@@ -30,9 +30,6 @@ import wealth_allocator
 # --- Research Lab ---
 import research_lab
 
-# --- NEW IMPORT ---
-import gpt_bridge
-
 from database import init_db, get_db, UserModel
 from membership import (
     get_membership_state,
@@ -43,8 +40,6 @@ from membership import (
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = FastAPI()
-# --- CONNECT THE BRIDGE ---
-app.include_router(gpt_bridge.router)
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
@@ -115,16 +110,12 @@ def pricing(request: Request):
 def about(request: Request):
     return templates.TemplateResponse("about.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
 
-# main.py
-
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy_page(request: Request):
     return templates.TemplateResponse("privacy.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
 
 @app.get("/gpt-guide", response_class=HTMLResponse)
 def gpt_guide_page(request: Request):
-    # This page is public/private depending on preference. 
-    # Let's make it public so people can see what they get.
     is_logged_in = _session_user_dict(request) is not None
     return templates.TemplateResponse("gpt-guide.html", {"request": request, "is_logged_in": is_logged_in})
 
@@ -313,7 +304,7 @@ async def dmr_history(request: Request, db: Session = Depends(get_db)):
     leverage = float(payload.get("leverage", 1.0))
     capital = float(payload.get("capital", 1000.0))
     
-    # NEW: Capture Strategy Selection
+    # Capture Strategy Selection
     strategy_mode = payload.get("strategy", "S0")
     
     inputs = await data_feed.get_inputs(symbol=symbol)

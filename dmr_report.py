@@ -26,90 +26,83 @@ def _normalize_session_key(key: str) -> str:
     return "utc"
 
 def _to_iso_z(dt: datetime) -> str:
-    """Helper to enforce Z-suffix UTC timestamps."""
     return dt.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 def _get_anchor_times(raw_15m: list, session_key: str):
     config = SESSION_CONFIGS.get(session_key, SESSION_CONFIGS["utc"])
     tz = pytz.timezone(config["tz"])
     
-    # Default if no data
     if not raw_15m:
         now_anchor = datetime.now(tz)
         return -1, now_anchor, config
 
-    # Find specific anchor candle
     for i in range(len(raw_15m) - 1, -1, -1):
         c = raw_15m[i]
         dt_utc = datetime.fromtimestamp(c['time'], tz=pytz.UTC)
         dt_anchor = dt_utc.astimezone(tz)
-        
         if dt_anchor.hour == config['h'] and dt_anchor.minute == config['m']:
             return i, dt_anchor, config
             
-    # Fallback
     last_utc = datetime.fromtimestamp(raw_15m[-1]['time'], tz=pytz.UTC)
     last_anchor = last_utc.astimezone(tz)
     target_anchor = last_anchor.replace(hour=config['h'], minute=config['m'], second=0, microsecond=0)
     return -1, target_anchor, config
-
-# Backward compatibility wrapper (Just in case)
-def _find_anchor_index(intraday_candles: list, session_key: str) -> int:
-    norm = _normalize_session_key(session_key)
-    idx, _, _ = _get_anchor_times(intraday_candles, norm)
-    return idx
 
 def generate_report_from_inputs(inputs: Dict[str, Any], session_tz_key: str = "UTC") -> Dict[str, Any]:
     symbol = inputs.get("symbol", "BTCUSDT")
     raw_15m = inputs.get("intraday_candles", [])
     raw_daily = inputs.get("daily_candles", [])
     
-    # 1. Determine Anchor & Lock State
     norm_key = _normalize_session_key(session_tz_key)
     idx, anchor_dt, config = _get_anchor_times(raw_15m, norm_key)
     
-    # Define Calibration Window (First 30m)
     calib_start = anchor_dt
     calib_end = anchor_dt + timedelta(minutes=30)
     
-    # Mode Logic Variables
     is_locked = False
     locked_at = datetime.now(timezone.utc)
     current_mode = "calibration"
+    
+    # Initialize Locked History
+    locked_history_15m = raw_15m 
 
     if idx >= 0:
-        # DATA SLICING (CRITICAL - DO NOT REMOVE)
         anchor_candle = raw_15m[idx]
+        
+        # --- THE FIX: SLICE DATA AT THE ANCHOR ---
+        # This dataset stops exactly at the session open.
+        # Passing this to SSE Engine prevents future candles from changing past levels.
+        locked_history_15m = raw_15m[:idx+1]
+        
         start_24 = max(0, idx - 96)
         slice_24h = raw_15m[start_24 : idx]
         start_4 = max(0, idx - 16)
         slice_4h = raw_15m[start_4 : idx]
         
-        # Lock Logic
         is_locked = True
         locked_at = calib_end 
         
-        # COMBAT VS DEBRIEF LOGIC
         now_utc = datetime.now(timezone.utc)
         anchor_utc = anchor_dt.astimezone(timezone.utc)
         elapsed = now_utc - anchor_utc
         
+        # Set Active Combat vs Debrief
         if elapsed < timedelta(hours=10):
-            current_mode = "active_combat"  # <--- THIS IS THE FIX
+            current_mode = "active_combat" 
         else:
             current_mode = "debrief"
             
     else:
-        # Pre-market or Missing Data
         anchor_candle = raw_15m[-1] if raw_15m else {}
         slice_24h = raw_15m[-96:] if raw_15m else []
         slice_4h = raw_15m[-16:] if raw_15m else []
+        locked_history_15m = raw_15m 
         is_locked = False
         current_mode = "calibration"
 
-    # 2. Run Math Engine (SSE) - PRESERVED
     sse_input = {
         "raw_15m_candles": raw_15m,
+        "locked_history_15m": locked_history_15m, # <-- SENT TO ENGINE
         "raw_daily_candles": raw_daily,
         "slice_24h": slice_24h,
         "slice_4h": slice_4h,
@@ -121,7 +114,6 @@ def generate_report_from_inputs(inputs: Dict[str, Any], session_tz_key: str = "U
     
     computed = sse_engine.compute_sse_levels(sse_input)
     
-    # 3. Resolve Conflicts & Permission (Metadata Enhancement)
     bias_model = computed["bias_model"]
     perm = bias_model["permission_state"]
     reqs = []
@@ -130,16 +122,13 @@ def generate_report_from_inputs(inputs: Dict[str, Any], session_tz_key: str = "U
             reqs.append("5m_alignment")
     perm["requirements_remaining"] = reqs
     
-    # 4. Generate Trade Logic (S0-S8) - PRESERVED
     trade_logic = trade_logic_v2.compute_trade_logic(symbol=symbol, inputs={**inputs, **computed})
     
-    # CLEANUP: Rename conflicting fields to let Bias Model be the Truth
     if "regime" in trade_logic:
         trade_logic["playbook_regime_label"] = trade_logic.pop("regime")
     if "analysis_bias" in trade_logic:
         del trade_logic["analysis_bias"]
 
-    # 5. Construct Hardened Contract v1.3
     session_id = norm_key.upper()
     session_date_str = anchor_dt.strftime("%Y-%m-%d")
     session_key = f"{symbol}|{session_id}|{session_date_str}"
@@ -149,7 +138,6 @@ def generate_report_from_inputs(inputs: Dict[str, Any], session_tz_key: str = "U
         "generated_at_utc": _to_iso_z(datetime.now(timezone.utc)),
         "symbol": symbol,
         "price": inputs.get("current_price"),
-        
         "session": {
             "session_key": session_key,
             "session_id": session_id,
@@ -164,9 +152,8 @@ def generate_report_from_inputs(inputs: Dict[str, Any], session_tz_key: str = "U
                 "locked": is_locked,
                 "locked_at_utc": _to_iso_z(locked_at) if is_locked else None
             },
-            "mode": current_mode  # Now explicitly "active_combat" during the day
+            "mode": current_mode
         },
-        
         "bias_model": bias_model,
         "levels": computed["levels"],
         "range_30m": {

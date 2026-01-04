@@ -38,7 +38,7 @@ class Shelf:
     primary: bool = False
 
 # ---------------------------------------------------------
-# 2. VRVP ENGINE (Preserved)
+# 2. VRVP ENGINE
 # ---------------------------------------------------------
 def _calculate_vrvp(candles: List[Dict[str, Any]], row_size_pct: float = 0.001) -> Dict[str, float]:
     if not candles: return {"poc": 0.0, "vah": 0.0, "val": 0.0}
@@ -82,7 +82,7 @@ def _calculate_vrvp(candles: List[Dict[str, Any]], row_size_pct: float = 0.001) 
     return {"poc": poc, "vah": min_p + (up * row_size), "val": min_p + (down * row_size)}
 
 # ---------------------------------------------------------
-# 3. PIVOT ENGINE (Preserved)
+# 3. PIVOT ENGINE
 # ---------------------------------------------------------
 def _build_htf_shelves(h4_supply, h4_demand, h1_supply, h1_demand):
     res = []; sup = []
@@ -94,6 +94,8 @@ def _build_htf_shelves(h4_supply, h4_demand, h1_supply, h1_demand):
 
 def _select_daily_levels(resistance, support):
     if not resistance or not support: return 0.0, 0.0, {"resistance": [], "support": []}
+    
+    # Sort by Strength DESC
     dr = max(resistance, key=lambda s: s.strength).level
     ds = max(support, key=lambda s: s.strength).level
     
@@ -144,25 +146,22 @@ def _find_pivots(candles: List[Dict], left: int = 3, right: int = 3) -> Tuple[fl
     return last_supply, last_demand
 
 # ---------------------------------------------------------
-# 4. TRIGGER LOGIC (FIXED: Uses Anchor Price, NOT Live Price)
+# 4. TRIGGER LOGIC
 # ---------------------------------------------------------
 def _pick_trigger_candidates(anchor_px, r30_h, r30_l, vrvp_24h, vrvp_4h, daily_sup, daily_res):
     # Base Calculation
     bo_base = max(r30_h, vrvp_24h.get("vah", 0)) if r30_h > 0 else daily_res
     bd_base = min(r30_l, vrvp_24h.get("val", 0)) if r30_l > 0 else daily_sup
     
-    # FIX: Safety buffer is calculated relative to ANCHOR (Session Open), not live price.
-    # This ensures the level is "Frozen" in history.
+    # SAFETY: Ensure Trigger is not inside the spread or too close to anchor
     min_dist = anchor_px * 0.002 
-    
-    # FIX: Ensure trigger is at least min_dist away from the OPEN, not current price.
     bo = max(bo_base, anchor_px + min_dist)
     bd = min(bd_base, anchor_px - min_dist)
     
     return float(bo), float(bd)
 
 # ---------------------------------------------------------
-# 5. CONTEXT & BIAS ENGINE (Preserved)
+# 5. CONTEXT & BIAS ENGINE
 # ---------------------------------------------------------
 def _calculate_shelf_imbalance(px: float, shelves: Dict[str, List[Dict]]) -> float:
     k = 100.0
@@ -253,29 +252,38 @@ def _calculate_bias_model(ctx: Dict, px: float, bo: float, bd: float, shelves: D
 def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
     def f(k, d=0.0): return float(inputs.get(k) or d)
     
+    # RAW DATA (For live context only)
     raw_15m = inputs.get("raw_15m_candles", [])
     daily_candles = inputs.get("raw_daily_candles", [])
+    
+    # LOCKED DATA (CRITICAL FIX: Use this for Pivots/Levels)
+    # If not provided, fallback to raw (but DMR report should always provide it)
+    locked_history = inputs.get("locked_history_15m", raw_15m)
+    
     slice_24h = inputs.get("slice_24h", [])
     slice_4h = inputs.get("slice_4h", [])
     
-    # 1. PIVOTS
-    candles_4h = _resample_candles(raw_15m, 240)
-    candles_1h = _resample_candles(raw_15m, 60)
+    # 1. PIVOTS (Calculating from LOCKED HISTORY prevents drift)
+    candles_4h = _resample_candles(locked_history, 240)
+    candles_1h = _resample_candles(locked_history, 60)
+    
     sup_4h, dem_4h = _find_pivots(candles_4h)
     sup_1h, dem_1h = _find_pivots(candles_1h)
     
     res_list, sup_list = _build_htf_shelves(sup_4h, dem_4h, sup_1h, dem_1h)
     ds, dr, htf_out = _select_daily_levels(res_list, sup_list)
-    if dr == 0 and raw_15m: dr = max(c['high'] for c in raw_15m[-96:])
-    if ds == 0 and raw_15m: ds = min(c['low'] for c in raw_15m[-96:])
+    
+    # Fallback to history if no pivot found
+    if dr == 0 and locked_history: dr = max(c['high'] for c in locked_history[-96:])
+    if ds == 0 and locked_history: ds = min(c['low'] for c in locked_history[-96:])
 
-    # 2. VRVP
+    # 2. VRVP (Uses sliced history)
     vrvp_24h = _calculate_vrvp(slice_24h)
     vrvp_4h = _calculate_vrvp(slice_4h)
     
-    # 3. TRIGGERS (FIXED: USING ANCHOR PRICE)
-    # Note: 'last_price' is actually the anchor closing price when passed from dmr_report correctly
-    # But strictly, we use session_open_price as the anchor for calculation.
+    # 3. TRIGGERS
+    # We use the Session Open Price (Anchor) to define the trigger logic,
+    # ensuring triggers don't "wiggle" based on current price action.
     anchor_px = f("session_open_price")
     live_px = f("last_price")
     
@@ -284,13 +292,13 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
     
     bo, bd = _pick_trigger_candidates(anchor_px, r30_h, r30_l, vrvp_24h, vrvp_4h, ds, dr)
     
-    # 4. CONTEXT
+    # 4. CONTEXT (Can use live data for trends, but anchor for location)
     ctx = _build_context(anchor_px, bo, bd, vrvp_24h["poc"], vrvp_24h["vah"], vrvp_24h["val"], raw_15m, daily_candles)
     
     # 5. BIAS
     bias = _calculate_bias_model(ctx, anchor_px, bo, bd, htf_out)
     
-    # 6. PERMISSION (Checked against LIVE price for status)
+    # 6. PERMISSION (This uses LIVE price because permission is real-time)
     perm = bias["permission_state"]
     if live_px > bo: perm["state"] = "DIRECTIONAL_LONG"; perm["active_side"] = "long"
     elif live_px < bd: perm["state"] = "DIRECTIONAL_SHORT"; perm["active_side"] = "short"
