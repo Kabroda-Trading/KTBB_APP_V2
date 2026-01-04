@@ -41,7 +41,8 @@
             <option value="America/New_York">🇺🇸 NY EQUITY (09:30 ET)</option>
             <option value="Europe/London">🇬🇧 LONDON (08:00 GMT)</option>
             <option value="Asia/Tokyo">🇯🇵 TOKYO (09:00 JST)</option>
-            <option value="Australia/Sydney">🇦🇺 SYDNEY (10:00 AEDT)</option> <option value="UTC">🌐 UTC (CRYPTO DEFAULT)</option>
+            <option value="Australia/Sydney">🇦🇺 SYDNEY (10:00 AEDT)</option>
+            <option value="UTC">🌐 UTC (CRYPTO DEFAULT)</option>
           </select>
           <span style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: var(--success); pointer-events: none;">▼</span>
         </div>
@@ -64,26 +65,31 @@
       <span style="width:6px; height:6px; background:#fff; border-radius:50%; opacity:0.5;"></span> MISSION TIMELINE <span style="opacity:0.3; font-size:11px;">(LOCAL SYNC)</span>
     </h3>
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+      
       <div style="background: rgba(255,255,255,0.03); border-left: 3px solid var(--text-muted); padding: 20px; border-radius: 0 8px 8px 0;">
         <div style="font-size: 11px; color: var(--text-muted); font-weight: 800; letter-spacing: 0.1em; margin-bottom: 6px;">MARKET OPEN</div>
         <div id="time_open" style="font-size: 22px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
         <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Session Start</div>
       </div>
+
       <div style="background: rgba(16, 185, 129, 0.05); border-left: 3px solid var(--warning); padding: 20px; border-radius: 0 8px 8px 0;">
         <div style="font-size: 11px; color: var(--warning); font-weight: 800; letter-spacing: 0.1em; margin-bottom: 6px;">CALIBRATION</div>
         <div id="time_calib" style="font-size: 22px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
         <div style="font-size: 12px; color: var(--warning); margin-top: 4px;">Initial Balance (30m)</div>
       </div>
+
       <div style="background: rgba(56, 189, 248, 0.05); border-left: 3px solid var(--success); padding: 20px; border-radius: 0 8px 8px 0;">
         <div style="font-size: 11px; color: var(--success); font-weight: 800; letter-spacing: 0.1em; margin-bottom: 6px;">EXECUTION</div>
         <div id="time_exec" style="font-size: 22px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
         <div style="font-size: 12px; color: var(--success); margin-top: 4px;">Strategy Active</div>
       </div>
+
       <div style="background: rgba(168, 85, 247, 0.05); border-left: 3px solid var(--purple); padding: 20px; border-radius: 0 8px 8px 0;">
         <div style="font-size: 11px; color: var(--purple); font-weight: 800; letter-spacing: 0.1em; margin-bottom: 6px;">CLOSE</div>
         <div id="time_close" style="font-size: 22px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
         <div style="font-size: 12px; color: var(--purple); margin-top: 4px;">Session End</div>
       </div>
+
     </div>
   </div>
 
@@ -100,12 +106,21 @@
         <p style="font-size: 13px; color: #888; margin: 0;">Live Structural Levels & Triggers</p>
       </div>
       
-      <div style="display: flex; gap: 12px;">
-        <button id="tvCopyBtn" class="btn secondary" onclick="copyForTV()" style="display:none; font-size: 12px; padding: 12px 20px; font-weight:700;">COPY INDICATOR DATA</button>
+      <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 12px;">
         
-        <button id="openGptBtn" onclick="openLaunchModal()" style="display:none; cursor: pointer; background: #00ff9d; color: #000; font-weight: 900; font-size: 12px; padding: 12px 24px; border: none; border-radius: 4px; box-shadow: 0 0 20px rgba(0, 255, 157, 0.4); text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s;">
-          🚀 LAUNCH BATTLEBOX AI
-        </button>
+        <div style="display: flex; gap: 12px;">
+          <button id="tvCopyBtn" class="btn secondary" onclick="copyForTV()" style="display:none; font-size: 12px; padding: 12px 20px; font-weight:700;">COPY INDICATOR DATA</button>
+          
+          <button id="openGptBtn" onclick="openLaunchModal()" style="display:none; cursor: pointer; background: #00ff9d; color: #000; font-weight: 900; font-size: 12px; padding: 12px 24px; border: none; border-radius: 4px; box-shadow: 0 0 20px rgba(0, 255, 157, 0.4); text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s;">
+            🚀 LAUNCH BATTLEBOX AI
+          </button>
+        </div>
+
+        <div id="ai-verbiage" style="display: none; text-align: right; font-size: 11px; color: #888; max-width: 320px; line-height: 1.5; border-right: 2px solid #00ff9d; padding-right: 15px;">
+          <span style="color: #00ff9d; font-weight: 800;">● NEURAL LINK ACTIVE</span><br>
+          <span style="color:#aaa;">Command copied.</span> Paste into AI to generate tactical briefing.
+        </div>
+
       </div>
     </div>
 
@@ -138,20 +153,16 @@
 
 <div id="launchModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); backdrop-filter:blur(5px); z-index:9999; align-items:center; justify-content:center;">
     <div style="background:#111; border:1px solid #333; padding:40px; border-radius:12px; max-width:500px; width:90%; text-align:center; box-shadow:0 0 50px rgba(0,0,0,0.8);">
-        
         <h2 style="color:#fff; margin-bottom:10px; font-size:24px;">NEURAL LINK ESTABLISHED</h2>
         <div style="height:2px; width:50px; background:#00ff9d; margin:0 auto 30px auto;"></div>
-        
         <div style="text-align:left; background:#000; padding:20px; border-radius:8px; border:1px solid #222; margin-bottom:30px;">
             <div style="color:#00ff9d; font-size:12px; font-weight:bold; margin-bottom:5px;">✓ COMMAND COPIED TO CLIPBOARD</div>
             <div style="font-family:monospace; color:#ccc; font-size:14px;">"Run full analysis for this session"</div>
         </div>
-
         <p style="color:#888; font-size:14px; margin-bottom:30px; line-height:1.5;">
             The BattleBox AI will open in a new tab.<br>
             <strong>Paste (Ctrl+V)</strong> the command into the chat to begin.
         </p>
-
         <div style="display:flex; gap:10px; justify-content:center;">
             <button onclick="closeLaunchModal()" style="background:transparent; border:1px solid #444; color:#888; padding:12px 24px; cursor:pointer; font-weight:bold; border-radius:4px;">CANCEL</button>
             <button onclick="proceedToAI()" style="background:#00ff9d; color:#000; border:none; padding:12px 30px; cursor:pointer; font-weight:900; border-radius:4px;">PROCEED TO TERMINAL &rarr;</button>
@@ -160,37 +171,41 @@
 </div>
 
 <script>
+  // YOUR GPT URL
   const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
+  
+  // SPECS WITH SYDNEY RESTORED
   const SPECS = {
     "America/New_York_Early": { tz: "America/New_York", h: 8, m: 30, label: "NY FUTURES" },
     "America/New_York":       { tz: "America/New_York", h: 9, m: 30, label: "NY EQUITY" },
     "Europe/London":          { tz: "Europe/London",    h: 8, m: 0,  label: "LONDON" },
     "Asia/Tokyo":             { tz: "Asia/Tokyo",       h: 9, m: 0,  label: "TOKYO" },
-    "Australia/Sydney":       { tz: "Australia/Sydney", h: 10, m: 0, label: "SYDNEY" }, /* CONFIRMED */
+    "Australia/Sydney":       { tz: "Australia/Sydney", h: 10, m: 0, label: "SYDNEY" }, /* RESTORED */
     "UTC":                    { tz: "UTC",              h: 0, m: 0,  label: "UTC CORE" }
   };
 
   let _lastDmrPayload = null;
   function fmt(x){ return x ? parseFloat(x).toFixed(2) : "—"; }
 
+  // Modal Control
   function openLaunchModal() {
       navigator.clipboard.writeText("Run full analysis for this session");
       document.getElementById('launchModal').style.display = 'flex';
   }
-  
   function closeLaunchModal() {
       document.getElementById('launchModal').style.display = 'none';
   }
-  
   function proceedToAI() {
       window.open(BATTLEBOX_GPT_URL, "_blank");
       closeLaunchModal();
   }
 
+  // CORE SESSION LOGIC
   function getSessionContext() {
     const key = document.getElementById("sessionTz").value;
     const spec = SPECS[key] || SPECS["UTC"];
     const now = new Date();
+    // Logic to calculate offset
     const targetTimeStr = now.toLocaleString("en-US", {timeZone: spec.tz, hour12: false});
     const targetDate = new Date(targetTimeStr); 
     const currentMins = (targetDate.getHours() * 60) + targetDate.getMinutes();
@@ -232,8 +247,10 @@
     document.getElementById("status").innerHTML = ctx.uiMsg;
     document.getElementById("status").style.color = ctx.uiColor;
     
+    // Only update if not loading
     if(btn.innerText !== "CALIBRATING...") {
         btn.innerText = ctx.btnLabel;
+        // Style overrides
         if(ctx.isReview) {
            btn.style.border = "1px solid rgba(255,255,255,0.2)";
            btn.style.boxShadow = "none";
@@ -287,6 +304,7 @@
 
       document.getElementById("tvCopyBtn").style.display = "inline-flex";
       document.getElementById("openGptBtn").style.display = "inline-flex"; 
+      document.getElementById("ai-verbiage").style.display = "block";
       document.getElementById("status").innerText = "> SYSTEM READY. DATA SYNCED.";
       document.getElementById("status").style.color = "var(--success)";
       
