@@ -144,15 +144,15 @@
         <div style="height:2px; width:50px; background:#00ff9d; margin:0 auto 30px auto;"></div>
         
         <div style="text-align:left; background:#000; padding:20px; border-radius:8px; border:1px solid #222; margin-bottom:30px;">
-            <div style="color:#00ff9d; font-size:12px; font-weight:bold; margin-bottom:5px;">✓ FULL SESSION DATA COPIED</div>
+            <div style="color:#00ff9d; font-size:12px; font-weight:bold; margin-bottom:5px;">✓ FULL COMMAND PROMPT COPIED</div>
             <div style="font-family:monospace; color:#ccc; font-size:12px; word-break: break-all;">
-                { "levels": {...}, "bias_model": {...}, "context": {...} }
+                Generate today’s Daily Market Review... { JSON }
             </div>
         </div>
 
         <p style="color:#888; font-size:14px; margin-bottom:30px; line-height:1.5;">
-            The BattleBox AI will open in a new tab.<br>
-            <strong>Paste (Ctrl+V)</strong> the data payload into the chat to begin analysis.
+            The BattleBox Command Prompt is ready.<br>
+            <strong>Paste (Ctrl+V)</strong> into the GPT to generate your battle plan immediately.
         </p>
 
         <div style="display:flex; gap:10px; justify-content:center;">
@@ -177,18 +177,26 @@
   let _lastDmrPayload = null;
   function fmt(x){ return x ? parseFloat(x).toFixed(2) : "—"; }
 
-  // --- MODAL LOGIC (UPDATED FOR CONTRACT v1.3) ---
+  // --- MODAL LOGIC (UPDATED: PROMPT WRAPPER) ---
   function openLaunchModal() {
       if (!_lastDmrPayload) { alert("Please Initialize Sequence First"); return; }
       
-      // Inject Viewer Info
+      // 1. Prepare Data Payload
       const payload = { ..._lastDmrPayload };
       payload.viewer = {
           local_tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
           source: "browser"
       };
 
-      navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      // 2. Wrap in Command Prompt
+      const jsonBody = JSON.stringify(payload, null, 2);
+      const promptText = `Generate today’s Daily Market Review using the Kabroda methodology.
+Use the following session packet as the authoritative data source:
+
+${jsonBody}`;
+
+      // 3. Copy to Clipboard
+      navigator.clipboard.writeText(promptText);
       document.getElementById('launchModal').style.display = 'flex';
   }
   
