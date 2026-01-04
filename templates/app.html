@@ -144,9 +144,9 @@
         <div style="height:2px; width:50px; background:#00ff9d; margin:0 auto 30px auto;"></div>
         
         <div style="text-align:left; background:#000; padding:20px; border-radius:8px; border:1px solid #222; margin-bottom:30px;">
-            <div style="color:#00ff9d; font-size:12px; font-weight:bold; margin-bottom:5px;">✓ SESSION DATA COPIED</div>
+            <div style="color:#00ff9d; font-size:12px; font-weight:bold; margin-bottom:5px;">✓ FULL SESSION DATA COPIED</div>
             <div style="font-family:monospace; color:#ccc; font-size:12px; word-break: break-all;">
-                { "symbol": "BTCUSDT", "levels": {...}, "logic": "ACTIVE" }
+                { "levels": {...}, "bias_model": {...}, "context": {...} }
             </div>
         </div>
 
@@ -165,7 +165,6 @@
 <script>
   const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
   
-  // SPECS: SYDNEY RESTORED
   const SPECS = {
     "America/New_York_Early": { tz: "America/New_York", h: 8, m: 30, label: "NY FUTURES" },
     "America/New_York":       { tz: "America/New_York", h: 9, m: 30, label: "NY EQUITY" },
@@ -178,20 +177,29 @@
   let _lastDmrPayload = null;
   function fmt(x){ return x ? parseFloat(x).toFixed(2) : "—"; }
 
-  // --- MODAL LOGIC (DATA COPY REPLACES API) ---
+  // --- UPDATED: COPY EVERYTHING (INCLUDING BIAS & SCORES) ---
   function openLaunchModal() {
       if (!_lastDmrPayload) { alert("Please Initialize Sequence First"); return; }
       
-      // Construct the Contract 1.1 JSON Payload manually for Clipboard
       const payload = {
           contract_version: "1.1",
           generated_at: new Date().toISOString(),
           symbol: _lastDmrPayload.symbol,
           price: _lastDmrPayload.last_price,
           session_tz: _lastDmrPayload.session_tz,
+          
+          // CORE LEVELS
           levels: _lastDmrPayload.levels,
+          
+          // THE MISSING PIECE: SSE SCORES & LEANS
+          bias_model: _lastDmrPayload.bias_model || {},
+          context: _lastDmrPayload.context || {},
+          htf_shelves: _lastDmrPayload.htf_shelves || {},
+          
+          // ANCHOR & LOGIC
           range_30m: _lastDmrPayload.range_30m,
           trade_logic: _lastDmrPayload.trade_logic || {},
+          
           context_hint: "User is manually pasting this session data."
       };
 
@@ -208,7 +216,7 @@
       closeLaunchModal();
   }
 
-  // --- CORE SESSION LOGIC (RESTORED) ---
+  // --- CORE SESSION LOGIC ---
   function getSessionContext() {
     const key = document.getElementById("sessionTz").value;
     const spec = SPECS[key] || SPECS["UTC"];
