@@ -5,36 +5,75 @@
   <div class="pill">TOOLKIT ACCESS</div>
   <h1 class="display-title">Execution <span class="gradient-text">Indicators</span></h1>
   <p class="lead-text">
-    The Kabroda Suite is now open source. Connect directly on TradingView.
+    The official TradingView scripts required to run the BattleBox system.
   </p>
 </div>
 
 <div class="bento-grid">
 
-  <div class="bento-card">
+  <div class="bento-card" style="border-top: 4px solid var(--primary);">
     <div style="margin-bottom: 20px;">
-      <h3 style="color: #fff;">Kabroda BattleBox Suite</h3>
-      <div style="font-size: 13px; color: var(--success); font-weight: 700; margin-top: 5px;">STATUS: PUBLIC</div>
+      <h3 style="color: #fff;">1. Kabroda BattleBox Command</h3>
+      <div style="font-size: 11px; background: var(--primary); color: #000; font-weight: 800; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-top: 8px;">
+        REQUIRED SYSTEM
+      </div>
     </div>
-    <p style="color: var(--text-muted); font-size: 14px; line-height: 1.6;">
-      The core execution overlay. Displays Daily Support, Resistance, Breakout Triggers, and the 30m Opening Range Anchor.
+    
+    <p style="color: var(--text-muted); font-size: 14px; line-height: 1.6; min-height: 60px;">
+      The <strong>Execution Anchor</strong>. This script receives the daily session levels you copy from the Suite. It locks your chart to the institutional spot price and displays your Breakout Triggers.
     </p>
+    
     <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--glass-border);">
-      <a href="https://www.tradingview.com/u/Kabroda/" target="_blank" class="btn primary" style="width: 100%; text-align: center;">
-        Get on TradingView
+      <a href="https://www.tradingview.com/script/3tgdfJun-Kabroda-BattleBox-Command/" target="_blank" class="btn primary" style="width: 100%; text-align: center;">
+        <span style="margin-right: 8px;">Add to Favorites</span> ↗
       </a>
     </div>
   </div>
 
-  <div class="bento-card" style="border: 1px solid var(--glass-border); background: rgba(0,0,0,0.3);">
-    <h3 style="color: #fff; margin-bottom: 15px;">How to Install</h3>
-    <ol style="color: var(--text-muted); font-size: 14px; line-height: 1.8; padding-left: 20px;">
-      <li>Click the button to visit our TradingView Profile.</li>
-      <li>Find the script <strong>"Kabroda BattleBox Suite"</strong>.</li>
-      <li>Click <strong>"Add to Favorites"</strong> (Star icon).</li>
-      <li>Open your Chart -> Indicators -> Favorites.</li>
-      <li>Apply the script and paste your levels from the Suite.</li>
-    </ol>
+  <div class="bento-card" style="border-top: 4px solid var(--purple);">
+    <div style="margin-bottom: 20px;">
+      <h3 style="color: #fff;">2. KTBB Intel: Multi-Timeframe</h3>
+      <div style="font-size: 11px; background: var(--purple); color: #fff; font-weight: 800; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-top: 8px;">
+        CONTEXT ENGINE
+      </div>
+    </div>
+    
+    <p style="color: var(--text-muted); font-size: 14px; line-height: 1.6; min-height: 60px;">
+      The <strong>Structural Companion</strong>. It automatically calculates Higher Timeframe (HTF) market structure, identifying dominant trends and key pivots so you never trade against the flow.
+    </p>
+    
+    <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--glass-border);">
+      <a href="https://www.tradingview.com/script/cznPRreq-KTBB-Intel-Multi-Timeframe-Context/" target="_blank" class="btn secondary" style="width: 100%; text-align: center; border-color: var(--purple); color: var(--purple);">
+        <span style="margin-right: 8px;">Add to Favorites</span> ↗
+      </a>
+    </div>
+  </div>
+
+  <div class="bento-card wide" style="background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border);">
+    <h3 style="color: #fff; margin-bottom: 20px; font-size: 16px;">⚡ How to Sync Your Charts</h3>
+    
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
+      <div>
+        <div style="color: var(--primary-bright); font-weight: 700; font-size: 12px; margin-bottom: 8px;">STEP 01</div>
+        <p style="color: var(--text-muted); font-size: 13px; line-height: 1.5;">
+          Click the buttons above to open the scripts on TradingView. Scroll down and click <strong>"Add to Favorites"</strong> (the Star icon).
+        </p>
+      </div>
+      
+      <div>
+        <div style="color: var(--primary-bright); font-weight: 700; font-size: 12px; margin-bottom: 8px;">STEP 02</div>
+        <p style="color: var(--text-muted); font-size: 13px; line-height: 1.5;">
+          Open your chart. Go to <strong>Indicators > Favorites</strong> and click <strong>Kabroda BattleBox Command</strong> to add it to your screen.
+        </p>
+      </div>
+
+      <div>
+        <div style="color: var(--primary-bright); font-weight: 700; font-size: 12px; margin-bottom: 8px;">STEP 03</div>
+        <p style="color: var(--text-muted); font-size: 13px; line-height: 1.5;">
+          Go to the <a href="/suite" style="color:#fff; text-decoration:underline;">Suite</a>. Click <strong>"Copy Indicator Data"</strong>. Open the Indicator Settings on your chart and paste the numbers into the "Session Data" field.
+        </p>
+      </div>
+    </div>
   </div>
 
 </div>
