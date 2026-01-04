@@ -41,7 +41,7 @@
             <option value="America/New_York">🇺🇸 NY EQUITY (09:30 ET)</option>
             <option value="Europe/London">🇬🇧 LONDON (08:00 GMT)</option>
             <option value="Asia/Tokyo">🇯🇵 TOKYO (09:00 JST)</option>
-            <option value="UTC">🌐 UTC (CRYPTO DEFAULT)</option>
+            <option value="Australia/Sydney">🇦🇺 SYDNEY (10:00 AEDT)</option> <option value="UTC">🌐 UTC (CRYPTO DEFAULT)</option>
           </select>
           <span style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: var(--success); pointer-events: none;">▼</span>
         </div>
@@ -166,18 +166,15 @@
     "America/New_York":       { tz: "America/New_York", h: 9, m: 30, label: "NY EQUITY" },
     "Europe/London":          { tz: "Europe/London",    h: 8, m: 0,  label: "LONDON" },
     "Asia/Tokyo":             { tz: "Asia/Tokyo",       h: 9, m: 0,  label: "TOKYO" },
-    "Australia/Sydney":       { tz: "Australia/Sydney", h: 10, m: 0, label: "SYDNEY" },
+    "Australia/Sydney":       { tz: "Australia/Sydney", h: 10, m: 0, label: "SYDNEY" }, /* CONFIRMED */
     "UTC":                    { tz: "UTC",              h: 0, m: 0,  label: "UTC CORE" }
   };
 
   let _lastDmrPayload = null;
   function fmt(x){ return x ? parseFloat(x).toFixed(2) : "—"; }
 
-  // --- MODAL LOGIC ---
   function openLaunchModal() {
-      // 1. Copy Command
       navigator.clipboard.writeText("Run full analysis for this session");
-      // 2. Show Modal
       document.getElementById('launchModal').style.display = 'flex';
   }
   
@@ -190,7 +187,6 @@
       closeLaunchModal();
   }
 
-  // --- SESSION LOGIC ---
   function getSessionContext() {
     const key = document.getElementById("sessionTz").value;
     const spec = SPECS[key] || SPECS["UTC"];
