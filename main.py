@@ -1,6 +1,6 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.4
+# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.5 (CLEAN)
 # ---------------------------------------------------------
 from __future__ import annotations
 
@@ -113,11 +113,6 @@ def about(request: Request):
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy_page(request: Request):
     return templates.TemplateResponse("privacy.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
-
-@app.get("/gpt-guide", response_class=HTMLResponse)
-def gpt_guide_page(request: Request):
-    is_logged_in = _session_user_dict(request) is not None
-    return templates.TemplateResponse("gpt-guide.html", {"request": request, "is_logged_in": is_logged_in})
 
 @app.get("/how-it-works", response_class=HTMLResponse)
 def how_it_works(request: Request):
