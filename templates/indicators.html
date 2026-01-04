@@ -1,250 +1,41 @@
 {% extends "base.html" %}
-
-{% block title %}Kabroda Lab | Command Center{% endblock %}
-
 {% block content %}
-<div class="app-container">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1 style="font-size: 1.5rem; margin: 0;">RESEARCH COMMAND</h1>
-        <a href="/suite" class="nav-item" style="font-size: 0.8rem; color: #888; text-decoration: none;">&larr; BACK TO SUITE</a>
-    </div>
 
-    <div style="display: grid; grid-template-columns: 250px 1fr; gap: 20px;">
-        
-        <div class="telemetry-card" style="height: fit-content;">
-            <h3 style="color: #00e5ff; margin-bottom: 15px;">CONFIG</h3>
-            
-            <div class="input-group">
-                <label>ASSET</label>
-                <select id="symbolSelect" style="width:100%; padding: 8px; background: #111; color: #fff; border: 1px solid #333;">
-                    <option value="BTCUSDT">BTC (BITCOIN)</option>
-                    <option value="ETHUSDT">ETH (ETHEREUM)</option>
-                </select>
-            </div>
-            
-            <div class="input-group" style="margin-top:15px;">
-                <label>SESSIONS</label>
-                <div style="background: #111; padding: 8px; border-radius: 4px; display: flex; flex-direction: column; gap: 5px;">
-                    <label style="font-size: 0.75rem;"><input type="checkbox" value="America/New_York" checked> NY FUTURES (08:30)</label>
-                    <label style="font-size: 0.75rem;"><input type="checkbox" value="Europe/London"> LONDON (08:00)</label>
-                </div>
-            </div>
-
-            <div class="input-group" style="margin-top:15px;">
-                <label>STRATEGY PROTOCOL</label>
-                <select id="stratSelect" style="width:100%; padding: 8px; background: #111; color: #fff; border: 1px solid #333;">
-                    <option value="S0">S0 - HOLD FIRE (Safety)</option>
-                    <option value="S1">S1 - BREAKOUT ACCEPTANCE (Long)</option>
-                    <option value="S2">S2 - BREAKDOWN ACCEPTANCE (Short)</option>
-                    <option value="S3">S3 - FAILED BREAKOUT (Reversal)</option>
-                    <option value="S4">S4 - MID-BAND FADE (Rotational)</option>
-                    <option value="S5">S5 - RANGE EXTREMES (Reversion)</option>
-                    <option value="S6">S6 - VALUE ROTATION (Ping Pong)</option>
-                    <option value="S7">S7 - TREND PULLBACK (Continuation)</option>
-                    <option value="S8">S8 - MOMENTUM EXPANSION (Impulse)</option>
-                    <option value="S9">S9 - EXHAUSTION REVERSAL (Counter)</option>
-                </select>
-            </div>
-
-            <div class="input-group" style="margin-top:15px;">
-                <label>SIMULATION</label>
-                <input type="number" id="levInput" placeholder="Lev (1x)" value="1" style="width:100%; margin-bottom:5px; background:#111; border:1px solid #333; color:#fff; padding:5px;">
-                <input type="number" id="capInput" placeholder="Cap ($1000)" value="1000" style="width:100%; background:#111; border:1px solid #333; color:#fff; padding:5px;">
-            </div>
-
-            <button class="primary-btn" onclick="runLab()" style="margin-top: 20px; width: 100%; padding: 12px; background: var(--primary); border: none; font-weight: bold; cursor: pointer;">RUN LAB</button>
-        </div>
-
-        <div>
-            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                <button class="tab-btn active" onclick="switchTab('stats')">SYSTEM STATS</button>
-                <button class="tab-btn" onclick="switchTab('sim')">STRATEGY SIM</button>
-                <button class="tab-btn" onclick="switchTab('replay')">LEVEL REPLAY</button>
-            </div>
-
-            <div id="view-stats" class="tab-view">
-                <div class="telemetry-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;">
-                    <div class="telemetry-card" style="text-align: center; background: rgba(0,255,157,0.1); border: 1px solid rgba(0,255,157,0.3);">
-                        <div class="label" style="color:#00ff9d; font-size: 0.7rem;">WIN RATE</div>
-                        <div class="value" id="stat-win">--%</div>
-                    </div>
-                    <div class="telemetry-card" style="text-align: center;">
-                        <div class="label" style="color:#aaa; font-size: 0.7rem;">TOTAL PNL</div>
-                        <div class="value" id="stat-pnl">--</div>
-                    </div>
-                    <div class="telemetry-card" style="text-align: center;">
-                        <div class="label" style="color:#aaa; font-size: 0.7rem;">VALID TRADES</div>
-                        <div class="value" id="stat-trades">--</div>
-                    </div>
-                    <div class="telemetry-card" style="text-align: center;">
-                        <div class="label" style="color:#aaa; font-size: 0.7rem;">SESSIONS</div>
-                        <div class="value" id="stat-sessions">--</div>
-                    </div>
-                </div>
-            </div>
-
-            <div id="view-sim" class="tab-view" style="display:none;">
-                <div class="telemetry-card">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                        <h3>TRADE LOG</h3>
-                        <div style="font-size: 0.8rem; color: #888;">Recent 20 Sessions</div>
-                    </div>
-                    <div style="max-height: 400px; overflow-y: auto;">
-                        <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
-                            <thead style="text-align: left; color: #666; border-bottom: 1px solid #333;">
-                                <tr>
-                                    <th style="padding: 8px;">DATE</th>
-                                    <th>STATUS</th>
-                                    <th>ENTRY</th>
-                                    <th>EXIT</th>
-                                    <th>PNL</th>
-                                </tr>
-                            </thead>
-                            <tbody id="sim-body"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <div id="view-replay" class="tab-view" style="display:none;">
-                <div class="telemetry-card" style="margin-bottom: 20px;">
-                    <h3 style="color:#00e5ff; margin-bottom: 10px;">SELECTED: <span id="replay-date" style="color:#fff">---</span></h3>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-family: monospace;">
-                        <div><span style="color:#ff4d4d">RES:</span> <span id="rep-res" style="color:#fff">---</span></div>
-                        <div><span style="color:#00ff9d">BO:</span> <span id="rep-bo" style="color:#fff">---</span></div>
-                        <div><span style="color:#b39ddb">BD:</span> <span id="rep-bd" style="color:#fff">---</span></div>
-                        <div><span style="color:#387ef5">SUP:</span> <span id="rep-sup" style="color:#fff">---</span></div>
-                    </div>
-                    <button onclick="copyReplay()" style="margin-top:15px; background:#333; color:#fff; border:none; padding:8px 16px; cursor: pointer; border-radius: 4px;">COPY LEVELS TO CLIPBOARD</button>
-                </div>
-                <div class="telemetry-card">
-                    <div style="max-height: 300px; overflow-y: auto;">
-                        <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
-                            <tbody id="replay-list"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-        </div>
-    </div>
+<div class="text-center" style="margin-bottom: 50px;">
+  <div class="pill">TOOLKIT ACCESS</div>
+  <h1 class="display-title">Execution <span class="gradient-text">Indicators</span></h1>
+  <p class="lead-text">
+    The Kabroda Suite is now open source. Connect directly on TradingView.
+  </p>
 </div>
 
-<style>
-.tab-btn { background: #111; border: 1px solid #333; color: #888; padding: 10px 20px; cursor: pointer; flex: 1; }
-.tab-btn.active { background: var(--primary); color: #000; font-weight: bold; border-color: var(--primary); }
-.value { font-size: 1.5rem; font-weight: bold; color: #fff; margin-top: 5px; }
-tr { border-bottom: 1px solid #222; }
-</style>
+<div class="bento-grid">
 
-<script>
-let currentReplay = null;
+  <div class="bento-card">
+    <div style="margin-bottom: 20px;">
+      <h3 style="color: #fff;">Kabroda BattleBox Suite</h3>
+      <div style="font-size: 13px; color: var(--success); font-weight: 700; margin-top: 5px;">STATUS: PUBLIC</div>
+    </div>
+    <p style="color: var(--text-muted); font-size: 14px; line-height: 1.6;">
+      The core execution overlay. Displays Daily Support, Resistance, Breakout Triggers, and the 30m Opening Range Anchor.
+    </p>
+    <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--glass-border);">
+      <a href="https://www.tradingview.com/u/Kabroda/" target="_blank" class="btn primary" style="width: 100%; text-align: center;">
+        Get on TradingView
+      </a>
+    </div>
+  </div>
 
-function switchTab(viewId) {
-    document.querySelectorAll('.tab-view').forEach(el => el.style.display = 'none');
-    document.getElementById('view-' + viewId).style.display = 'block';
-    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-    event.target.classList.add('active');
-}
+  <div class="bento-card" style="border: 1px solid var(--glass-border); background: rgba(0,0,0,0.3);">
+    <h3 style="color: #fff; margin-bottom: 15px;">How to Install</h3>
+    <ol style="color: var(--text-muted); font-size: 14px; line-height: 1.8; padding-left: 20px;">
+      <li>Click the button to visit our TradingView Profile.</li>
+      <li>Find the script <strong>"Kabroda BattleBox Suite"</strong>.</li>
+      <li>Click <strong>"Add to Favorites"</strong> (Star icon).</li>
+      <li>Open your Chart -> Indicators -> Favorites.</li>
+      <li>Apply the script and paste your levels from the Suite.</li>
+    </ol>
+  </div>
 
-async function runLab() {
-    const btn = document.querySelector('.primary-btn');
-    btn.innerText = "PROCESSING...";
-    btn.disabled = true;
-    
-    const sessions = [];
-    document.querySelectorAll('input[type="checkbox"]:checked').forEach(c => sessions.push(c.value));
-    
-    try {
-        const res = await fetch('/api/dmr/history', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                symbol: document.getElementById('symbolSelect').value,
-                sessions: sessions,
-                leverage: document.getElementById('levInput').value,
-                capital: document.getElementById('capInput').value,
-                strategy: document.getElementById('stratSelect').value // SEND SELECTED STRATEGY
-            })
-        });
-        const data = await res.json();
-        
-        // 1. UPDATE STATS
-        document.getElementById('stat-win').innerText = (data.stats.win_rate || 0) + "%";
-        document.getElementById('stat-pnl').innerText = "$" + (data.stats.total_pnl || 0).toFixed(0);
-        document.getElementById('stat-trades').innerText = (data.stats.valid_trades || 0);
-        document.getElementById('stat-sessions').innerText = (data.stats.total_sessions || 0);
-        
-        // Color PnL
-        document.getElementById('stat-pnl').style.color = data.stats.total_pnl >= 0 ? "#00ff9d" : "#ff4d4d";
-        
-        // 2. UPDATE SIMULATOR
-        renderSim(data.history);
-        
-        // 3. UPDATE REPLAY LIST
-        renderReplayList(data.history);
-        
-    } catch(e) { 
-        alert("Error: " + e); 
-        console.error(e);
-    } finally {
-        btn.innerText = "RUN LAB";
-        btn.disabled = false;
-    }
-}
-
-function renderSim(history) {
-    const tbody = document.getElementById('sim-body');
-    tbody.innerHTML = '';
-
-    history.forEach(row => {
-        const s = row.strategy;
-        const tr = document.createElement('tr');
-        let col = s.pnl >= 0 ? '#00ff9d' : '#ff4d4d';
-        if (s.status.includes("NO_") || s.status.includes("S0")) col = "#666"; 
-
-        tr.innerHTML = `
-            <td style="padding:10px; color:#aaa;">${row.date}</td>
-            <td style="color:#fff;">${s.status}</td>
-            <td style="color:#aaa;">${s.entry ? s.entry.toFixed(1) : '-'}</td>
-            <td style="color:#aaa;">${s.exit ? s.exit.toFixed(1) : '-'}</td>
-            <td style="color:${col}; font-weight:bold;">$${s.pnl.toFixed(0)}</td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
-
-function renderReplayList(history) {
-    const list = document.getElementById('replay-list');
-    list.innerHTML = '';
-    history.forEach(row => {
-        const tr = document.createElement('tr');
-        tr.style.cursor = "pointer";
-        tr.onclick = () => loadReplay(row);
-        tr.innerHTML = `<td style="padding:10px; color:#ccc; transition:0.2s;">${row.date} <span style="color:#666; font-size:0.7rem; margin-left:10px;">${row.session}</span></td>`;
-        tr.onmouseover = () => tr.style.background = "#222";
-        tr.onmouseout = () => tr.style.background = "transparent";
-        list.appendChild(tr);
-    });
-    if(history.length > 0) loadReplay(history[0]);
-}
-
-function loadReplay(row) {
-    currentReplay = row;
-    const l = row.levels;
-    document.getElementById('replay-date').innerText = row.date;
-    document.getElementById('rep-res').innerText = (l.daily_resistance||0).toFixed(2);
-    document.getElementById('rep-bo').innerText = (l.breakout_trigger||0).toFixed(2);
-    document.getElementById('rep-bd').innerText = (l.breakdown_trigger||0).toFixed(2);
-    document.getElementById('rep-sup').innerText = (l.daily_support||0).toFixed(2);
-}
-
-function copyReplay() {
-    if(!currentReplay) return;
-    const l = currentReplay.levels;
-    const txt = `${l.breakout_trigger.toFixed(2)},${l.breakdown_trigger.toFixed(2)},${l.daily_resistance.toFixed(2)},${l.daily_support.toFixed(2)}`;
-    navigator.clipboard.writeText(txt);
-    alert("Copied Levels: " + txt);
-}
-</script>
+</div>
 {% endblock %}
