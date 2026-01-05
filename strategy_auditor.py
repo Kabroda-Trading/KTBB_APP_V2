@@ -1,11 +1,17 @@
 # strategy_auditor.py
 # ==============================================================================
-# KABRODA STRATEGY AUDIT MASTER CORE v3.7 (S8 TRAP LOGIC)
+# KABRODA STRATEGY AUDIT MASTER CORE v3.8 (FULL SUITE COMPLETE)
 # ==============================================================================
-# Updates:
-# - S8: Implemented "Failed Breakout / Trap" Logic
-# - S8: State Machine (Detect Breakout -> Track Extremes -> Detect Re-entry)
-# - S8: Targets POC (Trap Resolution)
+# S0: Hold Fire (Discipline)
+# S1: Breakout Acceptance (Long Trend)
+# S2: Breakdown Acceptance (Short Trend)
+# S3: Structural Stand-Down (Shield)
+# S4: Mid-Band Fade (Rotation)
+# S5: Range Extremes (Hard Edge Fade)
+# S6: Value Rotation (Edge-to-Edge)
+# S7: Trend Continuation (Pullback)
+# S8: Failed Breakout (Trap)
+# S9: Circuit Breaker (Risk Guard)
 # ==============================================================================
 
 from __future__ import annotations
@@ -241,57 +247,35 @@ def run_s7_logic(levels, raw_c15, raw_c5, risk, regime):
 
 # --- S8: FAILED BREAKOUT / TRAP ---
 def run_s8_logic(levels, raw_c15, raw_c5, risk, regime):
-    """
-    S8: Trap Detection. 
-    1. Breakout Attempt (Close outside trigger)
-    2. Failure (Close back inside value)
-    """
     c15 = _to_candles(raw_c15); c5 = _to_candles(raw_c5)
     bo = levels.get("breakout_trigger", 0); bd = levels.get("breakdown_trigger", 0)
     vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
-    
     direction = "NONE"; setup_time = 0; entry = 0; stop = 0
     attempt_long = False; attempt_short = False
     trap_high = 0; trap_low = 999999
-    
-    # 1. State Machine Scanner
     for c in c15:
-        # Long Attempt (Breakout)
-        if c.close > bo: 
-            attempt_long = True; trap_high = max(trap_high, c.high)
-        # Short Attempt (Breakdown)
-        if c.close < bd: 
-            attempt_short = True; trap_low = min(trap_low, c.low)
-            
-        # Trap Confirmation (Re-entry)
-        if attempt_long and c.close < vah:
-            # Failed Long -> Short Trap Trade
-            direction = "SHORT"; setup_time = c.timestamp; entry = c.close
-            stop = trap_high + 25; break
-            
-        if attempt_short and c.close > val:
-            # Failed Short -> Long Trap Trade
-            direction = "LONG"; setup_time = c.timestamp; entry = c.close
-            stop = trap_low - 25; break
-            
-    if direction == "NONE":
-        return {"pnl": 0, "status": "S8_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S8_WAIT", "A", "No failed breakout detected.", 0, 0, 0)}
-
-    # 2. Auditor
+        if c.close > bo: attempt_long = True; trap_high = max(trap_high, c.high)
+        if c.close < bd: attempt_short = True; trap_low = min(trap_low, c.low)
+        if attempt_long and c.close < vah: direction = "SHORT"; setup_time = c.timestamp; entry = c.close; stop = trap_high + 25; break
+        if attempt_short and c.close > val: direction = "LONG"; setup_time = c.timestamp; entry = c.close; stop = trap_low - 25; break
+    if direction == "NONE": return {"pnl": 0, "status": "S8_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S8_WAIT", "A", "No failed breakout detected.", 0, 0, 0)}
     valid = True; code = "VALID_S8_A"; grade = "A"; reason = "Valid Trap Detected."
-    
-    # Gates? S8 is opportunistic, so fewer gates, but location matters.
-    # If re-entry is too deep, risk is bad.
     if direction == "SHORT" and entry < poc: valid = False; code = "INVALID_S8_LATE"; reason = "Trap entry below POC (Too late)."
     if direction == "LONG" and entry > poc: valid = False; code = "INVALID_S8_LATE"; reason = "Trap entry above POC (Too late)."
-    
-    target = poc # Trap targets the middle
-    
-    # 3. Executor
+    target = poc 
     return _execute_simulation(c5, setup_time, entry, stop, target, direction, risk, valid, code, grade, reason, exit_mode="FIXED")
 
-# --- S9 (PENDING) ---
-def run_s9_logic(levels, raw_c15, raw_c5, risk, regime): return {"pnl":0, "status":"S9_PENDING", "entry":0, "exit":0, "audit":{}}
+# --- S9: CIRCUIT BREAKER ---
+def run_s9_logic(levels, raw_c15, raw_c5, risk, regime):
+    c15 = _to_candles(raw_c15)
+    vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
+    value_width = vah - val
+    if value_width == 0: return {"pnl":0, "status":"S9_PENDING", "entry":0, "exit":0, "audit":{}}
+    is_extreme = False
+    for c in c15:
+        if abs(c.close - poc) > (value_width * 3.5): is_extreme = True; break
+    if is_extreme: return {"pnl": 0, "status": "S9_ACTIVE", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "S9_CIRCUIT_BREAKER", "A", "Extreme Displacement. Halted.", 0, 0, 0)}
+    else: return {"pnl": 0, "status": "S9_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "S9_MONITORING", "A", "Normal operations.", 0, 0, 0)}
 
 # ==========================================
 # 3. SHARED EXECUTOR
@@ -307,20 +291,14 @@ def _execute_simulation(candles_5m: List[Candle], setup_time: int, entry: float,
         c = candles_5m[i]
         if c.timestamp <= setup_time: continue
         
-        # 1. HARD STOP
         if direction == "LONG":
             if c.low <= stop: exit_price = stop; status = "STOPPED_OUT"; break
+            if c.high >= target: exit_price = target; status = "TAKE_PROFIT"; break
         else:
             if c.high >= stop: exit_price = stop; status = "STOPPED_OUT"; break
+            if c.low <= target: exit_price = target; status = "TAKE_PROFIT"; break
             
-        # 2. EXIT LOGIC
-        if exit_mode == "FIXED":
-            if direction == "LONG":
-                if c.high >= target: exit_price = target; status = "TAKE_PROFIT"; break
-            else:
-                if c.low <= target: exit_price = target; status = "TAKE_PROFIT"; break
-                
-        elif exit_mode == "TRAILING":
+        if exit_mode == "TRAILING":
             current_ema = ema_series[i]
             if direction == "LONG" and c.close < current_ema: exit_price = c.close; status = "TRAIL_EXIT"; break
             if direction == "SHORT" and c.close > current_ema: exit_price = c.close; status = "TRAIL_EXIT"; break
