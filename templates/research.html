@@ -158,13 +158,27 @@
                 <div class="telemetry-card" style="margin-bottom: 20px; border: 1px solid #333;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <h3 style="color:#00e5ff; margin: 0;">SELECTED: <span id="replay-date" style="color:#fff">---</span></h3>
-                        <button onclick="copyReplay()" style="background:#333; color:#fff; border:1px solid #555; padding:6px 12px; cursor: pointer; font-size: 0.7rem;">COPY LEVELS</button>
+                        
+                        <div style="display:flex; gap:10px;">
+                            <button onclick="copyLevelsOnly()" style="background:#333; color:#fff; border:1px solid #555; padding:6px 12px; cursor: pointer; font-size: 0.7rem;">COPY LEVELS</button>
+                            <button onclick="copyForensic()" style="background:#00ff9d; color:#000; border:none; padding:6px 12px; font-weight:bold; cursor: pointer; font-size: 0.7rem;">COPY FORENSIC DATA</button>
+                        </div>
                     </div>
+                    
                     <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; font-family: monospace; margin-top: 15px;">
                         <div><span style="color:#ff4d4d">RES:</span> <span id="rep-res" style="color:#fff">---</span></div>
                         <div><span style="color:#00ff9d">BO:</span> <span id="rep-bo" style="color:#fff">---</span></div>
                         <div><span style="color:#b39ddb">BD:</span> <span id="rep-bd" style="color:#fff">---</span></div>
                         <div><span style="color:#387ef5">SUP:</span> <span id="rep-sup" style="color:#fff">---</span></div>
+                    </div>
+                    
+                    <div id="trade-detail-box" style="margin-top: 20px; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 4px; display:none;">
+                        <div style="font-size: 0.75rem; color: #888; margin-bottom: 5px;">SIMULATION RESULT</div>
+                        <div style="font-family: monospace; color: #fff;">
+                            ENTRY: <span id="rep-entry" style="color: #fff;">--</span> 
+                            EXIT: <span id="rep-exit" style="color: #fff;">--</span> 
+                            PNL: <span id="rep-pnl" style="font-weight: bold;">--</span>
+                        </div>
                     </div>
                 </div>
                 <div class="telemetry-card" style="padding: 0;">
@@ -222,20 +236,19 @@ async function runLab() {
         });
         const data = await res.json();
         
-        // 1. UPDATE STATS
+        // UPDATE STATS
         document.getElementById('stat-win').innerText = (data.stats.win_rate || 0) + "%";
         document.getElementById('stat-pnl').innerText = "$" + (data.stats.total_pnl || 0).toFixed(0);
         document.getElementById('stat-trades').innerText = (data.stats.valid_trades || 0);
         document.getElementById('stat-sessions').innerText = (data.stats.total_sessions || 0);
         document.getElementById('stat-pnl').style.color = data.stats.total_pnl >= 0 ? "#00ff9d" : "#ff4d4d";
 
-        // 2. UPDATE REGIME HEATMAP
         updateRegime('rot', data.stats.regime_breakdown.ROTATIONAL);
         updateRegime('dir', data.stats.regime_breakdown.DIRECTIONAL);
         updateRegime('com', data.stats.regime_breakdown.COMPRESSED);
         updateRegime('vol', data.stats.regime_breakdown.VOLATILE);
 
-        // 3. SHOW EXEMPLAR (TEACHER)
+        // SHOW EXEMPLAR
         if(data.stats.exemplar) {
             bestExemplar = data.stats.exemplar;
             document.getElementById('exemplar-box').style.display = 'block';
@@ -247,7 +260,6 @@ async function runLab() {
             document.getElementById('exemplar-box').style.display = 'none';
         }
         
-        // 4. UPDATE SIMULATOR & REPLAY
         renderSim(data.history);
         renderReplayList(data.history);
         
@@ -263,7 +275,6 @@ function updateRegime(key, val) {
     if(val === undefined) val = 0;
     document.getElementById('reg-' + key).innerText = val + "%";
     document.getElementById('bar-' + key).style.width = val + "%";
-    // Color code based on success
     const color = val > 50 ? "#00ff9d" : (val > 0 ? "#ffcc00" : "#333");
     document.getElementById('bar-' + key).style.backgroundColor = color;
 }
@@ -307,30 +318,69 @@ function renderReplayList(history) {
 function loadReplay(row) {
     currentReplay = row;
     const l = row.levels;
+    const s = row.strategy;
+    
     document.getElementById('replay-date').innerText = row.date;
     document.getElementById('rep-res').innerText = (l.daily_resistance||0).toFixed(2);
     document.getElementById('rep-bo').innerText = (l.breakout_trigger||0).toFixed(2);
     document.getElementById('rep-bd').innerText = (l.breakdown_trigger||0).toFixed(2);
     document.getElementById('rep-sup').innerText = (l.daily_support||0).toFixed(2);
+    
+    // Show Trade Details
+    const detailBox = document.getElementById('trade-detail-box');
+    if(s.entry > 0) {
+        detailBox.style.display = 'block';
+        document.getElementById('rep-entry').innerText = s.entry.toFixed(2);
+        document.getElementById('rep-exit').innerText = s.exit.toFixed(2);
+        const pnl = document.getElementById('rep-pnl');
+        pnl.innerText = "$" + s.pnl.toFixed(0);
+        pnl.style.color = s.pnl >= 0 ? "#00ff9d" : "#ff4d4d";
+    } else {
+        detailBox.style.display = 'none';
+    }
 }
 
 function loadExemplar() {
     if(bestExemplar) {
         loadReplay(bestExemplar);
         switchTab('replay');
-        alert("Loaded Best Example: " + bestExemplar.date + ". Levels ready to copy.");
     }
 }
 
-function copyReplay() {
+// 1. OLD COPY LEVELS
+function copyLevelsOnly() {
     if(!currentReplay) return;
     const l = currentReplay.levels;
     const txt = `${l.breakout_trigger.toFixed(2)},${l.breakdown_trigger.toFixed(2)},${l.daily_resistance.toFixed(2)},${l.daily_support.toFixed(2)}`;
     navigator.clipboard.writeText(txt);
-    const btn = event.target;
-    const orig = btn.innerText;
-    btn.innerText = "COPIED!";
-    setTimeout(() => btn.innerText = orig, 1000);
+    alert("Copied Levels: " + txt);
+}
+
+// 2. NEW FORENSIC COPY
+function copyForensic() {
+    if(!currentReplay) return;
+    
+    const packet = {
+        "forensic_audit": "1.0",
+        "date": currentReplay.date,
+        "session": currentReplay.session,
+        "market_regime": currentReplay.regime,
+        "strategy_attempted": document.getElementById('stratSelect').value,
+        "levels": currentReplay.levels,
+        "simulation_result": currentReplay.strategy
+    };
+    
+    const prompt = `Analyze this trade simulation forensic packet. 
+The system attempted the selected strategy but produced the recorded PnL.
+1. Compare the Entry Price to the Levels. Was it a valid structural entry?
+2. Compare the Exit Price. Did it exit too early or hit a stop?
+3. Calculate the implied Risk:Reward based on the entry and exit.
+
+DATA PACKET:
+${JSON.stringify(packet, null, 2)}`;
+
+    navigator.clipboard.writeText(prompt);
+    alert("FORENSIC DATA COPIED. Paste into GPT.");
 }
 </script>
 {% endblock %}
