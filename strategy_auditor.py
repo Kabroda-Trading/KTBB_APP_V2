@@ -1,11 +1,11 @@
 # strategy_auditor.py
 # ==============================================================================
-# KABRODA STRATEGY AUDIT MASTER CORE v3.6 (S7 TREND CONTINUATION)
+# KABRODA STRATEGY AUDIT MASTER CORE v3.7 (S8 TRAP LOGIC)
 # ==============================================================================
 # Updates:
-# - S7: Implemented "Trend Pullback" Logic
-# - S7: Scans for Acceptance -> Pullback to EMA -> Resumption
-# - S7: Uses Trailing Exit (Uncapped)
+# - S8: Implemented "Failed Breakout / Trap" Logic
+# - S8: State Machine (Detect Breakout -> Track Extremes -> Detect Re-entry)
+# - S8: Targets POC (Trap Resolution)
 # ==============================================================================
 
 from __future__ import annotations
@@ -191,97 +191,106 @@ def run_s6_logic(levels, raw_c15, raw_c5, risk, regime):
     pinned = (vah - val) * 0.1
     if abs(poc - vah) < pinned or abs(poc - val) < pinned: return _fail_s6(res, "INVALID_S6_POC_PINNED", "POC pinned to edge.")
     if abs(bo - vah) < (poc * 0.0015) or abs(bd - val) < (poc * 0.0015): return _fail_s6(res, "INVALID_S6_TRIGGER_OVERLAP", "Triggers overlap Value.")
-    
-    entry = res["entry"]; stop = res["audit"]["stop_loss"]
-    target = val if entry > poc else vah
+    entry = res["entry"]; stop = res["audit"]["stop_loss"]; target = val if entry > poc else vah
     c5 = _to_candles(raw_c5)
-    
-    # Geometry Check
     direction = "SHORT" if entry > target else "LONG"
-    if direction == "SHORT" and not (target < entry < stop): return _fail_s6(res, "INVALID_S6_GEOMETRY", "Stop/Entry/Target invalid.")
-    if direction == "LONG" and not (stop < entry < target): return _fail_s6(res, "INVALID_S6_GEOMETRY", "Stop/Entry/Target invalid.")
-    
+    if direction == "SHORT" and not (target < entry < stop): return _fail_s6(res, "INVALID_S6_GEOMETRY", "Geometry Invalid.")
+    if direction == "LONG" and not (stop < entry < target): return _fail_s6(res, "INVALID_S6_GEOMETRY", "Geometry Invalid.")
     return _execute_simulation(c5, 0, entry, stop, target, direction, risk, res["audit"]["valid"], res["audit"]["code"], "A", res["audit"]["reason"], exit_mode="FIXED")
 
 def _fail_s6(res, code, reason):
     res["audit"]["valid"] = False; res["audit"]["code"] = code; res["audit"]["reason"] = reason; return res
 
-# --- S7: TREND PULLBACK (CONTINUATION) ---
+# --- S7 (CONTINUATION) ---
 def run_s7_logic(levels, raw_c15, raw_c5, risk, regime):
-    """
-    S7 looks for a 5m pullback to EMA AFTER acceptance has occurred.
-    """
     c15 = _to_candles(raw_c15); c5 = _to_candles(raw_c5)
     bo = levels.get("breakout_trigger", 0); bd = levels.get("breakdown_trigger", 0)
     ema_series = _calculate_ema(c5)
-    
-    # 1. SCANNER: Need Acceptance First
     direction = "NONE"; acceptance_time = 0
-    
-    # Long Scan
     streak = 0
     for c in c15:
         if c.close > bo: streak += 1
         else: streak = 0
         if streak >= 2: direction = "LONG"; acceptance_time = c.timestamp; break
-        
     if direction == "NONE":
         streak = 0
         for c in c15:
             if c.close < bd: streak += 1
             else: streak = 0
             if streak >= 2: direction = "SHORT"; acceptance_time = c.timestamp; break
-            
-    if direction == "NONE": 
-        return {"pnl": 0, "status": "S7_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S7_WAIT", "A", "No prior acceptance detected.", 0, 0, 0)}
-
-    # 2. PULLBACK SCANNER (5m)
-    # After acceptance, wait for price to touch/cross EMA, then resume.
-    setup_time = 0; entry = 0; stop = 0
-    pullback_detected = False
-    
+    if direction == "NONE": return {"pnl": 0, "status": "S7_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S7_WAIT", "A", "No prior acceptance.", 0, 0, 0)}
+    setup_time = 0; entry = 0; stop = 0; pullback = False
     for i in range(len(c5)):
-        c = c5[i]
+        c = c5[i]; cur_ema = ema_series[i]
         if c.timestamp <= acceptance_time: continue
-        
-        current_ema = ema_series[i]
-        
         if direction == "LONG":
-            if not pullback_detected:
-                # Wait for touch/dip below EMA
-                if c.low <= current_ema: pullback_detected = True
-            else:
-                # Wait for Close back above EMA (Resumption)
-                if c.close > current_ema:
-                    setup_time = c.timestamp; entry = c.close
-                    stop = min([x.low for x in c5[i-3:i+1]]) - 10 # Low of pullback swing
-                    break
-                    
+            if not pullback: 
+                if c.low <= cur_ema: pullback = True
+            elif c.close > cur_ema:
+                setup_time = c.timestamp; entry = c.close; stop = min([x.low for x in c5[i-3:i+1]]) - 10; break
         elif direction == "SHORT":
-            if not pullback_detected:
-                if c.high >= current_ema: pullback_detected = True
-            else:
-                if c.close < current_ema:
-                    setup_time = c.timestamp; entry = c.close
-                    stop = max([x.high for x in c5[i-3:i+1]]) + 10 # High of pullback swing
-                    break
-    
-    if entry == 0:
-        return {"pnl": 0, "status": "S7_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S7_WAIT", "A", "Trend accepted but no valid pullback setup found.", 0, 0, 0)}
-
-    # 3. AUDITOR
+            if not pullback: 
+                if c.high >= cur_ema: pullback = True
+            elif c.close < cur_ema:
+                setup_time = c.timestamp; entry = c.close; stop = max([x.high for x in c5[i-3:i+1]]) + 10; break
+    if entry == 0: return {"pnl": 0, "status": "S7_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S7_WAIT", "A", "Trend accepted, waiting for pullback.", 0, 0, 0)}
     valid = True; code = "VALID_S7_A"; grade = "A"; reason = "Valid Trend Continuation."
-    
-    if regime != "DIRECTIONAL":
-        valid = False; code = "INVALID_S7_REGIME"; reason = "S7 requires Directional Regime."
-        
+    if regime != "DIRECTIONAL": valid = False; code = "INVALID_S7_REGIME"; reason = "S7 requires Directional Regime."
     target = levels.get("daily_resistance", entry * 1.05) if direction == "LONG" else levels.get("daily_support", entry * 0.95)
-    
-    # 4. EXECUTOR (Trailing)
     return _execute_simulation(c5, setup_time, entry, stop, target, direction, risk, valid, code, grade, reason, exit_mode="TRAILING")
 
-# --- S8, S9 ---
-def run_s8_logic(levels, raw_c15, raw_c5, risk, regime): return {"pnl":0, "status":"S8_PENDING", "entry":0, "exit":0, "audit":{}}
+# --- S8: FAILED BREAKOUT / TRAP ---
+def run_s8_logic(levels, raw_c15, raw_c5, risk, regime):
+    """
+    S8: Trap Detection. 
+    1. Breakout Attempt (Close outside trigger)
+    2. Failure (Close back inside value)
+    """
+    c15 = _to_candles(raw_c15); c5 = _to_candles(raw_c5)
+    bo = levels.get("breakout_trigger", 0); bd = levels.get("breakdown_trigger", 0)
+    vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
+    
+    direction = "NONE"; setup_time = 0; entry = 0; stop = 0
+    attempt_long = False; attempt_short = False
+    trap_high = 0; trap_low = 999999
+    
+    # 1. State Machine Scanner
+    for c in c15:
+        # Long Attempt (Breakout)
+        if c.close > bo: 
+            attempt_long = True; trap_high = max(trap_high, c.high)
+        # Short Attempt (Breakdown)
+        if c.close < bd: 
+            attempt_short = True; trap_low = min(trap_low, c.low)
+            
+        # Trap Confirmation (Re-entry)
+        if attempt_long and c.close < vah:
+            # Failed Long -> Short Trap Trade
+            direction = "SHORT"; setup_time = c.timestamp; entry = c.close
+            stop = trap_high + 25; break
+            
+        if attempt_short and c.close > val:
+            # Failed Short -> Long Trap Trade
+            direction = "LONG"; setup_time = c.timestamp; entry = c.close
+            stop = trap_low - 25; break
+            
+    if direction == "NONE":
+        return {"pnl": 0, "status": "S8_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S8_WAIT", "A", "No failed breakout detected.", 0, 0, 0)}
+
+    # 2. Auditor
+    valid = True; code = "VALID_S8_A"; grade = "A"; reason = "Valid Trap Detected."
+    
+    # Gates? S8 is opportunistic, so fewer gates, but location matters.
+    # If re-entry is too deep, risk is bad.
+    if direction == "SHORT" and entry < poc: valid = False; code = "INVALID_S8_LATE"; reason = "Trap entry below POC (Too late)."
+    if direction == "LONG" and entry > poc: valid = False; code = "INVALID_S8_LATE"; reason = "Trap entry above POC (Too late)."
+    
+    target = poc # Trap targets the middle
+    
+    # 3. Executor
+    return _execute_simulation(c5, setup_time, entry, stop, target, direction, risk, valid, code, grade, reason, exit_mode="FIXED")
+
+# --- S9 (PENDING) ---
 def run_s9_logic(levels, raw_c15, raw_c5, risk, regime): return {"pnl":0, "status":"S9_PENDING", "entry":0, "exit":0, "audit":{}}
 
 # ==========================================
@@ -298,14 +307,20 @@ def _execute_simulation(candles_5m: List[Candle], setup_time: int, entry: float,
         c = candles_5m[i]
         if c.timestamp <= setup_time: continue
         
+        # 1. HARD STOP
         if direction == "LONG":
             if c.low <= stop: exit_price = stop; status = "STOPPED_OUT"; break
-            if c.high >= target: exit_price = target; status = "TAKE_PROFIT"; break
         else:
             if c.high >= stop: exit_price = stop; status = "STOPPED_OUT"; break
-            if c.low <= target: exit_price = target; status = "TAKE_PROFIT"; break
             
-        if exit_mode == "TRAILING":
+        # 2. EXIT LOGIC
+        if exit_mode == "FIXED":
+            if direction == "LONG":
+                if c.high >= target: exit_price = target; status = "TAKE_PROFIT"; break
+            else:
+                if c.low <= target: exit_price = target; status = "TAKE_PROFIT"; break
+                
+        elif exit_mode == "TRAILING":
             current_ema = ema_series[i]
             if direction == "LONG" and c.close < current_ema: exit_price = c.close; status = "TRAIL_EXIT"; break
             if direction == "SHORT" and c.close > current_ema: exit_price = c.close; status = "TRAIL_EXIT"; break
