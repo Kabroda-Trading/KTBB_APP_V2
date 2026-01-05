@@ -1,12 +1,10 @@
 # research_lab.py
 # ==============================================================================
-# KABRODA RESEARCH LAB v11.0 (PHASE LEDGER & SMART PULLBACKS)
+# KABRODA RESEARCH LAB v11.1 (HOTFIX: RESTORE DETECT_REGIME)
 # ==============================================================================
 # Updates:
-# - PERSISTENCE: 'phase_timeline' is now stored in LOCKED_SESSIONS memory.
-# - LOGIC: Pullbacks now check MULTIPLE shelves (Trigger, DR, VAH).
-# - GATING: 'DEAD' energy disables active hunting.
-# - UI: Always returns valid timeline structure to prevent frontend crash.
+# - FIXED: Restored 'detect_regime' function which caused Historical Lab crash.
+# - RETAINED: All Phase Ledger, Session Energy, and BattleBox Logic.
 # ==============================================================================
 
 from __future__ import annotations
@@ -83,15 +81,33 @@ def _compute_session_packet(raw_5m: List[Dict], raw_1h: List[Dict], anchor_idx: 
         "r30_low": r30_low
     }
 
+# --- MISSING FUNCTION RESTORED ---
+def detect_regime(candles_15m: List[Dict], bias_score: float, levels: Dict) -> str:
+    """
+    Legacy helper for Historical Lab to determine Rotational/Directional
+    based on simple heuristics (Range % or Bias Score).
+    """
+    if not candles_15m: return "UNKNOWN"
+    closes = [c['close'] for c in candles_15m]
+    bo = levels.get("breakout_trigger", 0)
+    bd = levels.get("breakdown_trigger", 0)
+    price = closes[-1]
+    
+    # 1. Explicit Acceptance Override
+    if price > bo * 1.001: return "DIRECTIONAL"
+    if price < bd * 0.999: return "DIRECTIONAL"
+    
+    # 2. Standard Logic
+    range_pct = ((bo - bd) / price) * 100 if price > 0 else 0
+    if abs(bias_score) > 0.25: return "DIRECTIONAL"
+    if range_pct > 0.5: return "ROTATIONAL"
+    return "COMPRESSED"
+
 # --- ADVANCED PHASE LOGIC WITH LEDGER ---
 def detect_phase_ledger(candles_15m: List[Dict], candles_5m: List[Dict], levels: Dict, ledger: Dict) -> Dict[str, Any]:
-    """
-    State Machine that Writes to Ledger (Persistent Memory).
-    """
     if not candles_15m or not candles_5m: return {"phase": "UNKNOWN", "msg": "No Data"}
     
     price = candles_5m[-1]['close']
-    # Levels
     bo = levels.get("breakout_trigger", 0)
     bd = levels.get("breakdown_trigger", 0)
     vah = levels.get("f24_vah", 0)
@@ -102,7 +118,7 @@ def detect_phase_ledger(candles_15m: List[Dict], candles_5m: List[Dict], levels:
     c1 = candles_15m[-1]['close']
     c2 = candles_15m[-2]['close'] if len(candles_15m) > 1 else c1
     
-    # 1. ACCEPTANCE CHECK
+    # 1. ACCEPTANCE
     if c1 > bo and c2 > bo:
         if not ledger.get("acceptance_time"):
             ledger["acceptance_time"] = candles_15m[-1]['time']
@@ -112,7 +128,7 @@ def detect_phase_ledger(candles_15m: List[Dict], candles_5m: List[Dict], levels:
             ledger["acceptance_time"] = candles_15m[-1]['time']
             ledger["acceptance_side"] = "BEAR"
             
-    # 2. FAILURE CHECK
+    # 2. FAILURE
     if ledger.get("acceptance_side") == "BULL":
         if c1 < vah: 
             ledger["failure_time"] = candles_15m[-1]['time']
@@ -122,25 +138,18 @@ def detect_phase_ledger(candles_15m: List[Dict], candles_5m: List[Dict], levels:
             ledger["failure_time"] = candles_15m[-1]['time']
             return {"phase": "FAILED_BREAK_BEAR", "msg": "Trap Detected"}
 
-    # 3. CONFIRMATION CHECK (Smart Pullback)
+    # 3. CONFIRMATION
     if ledger.get("acceptance_side") == "BULL" and not ledger.get("confirmation_time"):
         accept_ts = ledger["acceptance_time"]
-        # Look at 5m candles SINCE acceptance
         post_accept = [c for c in candles_5m if c['time'] >= accept_ts]
+        shelves = [s for s in [bo, dr, vah] if s > 0 and s < price * 1.05]
         
-        # Define Shelves to Test
-        shelves = [bo, dr, vah]
-        # Filter out 0 or irrelevant shelves
-        valid_shelves = [s for s in shelves if s > 0 and s < price * 1.05]
-        
-        # Did we dip into any shelf zone? (Within 0.15%)
         confirmed_shelf = None
-        for shelf in valid_shelves:
+        for shelf in shelves:
             if any(c['low'] <= shelf * 1.0015 for c in post_accept):
                 confirmed_shelf = shelf
                 break
         
-        # If dipped AND held above BO
         if confirmed_shelf and price > bo:
             ledger["confirmation_time"] = candles_5m[-1]['time']
             ledger["confirmation_shelf"] = confirmed_shelf
@@ -148,12 +157,10 @@ def detect_phase_ledger(candles_15m: List[Dict], candles_5m: List[Dict], levels:
     elif ledger.get("acceptance_side") == "BEAR" and not ledger.get("confirmation_time"):
         accept_ts = ledger["acceptance_time"]
         post_accept = [c for c in candles_5m if c['time'] >= accept_ts]
-        
-        shelves = [bd, ds, val]
-        valid_shelves = [s for s in shelves if s > 0 and s > price * 0.95]
+        shelves = [s for s in [bd, ds, val] if s > 0 and s > price * 0.95]
         
         confirmed_shelf = None
-        for shelf in valid_shelves:
+        for shelf in shelves:
             if any(c['high'] >= shelf * 0.9985 for c in post_accept):
                 confirmed_shelf = shelf
                 break
@@ -162,7 +169,7 @@ def detect_phase_ledger(candles_15m: List[Dict], candles_5m: List[Dict], levels:
             ledger["confirmation_time"] = candles_5m[-1]['time']
             ledger["confirmation_shelf"] = confirmed_shelf
 
-    # 4. DETERMINE PHASE FROM LEDGER
+    # 4. DETERMINE PHASE
     side = ledger.get("acceptance_side", "")
     if ledger.get("failure_time"):
         return {"phase": f"FAILED_BREAK_{side}", "msg": "Trap Logic Active"}
@@ -171,7 +178,6 @@ def detect_phase_ledger(candles_15m: List[Dict], candles_5m: List[Dict], levels:
     elif ledger.get("acceptance_time"):
         return {"phase": f"DIRECTIONAL_CANDIDATE_{side}", "msg": "Accepted. Awaiting Pullback."}
     
-    # 5. DEFAULT BALANCE
     if val <= price <= vah: return {"phase": "BALANCE", "msg": "Rotational"}
     return {"phase": "TESTING_EDGE", "msg": "Testing Edge"}
 
@@ -241,11 +247,6 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
     session_key = f"{symbol}_{session_info['name']}_{session_info['date_key']}"
     packet = {}; levels_source = "UNKNOWN"
     
-    # --- PHASE LEDGER INITIALIZATION ---
-    # Ensure a ledger exists for this session key
-    # Structure: { acceptance_time: int, acceptance_side: str, confirmation_time: int, failure_time: int, ... }
-    
-    # 1. CHECK LEVEL LOCK
     if session_key in LOCKED_SESSIONS:
         packet = LOCKED_SESSIONS[session_key]
         levels_source = "STORED"
@@ -256,10 +257,9 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
             "status": "CALIBRATING", "levels_source": "CALIBRATING",
             "message": f"Levels lock in {int((lock_end_ts - now_ts)/60)} min",
             "price": raw_5m[-1]['close'], "regime": "PENDING", "phase": "CALIBRATING", "levels": {}, "strategies": [],
-            "battlebox": {} # Safety
+            "battlebox": {}
         }
     else:
-        # COMPUTE FRESH LOCK
         anchor_idx = -1
         for i, c in enumerate(raw_5m):
             if c['time'] >= anchor_ts: anchor_idx = i; break
@@ -267,14 +267,13 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
         packet = _compute_session_packet(raw_5m, raw_1h, anchor_idx)
         if "error" in packet: return packet
         
-        packet["ledger"] = {} # Initialize clean ledger
+        packet["ledger"] = {}
         LOCKED_SESSIONS[session_key] = packet
         levels_source = "COMPUTED (NEW LOCK)"
     
     levels = packet["levels"]
-    ledger = packet.setdefault("ledger", {}) # Retrieve persistent ledger
+    ledger = packet.setdefault("ledger", {})
     
-    # 2. LIVE ANALYSIS
     anchor_idx_live = -1
     for i, c in enumerate(raw_5m):
         if c['time'] >= anchor_ts: anchor_idx_live = i; break
@@ -282,11 +281,9 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
     live_slice = raw_5m[anchor_idx_live:]
     candles_15m = _resample_15m(raw_5m)
     
-    # RUN DETECT PHASE (Updates Ledger In-Place)
     phase_data = detect_phase_ledger(candles_15m[-30:], live_slice, levels, ledger)
     phase = phase_data["phase"]
     
-    # 3. STRATEGY GATING
     energy = session_info["energy"]
     risk_settings = { "mode": risk_mode, "value": float(capital), "leverage": float(leverage) }
     strategies = {
@@ -313,32 +310,28 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
                 elif code in ["S4", "S6"]:
                     if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"
                     else: status = "MONITORING"; color = "#ffcc00"
-            
-            # DIRECTIONAL GATING (Direction Aware)
             elif "CANDIDATE" in phase:
                 if "BULL" in phase:
-                    if code == "S1": status = "ARMED"; color = "#ffcc00"; msg = "Accepted. Awaiting Pullback."
-                    elif code == "S2": status = "BLOCKED"; color = "#222"; msg = "Bull Posture."
+                    if code == "S1": status = "ARMED"; color = "#ffcc00"; msg = "Accepted. Wait Pullback."
+                    elif code == "S2": status = "BLOCKED"; color = "#222"
                 elif "BEAR" in phase:
-                    if code == "S2": status = "ARMED"; color = "#ffcc00"; msg = "Accepted. Awaiting Pullback."
-                    elif code == "S1": status = "BLOCKED"; color = "#222"; msg = "Bear Posture."
+                    if code == "S2": status = "ARMED"; color = "#ffcc00"; msg = "Accepted. Wait Pullback."
+                    elif code == "S1": status = "BLOCKED"; color = "#222"
                 if code in ["S4", "S6"]: status = "BLOCKED"; color = "#222"
-
             elif "CONFIRMED" in phase:
                 if "BULL" in phase:
                     if code in ["S1", "S7"]: 
                         if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"
-                        else: status = "HUNTING"; color = "#00ff9d"; msg = "Trend Confirmed."
+                        else: status = "HUNTING"; color = "#00ff9d"
                     elif code == "S2": status = "BLOCKED"; color = "#ef4444"
                 elif "BEAR" in phase:
                     if code in ["S2", "S7"]: 
                         if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"
-                        else: status = "HUNTING"; color = "#00ff9d"; msg = "Trend Confirmed."
+                        else: status = "HUNTING"; color = "#00ff9d"
                     elif code == "S1": status = "BLOCKED"; color = "#ef4444"
-            
             elif "FAILED" in phase:
                 if code == "S8": status = "ARMED"; color = "#00ff9d"; msg = "Trap Detected."
-                else: status = "CAUTION"; color = "#ffcc00"; msg = "Trap Risk."
+                else: status = "CAUTION"; color = "#ffcc00"
             
             results.append({
                 "strategy": code, "status": status, "color": color, "message": msg,
@@ -346,13 +339,10 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
             })
         except Exception as e: results.append({"strategy": code, "status": "ERROR", "color": "red"})
 
-    # --- BATTLEBOX PACKET ---
     battlebox = {
         "symbol": symbol,
         "timestamp_utc": datetime.now(timezone.utc).strftime("%H:%M UTC"),
-        "session": {
-            "active": session_info["name"], "anchor_time": session_info["anchor_fmt"], "energy_state": energy
-        },
+        "session": {"active": session_info["name"], "anchor_time": session_info["anchor_fmt"], "energy_state": energy},
         "levels": levels,
         "phase_timeline": {
             "current_phase": phase,
@@ -363,10 +353,7 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
                 "confirmed_shelf": ledger.get("confirmation_shelf")
             }
         },
-        "strategies_summary": [
-            {"code": r["strategy"], "status": r["status"], "msg": r["message"]} 
-            for r in results if r["status"] in ["ACTIVE SIGNAL", "ARMED", "HUNTING"]
-        ]
+        "strategies_summary": [{"code": r["strategy"], "status": r["status"], "msg": r["message"]} for r in results if r["status"] in ["ACTIVE SIGNAL", "ARMED", "HUNTING"]]
     }
 
     return {
@@ -382,9 +369,8 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
         "battlebox": battlebox
     }
 
-# --- HISTORICAL ANALYSIS (PRESERVED) ---
+# --- HISTORICAL ANALYSIS (RESTORED) ---
 async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str], leverage: float = 1, capital: float = 1000, strategy_mode: str = "S0", risk_mode: str = "fixed_margin") -> Dict[str, Any]:
-    # (Same as v9.1 - omitted for brevity but preserved in full overwrite)
     raw_15m = inputs.get("intraday_candles", [])
     symbol = inputs.get("symbol", "BTCUSDT")
     raw_5m = await fetch_5m_granular(symbol)
