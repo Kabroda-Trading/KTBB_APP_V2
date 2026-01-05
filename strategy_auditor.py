@@ -1,17 +1,10 @@
 # strategy_auditor.py
 # ==============================================================================
-# KABRODA STRATEGY AUDIT MASTER CORE v3.8 (FULL SUITE COMPLETE)
+# KABRODA STRATEGY AUDIT MASTER CORE v4.0 (STABLE)
 # ==============================================================================
-# S0: Hold Fire (Discipline)
-# S1: Breakout Acceptance (Long Trend)
-# S2: Breakdown Acceptance (Short Trend)
-# S3: Structural Stand-Down (Shield)
-# S4: Mid-Band Fade (Rotation)
-# S5: Range Extremes (Hard Edge Fade)
-# S6: Value Rotation (Edge-to-Edge)
-# S7: Trend Continuation (Pullback)
-# S8: Failed Breakout (Trap)
-# S9: Circuit Breaker (Risk Guard)
+# Updates:
+# - FIXED S7 CRASH: Added index safety check (i < 3) for pullback calculation.
+# - S8/S9: Ensured clean return packets for "PENDING" states.
 # ==============================================================================
 
 from __future__ import annotations
@@ -212,6 +205,7 @@ def run_s7_logic(levels, raw_c15, raw_c5, risk, regime):
     c15 = _to_candles(raw_c15); c5 = _to_candles(raw_c5)
     bo = levels.get("breakout_trigger", 0); bd = levels.get("breakdown_trigger", 0)
     ema_series = _calculate_ema(c5)
+    
     direction = "NONE"; acceptance_time = 0
     streak = 0
     for c in c15:
@@ -224,25 +218,41 @@ def run_s7_logic(levels, raw_c15, raw_c5, risk, regime):
             if c.close < bd: streak += 1
             else: streak = 0
             if streak >= 2: direction = "SHORT"; acceptance_time = c.timestamp; break
+            
     if direction == "NONE": return {"pnl": 0, "status": "S7_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S7_WAIT", "A", "No prior acceptance.", 0, 0, 0)}
+    
     setup_time = 0; entry = 0; stop = 0; pullback = False
+    
     for i in range(len(c5)):
         c = c5[i]; cur_ema = ema_series[i]
         if c.timestamp <= acceptance_time: continue
+        
+        # SAFETY FIX: Ensure index 'i' is large enough for lookback
+        if i < 3: continue 
+        
         if direction == "LONG":
             if not pullback: 
                 if c.low <= cur_ema: pullback = True
             elif c.close > cur_ema:
-                setup_time = c.timestamp; entry = c.close; stop = min([x.low for x in c5[i-3:i+1]]) - 10; break
+                setup_time = c.timestamp; entry = c.close
+                # Safe slice now
+                stop = min([x.low for x in c5[i-3:i+1]]) - 10 
+                break
         elif direction == "SHORT":
             if not pullback: 
                 if c.high >= cur_ema: pullback = True
             elif c.close < cur_ema:
-                setup_time = c.timestamp; entry = c.close; stop = max([x.high for x in c5[i-3:i+1]]) + 10; break
+                setup_time = c.timestamp; entry = c.close
+                # Safe slice now
+                stop = max([x.high for x in c5[i-3:i+1]]) + 10 
+                break
+                
     if entry == 0: return {"pnl": 0, "status": "S7_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S7_WAIT", "A", "Trend accepted, waiting for pullback.", 0, 0, 0)}
+    
     valid = True; code = "VALID_S7_A"; grade = "A"; reason = "Valid Trend Continuation."
     if regime != "DIRECTIONAL": valid = False; code = "INVALID_S7_REGIME"; reason = "S7 requires Directional Regime."
     target = levels.get("daily_resistance", entry * 1.05) if direction == "LONG" else levels.get("daily_support", entry * 0.95)
+    
     return _execute_simulation(c5, setup_time, entry, stop, target, direction, risk, valid, code, grade, reason, exit_mode="TRAILING")
 
 # --- S8: FAILED BREAKOUT / TRAP ---
@@ -250,18 +260,25 @@ def run_s8_logic(levels, raw_c15, raw_c5, risk, regime):
     c15 = _to_candles(raw_c15); c5 = _to_candles(raw_c5)
     bo = levels.get("breakout_trigger", 0); bd = levels.get("breakdown_trigger", 0)
     vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
+    
     direction = "NONE"; setup_time = 0; entry = 0; stop = 0
     attempt_long = False; attempt_short = False
     trap_high = 0; trap_low = 999999
+    
     for c in c15:
         if c.close > bo: attempt_long = True; trap_high = max(trap_high, c.high)
         if c.close < bd: attempt_short = True; trap_low = min(trap_low, c.low)
-        if attempt_long and c.close < vah: direction = "SHORT"; setup_time = c.timestamp; entry = c.close; stop = trap_high + 25; break
-        if attempt_short and c.close > val: direction = "LONG"; setup_time = c.timestamp; entry = c.close; stop = trap_low - 25; break
+        
+        if attempt_long and c.close < vah: 
+            direction = "SHORT"; setup_time = c.timestamp; entry = c.close; stop = trap_high + 25; break
+        if attempt_short and c.close > val: 
+            direction = "LONG"; setup_time = c.timestamp; entry = c.close; stop = trap_low - 25; break
+            
     if direction == "NONE": return {"pnl": 0, "status": "S8_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S8_WAIT", "A", "No failed breakout detected.", 0, 0, 0)}
+    
     valid = True; code = "VALID_S8_A"; grade = "A"; reason = "Valid Trap Detected."
-    if direction == "SHORT" and entry < poc: valid = False; code = "INVALID_S8_LATE"; reason = "Trap entry below POC (Too late)."
-    if direction == "LONG" and entry > poc: valid = False; code = "INVALID_S8_LATE"; reason = "Trap entry above POC (Too late)."
+    if direction == "SHORT" and entry < poc: valid = False; code = "INVALID_S8_LATE"; reason = "Trap entry below POC."
+    if direction == "LONG" and entry > poc: valid = False; code = "INVALID_S8_LATE"; reason = "Trap entry above POC."
     target = poc 
     return _execute_simulation(c5, setup_time, entry, stop, target, direction, risk, valid, code, grade, reason, exit_mode="FIXED")
 
@@ -270,10 +287,14 @@ def run_s9_logic(levels, raw_c15, raw_c5, risk, regime):
     c15 = _to_candles(raw_c15)
     vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
     value_width = vah - val
-    if value_width == 0: return {"pnl":0, "status":"S9_PENDING", "entry":0, "exit":0, "audit":{}}
+    
+    # Safety: Avoid division by zero
+    if value_width == 0: return {"pnl":0, "status":"S9_PENDING", "entry":0, "exit":0, "audit": _build_audit_packet(True, "S9_MONITORING", "A", "No value width.", 0, 0, 0)}
+    
     is_extreme = False
     for c in c15:
         if abs(c.close - poc) > (value_width * 3.5): is_extreme = True; break
+        
     if is_extreme: return {"pnl": 0, "status": "S9_ACTIVE", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "S9_CIRCUIT_BREAKER", "A", "Extreme Displacement. Halted.", 0, 0, 0)}
     else: return {"pnl": 0, "status": "S9_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "S9_MONITORING", "A", "Normal operations.", 0, 0, 0)}
 

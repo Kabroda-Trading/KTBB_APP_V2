@@ -1,4 +1,5 @@
 # research_lab.py
+# (No changes needed if you updated it in the previous step, but re-pasting for safety)
 from __future__ import annotations
 from typing import Any, Dict, List
 from datetime import datetime
@@ -29,6 +30,7 @@ def detect_regime(candles_15m: List[Dict], bias_score: float, levels: Dict) -> s
     bo = levels.get("breakout_trigger", 0)
     bd = levels.get("breakdown_trigger", 0)
     price = closes[-1]
+    
     range_pct = ((bo - bd) / price) * 100 if price > 0 else 0
     
     if abs(bias_score) > 0.25: return "DIRECTIONAL"
@@ -51,11 +53,7 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
     symbol = inputs.get("symbol", "BTCUSDT")
     raw_5m = await fetch_5m_granular(symbol)
     
-    risk_settings = {
-        "mode": risk_mode, 
-        "value": float(capital),
-        "leverage": float(leverage)
-    }
+    risk_settings = { "mode": risk_mode, "value": float(capital), "leverage": float(leverage) }
     
     history = []
     regime_stats = { "COMPRESSED": [], "DIRECTIONAL": [], "ROTATIONAL": [], "VOLATILE": [] }
@@ -91,29 +89,18 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             buffer_time = anchor['time'] - (300 * 50)
             future_5m = [c for c in raw_5m if c['time'] >= buffer_time]
             
-            # --- STRATEGY DISPATCHER ---
-            if strategy_mode == "S0":
-                result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S1":
-                result = strategy_auditor.run_s1_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S2":
-                result = strategy_auditor.run_s2_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S3":
-                result = strategy_auditor.run_s3_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S4":
-                result = strategy_auditor.run_s4_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S5":
-                result = strategy_auditor.run_s5_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S6":
-                result = strategy_auditor.run_s6_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S7":
-                result = strategy_auditor.run_s7_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S8":
-                result = strategy_auditor.run_s8_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S9":
-                result = strategy_auditor.run_s9_logic(levels, future_15m, future_5m, risk_settings, regime)
-            else:
-                result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
+            # --- DISPATCHER ---
+            if strategy_mode == "S0": result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S1": result = strategy_auditor.run_s1_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S2": result = strategy_auditor.run_s2_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S3": result = strategy_auditor.run_s3_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S4": result = strategy_auditor.run_s4_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S5": result = strategy_auditor.run_s5_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S6": result = strategy_auditor.run_s6_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S7": result = strategy_auditor.run_s7_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S8": result = strategy_auditor.run_s8_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S9": result = strategy_auditor.run_s9_logic(levels, future_15m, future_5m, risk_settings, regime)
+            else: result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
             
             history.append({
                 "session": s_key.replace("America/", "").replace("Europe/", ""),
@@ -126,33 +113,24 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
 
     history.sort(key=lambda x: x['date'], reverse=True)
     
-    # --- EXEMPLAR & STATS FILTERING ---
-    exemplar = None
-    best_score = -999
-    valid_pnl_total = 0.0
-    valid_wins = 0
-    valid_attempts = 0
+    # Stats
+    valid_wins = 0; valid_attempts = 0; valid_pnl_total = 0.0; exemplar = None; best_score = -999
     
     for h in history:
         res = h['strategy']
         is_valid = res.get('audit', {}).get('valid', False)
         
-        # Only Valid trades count for stats
-        if is_valid:
-            valid_attempts += 1
-            valid_pnl_total += res['pnl']
-            if res['pnl'] > 0: 
-                valid_wins += 1
-                
-            # Exemplar Selection
-            score = res['pnl'] + 1000 # Boost Valid trades
-            if score > best_score:
-                best_score = score
-                exemplar = h
+        # S3 Special Case: Valid Discipline = Valid "Win"
+        if strategy_mode == "S3" and is_valid:
+            valid_attempts += 1; valid_wins += 1 # 100% win rate for discipline
+        elif is_valid:
+            valid_attempts += 1; valid_pnl_total += res['pnl']
+            if res['pnl'] > 0: valid_wins += 1
+            score = res['pnl'] + 1000
+            if score > best_score: best_score = score; exemplar = h
 
     win_rate = int((valid_wins/valid_attempts)*100) if valid_attempts > 0 else 0
     
-    # Breakdown Stats
     regime_breakdown = {}
     for r, results in regime_stats.items():
         if results:

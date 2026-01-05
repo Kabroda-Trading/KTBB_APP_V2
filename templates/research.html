@@ -13,10 +13,8 @@
     </div>
 
     <div style="display: grid; grid-template-columns: 260px 1fr; gap: 20px;">
-        
         <div class="telemetry-card" style="height: fit-content; border-top: 2px solid var(--primary);">
             <h3 style="color: #fff; margin-bottom: 15px; font-size: 0.9rem;">SIMULATION CONFIG</h3>
-            
             <div class="input-group">
                 <label>TARGET ASSET</label>
                 <select id="symbolSelect" style="width:100%; padding: 10px; background: #0a0a0a; color: #fff; border: 1px solid #333; font-family: monospace;">
@@ -24,55 +22,46 @@
                     <option value="ETHUSDT">ETH (ETHEREUM)</option>
                 </select>
             </div>
-            
             <div class="input-group" style="margin-top:15px;">
                 <label>SESSIONS (FILTER)</label>
                 <div style="background: #0a0a0a; padding: 10px; border: 1px solid #333; border-radius: 4px; display: flex; flex-direction: column; gap: 8px;">
                     <label style="font-size: 0.75rem; display: flex; align-items: center; gap: 8px; color: #ccc;">
-                        <input type="checkbox" value="America/New_York" checked> 
-                        <span>NY FUTURES <span style="color:#666">(08:30)</span></span>
+                        <input type="checkbox" value="America/New_York" checked> <span>NY FUTURES (08:30)</span>
                     </label>
                     <label style="font-size: 0.75rem; display: flex; align-items: center; gap: 8px; color: #ccc;">
-                        <input type="checkbox" value="Europe/London"> 
-                        <span>LONDON <span style="color:#666">(08:00)</span></span>
+                        <input type="checkbox" value="Europe/London"> <span>LONDON (08:00)</span>
                     </label>
                 </div>
             </div>
-
             <div class="input-group" style="margin-top:15px;">
                 <label>STRATEGY PROTOCOL</label>
                 <select id="stratSelect" style="width:100%; padding: 10px; background: #0a0a0a; color: var(--primary); border: 1px solid #333; font-weight: bold; font-family: monospace;">
-                    <option value="S0">S0 - HOLD FIRE (Safety)</option>
+                    <option value="S0">S0 - HOLD FIRE</option>
                     <option value="S1">S1 - BREAKOUT ACCEPTANCE</option>
                     <option value="S2">S2 - BREAKDOWN ACCEPTANCE</option>
-                    <option value="S3">S3 - FAILED BREAKOUT (Trap)</option>
-                    <option value="S4">S4 - MID-BAND FADE (Rotation)</option>
-                    <option value="S5">S5 - RANGE EXTREMES (Fade)</option>
-                    <option value="S6">S6 - VALUE ROTATION (Ping Pong)</option>
-                    <option value="S7">S7 - TREND PULLBACK</option>
-                    <option value="S8">S8 - MOMENTUM EXPANSION</option>
-                    <option value="S9">S9 - EXHAUSTION REVERSAL</option>
+                    <option value="S3">S3 - STRUCTURAL SHIELD</option>
+                    <option value="S4">S4 - MID-BAND FADE</option>
+                    <option value="S5">S5 - RANGE EXTREMES</option>
+                    <option value="S6">S6 - VALUE ROTATION</option>
+                    <option value="S7">S7 - TREND CONTINUATION</option>
+                    <option value="S8">S8 - FAILED BREAKOUT</option>
+                    <option value="S9">S9 - CIRCUIT BREAKER</option>
                 </select>
             </div>
-
             <div class="input-group" style="margin-top:15px;">
                 <label>RISK MODEL</label>
                 <select id="riskMode" onchange="toggleRiskInputs()" style="width:100%; padding: 8px; background: #0a0a0a; color: #fff; border: 1px solid #333; margin-bottom: 10px;">
-                    <option value="fixed_margin">FIXED MARGIN (e.g. $1000 x 5)</option>
-                    <option value="fixed_risk">FIXED RISK (e.g. Lose $100)</option>
+                    <option value="fixed_margin">FIXED MARGIN</option>
+                    <option value="fixed_risk">FIXED RISK</option>
                 </select>
-
                 <div id="input-margin">
                     <input type="number" id="levInput" placeholder="Leverage (1x)" value="1" style="width:100%; background:#0a0a0a; border:1px solid #333; color:#fff; padding:8px; margin-bottom: 5px;">
                     <input type="number" id="capInput" placeholder="Margin ($1000)" value="1000" style="width:100%; background:#0a0a0a; border:1px solid #333; color:#fff; padding:8px;">
                 </div>
-                
                 <div id="input-risk" style="display: none;">
                     <input type="number" id="riskInput" placeholder="Risk Amount ($100)" value="100" style="width:100%; background:#0a0a0a; border:1px solid #ef4444; color:#fff; padding:8px;">
-                    <div style="font-size: 0.65rem; color: #666; margin-top: 4px;">*Auto-calculates position size based on Stop Loss.</div>
                 </div>
             </div>
-
             <button class="primary-btn" onclick="runLab()" style="margin-top: 20px; width: 100%; padding: 14px; background: var(--primary); border: none; font-weight: 900; letter-spacing: 1px; cursor: pointer; color: #000;">RUN SIMULATION</button>
         </div>
 
@@ -86,8 +75,7 @@
                             <span id="dt-validity" style="font-size: 0.8rem; padding: 2px 6px; border-radius: 4px; margin-left: 10px; background: #333;">--</span>
                         </div>
                         <div style="font-size: 0.8rem; color: #aaa; margin-top: 5px; font-family: monospace;">
-                            CODE: <span id="dt-code" style="color:var(--primary);">--</span> | 
-                            GRADE: <span id="dt-grade" style="color:#fff;">--</span>
+                            CODE: <span id="dt-code" style="color:var(--primary);">--</span> | GRADE: <span id="dt-grade" style="color:#fff;">--</span>
                         </div>
                     </div>
                     <div style="text-align: right;">
@@ -95,68 +83,30 @@
                         <div style="font-size: 0.7rem; color: #666;">IMPLIED PNL</div>
                     </div>
                 </div>
-
                 <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 4px;">
                     <div><span style="color:#888; font-size:0.7rem;">ENTRY</span><br><span id="dt-entry" style="font-family:monospace; color:#fff;">--</span></div>
                     <div><span style="color:#ef4444; font-size:0.7rem;">STOP</span><br><span id="dt-stop" style="font-family:monospace; color:#fff;">--</span></div>
                     <div><span style="color:#00ff9d; font-size:0.7rem;">TARGET</span><br><span id="dt-target" style="font-family:monospace; color:#fff;">--</span></div>
                 </div>
-
                 <div style="background: #000; padding: 10px; border: 1px solid #333; margin-bottom: 15px; font-family: monospace; font-size: 0.8rem; color: #ccc;">
                     > AUDIT REASON: <span id="dt-reason" style="color:#fff;">--</span>
                 </div>
-
                 <div style="display: flex; gap: 10px;">
                     <button onclick="copyForensic()" style="flex:1; background:var(--primary); color:#000; border:none; padding:10px; font-weight:bold; cursor:pointer;">COPY FOR GPT AUDIT</button>
                     <button onclick="copyTvString()" style="flex:1; background:#333; color:#fff; border:1px solid #555; padding:10px; font-weight:bold; cursor:pointer;">COPY FOR TRADINGVIEW</button>
                 </div>
             </div>
 
-            <div style="display: flex; gap: 2px; margin-bottom: 20px; background: #111; padding: 4px; border-radius: 4px; width: fit-content;">
-                <button class="tab-btn active" onclick="switchTab('sim')">TRADE LOG (MASTER)</button>
-                <button class="tab-btn" onclick="switchTab('stats')">SYSTEM STATS</button>
-            </div>
-
-            <div id="view-sim" class="tab-view">
-                <div class="telemetry-card" style="padding: 0;">
-                    <div style="max-height: 600px; overflow-y: auto;">
-                        <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
-                            <thead style="text-align: left; background: #111; color: #888; position: sticky; top: 0;">
-                                <tr>
-                                    <th style="padding: 12px;">DATE</th>
-                                    <th>VALIDITY</th>
-                                    <th>STATUS</th>
-                                    <th>ENTRY</th>
-                                    <th>PNL</th>
-                                </tr>
-                            </thead>
-                            <tbody id="sim-body"></tbody>
-                        </table>
-                    </div>
+            <div class="telemetry-card" style="padding: 0;">
+                <div style="max-height: 600px; overflow-y: auto;">
+                    <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
+                        <thead style="text-align: left; background: #111; color: #888; position: sticky; top: 0;">
+                            <tr><th style="padding: 12px;">DATE</th><th>VALIDITY</th><th>STATUS</th><th>ENTRY</th><th>PNL</th></tr>
+                        </thead>
+                        <tbody id="sim-body"></tbody>
+                    </table>
                 </div>
             </div>
-
-            <div id="view-stats" class="tab-view" style="display:none;">
-                <div class="telemetry-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px;">
-                    <div class="telemetry-card" style="text-align: center; border-top: 2px solid #666;">
-                        <div class="label" style="color:#888; font-size: 0.7rem; margin-bottom: 5px;">TOTAL SESSIONS</div>
-                        <div class="value" id="stat-sessions" style="font-size: 1.4rem;">--</div>
-                    </div>
-                    <div class="telemetry-card" style="text-align: center; border-top: 2px solid #666;">
-                        <div class="label" style="color:#888; font-size: 0.7rem; margin-bottom: 5px;">VALID SETUPS</div>
-                        <div class="value" id="stat-trades" style="font-size: 1.4rem;">--</div>
-                    </div>
-                    <div class="telemetry-card" style="text-align: center; border-top: 2px solid var(--primary);">
-                        <div class="label" style="color:var(--primary); font-size: 0.7rem; margin-bottom: 5px;">WIN RATE</div>
-                        <div class="value" id="stat-win" style="font-size: 1.4rem;">--%</div>
-                    </div>
-                    <div class="telemetry-card" style="text-align: center; border-top: 2px solid #fff;">
-                        <div class="label" style="color:#fff; font-size: 0.7rem; margin-bottom: 5px;">NET PNL</div>
-                        <div class="value" id="stat-pnl" style="font-size: 1.4rem;">--</div>
-                    </div>
-                </div>
-            </div>
-
         </div>
     </div>
 </div>
@@ -169,7 +119,6 @@ tr:hover { background: #1a1a1a; }
 td { padding: 10px 12px; }
 .tag-valid { color: #00ff9d; font-weight: bold; }
 .tag-invalid { color: #666; }
-.tag-fail { color: #ef4444; }
 </style>
 
 <script>
@@ -186,31 +135,16 @@ function toggleRiskInputs() {
     }
 }
 
-function switchTab(viewId) {
-    document.querySelectorAll('.tab-view').forEach(el => el.style.display = 'none');
-    document.getElementById('view-' + viewId).style.display = 'block';
-    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-    event.target.classList.add('active');
-}
-
 async function runLab() {
     const btn = document.querySelector('.primary-btn');
     btn.innerText = "RUNNING...";
     btn.disabled = true;
     
-    // ... (Payload logic identical to previous version) ...
     const sessions = [];
     document.querySelectorAll('input[type="checkbox"]:checked').forEach(c => sessions.push(c.value));
-    
     const riskMode = document.getElementById('riskMode').value;
-    let capital = 0; let leverage = 1;
-    
-    if (riskMode === 'fixed_risk') {
-        capital = document.getElementById('riskInput').value || 100; 
-    } else {
-        capital = document.getElementById('capInput').value || 1000;
-        leverage = document.getElementById('levInput').value || 1;
-    }
+    let capital = (riskMode === 'fixed_risk') ? (document.getElementById('riskInput').value || 100) : (document.getElementById('capInput').value || 1000);
+    let leverage = (riskMode === 'fixed_risk') ? 1 : (document.getElementById('levInput').value || 1);
     
     try {
         const res = await fetch('/api/dmr/history', {
@@ -226,19 +160,9 @@ async function runLab() {
             })
         });
         const data = await res.json();
-        
-        // Update Stats
-        document.getElementById('stat-win').innerText = (data.stats.win_rate || 0) + "%";
-        document.getElementById('stat-pnl').innerText = "$" + (data.stats.total_pnl || 0).toFixed(0);
-        document.getElementById('stat-trades').innerText = (data.stats.valid_trades || 0);
-        document.getElementById('stat-sessions').innerText = (data.stats.total_sessions || 0);
-        
         renderLog(data.history);
-        
-        // Auto-select exemplar or first valid trade
         if(data.stats.exemplar) selectTrade(data.stats.exemplar);
         else if(data.history.length > 0) selectTrade(data.history[0]);
-        
     } catch(e) { alert("Error: " + e); console.error(e); } 
     finally { btn.innerText = "RUN SIMULATION"; btn.disabled = false; }
 }
@@ -254,11 +178,7 @@ function renderLog(history) {
         let pnlColor = s.pnl > 0 ? '#00ff9d' : (s.pnl < 0 ? '#ef4444' : '#666');
         let validClass = audit.valid ? "tag-valid" : "tag-invalid";
         let validText = audit.valid ? "VALID" : "INVALID";
-        
-        // S3 Special Case
-        if (s.status === "S0_OBSERVED" && audit.valid) {
-            pnlColor = "#fff"; validText = "DISCIPLINE"; validClass = "tag-valid";
-        }
+        if (s.status === "S0_OBSERVED" && audit.valid) { pnlColor = "#fff"; validText = "DISCIPLINE"; validClass = "tag-valid"; }
 
         tr.innerHTML = `
             <td style="color:#ccc;">${row.date}</td>
@@ -275,58 +195,35 @@ function renderLog(history) {
 function selectTrade(row) {
     currentSelection = row;
     document.getElementById('detail-panel').style.display = 'block';
-    
     const s = row.strategy;
     const a = s.audit || {};
-    
-    // Header
     document.getElementById('dt-date').innerText = row.date;
     document.getElementById('dt-validity').innerText = a.valid ? "VALID EXECUTION" : "INVALID / BLOCKED";
     document.getElementById('dt-validity').style.color = a.valid ? "#00ff9d" : "#ef4444";
     document.getElementById('dt-validity').style.border = a.valid ? "1px solid #00ff9d" : "1px solid #ef4444";
-    
-    // Info
     document.getElementById('dt-code').innerText = a.code || s.status;
     document.getElementById('dt-grade').innerText = a.grade || "-";
     document.getElementById('dt-pnl').innerText = s.pnl === 0 ? "--" : (s.pnl > 0 ? "+$"+s.pnl.toFixed(0) : "$"+s.pnl.toFixed(0));
     document.getElementById('dt-pnl').style.color = s.pnl > 0 ? "#00ff9d" : (s.pnl < 0 ? "#ef4444" : "#666");
-    
-    // Metrics
     document.getElementById('dt-entry').innerText = s.entry ? s.entry.toFixed(2) : "0.00";
     document.getElementById('dt-stop').innerText = a.stop_loss ? a.stop_loss.toFixed(2) : "0.00";
     document.getElementById('dt-target').innerText = a.target ? a.target.toFixed(2) : "0.00";
-    
-    // Reason
     document.getElementById('dt-reason').innerText = a.reason || "No audit data available.";
 }
 
 function copyForensic() {
     if(!currentSelection) return;
-    const packet = {
-        "forensic_audit": "3.0",
-        "date": currentSelection.date,
-        "strategy": document.getElementById('stratSelect').value,
-        "audit_data": currentSelection.strategy.audit,
-        "levels": currentSelection.levels
-    };
+    const packet = { "forensic_audit": "3.0", "date": currentSelection.date, "strategy": document.getElementById('stratSelect').value, "audit_data": currentSelection.strategy.audit, "levels": currentSelection.levels };
     navigator.clipboard.writeText(JSON.stringify(packet, null, 2));
     alert("GPT AUDIT DATA COPIED.");
 }
 
 function copyTvString() {
     if(!currentSelection) return;
-    const s = currentSelection.strategy;
-    const a = s.audit || {};
-    const l = currentSelection.levels;
-    
-    // Format: Timestamp, Entry, Stop, Target, Valid(1/0), StatusLabel
-    // Since we don't have exact timestamp of setup, we use the date + 08:30 EST offset estimation for the visual anchor
-    // Actually, simply passing the date string is safer for Pine to resolve
-    
+    const s = currentSelection.strategy; const a = s.audit || {};
     const dataString = `DATA::${currentSelection.date}::${s.entry.toFixed(2)}::${a.stop_loss.toFixed(2)}::${a.target.toFixed(2)}::${a.valid ? 1 : 0}::${a.code}`;
-    
     navigator.clipboard.writeText(dataString);
-    alert("TRADINGVIEW STRING COPIED:\n" + dataString + "\n\nPaste this into the Ghost Replay indicator.");
+    alert("TRADINGVIEW STRING COPIED:\n" + dataString);
 }
 </script>
 {% endblock %}
