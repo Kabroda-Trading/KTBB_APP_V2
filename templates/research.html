@@ -228,4 +228,155 @@ function copyTvString() {
     alert("TRADINGVIEW STRING COPIED:\n" + dataString);
 }
 </script>
+{% endblock %}{% extends "base.html" %}
+
+{% block title %}Kabroda Lab | Live Tactical{% endblock %}
+
+{% block content %}
+<div class="app-container">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div>
+            <h1 style="font-size: 1.5rem; margin: 0; color: #fff;">RESEARCH COMMAND</h1>
+            <div style="font-size: 0.8rem; color: #666; letter-spacing: 1px;">BEHAVIORAL ANALYSIS & LIVE TACTICS</div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button onclick="setMode('HISTORICAL')" id="btn-hist" class="mode-btn active">HISTORICAL LAB</button>
+            <button onclick="setMode('LIVE')" id="btn-live" class="mode-btn">LIVE TACTICAL</button>
+        </div>
+    </div>
+
+    <div id="mode-live" style="display: none;">
+        <div class="telemetry-card" style="margin-bottom: 20px; border-left: 4px solid var(--primary);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <div style="font-size: 0.8rem; color: #888;">CURRENT MARKET REGIME</div>
+                    <div id="live-regime" style="font-size: 2rem; font-weight: 900; color: #fff;">LOADING...</div>
+                    <div style="font-size: 0.8rem; color: #666;">BTCUSDT | <span id="live-time">--:--</span></div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 0.8rem; color: #888;">CURRENT PRICE</div>
+                    <div id="live-price" style="font-size: 2rem; font-family: monospace; color: #fff;">-----</div>
+                </div>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+            <div id="strat-grid" style="display: contents;">
+                </div>
+        </div>
+        
+        <button onclick="runLivePulse()" style="margin-top: 20px; width: 100%; padding: 15px; background: #333; color: #fff; border: 1px solid #555; cursor: pointer;">REFRESH LIVE PULSE</button>
+    </div>
+
+    <div id="mode-hist" style="display: grid; grid-template-columns: 260px 1fr; gap: 20px;">
+        <div class="telemetry-card" style="height: fit-content; border-top: 2px solid var(--primary);">
+            <h3 style="color: #fff; margin-bottom: 15px; font-size: 0.9rem;">SIMULATION CONFIG</h3>
+            <div class="input-group">
+                <label>TARGET ASSET</label>
+                <select id="symbolSelect" style="width:100%; padding: 10px; background: #0a0a0a; color: #fff; border: 1px solid #333; font-family: monospace;">
+                    <option value="BTCUSDT">BTC (BITCOIN)</option>
+                    <option value="ETHUSDT">ETH (ETHEREUM)</option>
+                </select>
+            </div>
+            <div class="input-group" style="margin-top:15px;">
+                <label>STRATEGY PROTOCOL</label>
+                <select id="stratSelect" style="width:100%; padding: 10px; background: #0a0a0a; color: var(--primary); border: 1px solid #333; font-weight: bold; font-family: monospace;">
+                    <option value="ALL">★ ALL - BEST FIT SCANNER</option>
+                    <option disabled>---</option>
+                    <option value="S0">S0 - HOLD FIRE</option>
+                    <option value="S1">S1 - BREAKOUT ACCEPTANCE</option>
+                    <option value="S2">S2 - BREAKDOWN ACCEPTANCE</option>
+                    <option value="S3">S3 - STRUCTURAL SHIELD</option>
+                    <option value="S4">S4 - MID-BAND FADE</option>
+                    <option value="S5">S5 - RANGE EXTREMES</option>
+                    <option value="S6">S6 - VALUE ROTATION</option>
+                    <option value="S7">S7 - TREND CONTINUATION</option>
+                    <option value="S8">S8 - FAILED BREAKOUT</option>
+                    <option value="S9">S9 - CIRCUIT BREAKER</option>
+                </select>
+            </div>
+            <button class="primary-btn" onclick="runLab()" style="margin-top: 20px; width: 100%; padding: 14px; background: var(--primary); border: none; font-weight: 900; letter-spacing: 1px; cursor: pointer; color: #000;">RUN SIMULATION</button>
+        </div>
+
+        <div>
+            <div class="telemetry-card" style="padding: 0;">
+                <div style="max-height: 600px; overflow-y: auto;">
+                    <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
+                        <thead style="text-align: left; background: #111; color: #888; position: sticky; top: 0;">
+                            <tr><th style="padding: 12px;">DATE</th><th>VALIDITY</th><th>STATUS</th><th>ENTRY</th><th>PNL</th></tr>
+                        </thead>
+                        <tbody id="sim-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.mode-btn { background: transparent; border: 1px solid #333; color: #666; padding: 8px 16px; cursor: pointer; font-weight: bold; }
+.mode-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
+.strat-card { background: #111; border: 1px solid #333; padding: 15px; border-radius: 4px; }
+.strat-title { font-size: 1.1rem; font-weight: bold; color: #fff; margin-bottom: 5px; }
+.strat-status { font-size: 0.8rem; font-weight: bold; margin-bottom: 10px; display: inline-block; padding: 2px 6px; border-radius: 2px; }
+.strat-msg { font-size: 0.75rem; color: #aaa; height: 40px; overflow: hidden; }
+</style>
+
+<script>
+// ... [KEEP EXISTING HISTORICAL SCRIPTS (runLab, etc)] ...
+
+function setMode(mode) {
+    if(mode === 'LIVE') {
+        document.getElementById('mode-live').style.display = 'block';
+        document.getElementById('mode-hist').style.display = 'none';
+        document.getElementById('btn-live').classList.add('active');
+        document.getElementById('btn-hist').classList.remove('active');
+        runLivePulse();
+    } else {
+        document.getElementById('mode-live').style.display = 'none';
+        document.getElementById('mode-hist').style.display = 'grid';
+        document.getElementById('btn-live').classList.remove('active');
+        document.getElementById('btn-hist').classList.add('active');
+    }
+}
+
+async function runLivePulse() {
+    const grid = document.getElementById('strat-grid');
+    grid.innerHTML = '<div style="color:#666; padding:20px;">Scanning Live Markets...</div>';
+    
+    try {
+        const res = await fetch('/api/dmr/live', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ symbol: "BTCUSDT" })
+        });
+        const data = await res.json();
+        
+        // Update Header
+        document.getElementById('live-regime').innerText = data.regime;
+        document.getElementById('live-regime').style.color = data.regime === "DIRECTIONAL" ? "#00ff9d" : "#ffcc00";
+        document.getElementById('live-price').innerText = data.price.toFixed(2);
+        document.getElementById('live-time').innerText = data.timestamp;
+        
+        // Render Cards
+        grid.innerHTML = '';
+        data.strategies.forEach(s => {
+            const card = document.createElement('div');
+            card.className = 'strat-card';
+            card.style.borderTop = `3px solid ${s.color}`;
+            
+            card.innerHTML = `
+                <div class="strat-title">${s.strategy}</div>
+                <div class="strat-status" style="background:${s.color}; color:${s.color === '#00ff9d' ? '#000' : '#fff'}">${s.status}</div>
+                <div class="strat-msg">${s.message}</div>
+                ${s.levels.target > 0 ? `<div style="margin-top:10px; font-size:0.7rem; color:#666;">TARGET: ${s.levels.target}</div>` : ''}
+            `;
+            grid.appendChild(card);
+        });
+        
+    } catch(e) {
+        grid.innerHTML = `<div style="color:red">Connection Error: ${e}</div>`;
+    }
+}
+</script>
 {% endblock %}

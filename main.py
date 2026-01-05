@@ -155,6 +155,21 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     
     return JSONResponse(raw)
 
+@app.post("/api/dmr/live")
+async def dmr_live(request: Request, db: Session = Depends(get_db)):
+    # Standard security checks
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    require_paid_access(u)
+    
+    payload = await request.json()
+    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
+    
+    # Run the Pulse
+    live_data = await research_lab.run_live_pulse(symbol)
+    
+    return JSONResponse(live_data)
+
 @app.get("/indicators", response_class=HTMLResponse)
 def indicators(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
