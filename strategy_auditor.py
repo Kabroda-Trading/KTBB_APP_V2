@@ -1,12 +1,9 @@
 # strategy_auditor.py
 # ==============================================================================
-# KABRODA STRATEGY AUDIT MASTER CORE v2.0 (S4 HARDENED)
+# KABRODA STRATEGY AUDIT MASTER CORE v2.1 (RISK MODELING)
 # ==============================================================================
 # Updates:
-# - Added Regime Gating (Disable S4 in Directional)
-# - Added Structural Gating (Disable S4 if Triggers Overlap)
-# - Added "Implied R" calculation for all trades
-# - New Classification Buckets (VALID_S4_A, INVALID_S4_REGIME, etc)
+# - Added 'calculate_pnl_dynamic' to handle Fixed Risk vs Fixed Margin
 # ==============================================================================
 
 from __future__ import annotations
@@ -51,12 +48,42 @@ def _check_5m_alignment(candles: List[Candle], side: str) -> str:
         if c3.close > c2.close and c3.low > c2.low: return "A"
     return "B"
 
+def _calculate_pnl_dynamic(entry, exit, stop, direction, risk_settings):
+    """
+    Calculates PnL based on the user's selected Risk Model.
+    """
+    if entry == 0 or exit == 0: return 0.0
+    
+    # Raw price movement %
+    raw_pct = (exit - entry) / entry if direction == "LONG" else (entry - exit) / entry
+    
+    # MODEL 1: FIXED RISK (e.g., "I want to lose $100 if hit stop")
+    if risk_settings['mode'] == 'fixed_risk':
+        risk_dollars = risk_settings['value']
+        dist_to_stop = abs(entry - stop)
+        
+        # Safety: Avoid division by zero if stop equals entry
+        if dist_to_stop == 0: return 0.0
+        
+        # Position Size (Units) = Risk $ / Price Distance
+        position_size_units = risk_dollars / dist_to_stop
+        
+        # PnL = Units * Price Difference
+        price_diff = (exit - entry) if direction == "LONG" else (entry - exit)
+        return round(position_size_units * price_diff, 2)
+
+    # MODEL 2: FIXED MARGIN (e.g., "I use $1000 margin at 5x lev")
+    else:
+        capital = risk_settings['value']
+        leverage = risk_settings.get('leverage', 1.0)
+        return round(capital * raw_pct * leverage, 2)
+
 # ==========================================
 # 2. STRATEGY S4: MID-BAND FADE (v2.0)
 # ==========================================
 
 def run_s4_logic(levels: Dict, candles_15m: List[Dict], candles_5m: List[Dict], 
-                 leverage: float, capital: float, market_regime: str) -> Dict[str, Any]:
+                 risk_settings: Dict, market_regime: str) -> Dict[str, Any]:
     
     c15 = _to_candles(candles_15m)
     c5  = _to_candles(candles_5m)
@@ -67,24 +94,22 @@ def run_s4_logic(levels: Dict, candles_15m: List[Dict], candles_5m: List[Dict],
     bo = levels.get("breakout_trigger", 0)
     bd = levels.get("breakdown_trigger", 0)
     
-    # --- A. SCANNER (Find the Setup) ---
+    # --- A. SCANNER ---
     direction = "NONE"
     setup_time = 0
     entry_price = 0.0
     
     for i in range(1, len(c15)):
         prev, curr = c15[i-1], c15[i]
-        # Short: Poke above VAH, Close inside
         if prev.high > vah and curr.close < vah:
             direction = "SHORT"; setup_time = curr.timestamp; entry_price = curr.close; break
-        # Long: Poke below VAL, Close inside
         if prev.low < val and curr.close > val:
             direction = "LONG"; setup_time = curr.timestamp; entry_price = curr.close; break
             
     if direction == "NONE":
         return {"pnl": 0, "status": "NO_SETUP", "entry": 0, "exit": 0, "audit": {"valid": False, "reason": "No edge rejection found"}}
 
-    # --- B. AUDITOR (Forensic Check) ---
+    # --- B. AUDITOR ---
     hist_15 = _slice_history(c15, setup_time, 120)
     hist_5  = _slice_history(c5, setup_time, 30)
     
@@ -93,37 +118,29 @@ def run_s4_logic(levels: Dict, candles_15m: List[Dict], candles_5m: List[Dict],
         "quality": 0, "stop_loss": 0.0, "target": poc, "implied_rr": 0.0
     }
     
-    # 1. REGIME GATE (Hard Stop)
-    # S4 is Balance-Only. Directional kills it.
+    # 1. Regime Gate
     regime_fail = False
     if market_regime == "DIRECTIONAL":
-        audit["code"] = "INVALID_S4_REGIME"
-        audit["reason"] = "Market is DIRECTIONAL. S4 (Balance) Disabled."
-        regime_fail = True
+        audit["code"] = "INVALID_S4_REGIME"; audit["reason"] = "Market is DIRECTIONAL. S4 Disabled."; regime_fail = True
     
-    # 2. STRUCTURAL GATE (Ambiguity)
-    # If VAH is basically the Breakout Trigger, there is no 'fade zone'.
+    # 2. Structural Gate
     overlap_fail = False
-    overlap_tol = poc * 0.0015 # 0.15% tolerance
+    overlap_tol = poc * 0.0015
     if not regime_fail:
         if direction == "SHORT" and abs(vah - bo) < overlap_tol:
-            audit["code"] = "INVALID_S4_STRUCTURE"
-            audit["reason"] = "VAH overlaps Breakout Trigger. No fade zone."
-            overlap_fail = True
+            audit["code"] = "INVALID_S4_STRUCTURE"; audit["reason"] = "VAH overlaps Breakout Trigger."; overlap_fail = True
         elif direction == "LONG" and abs(val - bd) < overlap_tol:
-            audit["code"] = "INVALID_S4_STRUCTURE"
-            audit["reason"] = "VAL overlaps Breakdown Trigger. No fade zone."
-            overlap_fail = True
+            audit["code"] = "INVALID_S4_STRUCTURE"; audit["reason"] = "VAL overlaps Breakdown Trigger."; overlap_fail = True
 
-    # 3. ACCEPTANCE CHECK
+    # 3. Acceptance Check
     accept_fail = False
-    if not regime_fail and not overlap_fail:
+    if not (regime_fail or overlap_fail):
         if direction == "SHORT" and _check_acceptance(hist_15, bo, "long"):
             audit["code"] = "INVALID_ACCEPTED_BREAKOUT"; accept_fail = True
         elif direction == "LONG" and _check_acceptance(hist_15, bd, "short"):
             audit["code"] = "INVALID_ACCEPTED_BREAKDOWN"; accept_fail = True
 
-    # 4. LOCATION CHECK
+    # 4. Location Check
     loc_fail = False
     tolerance = poc * 0.002
     if not (regime_fail or overlap_fail or accept_fail):
@@ -140,7 +157,7 @@ def run_s4_logic(levels: Dict, candles_15m: List[Dict], candles_5m: List[Dict],
             elif entry_price > (val + tolerance):
                 audit["code"] = "INVALID_LOCATION_MID"; loc_fail = True
 
-    # 5. RISK CALCULATION (Run for ALL trades, even invalid ones)
+    # 5. Stop Loss Calculation
     stop_buff = 25.0
     if direction == "SHORT":
         audit["stop_loss"] = max(vah, bo) + stop_buff
@@ -151,29 +168,21 @@ def run_s4_logic(levels: Dict, candles_15m: List[Dict], candles_5m: List[Dict],
     reward = abs(entry_price - audit["target"])
     audit["implied_rr"] = round(reward / risk, 2) if risk > 0 else 0
 
-    # 6. FINAL CLASSIFICATION
+    # 6. Classification
     grade = _check_5m_alignment(hist_5, direction.lower())
     
     if regime_fail or overlap_fail or accept_fail or loc_fail:
         audit["valid"] = False
-        # Code/Reason already set above
     else:
         audit["valid"] = True
         if audit["implied_rr"] < 0.25:
-            audit["code"] = "VALID_S4_LOW_EFFICIENCY"
-            audit["quality"] = 50
-            audit["reason"] = f"Valid structure but low R ({audit['implied_rr']}R)"
+            audit["code"] = "VALID_S4_LOW_EFFICIENCY"; audit["quality"] = 50; audit["reason"] = f"Valid but low R ({audit['implied_rr']}R)"
         elif grade == "A":
-            audit["code"] = "VALID_S4_A"
-            audit["quality"] = 100
-            audit["reason"] = "Textbook S4. Correct Regime, Structure, and Trigger."
+            audit["code"] = "VALID_S4_A"; audit["quality"] = 100; audit["reason"] = "Textbook S4."
         else:
-            audit["code"] = f"VALID_S4_GRADE_{grade}"
-            audit["quality"] = 75
-            audit["reason"] = "Valid S4 with minor timing imperfection."
+            audit["code"] = f"VALID_S4_GRADE_{grade}"; audit["quality"] = 75; audit["reason"] = "Valid S4 with minor timing imperfection."
 
-    # --- C. EXECUTOR (Simulate PnL) ---
-    # We execute all to show "What happened", but the UI will highlight validity.
+    # --- C. EXECUTOR ---
     exit_price = entry_price
     status = "OPEN"
     stop = audit["stop_loss"]
@@ -188,12 +197,11 @@ def run_s4_logic(levels: Dict, candles_15m: List[Dict], candles_5m: List[Dict],
             if c.high >= stop: exit_price = stop; status = "STOPPED_OUT"; break
             if c.low <= target: exit_price = target; status = "TAKE_PROFIT"; break
             
-    # Report PnL
-    raw_pct = (exit_price - entry_price) / entry_price if direction == "LONG" else (entry_price - exit_price) / entry_price
-    pnl = capital * (raw_pct * leverage)
+    # --- D. DYNAMIC PNL CALCULATION ---
+    pnl = _calculate_pnl_dynamic(entry_price, exit_price, stop, direction, risk_settings)
     
     return {
-        "pnl": round(pnl, 2),
+        "pnl": pnl,
         "status": status,
         "entry": entry_price,
         "exit": exit_price,

@@ -299,14 +299,14 @@ async def dmr_history(request: Request, db: Session = Depends(get_db)):
     leverage = float(payload.get("leverage", 1.0))
     capital = float(payload.get("capital", 1000.0))
     
-    # Capture Strategy Selection
+    # NEW PARAMETERS
     strategy_mode = payload.get("strategy", "S0")
+    risk_mode = payload.get("risk_mode", "fixed_margin") # 'fixed_risk' or 'fixed_margin'
     
     inputs = await data_feed.get_inputs(symbol=symbol)
     
-    # Pass strategy mode to logic
     history = await research_lab.run_historical_analysis(
-        inputs, session_keys, leverage, capital, strategy_mode
+        inputs, session_keys, leverage, capital, strategy_mode, risk_mode
     )
     
     return JSONResponse(history)

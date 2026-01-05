@@ -1,6 +1,6 @@
 # research_lab.py
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from datetime import datetime
 import pandas as pd
 import sse_engine
@@ -8,9 +8,7 @@ import ccxt.async_support as ccxt
 import pytz
 import strategy_auditor
 
-# ---------------------------------------------------------
-# 1. MATH & INDICATORS (PRESERVED)
-# ---------------------------------------------------------
+# ... [KEEP MATH & CONTEXT FUNCTIONS SAME AS BEFORE] ...
 def calculate_ema(prices: List[float], period: int = 21) -> List[float]:
     if len(prices) < period: return []
     return pd.Series(prices).ewm(span=period, adjust=False).mean().tolist()
@@ -29,9 +27,6 @@ def calculate_atr(highs: List[float], lows: List[float], closes: List[float], pe
         tr_sum += max(hl, hc, lc)
     return tr_sum / period
 
-# ---------------------------------------------------------
-# 2. CONTEXT ENGINE (PRESERVED)
-# ---------------------------------------------------------
 def detect_regime(candles_15m: List[Dict], bias_score: float, levels: Dict) -> str:
     if not candles_15m: return "UNKNOWN"
     highs = [c['high'] for c in candles_15m]
@@ -51,9 +46,7 @@ def detect_regime(candles_15m: List[Dict], bias_score: float, levels: Dict) -> s
     if atr_pct > 0.5 and abs(bias_score) <= 0.25: return "VOLATILE"
     return "ROTATIONAL"
 
-# ---------------------------------------------------------
-# 3. LEGACY STRATEGY LIBRARY (S0-S9)
-# ---------------------------------------------------------
+# ... [LEGACY STRATEGY FUNCTIONS KEPT FOR S1-S9 COMPATIBILITY] ...
 def _execute_5m_trade_legacy(direction, setup_time, candles_5m, leverage, capital, exit_mode="EMA", target_price=0.0):
     c5_closes = [c['close'] for c in candles_5m]
     ema_21 = calculate_ema(c5_closes, 21)
@@ -84,7 +77,6 @@ def _execute_5m_trade_legacy(direction, setup_time, candles_5m, leverage, capita
     return {"pnl": round(pnl, 2), "status": f"{direction}_{status}", "entry": entry_price, "exit": exit_price, "audit": {}}
 
 def run_s0_strategy(*args): return {"pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0, "audit": {}}
-
 def run_s1_strategy(levels, c15, c5, lev, cap):
     bo = levels.get("breakout_trigger")
     if not bo: return {"pnl": 0, "status": "NO_LEVELS"}
@@ -93,7 +85,6 @@ def run_s1_strategy(levels, c15, c5, lev, cap):
         if c15[i]['close'] > bo and c15[i+1]['close'] > bo: direction = "LONG"; setup_time = c15[i+1]['time']; break
     if direction == "NONE": return {"pnl": 0, "status": "NO_SETUP", "entry": 0, "exit": 0, "audit": {}}
     return _execute_5m_trade_legacy(direction, setup_time, c5, lev, cap, exit_mode="EMA")
-
 def run_s2_strategy(levels, c15, c5, lev, cap):
     bd = levels.get("breakdown_trigger")
     if not bd: return {"pnl": 0, "status": "NO_LEVELS"}
@@ -115,11 +106,18 @@ async def fetch_5m_granular(symbol: str):
         return [{"time": int(c[0]/1000), "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])} for c in candles]
     except: return []
 
-async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str], leverage: float = 1, capital: float = 1000, strategy_mode: str = "S0") -> Dict[str, Any]:
+async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str], leverage: float = 1, capital: float = 1000, strategy_mode: str = "S0", risk_mode: str = "fixed_margin") -> Dict[str, Any]:
     raw_15m = inputs.get("intraday_candles", [])
     raw_daily = inputs.get("daily_candles", [])
     symbol = inputs.get("symbol", "BTCUSDT")
     raw_5m = await fetch_5m_granular(symbol)
+    
+    # Pack Risk Settings
+    risk_settings = {
+        "mode": risk_mode, # 'fixed_risk' or 'fixed_margin'
+        "value": capital,  # Either Risk $ or Margin $
+        "leverage": leverage
+    }
     
     history = []
     regime_stats = { "COMPRESSED": [], "DIRECTIONAL": [], "ROTATIONAL": [], "VOLATILE": [] }
@@ -160,8 +158,8 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             
             # --- STRATEGY DISPATCHER ---
             if strategy_mode == "S4":
-                # NEW v2.0: Pass Regime for Gating
-                result = strategy_auditor.run_s4_logic(levels, future_15m, future_5m, leverage, capital, regime)
+                # v2.1: Pass Risk Settings
+                result = strategy_auditor.run_s4_logic(levels, future_15m, future_5m, risk_settings, regime)
             elif strategy_mode == "S1":
                 result = run_s1_strategy(levels, future_15m, future_5m, leverage, capital)
             elif strategy_mode == "S2":
@@ -182,14 +180,11 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             
     history.sort(key=lambda x: x['date'], reverse=True)
     
-    # EXEMPLAR LOGIC
     exemplar = None
     best_score = -999
     for h in history:
         res = h['strategy']
         has_audit = res.get('audit', {}).get('valid', False)
-        
-        # Only consider trades with Positive PnL AND Valid Audit (if S4)
         if res['pnl'] > 0:
             score = res['pnl']
             if has_audit: score += 1000 
@@ -197,15 +192,13 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
                 best_score = score
                 exemplar = h
     
-    # STATS AGGREGATION
     count = len(history)
     wins = sum(1 for h in history if h['strategy']['pnl'] > 0)
-    # Exclude invalid trades from "Valid Attempts" count if they have audit data
     valid_attempts = 0
     for h in history:
         s = h['strategy']
         if "NO_" in s['status'] or "S0" in s['status']: continue
-        if s.get('audit') and not s['audit']['valid']: continue # Skip Invalid S4s
+        if s.get('audit') and not s['audit']['valid']: continue 
         valid_attempts += 1
 
     win_rate = int((wins/valid_attempts)*100) if valid_attempts > 0 else 0

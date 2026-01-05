@@ -26,20 +26,6 @@
             </div>
             
             <div class="input-group" style="margin-top:15px;">
-                <label>SESSIONS (FILTER)</label>
-                <div style="background: #0a0a0a; padding: 10px; border: 1px solid #333; border-radius: 4px; display: flex; flex-direction: column; gap: 8px;">
-                    <label style="font-size: 0.75rem; display: flex; align-items: center; gap: 8px; color: #ccc;">
-                        <input type="checkbox" value="America/New_York" checked> 
-                        <span>NY FUTURES <span style="color:#666">(08:30)</span></span>
-                    </label>
-                    <label style="font-size: 0.75rem; display: flex; align-items: center; gap: 8px; color: #ccc;">
-                        <input type="checkbox" value="Europe/London"> 
-                        <span>LONDON <span style="color:#666">(08:00)</span></span>
-                    </label>
-                </div>
-            </div>
-
-            <div class="input-group" style="margin-top:15px;">
                 <label>STRATEGY PROTOCOL</label>
                 <select id="stratSelect" style="width:100%; padding: 10px; background: #0a0a0a; color: var(--primary); border: 1px solid #333; font-weight: bold; font-family: monospace;">
                     <option value="S0">S0 - HOLD FIRE (Safety)</option>
@@ -56,10 +42,20 @@
             </div>
 
             <div class="input-group" style="margin-top:15px;">
-                <label>CAPITAL / LEVERAGE</label>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                    <input type="number" id="levInput" placeholder="1x" value="1" style="background:#0a0a0a; border:1px solid #333; color:#fff; padding:8px; text-align: center;">
-                    <input type="number" id="capInput" placeholder="$1000" value="1000" style="background:#0a0a0a; border:1px solid #333; color:#fff; padding:8px; text-align: center;">
+                <label>RISK MODEL</label>
+                <select id="riskMode" onchange="toggleRiskInputs()" style="width:100%; padding: 8px; background: #0a0a0a; color: #fff; border: 1px solid #333; margin-bottom: 10px;">
+                    <option value="fixed_margin">FIXED MARGIN (e.g. $1000 x 5)</option>
+                    <option value="fixed_risk">FIXED RISK (e.g. Lose $100)</option>
+                </select>
+
+                <div id="input-margin">
+                    <input type="number" id="levInput" placeholder="Leverage (1x)" value="1" style="width:100%; background:#0a0a0a; border:1px solid #333; color:#fff; padding:8px; margin-bottom: 5px;">
+                    <input type="number" id="capInput" placeholder="Margin ($1000)" value="1000" style="width:100%; background:#0a0a0a; border:1px solid #333; color:#fff; padding:8px;">
+                </div>
+                
+                <div id="input-risk" style="display: none;">
+                    <input type="number" id="riskInput" placeholder="Risk Amount ($100)" value="100" style="width:100%; background:#0a0a0a; border:1px solid #ef4444; color:#fff; padding:8px;">
+                    <div style="font-size: 0.65rem; color: #666; margin-top: 4px;">*Auto-calculates position size based on Stop Loss.</div>
                 </div>
             </div>
 
@@ -108,7 +104,6 @@
                         <div class="value" id="stat-pnl" style="font-size: 1.4rem;">--</div>
                     </div>
                 </div>
-
                 <h3 style="color: #fff; font-size: 0.9rem; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">PERFORMANCE BY MARKET REGIME</h3>
                 <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
                     <div class="telemetry-card" style="background: #0d0d0d;">
@@ -158,20 +153,17 @@
                 <div class="telemetry-card" style="margin-bottom: 20px; border: 1px solid #333;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <h3 style="color:#00e5ff; margin: 0;">SELECTED: <span id="replay-date" style="color:#fff">---</span></h3>
-                        
                         <div style="display:flex; gap:10px;">
                             <button onclick="copyLevelsOnly()" style="background:#333; color:#fff; border:1px solid #555; padding:6px 12px; cursor: pointer; font-size: 0.7rem;">COPY LEVELS</button>
                             <button onclick="copyForensic()" style="background:#00ff9d; color:#000; border:none; padding:6px 12px; font-weight:bold; cursor: pointer; font-size: 0.7rem;">COPY FORENSIC DATA</button>
                         </div>
                     </div>
-                    
                     <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; font-family: monospace; margin-top: 15px;">
                         <div><span style="color:#ff4d4d">RES:</span> <span id="rep-res" style="color:#fff">---</span></div>
                         <div><span style="color:#00ff9d">BO:</span> <span id="rep-bo" style="color:#fff">---</span></div>
                         <div><span style="color:#b39ddb">BD:</span> <span id="rep-bd" style="color:#fff">---</span></div>
                         <div><span style="color:#387ef5">SUP:</span> <span id="rep-sup" style="color:#fff">---</span></div>
                     </div>
-                    
                     <div id="trade-detail-box" style="margin-top: 20px; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 4px; display:none;">
                         <div style="font-size: 0.75rem; color: #888; margin-bottom: 5px;">SIMULATION RESULT</div>
                         <div style="font-family: monospace; color: #fff;">
@@ -207,6 +199,17 @@ td { padding: 10px 12px; }
 let currentReplay = null;
 let bestExemplar = null;
 
+function toggleRiskInputs() {
+    const mode = document.getElementById('riskMode').value;
+    if(mode === 'fixed_risk') {
+        document.getElementById('input-margin').style.display = 'none';
+        document.getElementById('input-risk').style.display = 'block';
+    } else {
+        document.getElementById('input-margin').style.display = 'block';
+        document.getElementById('input-risk').style.display = 'none';
+    }
+}
+
 function switchTab(viewId) {
     document.querySelectorAll('.tab-view').forEach(el => el.style.display = 'none');
     document.getElementById('view-' + viewId).style.display = 'block';
@@ -216,11 +219,22 @@ function switchTab(viewId) {
 
 async function runLab() {
     const btn = document.querySelector('.primary-btn');
-    btn.innerText = "CALCULATING REGIMES...";
+    btn.innerText = "RUNNING SIMULATION...";
     btn.disabled = true;
     
     const sessions = [];
     document.querySelectorAll('input[type="checkbox"]:checked').forEach(c => sessions.push(c.value));
+    
+    const riskMode = document.getElementById('riskMode').value;
+    let capital = 0;
+    let leverage = 1;
+    
+    if (riskMode === 'fixed_risk') {
+        capital = document.getElementById('riskInput').value; # This sends Risk Amount as 'capital'
+    } else {
+        capital = document.getElementById('capInput').value;
+        leverage = document.getElementById('levInput').value;
+    }
     
     try {
         const res = await fetch('/api/dmr/history', {
@@ -229,14 +243,15 @@ async function runLab() {
             body: JSON.stringify({
                 symbol: document.getElementById('symbolSelect').value,
                 sessions: sessions,
-                leverage: document.getElementById('levInput').value,
-                capital: document.getElementById('capInput').value,
-                strategy: document.getElementById('stratSelect').value
+                strategy: document.getElementById('stratSelect').value,
+                risk_mode: riskMode,
+                capital: capital,
+                leverage: leverage
             })
         });
         const data = await res.json();
         
-        // UPDATE STATS
+        // UPDATE UI (Same as before)
         document.getElementById('stat-win').innerText = (data.stats.win_rate || 0) + "%";
         document.getElementById('stat-pnl').innerText = "$" + (data.stats.total_pnl || 0).toFixed(0);
         document.getElementById('stat-trades').innerText = (data.stats.valid_trades || 0);
@@ -248,7 +263,6 @@ async function runLab() {
         updateRegime('com', data.stats.regime_breakdown.COMPRESSED);
         updateRegime('vol', data.stats.regime_breakdown.VOLATILE);
 
-        // SHOW EXEMPLAR
         if(data.stats.exemplar) {
             bestExemplar = data.stats.exemplar;
             document.getElementById('exemplar-box').style.display = 'block';
@@ -326,7 +340,6 @@ function loadReplay(row) {
     document.getElementById('rep-bd').innerText = (l.breakdown_trigger||0).toFixed(2);
     document.getElementById('rep-sup').innerText = (l.daily_support||0).toFixed(2);
     
-    // Show Trade Details
     const detailBox = document.getElementById('trade-detail-box');
     if(s.entry > 0) {
         detailBox.style.display = 'block';
@@ -347,7 +360,6 @@ function loadExemplar() {
     }
 }
 
-// 1. OLD COPY LEVELS
 function copyLevelsOnly() {
     if(!currentReplay) return;
     const l = currentReplay.levels;
@@ -356,7 +368,6 @@ function copyLevelsOnly() {
     alert("Copied Levels: " + txt);
 }
 
-// 2. NEW FORENSIC COPY
 function copyForensic() {
     if(!currentReplay) return;
     
