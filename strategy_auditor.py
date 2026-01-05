@@ -1,11 +1,11 @@
 # strategy_auditor.py
 # ==============================================================================
-# KABRODA STRATEGY AUDIT MASTER CORE v3.3 (S3 SHIELD)
+# KABRODA STRATEGY AUDIT MASTER CORE v3.4 (S5 HARDENED)
 # ==============================================================================
 # Updates:
-# - Added S3 Logic: The Structural No-Trade Filter
-# - S3 Validates "Discipline" (Standing down in bad structure)
-# - S3 Flags "Passive" (Standing down in good structure)
+# - S5: Added Hard Regime Gate (ROTATIONAL only)
+# - S5: Added Location Gate (Daily Levels MUST be outside Value)
+# - S5: Fixed Exit Mode (Capped at POC)
 # ==============================================================================
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ def _build_audit_packet(valid, code, grade, reason, stop, target, entry):
 # 2. STRATEGY LOGIC MODULES
 # ==========================================
 
-# --- S0: HOLD FIRE (Default) ---
+# --- S0: HOLD FIRE ---
 def run_s0_logic(levels, c15, c5, risk, regime):
     return {
         "pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0,
@@ -158,40 +158,24 @@ def run_s2_logic(levels, raw_c15, raw_c5, risk, regime):
     
     return _execute_simulation(c5, setup_time, entry, stop, target, "SHORT", risk, valid, code, grade, reason, exit_mode="TRAILING")
 
-# --- S3: STRUCTURAL STAND-DOWN (THE SHIELD) ---
+# --- S3: STRUCTURAL STAND-DOWN ---
 def run_s3_logic(levels, raw_c15, raw_c5, risk, regime):
-    """
-    S3 is not a trade. It validates the decision NOT to trade.
-    """
     bo = levels.get("breakout_trigger", 0); bd = levels.get("breakdown_trigger", 0)
     vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
     
-    # 1. Analyze for Messiness
     reasons = []
     is_messy = False
-    
-    tol = poc * 0.002 # 0.2% tolerance
+    tol = poc * 0.002 
     if abs(bo - vah) < tol: is_messy = True; reasons.append("VAH overlaps Breakout Trigger")
     if abs(bd - val) < tol: is_messy = True; reasons.append("VAL overlaps Breakdown Trigger")
-    
     rng_pct = (bo - bd) / poc
     if rng_pct < 0.005: is_messy = True; reasons.append("Compressed Range (<0.5%)")
-    
     if regime == "ROTATIONAL": is_messy = True; reasons.append("Rotational Regime")
     
-    # 2. Audit the Decision to Stand Down
     if is_messy:
-        # Correct decision. Market was bad.
-        return {
-            "pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0,
-            "audit": _build_audit_packet(True, "VALID_S0_DISCIPLINE", "A", f"Stand Down Validated: {', '.join(reasons)}", 0, 0, 0)
-        }
+        return {"pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S0_DISCIPLINE", "A", f"Stand Down Validated: {', '.join(reasons)}", 0, 0, 0)}
     else:
-        # Market was Clean (Directional + Spaced levels). Standing down was passive.
-        return {
-            "pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0,
-            "audit": _build_audit_packet(False, "INVALID_S3_PASSIVE", "C", "Market was Directional/Clean. S3 was too passive.", 0, 0, 0)
-        }
+        return {"pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0, "audit": _build_audit_packet(False, "INVALID_S3_PASSIVE", "C", "Market was Directional/Clean. S3 was too passive.", 0, 0, 0)}
 
 # --- S4: MID-BAND FADE ---
 def run_s4_logic(levels, raw_c15, raw_c5, risk, regime):
@@ -223,13 +207,14 @@ def run_s4_logic(levels, raw_c15, raw_c5, risk, regime):
     
     return _execute_simulation(c5, setup_time, entry, stop, target, direction, risk, valid, code, grade, reason, exit_mode="FIXED")
 
-# --- S5: RANGE EXTREMES ---
+# --- S5: RANGE EXTREMES (HARDENED) ---
 def run_s5_logic(levels, raw_c15, raw_c5, risk, regime):
     c15 = _to_candles(raw_c15); c5 = _to_candles(raw_c5)
     dr = levels.get("daily_resistance", 0); ds = levels.get("daily_support", 0)
     vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
     
     direction = "NONE"; setup_time = 0; entry = 0
+    # Scanner: Touch Daily Level
     for i in range(1, len(c15)):
         curr = c15[i]
         if curr.high >= dr and curr.close < dr:
@@ -239,13 +224,22 @@ def run_s5_logic(levels, raw_c15, raw_c5, risk, regime):
             
     if direction == "NONE": return {"pnl":0, "status":"NO_SETUP", "entry":0, "exit":0, "audit":{}}
 
+    # Auditor
     valid = True; code = "VALID_S5_A"; grade = "A"; reason = "Valid Hard Edge Fade."
-    if direction == "SHORT" and dr < vah: valid = False; code = "INVALID_S5_INSIDE_VALUE"; reason = "Daily Res inside Value."
-    if direction == "LONG" and ds > val: valid = False; code = "INVALID_S5_INSIDE_VALUE"; reason = "Daily Sup inside Value."
-    if regime == "DIRECTIONAL": valid = False; code = "INVALID_S5_TREND_DAY"; reason = "Don't fade hard edges on Trend Days."
+    
+    # Gate 1: Regime (Must be ROTATIONAL)
+    if regime != "ROTATIONAL":
+        valid = False; code = "INVALID_S5_TREND_DAY"; reason = f"S5 Forbidden in {regime} regime."
+        
+    # Gate 2: Location (Daily Level MUST be outside Value)
+    if direction == "SHORT" and dr <= vah:
+        valid = False; code = "INVALID_S5_INSIDE_VALUE"; reason = "Daily Res is inside/at Value High."
+    if direction == "LONG" and ds >= val:
+        valid = False; code = "INVALID_S5_INSIDE_VALUE"; reason = "Daily Sup is inside/at Value Low."
 
     stop = (dr * 1.003) if direction == "SHORT" else (ds * 0.997)
-    target = poc
+    target = poc # Capped target
+    
     return _execute_simulation(c5, setup_time, entry, stop, target, direction, risk, valid, code, grade, reason, exit_mode="FIXED")
 
 # --- S6: VALUE ROTATION ---
@@ -282,25 +276,17 @@ def _execute_simulation(candles_5m: List[Candle], setup_time: int, entry: float,
         c = candles_5m[i]
         if c.timestamp <= setup_time: continue
         
-        # 1. HARD STOP
         if direction == "LONG":
             if c.low <= stop: exit_price = stop; status = "STOPPED_OUT"; break
+            if c.high >= target: exit_price = target; status = "TAKE_PROFIT"; break
         else:
             if c.high >= stop: exit_price = stop; status = "STOPPED_OUT"; break
+            if c.low <= target: exit_price = target; status = "TAKE_PROFIT"; break
             
-        # 2. EXIT LOGIC
-        if exit_mode == "FIXED":
-            if direction == "LONG":
-                if c.high >= target: exit_price = target; status = "TAKE_PROFIT"; break
-            else:
-                if c.low <= target: exit_price = target; status = "TAKE_PROFIT"; break
-                
-        elif exit_mode == "TRAILING":
+        if exit_mode == "TRAILING":
             current_ema = ema_series[i]
-            if direction == "LONG":
-                if c.close < current_ema: exit_price = c.close; status = "TRAIL_EXIT"; break
-            else:
-                if c.close > current_ema: exit_price = c.close; status = "TRAIL_EXIT"; break
+            if direction == "LONG" and c.close < current_ema: exit_price = c.close; status = "TRAIL_EXIT"; break
+            if direction == "SHORT" and c.close > current_ema: exit_price = c.close; status = "TRAIL_EXIT"; break
             
     pnl = _calculate_pnl_dynamic(entry, exit_price, stop, direction, risk)
     audit = _build_audit_packet(valid, code, grade, reason, stop, target, entry)
