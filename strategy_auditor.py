@@ -1,22 +1,20 @@
 # strategy_auditor.py
 # ==============================================================================
-# KABRODA STRATEGY AUDIT MASTER CORE
+# KABRODA STRATEGY AUDIT MASTER CORE v2.0 (S4 HARDENED)
 # ==============================================================================
-# This file contains the "Deep Forensic" logic for all S-Strategies.
-# It is used by the Research Lab to grade historical trade quality.
-#
-# SECTIONS:
-# 1. SHARED UTILS (Geometry, math)
-# 2. S4: MID-BAND FADE (Rotational)
-# [Future S-Strategies will be added here]
+# Updates:
+# - Added Regime Gating (Disable S4 in Directional)
+# - Added Structural Gating (Disable S4 if Triggers Overlap)
+# - Added "Implied R" calculation for all trades
+# - New Classification Buckets (VALID_S4_A, INVALID_S4_REGIME, etc)
 # ==============================================================================
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 # ==========================================
-# 1. SHARED UTILS & DATA STRUCTURES
+# 1. SHARED UTILS
 # ==========================================
 
 @dataclass
@@ -27,18 +25,14 @@ class Candle:
     low: float
     close: float
 
-def _get_candles_in_window(candles: List[Dict], end_time: int, minutes_back: int) -> List[Candle]:
-    """Helper to slice history relative to a trade entry."""
-    start_time = end_time - (minutes_back * 60)
-    # Convert dicts to objects for easier math
-    sliced = []
-    for c in candles:
-        if start_time <= c['time'] <= end_time:
-            sliced.append(Candle(c['time'], c['open'], c['high'], c['low'], c['close']))
-    return sliced
+def _to_candles(raw_data: List[Dict]) -> List[Candle]:
+    return [Candle(c['time'], c['open'], c['high'], c['low'], c['close']) for c in raw_data]
+
+def _slice_history(candles: List[Candle], end_time: int, minutes_back: int) -> List[Candle]:
+    start = end_time - (minutes_back * 60)
+    return [c for c in candles if start <= c.timestamp <= end_time]
 
 def _check_acceptance(candles: List[Candle], level: float, side: str, n: int = 2) -> bool:
-    """Checks for N consecutive closes beyond a level."""
     streak = 0
     for c in candles:
         if (side == "long" and c.close > level) or (side == "short" and c.close < level):
@@ -49,113 +43,159 @@ def _check_acceptance(candles: List[Candle], level: float, side: str, n: int = 2
     return False
 
 def _check_5m_alignment(candles: List[Candle], side: str) -> str:
-    """Grades the 5m entry trigger quality (A, B, or C)."""
     if len(candles) < 3: return "C"
     c1, c2, c3 = candles[-3], candles[-2], candles[-1]
-    
     if side == "short":
-        # Lower Highs + Downward momentum
         if c3.close < c2.close and c3.high < c2.high: return "A"
     else:
-        # Higher Lows + Upward momentum
         if c3.close > c2.close and c3.low > c2.low: return "A"
     return "B"
 
 # ==========================================
-# 2. STRATEGY S4: MID-BAND FADE
+# 2. STRATEGY S4: MID-BAND FADE (v2.0)
 # ==========================================
-# Logic: Fade Value Edges (VAH/VAL) back to Center (POC).
-# Critical: Must NOT be accepted beyond Breakout/Breakdown triggers.
 
-def audit_s4(levels: Dict, trade_entry: float, trade_time: int, trade_side: str, 
-             raw_15m: List[Dict], raw_5m: List[Dict]) -> Dict[str, Any]:
+def run_s4_logic(levels: Dict, candles_15m: List[Dict], candles_5m: List[Dict], 
+                 leverage: float, capital: float, market_regime: str) -> Dict[str, Any]:
     
-    # 1. SETUP DATA
-    history_15m = _get_candles_in_window(raw_15m, trade_time, 120) # Look back 2 hours
-    history_5m = _get_candles_in_window(raw_5m, trade_time, 30)    # Look back 30 mins
+    c15 = _to_candles(candles_15m)
+    c5  = _to_candles(candles_5m)
     
-    vah = levels["f24_vah"]
-    val = levels["f24_val"]
-    poc = levels["f24_poc"]
-    bo = levels["breakout_trigger"]
-    bd = levels["breakdown_trigger"]
-    dr = levels.get("daily_resistance", 0)
-    ds = levels.get("daily_support", 0)
-
-    audit = {
-        "valid": False,
-        "quality": 0,
-        "code": "UNKNOWN",
-        "reason": "",
-        "stop_loss": 0.0,
-        "target": poc
-    }
-
-    # 2. REGIME CHECK (Hard Gate)
-    # If price accepted outside triggers, S4 is INVALID.
-    if trade_side == "short":
-        if _check_acceptance(history_15m, bo, "long"):
-            audit["code"] = "INVALID_REGIME_BREAKOUT"
-            audit["reason"] = "Market accepted above Breakout Trigger. Rotation invalid."
-            return audit
-    else:
-        if _check_acceptance(history_15m, bd, "short"):
-            audit["code"] = "INVALID_REGIME_BREAKDOWN"
-            audit["reason"] = "Market accepted below Breakdown Trigger. Rotation invalid."
-            return audit
-
-    # 3. LOCATION CHECK (The "No Man's Land" Gate)
-    # Entry must be near the Value Edge (VAH for short, VAL for long).
-    tolerance = poc * 0.002 # 0.2% tolerance
+    vah = levels.get("f24_vah", 0)
+    val = levels.get("f24_val", 0)
+    poc = levels.get("f24_poc", 0)
+    bo = levels.get("breakout_trigger", 0)
+    bd = levels.get("breakdown_trigger", 0)
     
-    if trade_side == "short":
-        # Invalid if entering way above resistance (Chasing)
-        hard_ceiling = max(vah, bo, dr)
-        if trade_entry > hard_ceiling + tolerance:
-            audit["code"] = "INVALID_CHASE_HIGH"
-            audit["reason"] = f"Entry {trade_entry} is too high above resistance structure."
-            return audit
-        
-        # Ideally entering near VAH or between VAH/Trigger
-        if not (trade_entry >= (vah - tolerance)):
-            audit["code"] = "INVALID_LOCATION_MID"
-            audit["reason"] = "Short entry is too deep inside value (Middle of range). Wait for VAH."
-            return audit
-
-    else: # Long
-        hard_floor = min(val, bd, ds)
-        if trade_entry < hard_floor - tolerance:
-            audit["code"] = "INVALID_CHASE_LOW"
-            audit["reason"] = f"Entry {trade_entry} is too far below support structure."
-            return audit
+    # --- A. SCANNER (Find the Setup) ---
+    direction = "NONE"
+    setup_time = 0
+    entry_price = 0.0
+    
+    for i in range(1, len(c15)):
+        prev, curr = c15[i-1], c15[i]
+        # Short: Poke above VAH, Close inside
+        if prev.high > vah and curr.close < vah:
+            direction = "SHORT"; setup_time = curr.timestamp; entry_price = curr.close; break
+        # Long: Poke below VAL, Close inside
+        if prev.low < val and curr.close > val:
+            direction = "LONG"; setup_time = curr.timestamp; entry_price = curr.close; break
             
-        if not (trade_entry <= (val + tolerance)):
-            audit["code"] = "INVALID_LOCATION_MID"
-            audit["reason"] = "Long entry is too deep inside value (Middle of range). Wait for VAL."
-            return audit
+    if direction == "NONE":
+        return {"pnl": 0, "status": "NO_SETUP", "entry": 0, "exit": 0, "audit": {"valid": False, "reason": "No edge rejection found"}}
 
-    # 4. ALIGNMENT CHECK (Grading)
-    grade = _check_5m_alignment(history_5m, trade_side)
+    # --- B. AUDITOR (Forensic Check) ---
+    hist_15 = _slice_history(c15, setup_time, 120)
+    hist_5  = _slice_history(c5, setup_time, 30)
     
-    # 5. RISK CALCULATION
-    # Stop Placement: Just beyond the invalidation point
-    stop_buffer = 25.0 # Points
+    audit = {
+        "valid": False, "code": "UNKNOWN", "reason": "", 
+        "quality": 0, "stop_loss": 0.0, "target": poc, "implied_rr": 0.0
+    }
     
-    if trade_side == "short":
-        # Invalidation is acceptance above VAH/Breakout
-        # If Daily Res is close, use that as the hard wall
-        base = max(vah, bo)
-        if dr > base and (dr - base) < 300: base = dr
-        audit["stop_loss"] = base + stop_buffer
+    # 1. REGIME GATE (Hard Stop)
+    # S4 is Balance-Only. Directional kills it.
+    regime_fail = False
+    if market_regime == "DIRECTIONAL":
+        audit["code"] = "INVALID_S4_REGIME"
+        audit["reason"] = "Market is DIRECTIONAL. S4 (Balance) Disabled."
+        regime_fail = True
+    
+    # 2. STRUCTURAL GATE (Ambiguity)
+    # If VAH is basically the Breakout Trigger, there is no 'fade zone'.
+    overlap_fail = False
+    overlap_tol = poc * 0.0015 # 0.15% tolerance
+    if not regime_fail:
+        if direction == "SHORT" and abs(vah - bo) < overlap_tol:
+            audit["code"] = "INVALID_S4_STRUCTURE"
+            audit["reason"] = "VAH overlaps Breakout Trigger. No fade zone."
+            overlap_fail = True
+        elif direction == "LONG" and abs(val - bd) < overlap_tol:
+            audit["code"] = "INVALID_S4_STRUCTURE"
+            audit["reason"] = "VAL overlaps Breakdown Trigger. No fade zone."
+            overlap_fail = True
+
+    # 3. ACCEPTANCE CHECK
+    accept_fail = False
+    if not regime_fail and not overlap_fail:
+        if direction == "SHORT" and _check_acceptance(hist_15, bo, "long"):
+            audit["code"] = "INVALID_ACCEPTED_BREAKOUT"; accept_fail = True
+        elif direction == "LONG" and _check_acceptance(hist_15, bd, "short"):
+            audit["code"] = "INVALID_ACCEPTED_BREAKDOWN"; accept_fail = True
+
+    # 4. LOCATION CHECK
+    loc_fail = False
+    tolerance = poc * 0.002
+    if not (regime_fail or overlap_fail or accept_fail):
+        if direction == "SHORT":
+            hard_ceiling = max(vah, bo)
+            if entry_price > hard_ceiling + tolerance: 
+                audit["code"] = "INVALID_CHASE_HIGH"; loc_fail = True
+            elif entry_price < (vah - tolerance):
+                audit["code"] = "INVALID_LOCATION_MID"; loc_fail = True
+        else:
+            hard_floor = min(val, bd)
+            if entry_price < hard_floor - tolerance:
+                audit["code"] = "INVALID_CHASE_LOW"; loc_fail = True
+            elif entry_price > (val + tolerance):
+                audit["code"] = "INVALID_LOCATION_MID"; loc_fail = True
+
+    # 5. RISK CALCULATION (Run for ALL trades, even invalid ones)
+    stop_buff = 25.0
+    if direction == "SHORT":
+        audit["stop_loss"] = max(vah, bo) + stop_buff
     else:
-        base = min(val, bd)
-        if ds < base and (base - ds) < 300: base = ds
-        audit["stop_loss"] = base - stop_buffer
+        audit["stop_loss"] = min(val, bd) - stop_buff
+        
+    risk = abs(entry_price - audit["stop_loss"])
+    reward = abs(entry_price - audit["target"])
+    audit["implied_rr"] = round(reward / risk, 2) if risk > 0 else 0
 
-    # 6. FINAL PASS
-    audit["valid"] = True
-    audit["quality"] = 100 if grade == "A" else 75
-    audit["code"] = f"VALID_S4_GRADE_{grade}"
-    audit["reason"] = "Valid rotational structure. Edge faded back to value."
+    # 6. FINAL CLASSIFICATION
+    grade = _check_5m_alignment(hist_5, direction.lower())
     
-    return audit
+    if regime_fail or overlap_fail or accept_fail or loc_fail:
+        audit["valid"] = False
+        # Code/Reason already set above
+    else:
+        audit["valid"] = True
+        if audit["implied_rr"] < 0.25:
+            audit["code"] = "VALID_S4_LOW_EFFICIENCY"
+            audit["quality"] = 50
+            audit["reason"] = f"Valid structure but low R ({audit['implied_rr']}R)"
+        elif grade == "A":
+            audit["code"] = "VALID_S4_A"
+            audit["quality"] = 100
+            audit["reason"] = "Textbook S4. Correct Regime, Structure, and Trigger."
+        else:
+            audit["code"] = f"VALID_S4_GRADE_{grade}"
+            audit["quality"] = 75
+            audit["reason"] = "Valid S4 with minor timing imperfection."
+
+    # --- C. EXECUTOR (Simulate PnL) ---
+    # We execute all to show "What happened", but the UI will highlight validity.
+    exit_price = entry_price
+    status = "OPEN"
+    stop = audit["stop_loss"]
+    target = audit["target"]
+    
+    for c in c5:
+        if c.timestamp <= setup_time: continue
+        if direction == "LONG":
+            if c.low <= stop: exit_price = stop; status = "STOPPED_OUT"; break
+            if c.high >= target: exit_price = target; status = "TAKE_PROFIT"; break
+        else:
+            if c.high >= stop: exit_price = stop; status = "STOPPED_OUT"; break
+            if c.low <= target: exit_price = target; status = "TAKE_PROFIT"; break
+            
+    # Report PnL
+    raw_pct = (exit_price - entry_price) / entry_price if direction == "LONG" else (entry_price - exit_price) / entry_price
+    pnl = capital * (raw_pct * leverage)
+    
+    return {
+        "pnl": round(pnl, 2),
+        "status": status,
+        "entry": entry_price,
+        "exit": exit_price,
+        "audit": audit
+    }

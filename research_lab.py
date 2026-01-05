@@ -6,12 +6,10 @@ import pandas as pd
 import sse_engine
 import ccxt.async_support as ccxt
 import pytz
-
-# NEW: Import the Master Strategy Auditor
 import strategy_auditor
 
 # ---------------------------------------------------------
-# 1. MATH & INDICATORS
+# 1. MATH & INDICATORS (PRESERVED)
 # ---------------------------------------------------------
 def calculate_ema(prices: List[float], period: int = 21) -> List[float]:
     if len(prices) < period: return []
@@ -32,7 +30,7 @@ def calculate_atr(highs: List[float], lows: List[float], closes: List[float], pe
     return tr_sum / period
 
 # ---------------------------------------------------------
-# 2. CONTEXT ENGINE
+# 2. CONTEXT ENGINE (PRESERVED)
 # ---------------------------------------------------------
 def detect_regime(candles_15m: List[Dict], bias_score: float, levels: Dict) -> str:
     if not candles_15m: return "UNKNOWN"
@@ -54,86 +52,59 @@ def detect_regime(candles_15m: List[Dict], bias_score: float, levels: Dict) -> s
     return "ROTATIONAL"
 
 # ---------------------------------------------------------
-# 3. STRATEGY EXECUTION (NOW WITH AUDIT)
+# 3. LEGACY STRATEGY LIBRARY (S0-S9)
 # ---------------------------------------------------------
+def _execute_5m_trade_legacy(direction, setup_time, candles_5m, leverage, capital, exit_mode="EMA", target_price=0.0):
+    c5_closes = [c['close'] for c in candles_5m]
+    ema_21 = calculate_ema(c5_closes, 21)
+    entry_price = 0.0; exit_price = 0.0; entry_idx = -1; status = "WAITING"
+    
+    for i in range(len(candles_5m)):
+        c = candles_5m[i]
+        if c['time'] < setup_time: continue
+        if i >= len(ema_21): break
+        if direction == "LONG" and c['close'] > ema_21[i]:
+            entry_price = c['close']; entry_idx = i; status = "IN_TRADE"; break
+        elif direction == "SHORT" and c['close'] < ema_21[i]:
+            entry_price = c['close']; entry_idx = i; status = "IN_TRADE"; break
+    if status != "IN_TRADE": return {"pnl": 0, "pct": 0, "status": "NO_5M_ENTRY", "entry": 0, "exit": 0, "audit": {}}
 
-def execute_strategy_simulation(strategy_id: str, levels: Dict, 
-                              candles_15m: List[Dict], candles_5m: List[Dict], 
-                              leverage: float, capital: float):
-    
-    # 1. FIND POTENTIAL SETUP (Scanning Phase)
-    # We look for the first valid trigger in the session
-    
-    direction = "NONE"
-    setup_time = 0
-    entry_price = 0.0
-    
-    # S4 LOGIC (Specific Scan)
-    if strategy_id == "S4":
-        vah = levels.get("f24_vah", 0)
-        val = levels.get("f24_val", 0)
-        # Scan for Rejection at edges
-        for i in range(1, len(candles_15m)):
-            prev, curr = candles_15m[i-1], candles_15m[i]
-            # Short Setup: Poke above VAH then Close inside
-            if prev['high'] > vah and curr['close'] < vah:
-                direction = "SHORT"; setup_time = curr['time']; entry_price = curr['close']; break
-            # Long Setup: Poke below VAL then Close inside
-            if prev['low'] < val and curr['close'] > val:
-                direction = "LONG"; setup_time = curr['time']; entry_price = curr['close']; break
-    
-    # DEFAULT / OTHER STRATEGIES (Placeholder for S0-S9 expansion)
-    elif strategy_id == "S0":
-        return {"pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0, "audit": {}}
-    else:
-        # Fallback to simple logic for others for now
-        return {"pnl": 0, "status": "NOT_IMPLEMENTED_YET", "entry": 0, "exit": 0, "audit": {}}
+    exit_price = candles_5m[-1]['close'] 
+    for i in range(entry_idx + 1, len(candles_5m)):
+        c = candles_5m[i]
+        if exit_mode == "TARGET":
+            if direction == "LONG" and c['high'] >= target_price: exit_price = target_price; status = "HIT_TARGET"; break
+            elif direction == "SHORT" and c['low'] <= target_price: exit_price = target_price; status = "HIT_TARGET"; break
+        if exit_mode == "EMA":
+            if direction == "LONG" and c['close'] < ema_21[i]: exit_price = c['close']; status = "EXIT_EMA"; break
+            elif direction == "SHORT" and c['close'] > ema_21[i]: exit_price = c['close']; status = "EXIT_EMA"; break
 
-    if direction == "NONE":
-        return {"pnl": 0, "status": "NO_SETUP_FOUND", "entry": 0, "exit": 0, "audit": {}}
-
-    # 2. AUDIT THE SETUP (The Forensic Check)
-    # We pass the candidate trade to the Auditor BEFORE executing
-    audit_result = strategy_auditor.audit_s4(
-        levels, entry_price, setup_time, direction.lower(), candles_15m, candles_5m
-    )
-    
-    # If the audit says INVALID, we record it but DO NOT trade (or trade with warning)
-    # For simulation, we will trade it to show PnL, but tag it with the Audit Code.
-    
-    # 3. EXECUTE TRADE (The PnL Check)
-    # Use the Auditor's calculated Stop and Target
-    stop_loss = audit_result["stop_loss"]
-    target = audit_result["target"]
-    
-    exit_price = entry_price # Default if flat
-    status = "OPEN"
-    
-    # Simulate forward from setup time
-    for c in candles_5m:
-        if c['time'] <= setup_time: continue
-        
-        if direction == "LONG":
-            if c['low'] <= stop_loss: exit_price = stop_loss; status = "STOPPED_OUT"; break
-            if c['high'] >= target:   exit_price = target;    status = "TAKE_PROFIT"; break
-        else: # SHORT
-            if c['high'] >= stop_loss: exit_price = stop_loss; status = "STOPPED_OUT"; break
-            if c['low'] <= target:     exit_price = target;    status = "TAKE_PROFIT"; break
-            
-    # 4. CALCULATE PNL
     raw_pct = (exit_price - entry_price) / entry_price if direction == "LONG" else (entry_price - exit_price) / entry_price
     pnl = capital * (raw_pct * leverage)
-    
-    return {
-        "pnl": round(pnl, 2),
-        "status": status,
-        "entry": entry_price,
-        "exit": exit_price,
-        "audit": audit_result  # Embed the forensic report
-    }
+    return {"pnl": round(pnl, 2), "status": f"{direction}_{status}", "entry": entry_price, "exit": exit_price, "audit": {}}
+
+def run_s0_strategy(*args): return {"pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0, "audit": {}}
+
+def run_s1_strategy(levels, c15, c5, lev, cap):
+    bo = levels.get("breakout_trigger")
+    if not bo: return {"pnl": 0, "status": "NO_LEVELS"}
+    direction = "NONE"; setup_time = 0
+    for i in range(len(c15) - 2):
+        if c15[i]['close'] > bo and c15[i+1]['close'] > bo: direction = "LONG"; setup_time = c15[i+1]['time']; break
+    if direction == "NONE": return {"pnl": 0, "status": "NO_SETUP", "entry": 0, "exit": 0, "audit": {}}
+    return _execute_5m_trade_legacy(direction, setup_time, c5, lev, cap, exit_mode="EMA")
+
+def run_s2_strategy(levels, c15, c5, lev, cap):
+    bd = levels.get("breakdown_trigger")
+    if not bd: return {"pnl": 0, "status": "NO_LEVELS"}
+    direction = "NONE"; setup_time = 0
+    for i in range(len(c15) - 2):
+        if c15[i]['close'] < bd and c15[i+1]['close'] < bd: direction = "SHORT"; setup_time = c15[i+1]['time']; break
+    if direction == "NONE": return {"pnl": 0, "status": "NO_SETUP", "entry": 0, "exit": 0, "audit": {}}
+    return _execute_5m_trade_legacy(direction, setup_time, c5, lev, cap, exit_mode="EMA")
 
 # ---------------------------------------------------------
-# 4. MAIN RUNNER
+# 4. MAIN RUNNER (THE HYBRID DISPATCHER)
 # ---------------------------------------------------------
 exchange_kucoin = ccxt.kucoin({'enableRateLimit': True})
 
@@ -187,38 +158,56 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             buffer_time = anchor['time'] - (300 * 50)
             future_5m = [c for c in raw_5m if c['time'] >= buffer_time]
             
-            # --- EXECUTE WITH NEW LOGIC ---
-            result = execute_strategy_simulation(strategy_mode, levels, future_15m, future_5m, leverage, capital)
+            # --- STRATEGY DISPATCHER ---
+            if strategy_mode == "S4":
+                # NEW v2.0: Pass Regime for Gating
+                result = strategy_auditor.run_s4_logic(levels, future_15m, future_5m, leverage, capital, regime)
+            elif strategy_mode == "S1":
+                result = run_s1_strategy(levels, future_15m, future_5m, leverage, capital)
+            elif strategy_mode == "S2":
+                result = run_s2_strategy(levels, future_15m, future_5m, leverage, capital)
+            else:
+                result = run_s0_strategy()
             
-            entry = {
+            entry_record = {
                 "session": s_key.replace("America/", "").replace("Europe/", ""),
                 "date": datetime.fromtimestamp(anchor["time"]).strftime("%Y-%m-%d"),
                 "regime": regime,
                 "levels": levels, 
-                "strategy": result # Now contains 'audit' block
+                "strategy": result 
             }
-            history.append(entry)
+            history.append(entry_record)
             regime_stats[regime].append(result["pnl"] > 0)
 
             
     history.sort(key=lambda x: x['date'], reverse=True)
     
-    # 4. FIND EXEMPLAR (Best Valid Trade)
+    # EXEMPLAR LOGIC
     exemplar = None
     best_score = -999
     for h in history:
-        # Prioritize VALID Audits over just raw PnL
-        audit = h['strategy'].get('audit', {})
-        if h['strategy']['pnl'] > 0 and audit.get('valid', False):
-            score = h['strategy']['pnl'] + audit.get('quality', 0)
+        res = h['strategy']
+        has_audit = res.get('audit', {}).get('valid', False)
+        
+        # Only consider trades with Positive PnL AND Valid Audit (if S4)
+        if res['pnl'] > 0:
+            score = res['pnl']
+            if has_audit: score += 1000 
             if score > best_score:
                 best_score = score
                 exemplar = h
     
-    # 5. STATS
+    # STATS AGGREGATION
     count = len(history)
     wins = sum(1 for h in history if h['strategy']['pnl'] > 0)
-    valid_attempts = sum(1 for h in history if "NO_" not in h['strategy']['status'] and "S0" not in h['strategy']['status'])
+    # Exclude invalid trades from "Valid Attempts" count if they have audit data
+    valid_attempts = 0
+    for h in history:
+        s = h['strategy']
+        if "NO_" in s['status'] or "S0" in s['status']: continue
+        if s.get('audit') and not s['audit']['valid']: continue # Skip Invalid S4s
+        valid_attempts += 1
+
     win_rate = int((wins/valid_attempts)*100) if valid_attempts > 0 else 0
     total_pnl = sum(h['strategy']['pnl'] for h in history)
     
