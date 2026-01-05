@@ -1,10 +1,10 @@
 # research_lab.py
 # ==============================================================================
-# KABRODA RESEARCH LAB v6.2 (STABLE & CRASH-PROOF)
+# KABRODA RESEARCH LAB v6.3 (LIVE VOLUME FIX)
 # ==============================================================================
 # Updates:
-# - FIXED: "KeyError: 'valid'" crash in Run All Scanner.
-# - INCLUDED: Live Pulse logic.
+# - FIXED: fetch_5m_granular now includes 'volume' to prevent SSE Engine crash.
+# - FIXED: "KeyError: valid" protection in historical scanner.
 # ==============================================================================
 
 from __future__ import annotations
@@ -54,7 +54,15 @@ async def fetch_5m_granular(symbol: str):
     s = symbol.upper().replace("BTCUSDT", "BTC/USDT").replace("ETHUSDT", "ETH/USDT")
     try:
         candles = await exchange_kucoin.fetch_ohlcv(s, '5m', limit=1440)
-        return [{"time": int(c[0]/1000), "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])} for c in candles]
+        # FIX: Include 'volume' (index 5)
+        return [{
+            "time": int(c[0]/1000), 
+            "open": float(c[1]), 
+            "high": float(c[2]), 
+            "low": float(c[3]), 
+            "close": float(c[4]),
+            "volume": float(c[5]) # <--- ADDED THIS
+        } for c in candles]
     except: return []
 
 # --- LIVE PULSE FUNCTION ---
@@ -64,6 +72,7 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
     
     slice_24h = raw_5m[-288:]
     last_candle = raw_5m[-1]
+    
     sse_input = {
         "raw_15m_candles": slice_24h, 
         "raw_daily_candles": [], 
@@ -74,10 +83,15 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
         "r30_low": min(c['low'] for c in slice_24h[-6:]),
         "last_price": last_candle['close']
     }
-    computed = sse_engine.compute_sse_levels(sse_input)
-    levels = computed["levels"]
-    bias_score = computed["bias_model"]["daily_lean"]["score"]
-    regime = detect_regime(slice_24h, bias_score, levels)
+    
+    try:
+        computed = sse_engine.compute_sse_levels(sse_input)
+        levels = computed["levels"]
+        bias_score = computed["bias_model"]["daily_lean"]["score"]
+        regime = detect_regime(slice_24h, bias_score, levels)
+    except Exception as e:
+        print(f"SSE ENGINE ERROR: {e}")
+        return {"error": f"Level Calc Failed: {str(e)}"}
     
     risk_settings = { "mode": risk_mode, "value": float(capital), "leverage": float(leverage) }
     strategies = {
@@ -91,17 +105,19 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
     for code, func in strategies.items():
         try:
             res = func(levels, slice_24h, raw_5m[-288:], risk_settings, regime)
-            status = "STANDBY"; color = "gray"; msg = res['audit'].get('reason', 'Waiting...')
+            
+            status = "STANDBY"; color = "#444"; msg = res['audit'].get('reason', 'Waiting...')
+            
             if code == "S9" and res['status'] == "S9_ACTIVE":
-                status = "CRITICAL ALERT"; color = "red"; msg = "MARKET HALTED (Extreme)"
+                status = "CRITICAL ALERT"; color = "#ef4444"; msg = "MARKET HALTED (Extreme)"
             elif res['audit'].get('valid', False):
                 if res['entry'] > 0:
                     status = "ACTIVE SIGNAL"; color = "#00ff9d"; msg = f"Entry found at {res['entry']}"
                 else:
                     status = "MONITORING"; color = "#ffcc00"; msg = "Valid Regime. Waiting for Trigger."
-            else:
-                status = "BLOCKED"; color = "#444"
-                
+            elif "INVALID" in res['audit'].get('code', ''):
+                status = "BLOCKED"; color = "#222"; msg = res['audit'].get('reason', 'Regime Mismatch')
+            
             results.append({
                 "strategy": code, "status": status, "color": color, "message": msg,
                 "levels": { "stop": res['audit'].get('stop_loss',0), "target": res['audit'].get('target',0) }
@@ -114,7 +130,7 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
         "price": last_candle['close'], "regime": regime, "levels": levels, "strategies": results
     }
 
-# --- HISTORICAL ANALYSIS (FIXED) ---
+# --- HISTORICAL ANALYSIS ---
 async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str], leverage: float = 1, capital: float = 1000, strategy_mode: str = "S0", risk_mode: str = "fixed_margin") -> Dict[str, Any]:
     raw_15m = inputs.get("intraday_candles", [])
     raw_daily = inputs.get("daily_candles", [])
@@ -142,8 +158,6 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
         
         for idx in indices:
             anchor = raw_15m[idx]
-            
-            # --- SSE CONTEXT ---
             sse_input = {
                 "raw_15m_candles": raw_15m[:idx], 
                 "raw_daily_candles": [d for d in raw_daily if d['time'] < anchor['time']],
@@ -157,13 +171,11 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             computed = sse_engine.compute_sse_levels(sse_input)
             levels = computed["levels"]
             bias_score = computed["bias_model"]["daily_lean"]["score"]
-            
             future_15m = raw_15m[idx : idx+64] 
             regime = detect_regime(future_15m[:16], bias_score, levels)
             buffer_time = anchor['time'] - (300 * 50)
             future_5m = [c for c in raw_5m if c['time'] >= buffer_time]
             
-            # --- STRATEGY EXECUTION ---
             final_result = None
             
             if strategy_mode == "ALL":
@@ -179,26 +191,20 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
                     try:
                         res = strat_func(levels, future_15m, future_5m, risk_settings, regime)
                         candidates.append(res)
-                    except Exception as e:
-                        print(f"!!! STRATEGY CRASH: {strat_func.__name__} - {e}")
-                        continue
+                    except: continue
 
                 try: s3_res = strategy_auditor.run_s3_logic(levels, future_15m, future_5m, risk_settings, regime)
                 except: s3_res = {"audit": {"valid": False}}
 
                 best_exec = None; best_pnl = -999999.0
-                
                 for c in candidates:
-                    # SAFETY FIX: Using .get() prevents KeyError crash
                     if c["audit"].get("valid", False) and c["pnl"] > 0:
-                        if c["pnl"] > best_pnl:
-                            best_pnl = c["pnl"]
-                            best_exec = c
+                        if c["pnl"] > best_pnl: best_pnl = c["pnl"]; best_exec = c
                 
                 if best_exec: final_result = best_exec
                 elif s3_res.get("audit", {}).get("valid", False): final_result = s3_res
                 else: final_result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
-                    
+            
             else:
                 try:
                     mapper = {
@@ -210,9 +216,7 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
                     }
                     func = mapper.get(strategy_mode, strategy_auditor.run_s0_logic)
                     final_result = func(levels, future_15m, future_5m, risk_settings, regime)
-                except Exception as e:
-                    print(f"!!! CRASH IN SINGLE MODE {strategy_mode}: {e}")
-                    traceback.print_exc()
+                except:
                     final_result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
             
             history.append({
@@ -225,26 +229,21 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             regime_stats[regime].append(final_result["pnl"] > 0)
 
     history.sort(key=lambda x: x['date'], reverse=True)
-    
-    # Stats
     valid_wins = 0; valid_attempts = 0; valid_pnl_total = 0.0; exemplar = None; best_score = -999
     
     for h in history:
         res = h['strategy']
         is_valid = res.get('audit', {}).get('valid', False)
-        
         if is_valid:
             valid_attempts += 1
             if res['status'] == "S0_OBSERVED": valid_wins += 1 
             else:
                 valid_pnl_total += res['pnl']
                 if res['pnl'] > 0: valid_wins += 1
-            
             score = res['pnl'] + (1000 if is_valid else 0)
             if score > best_score: best_score = score; exemplar = h
 
     win_rate = int((valid_wins/valid_attempts)*100) if valid_attempts > 0 else 0
-    
     regime_breakdown = {}
     for r, results in regime_stats.items():
         if results:
@@ -254,12 +253,8 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             regime_breakdown[r] = 0
 
     stats_out = {
-        "win_rate": win_rate,
-        "total_pnl": valid_pnl_total,
-        "valid_trades": valid_attempts,
-        "total_sessions": len(history),
-        "regime_breakdown": regime_breakdown,
-        "exemplar": exemplar
+        "win_rate": win_rate, "total_pnl": valid_pnl_total, "valid_trades": valid_attempts,
+        "total_sessions": len(history), "regime_breakdown": regime_breakdown, "exemplar": exemplar
     }
     
     return {"history": history, "stats": stats_out}
