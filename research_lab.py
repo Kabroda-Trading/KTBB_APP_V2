@@ -1,15 +1,16 @@
 # research_lab.py
 # ==============================================================================
-# KABRODA RESEARCH LAB v7.0 (MARKET PHASE AWARENESS)
+# KABRODA RESEARCH LAB v8.0 (MULTI-SESSION ANCHORING)
 # ==============================================================================
 # Updates:
-# - Added 'detect_phase': State machine for Balance -> Candidate -> Confirmed.
-# - Updated 'run_live_pulse': Uses Phase to gate/arm strategies intelligently.
+# - ADDED: '_get_dominant_session' to auto-detect NY, London, Tokyo, or Sydney.
+# - FIXED: Live Pulse now locks to the *active* market's open, not just NY.
+# - FIXED: 'CALIBRATING' status if session is <30 mins old.
 # ==============================================================================
 
 from __future__ import annotations
-from typing import Any, Dict, List
-from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 import sse_engine
 import ccxt.async_support as ccxt
@@ -39,12 +40,14 @@ def _resample_15m(raw_5m: List[Dict]) -> List[Dict]:
     df['dt'] = pd.to_datetime(df['time'], unit='s')
     df.set_index('dt', inplace=True)
     
-    # Resample logic
     ohlc = {
         'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum', 'time': 'first'
     }
-    df_15m = df.resample('15min').agg(ohlc).dropna()
-    return df_15m.to_dict('records')
+    try:
+        df_15m = df.resample('15min').agg(ohlc).dropna()
+        return df_15m.to_dict('records')
+    except:
+        return []
 
 def detect_regime(candles_15m: List[Dict], bias_score: float, levels: Dict) -> str:
     if not candles_15m: return "UNKNOWN"
@@ -84,26 +87,23 @@ def detect_phase(candles_15m: List[Dict], candles_5m: List[Dict], levels: Dict) 
     bear_accept = c1 < bd and c2 < bd
     
     # 2. CHECK FAILED BREAK (TRAP)
-    # Was outside, now back deep inside value?
     if (c2 > bo and c1 < vah): return "FAILED_BREAK_BULL"
     if (c2 < bd and c1 > val): return "FAILED_BREAK_BEAR"
     
     # 3. CHECK CONFIRMATION (Pullback Hold)
-    # Simplistic check: If accepted, check if we dipped back to trigger recently but held?
     if bull_accept:
-        # Check last 6 5m candles (30 mins) for a dip near trigger
         recent_lows = [c['low'] for c in candles_5m[-6:]]
         dipped = any(l <= bo * 1.001 for l in recent_lows)
         held = price > bo
         if dipped and held: return "DIRECTIONAL_CONFIRMED_BULL"
-        return "DIRECTIONAL_CANDIDATE_BULL" # Accepted but hasn't pulled back/held yet
+        return "DIRECTIONAL_CANDIDATE_BULL"
 
     if bear_accept:
         recent_highs = [c['high'] for c in candles_5m[-6:]]
         dipped = any(h >= bd * 0.999 for h in recent_highs)
         held = price < bd
         if dipped and held: return "DIRECTIONAL_CONFIRMED_BEAR"
-        return "DIRECTIONAL_CANDIDATE_BEAR" # Accepted but hasn't tested yet
+        return "DIRECTIONAL_CANDIDATE_BEAR"
 
     # 4. DEFAULT
     if val <= price <= vah: return "BALANCE"
@@ -115,9 +115,8 @@ exchange_kucoin = ccxt.kucoin({'enableRateLimit': True})
 async def fetch_5m_granular(symbol: str):
     s = symbol.upper().replace("BTCUSDT", "BTC/USDT").replace("ETHUSDT", "ETH/USDT")
     try:
-        # Fetch mostly recent data for live analysis (last 2 days is enough)
-        candles = await exchange_kucoin.fetch_ohlcv(s, '5m', limit=1440)
-        # Include 'volume' for SSE Engine
+        # Fetch 2 days of history to ensure we cover the anchor point
+        candles = await exchange_kucoin.fetch_ohlcv(s, '5m', limit=576)
         return [{
             "time": int(c[0]/1000), 
             "open": float(c[1]), 
@@ -128,39 +127,120 @@ async def fetch_5m_granular(symbol: str):
         } for c in candles]
     except: return []
 
-# --- LIVE PULSE FUNCTION ---
+# --- SESSION CONFIGURATION ---
+SESSION_CONFIGS = [
+    {"name": "New York", "tz": "America/New_York", "open_h": 8, "open_m": 30},
+    {"name": "London", "tz": "Europe/London", "open_h": 8, "open_m": 0},
+    {"name": "Tokyo", "tz": "Asia/Tokyo", "open_h": 9, "open_m": 0},
+    {"name": "Sydney", "tz": "Australia/Sydney", "open_h": 10, "open_m": 0},
+]
+
+def _get_dominant_session(now_utc: datetime) -> Dict[str, Any]:
+    """
+    Finds the session that opened most recently.
+    This ensures that if we are in London time, we lock to London open.
+    """
+    candidates = []
+    for s in SESSION_CONFIGS:
+        tz = pytz.timezone(s["tz"])
+        now_local = now_utc.astimezone(tz)
+        
+        # Today's open
+        open_time = now_local.replace(hour=s["open_h"], minute=s["open_m"], second=0, microsecond=0)
+        
+        # If open_time is in future, consider yesterday's open
+        if now_local < open_time:
+            open_time = open_time - timedelta(days=1)
+            
+        # Time since open
+        diff = (now_local - open_time).total_seconds()
+        
+        # Store diff
+        candidates.append({
+            "name": s["name"],
+            "tz": s["tz"],
+            "anchor_time": int(open_time.astimezone(pytz.UTC).timestamp()),
+            "anchor_fmt": open_time.strftime("%H:%M") + " " + s["name"].upper(), # e.g. "08:00 LONDON"
+            "diff": diff
+        })
+    
+    # Sort by smallest positive diff (most recently opened)
+    candidates.sort(key=lambda x: x['diff'])
+    
+    return candidates[0]
+
+# --- LIVE PULSE FUNCTION (MULTI-SESSION) ---
 async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: float = 1000, leverage: float = 1) -> Dict[str, Any]:
     raw_5m = await fetch_5m_granular(symbol)
     if not raw_5m: return {"error": "No data"}
     
-    # SSE Calc
-    slice_24h = raw_5m[-288:]
-    last_candle = raw_5m[-1]
+    # 1. Determine Session Anchor
+    now_utc = datetime.now(timezone.utc)
+    session_info = _get_dominant_session(now_utc)
+    anchor_ts = session_info["anchor_time"]
     
+    # 2. Find the candle index for the Anchor Time
+    anchor_idx = -1
+    for i, c in enumerate(raw_5m):
+        if c['time'] >= anchor_ts:
+            anchor_idx = i
+            break
+            
+    if anchor_idx == -1:
+        # Fallback: Data doesn't go back far enough
+        anchor_idx = 0
+    
+    # 3. Check Calibration Status (First 30 Mins)
+    # If we have less than 6 candles (30 mins) SINCE the open, levels aren't locked yet.
+    live_candles_count = len(raw_5m) - anchor_idx
+    is_calibrating = live_candles_count < 6
+    
+    # 4. Slice Data for Level Calculation (LOCKED)
+    # We take 24h (288 candles) ending at anchor_idx
+    start_idx = max(0, anchor_idx - 288)
+    locked_slice = raw_5m[start_idx : anchor_idx]
+    
+    # If calibrating, we use the best available previous data but flag it
+    if is_calibrating and len(locked_slice) < 50:
+        locked_slice = raw_5m[-288:] # Fallback to rolling if brand new session
+    
+    # 5. Compute SSE Levels
     sse_input = {
-        "raw_15m_candles": slice_24h, # Proxy
+        "raw_15m_candles": locked_slice, 
         "raw_daily_candles": [], 
-        "slice_24h": slice_24h,
-        "slice_4h": slice_24h[-48:],
-        "session_open_price": slice_24h[0]['open'], 
-        "r30_high": max(c['high'] for c in slice_24h[-6:]), 
-        "r30_low": min(c['low'] for c in slice_24h[-6:]),
-        "last_price": last_candle['close']
+        "slice_24h": locked_slice,
+        "slice_4h": locked_slice[-48:],
+        "session_open_price": locked_slice[0]['open'] if locked_slice else 0, 
+        "r30_high": max(c['high'] for c in locked_slice[-6:]) if locked_slice else 0, 
+        "r30_low": min(c['low'] for c in locked_slice[-6:]) if locked_slice else 0,
+        "last_price": locked_slice[-1]['close'] if locked_slice else 0
     }
     
+    levels = {}
+    bias_score = 0
     try:
         computed = sse_engine.compute_sse_levels(sse_input)
         levels = computed["levels"]
         bias_score = computed["bias_model"]["daily_lean"]["score"]
-        
-        # Build 15m candles for Phase Detection
-        candles_15m = _resample_15m(raw_5m)
-        regime = detect_regime(candles_15m[-30:], bias_score, levels)
-        phase = detect_phase(candles_15m[-30:], raw_5m[-48:], levels)
-        
     except Exception as e:
-        print(f"SSE/PHASE ERROR: {e}")
-        return {"error": f"Calc Failed: {str(e)}"}
+        print(f"SSE ENGINE ERROR: {e}")
+        return {"error": f"Level Calc Failed: {str(e)}"}
+        
+    # 6. Live Analysis
+    live_data_slice = raw_5m[anchor_idx:] 
+    if not live_data_slice: live_data_slice = raw_5m[-1:]
+    current_price_candle = live_data_slice[-1]
+    
+    # Build 15m candles from live data for Structure Check
+    candles_15m = _resample_15m(raw_5m)
+    
+    regime = detect_regime(candles_15m[-30:], bias_score, levels)
+    phase = detect_phase(candles_15m[-30:], raw_5m[-48:], levels)
+    
+    # Override Phase if Calibrating
+    if is_calibrating:
+        phase = "CALIBRATING (Wait 30m)"
+        regime = "PENDING"
     
     risk_settings = { "mode": risk_mode, "value": float(capital), "leverage": float(leverage) }
     strategies = {
@@ -173,45 +253,37 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
     results = []
     for code, func in strategies.items():
         try:
-            res = func(levels, slice_24h, raw_5m[-288:], risk_settings, regime)
+            res = func(levels, candles_15m[-30:], raw_5m[-48:], risk_settings, regime)
             
-            # --- PHASE OVERRIDES (The "Truth" Logic) ---
             status = "STANDBY"; color = "#444"; msg = res['audit'].get('reason', 'Waiting...')
             
-            # 1. S9 Circuit Breaker (Always First)
-            if code == "S9" and res['status'] == "S9_ACTIVE":
+            if is_calibrating:
+                status = "CALIBRATING"; color = "#444"; msg = "Session Open - Levels Locking..."
+            
+            elif code == "S9" and res['status'] == "S9_ACTIVE":
                 status = "CRITICAL ALERT"; color = "#ef4444"; msg = "MARKET HALTED (Extreme)"
             
-            # 2. Phase-Based Gating
             elif phase == "BALANCE":
-                if code in ["S1", "S2", "S7"]: 
-                    status = "BLOCKED"; color = "#222"; msg = "Market is Balanced. Trend blocked."
+                if code in ["S1", "S2", "S7"]: status = "BLOCKED"; color = "#222"; msg = "Market is Balanced."
                 elif code in ["S4", "S6"]:
-                    if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"; msg = f"Rotation Entry: {res['entry']}"
+                    if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"; msg = f"Entry: {res['entry']}"
                     else: status = "MONITORING"; color = "#ffcc00"; msg = "Valid Rotation Phase."
 
-            elif "CANDIDATE" in phase: # Breakout Attempted
-                if code in ["S4", "S6", "S5"]:
-                    status = "BLOCKED"; color = "#222"; msg = "Breakout in progress. Do not fade."
-                elif code in ["S1", "S2"]:
-                    status = "ARMED"; color = "#ffcc00"; msg = "Acceptance Printed. Awaiting Pullback."
-                elif code == "S7":
-                    status = "STANDBY"; color = "#444"; msg = "Wait for Confirmation."
+            elif "CANDIDATE" in phase:
+                if code in ["S4", "S6", "S5"]: status = "BLOCKED"; color = "#222"; msg = "Breakout Attempted."
+                elif code in ["S1", "S2"]: status = "ARMED"; color = "#ffcc00"; msg = "Acceptance. Awaiting Pullback."
+                elif code == "S7": status = "STANDBY"; color = "#444"
 
-            elif "CONFIRMED" in phase: # Trend Active
-                if code in ["S4", "S6", "S5"]:
-                    status = "BLOCKED"; color = "#ef4444"; msg = "TREND ACTIVE. FADING DANGEROUS."
+            elif "CONFIRMED" in phase:
+                if code in ["S4", "S6", "S5"]: status = "BLOCKED"; color = "#ef4444"; msg = "TREND ACTIVE."
                 elif code in ["S1", "S2", "S7"]:
-                    if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"; msg = f"Continuation Entry: {res['entry']}"
-                    else: status = "HUNTING"; color = "#00ff9d"; msg = "Trend Confirmed. Look for entries."
+                    if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"; msg = f"Entry: {res['entry']}"
+                    else: status = "HUNTING"; color = "#00ff9d"; msg = "Trend Confirmed."
 
-            elif "FAILED" in phase: # Trap
-                if code == "S8":
-                    status = "ARMED"; color = "#00ff9d"; msg = "Trap Detected. Look for entry."
-                else:
-                    status = "CAUTION"; color = "#ffcc00"; msg = "Market Trapped. Volatility risk."
+            elif "FAILED" in phase:
+                if code == "S8": status = "ARMED"; color = "#00ff9d"; msg = "Trap Detected."
+                else: status = "CAUTION"; color = "#ffcc00"; msg = "Trap Risk."
 
-            # 3. Fallback to Auditor validity if no phase override
             elif res['audit'].get('valid', False):
                 if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"
             
@@ -224,14 +296,15 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
 
     return {
         "timestamp": datetime.now(timezone.utc).strftime("%H:%M UTC"),
-        "price": last_candle['close'], 
+        "session_lock": session_info["anchor_fmt"], # e.g. "08:00 LONDON"
+        "price": current_price_candle['close'], 
         "regime": regime, 
-        "phase": phase, # Returning phase to UI
+        "phase": phase,
         "levels": levels, 
         "strategies": results
     }
 
-# --- HISTORICAL ANALYSIS (FIXED) ---
+# --- HISTORICAL ANALYSIS (PRESERVED) ---
 async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str], leverage: float = 1, capital: float = 1000, strategy_mode: str = "S0", risk_mode: str = "fixed_margin") -> Dict[str, Any]:
     raw_15m = inputs.get("intraday_candles", [])
     raw_daily = inputs.get("daily_candles", [])
