@@ -8,7 +8,7 @@ import ccxt.async_support as ccxt
 import pytz
 import strategy_auditor
 
-# --- MATH HELPERS ---
+# --- MATH HELPERS (PRESERVED) ---
 def calculate_ema(prices: List[float], period: int = 21) -> List[float]:
     if len(prices) < period: return []
     return pd.Series(prices).ewm(span=period, adjust=False).mean().tolist()
@@ -26,7 +26,6 @@ def calculate_atr(highs: List[float], lows: List[float], closes: List[float], pe
 def detect_regime(candles_15m: List[Dict], bias_score: float, levels: Dict) -> str:
     if not candles_15m: return "UNKNOWN"
     closes = [c['close'] for c in candles_15m]
-    
     bo = levels.get("breakout_trigger", 0)
     bd = levels.get("breakdown_trigger", 0)
     price = closes[-1]
@@ -35,16 +34,8 @@ def detect_regime(candles_15m: List[Dict], bias_score: float, levels: Dict) -> s
     
     if abs(bias_score) > 0.25: return "DIRECTIONAL"
     if range_pct > 0.5: return "ROTATIONAL"
-    return "COMPRESSED"
-
-# --- LEGACY STRATEGIES ---
-def _execute_5m_trade_legacy(direction, setup_time, candles_5m, leverage, capital, exit_mode="EMA"):
-    # (Simplified legacy logic for S1/S2/etc)
-    return {"pnl": 0, "status": "LEGACY_SIM", "entry": 0, "exit": 0, "audit": {}}
-
-def run_s0_strategy(): return {"pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0, "audit": {}}
-def run_s1_strategy(l, c15, c5, lev, cap): return _execute_5m_trade_legacy("LONG", 0, c5, lev, cap)
-def run_s2_strategy(l, c15, c5, lev, cap): return _execute_5m_trade_legacy("SHORT", 0, c5, lev, cap)
+    if range_pct < 0.5: return "COMPRESSED"
+    return "ROTATIONAL"
 
 # --- MAIN RUNNER ---
 exchange_kucoin = ccxt.kucoin({'enableRateLimit': True})
@@ -62,7 +53,6 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
     symbol = inputs.get("symbol", "BTCUSDT")
     raw_5m = await fetch_5m_granular(symbol)
     
-    # 1. Pack Risk Settings
     risk_settings = {
         "mode": risk_mode, 
         "value": float(capital),
@@ -103,15 +93,27 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             buffer_time = anchor['time'] - (300 * 50)
             future_5m = [c for c in raw_5m if c['time'] >= buffer_time]
             
-            # --- DISPATCHER ---
-            if strategy_mode == "S4":
-                result = strategy_auditor.run_s4_logic(levels, future_15m, future_5m, risk_settings, regime)
+            # --- UNIVERSAL STRATEGY ROUTER ---
+            if strategy_mode == "S0":
+                result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
             elif strategy_mode == "S1":
-                result = run_s1_strategy(levels, future_15m, future_5m, leverage, capital)
+                result = strategy_auditor.run_s1_logic(levels, future_15m, future_5m, risk_settings, regime)
             elif strategy_mode == "S2":
-                result = run_s2_strategy(levels, future_15m, future_5m, leverage, capital)
+                result = strategy_auditor.run_s2_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S4":
+                result = strategy_auditor.run_s4_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S5":
+                result = strategy_auditor.run_s5_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S6":
+                result = strategy_auditor.run_s6_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S7":
+                result = strategy_auditor.run_s7_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S8":
+                result = strategy_auditor.run_s8_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S9":
+                result = strategy_auditor.run_s9_logic(levels, future_15m, future_5m, risk_settings, regime)
             else:
-                result = run_s0_strategy()
+                result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
             
             history.append({
                 "session": s_key.replace("America/", "").replace("Europe/", ""),
@@ -124,10 +126,47 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
 
     history.sort(key=lambda x: x['date'], reverse=True)
     
-    # Simple Stats
-    wins = sum(1 for h in history if h['strategy']['pnl'] > 0)
+    # EXEMPLAR LOGIC
+    exemplar = None
+    best_score = -999
+    for h in history:
+        res = h['strategy']
+        has_audit = res.get('audit', {}).get('valid', False)
+        if res['pnl'] > 0:
+            score = res['pnl']
+            if has_audit: score += 1000 
+            if score > best_score:
+                best_score = score
+                exemplar = h
+    
     count = len(history)
-    win_rate = int((wins/count)*100) if count > 0 else 0
+    wins = sum(1 for h in history if h['strategy']['pnl'] > 0)
+    valid_attempts = 0
+    for h in history:
+        s = h['strategy']
+        # Filter valid attempts for cleaner stats
+        if "NO_" in s['status'] or "S0" in s['status']: continue
+        if s.get('audit') and not s['audit']['valid']: continue 
+        valid_attempts += 1
+
+    win_rate = int((wins/valid_attempts)*100) if valid_attempts > 0 else 0
     total_pnl = sum(h['strategy']['pnl'] for h in history)
     
-    return {"history": history, "stats": {"win_rate": win_rate, "total_pnl": total_pnl, "total_sessions": count, "valid_trades": count, "regime_breakdown": {}, "exemplar": None}}
+    regime_breakdown = {}
+    for r, results in regime_stats.items():
+        if results:
+            w = sum(1 for x in results if x)
+            regime_breakdown[r] = int((w / len(results)) * 100)
+        else:
+            regime_breakdown[r] = 0
+
+    stats_out = {
+        "win_rate": win_rate,
+        "total_pnl": total_pnl,
+        "valid_trades": valid_attempts,
+        "total_sessions": count,
+        "regime_breakdown": regime_breakdown,
+        "exemplar": exemplar
+    }
+    
+    return {"history": history, "stats": stats_out}
