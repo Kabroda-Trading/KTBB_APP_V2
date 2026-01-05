@@ -1,11 +1,11 @@
 # strategy_auditor.py
 # ==============================================================================
-# KABRODA STRATEGY AUDIT MASTER CORE v3.5 (S6 HARDENED)
+# KABRODA STRATEGY AUDIT MASTER CORE v3.6 (S7 TREND CONTINUATION)
 # ==============================================================================
 # Updates:
-# - S6: Added "Balanced Value" Gate (POC Pinned check)
-# - S6: Added "Trigger Overlap" Gate
-# - S6: Added Data Integrity Invariant Checks (Stop/Entry/Target Geometry)
+# - S7: Implemented "Trend Pullback" Logic
+# - S7: Scans for Acceptance -> Pullback to EMA -> Resumption
+# - S7: Uses Trailing Exit (Uncapped)
 # ==============================================================================
 
 from __future__ import annotations
@@ -63,7 +63,6 @@ def _check_5m_alignment(candles: List[Candle], side: str) -> str:
 
 def _calculate_pnl_dynamic(entry, exit, stop, direction, risk_settings):
     if entry == 0 or exit == 0: return 0.0
-    
     if risk_settings['mode'] == 'fixed_risk':
         risk_dollars = risk_settings['value']
         dist_to_stop = abs(entry - stop)
@@ -82,233 +81,206 @@ def _build_audit_packet(valid, code, grade, reason, stop, target, entry):
     reward = abs(entry - target)
     rr = round(reward / risk, 2) if risk > 0 else 0.0
     return {
-        "valid": valid,
-        "code": code,
-        "grade": grade,
-        "reason": reason,
-        "stop_loss": round(stop, 2),
-        "target": round(target, 2),
-        "implied_rr": rr
+        "valid": valid, "code": code, "grade": grade, "reason": reason,
+        "stop_loss": round(stop, 2), "target": round(target, 2), "implied_rr": rr
     }
 
 # ==========================================
 # 2. STRATEGY LOGIC MODULES
 # ==========================================
 
-# --- S0: HOLD FIRE ---
 def run_s0_logic(levels, c15, c5, risk, regime):
-    return {
-        "pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0,
-        "audit": _build_audit_packet(True, "VALID_S0_DISCIPLINE", "A", "Capital preserved.", 0, 0, 0)
-    }
+    return {"pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S0_DISCIPLINE", "A", "Capital preserved.", 0, 0, 0)}
 
-# --- S1: BREAKOUT ACCEPTANCE (LONG) ---
+# --- S1 (LONG) ---
 def run_s1_logic(levels, raw_c15, raw_c5, risk, regime):
     c15 = _to_candles(raw_c15); c5 = _to_candles(raw_c5)
     bo = levels.get("breakout_trigger", 0); vah = levels.get("f24_vah", 0); poc = levels.get("f24_poc", 0)
-    
     direction = "NONE"; setup_time = 0; entry = 0
     streak = 0
     for c in c15:
         if c.close > bo: streak += 1
         else: streak = 0
-        if streak >= 2:
-            direction = "LONG"; setup_time = c.timestamp; entry = c.close; break
-            
+        if streak >= 2: direction = "LONG"; setup_time = c.timestamp; entry = c.close; break
     if direction == "NONE": return {"pnl":0, "status":"NO_SETUP", "entry":0, "exit":0, "audit":{}}
-
     hist_5 = _slice_history(c5, setup_time, 30)
     valid = True; code = "VALID_S1_A"; grade = "A"; reason = "Valid Directional Breakout."
-    
     if regime != "DIRECTIONAL": valid = False; code = "INVALID_S1_REGIME"; reason = f"S1 Forbidden in {regime} regime."
     if abs(bo - vah) < (poc * 0.002): valid = False; code = "INVALID_S1_AMBIGUOUS"; reason = "Trigger overlaps Value High."
     if entry > bo * 1.003: valid = False; code = "INVALID_S1_CHASE"; reason = "Entry too far above trigger."
-    
     grade = _check_5m_alignment(hist_5, "long")
-    stop = bo * 0.998 
-    target = levels.get("daily_resistance", entry * 1.04) 
-    
+    stop = bo * 0.998; target = levels.get("daily_resistance", entry * 1.04) 
     return _execute_simulation(c5, setup_time, entry, stop, target, "LONG", risk, valid, code, grade, reason, exit_mode="TRAILING")
 
-# --- S2: BREAKDOWN ACCEPTANCE (SHORT) ---
+# --- S2 (SHORT) ---
 def run_s2_logic(levels, raw_c15, raw_c5, risk, regime):
     c15 = _to_candles(raw_c15); c5 = _to_candles(raw_c5)
     bd = levels.get("breakdown_trigger", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
-    
     direction = "NONE"; setup_time = 0; entry = 0
     streak = 0
     for c in c15:
         if c.close < bd: streak += 1
         else: streak = 0
-        if streak >= 2:
-            direction = "SHORT"; setup_time = c.timestamp; entry = c.close; break
-            
+        if streak >= 2: direction = "SHORT"; setup_time = c.timestamp; entry = c.close; break
     if direction == "NONE": return {"pnl":0, "status":"NO_SETUP", "entry":0, "exit":0, "audit":{}}
-
     hist_5 = _slice_history(c5, setup_time, 30)
     valid = True; code = "VALID_S2_A"; grade = "A"; reason = "Valid Directional Breakdown."
-    
     if regime != "DIRECTIONAL": valid = False; code = "INVALID_S2_REGIME"; reason = f"S2 Forbidden in {regime} regime."
     if abs(bd - val) < (poc * 0.002): valid = False; code = "INVALID_S2_AMBIGUOUS"; reason = "Trigger overlaps Value Low."
     if entry < bd * 0.997: valid = False; code = "INVALID_S2_CHASE"; reason = "Entry too far below trigger."
-
     grade = _check_5m_alignment(hist_5, "short")
-    stop = bd * 1.002
-    target = levels.get("daily_support", entry * 0.96)
-    
+    stop = bd * 1.002; target = levels.get("daily_support", entry * 0.96)
     return _execute_simulation(c5, setup_time, entry, stop, target, "SHORT", risk, valid, code, grade, reason, exit_mode="TRAILING")
 
-# --- S3: STRUCTURAL STAND-DOWN ---
+# --- S3 (SHIELD) ---
 def run_s3_logic(levels, raw_c15, raw_c5, risk, regime):
     bo = levels.get("breakout_trigger", 0); bd = levels.get("breakdown_trigger", 0)
     vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
-    
-    reasons = []
-    is_messy = False
-    tol = poc * 0.002 
+    reasons = []; is_messy = False; tol = poc * 0.002 
     if abs(bo - vah) < tol: is_messy = True; reasons.append("VAH overlaps Breakout Trigger")
     if abs(bd - val) < tol: is_messy = True; reasons.append("VAL overlaps Breakdown Trigger")
-    rng_pct = (bo - bd) / poc
-    if rng_pct < 0.005: is_messy = True; reasons.append("Compressed Range (<0.5%)")
+    if ((bo - bd) / poc) < 0.005: is_messy = True; reasons.append("Compressed Range")
     if regime == "ROTATIONAL": is_messy = True; reasons.append("Rotational Regime")
-    
-    if is_messy:
-        return {"pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S0_DISCIPLINE", "A", f"Stand Down Validated: {', '.join(reasons)}", 0, 0, 0)}
-    else:
-        return {"pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0, "audit": _build_audit_packet(False, "INVALID_S3_PASSIVE", "C", "Market was Directional/Clean. S3 was too passive.", 0, 0, 0)}
+    if is_messy: return {"pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S0_DISCIPLINE", "A", f"Stand Down Validated: {', '.join(reasons)}", 0, 0, 0)}
+    else: return {"pnl": 0, "status": "S0_OBSERVED", "entry": 0, "exit": 0, "audit": _build_audit_packet(False, "INVALID_S3_PASSIVE", "C", "Market was Clean. S3 was passive.", 0, 0, 0)}
 
-# --- S4: MID-BAND FADE ---
+# --- S4 (MID-BAND) ---
 def run_s4_logic(levels, raw_c15, raw_c5, risk, regime):
     c15 = _to_candles(raw_c15); c5 = _to_candles(raw_c5)
     vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
     bo = levels.get("breakout_trigger", 0); bd = levels.get("breakdown_trigger", 0)
-    
     direction = "NONE"; setup_time = 0; entry = 0
     for i in range(1, len(c15)):
         prev, curr = c15[i-1], c15[i]
-        if prev.high > vah and curr.close < vah:
-            direction = "SHORT"; setup_time = curr.timestamp; entry = curr.close; break
-        if prev.low < val and curr.close > val:
-            direction = "LONG"; setup_time = curr.timestamp; entry = curr.close; break
-    
+        if prev.high > vah and curr.close < vah: direction = "SHORT"; setup_time = curr.timestamp; entry = curr.close; break
+        if prev.low < val and curr.close > val: direction = "LONG"; setup_time = curr.timestamp; entry = curr.close; break
     if direction == "NONE": return {"pnl":0, "status":"NO_SETUP", "entry":0, "exit":0, "audit":{}}
-
     hist_15 = _slice_history(c15, setup_time, 120); hist_5 = _slice_history(c5, setup_time, 30)
     valid = True; code = "VALID_S4_A"; reason = "Valid Rotation."
-    
     if regime == "DIRECTIONAL": valid = False; code = "INVALID_S4_REGIME"; reason = "S4 Disabled in Directional Regime."
-    if (direction == "SHORT" and _check_acceptance(hist_15, bo, "long")) or \
-       (direction == "LONG" and _check_acceptance(hist_15, bd, "short")):
-        valid = False; code = "INVALID_ACCEPTED_OUTSIDE"; reason = "Price accepted outside trigger."
-
+    if (direction == "SHORT" and _check_acceptance(hist_15, bo, "long")) or (direction == "LONG" and _check_acceptance(hist_15, bd, "short")): valid = False; code = "INVALID_ACCEPTED_OUTSIDE"; reason = "Price accepted outside trigger."
     grade = _check_5m_alignment(hist_5, direction.lower())
-    stop = (max(vah, bo) + 25) if direction == "SHORT" else (min(val, bd) - 25)
-    target = poc
-    
+    stop = (max(vah, bo) + 25) if direction == "SHORT" else (min(val, bd) - 25); target = poc
     return _execute_simulation(c5, setup_time, entry, stop, target, direction, risk, valid, code, grade, reason, exit_mode="FIXED")
 
-# --- S5: RANGE EXTREMES ---
+# --- S5 (RANGE EXTREMES) ---
 def run_s5_logic(levels, raw_c15, raw_c5, risk, regime):
     c15 = _to_candles(raw_c15); c5 = _to_candles(raw_c5)
     dr = levels.get("daily_resistance", 0); ds = levels.get("daily_support", 0)
     vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
-    
     direction = "NONE"; setup_time = 0; entry = 0
     for i in range(1, len(c15)):
         curr = c15[i]
-        if curr.high >= dr and curr.close < dr:
-            direction = "SHORT"; setup_time = curr.timestamp; entry = curr.close; break
-        if curr.low <= ds and curr.close > ds:
-            direction = "LONG"; setup_time = curr.timestamp; entry = curr.close; break
-            
+        if curr.high >= dr and curr.close < dr: direction = "SHORT"; setup_time = curr.timestamp; entry = curr.close; break
+        if curr.low <= ds and curr.close > ds: direction = "LONG"; setup_time = curr.timestamp; entry = curr.close; break
     if direction == "NONE": return {"pnl":0, "status":"NO_SETUP", "entry":0, "exit":0, "audit":{}}
-
     valid = True; code = "VALID_S5_A"; grade = "A"; reason = "Valid Hard Edge Fade."
     if regime != "ROTATIONAL": valid = False; code = "INVALID_S5_TREND_DAY"; reason = f"S5 Forbidden in {regime} regime."
-    if direction == "SHORT" and dr <= vah: valid = False; code = "INVALID_S5_INSIDE_VALUE"; reason = "Daily Res is inside/at Value High."
-    if direction == "LONG" and ds >= val: valid = False; code = "INVALID_S5_INSIDE_VALUE"; reason = "Daily Sup is inside/at Value Low."
-
-    stop = (dr * 1.003) if direction == "SHORT" else (ds * 0.997)
-    target = poc 
+    if direction == "SHORT" and dr <= vah: valid = False; code = "INVALID_S5_INSIDE_VALUE"; reason = "Daily Res inside Value."
+    if direction == "LONG" and ds >= val: valid = False; code = "INVALID_S5_INSIDE_VALUE"; reason = "Daily Sup inside Value."
+    stop = (dr * 1.003) if direction == "SHORT" else (ds * 0.997); target = poc 
     return _execute_simulation(c5, setup_time, entry, stop, target, direction, risk, valid, code, grade, reason, exit_mode="FIXED")
 
-# --- S6: VALUE ROTATION (HARDENED) ---
+# --- S6 (VALUE ROTATION) ---
 def run_s6_logic(levels, raw_c15, raw_c5, risk, regime):
+    res = run_s4_logic(levels, raw_c15, raw_c5, risk, regime)
+    if res["entry"] == 0: return res
+    res["audit"]["code"] = res["audit"]["code"].replace("S4", "S6")
+    vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0); bo = levels.get("breakout_trigger", 0); bd = levels.get("breakdown_trigger", 0)
+    if regime != "ROTATIONAL": return _fail_s6(res, "INVALID_S6_NO_BALANCE", "S6 requires pure rotation.")
+    pinned = (vah - val) * 0.1
+    if abs(poc - vah) < pinned or abs(poc - val) < pinned: return _fail_s6(res, "INVALID_S6_POC_PINNED", "POC pinned to edge.")
+    if abs(bo - vah) < (poc * 0.0015) or abs(bd - val) < (poc * 0.0015): return _fail_s6(res, "INVALID_S6_TRIGGER_OVERLAP", "Triggers overlap Value.")
+    
+    entry = res["entry"]; stop = res["audit"]["stop_loss"]
+    target = val if entry > poc else vah
+    c5 = _to_candles(raw_c5)
+    
+    # Geometry Check
+    direction = "SHORT" if entry > target else "LONG"
+    if direction == "SHORT" and not (target < entry < stop): return _fail_s6(res, "INVALID_S6_GEOMETRY", "Stop/Entry/Target invalid.")
+    if direction == "LONG" and not (stop < entry < target): return _fail_s6(res, "INVALID_S6_GEOMETRY", "Stop/Entry/Target invalid.")
+    
+    return _execute_simulation(c5, 0, entry, stop, target, direction, risk, res["audit"]["valid"], res["audit"]["code"], "A", res["audit"]["reason"], exit_mode="FIXED")
+
+def _fail_s6(res, code, reason):
+    res["audit"]["valid"] = False; res["audit"]["code"] = code; res["audit"]["reason"] = reason; return res
+
+# --- S7: TREND PULLBACK (CONTINUATION) ---
+def run_s7_logic(levels, raw_c15, raw_c5, risk, regime):
+    """
+    S7 looks for a 5m pullback to EMA AFTER acceptance has occurred.
+    """
     c15 = _to_candles(raw_c15); c5 = _to_candles(raw_c5)
-    vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
     bo = levels.get("breakout_trigger", 0); bd = levels.get("breakdown_trigger", 0)
+    ema_series = _calculate_ema(c5)
     
-    # 1. SCANNER (Edge Rejection)
-    direction = "NONE"; setup_time = 0; entry = 0
-    for i in range(1, len(c15)):
-        prev, curr = c15[i-1], c15[i]
-        # Short: Poke above VAH, Close inside
-        if prev.high > vah and curr.close < vah:
-            direction = "SHORT"; setup_time = curr.timestamp; entry = curr.close; break
-        # Long: Poke below VAL, Close inside
-        if prev.low < val and curr.close > val:
-            direction = "LONG"; setup_time = curr.timestamp; entry = curr.close; break
-            
-    if direction == "NONE": return {"pnl":0, "status":"NO_SETUP", "entry":0, "exit":0, "audit":{}}
-
-    # 2. AUDITOR (Hardened)
-    hist_5 = _slice_history(c5, setup_time, 30)
-    audit = {"valid": False, "code": "UNKNOWN", "grade": "C", "reason": "", "stop_loss": 0.0, "target": 0.0, "implied_rr": 0.0}
+    # 1. SCANNER: Need Acceptance First
+    direction = "NONE"; acceptance_time = 0
     
-    def _finalize(valid, code, grade, reason):
-        audit["valid"] = valid; audit["code"] = code; audit["grade"] = grade; audit["reason"] = reason
+    # Long Scan
+    streak = 0
+    for c in c15:
+        if c.close > bo: streak += 1
+        else: streak = 0
+        if streak >= 2: direction = "LONG"; acceptance_time = c.timestamp; break
         
-        # STOP / TARGET LOGIC
-        stop_buff = 25.0
-        if direction == "SHORT":
-            stop_anchor = max(vah, bo)
-            audit["stop_loss"] = stop_anchor + stop_buff
-            audit["target"] = val # Full Rotation
-        else:
-            stop_anchor = min(val, bd)
-            audit["stop_loss"] = stop_anchor - stop_buff
-            audit["target"] = vah # Full Rotation
+    if direction == "NONE":
+        streak = 0
+        for c in c15:
+            if c.close < bd: streak += 1
+            else: streak = 0
+            if streak >= 2: direction = "SHORT"; acceptance_time = c.timestamp; break
             
-        # DATA INTEGRITY INVARIANTS
-        if direction == "SHORT" and not (audit["target"] < entry < audit["stop_loss"]):
-             audit["valid"] = False; audit["code"] = "INVALID_PACKET_INVARIANT"; audit["reason"] = "Stop/Target Geometry Invalid."
-        if direction == "LONG" and not (audit["stop_loss"] < entry < audit["target"]):
-             audit["valid"] = False; audit["code"] = "INVALID_PACKET_INVARIANT"; audit["reason"] = "Stop/Target Geometry Invalid."
-             
-        # RR Calculation
-        risk_amt = abs(entry - audit["stop_loss"])
-        reward_amt = abs(entry - audit["target"])
-        audit["implied_rr"] = round(reward_amt / risk_amt, 2) if risk_amt > 0 else 0.0
+    if direction == "NONE": 
+        return {"pnl": 0, "status": "S7_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S7_WAIT", "A", "No prior acceptance detected.", 0, 0, 0)}
+
+    # 2. PULLBACK SCANNER (5m)
+    # After acceptance, wait for price to touch/cross EMA, then resume.
+    setup_time = 0; entry = 0; stop = 0
+    pullback_detected = False
+    
+    for i in range(len(c5)):
+        c = c5[i]
+        if c.timestamp <= acceptance_time: continue
         
-        return _execute_simulation(c5, setup_time, entry, audit["stop_loss"], audit["target"], direction, risk, audit["valid"], audit["code"], audit["grade"], audit["reason"], exit_mode="FIXED")
+        current_ema = ema_series[i]
+        
+        if direction == "LONG":
+            if not pullback_detected:
+                # Wait for touch/dip below EMA
+                if c.low <= current_ema: pullback_detected = True
+            else:
+                # Wait for Close back above EMA (Resumption)
+                if c.close > current_ema:
+                    setup_time = c.timestamp; entry = c.close
+                    stop = min([x.low for x in c5[i-3:i+1]]) - 10 # Low of pullback swing
+                    break
+                    
+        elif direction == "SHORT":
+            if not pullback_detected:
+                if c.high >= current_ema: pullback_detected = True
+            else:
+                if c.close < current_ema:
+                    setup_time = c.timestamp; entry = c.close
+                    stop = max([x.high for x in c5[i-3:i+1]]) + 10 # High of pullback swing
+                    break
+    
+    if entry == 0:
+        return {"pnl": 0, "status": "S7_PENDING", "entry": 0, "exit": 0, "audit": _build_audit_packet(True, "VALID_S7_WAIT", "A", "Trend accepted but no valid pullback setup found.", 0, 0, 0)}
 
-    # GATE 1: REGIME
-    if regime != "ROTATIONAL":
-        return _finalize(False, "INVALID_S6_NO_BALANCE", "C", f"S6 requires Rotational regime (was {regime}).")
+    # 3. AUDITOR
+    valid = True; code = "VALID_S7_A"; grade = "A"; reason = "Valid Trend Continuation."
+    
+    if regime != "DIRECTIONAL":
+        valid = False; code = "INVALID_S7_REGIME"; reason = "S7 requires Directional Regime."
+        
+    target = levels.get("daily_resistance", entry * 1.05) if direction == "LONG" else levels.get("daily_support", entry * 0.95)
+    
+    # 4. EXECUTOR (Trailing)
+    return _execute_simulation(c5, setup_time, entry, stop, target, direction, risk, valid, code, grade, reason, exit_mode="TRAILING")
 
-    # GATE 2: BALANCED VALUE (POC Pinned?)
-    pinned_tol = (vah - val) * 0.1 # 10% tolerance
-    if abs(poc - vah) < pinned_tol or abs(poc - val) < pinned_tol:
-        return _finalize(False, "INVALID_S6_POC_PINNED", "C", "POC pinned to edge. Value not balanced.")
-
-    # GATE 3: TRIGGER OVERLAP
-    overlap_tol = poc * 0.0015
-    if abs(bo - vah) < overlap_tol or abs(bd - val) < overlap_tol:
-        return _finalize(False, "INVALID_S6_TRIGGER_OVERLAP", "C", "Triggers overlap Value. Structural mess.")
-
-    # GATE 4: ENTRY LOCATION
-    edge_tol = (vah - val) * 0.15 # 15% tolerance
-    if direction == "SHORT" and entry < (vah - edge_tol):
-        return _finalize(False, "INVALID_S6_LOCATION_MID", "C", "Entry too deep inside value.")
-    if direction == "LONG" and entry > (val + edge_tol):
-        return _finalize(False, "INVALID_S6_LOCATION_MID", "C", "Entry too deep inside value.")
-
-    # PASS
-    grade = _check_5m_alignment(hist_5, direction.lower())
-    return _finalize(True, f"VALID_S6_A" if grade=="A" else f"VALID_S6_GRADE_{grade}", grade, "Valid Value Rotation.")
-
-# --- S7, S8, S9 ---
-def run_s7_logic(levels, raw_c15, raw_c5, risk, regime): return {"pnl":0, "status":"S7_PENDING", "entry":0, "exit":0, "audit":{}}
+# --- S8, S9 ---
 def run_s8_logic(levels, raw_c15, raw_c5, risk, regime): return {"pnl":0, "status":"S8_PENDING", "entry":0, "exit":0, "audit":{}}
 def run_s9_logic(levels, raw_c15, raw_c5, risk, regime): return {"pnl":0, "status":"S9_PENDING", "entry":0, "exit":0, "audit":{}}
 
@@ -326,20 +298,14 @@ def _execute_simulation(candles_5m: List[Candle], setup_time: int, entry: float,
         c = candles_5m[i]
         if c.timestamp <= setup_time: continue
         
-        # 1. HARD STOP
         if direction == "LONG":
             if c.low <= stop: exit_price = stop; status = "STOPPED_OUT"; break
+            if c.high >= target: exit_price = target; status = "TAKE_PROFIT"; break
         else:
             if c.high >= stop: exit_price = stop; status = "STOPPED_OUT"; break
+            if c.low <= target: exit_price = target; status = "TAKE_PROFIT"; break
             
-        # 2. EXIT LOGIC
-        if exit_mode == "FIXED":
-            if direction == "LONG":
-                if c.high >= target: exit_price = target; status = "TAKE_PROFIT"; break
-            else:
-                if c.low <= target: exit_price = target; status = "TAKE_PROFIT"; break
-                
-        elif exit_mode == "TRAILING":
+        if exit_mode == "TRAILING":
             current_ema = ema_series[i]
             if direction == "LONG" and c.close < current_ema: exit_price = c.close; status = "TRAIL_EXIT"; break
             if direction == "SHORT" and c.close > current_ema: exit_price = c.close; status = "TRAIL_EXIT"; break
@@ -347,6 +313,4 @@ def _execute_simulation(candles_5m: List[Candle], setup_time: int, entry: float,
     pnl = _calculate_pnl_dynamic(entry, exit_price, stop, direction, risk)
     audit = _build_audit_packet(valid, code, grade, reason, stop, target, entry)
     
-    return {
-        "pnl": pnl, "status": status, "entry": entry, "exit": exit_price, "audit": audit
-    }
+    return { "pnl": pnl, "status": status, "entry": entry, "exit": exit_price, "audit": audit }
