@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Kabroda Lab | Live Tactical{% endblock %}
+{% block title %}Kabroda Lab | BattleBox{% endblock %}
 
 {% block content %}
 <div class="app-container">
@@ -16,12 +16,17 @@
     </div>
 
     <div id="mode-live" style="display: none;">
+        
         <div class="telemetry-card" style="margin-bottom: 20px; border-left: 4px solid var(--primary);">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
-                    <div style="font-size: 0.8rem; color: #888;">CURRENT MARKET REGIME</div>
+                    <div style="font-size: 0.8rem; color: #888;">MARKET POSTURE</div>
                     <div id="live-regime" style="font-size: 2rem; font-weight: 900; color: #fff;">LOADING...</div>
-                    <div style="font-size: 0.8rem; color: #666;">BTCUSDT | <span id="live-time">--:--</span></div>
+                    <div style="display:flex; align-items:center; gap: 10px; margin-top: 5px;">
+                        <div id="live-phase" style="font-size: 1rem; color: #ffcc00; font-weight: bold;">--</div>
+                        <div id="energy-badge" style="padding: 2px 8px; background: #333; font-size: 0.7rem; border-radius: 4px;">--</div>
+                    </div>
+                    <div style="font-size: 0.8rem; color: #666; margin-top: 5px;">BTCUSDT | <span id="live-time">--:--</span></div>
                 </div>
                 <div style="text-align: right;">
                     <div style="font-size: 0.8rem; color: #888;">CURRENT PRICE</div>
@@ -30,12 +35,24 @@
             </div>
         </div>
 
+        <div class="telemetry-card" style="margin-bottom: 20px; padding: 15px;">
+            <div style="font-size: 0.7rem; color: #888; margin-bottom: 10px;">SESSION TIMELINE</div>
+            <div style="display: flex; justify-content: space-between; gap: 10px;">
+                <div class="timeline-step" id="tl-lock">🔒 LOCKED</div>
+                <div class="timeline-step" id="tl-accept">🚀 ACCEPTANCE</div>
+                <div class="timeline-step" id="tl-confirm">✅ CONFIRMED</div>
+                <div class="timeline-step" id="tl-failed">⚠️ FAILED</div>
+            </div>
+        </div>
+
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
-            <div id="strat-grid" style="display: contents;">
-                </div>
+            <div id="strat-grid" style="display: contents;"></div>
         </div>
         
-        <button onclick="runLivePulse()" style="margin-top: 20px; width: 100%; padding: 15px; background: #333; color: #fff; border: 1px solid #555; cursor: pointer;">REFRESH LIVE PULSE</button>
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+            <button onclick="runLivePulse()" style="flex: 2; padding: 15px; background: #333; color: #fff; border: 1px solid #555; cursor: pointer;">REFRESH PULSE</button>
+            <button onclick="copyBattleBox()" style="flex: 1; padding: 15px; background: var(--primary); color: #000; border: none; font-weight: bold; cursor: pointer;">COPY BATTLEBOX JSON</button>
+        </div>
     </div>
 
     <div id="mode-hist" style="display: grid; grid-template-columns: 260px 1fr; gap: 20px;">
@@ -146,6 +163,8 @@
 .strat-title { font-size: 1.1rem; font-weight: bold; color: #fff; margin-bottom: 5px; }
 .strat-status { font-size: 0.8rem; font-weight: bold; margin-bottom: 10px; display: inline-block; padding: 2px 6px; border-radius: 2px; }
 .strat-msg { font-size: 0.75rem; color: #aaa; height: 40px; overflow: hidden; }
+.timeline-step { flex: 1; text-align: center; padding: 8px; background: #222; color: #666; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
+.timeline-step.active { background: #00ff9d; color: #000; }
 tr { border-bottom: 1px solid #1a1a1a; cursor: pointer; transition: background 0.2s; }
 tr:hover { background: #1a1a1a; }
 td { padding: 10px 12px; }
@@ -155,6 +174,7 @@ td { padding: 10px 12px; }
 
 <script>
 let currentSelection = null;
+let lastPacket = null; // Store for copy
 
 function toggleRiskInputs() {
     const mode = document.getElementById('riskMode').value;
@@ -193,11 +213,35 @@ async function runLivePulse() {
             body: JSON.stringify({ symbol: "BTCUSDT" })
         });
         const data = await res.json();
+        lastPacket = data.battlebox; // Save for copy
         
         document.getElementById('live-regime').innerText = data.regime;
         document.getElementById('live-regime').style.color = data.regime === "DIRECTIONAL" ? "#00ff9d" : "#ffcc00";
         document.getElementById('live-price').innerText = data.price.toFixed(2);
         document.getElementById('live-time').innerText = data.timestamp;
+        
+        const phaseLabel = data.phase ? data.phase.replace(/_/g, " ") : "WAITING FOR DATA";
+        const phaseEl = document.getElementById('live-phase');
+        phaseEl.innerText = phaseLabel;
+        
+        if(phaseLabel.includes("CONFIRMED")) phaseEl.style.color = "#00ff9d";
+        else if(phaseLabel.includes("CANDIDATE")) phaseEl.style.color = "#ffcc00";
+        else if(phaseLabel.includes("FAILED")) phaseEl.style.color = "#ef4444";
+        else phaseEl.style.color = "#888";
+        
+        // ENERGY BADGE
+        const enEl = document.getElementById('energy-badge');
+        enEl.innerText = data.energy;
+        if(data.energy === 'PRIME') { enEl.style.background = '#00ff9d'; enEl.style.color = '#000'; }
+        else if(data.energy === 'LATE') { enEl.style.background = '#ffcc00'; enEl.style.color = '#000'; }
+        else { enEl.style.background = '#333'; enEl.style.color = '#888'; }
+        
+        // TIMELINE LOGIC
+        const milestones = data.battlebox.phase_timeline.milestones;
+        if(data.energy !== 'CALIBRATING') document.getElementById('tl-lock').classList.add('active');
+        if(milestones.acceptance_time) document.getElementById('tl-accept').classList.add('active');
+        if(milestones.confirmation_time) document.getElementById('tl-confirm').classList.add('active');
+        if(milestones.failure_time) document.getElementById('tl-failed').classList.add('active');
         
         grid.innerHTML = '';
         data.strategies.forEach(s => {
@@ -217,6 +261,12 @@ async function runLivePulse() {
     } catch(e) {
         grid.innerHTML = `<div style="color:red">Connection Error: ${e}</div>`;
     }
+}
+
+function copyBattleBox() {
+    if(!lastPacket) { alert("Run Live Pulse first."); return; }
+    navigator.clipboard.writeText(JSON.stringify(lastPacket, null, 2));
+    alert("BATTLEBOX PACKET COPIED.\nPaste this into Kabroda GPT.");
 }
 
 async function runLab() {
