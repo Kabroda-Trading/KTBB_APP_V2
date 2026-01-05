@@ -1,11 +1,11 @@
 # strategy_auditor.py
 # ==============================================================================
-# KABRODA STRATEGY AUDIT MASTER CORE v3.4 (S5 HARDENED)
+# KABRODA STRATEGY AUDIT MASTER CORE v3.5 (S6 HARDENED)
 # ==============================================================================
 # Updates:
-# - S5: Added Hard Regime Gate (ROTATIONAL only)
-# - S5: Added Location Gate (Daily Levels MUST be outside Value)
-# - S5: Fixed Exit Mode (Capped at POC)
+# - S6: Added "Balanced Value" Gate (POC Pinned check)
+# - S6: Added "Trigger Overlap" Gate
+# - S6: Added Data Integrity Invariant Checks (Stop/Entry/Target Geometry)
 # ==============================================================================
 
 from __future__ import annotations
@@ -207,14 +207,13 @@ def run_s4_logic(levels, raw_c15, raw_c5, risk, regime):
     
     return _execute_simulation(c5, setup_time, entry, stop, target, direction, risk, valid, code, grade, reason, exit_mode="FIXED")
 
-# --- S5: RANGE EXTREMES (HARDENED) ---
+# --- S5: RANGE EXTREMES ---
 def run_s5_logic(levels, raw_c15, raw_c5, risk, regime):
     c15 = _to_candles(raw_c15); c5 = _to_candles(raw_c5)
     dr = levels.get("daily_resistance", 0); ds = levels.get("daily_support", 0)
     vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
     
     direction = "NONE"; setup_time = 0; entry = 0
-    # Scanner: Touch Daily Level
     for i in range(1, len(c15)):
         curr = c15[i]
         if curr.high >= dr and curr.close < dr:
@@ -224,38 +223,89 @@ def run_s5_logic(levels, raw_c15, raw_c5, risk, regime):
             
     if direction == "NONE": return {"pnl":0, "status":"NO_SETUP", "entry":0, "exit":0, "audit":{}}
 
-    # Auditor
     valid = True; code = "VALID_S5_A"; grade = "A"; reason = "Valid Hard Edge Fade."
-    
-    # Gate 1: Regime (Must be ROTATIONAL)
-    if regime != "ROTATIONAL":
-        valid = False; code = "INVALID_S5_TREND_DAY"; reason = f"S5 Forbidden in {regime} regime."
-        
-    # Gate 2: Location (Daily Level MUST be outside Value)
-    if direction == "SHORT" and dr <= vah:
-        valid = False; code = "INVALID_S5_INSIDE_VALUE"; reason = "Daily Res is inside/at Value High."
-    if direction == "LONG" and ds >= val:
-        valid = False; code = "INVALID_S5_INSIDE_VALUE"; reason = "Daily Sup is inside/at Value Low."
+    if regime != "ROTATIONAL": valid = False; code = "INVALID_S5_TREND_DAY"; reason = f"S5 Forbidden in {regime} regime."
+    if direction == "SHORT" and dr <= vah: valid = False; code = "INVALID_S5_INSIDE_VALUE"; reason = "Daily Res is inside/at Value High."
+    if direction == "LONG" and ds >= val: valid = False; code = "INVALID_S5_INSIDE_VALUE"; reason = "Daily Sup is inside/at Value Low."
 
     stop = (dr * 1.003) if direction == "SHORT" else (ds * 0.997)
-    target = poc # Capped target
-    
+    target = poc 
     return _execute_simulation(c5, setup_time, entry, stop, target, direction, risk, valid, code, grade, reason, exit_mode="FIXED")
 
-# --- S6: VALUE ROTATION ---
+# --- S6: VALUE ROTATION (HARDENED) ---
 def run_s6_logic(levels, raw_c15, raw_c5, risk, regime):
-    res = run_s4_logic(levels, raw_c15, raw_c5, risk, regime)
-    if res["entry"] == 0: return res
-    res["audit"]["code"] = res["audit"]["code"].replace("S4", "S6")
-    vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0)
+    c15 = _to_candles(raw_c15); c5 = _to_candles(raw_c5)
+    vah = levels.get("f24_vah", 0); val = levels.get("f24_val", 0); poc = levels.get("f24_poc", 0)
+    bo = levels.get("breakout_trigger", 0); bd = levels.get("breakdown_trigger", 0)
     
-    if regime != "ROTATIONAL":
-        res["audit"]["valid"] = False; res["audit"]["code"] = "INVALID_S6_NO_BALANCE"; res["audit"]["reason"] = "S6 requires pure rotation."
+    # 1. SCANNER (Edge Rejection)
+    direction = "NONE"; setup_time = 0; entry = 0
+    for i in range(1, len(c15)):
+        prev, curr = c15[i-1], c15[i]
+        # Short: Poke above VAH, Close inside
+        if prev.high > vah and curr.close < vah:
+            direction = "SHORT"; setup_time = curr.timestamp; entry = curr.close; break
+        # Long: Poke below VAL, Close inside
+        if prev.low < val and curr.close > val:
+            direction = "LONG"; setup_time = curr.timestamp; entry = curr.close; break
+            
+    if direction == "NONE": return {"pnl":0, "status":"NO_SETUP", "entry":0, "exit":0, "audit":{}}
+
+    # 2. AUDITOR (Hardened)
+    hist_5 = _slice_history(c5, setup_time, 30)
+    audit = {"valid": False, "code": "UNKNOWN", "grade": "C", "reason": "", "stop_loss": 0.0, "target": 0.0, "implied_rr": 0.0}
+    
+    def _finalize(valid, code, grade, reason):
+        audit["valid"] = valid; audit["code"] = code; audit["grade"] = grade; audit["reason"] = reason
         
-    entry = res["entry"]; stop = res["audit"]["stop_loss"]
-    target = val if entry > levels.get("f24_poc") else vah
-    c5 = _to_candles(raw_c5)
-    return _execute_simulation(c5, 0, entry, stop, target, "SHORT" if entry > target else "LONG", risk, res["audit"]["valid"], res["audit"]["code"], "A", res["audit"]["reason"], exit_mode="FIXED")
+        # STOP / TARGET LOGIC
+        stop_buff = 25.0
+        if direction == "SHORT":
+            stop_anchor = max(vah, bo)
+            audit["stop_loss"] = stop_anchor + stop_buff
+            audit["target"] = val # Full Rotation
+        else:
+            stop_anchor = min(val, bd)
+            audit["stop_loss"] = stop_anchor - stop_buff
+            audit["target"] = vah # Full Rotation
+            
+        # DATA INTEGRITY INVARIANTS
+        if direction == "SHORT" and not (audit["target"] < entry < audit["stop_loss"]):
+             audit["valid"] = False; audit["code"] = "INVALID_PACKET_INVARIANT"; audit["reason"] = "Stop/Target Geometry Invalid."
+        if direction == "LONG" and not (audit["stop_loss"] < entry < audit["target"]):
+             audit["valid"] = False; audit["code"] = "INVALID_PACKET_INVARIANT"; audit["reason"] = "Stop/Target Geometry Invalid."
+             
+        # RR Calculation
+        risk_amt = abs(entry - audit["stop_loss"])
+        reward_amt = abs(entry - audit["target"])
+        audit["implied_rr"] = round(reward_amt / risk_amt, 2) if risk_amt > 0 else 0.0
+        
+        return _execute_simulation(c5, setup_time, entry, audit["stop_loss"], audit["target"], direction, risk, audit["valid"], audit["code"], audit["grade"], audit["reason"], exit_mode="FIXED")
+
+    # GATE 1: REGIME
+    if regime != "ROTATIONAL":
+        return _finalize(False, "INVALID_S6_NO_BALANCE", "C", f"S6 requires Rotational regime (was {regime}).")
+
+    # GATE 2: BALANCED VALUE (POC Pinned?)
+    pinned_tol = (vah - val) * 0.1 # 10% tolerance
+    if abs(poc - vah) < pinned_tol or abs(poc - val) < pinned_tol:
+        return _finalize(False, "INVALID_S6_POC_PINNED", "C", "POC pinned to edge. Value not balanced.")
+
+    # GATE 3: TRIGGER OVERLAP
+    overlap_tol = poc * 0.0015
+    if abs(bo - vah) < overlap_tol or abs(bd - val) < overlap_tol:
+        return _finalize(False, "INVALID_S6_TRIGGER_OVERLAP", "C", "Triggers overlap Value. Structural mess.")
+
+    # GATE 4: ENTRY LOCATION
+    edge_tol = (vah - val) * 0.15 # 15% tolerance
+    if direction == "SHORT" and entry < (vah - edge_tol):
+        return _finalize(False, "INVALID_S6_LOCATION_MID", "C", "Entry too deep inside value.")
+    if direction == "LONG" and entry > (val + edge_tol):
+        return _finalize(False, "INVALID_S6_LOCATION_MID", "C", "Entry too deep inside value.")
+
+    # PASS
+    grade = _check_5m_alignment(hist_5, direction.lower())
+    return _finalize(True, f"VALID_S6_A" if grade=="A" else f"VALID_S6_GRADE_{grade}", grade, "Valid Value Rotation.")
 
 # --- S7, S8, S9 ---
 def run_s7_logic(levels, raw_c15, raw_c5, risk, regime): return {"pnl":0, "status":"S7_PENDING", "entry":0, "exit":0, "audit":{}}
@@ -276,14 +326,20 @@ def _execute_simulation(candles_5m: List[Candle], setup_time: int, entry: float,
         c = candles_5m[i]
         if c.timestamp <= setup_time: continue
         
+        # 1. HARD STOP
         if direction == "LONG":
             if c.low <= stop: exit_price = stop; status = "STOPPED_OUT"; break
-            if c.high >= target: exit_price = target; status = "TAKE_PROFIT"; break
         else:
             if c.high >= stop: exit_price = stop; status = "STOPPED_OUT"; break
-            if c.low <= target: exit_price = target; status = "TAKE_PROFIT"; break
             
-        if exit_mode == "TRAILING":
+        # 2. EXIT LOGIC
+        if exit_mode == "FIXED":
+            if direction == "LONG":
+                if c.high >= target: exit_price = target; status = "TAKE_PROFIT"; break
+            else:
+                if c.low <= target: exit_price = target; status = "TAKE_PROFIT"; break
+                
+        elif exit_mode == "TRAILING":
             current_ema = ema_series[i]
             if direction == "LONG" and c.close < current_ema: exit_price = c.close; status = "TRAIL_EXIT"; break
             if direction == "SHORT" and c.close > current_ema: exit_price = c.close; status = "TRAIL_EXIT"; break
