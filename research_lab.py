@@ -1,5 +1,12 @@
 # research_lab.py
-# (No changes needed if you updated it in the previous step, but re-pasting for safety)
+# ==============================================================================
+# KABRODA RESEARCH LAB v5.0 ("BEST FIT" SCANNER)
+# ==============================================================================
+# Updates:
+# - Added "ALL" strategy mode
+# - Runs all strategies per session and picks the "Champion"
+# ==============================================================================
+
 from __future__ import annotations
 from typing import Any, Dict, List
 from datetime import datetime
@@ -89,27 +96,63 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
             buffer_time = anchor['time'] - (300 * 50)
             future_5m = [c for c in raw_5m if c['time'] >= buffer_time]
             
-            # --- DISPATCHER ---
-            if strategy_mode == "S0": result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S1": result = strategy_auditor.run_s1_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S2": result = strategy_auditor.run_s2_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S3": result = strategy_auditor.run_s3_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S4": result = strategy_auditor.run_s4_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S5": result = strategy_auditor.run_s5_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S6": result = strategy_auditor.run_s6_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S7": result = strategy_auditor.run_s7_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S8": result = strategy_auditor.run_s8_logic(levels, future_15m, future_5m, risk_settings, regime)
-            elif strategy_mode == "S9": result = strategy_auditor.run_s9_logic(levels, future_15m, future_5m, risk_settings, regime)
-            else: result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
+            # --- CHAMPION SELECTION LOGIC ---
+            final_result = None
+            
+            if strategy_mode == "ALL":
+                candidates = []
+                # Run every execution strategy
+                candidates.append(strategy_auditor.run_s1_logic(levels, future_15m, future_5m, risk_settings, regime))
+                candidates.append(strategy_auditor.run_s2_logic(levels, future_15m, future_5m, risk_settings, regime))
+                candidates.append(strategy_auditor.run_s4_logic(levels, future_15m, future_5m, risk_settings, regime))
+                candidates.append(strategy_auditor.run_s5_logic(levels, future_15m, future_5m, risk_settings, regime))
+                candidates.append(strategy_auditor.run_s6_logic(levels, future_15m, future_5m, risk_settings, regime))
+                candidates.append(strategy_auditor.run_s7_logic(levels, future_15m, future_5m, risk_settings, regime))
+                candidates.append(strategy_auditor.run_s8_logic(levels, future_15m, future_5m, risk_settings, regime))
+                
+                # Check S3 (Discipline)
+                s3_res = strategy_auditor.run_s3_logic(levels, future_15m, future_5m, risk_settings, regime)
+                
+                # SELECTION RULES
+                # 1. Look for VALID execution with Profit
+                best_exec = None
+                best_pnl = -1.0
+                
+                for c in candidates:
+                    if c["audit"]["valid"] and c["pnl"] > 0:
+                        if c["pnl"] > best_pnl:
+                            best_pnl = c["pnl"]
+                            best_exec = c
+                
+                if best_exec:
+                    final_result = best_exec # Winner: Valid Trade
+                elif s3_res["audit"]["valid"]:
+                    final_result = s3_res    # Winner: Valid Discipline
+                else:
+                    # No good options. Default to S0 or the "least bad" fail for debug
+                    final_result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
+                    
+            # --- SINGLE STRATEGY MODE ---
+            elif strategy_mode == "S0": final_result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S1": final_result = strategy_auditor.run_s1_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S2": final_result = strategy_auditor.run_s2_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S3": final_result = strategy_auditor.run_s3_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S4": final_result = strategy_auditor.run_s4_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S5": final_result = strategy_auditor.run_s5_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S6": final_result = strategy_auditor.run_s6_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S7": final_result = strategy_auditor.run_s7_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S8": final_result = strategy_auditor.run_s8_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S9": final_result = strategy_auditor.run_s9_logic(levels, future_15m, future_5m, risk_settings, regime)
+            else: final_result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
             
             history.append({
                 "session": s_key.replace("America/", "").replace("Europe/", ""),
                 "date": datetime.fromtimestamp(anchor["time"]).strftime("%Y-%m-%d"),
                 "regime": regime,
                 "levels": levels, 
-                "strategy": result 
+                "strategy": final_result 
             })
-            regime_stats[regime].append(result["pnl"] > 0)
+            regime_stats[regime].append(final_result["pnl"] > 0)
 
     history.sort(key=lambda x: x['date'], reverse=True)
     
@@ -120,13 +163,17 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
         res = h['strategy']
         is_valid = res.get('audit', {}).get('valid', False)
         
-        # S3 Special Case: Valid Discipline = Valid "Win"
-        if strategy_mode == "S3" and is_valid:
-            valid_attempts += 1; valid_wins += 1 # 100% win rate for discipline
-        elif is_valid:
-            valid_attempts += 1; valid_pnl_total += res['pnl']
-            if res['pnl'] > 0: valid_wins += 1
-            score = res['pnl'] + 1000
+        # In ALL mode, S3 valid discipline counts as a "Win" for stats (capital saved)
+        if is_valid:
+            valid_attempts += 1
+            if res['status'] == "S0_OBSERVED": 
+                valid_wins += 1 # Discipline win
+            else:
+                valid_pnl_total += res['pnl']
+                if res['pnl'] > 0: valid_wins += 1
+            
+            # Exemplar Selection
+            score = res['pnl'] + (1000 if is_valid else 0)
             if score > best_score: best_score = score; exemplar = h
 
     win_rate = int((valid_wins/valid_attempts)*100) if valid_attempts > 0 else 0
