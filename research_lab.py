@@ -29,13 +29,10 @@ def detect_regime(candles_15m: List[Dict], bias_score: float, levels: Dict) -> s
     bo = levels.get("breakout_trigger", 0)
     bd = levels.get("breakdown_trigger", 0)
     price = closes[-1]
-    
     range_pct = ((bo - bd) / price) * 100 if price > 0 else 0
-    
     if abs(bias_score) > 0.25: return "DIRECTIONAL"
     if range_pct > 0.5: return "ROTATIONAL"
-    if range_pct < 0.5: return "COMPRESSED"
-    return "ROTATIONAL"
+    return "COMPRESSED"
 
 # --- MAIN RUNNER ---
 exchange_kucoin = ccxt.kucoin({'enableRateLimit': True})
@@ -100,6 +97,8 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
                 result = strategy_auditor.run_s1_logic(levels, future_15m, future_5m, risk_settings, regime)
             elif strategy_mode == "S2":
                 result = strategy_auditor.run_s2_logic(levels, future_15m, future_5m, risk_settings, regime)
+            elif strategy_mode == "S3":
+                result = strategy_auditor.run_s3_logic(levels, future_15m, future_5m, risk_settings, regime)
             elif strategy_mode == "S4":
                 result = strategy_auditor.run_s4_logic(levels, future_15m, future_5m, risk_settings, regime)
             elif strategy_mode == "S5":
@@ -132,24 +131,35 @@ async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str
     for h in history:
         res = h['strategy']
         has_audit = res.get('audit', {}).get('valid', False)
-        if res['pnl'] > 0:
+        # S3 Special case: Valid discipline = Score 100
+        if strategy_mode == "S3" and has_audit:
+            score = 100
+            if score > best_score: best_score = score; exemplar = h
+        # Execution Strategies: PnL + Valid
+        elif res['pnl'] > 0:
             score = res['pnl']
             if has_audit: score += 1000 
-            if score > best_score:
-                best_score = score
-                exemplar = h
+            if score > best_score: best_score = score; exemplar = h
     
     count = len(history)
     wins = sum(1 for h in history if h['strategy']['pnl'] > 0)
     valid_attempts = 0
     for h in history:
         s = h['strategy']
-        # Filter valid attempts for cleaner stats
-        if "NO_" in s['status'] or "S0" in s['status']: continue
+        if "NO_" in s['status'] or "S0" in s['status']: 
+            # S3 is a special case: S0_OBSERVED IS a valid outcome
+            if strategy_mode == "S3" and s['audit'].get('valid'): valid_attempts += 1
+            continue
         if s.get('audit') and not s['audit']['valid']: continue 
         valid_attempts += 1
 
-    win_rate = int((wins/valid_attempts)*100) if valid_attempts > 0 else 0
+    # S3 Win Rate = 100% if we correctly stood down
+    if strategy_mode == "S3":
+        correct_stands = sum(1 for h in history if h['strategy']['audit'].get('valid'))
+        win_rate = int((correct_stands/count)*100) if count > 0 else 0
+    else:
+        win_rate = int((wins/valid_attempts)*100) if valid_attempts > 0 else 0
+        
     total_pnl = sum(h['strategy']['pnl'] for h in history)
     
     regime_breakdown = {}
