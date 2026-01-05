@@ -1,10 +1,10 @@
 # research_lab.py
 # ==============================================================================
-# KABRODA RESEARCH LAB v6.3 (LIVE VOLUME FIX)
+# KABRODA RESEARCH LAB v7.0 (MARKET PHASE AWARENESS)
 # ==============================================================================
 # Updates:
-# - FIXED: fetch_5m_granular now includes 'volume' to prevent SSE Engine crash.
-# - FIXED: "KeyError: valid" protection in historical scanner.
+# - Added 'detect_phase': State machine for Balance -> Candidate -> Confirmed.
+# - Updated 'run_live_pulse': Uses Phase to gate/arm strategies intelligently.
 # ==============================================================================
 
 from __future__ import annotations
@@ -32,6 +32,20 @@ def calculate_atr(highs: List[float], lows: List[float], closes: List[float], pe
         tr_sum += max(hl, hc, lc)
     return tr_sum / period
 
+def _resample_15m(raw_5m: List[Dict]) -> List[Dict]:
+    """Helper to convert 5m candles to 15m for structure checks."""
+    if not raw_5m: return []
+    df = pd.DataFrame(raw_5m)
+    df['dt'] = pd.to_datetime(df['time'], unit='s')
+    df.set_index('dt', inplace=True)
+    
+    # Resample logic
+    ohlc = {
+        'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum', 'time': 'first'
+    }
+    df_15m = df.resample('15min').agg(ohlc).dropna()
+    return df_15m.to_dict('records')
+
 def detect_regime(candles_15m: List[Dict], bias_score: float, levels: Dict) -> str:
     if not candles_15m: return "UNKNOWN"
     closes = [c['close'] for c in candles_15m]
@@ -39,13 +53,61 @@ def detect_regime(candles_15m: List[Dict], bias_score: float, levels: Dict) -> s
     bd = levels.get("breakdown_trigger", 0)
     price = closes[-1]
     
+    # 1. Live Directional Override (Explicit Acceptance)
     if price > bo * 1.001: return "DIRECTIONAL"
     if price < bd * 0.999: return "DIRECTIONAL"
     
+    # 2. Standard Logic
     range_pct = ((bo - bd) / price) * 100 if price > 0 else 0
     if abs(bias_score) > 0.25: return "DIRECTIONAL"
     if range_pct > 0.5: return "ROTATIONAL"
     return "COMPRESSED"
+
+def detect_phase(candles_15m: List[Dict], candles_5m: List[Dict], levels: Dict) -> str:
+    """
+    Determines the current Market Phase based on sequence:
+    BALANCE -> CANDIDATE (Acceptance) -> CONFIRMED (Pullback Hold) -> FAILED (Trap)
+    """
+    if not candles_15m or not candles_5m: return "UNKNOWN"
+    
+    price = candles_5m[-1]['close']
+    bo = levels.get("breakout_trigger", 0)
+    bd = levels.get("breakdown_trigger", 0)
+    vah = levels.get("f24_vah", 0)
+    val = levels.get("f24_val", 0)
+    
+    # 1. CHECK ACCEPTANCE (Last 2 15m closes outside)
+    c1 = candles_15m[-1]['close']
+    c2 = candles_15m[-2]['close'] if len(candles_15m) > 1 else c1
+    
+    bull_accept = c1 > bo and c2 > bo
+    bear_accept = c1 < bd and c2 < bd
+    
+    # 2. CHECK FAILED BREAK (TRAP)
+    # Was outside, now back deep inside value?
+    if (c2 > bo and c1 < vah): return "FAILED_BREAK_BULL"
+    if (c2 < bd and c1 > val): return "FAILED_BREAK_BEAR"
+    
+    # 3. CHECK CONFIRMATION (Pullback Hold)
+    # Simplistic check: If accepted, check if we dipped back to trigger recently but held?
+    if bull_accept:
+        # Check last 6 5m candles (30 mins) for a dip near trigger
+        recent_lows = [c['low'] for c in candles_5m[-6:]]
+        dipped = any(l <= bo * 1.001 for l in recent_lows)
+        held = price > bo
+        if dipped and held: return "DIRECTIONAL_CONFIRMED_BULL"
+        return "DIRECTIONAL_CANDIDATE_BULL" # Accepted but hasn't pulled back/held yet
+
+    if bear_accept:
+        recent_highs = [c['high'] for c in candles_5m[-6:]]
+        dipped = any(h >= bd * 0.999 for h in recent_highs)
+        held = price < bd
+        if dipped and held: return "DIRECTIONAL_CONFIRMED_BEAR"
+        return "DIRECTIONAL_CANDIDATE_BEAR" # Accepted but hasn't tested yet
+
+    # 4. DEFAULT
+    if val <= price <= vah: return "BALANCE"
+    return "TESTING_EDGE"
 
 # --- MAIN RUNNER ---
 exchange_kucoin = ccxt.kucoin({'enableRateLimit': True})
@@ -53,15 +115,16 @@ exchange_kucoin = ccxt.kucoin({'enableRateLimit': True})
 async def fetch_5m_granular(symbol: str):
     s = symbol.upper().replace("BTCUSDT", "BTC/USDT").replace("ETHUSDT", "ETH/USDT")
     try:
+        # Fetch mostly recent data for live analysis (last 2 days is enough)
         candles = await exchange_kucoin.fetch_ohlcv(s, '5m', limit=1440)
-        # FIX: Include 'volume' (index 5)
+        # Include 'volume' for SSE Engine
         return [{
             "time": int(c[0]/1000), 
             "open": float(c[1]), 
             "high": float(c[2]), 
             "low": float(c[3]), 
             "close": float(c[4]),
-            "volume": float(c[5]) # <--- ADDED THIS
+            "volume": float(c[5])
         } for c in candles]
     except: return []
 
@@ -70,11 +133,12 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
     raw_5m = await fetch_5m_granular(symbol)
     if not raw_5m: return {"error": "No data"}
     
+    # SSE Calc
     slice_24h = raw_5m[-288:]
     last_candle = raw_5m[-1]
     
     sse_input = {
-        "raw_15m_candles": slice_24h, 
+        "raw_15m_candles": slice_24h, # Proxy
         "raw_daily_candles": [], 
         "slice_24h": slice_24h,
         "slice_4h": slice_24h[-48:],
@@ -88,10 +152,15 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
         computed = sse_engine.compute_sse_levels(sse_input)
         levels = computed["levels"]
         bias_score = computed["bias_model"]["daily_lean"]["score"]
-        regime = detect_regime(slice_24h, bias_score, levels)
+        
+        # Build 15m candles for Phase Detection
+        candles_15m = _resample_15m(raw_5m)
+        regime = detect_regime(candles_15m[-30:], bias_score, levels)
+        phase = detect_phase(candles_15m[-30:], raw_5m[-48:], levels)
+        
     except Exception as e:
-        print(f"SSE ENGINE ERROR: {e}")
-        return {"error": f"Level Calc Failed: {str(e)}"}
+        print(f"SSE/PHASE ERROR: {e}")
+        return {"error": f"Calc Failed: {str(e)}"}
     
     risk_settings = { "mode": risk_mode, "value": float(capital), "leverage": float(leverage) }
     strategies = {
@@ -106,17 +175,45 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
         try:
             res = func(levels, slice_24h, raw_5m[-288:], risk_settings, regime)
             
+            # --- PHASE OVERRIDES (The "Truth" Logic) ---
             status = "STANDBY"; color = "#444"; msg = res['audit'].get('reason', 'Waiting...')
             
+            # 1. S9 Circuit Breaker (Always First)
             if code == "S9" and res['status'] == "S9_ACTIVE":
                 status = "CRITICAL ALERT"; color = "#ef4444"; msg = "MARKET HALTED (Extreme)"
-            elif res['audit'].get('valid', False):
-                if res['entry'] > 0:
-                    status = "ACTIVE SIGNAL"; color = "#00ff9d"; msg = f"Entry found at {res['entry']}"
+            
+            # 2. Phase-Based Gating
+            elif phase == "BALANCE":
+                if code in ["S1", "S2", "S7"]: 
+                    status = "BLOCKED"; color = "#222"; msg = "Market is Balanced. Trend blocked."
+                elif code in ["S4", "S6"]:
+                    if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"; msg = f"Rotation Entry: {res['entry']}"
+                    else: status = "MONITORING"; color = "#ffcc00"; msg = "Valid Rotation Phase."
+
+            elif "CANDIDATE" in phase: # Breakout Attempted
+                if code in ["S4", "S6", "S5"]:
+                    status = "BLOCKED"; color = "#222"; msg = "Breakout in progress. Do not fade."
+                elif code in ["S1", "S2"]:
+                    status = "ARMED"; color = "#ffcc00"; msg = "Acceptance Printed. Awaiting Pullback."
+                elif code == "S7":
+                    status = "STANDBY"; color = "#444"; msg = "Wait for Confirmation."
+
+            elif "CONFIRMED" in phase: # Trend Active
+                if code in ["S4", "S6", "S5"]:
+                    status = "BLOCKED"; color = "#ef4444"; msg = "TREND ACTIVE. FADING DANGEROUS."
+                elif code in ["S1", "S2", "S7"]:
+                    if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"; msg = f"Continuation Entry: {res['entry']}"
+                    else: status = "HUNTING"; color = "#00ff9d"; msg = "Trend Confirmed. Look for entries."
+
+            elif "FAILED" in phase: # Trap
+                if code == "S8":
+                    status = "ARMED"; color = "#00ff9d"; msg = "Trap Detected. Look for entry."
                 else:
-                    status = "MONITORING"; color = "#ffcc00"; msg = "Valid Regime. Waiting for Trigger."
-            elif "INVALID" in res['audit'].get('code', ''):
-                status = "BLOCKED"; color = "#222"; msg = res['audit'].get('reason', 'Regime Mismatch')
+                    status = "CAUTION"; color = "#ffcc00"; msg = "Market Trapped. Volatility risk."
+
+            # 3. Fallback to Auditor validity if no phase override
+            elif res['audit'].get('valid', False):
+                if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"
             
             results.append({
                 "strategy": code, "status": status, "color": color, "message": msg,
@@ -127,10 +224,14 @@ async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: 
 
     return {
         "timestamp": datetime.now(timezone.utc).strftime("%H:%M UTC"),
-        "price": last_candle['close'], "regime": regime, "levels": levels, "strategies": results
+        "price": last_candle['close'], 
+        "regime": regime, 
+        "phase": phase, # Returning phase to UI
+        "levels": levels, 
+        "strategies": results
     }
 
-# --- HISTORICAL ANALYSIS ---
+# --- HISTORICAL ANALYSIS (FIXED) ---
 async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str], leverage: float = 1, capital: float = 1000, strategy_mode: str = "S0", risk_mode: str = "fixed_margin") -> Dict[str, Any]:
     raw_15m = inputs.get("intraday_candles", [])
     raw_daily = inputs.get("daily_candles", [])
