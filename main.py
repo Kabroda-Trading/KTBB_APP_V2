@@ -165,8 +165,16 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     
-    # Run the Pulse
-    live_data = await research_lab.run_live_pulse(symbol)
+    # --- NEW: Capture Session Control inputs from the UI ---
+    session_mode = payload.get("session_mode", "AUTO")
+    manual_id = payload.get("manual_session_id", None)
+    
+    # Pass them to the lab
+    live_data = await research_lab.run_live_pulse(
+        symbol, 
+        session_mode=session_mode, 
+        manual_id=manual_id
+    )
     
     return JSONResponse(live_data)
 
