@@ -10,7 +10,14 @@
             <h1 style="font-size: 1.8rem; margin: 0; color: #fff; letter-spacing: -1px;">SESSION CONTROL</h1>
             <div style="font-size: 0.9rem; color: #666; margin-top: 5px;">Prepare today's structure, then move into live state.</div>
         </div>
-        <div style="display: flex; gap: 15px;">
+        <div style="display: flex; gap: 15px; align-items: center;">
+            
+            <div style="display: flex; align-items: center; gap: 8px; margin-right: 15px; background: #111; padding: 5px 10px; border: 1px solid #333; border-radius: 4px;">
+                <input type="checkbox" id="autoRefreshToggle" onchange="toggleAutoRefresh()" style="cursor: pointer;">
+                <label for="autoRefreshToggle" style="font-size: 0.7rem; color: #888; cursor: pointer; font-weight: bold;">AUTO-PILOT (2m)</label>
+                <div id="live-dot" style="width: 8px; height: 8px; background: #333; border-radius: 50%;"></div>
+            </div>
+
             <div class="input-group" style="margin:0;">
                 <label style="font-size: 0.7rem; color: #666;">TARGET SESSION</label>
                 <select id="sessionMode" onchange="toggleManualSession()" class="cyber-select">
@@ -25,7 +32,7 @@
                     <option value="au_sydney">Sydney (10:00 AEDT)</option>
                 </select>
             </div>
-            <button onclick="runLivePulse()" class="cyber-btn-primary" style="height: 42px; align-self: flex-end;">
+            <button onclick="runLivePulse()" class="cyber-btn-primary" id="main-action-btn" style="height: 42px; align-self: flex-end;">
                 PREPARE SESSION
             </button>
         </div>
@@ -45,6 +52,16 @@
                 <div style="margin-top: 15px; display: flex; gap: 10px;">
                     <button onclick="copyStructure()" class="cyber-btn-sec" style="font-size:0.7rem; flex:1;">COPY DATA</button>
                     <button onclick="openMentor()" class="cyber-btn-sec" style="font-size:0.7rem; flex:1;">MENTOR</button>
+                </div>
+            </div>
+            
+            <div class="cyber-card">
+                <div class="card-header">SESSION PHASES</div>
+                <div class="phase-timeline">
+                    <div class="phase-step" id="ph-open"><div class="dot"></div><div class="label">MARKET OPEN</div></div>
+                    <div class="phase-step" id="ph-calib"><div class="dot"></div><div class="label">CALIBRATION<br><span style="font-size:0.6rem; color:#666;">(30m Lock)</span></div></div>
+                    <div class="phase-step" id="ph-active"><div class="dot"></div><div class="label">ACTIVE SESSION<br><span style="font-size:0.6rem; color:#666;">(Strategy Live)</span></div></div>
+                    <div class="phase-step" id="ph-close"><div class="dot"></div><div class="label">SESSION CLOSE</div></div>
                 </div>
             </div>
         </div>
@@ -68,6 +85,7 @@
                     <div style="text-align: right;">
                         <div style="font-size: 0.8rem; color: #888;">PRICE</div>
                         <div id="live-price" style="font-size: 2.5rem; font-family: monospace; color: #fff;">-----</div>
+                        <div id="refresh-time" style="font-size: 0.7rem; color: #444; margin-top: 5px;">--:--:--</div>
                     </div>
                 </div>
             </div>
@@ -112,18 +130,46 @@ body { background-color: var(--bg); font-family: 'Inter', sans-serif; }
 .strat-title { font-size: 0.9rem; font-weight: bold; color: #fff; margin-bottom: 5px; }
 .strat-status { font-size: 0.7rem; font-weight: bold; display: inline-block; padding: 2px 6px; border-radius: 2px; margin-bottom: 10px; }
 .strat-reason { font-size: 0.75rem; color: #888; height: 40px; overflow: hidden; margin-bottom: 15px; }
+
+/* PHASE TIMELINE */
+.phase-timeline { display: flex; flex-direction: column; gap: 20px; border-left: 2px solid #333; padding-left: 20px; margin-left: 10px; }
+.phase-step { position: relative; }
+.phase-step .dot { width: 10px; height: 10px; background: #333; border-radius: 50%; position: absolute; left: -26px; top: 5px; border: 2px solid var(--bg); }
+.phase-step.active .dot { background: var(--primary); box-shadow: 0 0 10px var(--primary); }
+.phase-step .label { font-size: 0.9rem; font-weight: bold; color: #666; }
+.phase-step.active .label { color: #fff; }
 </style>
 
 <script>
 let lastPacket = null;
+let autoRefreshTimer = null;
 
 function toggleManualSession() {
     const mode = document.getElementById('sessionMode').value;
     document.getElementById('manualSessionId').style.display = (mode === 'MANUAL') ? 'inline-block' : 'none';
 }
 
+function toggleAutoRefresh() {
+    const isActive = document.getElementById('autoRefreshToggle').checked;
+    const dot = document.getElementById('live-dot');
+    
+    if (isActive) {
+        dot.style.background = "#00ff9d";
+        dot.style.boxShadow = "0 0 8px #00ff9d";
+        // Run immediately, then interval
+        runLivePulse(); 
+        autoRefreshTimer = setInterval(runLivePulse, 120000); // 2 minutes (120000 ms)
+    } else {
+        dot.style.background = "#333";
+        dot.style.boxShadow = "none";
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+}
+
 async function runLivePulse() {
-    const btn = document.querySelector('.cyber-btn-primary');
+    const btn = document.querySelector('#main-action-btn');
+    const originalText = btn.innerText;
     btn.innerText = "UPDATING...";
     
     try {
@@ -136,21 +182,32 @@ async function runLivePulse() {
             body: JSON.stringify({ symbol: "BTCUSDT", session_mode: mode, manual_session_id: mid })
         });
         const data = await res.json();
+        
+        if (data.status === "ERROR") {
+            console.error("API Error:", data.message);
+            // Don't alert on auto-refresh to avoid annoyance
+            return;
+        }
+
         lastPacket = data.battlebox;
         
+        // --- HEADER UPDATES ---
         document.getElementById('posture-text').innerText = data.regime;
         document.getElementById('posture-text').style.color = data.regime === "DIRECTIONAL" ? "var(--primary)" : "#ffcc00";
         document.getElementById('live-price').innerText = data.price.toFixed(2);
+        document.getElementById('refresh-time').innerText = new Date().toLocaleTimeString();
         
         const enEl = document.getElementById('energy-tag');
         enEl.innerText = data.energy;
         enEl.style.background = data.energy === 'PRIME' ? 'var(--primary)' : '#333';
         enEl.style.color = data.energy === 'PRIME' ? '#000' : '#888';
         
+        // --- BATTLEBOX DATA ---
         if (data.battlebox) {
             document.getElementById('story-now').innerText = data.battlebox.story_now;
             document.getElementById('story-wait').innerText = data.battlebox.waiting_for;
             
+            // Ladder Colors
             const ladder = data.battlebox.ladder;
             document.getElementById('bar-perm').style.background = ladder.permission === 'EARNED' ? 'var(--primary)' : '#333';
             document.getElementById('bar-pull').style.background = ladder.pullback === 'QUALIFIED' ? 'var(--primary)' : (ladder.pullback==='FORMING'?'#ffcc00':'#333');
@@ -161,25 +218,36 @@ async function runLivePulse() {
             document.getElementById('lbl-resum').innerText = "RESUMPTION: " + ladder.resumption;
         }
         
+        // --- STRUCTURE ---
         document.getElementById('val-dr').innerText = data.levels.daily_resistance?.toFixed(2) || "---";
         document.getElementById('val-bo').innerText = data.levels.breakout_trigger?.toFixed(2) || "---";
         document.getElementById('val-bd').innerText = data.levels.breakdown_trigger?.toFixed(2) || "---";
         document.getElementById('val-ds').innerText = data.levels.daily_support?.toFixed(2) || "---";
 
+        // --- PHASE TIMELINE ---
+        document.querySelectorAll('.phase-step').forEach(el => el.classList.remove('active'));
+        document.getElementById('ph-open').classList.add('active');
+        if(data.energy !== 'CALIBRATING') document.getElementById('ph-calib').classList.add('active');
+        if(data.energy === 'PRIME' || data.energy === 'LATE') document.getElementById('ph-active').classList.add('active');
+        if(data.energy === 'DEAD') document.getElementById('ph-close').classList.add('active');
+
+        // --- STRATEGY CARDS ---
         const grid = document.getElementById('strat-grid');
         grid.innerHTML = '';
-        data.strategies.forEach(s => {
-            const card = document.createElement('div');
-            card.className = 'strat-card';
-            card.style.borderTop = `3px solid ${s.color}`;
-            card.innerHTML = `
-                <div class="strat-title">${s.code} - ${s.name}</div>
-                <div class="strat-status" style="background:${s.color}; color:${s.color==='#00ff9d'?'#000':'#fff'}">${s.status}</div>
-                <div class="strat-reason">${s.msg}</div>
-                <button onclick="explainScenario('${s.code}')" class="cyber-btn-sec" style="width:100%; font-size:0.7rem;">EXPLAIN THIS SCENARIO</button>
-            `;
-            grid.appendChild(card);
-        });
+        if (data.strategies) {
+            data.strategies.forEach(s => {
+                const card = document.createElement('div');
+                card.className = 'strat-card';
+                card.style.borderTop = `3px solid ${s.color}`;
+                card.innerHTML = `
+                    <div class="strat-title">${s.code} - ${s.name}</div>
+                    <div class="strat-status" style="background:${s.color}; color:${s.color==='#00ff9d'?'#000':'#fff'}">${s.status}</div>
+                    <div class="strat-reason">${s.message}</div>
+                    <button onclick="explainScenario('${s.code}')" class="cyber-btn-sec" style="width:100%; font-size:0.7rem; margin-top:auto;">EXPLAIN THIS SCENARIO</button>
+                `;
+                grid.appendChild(card);
+            });
+        }
         
     } catch(e) { console.error(e); } 
     finally { btn.innerText = "PREPARE SESSION"; }
