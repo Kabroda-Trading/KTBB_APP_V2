@@ -1,363 +1,216 @@
 {% extends "base.html" %}
 
-{% block title %}Kabroda Lab | BattleBox{% endblock %}
+{% block title %}Kabroda | Session Control{% endblock %}
 
 {% block content %}
-<div class="app-container">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+<div class="app-container" style="max-width: 1400px; margin: 0 auto;">
+    
+    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 30px; border-bottom: 1px solid #222; padding-bottom: 20px;">
         <div>
-            <h1 style="font-size: 1.5rem; margin: 0; color: #fff;">RESEARCH COMMAND</h1>
-            <div style="font-size: 0.8rem; color: #666; letter-spacing: 1px;">BEHAVIORAL ANALYSIS & LIVE TACTICS</div>
+            <h1 style="font-size: 1.8rem; margin: 0; color: #fff; letter-spacing: -1px;">SESSION CONTROL</h1>
+            <div style="font-size: 0.9rem; color: #666; margin-top: 5px;">Prepare today's structure, then move into live state.</div>
         </div>
-        <div style="display: flex; gap: 10px;">
-            <button onclick="setMode('HISTORICAL')" id="btn-hist" class="mode-btn active">HISTORICAL LAB</button>
-            <button onclick="setMode('LIVE')" id="btn-live" class="mode-btn">LIVE TACTICAL</button>
+        <div style="display: flex; gap: 15px;">
+            <div class="input-group" style="margin:0;">
+                <label style="font-size: 0.7rem; color: #666;">TARGET SESSION</label>
+                <select id="sessionMode" onchange="toggleManualSession()" class="cyber-select">
+                    <option value="AUTO">AUTO (Dominant)</option>
+                    <option value="MANUAL">MANUAL OVERRIDE</option>
+                </select>
+                <select id="manualSessionId" class="cyber-select" style="display:none; margin-left:5px;">
+                    <option value="us_ny_futures">NY Futures (08:30 ET)</option>
+                    <option value="us_ny_equity">NY Equity (09:30 ET)</option>
+                    <option value="eu_london">London (08:00 GMT)</option>
+                    <option value="asia_tokyo">Tokyo (09:00 JST)</option>
+                    <option value="au_sydney">Sydney (10:00 AEDT)</option>
+                </select>
+            </div>
+            <button onclick="runLivePulse()" class="cyber-btn-primary" style="height: 42px; align-self: flex-end;">
+                PREPARE SESSION
+            </button>
         </div>
     </div>
 
-    <div id="mode-live" style="display: none;">
+    <div style="display: grid; grid-template-columns: 300px 1fr; gap: 30px;">
         
-        <div class="telemetry-card" style="margin-bottom: 20px; border-left: 4px solid var(--primary);">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <div style="font-size: 0.8rem; color: #888;">MARKET POSTURE</div>
-                    <div id="live-regime" style="font-size: 2rem; font-weight: 900; color: #fff;">LOADING...</div>
-                    <div style="display:flex; align-items:center; gap: 10px; margin-top: 5px;">
-                        <div id="live-phase" style="font-size: 1rem; color: #ffcc00; font-weight: bold;">--</div>
-                        <div id="energy-badge" style="padding: 2px 8px; background: #333; font-size: 0.7rem; border-radius: 4px;">--</div>
-                    </div>
-                    <div style="font-size: 0.8rem; color: #666; margin-top: 5px;">BTCUSDT | <span id="live-time">--:--</span></div>
+        <div style="display: flex; flex-direction: column; gap: 30px;">
+            <div class="cyber-card">
+                <div class="card-header">MARKET STRUCTURE</div>
+                <div class="structure-grid">
+                    <div class="struct-row"><span>Daily Res</span><span id="val-dr" class="val">---</span></div>
+                    <div class="struct-row"><span style="color:var(--bull);">Breakout</span><span id="val-bo" class="val">---</span></div>
+                    <div class="struct-row"><span style="color:var(--bear);">Breakdown</span><span id="val-bd" class="val">---</span></div>
+                    <div class="struct-row"><span>Daily Sup</span><span id="val-ds" class="val">---</span></div>
                 </div>
-                <div style="text-align: right;">
-                    <div style="font-size: 0.8rem; color: #888;">CURRENT PRICE</div>
-                    <div id="live-price" style="font-size: 2rem; font-family: monospace; color: #fff;">-----</div>
+                <div style="margin-top: 15px; display: flex; gap: 10px;">
+                    <button onclick="copyStructure()" class="cyber-btn-sec" style="font-size:0.7rem; flex:1;">COPY DATA</button>
+                    <button onclick="openMentor()" class="cyber-btn-sec" style="font-size:0.7rem; flex:1;">MENTOR</button>
                 </div>
             </div>
-        </div>
-
-        <div class="telemetry-card" style="margin-bottom: 20px; padding: 15px;">
-            <div style="font-size: 0.7rem; color: #888; margin-bottom: 10px;">SESSION TIMELINE</div>
-            <div style="display: flex; justify-content: space-between; gap: 10px;">
-                <div class="timeline-step" id="tl-lock">🔒 LOCKED</div>
-                <div class="timeline-step" id="tl-accept">🚀 ACCEPTANCE</div>
-                <div class="timeline-step" id="tl-confirm">✅ CONFIRMED</div>
-                <div class="timeline-step" id="tl-failed">⚠️ FAILED</div>
-            </div>
-        </div>
-
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
-            <div id="strat-grid" style="display: contents;"></div>
-        </div>
-        
-        <div style="display: flex; gap: 10px; margin-top: 20px;">
-            <button onclick="runLivePulse()" style="flex: 2; padding: 15px; background: #333; color: #fff; border: 1px solid #555; cursor: pointer;">REFRESH PULSE</button>
-            <button onclick="copyBattleBox()" style="flex: 1; padding: 15px; background: var(--primary); color: #000; border: none; font-weight: bold; cursor: pointer;">COPY BATTLEBOX JSON</button>
-        </div>
-    </div>
-
-    <div id="mode-hist" style="display: grid; grid-template-columns: 260px 1fr; gap: 20px;">
-        <div class="telemetry-card" style="height: fit-content; border-top: 2px solid var(--primary);">
-            <h3 style="color: #fff; margin-bottom: 15px; font-size: 0.9rem;">SIMULATION CONFIG</h3>
-            <div class="input-group">
-                <label>TARGET ASSET</label>
-                <select id="symbolSelect" style="width:100%; padding: 10px; background: #0a0a0a; color: #fff; border: 1px solid #333; font-family: monospace;">
-                    <option value="BTCUSDT">BTC (BITCOIN)</option>
-                    <option value="ETHUSDT">ETH (ETHEREUM)</option>
-                </select>
-            </div>
-            <div class="input-group" style="margin-top:15px;">
-                <label>SESSIONS (FILTER)</label>
-                <div style="background: #0a0a0a; padding: 10px; border: 1px solid #333; border-radius: 4px; display: flex; flex-direction: column; gap: 8px;">
-                    <label style="font-size: 0.75rem; display: flex; align-items: center; gap: 8px; color: #ccc;">
-                        <input type="checkbox" value="America/New_York" checked> <span>NY FUTURES (08:30)</span>
-                    </label>
-                    <label style="font-size: 0.75rem; display: flex; align-items: center; gap: 8px; color: #ccc;">
-                        <input type="checkbox" value="Europe/London"> <span>LONDON (08:00)</span>
-                    </label>
-                </div>
-            </div>
-            <div class="input-group" style="margin-top:15px;">
-                <label>STRATEGY PROTOCOL</label>
-                <select id="stratSelect" style="width:100%; padding: 10px; background: #0a0a0a; color: var(--primary); border: 1px solid #333; font-weight: bold; font-family: monospace;">
-                    <option value="ALL">★ ALL - BEST FIT SCANNER</option>
-                    <option disabled>---</option>
-                    <option value="S0">S0 - HOLD FIRE</option>
-                    <option value="S1">S1 - BREAKOUT ACCEPTANCE</option>
-                    <option value="S2">S2 - BREAKDOWN ACCEPTANCE</option>
-                    <option value="S3">S3 - STRUCTURAL SHIELD</option>
-                    <option value="S4">S4 - MID-BAND FADE</option>
-                    <option value="S5">S5 - RANGE EXTREMES</option>
-                    <option value="S6">S6 - VALUE ROTATION</option>
-                    <option value="S7">S7 - TREND CONTINUATION</option>
-                    <option value="S8">S8 - FAILED BREAKOUT</option>
-                    <option value="S9">S9 - CIRCUIT BREAKER</option>
-                </select>
-            </div>
-            <div class="input-group" style="margin-top:15px;">
-                <label>RISK MODEL</label>
-                <select id="riskMode" onchange="toggleRiskInputs()" style="width:100%; padding: 8px; background: #0a0a0a; color: #fff; border: 1px solid #333; margin-bottom: 10px;">
-                    <option value="fixed_margin">FIXED MARGIN</option>
-                    <option value="fixed_risk">FIXED RISK</option>
-                </select>
-                <div id="input-margin">
-                    <input type="number" id="levInput" placeholder="Leverage (1x)" value="1" style="width:100%; background:#0a0a0a; border:1px solid #333; color:#fff; padding:8px; margin-bottom: 5px;">
-                    <input type="number" id="capInput" placeholder="Margin ($1000)" value="1000" style="width:100%; background:#0a0a0a; border:1px solid #333; color:#fff; padding:8px;">
-                </div>
-                <div id="input-risk" style="display: none;">
-                    <input type="number" id="riskInput" placeholder="Risk Amount ($100)" value="100" style="width:100%; background:#0a0a0a; border:1px solid #ef4444; color:#fff; padding:8px;">
-                </div>
-            </div>
-            <button class="primary-btn" onclick="runLab()" style="margin-top: 20px; width: 100%; padding: 14px; background: var(--primary); border: none; font-weight: 900; letter-spacing: 1px; cursor: pointer; color: #000;">RUN SIMULATION</button>
         </div>
 
         <div>
-            <div id="detail-panel" class="telemetry-card" style="display: none; margin-bottom: 20px; border: 1px solid #444; background: #111;">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
+            <div class="cockpit-header">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                     <div>
-                        <div style="font-size: 0.7rem; color: #888; font-weight: bold; margin-bottom: 5px;">SELECTED SIMULATION</div>
-                        <div style="font-size: 1.2rem; color: #fff; font-weight: bold;">
-                            <span id="dt-date">--</span> 
-                            <span id="dt-validity" style="font-size: 0.8rem; padding: 2px 6px; border-radius: 4px; margin-left: 10px; background: #333;">--</span>
+                        <div style="font-size: 0.8rem; color: #888;">LIVE MARKET STATE</div>
+                        <div style="font-size: 2.5rem; font-weight: 900; color: #fff; line-height: 1;">
+                            <span id="posture-text">OFFLINE</span>
+                            <span id="energy-tag" class="energy-tag">--</span>
                         </div>
-                        <div style="font-size: 0.8rem; color: #aaa; margin-top: 5px; font-family: monospace;">
-                            CODE: <span id="dt-code" style="color:var(--primary);">--</span> | GRADE: <span id="dt-grade" style="color:#fff;">--</span>
+                        <div style="margin-top: 10px; font-size: 1rem; color: #ccc;">
+                            <span style="color:#666;">RIGHT NOW:</span> <span id="story-now">--</span>
+                        </div>
+                        <div style="font-size: 0.9rem; color: #888;">
+                            <span style="color:#666;">WAITING FOR:</span> <span id="story-wait">--</span>
                         </div>
                     </div>
                     <div style="text-align: right;">
-                        <div style="font-size: 2rem; font-weight: 900;" id="dt-pnl">--</div>
-                        <div style="font-size: 0.7rem; color: #666;">IMPLIED PNL</div>
+                        <div style="font-size: 0.8rem; color: #888;">PRICE</div>
+                        <div id="live-price" style="font-size: 2.5rem; font-family: monospace; color: #fff;">-----</div>
                     </div>
-                </div>
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 4px;">
-                    <div><span style="color:#888; font-size:0.7rem;">ENTRY</span><br><span id="dt-entry" style="font-family:monospace; color:#fff;">--</span></div>
-                    <div><span style="color:#ef4444; font-size:0.7rem;">STOP</span><br><span id="dt-stop" style="font-family:monospace; color:#fff;">--</span></div>
-                    <div><span style="color:#00ff9d; font-size:0.7rem;">TARGET</span><br><span id="dt-target" style="font-family:monospace; color:#fff;">--</span></div>
-                </div>
-                <div style="background: #000; padding: 10px; border: 1px solid #333; margin-bottom: 15px; font-family: monospace; font-size: 0.8rem; color: #ccc;">
-                    > AUDIT REASON: <span id="dt-reason" style="color:#fff;">--</span>
-                </div>
-                <div style="display: flex; gap: 10px;">
-                    <button onclick="copyForensic()" style="flex:1; background:var(--primary); color:#000; border:none; padding:10px; font-weight:bold; cursor:pointer;">COPY FOR GPT AUDIT</button>
-                    <button onclick="copyTvString()" style="flex:1; background:#333; color:#fff; border:1px solid #555; padding:10px; font-weight:bold; cursor:pointer;">COPY FOR TRADINGVIEW</button>
                 </div>
             </div>
 
-            <div class="telemetry-card" style="padding: 0;">
-                <div style="max-height: 600px; overflow-y: auto;">
-                    <table style="width:100%; font-size: 0.8rem; border-collapse: collapse;">
-                        <thead style="text-align: left; background: #111; color: #888; position: sticky; top: 0;">
-                            <tr><th style="padding: 12px;">DATE</th><th>VALIDITY</th><th>STATUS</th><th>ENTRY</th><th>PNL</th></tr>
-                        </thead>
-                        <tbody id="sim-body"></tbody>
-                    </table>
+            <div style="margin: 20px 0;">
+                <div style="display: flex; gap: 5px; height: 6px; width: 100%; background: #111;">
+                    <div id="bar-perm" style="flex:1; background:#333; transition:0.3s;"></div>
+                    <div id="bar-pull" style="flex:1; background:#333; transition:0.3s;"></div>
+                    <div id="bar-resum" style="flex:1; background:#333; transition:0.3s;"></div>
                 </div>
+                <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 0.7rem; color: #666;">
+                    <span id="lbl-perm">PERMISSION</span>
+                    <span id="lbl-pull">PULLBACK</span>
+                    <span id="lbl-resum">RESUMPTION</span>
+                </div>
+            </div>
+
+            <div id="strat-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;"></div>
+
+            <div style="margin-top: 30px; display: flex; gap: 15px;">
+                <button onclick="runLivePulse()" class="cyber-btn-sec" style="flex:1; padding: 15px;">UPDATE LIVE STATE</button>
+                <button onclick="copyNightVision()" class="cyber-btn-primary" style="flex:1; padding: 15px;">COPY NIGHT VISION</button>
             </div>
         </div>
     </div>
 </div>
 
 <style>
-.mode-btn { background: transparent; border: 1px solid #333; color: #666; padding: 8px 16px; cursor: pointer; font-weight: bold; }
-.mode-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
-.strat-card { background: #111; border: 1px solid #333; padding: 15px; border-radius: 4px; }
-.strat-title { font-size: 1.1rem; font-weight: bold; color: #fff; margin-bottom: 5px; }
-.strat-status { font-size: 0.8rem; font-weight: bold; margin-bottom: 10px; display: inline-block; padding: 2px 6px; border-radius: 2px; }
-.strat-msg { font-size: 0.75rem; color: #aaa; height: 40px; overflow: hidden; }
-.timeline-step { flex: 1; text-align: center; padding: 8px; background: #222; color: #666; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
-.timeline-step.active { background: #00ff9d; color: #000; }
-tr { border-bottom: 1px solid #1a1a1a; cursor: pointer; transition: background 0.2s; }
-tr:hover { background: #1a1a1a; }
-td { padding: 10px 12px; }
-.tag-valid { color: #00ff9d; font-weight: bold; }
-.tag-invalid { color: #666; }
+:root { --primary: #00ff9d; --bull: #00ff9d; --bear: #ff4444; --bg: #0a0a0a; --card: #111; }
+body { background-color: var(--bg); font-family: 'Inter', sans-serif; }
+.cyber-select { background: #000; color: #fff; border: 1px solid #333; padding: 10px; font-family: monospace; cursor: pointer; }
+.cyber-btn-primary { background: var(--primary); color: #000; border: none; font-weight: 800; letter-spacing: 1px; cursor: pointer; }
+.cyber-btn-sec { background: #222; color: #fff; border: 1px solid #444; font-weight: 600; cursor: pointer; }
+.cyber-card { background: var(--card); border: 1px solid #222; padding: 20px; border-radius: 4px; }
+.card-header { font-size: 0.8rem; color: #888; letter-spacing: 1px; margin-bottom: 15px; border-bottom: 1px solid #222; padding-bottom: 10px; }
+.structure-grid { display: flex; flex-direction: column; gap: 10px; }
+.struct-row { display: flex; justify-content: space-between; font-size: 0.85rem; color: #888; border-bottom: 1px dashed #222; padding-bottom: 5px; }
+.struct-row .val { color: #fff; font-family: monospace; font-weight: bold; }
+.cockpit-header { background: linear-gradient(90deg, rgba(0,255,157,0.05) 0%, rgba(0,0,0,0) 100%); border-left: 4px solid var(--primary); padding: 20px; }
+.energy-tag { font-size: 0.7rem; background: #333; padding: 4px 8px; border-radius: 4px; vertical-align: middle; margin-left: 10px; }
+.strat-card { background: #141414; border: 1px solid #333; padding: 15px; border-radius: 4px; }
+.strat-title { font-size: 0.9rem; font-weight: bold; color: #fff; margin-bottom: 5px; }
+.strat-status { font-size: 0.7rem; font-weight: bold; display: inline-block; padding: 2px 6px; border-radius: 2px; margin-bottom: 10px; }
+.strat-reason { font-size: 0.75rem; color: #888; height: 40px; overflow: hidden; margin-bottom: 15px; }
 </style>
 
 <script>
-let currentSelection = null;
-let lastPacket = null; // Store for copy
+let lastPacket = null;
 
-function toggleRiskInputs() {
-    const mode = document.getElementById('riskMode').value;
-    if(mode === 'fixed_risk') {
-        document.getElementById('input-margin').style.display = 'none';
-        document.getElementById('input-risk').style.display = 'block';
-    } else {
-        document.getElementById('input-margin').style.display = 'block';
-        document.getElementById('input-risk').style.display = 'none';
-    }
-}
-
-function setMode(mode) {
-    if(mode === 'LIVE') {
-        document.getElementById('mode-live').style.display = 'block';
-        document.getElementById('mode-hist').style.display = 'none';
-        document.getElementById('btn-live').classList.add('active');
-        document.getElementById('btn-hist').classList.remove('active');
-        runLivePulse();
-    } else {
-        document.getElementById('mode-live').style.display = 'none';
-        document.getElementById('mode-hist').style.display = 'grid';
-        document.getElementById('btn-live').classList.remove('active');
-        document.getElementById('btn-hist').classList.add('active');
-    }
+function toggleManualSession() {
+    const mode = document.getElementById('sessionMode').value;
+    document.getElementById('manualSessionId').style.display = (mode === 'MANUAL') ? 'inline-block' : 'none';
 }
 
 async function runLivePulse() {
-    const grid = document.getElementById('strat-grid');
-    grid.innerHTML = '<div style="color:#666; padding:20px;">Scanning Live Markets...</div>';
+    const btn = document.querySelector('.cyber-btn-primary');
+    btn.innerText = "UPDATING...";
     
     try {
+        const mode = document.getElementById('sessionMode').value;
+        const mid = document.getElementById('manualSessionId').value;
+        
         const res = await fetch('/api/dmr/live', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ symbol: "BTCUSDT" })
+            body: JSON.stringify({ symbol: "BTCUSDT", session_mode: mode, manual_session_id: mid })
         });
         const data = await res.json();
-        lastPacket = data.battlebox; // Save for copy
+        lastPacket = data.battlebox;
         
-        document.getElementById('live-regime').innerText = data.regime;
-        document.getElementById('live-regime').style.color = data.regime === "DIRECTIONAL" ? "#00ff9d" : "#ffcc00";
+        document.getElementById('posture-text').innerText = data.regime;
+        document.getElementById('posture-text').style.color = data.regime === "DIRECTIONAL" ? "var(--primary)" : "#ffcc00";
         document.getElementById('live-price').innerText = data.price.toFixed(2);
-        document.getElementById('live-time').innerText = data.timestamp;
         
-        const phaseLabel = data.phase ? data.phase.replace(/_/g, " ") : "WAITING FOR DATA";
-        const phaseEl = document.getElementById('live-phase');
-        phaseEl.innerText = phaseLabel;
-        
-        if(phaseLabel.includes("CONFIRMED")) phaseEl.style.color = "#00ff9d";
-        else if(phaseLabel.includes("CANDIDATE")) phaseEl.style.color = "#ffcc00";
-        else if(phaseLabel.includes("FAILED")) phaseEl.style.color = "#ef4444";
-        else phaseEl.style.color = "#888";
-        
-        // ENERGY BADGE
-        const enEl = document.getElementById('energy-badge');
+        const enEl = document.getElementById('energy-tag');
         enEl.innerText = data.energy;
-        if(data.energy === 'PRIME') { enEl.style.background = '#00ff9d'; enEl.style.color = '#000'; }
-        else if(data.energy === 'LATE') { enEl.style.background = '#ffcc00'; enEl.style.color = '#000'; }
-        else { enEl.style.background = '#333'; enEl.style.color = '#888'; }
+        enEl.style.background = data.energy === 'PRIME' ? 'var(--primary)' : '#333';
+        enEl.style.color = data.energy === 'PRIME' ? '#000' : '#888';
         
-        // TIMELINE LOGIC
-        const milestones = data.battlebox.phase_timeline.milestones;
-        if(data.energy !== 'CALIBRATING') document.getElementById('tl-lock').classList.add('active');
-        if(milestones.acceptance_time) document.getElementById('tl-accept').classList.add('active');
-        if(milestones.confirmation_time) document.getElementById('tl-confirm').classList.add('active');
-        if(milestones.failure_time) document.getElementById('tl-failed').classList.add('active');
+        if (data.battlebox) {
+            document.getElementById('story-now').innerText = data.battlebox.story_now;
+            document.getElementById('story-wait').innerText = data.battlebox.waiting_for;
+            
+            const ladder = data.battlebox.ladder;
+            document.getElementById('bar-perm').style.background = ladder.permission === 'EARNED' ? 'var(--primary)' : '#333';
+            document.getElementById('bar-pull').style.background = ladder.pullback === 'QUALIFIED' ? 'var(--primary)' : (ladder.pullback==='FORMING'?'#ffcc00':'#333');
+            document.getElementById('bar-resum').style.background = ladder.resumption === 'UNDERWAY' ? 'var(--primary)' : '#333';
+            
+            document.getElementById('lbl-perm').innerText = "PERMISSION: " + ladder.permission;
+            document.getElementById('lbl-pull').innerText = "PULLBACK: " + ladder.pullback;
+            document.getElementById('lbl-resum').innerText = "RESUMPTION: " + ladder.resumption;
+        }
         
+        document.getElementById('val-dr').innerText = data.levels.daily_resistance?.toFixed(2) || "---";
+        document.getElementById('val-bo').innerText = data.levels.breakout_trigger?.toFixed(2) || "---";
+        document.getElementById('val-bd').innerText = data.levels.breakdown_trigger?.toFixed(2) || "---";
+        document.getElementById('val-ds').innerText = data.levels.daily_support?.toFixed(2) || "---";
+
+        const grid = document.getElementById('strat-grid');
         grid.innerHTML = '';
         data.strategies.forEach(s => {
             const card = document.createElement('div');
             card.className = 'strat-card';
             card.style.borderTop = `3px solid ${s.color}`;
-            
             card.innerHTML = `
-                <div class="strat-title">${s.strategy}</div>
-                <div class="strat-status" style="background:${s.color}; color:${s.color === '#00ff9d' ? '#000' : '#fff'}">${s.status}</div>
-                <div class="strat-msg">${s.message}</div>
-                ${s.levels.target > 0 ? `<div style="margin-top:10px; font-size:0.7rem; color:#666;">TARGET: ${s.levels.target}</div>` : ''}
+                <div class="strat-title">${s.code} - ${s.name}</div>
+                <div class="strat-status" style="background:${s.color}; color:${s.color==='#00ff9d'?'#000':'#fff'}">${s.status}</div>
+                <div class="strat-reason">${s.msg}</div>
+                <button onclick="explainScenario('${s.code}')" class="cyber-btn-sec" style="width:100%; font-size:0.7rem;">EXPLAIN THIS SCENARIO</button>
             `;
             grid.appendChild(card);
         });
         
-    } catch(e) {
-        grid.innerHTML = `<div style="color:red">Connection Error: ${e}</div>`;
-    }
+    } catch(e) { console.error(e); } 
+    finally { btn.innerText = "PREPARE SESSION"; }
 }
 
-function copyBattleBox() {
-    if(!lastPacket) { alert("Run Live Pulse first."); return; }
-    navigator.clipboard.writeText(JSON.stringify(lastPacket, null, 2));
-    alert("BATTLEBOX PACKET COPIED.\nPaste this into Kabroda GPT.");
+function copyStructure() {
+    if(!lastPacket) return;
+    const s = lastPacket.levels;
+    const text = `STRUCTURE DATA:\nDaily Res: ${s.daily_resistance}\nBreakout: ${s.breakout_trigger}\nBreakdown: ${s.breakdown_trigger}\nDaily Sup: ${s.daily_support}`;
+    navigator.clipboard.writeText(text);
+    alert("Structure Data Copied.");
 }
 
-async function runLab() {
-    const btn = document.querySelector('.primary-btn');
-    btn.innerText = "RUNNING...";
-    btn.disabled = true;
-    
-    const sessions = [];
-    document.querySelectorAll('input[type="checkbox"]:checked').forEach(c => sessions.push(c.value));
-    const riskMode = document.getElementById('riskMode').value;
-    let capital = (riskMode === 'fixed_risk') ? (document.getElementById('riskInput').value || 100) : (document.getElementById('capInput').value || 1000);
-    let leverage = (riskMode === 'fixed_risk') ? 1 : (document.getElementById('levInput').value || 1);
-    
-    try {
-        const res = await fetch('/api/dmr/history', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                symbol: document.getElementById('symbolSelect').value,
-                sessions: sessions,
-                strategy: document.getElementById('stratSelect').value,
-                risk_mode: riskMode,
-                capital: capital,
-                leverage: leverage
-            })
-        });
-        const data = await res.json();
-        renderLog(data.history);
-        if(data.stats.exemplar) selectTrade(data.stats.exemplar);
-        else if(data.history.length > 0) selectTrade(data.history[0]);
-    } catch(e) { alert("Error: " + e); console.error(e); } 
-    finally { btn.innerText = "RUN SIMULATION"; btn.disabled = false; }
+function openMentor() {
+    const prompt = `You are Kabroda Trading BattleBox. Use the following session packet as the authoritative source.\n\nWrite today's Daily Market Review.\n\nSESSION PACKET:\n${JSON.stringify(lastPacket, null, 2)}`;
+    navigator.clipboard.writeText(prompt);
+    alert("Mentor Prompt Copied.");
 }
 
-function renderLog(history) {
-    const tbody = document.getElementById('sim-body');
-    tbody.innerHTML = '';
-    history.forEach(row => {
-        const s = row.strategy;
-        const audit = s.audit || {};
-        const tr = document.createElement('tr');
-        
-        let pnlColor = s.pnl > 0 ? '#00ff9d' : (s.pnl < 0 ? '#ef4444' : '#666');
-        let validClass = audit.valid ? "tag-valid" : "tag-invalid";
-        let validText = audit.valid ? "VALID" : "INVALID";
-        if (s.status === "S0_OBSERVED" && audit.valid) { pnlColor = "#fff"; validText = "DISCIPLINE"; validClass = "tag-valid"; }
-
-        tr.innerHTML = `
-            <td style="color:#ccc;">${row.date}</td>
-            <td class="${validClass}" style="font-size:0.7rem;">${validText} <span style="color:#444; margin-left:5px;">${audit.grade || '-'}</span></td>
-            <td style="color:#fff; font-size:0.8rem;">${audit.code || s.status}</td>
-            <td style="color:#666;">${s.entry ? s.entry.toFixed(1) : '-'}</td>
-            <td style="color:${pnlColor}; font-weight:bold; text-align:right;">${s.pnl === 0 ? '--' : '$'+s.pnl.toFixed(0)}</td>
-        `;
-        tr.onclick = () => selectTrade(row);
-        tbody.appendChild(tr);
-    });
+function copyNightVision() {
+    if(!lastPacket) return;
+    const prompt = `You are Kabroda Trading BattleBox. Use the Live Battlefield State Packet below as the authoritative source.\n\nExplain what is true right now in calm trader language.\n\nLIVE BATTLEFIELD STATE PACKET:\n${JSON.stringify(lastPacket, null, 2)}`;
+    navigator.clipboard.writeText(prompt);
+    alert("Night Vision Copied.");
 }
 
-function selectTrade(row) {
-    currentSelection = row;
-    document.getElementById('detail-panel').style.display = 'block';
-    const s = row.strategy;
-    const a = s.audit || {};
-    document.getElementById('dt-date').innerText = row.date;
-    document.getElementById('dt-validity').innerText = a.valid ? "VALID EXECUTION" : "INVALID / BLOCKED";
-    document.getElementById('dt-validity').style.color = a.valid ? "#00ff9d" : "#ef4444";
-    document.getElementById('dt-validity').style.border = a.valid ? "1px solid #00ff9d" : "1px solid #ef4444";
-    document.getElementById('dt-code').innerText = a.code || s.status;
-    document.getElementById('dt-grade').innerText = a.grade || "-";
-    document.getElementById('dt-pnl').innerText = s.pnl === 0 ? "--" : (s.pnl > 0 ? "+$"+s.pnl.toFixed(0) : "$"+s.pnl.toFixed(0));
-    document.getElementById('dt-pnl').style.color = s.pnl > 0 ? "#00ff9d" : (s.pnl < 0 ? "#ef4444" : "#666");
-    document.getElementById('dt-entry').innerText = s.entry ? s.entry.toFixed(2) : "0.00";
-    document.getElementById('dt-stop').innerText = a.stop_loss ? a.stop_loss.toFixed(2) : "0.00";
-    document.getElementById('dt-target').innerText = a.target ? a.target.toFixed(2) : "0.00";
-    document.getElementById('dt-reason').innerText = a.reason || "No audit data available.";
-}
-
-function copyForensic() {
-    if(!currentSelection) return;
-    const packet = { "forensic_audit": "3.0", "date": currentSelection.date, "strategy": document.getElementById('stratSelect').value, "audit_data": currentSelection.strategy.audit, "levels": currentSelection.levels };
-    navigator.clipboard.writeText(JSON.stringify(packet, null, 2));
-    alert("GPT AUDIT DATA COPIED.");
-}
-
-function copyTvString() {
-    if(!currentSelection) return;
-    const s = currentSelection.strategy; const a = s.audit || {};
-    const dataString = `DATA::${currentSelection.date}::${s.entry.toFixed(2)}::${a.stop_loss.toFixed(2)}::${a.target.toFixed(2)}::${a.valid ? 1 : 0}::${a.code}`;
-    navigator.clipboard.writeText(dataString);
-    alert("TRADINGVIEW STRING COPIED:\n" + dataString);
+function explainScenario(code) {
+    if(!lastPacket) return;
+    const prompt = `You are Kabroda Trading BattleBox. Use the Live Battlefield State Packet below.\n\nFocus on scenario: ${code}.\nExplain what this scenario means and why its status is what it is.\n\nLIVE PACKET:\n${JSON.stringify(lastPacket, null, 2)}`;
+    navigator.clipboard.writeText(prompt);
+    alert("Scenario Prompt Copied.");
 }
 </script>
 {% endblock %}
