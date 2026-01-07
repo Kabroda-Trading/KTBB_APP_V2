@@ -9,5 +9,6 @@ tzdata==2025.1
 ccxt
 itsdangerous==2.2.0
 starlette==0.38.6
+psycopg==3.3.2
 psycopg-binary==3.3.2
 pandas==2.2.0
