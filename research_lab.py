@@ -1,11 +1,12 @@
 # research_lab.py
 # ==============================================================================
-# KABRODA RESEARCH LAB v19.0 (SHIP-READY SPEC)
+# KABRODA RESEARCH LAB v21.0 (STRICT DOCTRINE SHIP-READY)
 # ==============================================================================
-# Architecture:
-# 1. WAR MAP CONTEXT: Global Weather (Lean/Phase) - Never guesses.
-# 2. SESSION BATTLE: Strict Doctrine (2x 15m Permission -> 5m Pause).
-# 3. DATA CONTRACT: Stable outputs, no missing keys.
+# Rules:
+# 1. PERMISSION: 2x 15m Closes. Break=1/2, Confirm=2/2.
+# 2. TIMING: 5m Pause detection starts ONLY after permission timestamp.
+# 3. TRUTH: Timestamps use 'last' (Close Time) to prevent look-ahead.
+# 4. CONTRACT: Stable outputs, no missing keys.
 # ==============================================================================
 
 from __future__ import annotations
@@ -42,17 +43,40 @@ STRATEGY_DISPLAY = {
     "S9": "Stand Down Filter"
 }
 
+STATUS_MAPPING = {
+    "BLOCKED": "Unavailable",
+    "STANDBY": "Not in Play",
+    "ARMED": "Waiting for Setup",
+    "HUNTING": "Waiting for Setup",
+    "ACTIVE SIGNAL": "Tracking Opportunity",
+    "CRITICAL ALERT": "Stand Down",
+    "OFF-HOURS": "Monitor Only"
+}
+
 # --- MATH HELPERS ---
 def calculate_ema(prices: List[float], period: int = 21) -> List[float]:
     if len(prices) < period: return []
     return pd.Series(prices).ewm(span=period, adjust=False).mean().tolist()
 
 def _resample_candles(candles: List[Dict], timeframe: str) -> List[Dict]:
+    """
+    Robust resampling. 
+    CRITICAL CHANGE: Uses 'time': 'last' so timestamps represent the CLOSE time.
+    This ensures strict sequential logic (Permission at 09:00 -> Pause starts > 09:00).
+    """
     if not candles: return []
     df = pd.DataFrame(candles)
     df['dt'] = pd.to_datetime(df['time'], unit='s')
     df.set_index('dt', inplace=True)
-    ohlc = {'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum', 'time': 'first'}
+    
+    ohlc = {
+        'open': 'first', 
+        'high': 'max', 
+        'low': 'min', 
+        'close': 'last', 
+        'volume': 'sum', 
+        'time': 'last' # <--- DOCTRINE FIX: Use Close Time for sequencing
+    }
     try:
         return df.resample(timeframe).agg(ohlc).dropna().to_dict('records')
     except: return []
@@ -78,11 +102,8 @@ def _session_battle_template():
 
 # --- ENGINE 1: WAR MAP CONTEXT ---
 def _calculate_war_map(raw_1h: List[Dict]) -> Dict[str, Any]:
-    """
-    Determines Global Context. Defaults to NEUTRAL if data missing.
-    """
     if not raw_1h:
-        return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "UNCLEAR", "confidence": 0.0, "note": "No Data"}
+        return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "UNCLEAR", "note": "No Data"}
 
     daily = _resample_candles(raw_1h, '1D')
     h4 = _resample_candles(raw_1h, '4h')
@@ -90,14 +111,13 @@ def _calculate_war_map(raw_1h: List[Dict]) -> Dict[str, Any]:
     current_price = raw_1h[-1]['close']
     ema_21 = calculate_ema([c['close'] for c in daily], 21)
     
-    # Rule: If no EMA, return Neutral
     if not ema_21:
         return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "TRANSITION", "confidence": 0.0, "note": "Insufficient daily data."}
 
-    # 1. LEAN (Trend)
+    # 1. LEAN
     lean = "BULLISH" if current_price > ema_21[-1] else "BEARISH"
 
-    # 2. PHASE (Structure)
+    # 2. PHASE
     phase = "ROTATION"
     if h4 and len(h4) > 2:
         last = h4[-1]; prev = h4[-2]
@@ -113,7 +133,7 @@ def _calculate_war_map(raw_1h: List[Dict]) -> Dict[str, Any]:
     note = f"Market is {lean} in {phase} phase."
     if phase == "PULLBACK": note += " Corrective move. Be cautious of traps."
     
-    # 3. CAMPAIGN (Big Trade)
+    # 3. CAMPAIGN (Hidden in Drawer)
     campaign_status = "NOT_ARMED"
     campaign_note = "Structure alignment pending."
     if phase == "PULLBACK" and abs(current_price - ema_21[-1])/current_price < 0.015:
@@ -129,13 +149,8 @@ def _calculate_war_map(raw_1h: List[Dict]) -> Dict[str, Any]:
         "campaign": {"status": campaign_status, "side": "SHORT" if lean=="BEARISH" else "LONG", "note": campaign_note}
     }
 
-# --- ENGINE 2: SESSION BATTLE (EXECUTION) ---
+# --- ENGINE 2: SESSION BATTLE (STRICT DOCTRINE) ---
 def _calculate_session_battle(raw_5m: List[Dict], levels: Dict, ledger: Dict) -> Dict[str, Any]:
-    """
-    Strict Doctrine:
-    1. Permission = 2x 15m Closes.
-    2. Execution = 5m Pause (using candles AFTER permission).
-    """
     sb = _session_battle_template()
     if not raw_5m: return sb
     
@@ -146,7 +161,7 @@ def _calculate_session_battle(raw_5m: List[Dict], levels: Dict, ledger: Dict) ->
     vah = levels.get("f24_vah", 0)
     poc = levels.get("f24_poc", 0)
 
-    # 1. LOCATION
+    # 1. LOCATION TRUTH
     if current_price > bo: sb["location"]["relative_to_triggers"] = "ABOVE_BAND"
     elif current_price < bd: sb["location"]["relative_to_triggers"] = "BELOW_BAND"
     
@@ -157,53 +172,63 @@ def _calculate_session_battle(raw_5m: List[Dict], levels: Dict, ledger: Dict) ->
     elif current_price > poc: sb["location"]["relative_to_poc"] = "ABOVE_POC"
     else: sb["location"]["relative_to_poc"] = "BELOW_POC"
 
-    # 2. PERMISSION GATE (15m)
+    # 2. PERMISSION GATE (Strict 15m)
     candles_15m = _resample_candles(raw_5m, '15min')
     
-    # Check persistence first
-    if ledger.get("permission_status") == "EARNED":
-        sb["permission"]["status"] = "EARNED"
-        sb["permission"]["side"] = ledger["permission_side"]
-        sb["acceptance_progress"]["count"] = 2
-    
-    elif len(candles_15m) >= 2:
-        c1 = candles_15m[-1]['close']
-        c2 = candles_15m[-2]['close']
-        count = 0
-        side = "NONE"
+    # Needs at least 2 closed candles to judge 2/2
+    if len(candles_15m) >= 2:
+        c1 = candles_15m[-1]['close'] # Most recent closed
+        c2 = candles_15m[-2]['close'] # Previous closed
         
-        # Bear Check
-        if c1 < bd: count += 1; side = "SHORT"
-        if c2 < bd: count += 1; side = "SHORT"
-        
-        # Bull Check (Override if stronger)
-        if c1 > bo and c2 > bo: count = 2; side = "LONG"
-        elif c1 > bo: count = 1; side = "LONG"
-        
-        sb["acceptance_progress"]["count"] = count
-        sb["acceptance_progress"]["side_hint"] = side
-        
-        if count == 2:
+        # PERSISTENCE CHECK: If already earned, keep it unless invalidated
+        if ledger.get("permission_status") == "EARNED":
             sb["permission"]["status"] = "EARNED"
-            sb["permission"]["side"] = side
-            # SAVE TO LEDGER
-            ledger["permission_status"] = "EARNED"
-            ledger["permission_side"] = side
-            ledger["permission_time"] = candles_15m[-1]['time']
+            sb["permission"]["side"] = ledger["permission_side"]
+            sb["acceptance_progress"]["count"] = 2
+            sb["acceptance_progress"]["side_hint"] = ledger["permission_side"]
+        else:
+            # CHECK FRESH PERMISSION
+            count = 0
+            side = "NONE"
+            
+            # Bear Logic
+            if c1 < bd:
+                count = 1; side = "SHORT"
+                if c2 < bd: count = 2
+            
+            # Bull Logic (Override)
+            elif c1 > bo:
+                count = 1; side = "LONG"
+                if c2 > bo: count = 2
+            
+            sb["acceptance_progress"]["count"] = count
+            sb["acceptance_progress"]["side_hint"] = side
+            
+            if count == 2:
+                sb["permission"]["status"] = "EARNED"
+                sb["permission"]["side"] = side
+                # SAVE TO LEDGER
+                ledger["permission_status"] = "EARNED"
+                ledger["permission_side"] = side
+                # IMPORTANT: Permission time is the CLOSE time of the confirming candle
+                ledger["permission_time"] = candles_15m[-1]['time']
 
     if sb["permission"]["status"] == "NOT_EARNED":
         sb["action"] = "HOLD FIRE"
-        sb["reason"] = f"Permission not earned ({sb['acceptance_progress']['count']}/2). Session is rotational."
+        cnt = sb["acceptance_progress"]["count"]
+        if cnt == 0: sb["reason"] = "No acceptance yet. Waiting for 15m close beyond trigger."
+        elif cnt == 1: sb["reason"] = "Acceptance 1/2 printed. Waiting for second 15m close."
+        else: sb["reason"] = "Permission not earned. Session is rotational."
         return sb
 
     # 3. EXECUTION GATE (5m Pause)
-    # Filter 5m candles AFTER permission time
+    # DOCTRINE: Only use candles strictly AFTER permission earned
     perm_time = ledger.get("permission_time", 0)
-    exec_candles = [c for c in raw_5m if c['time'] >= perm_time]
+    exec_candles = [c for c in raw_5m if c['time'] > perm_time]
     
-    if len(exec_candles) < 3:
+    if len(exec_candles) < 2:
         sb["action"] = "PREPARE"
-        sb["reason"] = "Permission newly earned. Waiting for 5m structure."
+        sb["reason"] = "Permission earned. Now waiting for 5m pause structure."
         return sb
         
     pause_high = max(c['high'] for c in exec_candles)
@@ -211,24 +236,25 @@ def _calculate_session_battle(raw_5m: List[Dict], levels: Dict, ledger: Dict) ->
     range_pct = (pause_high - pause_low) / current_price
     
     pause_state = "NONE"
-    if range_pct < 0.0035: # 0.35% range tolerance
+    if range_pct < 0.0035: # Tight range (0.35%)
         pause_state = "CONFIRMED" if len(exec_candles) >= 4 else "FORMING"
         
     sb["execution"]["pause_state"] = pause_state
     
-    # Set Levels based on Side
-    if sb["permission"]["side"] == "SHORT":
+    # Map Levels
+    side = sb["permission"]["side"]
+    if side == "SHORT":
         sb["execution"]["levels"]["failure"] = pause_high
         sb["execution"]["levels"]["continuation"] = pause_low
     else:
         sb["execution"]["levels"]["failure"] = pause_low
         sb["execution"]["levels"]["continuation"] = pause_high
 
-    # 4. RESUMPTION (Action)
+    # 4. RESUMPTION (Decision)
     if pause_state == "NONE":
         sb["action"] = "HOLD FIRE"
-        sb["reason"] = "Permission earned, but price is extended/volatile. Wait for 5m pause."
-    elif sb["permission"]["side"] == "SHORT":
+        sb["reason"] = "Permission earned, but price is volatile. Wait for 5m pause."
+    elif side == "SHORT":
         if current_price < pause_low * 0.9995:
             sb["action"] = "GREENLIGHT"
             sb["reason"] = "Pause resolved lower. Continuation confirmed."
@@ -236,7 +262,7 @@ def _calculate_session_battle(raw_5m: List[Dict], levels: Dict, ledger: Dict) ->
         else:
             sb["action"] = "PREPARE"
             sb["reason"] = "Pause forming. Continuation requires break below pause low."
-    elif sb["permission"]["side"] == "LONG":
+    elif side == "LONG":
         if current_price > pause_high * 1.0005:
             sb["action"] = "GREENLIGHT"
             sb["reason"] = "Pause resolved higher. Continuation confirmed."
@@ -247,7 +273,7 @@ def _calculate_session_battle(raw_5m: List[Dict], levels: Dict, ledger: Dict) ->
 
     return sb
 
-# --- CORE SESSION FETCH & LOCK ---
+# --- CORE SESSION FETCH ---
 exchange_kucoin = ccxt.kucoin({'enableRateLimit': True})
 
 async def fetch_5m_granular(symbol: str):
@@ -278,7 +304,6 @@ def _get_active_session(now_utc: datetime, mode: str = "AUTO", manual_id: str = 
             elif elapsed < 240: energy = "PRIME"
             elif elapsed < 420: energy = "LATE"
             else: energy = "DEAD"
-            
             return {"name": cfg["name"], "anchor_time": int(open_time.astimezone(pytz.UTC).timestamp()), "anchor_fmt": open_time.strftime("%H:%M") + " " + cfg["name"].upper(), "date_key": open_time.strftime("%Y-%m-%d"), "energy": energy, "manual": True}
 
     candidates = []
@@ -348,8 +373,8 @@ async def run_live_pulse(symbol: str, session_mode: str="AUTO", manual_id: str=N
             anchor_idx = next((i for i, c in enumerate(raw_5m) if c['time'] >= anchor_ts), -1)
             packet = _compute_session_packet(raw_5m, raw_1h, anchor_idx)
             if "error" in packet: return {"status": "ERROR", "message": packet["error"]}
-            packet["ledger"] = {}
             LOCKED_SESSIONS[session_key] = packet
+            packet["ledger"] = {}
             
         levels = packet["levels"]
         ledger = packet.setdefault("ledger", {})
@@ -361,7 +386,7 @@ async def run_live_pulse(symbol: str, session_mode: str="AUTO", manual_id: str=N
         live_slice = raw_5m[anchor_idx_live:]
         session_battle = _calculate_session_battle(live_slice, levels, ledger)
         
-        # 3. LEGACY SUPPORT (STRATEGIES GRID)
+        # 3. LEGACY STRATEGIES (For Drawer)
         risk = {"mode": risk_mode, "value": float(capital), "leverage": float(leverage)}
         auditors = {
             "S1": strategy_auditor.run_s1_logic, "S2": strategy_auditor.run_s2_logic,
@@ -370,7 +395,7 @@ async def run_live_pulse(symbol: str, session_mode: str="AUTO", manual_id: str=N
         strategies = []
         for code, func in auditors.items():
             try:
-                res = func(levels, _resample_15m(raw_5m)[-30:], live_slice, risk, "ROTATIONAL") # simplified
+                res = func(levels, _resample_candles(raw_5m, '15min')[-30:], live_slice, risk, "ROTATIONAL")
                 strategies.append({
                     "code": code, "name": STRATEGY_DISPLAY.get(code, code),
                     "status": "Available" if res['audit']['valid'] else "Wait",
@@ -378,20 +403,32 @@ async def run_live_pulse(symbol: str, session_mode: str="AUTO", manual_id: str=N
                 })
             except: pass
 
-        # 4. BATTLEBOX PACKET
+        # 4. STORY & BATTLEBOX
+        story_now = f"{session_battle['action']}. {session_battle['reason']}"
+        story_wait = "Monitoring permission and 5m structure."
+        
         battlebox = {
             "war_map_context": war_map,
             "war_map_campaign": war_map.get("campaign"),
             "session_battle": session_battle,
             "session": session_info,
             "levels": levels,
-            "strategies_summary": strategies
+            "strategies_summary": strategies,
+            "story_now": story_now,
+            "story_wait": story_wait,
+            "ladder": {
+                "permission": session_battle["permission"]["status"],
+                "pullback": "QUALIFIED" if session_battle["execution"]["pause_state"] == "CONFIRMED" else ("FORMING" if session_battle["execution"]["pause_state"] == "FORMING" else "NOT STARTED"),
+                "resumption": session_battle["execution"]["resumption_state"]
+            }
         }
 
         return {
             "status": "OK",
             "timestamp": datetime.now(timezone.utc).strftime("%H:%M UTC"),
             "price": raw_5m[-1]['close'],
+            "energy": session_info["energy"],
+            "levels": levels,
             "battlebox": battlebox
         }
 
@@ -400,6 +437,6 @@ async def run_live_pulse(symbol: str, session_mode: str="AUTO", manual_id: str=N
         traceback.print_exc()
         return {"status": "ERROR", "message": str(e)}
 
-# --- HISTORICAL ---
+# --- HISTORICAL (Legacy) ---
 def detect_regime(candles_15m, bias_score, levels): return "ROTATIONAL"
 async def run_historical_analysis(inputs, session_keys, leverage, capital, strategy_mode, risk_mode): return {}

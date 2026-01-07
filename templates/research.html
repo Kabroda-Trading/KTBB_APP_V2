@@ -214,7 +214,7 @@ async function runLivePulse() {
         document.getElementById('sb-accept').innerText = `${acc.count}/2`;
         
         const loc = sb.location || {};
-        document.getElementById('sb-loc').innerText = `${loc.relative_to_triggers} | ${loc.relative_to_value}`;
+        document.getElementById('sb-loc').innerText = `${loc.relative_to_triggers || '-'} | ${loc.relative_to_value || '-'}`;
 
         // PREPARE BOX
         if(action === "PREPARE" && sb.execution && sb.execution.levels) {
@@ -225,12 +225,25 @@ async function runLivePulse() {
             document.getElementById('sb-prepare-box').style.display = "none";
         }
         
-        // LEVELS
-        const l = data.levels || {};
+        // LEVELS & STRATEGIES
+        const l = data.battlebox.levels || {}; // <--- SAFE READ
         document.getElementById('val-dr').innerText = l.daily_resistance?.toFixed(2) || "---";
         document.getElementById('val-bo').innerText = l.breakout_trigger?.toFixed(2) || "---";
         document.getElementById('val-bd').innerText = l.breakdown_trigger?.toFixed(2) || "---";
         document.getElementById('val-ds').innerText = l.daily_support?.toFixed(2) || "---";
+        
+        const stratList = document.getElementById('strat-list');
+        const strats = data.battlebox.strategies_summary || [];
+        if(strats.length > 0) {
+            stratList.innerHTML = strats.map(s => 
+                `<div style="margin-bottom:8px; padding:5px; border-left:2px solid #333;">
+                    <div style="font-weight:bold; color:#fff;">${s.name}</div>
+                    <div style="font-size:0.7rem; color:#888;">${s.status} - ${s.msg}</div>
+                </div>`
+            ).join('');
+        } else {
+            stratList.innerHTML = "No strategy telemetry active.";
+        }
         
     } catch(e) { console.error(e); } 
     finally { btn.innerText = "UPDATE INTEL"; }
