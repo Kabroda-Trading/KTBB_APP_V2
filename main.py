@@ -1,6 +1,7 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.5 (CLEAN)
+# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.7
+# (Battle Control Migration)
 # ---------------------------------------------------------
 from __future__ import annotations
 
@@ -27,8 +28,8 @@ import sse_engine
 import sjan_brain
 import wealth_allocator
 
-# --- Research Lab ---
-import research_lab
+# --- BATTLE CONTROL IMPORT (Formerly Research Lab) ---
+import battle_control
 
 from database import init_db, get_db, UserModel
 from membership import (
@@ -122,7 +123,7 @@ def how_it_works(request: Request):
 def network_page(request: Request):
     return templates.TemplateResponse("community.html", {"request": request, "is_logged_in": False})
 
-# --- DAY TRADING SUITE ---
+# --- DAY TRADING SUITE (SESSION CONTROL) ---
 @app.get("/suite", response_class=HTMLResponse)
 def suite(request: Request, db: Session = Depends(get_db)):
     sess = _session_user_dict(request)
@@ -135,6 +136,26 @@ def suite(request: Request, db: Session = Depends(get_db)):
         "request": request, "is_logged_in": True,
         "user": {"email": u.email, "username": u.username, "session_tz": (u.session_tz or "UTC"), "plan_label": flags.get("plan_label", ""), "plan": flags.get("plan") or ""}
     })
+
+# --- BATTLE CONTROL (NEW ROUTE) ---
+@app.get("/suite/battle-control", response_class=HTMLResponse)
+def battle_control_page(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    require_paid_access(u)
+    flags = _plan_flags(u)
+    return templates.TemplateResponse("battle_control.html", {
+        "request": request, "is_logged_in": True,
+        "user": {"email": u.email, "username": u.username, "plan_label": flags.get("plan_label", "")}
+    })
+
+# --- RESEARCH REDIRECT (COMPATIBILITY) ---
+@app.get("/research")
+def research_redirect(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    require_paid_access(u)
+    return RedirectResponse(url="/suite/battle-control", status_code=303)
 
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
@@ -157,23 +178,32 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/api/dmr/live")
 async def dmr_live(request: Request, db: Session = Depends(get_db)):
-    # Standard security checks
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
     require_paid_access(u)
     
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
+    ensure_symbol_allowed(u, symbol)
     
-    # --- NEW: Capture Session Control inputs from the UI ---
-    session_mode = payload.get("session_mode", "AUTO")
+    session_mode = (payload.get("session_mode") or "AUTO").upper()
+    if session_mode not in ("AUTO", "MANUAL"):
+        session_mode = "AUTO"
+        
     manual_id = payload.get("manual_session_id", None)
+    if session_mode == "AUTO":
+        manual_id = None
+    elif session_mode == "MANUAL" and not manual_id:
+        manual_id = "us_ny_futures" # Safe default
+
+    # OPERATOR FLEX PARAMETER
+    operator_flex = bool(payload.get("operator_flex", False))
     
-    # Pass them to the lab
-    live_data = await research_lab.run_live_pulse(
+    live_data = await battle_control.run_live_pulse(
         symbol, 
         session_mode=session_mode, 
-        manual_id=manual_id
+        manual_id=manual_id,
+        operator_flex=operator_flex
     )
     
     return JSONResponse(live_data)
@@ -297,19 +327,7 @@ async def billing_webhook(request: Request, db: Session = Depends(get_db)):
     sig = request.headers.get("stripe-signature", "")
     return billing.handle_webhook(payload=payload, sig_header=sig, db=db, UserModel=UserModel)
 
-# --- NEW ROUTE (Research Lab) ---
-@app.get("/research", response_class=HTMLResponse)
-def research_page(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-    flags = _plan_flags(u)
-    return templates.TemplateResponse("research.html", {
-        "request": request, "is_logged_in": True,
-        "user": {"email": u.email, "username": u.username, "plan_label": flags.get("plan_label", "")}
-    })
-
-# --- RESEARCH API (UPDATED) ---
+# --- RESEARCH API (UPDATED to call battle_control) ---
 @app.post("/api/dmr/history")
 async def dmr_history(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -324,11 +342,11 @@ async def dmr_history(request: Request, db: Session = Depends(get_db)):
     
     # NEW PARAMETERS
     strategy_mode = payload.get("strategy", "S0")
-    risk_mode = payload.get("risk_mode", "fixed_margin") # 'fixed_risk' or 'fixed_margin'
+    risk_mode = payload.get("risk_mode", "fixed_margin") 
     
     inputs = await data_feed.get_inputs(symbol=symbol)
     
-    history = await research_lab.run_historical_analysis(
+    history = await battle_control.run_historical_analysis(
         inputs, session_keys, leverage, capital, strategy_mode, risk_mode
     )
     

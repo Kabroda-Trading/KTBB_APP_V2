@@ -12,6 +12,7 @@
   --success: #10b981; /* Green for breakout */
   --danger: #ef4444;  /* Red for resistance */
   --purple: #a855f7;  /* Purple for breakdown */
+  --warning: #f59e0b; /* Orange/Gold */
 }
 
 body {
@@ -44,6 +45,25 @@ body {
 .nav-links { display: flex; align-items: center; gap: 32px; }
 .nav-item { font-size: 14px; color: var(--text-muted); text-decoration: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; transition: color 0.2s; }
 .nav-item:hover { color: var(--primary-bright); text-shadow: 0 0 8px var(--primary-glow); }
+
+/* --- DROPDOWN NAVIGATION (New for Suite) --- */
+.nav-item.dropdown { position: relative; display: inline-block; cursor: pointer; }
+.dropdown-content {
+  display: none; position: absolute; top: 100%; left: 0;
+  background: rgba(2, 6, 23, 0.95); backdrop-filter: blur(12px);
+  min-width: 200px; border: 1px solid var(--glass-border);
+  border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 1000;
+  padding: 8px 0;
+}
+.dropdown-content a {
+  display: block; padding: 12px 20px; color: var(--text-muted);
+  text-decoration: none; font-size: 13px; font-weight: 600; text-transform: uppercase;
+  transition: all 0.2s;
+}
+.dropdown-content a:hover {
+  background: rgba(56, 189, 248, 0.1); color: #fff;
+}
+.nav-item.dropdown:hover .dropdown-content { display: block; }
 
 /* --- LAYOUT --- */
 .page-wrapper { padding-top: 120px; padding-bottom: 80px; max-width: 1200px; margin: 0 auto; padding-left: 24px; padding-right: 24px; }
@@ -122,12 +142,6 @@ h1, h2, h3 { margin: 0; font-weight: 800; letter-spacing: -0.02em; color: #fff; 
   filter: brightness(1.1);
 }
 
-/* Optional: Make the lightning bolt pulsate */
-@keyframes pulse-bolt {
-  0% { opacity: 1; }
-  50% { opacity: 0.5; }
-  100% { opacity: 1; }
-}
 .btn-nav-trial span {
   display: flex; align-items: center; gap: 6px;
 }
