@@ -97,14 +97,15 @@
                 </div>
             </div>
             
-            <div style="text-align: right;">
-                <button onclick="copyBattleBox()" class="cyber-btn-primary">COPY BATTLEBOX JSON</button>
+            <div style="text-align: right; display:flex; gap:10px; justify-content:flex-end;">
+                <button onclick="copyTraderBrief()" class="cyber-btn-sec">COPY BRIEF</button>
+                <button onclick="copyBattleBox()" class="cyber-btn-primary">COPY FULL BATTLEBOX</button>
             </div>
         </div>
     </div>
 
     <div id="tactical-drawer" style="display: none; margin-top: 30px; border-top: 1px solid #333; padding-top: 20px;">
-        <h3 style="color: #888; font-size: 1rem; margin-bottom: 20px;">TACTICAL INTELLIGENCE</h3>
+        <h3 style="color: #888; font-size: 1rem; margin-bottom: 20px;">TACTICAL INTELLIGENCE (OPTIONAL)</h3>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
             <div class="cyber-card">
                 <div class="card-header">CAMPAIGN (BIG TRADE)</div>
@@ -112,7 +113,7 @@
                 <div id="wm-camp-note" style="margin-top: 10px; color: #888;">--</div>
             </div>
             <div class="cyber-card">
-                <div class="card-header">STRATEGY STATUS</div>
+                <div class="card-header">LEGACY STRATEGY TELEMETRY</div>
                 <div id="strat-list" style="font-size: 0.8rem; color: #ccc;">Loading...</div>
             </div>
         </div>
@@ -216,43 +217,58 @@ async function runLivePulse() {
         const loc = sb.location || {};
         document.getElementById('sb-loc').innerText = `${loc.relative_to_triggers || '-'} | ${loc.relative_to_value || '-'}`;
 
-        // PREPARE BOX
-        if(action === "PREPARE" && sb.execution && sb.execution.levels) {
+        // PREPARE BOX (Execution Gates)
+        // Show if PREPARE OR if Fallback Levels exist (to avoid blanks)
+        const levels = sb.execution?.levels || {};
+        if (levels.failure > 0) {
             document.getElementById('sb-prepare-box').style.display = "block";
-            document.getElementById('sb-fail-line').innerText = sb.execution.levels.failure?.toFixed(2) || "--";
-            document.getElementById('sb-cont-line').innerText = sb.execution.levels.continuation?.toFixed(2) || "--";
+            document.getElementById('sb-fail-line').innerText = levels.failure.toFixed(2);
+            document.getElementById('sb-cont-line').innerText = levels.continuation.toFixed(2);
         } else {
             document.getElementById('sb-prepare-box').style.display = "none";
         }
         
-        // LEVELS & STRATEGIES
-        const l = data.battlebox.levels || {}; // <--- SAFE READ
+        // LEVELS (Safe Read)
+        const l = data.battlebox.levels || {};
         document.getElementById('val-dr').innerText = l.daily_resistance?.toFixed(2) || "---";
         document.getElementById('val-bo').innerText = l.breakout_trigger?.toFixed(2) || "---";
         document.getElementById('val-bd').innerText = l.breakdown_trigger?.toFixed(2) || "---";
         document.getElementById('val-ds').innerText = l.daily_support?.toFixed(2) || "---";
         
-        const stratList = document.getElementById('strat-list');
+        // STRATEGIES (Drawer)
         const strats = data.battlebox.strategies_summary || [];
+        const stratList = document.getElementById('strat-list');
         if(strats.length > 0) {
-            stratList.innerHTML = strats.map(s => 
-                `<div style="margin-bottom:8px; padding:5px; border-left:2px solid #333;">
-                    <div style="font-weight:bold; color:#fff;">${s.name}</div>
+            stratList.innerHTML = strats.map(s => `
+                <div style="margin-bottom:8px; padding:8px; background:#111; border-left:3px solid #333;">
+                    <div style="font-weight:bold; color:#fff; font-size:0.8rem;">${s.name}</div>
                     <div style="font-size:0.7rem; color:#888;">${s.status} - ${s.msg}</div>
-                </div>`
-            ).join('');
+                </div>
+            `).join('');
         } else {
-            stratList.innerHTML = "No strategy telemetry active.";
+            stratList.innerHTML = "No active telemetry.";
         }
         
     } catch(e) { console.error(e); } 
     finally { btn.innerText = "UPDATE INTEL"; }
 }
 
+function copyTraderBrief() {
+    if(!lastPacket) return;
+    // Slim packet for GPT
+    const brief = {
+        "context": lastPacket.war_map_context,
+        "session": lastPacket.session_battle,
+        "levels": lastPacket.levels
+    };
+    navigator.clipboard.writeText(JSON.stringify(brief, null, 2));
+    alert("Trader Brief Copied.");
+}
+
 function copyBattleBox() {
     if(!lastPacket) return;
     navigator.clipboard.writeText(JSON.stringify(lastPacket, null, 2));
-    alert("Copied JSON.");
+    alert("Full Packet Copied.");
 }
 </script>
 {% endblock %}
