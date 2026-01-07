@@ -1,284 +1,212 @@
 {% extends "base.html" %}
 
-{% block title %}Kabroda | Session Control{% endblock %}
+{% block title %}Kabroda | Battle Control{% endblock %}
 
 {% block content %}
 <div class="app-container" style="max-width: 1400px; margin: 0 auto;">
     
     <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 30px; border-bottom: 1px solid #222; padding-bottom: 20px;">
         <div>
-            <h1 style="font-size: 1.8rem; margin: 0; color: #fff; letter-spacing: -1px;">SESSION CONTROL</h1>
-            <div style="font-size: 0.9rem; color: #666; margin-top: 5px;">Prepare today's structure, then move into live state.</div>
+            <h1 style="font-size: 1.8rem; margin: 0; color: #fff; letter-spacing: -1px;">BATTLE CONTROL</h1>
+            <div style="font-size: 0.9rem; color: #666; margin-top: 5px;">War Map Context & Session Execution</div>
         </div>
         <div style="display: flex; gap: 15px; align-items: center;">
-            
             <div style="display: flex; align-items: center; gap: 8px; margin-right: 15px; background: #111; padding: 5px 10px; border: 1px solid #333; border-radius: 4px;">
                 <input type="checkbox" id="autoRefreshToggle" onchange="toggleAutoRefresh()" style="cursor: pointer;">
-                <label for="autoRefreshToggle" style="font-size: 0.7rem; color: #888; cursor: pointer; font-weight: bold;">AUTO-PILOT (2m)</label>
+                <label for="autoRefreshToggle" style="font-size: 0.7rem; color: #888; cursor: pointer; font-weight: bold;">LIVE LINK (2m)</label>
                 <div id="live-dot" style="width: 8px; height: 8px; background: #333; border-radius: 50%;"></div>
             </div>
-
+            
             <div class="input-group" style="margin:0;">
-                <label style="font-size: 0.7rem; color: #666;">TARGET SESSION</label>
                 <select id="sessionMode" onchange="toggleManualSession()" class="cyber-select">
                     <option value="AUTO">AUTO (Dominant)</option>
                     <option value="MANUAL">MANUAL OVERRIDE</option>
                 </select>
                 <select id="manualSessionId" class="cyber-select" style="display:none; margin-left:5px;">
-                    <option value="us_ny_futures">NY Futures (08:30 ET)</option>
-                    <option value="us_ny_equity">NY Equity (09:30 ET)</option>
-                    <option value="eu_london">London (08:00 GMT)</option>
-                    <option value="asia_tokyo">Tokyo (09:00 JST)</option>
-                    <option value="au_sydney">Sydney (10:00 AEDT)</option>
+                    <option value="us_ny_futures">NY Futures</option>
+                    <option value="eu_london">London</option>
+                    <option value="asia_tokyo">Tokyo</option>
                 </select>
             </div>
-            <button onclick="runLivePulse()" class="cyber-btn-primary" id="main-action-btn" style="height: 42px; align-self: flex-end;">
-                PREPARE SESSION
-            </button>
+            <button onclick="runLivePulse()" class="cyber-btn-primary" id="main-action-btn" style="height: 42px; align-self: flex-end;">UPDATE INTEL</button>
         </div>
     </div>
 
-    <div style="display: grid; grid-template-columns: 300px 1fr; gap: 30px;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
         
-        <div style="display: flex; flex-direction: column; gap: 30px;">
-            <div class="cyber-card">
-                <div class="card-header">MARKET STRUCTURE</div>
-                <div class="structure-grid">
-                    <div class="struct-row"><span>Daily Res</span><span id="val-dr" class="val">---</span></div>
-                    <div class="struct-row"><span style="color:var(--bull);">Breakout</span><span id="val-bo" class="val">---</span></div>
-                    <div class="struct-row"><span style="color:var(--bear);">Breakdown</span><span id="val-bd" class="val">---</span></div>
-                    <div class="struct-row"><span>Daily Sup</span><span id="val-ds" class="val">---</span></div>
+        <div class="cyber-card" style="border-left: 4px solid #8b5cf6;"> <div class="card-header" style="color:#a78bfa;">WAR MAP (GLOBAL CONTEXT)</div>
+            
+            <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+                <div>
+                    <div style="font-size: 0.8rem; color: #888;">LEAN</div>
+                    <div id="wm-lean" style="font-size: 2rem; font-weight: 900; color: #fff;">--</div>
                 </div>
-                <div style="margin-top: 15px; display: flex; gap: 10px;">
-                    <button onclick="copyStructure()" class="cyber-btn-sec" style="font-size:0.7rem; flex:1;">COPY DATA</button>
-                    <button onclick="openMentor()" class="cyber-btn-sec" style="font-size:0.7rem; flex:1;">MENTOR</button>
+                <div style="text-align: right;">
+                    <div style="font-size: 0.8rem; color: #888;">PHASE</div>
+                    <div id="wm-phase" style="font-size: 2rem; font-weight: 900; color: #fff;">--</div>
                 </div>
             </div>
             
-            <div class="cyber-card">
-                <div class="card-header">SESSION PHASES</div>
-                <div class="phase-timeline">
-                    <div class="phase-step" id="ph-open"><div class="dot"></div><div class="label">MARKET OPEN</div></div>
-                    <div class="phase-step" id="ph-calib"><div class="dot"></div><div class="label">CALIBRATION<br><span style="font-size:0.6rem; color:#666;">(30m Lock)</span></div></div>
-                    <div class="phase-step" id="ph-active"><div class="dot"></div><div class="label">ACTIVE SESSION<br><span style="font-size:0.6rem; color:#666;">(Strategy Live)</span></div></div>
-                    <div class="phase-step" id="ph-close"><div class="dot"></div><div class="label">SESSION CLOSE</div></div>
+            <div id="wm-note" style="font-size: 0.9rem; color: #ccc; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #333;">--</div>
+            
+            <div style="background: #1a1a1a; padding: 15px; border-radius: 4px;">
+                <div style="font-size: 0.7rem; color: #888; letter-spacing: 1px;">CAMPAIGN (BIG TRADE)</div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px;">
+                    <div id="wm-camp-status" style="font-size: 1.2rem; font-weight: bold; color: #666;">NOT ARMED</div>
+                    <div id="wm-camp-note" style="font-size: 0.8rem; color: #666;">--</div>
                 </div>
             </div>
         </div>
 
-        <div>
-            <div class="cockpit-header">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                    <div>
-                        <div style="font-size: 0.8rem; color: #888;">LIVE MARKET STATE</div>
-                        <div style="font-size: 2.5rem; font-weight: 900; color: #fff; line-height: 1;">
-                            <span id="posture-text">OFFLINE</span>
-                            <span id="energy-tag" class="energy-tag">--</span>
-                        </div>
-                        <div style="margin-top: 10px; font-size: 1rem; color: #ccc;">
-                            <span style="color:#666;">RIGHT NOW:</span> <span id="story-now">--</span>
-                        </div>
-                        <div style="font-size: 0.9rem; color: #888;">
-                            <span style="color:#666;">WAITING FOR:</span> <span id="story-wait">--</span>
-                        </div>
+        <div class="cyber-card" style="border-left: 4px solid #3b82f6;"> <div class="card-header" style="color:#60a5fa;">SESSION BATTLE (EXECUTION)</div>
+            
+            <div style="text-align: center; padding: 20px; background: #000; border: 1px solid #333; border-radius: 4px; margin-bottom: 20px;">
+                <div style="font-size: 0.8rem; color: #888;">CURRENT ACTION</div>
+                <div id="sb-action" style="font-size: 3rem; font-weight: 900; color: #444;">HOLD FIRE</div>
+            </div>
+            
+            <div id="sb-reason" style="text-align: center; color: #ccc; margin-bottom: 20px; font-size: 1rem;">Waiting for data...</div>
+
+            <div id="sb-prepare-box" style="display: none; background: #111; padding: 15px; border: 1px solid #333;">
+                <div style="font-size: 0.7rem; color: #888; margin-bottom: 10px; text-align: center;">PAUSE LEVELS</div>
+                <div style="display: flex; justify-content: space-between;">
+                    <div style="text-align: left;">
+                        <div style="font-size: 0.7rem; color: #ef4444;">FAILURE LINE</div>
+                        <div id="sb-fail-line" style="font-family: monospace; font-size: 1.2rem; color: #fff;">--</div>
                     </div>
                     <div style="text-align: right;">
-                        <div style="font-size: 0.8rem; color: #888;">PRICE</div>
-                        <div id="live-price" style="font-size: 2.5rem; font-family: monospace; color: #fff;">-----</div>
-                        <div id="refresh-time" style="font-size: 0.7rem; color: #444; margin-top: 5px;">--:--:--</div>
+                        <div style="font-size: 0.7rem; color: #00ff9d;">CONTINUATION</div>
+                        <div id="sb-cont-line" style="font-family: monospace; font-size: 1.2rem; color: #fff;">--</div>
                     </div>
                 </div>
             </div>
-
-            <div style="margin: 20px 0;">
-                <div style="display: flex; gap: 5px; height: 6px; width: 100%; background: #111;">
-                    <div id="bar-perm" style="flex:1; background:#333; transition:0.3s;"></div>
-                    <div id="bar-pull" style="flex:1; background:#333; transition:0.3s;"></div>
-                    <div id="bar-resum" style="flex:1; background:#333; transition:0.3s;"></div>
-                </div>
-                <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 0.7rem; color: #666;">
-                    <span id="lbl-perm">PERMISSION</span>
-                    <span id="lbl-pull">PULLBACK</span>
-                    <span id="lbl-resum">RESUMPTION</span>
-                </div>
-            </div>
-
-            <div id="strat-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;"></div>
-
-            <div style="margin-top: 30px; display: flex; gap: 15px;">
-                <button onclick="runLivePulse()" class="cyber-btn-sec" style="flex:1; padding: 15px;">UPDATE LIVE STATE</button>
-                <button onclick="copyNightVision()" class="cyber-btn-primary" style="flex:1; padding: 15px;">COPY NIGHT VISION</button>
+            
+            <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #222; display: flex; justify-content: space-between; font-size: 0.8rem;">
+                <span style="color: #666;">PERMISSION:</span>
+                <span id="sb-perm" style="color: #fff; font-weight: bold;">--</span>
             </div>
         </div>
+
     </div>
+    
+    <div style="margin-top: 30px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
+        <div class="struct-card"><span>Daily Res</span><span id="val-dr" class="val">---</span></div>
+        <div class="struct-card"><span style="color:#00ff9d;">Breakout</span><span id="val-bo" class="val">---</span></div>
+        <div class="struct-card"><span style="color:#ef4444;">Breakdown</span><span id="val-bd" class="val">---</span></div>
+        <div class="struct-card"><span>Daily Sup</span><span id="val-ds" class="val">---</span></div>
+    </div>
+    
+    <div style="margin-top: 20px; text-align: center;">
+        <button onclick="copyBattleBox()" class="cyber-btn-sec" style="padding: 15px 30px;">COPY FULL INTEL PACKET</button>
+    </div>
+
 </div>
 
 <style>
-:root { --primary: #00ff9d; --bull: #00ff9d; --bear: #ff4444; --bg: #0a0a0a; --card: #111; }
+:root { --bg: #0a0a0a; --card: #111; }
 body { background-color: var(--bg); font-family: 'Inter', sans-serif; }
-.cyber-select { background: #000; color: #fff; border: 1px solid #333; padding: 10px; font-family: monospace; cursor: pointer; }
-.cyber-btn-primary { background: var(--primary); color: #000; border: none; font-weight: 800; letter-spacing: 1px; cursor: pointer; }
-.cyber-btn-sec { background: #222; color: #fff; border: 1px solid #444; font-weight: 600; cursor: pointer; }
 .cyber-card { background: var(--card); border: 1px solid #222; padding: 20px; border-radius: 4px; }
-.card-header { font-size: 0.8rem; color: #888; letter-spacing: 1px; margin-bottom: 15px; border-bottom: 1px solid #222; padding-bottom: 10px; }
-.structure-grid { display: flex; flex-direction: column; gap: 10px; }
-.struct-row { display: flex; justify-content: space-between; font-size: 0.85rem; color: #888; border-bottom: 1px dashed #222; padding-bottom: 5px; }
-.struct-row .val { color: #fff; font-family: monospace; font-weight: bold; }
-.cockpit-header { background: linear-gradient(90deg, rgba(0,255,157,0.05) 0%, rgba(0,0,0,0) 100%); border-left: 4px solid var(--primary); padding: 20px; }
-.energy-tag { font-size: 0.7rem; background: #333; padding: 4px 8px; border-radius: 4px; vertical-align: middle; margin-left: 10px; }
-.strat-card { background: #141414; border: 1px solid #333; padding: 15px; border-radius: 4px; }
-.strat-title { font-size: 0.9rem; font-weight: bold; color: #fff; margin-bottom: 5px; }
-.strat-status { font-size: 0.7rem; font-weight: bold; display: inline-block; padding: 2px 6px; border-radius: 2px; margin-bottom: 10px; }
-.strat-reason { font-size: 0.75rem; color: #888; height: 40px; overflow: hidden; margin-bottom: 15px; }
-
-/* PHASE TIMELINE */
-.phase-timeline { display: flex; flex-direction: column; gap: 20px; border-left: 2px solid #333; padding-left: 20px; margin-left: 10px; }
-.phase-step { position: relative; }
-.phase-step .dot { width: 10px; height: 10px; background: #333; border-radius: 50%; position: absolute; left: -26px; top: 5px; border: 2px solid var(--bg); }
-.phase-step.active .dot { background: var(--primary); box-shadow: 0 0 10px var(--primary); }
-.phase-step .label { font-size: 0.9rem; font-weight: bold; color: #666; }
-.phase-step.active .label { color: #fff; }
+.card-header { font-size: 0.8rem; letter-spacing: 1px; margin-bottom: 20px; font-weight: bold; }
+.struct-card { background: #111; border: 1px solid #333; padding: 10px; display: flex; justify-content: space-between; font-size: 0.8rem; color: #888; }
+.struct-card .val { color: #fff; font-family: monospace; font-weight: bold; }
+.cyber-btn-primary { background: #00ff9d; color: #000; border: none; font-weight: 800; letter-spacing: 1px; cursor: pointer; padding: 0 20px; }
+.cyber-btn-sec { background: #222; color: #fff; border: 1px solid #444; font-weight: 600; cursor: pointer; }
+.cyber-select { background: #000; color: #fff; border: 1px solid #333; padding: 10px; font-family: monospace; cursor: pointer; }
 </style>
 
 <script>
 let lastPacket = null;
 let autoRefreshTimer = null;
 
+function toggleAutoRefresh() {
+    const isActive = document.getElementById('autoRefreshToggle').checked;
+    const dot = document.getElementById('live-dot');
+    if(isActive) {
+        dot.style.background = "#00ff9d"; dot.style.boxShadow = "0 0 8px #00ff9d";
+        runLivePulse(); autoRefreshTimer = setInterval(runLivePulse, 120000);
+    } else {
+        dot.style.background = "#333"; dot.style.boxShadow = "none";
+        clearInterval(autoRefreshTimer);
+    }
+}
+
 function toggleManualSession() {
     const mode = document.getElementById('sessionMode').value;
     document.getElementById('manualSessionId').style.display = (mode === 'MANUAL') ? 'inline-block' : 'none';
 }
 
-function toggleAutoRefresh() {
-    const isActive = document.getElementById('autoRefreshToggle').checked;
-    const dot = document.getElementById('live-dot');
-    
-    if (isActive) {
-        dot.style.background = "#00ff9d";
-        dot.style.boxShadow = "0 0 8px #00ff9d";
-        // Run immediately, then interval
-        runLivePulse(); 
-        autoRefreshTimer = setInterval(runLivePulse, 120000); // 2 minutes (120000 ms)
-    } else {
-        dot.style.background = "#333";
-        dot.style.boxShadow = "none";
-        clearInterval(autoRefreshTimer);
-        autoRefreshTimer = null;
-    }
-}
-
 async function runLivePulse() {
     const btn = document.querySelector('#main-action-btn');
-    const originalText = btn.innerText;
     btn.innerText = "UPDATING...";
     
     try {
-        const mode = document.getElementById('sessionMode').value;
-        const mid = document.getElementById('manualSessionId').value;
-        
         const res = await fetch('/api/dmr/live', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ symbol: "BTCUSDT", session_mode: mode, manual_session_id: mid })
+            body: JSON.stringify({ 
+                symbol: "BTCUSDT", 
+                session_mode: document.getElementById('sessionMode').value,
+                manual_session_id: document.getElementById('manualSessionId').value 
+            })
         });
         const data = await res.json();
-        
-        if (data.status === "ERROR") {
-            console.error("API Error:", data.message);
-            // Don't alert on auto-refresh to avoid annoyance
-            return;
-        }
-
+        if(data.status === "ERROR") return;
         lastPacket = data.battlebox;
         
-        // --- HEADER UPDATES ---
-        document.getElementById('posture-text').innerText = data.regime;
-        document.getElementById('posture-text').style.color = data.regime === "DIRECTIONAL" ? "var(--primary)" : "#ffcc00";
-        document.getElementById('live-price').innerText = data.price.toFixed(2);
-        document.getElementById('refresh-time').innerText = new Date().toLocaleTimeString();
+        // WAR MAP
+        const wm = data.battlebox.war_map || {};
+        document.getElementById('wm-lean').innerText = wm.lean || "--";
+        document.getElementById('wm-lean').style.color = wm.lean === "BULLISH" ? "#00ff9d" : (wm.lean === "BEARISH" ? "#ef4444" : "#fff");
+        document.getElementById('wm-phase').innerText = wm.phase || "--";
+        document.getElementById('wm-note').innerText = wm.note || "--";
         
-        const enEl = document.getElementById('energy-tag');
-        enEl.innerText = data.energy;
-        enEl.style.background = data.energy === 'PRIME' ? 'var(--primary)' : '#333';
-        enEl.style.color = data.energy === 'PRIME' ? '#000' : '#888';
+        if(wm.campaign && wm.campaign.status === "ARMING") {
+            document.getElementById('wm-camp-status').innerText = "ARMING";
+            document.getElementById('wm-camp-status').style.color = "#ffcc00";
+            document.getElementById('wm-camp-note').innerText = wm.campaign.note;
+        } else {
+            document.getElementById('wm-camp-status').innerText = "NOT ARMED";
+            document.getElementById('wm-camp-status').style.color = "#666";
+            document.getElementById('wm-camp-note').innerText = "";
+        }
+
+        // SESSION BATTLE
+        const sb = data.battlebox.session_battle || {};
+        const action = sb.action || "HOLD FIRE";
+        const elAction = document.getElementById('sb-action');
+        elAction.innerText = action;
         
-        // --- BATTLEBOX DATA ---
-        if (data.battlebox) {
-            document.getElementById('story-now').innerText = data.battlebox.story_now;
-            document.getElementById('story-wait').innerText = data.battlebox.waiting_for;
-            
-            // Ladder Colors
-            const ladder = data.battlebox.ladder;
-            document.getElementById('bar-perm').style.background = ladder.permission === 'EARNED' ? 'var(--primary)' : '#333';
-            document.getElementById('bar-pull').style.background = ladder.pullback === 'QUALIFIED' ? 'var(--primary)' : (ladder.pullback==='FORMING'?'#ffcc00':'#333');
-            document.getElementById('bar-resum').style.background = ladder.resumption === 'UNDERWAY' ? 'var(--primary)' : '#333';
-            
-            document.getElementById('lbl-perm').innerText = "PERMISSION: " + ladder.permission;
-            document.getElementById('lbl-pull').innerText = "PULLBACK: " + ladder.pullback;
-            document.getElementById('lbl-resum').innerText = "RESUMPTION: " + ladder.resumption;
+        if(action === "GREENLIGHT") elAction.style.color = "#00ff9d";
+        else if(action === "PREPARE") elAction.style.color = "#ffcc00";
+        else elAction.style.color = "#444";
+        
+        document.getElementById('sb-reason').innerText = sb.reason || "--";
+        document.getElementById('sb-perm').innerText = sb.permission ? `${sb.permission.status} (${sb.permission.side})` : "--";
+        
+        // PREPARE LEVELS
+        if(action === "PREPARE" && sb.execution && sb.execution.levels) {
+            document.getElementById('sb-prepare-box').style.display = "block";
+            document.getElementById('sb-fail-line').innerText = sb.execution.levels.failure.toFixed(2);
+            document.getElementById('sb-cont-line').innerText = sb.execution.levels.continuation.toFixed(2);
+        } else {
+            document.getElementById('sb-prepare-box').style.display = "none";
         }
         
-        // --- STRUCTURE ---
-        document.getElementById('val-dr').innerText = data.levels.daily_resistance?.toFixed(2) || "---";
-        document.getElementById('val-bo').innerText = data.levels.breakout_trigger?.toFixed(2) || "---";
-        document.getElementById('val-bd').innerText = data.levels.breakdown_trigger?.toFixed(2) || "---";
-        document.getElementById('val-ds').innerText = data.levels.daily_support?.toFixed(2) || "---";
-
-        // --- PHASE TIMELINE ---
-        document.querySelectorAll('.phase-step').forEach(el => el.classList.remove('active'));
-        document.getElementById('ph-open').classList.add('active');
-        if(data.energy !== 'CALIBRATING') document.getElementById('ph-calib').classList.add('active');
-        if(data.energy === 'PRIME' || data.energy === 'LATE') document.getElementById('ph-active').classList.add('active');
-        if(data.energy === 'DEAD') document.getElementById('ph-close').classList.add('active');
-
-        // --- STRATEGY CARDS ---
-        const grid = document.getElementById('strat-grid');
-        grid.innerHTML = '';
-        if (data.strategies) {
-            data.strategies.forEach(s => {
-                const card = document.createElement('div');
-                card.className = 'strat-card';
-                card.style.borderTop = `3px solid ${s.color}`;
-                card.innerHTML = `
-                    <div class="strat-title">${s.code} - ${s.name}</div>
-                    <div class="strat-status" style="background:${s.color}; color:${s.color==='#00ff9d'?'#000':'#fff'}">${s.status}</div>
-                    <div class="strat-reason">${s.message}</div>
-                    <button onclick="explainScenario('${s.code}')" class="cyber-btn-sec" style="width:100%; font-size:0.7rem; margin-top:auto;">EXPLAIN THIS SCENARIO</button>
-                `;
-                grid.appendChild(card);
-            });
-        }
+        // STRUCTURE
+        const l = data.levels || {};
+        document.getElementById('val-dr').innerText = l.daily_resistance?.toFixed(2) || "---";
+        document.getElementById('val-bo').innerText = l.breakout_trigger?.toFixed(2) || "---";
+        document.getElementById('val-bd').innerText = l.breakdown_trigger?.toFixed(2) || "---";
+        document.getElementById('val-ds').innerText = l.daily_support?.toFixed(2) || "---";
         
     } catch(e) { console.error(e); } 
-    finally { btn.innerText = "PREPARE SESSION"; }
+    finally { btn.innerText = "UPDATE INTEL"; }
 }
 
-function copyStructure() {
+function copyBattleBox() {
     if(!lastPacket) return;
-    const s = lastPacket.levels;
-    const text = `STRUCTURE DATA:\nDaily Res: ${s.daily_resistance}\nBreakout: ${s.breakout_trigger}\nBreakdown: ${s.breakdown_trigger}\nDaily Sup: ${s.daily_support}`;
-    navigator.clipboard.writeText(text);
-    alert("Structure Data Copied.");
-}
-
-function openMentor() {
-    const prompt = `You are Kabroda Trading BattleBox. Use the following session packet as the authoritative source.\n\nWrite today's Daily Market Review.\n\nSESSION PACKET:\n${JSON.stringify(lastPacket, null, 2)}`;
-    navigator.clipboard.writeText(prompt);
-    alert("Mentor Prompt Copied.");
-}
-
-function copyNightVision() {
-    if(!lastPacket) return;
-    const prompt = `You are Kabroda Trading BattleBox. Use the Live Battlefield State Packet below as the authoritative source.\n\nExplain what is true right now in calm trader language.\n\nLIVE BATTLEFIELD STATE PACKET:\n${JSON.stringify(lastPacket, null, 2)}`;
-    navigator.clipboard.writeText(prompt);
-    alert("Night Vision Copied.");
-}
-
-function explainScenario(code) {
-    if(!lastPacket) return;
-    const prompt = `You are Kabroda Trading BattleBox. Use the Live Battlefield State Packet below.\n\nFocus on scenario: ${code}.\nExplain what this scenario means and why its status is what it is.\n\nLIVE PACKET:\n${JSON.stringify(lastPacket, null, 2)}`;
-    navigator.clipboard.writeText(prompt);
-    alert("Scenario Prompt Copied.");
+    navigator.clipboard.writeText(JSON.stringify(lastPacket, null, 2));
+    alert("Full Intel Packet Copied.");
 }
 </script>
 {% endblock %}
