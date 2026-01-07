@@ -90,7 +90,10 @@
             </div>
 
             <div id="sb-prepare-box" style="display: block; background: #112211; padding: 20px; border: 1px solid var(--primary); margin-bottom: 20px;">
-                <div style="font-size: 0.9rem; color: var(--primary); font-weight: bold; margin-bottom: 15px; text-align: center;">EXECUTION GATES (5M)</div>
+                <div style="font-size: 0.9rem; color: var(--primary); font-weight: bold; margin-bottom: 15px; text-align: center;">
+                    EXECUTION GATES (5M)
+                    <span id="sb-gates-mode" style="display:block; font-size:0.7rem; color:#88aa88; margin-top:4px;">PREVIEW (FLOATING)</span>
+                </div>
                 <div style="display: flex; justify-content: space-between; font-family: monospace; font-size: 1.4rem;">
                     <div><span style="color:#ef4444; font-size:0.8rem;">FAILURE LINE</span><br><span id="sb-fail-line" style="color:#fff;">--</span></div>
                     <div style="text-align:right;"><span style="color:#00ff9d; font-size:0.8rem;">CONTINUATION</span><br><span id="sb-cont-line" style="color:#fff;">--</span></div>
@@ -217,10 +220,24 @@ async function runLivePulse() {
         const loc = sb.location || {};
         document.getElementById('sb-loc').innerText = `${loc.relative_to_triggers || '-'} | ${loc.relative_to_value || '-'}`;
 
-        // EXECUTION GATES (ALWAYS VISIBLE)
-        const levels = sb.execution?.levels || {};
-        const perm = sb.permission?.status || "NOT_EARNED";
-        
+        // EXECUTION GATES (LOCKED VS PREVIEW)
+        const exec = sb.execution || {};
+        const levels = exec.levels || {};
+        const gatesMode = exec.gates_mode || "PREVIEW";
+        const pauseState = exec.pause_state || "NONE";
+
+        const structureText = pauseState === "CONFIRMED" ? "STRUCTURE CONFIRMED" : (pauseState === "FORMING" ? "STRUCTURE FORMING" : "NO STRUCTURE YET");
+        document.getElementById('sb-gates-mode').innerText = (gatesMode === "LOCKED") ? `LOCKED • ${structureText}` : `PREVIEW (FLOATING) • ${structureText}`;
+
+        const gateBox = document.getElementById('sb-prepare-box');
+        if (gatesMode === "LOCKED") {
+            gateBox.style.opacity = "1";
+            gateBox.style.borderColor = "var(--primary)";
+        } else {
+            gateBox.style.opacity = "0.65";
+            gateBox.style.borderColor = "#224422";
+        }
+
         document.getElementById('sb-fail-line').innerText = (levels.failure ? levels.failure.toFixed(2) : "--");
         document.getElementById('sb-cont-line').innerText = (levels.continuation ? levels.continuation.toFixed(2) : "--");
         

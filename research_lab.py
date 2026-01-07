@@ -1,11 +1,12 @@
 # research_lab.py
 # ==============================================================================
-# KABRODA RESEARCH LAB v24.1 (FINAL POLISH)
+# KABRODA RESEARCH LAB v24.2 (LOCKED GATES UPDATE)
 # ==============================================================================
 # Fixes:
-# 1. PAYLOAD: Added 'war_map_campaign' explicitly to battlebox so UI can read it.
-# 2. SAFETY: Added zero-check for fallback gates to prevent UI blanking.
-# 3. RETAINED: All v24.0 Strict Doctrine logic (Permission, Timing, etc).
+# 1. GATES: Implemented 'gates_locked' persistence. Once structure confirms,
+#    levels freeze and do not float.
+# 2. UI MODE: Added 'gates_mode' (PREVIEW vs LOCKED) to contract.
+# 3. DOCTRINE: Retains all v24.0 strict permission/timing logic.
 # ==============================================================================
 
 from __future__ import annotations
@@ -72,6 +73,8 @@ def _session_battle_template():
         "execution": {
             "pause_state": "NONE",
             "resumption_state": "NONE",
+            "gates_mode": "PREVIEW", # NEW
+            "locked_at": None,       # NEW
             "levels": {"failure": 0.0, "continuation": 0.0}
         }
     }
@@ -155,80 +158,109 @@ def _calculate_session_battle(raw_5m: List[Dict], levels: Dict, ledger: Dict) ->
             if last < bd: sb["acceptance_progress"] = {"count": 1, "required": 2, "side_hint": "SHORT"}
             elif last > bo: sb["acceptance_progress"] = {"count": 1, "required": 2, "side_hint": "LONG"}
 
-    # 3. GATES & PAUSE
-    perm_side = sb["permission"]["side"]
-    perm_time = ledger.get("permission_time", 0)
-    
-    # PATCH 2: Bulletproof Gates (Inside Band Fallback)
-    if perm_side == "SHORT" or (perm_side == "NONE" and current_price < bd):
-        sb["execution"]["levels"]["failure"] = bd * 1.001
-        sb["execution"]["levels"]["continuation"] = current_price * 0.999
-    elif perm_side == "LONG" or (perm_side == "NONE" and current_price > bo):
-        sb["execution"]["levels"]["failure"] = bo * 0.999
-        sb["execution"]["levels"]["continuation"] = current_price * 1.001
-    else:
-        # Inside Band Fallback
-        if bo > 0 and bd > 0:
-            sb["execution"]["levels"]["failure"] = bo
-            sb["execution"]["levels"]["continuation"] = bd
-        else:
-            # Ultra-safe fallback (No Zeros)
-            sb["execution"]["levels"]["failure"] = current_price
-            sb["execution"]["levels"]["continuation"] = current_price
-
     if sb["permission"]["status"] == "NOT_EARNED":
         sb["action"] = "HOLD FIRE"
         sb["reason"] = f"Permission not earned ({sb['acceptance_progress']['count']}/2)."
+        
+        # PREVIEW GATES (FLOATING)
+        if sb["acceptance_progress"]["side_hint"] == "SHORT" or current_price < bd:
+            sb["execution"]["levels"]["failure"] = bd * 1.001
+            sb["execution"]["levels"]["continuation"] = current_price * 0.999
+        elif sb["acceptance_progress"]["side_hint"] == "LONG" or current_price > bo:
+            sb["execution"]["levels"]["failure"] = bo * 0.999
+            sb["execution"]["levels"]["continuation"] = current_price * 1.001
+        else:
+            sb["execution"]["levels"]["failure"] = bo
+            sb["execution"]["levels"]["continuation"] = bd
         return sb
 
-    # 4. EXECUTION
+    # 3. EXECUTION: CALCULATE FLOATING STRUCTURE
+    perm_side = sb["permission"]["side"]
+    perm_time = ledger.get("permission_time", 0)
     exec_candles = [c for c in raw_5m if c['time'] > perm_time]
     
-    if len(exec_candles) < 2:
-        sb["action"] = "PREPARE"
-        sb["reason"] = "Permission earned. Waiting for structure."
-        return sb
-        
-    p_high = max(c['high'] for c in exec_candles)
-    p_low = min(c['low'] for c in exec_candles)
-    range_pct = (p_high - p_low) / current_price
+    pause_state = "NONE"
+    p_high = 0.0
+    p_low = 0.0
     
-    pause_state = "FORMING" if range_pct < 0.0035 else "NONE"
-    if len(exec_candles) >= 4 and pause_state == "FORMING": pause_state = "CONFIRMED"
+    if len(exec_candles) >= 2:
+        p_high = max(c['high'] for c in exec_candles)
+        p_low = min(c['low'] for c in exec_candles)
+        range_pct = (p_high - p_low) / current_price
+        
+        if range_pct < 0.0035: 
+            pause_state = "CONFIRMED" if len(exec_candles) >= 4 else "FORMING"
     
     sb["execution"]["pause_state"] = pause_state
-    
-    if pause_state == "NONE":
-        sb["action"] = "HOLD FIRE"
-        sb["reason"] = "Permission earned, but no 5m pause yet."
+
+    # 4. GATE LOCKING LOGIC
+    gates_locked = bool(ledger.get("gates_locked", False))
+
+    # Try to Lock if Confirmed
+    if pause_state == "CONFIRMED" and not gates_locked:
         if perm_side == "SHORT":
-            sb["execution"]["levels"]["failure"] = p_high
-            sb["execution"]["levels"]["continuation"] = p_low
+            ledger["locked_failure"] = p_high
+            ledger["locked_continuation"] = p_low
+        else: # LONG
+            ledger["locked_failure"] = p_low
+            ledger["locked_continuation"] = p_high
+        
+        ledger["gates_locked"] = True
+        ledger["gates_locked_time"] = raw_5m[-1]['time']
+        gates_locked = True
+
+    # 5. ASSIGN GATES (Locked vs Floating)
+    if gates_locked:
+        sb["execution"]["gates_mode"] = "LOCKED"
+        sb["execution"]["locked_at"] = ledger.get("gates_locked_time")
+        sb["execution"]["levels"]["failure"] = float(ledger["locked_failure"])
+        sb["execution"]["levels"]["continuation"] = float(ledger["locked_continuation"])
+    else:
+        sb["execution"]["gates_mode"] = "PREVIEW"
+        # Floating Logic
+        if pause_state == "NONE":
+            # Fallbacks
+            if perm_side == "SHORT":
+                sb["execution"]["levels"]["failure"] = bd * 1.001
+                sb["execution"]["levels"]["continuation"] = current_price * 0.999
+            else:
+                sb["execution"]["levels"]["failure"] = bo * 0.999
+                sb["execution"]["levels"]["continuation"] = current_price * 1.001
         else:
-            sb["execution"]["levels"]["failure"] = p_low
-            sb["execution"]["levels"]["continuation"] = p_high
+            # Active Structure
+            if perm_side == "SHORT":
+                sb["execution"]["levels"]["failure"] = p_high
+                sb["execution"]["levels"]["continuation"] = p_low
+            else:
+                sb["execution"]["levels"]["failure"] = p_low
+                sb["execution"]["levels"]["continuation"] = p_high
+
+    # 6. DECISION (Action)
+    fail = sb["execution"]["levels"]["failure"]
+    cont = sb["execution"]["levels"]["continuation"]
+    
+    if pause_state == "NONE" and not gates_locked:
+        sb["action"] = "HOLD FIRE"
+        sb["reason"] = "Permission earned. Waiting for structure."
         return sb
 
+    # Evaluate against Gates (Locked or Floating)
     if perm_side == "SHORT":
-        sb["execution"]["levels"]["failure"] = p_high
-        sb["execution"]["levels"]["continuation"] = p_low
-        if current_price < p_low * 0.9995:
+        if current_price < cont * 0.9995:
             sb["action"] = "GREENLIGHT"
-            sb["reason"] = "Pause resolved lower. Continuation active."
+            sb["reason"] = "Continuation confirmed below gate."
             sb["execution"]["resumption_state"] = "CONFIRMED"
         else:
             sb["action"] = "PREPARE"
-            sb["reason"] = "Pause detected. Wait for break of Low."
-    else: # LONG
-        sb["execution"]["levels"]["failure"] = p_low
-        sb["execution"]["levels"]["continuation"] = p_high
-        if current_price > p_high * 1.0005:
+            sb["reason"] = "Structure active. Wait for break of Continuation line."
+    elif perm_side == "LONG":
+        if current_price > cont * 1.0005:
             sb["action"] = "GREENLIGHT"
-            sb["reason"] = "Pause resolved higher. Continuation active."
+            sb["reason"] = "Continuation confirmed above gate."
             sb["execution"]["resumption_state"] = "CONFIRMED"
         else:
             sb["action"] = "PREPARE"
-            sb["reason"] = "Pause detected. Wait for break of High."
+            sb["reason"] = "Structure active. Wait for break of Continuation line."
 
     return sb
 
@@ -332,12 +364,10 @@ async def run_live_pulse(symbol: str, session_mode: str="AUTO", manual_id: str=N
                 strategies.append({"code": code, "name": STRATEGY_DISPLAY.get(code, code), "status": "Inactive", "msg": "Legacy Mode"})
         except: pass
 
-        # PATCH 1: Extract WM and Add Campaign Explicitly
         wm = _calculate_war_map(raw_1h)
-        
         battlebox = {
             "war_map_context": wm,
-            "war_map_campaign": wm.get("campaign"), # <--- PATCH 1 APPLIED
+            "war_map_campaign": wm.get("campaign"), 
             "session_battle": session_battle,
             "session": session_info,
             "levels": levels,
