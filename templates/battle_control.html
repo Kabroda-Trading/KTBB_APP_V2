@@ -3,6 +3,11 @@
 {% block title %}Kabroda | Battle Control{% endblock %}
 
 {% block content %}
+<script>
+  // This reads the database value passed by FastAPI
+  const USER_OP_FLEX = {{ 'true' if user.operator_flex else 'false' }};
+</script>
+
 <div class="app-container" style="max-width: 1400px; margin: 0 auto;">
     
     <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 15px;">
@@ -17,10 +22,11 @@
                 <div id="live-dot"></div>
             </div>
             
-            <div class="input-group" style="margin-left: 15px; display: flex; align-items: center; gap: 8px;">
-                <input type="checkbox" id="operatorFlex" style="accent-color: var(--warning);">
-                <label for="operatorFlex" style="font-size: 0.7rem; color: #888; cursor: pointer; font-weight: 700;">OP FLEX</label>
+            {% if user.operator_flex %}
+            <div style="font-size: 10px; color: var(--warning); border: 1px solid var(--warning); padding: 4px 8px; border-radius: 4px; font-weight: 700; letter-spacing: 1px;">
+                OP FLEX ACTIVE
             </div>
+            {% endif %}
 
             <div class="input-group" style="margin:0;">
                 <select id="sessionMode" onchange="toggleManualSession()" class="cyber-select">
@@ -184,7 +190,7 @@ async function runLivePulse() {
                 symbol: "BTCUSDT", 
                 session_mode: document.getElementById('sessionMode').value,
                 manual_session_id: document.getElementById('manualSessionId').value,
-                operator_flex: document.getElementById('operatorFlex').checked // SENDING OPERATOR FLEX
+                operator_flex: USER_OP_FLEX // USES DATABASE SETTING
             })
         });
         const data = await res.json();

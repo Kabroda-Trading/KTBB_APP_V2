@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 # ---------------------------------------------------------
@@ -36,6 +36,10 @@ class UserModel(Base):
     # --- NEW: TradingView Access ---
     tradingview_id = Column(String, nullable=True)
     # -------------------------------
+
+    # --- NEW: DEV SETTINGS ---
+    operator_flex = Column(Boolean, default=False)
+    # -------------------------
 
     # Membership fields
     tier = Column(String, default="tier1_manual", nullable=False)

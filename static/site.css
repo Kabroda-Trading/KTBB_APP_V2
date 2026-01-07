@@ -148,3 +148,40 @@ h1, h2, h3 { margin: 0; font-weight: 800; letter-spacing: -0.02em; color: #fff; 
 
 /* --- FOOTER --- */
 .footer { border-top: 1px solid var(--glass-border); padding: 40px 0; margin-top: 80px; text-align: center; color: var(--text-muted); font-size: 13px; }
+
+/* --- TOOLTIPS (New) --- */
+.tooltip-container {
+  position: relative;
+  display: inline-block;
+  cursor: help;
+  color: var(--primary-bright);
+  border-bottom: 1px dotted var(--primary-bright);
+}
+
+.tooltip-text {
+  visibility: hidden;
+  width: 280px;
+  background-color: #0f172a;
+  color: #fff;
+  text-align: left;
+  border-radius: 8px;
+  padding: 12px;
+  position: absolute;
+  z-index: 100;
+  bottom: 125%; /* Position above */
+  left: 50%;
+  margin-left: -140px; /* Center it */
+  opacity: 0;
+  transition: opacity 0.3s;
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 400;
+  text-transform: none;
+}
+
+.tooltip-container:hover .tooltip-text {
+  visibility: visible;
+  opacity: 1;
+}

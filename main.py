@@ -1,7 +1,7 @@
 # main.py
 # ---------------------------------------------------------
 # KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.7
-# (Battle Control Migration)
+# (Battle Control Migration + Operator Flex)
 # ---------------------------------------------------------
 from __future__ import annotations
 
@@ -72,6 +72,10 @@ def _startup():
         except Exception: db.rollback()
         try:
             db.execute(text("ALTER TABLE users ADD COLUMN tradingview_id VARCHAR"))
+            db.commit()
+        except Exception: db.rollback()
+        try:
+            db.execute(text("ALTER TABLE users ADD COLUMN operator_flex BOOLEAN"))
             db.commit()
         except Exception: db.rollback()
     except Exception as e:
@@ -146,7 +150,9 @@ def battle_control_page(request: Request, db: Session = Depends(get_db)):
     flags = _plan_flags(u)
     return templates.TemplateResponse("battle_control.html", {
         "request": request, "is_logged_in": True,
-        "user": {"email": u.email, "username": u.username, "plan_label": flags.get("plan_label", "")}
+        # PASSING FULL USER OBJECT so template sees .operator_flex
+        "user": u, 
+        "plan_label": flags.get("plan_label", "")
     })
 
 # --- RESEARCH REDIRECT (COMPATIBILITY) ---
@@ -271,9 +277,21 @@ def account(request: Request, db: Session = Depends(get_db)):
     flags = _plan_flags(u)
     return templates.TemplateResponse("account.html", {
         "request": request, "is_logged_in": True,
-        "user": {"email": u.email, "username": u.username, "tradingview_id": u.tradingview_id, "session_tz": (u.session_tz or "UTC")},
+        "user": u, # Pass Full User
         "tier_label": flags["plan_label"],
     })
+
+# --- NEW ENDPOINT TO SAVE FLEX SETTING ---
+@app.post("/account/settings")
+async def account_settings(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    
+    data = await request.json()
+    u.operator_flex = bool(data.get("operator_flex", False))
+    db.commit()
+    
+    return {"status": "ok"}
 
 @app.get("/login", response_class=HTMLResponse)
 def login_get(request: Request):
