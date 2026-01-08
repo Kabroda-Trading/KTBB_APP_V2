@@ -107,6 +107,14 @@ def _plan_flags(u: UserModel) -> Dict[str, Any]:
 def home(request: Request):
     return templates.TemplateResponse("home.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
 
+@app.get("/analysis", response_class=HTMLResponse)
+def analysis(request: Request):
+    return templates.TemplateResponse("analysis.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
+
+@app.get("/how-it-works", response_class=HTMLResponse)
+def how_it_works(request: Request):
+    return templates.TemplateResponse("how_it_works.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
+
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing(request: Request):
     return templates.TemplateResponse("pricing.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
@@ -118,14 +126,6 @@ def about(request: Request):
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy_page(request: Request):
     return templates.TemplateResponse("privacy.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
-
-@app.get("/how-it-works", response_class=HTMLResponse)
-def how_it_works(request: Request):
-    return templates.TemplateResponse("how_it_works.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
-
-@app.get("/network", response_class=HTMLResponse)
-def network_page(request: Request):
-    return templates.TemplateResponse("community.html", {"request": request, "is_logged_in": False})
 
 # --- DAY TRADING SUITE (SESSION CONTROL) ---
 @app.get("/suite", response_class=HTMLResponse)
