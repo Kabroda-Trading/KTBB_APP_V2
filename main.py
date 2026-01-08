@@ -129,6 +129,8 @@ def privacy_page(request: Request):
     return templates.TemplateResponse("privacy.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
 
 # --- DAY TRADING SUITE (SESSION CONTROL) ---
+# In main.py, locate the @app.get("/suite") route and ensure it looks like this:
+
 @app.get("/suite", response_class=HTMLResponse)
 def suite(request: Request, db: Session = Depends(get_db)):
     sess = _session_user_dict(request)
@@ -137,7 +139,9 @@ def suite(request: Request, db: Session = Depends(get_db)):
     try: require_paid_access(u)
     except HTTPException: return RedirectResponse(url="/pricing?paywall=1", status_code=303)
     flags = _plan_flags(u)
-    return templates.TemplateResponse("app.html", {
+    
+    # FIXED: Point to session_control.html (we will rename app.html next)
+    return templates.TemplateResponse("session_control.html", {
         "request": request, "is_logged_in": True,
         "user": {"email": u.email, "username": u.username, "session_tz": (u.session_tz or "UTC"), "plan_label": flags.get("plan_label", ""), "plan": flags.get("plan") or ""}
     })
