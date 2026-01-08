@@ -9,351 +9,87 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        /* --- COPYING BASE STYLES FOR CONSISTENCY --- */
-        :root {
-            --bg-dark: #050b14;
-            --bg-card: #0f1623;
-            --text-main: #e2e8f0;
-            --text-muted: #94a3b8;
-            --accent-cyan: #06b6d4;
-            --accent-glow: #22d3ee;
-            --accent-red: #ef4444;
-            --accent-green: #10b981;
-            --accent-orange: #f59e0b;
-            --font-main: 'Inter', system-ui, -apple-system, sans-serif;
-            --font-mono: 'JetBrains Mono', monospace;
-        }
-
+        :root { --bg-dark: #050b14; --bg-card: #0f1623; --text-main: #e2e8f0; --text-muted: #94a3b8; --accent-cyan: #06b6d4; --accent-glow: #22d3ee; --accent-red: #ef4444; --accent-green: #10b981; --accent-orange: #f59e0b; --font-main: 'Inter', system-ui, -apple-system, sans-serif; --font-mono: 'JetBrains Mono', monospace; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            background-color: var(--bg-dark);
-            color: var(--text-main);
-            font-family: var(--font-main);
-            line-height: 1.6;
-            overflow-x: hidden;
-        }
-
+        body { background-color: var(--bg-dark); color: var(--text-main); font-family: var(--font-main); line-height: 1.6; overflow-x: hidden; }
         h1, h2, h3, h4 { font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 20px;
-        }
-
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
         a { text-decoration: none; color: inherit; transition: 0.3s ease; }
-        
-        /* --- NAVIGATION --- */
-        .navbar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 20px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            background: rgba(5, 11, 20, 0.95);
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-            backdrop-filter: blur(10px);
-        }
 
-        .logo {
-            font-family: var(--font-mono);
-            font-weight: 700;
-            font-size: 1.2rem;
-            color: #fff;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
+        .navbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
+        .logo { font-family: var(--font-mono); font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; }
         .logo span { color: var(--accent-cyan); }
-
-        .nav-links {
-            display: flex;
-            gap: 2rem;
-            list-style: none;
-        }
-
-        .nav-links a {
-            font-size: 0.95rem;
-            color: var(--text-muted);
-            font-weight: 500;
-        }
-
+        .nav-links { display: flex; gap: 2rem; list-style: none; }
+        .nav-links a { font-size: 0.95rem; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
         .nav-links a:hover, .nav-links a.active { color: #fff; }
-
         .nav-cta .btn { padding: 0.6rem 1.2rem; font-size: 0.9rem; }
+        .btn { display: inline-block; padding: 1rem 2rem; border-radius: 4px; font-weight: 600; cursor: pointer; text-align: center; }
+        .btn-primary { background: var(--accent-cyan); color: var(--bg-dark); box-shadow: 0 0 15px rgba(6, 182, 212, 0.2); }
+        .btn-primary:hover { background: var(--accent-glow); box-shadow: 0 0 25px rgba(6, 182, 212, 0.4); }
 
-        /* --- BUTTONS --- */
-        .btn {
-            display: inline-block;
-            padding: 1rem 2rem;
-            border-radius: 4px;
-            font-weight: 600;
-            cursor: pointer;
-            text-align: center;
-        }
+        .method-hero { padding: 120px 0 80px; text-align: center; }
+        .eyebrow { font-family: var(--font-mono); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--accent-cyan); margin-bottom: 1.5rem; display: block; }
+        .method-hero h1 { font-size: 3.5rem; margin-bottom: 2rem; color: #fff; }
+        .method-hero p { font-size: 1.25rem; color: var(--text-muted); max-width: 650px; margin: 0 auto; }
+        .hero-highlight { color: #fff; font-weight: 600; border-bottom: 1px solid var(--accent-cyan); }
 
-        .btn-primary {
-            background: var(--accent-cyan);
-            color: var(--bg-dark);
-            box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
-        }
-        .btn-primary:hover {
-            background: var(--accent-glow);
-            box-shadow: 0 0 25px rgba(6, 182, 212, 0.4);
-        }
-
-        /* --- SECTION 1: HERO (PHILOSOPHY) --- */
-        .method-hero {
-            padding: 120px 0 80px;
-            text-align: center;
-        }
-
-        .eyebrow {
-            font-family: var(--font-mono);
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 0.15em;
-            color: var(--accent-cyan);
-            margin-bottom: 1.5rem;
-            display: block;
-        }
-
-        .method-hero h1 {
-            font-size: 3.5rem;
-            margin-bottom: 2rem;
-            color: #fff;
-        }
-
-        .method-hero p {
-            font-size: 1.25rem;
-            color: var(--text-muted);
-            max-width: 650px;
-            margin: 0 auto;
-        }
-
-        .hero-highlight {
-            color: #fff;
-            font-weight: 600;
-            border-bottom: 1px solid var(--accent-cyan);
-        }
-
-        /* --- SECTION 2: THE PROBLEM --- */
-        .problem-section {
-            padding: 80px 0;
-            background: var(--bg-card);
-            border-top: 1px solid rgba(255,255,255,0.05);
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            text-align: center;
-        }
-
+        .problem-section { padding: 80px 0; background: var(--bg-card); border-top: 1px solid rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.05); text-align: center; }
         .content-narrow { max-width: 700px; margin: 0 auto; }
-        
         .problem-section h2 { font-size: 2.2rem; margin-bottom: 2rem; }
         .problem-section p { font-size: 1.1rem; color: var(--text-muted); margin-bottom: 1.5rem; }
-        
-        .problem-final { 
-            font-weight: 700; 
-            color: #fff; 
-            margin-top: 2rem; 
-            font-size: 1.2rem;
-        }
+        .problem-final { font-weight: 700; color: #fff; margin-top: 2rem; font-size: 1.2rem; }
 
-        /* --- SECTION 3: THE PREMISE (3 CARDS) --- */
-        .premise-section {
-            padding: 100px 0;
-        }
-
+        .premise-section { padding: 100px 0; }
         .section-header { text-align: center; margin-bottom: 4rem; }
         .section-header h2 { font-size: 2.5rem; }
-
-        .premise-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 2rem;
-        }
-
-        .premise-card {
-            background: rgba(255,255,255,0.02);
-            border: 1px solid rgba(255,255,255,0.05);
-            padding: 2.5rem;
-            border-radius: 6px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .premise-card::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 3px;
-        }
+        .premise-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem; }
+        .premise-card { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); padding: 2.5rem; border-radius: 6px; position: relative; overflow: hidden; }
+        .premise-card::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 3px; }
         .card-build::before { background: var(--accent-cyan); }
         .card-test::before { background: var(--accent-orange); }
         .card-break::before { background: var(--accent-green); }
+        .premise-num { font-family: var(--font-mono); font-size: 0.9rem; opacity: 0.6; margin-bottom: 0.5rem; display: block; letter-spacing: 0.1em; }
+        .premise-title { font-size: 1.5rem; margin-bottom: 1rem; color: #fff; }
+        .premise-card p { color: var(--text-muted); font-size: 0.95rem; margin-bottom: 0.5rem; }
+        .anchor-line { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1); font-weight: 600; color: #fff; }
+        .footer-line { text-align: center; margin-top: 3rem; font-family: var(--font-mono); color: var(--text-muted); font-size: 0.9rem; }
 
-        .premise-num {
-            font-family: var(--font-mono);
-            font-size: 0.9rem;
-            opacity: 0.6;
-            margin-bottom: 0.5rem;
-            display: block;
-            letter-spacing: 0.1em;
-        }
-
-        .premise-title {
-            font-size: 1.5rem;
-            margin-bottom: 1rem;
-            color: #fff;
-        }
-
-        .premise-card p {
-            color: var(--text-muted);
-            font-size: 0.95rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .anchor-line {
-            margin-top: 1.5rem;
-            padding-top: 1rem;
-            border-top: 1px solid rgba(255,255,255,0.1);
-            font-weight: 600;
-            color: #fff;
-        }
-
-        .footer-line {
-            text-align: center;
-            margin-top: 3rem;
-            font-family: var(--font-mono);
-            color: var(--text-muted);
-            font-size: 0.9rem;
-        }
-
-        /* --- SECTION 4: IS / IS NOT --- */
-        .comparison-section {
-            padding: 80px 0;
-            background: var(--bg-card);
-            border-top: 1px solid rgba(255,255,255,0.05);
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .comparison-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 2rem;
-            max-width: 900px;
-            margin: 0 auto;
-        }
-
-        .comp-col {
-            padding: 2rem;
-            border-radius: 8px;
-            border: 1px solid rgba(255,255,255,0.05);
-        }
-
+        .comparison-section { padding: 80px 0; background: var(--bg-card); border-top: 1px solid rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; max-width: 900px; margin: 0 auto; }
+        .comp-col { padding: 2rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); }
         .comp-not { background: rgba(239, 68, 68, 0.05); border-color: rgba(239, 68, 68, 0.2); }
         .comp-is { background: rgba(16, 185, 129, 0.05); border-color: rgba(16, 185, 129, 0.2); }
-
         .comp-header { font-weight: 700; font-size: 1.25rem; margin-bottom: 1.5rem; }
-        
-        .comp-list div {
-            padding: 8px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            display: flex; align-items: center; gap: 10px;
-            font-size: 0.95rem; color: var(--text-muted);
-        }
+        .comp-list div { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; gap: 10px; font-size: 0.95rem; color: var(--text-muted); }
         .comp-list div:last-child { border-bottom: none; }
-
         .icon-x { color: var(--accent-red); }
         .icon-check { color: var(--accent-green); }
 
-        /* --- SECTION 5: OPERATING SYSTEM --- */
-        .os-section {
-            padding: 100px 0;
-        }
-
-        .os-step {
-            margin-bottom: 4rem;
-            padding-bottom: 4rem;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            max-width: 800px;
-            margin-left: auto;
-            margin-right: auto;
-        }
+        .os-section { padding: 100px 0; }
+        .os-step { margin-bottom: 4rem; padding-bottom: 4rem; border-bottom: 1px solid rgba(255,255,255,0.05); max-width: 800px; margin-left: auto; margin-right: auto; }
         .os-step:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-
-        .step-eyebrow {
-            font-family: var(--font-mono);
-            color: var(--accent-cyan);
-            font-size: 0.9rem;
-            margin-bottom: 0.5rem;
-            display: block;
-        }
-
+        .step-eyebrow { font-family: var(--font-mono); color: var(--accent-cyan); font-size: 0.9rem; margin-bottom: 0.5rem; display: block; }
         .os-step h3 { font-size: 2rem; margin-bottom: 1.5rem; }
         .os-step p { color: var(--text-muted); font-size: 1.1rem; margin-bottom: 1rem; }
-        
         .os-list { margin-bottom: 1.5rem; padding-left: 1.2rem; }
         .os-list li { color: var(--text-muted); margin-bottom: 0.5rem; }
+        .callout-box { background: rgba(6, 182, 212, 0.05); border-left: 3px solid var(--accent-cyan); padding: 1.5rem; margin-top: 1.5rem; color: #fff; font-weight: 500; }
 
-        .callout-box {
-            background: rgba(6, 182, 212, 0.05);
-            border-left: 3px solid var(--accent-cyan);
-            padding: 1.5rem;
-            margin-top: 1.5rem;
-            color: #fff;
-            font-weight: 500;
-        }
-
-        /* --- SECTION 6: WHO FOR --- */
-        .who-section {
-            padding: 100px 0;
-            text-align: center;
-            background: var(--bg-card);
-        }
-
+        .who-section { padding: 100px 0; text-align: center; background: var(--bg-card); }
         .who-content { max-width: 600px; margin: 0 auto; }
         .who-section h2 { font-size: 2.2rem; margin-bottom: 2rem; }
         .who-section p { font-size: 1.1rem; color: var(--text-muted); margin-bottom: 1.5rem; }
-        .who-list { 
-            list-style: none; 
-            margin: 2rem 0; 
-            padding: 2rem; 
-            background: rgba(0,0,0,0.2); 
-            border-radius: 8px; 
-            display: inline-block;
-            text-align: left;
-        }
+        .who-list { list-style: none; margin: 2rem 0; padding: 2rem; background: rgba(0,0,0,0.2); border-radius: 8px; display: inline-block; text-align: left; }
         .who-list li { margin-bottom: 0.5rem; color: #fff; display: flex; align-items: center; gap: 10px; }
         .who-list li::before { content: '•'; color: var(--accent-cyan); }
 
-        /* --- SECTION 7: FINAL CTA --- */
-        .final-cta {
-            padding: 120px 0;
-            text-align: center;
-            background: radial-gradient(circle at bottom, rgba(6, 182, 212, 0.08) 0%, transparent 70%);
-        }
-
+        .final-cta { padding: 120px 0; text-align: center; background: radial-gradient(circle at bottom, rgba(6, 182, 212, 0.08) 0%, transparent 70%); }
         .final-cta h2 { font-size: 3rem; margin-bottom: 1rem; }
         .final-sub { font-size: 1.25rem; color: var(--text-muted); margin-bottom: 2.5rem; }
-        
-        .secondary-link {
-            display: block;
-            margin-top: 1.5rem;
-            font-size: 0.9rem;
-            color: var(--text-muted);
-            text-decoration: underline;
-            text-underline-offset: 4px;
-        }
+        .secondary-link { display: block; margin-top: 1.5rem; font-size: 0.9rem; color: var(--text-muted); text-decoration: underline; text-underline-offset: 4px; }
         .secondary-link:hover { color: #fff; }
 
-        @media (max-width: 768px) {
-            .navbar { flex-direction: column; gap: 1rem; }
-            .nav-links { gap: 1rem; flex-wrap: wrap; justify-content: center; }
-            .method-hero h1 { font-size: 2.5rem; }
-            .comparison-grid { grid-template-columns: 1fr; }
-        }
+        @media (max-width: 768px) { .navbar { flex-direction: column; gap: 1rem; } .nav-links { gap: 1rem; flex-wrap: wrap; justify-content: center; } .method-hero h1 { font-size: 2.5rem; } .comparison-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
@@ -365,8 +101,9 @@
                 KABRODA
             </a>
             <ul class="nav-links">
-                <li><a href="/network">Network</a></li>
-                <li><a href="/how-it-works" class="active">Methodology</a></li>
+                <li><a href="/">Home</a></li>
+                <li><a href="/analysis">Analysis</a></li>
+                <li><a href="/how-it-works" class="active">How It Works</a></li>
                 <li><a href="/pricing">Pricing</a></li>
                 <li><a href="/login">Login</a></li>
             </ul>
@@ -380,10 +117,7 @@
         <div class="container">
             <span class="eyebrow">DECISION FRAMEWORK</span>
             <h1>Stop Trading Guesswork.<br>Start Trading Structure.</h1>
-            <p>
-                Kabroda is built on one principle: <span class="hero-highlight">price only makes sense relative to structure.</span><br>
-                No predictions. No opinions. Just context.
-            </p>
+            <p>Kabroda is built on one principle: <span class="hero-highlight">price only makes sense relative to structure.</span><br>No predictions. No opinions. Just context.</p>
         </div>
     </section>
 
@@ -392,9 +126,7 @@
             <h2>Why Most Traders Feel Stuck</h2>
             <p>Most traders don’t fail because they lack discipline. They fail because they’re forced to make decisions without context.</p>
             <p>Indicators react. Patterns repeat. Opinions conflict. And price keeps moving whether you understand it or not.</p>
-            <div class="problem-final">
-                That’s not trading. That’s reacting.
-            </div>
+            <div class="problem-final">That’s not trading. That’s reacting.</div>
         </div>
     </section>
 
@@ -429,9 +161,7 @@
                     <div class="anchor-line">Action only matters here.</div>
                 </div>
             </div>
-            <div class="footer-line">
-                Kabroda exists to tell you which phase you’re in — and keep you out of the rest.
-            </div>
+            <div class="footer-line">Kabroda exists to tell you which phase you’re in — and keep you out of the rest.</div>
         </div>
     </section>
 
@@ -460,9 +190,7 @@
                     </div>
                 </div>
             </div>
-            <div class="footer-line">
-                Kabroda doesn’t tell you what to trade. It tells you when trading even makes sense.
-            </div>
+            <div class="footer-line">Kabroda doesn’t tell you what to trade. It tells you when trading even makes sense.</div>
         </div>
     </section>
 
@@ -477,11 +205,8 @@
                     <li>Breakout and breakdown thresholds</li>
                     <li>The opening range that defines session bias</li>
                 </ul>
-                <div class="callout-box">
-                    No drawing. No interpretation. Just where price actually matters today.
-                </div>
+                <div class="callout-box">No drawing. No interpretation. Just where price actually matters today.</div>
             </div>
-
             <div class="os-step">
                 <span class="step-eyebrow">STEP 02</span>
                 <h3>Command Intelligence</h3>
@@ -492,19 +217,14 @@
                     <li>Behavioral risk</li>
                 </ul>
                 <p>And returns a clear operational posture: <strong>wait, prepare, or act.</strong></p>
-                <div class="callout-box">
-                    Wait. Observe. Prepare. Act. Just clarity.
-                </div>
+                <div class="callout-box">Wait. Observe. Prepare. Act. Just clarity.</div>
             </div>
-
             <div class="os-step">
                 <span class="step-eyebrow">STEP 03</span>
                 <h3>Clean the Chart</h3>
                 <p>With one click, Kabroda syncs directly to TradingView.</p>
                 <p>Your chart becomes quiet. Your decisions become simpler. Structure replaces clutter.</p>
-                <div class="callout-box">
-                    No drawing lines. Just execution.
-                </div>
+                <div class="callout-box">No drawing lines. Just execution.</div>
             </div>
         </div>
     </section>
@@ -513,14 +233,12 @@
         <div class="container who-content">
             <h2>Who Kabroda Is Built For</h2>
             <p>Kabroda is for traders who are done chasing and ready to operate with intent.</p>
-            
             <ul class="who-list">
                 <li>Fewer decisions</li>
                 <li>Higher confidence</li>
                 <li>Clear context</li>
                 <li>Long-term consistency</li>
             </ul>
-            
             <p style="font-weight: 600; color: #fff;">You’re in the right place.</p>
         </div>
     </section>
