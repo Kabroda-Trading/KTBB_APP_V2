@@ -1,89 +1,556 @@
-{% extends "base.html" %}
-{% block content %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kabroda | Decision Intelligence</title>
+    <style>
+        /* --- RESET & BASE STYLES --- */
+        :root {
+            --bg-dark: #050b14;
+            --bg-card: #0f1623;
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent-cyan: #06b6d4;
+            --accent-glow: #22d3ee;
+            --accent-red: #ef4444;
+            --accent-green: #10b981;
+            --font-main: 'Inter', system-ui, -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', 'Roboto Mono', monospace;
+        }
 
-<section class="text-center" style="margin-bottom: 80px;">
-  <div class="pill">DECISION FRAMEWORK</div>
-  <h1 class="display-title">
-    Stop Trading Guesswork.<br>
-    Start Trading <span class="gradient-text">Structure.</span>
-  </h1>
-  <p class="lead-text" style="max-width: 800px;">
-    Kabroda helps you understand market structure in real time — 
-    so you stop reacting to candles and start recognizing decisions.
-  </p>
-  <div class="hero-actions">
-    <a class="btn primary" href="/how-it-works">See How Structure Works</a>
-    <a class="btn secondary" href="/pricing">View Plans</a>
-  </div>
-</section>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
-<div class="bento-card wide" style="margin-bottom: 40px; border-left: 4px solid var(--danger);">
-  <div style="max-width: 900px; margin: 0 auto; text-align: center;">
-    <h2 style="margin-bottom: 20px; color: #fff;">Why Most Traders Feel Stuck</h2>
-    <p style="font-size: 18px; line-height: 1.6; color: var(--text-muted); margin-bottom: 30px;">
-      You’ve tried indicators, signals, and systems. You’ve had winning days and confusing losses. 
-      The problem isn’t your effort. The problem is that <strong>no one taught you how to read market structure.</strong>
-    </p>
-    <div style="font-size: 16px; color: #fff; font-weight: 600; background: rgba(255,255,255,0.05); padding: 20px; border-radius: 8px; display: inline-block;">
-      "Most traders don’t lose because their entries are bad.<br>
-      They lose because they don’t know what they’re looking at."
-    </div>
-  </div>
-</div>
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: var(--font-main);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
 
-<div class="bento-grid">
+        h1, h2, h3, h4 {
+            font-weight: 700;
+            line-height: 1.2;
+            letter-spacing: -0.02em;
+        }
 
-  <div class="bento-card wide" style="border-top: 4px solid var(--primary);">
-    <h3>The Market Is Always Doing One of Three Things</h3>
-    <div style="display: flex; flex-wrap: wrap; gap: 20px; margin-top: 24px;">
-      <div style="flex: 1; min-width: 200px;">
-        <div style="color: var(--primary-bright); font-weight: 800; margin-bottom: 8px;">01. BUILDING</div>
-        <p style="font-size: 14px; color: var(--text-muted);">Accumulating energy. Structure is forming. We wait.</p>
-      </div>
-      <div style="flex: 1; min-width: 200px;">
-        <div style="color: var(--warning); font-weight: 800; margin-bottom: 8px;">02. TESTING</div>
-        <p style="font-size: 14px; color: var(--text-muted);">Probing levels. Trapping early entrants. We observe.</p>
-      </div>
-      <div style="flex: 1; min-width: 200px;">
-        <div style="color: var(--success); font-weight: 800; margin-bottom: 8px;">03. BREAKING</div>
-        <p style="font-size: 14px; color: var(--text-muted);">Decisive movement. Permission earned. We execute.</p>
-      </div>
-    </div>
-    <p style="margin-top: 24px; font-size: 15px; color: #fff; border-top: 1px solid var(--glass-border); padding-top: 20px;">
-      Everything else is noise. Kabroda filters the noise so you only act when the market has decided.
-    </p>
-  </div>
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
 
-  <div class="bento-card" style="border-top: 4px solid var(--danger);">
-    <h3 style="color: var(--danger); margin-bottom: 20px;">🚫 Kabroda is NOT</h3>
-    <ul style="list-style: none; padding: 0; line-height: 2; color: var(--text-muted); font-size: 15px;">
-      <li>× Magic "Buy/Sell" Signals</li>
-      <li>× A Black Box Algorithm</li>
-      <li>× A "Get Rich Quick" Scheme</li>
-      <li>× Prediction or Fortune Telling</li>
-    </ul>
-  </div>
+        /* --- TYPOGRAPHY UTILS --- */
+        .text-center { text-align: center; }
+        .text-gradient {
+            background: linear-gradient(90deg, #fff, var(--text-muted));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .eyebrow {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--accent-cyan);
+            margin-bottom: 1rem;
+            display: block;
+        }
+        .glow-text {
+            color: var(--accent-glow);
+            text-shadow: 0 0 20px rgba(34, 211, 238, 0.4);
+        }
 
-  <div class="bento-card" style="border-top: 4px solid var(--success);">
-    <h3 style="color: var(--success); margin-bottom: 20px;">✅ Kabroda IS</h3>
-    <ul style="list-style: none; padding: 0; line-height: 2; color: #fff; font-size: 15px; font-weight: 600;">
-      <li>✓ A Real-Time Structure Interpreter</li>
-      <li>✓ A Discipline Enforcer</li>
-      <li>✓ A Teaching Framework</li>
-      <li>✓ A Decision Filter</li>
-    </ul>
-  </div>
+        /* --- BUTTONS --- */
+        .btn-group {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-top: 2rem;
+        }
 
-</div>
+        .btn {
+            padding: 1rem 2rem;
+            border-radius: 4px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            font-size: 1rem;
+            letter-spacing: 0.02em;
+        }
 
-<div class="text-center" style="margin-top: 80px; margin-bottom: 40px;">
-  <h2 style="margin-bottom: 16px;">Ready to understand the why?</h2>
-  <p style="color: var(--text-muted); max-width: 600px; margin: 0 auto 30px;">
-    We don't sell hope. We sell comprehension. Stop hoping for a good trade and start identifying valid structure.
-  </p>
-  <a href="/pricing" class="btn primary" style="font-size: 16px; padding: 16px 32px;">
-    Start 7-Day Free Trial
-  </a>
-</div>
+        .btn-primary {
+            background: var(--accent-cyan);
+            color: var(--bg-dark);
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+        }
+        .btn-primary:hover {
+            background: var(--accent-glow);
+            box-shadow: 0 0 25px rgba(6, 182, 212, 0.4);
+        }
 
-{% endblock %}
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--text-muted);
+            color: var(--text-main);
+        }
+        .btn-secondary:hover {
+            border-color: var(--text-main);
+            background: rgba(255,255,255,0.05);
+        }
+
+        /* --- SECTION 1: HERO --- */
+        .hero {
+            padding: 120px 0 100px;
+            position: relative;
+            background: radial-gradient(circle at center, rgba(6, 182, 212, 0.08) 0%, transparent 60%);
+        }
+
+        .hero h1 {
+            font-size: 4rem; /* Big impact */
+            margin-bottom: 1.5rem;
+        }
+
+        .hero p.subhead {
+            font-size: 1.25rem;
+            color: var(--text-muted);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .micro-copy {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 1rem;
+            display: block;
+            opacity: 0.7;
+        }
+
+        /* --- SECTION 2: REALITY CHECK --- */
+        .reality-check {
+            padding: 80px 0;
+            background: var(--bg-dark);
+            border-top: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .reality-content {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .reality-check h2 {
+            font-size: 2.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .reality-check p {
+            font-size: 1.1rem;
+            color: var(--text-muted);
+            margin-bottom: 1.5rem;
+        }
+
+        .pull-quote {
+            margin-top: 3rem;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-main);
+            border-left: 4px solid var(--accent-cyan);
+            padding-left: 20px;
+            display: inline-block;
+        }
+
+        /* --- SECTION 3: THE CORE TRUTH (CARDS) --- */
+        .core-truth {
+            padding: 100px 0;
+        }
+
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 3rem;
+        }
+
+        .phase-card {
+            background: var(--bg-card);
+            padding: 2rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.05);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .phase-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+        }
+
+        .phase-building::before { background: var(--accent-cyan); }
+        .phase-testing::before { background: #f59e0b; /* Orange */ }
+        .phase-breaking::before { background: var(--accent-green); }
+
+        .phase-title {
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            letter-spacing: 0.1em;
+            margin-bottom: 1rem;
+            display: block;
+            opacity: 0.8;
+        }
+        .phase-building .phase-title { color: var(--accent-cyan); }
+        .phase-testing .phase-title { color: #f59e0b; }
+        .phase-breaking .phase-title { color: var(--accent-green); }
+
+        .phase-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .phase-card p {
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+
+        .phase-action {
+            margin-top: 1.5rem;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .divider-line {
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        /* --- SECTION 4: THE SYSTEM (Split Layouts) --- */
+        .system-section {
+            padding: 100px 0;
+            background: linear-gradient(180deg, var(--bg-dark) 0%, var(--bg-card) 100%);
+        }
+
+        .system-block {
+            display: flex;
+            align-items: center;
+            gap: 4rem;
+            margin-bottom: 8rem;
+        }
+        
+        .system-block:last-child { margin-bottom: 0; }
+        
+        .system-block.reverse {
+            flex-direction: row-reverse;
+        }
+
+        .system-text {
+            flex: 1;
+        }
+
+        .system-visual {
+            flex: 1.2;
+            background: #000;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        .system-visual img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .step-label {
+            font-family: var(--font-mono);
+            color: var(--accent-cyan);
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+
+        .system-text h3 {
+            font-size: 2rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .system-text ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .system-text li {
+            position: relative;
+            padding-left: 1.5rem;
+            margin-bottom: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .system-text li::before {
+            content: '•';
+            color: var(--accent-cyan);
+            position: absolute;
+            left: 0;
+        }
+
+        .result-box {
+            background: rgba(255,255,255,0.03);
+            border-left: 2px solid var(--accent-cyan);
+            padding: 1rem;
+            color: var(--text-main);
+            font-weight: 500;
+        }
+
+        /* --- SECTION 5: NOT / IS --- */
+        .comparison-section {
+            padding: 80px 0;
+            background: var(--bg-dark);
+        }
+
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .comp-col {
+            padding: 2rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .comp-col.is-not { background: rgba(239, 68, 68, 0.05); border-color: rgba(239, 68, 68, 0.2); }
+        .comp-col.is-yes { background: rgba(16, 185, 129, 0.05); border-color: rgba(16, 185, 129, 0.2); }
+
+        .comp-header {
+            font-weight: 700;
+            font-size: 1.25rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .comp-list div {
+            padding: 0.75rem 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .comp-list div:last-child { border-bottom: none; }
+
+        .icon-x { color: var(--accent-red); }
+        .icon-check { color: var(--accent-green); }
+
+        .quiet-line {
+            text-align: center;
+            margin-top: 3rem;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* --- FINAL CTA --- */
+        .final-cta {
+            padding: 120px 0;
+            text-align: center;
+            background: radial-gradient(circle at bottom, rgba(6, 182, 212, 0.1) 0%, transparent 60%);
+        }
+
+        .final-cta h2 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        /* RESPONSIVE */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 2.5rem; }
+            .system-block { flex-direction: column; text-align: left; gap: 2rem; }
+            .system-block.reverse { flex-direction: column; }
+            .comparison-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <section class="hero text-center">
+        <div class="container">
+            <span class="eyebrow">Decision Intelligence for Traders</span>
+            <h1>
+                STOP GUESSING.<br>
+                START <span class="glow-text">SEEING.</span>
+            </h1>
+            <p class="subhead">
+                Kabroda reveals market structure in real time — so you know when nothing matters and when everything does.
+            </p>
+            <div class="btn-group">
+                <a href="#system" class="btn btn-secondary">EXPLORE THE SYSTEM</a>
+                <a href="/pricing" class="btn btn-primary">START 7-DAY FREE TRIAL</a>
+            </div>
+            <span class="micro-copy">No signals. No predictions. No noise.</span>
+        </div>
+    </section>
+
+    <section class="reality-check text-center">
+        <div class="container reality-content">
+            <h2>You’re Not Bad at Trading.<br><span class="text-gradient">You’re Just Trading Blind.</span></h2>
+            <p>Most traders don’t fail because they lack discipline. They fail because they’re forced to make decisions without context.</p>
+            <p>Candles print. Indicators flash. Opinions collide. And somehow, you’re expected to know what matters.</p>
+            <p>That’s not trading. <strong>That’s reacting.</strong></p>
+            <div class="pull-quote">
+                “Price only makes sense relative to structure.”
+            </div>
+        </div>
+    </section>
+
+    <section class="core-truth">
+        <div class="container">
+            <div class="text-center">
+                <h3>The Market Only Does Three Things</h3>
+            </div>
+            <div class="cards-grid">
+                <div class="phase-card phase-building">
+                    <span class="phase-title">01. BUILDING</span>
+                    <p>Energy is accumulating.</p>
+                    <p>Nothing is confirmed.</p>
+                    <div class="phase-action">Doing nothing is the edge.</div>
+                </div>
+                <div class="phase-card phase-testing">
+                    <span class="phase-title">02. TESTING</span>
+                    <p>Levels are probed.</p>
+                    <p>Weak hands are exposed.</p>
+                    <div class="phase-action">Patience beats prediction.</div>
+                </div>
+                <div class="phase-card phase-breaking">
+                    <span class="phase-title">03. BREAKING</span>
+                    <p>Structure breaks or fails.</p>
+                    <p>Direction is earned.</p>
+                    <div class="phase-action">Execution becomes obvious.</div>
+                </div>
+            </div>
+            <div class="text-center divider-line">
+                Kabroda exists to tell you which phase you’re in — and keep you out of the rest.
+            </div>
+        </div>
+    </section>
+
+    <section class="comparison-section">
+        <div class="container">
+            <div class="text-center" style="margin-bottom: 3rem;">
+                <h3>What Makes Kabroda Different</h3>
+            </div>
+            <div class="comparison-grid">
+                <div class="comp-col is-not">
+                    <div class="comp-header"><span class="icon-x">⊗</span> Kabroda is NOT</div>
+                    <div class="comp-list">
+                        <div><span class="icon-x">×</span> Magic "Buy/Sell" Signals</div>
+                        <div><span class="icon-x">×</span> A Black Box Algorithm</div>
+                        <div><span class="icon-x">×</span> A "Get Rich Quick" Scheme</div>
+                        <div><span class="icon-x">×</span> Prediction or Fortune Telling</div>
+                    </div>
+                </div>
+                <div class="comp-col is-yes">
+                    <div class="comp-header"><span class="icon-check">✓</span> Kabroda IS</div>
+                    <div class="comp-list">
+                        <div><span class="icon-check">✓</span> A Real-Time Structure Interpreter</div>
+                        <div><span class="icon-check">✓</span> A Discipline Enforcer</div>
+                        <div><span class="icon-check">✓</span> A Teaching Framework</div>
+                        <div><span class="icon-check">✓</span> A Decision Filter</div>
+                    </div>
+                </div>
+            </div>
+            <p class="quiet-line">
+                Kabroda doesn’t tell you what to trade. It tells you when trading even makes sense.
+            </p>
+        </div>
+    </section>
+
+    <section id="system" class="system-section">
+        <div class="container">
+            <div class="text-center" style="margin-bottom: 4rem;">
+                <span class="eyebrow">THE OPERATING SYSTEM</span>
+                <h2>This Is Not a Tool. It’s an OS.</h2>
+            </div>
+
+            <div class="system-block">
+                <div class="system-text">
+                    <span class="step-label">STEP 01</span>
+                    <h3>Calibrate Reality</h3>
+                    <p style="margin-bottom: 1rem;">Every session begins by anchoring price to objective structure:</p>
+                    <ul>
+                        <li>Institutional support & resistance</li>
+                        <li>Breakout and breakdown thresholds</li>
+                        <li>The opening range that defines bias</li>
+                    </ul>
+                    <div class="result-box">
+                        No drawing. No interpretation. Just where price actually matters today.
+                    </div>
+                </div>
+                <div class="system-visual">
+                    <img src="images/Screenshot 2026-01-07 174525.jpg" alt="Kabroda Calibration Dashboard">
+                </div>
+            </div>
+
+            <div class="system-block reverse">
+                <div class="system-text">
+                    <span class="step-label">STEP 02</span>
+                    <h3>Command Intelligence</h3>
+                    <p style="margin-bottom: 1rem;">Send the session context into the Kabroda AI Command. It analyzes structure, regime, and behavior.</p>
+                    <ul>
+                        <li>Analyzes structure and regime</li>
+                        <li>Returns clear operational posture</li>
+                        <li>Separates noise from signal</li>
+                    </ul>
+                    <div class="result-box">
+                        Wait. Observe. Prepare. Act. Just clarity.
+                    </div>
+                </div>
+                <div class="system-visual">
+                    <img src="images/Screenshot 2026-01-07 174549.png" alt="Kabroda Battle Control">
+                </div>
+            </div>
+
+            <div class="system-block">
+                <div class="system-text">
+                    <span class="step-label">STEP 03</span>
+                    <h3>Clean the Chart</h3>
+                    <p style="margin-bottom: 1rem;">With one click, Kabroda syncs to TradingView.</p>
+                    <ul>
+                        <li>Your chart becomes quiet</li>
+                        <li>Your decisions become simpler</li>
+                        <li>Structure replaces clutter</li>
+                    </ul>
+                    <div class="result-box">
+                        No drawing lines. Just execution.
+                    </div>
+                </div>
+                <div class="system-visual">
+                    <img src="images/Screenshot 2026-01-07 174604.jpg" alt="Kabroda TradingView Integration">
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <section class="final-cta">
+        <div class="container">
+            <h2>Trade Less. Understand More.</h2>
+            <p class="subhead" style="margin-bottom: 2rem;">Kabroda is for traders who are done chasing and ready to operate with intent.</p>
+            <a href="/pricing" class="btn btn-primary">START 7-DAY FREE TRIAL</a>
+            <span class="micro-copy">Cancel anytime. No lock-in. No pressure.</span>
+        </div>
+    </section>
+
+</body>
+</html>
