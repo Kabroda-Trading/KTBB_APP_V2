@@ -1,50 +1,363 @@
-{% extends "base.html" %}
-{% block content %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kabroda | The Network</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        /* --- BASE STYLES --- */
+        :root {
+            --bg-dark: #050b14;
+            --bg-card: #0f1623;
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent-cyan: #06b6d4;
+            --accent-glow: #22d3ee;
+            --accent-red: #ef4444;
+            --accent-green: #10b981;
+            --font-main: 'Inter', system-ui, -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
 
-<div class="text-center" style="margin-bottom: 60px;">
-  <div class="pill">THE KABRODA NETWORK</div>
-  <h1 class="display-title">Broadcast <span class="gradient-text">Signal</span></h1>
-  <p class="lead-text">
-    Live analysis, methodology breakdowns, and trade reviews. <br>
-    This is who we are. This is how we execute.
-  </p>
-  <div style="margin-top: 20px;">
-    <a href="https://www.youtube.com/@Kabroda" target="_blank" class="btn primary" style="padding: 12px 24px;">
-      <span style="margin-right: 8px;">📺</span> Subscribe on YouTube
-    </a>
-  </div>
-</div>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
-<div class="bento-card wide" style="padding: 0; overflow: hidden; aspect-ratio: 16/9; max-width: 900px; margin: 0 auto 60px auto; border: 2px solid var(--primary-glow);">
-  <iframe width="100%" height="100%" src="https://www.youtube.com/embed/videoseries?list=PLY0xZuYR2FEcyZSNJJk1_nWm6Pmpn7hHp" frameborder="0" allowfullscreen></iframe>
-</div>
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: var(--font-main);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
 
-<div class="bento-grid">
-  
-  <div class="bento-card" style="padding: 20px;">
-    <h3 style="margin-bottom: 16px; font-size: 18px;">Daily Briefings & Tools</h3>
-    <div style="aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden;">
-       <iframe width="100%" height="100%" src="https://www.youtube.com/embed/videoseries?list=PLY0xZuYR2FEcAuQWBfwxVCYtITyBBpOqr" frameborder="0" allowfullscreen></iframe>
+        h1, h2, h3, h4 { font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        a { text-decoration: none; color: inherit; transition: 0.3s ease; }
+
+        /* --- NAVIGATION --- */
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            background: rgba(5, 11, 20, 0.95);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+        }
+
+        .logo {
+            font-family: var(--font-mono);
+            font-weight: 700;
+            font-size: 1.2rem;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .logo span { color: var(--accent-cyan); }
+
+        .nav-links { display: flex; gap: 2rem; list-style: none; }
+        .nav-links a { font-size: 0.95rem; color: var(--text-muted); font-weight: 500; }
+        .nav-links a:hover, .nav-links a.active { color: #fff; }
+        .nav-cta .btn { padding: 0.6rem 1.2rem; font-size: 0.9rem; }
+
+        /* --- BUTTONS --- */
+        .btn {
+            display: inline-block;
+            padding: 1rem 2rem;
+            border-radius: 4px;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: center;
+        }
+        .btn-primary {
+            background: var(--accent-cyan);
+            color: var(--bg-dark);
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+        }
+        .btn-primary:hover {
+            background: var(--accent-glow);
+            box-shadow: 0 0 25px rgba(6, 182, 212, 0.4);
+        }
+        .btn-secondary {
+            border: 1px solid rgba(255,255,255,0.2);
+            color: var(--text-main);
+            background: transparent;
+        }
+        .btn-secondary:hover {
+            border-color: #fff;
+            background: rgba(255,255,255,0.05);
+        }
+
+        /* --- HERO SECTION --- */
+        .network-hero {
+            padding: 100px 0 60px;
+            text-align: center;
+        }
+
+        .eyebrow {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--accent-cyan);
+            margin-bottom: 1.5rem;
+            display: block;
+        }
+
+        .network-hero h1 {
+            font-size: 3.5rem;
+            margin-bottom: 1.5rem;
+            color: #fff;
+        }
+
+        .network-hero p {
+            font-size: 1.2rem;
+            color: var(--text-muted);
+            max-width: 700px;
+            margin: 0 auto 2.5rem;
+        }
+
+        /* --- FEATURED VIDEO (THE HUB) --- */
+        .featured-wrapper {
+            max-width: 900px;
+            margin: 0 auto 100px;
+            background: #000;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+
+        .video-container {
+            position: relative;
+            padding-bottom: 56.25%; /* 16:9 Aspect Ratio */
+            height: 0;
+            overflow: hidden;
+        }
+
+        .video-container iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: 0;
+        }
+
+        /* --- PLAYLIST GRID --- */
+        .playlist-section {
+            padding: 0 0 100px;
+        }
+
+        .grid-header {
+            margin-bottom: 3rem;
+            border-left: 3px solid var(--accent-cyan);
+            padding-left: 1.5rem;
+        }
+
+        .grid-header h2 { font-size: 2rem; margin-bottom: 0.5rem; }
+        .grid-header p { color: var(--text-muted); }
+
+        .playlist-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+
+        /* --- PLAYLIST CARD (Replaces Iframes) --- */
+        .playlist-card {
+            background: var(--bg-card);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 6px;
+            overflow: hidden;
+            transition: transform 0.3s ease, border-color 0.3s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .playlist-card:hover {
+            transform: translateY(-5px);
+            border-color: rgba(255,255,255,0.15);
+        }
+
+        .card-thumb {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: linear-gradient(45deg, #0f1623 0%, #1a2333 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            position: relative;
+        }
+
+        .play-icon {
+            width: 50px;
+            height: 50px;
+            background: rgba(6, 182, 212, 0.1);
+            border: 1px solid var(--accent-cyan);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--accent-cyan);
+            font-size: 1.5rem;
+        }
+
+        .card-content {
+            padding: 1.5rem;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-title {
+            font-size: 1.2rem;
+            color: #fff;
+            margin-bottom: 0.5rem;
+        }
+
+        .card-desc {
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            margin-bottom: 1.5rem;
+            flex: 1;
+        }
+
+        .card-btn {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--accent-cyan);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .card-btn:hover { color: var(--accent-glow); }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .navbar { flex-direction: column; gap: 1rem; }
+            .nav-links { gap: 1rem; flex-wrap: wrap; justify-content: center; }
+            .network-hero h1 { font-size: 2.5rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar">
+        <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; flex-wrap: wrap;">
+            <a href="/" class="logo">
+                <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
+                KABRODA
+            </a>
+            <ul class="nav-links">
+                <li><a href="/community" class="active">Network</a></li>
+                <li><a href="/how-it-works">Methodology</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/login">Login</a></li>
+            </ul>
+            <div class="nav-cta">
+                <a href="/pricing" class="btn btn-primary">Start 7-Day Free Trial</a>
+            </div>
+        </div>
+    </nav>
+
+    <section class="network-hero">
+        <div class="container">
+            <span class="eyebrow">THE KABRODA NETWORK</span>
+            <h1>Watch the Work.</h1>
+            <p>
+                Daily structure briefings, methodology breakdowns, and real-session reviews — so you learn how decisions are built, not guessed.
+            </p>
+            <a href="https://www.youtube.com/@Kabroda" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">
+                Visit YouTube Channel ↗
+            </a>
+        </div>
+    </section>
+
+    <div class="container">
+        <div class="featured-wrapper">
+            <div class="video-container">
+                <iframe 
+                    src="https://www.youtube.com/embed/VIDEOSERIES?list=PL_YOUR_FEATURED_LIST_ID&modestbranding=1&rel=0&iv_load_policy=3&playsinline=1" 
+                    title="Featured Kabroda Briefing" 
+                    frameborder="0" 
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                    allowfullscreen
+                    loading="lazy">
+                </iframe>
+            </div>
+        </div>
     </div>
-    <p style="font-size: 13px; color: var(--text-muted); margin-top: 12px;">Every morning. Pure structure. No fluff.</p>
-  </div>
 
-  <div class="bento-card" style="padding: 20px;">
-    <h3 style="margin-bottom: 16px; font-size: 18px;">Methodology</h3>
-    <div style="aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden;">
-       <iframe width="100%" height="100%" src="https://www.youtube.com/embed/videoseries?list=PLY0xZuYR2FEeGRUdZNje_aKHknO5knCoF" frameborder="0" allowfullscreen></iframe>
-    </div>
-    <p style="font-size: 13px; color: var(--text-muted); margin-top: 12px;">Learn the core doctrine of the BattleBox.</p>
-  </div>
+    <section class="playlist-section">
+        <div class="container">
+            
+            <div class="grid-header">
+                <h2>Archives & Training</h2>
+                <p>Select a frequency to study.</p>
+            </div>
 
-  <div class="bento-card" style="padding: 20px;">
-    <h3 style="margin-bottom: 16px; font-size: 18px;">Live Execution</h3>
-    <div style="aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden;">
-       <iframe width="100%" height="100%" src="https://www.youtube.com/embed/videoseries?list=PLY0xZuYR2FEdWTY-K6TfCKYBYFEI8Uzsi" frameborder="0" allowfullscreen></iframe>
-    </div>
-    <p style="font-size: 13px; color: var(--text-muted); margin-top: 12px;">Real trades. Real PnL. Real psychology.</p>
-  </div>
+            <div class="playlist-grid">
+                
+                <div class="playlist-card">
+                    <div class="card-thumb">
+                        <div class="play-icon">▶</div>
+                    </div>
+                    <div class="card-content">
+                        <div class="card-title">Methodology & Framework</div>
+                        <div class="card-desc">Deep dives into how Kabroda interprets structure. The theory behind the OS.</div>
+                        <a href="https://www.youtube.com/playlist?list=YOUR_METHODOLOGY_LIST_ID" target="_blank" rel="noopener noreferrer" class="card-btn">
+                            Watch Playlist →
+                        </a>
+                    </div>
+                </div>
 
-</div>
+                <div class="playlist-card">
+                    <div class="card-thumb">
+                        <div class="play-icon">▶</div>
+                    </div>
+                    <div class="card-content">
+                        <div class="card-title">Daily Structure Briefings</div>
+                        <div class="card-desc">Pre-market calibration. See the plan before the market opens.</div>
+                        <a href="https://www.youtube.com/playlist?list=YOUR_BRIEFING_LIST_ID" target="_blank" rel="noopener noreferrer" class="card-btn">
+                            Watch Playlist →
+                        </a>
+                    </div>
+                </div>
 
-{% endblock %}
+                <div class="playlist-card">
+                    <div class="card-thumb">
+                        <div class="play-icon">▶</div>
+                    </div>
+                    <div class="card-content">
+                        <div class="card-title">Live Execution Archive</div>
+                        <div class="card-desc">Real sessions. Real decisions. Real discipline. No hindsight trading.</div>
+                        <a href="https://www.youtube.com/playlist?list=YOUR_EXECUTION_LIST_ID" target="_blank" rel="noopener noreferrer" class="card-btn">
+                            Watch Playlist →
+                        </a>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+</body>
+</html>
