@@ -16,6 +16,7 @@
         .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
         a { text-decoration: none; color: inherit; transition: 0.3s ease; }
 
+        /* MEMBER NAV */
         .navbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
         .logo { font-family: var(--font-mono); font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; }
         .logo span { color: var(--accent-cyan); }
@@ -59,12 +60,12 @@
 
     <nav class="navbar">
         <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; flex-wrap: wrap;">
-            <a href="/app" class="logo">
+            <a href="/suite" class="logo">
                 <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
                 KABRODA
             </a>
             <ul class="nav-links">
-                <li><a href="/app">Suite ▼</a></li>
+                <li><a href="/suite">Suite ▼</a></li>
                 <li><a href="/analysis">Analysis</a></li>
                 <li><a href="/indicators" class="active">Indicators</a></li>
                 <li><a href="/account">Account</a></li>
