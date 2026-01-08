@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kabroda | The Network</title>
+    <title>Kabroda | Market Analysis</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -43,7 +43,7 @@
 
         a { text-decoration: none; color: inherit; transition: 0.3s ease; }
 
-        /* --- NAVIGATION --- */
+        /* --- NAVIGATION (UPDATED) --- */
         .navbar {
             display: flex;
             justify-content: space-between;
@@ -68,9 +68,22 @@
         }
         .logo span { color: var(--accent-cyan); }
 
-        .nav-links { display: flex; gap: 2rem; list-style: none; }
-        .nav-links a { font-size: 0.95rem; color: var(--text-muted); font-weight: 500; }
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-links a {
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            font-weight: 500;
+            text-transform: uppercase; /* Match Homepage Style */
+            letter-spacing: 0.05em;
+        }
+
         .nav-links a:hover, .nav-links a.active { color: #fff; }
+
         .nav-cta .btn { padding: 0.6rem 1.2rem; font-size: 0.9rem; }
 
         /* --- BUTTONS --- */
@@ -253,7 +266,7 @@
         /* Responsive */
         @media (max-width: 768px) {
             .navbar { flex-direction: column; gap: 1rem; }
-            .nav-links { gap: 1rem; flex-wrap: wrap; justify-content: center; }
+            .nav-links { gap: 1rem; font-size: 0.9rem; flex-wrap: wrap; justify-content: center; }
             .network-hero h1 { font-size: 2.5rem; }
         }
     </style>
@@ -267,8 +280,9 @@
                 KABRODA
             </a>
             <ul class="nav-links">
-                <li><a href="/community" class="active">Network</a></li>
-                <li><a href="/how-it-works">Methodology</a></li>
+                <li><a href="/">Home</a></li>
+                <li><a href="/analysis" class="active">Analysis</a></li>
+                <li><a href="/how-it-works">How It Works</a></li>
                 <li><a href="/pricing">Pricing</a></li>
                 <li><a href="/login">Login</a></li>
             </ul>
