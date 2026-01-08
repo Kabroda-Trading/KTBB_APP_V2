@@ -1,13 +1,15 @@
-{% extends "base.html" %}
-{% block content %}
+{% extends "base_member.html" %}
 
-<div style="width: 100%; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 30px;">
+{% block title %}Kabroda | Session Control{% endblock %}
+
+{% block content %}
+<div style="width: 100%; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 30px; padding-top: 40px;">
 
   <div style="display: flex; justify-content: space-between; align-items: flex-end; padding-bottom: 20px; border-bottom: 1px solid var(--glass-border);">
     <div>
-      <div class="pill" style="margin-bottom: 8px; font-size: 11px; letter-spacing: 2px;">BATTLEBOX COMMAND</div>
-      <h1 style="font-size: 36px; margin: 0; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1; text-shadow: 0 0 30px rgba(0,255,157,0.15);">
-        Session <span class="gradient-text">Control</span>
+      <div class="pill" style="margin-bottom: 8px; font-size: 11px; letter-spacing: 2px; color: var(--accent-cyan); border: 1px solid rgba(6,182,212,0.3); padding: 4px 10px; border-radius: 100px; display: inline-block;">BATTLEBOX COMMAND</div>
+      <h1 style="font-size: 36px; margin: 0; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1; text-shadow: 0 0 30px rgba(0,255,157,0.15); color: #fff;">
+        Session <span class="gradient-text" style="background: linear-gradient(to right, #00ff9d, #06b6d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Control</span>
       </h1>
     </div>
     <div style="text-align: right;">
@@ -18,13 +20,13 @@
     </div>
   </div>
 
-  <div class="bento-card wide" style="border-left: 4px solid var(--primary); display: flex; flex-direction: column; gap: 24px; padding: 30px;">
+  <div class="bento-card wide" style="border-left: 4px solid var(--primary); display: flex; flex-direction: column; gap: 24px; padding: 30px; background: #0f1623; border: 1px solid rgba(255,255,255,0.05);">
     <div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-end; justify-content: space-between;">
       
       <div style="flex: 1; min-width: 240px;">
         <label class="label" style="color: var(--primary-bright); font-size: 12px; margin-bottom: 8px; letter-spacing: 1px;">TARGET ASSET</label>
         <div style="position: relative;">
-          <select id="symbol" class="input" style="cursor:pointer; font-weight: 700; font-size: 16px; height: 55px; appearance: none; padding-right: 40px; text-transform: uppercase; width: 100%;">
+          <select id="symbol" class="input" style="cursor:pointer; font-weight: 700; font-size: 16px; height: 55px; appearance: none; padding-right: 40px; text-transform: uppercase; width: 100%; background: #050b14; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 15px;">
             <option value="BTCUSDT">BTC (Bitcoin)</option>
             <option value="ETHUSDT">ETH (Ethereum)</option>
             <option value="SOLUSDT">SOL (Solana)</option>
@@ -36,7 +38,7 @@
       <div style="flex: 1; min-width: 240px;">
         <label class="label" style="color: var(--success); font-size: 12px; margin-bottom: 8px; letter-spacing: 1px;">TARGET SESSION</label>
         <div style="position: relative;">
-          <select id="sessionTz" class="input" style="cursor:pointer; font-weight: 700; font-size: 16px; height: 55px; appearance: none; padding-right: 40px; border-color: rgba(16, 185, 129, 0.4); width: 100%;">
+          <select id="sessionTz" class="input" style="cursor:pointer; font-weight: 700; font-size: 16px; height: 55px; appearance: none; padding-right: 40px; border-color: rgba(16, 185, 129, 0.4); width: 100%; background: #050b14; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 15px;">
             <option value="America/New_York_Early">🇺🇸 NY FUTURES (08:30 ET)</option>
             <option value="America/New_York">🇺🇸 NY EQUITY (09:30 ET)</option>
             <option value="Europe/London">🇬🇧 LONDON (08:00 GMT)</option>
@@ -49,7 +51,7 @@
       </div>
 
       <div style="flex: 0 0 auto;">
-        <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="height: 55px; padding: 0 32px; font-size: 14px; font-weight: 800; letter-spacing: 1px; white-space: nowrap; box-shadow: 0 0 20px rgba(0,255,157,0.2);">
+        <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="height: 55px; padding: 0 32px; font-size: 14px; font-weight: 800; letter-spacing: 1px; white-space: nowrap; box-shadow: 0 0 20px rgba(0,255,157,0.2); background: #00ff9d; color: #000; border: none; cursor: pointer;">
           <span style="margin-right: 8px;">⚡ INITIATE CALIBRATION</span>
         </button>
       </div>
@@ -88,13 +90,13 @@
     </div>
   </div>
 
-  <div class="bento-card wide" style="position: relative; overflow: hidden; min-height: 320px; padding: 30px;">
+  <div class="bento-card wide" style="position: relative; overflow: hidden; min-height: 320px; padding: 30px; background: #0f1623; border: 1px solid rgba(255,255,255,0.08);">
     <div style="position: absolute; inset: 0; background-image: radial-gradient(var(--glass-border) 1px, transparent 1px); background-size: 20px 20px; opacity: 0.1; pointer-events: none;"></div>
 
     <div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; position: relative;">
       
       <div>
-        <h3 style="display: flex; align-items: center; gap: 12px; margin: 0 0 8px 0; font-size: 18px;">
+        <h3 style="display: flex; align-items: center; gap: 12px; margin: 0 0 8px 0; font-size: 18px; color: #fff;">
           <span style="width: 10px; height: 10px; background: var(--success); border-radius: 50%; box-shadow: 0 0 10px var(--success);"></span>
           BATTLEFIELD TELEMETRY
         </h3>
@@ -102,7 +104,7 @@
       </div>
       
       <div style="display: flex; gap: 12px;">
-        <button id="tvCopyBtn" class="btn secondary" onclick="copyForTV()" style="display:none; font-size: 12px; padding: 12px 20px; font-weight:700;">COPY INDICATOR DATA</button>
+        <button id="tvCopyBtn" class="btn secondary" onclick="copyForTV()" style="display:none; font-size: 12px; padding: 12px 20px; font-weight:700; background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #e2e8f0; cursor: pointer;">COPY INDICATOR DATA</button>
         
         <button id="openGptBtn" onclick="openLaunchModal()" style="display:none; cursor: pointer; background: #00ff9d; color: #000; font-weight: 900; font-size: 12px; padding: 12px 24px; border: none; border-radius: 4px; box-shadow: 0 0 20px rgba(0, 255, 157, 0.4); text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s;">
           🚀 LAUNCH BATTLEBOX AI
@@ -111,21 +113,21 @@
     </div>
 
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; position: relative;">
-      <div class="lvl-card c-red" style="background: rgba(239, 68, 68, 0.05); padding: 20px;">
-        <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px;">DAILY RESISTANCE</div>
-        <div id="lv_dr" class="lvl-val" style="font-family: monospace; font-size: 24px;">—</div>
+      <div class="lvl-card c-red" style="background: rgba(239, 68, 68, 0.05); padding: 20px; border-radius: 4px; border: 1px solid rgba(239, 68, 68, 0.1);">
+        <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px; color: #fca5a5;">DAILY RESISTANCE</div>
+        <div id="lv_dr" class="lvl-val" style="font-family: monospace; font-size: 24px; color: #fff;">—</div>
       </div>
-      <div class="lvl-card c-green" style="background: rgba(16, 185, 129, 0.05); padding: 20px;">
-        <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px;">BREAKOUT TRIGGER</div>
-        <div id="lv_bo" class="lvl-val" style="font-family: monospace; font-size: 24px;">—</div>
+      <div class="lvl-card c-green" style="background: rgba(16, 185, 129, 0.05); padding: 20px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.1);">
+        <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px; color: #6ee7b7;">BREAKOUT TRIGGER</div>
+        <div id="lv_bo" class="lvl-val" style="font-family: monospace; font-size: 24px; color: #fff;">—</div>
       </div>
-      <div class="lvl-card c-purple" style="background: rgba(168, 85, 247, 0.05); padding: 20px;">
-        <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px;">BREAKDOWN TRIGGER</div>
-        <div id="lv_bd" class="lvl-val" style="font-family: monospace; font-size: 24px;">—</div>
+      <div class="lvl-card c-purple" style="background: rgba(168, 85, 247, 0.05); padding: 20px; border-radius: 4px; border: 1px solid rgba(168, 85, 247, 0.1);">
+        <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px; color: #d8b4fe;">BREAKDOWN TRIGGER</div>
+        <div id="lv_bd" class="lvl-val" style="font-family: monospace; font-size: 24px; color: #fff;">—</div>
       </div>
-      <div class="lvl-card c-blue" style="background: rgba(59, 130, 246, 0.05); padding: 20px;">
-        <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px;">DAILY SUPPORT</div>
-        <div id="lv_ds" class="lvl-val" style="font-family: monospace; font-size: 24px;">—</div>
+      <div class="lvl-card c-blue" style="background: rgba(59, 130, 246, 0.05); padding: 20px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.1);">
+        <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px; color: #93c5fd;">DAILY SUPPORT</div>
+        <div id="lv_ds" class="lvl-val" style="font-family: monospace; font-size: 24px; color: #fff;">—</div>
       </div>
     </div>
 
@@ -161,10 +163,11 @@
         </div>
     </div>
 </div>
+{% endblock %}
 
+{% block scripts %}
 <script>
   const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
-  
   const SPECS = {
     "America/New_York_Early": { tz: "America/New_York", h: 8, m: 30, label: "NY FUTURES" },
     "America/New_York":       { tz: "America/New_York", h: 9, m: 30, label: "NY EQUITY" },
@@ -177,39 +180,20 @@
   let _lastDmrPayload = null;
   function fmt(x){ return x ? parseFloat(x).toFixed(2) : "—"; }
 
-  // --- MODAL LOGIC (UPDATED: PROMPT WRAPPER) ---
+  // ... (ALL YOUR ORIGINAL JS FUNCTIONS FOR SESSION CONTROL GO HERE) ...
   function openLaunchModal() {
       if (!_lastDmrPayload) { alert("Please Initialize Sequence First"); return; }
-      
-      // 1. Prepare Data Payload
       const payload = { ..._lastDmrPayload };
-      payload.viewer = {
-          local_tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          source: "browser"
-      };
-
-      // 2. Wrap in Command Prompt
+      payload.viewer = { local_tz: Intl.DateTimeFormat().resolvedOptions().timeZone, source: "browser" };
       const jsonBody = JSON.stringify(payload, null, 2);
-      const promptText = `Generate today’s Daily Market Review using the Kabroda methodology.
-Use the following session packet as the authoritative data source:
-
-${jsonBody}`;
-
-      // 3. Copy to Clipboard
+      const promptText = `Generate today’s Daily Market Review using the Kabroda methodology.\nUse the following session packet as the authoritative data source:\n\n${jsonBody}`;
       navigator.clipboard.writeText(promptText);
       document.getElementById('launchModal').style.display = 'flex';
   }
   
-  function closeLaunchModal() {
-      document.getElementById('launchModal').style.display = 'none';
-  }
-  
-  function proceedToAI() {
-      window.open(BATTLEBOX_GPT_URL, "_blank");
-      closeLaunchModal();
-  }
+  function closeLaunchModal() { document.getElementById('launchModal').style.display = 'none'; }
+  function proceedToAI() { window.open(BATTLEBOX_GPT_URL, "_blank"); closeLaunchModal(); }
 
-  // --- CORE SESSION LOGIC ---
   function getSessionContext() {
     const key = document.getElementById("sessionTz").value;
     const spec = SPECS[key] || SPECS["UTC"];

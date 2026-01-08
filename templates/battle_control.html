@@ -1,173 +1,180 @@
-{% extends "base.html" %}
+{% extends "base_member.html" %}
 
 {% block title %}Kabroda | Battle Control{% endblock %}
 
-{% block content %}
-<script>
-  // This reads the database value passed by FastAPI
-  const USER_OP_FLEX = {{ 'true' if user.operator_flex else 'false' }};
-</script>
-
-<div class="app-container" style="max-width: 1400px; margin: 0 auto;">
-    
-    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 15px;">
-        <div>
-            <h1 style="font-size: 1.8rem; margin: 0; color: #fff; letter-spacing: -1px;">BATTLE CONTROL</h1>
-            <div style="font-size: 0.9rem; color: #666; margin-top: 5px;">War Map Context & Session Execution</div>
-        </div>
-        <div style="display: flex; gap: 15px; align-items: center;">
-            <div class="live-toggle">
-                <input type="checkbox" id="autoRefreshToggle" onchange="toggleAutoRefresh()">
-                <label for="autoRefreshToggle">LIVE LINK</label>
-                <div id="live-dot"></div>
-            </div>
-            
-            {% if user.operator_flex %}
-            <div style="font-size: 10px; color: var(--warning); border: 1px solid var(--warning); padding: 4px 8px; border-radius: 4px; font-weight: 700; letter-spacing: 1px;">
-                OP FLEX ACTIVE
-            </div>
-            {% endif %}
-
-            <div class="input-group" style="margin:0;">
-                <select id="sessionMode" onchange="toggleManualSession()" class="cyber-select">
-                    <option value="AUTO">AUTO (Dominant)</option>
-                    <option value="MANUAL">MANUAL OVERRIDE</option>
-                </select>
-                <select id="manualSessionId" class="cyber-select" style="display:none; margin-left:5px;">
-                    <option value="us_ny_futures">NY Futures</option>
-                    <option value="eu_london">London</option>
-                    <option value="asia_tokyo">Tokyo</option>
-                </select>
-            </div>
-            <button onclick="runLivePulse()" class="cyber-btn-primary" id="main-action-btn" style="height: 42px;">UPDATE INTEL</button>
-        </div>
-    </div>
-
-    <div style="display: grid; grid-template-columns: 280px 1fr; gap: 20px;">
-        
-        <div style="display: flex; flex-direction: column; gap: 15px;">
-            <div class="cyber-card" style="border-left: 3px solid #8b5cf6;">
-                <div class="card-header" style="color:#a78bfa;">WAR MAP CONTEXT</div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                    <span style="color:#888; font-size:0.8rem;">LEAN</span>
-                    <span id="wm-lean" style="font-weight:bold; color:#fff;">--</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-                    <span style="color:#888; font-size:0.8rem;">PHASE</span>
-                    <span id="wm-phase" style="font-weight:bold; color:#fff;">--</span>
-                </div>
-                <div id="wm-note" style="font-size:0.75rem; color:#888; border-top:1px solid #333; padding-top:10px;">--</div>
-            </div>
-
-            <div class="cyber-card">
-                <div class="card-header">KEY LEVELS</div>
-                <div class="level-row"><span>Daily Res</span><span id="val-dr" class="val">---</span></div>
-                <div class="level-row"><span style="color:var(--bull);">Breakout</span><span id="val-bo" class="val">---</span></div>
-                <div class="level-row"><span style="color:var(--bear);">Breakdown</span><span id="val-bd" class="val">---</span></div>
-                <div class="level-row"><span>Daily Sup</span><span id="val-ds" class="val">---</span></div>
-            </div>
-            
-            <button onclick="toggleTactical()" class="cyber-btn-sec" style="width:100%; font-size:0.8rem;">TOGGLE TACTICAL DRAWER</button>
-        </div>
-
-        <div class="cyber-card" style="border-left: 4px solid #3b82f6;">
-            <div class="card-header" style="color:#60a5fa; display:flex; justify-content:space-between;">
-                <span>SESSION BATTLE</span>
-                <span id="session-name" style="color:#fff;">--</span>
-            </div>
-
-            <div style="text-align: center; padding: 25px; background: #080808; border: 1px solid #333; border-radius: 4px; margin-bottom: 25px;">
-                <div style="font-size: 0.8rem; color: #666; letter-spacing: 2px;">CURRENT DIRECTIVE</div>
-                <div id="sb-action" style="font-size: 4rem; font-weight: 900; color: #444; line-height: 1.1;">HOLD FIRE</div>
-                <div id="sb-reason" style="margin-top: 10px; color: #ccc; font-size: 1.1rem;">Waiting for data...</div>
-            </div>
-
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px;">
-                <div class="metric-box">
-                    <div class="label">PRICE</div>
-                    <div class="val" id="live-price" style="color:#fff;">---</div>
-                </div>
-                <div class="metric-box">
-                    <div class="label">PERMISSION</div>
-                    <div class="val" id="sb-perm">NONE</div>
-                </div>
-                <div class="metric-box">
-                    <div class="label">ACCEPTANCE</div>
-                    <div class="val" id="sb-accept">0/2</div>
-                </div>
-                <div class="metric-box">
-                    <div class="label">LOCATION</div>
-                    <div class="val" id="sb-loc" style="font-size:0.7rem;">--</div>
-                </div>
-            </div>
-
-            <div id="sb-prepare-box" style="display: block; background: #112211; padding: 20px; border: 1px solid var(--primary); margin-bottom: 20px;">
-                <div style="font-size: 0.9rem; color: var(--primary); font-weight: bold; margin-bottom: 15px; text-align: center;">
-                    EXECUTION GATES (5M)
-                    <span id="sb-gates-mode" style="display:block; font-size:0.7rem; color:#88aa88; margin-top:4px;">PREVIEW (FLOATING)</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; font-family: monospace; font-size: 1.4rem;">
-                    <div><span style="color:#ef4444; font-size:0.8rem;">FAILURE LINE</span><br><span id="sb-fail-line" style="color:#fff;">--</span></div>
-                    <div style="text-align:right;"><span style="color:#00ff9d; font-size:0.8rem;">CONTINUATION</span><br><span id="sb-cont-line" style="color:#fff;">--</span></div>
-                </div>
-            </div>
-            
-            <div style="text-align: right; display:flex; gap:10px; justify-content:flex-end;">
-                <button onclick="copyTraderBrief()" class="cyber-btn-sec">COPY BRIEF</button>
-                <button onclick="copyBattleBox()" class="cyber-btn-primary">COPY FULL BATTLEBOX</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="tactical-drawer" style="display: none; margin-top: 30px; border-top: 1px solid #333; padding-top: 20px;">
-        <h3 style="color: #888; font-size: 1rem; margin-bottom: 20px;">TACTICAL INTELLIGENCE (OPTIONAL)</h3>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
-            <div class="cyber-card">
-                <div class="card-header">CAMPAIGN (BIG TRADE)</div>
-                <div id="wm-camp-status" style="font-size: 1.5rem; font-weight: bold; color: #666;">NOT ARMED</div>
-                <div id="wm-camp-note" style="margin-top: 10px; color: #888;">--</div>
-            </div>
-            <div class="cyber-card">
-                <div class="card-header">STRATEGY STATUS (OPTIONAL)</div>
-                <div id="strat-list" style="font-size: 0.8rem; color: #ccc;">Loading...</div>
-            </div>
-        </div>
-    </div>
-
-</div>
-
+{% block head %}
 <style>
-:root { --bg: #0a0a0a; --card: #141414; --primary: #00ff9d; --bull: #00ff9d; --bear: #ff4444; }
-.cyber-card { background: var(--card); border: 1px solid #222; padding: 20px; border-radius: 4px; }
-.card-header { font-size: 0.8rem; letter-spacing: 1px; margin-bottom: 15px; border-bottom: 1px solid #222; padding-bottom: 10px; font-weight: bold; }
-.metric-box { background: #111; border: 1px solid #333; padding: 10px; text-align: center; border-radius: 4px; }
-.metric-box .label { font-size: 0.65rem; color: #666; margin-bottom: 3px; }
-.metric-box .val { font-size: 1.1rem; font-weight: bold; color: #ccc; }
-.level-row { display: flex; justify-content: space-between; font-size: 0.8rem; color: #888; border-bottom: 1px dashed #222; padding: 8px 0; }
-.level-row .val { color: #fff; font-family: monospace; font-weight: bold; }
-.live-toggle { display: flex; align-items: center; gap: 8px; background: #111; padding: 5px 12px; border: 1px solid #333; border-radius: 4px; }
-.live-toggle label { font-size: 0.7rem; color: #888; font-weight: bold; cursor: pointer; }
-#live-dot { width: 8px; height: 8px; background: #333; border-radius: 50%; transition: 0.3s; }
-.cyber-btn-primary { background: var(--primary); color: #000; border: none; font-weight: 800; padding: 0 20px; cursor: pointer; }
-.cyber-btn-sec { background: #222; color: #fff; border: 1px solid #444; padding: 10px 20px; cursor: pointer; font-weight: 600; }
-.cyber-select { background: #000; color: #fff; border: 1px solid #333; padding: 10px; cursor: pointer; }
+/* Namespaced CSS for Battle Control */
+.battle-control {
+    --bg: #0a0a0a; --card: #141414; --primary: #00ff9d; --bull: #00ff9d; --bear: #ff4444; 
+    --warning: #f59e0b;
+}
+.battle-control .cyber-card { background: var(--card); border: 1px solid #222; padding: 20px; border-radius: 4px; }
+.battle-control .card-header { font-size: 0.8rem; letter-spacing: 1px; margin-bottom: 15px; border-bottom: 1px solid #222; padding-bottom: 10px; font-weight: bold; }
+.battle-control .metric-box { background: #111; border: 1px solid #333; padding: 10px; text-align: center; border-radius: 4px; }
+.battle-control .metric-box .label { font-size: 0.65rem; color: #666; margin-bottom: 3px; }
+.battle-control .metric-box .val { font-size: 1.1rem; font-weight: bold; color: #ccc; }
+.battle-control .level-row { display: flex; justify-content: space-between; font-size: 0.8rem; color: #888; border-bottom: 1px dashed #222; padding: 8px 0; }
+.battle-control .level-row .val { color: #fff; font-family: monospace; font-weight: bold; }
+.battle-control .live-toggle { display: flex; align-items: center; gap: 8px; background: #111; padding: 5px 12px; border: 1px solid #333; border-radius: 4px; }
+.battle-control .live-toggle label { font-size: 0.7rem; color: #888; font-weight: bold; cursor: pointer; }
+.battle-control #live-dot { width: 8px; height: 8px; background: #333; border-radius: 50%; transition: 0.3s; }
+.battle-control .cyber-btn-primary { background: var(--primary); color: #000; border: none; font-weight: 800; padding: 0 20px; cursor: pointer; }
+.battle-control .cyber-btn-sec { background: #222; color: #fff; border: 1px solid #444; padding: 10px 20px; cursor: pointer; font-weight: 600; }
+.battle-control .cyber-select { background: #000; color: #fff; border: 1px solid #333; padding: 10px; cursor: pointer; }
 </style>
+{% endblock %}
 
+{% block content %}
+<div class="battle-control">
+    <div class="app-container" style="max-width: 1400px; margin: 0 auto; padding-top: 40px;">
+        
+        <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 15px;">
+            <div>
+                <h1 style="font-size: 1.8rem; margin: 0; color: #fff; letter-spacing: -1px;">BATTLE CONTROL</h1>
+                <div style="font-size: 0.9rem; color: #666; margin-top: 5px;">War Map Context & Session Execution</div>
+            </div>
+            <div style="display: flex; gap: 15px; align-items: center;">
+                <div class="live-toggle">
+                    <input type="checkbox" id="autoRefreshToggle" onchange="toggleAutoRefresh()">
+                    <label for="autoRefreshToggle">LIVE LINK</label>
+                    <div id="live-dot"></div>
+                </div>
+                
+                {% if user.operator_flex %}
+                <div style="font-size: 10px; color: var(--warning); border: 1px solid var(--warning); padding: 4px 8px; border-radius: 4px; font-weight: 700; letter-spacing: 1px;">
+                    OP FLEX ACTIVE
+                </div>
+                {% endif %}
+
+                <div class="input-group" style="margin:0;">
+                    <select id="sessionMode" onchange="toggleManualSession()" class="cyber-select">
+                        <option value="AUTO">AUTO (Dominant)</option>
+                        <option value="MANUAL">MANUAL OVERRIDE</option>
+                    </select>
+                    <select id="manualSessionId" class="cyber-select" style="display:none; margin-left:5px;">
+                        <option value="us_ny_futures">NY Futures</option>
+                        <option value="eu_london">London</option>
+                        <option value="asia_tokyo">Tokyo</option>
+                    </select>
+                </div>
+                <button onclick="runLivePulse()" class="cyber-btn-primary" id="main-action-btn" style="height: 42px;">UPDATE INTEL</button>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 280px 1fr; gap: 20px;">
+            
+            <div style="display: flex; flex-direction: column; gap: 15px;">
+                <div class="cyber-card" style="border-left: 3px solid #8b5cf6;">
+                    <div class="card-header" style="color:#a78bfa;">WAR MAP CONTEXT</div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                        <span style="color:#888; font-size:0.8rem;">LEAN</span>
+                        <span id="wm-lean" style="font-weight:bold; color:#fff;">--</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                        <span style="color:#888; font-size:0.8rem;">PHASE</span>
+                        <span id="wm-phase" style="font-weight:bold; color:#fff;">--</span>
+                    </div>
+                    <div id="wm-note" style="font-size:0.75rem; color:#888; border-top:1px solid #333; padding-top:10px;">--</div>
+                </div>
+
+                <div class="cyber-card">
+                    <div class="card-header">KEY LEVELS</div>
+                    <div class="level-row"><span>Daily Res</span><span id="val-dr" class="val">---</span></div>
+                    <div class="level-row"><span style="color:var(--bull);">Breakout</span><span id="val-bo" class="val">---</span></div>
+                    <div class="level-row"><span style="color:var(--bear);">Breakdown</span><span id="val-bd" class="val">---</span></div>
+                    <div class="level-row"><span>Daily Sup</span><span id="val-ds" class="val">---</span></div>
+                </div>
+                
+                <button onclick="toggleTactical()" class="cyber-btn-sec" style="width:100%; font-size:0.8rem;">TOGGLE TACTICAL DRAWER</button>
+            </div>
+
+            <div class="cyber-card" style="border-left: 4px solid #3b82f6;">
+                <div class="card-header" style="color:#60a5fa; display:flex; justify-content:space-between;">
+                    <span>SESSION BATTLE</span>
+                    <span id="session-name" style="color:#fff;">--</span>
+                </div>
+
+                <div style="text-align: center; padding: 25px; background: #080808; border: 1px solid #333; border-radius: 4px; margin-bottom: 25px;">
+                    <div style="font-size: 0.8rem; color: #666; letter-spacing: 2px;">CURRENT DIRECTIVE</div>
+                    <div id="sb-action" style="font-size: 4rem; font-weight: 900; color: #444; line-height: 1.1;">HOLD FIRE</div>
+                    <div id="sb-reason" style="margin-top: 10px; color: #ccc; font-size: 1.1rem;">Waiting for data...</div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px;">
+                    <div class="metric-box">
+                        <div class="label">PRICE</div>
+                        <div class="val" id="live-price" style="color:#fff;">---</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="label">PERMISSION</div>
+                        <div class="val" id="sb-perm">NONE</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="label">ACCEPTANCE</div>
+                        <div class="val" id="sb-accept">0/2</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="label">LOCATION</div>
+                        <div class="val" id="sb-loc" style="font-size:0.7rem;">--</div>
+                    </div>
+                </div>
+
+                <div id="sb-prepare-box" style="display: block; background: #112211; padding: 20px; border: 1px solid var(--primary); margin-bottom: 20px;">
+                    <div style="font-size: 0.9rem; color: var(--primary); font-weight: bold; margin-bottom: 15px; text-align: center;">
+                        EXECUTION GATES (5M)
+                        <span id="sb-gates-mode" style="display:block; font-size:0.7rem; color:#88aa88; margin-top:4px;">PREVIEW (FLOATING)</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-family: monospace; font-size: 1.4rem;">
+                        <div><span style="color:#ef4444; font-size:0.8rem;">FAILURE LINE</span><br><span id="sb-fail-line" style="color:#fff;">--</span></div>
+                        <div style="text-align:right;"><span style="color:#00ff9d; font-size:0.8rem;">CONTINUATION</span><br><span id="sb-cont-line" style="color:#fff;">--</span></div>
+                    </div>
+                </div>
+                
+                <div style="text-align: right; display:flex; gap:10px; justify-content:flex-end;">
+                    <button onclick="copyTraderBrief()" class="cyber-btn-sec">COPY BRIEF</button>
+                    <button onclick="copyBattleBox()" class="cyber-btn-primary">COPY FULL BATTLEBOX</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="tactical-drawer" style="display: none; margin-top: 30px; border-top: 1px solid #333; padding-top: 20px;">
+            <h3 style="color: #888; font-size: 1rem; margin-bottom: 20px;">TACTICAL INTELLIGENCE (OPTIONAL)</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                <div class="cyber-card">
+                    <div class="card-header">CAMPAIGN (BIG TRADE)</div>
+                    <div id="wm-camp-status" style="font-size: 1.5rem; font-weight: bold; color: #666;">NOT ARMED</div>
+                    <div id="wm-camp-note" style="margin-top: 10px; color: #888;">--</div>
+                </div>
+                <div class="cyber-card">
+                    <div class="card-header">STRATEGY STATUS (OPTIONAL)</div>
+                    <div id="strat-list" style="font-size: 0.8rem; color: #ccc;">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
 <script>
-let lastPacket = null;
-let autoRefreshTimer = null;
+  const USER_OP_FLEX = {{ 'true' if user.operator_flex else 'false' }};
+  // ... (Keeping your exact script logic, just inside this block) ...
+  let lastPacket = null;
+  let autoRefreshTimer = null;
 
-function toggleTactical() {
+  function toggleTactical() {
     const d = document.getElementById('tactical-drawer');
     d.style.display = d.style.display === 'none' ? 'block' : 'none';
-}
+  }
 
-function toggleManualSession() {
+  function toggleManualSession() {
     const mode = document.getElementById('sessionMode').value;
     document.getElementById('manualSessionId').style.display = (mode === 'MANUAL') ? 'inline-block' : 'none';
-}
+  }
 
-function toggleAutoRefresh() {
+  function toggleAutoRefresh() {
     if(document.getElementById('autoRefreshToggle').checked) {
         document.getElementById('live-dot').style.background = "#00ff9d";
         document.getElementById('live-dot').style.boxShadow = "0 0 8px #00ff9d";
@@ -177,9 +184,9 @@ function toggleAutoRefresh() {
         document.getElementById('live-dot').style.boxShadow = "none";
         clearInterval(autoRefreshTimer);
     }
-}
+  }
 
-async function runLivePulse() {
+  async function runLivePulse() {
     const btn = document.querySelector('#main-action-btn');
     btn.innerText = "UPDATING...";
     try {
@@ -190,7 +197,7 @@ async function runLivePulse() {
                 symbol: "BTCUSDT", 
                 session_mode: document.getElementById('sessionMode').value,
                 manual_session_id: document.getElementById('manualSessionId').value,
-                operator_flex: USER_OP_FLEX // USES DATABASE SETTING
+                operator_flex: USER_OP_FLEX 
             })
         });
         const data = await res.json();
@@ -232,7 +239,7 @@ async function runLivePulse() {
         const loc = sb.location || {};
         document.getElementById('sb-loc').innerText = `${loc.relative_to_triggers || '-'} | ${loc.relative_to_value || '-'}`;
 
-        // EXECUTION GATES (LOCKED VS PREVIEW)
+        // EXECUTION GATES
         const exec = sb.execution || {};
         const levels = exec.levels || {};
         const gatesMode = exec.gates_mode || "PREVIEW";
@@ -260,7 +267,7 @@ async function runLivePulse() {
         document.getElementById('val-bd').innerText = l.breakdown_trigger?.toFixed(2) || "---";
         document.getElementById('val-ds').innerText = l.daily_support?.toFixed(2) || "---";
         
-        // STRATEGIES (Drawer)
+        // STRATEGIES
         const strats = data.battlebox.strategies_summary || [];
         const stratList = document.getElementById('strat-list');
         if(strats.length > 0) {
@@ -276,9 +283,9 @@ async function runLivePulse() {
         
     } catch(e) { console.error(e); } 
     finally { btn.innerText = "UPDATE INTEL"; }
-}
+  }
 
-function copyTraderBrief() {
+  function copyTraderBrief() {
     if(!lastPacket) return;
     const brief = {
         "context": lastPacket.war_map_context,
@@ -287,12 +294,12 @@ function copyTraderBrief() {
     };
     navigator.clipboard.writeText(JSON.stringify(brief, null, 2));
     alert("Trader Brief Copied.");
-}
+  }
 
-function copyBattleBox() {
+  function copyBattleBox() {
     if(!lastPacket) return;
     navigator.clipboard.writeText(JSON.stringify(lastPacket, null, 2));
     alert("Full Packet Copied.");
-}
+  }
 </script>
 {% endblock %}

@@ -1,133 +1,45 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kabroda | Execution Indicators</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/site.css">
-    <style>
-        :root { --bg-dark: #050b14; --bg-card: #0f1623; --text-main: #e2e8f0; --text-muted: #94a3b8; --accent-cyan: #06b6d4; --accent-glow: #22d3ee; --accent-purple: #a855f7; --font-main: 'Inter', system-ui, -apple-system, sans-serif; --font-mono: 'JetBrains Mono', monospace; }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background-color: var(--bg-dark); color: var(--text-main); font-family: var(--font-main); line-height: 1.6; overflow-x: hidden; }
-        h1, h2, h3, h4 { font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
-        a { text-decoration: none; color: inherit; transition: 0.3s ease; }
+{% extends "base_member.html" %}
 
-        /* MEMBER NAV */
-        .navbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
-        .logo { font-family: var(--font-mono); font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; }
-        .logo span { color: var(--accent-cyan); }
-        .nav-links { display: flex; gap: 2rem; list-style: none; }
-        .nav-links a { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-        .nav-links a:hover, .nav-links a.active { color: #fff; }
+{% block title %}Execution Indicators | Kabroda{% endblock %}
 
-        .header-section { padding: 80px 0 60px; text-align: center; }
-        .pill { display: inline-block; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); padding: 6px 16px; border-radius: 100px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent-cyan); margin-bottom: 1.5rem; letter-spacing: 0.1em; text-transform: uppercase; }
-        .header-section h1 { font-size: 3rem; margin-bottom: 1rem; color: #fff; }
-        .header-section p { font-size: 1.1rem; color: var(--text-muted); max-width: 600px; margin: 0 auto; }
-
-        .indicator-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 2rem; margin-bottom: 3rem; }
-        .indicator-card { background: var(--bg-card); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 2.5rem; position: relative; display: flex; flex-direction: column; align-items: flex-start; }
-        .indicator-card.core { border-left: 3px solid var(--accent-cyan); }
-        .indicator-card.context { border-left: 3px solid var(--accent-purple); }
-        .badge { font-family: var(--font-mono); font-size: 0.7rem; text-transform: uppercase; padding: 4px 8px; border-radius: 4px; margin-bottom: 1rem; font-weight: 700; }
-        .badge.cyan { background: rgba(6, 182, 212, 0.1); color: var(--accent-cyan); }
-        .badge.purple { background: rgba(168, 85, 247, 0.1); color: var(--accent-purple); }
-        .indicator-card h3 { font-size: 1.5rem; margin-bottom: 1rem; color: #fff; }
-        .indicator-card p { font-size: 0.95rem; color: var(--text-muted); margin-bottom: 2rem; flex: 1; }
-        .btn-link { font-family: var(--font-main); font-weight: 600; font-size: 0.9rem; color: #fff; background: rgba(255,255,255,0.05); padding: 10px 20px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); }
-        .btn-link.cyan:hover { background: var(--accent-cyan); color: #000; border-color: var(--accent-cyan); }
-        .btn-link.purple:hover { background: var(--accent-purple); color: #000; border-color: var(--accent-purple); }
-
-        .reminder-box { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-left: 3px solid #f59e0b; padding: 1.5rem; border-radius: 6px; margin-bottom: 4rem; display: flex; align-items: center; gap: 1.5rem; }
-        .reminder-content strong { color: #f59e0b; display: block; font-size: 0.9rem; margin-bottom: 0.25rem; font-family: var(--font-mono); text-transform: uppercase; }
-        .reminder-content p { color: var(--text-muted); font-size: 0.95rem; margin: 0; }
-
-        .sync-section { border: 1px solid rgba(255,255,255,0.05); background: var(--bg-card); border-radius: 8px; padding: 3rem; }
-        .sync-header { display: flex; align-items: center; gap: 10px; margin-bottom: 2rem; color: #fff; }
-        .sync-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 2rem; }
-        .step-col h4 { font-family: var(--font-mono); color: var(--accent-cyan); font-size: 0.85rem; margin-bottom: 1rem; text-transform: uppercase; }
-        .step-col p { font-size: 0.95rem; color: var(--text-muted); }
-        .troubleshoot { margin-top: 2rem; padding-top: 2rem; border-top: 1px solid rgba(255,255,255,0.05); font-size: 0.9rem; color: var(--text-muted); opacity: 0.7; font-style: italic; }
-
-        @media (max-width: 768px) { .navbar { flex-direction: column; gap: 1rem; } .indicator-grid { grid-template-columns: 1fr; } .reminder-box { flex-direction: column; align-items: flex-start; } .sync-grid { grid-template-columns: 1fr; } }
-    </style>
-</head>
-<body>
-
-    <nav class="navbar">
-        <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; flex-wrap: wrap;">
-            <a href="/suite" class="logo">
-                <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
-                KABRODA
-            </a>
-            <ul class="nav-links">
-                <li><a href="/suite">Suite ▼</a></li>
-                <li><a href="/analysis">Analysis</a></li>
-                <li><a href="/indicators" class="active">Indicators</a></li>
-                <li><a href="/account">Account</a></li>
-                <li><a href="/logout">Logout</a></li>
-            </ul>
-        </div>
-    </nav>
-
+{% block content %}
+<div class="container">
     <section class="header-section">
-        <div class="container">
-            <span class="pill">EXECUTION LAYER</span>
-            <h1>Execution Indicators</h1>
-            <p>These TradingView scripts display Kabroda session structure on your chart. They do not generate signals or instructions.</p>
-        </div>
+        <span class="pill">EXECUTION LAYER</span>
+        <h1>Execution Indicators</h1>
+        <p>These TradingView scripts display Kabroda session structure on your chart.</p>
     </section>
 
-    <div class="container">
-        <div class="indicator-grid">
-            <div class="indicator-card core">
-                <div class="badge cyan">CORE EXECUTION LAYER</div>
-                <h3>1. Kabroda BattleBox Command</h3>
-                <p>The execution anchor. This indicator displays the session levels generated in Suite, including breakout and breakdown thresholds, and keeps your chart aligned to the active session.</p>
-                <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" class="btn-link cyan">Open in TradingView ↗</a>
-            </div>
-            <div class="indicator-card context">
-                <div class="badge purple">CONTEXT ENGINE</div>
-                <h3>2. KTBB Intel: Multi-Timeframe</h3>
-                <p>The structure companion. This indicator highlights higher-timeframe trend and key pivots so you can contextualize intraday execution.</p>
-                <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" class="btn-link purple">Open in TradingView ↗</a>
-            </div>
+    <div class="indicator-grid">
+        <div class="indicator-card core">
+            <div class="badge cyan">CORE EXECUTION LAYER</div>
+            <h3>1. Kabroda BattleBox Command</h3>
+            <p>The execution anchor. Displays session levels, breakout thresholds, and keeps your chart aligned.</p>
+            <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" class="btn-link cyan">Open in TradingView ↗</a>
         </div>
-
-        <div class="reminder-box">
-            <div class="reminder-content">
-                <strong>⚠️ &nbsp; Execution Reminder</strong>
-                <p>Indicators display structure. Decisions still require confirmation, alignment, and patience.</p>
-            </div>
-        </div>
-
-        <div class="sync-section">
-            <div class="sync-header">
-                <h3>⚡ How to Sync Your Charts</h3>
-            </div>
-            <div class="sync-grid">
-                <div class="step-col">
-                    <h4>Step 01</h4>
-                    <p>Open each script on TradingView and add it to your Favorites (Star icon).</p>
-                </div>
-                <div class="step-col">
-                    <h4>Step 02</h4>
-                    <p>Open your chart. Go to Indicators → Favorites and add Kabroda BattleBox Command. Add KTBB Intel if desired.</p>
-                </div>
-                <div class="step-col">
-                    <h4>Step 03</h4>
-                    <p>Go to Suite and click "Copy Indicator Data". Open the indicator settings and paste the values into the "Session Data" field.</p>
-                </div>
-            </div>
-            <div class="troubleshoot">
-                If levels do not update, confirm the symbol and refresh the chart.
-            </div>
+        <div class="indicator-card context">
+            <div class="badge purple">CONTEXT ENGINE</div>
+            <h3>2. KTBB Intel: Multi-Timeframe</h3>
+            <p>The structure companion. Highlights higher-timeframe trend and key pivots.</p>
+            <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" class="btn-link purple">Open in TradingView ↗</a>
         </div>
     </div>
-    <div style="height: 100px;"></div>
-</body>
-</html>
+
+    <div class="reminder-box">
+        <div class="reminder-content">
+            <strong>⚠️ &nbsp; Execution Reminder</strong>
+            <p>Indicators display structure. Decisions still require confirmation.</p>
+        </div>
+    </div>
+
+    <div class="sync-section">
+        <div class="sync-header"><h3>⚡ How to Sync Your Charts</h3></div>
+        <div class="sync-grid">
+            <div class="step-col"><h4>Step 01</h4><p>Add scripts to Favorites on TradingView.</p></div>
+            <div class="step-col"><h4>Step 02</h4><p>Add indicators to your chart from Favorites.</p></div>
+            <div class="step-col"><h4>Step 03</h4><p>Copy "Indicator Data" from Session Control and paste into settings.</p></div>
+        </div>
+    </div>
+</div>
+<div style="height: 100px;"></div>
+{% endblock %}

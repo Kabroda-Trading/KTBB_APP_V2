@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Kabroda Suite{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    
+    {% block head %}{% endblock %}
+    
+    <style>
+        /* Shared Member Base Styles to match your Dark Theme */
+        body { background-color: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; margin: 0; padding: 0; }
+        .member-wrapper { width: 100%; }
+        /* Nav Links styling override for base consistency */
+        .nav-links a { font-size: 0.85rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none; }
+        .nav-links a:hover, .nav-links a.active { color: #fff; }
+    </style>
+</head>
+<body>
+    {% include 'partials/nav_member.html' %}
+
+    <div class="member-wrapper">
+        {% block content %}{% endblock %}
+    </div>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>
