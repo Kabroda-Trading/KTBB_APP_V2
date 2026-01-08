@@ -1,357 +1,384 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kabroda | Session Control</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/site.css">
-    <style>
-        /* Shared Member Base Styles to match your Dark Theme */
-        body { background-color: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; margin: 0; padding: 0; }
-        .member-wrapper { width: 100%; }
-        /* Nav Links styling override for base consistency */
-        .navbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
-        .logo { font-family: var(--font-mono); font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; }
-        .logo span { color: #06b6d4; }
-        .nav-links { display: flex; gap: 2rem; list-style: none; }
-        .nav-links a { font-size: 0.85rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none; }
-        .nav-links a:hover, .nav-links a.active { color: #fff; }
-        .container { max-width: 1400px; margin: 0 auto; padding: 0 20px; }
-    </style>
-</head>
-<body>
-    
-    <nav class="navbar">
-        <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; flex-wrap: wrap;">
-            <a href="/suite" class="logo">
-                <div style="width: 12px; height: 12px; background: #06b6d4; border-radius: 2px;"></div>
-                KABRODA
-            </a>
-            <ul class="nav-links">
-                <li><a href="/suite" class="active">Suite ▼</a></li>
-                <li><a href="/analysis">Analysis</a></li>
-                <li><a href="/indicators">Indicators</a></li>
-                <li><a href="/account">Account</a></li>
-                <li><a href="/logout">Logout</a></li>
-            </ul>
-        </div>
-    </nav>
+{% extends "base_member.html" %}
 
-    <div style="width: 100%; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 30px; padding-top: 40px;">
+{% block title %}Kabroda | Battle Control{% endblock %}
 
-      <div style="display: flex; justify-content: space-between; align-items: flex-end; padding-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-        <div>
-          <div class="pill" style="margin-bottom: 8px; font-size: 11px; letter-spacing: 2px; color: #06b6d4; border: 1px solid rgba(6,182,212,0.3); padding: 4px 10px; border-radius: 100px; display: inline-block;">BATTLEBOX COMMAND</div>
-          <h1 style="font-size: 36px; margin: 0; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1; text-shadow: 0 0 30px rgba(0,255,157,0.15); color: #fff;">
-            Session <span class="gradient-text" style="background: linear-gradient(to right, #00ff9d, #06b6d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Control</span>
-          </h1>
-        </div>
-        <div style="text-align: right;">
-          <div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 2px;">Operative ID</div>
-          <div style="font-family: monospace; color: #22d3ee; font-size: 16px; letter-spacing: 0.1em; font-weight: 700; text-transform: uppercase;">
-            {{ user.username if user.username else user.email }}
-          </div>
-        </div>
-      </div>
+{% block head %}
+<style>
+/* NAMESPACED BATTLE CONTROL STYLES (Gold Standard) */
+.battle-control {
+    --bg-card: #0f1623;
+    --border-subtle: rgba(255,255,255,0.05);
+    --primary: #06b6d4; /* Cyan to match Indicators */
+    --accent-green: #10b981;
+    --accent-red: #ef4444;
+    --text-muted: #94a3b8;
+    --font-mono: 'JetBrains Mono', monospace;
+}
 
-      <div class="bento-card wide" style="border-left: 4px solid #00ff9d; display: flex; flex-direction: column; gap: 24px; padding: 30px; background: #0f1623; border: 1px solid rgba(255,255,255,0.05);">
-        <div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-end; justify-content: space-between;">
-          
-          <div style="flex: 1; min-width: 240px;">
-            <label class="label" style="color: #22d3ee; font-size: 12px; margin-bottom: 8px; letter-spacing: 1px;">TARGET ASSET</label>
-            <div style="position: relative;">
-              <select id="symbol" class="input" style="cursor:pointer; font-weight: 700; font-size: 16px; height: 55px; appearance: none; padding-right: 40px; text-transform: uppercase; width: 100%; background: #050b14; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 15px;">
-                <option value="BTCUSDT">BTC (Bitcoin)</option>
-                <option value="ETHUSDT">ETH (Ethereum)</option>
-                <option value="SOLUSDT">SOL (Solana)</option>
-              </select>
-              <span style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: #22d3ee; pointer-events: none;">▼</span>
+/* --- LAYOUT & HEADER --- */
+.battle-control .container { max-width: 1400px; margin: 0 auto; padding: 40px 20px; }
+
+.battle-control .command-header { 
+    display: flex; justify-content: space-between; align-items: flex-end; 
+    margin-bottom: 30px; padding-bottom: 20px; 
+    border-bottom: 1px solid var(--border-subtle); 
+}
+.battle-control .pill { 
+    display: inline-block; background: rgba(6, 182, 212, 0.1); color: var(--primary); 
+    border: 1px solid rgba(6, 182, 212, 0.2); padding: 4px 12px; border-radius: 100px; 
+    font-family: var(--font-mono); font-size: 0.7rem; text-transform: uppercase; 
+    letter-spacing: 0.1em; margin-bottom: 0.5rem; 
+}
+.battle-control h1 { font-size: 2.2rem; margin: 0; color: #fff; line-height: 1; }
+.battle-control .sub-text { font-size: 0.95rem; color: var(--text-muted); margin-top: 5px; }
+
+/* --- CONTROLS BAR --- */
+.battle-control .controls-bar { display: flex; gap: 15px; align-items: center; }
+
+/* Live Toggle */
+.battle-control .live-toggle { 
+    display: flex; align-items: center; gap: 10px; 
+    background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); 
+    padding: 8px 16px; border-radius: 4px; cursor: pointer; transition: 0.2s;
+}
+.battle-control .live-toggle:hover { border-color: rgba(255,255,255,0.1); }
+.battle-control .live-toggle label { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); cursor: pointer; font-weight: 600; text-transform: uppercase; }
+.battle-control #live-dot { width: 8px; height: 8px; background: #333; border-radius: 50%; transition: 0.3s; }
+
+/* Select Inputs */
+.battle-control .cyber-select { 
+    background: #050b14; color: #fff; border: 1px solid var(--border-subtle); 
+    padding: 8px 12px; border-radius: 4px; font-size: 0.85rem; font-family: 'Inter', sans-serif; 
+    outline: none; cursor: pointer; 
+}
+.battle-control .cyber-select:focus { border-color: var(--primary); }
+
+/* Primary Button */
+.battle-control .btn-action { 
+    background: var(--primary); color: #000; border: none; font-weight: 700; 
+    font-size: 0.85rem; padding: 0 20px; height: 38px; cursor: pointer; 
+    border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em; transition: 0.2s; 
+}
+.battle-control .btn-action:hover { box-shadow: 0 0 15px rgba(6, 182, 212, 0.3); }
+
+/* --- CARDS & GRID --- */
+.battle-control .grid-layout { display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
+.battle-control .card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 25px; }
+.battle-control .card-header { 
+    font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); 
+    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 20px; 
+    border-bottom: 1px solid var(--border-subtle); padding-bottom: 10px; font-weight: 700; 
+}
+
+/* Metrics & Levels */
+.battle-control .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 30px; }
+.battle-control .metric-box { background: rgba(0,0,0,0.2); border: 1px solid var(--border-subtle); padding: 15px; text-align: center; border-radius: 6px; }
+.battle-control .metric-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 5px; }
+.battle-control .metric-val { font-family: var(--font-mono); font-size: 1.1rem; font-weight: 700; color: #fff; }
+
+.battle-control .level-row { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted); border-bottom: 1px dashed var(--border-subtle); padding: 10px 0; }
+.battle-control .level-row:last-child { border-bottom: none; }
+.battle-control .level-val { color: #fff; font-family: var(--font-mono); font-weight: 600; }
+
+/* Status Box */
+.battle-control .status-box { text-align: center; padding: 40px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: 6px; margin-bottom: 25px; }
+.battle-control #sb-action { font-size: 3.5rem; font-weight: 800; color: #444; line-height: 1; letter-spacing: -0.02em; }
+.battle-control #sb-reason { margin-top: 10px; color: var(--text-muted); font-size: 1rem; }
+
+/* Execution Gates */
+.battle-control .gates-box { background: rgba(6, 182, 212, 0.05); border: 1px solid var(--primary); padding: 25px; border-radius: 6px; margin-bottom: 25px; }
+.battle-control .gates-header { text-align: center; color: var(--primary); font-size: 0.85rem; font-weight: 700; text-transform: uppercase; margin-bottom: 20px; }
+.battle-control .gates-sub { display: block; font-size: 0.7rem; color: var(--text-muted); margin-top: 5px; font-weight: 400; }
+.battle-control .gate-row { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 1.2rem; }
+.battle-control .gate-label { font-size: 0.75rem; display: block; margin-bottom: 5px; }
+
+/* Secondary Button */
+.battle-control .btn-sec { background: transparent; color: var(--text-muted); border: 1px solid var(--border-subtle); padding: 10px 20px; cursor: pointer; font-weight: 600; font-size: 0.8rem; border-radius: 4px; transition: 0.2s; }
+.battle-control .btn-sec:hover { border-color: #fff; color: #fff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="battle-control">
+    <div class="container">
+        
+        <div class="command-header">
+            <div>
+                <span class="pill">BATTLE CONTROL</span>
+                <h1>Session Command</h1>
+                <div class="sub-text">War Map Context & Session Execution</div>
             </div>
-          </div>
+            
+            <div class="controls-bar">
+                <div class="live-toggle">
+                    <input type="checkbox" id="autoRefreshToggle" onchange="toggleAutoRefresh()" style="display:none;">
+                    <label for="autoRefreshToggle">Live Link</label>
+                    <div id="live-dot"></div>
+                </div>
+                
+                <div class="input-group">
+                    <select id="sessionMode" onchange="toggleManualSession()" class="cyber-select">
+                        <option value="AUTO">AUTO (Dominant)</option>
+                        <option value="MANUAL">MANUAL OVERRIDE</option>
+                    </select>
+                    <select id="manualSessionId" class="cyber-select" style="display:none; margin-left:5px;">
+                        <option value="us_ny_futures">NY Futures</option>
+                        <option value="eu_london">London</option>
+                        <option value="asia_tokyo">Tokyo</option>
+                    </select>
+                </div>
 
-          <div style="flex: 1; min-width: 240px;">
-            <label class="label" style="color: #10b981; font-size: 12px; margin-bottom: 8px; letter-spacing: 1px;">TARGET SESSION</label>
-            <div style="position: relative;">
-              <select id="sessionTz" class="input" style="cursor:pointer; font-weight: 700; font-size: 16px; height: 55px; appearance: none; padding-right: 40px; border-color: rgba(16, 185, 129, 0.4); width: 100%; background: #050b14; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 15px;">
-                <option value="America/New_York_Early">🇺🇸 NY FUTURES (08:30 ET)</option>
-                <option value="America/New_York">🇺🇸 NY EQUITY (09:30 ET)</option>
-                <option value="Europe/London">🇬🇧 LONDON (08:00 GMT)</option>
-                <option value="Asia/Tokyo">🇯🇵 TOKYO (09:00 JST)</option>
-                <option value="Australia/Sydney">🇦🇺 SYDNEY (10:00 AEDT)</option>
-                <option value="UTC">🌐 UTC (CRYPTO DEFAULT)</option>
-              </select>
-              <span style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: #10b981; pointer-events: none;">▼</span>
+                <button onclick="runLivePulse()" class="btn-action" id="main-action-btn">Update Intel</button>
             </div>
-          </div>
-
-          <div style="flex: 0 0 auto;">
-            <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="height: 55px; padding: 0 32px; font-size: 14px; font-weight: 800; letter-spacing: 1px; white-space: nowrap; box-shadow: 0 0 20px rgba(0,255,157,0.2); background: #00ff9d; color: #000; border: none; cursor: pointer;">
-              <span style="margin-right: 8px;">⚡ INITIATE CALIBRATION</span>
-            </button>
-          </div>
         </div>
 
-        <div id="status" style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 15px; font-size: 13px; font-family: monospace; color: #94a3b8; text-align: right;">
-          > SYSTEM STANDBY... SELECT TARGET
-        </div>
-      </div>
-
-      <div class="bento-card wide" style="padding: 30px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
-        <h3 style="font-size: 14px; color: #94a3b8; margin-bottom: 25px; text-transform: uppercase; letter-spacing: 0.15em; display:flex; align-items:center; gap:10px;">
-          <span style="width:6px; height:6px; background:#fff; border-radius:50%; opacity:0.5;"></span> MISSION TIMELINE <span style="opacity:0.3; font-size:11px;">(LOCAL SYNC)</span>
-        </h3>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-          <div style="background: rgba(255,255,255,0.03); border-left: 3px solid #94a3b8; padding: 20px; border-radius: 0 8px 8px 0;">
-            <div style="font-size: 11px; color: #94a3b8; font-weight: 800; letter-spacing: 0.1em; margin-bottom: 6px;">MARKET OPEN</div>
-            <div id="time_open" style="font-size: 22px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-            <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">Session Start</div>
-          </div>
-          <div style="background: rgba(16, 185, 129, 0.05); border-left: 3px solid #f59e0b; padding: 20px; border-radius: 0 8px 8px 0;">
-            <div style="font-size: 11px; color: #f59e0b; font-weight: 800; letter-spacing: 0.1em; margin-bottom: 6px;">CALIBRATION</div>
-            <div id="time_calib" style="font-size: 22px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-            <div style="font-size: 12px; color: #f59e0b; margin-top: 4px;">Initial Balance (30m)</div>
-          </div>
-          <div style="background: rgba(56, 189, 248, 0.05); border-left: 3px solid #10b981; padding: 20px; border-radius: 0 8px 8px 0;">
-            <div style="font-size: 11px; color: #10b981; font-weight: 800; letter-spacing: 0.1em; margin-bottom: 6px;">EXECUTION</div>
-            <div id="time_exec" style="font-size: 22px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-            <div style="font-size: 12px; color: #10b981; margin-top: 4px;">Strategy Active</div>
-          </div>
-          <div style="background: rgba(168, 85, 247, 0.05); border-left: 3px solid #a855f7; padding: 20px; border-radius: 0 8px 8px 0;">
-            <div style="font-size: 11px; color: #a855f7; font-weight: 800; letter-spacing: 0.1em; margin-bottom: 6px;">CLOSE</div>
-            <div id="time_close" style="font-size: 22px; color: #fff; font-weight: 700; font-family: monospace;">--:--</div>
-            <div style="font-size: 12px; color: #a855f7; margin-top: 4px;">Session End</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="bento-card wide" style="position: relative; overflow: hidden; min-height: 320px; padding: 30px; background: #0f1623; border: 1px solid rgba(255,255,255,0.08);">
-        <div style="position: absolute; inset: 0; background-image: radial-gradient(rgba(255,255,255,0.1) 1px, transparent 1px); background-size: 20px 20px; opacity: 0.1; pointer-events: none;"></div>
-
-        <div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; position: relative;">
-          
-          <div>
-            <h3 style="display: flex; align-items: center; gap: 12px; margin: 0 0 8px 0; font-size: 18px; color: #fff;">
-              <span style="width: 10px; height: 10px; background: #10b981; border-radius: 50%; box-shadow: 0 0 10px #10b981;"></span>
-              BATTLEFIELD TELEMETRY
-            </h3>
-            <p style="font-size: 13px; color: #888; margin: 0;">Live Structural Levels & Triggers</p>
-          </div>
-          
-          <div style="display: flex; gap: 12px;">
-            <button id="tvCopyBtn" class="btn secondary" onclick="copyForTV()" style="display:none; font-size: 12px; padding: 12px 20px; font-weight:700; background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #e2e8f0; cursor: pointer;">COPY INDICATOR DATA</button>
+        <div class="grid-layout">
             
-            <button id="openGptBtn" onclick="openLaunchModal()" style="display:none; cursor: pointer; background: #00ff9d; color: #000; font-weight: 900; font-size: 12px; padding: 12px 24px; border: none; border-radius: 4px; box-shadow: 0 0 20px rgba(0, 255, 157, 0.4); text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s;">
-              🚀 LAUNCH BATTLEBOX AI
-            </button>
-          </div>
-        </div>
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+                <div class="card" style="border-left: 3px solid #8b5cf6;">
+                    <div class="card-header" style="color: #a78bfa;">War Map Context</div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+                        <span style="color:var(--text-muted); font-size:0.85rem;">Lean</span>
+                        <span id="wm-lean" style="font-weight:bold; color:#fff;">--</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
+                        <span style="color:var(--text-muted); font-size:0.85rem;">Phase</span>
+                        <span id="wm-phase" style="font-weight:bold; color:#fff;">--</span>
+                    </div>
+                    <div id="wm-note" style="font-size:0.8rem; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:15px; line-height:1.4;">--</div>
+                </div>
 
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; position: relative;">
-          <div class="lvl-card c-red" style="background: rgba(239, 68, 68, 0.05); padding: 20px; border-radius: 4px; border: 1px solid rgba(239, 68, 68, 0.1);">
-            <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px; color: #fca5a5;">DAILY RESISTANCE</div>
-            <div id="lv_dr" class="lvl-val" style="font-family: monospace; font-size: 24px; color: #fff;">—</div>
-          </div>
-          <div class="lvl-card c-green" style="background: rgba(16, 185, 129, 0.05); padding: 20px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.1);">
-            <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px; color: #6ee7b7;">BREAKOUT TRIGGER</div>
-            <div id="lv_bo" class="lvl-val" style="font-family: monospace; font-size: 24px; color: #fff;">—</div>
-          </div>
-          <div class="lvl-card c-purple" style="background: rgba(168, 85, 247, 0.05); padding: 20px; border-radius: 4px; border: 1px solid rgba(168, 85, 247, 0.1);">
-            <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px; color: #d8b4fe;">BREAKDOWN TRIGGER</div>
-            <div id="lv_bd" class="lvl-val" style="font-family: monospace; font-size: 24px; color: #fff;">—</div>
-          </div>
-          <div class="lvl-card c-blue" style="background: rgba(59, 130, 246, 0.05); padding: 20px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.1);">
-            <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px; color: #93c5fd;">DAILY SUPPORT</div>
-            <div id="lv_ds" class="lvl-val" style="font-family: monospace; font-size: 24px; color: #fff;">—</div>
-          </div>
-        </div>
+                <div class="card">
+                    <div class="card-header">Key Levels</div>
+                    <div class="level-row"><span>Daily Res</span><span id="val-dr" class="level-val">---</span></div>
+                    <div class="level-row"><span style="color:var(--accent-green);">Breakout</span><span id="val-bo" class="level-val">---</span></div>
+                    <div class="level-row"><span style="color:var(--accent-red);">Breakdown</span><span id="val-bd" class="level-val">---</span></div>
+                    <div class="level-row"><span>Daily Sup</span><span id="val-ds" class="level-val">---</span></div>
+                </div>
+                
+                <button onclick="toggleTactical()" class="btn-sec" style="width:100%;">Toggle Tactical Drawer</button>
+            </div>
 
-        <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; color: #94a3b8; font-size: 13px; font-family: monospace;">
-          <span>30M ANCHOR HIGH: <strong id="lv_30h" style="color: #fff;">—</strong></span>
-          <span>30M ANCHOR LOW: <strong id="lv_30l" style="color: #fff;">—</strong></span>
-        </div>
-      </div>
+            <div class="card" style="border-left: 4px solid var(--primary);">
+                <div class="card-header" style="color: var(--primary); display:flex; justify-content:space-between;">
+                    <span>Session Battle</span>
+                    <span id="session-name" style="color:#fff;">--</span>
+                </div>
 
-    </div>
+                <div class="status-box">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 10px;">Current Directive</div>
+                    <div id="sb-action">HOLD FIRE</div>
+                    <div id="sb-reason">Waiting for data...</div>
+                </div>
 
-    <div id="launchModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); backdrop-filter:blur(5px); z-index:9999; align-items:center; justify-content:center;">
-        <div style="background:#111; border:1px solid #333; padding:40px; border-radius:12px; max-width:500px; width:90%; text-align:center; box-shadow:0 0 50px rgba(0,0,0,0.8);">
-            
-            <h2 style="color:#fff; margin-bottom:10px; font-size:24px;">NEURAL LINK ESTABLISHED</h2>
-            <div style="height:2px; width:50px; background:#00ff9d; margin:0 auto 30px auto;"></div>
-            
-            <div style="text-align:left; background:#000; padding:20px; border-radius:8px; border:1px solid #222; margin-bottom:30px;">
-                <div style="color:#00ff9d; font-size:12px; font-weight:bold; margin-bottom:5px;">✓ FULL COMMAND PROMPT COPIED</div>
-                <div style="font-family:monospace; color:#ccc; font-size:12px; word-break: break-all;">
-                    Generate today’s Daily Market Review... { JSON }
+                <div class="metric-grid">
+                    <div class="metric-box">
+                        <div class="metric-label">Price</div>
+                        <div class="metric-val" id="live-price">---</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-label">Permission</div>
+                        <div class="metric-val" id="sb-perm">NONE</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-label">Acceptance</div>
+                        <div class="metric-val" id="sb-accept">0/2</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-label">Location</div>
+                        <div class="metric-val" id="sb-loc" style="font-size:0.75rem;">--</div>
+                    </div>
+                </div>
+
+                <div id="sb-prepare-box" class="gates-box">
+                    <div class="gates-header">
+                        Execution Gates (5M)
+                        <span id="sb-gates-mode" class="gates-sub">PREVIEW (FLOATING)</span>
+                    </div>
+                    <div class="gate-row">
+                        <div><span class="gate-label" style="color:var(--accent-red);">FAILURE LINE</span><span id="sb-fail-line" style="color:#fff;">--</span></div>
+                        <div style="text-align:right;"><span class="gate-label" style="color:var(--accent-green);">CONTINUATION</span><span id="sb-cont-line" style="color:#fff;">--</span></div>
+                    </div>
+                </div>
+                
+                <div style="text-align: right; display:flex; gap:10px; justify-content:flex-end;">
+                    <button onclick="copyTraderBrief()" class="btn-sec">Copy Brief</button>
+                    <button onclick="copyBattleBox()" class="btn-action">Copy Full BattleBox</button>
                 </div>
             </div>
+        </div>
 
-            <p style="color:#888; font-size:14px; margin-bottom:30px; line-height:1.5;">
-                The BattleBox Command Prompt is ready.<br>
-                <strong>Paste (Ctrl+V)</strong> into the GPT to generate your battle plan immediately.
-            </p>
-
-            <div style="display:flex; gap:10px; justify-content:center;">
-                <button onclick="closeLaunchModal()" style="background:transparent; border:1px solid #444; color:#888; padding:12px 24px; cursor:pointer; font-weight:bold; border-radius:4px;">CANCEL</button>
-                <button onclick="proceedToAI()" style="background:#00ff9d; color:#000; border:none; padding:12px 30px; cursor:pointer; font-weight:900; border-radius:4px;">PROCEED TO TERMINAL &rarr;</button>
+        <div id="tactical-drawer" style="display: none; margin-top: 30px; border-top: 1px solid var(--border-subtle); padding-top: 30px;">
+            <h3 style="color: var(--text-muted); font-size: 1rem; margin-bottom: 20px; font-weight: 600;">Tactical Intelligence</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                <div class="card">
+                    <div class="card-header">Campaign (Big Trade)</div>
+                    <div id="wm-camp-status" style="font-size: 1.5rem; font-weight: bold; color: var(--text-muted);">NOT ARMED</div>
+                    <div id="wm-camp-note" style="margin-top: 10px; color: var(--text-muted); font-size: 0.9rem;">--</div>
+                </div>
+                <div class="card">
+                    <div class="card-header">Strategy Status</div>
+                    <div id="strat-list" style="font-size: 0.85rem; color: var(--text-muted);">Loading...</div>
+                </div>
             </div>
         </div>
+
     </div>
+</div>
+{% endblock %}
 
-    <script>
-      const BATTLEBOX_GPT_URL = "https://chatgpt.com/g/g-6949c388d8c48191833b3c35af02d809-kabroda-trading-battlebox";
-      const SPECS = {
-        "America/New_York_Early": { tz: "America/New_York", h: 8, m: 30, label: "NY FUTURES" },
-        "America/New_York":       { tz: "America/New_York", h: 9, m: 30, label: "NY EQUITY" },
-        "Europe/London":          { tz: "Europe/London",    h: 8, m: 0,  label: "LONDON" },
-        "Asia/Tokyo":             { tz: "Asia/Tokyo",       h: 9, m: 0,  label: "TOKYO" },
-        "Australia/Sydney":       { tz: "Australia/Sydney", h: 10, m: 0, label: "SYDNEY" },
-        "UTC":                    { tz: "UTC",              h: 0, m: 0,  label: "UTC CORE" }
-      };
+{% block scripts %}
+<script>
+  // USER PREFERENCE PASSED FROM BACKEND
+  const USER_OP_FLEX = {{ 'true' if user.operator_flex else 'false' }};
+  
+  let lastPacket = null;
+  let autoRefreshTimer = null;
 
-      let _lastDmrPayload = null;
-      function fmt(x){ return x ? parseFloat(x).toFixed(2) : "—"; }
+  function toggleTactical() {
+    const d = document.getElementById('tactical-drawer');
+    d.style.display = d.style.display === 'none' ? 'block' : 'none';
+  }
 
-      function openLaunchModal() {
-          if (!_lastDmrPayload) { alert("Please Initialize Sequence First"); return; }
-          const payload = { ..._lastDmrPayload };
-          payload.viewer = { local_tz: Intl.DateTimeFormat().resolvedOptions().timeZone, source: "browser" };
-          const jsonBody = JSON.stringify(payload, null, 2);
-          const promptText = `Generate today’s Daily Market Review using the Kabroda methodology.\nUse the following session packet as the authoritative data source:\n\n${jsonBody}`;
-          navigator.clipboard.writeText(promptText);
-          document.getElementById('launchModal').style.display = 'flex';
-      }
-      
-      function closeLaunchModal() { document.getElementById('launchModal').style.display = 'none'; }
-      function proceedToAI() { window.open(BATTLEBOX_GPT_URL, "_blank"); closeLaunchModal(); }
+  function toggleManualSession() {
+    const mode = document.getElementById('sessionMode').value;
+    document.getElementById('manualSessionId').style.display = (mode === 'MANUAL') ? 'inline-block' : 'none';
+  }
 
-      function getSessionContext() {
-        const key = document.getElementById("sessionTz").value;
-        const spec = SPECS[key] || SPECS["UTC"];
-        const now = new Date();
-        const targetTimeStr = now.toLocaleString("en-US", {timeZone: spec.tz, hour12: false});
-        const targetDate = new Date(targetTimeStr); 
-        const currentMins = (targetDate.getHours() * 60) + targetDate.getMinutes();
-        const openMins = (spec.h * 60) + spec.m;
-        let diff = currentMins - openMins;
-        if (diff > 1200) diff -= 1440; 
-        if (diff < -1200) diff += 1440;
+  function toggleAutoRefresh() {
+    const toggle = document.getElementById('autoRefreshToggle');
+    const dot = document.getElementById('live-dot');
+    if(toggle.checked) {
+        dot.style.background = "#00ff9d";
+        dot.style.boxShadow = "0 0 8px #00ff9d";
+        runLivePulse(); 
+        autoRefreshTimer = setInterval(runLivePulse, 120000);
+    } else {
+        dot.style.background = "#333";
+        dot.style.boxShadow = "none";
+        clearInterval(autoRefreshTimer);
+    }
+  }
 
-        let uiMsg = "", uiColor = "#94a3b8", btnLabel = "⚡ INITIATE CALIBRATION", isReview = false;
+  async function runLivePulse() {
+    const btn = document.querySelector('#main-action-btn');
+    const originalText = btn.innerText;
+    btn.innerText = "UPDATING...";
+    try {
+        const res = await fetch('/api/dmr/live', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ 
+                symbol: "BTCUSDT", 
+                session_mode: document.getElementById('sessionMode').value,
+                manual_session_id: document.getElementById('manualSessionId').value,
+                operator_flex: USER_OP_FLEX 
+            })
+        });
+        const data = await res.json();
+        if(data.status === "ERROR") return;
+        lastPacket = data.battlebox;
+        
+        // WAR MAP
+        const wm = data.battlebox.war_map_context || {};
+        const leanEl = document.getElementById('wm-lean');
+        leanEl.innerText = wm.lean || "--";
+        leanEl.style.color = wm.lean === "BULLISH" ? "#00ff9d" : (wm.lean === "BEARISH" ? "#ef4444" : "#fff");
+        
+        document.getElementById('wm-phase').innerText = wm.phase || "--";
+        document.getElementById('wm-note').innerText = wm.note || "--";
+        
+        const camp = data.battlebox.war_map_campaign || {};
+        document.getElementById('wm-camp-status').innerText = camp.status || "NOT ARMED";
+        document.getElementById('wm-camp-note').innerText = camp.note || "--";
 
-        if (diff < 0) {
-           const h = Math.floor(Math.abs(diff) / 60);
-           const m = Math.abs(diff % 60);
-           uiMsg = `> ⚠️ PRE-MARKET: OPENS IN ${h}H ${m}M. BUTTON RUNS PREVIOUS SESSION.`;
-           uiColor = "#22d3ee";
-           btnLabel = "RUN PREVIOUS SESSION";
-           isReview = true;
-        } else if (diff >= 0 && diff < 30) {
-           uiMsg = `> 🟡 MARKET OPEN | CALIBRATING LIVE DATA... READY IN ${30 - diff} MINS.`;
-           uiColor = "#f59e0b";
-        } else if (diff >= 30 && diff < 90) {
-           uiMsg = `> 🟢 ACTIVE SESSION: ${spec.label} | INITIAL BALANCE | EXECUTION ONLINE.`;
-           uiColor = "#10b981";
-        } else if (diff >= 90 && diff < 480) { 
-           uiMsg = `> 🟢 ACTIVE SESSION: ${spec.label} | SESSION FLOW | EXECUTION ONLINE.`;
-           uiColor = "#10b981";
+        // SESSION BATTLE
+        const sb = data.battlebox.session_battle || {};
+        document.getElementById('session-name').innerText = data.battlebox.session?.name || "--";
+        
+        const action = sb.action || "HOLD FIRE";
+        const elAction = document.getElementById('sb-action');
+        elAction.innerText = action;
+        
+        if(action === "GREENLIGHT") elAction.style.color = "#00ff9d";
+        else if(action === "PREPARE") elAction.style.color = "#ffcc00";
+        else elAction.style.color = "#444";
+        
+        document.getElementById('sb-reason').innerText = sb.reason || "--";
+        document.getElementById('live-price').innerText = data.price.toFixed(2);
+        
+        const permStatus = sb.permission?.status || "NONE";
+        const permEl = document.getElementById('sb-perm');
+        permEl.innerText = permStatus;
+        permEl.style.color = permStatus === "EARNED" ? "#00ff9d" : "#94a3b8";
+        
+        const acc = sb.acceptance_progress || {count:0};
+        document.getElementById('sb-accept').innerText = `${acc.count || 0}/${acc.required || 2}`;
+        
+        const loc = sb.location || {};
+        document.getElementById('sb-loc').innerText = `${loc.relative_to_triggers || '-'} | ${loc.relative_to_value || '-'}`;
+
+        // EXECUTION GATES
+        const exec = sb.execution || {};
+        const levels = exec.levels || {};
+        const gatesMode = exec.gates_mode || "PREVIEW";
+        const pauseState = exec.pause_state || "NONE";
+
+        const structureText = pauseState === "CONFIRMED" ? "STRUCTURE CONFIRMED" : (pauseState === "FORMING" ? "STRUCTURE FORMING" : "NO STRUCTURE YET");
+        document.getElementById('sb-gates-mode').innerText = (gatesMode === "LOCKED") ? `LOCKED • ${structureText}` : `PREVIEW (FLOATING) • ${structureText}`;
+
+        const gateBox = document.getElementById('sb-prepare-box');
+        if (gatesMode === "LOCKED") {
+            gateBox.style.opacity = "1";
+            gateBox.style.borderColor = "var(--primary)";
         } else {
-           uiMsg = `> 🔵 MARKET CLOSED. PREPARING NEXT SESSION.`;
-           uiColor = "#94a3b8";
-           btnLabel = "RUN REVIEW SESSION";
-           isReview = true;
+            gateBox.style.opacity = "0.7";
+            gateBox.style.borderColor = "rgba(6, 182, 212, 0.2)";
         }
-        return { uiMsg, uiColor, btnLabel, isReview, now, diff };
-      }
 
-      function updateSessionStatus() {
-        const ctx = getSessionContext();
-        const btn = document.getElementById("levelsBtn");
-        document.getElementById("status").innerHTML = ctx.uiMsg;
-        document.getElementById("status").style.color = ctx.uiColor;
+        document.getElementById('sb-fail-line').innerText = (levels.failure ? levels.failure.toFixed(2) : "--");
+        document.getElementById('sb-cont-line').innerText = (levels.continuation ? levels.continuation.toFixed(2) : "--");
         
-        if(btn.innerText !== "CALIBRATING...") {
-            btn.innerText = ctx.btnLabel;
-            if(ctx.isReview) {
-               btn.style.border = "1px solid rgba(255,255,255,0.2)";
-               btn.style.boxShadow = "none";
-            } else if (ctx.uiColor.includes("success") || ctx.uiColor.includes("#10b981")) {
-               btn.style.border = "1px solid #10b981";
-               btn.style.boxShadow = "0 0 20px rgba(16, 185, 129, 0.2)";
-            } else {
-               btn.style.border = "1px solid #f59e0b";
-               btn.style.boxShadow = "none";
-            }
-        }
-        updateTimelineVisuals(ctx.now, ctx.diff);
-      }
-
-      function updateTimelineVisuals(now, diffMins) {
-        const openTime = new Date(now.getTime() - (diffMins * 60000));
-        const t_calib = new Date(openTime.getTime() + 30*60000);
-        const t_close = new Date(openTime.getTime() + 8*60*60000); 
-        const opt = {hour:'2-digit', minute:'2-digit'};
-        document.getElementById("time_open").innerText = openTime.toLocaleTimeString([], opt);
-        document.getElementById("time_calib").innerText = openTime.toLocaleTimeString([], opt) + " - " + t_calib.toLocaleTimeString([], opt);
-        document.getElementById("time_exec").innerText = t_calib.toLocaleTimeString([], opt) + " +";
-        document.getElementById("time_close").innerText = t_close.toLocaleTimeString([], opt);
-      }
-
-      async function calibrateBattlefield(){
-        const sym = document.getElementById("symbol").value;
-        const tz = document.getElementById("sessionTz").value;
-        const btn = document.getElementById("levelsBtn");
-        const prevText = btn.innerText;
+        // LEVELS
+        const l = data.battlebox.levels || {};
+        document.getElementById('val-dr').innerText = l.daily_resistance?.toFixed(2) || "---";
+        document.getElementById('val-bo').innerText = l.breakout_trigger?.toFixed(2) || "---";
+        document.getElementById('val-bd').innerText = l.breakdown_trigger?.toFixed(2) || "---";
+        document.getElementById('val-ds').innerText = l.daily_support?.toFixed(2) || "---";
         
-        btn.innerText = "CALIBRATING...";
-        btn.disabled = true;
-
-        try {
-          const r = await fetch("/api/dmr/run-raw", {
-            method: "POST", headers: {"Content-Type":"application/json"},
-            body: JSON.stringify({ symbol: sym, session_tz: tz })
-          });
-          const data = await r.json();
-          _lastDmrPayload = data;
-
-          const l = data.levels || {};
-          const r30 = data.range_30m || {};
-          document.getElementById("lv_ds").innerText = fmt(l.daily_support);
-          document.getElementById("lv_dr").innerText = fmt(l.daily_resistance);
-          document.getElementById("lv_bo").innerText = fmt(l.breakout_trigger);
-          document.getElementById("lv_bd").innerText = fmt(l.breakdown_trigger);
-          document.getElementById("lv_30h").innerText = fmt(r30.high);
-          document.getElementById("lv_30l").innerText = fmt(r30.low);
-
-          document.getElementById("tvCopyBtn").style.display = "inline-flex";
-          document.getElementById("openGptBtn").style.display = "inline-flex"; 
-          document.getElementById("status").innerText = "> SYSTEM READY. DATA SYNCED.";
-          document.getElementById("status").style.color = "#10b981";
-          
-        } catch(e) {
-          document.getElementById("status").innerText = "> ERROR: " + e.message;
-        } finally {
-          btn.disabled = false;
-          btn.innerText = prevText;
-          updateSessionStatus();
+        // STRATEGIES
+        const strats = data.battlebox.strategies_summary || [];
+        const stratList = document.getElementById('strat-list');
+        if(strats.length > 0) {
+            stratList.innerHTML = strats.map(s => `
+                <div style="margin-bottom:8px; padding:10px; background:rgba(255,255,255,0.02); border-left:3px solid var(--border-subtle); border-radius:4px;">
+                    <div style="font-weight:700; color:#fff; font-size:0.85rem;">${s.name}</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">${s.status} - ${s.msg}</div>
+                </div>
+            `).join('');
+        } else {
+            stratList.innerHTML = "No strategies active.";
         }
-      }
+        
+    } catch(e) { console.error(e); } 
+    finally { btn.innerText = originalText; }
+  }
 
-      async function copyForTV(){
-        if (!_lastDmrPayload) return;
-        const l = _lastDmrPayload.levels;
-        const r = _lastDmrPayload.range_30m;
-        const text = `${fmt(l.breakout_trigger)},${fmt(l.breakdown_trigger)},${fmt(l.daily_resistance)},${fmt(l.daily_support)},${fmt(r.high)},${fmt(r.low)}`;
-        await navigator.clipboard.writeText(text);
-        alert("COPIED for Indicator: " + text);
-      }
+  function copyTraderBrief() {
+    if(!lastPacket) return;
+    const brief = {
+        "context": lastPacket.war_map_context,
+        "session": lastPacket.session_battle,
+        "levels": lastPacket.levels
+    };
+    navigator.clipboard.writeText(JSON.stringify(brief, null, 2));
+    alert("Trader Brief Copied.");
+  }
 
-      setInterval(updateSessionStatus, 1000);
-      document.addEventListener("DOMContentLoaded", updateSessionStatus);
-      document.getElementById("sessionTz").addEventListener("change", updateSessionStatus);
-    </script>
-</body>
-</html>
+  function copyBattleBox() {
+    if(!lastPacket) return;
+    navigator.clipboard.writeText(JSON.stringify(lastPacket, null, 2));
+    alert("Full Packet Copied.");
+  }
+</script>
+{% endblock %}
