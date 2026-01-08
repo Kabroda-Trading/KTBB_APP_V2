@@ -1,26 +1,60 @@
 {% extends "base_member.html" %}
 
-{% block title %}Execution Indicators | Kabroda{% endblock %}
+{% block title %}Kabroda | Execution Indicators{% endblock %}
+
+{% block head %}
+<style>
+/* Specific Styles for Indicators Page */
+.header-section { padding: 80px 0 60px; text-align: center; }
+.pill { display: inline-block; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); padding: 6px 16px; border-radius: 100px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #06b6d4; margin-bottom: 1.5rem; letter-spacing: 0.1em; text-transform: uppercase; }
+.header-section h1 { font-size: 3rem; margin-bottom: 1rem; color: #fff; }
+.header-section p { font-size: 1.1rem; color: #94a3b8; max-width: 600px; margin: 0 auto; }
+
+.indicator-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 2rem; margin-bottom: 3rem; }
+.indicator-card { background: #0f1623; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 2.5rem; position: relative; display: flex; flex-direction: column; align-items: flex-start; }
+.indicator-card.core { border-left: 3px solid #06b6d4; }
+.indicator-card.context { border-left: 3px solid #a855f7; }
+.badge { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; text-transform: uppercase; padding: 4px 8px; border-radius: 4px; margin-bottom: 1rem; font-weight: 700; }
+.badge.cyan { background: rgba(6, 182, 212, 0.1); color: #06b6d4; }
+.badge.purple { background: rgba(168, 85, 247, 0.1); color: #a855f7; }
+.indicator-card h3 { font-size: 1.5rem; margin-bottom: 1rem; color: #fff; }
+.indicator-card p { font-size: 0.95rem; color: #94a3b8; margin-bottom: 2rem; flex: 1; }
+.btn-link { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 0.9rem; color: #fff; background: rgba(255,255,255,0.05); padding: 10px 20px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); text-decoration: none; }
+.btn-link.cyan:hover { background: #06b6d4; color: #000; border-color: #06b6d4; }
+.btn-link.purple:hover { background: #a855f7; color: #000; border-color: #a855f7; }
+
+.reminder-box { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-left: 3px solid #f59e0b; padding: 1.5rem; border-radius: 6px; margin-bottom: 4rem; display: flex; align-items: center; gap: 1.5rem; }
+.reminder-content strong { color: #f59e0b; display: block; font-size: 0.9rem; margin-bottom: 0.25rem; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; }
+.reminder-content p { color: #94a3b8; font-size: 0.95rem; margin: 0; }
+
+.sync-section { border: 1px solid rgba(255,255,255,0.05); background: #0f1623; border-radius: 8px; padding: 3rem; }
+.sync-header { display: flex; align-items: center; gap: 10px; margin-bottom: 2rem; color: #fff; }
+.sync-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 2rem; }
+.step-col h4 { font-family: 'JetBrains Mono', monospace; color: #06b6d4; font-size: 0.85rem; margin-bottom: 1rem; text-transform: uppercase; }
+.step-col p { font-size: 0.95rem; color: #94a3b8; }
+.troubleshoot { margin-top: 2rem; padding-top: 2rem; border-top: 1px solid rgba(255,255,255,0.05); font-size: 0.9rem; color: #94a3b8; opacity: 0.7; font-style: italic; }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="container">
+<div class="container" style="max-width: 1200px; margin: 0 auto; padding: 0 20px;">
     <section class="header-section">
         <span class="pill">EXECUTION LAYER</span>
         <h1>Execution Indicators</h1>
-        <p>These TradingView scripts display Kabroda session structure on your chart.</p>
+        <p>These TradingView scripts display Kabroda session structure on your chart. They do not generate signals or instructions.</p>
     </section>
 
     <div class="indicator-grid">
         <div class="indicator-card core">
             <div class="badge cyan">CORE EXECUTION LAYER</div>
             <h3>1. Kabroda BattleBox Command</h3>
-            <p>The execution anchor. Displays session levels, breakout thresholds, and keeps your chart aligned.</p>
+            <p>The execution anchor. This indicator displays the session levels generated in Suite, including breakout and breakdown thresholds, and keeps your chart aligned to the active session.</p>
             <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" class="btn-link cyan">Open in TradingView ↗</a>
         </div>
         <div class="indicator-card context">
             <div class="badge purple">CONTEXT ENGINE</div>
             <h3>2. KTBB Intel: Multi-Timeframe</h3>
-            <p>The structure companion. Highlights higher-timeframe trend and key pivots.</p>
+            <p>The structure companion. This indicator highlights higher-timeframe trend and key pivots so you can contextualize intraday execution.</p>
             <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" class="btn-link purple">Open in TradingView ↗</a>
         </div>
     </div>
@@ -28,18 +62,31 @@
     <div class="reminder-box">
         <div class="reminder-content">
             <strong>⚠️ &nbsp; Execution Reminder</strong>
-            <p>Indicators display structure. Decisions still require confirmation.</p>
+            <p>Indicators display structure. Decisions still require confirmation, alignment, and patience.</p>
         </div>
     </div>
 
     <div class="sync-section">
-        <div class="sync-header"><h3>⚡ How to Sync Your Charts</h3></div>
+        <div class="sync-header">
+            <h3>⚡ How to Sync Your Charts</h3>
+        </div>
         <div class="sync-grid">
-            <div class="step-col"><h4>Step 01</h4><p>Add scripts to Favorites on TradingView.</p></div>
-            <div class="step-col"><h4>Step 02</h4><p>Add indicators to your chart from Favorites.</p></div>
-            <div class="step-col"><h4>Step 03</h4><p>Copy "Indicator Data" from Session Control and paste into settings.</p></div>
+            <div class="step-col">
+                <h4>Step 01</h4>
+                <p>Open each script on TradingView and add it to your Favorites (Star icon).</p>
+            </div>
+            <div class="step-col">
+                <h4>Step 02</h4>
+                <p>Open your chart. Go to Indicators → Favorites and add Kabroda BattleBox Command. Add KTBB Intel if desired.</p>
+            </div>
+            <div class="step-col">
+                <h4>Step 03</h4>
+                <p>Go to Suite and click "Copy Indicator Data". Open the indicator settings and paste the values into the "Session Data" field.</p>
+            </div>
+        </div>
+        <div class="troubleshoot">
+            If levels do not update, confirm the symbol and refresh the chart.
         </div>
     </div>
 </div>
-<div style="height: 100px;"></div>
 {% endblock %}
