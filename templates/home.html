@@ -3,9 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kabroda | Decision Intelligence</title>
+    <title>Kabroda | Decision Framework for Traders</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        /* --- RESET & BASE STYLES --- */
+        /* --- RESET & VARIABLES --- */
         :root {
             --bg-dark: #050b14;
             --bg-card: #0f1623;
@@ -16,7 +19,7 @@
             --accent-red: #ef4444;
             --accent-green: #10b981;
             --font-main: 'Inter', system-ui, -apple-system, sans-serif;
-            --font-mono: 'JetBrains Mono', 'Roboto Mono', monospace;
+            --font-mono: 'JetBrains Mono', monospace;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -29,55 +32,71 @@
             overflow-x: hidden;
         }
 
-        h1, h2, h3, h4 {
-            font-weight: 700;
-            line-height: 1.2;
-            letter-spacing: -0.02em;
-        }
-
+        h1, h2, h3 { font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; }
+        
         .container {
             max-width: 1200px;
             margin: 0 auto;
             padding: 0 20px;
         }
 
-        /* --- TYPOGRAPHY UTILS --- */
-        .text-center { text-align: center; }
-        .text-gradient {
-            background: linear-gradient(90deg, #fff, var(--text-muted));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+        a { text-decoration: none; color: inherit; transition: 0.3s ease; }
+        
+        img { max-width: 100%; height: auto; display: block; }
+
+        /* --- NAVIGATION (GLOBAL RULE: VISIBLE) --- */
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            background: rgba(5, 11, 20, 0.95);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
         }
-        .eyebrow {
+
+        .logo {
             font-family: var(--font-mono);
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 0.15em;
-            color: var(--accent-cyan);
-            margin-bottom: 1rem;
-            display: block;
+            font-weight: 700;
+            font-size: 1.2rem;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
-        .glow-text {
-            color: var(--accent-glow);
-            text-shadow: 0 0 20px rgba(34, 211, 238, 0.4);
+        
+        .logo span { color: var(--accent-cyan); }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-links a {
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .nav-links a:hover { color: #fff; }
+
+        .nav-cta .btn {
+            padding: 0.6rem 1.2rem;
+            font-size: 0.9rem;
         }
 
         /* --- BUTTONS --- */
-        .btn-group {
-            display: flex;
-            gap: 1rem;
-            justify-content: center;
-            margin-top: 2rem;
-        }
-
         .btn {
+            display: inline-block;
             padding: 1rem 2rem;
             border-radius: 4px;
             font-weight: 600;
-            text-decoration: none;
-            transition: all 0.3s ease;
-            font-size: 1rem;
-            letter-spacing: 0.02em;
+            cursor: pointer;
+            text-align: center;
         }
 
         .btn-primary {
@@ -91,180 +110,222 @@
         }
 
         .btn-secondary {
-            background: transparent;
-            border: 1px solid var(--text-muted);
+            border: 1px solid rgba(255,255,255,0.2);
             color: var(--text-main);
+            background: transparent;
         }
         .btn-secondary:hover {
-            border-color: var(--text-main);
+            border-color: #fff;
             background: rgba(255,255,255,0.05);
         }
 
         /* --- SECTION 1: HERO --- */
         .hero {
-            padding: 120px 0 100px;
-            position: relative;
+            padding: 100px 0 80px;
+            text-align: center;
             background: radial-gradient(circle at center, rgba(6, 182, 212, 0.08) 0%, transparent 60%);
         }
 
-        .hero h1 {
-            font-size: 4rem; /* Big impact */
-            margin-bottom: 1.5rem;
-        }
-
-        .hero p.subhead {
-            font-size: 1.25rem;
-            color: var(--text-muted);
-            max-width: 600px;
-            margin: 0 auto;
-        }
-
-        .micro-copy {
+        .eyebrow {
             font-family: var(--font-mono);
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            margin-top: 1rem;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--accent-cyan);
+            margin-bottom: 1.5rem;
             display: block;
-            opacity: 0.7;
         }
 
-        /* --- SECTION 2: REALITY CHECK --- */
-        .reality-check {
-            padding: 80px 0;
-            background: var(--bg-dark);
+        .hero h1 {
+            font-size: 3.5rem;
+            margin-bottom: 1.5rem;
+            color: #fff;
+        }
+
+        .hero-sub {
+            font-size: 1.2rem;
+            color: var(--text-muted);
+            max-width: 650px;
+            margin: 0 auto 2.5rem;
+        }
+
+        .hero-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+
+        /* --- SECTION 2: THE PROBLEM --- */
+        .problem-section {
+            padding: 100px 0;
+            background: var(--bg-card); /* Slight contrast */
+            text-align: center;
             border-top: 1px solid rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255,255,255,0.05);
         }
 
-        .reality-content {
-            max-width: 600px;
+        .content-narrow {
+            max-width: 700px;
             margin: 0 auto;
         }
 
-        .reality-check h2 {
-            font-size: 2.5rem;
+        .problem-section h2 {
+            font-size: 2.2rem;
             margin-bottom: 2rem;
         }
 
-        .reality-check p {
+        .problem-section p {
             font-size: 1.1rem;
             color: var(--text-muted);
             margin-bottom: 1.5rem;
         }
 
-        .pull-quote {
-            margin-top: 3rem;
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: var(--text-main);
+        .anchor-line {
+            display: inline-block;
+            margin-top: 2rem;
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #fff;
             border-left: 4px solid var(--accent-cyan);
             padding-left: 20px;
-            display: inline-block;
         }
 
-        /* --- SECTION 3: THE CORE TRUTH (CARDS) --- */
-        .core-truth {
+        /* --- SECTION 3: WHAT KABRODA DOES (PILLARS) --- */
+        .pillars-section {
             padding: 100px 0;
         }
+        
+        .section-header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+        
+        .section-header h2 { font-size: 2.5rem; }
 
-        .cards-grid {
+        .pillars-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 2rem;
-            margin-top: 3rem;
         }
 
-        .phase-card {
-            background: var(--bg-card);
-            padding: 2rem;
-            border-radius: 8px;
+        .pillar-card {
+            background: rgba(255,255,255,0.02);
             border: 1px solid rgba(255,255,255,0.05);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .phase-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-        }
-
-        .phase-building::before { background: var(--accent-cyan); }
-        .phase-testing::before { background: #f59e0b; /* Orange */ }
-        .phase-breaking::before { background: var(--accent-green); }
-
-        .phase-title {
-            font-family: var(--font-mono);
-            font-size: 0.9rem;
-            letter-spacing: 0.1em;
-            margin-bottom: 1rem;
-            display: block;
-            opacity: 0.8;
-        }
-        .phase-building .phase-title { color: var(--accent-cyan); }
-        .phase-testing .phase-title { color: #f59e0b; }
-        .phase-breaking .phase-title { color: var(--accent-green); }
-
-        .phase-card h3 {
-            font-size: 1.5rem;
-            margin-bottom: 1rem;
+            padding: 2.5rem;
+            border-radius: 6px;
+            transition: transform 0.3s ease;
         }
         
-        .phase-card p {
-            font-size: 0.95rem;
+        .pillar-card:hover {
+            background: rgba(255,255,255,0.04);
+            transform: translateY(-5px);
+        }
+
+        .pillar-num {
+            font-family: var(--font-mono);
+            color: var(--accent-cyan);
+            font-size: 2rem;
+            opacity: 0.5;
+            margin-bottom: 1rem;
+            display: block;
+        }
+
+        .pillar-card h3 {
+            font-size: 1.4rem;
+            margin-bottom: 1rem;
+        }
+
+        .pillar-card p {
             color: var(--text-muted);
-            margin-bottom: 0.5rem;
+            font-size: 1rem;
         }
 
-        .phase-action {
-            margin-top: 1.5rem;
-            font-weight: 700;
-            color: var(--text-main);
+        /* --- SECTION 4: IS / IS NOT --- */
+        .is-not-section {
+            padding: 80px 0;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            background: var(--bg-card);
         }
 
-        .divider-line {
+        .comparison-wrapper {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0; /* Connected look */
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .panel {
+            padding: 3rem;
+        }
+
+        .panel-left {
+            background: rgba(239, 68, 68, 0.05); /* Red tint */
+            border-right: 1px solid rgba(255,255,255,0.1);
+        }
+        .panel-right {
+            background: rgba(16, 185, 129, 0.05); /* Green tint */
+        }
+
+        .panel h3 {
+            font-size: 1.5rem;
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .panel-list div {
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.05rem;
+        }
+        .panel-list div:last-child { border-bottom: none; }
+        
+        .icon-red { color: var(--accent-red); font-weight: bold; }
+        .icon-green { color: var(--accent-green); font-weight: bold; }
+
+        .footer-line {
+            text-align: center;
             margin-top: 3rem;
-            padding-top: 2rem;
-            border-top: 1px solid rgba(255,255,255,0.1);
+            font-family: var(--font-mono);
             color: var(--text-muted);
-            font-style: italic;
+            font-size: 0.95rem;
         }
 
-        /* --- SECTION 4: THE SYSTEM (Split Layouts) --- */
-        .system-section {
+        /* --- SECTION 5: SESSION FLOW --- */
+        .flow-section {
             padding: 100px 0;
-            background: linear-gradient(180deg, var(--bg-dark) 0%, var(--bg-card) 100%);
         }
 
-        .system-block {
+        .flow-step {
             display: flex;
             align-items: center;
             gap: 4rem;
-            margin-bottom: 8rem;
+            margin-bottom: 6rem;
         }
+        .flow-step:last-child { margin-bottom: 0; }
         
-        .system-block:last-child { margin-bottom: 0; }
+        /* Alternate Layout */
+        .flow-step.reverse { flex-direction: row-reverse; }
+
+        .step-text { flex: 1; }
         
-        .system-block.reverse {
-            flex-direction: row-reverse;
-        }
-
-        .system-text {
-            flex: 1;
-        }
-
-        .system-visual {
-            flex: 1.2;
-            background: #000;
-            border-radius: 8px;
+        .step-visual { 
+            flex: 1.2; 
             border: 1px solid rgba(255,255,255,0.1);
-            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            border-radius: 8px;
             overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
         }
-
-        .system-visual img {
+        
+        .step-visual img {
             width: 100%;
             height: auto;
             display: block;
@@ -273,282 +334,186 @@
         .step-label {
             font-family: var(--font-mono);
             color: var(--accent-cyan);
-            font-size: 0.9rem;
             margin-bottom: 0.5rem;
             display: block;
-        }
-
-        .system-text h3 {
-            font-size: 2rem;
-            margin-bottom: 1.5rem;
-        }
-
-        .system-text ul {
-            list-style: none;
-            margin-bottom: 2rem;
-        }
-
-        .system-text li {
-            position: relative;
-            padding-left: 1.5rem;
-            margin-bottom: 0.75rem;
-            color: var(--text-muted);
-        }
-
-        .system-text li::before {
-            content: '•';
-            color: var(--accent-cyan);
-            position: absolute;
-            left: 0;
-        }
-
-        .result-box {
-            background: rgba(255,255,255,0.03);
-            border-left: 2px solid var(--accent-cyan);
-            padding: 1rem;
-            color: var(--text-main);
-            font-weight: 500;
-        }
-
-        /* --- SECTION 5: NOT / IS --- */
-        .comparison-section {
-            padding: 80px 0;
-            background: var(--bg-dark);
-        }
-
-        .comparison-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 2rem;
-            max-width: 900px;
-            margin: 0 auto;
-        }
-
-        .comp-col {
-            padding: 2rem;
-            border-radius: 8px;
-            border: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .comp-col.is-not { background: rgba(239, 68, 68, 0.05); border-color: rgba(239, 68, 68, 0.2); }
-        .comp-col.is-yes { background: rgba(16, 185, 129, 0.05); border-color: rgba(16, 185, 129, 0.2); }
-
-        .comp-header {
-            font-weight: 700;
-            font-size: 1.25rem;
-            margin-bottom: 1.5rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .comp-list div {
-            padding: 0.75rem 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .comp-list div:last-child { border-bottom: none; }
-
-        .icon-x { color: var(--accent-red); }
-        .icon-check { color: var(--accent-green); }
-
-        .quiet-line {
-            text-align: center;
-            margin-top: 3rem;
-            color: var(--text-muted);
             font-size: 0.9rem;
+            letter-spacing: 0.1em;
         }
 
-        /* --- FINAL CTA --- */
-        .final-cta {
+        .step-text h3 { font-size: 2rem; margin-bottom: 1rem; }
+        .step-text p { color: var(--text-muted); font-size: 1.1rem; max-width: 90%; }
+
+        /* --- SECTION 6: CLOSE --- */
+        .close-section {
             padding: 120px 0;
             text-align: center;
-            background: radial-gradient(circle at bottom, rgba(6, 182, 212, 0.1) 0%, transparent 60%);
+            background: radial-gradient(circle at bottom, rgba(6, 182, 212, 0.08) 0%, transparent 70%);
         }
 
-        .final-cta h2 {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-        }
+        .close-section h2 { font-size: 3.5rem; margin-bottom: 1rem; }
+        .close-sub { font-size: 1.25rem; color: var(--text-muted); margin-bottom: 2.5rem; }
+        .micro-text { font-size: 0.85rem; color: var(--text-muted); margin-top: 1rem; display: block; opacity: 0.7; }
 
-        /* RESPONSIVE */
+        /* Responsive */
         @media (max-width: 768px) {
+            .navbar { flex-direction: column; gap: 1rem; }
+            .nav-links { gap: 1rem; font-size: 0.9rem; flex-wrap: wrap; justify-content: center; }
             .hero h1 { font-size: 2.5rem; }
-            .system-block { flex-direction: column; text-align: left; gap: 2rem; }
-            .system-block.reverse { flex-direction: column; }
-            .comparison-grid { grid-template-columns: 1fr; }
+            .comparison-wrapper { grid-template-columns: 1fr; }
+            .panel-left { border-right: none; border-bottom: 1px solid rgba(255,255,255,0.1); }
+            .flow-step { flex-direction: column !important; text-align: left; gap: 2rem; }
+            .step-text p { max-width: 100%; }
         }
     </style>
 </head>
 <body>
 
-    <section class="hero text-center">
+    <nav class="navbar">
+        <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; flex-wrap: wrap;">
+            <a href="/" class="logo">
+                <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
+                KABRODA
+            </a>
+            <ul class="nav-links">
+                <li><a href="/network">Network</a></li>
+                <li><a href="/methodology">Methodology</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/login">Login</a></li>
+            </ul>
+            <div class="nav-cta">
+                <a href="/pricing" class="btn btn-primary">Start 7-Day Free Trial</a>
+            </div>
+        </div>
+    </nav>
+
+    <header class="hero">
         <div class="container">
-            <span class="eyebrow">Decision Intelligence for Traders</span>
-            <h1>
-                STOP GUESSING.<br>
-                START <span class="glow-text">SEEING.</span>
-            </h1>
-            <p class="subhead">
-                Kabroda reveals market structure in real time — so you know when nothing matters and when everything does.
+            <span class="eyebrow">DECISION FRAMEWORK FOR TRADERS</span>
+            <h1>Stop Guessing.<br>Start Trading With Structure.</h1>
+            <p class="hero-sub">
+                Kabroda gives you real-time market context so you know when to wait, when to prepare, and when execution actually matters.
             </p>
-            <div class="btn-group">
-                <a href="#system" class="btn btn-secondary">EXPLORE THE SYSTEM</a>
-                <a href="/pricing" class="btn btn-primary">START 7-DAY FREE TRIAL</a>
+            <div class="hero-buttons">
+                <a href="/pricing" class="btn btn-primary">Start 7-Day Free Trial</a>
+                <a href="/methodology" class="btn btn-secondary">See How Kabroda Works</a>
             </div>
-            <span class="micro-copy">No signals. No predictions. No noise.</span>
+        </div>
+    </header>
+
+    <section class="problem-section">
+        <div class="container content-narrow">
+            <h2>You’re Not Bad at Trading.<br>You’re Trading Without Context.</h2>
+            <p>Most traders don’t fail because they lack discipline or effort.</p>
+            <p>They fail because they’re forced to make decisions without understanding where price is relative to structure.</p>
+            <p>Indicators fire. Candles move. Emotions react.</p>
+            <p>That’s not trading. That’s reacting.</p>
+            <div class="anchor-line">
+                Price only makes sense relative to structure.
+            </div>
         </div>
     </section>
 
-    <section class="reality-check text-center">
-        <div class="container reality-content">
-            <h2>You’re Not Bad at Trading.<br><span class="text-gradient">You’re Just Trading Blind.</span></h2>
-            <p>Most traders don’t fail because they lack discipline. They fail because they’re forced to make decisions without context.</p>
-            <p>Candles print. Indicators flash. Opinions collide. And somehow, you’re expected to know what matters.</p>
-            <p>That’s not trading. <strong>That’s reacting.</strong></p>
-            <div class="pull-quote">
-                “Price only makes sense relative to structure.”
-            </div>
-        </div>
-    </section>
-
-    <section class="core-truth">
+    <section class="pillars-section">
         <div class="container">
-            <div class="text-center">
-                <h3>The Market Only Does Three Things</h3>
+            <div class="section-header">
+                <h2>Kabroda Is a Decision Framework —<br>Not a Signal Service.</h2>
             </div>
-            <div class="cards-grid">
-                <div class="phase-card phase-building">
-                    <span class="phase-title">01. BUILDING</span>
-                    <p>Energy is accumulating.</p>
-                    <p>Nothing is confirmed.</p>
-                    <div class="phase-action">Doing nothing is the edge.</div>
+            <div class="pillars-grid">
+                <div class="pillar-card">
+                    <span class="pillar-num">01</span>
+                    <h3>Calibrates the Battlefield</h3>
+                    <p>Every session begins with objective levels that define where price actually matters.</p>
                 </div>
-                <div class="phase-card phase-testing">
-                    <span class="phase-title">02. TESTING</span>
-                    <p>Levels are probed.</p>
-                    <p>Weak hands are exposed.</p>
-                    <div class="phase-action">Patience beats prediction.</div>
+                <div class="pillar-card">
+                    <span class="pillar-num">02</span>
+                    <h3>Filters the Noise</h3>
+                    <p>Kabroda tells you when the market is undecided — so you don’t trade chop pretending it’s opportunity.</p>
                 </div>
-                <div class="phase-card phase-breaking">
-                    <span class="phase-title">03. BREAKING</span>
-                    <p>Structure breaks or fails.</p>
-                    <p>Direction is earned.</p>
-                    <div class="phase-action">Execution becomes obvious.</div>
+                <div class="pillar-card">
+                    <span class="pillar-num">03</span>
+                    <h3>Enforces Patience</h3>
+                    <p>You act only when structure earns permission. No chasing. No forcing.</p>
                 </div>
-            </div>
-            <div class="text-center divider-line">
-                Kabroda exists to tell you which phase you’re in — and keep you out of the rest.
             </div>
         </div>
     </section>
 
-    <section class="comparison-section">
+    <section class="is-not-section">
         <div class="container">
-            <div class="text-center" style="margin-bottom: 3rem;">
-                <h3>What Makes Kabroda Different</h3>
-            </div>
-            <div class="comparison-grid">
-                <div class="comp-col is-not">
-                    <div class="comp-header"><span class="icon-x">⊗</span> Kabroda is NOT</div>
-                    <div class="comp-list">
-                        <div><span class="icon-x">×</span> Magic "Buy/Sell" Signals</div>
-                        <div><span class="icon-x">×</span> A Black Box Algorithm</div>
-                        <div><span class="icon-x">×</span> A "Get Rich Quick" Scheme</div>
-                        <div><span class="icon-x">×</span> Prediction or Fortune Telling</div>
+            <div class="comparison-wrapper">
+                <div class="panel panel-left">
+                    <h3><span class="icon-red">⊗</span> Kabroda is NOT</h3>
+                    <div class="panel-list">
+                        <div><span class="icon-red">×</span> Buy/Sell signals</div>
+                        <div><span class="icon-red">×</span> A black-box prediction engine</div>
+                        <div><span class="icon-red">×</span> A “get rich quick” system</div>
+                        <div><span class="icon-red">×</span> Fortune telling or price targets</div>
                     </div>
                 </div>
-                <div class="comp-col is-yes">
-                    <div class="comp-header"><span class="icon-check">✓</span> Kabroda IS</div>
-                    <div class="comp-list">
-                        <div><span class="icon-check">✓</span> A Real-Time Structure Interpreter</div>
-                        <div><span class="icon-check">✓</span> A Discipline Enforcer</div>
-                        <div><span class="icon-check">✓</span> A Teaching Framework</div>
-                        <div><span class="icon-check">✓</span> A Decision Filter</div>
+                <div class="panel panel-right">
+                    <h3><span class="icon-green">✓</span> Kabroda IS</h3>
+                    <div class="panel-list">
+                        <div><span class="icon-green">✓</span> A real-time structure interpreter</div>
+                        <div><span class="icon-green">✓</span> A discipline enforcer</div>
+                        <div><span class="icon-green">✓</span> A teaching framework</div>
+                        <div><span class="icon-green">✓</span> A decision filter</div>
                     </div>
                 </div>
             </div>
-            <p class="quiet-line">
+            <div class="footer-line">
                 Kabroda doesn’t tell you what to trade. It tells you when trading even makes sense.
-            </p>
+            </div>
         </div>
     </section>
 
-    <section id="system" class="system-section">
+    <section class="flow-section">
         <div class="container">
-            <div class="text-center" style="margin-bottom: 4rem;">
-                <span class="eyebrow">THE OPERATING SYSTEM</span>
-                <h2>This Is Not a Tool. It’s an OS.</h2>
+            <div class="section-header">
+                <h2>How Traders Use Kabroda Each Session</h2>
             </div>
 
-            <div class="system-block">
-                <div class="system-text">
+            <div class="flow-step">
+                <div class="step-text">
                     <span class="step-label">STEP 01</span>
                     <h3>Calibrate Reality</h3>
-                    <p style="margin-bottom: 1rem;">Every session begins by anchoring price to objective structure:</p>
-                    <ul>
-                        <li>Institutional support & resistance</li>
-                        <li>Breakout and breakdown thresholds</li>
-                        <li>The opening range that defines bias</li>
-                    </ul>
-                    <div class="result-box">
-                        No drawing. No interpretation. Just where price actually matters today.
-                    </div>
+                    <p>Objective levels define where price matters today: support, resistance, value, and execution thresholds.</p>
                 </div>
-                <div class="system-visual">
-                    <img src="images/Screenshot 2026-01-07 174525.jpg" alt="Kabroda Calibration Dashboard">
+                <div class="step-visual">
+                    <img src="images/Kabroda Calibration Dashboard.png" alt="Kabroda Calibration Dashboard">
                 </div>
             </div>
 
-            <div class="system-block reverse">
-                <div class="system-text">
+            <div class="flow-step reverse">
+                <div class="step-text">
                     <span class="step-label">STEP 02</span>
                     <h3>Command Intelligence</h3>
-                    <p style="margin-bottom: 1rem;">Send the session context into the Kabroda AI Command. It analyzes structure, regime, and behavior.</p>
-                    <ul>
-                        <li>Analyzes structure and regime</li>
-                        <li>Returns clear operational posture</li>
-                        <li>Separates noise from signal</li>
-                    </ul>
-                    <div class="result-box">
-                        Wait. Observe. Prepare. Act. Just clarity.
-                    </div>
+                    <p>Session context is analyzed into a clear operational posture: wait, prepare, or act.</p>
                 </div>
-                <div class="system-visual">
-                    <img src="images/Screenshot 2026-01-07 174549.png" alt="Kabroda Battle Control">
+                <div class="step-visual">
+                    <img src="images/Kabroda Battle Control.png" alt="Kabroda Battle Control">
                 </div>
             </div>
 
-            <div class="system-block">
-                <div class="system-text">
+            <div class="flow-step">
+                <div class="step-text">
                     <span class="step-label">STEP 03</span>
                     <h3>Clean the Chart</h3>
-                    <p style="margin-bottom: 1rem;">With one click, Kabroda syncs to TradingView.</p>
-                    <ul>
-                        <li>Your chart becomes quiet</li>
-                        <li>Your decisions become simpler</li>
-                        <li>Structure replaces clutter</li>
-                    </ul>
-                    <div class="result-box">
-                        No drawing lines. Just execution.
-                    </div>
+                    <p>Kabroda syncs structure to your chart so execution happens without clutter or noise.</p>
                 </div>
-                <div class="system-visual">
-                    <img src="images/Screenshot 2026-01-07 174604.jpg" alt="Kabroda TradingView Integration">
+                <div class="step-visual">
+                    <img src="images/Kabroda TradingView Integration.png" alt="Kabroda TradingView Integration">
                 </div>
             </div>
 
         </div>
     </section>
 
-    <section class="final-cta">
+    <section class="close-section">
         <div class="container">
             <h2>Trade Less. Understand More.</h2>
-            <p class="subhead" style="margin-bottom: 2rem;">Kabroda is for traders who are done chasing and ready to operate with intent.</p>
-            <a href="/pricing" class="btn btn-primary">START 7-DAY FREE TRIAL</a>
-            <span class="micro-copy">Cancel anytime. No lock-in. No pressure.</span>
+            <p class="close-sub">Kabroda is for traders who are done chasing and ready to operate with intent.</p>
+            <a href="/pricing" class="btn btn-primary">Start 7-Day Free Trial</a>
+            <span class="micro-text">Cancel anytime. No lock-in. No pressure.</span>
         </div>
     </section>
 
