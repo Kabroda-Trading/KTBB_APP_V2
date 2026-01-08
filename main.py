@@ -109,6 +109,7 @@ def home(request: Request):
 
 @app.get("/analysis", response_class=HTMLResponse)
 def analysis(request: Request):
+    # This serves the NEW analysis.html file
     return templates.TemplateResponse("analysis.html", {"request": request, "is_logged_in": False, "force_public_nav": True})
 
 @app.get("/how-it-works", response_class=HTMLResponse)
