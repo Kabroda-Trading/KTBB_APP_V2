@@ -4,47 +4,90 @@
 
 {% block head %}
 <style>
-/* Namespaced CSS for Battle Control */
+/* Namespaced & Polished Styles for Battle Control */
 .battle-control {
-    --bg: #0a0a0a; --card: #141414; --primary: #00ff9d; --bull: #00ff9d; --bear: #ff4444; 
+    --bg-dark: #050b14;
+    --bg-card: #0f1623; 
+    --border-subtle: rgba(255,255,255,0.05);
+    --primary: #00ff9d; 
+    --bull: #00ff9d; 
+    --bear: #ef4444; 
     --warning: #f59e0b;
+    --text-muted: #94a3b8;
 }
-.battle-control .cyber-card { background: var(--card); border: 1px solid #222; padding: 20px; border-radius: 4px; }
-.battle-control .card-header { font-size: 0.8rem; letter-spacing: 1px; margin-bottom: 15px; border-bottom: 1px solid #222; padding-bottom: 10px; font-weight: bold; }
-.battle-control .metric-box { background: #111; border: 1px solid #333; padding: 10px; text-align: center; border-radius: 4px; }
-.battle-control .metric-box .label { font-size: 0.65rem; color: #666; margin-bottom: 3px; }
-.battle-control .metric-box .val { font-size: 1.1rem; font-weight: bold; color: #ccc; }
-.battle-control .level-row { display: flex; justify-content: space-between; font-size: 0.8rem; color: #888; border-bottom: 1px dashed #222; padding: 8px 0; }
-.battle-control .level-row .val { color: #fff; font-family: monospace; font-weight: bold; }
-.battle-control .live-toggle { display: flex; align-items: center; gap: 8px; background: #111; padding: 5px 12px; border: 1px solid #333; border-radius: 4px; }
-.battle-control .live-toggle label { font-size: 0.7rem; color: #888; font-weight: bold; cursor: pointer; }
-.battle-control #live-dot { width: 8px; height: 8px; background: #333; border-radius: 50%; transition: 0.3s; }
-.battle-control .cyber-btn-primary { background: var(--primary); color: #000; border: none; font-weight: 800; padding: 0 20px; cursor: pointer; }
-.battle-control .cyber-btn-sec { background: #222; color: #fff; border: 1px solid #444; padding: 10px 20px; cursor: pointer; font-weight: 600; }
-.battle-control .cyber-select { background: #000; color: #fff; border: 1px solid #333; padding: 10px; cursor: pointer; }
+
+/* Page Container */
+.battle-control .app-container { max-width: 1400px; margin: 0 auto; padding-top: 40px; padding-left: 20px; padding-right: 20px; }
+
+/* Command Header (Matches System Tone) */
+.battle-control .command-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid var(--border-subtle); }
+.battle-control .pill-label { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #06b6d4; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.5rem; display: block; }
+.battle-control h1 { font-size: 2rem; margin: 0; color: #fff; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+.battle-control .sub-text { font-size: 0.9rem; color: var(--text-muted); margin-top: 0.5rem; }
+
+/* Control Bar (Right Side) */
+.battle-control .controls-wrapper { display: flex; gap: 15px; align-items: center; }
+
+/* Toggle Switch */
+.battle-control .live-toggle { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.03); padding: 8px 16px; border: 1px solid var(--border-subtle); border-radius: 4px; transition: border-color 0.2s; }
+.battle-control .live-toggle:hover { border-color: rgba(255,255,255,0.1); }
+.battle-control .live-toggle label { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text-muted); font-weight: 600; cursor: pointer; text-transform: uppercase; }
+.battle-control #live-dot { width: 8px; height: 8px; background: #333; border-radius: 50%; transition: 0.3s; box-shadow: 0 0 0 1px rgba(0,0,0,0.5); }
+
+/* Inputs & Buttons */
+.battle-control .cyber-select { background: #050b14; color: #fff; border: 1px solid var(--border-subtle); padding: 10px 15px; border-radius: 4px; font-family: 'Inter', sans-serif; font-size: 0.85rem; cursor: pointer; outline: none; }
+.battle-control .cyber-select:focus { border-color: #06b6d4; }
+
+.battle-control .cyber-btn-primary { background: var(--primary); color: #000; border: none; font-weight: 700; font-size: 0.85rem; padding: 0 20px; height: 42px; cursor: pointer; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em; transition: all 0.2s; }
+.battle-control .cyber-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 0 15px rgba(0, 255, 157, 0.3); }
+
+.battle-control .cyber-btn-sec { background: transparent; color: var(--text-muted); border: 1px solid var(--border-subtle); padding: 10px 20px; cursor: pointer; font-weight: 600; font-size: 0.8rem; border-radius: 4px; transition: all 0.2s; }
+.battle-control .cyber-btn-sec:hover { border-color: #fff; color: #fff; }
+
+/* Card Styles (Cleaned Up) */
+.battle-control .cyber-card { background: var(--bg-card); border: 1px solid var(--border-subtle); padding: 25px; border-radius: 8px; position: relative; }
+.battle-control .card-header { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 20px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 10px; font-weight: 700; display: flex; justify-content: space-between; }
+
+/* Metrics */
+.battle-control .metric-box { background: rgba(0,0,0,0.2); border: 1px solid var(--border-subtle); padding: 15px; text-align: center; border-radius: 6px; }
+.battle-control .metric-box .label { font-size: 0.65rem; color: var(--text-muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.05em; }
+.battle-control .metric-box .val { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 700; color: #fff; }
+
+/* Levels List */
+.battle-control .level-row { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted); border-bottom: 1px dashed var(--border-subtle); padding: 10px 0; }
+.battle-control .level-row:last-child { border-bottom: none; }
+.battle-control .level-row .val { color: #fff; font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+
+/* Session Status Box */
+.battle-control .status-box { text-align: center; padding: 30px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: 6px; margin-bottom: 25px; }
+.battle-control .status-label { font-size: 0.75rem; color: var(--text-muted); letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 10px; }
+.battle-control #sb-action { font-size: 3.5rem; font-weight: 800; color: #444; line-height: 1; letter-spacing: -0.03em; }
+.battle-control #sb-reason { margin-top: 10px; color: var(--text-muted); font-size: 1rem; }
+
+/* Op Flex Badge */
+.battle-control .flex-badge { font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.3); background: rgba(245, 158, 11, 0.05); padding: 4px 8px; border-radius: 4px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="battle-control">
-    <div class="app-container" style="max-width: 1400px; margin: 0 auto; padding-top: 40px;">
+    <div class="app-container">
         
-        <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 15px;">
+        <div class="command-header">
             <div>
-                <h1 style="font-size: 1.8rem; margin: 0; color: #fff; letter-spacing: -1px;">BATTLE CONTROL</h1>
-                <div style="font-size: 0.9rem; color: #666; margin-top: 5px;">War Map Context & Session Execution</div>
+                <span class="pill-label">War Map Context & Session Execution</span>
+                <h1>Battle Control</h1>
             </div>
-            <div style="display: flex; gap: 15px; align-items: center;">
+            
+            <div class="controls-wrapper">
                 <div class="live-toggle">
-                    <input type="checkbox" id="autoRefreshToggle" onchange="toggleAutoRefresh()">
-                    <label for="autoRefreshToggle">LIVE LINK</label>
+                    <input type="checkbox" id="autoRefreshToggle" onchange="toggleAutoRefresh()" style="display:none;">
+                    <label for="autoRefreshToggle">Live Link</label>
                     <div id="live-dot"></div>
                 </div>
                 
                 {% if user.operator_flex %}
-                <div style="font-size: 10px; color: var(--warning); border: 1px solid var(--warning); padding: 4px 8px; border-radius: 4px; font-weight: 700; letter-spacing: 1px;">
-                    OP FLEX ACTIVE
-                </div>
+                <div class="flex-badge">OP FLEX ACTIVE</div>
                 {% endif %}
 
                 <div class="input-group" style="margin:0;">
@@ -58,97 +101,99 @@
                         <option value="asia_tokyo">Tokyo</option>
                     </select>
                 </div>
-                <button onclick="runLivePulse()" class="cyber-btn-primary" id="main-action-btn" style="height: 42px;">UPDATE INTEL</button>
+
+                <button onclick="runLivePulse()" class="cyber-btn-primary" id="main-action-btn">Update Intel</button>
             </div>
         </div>
 
-        <div style="display: grid; grid-template-columns: 280px 1fr; gap: 20px;">
+        <div style="display: grid; grid-template-columns: 300px 1fr; gap: 20px;">
             
-            <div style="display: flex; flex-direction: column; gap: 15px;">
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+                
                 <div class="cyber-card" style="border-left: 3px solid #8b5cf6;">
-                    <div class="card-header" style="color:#a78bfa;">WAR MAP CONTEXT</div>
-                    <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                        <span style="color:#888; font-size:0.8rem;">LEAN</span>
-                        <span id="wm-lean" style="font-weight:bold; color:#fff;">--</span>
+                    <div class="card-header" style="color: #a78bfa;">War Map Context</div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+                        <span style="color:var(--text-muted); font-size:0.85rem;">Lean</span>
+                        <span id="wm-lean" style="font-weight:bold; color:#fff; font-size:0.9rem;">--</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-                        <span style="color:#888; font-size:0.8rem;">PHASE</span>
-                        <span id="wm-phase" style="font-weight:bold; color:#fff;">--</span>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
+                        <span style="color:var(--text-muted); font-size:0.85rem;">Phase</span>
+                        <span id="wm-phase" style="font-weight:bold; color:#fff; font-size:0.9rem;">--</span>
                     </div>
-                    <div id="wm-note" style="font-size:0.75rem; color:#888; border-top:1px solid #333; padding-top:10px;">--</div>
+                    <div id="wm-note" style="font-size:0.8rem; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:15px; line-height:1.4;">--</div>
                 </div>
 
                 <div class="cyber-card">
-                    <div class="card-header">KEY LEVELS</div>
+                    <div class="card-header">Key Levels</div>
                     <div class="level-row"><span>Daily Res</span><span id="val-dr" class="val">---</span></div>
                     <div class="level-row"><span style="color:var(--bull);">Breakout</span><span id="val-bo" class="val">---</span></div>
                     <div class="level-row"><span style="color:var(--bear);">Breakdown</span><span id="val-bd" class="val">---</span></div>
                     <div class="level-row"><span>Daily Sup</span><span id="val-ds" class="val">---</span></div>
                 </div>
                 
-                <button onclick="toggleTactical()" class="cyber-btn-sec" style="width:100%; font-size:0.8rem;">TOGGLE TACTICAL DRAWER</button>
+                <button onclick="toggleTactical()" class="cyber-btn-sec" style="width:100%;">Toggle Tactical Drawer</button>
             </div>
 
             <div class="cyber-card" style="border-left: 4px solid #3b82f6;">
-                <div class="card-header" style="color:#60a5fa; display:flex; justify-content:space-between;">
-                    <span>SESSION BATTLE</span>
+                <div class="card-header" style="color: #60a5fa;">
+                    <span>Session Battle</span>
                     <span id="session-name" style="color:#fff;">--</span>
                 </div>
 
-                <div style="text-align: center; padding: 25px; background: #080808; border: 1px solid #333; border-radius: 4px; margin-bottom: 25px;">
-                    <div style="font-size: 0.8rem; color: #666; letter-spacing: 2px;">CURRENT DIRECTIVE</div>
-                    <div id="sb-action" style="font-size: 4rem; font-weight: 900; color: #444; line-height: 1.1;">HOLD FIRE</div>
-                    <div id="sb-reason" style="margin-top: 10px; color: #ccc; font-size: 1.1rem;">Waiting for data...</div>
+                <div class="status-box">
+                    <div class="status-label">Current Directive</div>
+                    <div id="sb-action">HOLD FIRE</div>
+                    <div id="sb-reason">Waiting for data...</div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px;">
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 30px;">
                     <div class="metric-box">
-                        <div class="label">PRICE</div>
-                        <div class="val" id="live-price" style="color:#fff;">---</div>
+                        <div class="label">Price</div>
+                        <div class="val" id="live-price">---</div>
                     </div>
                     <div class="metric-box">
-                        <div class="label">PERMISSION</div>
+                        <div class="label">Permission</div>
                         <div class="val" id="sb-perm">NONE</div>
                     </div>
                     <div class="metric-box">
-                        <div class="label">ACCEPTANCE</div>
+                        <div class="label">Acceptance</div>
                         <div class="val" id="sb-accept">0/2</div>
                     </div>
                     <div class="metric-box">
-                        <div class="label">LOCATION</div>
-                        <div class="val" id="sb-loc" style="font-size:0.7rem;">--</div>
+                        <div class="label">Location</div>
+                        <div class="val" id="sb-loc" style="font-size:0.75rem;">--</div>
                     </div>
                 </div>
 
-                <div id="sb-prepare-box" style="display: block; background: #112211; padding: 20px; border: 1px solid var(--primary); margin-bottom: 20px;">
-                    <div style="font-size: 0.9rem; color: var(--primary); font-weight: bold; margin-bottom: 15px; text-align: center;">
-                        EXECUTION GATES (5M)
-                        <span id="sb-gates-mode" style="display:block; font-size:0.7rem; color:#88aa88; margin-top:4px;">PREVIEW (FLOATING)</span>
+                <div id="sb-prepare-box" style="display: block; background: rgba(16, 185, 129, 0.05); padding: 25px; border: 1px solid var(--primary); margin-bottom: 25px; border-radius: 6px;">
+                    <div style="font-size: 0.85rem; color: var(--primary); font-weight: 700; margin-bottom: 20px; text-align: center; letter-spacing: 0.05em; text-transform: uppercase;">
+                        Execution Gates (5M)
+                        <span id="sb-gates-mode" style="display:block; font-size:0.7rem; color:var(--text-muted); margin-top:5px; font-weight: 400;">PREVIEW (FLOATING)</span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-family: monospace; font-size: 1.4rem;">
-                        <div><span style="color:#ef4444; font-size:0.8rem;">FAILURE LINE</span><br><span id="sb-fail-line" style="color:#fff;">--</span></div>
-                        <div style="text-align:right;"><span style="color:#00ff9d; font-size:0.8rem;">CONTINUATION</span><br><span id="sb-cont-line" style="color:#fff;">--</span></div>
+                    <div style="display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 1.2rem;">
+                        <div><span style="color:#ef4444; font-size:0.75rem; display:block; margin-bottom:5px;">FAILURE LINE</span><span id="sb-fail-line" style="color:#fff;">--</span></div>
+                        <div style="text-align:right;"><span style="color:#00ff9d; font-size:0.75rem; display:block; margin-bottom:5px;">CONTINUATION</span><span id="sb-cont-line" style="color:#fff;">--</span></div>
                     </div>
                 </div>
                 
                 <div style="text-align: right; display:flex; gap:10px; justify-content:flex-end;">
-                    <button onclick="copyTraderBrief()" class="cyber-btn-sec">COPY BRIEF</button>
-                    <button onclick="copyBattleBox()" class="cyber-btn-primary">COPY FULL BATTLEBOX</button>
+                    <button onclick="copyTraderBrief()" class="cyber-btn-sec">Copy Brief</button>
+                    <button onclick="copyBattleBox()" class="cyber-btn-primary">Copy Full BattleBox</button>
                 </div>
             </div>
         </div>
 
-        <div id="tactical-drawer" style="display: none; margin-top: 30px; border-top: 1px solid #333; padding-top: 20px;">
-            <h3 style="color: #888; font-size: 1rem; margin-bottom: 20px;">TACTICAL INTELLIGENCE (OPTIONAL)</h3>
+        <div id="tactical-drawer" style="display: none; margin-top: 30px; border-top: 1px solid var(--border-subtle); padding-top: 30px;">
+            <h3 style="color: var(--text-muted); font-size: 1rem; margin-bottom: 20px; font-weight: 600;">Tactical Intelligence</h3>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
                 <div class="cyber-card">
-                    <div class="card-header">CAMPAIGN (BIG TRADE)</div>
-                    <div id="wm-camp-status" style="font-size: 1.5rem; font-weight: bold; color: #666;">NOT ARMED</div>
-                    <div id="wm-camp-note" style="margin-top: 10px; color: #888;">--</div>
+                    <div class="card-header">Campaign (Big Trade)</div>
+                    <div id="wm-camp-status" style="font-size: 1.5rem; font-weight: bold; color: var(--text-muted);">NOT ARMED</div>
+                    <div id="wm-camp-note" style="margin-top: 10px; color: var(--text-muted); font-size: 0.9rem;">--</div>
                 </div>
                 <div class="cyber-card">
-                    <div class="card-header">STRATEGY STATUS (OPTIONAL)</div>
-                    <div id="strat-list" style="font-size: 0.8rem; color: #ccc;">Loading...</div>
+                    <div class="card-header">Strategy Status</div>
+                    <div id="strat-list" style="font-size: 0.85rem; color: var(--text-muted);">Loading...</div>
                 </div>
             </div>
         </div>
@@ -160,7 +205,7 @@
 {% block scripts %}
 <script>
   const USER_OP_FLEX = {{ 'true' if user.operator_flex else 'false' }};
-  // ... (Keeping your exact script logic, just inside this block) ...
+  // ... (ALL YOUR ORIGINAL JS LOGIC IS PRESERVED HERE) ...
   let lastPacket = null;
   let autoRefreshTimer = null;
 
@@ -175,19 +220,25 @@
   }
 
   function toggleAutoRefresh() {
-    if(document.getElementById('autoRefreshToggle').checked) {
-        document.getElementById('live-dot').style.background = "#00ff9d";
-        document.getElementById('live-dot').style.boxShadow = "0 0 8px #00ff9d";
-        runLivePulse(); autoRefreshTimer = setInterval(runLivePulse, 120000);
+    const toggle = document.getElementById('autoRefreshToggle');
+    const dot = document.getElementById('live-dot');
+    // Using a fake checkbox requires click handling, but here we trigger on the input change
+    // Assuming the user clicks the label which toggles the hidden input
+    if(toggle.checked) {
+        dot.style.background = "#00ff9d";
+        dot.style.boxShadow = "0 0 8px #00ff9d";
+        runLivePulse(); 
+        autoRefreshTimer = setInterval(runLivePulse, 120000);
     } else {
-        document.getElementById('live-dot').style.background = "#333";
-        document.getElementById('live-dot').style.boxShadow = "none";
+        dot.style.background = "#333";
+        dot.style.boxShadow = "none";
         clearInterval(autoRefreshTimer);
     }
   }
 
   async function runLivePulse() {
     const btn = document.querySelector('#main-action-btn');
+    const originalText = btn.innerText;
     btn.innerText = "UPDATING...";
     try {
         const res = await fetch('/api/dmr/live', {
@@ -206,8 +257,10 @@
         
         // WAR MAP
         const wm = data.battlebox.war_map_context || {};
-        document.getElementById('wm-lean').innerText = wm.lean || "--";
-        document.getElementById('wm-lean').style.color = wm.lean === "BULLISH" ? "#00ff9d" : (wm.lean === "BEARISH" ? "#ef4444" : "#fff");
+        const leanEl = document.getElementById('wm-lean');
+        leanEl.innerText = wm.lean || "--";
+        leanEl.style.color = wm.lean === "BULLISH" ? "#00ff9d" : (wm.lean === "BEARISH" ? "#ef4444" : "#fff");
+        
         document.getElementById('wm-phase').innerText = wm.phase || "--";
         document.getElementById('wm-note').innerText = wm.note || "--";
         
@@ -230,8 +283,10 @@
         document.getElementById('sb-reason').innerText = sb.reason || "--";
         document.getElementById('live-price').innerText = data.price.toFixed(2);
         
-        document.getElementById('sb-perm').innerText = sb.permission?.status || "NONE";
-        document.getElementById('sb-perm').style.color = sb.permission?.status === "EARNED" ? "#00ff9d" : "#666";
+        const permStatus = sb.permission?.status || "NONE";
+        const permEl = document.getElementById('sb-perm');
+        permEl.innerText = permStatus;
+        permEl.style.color = permStatus === "EARNED" ? "#00ff9d" : "#94a3b8";
         
         const acc = sb.acceptance_progress || {count:0};
         document.getElementById('sb-accept').innerText = `${acc.count || 0}/${acc.required || 2}`;
@@ -253,8 +308,8 @@
             gateBox.style.opacity = "1";
             gateBox.style.borderColor = "var(--primary)";
         } else {
-            gateBox.style.opacity = "0.65";
-            gateBox.style.borderColor = "#224422";
+            gateBox.style.opacity = "0.7";
+            gateBox.style.borderColor = "rgba(0, 255, 157, 0.2)";
         }
 
         document.getElementById('sb-fail-line').innerText = (levels.failure ? levels.failure.toFixed(2) : "--");
@@ -272,9 +327,9 @@
         const stratList = document.getElementById('strat-list');
         if(strats.length > 0) {
             stratList.innerHTML = strats.map(s => `
-                <div style="margin-bottom:8px; padding:8px; background:#111; border-left:3px solid #333;">
-                    <div style="font-weight:bold; color:#fff; font-size:0.8rem;">${s.name}</div>
-                    <div style="font-size:0.7rem; color:#888;">${s.status} - ${s.msg}</div>
+                <div style="margin-bottom:8px; padding:10px; background:rgba(255,255,255,0.02); border-left:3px solid var(--border-subtle); border-radius:4px;">
+                    <div style="font-weight:700; color:#fff; font-size:0.85rem;">${s.name}</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">${s.status} - ${s.msg}</div>
                 </div>
             `).join('');
         } else {
@@ -282,7 +337,7 @@
         }
         
     } catch(e) { console.error(e); } 
-    finally { btn.innerText = "UPDATE INTEL"; }
+    finally { btn.innerText = originalText; }
   }
 
   function copyTraderBrief() {
