@@ -1,12 +1,10 @@
 # battle_control.py
 # ==============================================================================
-# KABRODA BATTLE CONTROL ENGINE v1.0
-# (Formerly Research Lab)
+# KABRODA BATTLE CONTROL ENGINE v2.1 (FINAL DEPLOY)
 # ==============================================================================
-# Operations:
-# 1. LIVE PULSE: Handles real-time session updates.
-# 2. GATES: Manages structure locking and validation.
-# 3. FLEX: Applies Operator Flex logic when permitted.
+# 1. LOCKING: Explicit 30m window (anchor_ts + 1800).
+# 2. SLICING: Strict timestamp boundaries for Context vs Execution.
+# 3. SAFETY: Stable payloads & Consistent Vocabulary (INSIDE vs INSIDE_BAND).
 # ==============================================================================
 
 from __future__ import annotations
@@ -14,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import sse_engine
+import structure_state_engine # The Law Layer
 import ccxt.async_support as ccxt
 import pytz
 import traceback
@@ -41,13 +40,12 @@ STRATEGY_DISPLAY = {
     "S9": "Stand Down Filter"
 }
 
-# --- MATH HELPERS ---
+# --- HELPERS ---
 def calculate_ema(prices: List[float], period: int = 21) -> List[float]:
     if len(prices) < period: return []
     return pd.Series(prices).ewm(span=period, adjust=False).mean().tolist()
 
 def _resample_candles(candles: List[Dict], timeframe: str) -> List[Dict]:
-    """Robust resampling using CLOSE TIME ('last') for strict sequencing."""
     if not candles: return []
     df = pd.DataFrame(candles)
     df['dt'] = pd.to_datetime(df['time'], unit='s')
@@ -56,18 +54,14 @@ def _resample_candles(candles: List[Dict], timeframe: str) -> List[Dict]:
     try: return df.resample(timeframe).agg(ohlc).dropna().to_dict('records')
     except: return []
 
-# --- STABLE TEMPLATE ---
-def _session_battle_template():
+def _safe_placeholder_state(reason="Waiting..."):
     return {
         "action": "HOLD FIRE",
-        "reason": "Waiting for data...",
+        "reason": reason,
         "permission": {"status": "NOT_EARNED", "side": "NONE"},
         "acceptance_progress": {"count": 0, "required": 2, "side_hint": "NONE"},
-        "location": {
-            "relative_to_triggers": "INSIDE_BAND", 
-            "relative_to_value": "INSIDE_VALUE", 
-            "relative_to_poc": "AT_POC"
-        },
+        # FIXED: Vocabulary alignment with Structure State Engine (ABOVE/INSIDE/BELOW)
+        "location": {"relative_to_triggers": "INSIDE"}, 
         "execution": {
             "pause_state": "NONE",
             "resumption_state": "NONE",
@@ -94,8 +88,8 @@ def _calculate_war_map(raw_1h: List[Dict]) -> Dict[str, Any]:
         if lean == "BULLISH": phase = "ADVANCE" if last['close'] > prev['high'] else ("PULLBACK" if last['close'] < prev['low'] else "TRANSITION")
         else: phase = "ADVANCE" if last['close'] < prev['low'] else ("PULLBACK" if last['close'] > prev['high'] else "TRANSITION")
 
-    note = f"Market is {lean} in {phase} phase."
-    if phase == "PULLBACK": note += " Corrective move. Be cautious."
+    # MANDATORY REFRAMING: Context, NOT Permission
+    note = f"Pressure reads {lean} with {phase} behavior. This is context, not permission."
     
     campaign_status = "NOT_ARMED"
     campaign_note = "Structure alignment pending."
@@ -106,171 +100,6 @@ def _calculate_war_map(raw_1h: List[Dict]) -> Dict[str, Any]:
         "status": "LIVE", "lean": lean, "phase": phase, "confidence": 0.9, "note": note,
         "campaign": {"status": campaign_status, "side": "SHORT" if lean=="BEARISH" else "LONG", "note": campaign_note}
     }
-
-# --- ENGINE 2: SESSION BATTLE ---
-def _calculate_session_battle(raw_5m: List[Dict], levels: Dict, ledger: Dict, operator_flex: bool = False) -> Dict[str, Any]:
-    sb = _session_battle_template()
-    if not raw_5m: return sb
-    
-    current_price = raw_5m[-1]['close']
-    bo, bd = levels.get("breakout_trigger", 0), levels.get("breakdown_trigger", 0)
-    val, vah = levels.get("f24_val", 0), levels.get("f24_vah", 0)
-    poc = levels.get("f24_poc", 0)
-
-    # 1. LOCATION
-    sb["location"]["relative_to_triggers"] = "ABOVE_BAND" if current_price > bo else ("BELOW_BAND" if current_price < bd else "INSIDE_BAND")
-    sb["location"]["relative_to_value"] = "ABOVE_VALUE" if current_price > vah else ("BELOW_VALUE" if current_price < val else "INSIDE_VALUE")
-    sb["location"]["relative_to_poc"] = "AT_POC" if abs(current_price - poc)/poc < 0.001 else ("ABOVE_POC" if current_price > poc else "BELOW_POC")
-
-    # 2. PERMISSION (PERSISTENT SCAN)
-    candles_15m = _resample_candles(raw_5m, '15min')
-    
-    if ledger.get("permission_status") == "EARNED":
-        sb["permission"]["status"] = "EARNED"
-        sb["permission"]["side"] = ledger["permission_side"]
-        sb["acceptance_progress"]["count"] = 2
-        sb["acceptance_progress"]["side_hint"] = ledger["permission_side"]
-    else:
-        consecutive_bear = 0
-        consecutive_bull = 0
-        for c in candles_15m:
-            if c['close'] < bd: consecutive_bear += 1
-            else: consecutive_bear = 0
-            
-            if c['close'] > bo: consecutive_bull += 1
-            else: consecutive_bull = 0
-            
-            if consecutive_bear == 2:
-                sb["permission"] = {"status": "EARNED", "side": "SHORT"}
-                sb["acceptance_progress"] = {"count": 2, "required": 2, "side_hint": "SHORT"}
-                ledger.update({"permission_status": "EARNED", "permission_side": "SHORT", "permission_time": c['time']})
-                break
-            if consecutive_bull == 2:
-                sb["permission"] = {"status": "EARNED", "side": "LONG"}
-                sb["acceptance_progress"] = {"count": 2, "required": 2, "side_hint": "LONG"}
-                ledger.update({"permission_status": "EARNED", "permission_side": "LONG", "permission_time": c['time']})
-                break
-        
-        if sb["permission"]["status"] == "NOT_EARNED" and candles_15m:
-            last = candles_15m[-1]['close']
-            if last < bd: sb["acceptance_progress"] = {"count": 1, "required": 2, "side_hint": "SHORT"}
-            elif last > bo: sb["acceptance_progress"] = {"count": 1, "required": 2, "side_hint": "LONG"}
-
-    if sb["permission"]["status"] == "NOT_EARNED":
-        sb["action"] = "HOLD FIRE"
-        sb["reason"] = f"Permission not earned ({sb['acceptance_progress']['count']}/2)."
-        
-        # PREVIEW GATES (FLOATING)
-        if sb["acceptance_progress"]["side_hint"] == "SHORT" or current_price < bd:
-            sb["execution"]["levels"]["failure"] = bd * 1.001
-            sb["execution"]["levels"]["continuation"] = current_price * 0.999
-        elif sb["acceptance_progress"]["side_hint"] == "LONG" or current_price > bo:
-            sb["execution"]["levels"]["failure"] = bo * 0.999
-            sb["execution"]["levels"]["continuation"] = current_price * 1.001
-        else:
-            sb["execution"]["levels"]["failure"] = bo
-            sb["execution"]["levels"]["continuation"] = bd
-        return sb
-
-    # 3. EXECUTION: CALCULATE FLOATING STRUCTURE
-    perm_side = sb["permission"]["side"]
-    perm_time = ledger.get("permission_time", 0)
-    exec_candles = [c for c in raw_5m if c['time'] > perm_time]
-    
-    pause_state = "NONE"
-    p_high = 0.0
-    p_low = 0.0
-    
-    if len(exec_candles) >= 2:
-        p_high = max(c['high'] for c in exec_candles)
-        p_low = min(c['low'] for c in exec_candles)
-        range_pct = (p_high - p_low) / current_price
-        
-        # STANDARD LOGIC
-        if range_pct < 0.0035: 
-            if len(exec_candles) >= 4:
-                pause_state = "CONFIRMED"
-            elif len(exec_candles) >= 2:
-                pause_state = "FORMING"
-
-        # OPERATOR FLEX OVERRIDE (Explicit "Pause-Lite")
-        if operator_flex and sb["permission"]["status"] == "EARNED" and sb["acceptance_progress"]["count"] >= 2:
-            if range_pct < 0.0040: # Slightly relaxed range constraint
-                if len(exec_candles) >= 2: # Faster confirmation (2 candles instead of 4)
-                    pause_state = "CONFIRMED"
-    
-    sb["execution"]["pause_state"] = pause_state
-
-    # 4. GATE LOCKING LOGIC
-    gates_locked = bool(ledger.get("gates_locked", False))
-
-    # Try to Lock if Confirmed
-    if pause_state == "CONFIRMED" and not gates_locked:
-        if perm_side == "SHORT":
-            ledger["locked_failure"] = p_high
-            ledger["locked_continuation"] = p_low
-        else: # LONG
-            ledger["locked_failure"] = p_low
-            ledger["locked_continuation"] = p_high
-        
-        ledger["gates_locked"] = True
-        ledger["gates_locked_time"] = raw_5m[-1]['time']
-        gates_locked = True
-
-    # 5. ASSIGN GATES (Locked vs Floating)
-    if gates_locked:
-        sb["execution"]["gates_mode"] = "LOCKED"
-        sb["execution"]["locked_at"] = ledger.get("gates_locked_time")
-        sb["execution"]["levels"]["failure"] = float(ledger["locked_failure"])
-        sb["execution"]["levels"]["continuation"] = float(ledger["locked_continuation"])
-    else:
-        sb["execution"]["gates_mode"] = "PREVIEW"
-        # Floating Logic
-        if pause_state == "NONE":
-            # Fallbacks
-            if perm_side == "SHORT":
-                sb["execution"]["levels"]["failure"] = bd * 1.001
-                sb["execution"]["levels"]["continuation"] = current_price * 0.999
-            else:
-                sb["execution"]["levels"]["failure"] = bo * 0.999
-                sb["execution"]["levels"]["continuation"] = current_price * 1.001
-        else:
-            # Active Structure
-            if perm_side == "SHORT":
-                sb["execution"]["levels"]["failure"] = p_high
-                sb["execution"]["levels"]["continuation"] = p_low
-            else:
-                sb["execution"]["levels"]["failure"] = p_low
-                sb["execution"]["levels"]["continuation"] = p_high
-
-    # 6. DECISION (Action)
-    fail = sb["execution"]["levels"]["failure"]
-    cont = sb["execution"]["levels"]["continuation"]
-    
-    if pause_state == "NONE" and not gates_locked:
-        sb["action"] = "HOLD FIRE"
-        sb["reason"] = "Permission earned. Waiting for structure."
-        return sb
-
-    # Evaluate against Gates (Locked or Floating)
-    if perm_side == "SHORT":
-        if current_price < cont * 0.9995:
-            sb["action"] = "GREENLIGHT"
-            sb["reason"] = "Continuation confirmed below gate."
-            sb["execution"]["resumption_state"] = "CONFIRMED"
-        else:
-            sb["action"] = "PREPARE"
-            sb["reason"] = "Structure active. Wait for break of Continuation line."
-    elif perm_side == "LONG":
-        if current_price > cont * 1.0005:
-            sb["action"] = "GREENLIGHT"
-            sb["reason"] = "Continuation confirmed above gate."
-            sb["execution"]["resumption_state"] = "CONFIRMED"
-        else:
-            sb["action"] = "PREPARE"
-            sb["reason"] = "Structure active. Wait for break of Continuation line."
-
-    return sb
 
 # --- CORE SESSION FETCH ---
 exchange_kucoin = ccxt.kucoin({'enableRateLimit': True})
@@ -289,23 +118,59 @@ async def fetch_1h_context(symbol: str):
         return [{"time": int(c[0]/1000), "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4]), "volume": float(c[5])} for c in candles]
     except: return []
 
-def _compute_session_packet(raw_5m: List[Dict], raw_1h: List[Dict], anchor_idx: int) -> Dict[str, Any]:
-    if anchor_idx == -1 or anchor_idx + 6 > len(raw_5m): return {"error": "Insufficient data"}
-    calibration_slice = raw_5m[anchor_idx : anchor_idx + 6]
-    context_slice = raw_5m[max(0, anchor_idx - 288) : anchor_idx + 6]
-    daily_structure = _resample_candles(raw_1h, '1D')
+# --- PACKET COMPUTATION (STRICT TIMESTAMP SLICING) ---
+def _compute_session_packet(raw_5m: List[Dict], raw_1h: List[Dict], anchor_ts: int) -> Dict[str, Any]:
+    # 1. DEFINE LOCK TIME
+    lock_end_ts = anchor_ts + 1800 # Exactly 30 mins
     
+    # 2. SLICE BY TIMESTAMP
+    calibration_slice = [c for c in raw_5m if anchor_ts <= c["time"] < lock_end_ts]
+    
+    # Guard: Need at least 6 candles (30m)
+    if len(calibration_slice) < 6:
+        # If we are slightly past lock time but data is laggy, we might fail here.
+        # But for 'compute_packet', we assume data is present.
+        return {"error": "Insufficient calibration window (need 30m of data)."}
+
+    # Context Slices (Ending exactly at lock_end_ts)
+    context_slice_24h = [c for c in raw_5m if (lock_end_ts - 86400) <= c["time"] < lock_end_ts]
+    slice_4h_5m = [c for c in raw_5m if (lock_end_ts - 14400) <= c["time"] < lock_end_ts]
+    
+    daily_structure = _resample_candles(raw_1h, '1D')
+
+    # 3. COMPUTE ANCHORS
+    session_open_price = calibration_slice[0]['open']
+    r30_high = max(c['high'] for c in calibration_slice)
+    r30_low = min(c['low'] for c in calibration_slice)
+    
+    # Last price at the moment of locking (for context display only)
+    last_price = context_slice_24h[-1]['close'] if context_slice_24h else session_open_price
+
+    # 4. PASS TO SSE v2.0 (5m NATIVE)
     sse_input = {
-        "raw_15m_candles": context_slice, "raw_daily_candles": daily_structure,
-        "slice_24h": context_slice, "slice_4h": context_slice[-48:],
-        "session_open_price": calibration_slice[0]['open'],
-        "r30_high": max(c['high'] for c in calibration_slice), "r30_low": min(c['low'] for c in calibration_slice),
-        "last_price": context_slice[-1]['close']
+        "locked_history_5m": context_slice_24h, # Primary context
+        "slice_24h_5m": context_slice_24h,
+        "slice_4h_5m": slice_4h_5m,
+        "raw_daily_candles": daily_structure,
+        "session_open_price": session_open_price,
+        "r30_high": r30_high,
+        "r30_low": r30_low,
+        "last_price": last_price
     }
+    
     computed = sse_engine.compute_sse_levels(sse_input)
-    return {"levels": computed["levels"], "bias_score": computed["bias_model"]["daily_lean"]["score"]}
+    
+    # 3A. SSE ERROR GUARD
+    if "error" in computed:
+        return {"error": computed["error"], "meta": computed.get("meta", {})}
+
+    return {
+        "levels": computed["levels"], 
+        "lock_time": lock_end_ts # Store the explicit lock timestamp
+    }
 
 def _get_active_session(now_utc: datetime, mode: str = "AUTO", manual_id: str = None) -> Dict[str, Any]:
+    # (Same as before - kept brief)
     if mode == "MANUAL" and manual_id:
         cfg = next((s for s in SESSION_CONFIGS if s["id"] == manual_id), None)
         if cfg:
@@ -348,26 +213,61 @@ async def run_live_pulse(symbol: str, session_mode: str="AUTO", manual_id: str=N
         session_info = _get_active_session(now_utc, session_mode, manual_id)
         anchor_ts = session_info["anchor_time"]
         
+        # 3B. STABLE PAYLOAD DURING CALIBRATION
+        if now_ts < anchor_ts + 1800:
+            wm = _calculate_war_map(raw_1h)
+            safe_battlebox = {
+                "war_map_context": wm,
+                "war_map_campaign": wm.get("campaign"), 
+                "session_battle": _safe_placeholder_state("Calibrating... levels not locked yet."),
+                "session": session_info,
+                "levels": {}, # Empty levels is safe for UI
+                "strategies_summary": [],
+                "story_now": "Market Calibrating.",
+                "story_wait": "Hold fire."
+            }
+            return {
+                "status": "CALIBRATING",
+                "timestamp": datetime.now(timezone.utc).strftime("%H:%M UTC"),
+                "price": raw_5m[-1]['close'],
+                # FIXED: Energy matches logic (prevents UI drift)
+                "energy": session_info["energy"], 
+                "battlebox": safe_battlebox
+            }
+        
         session_key = f"{symbol}_{session_info['name']}_{session_info['date_key']}"
+        
+        # Compute if not locked
         if session_key not in LOCKED_SESSIONS:
-            if now_ts < anchor_ts + 1800:
-                return {"status": "CALIBRATING", "message": "Calibrating...", "session": session_info, "price": raw_5m[-1]['close'], "battlebox": {}}
+            packet = _compute_session_packet(raw_5m, raw_1h, anchor_ts)
             
-            anchor_idx = next((i for i, c in enumerate(raw_5m) if c['time'] >= anchor_ts), -1)
-            packet = _compute_session_packet(raw_5m, raw_1h, anchor_idx)
-            if "error" in packet: return {"status": "ERROR", "message": packet["error"]}
+            if "error" in packet: 
+                # Return stable error state
+                wm = _calculate_war_map(raw_1h)
+                err_battlebox = {
+                    "war_map_context": wm, "war_map_campaign": wm.get("campaign"), 
+                    "session_battle": _safe_placeholder_state(f"Error: {packet['error']}"),
+                    "session": session_info, "levels": {}, "strategies_summary": []
+                }
+                return {"status": "ERROR", "message": packet["error"], "battlebox": err_battlebox}
+            
             LOCKED_SESSIONS[session_key] = packet
-            packet["ledger"] = {}
             
         levels = LOCKED_SESSIONS[session_key]["levels"]
-        ledger = LOCKED_SESSIONS[session_key]["ledger"]
+        lock_time = LOCKED_SESSIONS[session_key]["lock_time"] # Guaranteed by _compute_session_packet
         
-        battle_slice = [c for c in raw_5m if c['time'] >= (anchor_ts - 3600)]
-        session_battle = _calculate_session_battle(battle_slice, levels, ledger, operator_flex=operator_flex)
+        # SLICE 5M HISTORY FROM LOCK TIME FORWARD
+        # (This feeds the State Engine Law Layer)
+        post_lock_candles = [c for c in raw_5m if c['time'] >= lock_time]
+        
+        # 3C. EMPTY SLICE GUARD
+        if not post_lock_candles:
+            session_battle = _safe_placeholder_state("Waiting for post-lock candles.")
+        else:
+            session_battle = structure_state_engine.compute_structure_state(levels, post_lock_candles)
         
         strategies = []
         try:
-            risk = {"mode": risk_mode, "value": float(capital), "leverage": float(leverage)}
             for code in ["S1","S2","S4","S7"]:
                 strategies.append({"code": code, "name": STRATEGY_DISPLAY.get(code, code), "status": "Inactive", "msg": "Legacy Mode"})
         except: pass
