@@ -16,14 +16,7 @@
         .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
         a { text-decoration: none; color: inherit; transition: 0.3s ease; }
 
-        /* MEMBER NAV */
-        .navbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
-        .logo { font-family: var(--font-mono); font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; }
-        .logo span { color: var(--accent-cyan); }
-        .nav-links { display: flex; gap: 2rem; list-style: none; }
-        .nav-links a { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-        .nav-links a:hover, .nav-links a.active { color: #fff; }
-
+        /* HEADER & GRID STYLES */
         .header-section { padding: 80px 0 60px; text-align: center; }
         .pill { display: inline-block; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); padding: 6px 16px; border-radius: 100px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent-cyan); margin-bottom: 1.5rem; letter-spacing: 0.1em; text-transform: uppercase; }
         .header-section h1 { font-size: 3rem; margin-bottom: 1rem; color: #fff; }
@@ -58,18 +51,26 @@
 </head>
 <body>
 
-    <nav class="navbar">
-        <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; flex-wrap: wrap;">
-            <a href="/suite" class="logo">
+    <nav class="navbar" style="border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px);">
+        <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; max-width: 1200px; margin: 0 auto; padding: 20px;">
+            <a href="/" class="logo" style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; text-decoration: none;">
                 <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
                 KABRODA
             </a>
-            <ul class="nav-links">
-                <li><a href="/suite">Suite ▼</a></li>
-                <li><a href="/analysis">Analysis</a></li>
-                <li><a href="/indicators" class="active">Indicators</a></li>
-                <li><a href="/account">Account</a></li>
-                <li><a href="/logout">Logout</a></li>
+            <ul class="nav-links" style="display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0; align-items: center;">
+                <li class="dropdown-wrapper" style="position: relative; cursor: pointer;">
+                    <span class="active" onclick="toggleDropdown()" style="font-size: 0.95rem; color: #fff; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em;">
+                        SUITE ▼
+                    </span>
+                    <div id="suiteDropdown" style="display: none; position: absolute; top: 100%; left: 0; background: #0f1623; border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 4px; min-width: 180px; z-index: 9999; margin-top:10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+                        <a href="/suite" style="display: block; padding: 8px 12px; color: #aaa; text-decoration: none; font-size: 0.9rem;">Session Control</a>
+                        <a href="/suite/battle-control" style="display: block; padding: 8px 12px; color: #aaa; text-decoration: none; font-size: 0.9rem;">Battle Control</a>
+                    </div>
+                </li>
+                <li><a href="/analysis" style="font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;">INTEL</a></li>
+                <li><a href="/indicators" style="font-size: 0.95rem; color: var(--accent-cyan); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;">INDICATORS</a></li>
+                <li><a href="/account" style="font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;">ACCOUNT</a></li>
+                <li><a href="/logout" style="font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none; opacity: 0.6;">LOGOUT</a></li>
             </ul>
         </div>
     </nav>
@@ -129,5 +130,19 @@
         </div>
     </div>
     <div style="height: 100px;"></div>
+
+    <script>
+        function toggleDropdown() {
+            const el = document.getElementById('suiteDropdown');
+            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+        document.addEventListener('click', function(e) {
+            const wrapper = document.querySelector('.dropdown-wrapper');
+            const dropdown = document.getElementById('suiteDropdown');
+            if (!wrapper.contains(e.target) && dropdown.style.display === 'block') {
+                dropdown.style.display = 'none';
+            }
+        });
+    </script>
 </body>
 </html>
