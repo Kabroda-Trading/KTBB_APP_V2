@@ -49,7 +49,8 @@ def create_checkout_session(db: Session, user_model, plan_key: str = "monthly") 
         "customer": cust_id,
         "line_items": [{"price": price_id, "quantity": 1}],
         "success_url": f"{PUBLIC_BASE_URL}/suite?billing=success",
-        "cancel_url": f"{PUBLIC_BASE_URL}/pricing?billing=cancel",
+        # FIXED: Cancel goes to Homepage as requested
+        "cancel_url": f"{PUBLIC_BASE_URL}/", 
         "client_reference_id": str(user_model.id),
         "allow_promotion_codes": True,
         "subscription_data": {"trial_period_days": 7} # GLOBAL 7-DAY TRIAL
@@ -60,7 +61,8 @@ def create_checkout_session(db: Session, user_model, plan_key: str = "monthly") 
 
 def create_billing_portal(db: Session, user_model) -> str:
     cust_id = ensure_customer(db, user_model)
-    portal = stripe.billing_portal.Session.create(customer=cust_id, return_url=f"{PUBLIC_BASE_URL}/suite")
+    # FIXED: Return to Account page (safer UX)
+    portal = stripe.billing_portal.Session.create(customer=cust_id, return_url=f"{PUBLIC_BASE_URL}/account")
     return portal["url"]
 
 def handle_webhook(payload, sig_header, db, UserModel):
