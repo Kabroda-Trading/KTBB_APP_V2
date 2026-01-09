@@ -24,6 +24,8 @@
 
         .card { background: #0f1623; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 2.5rem; margin-bottom: 2rem; }
         .card.accent { border-left: 3px solid #06b6d4; }
+        .card.admin { border-left: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.05); }
+        
         .card h2 { font-size: 1.1rem; margin-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 1rem; color: #fff; letter-spacing: 0.05em; text-transform: uppercase; }
         
         .info-row { display: flex; justify-content: space-between; margin-bottom: 1.2rem; font-size: 0.95rem; color: #94a3b8; align-items: center; }
@@ -41,6 +43,8 @@
         
         .btn-save { background: #06b6d4; color: #000; border: none; padding: 12px 24px; font-weight: 700; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; transition: 0.2s; }
         .btn-save:hover { box-shadow: 0 0 15px rgba(6, 182, 212, 0.4); }
+
+        .btn-admin { background: #f59e0b; color: #000; border: none; padding: 12px 24px; font-weight: 700; border-radius: 4px; text-decoration: none; display: inline-block; text-transform: uppercase; letter-spacing: 1px; }
 
         .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
         .switch input { opacity: 0; width: 0; height: 0; }
@@ -80,6 +84,18 @@
             <h1>Account Command</h1>
             <p>Manage your identity, billing, and system preferences.</p>
         </div>
+
+        {% if is_admin %}
+        <div class="card admin">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <h2 style="color:#f59e0b; border-bottom:none; margin-bottom:0;">GOD MODE ACCESS</h2>
+                    <p style="margin:5px 0 0 0; font-size:0.9rem;">You have elevated privileges.</p>
+                </div>
+                <a href="/admin" class="btn-admin">ENTER ADMIN CONSOLE ⚡</a>
+            </div>
+        </div>
+        {% endif %}
 
         <div class="card">
             <h2>Identity Protocol</h2>
@@ -145,7 +161,6 @@
     </div>
 
     <script>
-        // --- 1. BILLING PORTAL LOGIC (FIXED) ---
         async function openBillingPortal() {
             const btn = document.getElementById('billingBtn');
             const originalText = btn.innerText;
@@ -162,7 +177,6 @@
                 const data = await response.json();
                 
                 if (data.url) {
-                    // Success: Redirect to Stripe URL
                     window.location.href = data.url;
                 } else {
                     alert("Error accessing billing portal. Please contact support.");
@@ -177,7 +191,6 @@
             }
         }
 
-        // --- 2. SETTINGS AUTO-SAVE ---
         document.getElementById('flexToggle').addEventListener('change', async function() {
             try {
                 await fetch('/account/settings', {
@@ -188,7 +201,6 @@
             } catch (e) { console.error("Setting save failed", e); }
         });
 
-        // --- 3. PROFILE SAVE ---
         async function saveProfile() {
             const btn = document.querySelector('.btn-save');
             const originalText = btn.innerText;

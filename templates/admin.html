@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kabroda | Admin Console</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
@@ -30,7 +29,7 @@
     <div class="container">
         <div class="header">
             <div>
-                <a href="/suite" class="back-link">← Back to Suite</a>
+                <a href="/account" class="back-link">← Back to Account</a>
                 <h1 style="margin-top: 10px;">GOD MODE <span class="pill">ADMIN</span></h1>
             </div>
             <div style="text-align: right; color: #94a3b8;">
@@ -44,7 +43,7 @@
                     <th>ID</th>
                     <th>EMAIL</th>
                     <th>OPERATIVE ID</th>
-                    <th>MEMBERSHIP</th>
+                    <th>STATUS</th>
                     <th>JOINED</th>
                 </tr>
             </thead>
@@ -55,13 +54,13 @@
                     <td style="color: #fff; font-weight: 600;">{{ u.email }}</td>
                     <td style="color: #06b6d4;">{{ u.username if u.username else '—' }}</td>
                     <td>
-                        {% if u.subscription_status == 'active' %}
-                            <span class="status-badge paid">ACTIVE PLAN</span>
+                        {% if u.status == 'ACTIVE' %}
+                            <span class="status-badge paid">ACTIVE</span>
                         {% else %}
                             <span class="status-badge free">INACTIVE</span>
                         {% endif %}
                     </td>
-                    <td style="color: #94a3b8;">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+                    <td style="color: #94a3b8;">{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else 'N/A' }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

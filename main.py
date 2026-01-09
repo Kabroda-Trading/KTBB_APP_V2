@@ -57,21 +57,36 @@ app.add_middleware(
     max_age=86400 * 30  # <--- KEEPS USERS LOGGED IN FOR 30 DAYS
 )
 
-# --- ADMIN ROUTE ---
+# --- ADMIN ROUTE (FIXED) ---
 @app.get("/admin", response_class=HTMLResponse)
 def admin_panel(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
     
-    # SECURITY CHECK: Only allow specific emails
-    # REPLACE THIS WITH YOUR REAL ADMIN EMAILS
-    ALLOWED_ADMINS = ["grossmonkeytrader@protonmail.com", "spiritmaker79@gmail.com"] 
-    
     if u.email not in ALLOWED_ADMINS:
         return RedirectResponse(url="/suite", status_code=303)
 
+    # Fetch users
     users = db.query(UserModel).order_by(UserModel.created_at.desc()).all()
-    return templates.TemplateResponse("admin.html", {"request": request, "users": users})
+    
+    # Pre-calculate data to prevent 500 Errors
+    clean_list = []
+    now = datetime.now()
+    for usr in users:
+        # Determine status safely
+        status = "INACTIVE"
+        if usr.subscription_end and usr.subscription_end > now:
+            status = "ACTIVE"
+            
+        clean_list.append({
+            "id": str(usr.id),
+            "email": usr.email,
+            "username": usr.username,
+            "status": status,
+            "created_at": usr.created_at
+        })
+
+    return templates.TemplateResponse("admin.html", {"request": request, "users": clean_list})
 
 @app.on_event("startup")
 def _startup():
@@ -205,12 +220,27 @@ def register_post(request: Request, db: Session = Depends(get_db), email: str = 
     auth.set_user_session(request, u)
     return RedirectResponse(url=billing.create_checkout_session(db=db, user_model=u, plan_key=plan), status_code=303)
 
+# --- ADMIN CONFIG ---
+# REPLACE WITH YOUR REAL EMAILS
+ALLOWED_ADMINS = ["grossmonkeytrader@protonmail.com", "spiritmaker79@gmail.com"]
+
+# --- ACCOUNT ROUTE (UPDATED) ---
 @app.get("/account", response_class=HTMLResponse)
 def account(request: Request, db: Session = Depends(get_db)):
     sess = _session_user_dict(request)
     if not sess: return RedirectResponse(url="/login", status_code=303)
     u = _db_user_from_session(db, sess)
-    return templates.TemplateResponse("account.html", {"request": request, "is_logged_in": True, "user": u, "tier_label": _plan_flags(u)["plan_label"]})
+    
+    # Check if this user is an admin
+    is_admin = u.email in ALLOWED_ADMINS
+    
+    return templates.TemplateResponse("account.html", {
+        "request": request, 
+        "is_logged_in": True, 
+        "user": u, 
+        "tier_label": _plan_flags(u)["plan_label"],
+        "is_admin": is_admin  # <--- PASS THIS FLAG
+    })
 
 @app.post("/account/settings")
 async def account_settings(request: Request, db: Session = Depends(get_db)):
