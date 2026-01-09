@@ -1,107 +1,124 @@
-{% extends "base_member.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kabroda | Operator Profile</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        body { background-color: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; margin: 0; padding: 0; }
+        .navbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
+        .logo { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.2rem; color: #fff !important; display: flex; align-items: center; gap: 10px; text-decoration: none; }
+        .nav-links { display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0; align-items: center; }
+        .nav-links a, .nav-links span { font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none; cursor: pointer; }
+        .nav-links a:hover, .nav-links a.active, .nav-links span.active { color: #fff; }
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; }
 
-{% block title %}Kabroda | Operator Profile{% endblock %}
+        .account-header { padding: 60px 0 40px; text-align: center; }
+        .pill { display: inline-block; background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.2); padding: 6px 16px; border-radius: 100px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #06b6d4; margin-bottom: 1.5rem; letter-spacing: 0.1em; text-transform: uppercase; }
+        h1 { font-size: 3rem; margin-bottom: 1rem; color: #fff; }
+        p { font-size: 1.1rem; color: #94a3b8; }
 
-{% block head %}
-<style>
-/* Gold Standard Account Styling */
-.account-header { padding: 80px 0 60px; text-align: center; }
-.pill { display: inline-block; background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.2); padding: 6px 16px; border-radius: 100px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #06b6d4; margin-bottom: 1.5rem; letter-spacing: 0.1em; text-transform: uppercase; }
-.account-header h1 { font-size: 3rem; margin-bottom: 1rem; color: #fff; font-weight: 700; letter-spacing: -0.02em; }
-.account-header p { font-size: 1.1rem; color: #94a3b8; max-width: 600px; margin: 0 auto; }
+        .card { background: #0f1623; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 2.5rem; margin-bottom: 2rem; }
+        .card.accent { border-left: 3px solid #06b6d4; }
+        .card h2 { font-size: 1.1rem; margin-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 1rem; color: #fff; }
+        .info-row { display: flex; justify-content: space-between; margin-bottom: 1.2rem; font-size: 0.95rem; color: #94a3b8; }
+        .info-val { color: #fff; font-family: 'JetBrains Mono', monospace; }
+        .plan-badge { background: rgba(6, 182, 212, 0.1); color: #06b6d4; padding: 4px 10px; border-radius: 4px; font-weight: 700; }
+        .btn-manage { display: block; width: 100%; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: #fff; text-align: center; border-radius: 4px; font-weight: 600; cursor: pointer; }
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #334155; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #06b6d4; }
+        input:checked + .slider:before { transform: translateX(20px); }
+    </style>
+</head>
+<body>
 
-.container { max-width: 800px; margin: 0 auto; padding: 0 20px; }
-
-.card { background: #0f1623; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 2.5rem; margin-bottom: 2rem; position: relative; }
-.card.accent { border-left: 3px solid #06b6d4; } /* Cyan Accent */
-
-.card h2 { font-size: 1.1rem; margin-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 1rem; color: #fff; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
-
-.info-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.2rem; font-size: 0.95rem; }
-.info-row:last-child { margin-bottom: 0; }
-.info-label { color: #94a3b8; }
-.info-value { font-weight: 500; font-family: 'JetBrains Mono', monospace; color: #e2e8f0; }
-
-.plan-badge { background: rgba(6, 182, 212, 0.1); color: #06b6d4; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; text-transform: uppercase; font-weight: 700; border: 1px solid rgba(6, 182, 212, 0.2); }
-
-/* Functional Button */
-.btn-manage { display: inline-block; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 14px; border-radius: 4px; color: #fff; font-size: 0.9rem; font-weight: 600; cursor: pointer; width: 100%; text-align: center; transition: all 0.2s ease; margin-top: 1.5rem; }
-.btn-manage:hover { background: rgba(255,255,255,0.05); border-color: #06b6d4; color: #06b6d4; }
-
-/* Toggle */
-.settings-toggle { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0; }
-.toggle-label strong { display: block; font-size: 1rem; margin-bottom: 0.4rem; color: #e2e8f0; }
-.toggle-desc { font-size: 0.85rem; color: #94a3b8; max-width: 80%; line-height: 1.5; }
-.switch { position: relative; display: inline-block; width: 44px; height: 24px; }
-.switch input { opacity: 0; width: 0; height: 0; }
-.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #334155; transition: .4s; border-radius: 34px; }
-.slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
-input:checked + .slider { background-color: #06b6d4; }
-input:checked + .slider:before { transform: translateX(20px); }
-</style>
-{% endblock %}
-
-{% block content %}
-<div class="container">
-    <div class="account-header">
-        <span class="pill">OPERATOR PROFILE</span>
-        <h1>Account Settings</h1>
-        <p>Manage subscription, billing, and system preferences.</p>
-    </div>
-
-    <div class="card">
-        <h2>Identity</h2>
-        <div class="info-row">
-            <span class="info-label">Operative Email</span>
-            <span class="info-value">{{ user.email }}</span>
+    <nav class="navbar">
+        <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; max-width: 1200px;">
+            <a href="/" class="logo">
+                <div style="width: 12px; height: 12px; background: #06b6d4; border-radius: 2px;"></div>
+                KABRODA
+            </a>
+            <ul class="nav-links">
+                <li class="dropdown-wrapper" style="position: relative; cursor: pointer;">
+                    <span class="active" onclick="toggleDropdown()" style="color: #fff;">SUITE ▼</span>
+                    <div id="suiteDropdown" style="display: none; position: absolute; top: 100%; left: 0; background: #0f1623; border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 4px; min-width: 180px; z-index: 9999; margin-top:10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+                        <a href="/suite" style="display: block; padding: 8px 12px; color: #aaa; text-decoration: none;">Session Control</a>
+                        <a href="/suite/battle-control" style="display: block; padding: 8px 12px; color: #aaa; text-decoration: none;">Battle Control</a>
+                    </div>
+                </li>
+                <li><a href="/analysis">INTEL</a></li>
+                <li><a href="/indicators">INDICATORS</a></li>
+                <li><a href="/account" style="color: #06b6d4;">ACCOUNT</a></li>
+                <li><a href="/logout">LOGOUT</a></li>
+            </ul>
         </div>
-        <div class="info-row">
-            <span class="info-label">Member Since</span>
-            <span class="info-value">{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else 'N/A' }}</span>
-        </div>
-    </div>
+    </nav>
 
-    <div class="card accent">
-        <h2>Subscription Status</h2>
-        <div class="info-row">
-            <span class="info-label">Current Plan</span>
-            <span class="info-value"><span class="plan-badge">{{ tier_label }}</span></span>
+    <div class="container">
+        <div class="account-header">
+            <span class="pill">OPERATOR PROFILE</span>
+            <h1>Account Settings</h1>
+            <p>Manage subscription, billing, and system preferences.</p>
         </div>
-        
-        <form action="/billing/portal" method="POST">
-            <button type="submit" class="btn-manage">Manage Billing & Cancellation ↗</button>
-        </form>
-    </div>
 
-    <div class="card">
-        <h2>System Preferences</h2>
-        <div class="settings-toggle">
-            <div class="toggle-label">
-                <strong>Operator Flex Mode</strong>
-                <div class="toggle-desc">Enable advanced manual session overrides in Battle Control. Used for backtesting or special market conditions.</div>
+        <div class="card">
+            <h2>Identity</h2>
+            <div class="info-row">
+                <span>Operative Email</span>
+                <span class="info-val">{{ user.email }}</span>
             </div>
-            <label class="switch">
-                <input type="checkbox" id="flexToggle" {% if user.operator_flex %}checked{% endif %}>
-                <span class="slider"></span>
-            </label>
+            <div class="info-row">
+                <span>Member Since</span>
+                <span class="info-val">{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else 'N/A' }}</span>
+            </div>
+        </div>
+
+        <div class="card accent">
+            <h2>Subscription Status</h2>
+            <div class="info-row">
+                <span>Current Plan</span>
+                <span class="info-val"><span class="plan-badge">{{ tier_label }}</span></span>
+            </div>
+            <form action="/billing/portal" method="POST">
+                <button type="submit" class="btn-manage">Manage Billing & Cancellation ↗</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>System Preferences</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <strong style="display: block; color: #fff; margin-bottom: 5px;">Operator Flex Mode</strong>
+                    <span style="font-size: 0.85rem; color: #94a3b8;">Enable manual session overrides in Battle Control.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="flexToggle" {% if user.operator_flex %}checked{% endif %}>
+                    <span class="slider"></span>
+                </label>
+            </div>
         </div>
     </div>
-</div>
-{% endblock %}
 
-{% block scripts %}
-<script>
-    document.getElementById('flexToggle').addEventListener('change', async function() {
-        const isChecked = this.checked;
-        try {
-            await fetch('/account/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ operator_flex: isChecked })
-            });
-        } catch (e) {
-            console.error("Failed to save setting", e);
-        }
-    });
-</script>
-{% endblock %}
+    <script>
+        document.getElementById('flexToggle').addEventListener('change', async function() {
+            const isChecked = this.checked;
+            try {
+                await fetch('/account/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ operator_flex: isChecked })
+                });
+            } catch (e) { console.error("Failed to save setting", e); }
+        });
+        function toggleDropdown() { const el = document.getElementById('suiteDropdown'); el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
+        document.addEventListener('click', function(e) { const wrapper = document.querySelector('.dropdown-wrapper'); const dropdown = document.getElementById('suiteDropdown'); if (!wrapper.contains(e.target) && dropdown.style.display === 'block') { dropdown.style.display = 'none'; } });
+    </script>
+</body>
+</html>
