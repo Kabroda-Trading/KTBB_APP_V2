@@ -24,6 +24,7 @@
         .input:focus { border-color: var(--accent-cyan); }
         .btn.primary { margin-top: 12px; background: var(--accent-cyan); color: #000; font-weight: 700; padding: 14px; border-radius: 4px; cursor: pointer; border: none; width: 100%; transition: transform 0.1s, box-shadow 0.2s; letter-spacing: 0.05em; text-transform: uppercase; }
         .btn.primary:hover { box-shadow: 0 0 15px rgba(6, 182, 212, 0.3); }
+        .plan-tag { display: inline-block; background: rgba(6, 182, 212, 0.1); color: var(--accent-cyan); padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-family: var(--font-mono); margin-bottom: 1rem; border: 1px solid rgba(6, 182, 212, 0.2); }
     </style>
 </head>
 <body>
@@ -42,15 +43,24 @@
     </nav>
     <div class="login-wrapper">
         <div class="bento-card">
-            <div class="text-center" style="margin-bottom: 32px; text-align: center;">
+            <div class="text-center" style="margin-bottom: 24px; text-align: center;">
                 <div style="width: 40px; height: 4px; background: var(--accent-cyan); margin: 0 auto 20px; border-radius: 2px;"></div>
                 <h3 style="font-size: 1.5rem; letter-spacing: -0.02em; margin-bottom: 0.5rem; color: #fff; margin-top:0;">Initialize Identity</h3>
-                <p style="color: var(--text-muted); font-size: 0.9rem;">Establish your operator profile.</p>
+                
+                {% if plan and plan != 'monthly' %}
+                    <div class="plan-tag">SELECTED PLAN: {{ plan|upper }}</div>
+                {% endif %}
+                
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0;">Establish your operator profile.</p>
             </div>
+
             {% if error %}
             <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; color: #fca5a5; padding: 12px; border-radius: 4px; margin-bottom: 24px; font-size: 0.85rem; text-align: center;">{{ error }}</div>
             {% endif %}
+            
             <form method="post" action="/register" style="display: flex; flex-direction: column; gap: 20px;">
+                <input type="hidden" name="plan" value="{{ plan|default('monthly') }}">
+                
                 <div>
                     <label class="label">Email Identity</label>
                     <input name="email" type="email" class="input" required placeholder="operative@domain.com" />

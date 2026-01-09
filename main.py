@@ -1,7 +1,6 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX + WEALTH OS v6.9
-# (Research Lab Integrated)
+# KABRODA UNIFIED SERVER: BATTLEBOX v7.0 (CLEAN)
 # ---------------------------------------------------------
 from __future__ import annotations
 
@@ -25,14 +24,10 @@ import dmr_report
 import data_feed
 import sse_engine
 
-# --- WEALTH IMPORTS ---
-import sjan_brain
-import wealth_allocator
-
 # --- BATTLE CONTROL IMPORT ---
 import battle_control
 
-# --- RESEARCH LAB IMPORT (NEW) ---
+# --- RESEARCH LAB IMPORT ---
 import research_lab
 
 from database import init_db, get_db, UserModel
@@ -159,7 +154,7 @@ def battle_control_page(request: Request, db: Session = Depends(get_db)):
         "plan_label": flags.get("plan_label", "")
     })
 
-# --- RESEARCH LAB (NEW PAGE) ---
+# --- RESEARCH LAB ---
 @app.get("/suite/research-lab", response_class=HTMLResponse)
 def research_lab_page(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -173,7 +168,6 @@ def research_lab_page(request: Request, db: Session = Depends(get_db)):
         "plan_label": flags.get("plan_label", "")
     })
 
-# Backward-compatible alias for your typed URL
 @app.get("/research_lab")
 def research_lab_alias(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -202,7 +196,7 @@ def login_post(request: Request, db: Session = Depends(get_db), email: str = For
     u = auth.authenticate_user(db, email=email, password=password)
     if not u: return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"}, status_code=401)
     auth.set_user_session(request, u)
-    # Check if paid, otherwise send to pricing
+    
     ms = get_membership_state(u)
     if not ms.is_paid:
         return RedirectResponse(url="/pricing?renewal=1", status_code=303)
@@ -214,26 +208,26 @@ def logout(request: Request):
     return RedirectResponse(url="/", status_code=303)
 
 @app.get("/register", response_class=HTMLResponse)
-def register_get(request: Request):
+def register_get(request: Request, plan: str = "monthly"):
     if auth.registration_disabled(): return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("register.html", {"request": request, "error": None})
+    # Plan defaults to monthly, but if URL is /register?plan=annual, it passes to template
+    return templates.TemplateResponse("register.html", {"request": request, "error": None, "plan": plan})
 
 @app.post("/register")
-def register_post(request: Request, db: Session = Depends(get_db), email: str = Form(...), password: str = Form(...)):
+def register_post(request: Request, db: Session = Depends(get_db), email: str = Form(...), password: str = Form(...), plan: str = Form("monthly")):
     if auth.registration_disabled(): raise HTTPException(status_code=403, detail="Registration disabled")
     
     # 1. Create User
     try: 
         u = auth.create_user(db, email=email, password=password)
     except HTTPException as e: 
-        return templates.TemplateResponse("register.html", {"request": request, "error": str(e.detail)}, status_code=e.status_code)
+        return templates.TemplateResponse("register.html", {"request": request, "error": str(e.detail), "plan": plan}, status_code=e.status_code)
     
     # 2. Login immediately
     auth.set_user_session(request, u)
     
-    # 3. Redirect to Stripe (Errors here will now show up in logs, not silent redirect)
-    # Defaulting to monthly plan for initial flow
-    checkout_url = billing.create_checkout_session(db=db, user_model=u, plan_key="monthly")
+    # 3. Create Checkout for the SELECTED plan
+    checkout_url = billing.create_checkout_session(db=db, user_model=u, plan_key=plan)
     return RedirectResponse(url=checkout_url, status_code=303)
 
 @app.get("/account", response_class=HTMLResponse)

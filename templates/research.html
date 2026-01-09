@@ -1,286 +1,491 @@
-{% extends "base.html" %}
+# research_lab.py
+# ==============================================================================
+# KABRODA RESEARCH LAB v8.1 (SESSION LOCK DOCTRINE)
+# ==============================================================================
+# Updates:
+# - IMPLEMENTED: Step A2 - Session Locking.
+# - FIXED: Levels are calculated ONLY from the 30m Lock Window (Open -> Open+30m).
+# - ADDED: In-Memory Persistence (LOCKED_SESSIONS) to prevent drift.
+# - ADDED: 'CALIBRATING' state for the first 30 mins of a session.
+# ==============================================================================
 
-{% block title %}Kabroda | Battle Control{% endblock %}
+from __future__ import annotations
+from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+import pandas as pd
+import sse_engine
+import ccxt.async_support as ccxt
+import pytz
+import strategy_auditor
+import traceback
 
-{% block content %}
-<div class="app-container" style="max-width: 1400px; margin: 0 auto;">
+# --- GLOBAL PERSISTENCE (In-Memory Cache) ---
+# Stores locked levels to prevent re-computation/drift during a session.
+# Key: "{symbol}_{session_name}_{anchor_date_str}"
+# Value: Dict with levels, r30, timestamp, etc.
+LOCKED_SESSIONS = {}
+
+# --- MATH HELPERS ---
+def calculate_ema(prices: List[float], period: int = 21) -> List[float]:
+    if len(prices) < period: return []
+    return pd.Series(prices).ewm(span=period, adjust=False).mean().tolist()
+
+def calculate_atr(highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> float:
+    if len(closes) < period + 1: return 0.0
+    tr_sum = 0.0
+    for i in range(1, period + 1):
+        hl = highs[-i] - lows[-i]
+        hc = abs(highs[-i] - closes[-i-1])
+        lc = abs(lows[-i] - closes[-i-1])
+        tr_sum += max(hl, hc, lc)
+    return tr_sum / period
+
+def _resample_15m(raw_5m: List[Dict]) -> List[Dict]:
+    """Helper to convert 5m candles to 15m for structure checks."""
+    if not raw_5m: return []
+    df = pd.DataFrame(raw_5m)
+    df['dt'] = pd.to_datetime(df['time'], unit='s')
+    df.set_index('dt', inplace=True)
     
-    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 15px;">
-        <div>
-            <h1 style="font-size: 1.8rem; margin: 0; color: #fff; letter-spacing: -1px;">BATTLE CONTROL</h1>
-            <div style="font-size: 0.9rem; color: #666; margin-top: 5px;">War Map Context & Session Execution</div>
-        </div>
-        <div style="display: flex; gap: 15px; align-items: center;">
-            <div class="live-toggle">
-                <input type="checkbox" id="autoRefreshToggle" onchange="toggleAutoRefresh()">
-                <label for="autoRefreshToggle">LIVE LINK</label>
-                <div id="live-dot"></div>
-            </div>
-            <div class="input-group" style="margin:0;">
-                <select id="sessionMode" onchange="toggleManualSession()" class="cyber-select">
-                    <option value="AUTO">AUTO (Dominant)</option>
-                    <option value="MANUAL">MANUAL OVERRIDE</option>
-                </select>
-                <select id="manualSessionId" class="cyber-select" style="display:none; margin-left:5px;">
-                    <option value="us_ny_futures">NY Futures</option>
-                    <option value="eu_london">London</option>
-                    <option value="asia_tokyo">Tokyo</option>
-                </select>
-            </div>
-            <button onclick="runLivePulse()" class="cyber-btn-primary" id="main-action-btn" style="height: 42px;">UPDATE INTEL</button>
-        </div>
-    </div>
-
-    <div style="display: grid; grid-template-columns: 280px 1fr; gap: 20px;">
-        
-        <div style="display: flex; flex-direction: column; gap: 15px;">
-            <div class="cyber-card" style="border-left: 3px solid #8b5cf6;">
-                <div class="card-header" style="color:#a78bfa;">WAR MAP CONTEXT</div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                    <span style="color:#888; font-size:0.8rem;">LEAN</span>
-                    <span id="wm-lean" style="font-weight:bold; color:#fff;">--</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-                    <span style="color:#888; font-size:0.8rem;">PHASE</span>
-                    <span id="wm-phase" style="font-weight:bold; color:#fff;">--</span>
-                </div>
-                <div id="wm-note" style="font-size:0.75rem; color:#888; border-top:1px solid #333; padding-top:10px;">--</div>
-            </div>
-
-            <div class="cyber-card">
-                <div class="card-header">KEY LEVELS</div>
-                <div class="level-row"><span>Daily Res</span><span id="val-dr" class="val">---</span></div>
-                <div class="level-row"><span style="color:var(--bull);">Breakout</span><span id="val-bo" class="val">---</span></div>
-                <div class="level-row"><span style="color:var(--bear);">Breakdown</span><span id="val-bd" class="val">---</span></div>
-                <div class="level-row"><span>Daily Sup</span><span id="val-ds" class="val">---</span></div>
-            </div>
-            
-            <button onclick="toggleTactical()" class="cyber-btn-sec" style="width:100%; font-size:0.8rem;">TOGGLE TACTICAL DRAWER</button>
-        </div>
-
-        <div class="cyber-card" style="border-left: 4px solid #3b82f6;">
-            <div class="card-header" style="color:#60a5fa; display:flex; justify-content:space-between;">
-                <span>SESSION BATTLE</span>
-                <span id="session-name" style="color:#fff;">--</span>
-            </div>
-
-            <div style="text-align: center; padding: 25px; background: #080808; border: 1px solid #333; border-radius: 4px; margin-bottom: 25px;">
-                <div style="font-size: 0.8rem; color: #666; letter-spacing: 2px;">CURRENT DIRECTIVE</div>
-                <div id="sb-action" style="font-size: 4rem; font-weight: 900; color: #444; line-height: 1.1;">HOLD FIRE</div>
-                <div id="sb-reason" style="margin-top: 10px; color: #ccc; font-size: 1.1rem;">Waiting for data...</div>
-            </div>
-
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px;">
-                <div class="metric-box">
-                    <div class="label">PRICE</div>
-                    <div class="val" id="live-price" style="color:#fff;">---</div>
-                </div>
-                <div class="metric-box">
-                    <div class="label">PERMISSION</div>
-                    <div class="val" id="sb-perm">NONE</div>
-                </div>
-                <div class="metric-box">
-                    <div class="label">ACCEPTANCE</div>
-                    <div class="val" id="sb-accept">0/2</div>
-                </div>
-                <div class="metric-box">
-                    <div class="label">LOCATION</div>
-                    <div class="val" id="sb-loc" style="font-size:0.7rem;">--</div>
-                </div>
-            </div>
-
-            <div id="sb-prepare-box" style="display: block; background: #112211; padding: 20px; border: 1px solid var(--primary); margin-bottom: 20px;">
-                <div style="font-size: 0.9rem; color: var(--primary); font-weight: bold; margin-bottom: 15px; text-align: center;">
-                    EXECUTION GATES (5M)
-                    <span id="sb-gates-mode" style="display:block; font-size:0.7rem; color:#88aa88; margin-top:4px;">PREVIEW (FLOATING)</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; font-family: monospace; font-size: 1.4rem;">
-                    <div><span style="color:#ef4444; font-size:0.8rem;">FAILURE LINE</span><br><span id="sb-fail-line" style="color:#fff;">--</span></div>
-                    <div style="text-align:right;"><span style="color:#00ff9d; font-size:0.8rem;">CONTINUATION</span><br><span id="sb-cont-line" style="color:#fff;">--</span></div>
-                </div>
-            </div>
-            
-            <div style="text-align: right; display:flex; gap:10px; justify-content:flex-end;">
-                <button onclick="copyTraderBrief()" class="cyber-btn-sec">COPY BRIEF</button>
-                <button onclick="copyBattleBox()" class="cyber-btn-primary">COPY FULL BATTLEBOX</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="tactical-drawer" style="display: none; margin-top: 30px; border-top: 1px solid #333; padding-top: 20px;">
-        <h3 style="color: #888; font-size: 1rem; margin-bottom: 20px;">TACTICAL INTELLIGENCE (OPTIONAL)</h3>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
-            <div class="cyber-card">
-                <div class="card-header">CAMPAIGN (BIG TRADE)</div>
-                <div id="wm-camp-status" style="font-size: 1.5rem; font-weight: bold; color: #666;">NOT ARMED</div>
-                <div id="wm-camp-note" style="margin-top: 10px; color: #888;">--</div>
-            </div>
-            <div class="cyber-card">
-                <div class="card-header">STRATEGY STATUS (OPTIONAL)</div>
-                <div id="strat-list" style="font-size: 0.8rem; color: #ccc;">Loading...</div>
-            </div>
-        </div>
-    </div>
-
-</div>
-
-<style>
-:root { --bg: #0a0a0a; --card: #141414; --primary: #00ff9d; --bull: #00ff9d; --bear: #ff4444; }
-body { background-color: var(--bg); font-family: 'Inter', sans-serif; }
-.cyber-card { background: var(--card); border: 1px solid #222; padding: 20px; border-radius: 4px; }
-.card-header { font-size: 0.8rem; letter-spacing: 1px; margin-bottom: 15px; border-bottom: 1px solid #222; padding-bottom: 10px; font-weight: bold; }
-.metric-box { background: #111; border: 1px solid #333; padding: 10px; text-align: center; border-radius: 4px; }
-.metric-box .label { font-size: 0.65rem; color: #666; margin-bottom: 3px; }
-.metric-box .val { font-size: 1.1rem; font-weight: bold; color: #ccc; }
-.level-row { display: flex; justify-content: space-between; font-size: 0.8rem; color: #888; border-bottom: 1px dashed #222; padding: 8px 0; }
-.level-row .val { color: #fff; font-family: monospace; font-weight: bold; }
-.live-toggle { display: flex; align-items: center; gap: 8px; background: #111; padding: 5px 12px; border: 1px solid #333; border-radius: 4px; }
-.live-toggle label { font-size: 0.7rem; color: #888; font-weight: bold; cursor: pointer; }
-#live-dot { width: 8px; height: 8px; background: #333; border-radius: 50%; transition: 0.3s; }
-.cyber-btn-primary { background: var(--primary); color: #000; border: none; font-weight: 800; padding: 0 20px; cursor: pointer; }
-.cyber-btn-sec { background: #222; color: #fff; border: 1px solid #444; padding: 10px 20px; cursor: pointer; font-weight: 600; }
-.cyber-select { background: #000; color: #fff; border: 1px solid #333; padding: 10px; cursor: pointer; }
-</style>
-
-<script>
-let lastPacket = null;
-let autoRefreshTimer = null;
-
-function toggleTactical() {
-    const d = document.getElementById('tactical-drawer');
-    d.style.display = d.style.display === 'none' ? 'block' : 'none';
-}
-
-function toggleManualSession() {
-    const mode = document.getElementById('sessionMode').value;
-    document.getElementById('manualSessionId').style.display = (mode === 'MANUAL') ? 'inline-block' : 'none';
-}
-
-function toggleAutoRefresh() {
-    if(document.getElementById('autoRefreshToggle').checked) {
-        document.getElementById('live-dot').style.background = "#00ff9d";
-        document.getElementById('live-dot').style.boxShadow = "0 0 8px #00ff9d";
-        runLivePulse(); autoRefreshTimer = setInterval(runLivePulse, 120000);
-    } else {
-        document.getElementById('live-dot').style.background = "#333";
-        document.getElementById('live-dot').style.boxShadow = "none";
-        clearInterval(autoRefreshTimer);
+    ohlc = {
+        'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum', 'time': 'first'
     }
-}
+    try:
+        df_15m = df.resample('15min').agg(ohlc).dropna()
+        return df_15m.to_dict('records')
+    except:
+        return []
 
-async function runLivePulse() {
-    const btn = document.querySelector('#main-action-btn');
-    btn.innerText = "UPDATING...";
-    try {
-        const res = await fetch('/api/dmr/live', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ 
-                symbol: "BTCUSDT", 
-                session_mode: document.getElementById('sessionMode').value,
-                manual_session_id: document.getElementById('manualSessionId').value 
+def detect_regime(candles_15m: List[Dict], bias_score: float, levels: Dict) -> str:
+    if not candles_15m: return "UNKNOWN"
+    closes = [c['close'] for c in candles_15m]
+    bo = levels.get("breakout_trigger", 0)
+    bd = levels.get("breakdown_trigger", 0)
+    price = closes[-1]
+    
+    # 1. Live Directional Override (Explicit Acceptance)
+    if price > bo * 1.001: return "DIRECTIONAL"
+    if price < bd * 0.999: return "DIRECTIONAL"
+    
+    # 2. Standard Logic
+    range_pct = ((bo - bd) / price) * 100 if price > 0 else 0
+    if abs(bias_score) > 0.25: return "DIRECTIONAL"
+    if range_pct > 0.5: return "ROTATIONAL"
+    return "COMPRESSED"
+
+def detect_phase(candles_15m: List[Dict], candles_5m: List[Dict], levels: Dict) -> str:
+    """
+    Determines the current Market Phase based on sequence:
+    BALANCE -> CANDIDATE (Acceptance) -> CONFIRMED (Pullback Hold) -> FAILED (Trap)
+    """
+    if not candles_15m or not candles_5m: return "UNKNOWN"
+    
+    price = candles_5m[-1]['close']
+    bo = levels.get("breakout_trigger", 0)
+    bd = levels.get("breakdown_trigger", 0)
+    vah = levels.get("f24_vah", 0)
+    val = levels.get("f24_val", 0)
+    
+    # 1. CHECK ACCEPTANCE (Last 2 15m closes outside)
+    c1 = candles_15m[-1]['close']
+    c2 = candles_15m[-2]['close'] if len(candles_15m) > 1 else c1
+    
+    bull_accept = c1 > bo and c2 > bo
+    bear_accept = c1 < bd and c2 < bd
+    
+    # 2. CHECK FAILED BREAK (TRAP)
+    if (c2 > bo and c1 < vah): return "FAILED_BREAK_BULL"
+    if (c2 < bd and c1 > val): return "FAILED_BREAK_BEAR"
+    
+    # 3. CHECK CONFIRMATION (Pullback Hold)
+    if bull_accept:
+        recent_lows = [c['low'] for c in candles_5m[-6:]]
+        dipped = any(l <= bo * 1.001 for l in recent_lows)
+        held = price > bo
+        if dipped and held: return "DIRECTIONAL_CONFIRMED_BULL"
+        return "DIRECTIONAL_CANDIDATE_BULL"
+
+    if bear_accept:
+        recent_highs = [c['high'] for c in candles_5m[-6:]]
+        dipped = any(h >= bd * 0.999 for h in recent_highs)
+        held = price < bd
+        if dipped and held: return "DIRECTIONAL_CONFIRMED_BEAR"
+        return "DIRECTIONAL_CANDIDATE_BEAR"
+
+    # 4. DEFAULT
+    if val <= price <= vah: return "BALANCE"
+    return "TESTING_EDGE"
+
+# --- MAIN RUNNER ---
+exchange_kucoin = ccxt.kucoin({'enableRateLimit': True})
+
+async def fetch_5m_granular(symbol: str):
+    s = symbol.upper().replace("BTCUSDT", "BTC/USDT").replace("ETHUSDT", "ETH/USDT")
+    try:
+        # Fetch 2 days of history to ensure we cover the anchor point
+        candles = await exchange_kucoin.fetch_ohlcv(s, '5m', limit=576)
+        return [{
+            "time": int(c[0]/1000), 
+            "open": float(c[1]), 
+            "high": float(c[2]), 
+            "low": float(c[3]), 
+            "close": float(c[4]),
+            "volume": float(c[5])
+        } for c in candles]
+    except: return []
+
+# --- SESSION CONFIGURATION ---
+SESSION_CONFIGS = [
+    {"name": "New York", "tz": "America/New_York", "open_h": 8, "open_m": 30},
+    {"name": "London", "tz": "Europe/London", "open_h": 8, "open_m": 0},
+    {"name": "Tokyo", "tz": "Asia/Tokyo", "open_h": 9, "open_m": 0},
+    {"name": "Sydney", "tz": "Australia/Sydney", "open_h": 10, "open_m": 0},
+]
+
+def _get_dominant_session(now_utc: datetime) -> Dict[str, Any]:
+    """
+    Finds the session that opened most recently.
+    """
+    candidates = []
+    for s in SESSION_CONFIGS:
+        tz = pytz.timezone(s["tz"])
+        now_local = now_utc.astimezone(tz)
+        
+        # Today's open
+        open_time = now_local.replace(hour=s["open_h"], minute=s["open_m"], second=0, microsecond=0)
+        
+        # If open_time is in future, consider yesterday's open
+        if now_local < open_time:
+            open_time = open_time - timedelta(days=1)
+            
+        # Time since open
+        diff = (now_local - open_time).total_seconds()
+        
+        candidates.append({
+            "name": s["name"],
+            "tz": s["tz"],
+            "anchor_time": int(open_time.astimezone(pytz.UTC).timestamp()),
+            "anchor_fmt": open_time.strftime("%H:%M") + " " + s["name"].upper(),
+            "date_key": open_time.strftime("%Y-%m-%d"),
+            "diff": diff
+        })
+    
+    candidates.sort(key=lambda x: x['diff'])
+    return candidates[0]
+
+# --- LIVE PULSE FUNCTION (SESSION LOCKED) ---
+async def run_live_pulse(symbol: str, risk_mode: str = "fixed_margin", capital: float = 1000, leverage: float = 1) -> Dict[str, Any]:
+    raw_5m = await fetch_5m_granular(symbol)
+    if not raw_5m: return {"error": "No data"}
+    
+    # 1. Determine Session Anchor
+    now_utc = datetime.now(timezone.utc)
+    now_ts = int(now_utc.timestamp())
+    session_info = _get_dominant_session(now_utc)
+    
+    anchor_ts = session_info["anchor_time"]
+    lock_end_ts = anchor_ts + 1800 # 30 minutes after open
+    
+    # Generate Unique Session Key for Cache
+    session_key = f"{symbol}_{session_info['name']}_{session_info['date_key']}"
+    
+    levels = {}
+    bias_score = 0
+    levels_source = "UNKNOWN"
+    
+    # 2. CHECK CACHE (Persistence Rule)
+    if session_key in LOCKED_SESSIONS:
+        cached = LOCKED_SESSIONS[session_key]
+        levels = cached["levels"]
+        bias_score = cached["bias_score"]
+        levels_source = "STORED"
+    
+    # 3. CHECK CALIBRATION STATUS
+    elif now_ts < lock_end_ts:
+        # Lock window is still open. We are CALIBRATING.
+        # We do NOT compute final levels yet.
+        return {
+            "timestamp": datetime.now(timezone.utc).strftime("%H:%M UTC"),
+            "session_lock": session_info["anchor_fmt"],
+            "status": "CALIBRATING",
+            "levels_source": "CALIBRATING",
+            "message": f"Levels lock in {int((lock_end_ts - now_ts)/60)} min",
+            "price": raw_5m[-1]['close'],
+            "regime": "PENDING",
+            "phase": "CALIBRATING",
+            "levels": {}, # Empty levels
+            "strategies": []
+        }
+        
+    # 4. COMPUTE & LOCK (If not in cache and window closed)
+    else:
+        # Find indices for the CORRECT windows
+        # Window A: Context (24h ending at Lock Time) -> for VAH/VAL
+        # Window B: Calibration (Anchor -> Lock Time) -> for R30 High/Low
+        
+        lock_idx = -1
+        anchor_idx = -1
+        
+        for i, c in enumerate(raw_5m):
+            if c['time'] == anchor_ts: anchor_idx = i
+            if c['time'] == lock_end_ts: lock_idx = i # Exact match preferred
+            
+        # Fallback if exact timestamp missing (e.g. gap)
+        if lock_idx == -1: 
+            # Find first candle AFTER lock time
+            for i, c in enumerate(raw_5m):
+                if c['time'] > lock_end_ts: 
+                    lock_idx = i
+                    break
+        
+        if anchor_idx == -1 or lock_idx == -1:
+             return {"error": "Insufficient data to lock session."}
+
+        # Context Slice: 24h ending at LOCK TIME (not rolling live)
+        context_start = max(0, lock_idx - 288)
+        context_slice = raw_5m[context_start : lock_idx]
+        
+        # Calibration Slice: The 30m window (Anchor -> Lock Time)
+        calibration_slice = raw_5m[anchor_idx : lock_idx]
+        
+        if not calibration_slice:
+             return {"error": "Empty calibration window."}
+
+        # SSE Computation
+        # Note: We override 'r30' logic to strictly use calibration_slice
+        r30_high = max(c['high'] for c in calibration_slice)
+        r30_low = min(c['low'] for c in calibration_slice)
+        open_price = calibration_slice[0]['open']
+        
+        sse_input = {
+            "raw_15m_candles": context_slice, 
+            "raw_daily_candles": [], 
+            "slice_24h": context_slice,
+            "slice_4h": context_slice[-48:],
+            "session_open_price": open_price, 
+            "r30_high": r30_high, 
+            "r30_low": r30_low,
+            "last_price": context_slice[-1]['close']
+        }
+        
+        try:
+            computed = sse_engine.compute_sse_levels(sse_input)
+            levels = computed["levels"]
+            bias_score = computed["bias_model"]["daily_lean"]["score"]
+            
+            # STORE IN CACHE
+            LOCKED_SESSIONS[session_key] = {
+                "levels": levels,
+                "bias_score": bias_score,
+                "locked_at": datetime.now(timezone.utc).isoformat()
+            }
+            levels_source = "COMPUTED (NEW LOCK)"
+            
+        except Exception as e:
+            print(f"SSE ENGINE ERROR: {e}")
+            return {"error": f"Level Calc Failed: {str(e)}"}
+
+    # 5. Live Analysis (Phase/Regime)
+    # Using LIVE price against LOCKED levels
+    
+    # Re-find anchor index for live slicing
+    anchor_idx_live = -1
+    for i, c in enumerate(raw_5m):
+        if c['time'] >= anchor_ts:
+            anchor_idx_live = i
+            break
+            
+    # Build 15m candles from live data for Structure Check
+    candles_15m = _resample_15m(raw_5m)
+    
+    regime = detect_regime(candles_15m[-30:], bias_score, levels)
+    phase = detect_phase(candles_15m[-30:], raw_5m[-48:], levels)
+    
+    risk_settings = { "mode": risk_mode, "value": float(capital), "leverage": float(leverage) }
+    strategies = {
+        "S1": strategy_auditor.run_s1_logic, "S2": strategy_auditor.run_s2_logic,
+        "S4": strategy_auditor.run_s4_logic, "S5": strategy_auditor.run_s5_logic,
+        "S6": strategy_auditor.run_s6_logic, "S7": strategy_auditor.run_s7_logic,
+        "S8": strategy_auditor.run_s8_logic, "S9": strategy_auditor.run_s9_logic
+    }
+    
+    results = []
+    # Only run strategies if we have valid levels
+    if levels:
+        for code, func in strategies.items():
+            try:
+                # Use live data slice for logic
+                live_slice = raw_5m[anchor_idx_live:] if anchor_idx_live != -1 else raw_5m[-100:]
+                res = func(levels, candles_15m[-30:], live_slice, risk_settings, regime)
+                
+                status = "STANDBY"; color = "#444"; msg = res['audit'].get('reason', 'Waiting...')
+                
+                if code == "S9" and res['status'] == "S9_ACTIVE":
+                    status = "CRITICAL ALERT"; color = "#ef4444"; msg = "MARKET HALTED (Extreme)"
+                
+                elif phase == "BALANCE":
+                    if code in ["S1", "S2", "S7"]: status = "BLOCKED"; color = "#222"; msg = "Market is Balanced."
+                    elif code in ["S4", "S6"]:
+                        if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"; msg = f"Entry: {res['entry']}"
+                        else: status = "MONITORING"; color = "#ffcc00"; msg = "Valid Rotation Phase."
+
+                elif "CANDIDATE" in phase:
+                    if code in ["S4", "S6", "S5"]: status = "BLOCKED"; color = "#222"; msg = "Breakout Attempted."
+                    elif code in ["S1", "S2"]: status = "ARMED"; color = "#ffcc00"; msg = "Acceptance. Awaiting Pullback."
+                    elif code == "S7": status = "STANDBY"; color = "#444"
+
+                elif "CONFIRMED" in phase:
+                    if code in ["S4", "S6", "S5"]: status = "BLOCKED"; color = "#ef4444"; msg = "TREND ACTIVE."
+                    elif code in ["S1", "S2", "S7"]:
+                        if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"; msg = f"Entry: {res['entry']}"
+                        else: status = "HUNTING"; color = "#00ff9d"; msg = "Trend Confirmed."
+
+                elif "FAILED" in phase:
+                    if code == "S8": status = "ARMED"; color = "#00ff9d"; msg = "Trap Detected."
+                    else: status = "CAUTION"; color = "#ffcc00"; msg = "Trap Risk."
+
+                elif res['audit'].get('valid', False):
+                    if res['entry'] > 0: status = "ACTIVE SIGNAL"; color = "#00ff9d"
+                
+                results.append({
+                    "strategy": code, "status": status, "color": color, "message": msg,
+                    "levels": { "stop": res['audit'].get('stop_loss',0), "target": res['audit'].get('target',0) }
+                })
+            except Exception as e:
+                results.append({"strategy": code, "status": "ERROR", "color": "red", "message": str(e)})
+
+    return {
+        "timestamp": datetime.now(timezone.utc).strftime("%H:%M UTC"),
+        "session_lock": session_info["anchor_fmt"],
+        "levels_source": levels_source, # DEBUG FIELD
+        "lock_end_ts": lock_end_ts,     # DEBUG FIELD
+        "session_key": session_key,     # DEBUG FIELD
+        "price": raw_5m[-1]['close'], 
+        "regime": regime, 
+        "phase": phase,
+        "levels": levels, 
+        "strategies": results
+    }
+
+# --- HISTORICAL ANALYSIS (PRESERVED) ---
+async def run_historical_analysis(inputs: Dict[str, Any], session_keys: List[str], leverage: float = 1, capital: float = 1000, strategy_mode: str = "S0", risk_mode: str = "fixed_margin") -> Dict[str, Any]:
+    # (Existing historical code remains here - keeping it brief for the file overwrite)
+    # ... [PASTE THE PREVIOUS HISTORICAL FUNCTION HERE IF NEEDED, OR IT WILL BE PRESERVED IF YOU ONLY PASTE THE TOP HALF] ...
+    # To avoid truncation errors, I will include the standard historical logic below.
+    
+    raw_15m = inputs.get("intraday_candles", [])
+    raw_daily = inputs.get("daily_candles", [])
+    symbol = inputs.get("symbol", "BTCUSDT")
+    raw_5m = await fetch_5m_granular(symbol)
+    
+    risk_settings = { "mode": risk_mode, "value": float(capital), "leverage": float(leverage) }
+    
+    history = []
+    regime_stats = { "COMPRESSED": [], "DIRECTIONAL": [], "ROTATIONAL": [], "VOLATILE": [] }
+    tz_map = {"London": ("Europe/London", 8, 0), "New_York": ("America/New_York", 8, 30)}
+    
+    for s_key in session_keys:
+        target = (0,0,0)
+        for k,v in tz_map.items(): 
+            if k in s_key or s_key in k: target = v
+        if target == (0,0,0): continue 
+        
+        market_tz = pytz.timezone(target[0])
+        indices = []
+        for i in range(len(raw_15m)-1, -1, -1):
+            dt = datetime.fromtimestamp(raw_15m[i]['time'], tz=pytz.UTC).astimezone(market_tz)
+            if dt.hour == target[1] and dt.minute == target[2]: indices.append(i)
+            if len(indices) >= 20: break 
+        
+        for idx in indices:
+            anchor = raw_15m[idx]
+            sse_input = {
+                "raw_15m_candles": raw_15m[:idx], 
+                "raw_daily_candles": [d for d in raw_daily if d['time'] < anchor['time']],
+                "slice_24h": raw_15m[max(0, idx-96):idx],
+                "slice_4h": raw_15m[max(0, idx-16):idx],
+                "session_open_price": anchor.get("open", 0.0), 
+                "r30_high": anchor.get("high", 0.0), 
+                "r30_low": anchor.get("low", 0.0), 
+                "last_price": anchor.get("close", 0.0)
+            }
+            computed = sse_engine.compute_sse_levels(sse_input)
+            levels = computed["levels"]
+            bias_score = computed["bias_model"]["daily_lean"]["score"]
+            future_15m = raw_15m[idx : idx+64] 
+            regime = detect_regime(future_15m[:16], bias_score, levels)
+            buffer_time = anchor['time'] - (300 * 50)
+            future_5m = [c for c in raw_5m if c['time'] >= buffer_time]
+            
+            final_result = None
+            if strategy_mode == "ALL":
+                candidates = []
+                strategies = [
+                    strategy_auditor.run_s1_logic, strategy_auditor.run_s2_logic,
+                    strategy_auditor.run_s4_logic, strategy_auditor.run_s5_logic,
+                    strategy_auditor.run_s6_logic, strategy_auditor.run_s7_logic,
+                    strategy_auditor.run_s8_logic
+                ]
+                for strat_func in strategies:
+                    try:
+                        res = strat_func(levels, future_15m, future_5m, risk_settings, regime)
+                        candidates.append(res)
+                    except: continue
+                try: s3_res = strategy_auditor.run_s3_logic(levels, future_15m, future_5m, risk_settings, regime)
+                except: s3_res = {"audit": {"valid": False}}
+                best_exec = None; best_pnl = -999999.0
+                for c in candidates:
+                    if c["audit"].get("valid", False) and c["pnl"] > 0:
+                        if c["pnl"] > best_pnl: best_pnl = c["pnl"]; best_exec = c
+                if best_exec: final_result = best_exec
+                elif s3_res.get("audit", {}).get("valid", False): final_result = s3_res
+                else: final_result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
+            else:
+                try:
+                    mapper = {
+                        "S0": strategy_auditor.run_s0_logic, "S1": strategy_auditor.run_s1_logic,
+                        "S2": strategy_auditor.run_s2_logic, "S3": strategy_auditor.run_s3_logic,
+                        "S4": strategy_auditor.run_s4_logic, "S5": strategy_auditor.run_s5_logic,
+                        "S6": strategy_auditor.run_s6_logic, "S7": strategy_auditor.run_s7_logic,
+                        "S8": strategy_auditor.run_s8_logic, "S9": strategy_auditor.run_s9_logic
+                    }
+                    func = mapper.get(strategy_mode, strategy_auditor.run_s0_logic)
+                    final_result = func(levels, future_15m, future_5m, risk_settings, regime)
+                except:
+                    final_result = strategy_auditor.run_s0_logic(levels, future_15m, future_5m, risk_settings, regime)
+            history.append({
+                "session": s_key.replace("America/", "").replace("Europe/", ""),
+                "date": datetime.fromtimestamp(anchor["time"]).strftime("%Y-%m-%d"),
+                "regime": regime, "levels": levels, "strategy": final_result
             })
-        });
-        const data = await res.json();
-        if(data.status === "ERROR") return;
-        lastPacket = data.battlebox;
-        
-        // WAR MAP
-        const wm = data.battlebox.war_map_context || {};
-        document.getElementById('wm-lean').innerText = wm.lean || "--";
-        document.getElementById('wm-lean').style.color = wm.lean === "BULLISH" ? "#00ff9d" : (wm.lean === "BEARISH" ? "#ef4444" : "#fff");
-        document.getElementById('wm-phase').innerText = wm.phase || "--";
-        document.getElementById('wm-note').innerText = wm.note || "--";
-        
-        const camp = data.battlebox.war_map_campaign || {};
-        document.getElementById('wm-camp-status').innerText = camp.status || "NOT ARMED";
-        document.getElementById('wm-camp-note').innerText = camp.note || "--";
+            regime_stats[regime].append(final_result["pnl"] > 0)
 
-        // SESSION BATTLE
-        const sb = data.battlebox.session_battle || {};
-        document.getElementById('session-name').innerText = data.battlebox.session?.name || "--";
-        
-        const action = sb.action || "HOLD FIRE";
-        const elAction = document.getElementById('sb-action');
-        elAction.innerText = action;
-        
-        if(action === "GREENLIGHT") elAction.style.color = "#00ff9d";
-        else if(action === "PREPARE") elAction.style.color = "#ffcc00";
-        else elAction.style.color = "#444";
-        
-        document.getElementById('sb-reason').innerText = sb.reason || "--";
-        document.getElementById('live-price').innerText = data.price.toFixed(2);
-        
-        document.getElementById('sb-perm').innerText = sb.permission?.status || "NONE";
-        document.getElementById('sb-perm').style.color = sb.permission?.status === "EARNED" ? "#00ff9d" : "#666";
-        
-        const acc = sb.acceptance_progress || {count:0};
-        document.getElementById('sb-accept').innerText = `${acc.count || 0}/${acc.required || 2}`;
-        
-        const loc = sb.location || {};
-        document.getElementById('sb-loc').innerText = `${loc.relative_to_triggers || '-'} | ${loc.relative_to_value || '-'}`;
+    history.sort(key=lambda x: x['date'], reverse=True)
+    valid_wins = 0; valid_attempts = 0; valid_pnl_total = 0.0; exemplar = None; best_score = -999
+    for h in history:
+        res = h['strategy']
+        is_valid = res.get('audit', {}).get('valid', False)
+        if is_valid:
+            valid_attempts += 1
+            if res['status'] == "S0_OBSERVED": valid_wins += 1 
+            else:
+                valid_pnl_total += res['pnl']
+                if res['pnl'] > 0: valid_wins += 1
+            score = res['pnl'] + (1000 if is_valid else 0)
+            if score > best_score: best_score = score; exemplar = h
 
-        // EXECUTION GATES (LOCKED VS PREVIEW)
-        const exec = sb.execution || {};
-        const levels = exec.levels || {};
-        const gatesMode = exec.gates_mode || "PREVIEW";
-        const pauseState = exec.pause_state || "NONE";
+    win_rate = int((valid_wins/valid_attempts)*100) if valid_attempts > 0 else 0
+    regime_breakdown = {}
+    for r, results in regime_stats.items():
+        if results:
+            w = sum(1 for x in results if x)
+            regime_breakdown[r] = int((w / len(results)) * 100)
+        else:
+            regime_breakdown[r] = 0
 
-        const structureText = pauseState === "CONFIRMED" ? "STRUCTURE CONFIRMED" : (pauseState === "FORMING" ? "STRUCTURE FORMING" : "NO STRUCTURE YET");
-        document.getElementById('sb-gates-mode').innerText = (gatesMode === "LOCKED") ? `LOCKED • ${structureText}` : `PREVIEW (FLOATING) • ${structureText}`;
-
-        const gateBox = document.getElementById('sb-prepare-box');
-        if (gatesMode === "LOCKED") {
-            gateBox.style.opacity = "1";
-            gateBox.style.borderColor = "var(--primary)";
-        } else {
-            gateBox.style.opacity = "0.65";
-            gateBox.style.borderColor = "#224422";
-        }
-
-        document.getElementById('sb-fail-line').innerText = (levels.failure ? levels.failure.toFixed(2) : "--");
-        document.getElementById('sb-cont-line').innerText = (levels.continuation ? levels.continuation.toFixed(2) : "--");
-        
-        // LEVELS
-        const l = data.battlebox.levels || {};
-        document.getElementById('val-dr').innerText = l.daily_resistance?.toFixed(2) || "---";
-        document.getElementById('val-bo').innerText = l.breakout_trigger?.toFixed(2) || "---";
-        document.getElementById('val-bd').innerText = l.breakdown_trigger?.toFixed(2) || "---";
-        document.getElementById('val-ds').innerText = l.daily_support?.toFixed(2) || "---";
-        
-        // STRATEGIES (Drawer)
-        const strats = data.battlebox.strategies_summary || [];
-        const stratList = document.getElementById('strat-list');
-        if(strats.length > 0) {
-            stratList.innerHTML = strats.map(s => `
-                <div style="margin-bottom:8px; padding:8px; background:#111; border-left:3px solid #333;">
-                    <div style="font-weight:bold; color:#fff; font-size:0.8rem;">${s.name}</div>
-                    <div style="font-size:0.7rem; color:#888;">${s.status} - ${s.msg}</div>
-                </div>
-            `).join('');
-        } else {
-            stratList.innerHTML = "No strategies active.";
-        }
-        
-    } catch(e) { console.error(e); } 
-    finally { btn.innerText = "UPDATE INTEL"; }
-}
-
-function copyTraderBrief() {
-    if(!lastPacket) return;
-    const brief = {
-        "context": lastPacket.war_map_context,
-        "session": lastPacket.session_battle,
-        "levels": lastPacket.levels
-    };
-    navigator.clipboard.writeText(JSON.stringify(brief, null, 2));
-    alert("Trader Brief Copied.");
-}
-
-function copyBattleBox() {
-    if(!lastPacket) return;
-    navigator.clipboard.writeText(JSON.stringify(lastPacket, null, 2));
-    alert("Full Packet Copied.");
-}
-</script>
-{% endblock %}
+    stats_out = {
+        "win_rate": win_rate, "total_pnl": valid_pnl_total, "valid_trades": valid_attempts,
+        "total_sessions": len(history), "regime_breakdown": regime_breakdown, "exemplar": exemplar
+    }
+    
+    return {"history": history, "stats": stats_out}

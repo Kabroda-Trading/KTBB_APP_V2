@@ -80,7 +80,24 @@
 </head>
 <body>
 
-    {% include 'partials/nav_public.html' %}
+    <nav class="navbar">
+        <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; flex-wrap: wrap;">
+            <a href="/" class="logo">
+                <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
+                KABRODA
+            </a>
+            <ul class="nav-links">
+                <li><a href="/">Home</a></li>
+                <li><a href="/analysis">Analysis</a></li>
+                <li><a href="/how-it-works">How It Works</a></li>
+                <li><a href="/pricing" class="active">Pricing</a></li>
+                <li><a href="/login">Login</a></li>
+            </ul>
+            <div class="nav-cta">
+                <a href="/login" class="btn btn-primary">Member Access</a>
+            </div>
+        </div>
+    </nav>
 
     <section class="pricing-hero">
         <div class="container">
@@ -222,29 +239,34 @@
             btn.disabled = true;
 
             try {
+                // ATTEMPT TO CHECKOUT (Checks if logged in via cookie/session)
                 const response = await fetch('/billing/checkout', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ plan: plan })
                 });
                 
+                // If the server redirects, follow it (usually to Stripe or Login)
                 if (response.redirected) {
                     window.location.href = response.url;
                     return;
                 }
 
+                // Parse response
                 const data = await response.json();
+                
                 if (data.url) {
+                    // Logged in + Stripe URL created -> Go to Stripe
                     window.location.href = data.url;
                 } else {
-                    alert("System Message: Please log in to start trial.");
-                    window.location.href = "/login";
+                    // NOT LOGGED IN -> Send to Register with PLAN Param
+                    // This fixes the flow so they don't lose their choice
+                    window.location.href = "/register?plan=" + plan;
                 }
             } catch (err) {
                 console.error(err);
-                alert("Connection unavailable.");
-                btn.innerText = originalText;
-                btn.disabled = false;
+                // Fallback for network errors
+                window.location.href = "/register?plan=" + plan;
             }
         }
     </script>
