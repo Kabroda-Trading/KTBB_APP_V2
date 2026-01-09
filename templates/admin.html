@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kabroda | Admin Console</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        body { background: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 40px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; border-bottom: 1px solid #333; padding-bottom: 20px; }
+        h1 { font-family: 'JetBrains Mono', monospace; color: #fff; margin: 0; }
+        .pill { background: #06b6d4; color: #000; padding: 4px 12px; border-radius: 4px; font-weight: 700; font-size: 12px; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+        th { text-align: left; padding: 12px; border-bottom: 1px solid #333; color: #94a3b8; font-family: 'JetBrains Mono', monospace; }
+        td { padding: 16px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        tr:hover { background: rgba(255,255,255,0.02); }
+        
+        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+        .paid { background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.2); }
+        .free { background: rgba(255, 255, 255, 0.05); color: #94a3b8; }
+        
+        .back-link { color: #94a3b8; text-decoration: none; font-size: 14px; display: inline-flex; align-items: center; gap: 5px; }
+        .back-link:hover { color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <a href="/suite" class="back-link">← Back to Suite</a>
+                <h1 style="margin-top: 10px;">GOD MODE <span class="pill">ADMIN</span></h1>
+            </div>
+            <div style="text-align: right; color: #94a3b8;">
+                Total Members: <strong style="color: #fff;">{{ users|length }}</strong>
+            </div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>EMAIL</th>
+                    <th>OPERATIVE ID</th>
+                    <th>MEMBERSHIP</th>
+                    <th>JOINED</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr>
+                    <td style="font-family: monospace; color: #64748b;">{{ u.id[:8] }}...</td>
+                    <td style="color: #fff; font-weight: 600;">{{ u.email }}</td>
+                    <td style="color: #06b6d4;">{{ u.username if u.username else '—' }}</td>
+                    <td>
+                        {% if u.subscription_status == 'active' %}
+                            <span class="status-badge paid">ACTIVE PLAN</span>
+                        {% else %}
+                            <span class="status-badge free">INACTIVE</span>
+                        {% endif %}
+                    </td>
+                    <td style="color: #94a3b8;">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>

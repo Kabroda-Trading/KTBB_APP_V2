@@ -57,6 +57,22 @@ app.add_middleware(
     max_age=86400 * 30  # <--- KEEPS USERS LOGGED IN FOR 30 DAYS
 )
 
+# --- ADMIN ROUTE ---
+@app.get("/admin", response_class=HTMLResponse)
+def admin_panel(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    
+    # SECURITY CHECK: Only allow specific emails
+    # REPLACE THIS WITH YOUR REAL ADMIN EMAILS
+    ALLOWED_ADMINS = ["grossmonkeytrader@protonmail.com", "spiritmaker79@gmail.com"] 
+    
+    if u.email not in ALLOWED_ADMINS:
+        return RedirectResponse(url="/suite", status_code=303)
+
+    users = db.query(UserModel).order_by(UserModel.created_at.desc()).all()
+    return templates.TemplateResponse("admin.html", {"request": request, "users": users})
+
 @app.on_event("startup")
 def _startup():
     init_db()
