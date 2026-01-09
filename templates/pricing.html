@@ -16,6 +16,7 @@
         .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
         a { text-decoration: none; color: inherit; transition: 0.3s ease; }
 
+        /* NAV STYLES (Matching Public) */
         .navbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
         .logo { font-family: var(--font-mono); font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; }
         .logo span { color: var(--accent-cyan); }
@@ -24,12 +25,14 @@
         .nav-links a:hover, .nav-links a.active { color: #fff; }
         .nav-cta .btn { width: auto; padding: 0.6rem 1.2rem; font-size: 0.9rem; }
         
-        .btn { display: inline-block; padding: 1rem 2rem; border-radius: 4px; font-weight: 600; cursor: pointer; text-align: center; width: 100%; }
+        /* BUTTONS */
+        .btn { display: inline-block; padding: 1rem 2rem; border-radius: 4px; font-weight: 600; cursor: pointer; text-align: center; width: 100%; border: none; }
         .btn-primary { background: var(--accent-cyan); color: var(--bg-dark); box-shadow: 0 0 15px rgba(6, 182, 212, 0.2); }
         .btn-primary:hover { background: var(--accent-glow); box-shadow: 0 0 25px rgba(6, 182, 212, 0.4); }
         .btn-outline { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: var(--text-main); }
         .btn-outline:hover { border-color: #fff; background: rgba(255,255,255,0.05); }
 
+        /* SECTIONS */
         .pricing-hero { padding: 100px 0 60px; text-align: center; }
         .eyebrow { font-family: var(--font-mono); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--accent-cyan); margin-bottom: 1.5rem; display: block; }
         .pricing-hero h1 { font-size: 3.5rem; margin-bottom: 1.5rem; color: #fff; }
@@ -93,7 +96,7 @@
                 <li><a href="/login">Login</a></li>
             </ul>
             <div class="nav-cta">
-                <a href="/pricing" class="btn btn-primary">Start 7-Day Free Trial</a>
+                <a href="#" onclick="checkout('monthly')" class="btn btn-primary">Start 7-Day Free Trial</a>
             </div>
         </div>
     </nav>
@@ -122,7 +125,7 @@
                         <li>TradingView Sync</li>
                         <li>Ongoing System Updates</li>
                     </ul>
-                    <a href="#" class="btn btn-outline">Start Monthly Trial</a>
+                    <button onclick="checkout('monthly')" class="btn btn-outline">Start Monthly Trial</button>
                 </div>
 
                 <div class="pricing-card featured">
@@ -135,7 +138,7 @@
                         <li>Locked-in rate for 12 months</li>
                         <li>Priority support access</li>
                     </ul>
-                    <a href="#" class="btn btn-primary">Start Annual Trial</a>
+                    <button onclick="checkout('annual')" class="btn btn-primary">Start Annual Trial</button>
                 </div>
 
                 <div class="pricing-card">
@@ -151,7 +154,7 @@
                         <li>TradingView Sync</li>
                         <li>Ongoing System Updates</li>
                     </ul>
-                    <a href="#" class="btn btn-outline">Start 6-Month Trial</a>
+                    <button onclick="checkout('semi')" class="btn btn-outline">Start 6-Month Trial</button>
                 </div>
             </div>
         </div>
@@ -230,11 +233,47 @@
         <div class="container">
             <h2>Stop Paying for Tools.<br>Start Operating With Structure.</h2>
             <div class="cta-container">
-                <a href="#" class="btn btn-primary">Start 7-Day Free Trial</a>
+                <button onclick="checkout('monthly')" class="btn btn-primary">Start 7-Day Free Trial</button>
                 <div class="micro-copy">Full access. Cancel anytime.</div>
             </div>
         </div>
     </section>
+
+    <script>
+        async function checkout(plan) {
+            const btn = event.target;
+            const originalText = btn.innerText;
+            btn.innerText = "Processing...";
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/billing/checkout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ plan: plan })
+                });
+                
+                // Handle 303 Redirects (Auth)
+                if (response.redirected) {
+                    window.location.href = response.url;
+                    return;
+                }
+
+                const data = await response.json();
+                if (data.url) {
+                    window.location.href = data.url;
+                } else {
+                    alert("System Message: Please log in to start trial.");
+                    window.location.href = "/login";
+                }
+            } catch (err) {
+                console.error(err);
+                alert("Connection unavailable.");
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+    </script>
 
 </body>
 </html>
