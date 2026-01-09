@@ -1,43 +1,86 @@
-{% extends "base.html" %}
-{% block content %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kabroda | Initialize Account</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        /* Exact same standalone styles as Login for consistency */
+        :root { --bg-dark: #050b14; --bg-card: #0f1623; --text-main: #e2e8f0; --text-muted: #94a3b8; --accent-cyan: #06b6d4; --font-main: 'Inter', system-ui, -apple-system, sans-serif; --font-mono: 'JetBrains Mono', monospace; }
+        body { background-color: var(--bg-dark); color: var(--text-main); font-family: var(--font-main); margin: 0; padding: 0; }
+        
+        .navbar { border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
+        .nav-container { max-width: 1200px; margin: 0 auto; padding: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { font-family: var(--font-mono); font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; text-decoration: none; }
+        .nav-links { display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0; }
+        .nav-links a { font-size: 0.95rem; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none; }
+        .nav-links a:hover { color: #fff; }
 
-<div style="min-height: 70vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at center, rgba(6, 182, 212, 0.05) 0%, transparent 70%);">
-  
-  <div class="bento-card" style="max-width: 400px; width: 100%; padding: 40px; box-shadow: 0 30px 60px rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.08);">
-    
-    <div class="text-center" style="margin-bottom: 32px;">
-      <div style="width: 40px; height: 4px; background: var(--accent-cyan); margin: 0 auto 20px; border-radius: 2px;"></div>
-      <h3 style="font-size: 1.5rem; letter-spacing: -0.02em; margin-bottom: 0.5rem; color: #fff;">Initialize Identity</h3>
-      <p style="color: var(--text-muted); font-size: 0.9rem;">Establish your operator profile.</p>
+        .login-wrapper { min-height: 70vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at center, rgba(6, 182, 212, 0.05) 0%, transparent 70%); padding: 20px; }
+        .bento-card { max-width: 400px; width: 100%; padding: 40px; box-shadow: 0 30px 60px rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.08); background: var(--bg-card); border-radius: 8px; }
+        
+        .label { font-size: 0.75rem; letter-spacing: 0.1em; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 8px; display: block; }
+        .input { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 4px; width: 100%; outline: none; transition: border-color 0.2s; box-sizing: border-box; }
+        .input:focus { border-color: var(--accent-cyan); }
+        
+        .btn.primary { margin-top: 12px; background: var(--accent-cyan); color: #000; font-weight: 700; padding: 14px; border-radius: 4px; cursor: pointer; border: none; width: 100%; transition: transform 0.1s, box-shadow 0.2s; letter-spacing: 0.05em; text-transform: uppercase; }
+        .btn.primary:hover { box-shadow: 0 0 15px rgba(6, 182, 212, 0.3); }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="/" class="logo">
+                <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
+                KABRODA
+            </a>
+            <ul class="nav-links">
+                <li><a href="/">Home</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/login">Login</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="login-wrapper">
+        <div class="bento-card">
+            <div class="text-center" style="margin-bottom: 32px; text-align: center;">
+                <div style="width: 40px; height: 4px; background: var(--accent-cyan); margin: 0 auto 20px; border-radius: 2px;"></div>
+                <h3 style="font-size: 1.5rem; letter-spacing: -0.02em; margin-bottom: 0.5rem; color: #fff; margin-top:0;">Initialize Identity</h3>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">Establish your operator profile.</p>
+            </div>
+
+            {% if error %}
+            <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; color: #fca5a5; padding: 12px; border-radius: 4px; margin-bottom: 24px; font-size: 0.85rem; text-align: center;">
+                {{ error }}
+            </div>
+            {% endif %}
+
+            <form method="post" action="/register" style="display: flex; flex-direction: column; gap: 20px;">
+                <div>
+                    <label class="label">Email Identity</label>
+                    <input name="email" type="email" class="input" required placeholder="operative@domain.com" />
+                </div>
+                
+                <div>
+                    <label class="label">Create Access Key</label>
+                    <input name="password" type="password" class="input" required placeholder="••••••••" />
+                </div>
+
+                <button class="btn primary" type="submit">CREATE ACCOUNT</button>
+            </form>
+
+            <div style="text-align: center; margin-top: 32px; font-size: 0.85rem; padding-top: 24px; border-top: 1px solid rgba(255,255,255,0.05);">
+                <span style="color: var(--text-muted);">Already active?</span> 
+                <a href="/login" style="color: var(--accent-cyan); text-decoration: none; font-weight: 600; margin-left: 5px;">Login here</a>
+            </div>
+        </div>
     </div>
 
-    {% if error %}
-    <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid var(--danger); color: #fca5a5; padding: 12px; border-radius: 4px; margin-bottom: 24px; font-size: 0.85rem; text-align: center;">
-      {{ error }}
-    </div>
-    {% endif %}
-
-    <form method="post" action="/register" style="display: flex; flex-direction: column; gap: 20px;">
-      <div>
-        <label class="label" style="font-size: 0.75rem; letter-spacing: 0.1em; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 8px; display: block;">Email Identity</label>
-        <input name="email" type="email" class="input" required placeholder="operative@domain.com" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 4px; width: 100%; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--accent-cyan)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'" />
-      </div>
-      
-      <div>
-        <label class="label" style="font-size: 0.75rem; letter-spacing: 0.1em; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 8px; display: block;">Create Access Key</label>
-        <input name="password" type="password" class="input" required placeholder="••••••••" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 4px; width: 100%; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--accent-cyan)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'" />
-      </div>
-
-      <button class="btn primary" type="submit" style="margin-top: 12px; background: var(--accent-cyan); color: #000; font-weight: 700; padding: 14px; border-radius: 4px; cursor: pointer; border: none; transition: transform 0.1s, box-shadow 0.2s; letter-spacing: 0.05em;">
-        CREATE ACCOUNT
-      </button>
-    </form>
-
-    <div class="text-center" style="margin-top: 32px; font-size: 0.85rem; padding-top: 24px; border-top: 1px solid rgba(255,255,255,0.05);">
-      <span style="color: var(--text-muted);">Already active?</span> 
-      <a href="/login" style="color: var(--accent-cyan); text-decoration: none; font-weight: 600; margin-left: 5px; transition: color 0.2s;">Login here</a>
-    </div>
-  </div>
-
-</div>
-{% endblock %}
+</body>
+</html>
