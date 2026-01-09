@@ -173,6 +173,14 @@ def research_lab_page(request: Request, db: Session = Depends(get_db)):
         "plan_label": flags.get("plan_label", "")
     })
 
+# Backward-compatible alias for your typed URL
+@app.get("/research_lab")
+def research_lab_alias(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    require_paid_access(u)
+    return RedirectResponse(url="/suite/research-lab", status_code=303)
+
 @app.get("/indicators", response_class=HTMLResponse)
 def indicators(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
