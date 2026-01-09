@@ -1,18 +1,15 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v10.0 (FINAL)
+# KABRODA UNIFIED SERVER: BATTLEBOX v10.1 (ADMIN FIX)
 # ---------------------------------------------------------
-# Includes:
-# 1. Unified Pipeline (No drift)
-# 2. Account Profile Updates (Operative ID / Timezone)
-# 3. 30-Day Session Persistence
-# 4. Correct Billing Routing
+# Changes: Added 'datetime' import to fix Admin 500 Error
 # ---------------------------------------------------------
 from __future__ import annotations
 
 import asyncio
 import os
 import traceback
+from datetime import datetime, timedelta # <--- FIXED: Added this import
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, Form, HTTPException, Depends
@@ -26,7 +23,7 @@ from starlette.templating import Jinja2Templates
 # --- CORE IMPORTS ---
 import auth
 import billing
-import battlebox_pipeline  # <--- SINGLE SOURCE OF TRUTH
+import battlebox_pipeline
 import research_lab
 
 from database import init_db, get_db, UserModel
@@ -48,45 +45,18 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
 IS_HTTPS = PUBLIC_BASE_URL.startswith("https://")
 SESSION_HTTPS_ONLY = _bool_env("SESSION_HTTPS_ONLY", default=IS_HTTPS)
 
-# --- SESSION CONFIGURATION (30-DAY PERSISTENCE) ---
+# --- SESSION CONFIGURATION ---
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
     https_only=SESSION_HTTPS_ONLY,
     same_site="lax",
-    max_age=86400 * 30  # <--- KEEPS USERS LOGGED IN FOR 30 DAYS
+    max_age=86400 * 30
 )
 
-# --- ADMIN ROUTE (FIXED) ---
-@app.get("/admin", response_class=HTMLResponse)
-def admin_panel(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    
-    if u.email not in ALLOWED_ADMINS:
-        return RedirectResponse(url="/suite", status_code=303)
-
-    # Fetch users
-    users = db.query(UserModel).order_by(UserModel.created_at.desc()).all()
-    
-    # Pre-calculate data to prevent 500 Errors
-    clean_list = []
-    now = datetime.now()
-    for usr in users:
-        # Determine status safely
-        status = "INACTIVE"
-        if usr.subscription_end and usr.subscription_end > now:
-            status = "ACTIVE"
-            
-        clean_list.append({
-            "id": str(usr.id),
-            "email": usr.email,
-            "username": usr.username,
-            "status": status,
-            "created_at": usr.created_at
-        })
-
-    return templates.TemplateResponse("admin.html", {"request": request, "users": clean_list})
+# --- ADMIN CONFIG ---
+# REPLACE WITH YOUR REAL EMAILS
+ALLOWED_ADMINS = ["spiritmaker79@gmail.com", "grossmonkeytrader@protonmail.com"]
 
 @app.on_event("startup")
 def _startup():
@@ -185,13 +155,9 @@ def indicators(request: Request, db: Session = Depends(get_db)):
 
 # --- AUTH & ACCOUNT ---
 @app.get("/login", response_class=HTMLResponse)
-def login_get(request: Request, db: Session = Depends(get_db)):
-    # 1. Check if user is already logged in
+def login_get(request: Request):
     sess = _session_user_dict(request)
-    if sess:
-        return RedirectResponse(url="/suite", status_code=303)
-        
-    # 2. If not, show login page
+    if sess: return RedirectResponse(url="/suite", status_code=303)
     return templates.TemplateResponse("login.html", {"request": request, "error": None})
 
 @app.post("/login")
@@ -220,18 +186,13 @@ def register_post(request: Request, db: Session = Depends(get_db), email: str = 
     auth.set_user_session(request, u)
     return RedirectResponse(url=billing.create_checkout_session(db=db, user_model=u, plan_key=plan), status_code=303)
 
-# --- ADMIN CONFIG ---
-# REPLACE WITH YOUR REAL EMAILS
-ALLOWED_ADMINS = ["grossmonkeytrader@protonmail.com", "spiritmaker79@gmail.com"]
-
-# --- ACCOUNT ROUTE (UPDATED) ---
 @app.get("/account", response_class=HTMLResponse)
 def account(request: Request, db: Session = Depends(get_db)):
     sess = _session_user_dict(request)
     if not sess: return RedirectResponse(url="/login", status_code=303)
     u = _db_user_from_session(db, sess)
     
-    # Check if this user is an admin
+    # Check Admin Status
     is_admin = u.email in ALLOWED_ADMINS
     
     return templates.TemplateResponse("account.html", {
@@ -239,7 +200,7 @@ def account(request: Request, db: Session = Depends(get_db)):
         "is_logged_in": True, 
         "user": u, 
         "tier_label": _plan_flags(u)["plan_label"],
-        "is_admin": is_admin  # <--- PASS THIS FLAG
+        "is_admin": is_admin
     })
 
 @app.post("/account/settings")
@@ -251,22 +212,54 @@ async def account_settings(request: Request, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "ok"}
 
-# --- PROFILE UPDATE (Identity Protocol) ---
 @app.post("/account/profile")
 async def account_profile_update(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
     data = await request.json()
     
-    if "username" in data:
-        u.username = str(data["username"]).strip()[:50]
-    if "tradingview_id" in data:
-        u.tradingview_id = str(data["tradingview_id"]).strip()
-    if "session_tz" in data:
-        u.session_tz = str(data["session_tz"]).strip()
+    if "username" in data: u.username = str(data["username"]).strip()[:50]
+    if "tradingview_id" in data: u.tradingview_id = str(data["tradingview_id"]).strip()
+    if "session_tz" in data: u.session_tz = str(data["session_tz"]).strip()
         
     db.commit()
     return {"status": "ok"}
+
+# --- ADMIN ROUTE ---
+@app.get("/admin", response_class=HTMLResponse)
+def admin_panel(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    
+    if u.email not in ALLOWED_ADMINS:
+        return RedirectResponse(url="/suite", status_code=303)
+
+    users = db.query(UserModel).order_by(UserModel.created_at.desc()).all()
+    
+    # Safe Data Calculation
+    clean_list = []
+    now = datetime.now() # <--- This works now because we imported datetime
+    for usr in users:
+        status = "INACTIVE"
+        if usr.subscription_end and usr.subscription_end > now:
+            status = "ACTIVE"
+            
+        clean_list.append({
+            "id": str(usr.id),
+            "email": usr.email,
+            "username": usr.username,
+            "status": status,
+            "created_at": usr.created_at
+        })
+
+    return templates.TemplateResponse("admin.html", {"request": request, "users": clean_list})
+
+@app.get("/sandbox", response_class=HTMLResponse)
+def ui_sandbox(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    if u.email not in ALLOWED_ADMINS: return RedirectResponse(url="/suite", status_code=303)
+    return templates.TemplateResponse("ui_sandbox.html", {"request": request})
 
 # --- BILLING ---
 @app.post("/billing/checkout")
@@ -287,7 +280,7 @@ async def billing_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.body()
     return billing.handle_webhook(payload=payload, sig_header=request.headers.get("stripe-signature", ""), db=db, UserModel=UserModel)
 
-# --- UNIFIED API ENDPOINTS (PIPELINE) ---
+# --- UNIFIED API ENDPOINTS ---
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -297,7 +290,6 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     requested_tz = payload.get("session_tz") or (u.session_tz or "UTC")
     ensure_symbol_allowed(u, symbol)
-    # PIPELINE CALL
     out = await battlebox_pipeline.get_session_review(symbol=symbol, session_tz=requested_tz)
     return JSONResponse(out)
 
@@ -309,7 +301,6 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     ensure_symbol_allowed(u, symbol)
-    # PIPELINE CALL
     out = await battlebox_pipeline.get_live_battlebox(
         symbol=symbol,
         session_mode=(payload.get("session_mode") or "AUTO").upper(),
