@@ -154,7 +154,13 @@ def indicators(request: Request, db: Session = Depends(get_db)):
 
 # --- AUTH & ACCOUNT ---
 @app.get("/login", response_class=HTMLResponse)
-def login_get(request: Request):
+def login_get(request: Request, db: Session = Depends(get_db)):
+    # 1. Check if user is already logged in
+    sess = _session_user_dict(request)
+    if sess:
+        return RedirectResponse(url="/suite", status_code=303)
+        
+    # 2. If not, show login page
     return templates.TemplateResponse("login.html", {"request": request, "error": None})
 
 @app.post("/login")

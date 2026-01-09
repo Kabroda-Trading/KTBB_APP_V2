@@ -87,14 +87,24 @@
                 KABRODA
             </a>
             <ul class="nav-links">
-                <li><a href="/">Home</a></li>
-                <li><a href="/analysis">Analysis</a></li>
-                <li><a href="/how-it-works">How It Works</a></li>
-                <li><a href="/pricing" class="active">Pricing</a></li>
-                <li><a href="/login">Login</a></li>
+                {% if is_logged_in %}
+                    <li><a href="/suite">Session Control</a></li>
+                    <li><a href="/suite/battle-control">Battle Control</a></li>
+                    <li><a href="/account">Account</a></li>
+                {% else %}
+                    <li><a href="/">Home</a></li>
+                    <li><a href="/analysis">Analysis</a></li>
+                    <li><a href="/how-it-works">How It Works</a></li>
+                    <li><a href="/pricing" class="active">Pricing</a></li>
+                    <li><a href="/login">Login</a></li>
+                {% endif %}
             </ul>
             <div class="nav-cta">
-                <a href="/login" class="btn btn-primary">Member Access</a>
+                {% if is_logged_in %}
+                    <a href="/suite" class="btn btn-primary">OPEN SUITE &rarr;</a>
+                {% else %}
+                    <a href="/login" class="btn btn-primary">Member Access</a>
+                {% endif %}
             </div>
         </div>
     </nav>
