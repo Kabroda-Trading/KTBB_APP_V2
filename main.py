@@ -1,6 +1,6 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v7.0 (CLEAN)
+# KABRODA UNIFIED SERVER: BATTLEBOX v9.0 (PIPELINE)
 # ---------------------------------------------------------
 from __future__ import annotations
 
@@ -20,22 +20,11 @@ from starlette.templating import Jinja2Templates
 # --- CORE IMPORTS ---
 import auth
 import billing
-import dmr_report
-import data_feed
-import sse_engine
-
-# --- BATTLE CONTROL IMPORT ---
-import battle_control
-
-# --- RESEARCH LAB IMPORT ---
+import battlebox_pipeline  # <--- THE NEW SINGLE SOURCE OF TRUTH
 import research_lab
 
 from database import init_db, get_db, UserModel
-from membership import (
-    get_membership_state,
-    require_paid_access,
-    ensure_symbol_allowed,
-)
+from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -65,23 +54,13 @@ def _startup():
     init_db()
     db = next(get_db()) 
     try:
-        # Auto-migrate columns if missing
-        try:
-            db.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR"))
-            db.commit()
-        except Exception: db.rollback()
-        try:
-            db.execute(text("ALTER TABLE users ADD COLUMN tradingview_id VARCHAR"))
-            db.commit()
-        except Exception: db.rollback()
-        try:
-            db.execute(text("ALTER TABLE users ADD COLUMN operator_flex BOOLEAN"))
-            db.commit()
-        except Exception: db.rollback()
-    except Exception as e:
-        print(f"--- STARTUP SCHEMA LOG: {e}")
-    finally:
-        db.close()
+        try: db.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR")); db.commit()
+        except: db.rollback()
+        try: db.execute(text("ALTER TABLE users ADD COLUMN tradingview_id VARCHAR")); db.commit()
+        except: db.rollback()
+        try: db.execute(text("ALTER TABLE users ADD COLUMN operator_flex BOOLEAN")); db.commit()
+        except: db.rollback()
+    finally: db.close()
 
 # --- HELPERS ---
 def _session_user_dict(request: Request) -> Optional[Dict[str, Any]]:
@@ -105,27 +84,27 @@ def _plan_flags(u: UserModel) -> Dict[str, Any]:
 # --- PUBLIC ROUTES ---
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    return templates.TemplateResponse("home.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None, "force_public_nav": True})
+    return templates.TemplateResponse("home.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
 
 @app.get("/analysis", response_class=HTMLResponse)
 def analysis(request: Request):
-    return templates.TemplateResponse("analysis.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None, "force_public_nav": True})
+    return templates.TemplateResponse("analysis.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
 
 @app.get("/how-it-works", response_class=HTMLResponse)
 def how_it_works(request: Request):
-    return templates.TemplateResponse("how_it_works.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None, "force_public_nav": True})
+    return templates.TemplateResponse("how_it_works.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
 
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing(request: Request):
-    return templates.TemplateResponse("pricing.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None, "force_public_nav": True})
+    return templates.TemplateResponse("pricing.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
 
 @app.get("/about", response_class=HTMLResponse)
 def about(request: Request):
-    return templates.TemplateResponse("about.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None, "force_public_nav": True})
+    return templates.TemplateResponse("about.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
 
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy_page(request: Request):
-    return templates.TemplateResponse("privacy.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None, "force_public_nav": True})
+    return templates.TemplateResponse("privacy.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
 
 # --- SUITE ROUTES ---
 @app.get("/suite", response_class=HTMLResponse)
@@ -136,11 +115,7 @@ def suite(request: Request, db: Session = Depends(get_db)):
     try: require_paid_access(u)
     except HTTPException: return RedirectResponse(url="/pricing?paywall=1", status_code=303)
     flags = _plan_flags(u)
-    
-    return templates.TemplateResponse("session_control.html", {
-        "request": request, "is_logged_in": True,
-        "user": {"email": u.email, "username": u.username, "session_tz": (u.session_tz or "UTC"), "plan_label": flags.get("plan_label", ""), "plan": flags.get("plan") or ""}
-    })
+    return templates.TemplateResponse("session_control.html", {"request": request, "is_logged_in": True, "user": u, "plan_label": flags.get("plan_label", "")})
 
 @app.get("/suite/battle-control", response_class=HTMLResponse)
 def battle_control_page(request: Request, db: Session = Depends(get_db)):
@@ -148,32 +123,15 @@ def battle_control_page(request: Request, db: Session = Depends(get_db)):
     u = _db_user_from_session(db, sess)
     require_paid_access(u)
     flags = _plan_flags(u)
-    return templates.TemplateResponse("battle_control.html", {
-        "request": request, "is_logged_in": True,
-        "user": u, 
-        "plan_label": flags.get("plan_label", "")
-    })
+    return templates.TemplateResponse("battle_control.html", {"request": request, "is_logged_in": True, "user": u, "plan_label": flags.get("plan_label", "")})
 
-# --- RESEARCH LAB ---
 @app.get("/suite/research-lab", response_class=HTMLResponse)
 def research_lab_page(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
     require_paid_access(u)
     flags = _plan_flags(u)
-    return templates.TemplateResponse("research_lab.html", {
-        "request": request,
-        "is_logged_in": True,
-        "user": u,
-        "plan_label": flags.get("plan_label", "")
-    })
-
-@app.get("/research_lab")
-def research_lab_alias(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-    return RedirectResponse(url="/suite/research-lab", status_code=303)
+    return templates.TemplateResponse("research_lab.html", {"request": request, "is_logged_in": True, "user": u, "plan_label": flags.get("plan_label", "")})
 
 @app.get("/indicators", response_class=HTMLResponse)
 def indicators(request: Request, db: Session = Depends(get_db)):
@@ -181,10 +139,7 @@ def indicators(request: Request, db: Session = Depends(get_db)):
     u = _db_user_from_session(db, sess)
     require_paid_access(u)
     flags = _plan_flags(u)
-    return templates.TemplateResponse("indicators.html", {
-        "request": request, "is_logged_in": True,
-        "user": {"email": u.email, "username": u.username, "session_tz": (u.session_tz or "UTC"), "plan_label": flags.get("plan_label", ""), "plan": flags.get("plan") or ""}
-    })
+    return templates.TemplateResponse("indicators.html", {"request": request, "is_logged_in": True, "user": u, "plan_label": flags.get("plan_label", "")})
 
 # --- AUTH & ACCOUNT ---
 @app.get("/login", response_class=HTMLResponse)
@@ -196,10 +151,7 @@ def login_post(request: Request, db: Session = Depends(get_db), email: str = For
     u = auth.authenticate_user(db, email=email, password=password)
     if not u: return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"}, status_code=401)
     auth.set_user_session(request, u)
-    
-    ms = get_membership_state(u)
-    if not ms.is_paid:
-        return RedirectResponse(url="/pricing?renewal=1", status_code=303)
+    if not get_membership_state(u).is_paid: return RedirectResponse(url="/pricing?renewal=1", status_code=303)
     return RedirectResponse(url="/suite", status_code=303)
 
 @app.get("/logout")
@@ -210,37 +162,22 @@ def logout(request: Request):
 @app.get("/register", response_class=HTMLResponse)
 def register_get(request: Request, plan: str = "monthly"):
     if auth.registration_disabled(): return RedirectResponse(url="/login", status_code=303)
-    # Plan defaults to monthly, but if URL is /register?plan=annual, it passes to template
     return templates.TemplateResponse("register.html", {"request": request, "error": None, "plan": plan})
 
 @app.post("/register")
 def register_post(request: Request, db: Session = Depends(get_db), email: str = Form(...), password: str = Form(...), plan: str = Form("monthly")):
     if auth.registration_disabled(): raise HTTPException(status_code=403, detail="Registration disabled")
-    
-    # 1. Create User
-    try: 
-        u = auth.create_user(db, email=email, password=password)
-    except HTTPException as e: 
-        return templates.TemplateResponse("register.html", {"request": request, "error": str(e.detail), "plan": plan}, status_code=e.status_code)
-    
-    # 2. Login immediately
+    try: u = auth.create_user(db, email=email, password=password)
+    except HTTPException as e: return templates.TemplateResponse("register.html", {"request": request, "error": str(e.detail), "plan": plan}, status_code=e.status_code)
     auth.set_user_session(request, u)
-    
-    # 3. Create Checkout for the SELECTED plan
-    checkout_url = billing.create_checkout_session(db=db, user_model=u, plan_key=plan)
-    return RedirectResponse(url=checkout_url, status_code=303)
+    return RedirectResponse(url=billing.create_checkout_session(db=db, user_model=u, plan_key=plan), status_code=303)
 
 @app.get("/account", response_class=HTMLResponse)
 def account(request: Request, db: Session = Depends(get_db)):
     sess = _session_user_dict(request)
     if not sess: return RedirectResponse(url="/login", status_code=303)
     u = _db_user_from_session(db, sess)
-    flags = _plan_flags(u)
-    return templates.TemplateResponse("account.html", {
-        "request": request, "is_logged_in": True,
-        "user": u,
-        "tier_label": flags["plan_label"],
-    })
+    return templates.TemplateResponse("account.html", {"request": request, "is_logged_in": True, "user": u, "tier_label": _plan_flags(u)["plan_label"]})
 
 @app.post("/account/settings")
 async def account_settings(request: Request, db: Session = Depends(get_db)):
@@ -251,15 +188,13 @@ async def account_settings(request: Request, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "ok"}
 
-# --- BILLING & API ---
+# --- BILLING ---
 @app.post("/billing/checkout")
 async def billing_checkout(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-    try: payload = await request.json()
-    except: payload = {}
-    plan_key = payload.get("plan", "monthly")
-    return {"url": billing.create_checkout_session(db=db, user_model=u, plan_key=plan_key)}
+    payload = await request.json()
+    return {"url": billing.create_checkout_session(db=db, user_model=u, plan_key=payload.get("plan", "monthly"))}
 
 @app.post("/billing/portal")
 async def billing_portal(request: Request, db: Session = Depends(get_db)):
@@ -270,9 +205,9 @@ async def billing_portal(request: Request, db: Session = Depends(get_db)):
 @app.post("/billing/webhook")
 async def billing_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.body()
-    sig = request.headers.get("stripe-signature", "")
-    return billing.handle_webhook(payload=payload, sig_header=sig, db=db, UserModel=UserModel)
+    return billing.handle_webhook(payload=payload, sig_header=request.headers.get("stripe-signature", ""), db=db, UserModel=UserModel)
 
+# --- UNIFIED API ENDPOINTS ---
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -282,9 +217,9 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     requested_tz = payload.get("session_tz") or (u.session_tz or "UTC")
     ensure_symbol_allowed(u, symbol)
-    inputs = await data_feed.get_inputs(symbol=symbol, session_tz=requested_tz)
-    raw = await asyncio.to_thread(dmr_report.generate_report_from_inputs, inputs, requested_tz)
-    return JSONResponse(raw)
+    # ROUTED THROUGH PIPELINE
+    out = await battlebox_pipeline.get_session_review(symbol=symbol, session_tz=requested_tz)
+    return JSONResponse(out)
 
 @app.post("/api/dmr/live")
 async def dmr_live(request: Request, db: Session = Depends(get_db)):
@@ -294,36 +229,27 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     ensure_symbol_allowed(u, symbol)
-    session_mode = (payload.get("session_mode") or "AUTO").upper()
-    manual_id = payload.get("manual_session_id", None)
-    operator_flex = bool(payload.get("operator_flex", False))
-    live_data = await battle_control.run_live_pulse(symbol, session_mode=session_mode, manual_id=manual_id, operator_flex=operator_flex)
-    return JSONResponse(live_data)
+    # ROUTED THROUGH PIPELINE
+    out = await battlebox_pipeline.get_live_battlebox(
+        symbol=symbol,
+        session_mode=(payload.get("session_mode") or "AUTO").upper(),
+        manual_id=payload.get("manual_session_id", None),
+        operator_flex=bool(payload.get("operator_flex", False))
+    )
+    return JSONResponse(out)
 
-# --- RESEARCH LAB (API) ---
 @app.post("/api/research/run")
 async def research_run(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
     require_paid_access(u)
-
     payload = await request.json()
-    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    ensure_symbol_allowed(u, symbol)
-
-    start_date_utc = payload.get("start_date_utc")
-    end_date_utc = payload.get("end_date_utc")
-    session_ids = payload.get("session_ids") or None
-
-    if not start_date_utc or not end_date_utc:
-        return JSONResponse({"ok": False, "error": "start_date_utc and end_date_utc are required."})
-
     try:
         out = await research_lab.run_research_lab(
-            symbol=symbol,
-            start_date_utc=start_date_utc,
-            end_date_utc=end_date_utc,
-            session_ids=session_ids,
+            symbol=(payload.get("symbol") or "BTCUSDT").strip().upper(),
+            start_date_utc=payload.get("start_date_utc"),
+            end_date_utc=payload.get("end_date_utc"),
+            session_ids=payload.get("session_ids")
         )
         return JSONResponse(out)
     except Exception as e:
