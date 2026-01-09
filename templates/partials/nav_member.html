@@ -1,27 +1,26 @@
-<nav class="navbar member-nav">
-    <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; flex-wrap: wrap;">
-        <a href="/suite" class="logo">
-            <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
+<nav class="navbar" style="border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px);">
+    <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; max-width: 1200px; margin: 0 auto; padding: 20px;">
+        
+        <a href="/" class="logo" style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; text-decoration: none;">
+            <div style="width: 12px; height: 12px; background: #06b6d4; border-radius: 2px;"></div>
             KABRODA
         </a>
-        <ul class="nav-links">
+
+        <ul class="nav-links" style="display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0; align-items: center;">
             <li class="dropdown-wrapper" style="position: relative; cursor: pointer;">
-                <span class="{% if '/suite' in request.url.path %}active{% endif %}" onclick="toggleDropdown()">
+                <span class="{% if '/suite' in request.url.path %}active{% endif %}" onclick="toggleDropdown()" style="font-size: 0.95rem; color: {% if '/suite' in request.url.path %}#fff{% else %}#94a3b8{% endif %}; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em;">
                     SUITE ▼
                 </span>
-                <div id="suiteDropdown" style="display: none; position: absolute; top: 100%; left: 0; background: #0f1623; border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 4px; min-width: 180px; z-index: 9999;">
-                    <a href="/suite" style="display: block; padding: 8px 12px; color: {% if request.url.path == '/suite' %}var(--accent-cyan){% else %}#aaa{% endif %};">Session Control</a>
-                    <a href="/suite/battle-control" style="display: block; padding: 8px 12px; color: {% if '/battle-control' in request.url.path %}var(--accent-cyan){% else %}#aaa{% endif %};">Battle Control</a>
+                <div id="suiteDropdown" style="display: none; position: absolute; top: 100%; left: 0; background: #0f1623; border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 4px; min-width: 180px; z-index: 9999; margin-top:10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+                    <a href="/suite" style="display: block; padding: 8px 12px; color: {% if request.url.path == '/suite' %}#06b6d4{% else %}#aaa{% endif %}; text-decoration: none; font-size: 0.9rem;">Session Control</a>
+                    <a href="/suite/battle-control" style="display: block; padding: 8px 12px; color: {% if '/battle-control' in request.url.path %}#06b6d4{% else %}#aaa{% endif %}; text-decoration: none; font-size: 0.9rem;">Battle Control</a>
                 </div>
             </li>
 
-            <li><a href="/analysis" class="{% if '/analysis' in request.url.path %}active{% endif %}">INTEL</a></li>
-            
-            <li><a href="/indicators" class="{% if '/indicators' in request.url.path %}active{% endif %}">INDICATORS</a></li>
-            
-            <li><a href="/account" class="{% if '/account' in request.url.path %}active{% endif %}">ACCOUNT</a></li>
-            
-            <li><a href="/logout" style="opacity: 0.6;">LOGOUT</a></li>
+            <li><a href="/analysis" style="font-size: 0.95rem; color: {% if '/analysis' in request.url.path %}#fff{% else %}#94a3b8{% endif %}; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;">INTEL</a></li>
+            <li><a href="/indicators" style="font-size: 0.95rem; color: {% if '/indicators' in request.url.path %}#fff{% else %}#94a3b8{% endif %}; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;">INDICATORS</a></li>
+            <li><a href="/account" style="font-size: 0.95rem; color: {% if '/account' in request.url.path %}#fff{% else %}#94a3b8{% endif %}; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;">ACCOUNT</a></li>
+            <li><a href="/logout" style="font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none; opacity: 0.6;">LOGOUT</a></li>
         </ul>
     </div>
 </nav>
@@ -31,7 +30,6 @@
         const el = document.getElementById('suiteDropdown');
         el.style.display = el.style.display === 'none' ? 'block' : 'none';
     }
-    // Close dropdown when clicking outside
     document.addEventListener('click', function(e) {
         const wrapper = document.querySelector('.dropdown-wrapper');
         const dropdown = document.getElementById('suiteDropdown');
