@@ -1,6 +1,12 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v9.0 (PIPELINE)
+# KABRODA UNIFIED SERVER: BATTLEBOX v10.0 (FINAL)
+# ---------------------------------------------------------
+# Includes:
+# 1. Unified Pipeline (No drift)
+# 2. Account Profile Updates (Operative ID / Timezone)
+# 3. 30-Day Session Persistence
+# 4. Correct Billing Routing
 # ---------------------------------------------------------
 from __future__ import annotations
 
@@ -20,7 +26,7 @@ from starlette.templating import Jinja2Templates
 # --- CORE IMPORTS ---
 import auth
 import billing
-import battlebox_pipeline  # <--- THE NEW SINGLE SOURCE OF TRUTH
+import battlebox_pipeline  # <--- SINGLE SOURCE OF TRUTH
 import research_lab
 
 from database import init_db, get_db, UserModel
@@ -42,11 +48,13 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
 IS_HTTPS = PUBLIC_BASE_URL.startswith("https://")
 SESSION_HTTPS_ONLY = _bool_env("SESSION_HTTPS_ONLY", default=IS_HTTPS)
 
+# --- SESSION CONFIGURATION (30-DAY PERSISTENCE) ---
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
     https_only=SESSION_HTTPS_ONLY,
     same_site="lax",
+    max_age=86400 * 30  # <--- KEEPS USERS LOGGED IN FOR 30 DAYS
 )
 
 @app.on_event("startup")
@@ -60,7 +68,10 @@ def _startup():
         except: db.rollback()
         try: db.execute(text("ALTER TABLE users ADD COLUMN operator_flex BOOLEAN")); db.commit()
         except: db.rollback()
-    finally: db.close()
+    except Exception as e:
+        print(f"--- STARTUP SCHEMA LOG: {e}")
+    finally:
+        db.close()
 
 # --- HELPERS ---
 def _session_user_dict(request: Request) -> Optional[Dict[str, Any]]:
@@ -188,6 +199,23 @@ async def account_settings(request: Request, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "ok"}
 
+# --- PROFILE UPDATE (Identity Protocol) ---
+@app.post("/account/profile")
+async def account_profile_update(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    data = await request.json()
+    
+    if "username" in data:
+        u.username = str(data["username"]).strip()[:50]
+    if "tradingview_id" in data:
+        u.tradingview_id = str(data["tradingview_id"]).strip()
+    if "session_tz" in data:
+        u.session_tz = str(data["session_tz"]).strip()
+        
+    db.commit()
+    return {"status": "ok"}
+
 # --- BILLING ---
 @app.post("/billing/checkout")
 async def billing_checkout(request: Request, db: Session = Depends(get_db)):
@@ -207,7 +235,7 @@ async def billing_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.body()
     return billing.handle_webhook(payload=payload, sig_header=request.headers.get("stripe-signature", ""), db=db, UserModel=UserModel)
 
-# --- UNIFIED API ENDPOINTS ---
+# --- UNIFIED API ENDPOINTS (PIPELINE) ---
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -217,7 +245,7 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     requested_tz = payload.get("session_tz") or (u.session_tz or "UTC")
     ensure_symbol_allowed(u, symbol)
-    # ROUTED THROUGH PIPELINE
+    # PIPELINE CALL
     out = await battlebox_pipeline.get_session_review(symbol=symbol, session_tz=requested_tz)
     return JSONResponse(out)
 
@@ -229,7 +257,7 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     ensure_symbol_allowed(u, symbol)
-    # ROUTED THROUGH PIPELINE
+    # PIPELINE CALL
     out = await battlebox_pipeline.get_live_battlebox(
         symbol=symbol,
         session_mode=(payload.get("session_mode") or "AUTO").upper(),
