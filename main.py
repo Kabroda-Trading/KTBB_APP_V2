@@ -226,30 +226,43 @@ async def account_profile_update(request: Request, db: Session = Depends(get_db)
     return {"status": "ok"}
 
 # --- ADMIN ROUTE ---
+# --- REPLACE THIS FUNCTION IN main.py ---
 @app.get("/admin", response_class=HTMLResponse)
 def admin_panel(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
     
+    # 1. Security Check
     if u.email not in ALLOWED_ADMINS:
         return RedirectResponse(url="/suite", status_code=303)
 
+    # 2. Fetch Users
     users = db.query(UserModel).order_by(UserModel.created_at.desc()).all()
     
-    # Safe Data Calculation
+    # 3. Bulletproof Data Processing
     clean_list = []
-    now = datetime.now() # <--- This works now because we imported datetime
+    now = datetime.now()
+    
     for usr in users:
+        # Default values to prevent crashes
         status = "INACTIVE"
-        if usr.subscription_end and usr.subscription_end > now:
-            status = "ACTIVE"
+        joined_date = "N/A"
+        
+        # Safe Status Check
+        if usr.subscription_end:
+            if usr.subscription_end > now:
+                status = "ACTIVE"
+        
+        # Safe Date Formatting
+        if usr.created_at:
+            joined_date = usr.created_at.strftime('%Y-%m-%d')
             
         clean_list.append({
             "id": str(usr.id),
             "email": usr.email,
             "username": usr.username,
             "status": status,
-            "created_at": usr.created_at
+            "created_at": joined_date
         })
 
     return templates.TemplateResponse("admin.html", {"request": request, "users": clean_list})
