@@ -1,16 +1,15 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v10.2 (STABLE)
+# KABRODA UNIFIED SERVER: BATTLEBOX v10.4 (ADMIN CRASH FIX)
 # ---------------------------------------------------------
-# Fixes: Admin 500 Error (Defensive Date Handling)
-# Includes: Tuning Routes, Sandbox, and 30-Day Sessions
+# 1. Admin Page: Uses getattr() to safely handle missing data (Fixes 500 Error).
+# 2. Includes all Research Lab & Tuning endpoints you just deployed.
 # ---------------------------------------------------------
 from __future__ import annotations
 
-import asyncio
 import os
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, Form, HTTPException, Depends
@@ -193,7 +192,6 @@ def account(request: Request, db: Session = Depends(get_db)):
     if not sess: return RedirectResponse(url="/login", status_code=303)
     u = _db_user_from_session(db, sess)
     
-    # Check Admin Status
     is_admin = u.email in ALLOWED_ADMINS
     
     return templates.TemplateResponse("account.html", {
@@ -226,7 +224,7 @@ async def account_profile_update(request: Request, db: Session = Depends(get_db)
     db.commit()
     return {"status": "ok"}
 
-# --- ADMIN ROUTE (FIXED) ---
+# --- ADMIN ROUTE (CRASH PROOF) ---
 @app.get("/admin", response_class=HTMLResponse)
 def admin_panel(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -237,24 +235,27 @@ def admin_panel(request: Request, db: Session = Depends(get_db)):
 
     users = db.query(UserModel).order_by(UserModel.created_at.desc()).all()
     
-    # Safe Data Calculation
     clean_list = []
     now = datetime.now()
+    
     for usr in users:
+        # Prevent 500 error if attributes missing
         status = "INACTIVE"
         joined = "N/A"
         
-        # Defensive Checks
-        if usr.subscription_end and usr.subscription_end > now:
+        # Safe Attribute Access (THIS IS THE FIX)
+        sub_end = getattr(usr, "subscription_end", None)
+        if sub_end and sub_end > now:
             status = "ACTIVE"
         
-        if usr.created_at:
-            joined = usr.created_at.strftime('%Y-%m-%d')
+        created = getattr(usr, "created_at", None)
+        if created:
+            joined = created.strftime('%Y-%m-%d')
             
         clean_list.append({
             "id": str(usr.id),
             "email": usr.email,
-            "username": usr.username,
+            "username": getattr(usr, "username", None),
             "status": status,
             "created_at": joined
         })
@@ -323,11 +324,15 @@ async def research_run(request: Request, db: Session = Depends(get_db)):
     require_paid_access(u)
     payload = await request.json()
     try:
+        # Extract Tuning (This supports the files you just deployed)
+        tuning_cfg = payload.get("tuning") 
+        
         out = await research_lab.run_research_lab(
             symbol=(payload.get("symbol") or "BTCUSDT").strip().upper(),
             start_date_utc=payload.get("start_date_utc"),
             end_date_utc=payload.get("end_date_utc"),
-            session_ids=payload.get("session_ids")
+            session_ids=payload.get("session_ids"),
+            tuning=tuning_cfg # Passes it down to the new engines
         )
         return JSONResponse(out)
     except Exception as e:
