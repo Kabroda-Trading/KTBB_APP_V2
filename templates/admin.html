@@ -60,7 +60,7 @@
                             <span class="status-badge free">INACTIVE</span>
                         {% endif %}
                     </td>
-                    <td style="color: #94a3b8;">{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else 'N/A' }}</td>
+                    <td style="color: #94a3b8;">{{ u.created_at }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

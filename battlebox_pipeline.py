@@ -1,9 +1,9 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE v4.0 (RESTORED & TUNABLE)
+# KABRODA BATTLEBOX PIPELINE v4.1 (GEOBLOCK FIX)
 # ==============================================================================
 # 1) SINGLE SOURCE OF TRUTH: Handles Live Dashboard AND Research Lab.
-# 2) Includes internal Data Fetching (Live + Historical Pagination).
+# 2) Switched History Fetcher to KuCoin to bypass Binance US Geo-blocking.
 # 3) Passes "Tuning" parameters to SSE and State Engines.
 # ==============================================================================
 
@@ -32,7 +32,7 @@ SESSION_CONFIGS = [
 
 LOCKED_SESSIONS: Dict[str, Dict[str, Any]] = {}
 
-# We use KuCoin for live checks (fast) and Binance for History (deep)
+# Use KuCoin for EVERYTHING (Live + History) to avoid Binance US blocks
 _exchange_live = ccxt.kucoin({"enableRateLimit": True})
 
 # ----------------------------
@@ -131,20 +131,30 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
     except: return []
 
 async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
-    """Deep fetch for Research Lab (Binance preferred for history)"""
-    # Using a temporary exchange instance for deep history
-    exchange = ccxt.binance({'enableRateLimit': True})
-    s = symbol.replace("/", "") # Binance format BTCUSDT
+    """Deep fetch for Research Lab (Uses KuCoin to avoid Binance US Block)"""
+    # Using KuCoin for history because it's friendlier to US servers
+    exchange = ccxt.kucoin({'enableRateLimit': True})
+    s = _normalize_symbol(symbol) # KuCoin needs BTC/USDT format
     all_candles = []
+    
     try:
         current = start_ts * 1000
         end = end_ts * 1000
+        
         while current < end:
+            # KuCoin limit is usually 1500
             ohlcv = await exchange.fetch_ohlcv(s, '5m', current, 1000)
             if not ohlcv: break
+            
             all_candles.extend(ohlcv)
-            current = ohlcv[-1][0] + (5*60*1000)
+            
+            # Next page
+            last_candle_time = ohlcv[-1][0]
+            current = last_candle_time + (5*60*1000)
+            
+            # Safety break if we caught up
             if len(ohlcv) < 1000: break
+            
     except Exception as e:
         print(f"History Fetch Error: {e}")
     finally:
@@ -154,8 +164,16 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int) -
     formatted = []
     for c in all_candles:
         ts = int(c[0]/1000)
+        # Strict window check
         if start_ts <= ts <= end_ts:
-            formatted.append({"time": ts, "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4]), "volume": float(c[5])})
+            formatted.append({
+                "time": ts, 
+                "open": float(c[1]), 
+                "high": float(c[2]), 
+                "low": float(c[3]), 
+                "close": float(c[4]), 
+                "volume": float(c[5])
+            })
     return formatted
 
 def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
