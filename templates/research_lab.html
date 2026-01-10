@@ -1,173 +1,202 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Kabroda Research Lab</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#0b1220; color:#e5e7eb; margin:0; }
-    .wrap { max-width: 1100px; margin: 0 auto; padding: 18px; }
-    .card { background:#0f1b33; border:1px solid #1f2a44; border-radius: 14px; padding: 14px; margin-bottom: 14px; }
-    .row { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
-    label { display:block; font-size:12px; opacity:.85; margin-bottom:6px; }
-    input, select, button, textarea {
-      background:#0b1220; color:#e5e7eb; border:1px solid #26324f; border-radius:10px;
-      padding:10px 12px; font-size:14px;
-    }
-    select[multiple] { height: 160px; }
-    button { cursor:pointer; background:#2563eb; border-color:#2563eb; }
-    button:disabled { opacity:.6; cursor:not-allowed; }
-    table { width:100%; border-collapse: collapse; }
-    th, td { border-bottom:1px solid #1f2a44; padding:10px; text-align:left; font-size:13px; }
-    .muted { opacity:.7; }
-    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid #26324f; }
-    .ok { background: rgba(16,185,129,.15); border-color: rgba(16,185,129,.35); }
-    .bad { background: rgba(239,68,68,.15); border-color: rgba(239,68,68,.35); }
-    pre { white-space: pre-wrap; word-break: break-word; background:#0b1220; border:1px solid #26324f; border-radius:12px; padding:12px; }
-  </style>
+    <meta charset="UTF-8">
+    <title>Kabroda | Research Lab</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        body { background-color: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        
+        /* HEADER */
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
+        h1 { font-family: 'JetBrains Mono', monospace; margin: 0; color: #fff; }
+        .pill { background: #8b5cf6; color: #fff; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 700; letter-spacing: 1px; }
+        
+        /* LAYOUT */
+        .lab-grid { display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
+        
+        /* CONTROLS */
+        .panel { background: #0f1623; border: 1px solid rgba(255,255,255,0.1); padding: 20px; border-radius: 8px; }
+        .control-group { margin-bottom: 20px; }
+        label { display: block; color: #94a3b8; font-size: 12px; font-weight: 700; margin-bottom: 8px; letter-spacing: 0.5px; }
+        input, select { width: 100%; background: #050b14; border: 1px solid #333; color: #fff; padding: 10px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; }
+        
+        /* TUNING SLIDERS */
+        .range-wrap { display: flex; align-items: center; gap: 10px; }
+        input[type=range] { flex: 1; accent-color: #06b6d4; }
+        .range-val { font-family: 'JetBrains Mono', monospace; color: #06b6d4; width: 40px; text-align: right; }
+
+        /* BUTTONS */
+        .btn-run { width: 100%; background: #06b6d4; color: #000; border: none; padding: 12px; font-weight: 700; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; margin-top: 10px; }
+        .btn-run:hover { box-shadow: 0 0 15px rgba(6, 182, 212, 0.4); }
+        
+        /* RESULTS AREA */
+        .stats-row { display: flex; gap: 15px; margin-bottom: 20px; }
+        .stat-card { flex: 1; background: rgba(255,255,255,0.03); padding: 15px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); text-align: center; }
+        .stat-val { display: block; font-size: 24px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono', monospace; }
+        .stat-lbl { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
+        
+        /* FAIL REASONS CHART */
+        .fail-bar { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
+        .fail-lbl { width: 140px; color: #94a3b8; }
+        .fail-track { flex: 1; background: rgba(255,255,255,0.05); height: 8px; border-radius: 4px; overflow: hidden; margin: 0 10px; }
+        .fail-fill { height: 100%; background: #ef4444; }
+        .fail-count { width: 30px; text-align: right; color: #fff; font-weight: 700; }
+
+        pre { background: #000; padding: 15px; border-radius: 6px; overflow-x: auto; color: #00ff9d; font-size: 12px; border: 1px solid #333; max-height: 400px; }
+    </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <h2 style="margin:0 0 8px 0;">Research Lab</h2>
-      <div class="muted">Measures: acceptance frequency, alignment frequency (“trade opportunities”), and no-trade sessions.</div>
+    <div class="container">
+        <div class="header">
+            <div>
+                <a href="/suite" style="color: #94a3b8; text-decoration: none; font-size: 14px;">← Back to Suite</a>
+                <h1 style="margin-top: 10px;">RESEARCH LAB <span class="pill">BETA</span></h1>
+            </div>
+        </div>
+
+        <div class="lab-grid">
+            <div class="panel">
+                <div class="control-group">
+                    <label>TARGET ASSET</label>
+                    <select id="symbol"><option value="BTCUSDT">BTCUSDT</option><option value="ETHUSDT">ETHUSDT</option></select>
+                </div>
+                <div class="control-group">
+                    <label>DATE RANGE (UTC)</label>
+                    <input type="date" id="startDate" value="2025-01-01">
+                    <input type="date" id="endDate" value="2025-01-07" style="margin-top: 5px;">
+                </div>
+                
+                <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
+                <label style="color: #06b6d4;">SYSTEM TUNING</label>
+                
+                <div class="control-group">
+                    <label>MIN TRIGGER DIST (BPS)</label>
+                    <div class="range-wrap">
+                        <input type="range" id="tuneDist" min="5" max="50" value="20" oninput="updateVal('valDist', this.value)">
+                        <span id="valDist" class="range-val">20</span>
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <label>ACCEPTANCE CLOSES</label>
+                    <div class="range-wrap">
+                        <input type="range" id="tuneAcc" min="1" max="4" value="2" oninput="updateVal('valAcc', this.value)">
+                        <span id="valAcc" class="range-val">2</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>ALIGNMENT WINDOW (MINS)</label>
+                    <div class="range-wrap">
+                        <input type="range" id="tuneWin" min="30" max="240" step="30" value="120" oninput="updateVal('valWin', this.value)">
+                        <span id="valWin" class="range-val">120</span>
+                    </div>
+                </div>
+
+                <button onclick="runLab()" class="btn-run" id="runBtn">INITIATE RUN</button>
+            </div>
+
+            <div class="panel">
+                <div id="resultsArea" style="display: none;">
+                    <div class="stats-row">
+                        <div class="stat-card">
+                            <span class="stat-val" id="resTotal">0</span>
+                            <span class="stat-lbl">Sessions</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-val" id="resRate" style="color: #06b6d4;">0%</span>
+                            <span class="stat-lbl">Alignment Rate</span>
+                        </div>
+                    </div>
+
+                    <h3 style="color:#fff; font-size:14px; margin-bottom:15px; border-bottom:1px solid #333; padding-bottom:5px;">DIAGNOSTICS: WHY TRADES FAILED</h3>
+                    <div id="failChart"></div>
+
+                    <h3 style="color:#fff; font-size:14px; margin-top:30px; margin-bottom:10px;">SESSION LOG</h3>
+                    <pre id="jsonOutput">Waiting for data...</pre>
+                </div>
+                
+                <div id="loading" style="display: none; text-align: center; padding: 50px; color: #94a3b8;">
+                    PROCESSING 5M CANDLE DATA...
+                </div>
+                
+                <div id="placeholder" style="text-align: center; padding: 50px; color: #64748b;">
+                    Select parameters and click INITIATE RUN.
+                </div>
+            </div>
+        </div>
     </div>
 
-    <div class="card">
-      <div class="row">
-        <div style="min-width:180px;">
-          <label>Symbol</label>
-          <input id="symbol" value="BTCUSDT"/>
-        </div>
+    <script>
+        function updateVal(id, val) { document.getElementById(id).innerText = val; }
 
-        <div style="min-width:180px;">
-          <label>Start date (UTC)</label>
-          <input id="start" type="date"/>
-        </div>
+        async function runLab() {
+            // UI State
+            document.getElementById('runBtn').disabled = true;
+            document.getElementById('runBtn').innerText = "RUNNING...";
+            document.getElementById('resultsArea').style.display = 'none';
+            document.getElementById('placeholder').style.display = 'none';
+            document.getElementById('loading').style.display = 'block';
 
-        <div style="min-width:180px;">
-          <label>End date (UTC)</label>
-          <input id="end" type="date"/>
-        </div>
+            // Payload Construction
+            const payload = {
+                symbol: document.getElementById('symbol').value,
+                start_date_utc: document.getElementById('startDate').value,
+                end_date_utc: document.getElementById('endDate').value,
+                session_ids: ["us_ny_futures", "us_ny_equity", "eu_london", "asia_tokyo"],
+                tuning: {
+                    min_trigger_dist_bps: parseInt(document.getElementById('tuneDist').value),
+                    acceptance_closes: parseInt(document.getElementById('tuneAcc').value),
+                    alignment_window_minutes: parseInt(document.getElementById('tuneWin').value)
+                }
+            };
 
-        <div style="min-width:260px; flex:1;">
-          <label>Sessions</label>
-          <select id="sessions" multiple>
-            <option value="us_ny_futures" selected>NY Futures</option>
-            <option value="us_ny_equity">NY Equity</option>
-            <option value="eu_london" selected>London</option>
-            <option value="asia_tokyo">Tokyo</option>
-            <option value="au_sydney">Sydney</option>
-          </select>
-        </div>
+            try {
+                const res = await fetch('/api/research/run', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await res.json();
+                
+                // Render Stats
+                document.getElementById('resTotal').innerText = data.stats.sessions_total;
+                document.getElementById('resRate').innerText = data.stats.alignment_rate_pct + "%";
+                
+                // Render Fail Chart
+                const reasons = data.stats.fail_reasons || {};
+                let html = "";
+                const maxVal = Math.max(...Object.values(reasons), 1);
+                
+                for (const [reason, count] of Object.entries(reasons)) {
+                    const pct = (count / maxVal) * 100;
+                    html += `
+                        <div class="fail-bar">
+                            <span class="fail-lbl">${reason}</span>
+                            <div class="fail-track"><div class="fail-fill" style="width: ${pct}%"></div></div>
+                            <span class="fail-count">${count}</span>
+                        </div>
+                    `;
+                }
+                if(Object.keys(reasons).length === 0) html = "<div style='color:#666; font-size:12px;'>No failures recorded (or no sessions run).</div>";
+                document.getElementById('failChart').innerHTML = html;
 
-        <div>
-          <button id="runBtn">Run</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3 style="margin-top:0;">Summary</h3>
-      <pre id="summary">Run a test to see results.</pre>
-    </div>
-
-    <div class="card">
-      <h3 style="margin-top:0;">Sessions</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Session</th>
-            <th>Acceptance</th>
-            <th>Alignment (Trade)</th>
-            <th>Side</th>
-            <th>Notes</th>
-          </tr>
-        </thead>
-        <tbody id="rows"></tbody>
-      </table>
-    </div>
-  </div>
-<script>
-(function(){
-  const $ = (id)=>document.getElementById(id);
-
-  // default dates: last 7 days
-  const today = new Date();
-  const end = new Date(today);
-  const start = new Date(today);
-  start.setUTCDate(start.getUTCDate() - 7);
-
-  const fmt = (d)=> d.toISOString().slice(0,10);
-  $("start").value = fmt(start);
-  $("end").value = fmt(end);
-
-  async function run(){
-    $("runBtn").disabled = true;
-    $("summary").textContent = "Running...";
-    $("rows").innerHTML = "";
-
-    const symbol = $("symbol").value.trim().toUpperCase();
-    const startDate = $("start").value;
-    const endDate = $("end").value;
-
-    const sel = Array.from($("sessions").selectedOptions).map(o=>o.value);
-
-    const payload = {
-      symbol,
-      start_date_utc: startDate,
-      end_date_utc: endDate,
-      session_ids: sel
-    };
-
-    try{
-      const res = await fetch("/api/research/run", {
-        method:"POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-
-      $("summary").textContent = JSON.stringify({
-        ok: data.ok,
-        symbol: data.symbol,
-        range: data.range,
-        stats: data.stats
-      }, null, 2);
-
-      if(!data.ok){
-        return;
-      }
-
-      const rows = data.sessions || [];
-      for(const r of rows){
-        const ok = !!r.ok;
-        const hadAcc = ok && r.counts?.had_acceptance;
-        const hadAln = ok && r.counts?.had_alignment;
-        const side = ok ? (r.events?.acceptance_side || "NONE") : "NONE";
-
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${r.date || ""}</td>
-          <td>${r.session_name || r.session_id || ""}</td>
-          <td><span class="pill ${hadAcc ? "ok":"bad"}">${hadAcc ? "YES":"NO"}</span></td>
-          <td><span class="pill ${hadAln ? "ok":"bad"}">${hadAln ? "YES":"NO"}</span></td>
-          <td>${side}</td>
-          <td class="muted">${ok ? "" : (r.error || "Error")}</td>
-        `;
-        $("rows").appendChild(tr);
-      }
-
-    } catch(e){
-      $("summary").textContent = "Error: " + (e?.message || String(e));
-    } finally {
-      $("runBtn").disabled = false;
-    }
-  }
-
-  $("runBtn").addEventListener("click", run);
-})();
-</script>
+                // Raw JSON
+                document.getElementById('jsonOutput').innerText = JSON.stringify(data.sessions, null, 2);
+                
+                document.getElementById('resultsArea').style.display = 'block';
+            } catch (e) {
+                alert("Error: " + e);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('runBtn').disabled = false;
+                document.getElementById('runBtn').innerText = "INITIATE RUN";
+            }
+        }
+    </script>
 </body>
 </html>
