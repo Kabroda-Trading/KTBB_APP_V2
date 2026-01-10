@@ -1,9 +1,9 @@
 # structure_state_engine.py
 # ==============================================================================
-# STRUCTURE STATE ENGINE (The Law Layer) - SHIP-READY
+# STRUCTURE STATE ENGINE (The Law Layer) - DIAGNOSTIC & TUNABLE
 # ==============================================================================
 # Doctrine:
-# 1) Acceptance = 2 consecutive 15m closes outside trigger.
+# 1) Acceptance = 2 consecutive 15m closes outside trigger (TUNABLE).
 # 2) Revocation = 15m close back inside band OR opposite-trigger violation.
 # 3) Alignment  = 5m role-flip evidence near trigger (post-acceptance).
 # ==============================================================================
@@ -77,10 +77,19 @@ def compute_structure_state(
     candles_5m_post_lock: List[Dict[str, Any]],
     trigger_zone_bps: int = 15,
     align_window_minutes: int = 120,
+    tuning: Dict[str, Any] = None, # <--- NEW ARGUMENT
 ) -> Dict[str, Any]:
 
+    # 1. Tuning Defaults
+    tuning = tuning or {}
+    req_closes = tuning.get("acceptance_closes", 2) # Default 2
+    
+    # 2. Setup
     bo = float(levels.get("breakout_trigger", 0.0) or 0.0)
     bd = float(levels.get("breakdown_trigger", 0.0) or 0.0)
+    
+    # Initialize Diagnostic Reason
+    fail_reason = "NO_TRIGGER_TOUCH" 
 
     if bo <= 0 or bd <= 0 or not candles_5m_post_lock:
         return _return_state("HOLD FIRE", "Waiting for levels or candles...", "NONE")
@@ -104,6 +113,11 @@ def compute_structure_state(
 
     for c in candles_15m:
         close = float(c["close"])
+
+        # DIAGNOSTIC: Did we hit trigger?
+        if fail_reason == "NO_TRIGGER_TOUCH":
+             if float(c["high"]) >= bo or float(c["low"]) <= bd:
+                 fail_reason = "NO_ACCEPTANCE"
 
         # Opposite-trigger violation (hard flip)
         if state in ("ACCEPT_LONG", "ALIGN_LONG") and close < bd:
@@ -141,19 +155,21 @@ def compute_structure_state(
             cons_short = 0
             state = "TEST_LONG"
             side = "LONG"
-            if cons_long >= 2:
+            if cons_long >= req_closes: # <--- CHANGED FROM 2
                 state = "ACCEPT_LONG"
                 side = "LONG"
                 acceptance_ts = int(c["time"])
+                fail_reason = "NO_ALIGNMENT" # <--- UPDATE REASON
         elif close < bd:
             cons_short += 1
             cons_long = 0
             state = "TEST_SHORT"
             side = "SHORT"
-            if cons_short >= 2:
+            if cons_short >= req_closes: # <--- CHANGED FROM 2
                 state = "ACCEPT_SHORT"
                 side = "SHORT"
                 acceptance_ts = int(c["time"])
+                fail_reason = "NO_ALIGNMENT" # <--- UPDATE REASON
         else:
             cons_long = 0
             cons_short = 0
@@ -192,7 +208,7 @@ def compute_structure_state(
             "action": "HOLD FIRE",
             "reason": "Market is balanced. Waiting for a clean test and acceptance.",
             "permission": {"status": "NOT_EARNED", "side": "NONE"},
-            "acceptance_progress": {"count": 0, "required": 2, "side_hint": "NONE"},
+            "acceptance_progress": {"count": 0, "required": req_closes, "side_hint": "NONE"},
             "location": {"relative_to_triggers": rel},
             "execution": {
                 "pause_state": "NONE",
@@ -201,6 +217,7 @@ def compute_structure_state(
                 "locked_at": None,
                 "levels": {"failure": 0.0, "continuation": 0.0},
             },
+            "diagnostics": {"fail_reason": fail_reason}
         }
 
     if state in ("TEST_LONG", "TEST_SHORT"):
@@ -208,7 +225,7 @@ def compute_structure_state(
             "action": "HOLD FIRE",
             "reason": "Testing the band. No acceptance yet.",
             "permission": {"status": "NOT_EARNED", "side": side},
-            "acceptance_progress": {"count": progress_count, "required": 2, "side_hint": side_hint},
+            "acceptance_progress": {"count": progress_count, "required": req_closes, "side_hint": side_hint},
             "location": {"relative_to_triggers": rel},
             "execution": {
                 "pause_state": "NONE",
@@ -217,6 +234,7 @@ def compute_structure_state(
                 "locked_at": None,
                 "levels": {"failure": 0.0, "continuation": 0.0},
             },
+            "diagnostics": {"fail_reason": fail_reason}
         }
 
     # ACCEPT_* : look for alignment
@@ -305,11 +323,18 @@ def compute_structure_state(
             fail_level = bd
             cont_level = min(float(c["low"]) for c in post_accept) if post_accept else px_now
 
+    # If we are LOCKED, the fail reason is cleared
+    if gates_mode == "LOCKED":
+        fail_reason = "NONE"
+
     return {
         "action": action,
         "reason": reason,
-        "permission": {"status": permission_status if state.startswith("ACCEPT") or state.startswith("ALIGN") else "NOT_EARNED", "side": side},
-        "acceptance_progress": {"count": 2, "required": 2, "side_hint": side},
+        "permission": {
+            "status": permission_status if state.startswith("ACCEPT") or state.startswith("ALIGN") else "NOT_EARNED", 
+            "side": side
+        },
+        "acceptance_progress": {"count": 2, "required": req_closes, "side_hint": side},
         "location": {"relative_to_triggers": rel},
         "execution": {
             "pause_state": pause_state,
@@ -318,4 +343,8 @@ def compute_structure_state(
             "locked_at": acceptance_ts if gates_mode == "LOCKED" else None,
             "levels": {"failure": float(fail_level), "continuation": float(cont_level)},
         },
+        "diagnostics": {   # <--- NEW SECTION
+            "fail_reason": fail_reason,
+            "tuning_used": tuning
+        }
     }

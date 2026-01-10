@@ -1,15 +1,16 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v10.1 (ADMIN FIX)
+# KABRODA UNIFIED SERVER: BATTLEBOX v10.2 (STABLE)
 # ---------------------------------------------------------
-# Changes: Added 'datetime' import to fix Admin 500 Error
+# Fixes: Admin 500 Error (Defensive Date Handling)
+# Includes: Tuning Routes, Sandbox, and 30-Day Sessions
 # ---------------------------------------------------------
 from __future__ import annotations
 
 import asyncio
 import os
 import traceback
-from datetime import datetime, timedelta # <--- FIXED: Added this import
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, Form, HTTPException, Depends
@@ -225,44 +226,37 @@ async def account_profile_update(request: Request, db: Session = Depends(get_db)
     db.commit()
     return {"status": "ok"}
 
-# --- ADMIN ROUTE ---
-# --- REPLACE THIS FUNCTION IN main.py ---
+# --- ADMIN ROUTE (FIXED) ---
 @app.get("/admin", response_class=HTMLResponse)
 def admin_panel(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
     
-    # 1. Security Check
     if u.email not in ALLOWED_ADMINS:
         return RedirectResponse(url="/suite", status_code=303)
 
-    # 2. Fetch Users
     users = db.query(UserModel).order_by(UserModel.created_at.desc()).all()
     
-    # 3. Bulletproof Data Processing
+    # Safe Data Calculation
     clean_list = []
     now = datetime.now()
-    
     for usr in users:
-        # Default values to prevent crashes
         status = "INACTIVE"
-        joined_date = "N/A"
+        joined = "N/A"
         
-        # Safe Status Check
-        if usr.subscription_end:
-            if usr.subscription_end > now:
-                status = "ACTIVE"
+        # Defensive Checks
+        if usr.subscription_end and usr.subscription_end > now:
+            status = "ACTIVE"
         
-        # Safe Date Formatting
         if usr.created_at:
-            joined_date = usr.created_at.strftime('%Y-%m-%d')
+            joined = usr.created_at.strftime('%Y-%m-%d')
             
         clean_list.append({
             "id": str(usr.id),
             "email": usr.email,
             "username": usr.username,
             "status": status,
-            "created_at": joined_date
+            "created_at": joined
         })
 
     return templates.TemplateResponse("admin.html", {"request": request, "users": clean_list})

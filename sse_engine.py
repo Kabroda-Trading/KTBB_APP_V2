@@ -1,12 +1,12 @@
 # sse_engine.py
 # ==============================================================================
-# STRATEGIC STRUCTURAL ENGINE (SSE) v2.0 - 5M NATIVE (FINAL CLEAN)
+# STRATEGIC STRUCTURAL ENGINE (SSE) v2.1 - TUNABLE DIAGNOSTIC
 # ==============================================================================
 # Contract:
 # 1) Native input timeframe is 5m.
 # 2) 15m/1h/4h are derived internally via resampling.
 # 3) Triggers are calculated from 30m anchor range + 24h VRVP edges + pivot shelves.
-# 4) SSE does NOT "earn permission" (acceptance/alignment is handled by Structure State Engine).
+# 4) Now supports "Tuning" overrides for Research Lab optimization.
 # ==============================================================================
 
 from __future__ import annotations
@@ -41,7 +41,6 @@ def _calculate_atr(candles: List[Dict[str, Any]], period: int = 14) -> float:
 def _resample(candles: List[Dict[str, Any]], minutes: int) -> List[Dict[str, Any]]:
     """
     Generic time-bucket resampler. Assumes candles have unix 'time' seconds and OHLCV fields.
-    Works for 5m->15m/1h/4h and also for 15m->1h/4h (legacy bridge).
     """
     if not candles:
         return []
@@ -183,13 +182,26 @@ def _select_daily_levels(resistance: List[Shelf], support: List[Shelf]) -> Tuple
 # ---------------------------------------------------------
 # 4) CONTEXT & TRIGGER LOGIC
 # ---------------------------------------------------------
-def _pick_trigger_candidates(anchor_px: float, r30_h: float, r30_l: float, vrvp_24h: Dict[str, float], daily_sup: float, daily_res: float) -> Tuple[float, float]:
+def _pick_trigger_candidates(
+    anchor_px: float, 
+    r30_h: float, 
+    r30_l: float, 
+    vrvp_24h: Dict[str, float], 
+    daily_sup: float, 
+    daily_res: float,
+    tuning: Dict[str, Any] = None  # <--- NEW ARGUMENT
+) -> Tuple[float, float]:
+    
     # Base: prioritize R30 extremes, then value edge, then daily pivot
     bo_base = max(r30_h, float(vrvp_24h.get("vah", 0.0))) if r30_h > 0 else float(daily_res)
     bd_base = min(r30_l, float(vrvp_24h.get("val", 0.0))) if r30_l > 0 else float(daily_sup)
 
+    # Tuning Logic (Default to 20 bps / 0.2% if no tuning provided)
+    tuning = tuning or {}
+    bps = tuning.get("min_trigger_dist_bps", 20)
+    min_dist = anchor_px * (bps / 10000.0)
+
     # Safety: ensure triggers are not too close to anchor
-    min_dist = anchor_px * 0.002  # 0.2%
     bo = max(float(bo_base), anchor_px + min_dist)
     bd = min(float(bd_base), anchor_px - min_dist)
     return float(bo), float(bd)
@@ -386,7 +398,13 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
     vrvp_24h = _calculate_vrvp(context_24h_15m)
 
     # 3) Triggers (anchor-based)
-    bo, bd = _pick_trigger_candidates(anchor_px, r30_h, r30_l, vrvp_24h, ds, dr)
+    # NEW: Extract tuning from inputs to pass down
+    tuning_cfg = inputs.get("tuning", {}) 
+    
+    bo, bd = _pick_trigger_candidates(
+        anchor_px, r30_h, r30_l, vrvp_24h, ds, dr, 
+        tuning=tuning_cfg # <--- PASS IT HERE
+    )
 
     # 4) Context & bias
     ctx = _build_context(
