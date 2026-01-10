@@ -74,6 +74,30 @@ def _startup():
     finally:
         db.close()
 
+# --- ADMIN ACTIONS ---
+@app.post("/admin/delete-user")
+def delete_user(request: Request, user_id: str = Form(...), db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    admin_user = _db_user_from_session(db, sess)
+    
+    # 1. Security Check (Crucial)
+    if admin_user.email not in ALLOWED_ADMINS:
+        return RedirectResponse(url="/suite", status_code=303)
+
+    # 2. Find and Delete
+    # We use UUID casting if your DB uses UUIDs, or just string matching
+    target = db.query(UserModel).filter(UserModel.id == user_id).first()
+    
+    if target:
+        # Prevent Admin Suicide (Don't delete yourself)
+        if target.email == admin_user.email:
+            return RedirectResponse(url="/admin?error=cannot_delete_self", status_code=303)
+            
+        db.delete(target)
+        db.commit()
+        
+    return RedirectResponse(url="/admin", status_code=303)        
+
 # --- HELPERS ---
 def _session_user_dict(request: Request) -> Optional[Dict[str, Any]]:
     u = request.session.get("user")

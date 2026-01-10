@@ -23,6 +23,25 @@
         
         .back-link { color: #94a3b8; text-decoration: none; font-size: 14px; display: inline-flex; align-items: center; gap: 5px; }
         .back-link:hover { color: #fff; }
+
+        /* Delete Button Styles */
+        .btn-delete {
+            background: transparent;
+            border: 1px solid #ef4444;
+            color: #ef4444;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.2s;
+        }
+        .btn-delete:hover {
+            background: #ef4444;
+            color: #fff;
+        }
     </style>
 </head>
 <body>
@@ -45,6 +64,7 @@
                     <th>OPERATIVE ID</th>
                     <th>STATUS</th>
                     <th>JOINED</th>
+                    <th style="text-align: right;">ACTIONS</th>
                 </tr>
             </thead>
             <tbody>
@@ -61,6 +81,15 @@
                         {% endif %}
                     </td>
                     <td style="color: #94a3b8;">{{ u.created_at }}</td>
+                    
+                    <td style="text-align: right;">
+                        <form action="/admin/delete-user" method="POST" onsubmit="return confirm('⚠️ WARNING: This will permanently delete user {{ u.email }}. Are you sure?');" style="display:inline;">
+                            <input type="hidden" name="user_id" value="{{ u.id }}">
+                            <button type="submit" class="btn-delete">
+                                DELETE ✕
+                            </button>
+                        </form>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
