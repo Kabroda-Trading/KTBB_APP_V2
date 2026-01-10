@@ -1,9 +1,9 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v10.4 (ADMIN CRASH FIX)
+# KABRODA UNIFIED SERVER: BATTLEBOX v10.5 (DELETE FIX)
 # ---------------------------------------------------------
-# 1. Admin Page: Uses getattr() to safely handle missing data (Fixes 500 Error).
-# 2. Includes all Research Lab & Tuning endpoints you just deployed.
+# 1. Admin Page: Fixes "Integer vs String" delete crash.
+# 2. Includes all Research Lab & Tuning endpoints.
 # ---------------------------------------------------------
 from __future__ import annotations
 
@@ -73,30 +73,6 @@ def _startup():
         print(f"--- STARTUP SCHEMA LOG: {e}")
     finally:
         db.close()
-
-# --- ADMIN ACTIONS ---
-@app.post("/admin/delete-user")
-def delete_user(request: Request, user_id: str = Form(...), db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    admin_user = _db_user_from_session(db, sess)
-    
-    # 1. Security Check (Crucial)
-    if admin_user.email not in ALLOWED_ADMINS:
-        return RedirectResponse(url="/suite", status_code=303)
-
-    # 2. Find and Delete
-    # We use UUID casting if your DB uses UUIDs, or just string matching
-    target = db.query(UserModel).filter(UserModel.id == user_id).first()
-    
-    if target:
-        # Prevent Admin Suicide (Don't delete yourself)
-        if target.email == admin_user.email:
-            return RedirectResponse(url="/admin?error=cannot_delete_self", status_code=303)
-            
-        db.delete(target)
-        db.commit()
-        
-    return RedirectResponse(url="/admin", status_code=303)        
 
 # --- HELPERS ---
 def _session_user_dict(request: Request) -> Optional[Dict[str, Any]]:
@@ -248,7 +224,7 @@ async def account_profile_update(request: Request, db: Session = Depends(get_db)
     db.commit()
     return {"status": "ok"}
 
-# --- ADMIN ROUTE (CRASH PROOF) ---
+# --- ADMIN ROUTE (SAFE) ---
 @app.get("/admin", response_class=HTMLResponse)
 def admin_panel(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -263,11 +239,10 @@ def admin_panel(request: Request, db: Session = Depends(get_db)):
     now = datetime.now()
     
     for usr in users:
-        # Prevent 500 error if attributes missing
         status = "INACTIVE"
         joined = "N/A"
         
-        # Safe Attribute Access (THIS IS THE FIX)
+        # Safe Attribute Access
         sub_end = getattr(usr, "subscription_end", None)
         if sub_end and sub_end > now:
             status = "ACTIVE"
@@ -285,6 +260,37 @@ def admin_panel(request: Request, db: Session = Depends(get_db)):
         })
 
     return templates.TemplateResponse("admin.html", {"request": request, "users": clean_list})
+
+# --- ADMIN ACTION: DELETE USER (FIXED) ---
+@app.post("/admin/delete-user")
+def delete_user(request: Request, user_id: str = Form(...), db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    admin_user = _db_user_from_session(db, sess)
+    
+    # 1. Security Check
+    if admin_user.email not in ALLOWED_ADMINS:
+        return RedirectResponse(url="/suite", status_code=303)
+
+    # 2. Find and Delete (FIXED: CAST ID TO INT)
+    try:
+        # The database expects an Integer ID, but the form sends a String.
+        # We must convert it here.
+        target_id = int(user_id)
+        target = db.query(UserModel).filter(UserModel.id == target_id).first()
+        
+        if target:
+            # Prevent Admin Suicide
+            if target.email == admin_user.email:
+                return RedirectResponse(url="/admin?error=cannot_delete_self", status_code=303)
+                
+            db.delete(target)
+            db.commit()
+            
+    except ValueError:
+        # If user_id wasn't a number, just ignore it
+        pass
+        
+    return RedirectResponse(url="/admin", status_code=303)
 
 @app.get("/sandbox", response_class=HTMLResponse)
 def ui_sandbox(request: Request, db: Session = Depends(get_db)):
@@ -348,15 +354,13 @@ async def research_run(request: Request, db: Session = Depends(get_db)):
     require_paid_access(u)
     payload = await request.json()
     try:
-        # Extract Tuning (This supports the files you just deployed)
         tuning_cfg = payload.get("tuning") 
-        
         out = await research_lab.run_research_lab(
             symbol=(payload.get("symbol") or "BTCUSDT").strip().upper(),
             start_date_utc=payload.get("start_date_utc"),
             end_date_utc=payload.get("end_date_utc"),
             session_ids=payload.get("session_ids"),
-            tuning=tuning_cfg # Passes it down to the new engines
+            tuning=tuning_cfg
         )
         return JSONResponse(out)
     except Exception as e:
