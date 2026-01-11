@@ -1,15 +1,12 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v10.5 (DELETE FIX)
-# ---------------------------------------------------------
-# 1. Admin Page: Fixes "Integer vs String" delete crash.
-# 2. Includes all Research Lab & Tuning endpoints.
+# KABRODA UNIFIED SERVER: BATTLEBOX v10.8 (IMPORT FIX)
 # ---------------------------------------------------------
 from __future__ import annotations
 
 import os
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone, timedelta  # <--- FIXED IMPORTS HERE
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, Form, HTTPException, Depends
@@ -55,7 +52,6 @@ app.add_middleware(
 )
 
 # --- ADMIN CONFIG ---
-# REPLACE WITH YOUR REAL EMAILS
 ALLOWED_ADMINS = ["spiritmaker79@gmail.com", "grossmonkeytrader@protonmail.com"]
 
 @app.on_event("startup")
@@ -224,7 +220,7 @@ async def account_profile_update(request: Request, db: Session = Depends(get_db)
     db.commit()
     return {"status": "ok"}
 
-# --- ADMIN ROUTE (SAFE) ---
+# --- ADMIN ROUTE (CRASH PROOF) ---
 @app.get("/admin", response_class=HTMLResponse)
 def admin_panel(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -347,8 +343,6 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
     )
     return JSONResponse(out)
 
-# In main.py, replace @app.post("/api/research/run") with:
-
 @app.post("/api/research/run")
 async def research_run(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -363,8 +357,10 @@ async def research_run(request: Request, db: Session = Depends(get_db)):
         tuning_cfg = payload.get("tuning")
         
         # 2. Fetch Data via Pipeline (KuCoin)
+        # Parse dates safely
         start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        
         fetch_start = int((start_dt - timedelta(hours=48)).timestamp())
         fetch_end = int((end_dt + timedelta(hours=30)).timestamp())
         
