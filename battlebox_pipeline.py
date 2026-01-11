@@ -1,10 +1,10 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE v4.1 (GEOBLOCK FIX)
+# KABRODA BATTLEBOX PIPELINE v4.2 (FETCHER & LIVE)
 # ==============================================================================
-# 1) SINGLE SOURCE OF TRUTH: Handles Live Dashboard AND Research Lab.
-# 2) Switched History Fetcher to KuCoin to bypass Binance US Geo-blocking.
-# 3) Passes "Tuning" parameters to SSE and State Engines.
+# 1. Handles Data Fetching (KuCoin for US Compat).
+# 2. Handles Live Dashboard Logic (War Map, Energy).
+# 3. Exposes Fetchers for Research Lab.
 # ==============================================================================
 
 from __future__ import annotations
@@ -31,8 +31,6 @@ SESSION_CONFIGS = [
 ]
 
 LOCKED_SESSIONS: Dict[str, Dict[str, Any]] = {}
-
-# Use KuCoin for EVERYTHING (Live + History) to avoid Binance US blocks
 _exchange_live = ccxt.kucoin({"enableRateLimit": True})
 
 # ----------------------------
@@ -74,7 +72,6 @@ def anchor_ts_for_utc_date(cfg: Dict, utc_date: datetime) -> int:
 def resolve_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[str] = None) -> Dict[str, Any]:
     mode = (mode or "AUTO").upper()
     
-    # MANUAL OVERRIDE
     if mode == "MANUAL" and manual_id:
         cfg = next((s for s in SESSION_CONFIGS if s["id"] == manual_id), SESSION_CONFIGS[0])
         tz = pytz.timezone(cfg["tz"])
@@ -89,7 +86,6 @@ def resolve_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[s
             "energy": _infer_energy(elapsed),
         }
 
-    # AUTO SELECTION
     candidates = []
     for cfg in SESSION_CONFIGS:
         tz = pytz.timezone(cfg["tz"])
@@ -110,10 +106,9 @@ def resolve_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[s
     }
 
 # ----------------------------
-# DATA FETCHING (INTERNAL)
+# DATA FETCHING
 # ----------------------------
 async def fetch_live_5m(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
-    """Fast fetch for Live Dashboard"""
     s = _normalize_symbol(symbol)
     try:
         rows = await _exchange_live.fetch_ohlcv(s, "5m", limit=limit)
@@ -123,7 +118,6 @@ async def fetch_live_5m(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
         return []
 
 async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
-    """Fast fetch for War Map"""
     s = _normalize_symbol(symbol)
     try:
         rows = await _exchange_live.fetch_ohlcv(s, "1h", limit=limit)
@@ -131,10 +125,9 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
     except: return []
 
 async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
-    """Deep fetch for Research Lab (Uses KuCoin to avoid Binance US Block)"""
-    # Using KuCoin for history because it's friendlier to US servers
+    """Deep fetch for Research Lab (Uses KuCoin)"""
     exchange = ccxt.kucoin({'enableRateLimit': True})
-    s = _normalize_symbol(symbol) # KuCoin needs BTC/USDT format
+    s = _normalize_symbol(symbol)
     all_candles = []
     
     try:
@@ -142,37 +135,25 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int) -
         end = end_ts * 1000
         
         while current < end:
-            # KuCoin limit is usually 1500
-            ohlcv = await exchange.fetch_ohlcv(s, '5m', current, 1000)
+            ohlcv = await exchange.fetch_ohlcv(s, '5m', current, 1500) # KuCoin limit 1500
             if not ohlcv: break
             
             all_candles.extend(ohlcv)
-            
-            # Next page
-            last_candle_time = ohlcv[-1][0]
-            current = last_candle_time + (5*60*1000)
-            
-            # Safety break if we caught up
-            if len(ohlcv) < 1000: break
+            current = ohlcv[-1][0] + (5*60*1000)
+            if len(ohlcv) < 1500: break
             
     except Exception as e:
         print(f"History Fetch Error: {e}")
     finally:
         await exchange.close()
     
-    # Format
     formatted = []
     for c in all_candles:
         ts = int(c[0]/1000)
-        # Strict window check
         if start_ts <= ts <= end_ts:
             formatted.append({
                 "time": ts, 
-                "open": float(c[1]), 
-                "high": float(c[2]), 
-                "low": float(c[3]), 
-                "close": float(c[4]), 
-                "volume": float(c[5])
+                "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4]), "volume": float(c[5])
             })
     return formatted
 
@@ -211,7 +192,7 @@ def _compute_sse_packet(raw_5m: List[Dict], anchor_ts: int, tuning: Dict = None)
         "r30_high": r30_high, 
         "r30_low": r30_low,
         "last_price": last_price,
-        "tuning": tuning or {} # <--- Inject Tuning
+        "tuning": tuning or {}
     }
 
     computed = sse_engine.compute_sse_levels(sse_input)
@@ -226,62 +207,9 @@ def _compute_sse_packet(raw_5m: List[Dict], anchor_ts: int, tuning: Dict = None)
     }
 
 # ----------------------------
-# HISTORICAL / RESEARCH DELEGATE
-# ----------------------------
-def compute_session_from_candles(
-    cfg: Dict, 
-    utc_date: datetime, 
-    raw_5m: List[Dict], 
-    exec_hours: int = 6,
-    tuning: Dict = None  # <--- Tuning Argument
-) -> Dict[str, Any]:
-    """
-    THE TRUTH FUNCTION for Research Lab.
-    Calculates exactly what happened in a historical session using Pipeline logic.
-    """
-    anchor_ts = anchor_ts_for_utc_date(cfg, utc_date)
-    lock_end_ts = anchor_ts + 1800
-    exec_end_ts = lock_end_ts + (exec_hours * 3600)
-    
-    # 1. Compute SSE (Levels)
-    pkt = _compute_sse_packet(raw_5m, anchor_ts, tuning=tuning)
-    
-    if "error" in pkt:
-        return {"ok": False, "error": pkt["error"], "final_state": "INVALID"}
-    
-    levels = pkt["levels"]
-    
-    # 2. Compute Law Layer (State)
-    post_lock_candles = [c for c in raw_5m if lock_end_ts <= c["time"] < exec_end_ts]
-    
-    state = structure_state_engine.compute_structure_state(
-        levels=levels, 
-        candles_5m_post_lock=post_lock_candles,
-        tuning=tuning # <--- Pass Tuning
-    )
-    
-    had_acceptance = (state["permission"]["status"] == "EARNED")
-    had_alignment = (state["execution"]["gates_mode"] == "LOCKED")
-    side = state["permission"]["side"]
-    
-    return {
-        "ok": True,
-        "counts": {
-            "had_acceptance": had_acceptance,
-            "had_alignment": had_alignment
-        },
-        "events": {
-            "acceptance_side": side,
-            "final_state": state["action"],
-            "fail_reason": state.get("diagnostics", {}).get("fail_reason", "UNKNOWN")
-        }
-    }
-
-# ----------------------------
-# PUBLIC API
+# PUBLIC API (LIVE & REVIEW)
 # ----------------------------
 async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id: str = None, operator_flex: bool = False) -> Dict[str, Any]:
-    """LIVE DASHBOARD ENTRY POINT"""
     raw_5m = await fetch_live_5m(symbol)
     raw_1h = await fetch_live_1h(symbol)
     
@@ -292,7 +220,6 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     anchor_ts = session["anchor_time"]
     lock_end_ts = anchor_ts + 1800
 
-    # 1. CALIBRATION PHASE
     if int(now_utc.timestamp()) < lock_end_ts:
         wm = _war_map_from_1h(raw_1h)
         return {
@@ -308,7 +235,6 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
             }
         }
 
-    # 2. LOCKED SESSION CACHE
     session_key = f"{symbol}_{session['id']}_{session['date_key']}"
     if session_key not in LOCKED_SESSIONS:
         pkt = _compute_sse_packet(raw_5m, anchor_ts)
@@ -321,7 +247,6 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     levels = pkt["levels"]
     lock_time = pkt["lock_time"]
 
-    # 3. LAW LAYER (State Engine)
     post_lock = [c for c in raw_5m if c["time"] >= lock_time]
     state = structure_state_engine.compute_structure_state(levels, post_lock)
     wm = _war_map_from_1h(raw_1h)
@@ -342,7 +267,6 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     }
 
 async def get_session_review(symbol: str, session_tz: str) -> Dict[str, Any]:
-    """REVIEW MODE ENTRY POINT"""
     raw_5m = await fetch_live_5m(symbol)
     if not raw_5m: return {"ok": False, "error": "No Data"}
 

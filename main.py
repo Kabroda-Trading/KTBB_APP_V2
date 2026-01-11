@@ -347,6 +347,8 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
     )
     return JSONResponse(out)
 
+# In main.py, replace @app.post("/api/research/run") with:
+
 @app.post("/api/research/run")
 async def research_run(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -354,11 +356,26 @@ async def research_run(request: Request, db: Session = Depends(get_db)):
     require_paid_access(u)
     payload = await request.json()
     try:
-        tuning_cfg = payload.get("tuning") 
-        out = await research_lab.run_research_lab(
-            symbol=(payload.get("symbol") or "BTCUSDT").strip().upper(),
-            start_date_utc=payload.get("start_date_utc"),
-            end_date_utc=payload.get("end_date_utc"),
+        # 1. Extract Config
+        symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
+        start_date = payload.get("start_date_utc")
+        end_date = payload.get("end_date_utc")
+        tuning_cfg = payload.get("tuning")
+        
+        # 2. Fetch Data via Pipeline (KuCoin)
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        fetch_start = int((start_dt - timedelta(hours=48)).timestamp())
+        fetch_end = int((end_dt + timedelta(hours=30)).timestamp())
+        
+        raw_5m = await battlebox_pipeline.fetch_historical_pagination(symbol, fetch_start, fetch_end)
+        
+        # 3. Pass Data to Research Lab (Pure Function)
+        out = await research_lab.run_research_lab_from_candles(
+            symbol=symbol,
+            raw_5m=raw_5m,
+            start_date_utc=start_date,
+            end_date_utc=end_date,
             session_ids=payload.get("session_ids"),
             tuning=tuning_cfg
         )
