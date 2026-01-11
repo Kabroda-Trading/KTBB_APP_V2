@@ -1,12 +1,7 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE v4.2 (FETCHER & LIVE)
+# KABRODA BATTLEBOX PIPELINE v4.5 (VERBOSE ERRORS)
 # ==============================================================================
-# 1. Handles Data Fetching (KuCoin for US Compat).
-# 2. Handles Live Dashboard Logic (War Map, Energy).
-# 3. Exposes Fetchers for Research Lab.
-# ==============================================================================
-
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -15,7 +10,6 @@ import pytz
 import asyncio
 import ccxt.async_support as ccxt
 
-# --- ENGINES ---
 import sse_engine
 import structure_state_engine
 
@@ -125,7 +119,7 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
     except: return []
 
 async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
-    """Deep fetch for Research Lab (Uses KuCoin)"""
+    """Deep fetch for Research Lab (Uses KuCoin) - Errors Bubble Up"""
     exchange = ccxt.kucoin({'enableRateLimit': True})
     s = _normalize_symbol(symbol)
     all_candles = []
@@ -135,15 +129,14 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int) -
         end = end_ts * 1000
         
         while current < end:
-            ohlcv = await exchange.fetch_ohlcv(s, '5m', current, 1500) # KuCoin limit 1500
+            # We let exceptions happen here so the UI sees the real error (e.g. Rate Limit)
+            ohlcv = await exchange.fetch_ohlcv(s, '5m', current, 1500) 
             if not ohlcv: break
             
             all_candles.extend(ohlcv)
             current = ohlcv[-1][0] + (5*60*1000)
             if len(ohlcv) < 1500: break
             
-    except Exception as e:
-        print(f"History Fetch Error: {e}")
     finally:
         await exchange.close()
     

@@ -151,14 +151,14 @@
         function updateVal(id, val) { document.getElementById(id).innerText = val; }
 
         async function runLab() {
-            // 1. UI Loading State
+            // UI State
             document.getElementById('runBtn').disabled = true;
             document.getElementById('runBtn').innerText = "RUNNING...";
             document.getElementById('resultsArea').style.display = 'none';
             document.getElementById('placeholder').style.display = 'none';
             document.getElementById('loading').style.display = 'block';
 
-            // 2. Prepare Payload
+            // Payload Construction
             const payload = {
                 symbol: document.getElementById('symbol').value,
                 start_date_utc: document.getElementById('startDate').value,
@@ -172,7 +172,6 @@
             };
 
             try {
-                // 3. Call API
                 const res = await fetch('/api/research/run', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -181,17 +180,18 @@
                 
                 const data = await res.json();
 
-                // 4. CRITICAL: Handle Backend Errors Safely
+                // ----------------------------------------------------
+                // THIS IS THE FIX: CHECK FOR ERROR BEFORE READING STATS
+                // ----------------------------------------------------
                 if (!data.ok) {
-                    alert("⚠️ SYSTEM ERROR:\n" + (data.error || "Unknown Error Occurred"));
-                    // Reset UI
+                    alert("SERVER ERROR:\n" + (data.error || "Unknown error occurred."));
                     document.getElementById('loading').style.display = 'none';
                     document.getElementById('runBtn').disabled = false;
                     document.getElementById('runBtn').innerText = "INITIATE RUN";
-                    return; // STOP HERE
+                    return; 
                 }
 
-                // 5. If Success, Render Stats
+                // If we get here, data.ok is TRUE, so data.stats exists.
                 const stats = data.stats;
 
                 document.getElementById('resTotal').innerText = stats.sessions_total;
@@ -206,6 +206,7 @@
                 // GO Breakdown Chart
                 let goHtml = "";
                 const totalGos = stats.go_count || 1;
+                
                 const campPct = (stats.campaign_go_count || 0) / totalGos * 100;
                 goHtml += `
                     <div class="fail-bar">
@@ -242,9 +243,7 @@
                 if(Object.keys(reasons).length === 0) failHtml = "<div style='color:#666; font-size:12px;'>No failures recorded.</div>";
                 document.getElementById('failChart').innerHTML = failHtml;
 
-                // Raw Log
                 document.getElementById('jsonOutput').innerText = JSON.stringify(data.sessions, null, 2);
-                
                 document.getElementById('resultsArea').style.display = 'block';
 
             } catch (e) {
