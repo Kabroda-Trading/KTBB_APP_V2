@@ -31,6 +31,7 @@
         /* BUTTONS */
         .btn-run { width: 100%; background: #06b6d4; color: #000; border: none; padding: 12px; font-weight: 700; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; margin-top: 10px; }
         .btn-run:hover { box-shadow: 0 0 15px rgba(6, 182, 212, 0.4); }
+        .btn-run:disabled { background: #334155; color: #94a3b8; cursor: not-allowed; box-shadow: none; }
         
         /* RESULTS AREA */
         .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
@@ -38,7 +39,7 @@
         .stat-val { display: block; font-size: 24px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono', monospace; }
         .stat-lbl { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
         
-        /* FAIL REASONS CHART */
+        /* CHARTS */
         .chart-box { margin-bottom: 20px; }
         .fail-bar { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
         .fail-lbl { width: 140px; color: #94a3b8; }
@@ -150,14 +151,14 @@
         function updateVal(id, val) { document.getElementById(id).innerText = val; }
 
         async function runLab() {
-            // UI State
+            // 1. UI Loading State
             document.getElementById('runBtn').disabled = true;
             document.getElementById('runBtn').innerText = "RUNNING...";
             document.getElementById('resultsArea').style.display = 'none';
             document.getElementById('placeholder').style.display = 'none';
             document.getElementById('loading').style.display = 'block';
 
-            // Payload Construction
+            // 2. Prepare Payload
             const payload = {
                 symbol: document.getElementById('symbol').value,
                 start_date_utc: document.getElementById('startDate').value,
@@ -171,6 +172,7 @@
             };
 
             try {
+                // 3. Call API
                 const res = await fetch('/api/research/run', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -178,9 +180,20 @@
                 });
                 
                 const data = await res.json();
+
+                // 4. CRITICAL: Handle Backend Errors Safely
+                if (!data.ok) {
+                    alert("⚠️ SYSTEM ERROR:\n" + (data.error || "Unknown Error Occurred"));
+                    // Reset UI
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('runBtn').disabled = false;
+                    document.getElementById('runBtn').innerText = "INITIATE RUN";
+                    return; // STOP HERE
+                }
+
+                // 5. If Success, Render Stats
                 const stats = data.stats;
 
-                // 1. Top Level Stats
                 document.getElementById('resTotal').innerText = stats.sessions_total;
                 document.getElementById('resAcc').innerText = stats.acceptance_count;
                 document.getElementById('resGo').innerText = stats.go_count;
@@ -190,11 +203,9 @@
                     : "0.0";
                 document.getElementById('resRate').innerText = goRate + "%";
                 
-                // 2. GO Type Breakdown
+                // GO Breakdown Chart
                 let goHtml = "";
                 const totalGos = stats.go_count || 1;
-                
-                // Campaign GO
                 const campPct = (stats.campaign_go_count || 0) / totalGos * 100;
                 goHtml += `
                     <div class="fail-bar">
@@ -203,7 +214,6 @@
                         <span class="fail-count">${stats.campaign_go_count || 0}</span>
                     </div>
                 `;
-                // Scalp GO
                 const scalpPct = (stats.scalp_go_count || 0) / totalGos * 100;
                 goHtml += `
                     <div class="fail-bar">
@@ -214,7 +224,7 @@
                 `;
                 document.getElementById('goChart').innerHTML = goHtml;
 
-                // 3. Fail Reasons Chart
+                // Fail Reasons Chart
                 const reasons = stats.fail_reasons || {};
                 let failHtml = "";
                 const maxVal = Math.max(...Object.values(reasons), 1);
@@ -232,12 +242,13 @@
                 if(Object.keys(reasons).length === 0) failHtml = "<div style='color:#666; font-size:12px;'>No failures recorded.</div>";
                 document.getElementById('failChart').innerHTML = failHtml;
 
-                // 4. Raw JSON
+                // Raw Log
                 document.getElementById('jsonOutput').innerText = JSON.stringify(data.sessions, null, 2);
                 
                 document.getElementById('resultsArea').style.display = 'block';
+
             } catch (e) {
-                alert("Error: " + e);
+                alert("CLIENT ERROR: " + e);
             } finally {
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('runBtn').disabled = false;
