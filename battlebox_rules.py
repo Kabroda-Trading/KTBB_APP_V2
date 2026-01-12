@@ -1,9 +1,11 @@
 # battlebox_rules.py
 # ==============================================================================
-# BATTLEBOX RULE LAYER v2.7 (FORCED DEPLOYMENT UPDATE)
+# BATTLEBOX RULE LAYER v3.0 (RENAMED TO BREAK CACHE)
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
+
+print(">>> LOADING BATTLEBOX RULES v3.0 (FUSION EDITION) <<<") # Debug Log
 
 # CONFIG
 STOCH_K = 14
@@ -101,22 +103,22 @@ def check_volume_pressure(candles: List[Dict[str, Any]]) -> bool:
     if avg == 0: return True
     return curr > (avg * 1.5)
 
-# --- MASTER SIGNAL DETECTOR ---
-def detect_pullback_go(
+# --- MASTER SIGNAL DETECTOR (RENAMED) ---
+def detect_fusion_trade(
     side: str,
     levels: Dict[str, float],
     post_accept_5m: List[Dict[str, Any]],
     stoch_15m_at_accept: Dict[str, Optional[float]],
     use_zone: str = "TRIGGER",
-    # THESE ARGUMENTS must be explicit
+    # EXPLICIT ARGUMENTS
     require_volume: bool = False,
     require_divergence: bool = False,
     fusion_mode: bool = False, 
     zone_tol: float = DEFAULT_ZONE_TOL,
-    # NUCLEAR SAFETY: This **kwargs catches any mismatch so it CANNOT crash
     **kwargs 
 ) -> Dict[str, Any]:
     
+    # SAFETY: If inputs are missing, fail gracefully
     if side not in ("LONG", "SHORT") or not post_accept_5m:
         return {"ok": False, "go_type": "NONE", "go_ts": None}
 
