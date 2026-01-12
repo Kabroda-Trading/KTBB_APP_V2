@@ -1,9 +1,10 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB CONTROLLER v4.6 (SYNC FIX)
+# RESEARCH LAB CONTROLLER v4.7 (FINAL SYNC & IMPORT FIX)
 # ==============================================================================
 from __future__ import annotations
-from datetime import datetime, timedelta, timezone
+# CRITICAL: Ensure timezone is imported
+from datetime import datetime, timedelta, timezone 
 from typing import Any, Dict, List, Optional
 import traceback
 
@@ -27,6 +28,7 @@ async def run_research_lab_from_candles(
     try:
         if not raw_5m: return {"ok": False, "error": "No candles provided to Research Lab."}
 
+        # Uses the imported timezone object
         start_dt = datetime.strptime(start_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         end_dt = datetime.strptime(end_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
@@ -80,6 +82,7 @@ async def run_research_lab_from_candles(
                     candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
                     st15 = battlebox_rules.compute_stoch(candles_15m_proxy)
                     
+                    # Passes all arguments correctly
                     go = battlebox_rules.detect_pullback_go(
                         side=side, levels=levels, post_accept_5m=post_lock, stoch_15m_at_accept=st15, 
                         use_zone="TRIGGER", require_volume=req_vol, require_divergence=req_div,

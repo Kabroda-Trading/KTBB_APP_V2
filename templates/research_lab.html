@@ -162,7 +162,7 @@
     <script>
         function updateVal(id, val) { document.getElementById(id).innerText = val; }
 
-        // AUTO-SET DATE TO 2026
+        // AUTO-SET DATE TO TODAY/LAST WEEK
         window.onload = function() {
             const today = new Date();
             const lastWeek = new Date();
@@ -193,7 +193,7 @@
                 tuning: {
                     min_trigger_dist_bps: parseInt(document.getElementById('tuneDist').value),
                     acceptance_closes: parseInt(document.getElementById('tuneAcc').value),
-                    alignment_window_minutes: parseInt(document.getElementById('tuneWin').value),
+                    // REMOVED tuneWin as it's not in the HTML
                     zone_tolerance_bps: parseInt(document.getElementById('tuneTol').value),
                     
                     fusion_mode: document.getElementById('chkFusion').checked,
@@ -211,12 +211,9 @@
                 
                 const data = await res.json();
 
+                // CRITICAL: Check for backend error before accessing stats
                 if (!data.ok) {
-                    alert("SERVER ERROR:\n" + (data.error || "Unknown error."));
-                    document.getElementById('loading').style.display = 'none';
-                    document.getElementById('runBtn').disabled = false;
-                    document.getElementById('runBtn').innerText = "INITIATE RUN";
-                    return; 
+                    throw new Error(data.error || "Unknown server error.");
                 }
 
                 const stats = data.stats;
@@ -270,7 +267,7 @@
                 document.getElementById('resultsArea').style.display = 'block';
 
             } catch (e) {
-                alert("CLIENT ERROR: " + e);
+                alert("CLIENT ERROR: " + e.message);
             } finally {
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('runBtn').disabled = false;
