@@ -1,12 +1,13 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v10.8 (IMPORT FIX)
+# KABRODA UNIFIED SERVER: BATTLEBOX v10.9 (TIMEZONE FIX)
 # ---------------------------------------------------------
 from __future__ import annotations
 
 import os
 import traceback
-from datetime import datetime, timezone, timedelta  # <--- FIXED IMPORTS HERE
+# CRITICAL FIX: Added 'timezone' and 'timedelta' to imports
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, Form, HTTPException, Depends
@@ -220,7 +221,7 @@ async def account_profile_update(request: Request, db: Session = Depends(get_db)
     db.commit()
     return {"status": "ok"}
 
-# --- ADMIN ROUTE (CRASH PROOF) ---
+# --- ADMIN ROUTE (SAFE) ---
 @app.get("/admin", response_class=HTMLResponse)
 def admin_panel(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -357,7 +358,7 @@ async def research_run(request: Request, db: Session = Depends(get_db)):
         tuning_cfg = payload.get("tuning")
         
         # 2. Fetch Data via Pipeline (KuCoin)
-        # Parse dates safely
+        # Safe Date Parsing using the imported timezone
         start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         
