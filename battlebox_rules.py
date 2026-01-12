@@ -108,17 +108,14 @@ def detect_pullback_go(
     post_accept_5m: List[Dict[str, Any]],
     stoch_15m_at_accept: Dict[str, Optional[float]],
     use_zone: str = "TRIGGER",
-    # EXPLICIT ARGUMENTS
+    # EXPLICIT ARGUMENTS (The new stuff)
     require_volume: bool = False,
     require_divergence: bool = False,
     fusion_mode: bool = False, 
     zone_tol: float = DEFAULT_ZONE_TOL,
-    # SAFETY NET: Catches any extra arguments to prevent crashes
+    # SAFETY NET: **kwargs catches any extra arguments to prevent crashes
     **kwargs 
 ) -> Dict[str, Any]:
-    
-    # Safely handle potential argument mismatches
-    # If the caller sends 'jewel_mode' instead of 'fusion_mode', we can catch it here if needed.
     
     if side not in ("LONG", "SHORT") or not post_accept_5m:
         return {"ok": False, "go_type": "NONE", "go_ts": None}
