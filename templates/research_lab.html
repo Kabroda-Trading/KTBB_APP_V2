@@ -28,6 +28,11 @@
         input[type=range] { flex: 1; accent-color: #06b6d4; }
         .range-val { font-family: 'JetBrains Mono', monospace; color: #06b6d4; width: 40px; text-align: right; }
 
+        /* CHECKBOXES */
+        .checkbox-group { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        input[type=checkbox] { width: auto; accent-color: #10b981; }
+        .check-lbl { color: #fff; font-size: 13px; cursor: pointer; }
+
         /* BUTTONS */
         .btn-run { width: 100%; background: #06b6d4; color: #000; border: none; padding: 12px; font-weight: 700; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; margin-top: 10px; }
         .btn-run:hover { box-shadow: 0 0 15px rgba(6, 182, 212, 0.4); }
@@ -39,7 +44,6 @@
         .stat-val { display: block; font-size: 24px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono', monospace; }
         .stat-lbl { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
         
-        /* CHARTS */
         .chart-box { margin-bottom: 20px; }
         .fail-bar { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
         .fail-lbl { width: 140px; color: #94a3b8; }
@@ -98,6 +102,19 @@
                     </div>
                 </div>
 
+                <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
+                <label style="color: #10b981;">ADVANCED FILTERS</label>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chkVol">
+                    <label for="chkVol" class="check-lbl">REQUIRE VOLUME (>1.5x Avg)</label>
+                </div>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chkDiv">
+                    <label for="chkDiv" class="check-lbl">REQUIRE RSI DIVERGENCE</label>
+                </div>
+
                 <button onclick="runLab()" class="btn-run" id="runBtn">INITIATE RUN</button>
             </div>
 
@@ -151,14 +168,12 @@
         function updateVal(id, val) { document.getElementById(id).innerText = val; }
 
         async function runLab() {
-            // UI State
             document.getElementById('runBtn').disabled = true;
             document.getElementById('runBtn').innerText = "RUNNING...";
             document.getElementById('resultsArea').style.display = 'none';
             document.getElementById('placeholder').style.display = 'none';
             document.getElementById('loading').style.display = 'block';
 
-            // Payload Construction
             const payload = {
                 symbol: document.getElementById('symbol').value,
                 start_date_utc: document.getElementById('startDate').value,
@@ -167,7 +182,10 @@
                 tuning: {
                     min_trigger_dist_bps: parseInt(document.getElementById('tuneDist').value),
                     acceptance_closes: parseInt(document.getElementById('tuneAcc').value),
-                    alignment_window_minutes: parseInt(document.getElementById('tuneWin').value)
+                    alignment_window_minutes: parseInt(document.getElementById('tuneWin').value),
+                    // NEW: Checkbox Values
+                    require_volume: document.getElementById('chkVol').checked,
+                    require_divergence: document.getElementById('chkDiv').checked
                 }
             };
 
@@ -180,9 +198,6 @@
                 
                 const data = await res.json();
 
-                // ----------------------------------------------------
-                // THIS IS THE FIX: CHECK FOR ERROR BEFORE READING STATS
-                // ----------------------------------------------------
                 if (!data.ok) {
                     alert("SERVER ERROR:\n" + (data.error || "Unknown error occurred."));
                     document.getElementById('loading').style.display = 'none';
@@ -191,9 +206,7 @@
                     return; 
                 }
 
-                // If we get here, data.ok is TRUE, so data.stats exists.
                 const stats = data.stats;
-
                 document.getElementById('resTotal').innerText = stats.sessions_total;
                 document.getElementById('resAcc').innerText = stats.acceptance_count;
                 document.getElementById('resGo').innerText = stats.go_count;
@@ -203,7 +216,6 @@
                     : "0.0";
                 document.getElementById('resRate').innerText = goRate + "%";
                 
-                // GO Breakdown Chart
                 let goHtml = "";
                 const totalGos = stats.go_count || 1;
                 
@@ -225,7 +237,6 @@
                 `;
                 document.getElementById('goChart').innerHTML = goHtml;
 
-                // Fail Reasons Chart
                 const reasons = stats.fail_reasons || {};
                 let failHtml = "";
                 const maxVal = Math.max(...Object.values(reasons), 1);

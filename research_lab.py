@@ -1,24 +1,18 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB CONTROLLER v4.0 (PURE FUNCTION)
+# RESEARCH LAB CONTROLLER v4.2 (WITH LEVERS)
 # ==============================================================================
-# 1. Accepts pre-fetched candles (No CCXT usage here).
-# 2. Runs SSE + State Engine (Engines are Sacred).
-# 3. Runs Battlebox Rules (Stoch/GO) for extra insights.
-# ==============================================================================
-
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 import traceback
 
-import battlebox_pipeline  # For session configs and anchor logic
+import battlebox_pipeline
 import sse_engine
 import structure_state_engine
-import battlebox_rules  # <--- The New Rule Layer
+import battlebox_rules
 
 def _slice_by_ts(candles: List[Dict[str, Any]], start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
-    # Assumes candles are sorted by time
     return [c for c in candles if start_ts <= c["time"] < end_ts]
 
 async def run_research_lab_from_candles(
@@ -30,12 +24,6 @@ async def run_research_lab_from_candles(
     exec_hours: int = 12,
     tuning: Dict[str, Any] = None
 ) -> Dict[str, Any]:
-    """
-    Pure Replay Coordinator:
-    - Uses ONLY raw_5m passed in.
-    - Runs Engines (SSE/State) strictly.
-    - Applies Rule Layer (GO signals) for reporting.
-    """
     try:
         if not raw_5m:
             return {"ok": False, "error": "No candles provided to Research Lab."}
@@ -46,26 +34,27 @@ async def run_research_lab_from_candles(
         target_ids = session_ids or [s["id"] for s in battlebox_pipeline.SESSION_CONFIGS]
         active_cfgs = [s for s in battlebox_pipeline.SESSION_CONFIGS if s["id"] in target_ids]
 
+        # NEW: Extract Levers (Default to False so we don't break existing behavior)
+        tuning = tuning or {}
+        req_vol = bool(tuning.get("require_volume", False))
+        req_div = bool(tuning.get("require_divergence", False))
+
         sessions_result: List[Dict[str, Any]] = []
         curr_day = start_dt
 
         while curr_day <= end_dt:
             day_str = curr_day.strftime("%Y-%m-%d")
-
             for cfg in active_cfgs:
-                # 1. Anchor & Slice (Strict)
                 anchor_ts = battlebox_pipeline.anchor_ts_for_utc_date(cfg, curr_day)
                 lock_end_ts = anchor_ts + 1800
                 exec_end_ts = lock_end_ts + (exec_hours * 3600)
 
                 calibration = _slice_by_ts(raw_5m, anchor_ts, lock_end_ts)
-                if len(calibration) < 6:
-                    continue
+                if len(calibration) < 6: continue
 
                 context_24h = _slice_by_ts(raw_5m, lock_end_ts - 86400, lock_end_ts)
                 post_lock = _slice_by_ts(raw_5m, lock_end_ts, exec_end_ts)
 
-                # 2. Run SSE Engine (Levels)
                 sse_input = {
                     "locked_history_5m": context_24h,
                     "slice_24h_5m": context_24h,
@@ -73,37 +62,33 @@ async def run_research_lab_from_candles(
                     "r30_high": max(c["high"] for c in calibration),
                     "r30_low": min(c["low"] for c in calibration),
                     "last_price": context_24h[-1]["close"] if context_24h else 0.0,
-                    "tuning": tuning or {}
+                    "tuning": tuning
                 }
                 computed = sse_engine.compute_sse_levels(sse_input)
-                if "error" in computed:
-                    continue
+                if "error" in computed: continue
 
                 levels = computed["levels"]
-
-                # 3. Run State Engine (The Law) - Respects Tuning Levers
                 state = structure_state_engine.compute_structure_state(levels, post_lock, tuning=tuning)
-                
                 had_acceptance = (state["permission"]["status"] == "EARNED")
                 side = state["permission"]["side"]
 
-                # 4. Run Rule Layer (GO Detector) - Only if Accepted
                 go = {"ok": False, "go_type": "NONE", "go_ts": None, "reason": "NO_ACCEPTANCE", "evidence": {}}
                 
                 if had_acceptance and side in ("LONG", "SHORT") and post_lock:
-                    # Proxy 15m Stoch at Acceptance time (using context)
                     candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
                     st15 = battlebox_rules.compute_stoch(candles_15m_proxy)
                     
+                    # NEW: Pass levers to rules engine
                     go = battlebox_rules.detect_pullback_go(
                         side=side,
                         levels=levels,
                         post_accept_5m=post_lock,
                         stoch_15m_at_accept=st15,
-                        use_zone="TRIGGER"
+                        use_zone="TRIGGER",
+                        require_volume=req_vol,
+                        require_divergence=req_div
                     )
 
-                # 5. Pack Results (Clean Data for GPT)
                 sessions_result.append({
                     "ok": True,
                     "date": day_str,
@@ -129,10 +114,8 @@ async def run_research_lab_from_candles(
                         "fail_reason": state.get("diagnostics", {}).get("fail_reason", "UNKNOWN")
                     }
                 })
-
             curr_day += timedelta(days=1)
 
-        # 6. Aggregate Stats
         total = len(sessions_result)
         acc_count = sum(1 for s in sessions_result if s["counts"]["had_acceptance"])
         align_count = sum(1 for s in sessions_result if s["counts"]["had_alignment"])
@@ -152,6 +135,8 @@ async def run_research_lab_from_candles(
                 "acceptance_count": acc_count,
                 "alignment_count": align_count,
                 "go_count": go_count,
+                "campaign_go_count": sum(1 for s in sessions_result if s["counts"]["go_type"] == "CAMPAIGN_GO"),
+                "scalp_go_count": sum(1 for s in sessions_result if s["counts"]["go_type"] == "SCALP_GO"),
                 "fail_reasons": fail_reasons
             },
             "sessions": sessions_result
