@@ -1,6 +1,6 @@
 # battlebox_rules.py
 # ==============================================================================
-# BATTLEBOX RULE LAYER v2.3 (FUSION MODE)
+# BATTLEBOX RULE LAYER v2.3 (FUSION MODE + ARGUMENT FIX)
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
@@ -74,7 +74,6 @@ def stoch_aligned(side: str, st: Dict[str, Optional[float]]) -> bool:
     return False
 
 def rsi_aligned(side: str, rsi_val: float) -> bool:
-    """Fusion Mode: RSI must also be extreme."""
     if side == "SHORT": return rsi_val >= RSI_OB
     if side == "LONG": return rsi_val <= RSI_OS
     return False
@@ -109,9 +108,10 @@ def detect_pullback_go(
     post_accept_5m: List[Dict[str, Any]],
     stoch_15m_at_accept: Dict[str, Optional[float]],
     use_zone: str = "TRIGGER",
+    # THESE ARGUMENTS MUST BE HERE OR IT CRASHES
     require_volume: bool = False,
     require_divergence: bool = False,
-    fusion_mode: bool = False, # <--- RENAMED FROM JEWEL_MODE
+    fusion_mode: bool = False, 
     zone_tol: float = DEFAULT_ZONE_TOL
 ) -> Dict[str, Any]:
     

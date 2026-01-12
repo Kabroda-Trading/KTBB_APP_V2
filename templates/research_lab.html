@@ -54,8 +54,8 @@
                 </div>
                 <div class="control-group">
                     <label>DATE RANGE (UTC)</label>
-                    <input type="date" id="startDate" value="2025-01-01">
-                    <input type="date" id="endDate" value="2025-01-07" style="margin-top: 5px;">
+                    <input type="date" id="startDate">
+                    <input type="date" id="endDate" style="margin-top: 5px;">
                 </div>
                 
                 <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
@@ -162,6 +162,16 @@
     <script>
         function updateVal(id, val) { document.getElementById(id).innerText = val; }
 
+        // AUTO-SET DATE (NEW)
+        window.onload = function() {
+            const today = new Date();
+            const lastWeek = new Date();
+            lastWeek.setDate(today.getDate() - 7);
+            
+            document.getElementById('endDate').valueAsDate = today;
+            document.getElementById('startDate').valueAsDate = lastWeek;
+        };
+
         async function runLab() {
             document.getElementById('runBtn').disabled = true;
             document.getElementById('runBtn').innerText = "RUNNING...";
@@ -186,8 +196,7 @@
                     alignment_window_minutes: parseInt(document.getElementById('tuneWin').value),
                     zone_tolerance_bps: parseInt(document.getElementById('tuneTol').value),
                     
-                    // NEW: Pass levers
-                    fusion_mode: document.getElementById('chkFusion').checked, // <--- RENAMED
+                    fusion_mode: document.getElementById('chkFusion').checked,
                     require_volume: document.getElementById('chkVol').checked,
                     require_divergence: document.getElementById('chkDiv').checked
                 }
