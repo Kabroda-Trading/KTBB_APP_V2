@@ -1,6 +1,6 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE v4.5 (VERBOSE ERRORS)
+# KABRODA BATTLEBOX PIPELINE v4.4 (DEBUG LOGGING)
 # ==============================================================================
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
@@ -13,9 +13,7 @@ import ccxt.async_support as ccxt
 import sse_engine
 import structure_state_engine
 
-# ----------------------------
 # CONFIG
-# ----------------------------
 SESSION_CONFIGS = [
     {"id": "us_ny_futures", "name": "NY Futures", "tz": "America/New_York", "open_h": 8, "open_m": 30},
     {"id": "us_ny_equity",  "name": "NY Equity",  "tz": "America/New_York", "open_h": 9, "open_m": 30},
@@ -27,9 +25,7 @@ SESSION_CONFIGS = [
 LOCKED_SESSIONS: Dict[str, Dict[str, Any]] = {}
 _exchange_live = ccxt.kucoin({"enableRateLimit": True})
 
-# ----------------------------
 # HELPERS
-# ----------------------------
 def _normalize_symbol(symbol: str) -> str:
     s = (symbol or "").upper().strip()
     if s in ("BTC", "BTCUSDT"): return "BTC/USDT"
@@ -65,7 +61,6 @@ def anchor_ts_for_utc_date(cfg: Dict, utc_date: datetime) -> int:
 
 def resolve_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[str] = None) -> Dict[str, Any]:
     mode = (mode or "AUTO").upper()
-    
     if mode == "MANUAL" and manual_id:
         cfg = next((s for s in SESSION_CONFIGS if s["id"] == manual_id), SESSION_CONFIGS[0])
         tz = pytz.timezone(cfg["tz"])
@@ -79,7 +74,6 @@ def resolve_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[s
             "date_key": open_time.strftime("%Y-%m-%d"),
             "energy": _infer_energy(elapsed),
         }
-
     candidates = []
     for cfg in SESSION_CONFIGS:
         tz = pytz.timezone(cfg["tz"])
@@ -88,10 +82,8 @@ def resolve_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[s
         if now_local < open_time: open_time -= timedelta(days=1)
         elapsed = (now_local - open_time).total_seconds() / 60.0
         candidates.append((elapsed, cfg, open_time))
-    
     candidates.sort(key=lambda x: x[0])
     elapsed, cfg, open_time = candidates[0]
-    
     return {
         "id": cfg["id"], "name": cfg["name"], "tz": cfg["tz"],
         "anchor_time": int(open_time.astimezone(timezone.utc).timestamp()),
@@ -99,9 +91,7 @@ def resolve_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[s
         "energy": _infer_energy(elapsed),
     }
 
-# ----------------------------
 # DATA FETCHING
-# ----------------------------
 async def fetch_live_5m(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
     s = _normalize_symbol(symbol)
     try:
@@ -119,7 +109,8 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
     except: return []
 
 async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
-    """Deep fetch for Research Lab (Uses KuCoin) - Errors Bubble Up"""
+    """Deep fetch with LOGGING to debug the hang."""
+    print(f"--- STARTING HISTORY FETCH: {symbol} ---") # DEBUG LOG
     exchange = ccxt.kucoin({'enableRateLimit': True})
     s = _normalize_symbol(symbol)
     all_candles = []
@@ -127,16 +118,27 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int) -
     try:
         current = start_ts * 1000
         end = end_ts * 1000
+        page = 1
         
         while current < end:
-            # We let exceptions happen here so the UI sees the real error (e.g. Rate Limit)
-            ohlcv = await exchange.fetch_ohlcv(s, '5m', current, 1500) 
-            if not ohlcv: break
+            print(f"   > Fetching Page {page} (Start: {datetime.fromtimestamp(current/1000)})") # DEBUG LOG
+            
+            ohlcv = await exchange.fetch_ohlcv(s, '5m', current, 1500)
+            if not ohlcv: 
+                print("   > No more data returned.")
+                break
             
             all_candles.extend(ohlcv)
             current = ohlcv[-1][0] + (5*60*1000)
-            if len(ohlcv) < 1500: break
+            page += 1
             
+            if len(ohlcv) < 1500: 
+                print("   > Reached end of data stream.")
+                break
+            
+    except Exception as e:
+        print(f"!!! HISTORY FETCH ERROR: {e}")
+        traceback.print_exc()
     finally:
         await exchange.close()
     
@@ -145,9 +147,10 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int) -
         ts = int(c[0]/1000)
         if start_ts <= ts <= end_ts:
             formatted.append({
-                "time": ts, 
-                "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4]), "volume": float(c[5])
+                "time": ts, "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4]), "volume": float(c[5])
             })
+    
+    print(f"--- FETCH COMPLETE: {len(formatted)} candles loaded. ---") # DEBUG LOG
     return formatted
 
 def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -160,16 +163,12 @@ def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
     lean = "BULLISH" if closes[-1] > ema else "BEARISH"
     return {"status": "LIVE", "lean": lean, "phase": "TRANSITION", "note": f"Pressure is {lean}."}
 
-# ----------------------------
 # CORE COMPUTATION
-# ----------------------------
 def _compute_sse_packet(raw_5m: List[Dict], anchor_ts: int, tuning: Dict = None) -> Dict[str, Any]:
     lock_end_ts = anchor_ts + 1800
     calibration = [c for c in raw_5m if anchor_ts <= c["time"] < lock_end_ts]
-    
     if len(calibration) < 6:
         return {"error": "Insufficient calibration data.", "lock_end_ts": lock_end_ts}
-
     context_24h = [c for c in raw_5m if (lock_end_ts - 86400) <= c["time"] < lock_end_ts]
     
     session_open = calibration[0]["open"]
@@ -187,10 +186,8 @@ def _compute_sse_packet(raw_5m: List[Dict], anchor_ts: int, tuning: Dict = None)
         "last_price": last_price,
         "tuning": tuning or {}
     }
-
     computed = sse_engine.compute_sse_levels(sse_input)
     if "error" in computed: return computed
-    
     return {
         "levels": computed["levels"],
         "context": computed.get("context", {}),
@@ -199,15 +196,11 @@ def _compute_sse_packet(raw_5m: List[Dict], anchor_ts: int, tuning: Dict = None)
         "lock_time": lock_end_ts
     }
 
-# ----------------------------
-# PUBLIC API (LIVE & REVIEW)
-# ----------------------------
+# PUBLIC API
 async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id: str = None, operator_flex: bool = False) -> Dict[str, Any]:
     raw_5m = await fetch_live_5m(symbol)
     raw_1h = await fetch_live_1h(symbol)
-    
     if not raw_5m: return {"status": "ERROR", "message": "No Data"}
-    
     now_utc = datetime.now(timezone.utc)
     session = resolve_session(now_utc, session_mode, manual_id)
     anchor_ts = session["anchor_time"]
@@ -227,7 +220,6 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                 "levels": {}
             }
         }
-
     session_key = f"{symbol}_{session['id']}_{session['date_key']}"
     if session_key not in LOCKED_SESSIONS:
         pkt = _compute_sse_packet(raw_5m, anchor_ts)
@@ -235,15 +227,12 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
              wm = _war_map_from_1h(raw_1h)
              return {"status": "ERROR", "message": pkt["error"], "battlebox": {"war_map_context": wm, "session_battle": _safe_placeholder_state(pkt["error"]), "levels": {}}}
         LOCKED_SESSIONS[session_key] = pkt
-
     pkt = LOCKED_SESSIONS[session_key]
     levels = pkt["levels"]
     lock_time = pkt["lock_time"]
-
     post_lock = [c for c in raw_5m if c["time"] >= lock_time]
     state = structure_state_engine.compute_structure_state(levels, post_lock)
     wm = _war_map_from_1h(raw_1h)
-
     return {
         "status": "OK",
         "timestamp": now_utc.strftime("%H:%M UTC"),
@@ -262,24 +251,18 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
 async def get_session_review(symbol: str, session_tz: str) -> Dict[str, Any]:
     raw_5m = await fetch_live_5m(symbol)
     if not raw_5m: return {"ok": False, "error": "No Data"}
-
     cfg = next((s for s in SESSION_CONFIGS if s["tz"] == session_tz), SESSION_CONFIGS[0])
     anchor_ts = anchor_ts_for_utc_date(cfg, datetime.now(timezone.utc))
     lock_end_ts = anchor_ts + 1800
-    
     if anchor_ts > datetime.now(timezone.utc).timestamp():
          anchor_ts -= 86400
          lock_end_ts -= 86400
-         
     pkt = _compute_sse_packet(raw_5m, anchor_ts)
-    
     if "error" in pkt:
         if int(datetime.now(timezone.utc).timestamp()) < lock_end_ts:
              return {"ok": True, "mode": "CALIBRATING", "symbol": symbol, "session": {"name": cfg["name"]}, "message": "Calibrating..."}
         return {"ok": False, "error": pkt["error"]}
-
     open_time = datetime.fromtimestamp(anchor_ts, tz=timezone.utc).isoformat()
-
     return {
         "ok": True,
         "mode": "LOCKED",
