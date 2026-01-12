@@ -1,6 +1,6 @@
 # battlebox_rules.py
 # ==============================================================================
-# BATTLEBOX RULE LAYER v2.6 (SAFETY PATCH + KWARGS)
+# BATTLEBOX RULE LAYER v2.7 (FORCED DEPLOYMENT UPDATE)
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
@@ -108,12 +108,12 @@ def detect_pullback_go(
     post_accept_5m: List[Dict[str, Any]],
     stoch_15m_at_accept: Dict[str, Optional[float]],
     use_zone: str = "TRIGGER",
-    # EXPLICIT ARGUMENTS (The new stuff)
+    # THESE ARGUMENTS must be explicit
     require_volume: bool = False,
     require_divergence: bool = False,
     fusion_mode: bool = False, 
     zone_tol: float = DEFAULT_ZONE_TOL,
-    # SAFETY NET: **kwargs catches any extra arguments to prevent crashes
+    # NUCLEAR SAFETY: This **kwargs catches any mismatch so it CANNOT crash
     **kwargs 
 ) -> Dict[str, Any]:
     
