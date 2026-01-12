@@ -1,73 +1,59 @@
 # battlebox_rules.py
 # ==============================================================================
-# BATTLEBOX RULE LAYER v2.0 (MULTI-MODEL)
+# BATTLEBOX RULE LAYER v2.1 (DYNAMIC TOLERANCE)
 # ==============================================================================
-# 1. Stochastics (Momentum)
-# 2. RSI Divergence (Reversal/Continuation)
-# 3. Volume Pressure (Breakout Validation)
-# ==============================================================================
-
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
 
-# --- CONFIG (SINGLE SOURCE OF TRUTH) ---
+# --- CONFIG ---
 STOCH_K = 14
 STOCH_D = 3
 STOCH_SMOOTH = 3
 
 RSI_PERIOD = 14
-DIV_LOOKBACK = 10  # Look back X candles for divergence pivot
+DIV_LOOKBACK = 10 
 
 OB = 80.0
 OS = 20.0
 RSI_OB = 70.0
 RSI_OS = 30.0
 
-ZONE_TOL_PCT = 0.0010      # 0.10% zone touch tolerance
-PUSH_MIN_PCT = 0.0008      # 0.08% push-away confirmation
-MAX_GO_BARS_5M = 48        # 4 hours after acceptance
+# Defaults
+DEFAULT_ZONE_TOL = 0.0010  # 0.10%
+PUSH_MIN_PCT = 0.0008      # 0.08%
+MAX_GO_BARS_5M = 48        
 
 # --- HELPERS ---
 def _sma(vals: List[float], n: int) -> float:
-    if len(vals) < n:
-        return sum(vals) / max(len(vals), 1)
+    if len(vals) < n: return sum(vals) / max(len(vals), 1)
     return sum(vals[-n:]) / n
 
 def compute_stoch(candles: List[Dict[str, Any]], k: int = STOCH_K, d: int = STOCH_D, smooth: int = STOCH_SMOOTH) -> Dict[str, Optional[float]]:
-    if not candles or len(candles) < k:
-        return {"k_raw": None, "k_smooth": None, "d": None}
-
+    if not candles or len(candles) < k: return {"k_raw": None, "k_smooth": None, "d": None}
     highs = [float(c["high"]) for c in candles]
     lows = [float(c["low"]) for c in candles]
     closes = [float(c["close"]) for c in candles]
-
-    k_series: List[float] = []
+    k_series = []
     for i in range(k - 1, len(candles)):
         hh = max(highs[i - k + 1 : i + 1])
         ll = min(lows[i - k + 1 : i + 1])
         denom = (hh - ll)
         k_val = 50.0 if denom <= 0 else ((closes[i] - ll) / denom) * 100.0
         k_series.append(k_val)
+    k_smooth = []
+    for i in range(len(k_series)): k_smooth.append(_sma(k_series[: i + 1], smooth))
+    ds = []
+    for i in range(len(k_smooth)): ds.append(_sma(k_smooth[: i + 1], d))
+    return {"k_raw": float(k_series[-1]), "k_smooth": float(k_smooth[-1]), "d": float(ds[-1])}
 
-    k_smooth_series = []
-    for i in range(len(k_series)):
-        k_smooth_series.append(_sma(k_series[: i + 1], smooth))
-
-    d_series = []
-    for i in range(len(k_smooth_series)):
-        d_series.append(_sma(k_smooth_series[: i + 1], d))
-
-    return {"k_raw": float(k_series[-1]), "k_smooth": float(k_smooth_series[-1]), "d": float(d_series[-1])}
-
-def stoch_aligned(side: str, st: Dict[str, Optional[float]], ob: float = OB, os: float = OS) -> bool:
+def stoch_aligned(side: str, st: Dict[str, Optional[float]]) -> bool:
     k = st.get("k_smooth")
     d = st.get("d")
     if k is None or d is None: return False
-    if side == "SHORT": return k >= ob or d >= ob
-    if side == "LONG": return k <= os or d <= os
+    if side == "SHORT": return k >= OB or d >= OB
+    if side == "LONG": return k <= OS or d <= OS
     return False
 
-# --- RSI & DIVERGENCE ENGINE ---
 def compute_rsi(candles: List[Dict[str, Any]], period: int = RSI_PERIOD) -> float:
     if not candles or len(candles) < period + 1: return 50.0
     closes = [float(c["close"]) for c in candles]
@@ -91,29 +77,22 @@ def check_divergence(side: str, candles: List[Dict[str, Any]]) -> bool:
     current = candles[-1]
     prev_window = candles[-(DIV_LOOKBACK+1):-1]
     curr_rsi = compute_rsi(candles)
-    
     if side == "LONG":
         curr_price = float(current["low"])
-        lowest_prev = min(prev_window, key=lambda x: float(x["low"]))
-        prev_price = float(lowest_prev["low"])
-        if curr_price < prev_price and (curr_rsi > RSI_OS and curr_rsi < 50):
-            return True
+        prev_low = min(prev_window, key=lambda x: float(x["low"]))
+        if curr_price < float(prev_low["low"]) and (curr_rsi > RSI_OS and curr_rsi < 50): return True
     elif side == "SHORT":
         curr_price = float(current["high"])
-        highest_prev = max(prev_window, key=lambda x: float(x["high"]))
-        prev_price = float(highest_prev["high"])
-        if curr_price > prev_price and (curr_rsi < RSI_OB and curr_rsi > 50):
-            return True
+        prev_high = max(prev_window, key=lambda x: float(x["high"]))
+        if curr_price > float(prev_high["high"]) and (curr_rsi < RSI_OB and curr_rsi > 50): return True
     return False
 
-# --- VOLUME PRESSURE ENGINE ---
-def check_volume_pressure(candles: List[Dict[str, Any]], multiplier: float = 1.5) -> bool:
+def check_volume_pressure(candles: List[Dict[str, Any]]) -> bool:
     if len(candles) < 21: return False
-    current_vol = float(candles[-1].get("volume", 0))
-    history = candles[-21:-1]
-    avg_vol = sum(float(c.get("volume", 0)) for c in history) / len(history)
-    if avg_vol == 0: return True
-    return current_vol > (avg_vol * multiplier)
+    curr = float(candles[-1].get("volume", 0))
+    hist = candles[-21:-1]
+    avg = sum(float(c.get("volume", 0)) for c in hist) / len(hist)
+    return curr > (avg * 1.5)
 
 # --- MASTER SIGNAL DETECTOR ---
 def detect_pullback_go(
@@ -122,8 +101,9 @@ def detect_pullback_go(
     post_accept_5m: List[Dict[str, Any]],
     stoch_15m_at_accept: Dict[str, Optional[float]],
     use_zone: str = "TRIGGER",
-    require_volume: bool = False, # <--- THIS ARGUMENT WAS MISSING
-    require_divergence: bool = False # <--- THIS ARGUMENT WAS MISSING
+    require_volume: bool = False,
+    require_divergence: bool = False,
+    zone_tol: float = DEFAULT_ZONE_TOL # <--- NEW ARGUMENT
 ) -> Dict[str, Any]:
     
     if side not in ("LONG", "SHORT") or not post_accept_5m:
@@ -139,8 +119,7 @@ def detect_pullback_go(
     else:
         zone = bo if side == "LONG" else bd
 
-    if zone <= 0:
-        return {"ok": False, "go_type": "NONE"}
+    if zone <= 0: return {"ok": False, "go_type": "NONE"}
 
     allow_campaign = stoch_aligned(side, stoch_15m_at_accept)
     allow_scalp = True
@@ -153,9 +132,10 @@ def detect_pullback_go(
         lo = float(c["low"])
         hi = float(c["high"])
 
-        # 1) Touch Zone
-        tol = zone * ZONE_TOL_PCT
+        # 1) Touch Zone (Dynamic Tolerance)
+        tol = zone * zone_tol
         in_touch = (lo <= zone + tol) if side == "LONG" else (hi >= zone - tol)
+        
         if in_touch and not touched: touched = True
         if not touched: continue
 
@@ -167,7 +147,7 @@ def detect_pullback_go(
         push_ok = (px >= zone * (1.0 + PUSH_MIN_PCT)) if side == "LONG" else (px <= zone * (1.0 - PUSH_MIN_PCT))
         if not push_ok: continue
 
-        # 4) OPTIONAL FILTERS
+        # 4) Filters
         if require_volume and not check_volume_pressure(window): continue
         if require_divergence and not check_divergence(side, window): continue
 

@@ -1,6 +1,6 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB CONTROLLER v4.2 (WITH LEVERS)
+# RESEARCH LAB CONTROLLER v4.3 (SESSION FILTER + TOLERANCE)
 # ==============================================================================
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
@@ -31,13 +31,19 @@ async def run_research_lab_from_candles(
         start_dt = datetime.strptime(start_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         end_dt = datetime.strptime(end_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
+        # FILTER SESSIONS based on user selection
         target_ids = session_ids or [s["id"] for s in battlebox_pipeline.SESSION_CONFIGS]
         active_cfgs = [s for s in battlebox_pipeline.SESSION_CONFIGS if s["id"] in target_ids]
 
-        # NEW: Extract Levers (Default to False so we don't break existing behavior)
+        # Extract Levers
         tuning = tuning or {}
         req_vol = bool(tuning.get("require_volume", False))
         req_div = bool(tuning.get("require_divergence", False))
+        
+        # New: Zone Tolerance (Default 0.10%, can go up to 0.50%)
+        # Frontend sends integer BPS (e.g., 25 bps). Convert to float (0.0025).
+        tol_bps = int(tuning.get("zone_tolerance_bps", 10)) 
+        zone_tol = tol_bps / 10000.0
 
         sessions_result: List[Dict[str, Any]] = []
         curr_day = start_dt
@@ -78,7 +84,6 @@ async def run_research_lab_from_candles(
                     candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
                     st15 = battlebox_rules.compute_stoch(candles_15m_proxy)
                     
-                    # NEW: Pass levers to rules engine
                     go = battlebox_rules.detect_pullback_go(
                         side=side,
                         levels=levels,
@@ -86,7 +91,8 @@ async def run_research_lab_from_candles(
                         stoch_15m_at_accept=st15,
                         use_zone="TRIGGER",
                         require_volume=req_vol,
-                        require_divergence=req_div
+                        require_divergence=req_div,
+                        zone_tol=zone_tol # <--- Passing the custom width
                     )
 
                 sessions_result.append({
@@ -118,7 +124,6 @@ async def run_research_lab_from_candles(
 
         total = len(sessions_result)
         acc_count = sum(1 for s in sessions_result if s["counts"]["had_acceptance"])
-        align_count = sum(1 for s in sessions_result if s["counts"]["had_alignment"])
         go_count = sum(1 for s in sessions_result if s["counts"]["had_go"])
         
         fail_reasons = {}
@@ -133,7 +138,7 @@ async def run_research_lab_from_candles(
             "stats": {
                 "sessions_total": total,
                 "acceptance_count": acc_count,
-                "alignment_count": align_count,
+                "alignment_count": sum(1 for s in sessions_result if s["counts"]["had_alignment"]),
                 "go_count": go_count,
                 "campaign_go_count": sum(1 for s in sessions_result if s["counts"]["go_type"] == "CAMPAIGN_GO"),
                 "scalp_go_count": sum(1 for s in sessions_result if s["counts"]["go_type"] == "SCALP_GO"),
