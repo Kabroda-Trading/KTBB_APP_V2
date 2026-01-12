@@ -1,282 +1,138 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Kabroda | Research Lab</title>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/site.css">
-    <style>
-        body { background-color: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
-        h1 { font-family: 'JetBrains Mono', monospace; margin: 0; color: #fff; }
-        .pill { background: #8b5cf6; color: #fff; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 700; letter-spacing: 1px; }
-        .lab-grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
-        .panel { background: #0f1623; border: 1px solid rgba(255,255,255,0.1); padding: 20px; border-radius: 8px; }
-        .control-group { margin-bottom: 20px; }
-        label { display: block; color: #94a3b8; font-size: 12px; font-weight: 700; margin-bottom: 8px; letter-spacing: 0.5px; }
-        input, select { width: 100%; background: #050b14; border: 1px solid #333; color: #fff; padding: 10px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; }
-        .range-wrap { display: flex; align-items: center; gap: 10px; }
-        input[type=range] { flex: 1; accent-color: #06b6d4; }
-        .range-val { font-family: 'JetBrains Mono', monospace; color: #06b6d4; width: 40px; text-align: right; }
-        .checkbox-group { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-        input[type=checkbox] { width: auto; accent-color: #10b981; }
-        .check-lbl { color: #fff; font-size: 13px; cursor: pointer; }
-        .session-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 20px; }
-        .btn-run { width: 100%; background: #06b6d4; color: #000; border: none; padding: 12px; font-weight: 700; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; margin-top: 10px; }
-        .btn-run:disabled { background: #334155; color: #94a3b8; cursor: not-allowed; }
-        .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
-        .stat-card { background: rgba(255,255,255,0.03); padding: 15px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); text-align: center; }
-        .stat-val { display: block; font-size: 24px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono', monospace; }
-        .stat-lbl { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
-        .fail-bar { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
-        .fail-lbl { width: 140px; color: #94a3b8; }
-        .fail-track { flex: 1; background: rgba(255,255,255,0.05); height: 8px; border-radius: 4px; overflow: hidden; margin: 0 10px; }
-        .fail-fill { height: 100%; }
-        .fail-count { width: 30px; text-align: right; color: #fff; font-weight: 700; }
-        pre { background: #000; padding: 15px; border-radius: 6px; overflow-x: auto; color: #00ff9d; font-size: 12px; border: 1px solid #333; max-height: 400px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div>
-                <a href="/suite" style="color: #94a3b8; text-decoration: none; font-size: 14px;">← Back to Suite</a>
-                <h1 style="margin-top: 10px;">RESEARCH LAB <span class="pill">BETA</span></h1>
-            </div>
-        </div>
+# research_lab.py
+# ==============================================================================
+# RESEARCH LAB CONTROLLER v4.6 (SYNC FIX)
+# ==============================================================================
+from __future__ import annotations
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+import traceback
 
-        <div class="lab-grid">
-            <div class="panel">
-                <div class="control-group">
-                    <label>TARGET ASSET</label>
-                    <select id="symbol"><option value="BTCUSDT">BTCUSDT</option><option value="ETHUSDT">ETHUSDT</option></select>
-                </div>
-                <div class="control-group">
-                    <label>DATE RANGE (UTC)</label>
-                    <input type="date" id="startDate">
-                    <input type="date" id="endDate" style="margin-top: 5px;">
-                </div>
+import battlebox_pipeline
+import sse_engine
+import structure_state_engine
+import battlebox_rules
+
+def _slice_by_ts(candles: List[Dict[str, Any]], start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
+    return [c for c in candles if start_ts <= c["time"] < end_ts]
+
+async def run_research_lab_from_candles(
+    symbol: str,
+    raw_5m: List[Dict[str, Any]],
+    start_date_utc: str,
+    end_date_utc: str,
+    session_ids: Optional[List[str]] = None,
+    exec_hours: int = 12,
+    tuning: Dict[str, Any] = None
+) -> Dict[str, Any]:
+    try:
+        if not raw_5m: return {"ok": False, "error": "No candles provided to Research Lab."}
+
+        start_dt = datetime.strptime(start_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        end_dt = datetime.strptime(end_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+        target_ids = session_ids or [s["id"] for s in battlebox_pipeline.SESSION_CONFIGS]
+        active_cfgs = [s for s in battlebox_pipeline.SESSION_CONFIGS if s["id"] in target_ids]
+
+        tuning = tuning or {}
+        req_vol = bool(tuning.get("require_volume", False))
+        req_div = bool(tuning.get("require_divergence", False))
+        fusion_mode = bool(tuning.get("fusion_mode", False))
+        
+        tol_bps = int(tuning.get("zone_tolerance_bps", 10)) 
+        zone_tol = tol_bps / 10000.0
+
+        sessions_result: List[Dict[str, Any]] = []
+        curr_day = start_dt
+
+        while curr_day <= end_dt:
+            day_str = curr_day.strftime("%Y-%m-%d")
+            for cfg in active_cfgs:
+                anchor_ts = battlebox_pipeline.anchor_ts_for_utc_date(cfg, curr_day)
+                lock_end_ts = anchor_ts + 1800
+                exec_end_ts = lock_end_ts + (exec_hours * 3600)
+
+                calibration = _slice_by_ts(raw_5m, anchor_ts, lock_end_ts)
+                if len(calibration) < 6: continue
+
+                context_24h = _slice_by_ts(raw_5m, lock_end_ts - 86400, lock_end_ts)
+                post_lock = _slice_by_ts(raw_5m, lock_end_ts, exec_end_ts)
+
+                sse_input = {
+                    "locked_history_5m": context_24h,
+                    "slice_24h_5m": context_24h,
+                    "session_open_price": calibration[0]["open"],
+                    "r30_high": max(c["high"] for c in calibration),
+                    "r30_low": min(c["low"] for c in calibration),
+                    "last_price": context_24h[-1]["close"] if context_24h else 0.0,
+                    "tuning": tuning
+                }
+                computed = sse_engine.compute_sse_levels(sse_input)
+                if "error" in computed: continue
+
+                levels = computed["levels"]
+                state = structure_state_engine.compute_structure_state(levels, post_lock, tuning=tuning)
+                had_acceptance = (state["permission"]["status"] == "EARNED")
+                side = state["permission"]["side"]
+
+                go = {"ok": False, "go_type": "NONE", "go_ts": None, "reason": "NO_ACCEPTANCE", "evidence": {}}
                 
-                <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
-                <label style="color: #06b6d4;">ACTIVE SESSIONS</label>
-                <div class="session-grid">
-                    <div class="checkbox-group"><input type="checkbox" id="sessNYF" checked><label for="sessNYF" class="check-lbl">NY Futures</label></div>
-                    <div class="checkbox-group"><input type="checkbox" id="sessNYE" checked><label for="sessNYE" class="check-lbl">NY Equity</label></div>
-                    <div class="checkbox-group"><input type="checkbox" id="sessLDN"><label for="sessLDN" class="check-lbl">London</label></div>
-                    <div class="checkbox-group"><input type="checkbox" id="sessTKO"><label for="sessTKO" class="check-lbl">Tokyo</label></div>
-                </div>
-
-                <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
-                <label style="color: #06b6d4;">SYSTEM TUNING</label>
-                
-                <div class="control-group">
-                    <label>TOUCH TOLERANCE (BPS)</label>
-                    <div class="range-wrap">
-                        <input type="range" id="tuneTol" min="5" max="50" value="10" oninput="updateVal('valTol', this.value)">
-                        <span id="valTol" class="range-val">10</span>
-                    </div>
-                </div>
-
-                <div class="control-group">
-                    <label>MIN TRIGGER DIST (BPS)</label>
-                    <div class="range-wrap">
-                        <input type="range" id="tuneDist" min="5" max="50" value="20" oninput="updateVal('valDist', this.value)">
-                        <span id="valDist" class="range-val">20</span>
-                    </div>
-                </div>
-                
-                <div class="control-group">
-                    <label>ACCEPTANCE CLOSES</label>
-                    <div class="range-wrap">
-                        <input type="range" id="tuneAcc" min="1" max="4" value="2" oninput="updateVal('valAcc', this.value)">
-                        <span id="valAcc" class="range-val">2</span>
-                    </div>
-                </div>
-
-                <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
-                <label style="color: #10b981;">ADVANCED FILTERS</label>
-
-                <div class="checkbox-group">
-                    <input type="checkbox" id="chkFusion">
-                    <label for="chkFusion" class="check-lbl" style="color:#fbbf24; font-weight:700;">FUSION MODE (Stoch + RSI)</label>
-                </div>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="chkVol">
-                    <label for="chkVol" class="check-lbl">REQUIRE VOLUME (>1.5x Avg)</label>
-                </div>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="chkDiv">
-                    <label for="chkDiv" class="check-lbl">REQUIRE RSI DIVERGENCE</label>
-                </div>
-
-                <button onclick="runLab()" class="btn-run" id="runBtn">INITIATE RUN</button>
-            </div>
-
-            <div class="panel">
-                <div id="resultsArea" style="display: none;">
-                    <div class="stats-row">
-                        <div class="stat-card">
-                            <span class="stat-val" id="resTotal">0</span>
-                            <span class="stat-lbl">Sessions</span>
-                        </div>
-                        <div class="stat-card">
-                            <span class="stat-val" id="resAcc" style="color: #fbbf24;">0</span>
-                            <span class="stat-lbl">Accepted</span>
-                        </div>
-                        <div class="stat-card">
-                            <span class="stat-val" id="resGo" style="color: #10b981;">0</span>
-                            <span class="stat-lbl">Total GOs</span>
-                        </div>
-                        <div class="stat-card">
-                            <span class="stat-val" id="resRate" style="color: #06b6d4;">0%</span>
-                            <span class="stat-lbl">GO Rate</span>
-                        </div>
-                    </div>
-
-                    <div class="chart-box">
-                        <h3 style="color:#fff; font-size:14px; margin-bottom:15px; border-bottom:1px solid #333; padding-bottom:5px;">STRATEGY BREAKDOWN</h3>
-                        <div id="goChart"></div>
-                    </div>
-
-                    <div class="chart-box">
-                        <h3 style="color:#fff; font-size:14px; margin-bottom:15px; border-bottom:1px solid #333; padding-bottom:5px;">DIAGNOSTICS: WHY TRADES FAILED</h3>
-                        <div id="failChart"></div>
-                    </div>
-
-                    <h3 style="color:#fff; font-size:14px; margin-top:30px; margin-bottom:10px;">SESSION LOG</h3>
-                    <pre id="jsonOutput">Waiting for data...</pre>
-                </div>
-                
-                <div id="loading" style="display: none; text-align: center; padding: 50px; color: #94a3b8;">
-                    FETCHING & ANALYZING DATA...
-                </div>
-                
-                <div id="placeholder" style="text-align: center; padding: 50px; color: #64748b;">
-                    Select parameters and click INITIATE RUN.
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        function updateVal(id, val) { document.getElementById(id).innerText = val; }
-
-        // AUTO-SET DATE (NEW)
-        window.onload = function() {
-            const today = new Date();
-            const lastWeek = new Date();
-            lastWeek.setDate(today.getDate() - 7);
-            
-            document.getElementById('endDate').valueAsDate = today;
-            document.getElementById('startDate').valueAsDate = lastWeek;
-        };
-
-        async function runLab() {
-            document.getElementById('runBtn').disabled = true;
-            document.getElementById('runBtn').innerText = "RUNNING...";
-            document.getElementById('resultsArea').style.display = 'none';
-            document.getElementById('placeholder').style.display = 'none';
-            document.getElementById('loading').style.display = 'block';
-
-            const activeSessions = [];
-            if(document.getElementById('sessNYF').checked) activeSessions.push("us_ny_futures");
-            if(document.getElementById('sessNYE').checked) activeSessions.push("us_ny_equity");
-            if(document.getElementById('sessLDN').checked) activeSessions.push("eu_london");
-            if(document.getElementById('sessTKO').checked) activeSessions.push("asia_tokyo");
-
-            const payload = {
-                symbol: document.getElementById('symbol').value,
-                start_date_utc: document.getElementById('startDate').value,
-                end_date_utc: document.getElementById('endDate').value,
-                session_ids: activeSessions,
-                tuning: {
-                    min_trigger_dist_bps: parseInt(document.getElementById('tuneDist').value),
-                    acceptance_closes: parseInt(document.getElementById('tuneAcc').value),
-                    alignment_window_minutes: parseInt(document.getElementById('tuneWin').value),
-                    zone_tolerance_bps: parseInt(document.getElementById('tuneTol').value),
+                if had_acceptance and side in ("LONG", "SHORT") and post_lock:
+                    candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
+                    st15 = battlebox_rules.compute_stoch(candles_15m_proxy)
                     
-                    fusion_mode: document.getElementById('chkFusion').checked,
-                    require_volume: document.getElementById('chkVol').checked,
-                    require_divergence: document.getElementById('chkDiv').checked
-                }
-            };
+                    go = battlebox_rules.detect_pullback_go(
+                        side=side, levels=levels, post_accept_5m=post_lock, stoch_15m_at_accept=st15, 
+                        use_zone="TRIGGER", require_volume=req_vol, require_divergence=req_div,
+                        fusion_mode=fusion_mode, zone_tol=zone_tol
+                    )
 
-            try {
-                const res = await fetch('/api/research/run', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(payload)
-                });
-                
-                const data = await res.json();
+                sessions_result.append({
+                    "ok": True,
+                    "date": day_str,
+                    "session_id": cfg["id"],
+                    "session_name": cfg["name"],
+                    "levels_compact": {
+                        "BO": levels.get("breakout_trigger"),
+                        "BD": levels.get("breakdown_trigger"),
+                        "DS": levels.get("daily_support"),
+                        "DR": levels.get("daily_resistance")
+                    },
+                    "counts": {
+                        "had_acceptance": had_acceptance,
+                        "had_alignment": (state["execution"]["gates_mode"] == "LOCKED"),
+                        "had_go": bool(go["ok"]),
+                        "go_type": go["go_type"],
+                    },
+                    "events": {
+                        "acceptance_side": side,
+                        "final_state": state.get("action"),
+                        "go_ts": go.get("go_ts"),
+                        "go_reason": go.get("reason"),
+                        "fail_reason": state.get("diagnostics", {}).get("fail_reason", "UNKNOWN")
+                    }
+                })
+            curr_day += timedelta(days=1)
 
-                if (!data.ok) {
-                    alert("SERVER ERROR:\n" + (data.error || "Unknown error."));
-                    document.getElementById('loading').style.display = 'none';
-                    document.getElementById('runBtn').disabled = false;
-                    document.getElementById('runBtn').innerText = "INITIATE RUN";
-                    return; 
-                }
+        total = len(sessions_result)
+        fail_reasons = {}
+        for s in sessions_result:
+            r = s["events"].get("fail_reason")
+            if r: fail_reasons[r] = fail_reasons.get(r, 0) + 1
 
-                const stats = data.stats;
-                document.getElementById('resTotal').innerText = stats.sessions_total;
-                document.getElementById('resAcc').innerText = stats.acceptance_count;
-                document.getElementById('resGo').innerText = stats.go_count;
-                
-                const goRate = stats.sessions_total > 0 
-                    ? ((stats.go_count / stats.sessions_total) * 100).toFixed(1) 
-                    : "0.0";
-                document.getElementById('resRate').innerText = goRate + "%";
-                
-                let goHtml = "";
-                const totalGos = stats.go_count || 1;
-                const campPct = (stats.campaign_go_count || 0) / totalGos * 100;
-                goHtml += `
-                    <div class="fail-bar">
-                        <span class="fail-lbl">CAMPAIGN (15m+5m)</span>
-                        <div class="fail-track"><div class="fail-fill" style="width: ${campPct}%; background: #10b981;"></div></div>
-                        <span class="fail-count">${stats.campaign_go_count || 0}</span>
-                    </div>
-                `;
-                const scalpPct = (stats.scalp_go_count || 0) / totalGos * 100;
-                goHtml += `
-                    <div class="fail-bar">
-                        <span class="fail-lbl">SCALP (5m Only)</span>
-                        <div class="fail-track"><div class="fail-fill" style="width: ${scalpPct}%; background: #f59e0b;"></div></div>
-                        <span class="fail-count">${stats.scalp_go_count || 0}</span>
-                    </div>
-                `;
-                document.getElementById('goChart').innerHTML = goHtml;
-
-                const reasons = stats.fail_reasons || {};
-                let failHtml = "";
-                const maxVal = Math.max(...Object.values(reasons), 1);
-                
-                for (const [reason, count] of Object.entries(reasons)) {
-                    const pct = (count / maxVal) * 100;
-                    failHtml += `
-                        <div class="fail-bar">
-                            <span class="fail-lbl">${reason}</span>
-                            <div class="fail-track"><div class="fail-fill" style="width: ${pct}%; background: #ef4444;"></div></div>
-                            <span class="fail-count">${count}</span>
-                        </div>
-                    `;
-                }
-                if(Object.keys(reasons).length === 0) failHtml = "<div style='color:#666; font-size:12px;'>No failures recorded.</div>";
-                document.getElementById('failChart').innerHTML = failHtml;
-
-                document.getElementById('jsonOutput').innerText = JSON.stringify(data.sessions, null, 2);
-                document.getElementById('resultsArea').style.display = 'block';
-
-            } catch (e) {
-                alert("CLIENT ERROR: " + e);
-            } finally {
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('runBtn').disabled = false;
-                document.getElementById('runBtn').innerText = "INITIATE RUN";
-            }
+        return {
+            "ok": True,
+            "symbol": symbol,
+            "range": {"start": start_date_utc, "end": end_date_utc},
+            "stats": {
+                "sessions_total": total,
+                "acceptance_count": sum(1 for s in sessions_result if s["counts"]["had_acceptance"]),
+                "go_count": sum(1 for s in sessions_result if s["counts"]["had_go"]),
+                "campaign_go_count": sum(1 for s in sessions_result if s["counts"]["go_type"] == "CAMPAIGN_GO"),
+                "scalp_go_count": sum(1 for s in sessions_result if s["counts"]["go_type"] == "SCALP_GO"),
+                "fail_reasons": fail_reasons
+            },
+            "sessions": sessions_result
         }
-    </script>
-</body>
-</html>
+    except Exception as e:
+        traceback.print_exc()
+        return {"ok": False, "error": str(e)}

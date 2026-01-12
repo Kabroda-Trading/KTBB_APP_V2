@@ -1,6 +1,6 @@
 # battlebox_rules.py
 # ==============================================================================
-# BATTLEBOX RULE LAYER v2.3 (FUSION MODE + ARGUMENT FIX)
+# BATTLEBOX RULE LAYER v2.4 (SYNC FIX)
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
@@ -108,7 +108,7 @@ def detect_pullback_go(
     post_accept_5m: List[Dict[str, Any]],
     stoch_15m_at_accept: Dict[str, Optional[float]],
     use_zone: str = "TRIGGER",
-    # THESE ARGUMENTS MUST BE HERE OR IT CRASHES
+    # CRITICAL: THESE ARGUMENTS MUST EXIST
     require_volume: bool = False,
     require_divergence: bool = False,
     fusion_mode: bool = False, 

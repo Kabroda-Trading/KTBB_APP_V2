@@ -1,317 +1,380 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kabroda | Battle Control</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/site.css">
-    <style>
-        /* Shared Member Base Styles */
-        body { background-color: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; margin: 0; padding: 0; }
-        
-        /* EXACT NAV STYLING FROM SESSION CONTROL */
-        .navbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
-        .logo { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.2rem; color: #fff !important; display: flex; align-items: center; gap: 10px; text-decoration: none; }
-        .nav-links { display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0; align-items: center; }
-        .nav-links a, .nav-links span { font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none; cursor: pointer; }
-        .nav-links a:hover, .nav-links a.active, .nav-links span.active { color: #fff; }
-        
-        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+# battlebox_pipeline.py
+# ==============================================================================
+# KABRODA BATTLEBOX PIPELINE v4.1 (GEOBLOCK FIX)
+# ==============================================================================
+# 1) SINGLE SOURCE OF TRUTH: Handles Live Dashboard AND Research Lab.
+# 2) Switched History Fetcher to KuCoin to bypass Binance US Geo-blocking.
+# 3) Passes "Tuning" parameters to SSE and State Engines.
+# ==============================================================================
 
-        /* BATTLE CONTROL SPECIFIC */
-        .battle-control {
-            --bg-card: #0f1623;
-            --border-subtle: rgba(255,255,255,0.05);
-            --primary: #06b6d4;
-            --accent-green: #10b981;
-            --accent-red: #ef4444;
-            --text-muted: #94a3b8;
-            --font-mono: 'JetBrains Mono', monospace;
+from __future__ import annotations
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+import traceback
+import pytz
+import asyncio
+import ccxt.async_support as ccxt
+
+# --- ENGINES ---
+import sse_engine
+import structure_state_engine
+
+# ----------------------------
+# CONFIG
+# ----------------------------
+SESSION_CONFIGS = [
+    {"id": "us_ny_futures", "name": "NY Futures", "tz": "America/New_York", "open_h": 8, "open_m": 30},
+    {"id": "us_ny_equity",  "name": "NY Equity",  "tz": "America/New_York", "open_h": 9, "open_m": 30},
+    {"id": "eu_london",     "name": "London",     "tz": "Europe/London",    "open_h": 8, "open_m": 0},
+    {"id": "asia_tokyo",    "name": "Tokyo",      "tz": "Asia/Tokyo",       "open_h": 9, "open_m": 0},
+    {"id": "au_sydney",     "name": "Sydney",     "tz": "Australia/Sydney", "open_h": 10, "open_m": 0},
+]
+
+LOCKED_SESSIONS: Dict[str, Dict[str, Any]] = {}
+
+# Use KuCoin for EVERYTHING (Live + History) to avoid Binance US blocks
+_exchange_live = ccxt.kucoin({"enableRateLimit": True})
+
+# ----------------------------
+# HELPERS
+# ----------------------------
+def _normalize_symbol(symbol: str) -> str:
+    s = (symbol or "").upper().strip()
+    if s in ("BTC", "BTCUSDT"): return "BTC/USDT"
+    if s in ("ETH", "ETHUSDT"): return "ETH/USDT"
+    if s.endswith("USDT") and "/" not in s: return s.replace("USDT", "/USDT")
+    return s
+
+def _safe_placeholder_state(reason: str = "Waiting...") -> Dict[str, Any]:
+    return {
+        "action": "HOLD FIRE",
+        "reason": reason,
+        "permission": {"status": "NOT_EARNED", "side": "NONE"},
+        "acceptance_progress": {"count": 0, "required": 2, "side_hint": "NONE"},
+        "location": {"relative_to_triggers": "INSIDE_BAND"},
+        "execution": {
+            "pause_state": "NONE", "resumption_state": "NONE", "gates_mode": "PREVIEW",
+            "locked_at": None, "levels": {"failure": 0.0, "continuation": 0.0},
+        },
+    }
+
+def _infer_energy(elapsed_min: float) -> str:
+    if elapsed_min < 30: return "CALIBRATING"
+    if elapsed_min < 240: return "PRIME"
+    if elapsed_min < 420: return "LATE"
+    return "DEAD"
+
+def anchor_ts_for_utc_date(cfg: Dict, utc_date: datetime) -> int:
+    tz = pytz.timezone(cfg["tz"])
+    y, m, d = utc_date.year, utc_date.month, utc_date.day
+    local_open_naive = datetime(y, m, d, cfg["open_h"], cfg["open_m"], 0)
+    local_open = tz.localize(local_open_naive)
+    return int(local_open.astimezone(timezone.utc).timestamp())
+
+def resolve_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[str] = None) -> Dict[str, Any]:
+    mode = (mode or "AUTO").upper()
+    
+    # MANUAL OVERRIDE
+    if mode == "MANUAL" and manual_id:
+        cfg = next((s for s in SESSION_CONFIGS if s["id"] == manual_id), SESSION_CONFIGS[0])
+        tz = pytz.timezone(cfg["tz"])
+        now_local = now_utc.astimezone(tz)
+        open_time = now_local.replace(hour=cfg["open_h"], minute=cfg["open_m"], second=0, microsecond=0)
+        if now_local < open_time: open_time -= timedelta(days=1)
+        elapsed = (now_local - open_time).total_seconds() / 60.0
+        return {
+            "id": cfg["id"], "name": cfg["name"], "tz": cfg["tz"],
+            "anchor_time": int(open_time.astimezone(timezone.utc).timestamp()),
+            "date_key": open_time.strftime("%Y-%m-%d"),
+            "energy": _infer_energy(elapsed),
         }
-        .command-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .pill { display: inline-block; background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.2); padding: 4px 12px; border-radius: 100px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--primary); margin-bottom: 0.5rem; letter-spacing: 0.1em; text-transform: uppercase; }
-        h1 { font-size: 2.2rem; margin: 0; color: #fff; line-height: 1; }
-        .sub-text { font-size: 0.95rem; color: var(--text-muted); margin-top: 5px; }
-        
-        .controls-bar { display: flex; gap: 15px; align-items: center; }
-        .live-toggle { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); padding: 8px 16px; border-radius: 4px; cursor: pointer; transition: 0.2s; }
-        .live-toggle label { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); cursor: pointer; font-weight: 600; text-transform: uppercase; }
-        #live-dot { width: 8px; height: 8px; background: #333; border-radius: 50%; transition: 0.3s; }
-        
-        .cyber-select { background: #050b14; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 8px 12px; border-radius: 4px; font-size: 0.85rem; outline: none; cursor: pointer; }
-        .btn-action { background: var(--primary); color: #000; border: none; font-weight: 700; font-size: 0.85rem; padding: 0 20px; height: 38px; cursor: pointer; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em; transition: 0.2s; }
-        .btn-action:hover { box-shadow: 0 0 15px rgba(6, 182, 212, 0.3); }
-        
-        .grid-layout { display: grid; grid-template-columns: 300px 1fr; gap: 20px; margin-top:30px; }
-        .card { background: var(--bg-card); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 25px; }
-        .card-header { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 10px; font-weight: 700; }
-        
-        .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 30px; }
-        .metric-box { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); padding: 15px; text-align: center; border-radius: 6px; }
-        .metric-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 5px; }
-        .metric-val { font-family: var(--font-mono); font-size: 1.1rem; font-weight: 700; color: #fff; }
-        
-        .level-row { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted); border-bottom: 1px dashed rgba(255,255,255,0.05); padding: 10px 0; }
-        .level-val { color: #fff; font-family: var(--font-mono); font-weight: 600; }
-        
-        .status-box { text-align: center; padding: 40px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; margin-bottom: 25px; }
-        #sb-action { font-size: 3.5rem; font-weight: 800; color: #444; line-height: 1; letter-spacing: -0.02em; }
-        
-        .gates-box { background: rgba(6, 182, 212, 0.05); border: 1px solid var(--primary); padding: 25px; border-radius: 6px; margin-bottom: 25px; }
-        .gate-row { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 1.2rem; }
-        .gate-label { font-size: 0.75rem; display: block; margin-bottom: 5px; }
-        .btn-sec { background: transparent; color: var(--text-muted); border: 1px solid rgba(255,255,255,0.1); padding: 10px 20px; cursor: pointer; font-weight: 600; font-size: 0.8rem; border-radius: 4px; transition: 0.2s; }
-        .btn-sec:hover { border-color: #fff; color: #fff; }
-    </style>
-</head>
-<body>
 
-    <nav class="navbar">
-        <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
-            <a href="/" class="logo">
-                <div style="width: 12px; height: 12px; background: #06b6d4; border-radius: 2px;"></div>
-                KABRODA
-            </a>
-            <ul class="nav-links">
-                <li class="dropdown-wrapper" style="position: relative; cursor: pointer;">
-                    <span class="active" onclick="toggleDropdown()" style="color: #fff;">SUITE ▼</span>
-                    <div id="suiteDropdown" style="display: none; position: absolute; top: 100%; left: 0; background: #0f1623; border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 4px; min-width: 180px; z-index: 9999; margin-top:10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
-                        <a href="/suite" style="display: block; padding: 8px 12px; color: #aaa;">Session Control</a>
-                        <a href="/suite/battle-control" style="display: block; padding: 8px 12px; color: #06b6d4;">Battle Control</a>
-                    </div>
-                </li>
-                <li><a href="/analysis">INTEL</a></li>
-                <li><a href="/indicators">INDICATORS</a></li>
-                <li><a href="/account">ACCOUNT</a></li>
-                <li><a href="/logout">LOGOUT</a></li>
-            </ul>
-        </div>
-    </nav>
+    # AUTO SELECTION
+    candidates = []
+    for cfg in SESSION_CONFIGS:
+        tz = pytz.timezone(cfg["tz"])
+        now_local = now_utc.astimezone(tz)
+        open_time = now_local.replace(hour=cfg["open_h"], minute=cfg["open_m"], second=0, microsecond=0)
+        if now_local < open_time: open_time -= timedelta(days=1)
+        elapsed = (now_local - open_time).total_seconds() / 60.0
+        candidates.append((elapsed, cfg, open_time))
+    
+    candidates.sort(key=lambda x: x[0])
+    elapsed, cfg, open_time = candidates[0]
+    
+    return {
+        "id": cfg["id"], "name": cfg["name"], "tz": cfg["tz"],
+        "anchor_time": int(open_time.astimezone(timezone.utc).timestamp()),
+        "date_key": open_time.strftime("%Y-%m-%d"),
+        "energy": _infer_energy(elapsed),
+    }
 
-    <div class="battle-control">
-        <div class="container" style="padding-top:40px;">
+# ----------------------------
+# DATA FETCHING (INTERNAL)
+# ----------------------------
+async def fetch_live_5m(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
+    """Fast fetch for Live Dashboard"""
+    s = _normalize_symbol(symbol)
+    try:
+        rows = await _exchange_live.fetch_ohlcv(s, "5m", limit=limit)
+        return [{"time": int(r[0]/1000), "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "volume": float(r[5])} for r in rows]
+    except:
+        traceback.print_exc()
+        return []
+
+async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
+    """Fast fetch for War Map"""
+    s = _normalize_symbol(symbol)
+    try:
+        rows = await _exchange_live.fetch_ohlcv(s, "1h", limit=limit)
+        return [{"time": int(r[0]/1000), "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "volume": float(r[5])} for r in rows]
+    except: return []
+
+async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
+    """Deep fetch for Research Lab (Uses KuCoin to avoid Binance US Block)"""
+    # Using KuCoin for history because it's friendlier to US servers
+    exchange = ccxt.kucoin({'enableRateLimit': True})
+    s = _normalize_symbol(symbol) # KuCoin needs BTC/USDT format
+    all_candles = []
+    
+    try:
+        current = start_ts * 1000
+        end = end_ts * 1000
+        
+        while current < end:
+            # KuCoin limit is usually 1500
+            ohlcv = await exchange.fetch_ohlcv(s, '5m', current, 1000)
+            if not ohlcv: break
             
-            <div class="command-header">
-                <div>
-                    <span class="pill">BATTLE CONTROL</span>
-                    <h1>Session Command</h1>
-                    <div class="sub-text">War Map Context & Session Execution</div>
-                </div>
-                
-                <div class="controls-bar">
-                    <div class="live-toggle">
-                        <input type="checkbox" id="autoRefreshToggle" onchange="toggleAutoRefresh()" style="display:none;">
-                        <label for="autoRefreshToggle">Live Link</label>
-                        <div id="live-dot"></div>
-                    </div>
-                    
-                    {% if user.operator_flex %}
-                    <div style="font-size:10px; color:#f59e0b; border:1px solid #f59e0b; padding:4px 8px; border-radius:4px;">OP FLEX</div>
-                    {% endif %}
+            all_candles.extend(ohlcv)
+            
+            # Next page
+            last_candle_time = ohlcv[-1][0]
+            current = last_candle_time + (5*60*1000)
+            
+            # Safety break if we caught up
+            if len(ohlcv) < 1000: break
+            
+    except Exception as e:
+        print(f"History Fetch Error: {e}")
+    finally:
+        await exchange.close()
+    
+    # Format
+    formatted = []
+    for c in all_candles:
+        ts = int(c[0]/1000)
+        # Strict window check
+        if start_ts <= ts <= end_ts:
+            formatted.append({
+                "time": ts, 
+                "open": float(c[1]), 
+                "high": float(c[2]), 
+                "low": float(c[3]), 
+                "close": float(c[4]), 
+                "volume": float(c[5])
+            })
+    return formatted
 
-                    <div class="input-group">
-                        <select id="sessionMode" onchange="toggleManualSession()" class="cyber-select">
-                            <option value="AUTO">AUTO (Dominant)</option>
-                            <option value="MANUAL">MANUAL OVERRIDE</option>
-                        </select>
-                        <select id="manualSessionId" class="cyber-select" style="display:none; margin-left:5px;">
-                            <option value="us_ny_futures">NY Futures</option>
-                            <option value="eu_london">London</option>
-                            <option value="asia_tokyo">Tokyo</option>
-                        </select>
-                    </div>
+def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not raw_1h: return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "UNCLEAR", "note": "No 1h data."}
+    closes = [c["close"] for c in raw_1h]
+    if len(closes) < 22: return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "TRANSITION", "note": "Insufficient history."}
+    alpha = 2.0 / (21.0 + 1.0)
+    ema = closes[0]
+    for px in closes[1:]: ema = (px * alpha) + (ema * (1 - alpha))
+    lean = "BULLISH" if closes[-1] > ema else "BEARISH"
+    return {"status": "LIVE", "lean": lean, "phase": "TRANSITION", "note": f"Pressure is {lean}."}
 
-                    <button onclick="runLivePulse()" class="btn-action" id="main-action-btn">Update Intel</button>
-                </div>
-            </div>
+# ----------------------------
+# CORE COMPUTATION
+# ----------------------------
+def _compute_sse_packet(raw_5m: List[Dict], anchor_ts: int, tuning: Dict = None) -> Dict[str, Any]:
+    lock_end_ts = anchor_ts + 1800
+    calibration = [c for c in raw_5m if anchor_ts <= c["time"] < lock_end_ts]
+    
+    if len(calibration) < 6:
+        return {"error": "Insufficient calibration data.", "lock_end_ts": lock_end_ts}
 
-            <div class="grid-layout">
-                
-                <div style="display: flex; flex-direction: column; gap: 20px;">
-                    <div class="card" style="border-left: 3px solid #8b5cf6;">
-                        <div class="card-header" style="color: #a78bfa;">War Map Context</div>
-                        <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
-                            <span style="color:var(--text-muted); font-size:0.85rem;">Lean</span>
-                            <span id="wm-lean" style="font-weight:bold; color:#fff;">--</span>
-                        </div>
-                        <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
-                            <span style="color:var(--text-muted); font-size:0.85rem;">Phase</span>
-                            <span id="wm-phase" style="font-weight:bold; color:#fff;">--</span>
-                        </div>
-                        <div id="wm-note" style="font-size:0.8rem; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:15px; line-height:1.4;">--</div>
-                    </div>
+    context_24h = [c for c in raw_5m if (lock_end_ts - 86400) <= c["time"] < lock_end_ts]
+    
+    session_open = calibration[0]["open"]
+    r30_high = max(c["high"] for c in calibration)
+    r30_low = min(c["low"] for c in calibration)
+    last_price = context_24h[-1]["close"] if context_24h else session_open
 
-                    <div class="card">
-                        <div class="card-header">Key Levels</div>
-                        <div class="level-row"><span>Daily Res</span><span id="val-dr" class="level-val">---</span></div>
-                        <div class="level-row"><span style="color:var(--accent-green);">Breakout</span><span id="val-bo" class="level-val">---</span></div>
-                        <div class="level-row"><span style="color:var(--accent-red);">Breakdown</span><span id="val-bd" class="level-val">---</span></div>
-                        <div class="level-row"><span>Daily Sup</span><span id="val-ds" class="level-val">---</span></div>
-                    </div>
-                    
-                    <button onclick="toggleTactical()" class="btn-sec" style="width:100%;">Toggle Tactical Drawer</button>
-                </div>
+    sse_input = {
+        "locked_history_5m": context_24h,
+        "slice_24h_5m": context_24h,
+        "slice_4h_5m": context_24h[-48:], 
+        "session_open_price": session_open,
+        "r30_high": r30_high, 
+        "r30_low": r30_low,
+        "last_price": last_price,
+        "tuning": tuning or {} # <--- Inject Tuning
+    }
 
-                <div class="card" style="border-left: 4px solid var(--primary);">
-                    <div class="card-header" style="color: var(--primary); display:flex; justify-content:space-between;">
-                        <span>Session Battle</span>
-                        <span id="session-name" style="color:#fff;">--</span>
-                    </div>
+    computed = sse_engine.compute_sse_levels(sse_input)
+    if "error" in computed: return computed
+    
+    return {
+        "levels": computed["levels"],
+        "context": computed.get("context", {}),
+        "bias_model": computed.get("bias_model", {}),
+        "htf_shelves": computed.get("htf_shelves", {}),
+        "lock_time": lock_end_ts
+    }
 
-                    <div class="status-box">
-                        <div style="font-size: 0.75rem; color: var(--text-muted); letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 10px;">Current Directive</div>
-                        <div id="sb-action">HOLD FIRE</div>
-                        <div id="sb-reason">Waiting for data...</div>
-                    </div>
-
-                    <div class="metric-grid">
-                        <div class="metric-box">
-                            <div class="metric-label">Price</div>
-                            <div class="metric-val" id="live-price">---</div>
-                        </div>
-                        <div class="metric-box">
-                            <div class="metric-label">Permission</div>
-                            <div class="metric-val" id="sb-perm">NONE</div>
-                        </div>
-                        <div class="metric-box">
-                            <div class="metric-label">Acceptance</div>
-                            <div class="metric-val" id="sb-accept">0/2</div>
-                        </div>
-                        <div class="metric-box">
-                            <div class="metric-label">Location</div>
-                            <div class="metric-val" id="sb-loc" style="font-size:0.75rem;">--</div>
-                        </div>
-                    </div>
-
-                    <div id="sb-prepare-box" class="gates-box">
-                        <div class="gates-header">
-                            Execution Gates (5M)
-                            <span id="sb-gates-mode" class="gates-sub">PREVIEW (FLOATING)</span>
-                        </div>
-                        <div class="gate-row">
-                            <div><span class="gate-label" style="color:var(--accent-red);">FAILURE LINE</span><span id="sb-fail-line" style="color:#fff;">--</span></div>
-                            <div style="text-align:right;"><span class="gate-label" style="color:var(--accent-green);">CONTINUATION</span><span id="sb-cont-line" style="color:#fff;">--</span></div>
-                        </div>
-                    </div>
-                    
-                    <div style="text-align: right; display:flex; gap:10px; justify-content:flex-end;">
-                        <button onclick="copyTraderBrief()" class="btn-sec">Copy Brief</button>
-                        <button onclick="copyBattleBox()" class="btn-action">Copy Full BattleBox</button>
-                    </div>
-                </div>
-            </div>
-
-            <div id="tactical-drawer" style="display: none; margin-top: 30px; border-top: 1px solid var(--border-subtle); padding-top: 30px;">
-                <h3 style="color: var(--text-muted); font-size: 1rem; margin-bottom: 20px; font-weight: 600;">Tactical Intelligence</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
-                    <div class="card">
-                        <div class="card-header">Campaign (Big Trade)</div>
-                        <div id="wm-camp-status" style="font-size: 1.5rem; font-weight: bold; color: var(--text-muted);">NOT ARMED</div>
-                        <div id="wm-camp-note" style="margin-top: 10px; color: var(--text-muted); font-size: 0.9rem;">--</div>
-                    </div>
-                    <div class="card">
-                        <div class="card-header">Strategy Status</div>
-                        <div id="strat-list" style="font-size: 0.85rem; color: var(--text-muted);">Loading...</div>
-                    </div>
-                </div>
-            </div>
-
-        </div>
-    </div>
-
-    <script>
-      const USER_OP_FLEX = {{ 'true' if user.operator_flex else 'false' }};
-      let lastPacket = null;
-      let autoRefreshTimer = null;
-
-      function toggleTactical() {
-        const d = document.getElementById('tactical-drawer');
-        d.style.display = d.style.display === 'none' ? 'block' : 'none';
-      }
-      function toggleManualSession() {
-        const mode = document.getElementById('sessionMode').value;
-        document.getElementById('manualSessionId').style.display = (mode === 'MANUAL') ? 'inline-block' : 'none';
-      }
-      function toggleAutoRefresh() {
-        const toggle = document.getElementById('autoRefreshToggle');
-        const dot = document.getElementById('live-dot');
-        if(toggle.checked) {
-            dot.style.background = "#00ff9d";
-            dot.style.boxShadow = "0 0 8px #00ff9d";
-            runLivePulse(); 
-            autoRefreshTimer = setInterval(runLivePulse, 120000);
-        } else {
-            dot.style.background = "#333";
-            dot.style.boxShadow = "none";
-            clearInterval(autoRefreshTimer);
+# ----------------------------
+# HISTORICAL / RESEARCH DELEGATE
+# ----------------------------
+def compute_session_from_candles(
+    cfg: Dict, 
+    utc_date: datetime, 
+    raw_5m: List[Dict], 
+    exec_hours: int = 6,
+    tuning: Dict = None  # <--- Tuning Argument
+) -> Dict[str, Any]:
+    """
+    THE TRUTH FUNCTION for Research Lab.
+    Calculates exactly what happened in a historical session using Pipeline logic.
+    """
+    anchor_ts = anchor_ts_for_utc_date(cfg, utc_date)
+    lock_end_ts = anchor_ts + 1800
+    exec_end_ts = lock_end_ts + (exec_hours * 3600)
+    
+    # 1. Compute SSE (Levels)
+    pkt = _compute_sse_packet(raw_5m, anchor_ts, tuning=tuning)
+    
+    if "error" in pkt:
+        return {"ok": False, "error": pkt["error"], "final_state": "INVALID"}
+    
+    levels = pkt["levels"]
+    
+    # 2. Compute Law Layer (State)
+    post_lock_candles = [c for c in raw_5m if lock_end_ts <= c["time"] < exec_end_ts]
+    
+    state = structure_state_engine.compute_structure_state(
+        levels=levels, 
+        candles_5m_post_lock=post_lock_candles,
+        tuning=tuning # <--- Pass Tuning
+    )
+    
+    had_acceptance = (state["permission"]["status"] == "EARNED")
+    had_alignment = (state["execution"]["gates_mode"] == "LOCKED")
+    side = state["permission"]["side"]
+    
+    return {
+        "ok": True,
+        "counts": {
+            "had_acceptance": had_acceptance,
+            "had_alignment": had_alignment
+        },
+        "events": {
+            "acceptance_side": side,
+            "final_state": state["action"],
+            "fail_reason": state.get("diagnostics", {}).get("fail_reason", "UNKNOWN")
         }
-      }
-      async function runLivePulse() {
-        const btn = document.querySelector('#main-action-btn');
-        const originalText = btn.innerText;
-        btn.innerText = "UPDATING...";
-        try {
-            const res = await fetch('/api/dmr/live', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ 
-                    symbol: "BTCUSDT", 
-                    session_mode: document.getElementById('sessionMode').value,
-                    manual_session_id: document.getElementById('manualSessionId').value,
-                    operator_flex: USER_OP_FLEX 
-                })
-            });
-            const data = await res.json();
-            if(data.status === "ERROR") return;
-            lastPacket = data.battlebox;
-            
-            // MAP DATA TO UI
-            const wm = data.battlebox.war_map_context || {};
-            document.getElementById('wm-lean').innerText = wm.lean || "--";
-            document.getElementById('wm-lean').style.color = wm.lean === "BULLISH" ? "#00ff9d" : (wm.lean === "BEARISH" ? "#ef4444" : "#fff");
-            document.getElementById('wm-phase').innerText = wm.phase || "--";
-            document.getElementById('wm-note').innerText = wm.note || "--";
-            
-            const sb = data.battlebox.session_battle || {};
-            document.getElementById('session-name').innerText = data.battlebox.session?.name || "--";
-            const action = sb.action || "HOLD FIRE";
-            document.getElementById('sb-action').innerText = action;
-            document.getElementById('sb-reason').innerText = sb.reason || "--";
-            document.getElementById('live-price').innerText = data.price.toFixed(2);
-            document.getElementById('sb-perm').innerText = sb.permission?.status || "NONE";
-            const acc = sb.acceptance_progress || {count:0};
-            document.getElementById('sb-accept').innerText = `${acc.count || 0}/${acc.required || 2}`;
-            const loc = sb.location || {};
-            document.getElementById('sb-loc').innerText = `${loc.relative_to_triggers || '-'} | ${loc.relative_to_value || '-'}`;
+    }
 
-            const exec = sb.execution || {};
-            const levels = exec.levels || {};
-            const gatesMode = exec.gates_mode || "PREVIEW";
-            document.getElementById('sb-gates-mode').innerText = (gatesMode === "LOCKED") ? `LOCKED` : `PREVIEW (FLOATING)`;
-            
-            document.getElementById('sb-fail-line').innerText = (levels.failure ? levels.failure.toFixed(2) : "--");
-            document.getElementById('sb-cont-line').innerText = (levels.continuation ? levels.continuation.toFixed(2) : "--");
-            
-            const l = data.battlebox.levels || {};
-            document.getElementById('val-dr').innerText = l.daily_resistance?.toFixed(2) || "---";
-            document.getElementById('val-bo').innerText = l.breakout_trigger?.toFixed(2) || "---";
-            document.getElementById('val-bd').innerText = l.breakdown_trigger?.toFixed(2) || "---";
-            document.getElementById('val-ds').innerText = l.daily_support?.toFixed(2) || "---";
-            
-        } catch(e) { console.error(e); } 
-        finally { btn.innerText = originalText; }
-      }
-      function copyTraderBrief() {
-        if(!lastPacket) return;
-        navigator.clipboard.writeText(JSON.stringify(lastPacket, null, 2));
-        alert("Brief Copied.");
-      }
-      function copyBattleBox() { copyTraderBrief(); }
-      function toggleDropdown() { const el = document.getElementById('suiteDropdown'); el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
-      document.addEventListener('click', function(e) { const wrapper = document.querySelector('.dropdown-wrapper'); const dropdown = document.getElementById('suiteDropdown'); if (!wrapper.contains(e.target) && dropdown.style.display === 'block') { dropdown.style.display = 'none'; } });
-    </script>
-</body>
-</html>
+# ----------------------------
+# PUBLIC API
+# ----------------------------
+async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id: str = None, operator_flex: bool = False) -> Dict[str, Any]:
+    """LIVE DASHBOARD ENTRY POINT"""
+    raw_5m = await fetch_live_5m(symbol)
+    raw_1h = await fetch_live_1h(symbol)
+    
+    if not raw_5m: return {"status": "ERROR", "message": "No Data"}
+    
+    now_utc = datetime.now(timezone.utc)
+    session = resolve_session(now_utc, session_mode, manual_id)
+    anchor_ts = session["anchor_time"]
+    lock_end_ts = anchor_ts + 1800
+
+    # 1. CALIBRATION PHASE
+    if int(now_utc.timestamp()) < lock_end_ts:
+        wm = _war_map_from_1h(raw_1h)
+        return {
+            "status": "CALIBRATING",
+            "timestamp": now_utc.strftime("%H:%M UTC"),
+            "price": raw_5m[-1]["close"],
+            "energy": "CALIBRATING",
+            "battlebox": {
+                "war_map_context": wm,
+                "session_battle": _safe_placeholder_state("Calibrating..."),
+                "session": session,
+                "levels": {}
+            }
+        }
+
+    # 2. LOCKED SESSION CACHE
+    session_key = f"{symbol}_{session['id']}_{session['date_key']}"
+    if session_key not in LOCKED_SESSIONS:
+        pkt = _compute_sse_packet(raw_5m, anchor_ts)
+        if "error" in pkt:
+             wm = _war_map_from_1h(raw_1h)
+             return {"status": "ERROR", "message": pkt["error"], "battlebox": {"war_map_context": wm, "session_battle": _safe_placeholder_state(pkt["error"]), "levels": {}}}
+        LOCKED_SESSIONS[session_key] = pkt
+
+    pkt = LOCKED_SESSIONS[session_key]
+    levels = pkt["levels"]
+    lock_time = pkt["lock_time"]
+
+    # 3. LAW LAYER (State Engine)
+    post_lock = [c for c in raw_5m if c["time"] >= lock_time]
+    state = structure_state_engine.compute_structure_state(levels, post_lock)
+    wm = _war_map_from_1h(raw_1h)
+
+    return {
+        "status": "OK",
+        "timestamp": now_utc.strftime("%H:%M UTC"),
+        "price": raw_5m[-1]["close"],
+        "energy": session["energy"],
+        "battlebox": {
+            "war_map_context": wm,
+            "session_battle": state,
+            "levels": levels,
+            "session": session,
+            "bias_model": pkt.get("bias_model", {}),
+            "context": pkt.get("context", {}),
+        }
+    }
+
+async def get_session_review(symbol: str, session_tz: str) -> Dict[str, Any]:
+    """REVIEW MODE ENTRY POINT"""
+    raw_5m = await fetch_live_5m(symbol)
+    if not raw_5m: return {"ok": False, "error": "No Data"}
+
+    cfg = next((s for s in SESSION_CONFIGS if s["tz"] == session_tz), SESSION_CONFIGS[0])
+    anchor_ts = anchor_ts_for_utc_date(cfg, datetime.now(timezone.utc))
+    lock_end_ts = anchor_ts + 1800
+    
+    if anchor_ts > datetime.now(timezone.utc).timestamp():
+         anchor_ts -= 86400
+         lock_end_ts -= 86400
+         
+    pkt = _compute_sse_packet(raw_5m, anchor_ts)
+    
+    if "error" in pkt:
+        if int(datetime.now(timezone.utc).timestamp()) < lock_end_ts:
+             return {"ok": True, "mode": "CALIBRATING", "symbol": symbol, "session": {"name": cfg["name"]}, "message": "Calibrating..."}
+        return {"ok": False, "error": pkt["error"]}
+
+    open_time = datetime.fromtimestamp(anchor_ts, tz=timezone.utc).isoformat()
+
+    return {
+        "ok": True,
+        "mode": "LOCKED",
+        "symbol": symbol,
+        "price": raw_5m[-1]["close"],
+        "session": {"name": cfg["name"], "anchor_time": open_time},
+        "levels": pkt["levels"],
+        "bias_model": pkt.get("bias_model", {}),
+        "context": pkt.get("context", {}),
+        "htf_shelves": pkt.get("htf_shelves", {}),
+        "range_30m": {
+            "high": pkt["levels"].get("range30m_high", 0),
+            "low": pkt["levels"].get("range30m_low", 0)
+        }
+    }
