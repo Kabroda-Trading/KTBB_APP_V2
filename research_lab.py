@@ -1,11 +1,12 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB CONTROLLER v4.8 (HARD RENAME TO FIX CACHE)
+# RESEARCH LAB CONTROLLER v5.0 (LOGGING ENABLED)
 # ==============================================================================
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone 
 from typing import Any, Dict, List, Optional
 import traceback
+import sys
 
 import battlebox_pipeline
 import sse_engine
@@ -13,6 +14,7 @@ import structure_state_engine
 import battlebox_rules
 
 def _slice_by_ts(candles: List[Dict[str, Any]], start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
+    # Opt: In future, use bisect for speed, but this is fine for now
     return [c for c in candles if start_ts <= c["time"] < end_ts]
 
 async def run_research_lab_from_candles(
@@ -25,7 +27,12 @@ async def run_research_lab_from_candles(
     tuning: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     try:
+        print(f"[LAB] Starting analysis for {symbol} ({len(raw_5m)} candles provided)")
+        
         if not raw_5m: return {"ok": False, "error": "No candles provided to Research Lab."}
+
+        # Ensure sorted data to prevent slicing issues
+        raw_5m.sort(key=lambda x: x["time"])
 
         start_dt = datetime.strptime(start_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         end_dt = datetime.strptime(end_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -46,6 +53,8 @@ async def run_research_lab_from_candles(
 
         while curr_day <= end_dt:
             day_str = curr_day.strftime("%Y-%m-%d")
+            # print(f"[LAB] Processing {day_str}...") # Uncomment for verbose logs
+            
             for cfg in active_cfgs:
                 anchor_ts = battlebox_pipeline.anchor_ts_for_utc_date(cfg, curr_day)
                 lock_end_ts = anchor_ts + 1800
@@ -80,7 +89,6 @@ async def run_research_lab_from_candles(
                     candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
                     st15 = battlebox_rules.compute_stoch(candles_15m_proxy)
                     
-                    # CALLING NEW FUNCTION NAME
                     go = battlebox_rules.detect_fusion_trade(
                         side=side, levels=levels, post_accept_5m=post_lock, stoch_15m_at_accept=st15, 
                         use_zone="TRIGGER", require_volume=req_vol, require_divergence=req_div,
@@ -119,6 +127,8 @@ async def run_research_lab_from_candles(
         for s in sessions_result:
             r = s["events"].get("fail_reason")
             if r: fail_reasons[r] = fail_reasons.get(r, 0) + 1
+            
+        print(f"[LAB] Analysis complete. Sessions: {total}")
 
         return {
             "ok": True,

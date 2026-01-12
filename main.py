@@ -1,12 +1,12 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v10.9 (TIMEZONE FIX)
+# KABRODA UNIFIED SERVER: BATTLEBOX v11.0 (AUDITED)
 # ---------------------------------------------------------
 from __future__ import annotations
 
 import os
 import traceback
-# CRITICAL FIX: Added 'timezone' and 'timedelta' to imports
+import asyncio  # <--- NEW IMPORT
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional
 
@@ -52,7 +52,6 @@ app.add_middleware(
     max_age=86400 * 30
 )
 
-# --- ADMIN CONFIG ---
 ALLOWED_ADMINS = ["spiritmaker79@gmail.com", "grossmonkeytrader@protonmail.com"]
 
 @app.on_event("startup")
@@ -221,32 +220,24 @@ async def account_profile_update(request: Request, db: Session = Depends(get_db)
     db.commit()
     return {"status": "ok"}
 
-# --- ADMIN ROUTE (SAFE) ---
 @app.get("/admin", response_class=HTMLResponse)
 def admin_panel(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     u = _db_user_from_session(db, sess)
-    
     if u.email not in ALLOWED_ADMINS:
         return RedirectResponse(url="/suite", status_code=303)
 
     users = db.query(UserModel).order_by(UserModel.created_at.desc()).all()
-    
     clean_list = []
     now = datetime.now()
     
     for usr in users:
         status = "INACTIVE"
         joined = "N/A"
-        
-        # Safe Attribute Access
         sub_end = getattr(usr, "subscription_end", None)
-        if sub_end and sub_end > now:
-            status = "ACTIVE"
-        
+        if sub_end and sub_end > now: status = "ACTIVE"
         created = getattr(usr, "created_at", None)
-        if created:
-            joined = created.strftime('%Y-%m-%d')
+        if created: joined = created.strftime('%Y-%m-%d')
             
         clean_list.append({
             "id": str(usr.id),
@@ -258,35 +249,19 @@ def admin_panel(request: Request, db: Session = Depends(get_db)):
 
     return templates.TemplateResponse("admin.html", {"request": request, "users": clean_list})
 
-# --- ADMIN ACTION: DELETE USER (FIXED) ---
 @app.post("/admin/delete-user")
 def delete_user(request: Request, user_id: str = Form(...), db: Session = Depends(get_db)):
     sess = _require_session_user(request)
     admin_user = _db_user_from_session(db, sess)
-    
-    # 1. Security Check
-    if admin_user.email not in ALLOWED_ADMINS:
-        return RedirectResponse(url="/suite", status_code=303)
-
-    # 2. Find and Delete (FIXED: CAST ID TO INT)
+    if admin_user.email not in ALLOWED_ADMINS: return RedirectResponse(url="/suite", status_code=303)
     try:
-        # The database expects an Integer ID, but the form sends a String.
-        # We must convert it here.
         target_id = int(user_id)
         target = db.query(UserModel).filter(UserModel.id == target_id).first()
-        
         if target:
-            # Prevent Admin Suicide
-            if target.email == admin_user.email:
-                return RedirectResponse(url="/admin?error=cannot_delete_self", status_code=303)
-                
+            if target.email == admin_user.email: return RedirectResponse(url="/admin?error=cannot_delete_self", status_code=303)
             db.delete(target)
             db.commit()
-            
-    except ValueError:
-        # If user_id wasn't a number, just ignore it
-        pass
-        
+    except ValueError: pass
     return RedirectResponse(url="/admin", status_code=303)
 
 @app.get("/sandbox", response_class=HTMLResponse)
@@ -296,7 +271,6 @@ def ui_sandbox(request: Request, db: Session = Depends(get_db)):
     if u.email not in ALLOWED_ADMINS: return RedirectResponse(url="/suite", status_code=303)
     return templates.TemplateResponse("ui_sandbox.html", {"request": request})
 
-# --- BILLING ---
 @app.post("/billing/checkout")
 async def billing_checkout(request: Request, db: Session = Depends(get_db)):
     sess = _require_session_user(request)
@@ -357,17 +331,26 @@ async def research_run(request: Request, db: Session = Depends(get_db)):
         end_date = payload.get("end_date_utc")
         tuning_cfg = payload.get("tuning")
         
-        # 2. Fetch Data via Pipeline (KuCoin)
-        # Safe Date Parsing using the imported timezone
+        # 2. Fetch Data (WITH TIMEOUT CIRCUIT BREAKER)
         start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         
         fetch_start = int((start_dt - timedelta(hours=48)).timestamp())
         fetch_end = int((end_dt + timedelta(hours=30)).timestamp())
         
-        raw_5m = await battlebox_pipeline.fetch_historical_pagination(symbol, fetch_start, fetch_end)
+        print(f"[API] Requesting Pipeline Data for {symbol} ({fetch_start} -> {fetch_end})...")
         
-        # 3. Pass Data to Research Lab (Pure Function)
+        # FIX: Force a 45s timeout. If pipeline loops, this kills it.
+        try:
+            raw_5m = await asyncio.wait_for(
+                battlebox_pipeline.fetch_historical_pagination(symbol, fetch_start, fetch_end),
+                timeout=45.0
+            )
+            print(f"[API] Pipeline returned {len(raw_5m)} candles.")
+        except asyncio.TimeoutError:
+            raise Exception("Pipeline data fetch timed out. Check battlebox_pipeline.py for infinite loops.")
+
+        # 3. Pass Data to Research Lab
         out = await research_lab.run_research_lab_from_candles(
             symbol=symbol,
             raw_5m=raw_5m,
