@@ -25,6 +25,11 @@
         .session-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 20px; }
         .btn-run { width: 100%; background: #06b6d4; color: #000; border: none; padding: 12px; font-weight: 700; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; margin-top: 10px; }
         .btn-run:disabled { background: #334155; color: #94a3b8; cursor: not-allowed; }
+        
+        /* NEW: Copy Button Styling */
+        .btn-copy { background: #334155; color: #fff; border: 1px solid #475569; padding: 4px 12px; font-size: 11px; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; }
+        .btn-copy:hover { background: #475569; }
+
         .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
         .stat-card { background: rgba(255,255,255,0.03); padding: 15px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); text-align: center; }
         .stat-val { display: block; font-size: 24px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono', monospace; }
@@ -144,7 +149,11 @@
                         <div id="failChart"></div>
                     </div>
 
-                    <h3 style="color:#fff; font-size:14px; margin-top:30px; margin-bottom:10px;">SESSION LOG</h3>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top:30px; margin-bottom:10px;">
+                        <h3 style="color:#fff; font-size:14px; margin:0;">SESSION LOG</h3>
+                        <button id="copyBtn" onclick="copyLog()" class="btn-copy">COPY LOG</button>
+                    </div>
+                    
                     <pre id="jsonOutput">Waiting for data...</pre>
                 </div>
                 
@@ -162,7 +171,6 @@
     <script>
         function updateVal(id, val) { document.getElementById(id).innerText = val; }
 
-        // AUTO-SET DATE TO 2026
         window.onload = function() {
             const today = new Date();
             const lastWeek = new Date();
@@ -171,6 +179,24 @@
             document.getElementById('endDate').valueAsDate = today;
             document.getElementById('startDate').valueAsDate = lastWeek;
         };
+
+        // NEW: COPY FUNCTION
+        async function copyLog() {
+            const text = document.getElementById('jsonOutput').innerText;
+            try {
+                await navigator.clipboard.writeText(text);
+                const btn = document.getElementById('copyBtn');
+                const originalText = btn.innerText;
+                btn.innerText = "COPIED!";
+                btn.style.background = "#10b981"; // Green feedback
+                setTimeout(() => {
+                    btn.innerText = "COPY LOG";
+                    btn.style.background = "#334155"; // Reset color
+                }, 2000);
+            } catch (err) {
+                alert("Failed to copy log: " + err);
+            }
+        }
 
         async function runLab() {
             document.getElementById('runBtn').disabled = true;
@@ -193,9 +219,8 @@
                 tuning: {
                     min_trigger_dist_bps: parseInt(document.getElementById('tuneDist').value),
                     acceptance_closes: parseInt(document.getElementById('tuneAcc').value),
-                    alignment_window_minutes: parseInt(document.getElementById('tuneWin').value), 
+                    alignment_window_minutes: parseInt(document.getElementById('tuneWin').value),
                     zone_tolerance_bps: parseInt(document.getElementById('tuneTol').value),
-                    
                     fusion_mode: document.getElementById('chkFusion').checked,
                     require_volume: document.getElementById('chkVol').checked,
                     require_divergence: document.getElementById('chkDiv').checked
@@ -211,7 +236,6 @@
                 
                 const data = await res.json();
 
-                // CRITICAL FIX: Check for error before trying to read 'stats'
                 if (!data.ok) {
                     throw new Error(data.error || "Unknown server error.");
                 }
