@@ -1,29 +1,29 @@
 # battlebox_rules.py
 # ==============================================================================
-# BATTLEBOX RULE LAYER v2.1 (DYNAMIC TOLERANCE)
+# BATTLEBOX RULE LAYER v2.3 (FUSION MODE)
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
 
-# --- CONFIG ---
+# CONFIG
 STOCH_K = 14
 STOCH_D = 3
 STOCH_SMOOTH = 3
-
 RSI_PERIOD = 14
 DIV_LOOKBACK = 10 
 
+# Thresholds
 OB = 80.0
 OS = 20.0
 RSI_OB = 70.0
 RSI_OS = 30.0
 
 # Defaults
-DEFAULT_ZONE_TOL = 0.0010  # 0.10%
-PUSH_MIN_PCT = 0.0008      # 0.08%
+DEFAULT_ZONE_TOL = 0.0010
+PUSH_MIN_PCT = 0.0008
 MAX_GO_BARS_5M = 48        
 
-# --- HELPERS ---
+# HELPERS
 def _sma(vals: List[float], n: int) -> float:
     if len(vals) < n: return sum(vals) / max(len(vals), 1)
     return sum(vals[-n:]) / n
@@ -46,14 +46,6 @@ def compute_stoch(candles: List[Dict[str, Any]], k: int = STOCH_K, d: int = STOC
     for i in range(len(k_smooth)): ds.append(_sma(k_smooth[: i + 1], d))
     return {"k_raw": float(k_series[-1]), "k_smooth": float(k_smooth[-1]), "d": float(ds[-1])}
 
-def stoch_aligned(side: str, st: Dict[str, Optional[float]]) -> bool:
-    k = st.get("k_smooth")
-    d = st.get("d")
-    if k is None or d is None: return False
-    if side == "SHORT": return k >= OB or d >= OB
-    if side == "LONG": return k <= OS or d <= OS
-    return False
-
 def compute_rsi(candles: List[Dict[str, Any]], period: int = RSI_PERIOD) -> float:
     if not candles or len(candles) < period + 1: return 50.0
     closes = [float(c["close"]) for c in candles]
@@ -71,6 +63,21 @@ def compute_rsi(candles: List[Dict[str, Any]], period: int = RSI_PERIOD) -> floa
     if avg_loss == 0: return 100.0
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
+
+# --- ALIGNMENT CHECKERS ---
+def stoch_aligned(side: str, st: Dict[str, Optional[float]]) -> bool:
+    k = st.get("k_smooth")
+    d = st.get("d")
+    if k is None or d is None: return False
+    if side == "SHORT": return k >= OB or d >= OB
+    if side == "LONG": return k <= OS or d <= OS
+    return False
+
+def rsi_aligned(side: str, rsi_val: float) -> bool:
+    """Fusion Mode: RSI must also be extreme."""
+    if side == "SHORT": return rsi_val >= RSI_OB
+    if side == "LONG": return rsi_val <= RSI_OS
+    return False
 
 def check_divergence(side: str, candles: List[Dict[str, Any]]) -> bool:
     if len(candles) < DIV_LOOKBACK + 5: return False
@@ -92,6 +99,7 @@ def check_volume_pressure(candles: List[Dict[str, Any]]) -> bool:
     curr = float(candles[-1].get("volume", 0))
     hist = candles[-21:-1]
     avg = sum(float(c.get("volume", 0)) for c in hist) / len(hist)
+    if avg == 0: return True
     return curr > (avg * 1.5)
 
 # --- MASTER SIGNAL DETECTOR ---
@@ -103,7 +111,8 @@ def detect_pullback_go(
     use_zone: str = "TRIGGER",
     require_volume: bool = False,
     require_divergence: bool = False,
-    zone_tol: float = DEFAULT_ZONE_TOL # <--- NEW ARGUMENT
+    fusion_mode: bool = False, # <--- RENAMED FROM JEWEL_MODE
+    zone_tol: float = DEFAULT_ZONE_TOL
 ) -> Dict[str, Any]:
     
     if side not in ("LONG", "SHORT") or not post_accept_5m:
@@ -121,8 +130,7 @@ def detect_pullback_go(
 
     if zone <= 0: return {"ok": False, "go_type": "NONE"}
 
-    allow_campaign = stoch_aligned(side, stoch_15m_at_accept)
-    allow_scalp = True
+    campaign_base_ok = stoch_aligned(side, stoch_15m_at_accept)
     touched = False
 
     for i in range(min(len(post_accept_5m), MAX_GO_BARS_5M)):
@@ -132,16 +140,20 @@ def detect_pullback_go(
         lo = float(c["low"])
         hi = float(c["high"])
 
-        # 1) Touch Zone (Dynamic Tolerance)
+        # 1) Touch Zone
         tol = zone * zone_tol
         in_touch = (lo <= zone + tol) if side == "LONG" else (hi >= zone - tol)
-        
         if in_touch and not touched: touched = True
         if not touched: continue
 
-        # 2) Stoch Alignment
+        # 2) Alignment
         st5 = compute_stoch(window)
         if not stoch_aligned(side, st5): continue
+        
+        # FUSION MODE CHECK
+        if fusion_mode:
+            rsi_val = compute_rsi(window)
+            if not rsi_aligned(side, rsi_val): continue
 
         # 3) Push Confirmation
         push_ok = (px >= zone * (1.0 + PUSH_MIN_PCT)) if side == "LONG" else (px <= zone * (1.0 - PUSH_MIN_PCT))
@@ -151,14 +163,13 @@ def detect_pullback_go(
         if require_volume and not check_volume_pressure(window): continue
         if require_divergence and not check_divergence(side, window): continue
 
-        go_type = "CAMPAIGN_GO" if allow_campaign else ("SCALP_GO" if allow_scalp else "NONE")
-        if go_type == "NONE": continue
-
+        go_type = "CAMPAIGN_GO" if campaign_base_ok else "SCALP_GO"
+        
         return {
             "ok": True, 
             "go_type": go_type, 
             "go_ts": int(c["time"]), 
-            "reason": "TOUCH+STOCH+PUSH" + ("+VOL" if require_volume else "") + ("+DIV" if require_divergence else "")
+            "reason": "TOUCH+STOCH" + ("+FUSION" if fusion_mode else "") + "+PUSH" + ("+VOL" if require_volume else "") + ("+DIV" if require_divergence else "")
         }
 
     return {"ok": False, "go_type": "NONE", "go_ts": None}
