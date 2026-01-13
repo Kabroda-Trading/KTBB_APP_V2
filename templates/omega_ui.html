@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PROJECT OMEGA // CLASSIFIED</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg: #050505; --panel: #0a0a0a; --red: #dc2626; --amber: #d97706; --green: #059669; --text: #a3a3a3; --mono: 'JetBrains Mono', monospace; }
+        body { background: var(--bg); color: var(--text); font-family: var(--mono); margin: 0; padding: 20px; height: 100vh; display: flex; flex-direction: column; }
+        
+        /* TOP BAR */
+        .top-nav { display: flex; justify-content: space-between; border-bottom: 1px solid #333; padding-bottom: 15px; margin-bottom: 30px; }
+        .brand { font-size: 24px; font-weight: 800; color: #fff; letter-spacing: -1px; display: flex; align-items: center; gap: 10px; }
+        .blink { animation: blinker 2s linear infinite; width: 10px; height: 10px; background: var(--red); border-radius: 50%; }
+        @keyframes blinker { 50% { opacity: 0; } }
+        .back-link { color: #444; text-decoration: none; font-size: 12px; }
+        .back-link:hover { color: #fff; }
+
+        /* GRID */
+        .war-room { display: grid; grid-template-columns: 1fr 400px; gap: 20px; height: 100%; }
+        .panel { background: var(--panel); border: 1px solid #222; padding: 30px; display: flex; flex-direction: column; justify-content: center; position: relative; }
+        
+        /* SIGNAL DISPLAY */
+        .signal-status { font-size: 14px; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; }
+        .big-price { font-size: 80px; font-weight: 800; color: #fff; margin: 0; line-height: 1; }
+        .context-tag { position: absolute; top: 20px; right: 20px; border: 1px solid #333; padding: 5px 10px; font-size: 10px; color: #666; }
+        
+        /* STATES */
+        .state-standby { color: #444; }
+        .state-locked { color: var(--amber); border-color: var(--amber); box-shadow: 0 0 20px rgba(217, 119, 6, 0.1); }
+        .state-executing { color: var(--green); border-color: var(--green); box-shadow: 0 0 30px rgba(5, 150, 105, 0.2); }
+
+        /* INTEL PANEL */
+        .intel-row { display: flex; justify-content: space-between; border-bottom: 1px solid #222; padding: 15px 0; font-size: 14px; }
+        .intel-label { color: #555; }
+        .intel-val { color: #fff; font-weight: bold; }
+        .target-box { background: #111; border-left: 2px solid #333; padding: 15px; margin-top: 10px; }
+        .t-id { color: var(--amber); font-size: 12px; margin-bottom: 5px; display: block; }
+        .t-price { color: #fff; font-size: 20px; }
+        .t-prob { float: right; font-size: 12px; color: #444; }
+
+    </style>
+</head>
+<body>
+
+    <div class="top-nav">
+        <div class="brand">
+            <div class="blink"></div>
+            PROJECT OMEGA
+        </div>
+        <div>
+            <a href="/suite" class="back-link">RETURN TO BASE</a>
+        </div>
+    </div>
+
+    <div class="war-room">
+        <div class="panel" id="mainPanel">
+            <div class="context-tag" id="ctxFlag">SEARCHING...</div>
+            <div class="signal-status" id="statusText">SYSTEM STANDBY</div>
+            <div class="big-price" id="liveTrigger">--</div>
+            <div style="margin-top: 20px; color: #444; font-size: 12px;">
+                CONFIRMATION: 1-CANDLE CLOSE // TIMEFRAME: 15M
+            </div>
+        </div>
+
+        <div class="panel" style="justify-content: flex-start;">
+            <div style="border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 20px; color: #666; font-size: 12px;">MISSION PARAMETERS</div>
+            
+            <div class="intel-row">
+                <span class="intel-label">STOP LOSS (30m)</span>
+                <span class="intel-val" id="valStop" style="color: var(--red);">--</span>
+            </div>
+            
+            <div id="targetContainer" style="margin-top: 20px;">
+                <div style="text-align: center; color: #333; margin-top: 50px;">
+                    WAITING FOR LOCK...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function pollOmega() {
+            try {
+                // In real implementation, pass dynamic symbol
+                const res = await fetch('/api/black-ops/status', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ symbol: "BTCUSDT" })
+                });
+                const data = await res.json();
+                render(data);
+            } catch(e) { console.log(e); }
+        }
+
+        function render(data) {
+            const p = document.getElementById('mainPanel');
+            const sText = document.getElementById('statusText');
+            const trig = document.getElementById('liveTrigger');
+            
+            // RESET CLASSES
+            p.classList.remove('state-locked', 'state-executing');
+            
+            if (data.status === 'LOCKED') {
+                p.classList.add('state-locked');
+                sText.innerText = "⚠️ LOCKED & LOADED // WATCH CLOSE";
+                sText.style.color = "#d97706";
+            } else if (data.status === 'EXECUTING') {
+                p.classList.add('state-executing');
+                sText.innerText = "🚀 EXECUTE ORDER 66";
+                sText.style.color = "#059669";
+            } else {
+                sText.innerText = "SCANNING FOR ALPHA...";
+                sText.style.color = "#444";
+            }
+
+            // PRICES
+            const entryPrice = data.execution?.entry || data.triggers?.BO || 0;
+            trig.innerText = entryPrice > 0 ? entryPrice.toLocaleString() : "--";
+            
+            document.getElementById('ctxFlag').innerText = `CTX: ${data.context || 'UNK'}`;
+            document.getElementById('valStop').innerText = data.execution?.stop_loss ? data.execution.stop_loss.toLocaleString() : "--";
+
+            // TARGETS
+            const tCont = document.getElementById('targetContainer');
+            if(data.execution?.targets && data.execution.targets.length > 0) {
+                tCont.innerHTML = data.execution.targets.map(t => `
+                    <div class="target-box">
+                        <span class="t-prob">HIT RATE: ${t.prob}</span>
+                        <span class="t-id">${t.id} // PROFIT TARGET</span>
+                        <div class="t-price">${t.price.toLocaleString()}</div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        setInterval(pollOmega, 2000); // 2s Refresh
+        pollOmega();
+    </script>
+</body>
+</html>

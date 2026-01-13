@@ -23,6 +23,7 @@ import auth
 import billing
 import battlebox_pipeline
 import research_lab
+import black_ops_engine # <--- NEW
 
 from database import init_db, get_db, UserModel
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
@@ -117,13 +118,25 @@ def privacy_page(request: Request):
 # --- SUITE ROUTES ---
 @app.get("/suite", response_class=HTMLResponse)
 def suite(request: Request, db: Session = Depends(get_db)):
+    # 1. Standard Security Checks
     sess = _session_user_dict(request)
     if not sess: return RedirectResponse(url="/login", status_code=303)
     u = _db_user_from_session(db, sess)
     try: require_paid_access(u)
     except HTTPException: return RedirectResponse(url="/pricing?paywall=1", status_code=303)
     flags = _plan_flags(u)
-    return templates.TemplateResponse("session_control.html", {"request": request, "is_logged_in": True, "user": u, "plan_label": flags.get("plan_label", "")})
+    
+    # 2. NEW: Admin Check
+    is_admin = u.email in ALLOWED_ADMINS
+    
+    # 3. Render Template with 'is_admin' flag
+    return templates.TemplateResponse("session_control.html", {
+        "request": request, 
+        "is_logged_in": True, 
+        "user": u, 
+        "plan_label": flags.get("plan_label", ""),
+        "is_admin": is_admin  # <--- The Key Update
+    })
 
 @app.get("/suite/battle-control", response_class=HTMLResponse)
 def battle_control_page(request: Request, db: Session = Depends(get_db)):
@@ -248,6 +261,32 @@ def admin_panel(request: Request, db: Session = Depends(get_db)):
         })
 
     return templates.TemplateResponse("admin.html", {"request": request, "users": clean_list})
+# --- PROJECT OMEGA ROUTES (ADMIN ONLY) ---
+@app.get("/suite/black-ops", response_class=HTMLResponse)
+def black_ops_ui(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    
+    # SECURITY CHECK
+    if u.email not in ALLOWED_ADMINS:
+        return RedirectResponse(url="/suite", status_code=303)
+        
+    return templates.TemplateResponse("omega_ui.html", {"request": request})
+
+@app.post("/api/black-ops/status")
+async def black_ops_api(request: Request, db: Session = Depends(get_db)):
+    sess = _require_session_user(request)
+    u = _db_user_from_session(db, sess)
+    
+    # SECURITY CHECK
+    if u.email not in ALLOWED_ADMINS:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+        
+    payload = await request.json()
+    symbol = payload.get("symbol", "BTCUSDT")
+    
+    data = await black_ops_engine.get_omega_status(symbol)
+    return JSONResponse(data)
 
 @app.post("/admin/delete-user")
 def delete_user(request: Request, user_id: str = Form(...), db: Session = Depends(get_db)):
