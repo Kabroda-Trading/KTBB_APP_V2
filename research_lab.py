@@ -1,6 +1,6 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB CONTROLLER v7.0 (CONFIRMATION MODE SUPPORT)
+# RESEARCH LAB CONTROLLER v7.0 (SIMULATION INTEGRATION)
 # ==============================================================================
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone 
@@ -41,14 +41,9 @@ async def run_research_lab_from_candles(
         req_vol = bool(tuning.get("require_volume", False))
         req_div = bool(tuning.get("require_divergence", False))
         fusion_mode = bool(tuning.get("fusion_mode", False))
-        
-        # FLAGS
         ignore_15m = bool(tuning.get("ignore_15m_alignment", False))
         ignore_5m = bool(tuning.get("ignore_5m_stoch", False))
-        
-        # CONFIRMATION MODE
         confirm_mode = tuning.get("confirmation_mode", "TOUCH")
-        
         tol_bps = int(tuning.get("zone_tolerance_bps", 10)) 
         zone_tol = tol_bps / 10000.0
 
@@ -98,8 +93,26 @@ async def run_research_lab_from_candles(
                         fusion_mode=fusion_mode, zone_tol=zone_tol,
                         ignore_15m=ignore_15m,
                         ignore_5m_stoch=ignore_5m,
-                        confirmation_mode=confirm_mode # <--- PASSING NEW ARG
+                        confirmation_mode=confirm_mode
                     )
+
+                    # --- SIMULATION ---
+                    if go["ok"]:
+                        stop_price = 0.0
+                        if side == "LONG": stop_price = min(c["low"] for c in calibration) 
+                        else: stop_price = max(c["high"] for c in calibration)
+
+                        trade_candles = [c for c in raw_5m if c["time"] > go["go_ts"] and c["time"] < exec_end_ts]
+                        
+                        sim = battlebox_rules.simulate_trade(
+                            entry_price=levels.get("breakout_trigger") if side == "LONG" else levels.get("breakdown_trigger"),
+                            entry_ts=go["go_ts"],
+                            stop_price=stop_price,
+                            direction=side,
+                            levels=levels,
+                            future_candles=trade_candles
+                        )
+                        go["simulation"] = sim
 
                 sessions_result.append({
                     "ok": True,
@@ -123,7 +136,8 @@ async def run_research_lab_from_candles(
                         "final_state": state.get("action"),
                         "go_ts": go.get("go_ts"),
                         "go_reason": go.get("reason"),
-                        "fail_reason": state.get("diagnostics", {}).get("fail_reason", "UNKNOWN")
+                        "fail_reason": state.get("diagnostics", {}).get("fail_reason", "UNKNOWN"),
+                        "simulation": go.get("simulation") 
                     }
                 })
             curr_day += timedelta(days=1)
