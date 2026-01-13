@@ -29,7 +29,7 @@
         /* SIGNAL DISPLAY */
         .signal-status { font-size: 14px; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; }
         .big-price { font-size: 80px; font-weight: 800; color: #fff; margin: 0; line-height: 1; }
-        .context-tag { position: absolute; top: 20px; right: 20px; border: 1px solid #333; padding: 5px 10px; font-size: 10px; color: #666; }
+        .context-tag { position: absolute; top: 20px; right: 20px; border: 1px solid #333; padding: 5px 10px; font-size: 10px; color: #666; font-weight: bold; }
         
         /* STATES */
         .state-standby { color: #444; }
@@ -119,7 +119,6 @@
             if(soundEnabled) {
                 btn.innerText = "SOUND: ON";
                 btn.classList.add('ctrl-active');
-                // Play a silent note to unlock audio engine on mobile/safari
                 const audio = document.getElementById('alarmSound');
                 audio.volume = 0.5;
                 audio.play().catch(e => console.log("Audio unlock failed", e));
@@ -132,8 +131,6 @@
         function triggerAlarm(type) {
             if(soundEnabled) {
                 const audio = document.getElementById('alarmSound');
-                // You can replace this src with a real 'klaxon.mp3' url if you upload one later
-                // For now it uses a tiny placeholder beep
                 audio.currentTime = 0;
                 audio.play().catch(e => console.log("Play failed", e));
             }
@@ -187,11 +184,26 @@
                 sText.style.color = "#444";
             }
 
-            // PRICES
+            // PRICES & STRENGTH (UPDATED)
             const entryPrice = data.execution?.entry || data.triggers?.BO || 0;
             trig.innerText = entryPrice > 0 ? entryPrice.toLocaleString() : "--";
             
-            document.getElementById('ctxFlag').innerText = `CTX: ${data.context || 'UNK'}`;
+            // Render Strength Score
+            const strength = data.strength || {score: 0, rating: "CALIBRATING", tags: []};
+            const ctxText = `CTX: ${data.context || 'UNK'} | ${strength.rating} (${strength.score}%)`;
+            const ctxEl = document.getElementById('ctxFlag');
+            
+            ctxEl.innerText = ctxText;
+            
+            // Color code the context tag
+            if (strength.score >= 80) {
+                ctxEl.style.borderColor = "#059669";
+                ctxEl.style.color = "#059669";
+            } else {
+                ctxEl.style.borderColor = "#333";
+                ctxEl.style.color = "#666";
+            }
+
             document.getElementById('valStop').innerText = data.execution?.stop_loss ? data.execution.stop_loss.toLocaleString() : "--";
 
             // TARGETS
