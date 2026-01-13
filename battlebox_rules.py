@@ -1,13 +1,11 @@
 # battlebox_rules.py
 # ==============================================================================
-# BATTLEBOX RULE LAYER v5.1 (STRESS TEST MODE)
-# ==============================================================================
-# Unified Master File with "Stress Test" capabilities.
+# BATTLEBOX RULE LAYER v6.0 (CONFIRMATION MODE + STRESS TEST)
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
 
-print(">>> LOADING BATTLEBOX RULES v5.1 (STRESS TEST ENABLED) <<<")
+print(">>> LOADING BATTLEBOX RULES v6.0 (CONFIRMATION MODE ENABLED) <<<")
 
 # CONFIG
 STOCH_K = 14
@@ -125,7 +123,8 @@ def detect_pullback_go(
     fusion_mode: bool = False, 
     zone_tol: float = DEFAULT_ZONE_TOL,
     ignore_15m: bool = False,
-    ignore_5m_stoch: bool = False, # <--- NEW ARGUMENT
+    ignore_5m_stoch: bool = False,
+    confirmation_mode: str = "TOUCH", # NEW: "TOUCH", "1_CLOSE", "2_CLOSE"
     **kwargs 
 ) -> Dict[str, Any]:
     
@@ -145,12 +144,7 @@ def detect_pullback_go(
     if zone <= 0: return {"ok": False, "go_type": "NONE"}
 
     # LOGIC: If ignore_15m is TRUE, we force the base check to pass.
-    if ignore_15m:
-        campaign_base_ok = True
-    else:
-        campaign_base_ok = stoch_aligned(side, stoch_15m_at_accept)
-
-    touched = False
+    campaign_base_ok = True if ignore_15m else stoch_aligned(side, stoch_15m_at_accept)
 
     for i in range(min(len(post_accept_5m), MAX_GO_BARS_5M)):
         window = post_accept_5m[: i + 1]
@@ -159,13 +153,40 @@ def detect_pullback_go(
         lo = float(c["low"])
         hi = float(c["high"])
 
-        # 1) Touch
-        tol = zone * zone_tol
-        in_touch = (lo <= zone + tol) if side == "LONG" else (hi >= zone - tol)
-        if in_touch and not touched: touched = True
-        if not touched: continue
+        # ----------------------------------------
+        # NEW TRIGGER LOGIC (Replacing Simple Touch)
+        # ----------------------------------------
+        is_triggered = False
+        
+        # 1. TOUCH (Aggressive)
+        if confirmation_mode == "TOUCH":
+            tol = zone * zone_tol
+            if side == "LONG" and lo <= zone + tol: is_triggered = True
+            if side == "SHORT" and hi >= zone - tol: is_triggered = True
+            
+        # 2. 1-CANDLE CLOSE (Standard)
+        elif confirmation_mode == "1_CLOSE":
+            # Just requires current close to be outside zone
+            if side == "LONG" and px > zone: is_triggered = True
+            if side == "SHORT" and px < zone: is_triggered = True
+            
+        # 3. 2-CANDLE CLOSE (Conservative / Anti-Fakeout)
+        elif confirmation_mode == "2_CLOSE":
+            if i > 0: # We need at least 2 bars in the window
+                prev_c = window[-2]
+                prev_px = float(prev_c["close"])
+                
+                if side == "LONG":
+                    # Current closed ABOVE and Previous closed ABOVE
+                    if px > zone and prev_px > zone: is_triggered = True
+                else: # SHORT
+                    # Current closed BELOW and Previous closed BELOW
+                    if px < zone and prev_px < zone: is_triggered = True
+        
+        if not is_triggered: continue
+        # ----------------------------------------
 
-        # 2) 5m Stoch Alignment (BYPASSABLE FOR STRESS TEST)
+        # 2) 5m Stoch Alignment (BYPASSABLE)
         if not ignore_5m_stoch:
             st5 = compute_stoch(window)
             if not stoch_aligned(side, st5): continue
@@ -175,9 +196,11 @@ def detect_pullback_go(
             rsi_val = compute_rsi(window)
             if not rsi_aligned(side, rsi_val): continue
 
-        # 4) Push
-        push_ok = (px >= zone * (1.0 + PUSH_MIN_PCT)) if side == "LONG" else (px <= zone * (1.0 - PUSH_MIN_PCT))
-        if not push_ok: continue
+        # 4) Push (Only applies if using TOUCH logic, usually)
+        # If using Close logic, price is already past zone, so push is implied.
+        if confirmation_mode == "TOUCH":
+            push_ok = (px >= zone * (1.0 + PUSH_MIN_PCT)) if side == "LONG" else (px <= zone * (1.0 - PUSH_MIN_PCT))
+            if not push_ok: continue
 
         # 5) Filters
         if require_volume and not check_volume_pressure(window): continue
@@ -185,11 +208,17 @@ def detect_pullback_go(
 
         go_type = "CAMPAIGN_GO" if campaign_base_ok else "SCALP_GO"
         
+        # Build reason string
+        reason_str = confirmation_mode
+        if not ignore_5m_stoch: reason_str += "+STOCH"
+        if require_volume: reason_str += "+VOL"
+        if require_divergence: reason_str += "+DIV"
+        
         return {
             "ok": True, 
             "go_type": go_type, 
             "go_ts": int(c["time"]), 
-            "reason": "TOUCH" + ("+STOCH" if not ignore_5m_stoch else "") + ("+FUSION" if fusion_mode else "") + ("+VOL" if require_volume else "") + ("+DIV" if require_divergence else "")
+            "reason": reason_str
         }
 
     return {"ok": False, "go_type": "NONE", "go_ts": None}

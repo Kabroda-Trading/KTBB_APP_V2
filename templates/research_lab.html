@@ -73,6 +73,15 @@
                 <label style="color: #06b6d4;">SYSTEM TUNING</label>
                 
                 <div class="control-group">
+                    <label>CONFIRMATION MODE</label>
+                    <select id="confirmMode">
+                        <option value="TOUCH">Touch (Aggressive)</option>
+                        <option value="1_CLOSE">1-Candle Close (Standard)</option>
+                        <option value="2_CLOSE">2-Candle Close (Anti-Fakeout)</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
                     <label>TOUCH TOLERANCE (BPS)</label>
                     <div class="range-wrap">
                         <input type="range" id="tuneTol" min="5" max="50" value="10" oninput="updateVal('valTol', this.value)">
@@ -224,9 +233,12 @@
                     alignment_window_minutes: 120,
                     zone_tolerance_bps: parseInt(document.getElementById('tuneTol').value),
                     
+                    // --- NEW: CONFIRMATION MODE ---
+                    confirmation_mode: document.getElementById('confirmMode').value,
+
                     // PASS FLAGS
                     ignore_15m_alignment: document.getElementById('chkIgnore15m').checked,
-                    ignore_5m_stoch: document.getElementById('chkIgnore5m').checked, // <--- NEW
+                    ignore_5m_stoch: document.getElementById('chkIgnore5m').checked,
 
                     fusion_mode: document.getElementById('chkFusion').checked,
                     require_volume: document.getElementById('chkVol').checked,
