@@ -9,10 +9,16 @@
         body { background: var(--bg); color: var(--text); font-family: var(--mono); margin: 0; padding: 20px; height: 100vh; display: flex; flex-direction: column; }
         
         /* TOP BAR */
-        .top-nav { display: flex; justify-content: space-between; border-bottom: 1px solid #333; padding-bottom: 15px; margin-bottom: 30px; }
+        .top-nav { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 15px; margin-bottom: 30px; }
         .brand { font-size: 24px; font-weight: 800; color: #fff; letter-spacing: -1px; display: flex; align-items: center; gap: 10px; }
         .blink { animation: blinker 2s linear infinite; width: 10px; height: 10px; background: var(--red); border-radius: 50%; }
         @keyframes blinker { 50% { opacity: 0; } }
+        
+        .controls { display: flex; gap: 20px; align-items: center; }
+        .ctrl-btn { background: #111; border: 1px solid #333; color: #666; padding: 8px 12px; font-family: var(--mono); font-size: 11px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: 0.2s; }
+        .ctrl-btn:hover { border-color: #666; color: #fff; }
+        .ctrl-active { border-color: var(--green); color: var(--green); background: rgba(5, 150, 105, 0.1); }
+        
         .back-link { color: #444; text-decoration: none; font-size: 12px; }
         .back-link:hover { color: #fff; }
 
@@ -48,7 +54,9 @@
             <div class="blink"></div>
             PROJECT OMEGA
         </div>
-        <div>
+        <div class="controls">
+            <button id="btnNotify" class="ctrl-btn" onclick="requestNotify()">ENABLE ALERTS</button>
+            <button id="btnSound" class="ctrl-btn" onclick="toggleSound()">SOUND: OFF</button>
             <a href="/suite" class="back-link">RETURN TO BASE</a>
         </div>
     </div>
@@ -79,10 +87,68 @@
         </div>
     </div>
 
+    <audio id="alarmSound" src="data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU"></audio>
+
     <script>
+        let soundEnabled = false;
+        let lastStatus = "STANDBY";
+        
+        // --- NOTIFICATION LOGIC ---
+        function requestNotify() {
+            if (!("Notification" in window)) {
+                alert("This browser does not support desktop notifications");
+                return;
+            }
+            Notification.requestPermission().then(permission => {
+                const btn = document.getElementById('btnNotify');
+                if (permission === "granted") {
+                    btn.innerText = "ALERTS ACTIVE";
+                    btn.classList.add('ctrl-active');
+                    new Notification("Omega System", { body: "Communications Link Established." });
+                } else {
+                    btn.innerText = "ALERTS DENIED";
+                    btn.style.borderColor = "#ef4444";
+                }
+            });
+        }
+
+        // --- SOUND LOGIC ---
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            const btn = document.getElementById('btnSound');
+            if(soundEnabled) {
+                btn.innerText = "SOUND: ON";
+                btn.classList.add('ctrl-active');
+                // Play a silent note to unlock audio engine on mobile/safari
+                const audio = document.getElementById('alarmSound');
+                audio.volume = 0.5;
+                audio.play().catch(e => console.log("Audio unlock failed", e));
+            } else {
+                btn.innerText = "SOUND: OFF";
+                btn.classList.remove('ctrl-active');
+            }
+        }
+
+        function triggerAlarm(type) {
+            if(soundEnabled) {
+                const audio = document.getElementById('alarmSound');
+                // You can replace this src with a real 'klaxon.mp3' url if you upload one later
+                // For now it uses a tiny placeholder beep
+                audio.currentTime = 0;
+                audio.play().catch(e => console.log("Play failed", e));
+            }
+            
+            if(Notification.permission === "granted") {
+                new Notification("PROJECT OMEGA ALERT", {
+                    body: type === "EXECUTING" ? "🚀 EXECUTE SIGNAL DETECTED" : "⚠️ TRIGGER LOCKED - GET READY",
+                    requireInteraction: true
+                });
+            }
+        }
+
+        // --- CORE POLLING ---
         async function pollOmega() {
             try {
-                // In real implementation, pass dynamic symbol
                 const res = await fetch('/api/black-ops/status', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -98,7 +164,14 @@
             const sText = document.getElementById('statusText');
             const trig = document.getElementById('liveTrigger');
             
-            // RESET CLASSES
+            // STATE CHANGE DETECTION
+            if (data.status !== lastStatus) {
+                if (data.status === "EXECUTING") triggerAlarm("EXECUTING");
+                if (data.status === "LOCKED") triggerAlarm("LOCKED");
+                lastStatus = data.status;
+            }
+
+            // RESET VISUALS
             p.classList.remove('state-locked', 'state-executing');
             
             if (data.status === 'LOCKED') {
