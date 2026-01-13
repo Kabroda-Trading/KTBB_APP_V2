@@ -1,6 +1,6 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB CONTROLLER v7.0 (SIMULATION INTEGRATION)
+# RESEARCH LAB CONTROLLER v7.1 (FULL DATA PIPELINE)
 # ==============================================================================
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone 

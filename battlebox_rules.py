@@ -1,11 +1,11 @@
 # battlebox_rules.py
 # ==============================================================================
-# BATTLEBOX RULE LAYER v7.0 (SMART STRUCTURE TARGETING)
+# BATTLEBOX RULE LAYER v7.1 (FULL CONTEXT AWARENESS)
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
 
-print(">>> LOADING BATTLEBOX RULES v7.0 (SMART TARGETS ENABLED) <<<")
+print(">>> LOADING BATTLEBOX RULES v7.1 (CONTEXT METRICS ENABLED) <<<")
 
 # CONFIG
 STOCH_K = 14
@@ -221,32 +221,41 @@ def simulate_trade(
     energy = abs(dr - ds)
     if energy == 0: energy = entry_price * 0.01
 
-    # 2. Determine Trade Targets (Compression vs Blue Sky)
-    is_blue_sky = False
-    targets = []
+    # --- CONTEXT METRICS ---
+    # Calculate Range Compression (in Basis Points)
+    range_bps = (energy / entry_price) * 10000 if entry_price > 0 else 0
+    
+    # Calculate "Trigger Location" (0.0 = Support, 1.0 = Resistance)
+    # > 1.0 means Blue Sky (Above Resistance)
+    rel_pos = 0.0
+    if energy > 0:
+        if direction == "LONG":
+            rel_pos = (entry_price - ds) / energy
+        else: 
+            rel_pos = (dr - entry_price) / energy
+            
+    is_blue_sky = rel_pos > 1.0
+    is_compressed = range_bps < 150 
 
+    # 2. Set Targets based on Context
+    targets = []
     if direction == "LONG":
-        if entry_price < dr: 
-            # COMPRESSION: TP1 is DR
+        if not is_blue_sky: 
+            # STRUCTURE TRADE
             targets.append({"name": "TP1", "price": dr})
             targets.append({"name": "TP2", "price": entry_price + energy})
             targets.append({"name": "TP3", "price": entry_price + (energy * 2.5)})
         else:
-            # BLUE SKY: No Resistance
-            is_blue_sky = True
+            # BLUE SKY TRADE
             targets.append({"name": "TP1", "price": entry_price + (energy * 0.5)})
             targets.append({"name": "TP2", "price": entry_price + energy})
             targets.append({"name": "TP3", "price": entry_price + (energy * 3.0)})
-
     else: # SHORT
-        if entry_price > ds:
-            # COMPRESSION: TP1 is DS
+        if not is_blue_sky:
             targets.append({"name": "TP1", "price": ds})
             targets.append({"name": "TP2", "price": entry_price - energy})
             targets.append({"name": "TP3", "price": entry_price - (energy * 2.5)})
         else:
-            # BLUE SKY
-            is_blue_sky = True
             targets.append({"name": "TP1", "price": entry_price - (energy * 0.5)})
             targets.append({"name": "TP2", "price": entry_price - energy})
             targets.append({"name": "TP3", "price": entry_price - (energy * 3.0)})
@@ -290,5 +299,9 @@ def simulate_trade(
         "r_realized": round(r_mult, 2),
         "targets_hit": hits,
         "trade_type": "BLUE SKY" if is_blue_sky else "STRUCTURE",
-        "energy_pts": int(energy)
+        "context": {
+            "range_bps": round(range_bps, 0),
+            "trigger_loc": round(rel_pos, 2),
+            "is_compressed": is_compressed
+        }
     }

@@ -82,6 +82,14 @@
                 </div>
 
                 <div class="control-group">
+                    <label>SIMULATED LEVERAGE</label>
+                    <div class="range-wrap">
+                        <input type="range" id="simLev" min="1" max="50" value="20" oninput="updateVal('valLev', this.value + 'x')">
+                        <span id="valLev" class="range-val">20x</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
                     <label>TOUCH TOLERANCE (BPS)</label>
                     <div class="range-wrap">
                         <input type="range" id="tuneTol" min="5" max="50" value="10" oninput="updateVal('valTol', this.value)">
@@ -288,14 +296,31 @@
                 let tp1 = 0;
                 let tp2 = 0;
                 let tp3 = 0;
+                
+                let blueSkyCount = 0;
+                let blueSkyWins = 0;
+                let structCount = 0;
+                let structWins = 0;
 
                 for (let s of data.sessions) {
                     if (s.counts.had_go && s.events.simulation) {
                         totalGos++;
-                        if (s.events.simulation.outcome === "WIN/OPEN") wins++;
-                        if (s.events.simulation.targets_hit.includes("TP1")) tp1++;
-                        if (s.events.simulation.targets_hit.includes("TP2")) tp2++;
-                        if (s.events.simulation.targets_hit.includes("TP3")) tp3++;
+                        let sim = s.events.simulation;
+                        let isWin = sim.outcome === "WIN/OPEN";
+                        
+                        if (isWin) wins++;
+                        if (sim.targets_hit.includes("TP1")) tp1++;
+                        if (sim.targets_hit.includes("TP2")) tp2++;
+                        if (sim.targets_hit.includes("TP3")) tp3++;
+                        
+                        // Context Stats Logic
+                        if (sim.trade_type === "BLUE SKY") {
+                            blueSkyCount++;
+                            if (isWin) blueSkyWins++;
+                        } else {
+                            structCount++;
+                            if (isWin) structWins++;
+                        }
                     }
                 }
 
@@ -304,6 +329,11 @@
                     document.getElementById('simTP1').innerText = ((tp1 / totalGos) * 100).toFixed(0) + "%";
                     document.getElementById('simTP2').innerText = ((tp2 / totalGos) * 100).toFixed(0) + "%";
                     document.getElementById('simTP3').innerText = ((tp3 / totalGos) * 100).toFixed(0) + "%";
+                    
+                    // Log Context Stats to Console for deep dive
+                    console.log("--- CONTEXT ANALYSIS ---");
+                    console.log(`Blue Sky Trades: ${blueSkyCount} (Win Rate: ${blueSkyCount > 0 ? (blueSkyWins/blueSkyCount*100).toFixed(0) : 0}%)`);
+                    console.log(`Structure Trades: ${structCount} (Win Rate: ${structCount > 0 ? (structWins/structCount*100).toFixed(0) : 0}%)`);
                 } else {
                     document.getElementById('simWinRate').innerText = "0%";
                     document.getElementById('simTP1').innerText = "0%";
