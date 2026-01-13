@@ -2,7 +2,7 @@
 # ==============================================================================
 # BATTLEBOX RULE LAYER v5.0 (UNIFIED MASTER)
 # ==============================================================================
-# Single Source of Truth for Live Dashboard AND Research Lab.
+# Single Source of Truth. No dependencies on 'rules_engine'.
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
@@ -114,7 +114,7 @@ def check_volume_pressure(candles: List[Dict[str, Any]]) -> bool:
     except: return False
 
 # --- UNIFIED SIGNAL DETECTOR ---
-# Name MUST be 'detect_pullback_go' for Live Site compatibility.
+# Name is 'detect_pullback_go' to match what Research Lab and Live Site expect.
 def detect_pullback_go(
     side: str,
     levels: Dict[str, float],

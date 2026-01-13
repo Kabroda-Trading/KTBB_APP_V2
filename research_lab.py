@@ -1,6 +1,6 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB CONTROLLER v6.0 (RESTORED TO ORIGINAL ARCHITECTURE)
+# RESEARCH LAB CONTROLLER v6.0 (RESTORED TO ORIGINAL IMPORTS)
 # ==============================================================================
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone 
@@ -10,8 +10,7 @@ import traceback
 import battlebox_pipeline
 import sse_engine
 import structure_state_engine
-# FIX: Point back to the original file
-import battlebox_rules 
+import battlebox_rules  # <--- BACK TO NORMAL
 
 def _slice_by_ts(candles: List[Dict[str, Any]], start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
     return [c for c in candles if start_ts <= c["time"] < end_ts]
@@ -87,7 +86,7 @@ async def run_research_lab_from_candles(
                     candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
                     st15 = battlebox_rules.compute_stoch(candles_15m_proxy)
                     
-                    # FIX: Call the STANDARD function name
+                    # BACK TO ORIGINAL FUNCTION NAME
                     go = battlebox_rules.detect_pullback_go(
                         side=side, levels=levels, post_accept_5m=post_lock, stoch_15m_at_accept=st15, 
                         use_zone="TRIGGER", require_volume=req_vol, require_divergence=req_div,
