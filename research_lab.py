@@ -1,6 +1,6 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB CONTROLLER v5.2 (FULL FILE + IGNORE 15M)
+# RESEARCH LAB CONTROLLER v6.0 (RESTORED TO ORIGINAL IMPORTS)
 # ==============================================================================
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone 
@@ -10,7 +10,7 @@ import traceback
 import battlebox_pipeline
 import sse_engine
 import structure_state_engine
-import rules_engine as battlebox_rules 
+import battlebox_rules  # <--- BACK TO NORMAL
 
 def _slice_by_ts(candles: List[Dict[str, Any]], start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
     return [c for c in candles if start_ts <= c["time"] < end_ts]
@@ -41,7 +41,6 @@ async def run_research_lab_from_candles(
         req_vol = bool(tuning.get("require_volume", False))
         req_div = bool(tuning.get("require_divergence", False))
         fusion_mode = bool(tuning.get("fusion_mode", False))
-        # NEW: IGNORE 15M FLAG
         ignore_15m = bool(tuning.get("ignore_15m_alignment", False))
         
         tol_bps = int(tuning.get("zone_tolerance_bps", 10)) 
@@ -87,11 +86,12 @@ async def run_research_lab_from_candles(
                     candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
                     st15 = battlebox_rules.compute_stoch(candles_15m_proxy)
                     
-                    go = battlebox_rules.detect_fusion_trade(
+                    # BACK TO ORIGINAL FUNCTION NAME
+                    go = battlebox_rules.detect_pullback_go(
                         side=side, levels=levels, post_accept_5m=post_lock, stoch_15m_at_accept=st15, 
                         use_zone="TRIGGER", require_volume=req_vol, require_divergence=req_div,
                         fusion_mode=fusion_mode, zone_tol=zone_tol,
-                        ignore_15m=ignore_15m # <--- PASSING THE NEW FLAG
+                        ignore_15m=ignore_15m
                     )
 
                 sessions_result.append({
