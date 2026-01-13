@@ -1,10 +1,8 @@
 # battlebox_rules.py
 # ==============================================================================
-# BATTLEBOX RULE LAYER v5.0 (UNIFIED & RESTORED)
+# BATTLEBOX RULE LAYER v5.0 (UNIFIED MASTER)
 # ==============================================================================
-# 1. Single Source of Truth (No more rules_engine.py)
-# 2. Supports LIVE SITE (detect_pullback_go)
-# 3. Supports RESEARCH LAB (Fusion, Volume, Ignore 15m)
+# Single Source of Truth for Live Dashboard AND Research Lab.
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
@@ -116,9 +114,7 @@ def check_volume_pressure(candles: List[Dict[str, Any]]) -> bool:
     except: return False
 
 # --- UNIFIED SIGNAL DETECTOR ---
-# This function name matches what the Live Site expects.
-# The new arguments allow Research Lab to use advanced features.
-# **kwargs prevents crashes if arguments mismatch.
+# Name MUST be 'detect_pullback_go' for Live Site compatibility.
 def detect_pullback_go(
     side: str,
     levels: Dict[str, float],
