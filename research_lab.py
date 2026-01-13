@@ -1,6 +1,6 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB CONTROLLER v5.1 (USES NEW RULES ENGINE)
+# RESEARCH LAB CONTROLLER v5.2 (FULL FILE + IGNORE 15M)
 # ==============================================================================
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone 
@@ -10,7 +10,7 @@ import traceback
 import battlebox_pipeline
 import sse_engine
 import structure_state_engine
-import rules_engine as battlebox_rules  # <--- CHANGED IMPORT
+import rules_engine as battlebox_rules 
 
 def _slice_by_ts(candles: List[Dict[str, Any]], start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
     return [c for c in candles if start_ts <= c["time"] < end_ts]
@@ -41,6 +41,9 @@ async def run_research_lab_from_candles(
         req_vol = bool(tuning.get("require_volume", False))
         req_div = bool(tuning.get("require_divergence", False))
         fusion_mode = bool(tuning.get("fusion_mode", False))
+        # NEW: IGNORE 15M FLAG
+        ignore_15m = bool(tuning.get("ignore_15m_alignment", False))
+        
         tol_bps = int(tuning.get("zone_tolerance_bps", 10)) 
         zone_tol = tol_bps / 10000.0
 
@@ -87,7 +90,8 @@ async def run_research_lab_from_candles(
                     go = battlebox_rules.detect_fusion_trade(
                         side=side, levels=levels, post_accept_5m=post_lock, stoch_15m_at_accept=st15, 
                         use_zone="TRIGGER", require_volume=req_vol, require_divergence=req_div,
-                        fusion_mode=fusion_mode, zone_tol=zone_tol
+                        fusion_mode=fusion_mode, zone_tol=zone_tol,
+                        ignore_15m=ignore_15m # <--- PASSING THE NEW FLAG
                     )
 
                 sessions_result.append({

@@ -96,6 +96,11 @@
                     </div>
                 </div>
 
+                <div class="checkbox-group" style="margin-top: 15px;">
+                    <input type="checkbox" id="chkIgnore15m">
+                    <label for="chkIgnore15m" class="check-lbl" style="color: #f87171; font-weight: 700;">IGNORE 15m ALIGNMENT (Unlocks All Trades)</label>
+                </div>
+
                 <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
                 <label style="color: #10b981;">ADVANCED FILTERS</label>
 
@@ -172,7 +177,6 @@
             const today = new Date();
             const lastWeek = new Date();
             lastWeek.setDate(today.getDate() - 7);
-            
             document.getElementById('endDate').valueAsDate = today;
             document.getElementById('startDate').valueAsDate = lastWeek;
         };
@@ -212,8 +216,12 @@
                 tuning: {
                     min_trigger_dist_bps: parseInt(document.getElementById('tuneDist').value),
                     acceptance_closes: parseInt(document.getElementById('tuneAcc').value),
-                    alignment_window_minutes: 120, // HARDCODED FIX: Removed broken 'tuneWin' element reference
+                    alignment_window_minutes: 120,
                     zone_tolerance_bps: parseInt(document.getElementById('tuneTol').value),
+                    
+                    // NEW: Pass Ignore 15m Flag
+                    ignore_15m_alignment: document.getElementById('chkIgnore15m').checked,
+
                     fusion_mode: document.getElementById('chkFusion').checked,
                     require_volume: document.getElementById('chkVol').checked,
                     require_divergence: document.getElementById('chkDiv').checked
@@ -226,66 +234,37 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)
                 });
-                
                 const data = await res.json();
-
-                if (!data.ok) {
-                    throw new Error(data.error || "Unknown server error.");
-                }
+                if (!data.ok) throw new Error(data.error || "Unknown server error.");
 
                 const stats = data.stats;
                 document.getElementById('resTotal').innerText = stats.sessions_total;
                 document.getElementById('resAcc').innerText = stats.acceptance_count;
                 document.getElementById('resGo').innerText = stats.go_count;
-                
-                const goRate = stats.sessions_total > 0 
-                    ? ((stats.go_count / stats.sessions_total) * 100).toFixed(1) 
-                    : "0.0";
+                const goRate = stats.sessions_total > 0 ? ((stats.go_count / stats.sessions_total) * 100).toFixed(1) : "0.0";
                 document.getElementById('resRate').innerText = goRate + "%";
                 
                 let goHtml = "";
                 const totalGos = stats.go_count || 1;
                 const campPct = (stats.campaign_go_count || 0) / totalGos * 100;
-                goHtml += `
-                    <div class="fail-bar">
-                        <span class="fail-lbl">CAMPAIGN (15m+5m)</span>
-                        <div class="fail-track"><div class="fail-fill" style="width: ${campPct}%; background: #10b981;"></div></div>
-                        <span class="fail-count">${stats.campaign_go_count || 0}</span>
-                    </div>
-                `;
+                goHtml += `<div class="fail-bar"><span class="fail-lbl">CAMPAIGN (15m+5m)</span><div class="fail-track"><div class="fail-fill" style="width: ${campPct}%; background: #10b981;"></div></div><span class="fail-count">${stats.campaign_go_count || 0}</span></div>`;
                 const scalpPct = (stats.scalp_go_count || 0) / totalGos * 100;
-                goHtml += `
-                    <div class="fail-bar">
-                        <span class="fail-lbl">SCALP (5m Only)</span>
-                        <div class="fail-track"><div class="fail-fill" style="width: ${scalpPct}%; background: #f59e0b;"></div></div>
-                        <span class="fail-count">${stats.scalp_go_count || 0}</span>
-                    </div>
-                `;
+                goHtml += `<div class="fail-bar"><span class="fail-lbl">SCALP (5m Only)</span><div class="fail-track"><div class="fail-fill" style="width: ${scalpPct}%; background: #f59e0b;"></div></div><span class="fail-count">${stats.scalp_go_count || 0}</span></div>`;
                 document.getElementById('goChart').innerHTML = goHtml;
 
                 const reasons = stats.fail_reasons || {};
                 let failHtml = "";
                 const maxVal = Math.max(...Object.values(reasons), 1);
-                
                 for (const [reason, count] of Object.entries(reasons)) {
                     const pct = (count / maxVal) * 100;
-                    failHtml += `
-                        <div class="fail-bar">
-                            <span class="fail-lbl">${reason}</span>
-                            <div class="fail-track"><div class="fail-fill" style="width: ${pct}%; background: #ef4444;"></div></div>
-                            <span class="fail-count">${count}</span>
-                        </div>
-                    `;
+                    failHtml += `<div class="fail-bar"><span class="fail-lbl">${reason}</span><div class="fail-track"><div class="fail-fill" style="width: ${pct}%; background: #ef4444;"></div></div><span class="fail-count">${count}</span></div>`;
                 }
                 if(Object.keys(reasons).length === 0) failHtml = "<div style='color:#666; font-size:12px;'>No failures recorded.</div>";
                 document.getElementById('failChart').innerHTML = failHtml;
 
                 document.getElementById('jsonOutput').innerText = JSON.stringify(data.sessions, null, 2);
                 document.getElementById('resultsArea').style.display = 'block';
-
-            } catch (e) {
-                alert("CLIENT ERROR: " + e.message);
-            } finally {
+            } catch (e) { alert("CLIENT ERROR: " + e.message); } finally {
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('runBtn').disabled = false;
                 document.getElementById('runBtn').innerText = "INITIATE RUN";

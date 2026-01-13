@@ -1,11 +1,11 @@
 # rules_engine.py (FORMERLY battlebox_rules.py)
 # ==============================================================================
-# BATTLEBOX RULE LAYER v4.0 (RENAMED TO FORCE UPDATE)
+# BATTLEBOX RULE LAYER v4.1 (IGNORE 15M FEATURE)
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
 
-print(">>> LOADING RULES ENGINE v4.0 (FRESH FILE) <<<")
+print(">>> LOADING RULES ENGINE v4.1 (IGNORE 15M ENABLED) <<<")
 
 # CONFIG
 STOCH_K = 14
@@ -115,6 +115,7 @@ def detect_fusion_trade(
     require_divergence: bool = False,
     fusion_mode: bool = False, 
     zone_tol: float = DEFAULT_ZONE_TOL,
+    ignore_15m: bool = False, # <--- NEW ARGUMENT
     # NUCLEAR SAFETY: **kwargs catches any extra arguments to prevent crashes
     **kwargs 
 ) -> Dict[str, Any]:
@@ -134,7 +135,12 @@ def detect_fusion_trade(
 
     if zone <= 0: return {"ok": False, "go_type": "NONE"}
 
-    campaign_base_ok = stoch_aligned(side, stoch_15m_at_accept)
+    # LOGIC UPDATE: IF IGNORE 15M IS ON, FORCE BASE_OK TO TRUE
+    if ignore_15m:
+        campaign_base_ok = True
+    else:
+        campaign_base_ok = stoch_aligned(side, stoch_15m_at_accept)
+
     touched = False
 
     for i in range(min(len(post_accept_5m), MAX_GO_BARS_5M)):
@@ -150,7 +156,7 @@ def detect_fusion_trade(
         if in_touch and not touched: touched = True
         if not touched: continue
 
-        # 2) Alignment
+        # 2) Alignment (5m check is always required)
         st5 = compute_stoch(window)
         if not stoch_aligned(side, st5): continue
         
