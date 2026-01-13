@@ -1,13 +1,13 @@
 # battlebox_rules.py
 # ==============================================================================
-# BATTLEBOX RULE LAYER v5.0 (UNIFIED MASTER)
+# BATTLEBOX RULE LAYER v5.1 (STRESS TEST MODE)
 # ==============================================================================
-# Single Source of Truth. No dependencies on 'rules_engine'.
+# Unified Master File with "Stress Test" capabilities.
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
 
-print(">>> LOADING BATTLEBOX RULES v5.0 (UNIFIED) <<<")
+print(">>> LOADING BATTLEBOX RULES v5.1 (STRESS TEST ENABLED) <<<")
 
 # CONFIG
 STOCH_K = 14
@@ -114,7 +114,6 @@ def check_volume_pressure(candles: List[Dict[str, Any]]) -> bool:
     except: return False
 
 # --- UNIFIED SIGNAL DETECTOR ---
-# Name is 'detect_pullback_go' to match what Research Lab and Live Site expect.
 def detect_pullback_go(
     side: str,
     levels: Dict[str, float],
@@ -126,6 +125,7 @@ def detect_pullback_go(
     fusion_mode: bool = False, 
     zone_tol: float = DEFAULT_ZONE_TOL,
     ignore_15m: bool = False,
+    ignore_5m_stoch: bool = False, # <--- NEW ARGUMENT
     **kwargs 
 ) -> Dict[str, Any]:
     
@@ -165,9 +165,10 @@ def detect_pullback_go(
         if in_touch and not touched: touched = True
         if not touched: continue
 
-        # 2) 5m Stoch Alignment (Always Required)
-        st5 = compute_stoch(window)
-        if not stoch_aligned(side, st5): continue
+        # 2) 5m Stoch Alignment (BYPASSABLE FOR STRESS TEST)
+        if not ignore_5m_stoch:
+            st5 = compute_stoch(window)
+            if not stoch_aligned(side, st5): continue
         
         # 3) Fusion Mode (RSI)
         if fusion_mode:
@@ -188,7 +189,7 @@ def detect_pullback_go(
             "ok": True, 
             "go_type": go_type, 
             "go_ts": int(c["time"]), 
-            "reason": "TOUCH+STOCH" + ("+FUSION" if fusion_mode else "") + ("+VOL" if require_volume else "") + ("+DIV" if require_divergence else "")
+            "reason": "TOUCH" + ("+STOCH" if not ignore_5m_stoch else "") + ("+FUSION" if fusion_mode else "") + ("+VOL" if require_volume else "") + ("+DIV" if require_divergence else "")
         }
 
     return {"ok": False, "go_type": "NONE", "go_ts": None}

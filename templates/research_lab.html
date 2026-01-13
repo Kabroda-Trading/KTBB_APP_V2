@@ -98,7 +98,12 @@
 
                 <div class="checkbox-group" style="margin-top: 15px;">
                     <input type="checkbox" id="chkIgnore15m">
-                    <label for="chkIgnore15m" class="check-lbl" style="color: #f87171; font-weight: 700;">IGNORE 15m ALIGNMENT (Unlocks All Trades)</label>
+                    <label for="chkIgnore15m" class="check-lbl" style="color: #f87171; font-weight: 700;">IGNORE 15m ALIGNMENT (Open Trend)</label>
+                </div>
+                
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chkIgnore5m">
+                    <label for="chkIgnore5m" class="check-lbl" style="color: #ef4444; font-weight: 700;">IGNORE 5m STOCH (Pure Touch)</label>
                 </div>
 
                 <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
@@ -219,8 +224,9 @@
                     alignment_window_minutes: 120,
                     zone_tolerance_bps: parseInt(document.getElementById('tuneTol').value),
                     
-                    // NEW: Pass Ignore 15m Flag
+                    // PASS FLAGS
                     ignore_15m_alignment: document.getElementById('chkIgnore15m').checked,
+                    ignore_5m_stoch: document.getElementById('chkIgnore5m').checked, // <--- NEW
 
                     fusion_mode: document.getElementById('chkFusion').checked,
                     require_volume: document.getElementById('chkVol').checked,
