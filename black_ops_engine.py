@@ -1,6 +1,6 @@
 # black_ops_engine.py
 # ==============================================================================
-# PROJECT OMEGA: SPECIAL OPERATIONS LOGIC ENGINE (SESSION LOCKED)
+# PROJECT OMEGA: SPECIAL OPERATIONS LOGIC ENGINE (LIVE OPTIMIZED)
 # CLASSIFICATION: TOP SECRET // ADMIN EYES ONLY
 # ==============================================================================
 from __future__ import annotations
@@ -32,50 +32,42 @@ def _get_candles_in_range(all_candles: List[Dict], start_ts: int, end_ts: int) -
 async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
     """
     Independent scanning engine for Project Omega. 
-    LOCKED to the active session's Opening Range to prevent target drift.
+    OPTIMIZED: Uses fetch_live_5m for high-frequency polling.
     """
     try:
         # 1. RESOLVE ACTIVE SESSION ANCHOR
-        # We use the pipeline to find "Today's Open" (e.g. NY Futures 08:30)
         now_utc = datetime.now(timezone.utc)
         
-        # Force NY Futures for consistency, or use AUTO to detect
+        # Use AUTO resolution to find the most relevant active session, or force NY
+        # switching to "us_ny_futures" manually ensures consistent daily levels
         session_info = battlebox_pipeline.resolve_session(now_utc, mode="MANUAL", manual_id="us_ny_futures")
         
         anchor_ts = session_info["anchor_time"]
-        lock_end_ts = anchor_ts + 1800 # The 30-minute lock window
+        lock_end_ts = anchor_ts + 1800 
         
-        # 2. DATA ACQUISITION
-        # We need data from (Anchor - 24h) up to NOW
-        fetch_start = anchor_ts - 86400
-        fetch_end = int(now_utc.timestamp())
-        
-        raw_5m = await battlebox_pipeline.fetch_historical_pagination(
-            symbol=symbol, 
-            start_ts=fetch_start, 
-            end_ts=fetch_end
-        )
+        # 2. DATA ACQUISITION (FAST PATH)
+        # Instead of pagination (slow), we pull the last 2000 candles from the live cache.
+        # 2000 candles * 5m = 10,000 mins = ~6.9 days of data. Plenty for 24h lookback.
+        raw_5m = await battlebox_pipeline.fetch_live_5m(symbol, limit=2000)
 
         if not raw_5m or len(raw_5m) < 12:
-            return {"status": "OFFLINE", "msg": "Waiting for Pipeline Data..."}
+            return {"status": "OFFLINE", "msg": "Waiting for Data Stream..."}
 
         current_price = float(raw_5m[-1]["close"])
 
         # 3. LEVEL COMPUTATION (LOCKED)
-        # Instead of "last 6 candles", we specificially grab the calibration window
         calibration_candles = _get_candles_in_range(raw_5m, anchor_ts, lock_end_ts)
         
-        # If we haven't finished the first 30 mins yet, we can't lock.
         if len(calibration_candles) < 1:
              return {"status": "STANDBY", "msg": "Building Opening Range..."}
              
-        # LOCKING THE R30 (This prevents the drift)
+        # LOCKING THE R30
         r30_high = max(float(c["high"]) for c in calibration_candles)
         r30_low = min(float(c["low"]) for c in calibration_candles)
         
-        # The 24h context is fixed to the period BEFORE the lock
+        # 24h Context Logic
         context_24h = _get_candles_in_range(raw_5m, lock_end_ts - 86400, lock_end_ts)
-        if not context_24h: context_24h = raw_5m[:50] # Fallback if history is short
+        if not context_24h: context_24h = raw_5m[:50] # Fallback
 
         try:
             sse_input = {
@@ -97,14 +89,11 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
             return {"status": "ERROR", "msg": f"Level Logic: {str(e)}"}
 
         # 4. SIGNAL SCANNING
-        # We only check candles AFTER the lock time
         post_lock_candles = [c for c in raw_5m if c["time"] >= lock_end_ts]
         
         if not post_lock_candles:
-             # We are in the calibration phase, no signals yet
              return {"status": "STANDBY", "msg": "Calibrating Session..."}
 
-        # Check the most recent candle for trigger
         recent_window = post_lock_candles[-3:]
         
         go_long = battlebox_rules.detect_pullback_go(
@@ -131,13 +120,12 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
         if go_long.get("ok"):
             status = "EXECUTING"
             active_side = "LONG"
-            stop_loss = r30_low # Locked 30m Low
+            stop_loss = r30_low
         elif go_short.get("ok"):
             status = "EXECUTING"
             active_side = "SHORT"
-            stop_loss = r30_high # Locked 30m High
+            stop_loss = r30_high
         else:
-            # PROXIMITY CHECK
             if bo > 0 and abs(current_price - bo) / bo < 0.001:
                 status = "LOCKED"
                 active_side = "LONG"
@@ -145,7 +133,7 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
                 status = "LOCKED"
                 active_side = "SHORT"
 
-        # 6. TARGET GENERATION
+        # 6. TARGETS
         targets = []
         context_type = "STRUCTURE"
         
@@ -187,6 +175,5 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
         }
 
     except Exception as e:
-        print("!!! OMEGA ENGINE CRITICAL FAILURE !!!")
-        traceback.print_exc()
+        # Keep minimal error logging to avoid flooding logs during high-frequency polling
         return {"ok": False, "status": "ERROR", "msg": str(e)}
