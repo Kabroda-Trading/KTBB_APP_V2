@@ -155,6 +155,28 @@
                         </div>
                     </div>
 
+                    <div class="chart-box" style="margin-top: 20px;">
+                        <h3 style="color:#fff; font-size:14px; margin-bottom:15px; border-bottom:1px solid #333; padding-bottom:5px;">💰 PROFITABILITY SIMULATION</h3>
+                        <div class="stats-row">
+                            <div class="stat-card">
+                                <span class="stat-val" id="simWinRate" style="color: #10b981;">0%</span>
+                                <span class="stat-lbl">Win Rate (Base)</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-val" id="simTP1" style="color: #fbbf24;">0%</span>
+                                <span class="stat-lbl">TP1 (Structure)</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-val" id="simTP2" style="color: #06b6d4;">0%</span>
+                                <span class="stat-lbl">TP2 (Stretch)</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-val" id="simTP3" style="color: #8b5cf6;">0%</span>
+                                <span class="stat-lbl">TP3 (Moon)</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="chart-box">
                         <h3 style="color:#fff; font-size:14px; margin-bottom:15px; border-bottom:1px solid #333; padding-bottom:5px;">STRATEGY BREAKDOWN</h3>
                         <div id="goChart"></div>
@@ -233,10 +255,8 @@
                     alignment_window_minutes: 120,
                     zone_tolerance_bps: parseInt(document.getElementById('tuneTol').value),
                     
-                    // --- NEW: CONFIRMATION MODE ---
                     confirmation_mode: document.getElementById('confirmMode').value,
 
-                    // PASS FLAGS
                     ignore_15m_alignment: document.getElementById('chkIgnore15m').checked,
                     ignore_5m_stoch: document.getElementById('chkIgnore5m').checked,
 
@@ -262,11 +282,40 @@
                 const goRate = stats.sessions_total > 0 ? ((stats.go_count / stats.sessions_total) * 100).toFixed(1) : "0.0";
                 document.getElementById('resRate').innerText = goRate + "%";
                 
+                // --- NEW: SIMULATION STATS ---
+                let totalGos = 0;
+                let wins = 0;
+                let tp1 = 0;
+                let tp2 = 0;
+                let tp3 = 0;
+
+                for (let s of data.sessions) {
+                    if (s.counts.had_go && s.events.simulation) {
+                        totalGos++;
+                        if (s.events.simulation.outcome === "WIN/OPEN") wins++;
+                        if (s.events.simulation.targets_hit.includes("TP1")) tp1++;
+                        if (s.events.simulation.targets_hit.includes("TP2")) tp2++;
+                        if (s.events.simulation.targets_hit.includes("TP3")) tp3++;
+                    }
+                }
+
+                if (totalGos > 0) {
+                    document.getElementById('simWinRate').innerText = ((wins / totalGos) * 100).toFixed(0) + "%";
+                    document.getElementById('simTP1').innerText = ((tp1 / totalGos) * 100).toFixed(0) + "%";
+                    document.getElementById('simTP2').innerText = ((tp2 / totalGos) * 100).toFixed(0) + "%";
+                    document.getElementById('simTP3').innerText = ((tp3 / totalGos) * 100).toFixed(0) + "%";
+                } else {
+                    document.getElementById('simWinRate').innerText = "0%";
+                    document.getElementById('simTP1').innerText = "0%";
+                    document.getElementById('simTP2').innerText = "0%";
+                    document.getElementById('simTP3').innerText = "0%";
+                }
+
                 let goHtml = "";
-                const totalGos = stats.go_count || 1;
-                const campPct = (stats.campaign_go_count || 0) / totalGos * 100;
+                const tGo = stats.go_count || 1;
+                const campPct = (stats.campaign_go_count || 0) / tGo * 100;
                 goHtml += `<div class="fail-bar"><span class="fail-lbl">CAMPAIGN (15m+5m)</span><div class="fail-track"><div class="fail-fill" style="width: ${campPct}%; background: #10b981;"></div></div><span class="fail-count">${stats.campaign_go_count || 0}</span></div>`;
-                const scalpPct = (stats.scalp_go_count || 0) / totalGos * 100;
+                const scalpPct = (stats.scalp_go_count || 0) / tGo * 100;
                 goHtml += `<div class="fail-bar"><span class="fail-lbl">SCALP (5m Only)</span><div class="fail-track"><div class="fail-fill" style="width: ${scalpPct}%; background: #f59e0b;"></div></div><span class="fail-count">${stats.scalp_go_count || 0}</span></div>`;
                 document.getElementById('goChart').innerHTML = goHtml;
 

@@ -1,224 +1,169 @@
-# battlebox_rules.py
+# research_lab.py
 # ==============================================================================
-# BATTLEBOX RULE LAYER v6.0 (CONFIRMATION MODE + STRESS TEST)
+# RESEARCH LAB CONTROLLER v7.0 (SIMULATION INTEGRATION)
 # ==============================================================================
 from __future__ import annotations
-from typing import Dict, List, Any, Optional
+from datetime import datetime, timedelta, timezone 
+from typing import Any, Dict, List, Optional
+import traceback
 
-print(">>> LOADING BATTLEBOX RULES v6.0 (CONFIRMATION MODE ENABLED) <<<")
+import battlebox_pipeline
+import sse_engine
+import structure_state_engine
+import battlebox_rules 
 
-# CONFIG
-STOCH_K = 14
-STOCH_D = 3
-STOCH_SMOOTH = 3
-RSI_PERIOD = 14
-DIV_LOOKBACK = 10 
+def _slice_by_ts(candles: List[Dict[str, Any]], start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
+    return [c for c in candles if start_ts <= c["time"] < end_ts]
 
-# Thresholds
-OB = 80.0
-OS = 20.0
-RSI_OB = 70.0
-RSI_OS = 30.0
-
-# Defaults
-DEFAULT_ZONE_TOL = 0.0010
-PUSH_MIN_PCT = 0.0008
-MAX_GO_BARS_5M = 48        
-
-# --- HELPERS ---
-def _sma(vals: List[float], n: int) -> float:
-    if len(vals) < n: return sum(vals) / max(len(vals), 1)
-    return sum(vals[-n:]) / n
-
-def compute_stoch(candles: List[Dict[str, Any]], k: int = STOCH_K, d: int = STOCH_D, smooth: int = STOCH_SMOOTH) -> Dict[str, Optional[float]]:
-    if not candles or len(candles) < k: return {"k_raw": None, "k_smooth": None, "d": None}
-    try:
-        highs = [float(c["high"]) for c in candles]
-        lows = [float(c["low"]) for c in candles]
-        closes = [float(c["close"]) for c in candles]
-        k_series = []
-        for i in range(k - 1, len(candles)):
-            hh = max(highs[i - k + 1 : i + 1])
-            ll = min(lows[i - k + 1 : i + 1])
-            denom = (hh - ll)
-            k_val = 50.0 if denom <= 0 else ((closes[i] - ll) / denom) * 100.0
-            k_series.append(k_val)
-        k_smooth = []
-        for i in range(len(k_series)): k_smooth.append(_sma(k_series[: i + 1], smooth))
-        ds = []
-        for i in range(len(k_smooth)): ds.append(_sma(k_smooth[: i + 1], d))
-        return {"k_raw": float(k_series[-1]), "k_smooth": float(k_smooth[-1]), "d": float(ds[-1])}
-    except: return {"k_raw": None, "k_smooth": None, "d": None}
-
-def compute_rsi(candles: List[Dict[str, Any]], period: int = RSI_PERIOD) -> float:
-    if not candles or len(candles) < period + 1: return 50.0
-    try:
-        closes = [float(c["close"]) for c in candles]
-        gains = []
-        losses = []
-        for i in range(1, len(closes)):
-            delta = closes[i] - closes[i-1]
-            gains.append(max(delta, 0))
-            losses.append(max(-delta, 0))
-        avg_gain = sum(gains[:period]) / period
-        avg_loss = sum(losses[:period]) / period
-        for i in range(period, len(gains)):
-            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-        if avg_loss == 0: return 100.0
-        rs = avg_gain / avg_loss
-        return 100.0 - (100.0 / (1.0 + rs))
-    except: return 50.0
-
-# --- CHECKS ---
-def stoch_aligned(side: str, st: Dict[str, Optional[float]]) -> bool:
-    k = st.get("k_smooth")
-    d = st.get("d")
-    if k is None or d is None: return False
-    if side == "SHORT": return k >= OB or d >= OB
-    if side == "LONG": return k <= OS or d <= OS
-    return False
-
-def rsi_aligned(side: str, rsi_val: float) -> bool:
-    if side == "SHORT": return rsi_val >= RSI_OB
-    if side == "LONG": return rsi_val <= RSI_OS
-    return False
-
-def check_divergence(side: str, candles: List[Dict[str, Any]]) -> bool:
-    if len(candles) < DIV_LOOKBACK + 5: return False
-    try:
-        current = candles[-1]
-        prev_window = candles[-(DIV_LOOKBACK+1):-1]
-        curr_rsi = compute_rsi(candles)
-        if side == "LONG":
-            curr_price = float(current["low"])
-            prev_low = min(prev_window, key=lambda x: float(x["low"]))
-            if curr_price < float(prev_low["low"]) and (curr_rsi > RSI_OS and curr_rsi < 50): return True
-        elif side == "SHORT":
-            curr_price = float(current["high"])
-            prev_high = max(prev_window, key=lambda x: float(x["high"]))
-            if curr_price > float(prev_high["high"]) and (curr_rsi < RSI_OB and curr_rsi > 50): return True
-        return False
-    except: return False
-
-def check_volume_pressure(candles: List[Dict[str, Any]]) -> bool:
-    if len(candles) < 21: return False
-    try:
-        curr = float(candles[-1].get("volume", 0) or 0)
-        hist = candles[-21:-1]
-        avg = sum(float(c.get("volume", 0) or 0) for c in hist) / len(hist)
-        if avg == 0: return True
-        return curr > (avg * 1.5)
-    except: return False
-
-# --- UNIFIED SIGNAL DETECTOR ---
-def detect_pullback_go(
-    side: str,
-    levels: Dict[str, float],
-    post_accept_5m: List[Dict[str, Any]],
-    stoch_15m_at_accept: Dict[str, Optional[float]],
-    use_zone: str = "TRIGGER",
-    require_volume: bool = False,
-    require_divergence: bool = False,
-    fusion_mode: bool = False, 
-    zone_tol: float = DEFAULT_ZONE_TOL,
-    ignore_15m: bool = False,
-    ignore_5m_stoch: bool = False,
-    confirmation_mode: str = "TOUCH", # NEW: "TOUCH", "1_CLOSE", "2_CLOSE"
-    **kwargs 
+async def run_research_lab_from_candles(
+    symbol: str,
+    raw_5m: List[Dict[str, Any]],
+    start_date_utc: str,
+    end_date_utc: str,
+    session_ids: Optional[List[str]] = None,
+    exec_hours: int = 12,
+    tuning: Dict[str, Any] = None
 ) -> Dict[str, Any]:
-    
-    if side not in ("LONG", "SHORT") or not post_accept_5m:
-        return {"ok": False, "go_type": "NONE", "go_ts": None}
-
-    bo = float(levels.get("breakout_trigger", 0.0))
-    bd = float(levels.get("breakdown_trigger", 0.0))
-    vah = float(levels.get("f24_vah", 0.0))
-    val = float(levels.get("f24_val", 0.0))
-
-    if use_zone == "VALUE":
-        zone = val if side == "LONG" else vah
-    else:
-        zone = bo if side == "LONG" else bd
-
-    if zone <= 0: return {"ok": False, "go_type": "NONE"}
-
-    # LOGIC: If ignore_15m is TRUE, we force the base check to pass.
-    campaign_base_ok = True if ignore_15m else stoch_aligned(side, stoch_15m_at_accept)
-
-    for i in range(min(len(post_accept_5m), MAX_GO_BARS_5M)):
-        window = post_accept_5m[: i + 1]
-        c = window[-1]
-        px = float(c["close"])
-        lo = float(c["low"])
-        hi = float(c["high"])
-
-        # ----------------------------------------
-        # NEW TRIGGER LOGIC (Replacing Simple Touch)
-        # ----------------------------------------
-        is_triggered = False
+    try:
+        print(f"[LAB] Starting analysis for {symbol} ({len(raw_5m)} candles provided)")
         
-        # 1. TOUCH (Aggressive)
-        if confirmation_mode == "TOUCH":
-            tol = zone * zone_tol
-            if side == "LONG" and lo <= zone + tol: is_triggered = True
-            if side == "SHORT" and hi >= zone - tol: is_triggered = True
+        if not raw_5m: return {"ok": False, "error": "No candles provided to Research Lab."}
+
+        raw_5m.sort(key=lambda x: x["time"])
+
+        start_dt = datetime.strptime(start_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        end_dt = datetime.strptime(end_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+        target_ids = session_ids or [s["id"] for s in battlebox_pipeline.SESSION_CONFIGS]
+        active_cfgs = [s for s in battlebox_pipeline.SESSION_CONFIGS if s["id"] in target_ids]
+
+        tuning = tuning or {}
+        req_vol = bool(tuning.get("require_volume", False))
+        req_div = bool(tuning.get("require_divergence", False))
+        fusion_mode = bool(tuning.get("fusion_mode", False))
+        ignore_15m = bool(tuning.get("ignore_15m_alignment", False))
+        ignore_5m = bool(tuning.get("ignore_5m_stoch", False))
+        confirm_mode = tuning.get("confirmation_mode", "TOUCH")
+        tol_bps = int(tuning.get("zone_tolerance_bps", 10)) 
+        zone_tol = tol_bps / 10000.0
+
+        sessions_result: List[Dict[str, Any]] = []
+        curr_day = start_dt
+
+        while curr_day <= end_dt:
+            day_str = curr_day.strftime("%Y-%m-%d")
             
-        # 2. 1-CANDLE CLOSE (Standard)
-        elif confirmation_mode == "1_CLOSE":
-            # Just requires current close to be outside zone
-            if side == "LONG" and px > zone: is_triggered = True
-            if side == "SHORT" and px < zone: is_triggered = True
-            
-        # 3. 2-CANDLE CLOSE (Conservative / Anti-Fakeout)
-        elif confirmation_mode == "2_CLOSE":
-            if i > 0: # We need at least 2 bars in the window
-                prev_c = window[-2]
-                prev_px = float(prev_c["close"])
+            for cfg in active_cfgs:
+                anchor_ts = battlebox_pipeline.anchor_ts_for_utc_date(cfg, curr_day)
+                lock_end_ts = anchor_ts + 1800
+                exec_end_ts = lock_end_ts + (exec_hours * 3600)
+
+                calibration = _slice_by_ts(raw_5m, anchor_ts, lock_end_ts)
+                if len(calibration) < 6: continue
+
+                context_24h = _slice_by_ts(raw_5m, lock_end_ts - 86400, lock_end_ts)
+                post_lock = _slice_by_ts(raw_5m, lock_end_ts, exec_end_ts)
+
+                sse_input = {
+                    "locked_history_5m": context_24h,
+                    "slice_24h_5m": context_24h,
+                    "session_open_price": calibration[0]["open"],
+                    "r30_high": max(c["high"] for c in calibration),
+                    "r30_low": min(c["low"] for c in calibration),
+                    "last_price": context_24h[-1]["close"] if context_24h else 0.0,
+                    "tuning": tuning
+                }
+                computed = sse_engine.compute_sse_levels(sse_input)
+                if "error" in computed: continue
+
+                levels = computed["levels"]
+                state = structure_state_engine.compute_structure_state(levels, post_lock, tuning=tuning)
+                had_acceptance = (state["permission"]["status"] == "EARNED")
+                side = state["permission"]["side"]
+
+                go = {"ok": False, "go_type": "NONE", "go_ts": None, "reason": "NO_ACCEPTANCE", "evidence": {}}
                 
-                if side == "LONG":
-                    # Current closed ABOVE and Previous closed ABOVE
-                    if px > zone and prev_px > zone: is_triggered = True
-                else: # SHORT
-                    # Current closed BELOW and Previous closed BELOW
-                    if px < zone and prev_px < zone: is_triggered = True
-        
-        if not is_triggered: continue
-        # ----------------------------------------
+                if had_acceptance and side in ("LONG", "SHORT") and post_lock:
+                    candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
+                    st15 = battlebox_rules.compute_stoch(candles_15m_proxy)
+                    
+                    go = battlebox_rules.detect_pullback_go(
+                        side=side, levels=levels, post_accept_5m=post_lock, stoch_15m_at_accept=st15, 
+                        use_zone="TRIGGER", require_volume=req_vol, require_divergence=req_div,
+                        fusion_mode=fusion_mode, zone_tol=zone_tol,
+                        ignore_15m=ignore_15m,
+                        ignore_5m_stoch=ignore_5m,
+                        confirmation_mode=confirm_mode
+                    )
 
-        # 2) 5m Stoch Alignment (BYPASSABLE)
-        if not ignore_5m_stoch:
-            st5 = compute_stoch(window)
-            if not stoch_aligned(side, st5): continue
-        
-        # 3) Fusion Mode (RSI)
-        if fusion_mode:
-            rsi_val = compute_rsi(window)
-            if not rsi_aligned(side, rsi_val): continue
+                    # --- SIMULATION ---
+                    if go["ok"]:
+                        stop_price = 0.0
+                        if side == "LONG": stop_price = min(c["low"] for c in calibration) 
+                        else: stop_price = max(c["high"] for c in calibration)
 
-        # 4) Push (Only applies if using TOUCH logic, usually)
-        # If using Close logic, price is already past zone, so push is implied.
-        if confirmation_mode == "TOUCH":
-            push_ok = (px >= zone * (1.0 + PUSH_MIN_PCT)) if side == "LONG" else (px <= zone * (1.0 - PUSH_MIN_PCT))
-            if not push_ok: continue
+                        trade_candles = [c for c in raw_5m if c["time"] > go["go_ts"] and c["time"] < exec_end_ts]
+                        
+                        sim = battlebox_rules.simulate_trade(
+                            entry_price=levels.get("breakout_trigger") if side == "LONG" else levels.get("breakdown_trigger"),
+                            entry_ts=go["go_ts"],
+                            stop_price=stop_price,
+                            direction=side,
+                            levels=levels,
+                            future_candles=trade_candles
+                        )
+                        go["simulation"] = sim
 
-        # 5) Filters
-        if require_volume and not check_volume_pressure(window): continue
-        if require_divergence and not check_divergence(side, window): continue
+                sessions_result.append({
+                    "ok": True,
+                    "date": day_str,
+                    "session_id": cfg["id"],
+                    "session_name": cfg["name"],
+                    "levels_compact": {
+                        "BO": levels.get("breakout_trigger"),
+                        "BD": levels.get("breakdown_trigger"),
+                        "DS": levels.get("daily_support"),
+                        "DR": levels.get("daily_resistance")
+                    },
+                    "counts": {
+                        "had_acceptance": had_acceptance,
+                        "had_alignment": (state["execution"]["gates_mode"] == "LOCKED"),
+                        "had_go": bool(go["ok"]),
+                        "go_type": go["go_type"],
+                    },
+                    "events": {
+                        "acceptance_side": side,
+                        "final_state": state.get("action"),
+                        "go_ts": go.get("go_ts"),
+                        "go_reason": go.get("reason"),
+                        "fail_reason": state.get("diagnostics", {}).get("fail_reason", "UNKNOWN"),
+                        "simulation": go.get("simulation") 
+                    }
+                })
+            curr_day += timedelta(days=1)
 
-        go_type = "CAMPAIGN_GO" if campaign_base_ok else "SCALP_GO"
-        
-        # Build reason string
-        reason_str = confirmation_mode
-        if not ignore_5m_stoch: reason_str += "+STOCH"
-        if require_volume: reason_str += "+VOL"
-        if require_divergence: reason_str += "+DIV"
-        
+        total = len(sessions_result)
+        fail_reasons = {}
+        for s in sessions_result:
+            r = s["events"].get("fail_reason")
+            if r: fail_reasons[r] = fail_reasons.get(r, 0) + 1
+            
+        print(f"[LAB] Analysis complete. Sessions: {total}")
+
         return {
-            "ok": True, 
-            "go_type": go_type, 
-            "go_ts": int(c["time"]), 
-            "reason": reason_str
+            "ok": True,
+            "symbol": symbol,
+            "range": {"start": start_date_utc, "end": end_date_utc},
+            "stats": {
+                "sessions_total": total,
+                "acceptance_count": sum(1 for s in sessions_result if s["counts"]["had_acceptance"]),
+                "go_count": sum(1 for s in sessions_result if s["counts"]["had_go"]),
+                "campaign_go_count": sum(1 for s in sessions_result if s["counts"]["go_type"] == "CAMPAIGN_GO"),
+                "scalp_go_count": sum(1 for s in sessions_result if s["counts"]["go_type"] == "SCALP_GO"),
+                "fail_reasons": fail_reasons
+            },
+            "sessions": sessions_result
         }
-
-    return {"ok": False, "go_type": "NONE", "go_ts": None}
+    except Exception as e:
+        traceback.print_exc()
+        return {"ok": False, "error": str(e)}
