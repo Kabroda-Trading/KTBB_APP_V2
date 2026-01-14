@@ -80,7 +80,7 @@
         </div>
         <div class="controls">
             <div class="status-pill">FERRARI MODE ACTIVE</div>
-            <button id="btnAlert" class="alert-toggle" onclick="toggleAlerts()">AUDIO: OFF</button>
+            <button id="btnAlert" class="alert-toggle" onclick="toggleAlerts()">ALERTS: OFF</button>
             <a href="/suite" class="back-link">EXIT</a>
         </div>
     </div>
@@ -173,8 +173,8 @@
 
         // AUDIO SYSTEM
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
         function playPing() {
-            if(!alertsEnabled) return;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.connect(gain);
@@ -188,13 +188,30 @@
         function toggleAlerts() {
             alertsEnabled = !alertsEnabled;
             const btn = document.getElementById('btnAlert');
+            
             if(alertsEnabled) {
-                btn.innerText = "AUDIO: ON";
+                btn.innerText = "ALERTS: ON";
                 btn.classList.add('active');
+                
+                // 1. Activate Audio
                 if (audioCtx.state === 'suspended') audioCtx.resume();
-                playPing(); // Test
+                playPing(); // Test Sound
+                
+                // 2. Request Browser Notification Permission
+                if ("Notification" in window) {
+                    if (Notification.permission !== "granted") {
+                        Notification.requestPermission().then(permission => {
+                            if(permission === "granted") {
+                                new Notification("PROJECT OMEGA", { 
+                                    body: "Visual Alerts Enabled. You will be notified of zone changes." 
+                                });
+                            }
+                        });
+                    }
+                }
+
             } else {
-                btn.innerText = "AUDIO: OFF";
+                btn.innerText = "ALERTS: OFF";
                 btn.classList.remove('active');
             }
         }
@@ -220,12 +237,8 @@
                     document.getElementById('livePrice').innerText = currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2});
                     
                     if(data.battlebox && data.battlebox.levels) {
-                        // Determine direction based on where price is relative to open
-                        // For simplicity, if price > Daily Resistance -> Long logic
                         const l = data.battlebox.levels;
-                        triggerPrice = l.breakout_trigger; // Default to Long for display
-                        
-                        // Check Blue Sky Context (Price > Daily Res)
+                        triggerPrice = l.breakout_trigger;
                         isBlueSky = (l.daily_resistance && triggerPrice > l.daily_resistance);
                         
                         document.getElementById('valTrigger').innerText = triggerPrice.toLocaleString(undefined, {maximumFractionDigits: 0});
@@ -248,11 +261,10 @@
             const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
             const stopPrice = parseFloat(document.getElementById('inpStop').value) || 0;
 
-            // 1. Risk Math
+            // Risk Math
             const dollarRisk = bal * (riskPct / 100);
             document.getElementById('riskAmt').innerText = "$" + dollarRisk.toFixed(0) + " RISK";
 
-            // 2. Position Sizer
             if (stopPrice > 0) {
                 const distPct = Math.abs(currentPrice - stopPrice) / currentPrice;
                 if (distPct > 0) {
@@ -261,7 +273,7 @@
                 }
             }
 
-            // 3. Smart Coach Logic
+            // Coach Logic
             const riskDist = Math.abs(triggerPrice - stopPrice);
             const secure = triggerPrice + (riskDist * 0.5); 
             const tp1 = triggerPrice + riskDist;
@@ -294,11 +306,9 @@
             }
             else if (currentPrice >= secure && currentPrice < tp1) {
                 coach.classList.add('mode-secure');
-                // VULTURE vs EAGLE LOGIC
                 if (isBlueSky) {
                     msg.innerText = "HOLD (EAGLE MODE)";
                 } else {
-                    // Structure: 60% rule
                     const progress = (currentPrice - triggerPrice) / (tp1 - triggerPrice);
                     if (progress > 0.6) msg.innerText = "MOVE STOP TO B.E. (VULTURE)";
                     else msg.innerText = "HOLD (STRUCTURE)";
@@ -313,9 +323,19 @@
                 zone = "PROFIT";
             }
 
-            // Alert Trigger
+            // ALERT TRIGGER
             if (zone !== lastZone) {
-                if (alertsEnabled) playPing();
+                if (alertsEnabled) {
+                    // 1. Audio
+                    playPing();
+                    
+                    // 2. Visual Browser Popup
+                    if ("Notification" in window && Notification.permission === "granted") {
+                        new Notification("OMEGA // " + zTxt.innerText, { 
+                            body: msg.innerText + "\nPrice: " + currentPrice.toLocaleString()
+                        });
+                    }
+                }
                 lastZone = zone;
             }
         }
