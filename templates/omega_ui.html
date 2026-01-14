@@ -206,24 +206,61 @@
     </div>
 
     <script>
-        // --- LIVE DATA SIMULATION (Replace with WebSocket) ---
-        let currentPrice = 96150; 
-        let triggerPrice = 95454;
+        // --- REAL LIVE DATA CONNECTION ---
+        // We use the same feed as Battle Control to ensure accuracy
+        const API_ENDPOINT = '/api/dmr/live'; 
+        
+        // Default values until data loads
+        let currentPrice = 0; 
+        let triggerPrice = 95454; // This will auto-update if backend sends it
+
+        async function fetchLiveData() {
+            try {
+                const res = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ 
+                        symbol: "BTCUSDT", 
+                        session_mode: "AUTO", 
+                        operator_flex: true 
+                    })
+                });
+                
+                const data = await res.json();
+                
+                if(data.status === "OK" || data.price) {
+                    // 1. UPDATE PRICE
+                    currentPrice = data.price;
+                    document.getElementById('livePrice').innerText = currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2});
+                    
+                    // 2. UPDATE TRIGGER (If available in data, otherwise keep default)
+                    if(data.battlebox && data.battlebox.levels && data.battlebox.levels.breakout_trigger) {
+                        triggerPrice = data.battlebox.levels.breakout_trigger;
+                        document.getElementById('valTrigger').innerText = triggerPrice.toLocaleString(undefined, {maximumFractionDigits: 0});
+                    }
+
+                    // 3. RE-CALCULATE EVERYTHING
+                    calc();
+                }
+            } catch(e) {
+                console.error("Data Link Severed:", e);
+                document.getElementById('livePrice').style.color = "#444"; // Dim if broken
+            }
+        }
 
         function calc() {
+            if(currentPrice === 0) return; // Wait for first data
+
             const bal = parseFloat(document.getElementById('inpBal').value) || 0;
             const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
             const stopPrice = parseFloat(document.getElementById('inpStop').value) || 0;
 
-            // 1. Update Prices
-            document.getElementById('livePrice').innerText = currentPrice.toLocaleString();
-            document.getElementById('valTrigger').innerText = triggerPrice.toLocaleString();
-
-            // 2. Risk Math
+            // 1. Risk Math
             const dollarRisk = bal * (riskPct / 100);
             document.getElementById('riskAmt').innerText = "$" + dollarRisk.toFixed(0) + " RISK";
 
-            // 3. Magic Box (Position Size)
+            // 2. Magic Box (Position Size)
+            // Logic: You buy enough so that if it hits stop, you lose exactly dollarRisk
             if (currentPrice > 0 && stopPrice > 0) {
                 const distPct = Math.abs(currentPrice - stopPrice) / currentPrice;
                 if (distPct > 0) {
@@ -232,7 +269,7 @@
                 }
             }
 
-            // 4. Coaching Logic
+            // 3. Coaching Logic
             updateCoach(currentPrice, triggerPrice, stopPrice);
         }
 
@@ -240,9 +277,8 @@
             const coach = document.getElementById('coachPanel');
             const msg = document.getElementById('coachText');
             
-            // Targets Calculation (Dynamic based on Risk Distance)
+            // Targets Calculation
             const riskDist = Math.abs(trigger - stop);
-            
             const secure = trigger + (riskDist * 0.5); // 0.5 R
             const tp1 = trigger + riskDist;            // 1.0 R
             const tp2 = trigger + (riskDist * 2);      // 2.0 R
@@ -253,7 +289,7 @@
             document.getElementById('txtTP2').innerText = tp2.toLocaleString(undefined, {maximumFractionDigits:0});
             document.getElementById('txtTP3').innerText = tp3.toLocaleString(undefined, {maximumFractionDigits:0});
 
-            // Coach Logic
+            // Status Logic
             coach.className = "coach-banner"; // reset
             
             if (price < trigger) {
@@ -261,6 +297,8 @@
                 msg.innerText = "STANDBY";
                 document.getElementById('livePrice').style.color = "#fff";
                 document.getElementById('zoneText').innerText = "PRE-GAME";
+                document.getElementById('stopStatus').innerText = "WAITING";
+                document.getElementById('stopStatus').style.color = "#666";
             } 
             else if (price >= trigger && price < secure) {
                 coach.classList.add('mode-entry');
@@ -283,16 +321,16 @@
                 msg.innerText = "SELL 50% / TRAIL";
                 document.getElementById('livePrice').style.color = "var(--green)";
                 document.getElementById('zoneText').innerText = "PROFIT ZONE";
+                document.getElementById('stopStatus').innerText = "LOCKED PROFIT";
             }
         }
 
-        setInterval(() => {
-            // Simulate random price flicker for "Live" feel
-            // currentPrice += (Math.random() > 0.5 ? 10 : -10); 
-            calc();
-        }, 1000);
-
-        calc(); // Init
+        // --- THE HEARTBEAT ---
+        // Fetch new data every 2 seconds
+        setInterval(fetchLiveData, 2000);
+        
+        // Initial call
+        fetchLiveData();
     </script>
 </body>
 </html>
