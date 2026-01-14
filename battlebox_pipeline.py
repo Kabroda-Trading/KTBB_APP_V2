@@ -1,6 +1,6 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE v4.5 (RESTORED STABLE VERSION)
+# KABRODA BATTLEBOX PIPELINE v5.1 (PUBLIC STRUCTURE LOGIC)
 # ==============================================================================
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
@@ -26,6 +26,92 @@ SESSION_CONFIGS = [
 
 LOCKED_SESSIONS: Dict[str, Dict[str, Any]] = {}
 _exchange_live = ccxt.kucoin({"enableRateLimit": True})
+
+# ----------------------------
+# LOCAL HELPERS (RSI & DIV for Public View)
+# ----------------------------
+def _calculate_rsi(prices: List[float], period=14) -> List[float]:
+    if len(prices) < period + 1: return [50.0] * len(prices)
+    gains, losses = [], []
+    for i in range(1, len(prices)):
+        delta = prices[i] - prices[i-1]
+        gains.append(max(delta, 0))
+        losses.append(max(-delta, 0))
+    
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    rsis = [50.0] * period 
+    
+    for i in range(period, len(prices)-1):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        if avg_loss == 0: rsi = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi = 100.0 - (100.0 / (1.0 + rs))
+        rsis.append(rsi)
+    return rsis
+
+def _check_public_structure(levels: Dict[str, float], candles: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Logic: 1-Candle Close + RSI Divergence
+    Ignores Stochastics entirely.
+    """
+    if not candles or len(candles) < 20: 
+        return {"active": False}
+
+    bo = levels.get("breakout_trigger", 0.0)
+    bd = levels.get("breakdown_trigger", 0.0)
+    if bo == 0 or bd == 0: return {"active": False}
+
+    current = candles[-1]
+    px = float(current["close"])
+    
+    # 1. TRIGGER CHECK (1-Candle Close)
+    side = "NONE"
+    if px > bo: side = "LONG"
+    elif px < bd: side = "SHORT"
+    
+    if side == "NONE": return {"active": False}
+
+    # 2. RSI CALCULATION
+    closes = [float(c["close"]) for c in candles]
+    rsis = _calculate_rsi(closes)
+    curr_rsi = rsis[-1]
+
+    # 3. DIVERGENCE CHECK (Simplified Lookback)
+    # We look for price making a new extreme but RSI failing to follow
+    lookback = candles[-15:-1] # Prior 15 bars excluding current
+    has_divergence = False
+    
+    if side == "LONG":
+        # Price made a low recently?
+        min_price_idx = min(range(len(lookback)), key=lambda i: lookback[i]["low"])
+        recent_low_rsi = rsis[len(candles) - 15 + min_price_idx]
+        # If current low is lower than prev, but RSI is higher = Bull Div
+        if float(current["low"]) < float(lookback[min_price_idx]["low"]) and curr_rsi > recent_low_rsi:
+            has_divergence = True
+        # Also accept standard oversold bounce as "Structure" for public
+        if curr_rsi < 35: has_divergence = True 
+
+    elif side == "SHORT":
+        # Price made a high recently?
+        max_price_idx = max(range(len(lookback)), key=lambda i: lookback[i]["high"])
+        recent_high_rsi = rsis[len(candles) - 15 + max_price_idx]
+        # If current high is higher than prev, but RSI is lower = Bear Div
+        if float(current["high"]) > float(lookback[max_price_idx]["high"]) and curr_rsi < recent_high_rsi:
+            has_divergence = True
+        if curr_rsi > 65: has_divergence = True
+
+    if has_divergence:
+        return {
+            "active": True,
+            "action": f"STRUCTURE {side}",
+            "reason": "BREAKOUT + RSI DIV",
+            "side": side
+        }
+    
+    return {"active": False}
 
 # ----------------------------
 # HELPERS
@@ -65,7 +151,6 @@ def anchor_ts_for_utc_date(cfg: Dict, utc_date: datetime) -> int:
 
 def resolve_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[str] = None) -> Dict[str, Any]:
     mode = (mode or "AUTO").upper()
-    
     if mode == "MANUAL" and manual_id:
         cfg = next((s for s in SESSION_CONFIGS if s["id"] == manual_id), SESSION_CONFIGS[0])
         tz = pytz.timezone(cfg["tz"])
@@ -73,12 +158,7 @@ def resolve_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[s
         open_time = now_local.replace(hour=cfg["open_h"], minute=cfg["open_m"], second=0, microsecond=0)
         if now_local < open_time: open_time -= timedelta(days=1)
         elapsed = (now_local - open_time).total_seconds() / 60.0
-        return {
-            "id": cfg["id"], "name": cfg["name"], "tz": cfg["tz"],
-            "anchor_time": int(open_time.astimezone(timezone.utc).timestamp()),
-            "date_key": open_time.strftime("%Y-%m-%d"),
-            "energy": _infer_energy(elapsed),
-        }
+        return {"id": cfg["id"], "name": cfg["name"], "tz": cfg["tz"], "anchor_time": int(open_time.astimezone(timezone.utc).timestamp()), "date_key": open_time.strftime("%Y-%m-%d"), "energy": _infer_energy(elapsed)}
 
     candidates = []
     for cfg in SESSION_CONFIGS:
@@ -91,13 +171,7 @@ def resolve_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[s
     
     candidates.sort(key=lambda x: x[0])
     elapsed, cfg, open_time = candidates[0]
-    
-    return {
-        "id": cfg["id"], "name": cfg["name"], "tz": cfg["tz"],
-        "anchor_time": int(open_time.astimezone(timezone.utc).timestamp()),
-        "date_key": open_time.strftime("%Y-%m-%d"),
-        "energy": _infer_energy(elapsed),
-    }
+    return {"id": cfg["id"], "name": cfg["name"], "tz": cfg["tz"], "anchor_time": int(open_time.astimezone(timezone.utc).timestamp()), "date_key": open_time.strftime("%Y-%m-%d"), "energy": _infer_energy(elapsed)}
 
 # ----------------------------
 # DATA FETCHING
@@ -119,35 +193,25 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
     except: return []
 
 async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
-    """Deep fetch for Research Lab (Uses KuCoin) - Errors Bubble Up"""
     exchange = ccxt.kucoin({'enableRateLimit': True})
     s = _normalize_symbol(symbol)
     all_candles = []
-    
     try:
         current = start_ts * 1000
         end = end_ts * 1000
-        
         while current < end:
-            # We let exceptions happen here so the UI sees the real error (e.g. Rate Limit)
             ohlcv = await exchange.fetch_ohlcv(s, '5m', current, 1500) 
             if not ohlcv: break
-            
             all_candles.extend(ohlcv)
             current = ohlcv[-1][0] + (5*60*1000)
             if len(ohlcv) < 1500: break
-            
-    finally:
-        await exchange.close()
+    finally: await exchange.close()
     
     formatted = []
     for c in all_candles:
         ts = int(c[0]/1000)
         if start_ts <= ts <= end_ts:
-            formatted.append({
-                "time": ts, 
-                "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4]), "volume": float(c[5])
-            })
+            formatted.append({"time": ts, "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4]), "volume": float(c[5])})
     return formatted
 
 def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -161,51 +225,11 @@ def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"status": "LIVE", "lean": lean, "phase": "TRANSITION", "note": f"Pressure is {lean}."}
 
 # ----------------------------
-# CORE COMPUTATION
-# ----------------------------
-def _compute_sse_packet(raw_5m: List[Dict], anchor_ts: int, tuning: Dict = None) -> Dict[str, Any]:
-    lock_end_ts = anchor_ts + 1800
-    calibration = [c for c in raw_5m if anchor_ts <= c["time"] < lock_end_ts]
-    
-    if len(calibration) < 6:
-        return {"error": "Insufficient calibration data.", "lock_end_ts": lock_end_ts}
-
-    context_24h = [c for c in raw_5m if (lock_end_ts - 86400) <= c["time"] < lock_end_ts]
-    
-    session_open = calibration[0]["open"]
-    r30_high = max(c["high"] for c in calibration)
-    r30_low = min(c["low"] for c in calibration)
-    last_price = context_24h[-1]["close"] if context_24h else session_open
-
-    sse_input = {
-        "locked_history_5m": context_24h,
-        "slice_24h_5m": context_24h,
-        "slice_4h_5m": context_24h[-48:], 
-        "session_open_price": session_open,
-        "r30_high": r30_high, 
-        "r30_low": r30_low,
-        "last_price": last_price,
-        "tuning": tuning or {}
-    }
-
-    computed = sse_engine.compute_sse_levels(sse_input)
-    if "error" in computed: return computed
-    
-    return {
-        "levels": computed["levels"],
-        "context": computed.get("context", {}),
-        "bias_model": computed.get("bias_model", {}),
-        "htf_shelves": computed.get("htf_shelves", {}),
-        "lock_time": lock_end_ts
-    }
-
-# ----------------------------
 # PUBLIC API (LIVE & REVIEW)
 # ----------------------------
 async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id: str = None, operator_flex: bool = False) -> Dict[str, Any]:
     raw_5m = await fetch_live_5m(symbol)
     raw_1h = await fetch_live_1h(symbol)
-    
     if not raw_5m: return {"status": "ERROR", "message": "No Data"}
     
     now_utc = datetime.now(timezone.utc)
@@ -215,18 +239,7 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
 
     if int(now_utc.timestamp()) < lock_end_ts:
         wm = _war_map_from_1h(raw_1h)
-        return {
-            "status": "CALIBRATING",
-            "timestamp": now_utc.strftime("%H:%M UTC"),
-            "price": raw_5m[-1]["close"],
-            "energy": "CALIBRATING",
-            "battlebox": {
-                "war_map_context": wm,
-                "session_battle": _safe_placeholder_state("Calibrating..."),
-                "session": session,
-                "levels": {}
-            }
-        }
+        return {"status": "CALIBRATING", "timestamp": now_utc.strftime("%H:%M UTC"), "price": raw_5m[-1]["close"], "energy": "CALIBRATING", "battlebox": {"war_map_context": wm, "session_battle": _safe_placeholder_state("Calibrating..."), "session": session, "levels": {}}}
 
     session_key = f"{symbol}_{session['id']}_{session['date_key']}"
     if session_key not in LOCKED_SESSIONS:
@@ -239,9 +252,22 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     pkt = LOCKED_SESSIONS[session_key]
     levels = pkt["levels"]
     lock_time = pkt["lock_time"]
-
     post_lock = [c for c in raw_5m if c["time"] >= lock_time]
+    
+    # 1. Base State (Standard Logic)
     state = structure_state_engine.compute_structure_state(levels, post_lock)
+    
+    # 2. PUBLIC STRUCTURE CHECK (The Update)
+    # Checks for 1-Candle Close + RSI Divergence
+    # Replaces "HOLD FIRE" with "STRUCTURE ACTIVE"
+    public_chk = _check_public_structure(levels, post_lock)
+    
+    if public_chk["active"]:
+        state["action"] = public_chk["action"]  # e.g., "STRUCTURE LONG"
+        state["reason"] = public_chk["reason"]  # e.g., "BREAKOUT + RSI DIV"
+        state["permission"]["status"] = "WATCHING"
+        state["permission"]["side"] = public_chk["side"]
+
     wm = _war_map_from_1h(raw_1h)
 
     return {
@@ -260,38 +286,34 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     }
 
 async def get_session_review(symbol: str, session_tz: str) -> Dict[str, Any]:
+    # (Existing Logic - Unchanged)
     raw_5m = await fetch_live_5m(symbol)
     if not raw_5m: return {"ok": False, "error": "No Data"}
-
     cfg = next((s for s in SESSION_CONFIGS if s["tz"] == session_tz), SESSION_CONFIGS[0])
     anchor_ts = anchor_ts_for_utc_date(cfg, datetime.now(timezone.utc))
     lock_end_ts = anchor_ts + 1800
-    
     if anchor_ts > datetime.now(timezone.utc).timestamp():
          anchor_ts -= 86400
          lock_end_ts -= 86400
-         
     pkt = _compute_sse_packet(raw_5m, anchor_ts)
-    
     if "error" in pkt:
         if int(datetime.now(timezone.utc).timestamp()) < lock_end_ts:
              return {"ok": True, "mode": "CALIBRATING", "symbol": symbol, "session": {"name": cfg["name"]}, "message": "Calibrating..."}
         return {"ok": False, "error": pkt["error"]}
-
     open_time = datetime.fromtimestamp(anchor_ts, tz=timezone.utc).isoformat()
+    return {"ok": True, "mode": "LOCKED", "symbol": symbol, "price": raw_5m[-1]["close"], "session": {"name": cfg["name"], "anchor_time": open_time}, "levels": pkt["levels"], "bias_model": pkt.get("bias_model", {}), "context": pkt.get("context", {}), "htf_shelves": pkt.get("htf_shelves", {}), "range_30m": {"high": pkt["levels"].get("range30m_high", 0), "low": pkt["levels"].get("range30m_low", 0)}}
 
-    return {
-        "ok": True,
-        "mode": "LOCKED",
-        "symbol": symbol,
-        "price": raw_5m[-1]["close"],
-        "session": {"name": cfg["name"], "anchor_time": open_time},
-        "levels": pkt["levels"],
-        "bias_model": pkt.get("bias_model", {}),
-        "context": pkt.get("context", {}),
-        "htf_shelves": pkt.get("htf_shelves", {}),
-        "range_30m": {
-            "high": pkt["levels"].get("range30m_high", 0),
-            "low": pkt["levels"].get("range30m_low", 0)
-        }
-    }
+# Core Computation Wrapper
+def _compute_sse_packet(raw_5m: List[Dict], anchor_ts: int, tuning: Dict = None) -> Dict[str, Any]:
+    lock_end_ts = anchor_ts + 1800
+    calibration = [c for c in raw_5m if anchor_ts <= c["time"] < lock_end_ts]
+    if len(calibration) < 6: return {"error": "Insufficient calibration data.", "lock_end_ts": lock_end_ts}
+    context_24h = [c for c in raw_5m if (lock_end_ts - 86400) <= c["time"] < lock_end_ts]
+    session_open = calibration[0]["open"]
+    r30_high = max(c["high"] for c in calibration)
+    r30_low = min(c["low"] for c in calibration)
+    last_price = context_24h[-1]["close"] if context_24h else session_open
+    sse_input = {"locked_history_5m": context_24h, "slice_24h_5m": context_24h, "slice_4h_5m": context_24h[-48:], "session_open_price": session_open, "r30_high": r30_high, "r30_low": r30_low, "last_price": last_price, "tuning": tuning or {}}
+    computed = sse_engine.compute_sse_levels(sse_input)
+    if "error" in computed: return computed
+    return {"levels": computed["levels"], "context": computed.get("context", {}), "bias_model": computed.get("bias_model", {}), "htf_shelves": computed.get("htf_shelves", {}), "lock_time": lock_end_ts}

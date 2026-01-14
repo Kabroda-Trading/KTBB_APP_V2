@@ -221,7 +221,6 @@
 
         </div>
     </div>
-
     <script>
       const USER_OP_FLEX = {{ 'true' if user.operator_flex else 'false' }};
       let lastPacket = null;
@@ -249,6 +248,7 @@
             clearInterval(autoRefreshTimer);
         }
       }
+      
       async function runLivePulse() {
         const btn = document.querySelector('#main-action-btn');
         const originalText = btn.innerText;
@@ -277,8 +277,22 @@
             
             const sb = data.battlebox.session_battle || {};
             document.getElementById('session-name').innerText = data.battlebox.session?.name || "--";
+            
+            // --- UPDATED ACTION LOGIC ---
             const action = sb.action || "HOLD FIRE";
-            document.getElementById('sb-action').innerText = action;
+            const actionEl = document.getElementById('sb-action');
+            actionEl.innerText = action;
+            
+            // Dynamic Colors based on Action
+            if (action.includes("STRUCTURE")) {
+                actionEl.style.color = "#06b6d4"; // Cyan for Structure
+            } else if (action.includes("ENGAGE") || action.includes("EXECUTE")) {
+                actionEl.style.color = "#10b981"; // Green for Action
+            } else {
+                actionEl.style.color = "#444"; // Grey for Hold
+            }
+            // -----------------------------
+
             document.getElementById('sb-reason').innerText = sb.reason || "--";
             document.getElementById('live-price').innerText = data.price.toFixed(2);
             document.getElementById('sb-perm').innerText = sb.permission?.status || "NONE";
@@ -304,6 +318,7 @@
         } catch(e) { console.error(e); } 
         finally { btn.innerText = originalText; }
       }
+      
       function copyTraderBrief() {
         if(!lastPacket) return;
         navigator.clipboard.writeText(JSON.stringify(lastPacket, null, 2));
