@@ -28,7 +28,15 @@
         
         /* SIGNAL DISPLAY */
         .signal-status { font-size: 14px; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; }
+        
+        /* UPDATED: Flex container for Live Price vs Trigger */
+        .price-row { display: flex; gap: 40px; align-items: baseline; margin-top: 10px; }
+        .price-col { display: flex; flex-direction: column; }
+        .price-lbl { font-size: 10px; color: #555; margin-bottom: 5px; letter-spacing: 1px; }
+
         .big-price { font-size: 80px; font-weight: 800; color: #fff; margin: 0; line-height: 1; }
+        .trigger-price { font-size: 50px; font-weight: 800; color: #444; margin: 0; line-height: 1; }
+
         .context-tag { position: absolute; top: 20px; right: 20px; border: 1px solid #333; padding: 5px 10px; font-size: 10px; color: #666; font-weight: bold; }
         
         /* STATES */
@@ -65,7 +73,18 @@
         <div class="panel" id="mainPanel">
             <div class="context-tag" id="ctxFlag">SEARCHING...</div>
             <div class="signal-status" id="statusText">SYSTEM STANDBY</div>
-            <div class="big-price" id="liveTrigger">--</div>
+            
+            <div class="price-row">
+                <div class="price-col">
+                    <span class="price-lbl">LIVE MARKET</span>
+                    <div class="big-price" id="livePrice">--</div>
+                </div>
+                <div class="price-col">
+                    <span class="price-lbl">TRIGGER LEVEL</span>
+                    <div class="trigger-price" id="liveTrigger">--</div>
+                </div>
+            </div>
+
             <div style="margin-top: 20px; color: #444; font-size: 12px;">
                 CONFIRMATION: 1-CANDLE CLOSE // TIMEFRAME: 15M
             </div>
@@ -160,6 +179,7 @@
             const p = document.getElementById('mainPanel');
             const sText = document.getElementById('statusText');
             const trig = document.getElementById('liveTrigger');
+            const liveP = document.getElementById('livePrice');
             
             // STATE CHANGE DETECTION
             if (data.status !== lastStatus) {
@@ -174,11 +194,11 @@
             if (data.status === 'LOCKED') {
                 p.classList.add('state-locked');
                 sText.innerText = "⚠️ LOCKED & LOADED // WATCH CLOSE";
-                sText.style.color = "#d97706";
+                sText.style.color = "var(--amber)";
             } else if (data.status === 'EXECUTING') {
                 p.classList.add('state-executing');
                 sText.innerText = "🚀 EXECUTE ORDER 66";
-                sText.style.color = "#059669";
+                sText.style.color = "var(--green)";
             } else {
                 sText.innerText = "SCANNING FOR ALPHA...";
                 sText.style.color = "#444";
@@ -188,6 +208,18 @@
             const entryPrice = data.execution?.entry || data.triggers?.BO || 0;
             trig.innerText = entryPrice > 0 ? entryPrice.toLocaleString() : "--";
             
+            // --- NEW: LIVE PRICE RENDER LOGIC ---
+            if(data.price) {
+                liveP.innerText = data.price.toLocaleString();
+                // Turn Green if we are WINNING (Above Trigger)
+                if(entryPrice > 0 && data.price > entryPrice) {
+                    liveP.style.color = "var(--green)";
+                } else {
+                    liveP.style.color = "#fff";
+                }
+            }
+            // ------------------------------------
+            
             // Render Strength Score
             const strength = data.strength || {score: 0, rating: "CALIBRATING", tags: []};
             const ctxText = `CTX: ${data.context || 'UNK'} | ${strength.rating} (${strength.score}%)`;
@@ -195,10 +227,12 @@
             
             ctxEl.innerText = ctxText;
             
-            // Color code the context tag
             if (strength.score >= 80) {
-                ctxEl.style.borderColor = "#059669";
-                ctxEl.style.color = "#059669";
+                ctxEl.style.borderColor = "var(--green)";
+                ctxEl.style.color = "var(--green)";
+            } else if (strength.score >= 50) {
+                ctxEl.style.borderColor = "var(--amber)";
+                ctxEl.style.color = "var(--amber)";
             } else {
                 ctxEl.style.borderColor = "#333";
                 ctxEl.style.color = "#666";
