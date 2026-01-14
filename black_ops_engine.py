@@ -1,6 +1,6 @@
 # black_ops_engine.py
 # ==============================================================================
-# PROJECT OMEGA: SPECIAL OPERATIONS LOGIC ENGINE (STRENGTH ENABLED)
+# PROJECT OMEGA: SPECIAL OPERATIONS LOGIC ENGINE (STRICT ALIGNMENT)
 # CLASSIFICATION: TOP SECRET // ADMIN EYES ONLY
 # ==============================================================================
 from __future__ import annotations
@@ -13,10 +13,12 @@ import battlebox_pipeline
 import sse_engine
 import battlebox_rules
 
-# --- OMEGA SPECIAL OPS CONFIGURATION ---
+# --- OMEGA SPECIAL OPS CONFIGURATION (STRICT MODE) ---
+# UPDATED: "ignore_15m_alignment" set to False to match Research Lab Backtests.
+# This ensures we only take high-probability, trend-aligned trades.
 OMEGA_CONFIG = {
-    "ignore_15m_alignment": True,
-    "ignore_5m_stoch": True,
+    "ignore_15m_alignment": False,  # <--- CHANGED: Now STRICT (Matches Lab)
+    "ignore_5m_stoch": True,        # Keeping 5m loose (as per your Lab settings)
     "require_volume": True,
     "require_divergence": False,
     "fusion_mode": False,
@@ -30,16 +32,13 @@ def _get_candles_in_range(all_candles: List[Dict], start_ts: int, end_ts: int) -
     return [c for c in all_candles if start_ts <= c["time"] < end_ts]
 
 def _calc_strength(entry: float, stop: float, dr: float, ds: float, side: str) -> dict:
-    """
-    Calculates Trade Strength based on 2025 'Home Run' DNA.
-    Returns a score (0-100) and a rating.
-    """
+    """Calculates Trade Strength based on 2025 'Home Run' DNA."""
     score = 0
     reasons = []
     
     if entry == 0 or stop == 0: return {"score": 0, "rating": "WAITING", "tags": []}
 
-    # 1. CONTEXT (40 Pts) - Blue Sky is King
+    # 1. CONTEXT (40 Pts)
     if side == "LONG":
         if entry > dr:
             score += 40
@@ -55,21 +54,19 @@ def _calc_strength(entry: float, stop: float, dr: float, ds: float, side: str) -
             score += 10
             reasons.append("IN STRUCTURE")
             
-    # 2. COMPRESSION (40 Pts) - Tight Stops = Big Pops
-    # Risk % of asset price (e.g. 500 / 90000 = 0.0055)
+    # 2. COMPRESSION (40 Pts)
     if entry > 0:
         risk_pct = abs(entry - stop) / entry
-        
-        if risk_pct < 0.006: # < 0.6% Risk (Super tight)
+        if risk_pct < 0.006:
             score += 40
             reasons.append("SUPER COIL")
-        elif risk_pct < 0.01: # < 1.0% Risk (Standard)
+        elif risk_pct < 0.01:
             score += 20
             reasons.append("NORMAL RISK")
         else:
             reasons.append("WIDE STOP")
 
-    # 3. BASELINE (20 Pts) - The system works, so give it credit
+    # 3. BASELINE (20 Pts)
     score += 20 
     
     # RATING
@@ -82,19 +79,17 @@ def _calc_strength(entry: float, stop: float, dr: float, ds: float, side: str) -
 async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
     """
     Independent scanning engine for Project Omega. 
-    Uses fast live fetch + session locking + strength calculation.
+    STRICT MODE: Respects 15m Alignment to match 2025 Backtest Data.
     """
     try:
-        # 1. RESOLVE ACTIVE SESSION ANCHOR (LOCKING)
+        # 1. RESOLVE ACTIVE SESSION (NY FUTURES LOCK)
         now_utc = datetime.now(timezone.utc)
-        # We manually force NY Futures to ensure the daily levels are stable
         session_info = battlebox_pipeline.resolve_session(now_utc, mode="MANUAL", manual_id="us_ny_futures")
         
         anchor_ts = session_info["anchor_time"]
         lock_end_ts = anchor_ts + 1800 
         
-        # 2. DATA ACQUISITION (FAST PATH)
-        # Pulling 2000 candles from live cache to avoid database timeout
+        # 2. DATA ACQUISITION
         raw_5m = await battlebox_pipeline.fetch_live_5m(symbol, limit=2000)
 
         if not raw_5m or len(raw_5m) < 12:
@@ -102,17 +97,15 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
 
         current_price = float(raw_5m[-1]["close"])
 
-        # 3. LEVEL COMPUTATION (LOCKED)
+        # 3. LEVEL COMPUTATION
         calibration_candles = _get_candles_in_range(raw_5m, anchor_ts, lock_end_ts)
         
         if len(calibration_candles) < 1:
              return {"status": "STANDBY", "msg": "Building Opening Range..."}
              
-        # LOCKING THE R30
         r30_high = max(float(c["high"]) for c in calibration_candles)
         r30_low = min(float(c["low"]) for c in calibration_candles)
         
-        # 24h Context (Lookback from the lock time)
         context_24h = _get_candles_in_range(raw_5m, lock_end_ts - 86400, lock_end_ts)
         if not context_24h: context_24h = raw_5m[:50] 
 
@@ -159,8 +152,6 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
         active_side = "NONE"
         stop_loss = 0.0
         
-        # Determine likely side for Strength Meter even if not triggered yet
-        # If price is closer to BO, we check LONG strength. Closer to BD, check SHORT.
         midpoint = (bo + bd) / 2
         preview_side = "LONG" if current_price > midpoint else "SHORT"
         
@@ -182,12 +173,10 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
                 active_side = "SHORT"
                 stop_loss = r30_high
             else:
-                # Preview mode
                 active_side = preview_side
                 stop_loss = r30_low if active_side == "LONG" else r30_high
 
-        # 6. STRENGTH CALCULATION
-        # Calculate strength for either the active trade OR the preview trade
+        # 6. STRENGTH
         trigger_px = bo if active_side == "LONG" else bd
         strength = _calc_strength(trigger_px, stop_loss, dr, ds, active_side)
 
