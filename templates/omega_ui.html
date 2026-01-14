@@ -13,6 +13,7 @@
             --red: #ff3366; 
             --blue: #00ccff; 
             --amber: #f59e0b; 
+            --purple: #8b5cf6;
             --text: #e2e8f0; 
             --dim: #64748b; 
         }
@@ -136,18 +137,22 @@
                 <div class="coach-action" id="coachText">STANDBY</div>
             </div>
 
-            <div style="margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; text-align: center;">
+            <div style="margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 5px; text-align: center;">
                 <div style="background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #1e293b;">
-                    <div style="font-size: 10px; color: var(--amber); margin-bottom: 5px;">BREAK-EVEN</div>
-                    <div style="font-family: 'JetBrains Mono'; font-weight: 700; font-size: 14px;" id="txtSecure">--</div>
+                    <div style="font-size: 9px; color: var(--amber); margin-bottom: 5px; letter-spacing:1px;">SHIELD</div>
+                    <div style="font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px;" id="txtSecure">--</div>
                 </div>
                 <div style="background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #1e293b;">
-                    <div style="font-size: 10px; color: var(--green); margin-bottom: 5px;">TARGET 1</div>
-                    <div style="font-family: 'JetBrains Mono'; font-weight: 700; font-size: 14px;" id="txtTP1">--</div>
+                    <div style="font-size: 9px; color: var(--green); margin-bottom: 5px; letter-spacing:1px;">TARGET 1</div>
+                    <div style="font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px;" id="txtTP1">--</div>
                 </div>
                 <div style="background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #1e293b;">
-                    <div style="font-size: 10px; color: var(--blue); margin-bottom: 5px;">TARGET 2</div>
-                    <div style="font-family: 'JetBrains Mono'; font-weight: 700; font-size: 14px;" id="txtTP2">--</div>
+                    <div style="font-size: 9px; color: var(--blue); margin-bottom: 5px; letter-spacing:1px;">TARGET 2</div>
+                    <div style="font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px;" id="txtTP2">--</div>
+                </div>
+                <div style="background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #1e293b;">
+                    <div style="font-size: 9px; color: var(--purple); margin-bottom: 5px; letter-spacing:1px;">TARGET 3</div>
+                    <div style="font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px;" id="txtTP3">--</div>
                 </div>
             </div>
         </div>
@@ -192,6 +197,10 @@
                     <span class="shield-lbl">Stop Status</span>
                     <span class="shield-val" style="color: var(--red);" id="stopStatus">AT RISK ($120)</span>
                 </div>
+                <div class="shield-row" style="margin-top: 15px;">
+                    <span class="shield-lbl">CONTEXT</span>
+                    <span class="shield-val" style="color: var(--purple);">BLUE SKY (FERRARI)</span>
+                </div>
             </div>
         </div>
     </div>
@@ -230,32 +239,32 @@
         function updateCoach(price, trigger, stop) {
             const coach = document.getElementById('coachPanel');
             const msg = document.getElementById('coachText');
-            const secureEl = document.getElementById('txtSecure');
-            const tp1El = document.getElementById('txtTP1');
-            const tp2El = document.getElementById('txtTP2');
-
-            // Simple targets logic
+            
+            // Targets Calculation (Dynamic based on Risk Distance)
             const riskDist = Math.abs(trigger - stop);
-            const secure = trigger + (riskDist * 0.5);
-            const tp1 = trigger + riskDist;
-            const tp2 = trigger + (riskDist * 2);
+            
+            const secure = trigger + (riskDist * 0.5); // 0.5 R
+            const tp1 = trigger + riskDist;            // 1.0 R
+            const tp2 = trigger + (riskDist * 2);      // 2.0 R
+            const tp3 = trigger + (riskDist * 3);      // 3.0 R (Blue Sky)
 
-            secureEl.innerText = secure.toLocaleString(undefined, {maximumFractionDigits:0});
-            tp1El.innerText = tp1.toLocaleString(undefined, {maximumFractionDigits:0});
-            tp2El.innerText = tp2.toLocaleString(undefined, {maximumFractionDigits:0});
+            document.getElementById('txtSecure').innerText = secure.toLocaleString(undefined, {maximumFractionDigits:0});
+            document.getElementById('txtTP1').innerText = tp1.toLocaleString(undefined, {maximumFractionDigits:0});
+            document.getElementById('txtTP2').innerText = tp2.toLocaleString(undefined, {maximumFractionDigits:0});
+            document.getElementById('txtTP3').innerText = tp3.toLocaleString(undefined, {maximumFractionDigits:0});
 
-            // Logic
+            // Coach Logic
             coach.className = "coach-banner"; // reset
             
             if (price < trigger) {
                 coach.classList.add('mode-wait');
-                msg.innerText = "WAITING FOR BREAKOUT";
+                msg.innerText = "STANDBY";
                 document.getElementById('livePrice').style.color = "#fff";
                 document.getElementById('zoneText').innerText = "PRE-GAME";
             } 
             else if (price >= trigger && price < secure) {
                 coach.classList.add('mode-entry');
-                msg.innerText = "MARKET BUY // ACTIVE";
+                msg.innerText = "EXECUTE (MARKET BUY)";
                 document.getElementById('livePrice').style.color = "var(--blue)";
                 document.getElementById('zoneText').innerText = "ENTRY ZONE";
                 document.getElementById('stopStatus').innerText = "AT RISK";
