@@ -1,6 +1,6 @@
 # battlebox_rules.py
 # ==============================================================================
-# BATTLEBOX RULE LAYER v8.2 (AUDITED: STRICT MANUAL CONTROL)
+# BATTLEBOX RULE LAYER v9.0 (RESTORED & COMPLETE)
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
@@ -89,18 +89,16 @@ def detect_pullback_go(
     zone = bo if side == "LONG" else bd
     if zone <= 0: return {"ok": False, "go_type": "NONE"}
 
-    # 2. CONTEXT CHECK (Just for reporting, does NOT override logic)
+    # 2. CONTEXT CHECK (Just for reporting)
     is_blue_sky = False
     if side == "LONG" and bo > dr: is_blue_sky = True
     if side == "SHORT" and bd < ds: is_blue_sky = True
 
     # 3. ALIGNMENT CHECK (15m)
-    # The logic here is absolute. If ignore_15m is True, we pass. Period.
     if ignore_15m:
         campaign_base_ok = True
     else:
         campaign_base_ok = stoch_aligned(side, stoch_15m_at_accept)
-        # If strict mode (Volvo) and alignment fails, we kill it here.
         if not campaign_base_ok:
             return {"ok": False, "go_type": "NONE", "reason": "NO_ALIGNMENT_15M"}
 
@@ -119,7 +117,6 @@ def detect_pullback_go(
         if not is_triggered: continue
 
         # Filter Check (5m Stoch)
-        # The logic here is absolute. If ignore_5m_stoch is True, we skip the check.
         if not ignore_5m_stoch:
             st5 = compute_stoch(window)
             if not stoch_aligned(side, st5): continue
@@ -127,7 +124,6 @@ def detect_pullback_go(
         if require_volume and not check_volume_pressure(window): continue
 
         # 5. RESULT & TAGGING
-        # We create a detailed reason string so you can compare A/B tests easily.
         go_tag = "STRICT_GO"
         reason_tag = "ALIGNED"
 
@@ -137,7 +133,6 @@ def detect_pullback_go(
             if ignore_15m: reason_tag += "_15M"
             if ignore_5m_stoch: reason_tag += "_5M"
 
-        # Add context to the reason so you know WHY it was a good/bad override
         if is_blue_sky: reason_tag += "|BLUESKY"
         elif campaign_base_ok: reason_tag += "|STRUCT"
 
@@ -149,3 +144,101 @@ def detect_pullback_go(
         }
 
     return {"ok": False, "go_type": "NONE", "reason": "NO_TRIGGER"}
+
+# --- RESTORED: TRADE SIMULATOR (Required for Research Lab) ---
+def simulate_trade(
+    entry_price: float,
+    entry_ts: int,
+    stop_price: float,
+    direction: str,
+    levels: Dict[str, float],
+    future_candles: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    
+    if not future_candles:
+        return {"outcome": "OPEN", "r_mult": 0.0, "tp_hits": []}
+
+    # 1. Calculate Market Energy (Daily Range)
+    dr = levels.get("daily_resistance", 0.0)
+    ds = levels.get("daily_support", 0.0)
+    energy = abs(dr - ds)
+    if energy == 0: energy = entry_price * 0.01
+
+    # --- CONTEXT METRICS ---
+    range_bps = (energy / entry_price) * 10000 if entry_price > 0 else 0
+    rel_pos = 0.0
+    if energy > 0:
+        if direction == "LONG":
+            rel_pos = (entry_price - ds) / energy
+        else: 
+            rel_pos = (dr - entry_price) / energy
+            
+    is_blue_sky = rel_pos > 1.0
+    is_compressed = range_bps < 150 
+
+    # 2. Set Targets based on Context
+    targets = []
+    if direction == "LONG":
+        if not is_blue_sky: 
+            targets.append({"name": "TP1", "price": dr})
+            targets.append({"name": "TP2", "price": entry_price + energy})
+            targets.append({"name": "TP3", "price": entry_price + (energy * 2.5)})
+        else:
+            targets.append({"name": "TP1", "price": entry_price + (energy * 0.5)})
+            targets.append({"name": "TP2", "price": entry_price + energy})
+            targets.append({"name": "TP3", "price": entry_price + (energy * 3.0)})
+    else: # SHORT
+        if not is_blue_sky:
+            targets.append({"name": "TP1", "price": ds})
+            targets.append({"name": "TP2", "price": entry_price - energy})
+            targets.append({"name": "TP3", "price": entry_price - (energy * 2.5)})
+        else:
+            targets.append({"name": "TP1", "price": entry_price - (energy * 0.5)})
+            targets.append({"name": "TP2", "price": entry_price - energy})
+            targets.append({"name": "TP3", "price": entry_price - (energy * 3.0)})
+
+    # 3. Run Simulation
+    hits = []
+    stopped_out = False
+    stop_hit_price = 0.0
+    risk_dist = abs(entry_price - stop_price)
+    exit_price = future_candles[-1]["close"] 
+
+    for c in future_candles:
+        c_high = float(c["high"])
+        c_low = float(c["low"])
+
+        if direction == "LONG":
+            if c_low <= stop_price:
+                stopped_out = True
+                stop_hit_price = stop_price
+                exit_price = stop_price
+                break 
+            for t in targets:
+                if t["name"] not in hits and c_high >= t["price"]:
+                    hits.append(t["name"])
+        else: # SHORT
+            if c_high >= stop_price:
+                stopped_out = True
+                stop_hit_price = stop_price
+                exit_price = stop_price
+                break
+            for t in targets:
+                if t["name"] not in hits and c_low <= t["price"]:
+                    hits.append(t["name"])
+
+    # 4. Results
+    pnl = (exit_price - entry_price) if direction == "LONG" else (entry_price - exit_price)
+    r_mult = pnl / risk_dist if risk_dist > 0 else 0
+
+    return {
+        "outcome": "LOSS" if stopped_out else "WIN/OPEN",
+        "r_realized": round(r_mult, 2),
+        "targets_hit": hits,
+        "trade_type": "BLUE SKY" if is_blue_sky else "STRUCTURE",
+        "context": {
+            "range_bps": round(range_bps, 0),
+            "trigger_loc": round(rel_pos, 2),
+            "is_compressed": is_compressed
+        }
+    }
