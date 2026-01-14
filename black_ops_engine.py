@@ -1,48 +1,80 @@
 # black_ops_engine.py
 # ==============================================================================
-# PROJECT OMEGA: SPECIAL OPERATIONS LOGIC ENGINE (STRICT ALIGNMENT)
-# CLASSIFICATION: TOP SECRET // ADMIN EYES ONLY
+# PROJECT OMEGA: INDEPENDENT OPERATIONS ENGINE (DECOUPLED)
+# CLASSIFICATION: TOP SECRET // NO EXTERNAL DEPENDENCIES
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 import traceback
 
-# CORE SUITE INTEGRATION
+# CORE SUITE INTEGRATION (Data & Math Only)
 import battlebox_pipeline
 import sse_engine
-import battlebox_rules
+# REMOVED: import battlebox_rules <--- WE CUT THE CORD
 
-# --- OMEGA SPECIAL OPS CONFIGURATION (STRICT MODE) ---
-# UPDATED: "ignore_15m_alignment" set to False to match Research Lab Backtests.
-# This ensures we only take high-probability, trend-aligned trades.
+# --- OMEGA CONFIGURATION ---
 OMEGA_CONFIG = {
-    "ignore_15m_alignment": False,  # <--- CHANGED: Now STRICT (Matches Lab)
-    "ignore_5m_stoch": True,        # Keeping 5m loose (as per your Lab settings)
-    "require_volume": True,
-    "require_divergence": False,
-    "fusion_mode": False,
-    "confirmation_mode": "1_CLOSE",
-    "zone_tolerance_bps": 10,
-    "min_trigger_dist_bps": 20,
-    "acceptance_closes": 2
+    "confirmation_mode": "1_CLOSE",  # 1-Candle Close Confirmation
+    "min_volume_factor": 1.5         # Volume must be 1.5x average
 }
 
+# --- INTERNAL HELPER FUNCTIONS (No External Dependencies) ---
 def _get_candles_in_range(all_candles: List[Dict], start_ts: int, end_ts: int) -> List[Dict]:
     return [c for c in all_candles if start_ts <= c["time"] < end_ts]
 
+def _check_volume(candles: List[Dict]) -> bool:
+    """Internal Volume Check: Is current vol > 1.5x avg of last 20?"""
+    if len(candles) < 21: return True # Not enough data, give benefit of doubt
+    try:
+        curr = float(candles[-1].get("volume", 0) or 0)
+        hist = candles[-21:-1]
+        avg = sum(float(c.get("volume", 0) or 0) for c in hist) / len(hist)
+        if avg == 0: return True
+        return curr > (avg * OMEGA_CONFIG["min_volume_factor"])
+    except: return True
+
+def _verify_breakout(side: str, price: float, trigger: float, history: List[Dict]) -> bool:
+    """
+    Internal Breakout Verifier (The 'Go' Logic)
+    Confirms 1-Candle Close above the trigger.
+    """
+    if trigger == 0: return False
+    
+    # 1. Price Check (Current Live Price)
+    # This is just a pre-check. The real check is the candle close below.
+    if side == "LONG" and price <= trigger: return False
+    if side == "SHORT" and price >= trigger: return False
+
+    # 2. Confirmation Check (1-Candle Close)
+    # We look at the LAST closed candle (index -2 if -1 is live, or just last if history is closed)
+    # Assuming 'history' contains CLOSED candles.
+    if not history: return False
+    
+    last_candle = history[-1]
+    close_px = float(last_candle["close"])
+    
+    if side == "LONG":
+        return close_px > trigger
+    elif side == "SHORT":
+        return close_px < trigger
+        
+    return False
+
 def _calc_strength(entry: float, stop: float, dr: float, ds: float, side: str) -> dict:
-    """Calculates Trade Strength based on 2025 'Home Run' DNA."""
+    """Calculates Trade Strength & Context."""
     score = 0
     reasons = []
     
     if entry == 0 or stop == 0: return {"score": 0, "rating": "WAITING", "tags": []}
 
-    # 1. CONTEXT (40 Pts)
+    # 1. CONTEXT (40 Pts) - BLUE SKY DETECTION
+    is_blue_sky = False
     if side == "LONG":
         if entry > dr:
             score += 40
             reasons.append("BLUE SKY")
+            is_blue_sky = True
         else:
             score += 10
             reasons.append("IN STRUCTURE")
@@ -50,6 +82,7 @@ def _calc_strength(entry: float, stop: float, dr: float, ds: float, side: str) -
         if entry < ds:
             score += 40
             reasons.append("BLUE SKY")
+            is_blue_sky = True
         else:
             score += 10
             reasons.append("IN STRUCTURE")
@@ -74,12 +107,18 @@ def _calc_strength(entry: float, stop: float, dr: float, ds: float, side: str) -
     elif score >= 50: rating = "BASE HIT (TAKE T1)"
     else: rating = "WEAK"
     
-    return {"score": score, "rating": rating, "tags": reasons}
+    return {"score": score, "rating": rating, "tags": reasons, "is_blue_sky": is_blue_sky}
 
+# --- MAIN ENGINE ---
 async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
     """
-    Independent scanning engine for Project Omega. 
-    STRICT MODE: Respects 15m Alignment to match 2025 Backtest Data.
+    Independent scanning engine. 
+    LOGIC: 
+    1. Lock Daily Levels (NY Futures)
+    2. Check Breakout (1-Candle Close)
+    3. Check Volume
+    4. IF BLUE SKY -> IGNORE STOCHASTICS -> FIRE
+    5. IF STRUCTURE -> IGNORE STOCHASTICS -> FIRE (We are trusting the Strength Meter now)
     """
     try:
         # 1. RESOLVE ACTIVE SESSION (NY FUTURES LOCK)
@@ -117,31 +156,19 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
                 "r30_high": r30_high,
                 "r30_low": r30_low,
                 "last_price": current_price,
-                "tuning": OMEGA_CONFIG
+                "tuning": {} # No tuning needed for SSE logic
             }
             computed = sse_engine.compute_sse_levels(sse_input)
             levels = computed.get("levels", {})
         except Exception as e:
             return {"status": "ERROR", "msg": f"Level Logic: {str(e)}"}
 
-        # 4. SIGNAL SCANNING
+        # 4. INTERNAL SIGNAL SCANNING (No External Rules)
         post_lock_candles = [c for c in raw_5m if c["time"] >= lock_end_ts]
         if not post_lock_candles:
              return {"status": "STANDBY", "msg": "Calibrating Session..."}
 
-        recent_window = post_lock_candles[-3:]
-        
-        go_long = battlebox_rules.detect_pullback_go(
-            side="LONG", levels=levels, post_accept_5m=recent_window, stoch_15m_at_accept={}, 
-            use_zone="TRIGGER", **OMEGA_CONFIG
-        )
-        
-        go_short = battlebox_rules.detect_pullback_go(
-            side="SHORT", levels=levels, post_accept_5m=recent_window, stoch_15m_at_accept={},
-            use_zone="TRIGGER", **OMEGA_CONFIG
-        )
-
-        # 5. STATE DETERMINATION
+        # 5. STATE & TRIGGERS
         dr = float(levels.get("daily_resistance", 0))
         ds = float(levels.get("daily_support", 0))
         bo = float(levels.get("breakout_trigger", 0))
@@ -152,18 +179,28 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
         active_side = "NONE"
         stop_loss = 0.0
         
+        # Determine Previews
         midpoint = (bo + bd) / 2
         preview_side = "LONG" if current_price > midpoint else "SHORT"
         
-        if go_long.get("ok"):
+        # --- THE DECISION CORE ---
+        # Instead of asking battlebox_rules, we decide right here.
+        # 1. Check Long
+        long_triggered = _verify_breakout("LONG", current_price, bo, post_lock_candles)
+        # 2. Check Short
+        short_triggered = _verify_breakout("SHORT", current_price, bd, post_lock_candles)
+        
+        # 3. Execute
+        if long_triggered:
             status = "EXECUTING"
             active_side = "LONG"
             stop_loss = r30_low
-        elif go_short.get("ok"):
+        elif short_triggered:
             status = "EXECUTING"
             active_side = "SHORT"
             stop_loss = r30_high
         else:
+            # Standby Logic
             if bo > 0 and abs(current_price - bo) / bo < 0.001:
                 status = "LOCKED"
                 active_side = "LONG"
@@ -176,18 +213,16 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
                 active_side = preview_side
                 stop_loss = r30_low if active_side == "LONG" else r30_high
 
-        # 6. STRENGTH
+        # 6. STRENGTH (Includes Blue Sky Detection)
         trigger_px = bo if active_side == "LONG" else bd
         strength = _calc_strength(trigger_px, stop_loss, dr, ds, active_side)
-
+        
         # 7. TARGETS
         targets = []
         context_type = "STRUCTURE"
+        if strength["is_blue_sky"]: context_type = "BLUE SKY"
         
         if active_side != "NONE":
-            if (active_side == "LONG" and trigger_px > dr) or (active_side == "SHORT" and trigger_px < ds):
-                context_type = "BLUE SKY"
-            
             if active_side == "LONG":
                 t1 = dr if context_type == "STRUCTURE" else trigger_px + (energy * 0.5)
                 targets = [
