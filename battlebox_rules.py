@@ -1,6 +1,6 @@
 # battlebox_rules.py
 # ==============================================================================
-# BATTLEBOX RULE LAYER v9.0 (RESTORED & COMPLETE)
+# BATTLEBOX RULE LAYER v9.1 (FULL RESTORATION + SIMULATOR)
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
@@ -9,8 +9,15 @@ from typing import Dict, List, Any, Optional
 STOCH_K = 14
 STOCH_D = 3
 STOCH_SMOOTH = 3
+RSI_PERIOD = 14
+DIV_LOOKBACK = 10 
+
+# Thresholds
 OB = 80.0
 OS = 20.0
+RSI_OB = 70.0
+RSI_OS = 30.0
+
 DEFAULT_ZONE_TOL = 0.0010
 MAX_GO_BARS_5M = 48         
 
@@ -19,8 +26,7 @@ def _sma(vals: List[float], n: int) -> float:
     if len(vals) < n: return sum(vals) / max(len(vals), 1)
     return sum(vals[-n:]) / n
 
-def compute_stoch(candles: List[Dict[str, Any]]) -> Dict[str, Optional[float]]:
-    k, d, smooth = STOCH_K, STOCH_D, STOCH_SMOOTH
+def compute_stoch(candles: List[Dict[str, Any]], k: int = STOCH_K, d: int = STOCH_D, smooth: int = STOCH_SMOOTH) -> Dict[str, Optional[float]]:
     if not candles or len(candles) < k: return {"k_smooth": None, "d": None}
     try:
         highs = [float(c["high"]) for c in candles]
@@ -42,13 +48,57 @@ def compute_stoch(candles: List[Dict[str, Any]]) -> Dict[str, Optional[float]]:
         return {"k_smooth": float(k_smooth[-1]), "d": float(ds[-1])}
     except: return {"k_smooth": None, "d": None}
 
+def compute_rsi(candles: List[Dict[str, Any]], period: int = RSI_PERIOD) -> float:
+    if not candles or len(candles) < period + 1: return 50.0
+    try:
+        closes = [float(c["close"]) for c in candles]
+        gains = []
+        losses = []
+        for i in range(1, len(closes)):
+            delta = closes[i] - closes[i-1]
+            gains.append(max(delta, 0))
+            losses.append(max(-delta, 0))
+        avg_gain = sum(gains[:period]) / period
+        avg_loss = sum(losses[:period]) / period
+        for i in range(period, len(gains)):
+            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        if avg_loss == 0: return 100.0
+        rs = avg_gain / avg_loss
+        return 100.0 - (100.0 / (1.0 + rs))
+    except: return 50.0
+
+# --- CHECKS ---
 def stoch_aligned(side: str, st: Dict[str, Optional[float]]) -> bool:
-    k, d = st.get("k_smooth"), st.get("d")
+    k = st.get("k_smooth")
+    d = st.get("d")
     if k is None or d is None: return False
     # LONG: We want oversold (Cheap) unless ignored
     if side == "LONG": return k <= OS or d <= OS
     if side == "SHORT": return k >= OB or d >= OB
     return False
+
+def rsi_aligned(side: str, rsi_val: float) -> bool:
+    if side == "SHORT": return rsi_val >= RSI_OB
+    if side == "LONG": return rsi_val <= RSI_OS
+    return False
+
+def check_divergence(side: str, candles: List[Dict[str, Any]]) -> bool:
+    if len(candles) < DIV_LOOKBACK + 5: return False
+    try:
+        current = candles[-1]
+        prev_window = candles[-(DIV_LOOKBACK+1):-1]
+        curr_rsi = compute_rsi(candles)
+        if side == "LONG":
+            curr_price = float(current["low"])
+            prev_low = min(prev_window, key=lambda x: float(x["low"]))
+            if curr_price < float(prev_low["low"]) and (curr_rsi > RSI_OS and curr_rsi < 50): return True
+        elif side == "SHORT":
+            curr_price = float(current["high"])
+            prev_high = max(prev_window, key=lambda x: float(x["high"]))
+            if curr_price > float(prev_high["high"]) and (curr_rsi < RSI_OB and curr_rsi > 50): return True
+        return False
+    except: return False
 
 def check_volume_pressure(candles: List[Dict[str, Any]]) -> bool:
     if len(candles) < 21: return True
@@ -89,12 +139,13 @@ def detect_pullback_go(
     zone = bo if side == "LONG" else bd
     if zone <= 0: return {"ok": False, "go_type": "NONE"}
 
-    # 2. CONTEXT CHECK (Just for reporting)
+    # 2. CONTEXT CHECK
     is_blue_sky = False
     if side == "LONG" and bo > dr: is_blue_sky = True
     if side == "SHORT" and bd < ds: is_blue_sky = True
 
     # 3. ALIGNMENT CHECK (15m)
+    # This matches your expectation: Checked Box = Override.
     if ignore_15m:
         campaign_base_ok = True
     else:
@@ -107,21 +158,36 @@ def detect_pullback_go(
         window = post_accept_5m[: i + 1]
         c = window[-1]
         px = float(c["close"])
+        lo = float(c["low"])
+        hi = float(c["high"])
 
         # Trigger Check
         is_triggered = False
-        if confirmation_mode == "1_CLOSE":
+        if confirmation_mode == "TOUCH":
+            tol = zone * zone_tol
+            if side == "LONG" and lo <= zone + tol: is_triggered = True
+            if side == "SHORT" and hi >= zone - tol: is_triggered = True  
+        elif confirmation_mode == "1_CLOSE":
             if side == "LONG" and px > zone: is_triggered = True
             if side == "SHORT" and px < zone: is_triggered = True
         
         if not is_triggered: continue
 
-        # Filter Check (5m Stoch)
+        # Filter Check (5m Stoch / RSI / Fusion)
         if not ignore_5m_stoch:
             st5 = compute_stoch(window)
-            if not stoch_aligned(side, st5): continue
+            
+            # FUSION MODE: If Stoch fails, check RSI
+            if fusion_mode:
+                if not stoch_aligned(side, st5):
+                    rsi_val = compute_rsi(window)
+                    if not rsi_aligned(side, rsi_val): continue
+            else:
+                # STANDARD MODE: Strict Stoch check
+                if not stoch_aligned(side, st5): continue
         
         if require_volume and not check_volume_pressure(window): continue
+        if require_divergence and not check_divergence(side, window): continue
 
         # 5. RESULT & TAGGING
         go_tag = "STRICT_GO"
@@ -138,14 +204,14 @@ def detect_pullback_go(
 
         return {
             "ok": True, 
-            "go_type": go_tag,
+            "go_type": go_tag, 
             "go_ts": int(c["time"]), 
             "reason": reason_tag
         }
 
     return {"ok": False, "go_type": "NONE", "reason": "NO_TRIGGER"}
 
-# --- RESTORED: TRADE SIMULATOR (Required for Research Lab) ---
+# --- TRADE SIMULATOR (RESTORED) ---
 def simulate_trade(
     entry_price: float,
     entry_ts: int,
@@ -158,13 +224,11 @@ def simulate_trade(
     if not future_candles:
         return {"outcome": "OPEN", "r_mult": 0.0, "tp_hits": []}
 
-    # 1. Calculate Market Energy (Daily Range)
     dr = levels.get("daily_resistance", 0.0)
     ds = levels.get("daily_support", 0.0)
     energy = abs(dr - ds)
     if energy == 0: energy = entry_price * 0.01
 
-    # --- CONTEXT METRICS ---
     range_bps = (energy / entry_price) * 10000 if entry_price > 0 else 0
     rel_pos = 0.0
     if energy > 0:
@@ -176,7 +240,6 @@ def simulate_trade(
     is_blue_sky = rel_pos > 1.0
     is_compressed = range_bps < 150 
 
-    # 2. Set Targets based on Context
     targets = []
     if direction == "LONG":
         if not is_blue_sky: 
@@ -197,7 +260,6 @@ def simulate_trade(
             targets.append({"name": "TP2", "price": entry_price - energy})
             targets.append({"name": "TP3", "price": entry_price - (energy * 3.0)})
 
-    # 3. Run Simulation
     hits = []
     stopped_out = False
     stop_hit_price = 0.0
@@ -227,7 +289,6 @@ def simulate_trade(
                 if t["name"] not in hits and c_low <= t["price"]:
                     hits.append(t["name"])
 
-    # 4. Results
     pnl = (exit_price - entry_price) if direction == "LONG" else (entry_price - exit_price)
     r_mult = pnl / risk_dist if risk_dist > 0 else 0
 
