@@ -2,51 +2,42 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PROJECT OMEGA // LIVE COMMAND</title>
+    <title>PROJECT OMEGA // COMMAND</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
     <style>
         :root { 
-            --bg: #050b14; 
-            --panel: #0f172a; 
-            --border: #1e293b; 
-            --green: #00ff9d; 
-            --red: #ff3366; 
-            --blue: #00ccff; 
-            --amber: #f59e0b; 
-            --purple: #8b5cf6;
-            --text: #e2e8f0; 
-            --dim: #64748b; 
+            --bg: #050b14; --panel: #0f172a; --border: #1e293b; 
+            --green: #00ff9d; --red: #ff3366; --blue: #00ccff; --amber: #f59e0b; --purple: #8b5cf6;
+            --text: #e2e8f0; --dim: #64748b; 
         }
         body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; height: 100vh; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; }
         
-        /* HEADER */
         .top-nav { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 20px; }
         .brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 24px; color: #fff; letter-spacing: -1px; display: flex; align-items: center; gap: 10px; }
         .blink { animation: blinker 2s linear infinite; width: 10px; height: 10px; background: var(--green); border-radius: 50%; }
         @keyframes blinker { 50% { opacity: 0; } }
         
-        .controls { display: flex; gap: 20px; align-items: center; }
+        .controls { display: flex; gap: 15px; align-items: center; }
         .status-pill { font-size: 10px; font-family: 'JetBrains Mono'; color: var(--green); border: 1px solid var(--green); padding: 4px 8px; border-radius: 4px; text-transform: uppercase; }
+        .alert-toggle { background: transparent; border: 1px solid var(--dim); color: var(--dim); padding: 5px 10px; font-family: 'JetBrains Mono'; font-size: 10px; cursor: pointer; border-radius: 4px; transition: 0.2s; }
+        .alert-toggle.active { border-color: var(--red); color: var(--red); box-shadow: 0 0 10px rgba(255, 51, 102, 0.2); }
         .back-link { color: var(--dim); text-decoration: none; font-size: 11px; font-weight: 700; }
-        .back-link:hover { color: #fff; }
 
-        /* GRID LAYOUT */
         .war-room { display: grid; grid-template-columns: 320px 1fr 320px; gap: 20px; height: 100%; }
         .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; display: flex; flex-direction: column; position: relative; }
         .panel-head { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--dim); letter-spacing: 1px; margin-bottom: 15px; text-transform: uppercase; display: flex; justify-content: space-between; }
 
-        /* --- PANEL 1: RISK COMMAND (The Magic Box) --- */
+        /* INPUTS */
         .input-group { margin-bottom: 12px; }
         .input-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-bottom: 4px; font-family: 'JetBrains Mono'; }
-        .input-field { width: 100%; background: #020617; border: 1px solid var(--border); color: #fff; padding: 10px; font-family: 'JetBrains Mono'; font-size: 14px; text-align: right; box-sizing: border-box; outline: none; transition: 0.2s; border-radius: 4px; }
+        .input-field { width: 100%; background: #020617; border: 1px solid var(--border); color: #fff; padding: 10px; font-family: 'JetBrains Mono'; font-size: 14px; text-align: right; box-sizing: border-box; outline: none; border-radius: 4px; }
         .input-field:focus { border-color: var(--blue); }
 
         .magic-box { margin-top: auto; background: #020617; border: 1px solid var(--blue); border-radius: 6px; padding: 20px; text-align: center; }
         .magic-lbl { font-size: 9px; color: var(--blue); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 5px; }
         .magic-val { font-size: 32px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; letter-spacing: -1px; }
-        .magic-sub { font-size: 10px; color: var(--dim); margin-top: 5px; }
 
-        /* --- PANEL 2: MARKET INTEL (The Coach) --- */
+        /* TELEMETRY */
         .price-display { text-align: center; margin-bottom: 30px; }
         .live-price { font-size: 72px; font-weight: 900; letter-spacing: -3px; line-height: 1; color: #fff; }
         .trigger-info { font-family: 'JetBrains Mono'; font-size: 12px; color: var(--dim); margin-top: 8px; }
@@ -55,13 +46,18 @@
         .coach-title { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; opacity: 0.7; }
         .coach-action { font-size: 28px; font-weight: 900; font-family: 'JetBrains Mono'; line-height: 1.1; }
         
-        /* Coach Modes */
         .mode-wait { border-color: #333; color: var(--dim); }
         .mode-entry { border-color: var(--blue); background: rgba(0, 204, 255, 0.08); color: var(--blue); box-shadow: 0 0 20px rgba(0,204,255,0.1); }
         .mode-secure { border-color: var(--amber); background: rgba(245, 158, 11, 0.08); color: var(--amber); }
         .mode-profit { border-color: var(--green); background: rgba(0, 255, 157, 0.08); color: var(--green); }
 
-        /* --- PANEL 3: LOGIC STREAM (The Brain) --- */
+        /* TARGET GRID */
+        .target-grid { margin-top: 30px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; text-align: center; }
+        .target-box { background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #1e293b; }
+        .target-lbl { font-size: 9px; margin-bottom: 5px; letter-spacing:1px; }
+        .target-val { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px; }
+
+        /* LOGIC STREAM */
         .logic-row { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
         .logic-icon { width: 24px; text-align: center; font-size: 14px; margin-right: 10px; }
         .logic-text { flex: 1; color: var(--text); }
@@ -73,9 +69,6 @@
 
         .shield-section { margin-top: auto; padding-top: 20px; border-top: 1px solid var(--border); }
         .shield-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; }
-        .shield-lbl { color: var(--dim); }
-        .shield-val { font-family: 'JetBrains Mono'; font-weight: 700; color: #fff; }
-
     </style>
 </head>
 <body>
@@ -87,6 +80,7 @@
         </div>
         <div class="controls">
             <div class="status-pill">FERRARI MODE ACTIVE</div>
+            <button id="btnAlert" class="alert-toggle" onclick="toggleAlerts()">AUDIO: OFF</button>
             <a href="/suite" class="back-link">EXIT</a>
         </div>
     </div>
@@ -108,120 +102,113 @@
             <div class="input-group" style="margin-top: 20px;">
                 <label class="input-label">
                     <span>STOP LOSS PRICE</span>
-                    <span id="riskAmt" style="color: var(--red); font-weight: 700;">$120.00 RISK</span>
+                    <span id="riskAmt" style="color: var(--red); font-weight: 700;">--</span>
                 </label>
-                <input type="number" id="inpStop" class="input-field" value="94800" oninput="calc()">
+                <input type="number" id="inpStop" class="input-field" value="94720" oninput="calc()">
             </div>
 
             <div class="magic-box">
                 <div class="magic-lbl">TYPE THIS INTO EXCHANGE (USDT)</div>
                 <div class="magic-val" id="outUSDT">0</div>
-                <div class="magic-sub">Calculated for Market Order</div>
             </div>
-            
-            <div style="text-align: center; margin-top: 10px; font-size: 10px; color: #444;">
-                AUTO-LEVERAGE • 10% RISK • FIXED DOLLAR LOSS
-            </div>
+            <div style="text-align: center; margin-top: 10px; font-size: 10px; color: #444;">10% RISK • LOCKED NY SESSION</div>
         </div>
 
         <div class="panel">
-            <div class="panel-head">MARKET TELEMETRY</div>
+            <div class="panel-head">MARKET TELEMETRY (NY SESSION)</div>
             
             <div class="price-display">
                 <div class="live-price" id="livePrice">--</div>
-                <div class="trigger-info">TRIGGER LEVEL: <span id="valTrigger" style="color: #fff;">95,454</span></div>
+                <div class="trigger-info">TRIGGER: <span id="valTrigger" style="color: #fff;">--</span></div>
             </div>
 
             <div id="coachPanel" class="coach-banner mode-wait">
                 <div class="coach-title">TACTICAL GUIDANCE</div>
-                <div class="coach-action" id="coachText">STANDBY</div>
+                <div class="coach-action" id="coachText">CONNECTING...</div>
             </div>
 
-            <div style="margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 5px; text-align: center;">
-                <div style="background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #1e293b;">
-                    <div style="font-size: 9px; color: var(--amber); margin-bottom: 5px; letter-spacing:1px;">SHIELD</div>
-                    <div style="font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px;" id="txtSecure">--</div>
-                </div>
-                <div style="background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #1e293b;">
-                    <div style="font-size: 9px; color: var(--green); margin-bottom: 5px; letter-spacing:1px;">TARGET 1</div>
-                    <div style="font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px;" id="txtTP1">--</div>
-                </div>
-                <div style="background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #1e293b;">
-                    <div style="font-size: 9px; color: var(--blue); margin-bottom: 5px; letter-spacing:1px;">TARGET 2</div>
-                    <div style="font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px;" id="txtTP2">--</div>
-                </div>
-                <div style="background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #1e293b;">
-                    <div style="font-size: 9px; color: var(--purple); margin-bottom: 5px; letter-spacing:1px;">TARGET 3</div>
-                    <div style="font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px;" id="txtTP3">--</div>
-                </div>
+            <div class="target-grid">
+                <div class="target-box"><div class="target-lbl" style="color:var(--amber)">SHIELD</div><div class="target-val" id="txtSecure">--</div></div>
+                <div class="target-box"><div class="target-lbl" style="color:var(--green)">TARGET 1</div><div class="target-val" id="txtTP1">--</div></div>
+                <div class="target-box"><div class="target-lbl" style="color:var(--blue)">TARGET 2</div><div class="target-val" id="txtTP2">--</div></div>
+                <div class="target-box"><div class="target-lbl" style="color:var(--purple)">TARGET 3</div><div class="target-val" id="txtTP3">--</div></div>
             </div>
         </div>
 
         <div class="panel">
             <div class="panel-head">LOGIC STREAM</div>
-
-            <div class="logic-row">
-                <div class="logic-icon">⏱️</div>
-                <div class="logic-text">
-                    <div style="font-weight: 700;">15m Close</div>
-                    <div style="font-size: 10px; color: var(--dim);">The General</div>
-                </div>
-                <div class="logic-status status-wait" id="st15">PENDING</div>
-            </div>
-
             <div class="logic-row">
                 <div class="logic-icon">🚀</div>
-                <div class="logic-text">
-                    <div style="font-weight: 700;">5m Momentum</div>
-                    <div style="font-size: 10px; color: var(--dim);">The Soldier (Aggressive)</div>
-                </div>
-                <div class="logic-status status-pass" id="st5">CONFIRMED</div>
+                <div class="logic-text"><div>5m Momentum</div><div style="font-size:10px; color:var(--dim)">The Soldier</div></div>
+                <div class="logic-status status-pass">CONFIRMED</div>
             </div>
-
             <div class="logic-row">
-                <div class="logic-icon">⚠️</div>
-                <div class="logic-text">
-                    <div style="font-weight: 700;">Stochastics > 80</div>
-                    <div style="font-size: 10px; color: var(--dim);">System Override Active</div>
-                </div>
-                <div class="logic-status status-warn">IGNORED</div>
+                <div class="logic-icon">⚡</div>
+                <div class="logic-text"><div>FUSION MODE</div><div style="font-size:10px; color:var(--dim)">Stoch + RSI</div></div>
+                <div class="logic-status status-pass">ACTIVE</div>
             </div>
 
             <div class="shield-section">
                 <div class="panel-head">TRADE MANAGEMENT</div>
                 <div class="shield-row">
                     <span class="shield-lbl">Current Zone</span>
-                    <span class="shield-val" style="color: var(--blue);" id="zoneText">ENTRY ZONE</span>
-                </div>
-                <div class="shield-row">
-                    <span class="shield-lbl">Stop Status</span>
-                    <span class="shield-val" style="color: var(--red);" id="stopStatus">AT RISK ($120)</span>
+                    <span class="shield-val" style="color: var(--blue);" id="zoneText">--</span>
                 </div>
                 <div class="shield-row" style="margin-top: 15px;">
                     <span class="shield-lbl">CONTEXT</span>
-                    <span class="shield-val" style="color: var(--purple);">BLUE SKY (FERRARI)</span>
+                    <span class="shield-val" id="contextFlag" style="color: var(--purple);">--</span>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-        // --- REAL LIVE DATA CONNECTION ---
-        // We use the same feed as Battle Control to ensure accuracy
         const API_ENDPOINT = '/api/dmr/live'; 
         
-        // Default values until data loads
         let currentPrice = 0; 
-        let triggerPrice = 95454; // This will auto-update if backend sends it
+        let triggerPrice = 0; 
+        let isBlueSky = false;
+        let alertsEnabled = false;
+        let lastZone = "PRE-GAME";
+
+        // AUDIO SYSTEM
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playPing() {
+            if(!alertsEnabled) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.frequency.value = 880; 
+            gain.gain.value = 0.1;
+            osc.start();
+            setTimeout(() => osc.stop(), 200);
+        }
+
+        function toggleAlerts() {
+            alertsEnabled = !alertsEnabled;
+            const btn = document.getElementById('btnAlert');
+            if(alertsEnabled) {
+                btn.innerText = "AUDIO: ON";
+                btn.classList.add('active');
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                playPing(); // Test
+            } else {
+                btn.innerText = "AUDIO: OFF";
+                btn.classList.remove('active');
+            }
+        }
 
         async function fetchLiveData() {
             try {
+                // FORCE NY FUTURES to prevent drifting
                 const res = await fetch(API_ENDPOINT, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ 
                         symbol: "BTCUSDT", 
-                        session_mode: "AUTO", 
+                        session_mode: "MANUAL", 
+                        manual_session_id: "us_ny_futures", 
                         operator_flex: true 
                     })
                 });
@@ -229,27 +216,33 @@
                 const data = await res.json();
                 
                 if(data.status === "OK" || data.price) {
-                    // 1. UPDATE PRICE
                     currentPrice = data.price;
                     document.getElementById('livePrice').innerText = currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2});
                     
-                    // 2. UPDATE TRIGGER (If available in data, otherwise keep default)
-                    if(data.battlebox && data.battlebox.levels && data.battlebox.levels.breakout_trigger) {
-                        triggerPrice = data.battlebox.levels.breakout_trigger;
+                    if(data.battlebox && data.battlebox.levels) {
+                        // Determine direction based on where price is relative to open
+                        // For simplicity, if price > Daily Resistance -> Long logic
+                        const l = data.battlebox.levels;
+                        triggerPrice = l.breakout_trigger; // Default to Long for display
+                        
+                        // Check Blue Sky Context (Price > Daily Res)
+                        isBlueSky = (l.daily_resistance && triggerPrice > l.daily_resistance);
+                        
                         document.getElementById('valTrigger').innerText = triggerPrice.toLocaleString(undefined, {maximumFractionDigits: 0});
+                        
+                        const ctxText = isBlueSky ? "BLUE SKY (EAGLE)" : "STRUCTURE (VULTURE)";
+                        const ctxColor = isBlueSky ? "var(--purple)" : "var(--amber)";
+                        const ctxEl = document.getElementById('contextFlag');
+                        ctxEl.innerText = ctxText;
+                        ctxEl.style.color = ctxColor;
                     }
-
-                    // 3. RE-CALCULATE EVERYTHING
                     calc();
                 }
-            } catch(e) {
-                console.error("Data Link Severed:", e);
-                document.getElementById('livePrice').style.color = "#444"; // Dim if broken
-            }
+            } catch(e) { console.error(e); }
         }
 
         function calc() {
-            if(currentPrice === 0) return; // Wait for first data
+            if(currentPrice === 0 || triggerPrice === 0) return;
 
             const bal = parseFloat(document.getElementById('inpBal').value) || 0;
             const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
@@ -259,78 +252,76 @@
             const dollarRisk = bal * (riskPct / 100);
             document.getElementById('riskAmt').innerText = "$" + dollarRisk.toFixed(0) + " RISK";
 
-            // 2. Magic Box (Position Size)
-            // Logic: You buy enough so that if it hits stop, you lose exactly dollarRisk
-            if (currentPrice > 0 && stopPrice > 0) {
+            // 2. Position Sizer
+            if (stopPrice > 0) {
                 const distPct = Math.abs(currentPrice - stopPrice) / currentPrice;
                 if (distPct > 0) {
-                    const positionSizeUSDT = dollarRisk / distPct;
-                    document.getElementById('outUSDT').innerText = Math.floor(positionSizeUSDT).toLocaleString();
+                    const size = dollarRisk / distPct;
+                    document.getElementById('outUSDT').innerText = Math.floor(size).toLocaleString();
                 }
             }
 
-            // 3. Coaching Logic
-            updateCoach(currentPrice, triggerPrice, stopPrice);
-        }
-
-        function updateCoach(price, trigger, stop) {
-            const coach = document.getElementById('coachPanel');
-            const msg = document.getElementById('coachText');
-            
-            // Targets Calculation
-            const riskDist = Math.abs(trigger - stop);
-            const secure = trigger + (riskDist * 0.5); // 0.5 R
-            const tp1 = trigger + riskDist;            // 1.0 R
-            const tp2 = trigger + (riskDist * 2);      // 2.0 R
-            const tp3 = trigger + (riskDist * 3);      // 3.0 R (Blue Sky)
+            // 3. Smart Coach Logic
+            const riskDist = Math.abs(triggerPrice - stopPrice);
+            const secure = triggerPrice + (riskDist * 0.5); 
+            const tp1 = triggerPrice + riskDist;
+            const tp2 = triggerPrice + (riskDist * 2);
+            const tp3 = triggerPrice + (riskDist * 3);
 
             document.getElementById('txtSecure').innerText = secure.toLocaleString(undefined, {maximumFractionDigits:0});
             document.getElementById('txtTP1').innerText = tp1.toLocaleString(undefined, {maximumFractionDigits:0});
             document.getElementById('txtTP2').innerText = tp2.toLocaleString(undefined, {maximumFractionDigits:0});
             document.getElementById('txtTP3').innerText = tp3.toLocaleString(undefined, {maximumFractionDigits:0});
 
-            // Status Logic
-            coach.className = "coach-banner"; // reset
-            
-            if (price < trigger) {
+            const coach = document.getElementById('coachPanel');
+            const msg = document.getElementById('coachText');
+            const zTxt = document.getElementById('zoneText');
+            let zone = "";
+
+            coach.className = "coach-banner"; 
+
+            if (currentPrice < triggerPrice) {
                 coach.classList.add('mode-wait');
-                msg.innerText = "STANDBY";
-                document.getElementById('livePrice').style.color = "#fff";
-                document.getElementById('zoneText').innerText = "PRE-GAME";
-                document.getElementById('stopStatus').innerText = "WAITING";
-                document.getElementById('stopStatus').style.color = "#666";
+                msg.innerText = "WAITING FOR BREAKOUT";
+                zTxt.innerText = "PRE-GAME";
+                zone = "PRE";
             } 
-            else if (price >= trigger && price < secure) {
+            else if (currentPrice >= triggerPrice && currentPrice < secure) {
                 coach.classList.add('mode-entry');
-                msg.innerText = "EXECUTE (MARKET BUY)";
-                document.getElementById('livePrice').style.color = "var(--blue)";
-                document.getElementById('zoneText').innerText = "ENTRY ZONE";
-                document.getElementById('stopStatus').innerText = "AT RISK";
-                document.getElementById('stopStatus').style.color = "var(--red)";
+                msg.innerText = "MARKET BUY // ACTIVE";
+                zTxt.innerText = "ENTRY ZONE";
+                zone = "ENTRY";
             }
-            else if (price >= secure && price < tp1) {
+            else if (currentPrice >= secure && currentPrice < tp1) {
                 coach.classList.add('mode-secure');
-                msg.innerText = "MOVE STOP TO B.E.";
-                document.getElementById('livePrice').style.color = "var(--amber)";
-                document.getElementById('zoneText').innerText = "SECURE ZONE";
-                document.getElementById('stopStatus').innerText = "SAFE (0 RISK)";
-                document.getElementById('stopStatus').style.color = "var(--green)";
+                // VULTURE vs EAGLE LOGIC
+                if (isBlueSky) {
+                    msg.innerText = "HOLD (EAGLE MODE)";
+                } else {
+                    // Structure: 60% rule
+                    const progress = (currentPrice - triggerPrice) / (tp1 - triggerPrice);
+                    if (progress > 0.6) msg.innerText = "MOVE STOP TO B.E. (VULTURE)";
+                    else msg.innerText = "HOLD (STRUCTURE)";
+                }
+                zTxt.innerText = "SECURE ZONE";
+                zone = "SECURE";
             }
-            else if (price >= tp1) {
+            else if (currentPrice >= tp1) {
                 coach.classList.add('mode-profit');
-                msg.innerText = "SELL 50% / TRAIL";
-                document.getElementById('livePrice').style.color = "var(--green)";
-                document.getElementById('zoneText').innerText = "PROFIT ZONE";
-                document.getElementById('stopStatus').innerText = "LOCKED PROFIT";
+                msg.innerText = isBlueSky ? "HOLD FOR TP3 (EAGLE)" : "SELL 75% (VULTURE)";
+                zTxt.innerText = "PROFIT ZONE";
+                zone = "PROFIT";
+            }
+
+            // Alert Trigger
+            if (zone !== lastZone) {
+                if (alertsEnabled) playPing();
+                lastZone = zone;
             }
         }
 
-        // --- THE HEARTBEAT ---
-        // Fetch new data every 2 seconds
         setInterval(fetchLiveData, 2000);
-        
-        // Initial call
-        fetchLiveData();
+        fetchLiveData(); // Init
     </script>
 </body>
 </html>
