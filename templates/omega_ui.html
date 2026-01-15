@@ -156,7 +156,9 @@
     </div>
 
     <script>
-        const API_ENDPOINT = '/api/dmr/live'; 
+        // === FIXED ENDPOINT (Connecting to Black Ops Engine) ===
+        const API_ENDPOINT = '/api/black-ops/status'; 
+        
         let currentPrice = 0; 
         let triggerPrice = 0; 
         let isBlueSky = false;
@@ -197,13 +199,13 @@
                 const res = await fetch(API_ENDPOINT, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ symbol: "BTCUSDT", session_mode: "MANUAL", manual_session_id: "us_ny_futures", operator_flex: true })
+                    // We only need the symbol for Black Ops Engine
+                    body: JSON.stringify({ symbol: "BTCUSDT" }) 
                 });
                 const data = await res.json();
                 
-                // === STRICT FUSION LOGIC (v10.1) ===
-                // We only look for data.price and data.execution. 
-                // No legacy checks. No fallbacks.
+                // === STRICT FUSION LOGIC ===
+                // This structure matches what black_ops_engine.py returns
                 
                 if(data.price) {
                     currentPrice = data.price;
@@ -219,7 +221,6 @@
                         }
                     } else if (data.triggers) {
                         // Standby Mode: The engine calculated triggers but price hasn't broken them yet.
-                        // We use the triggers just to populate the "Trigger" text on screen.
                         const t = data.triggers;
                         triggerPrice = t.BO > 0 ? t.BO : t.BD; 
                     }
