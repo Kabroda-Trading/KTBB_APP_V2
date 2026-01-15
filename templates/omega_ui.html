@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>PROJECT OMEGA // COMMAND</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
     <style>
         :root { 
@@ -10,34 +11,40 @@
             --green: #00ff9d; --red: #ff3366; --blue: #00ccff; --amber: #f59e0b; --purple: #8b5cf6;
             --text: #e2e8f0; --dim: #64748b; 
         }
-        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; height: 100vh; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; min-height: 100vh; display: flex; flex-direction: column; box-sizing: border-box; }
         
-        .top-nav { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 20px; }
-        .brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 24px; color: #fff; letter-spacing: -1px; display: flex; align-items: center; gap: 10px; }
+        /* MOBILE OPTIMIZED NAV */
+        .top-nav { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        .brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 20px; color: #fff; letter-spacing: -1px; display: flex; align-items: center; gap: 10px; }
         .blink { animation: blinker 2s linear infinite; width: 10px; height: 10px; background: var(--green); border-radius: 50%; }
         @keyframes blinker { 50% { opacity: 0; } }
         
-        .controls { display: flex; gap: 15px; align-items: center; }
+        .controls { display: flex; gap: 10px; align-items: center; }
         .status-pill { font-size: 10px; font-family: 'JetBrains Mono'; color: var(--green); border: 1px solid var(--green); padding: 4px 8px; border-radius: 4px; text-transform: uppercase; }
         .alert-toggle { background: transparent; border: 1px solid var(--dim); color: var(--dim); padding: 5px 10px; font-family: 'JetBrains Mono'; font-size: 10px; cursor: pointer; border-radius: 4px; transition: 0.2s; }
         .alert-toggle.active { border-color: var(--red); color: var(--red); box-shadow: 0 0 10px rgba(255, 51, 102, 0.2); }
-        .back-link { color: var(--dim); text-decoration: none; font-size: 11px; font-weight: 700; }
+        .back-link { color: var(--dim); text-decoration: none; font-size: 11px; font-weight: 700; border: 1px solid var(--border); padding: 5px 10px; border-radius: 4px; }
 
+        /* RESPONSIVE GRID */
         .war-room { display: grid; grid-template-columns: 320px 1fr 320px; gap: 20px; height: 100%; }
+        @media (max-width: 1000px) {
+            .war-room { grid-template-columns: 1fr; height: auto; }
+            .panel { min-height: auto; margin-bottom: 10px; }
+            .status-pill { display: none; }
+        }
+
         .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; display: flex; flex-direction: column; position: relative; }
         .panel-head { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--dim); letter-spacing: 1px; margin-bottom: 15px; text-transform: uppercase; display: flex; justify-content: space-between; }
 
-        /* INPUTS */
         .input-group { margin-bottom: 12px; }
         .input-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-bottom: 4px; font-family: 'JetBrains Mono'; }
         .input-field { width: 100%; background: #020617; border: 1px solid var(--border); color: #fff; padding: 10px; font-family: 'JetBrains Mono'; font-size: 14px; text-align: right; box-sizing: border-box; outline: none; border-radius: 4px; }
         .input-field:focus { border-color: var(--blue); }
 
-        .magic-box { margin-top: auto; background: #020617; border: 1px solid var(--blue); border-radius: 6px; padding: 20px; text-align: center; }
+        .magic-box { margin-top: 20px; background: #020617; border: 1px solid var(--blue); border-radius: 6px; padding: 20px; text-align: center; }
         .magic-lbl { font-size: 9px; color: var(--blue); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 5px; }
         .magic-val { font-size: 32px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; letter-spacing: -1px; }
 
-        /* TELEMETRY */
         .price-display { text-align: center; margin-bottom: 30px; }
         .live-price { font-size: 72px; font-weight: 900; letter-spacing: -3px; line-height: 1; color: #fff; }
         .trigger-info { font-family: 'JetBrains Mono'; font-size: 12px; color: var(--dim); margin-top: 8px; }
@@ -51,13 +58,11 @@
         .mode-secure { border-color: var(--amber); background: rgba(245, 158, 11, 0.08); color: var(--amber); }
         .mode-profit { border-color: var(--green); background: rgba(0, 255, 157, 0.08); color: var(--green); }
 
-        /* TARGET GRID */
         .target-grid { margin-top: 30px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; text-align: center; }
         .target-box { background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #1e293b; }
         .target-lbl { font-size: 9px; margin-bottom: 5px; letter-spacing:1px; }
         .target-val { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px; }
 
-        /* LOGIC STREAM */
         .logic-row { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
         .logic-icon { width: 24px; text-align: center; font-size: 14px; margin-right: 10px; }
         .logic-text { flex: 1; color: var(--text); }
@@ -67,19 +72,16 @@
         .status-warn { background: rgba(245,158,11,0.15); color: var(--amber); }
         .status-wait { background: #1e293b; color: var(--dim); }
 
-        .shield-section { margin-top: auto; padding-top: 20px; border-top: 1px solid var(--border); }
+        .shield-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
         .shield-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; }
     </style>
 </head>
 <body>
 
     <div class="top-nav">
-        <div class="brand">
-            <div class="blink"></div>
-            PROJECT OMEGA // LIVE
-        </div>
+        <div class="brand"><div class="blink"></div>PROJECT OMEGA</div>
         <div class="controls">
-            <div class="status-pill">FERRARI MODE ACTIVE</div>
+            <div class="status-pill">FERRARI MODE</div>
             <button id="btnAlert" class="alert-toggle" onclick="toggleAlerts()">ALERTS: OFF</button>
             <a href="/suite" class="back-link">EXIT</a>
         </div>
@@ -88,17 +90,14 @@
     <div class="war-room">
         <div class="panel">
             <div class="panel-head">POSITION SIZER</div>
-            
             <div class="input-group">
                 <label class="input-label">ACCOUNT BALANCE ($)</label>
                 <input type="number" id="inpBal" class="input-field" value="1200" oninput="calc()">
             </div>
-            
             <div class="input-group">
                 <label class="input-label">RISK PER TRADE (%)</label>
                 <input type="number" id="inpRisk" class="input-field" value="10" oninput="calc()">
             </div>
-
             <div class="input-group" style="margin-top: 20px;">
                 <label class="input-label">
                     <span>STOP LOSS PRICE</span>
@@ -106,27 +105,22 @@
                 </label>
                 <input type="number" id="inpStop" class="input-field" value="94720" oninput="calc()">
             </div>
-
             <div class="magic-box">
                 <div class="magic-lbl">TYPE THIS INTO EXCHANGE (USDT)</div>
                 <div class="magic-val" id="outUSDT">0</div>
             </div>
-            <div style="text-align: center; margin-top: 10px; font-size: 10px; color: #444;">10% RISK • LOCKED NY SESSION</div>
         </div>
 
         <div class="panel">
             <div class="panel-head">MARKET TELEMETRY (NY SESSION)</div>
-            
             <div class="price-display">
                 <div class="live-price" id="livePrice">--</div>
                 <div class="trigger-info">TRIGGER: <span id="valTrigger" style="color: #fff;">--</span></div>
             </div>
-
             <div id="coachPanel" class="coach-banner mode-wait">
                 <div class="coach-title">TACTICAL GUIDANCE</div>
                 <div class="coach-action" id="coachText">CONNECTING...</div>
             </div>
-
             <div class="target-grid">
                 <div class="target-box"><div class="target-lbl" style="color:var(--amber)">SHIELD</div><div class="target-val" id="txtSecure">--</div></div>
                 <div class="target-box"><div class="target-lbl" style="color:var(--green)">TARGET 1</div><div class="target-val" id="txtTP1">--</div></div>
@@ -139,15 +133,14 @@
             <div class="panel-head">LOGIC STREAM</div>
             <div class="logic-row">
                 <div class="logic-icon">🚀</div>
-                <div class="logic-text"><div>5m Momentum</div><div style="font-size:10px; color:var(--dim)">The Soldier</div></div>
-                <div class="logic-status status-pass">CONFIRMED</div>
+                <div class="logic-text"><div>NY Open Levels</div><div style="font-size:10px; color:var(--dim)">The Foundation</div></div>
+                <div class="logic-status status-pass">LOCKED</div>
             </div>
             <div class="logic-row">
                 <div class="logic-icon">⚡</div>
                 <div class="logic-text"><div>FUSION MODE</div><div style="font-size:10px; color:var(--dim)">Stoch + RSI</div></div>
                 <div class="logic-status status-pass">ACTIVE</div>
             </div>
-
             <div class="shield-section">
                 <div class="panel-head">TRADE MANAGEMENT</div>
                 <div class="shield-row">
@@ -162,80 +155,173 @@
         </div>
     </div>
 
-    <style>
-        :root { 
-            --bg: #050b14; --panel: #0f172a; --border: #1e293b; 
-            --green: #00ff9d; --red: #ff3366; --blue: #00ccff; --amber: #f59e0b; --purple: #8b5cf6;
-            --text: #e2e8f0; --dim: #64748b; 
-        }
-        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; min-height: 100vh; display: flex; flex-direction: column; box-sizing: border-box; }
-        
-        .top-nav { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
-        .brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 20px; color: #fff; letter-spacing: -1px; display: flex; align-items: center; gap: 10px; }
-        .blink { animation: blinker 2s linear infinite; width: 10px; height: 10px; background: var(--green); border-radius: 50%; }
-        @keyframes blinker { 50% { opacity: 0; } }
-        
-        .controls { display: flex; gap: 15px; align-items: center; }
-        .status-pill { font-size: 10px; font-family: 'JetBrains Mono'; color: var(--green); border: 1px solid var(--green); padding: 4px 8px; border-radius: 4px; text-transform: uppercase; }
-        .alert-toggle { background: transparent; border: 1px solid var(--dim); color: var(--dim); padding: 5px 10px; font-family: 'JetBrains Mono'; font-size: 10px; cursor: pointer; border-radius: 4px; transition: 0.2s; }
-        .alert-toggle.active { border-color: var(--red); color: var(--red); box-shadow: 0 0 10px rgba(255, 51, 102, 0.2); }
-        .back-link { color: var(--dim); text-decoration: none; font-size: 11px; font-weight: 700; }
+    <script>
+        const API_ENDPOINT = '/api/dmr/live'; 
+        let currentPrice = 0; 
+        let triggerPrice = 0; 
+        let isBlueSky = false;
+        let alertsEnabled = false;
+        let lastZone = "PRE-GAME";
 
-        /* RESPONSIVE LAYOUT */
-        .war-room { display: grid; grid-template-columns: 320px 1fr 320px; gap: 20px; height: 100%; }
-        
-        @media (max-width: 1000px) {
-            .war-room { grid-template-columns: 1fr; height: auto; } /* Stack vertically on tablets/phones */
-            .panel { min-height: auto; }
-            .top-nav { flex-direction: column; align-items: flex-start; }
-            .controls { width: 100%; justify-content: space-between; margin-top: 10px; }
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playPing() {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.frequency.value = 880; gain.gain.value = 0.1;
+            osc.start(); setTimeout(() => osc.stop(), 200);
         }
 
-        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; display: flex; flex-direction: column; position: relative; }
-        .panel-head { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--dim); letter-spacing: 1px; margin-bottom: 15px; text-transform: uppercase; display: flex; justify-content: space-between; }
+        function toggleAlerts() {
+            alertsEnabled = !alertsEnabled;
+            const btn = document.getElementById('btnAlert');
+            if(alertsEnabled) {
+                btn.innerText = "ALERTS: ON";
+                btn.classList.add('active');
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                playPing();
+                if ("Notification" in window && Notification.permission !== "granted") {
+                    Notification.requestPermission().then(permission => {
+                        if(permission === "granted") new Notification("PROJECT OMEGA", { body: "Visual Alerts Active" });
+                    });
+                }
+            } else {
+                btn.innerText = "ALERTS: OFF";
+                btn.classList.remove('active');
+            }
+        }
 
-        /* INPUTS */
-        .input-group { margin-bottom: 12px; }
-        .input-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-bottom: 4px; font-family: 'JetBrains Mono'; }
-        .input-field { width: 100%; background: #020617; border: 1px solid var(--border); color: #fff; padding: 10px; font-family: 'JetBrains Mono'; font-size: 14px; text-align: right; box-sizing: border-box; outline: none; border-radius: 4px; }
-        .input-field:focus { border-color: var(--blue); }
+        async function fetchLiveData() {
+            try {
+                const res = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ symbol: "BTCUSDT", session_mode: "MANUAL", manual_session_id: "us_ny_futures", operator_flex: true })
+                });
+                const data = await res.json();
+                
+                // === STRICT FUSION LOGIC (v10.1) ===
+                // We only look for data.price and data.execution. 
+                // No legacy checks. No fallbacks.
+                
+                if(data.price) {
+                    currentPrice = data.price;
+                    document.getElementById('livePrice').innerText = currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2});
+                    
+                    if (data.execution && data.execution.entry) {
+                        triggerPrice = data.execution.entry;
+                        isBlueSky = (data.strength && data.strength.is_blue_sky);
+                        
+                        // Auto-fill Stop Loss if it's the default value
+                        if(data.execution.stop_loss && document.getElementById('inpStop').value == 94720) {
+                             document.getElementById('inpStop').value = data.execution.stop_loss;
+                        }
+                    } else if (data.triggers) {
+                        // Standby Mode: The engine calculated triggers but price hasn't broken them yet.
+                        // We use the triggers just to populate the "Trigger" text on screen.
+                        const t = data.triggers;
+                        triggerPrice = t.BO > 0 ? t.BO : t.BD; 
+                    }
 
-        .magic-box { margin-top: 20px; background: #020617; border: 1px solid var(--blue); border-radius: 6px; padding: 20px; text-align: center; }
-        .magic-lbl { font-size: 9px; color: var(--blue); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 5px; }
-        .magic-val { font-size: 32px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; letter-spacing: -1px; }
+                    if (triggerPrice > 0) {
+                        document.getElementById('valTrigger').innerText = triggerPrice.toLocaleString(undefined, {maximumFractionDigits: 0});
+                        
+                        const ctxText = isBlueSky ? "BLUE SKY (EAGLE)" : "STRUCTURE (VULTURE)";
+                        const ctxColor = isBlueSky ? "var(--purple)" : "var(--amber)";
+                        const ctxEl = document.getElementById('contextFlag');
+                        ctxEl.innerText = ctxText;
+                        ctxEl.style.color = ctxColor;
+                    }
+                    
+                    calc(); // Force calculation
+                }
+            } catch(e) { console.error(e); }
+        }
 
-        /* TELEMETRY */
-        .price-display { text-align: center; margin-bottom: 30px; }
-        .live-price { font-size: 72px; font-weight: 900; letter-spacing: -3px; line-height: 1; color: #fff; }
-        .trigger-info { font-family: 'JetBrains Mono'; font-size: 12px; color: var(--dim); margin-top: 8px; }
+        function calc() {
+            if(currentPrice === 0) return;
 
-        .coach-banner { padding: 25px; border-radius: 8px; text-align: center; border: 2px solid #333; background: #020617; transition: 0.3s; }
-        .coach-title { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; opacity: 0.7; }
-        .coach-action { font-size: 28px; font-weight: 900; font-family: 'JetBrains Mono'; line-height: 1.1; }
-        
-        .mode-wait { border-color: #333; color: var(--dim); }
-        .mode-entry { border-color: var(--blue); background: rgba(0, 204, 255, 0.08); color: var(--blue); box-shadow: 0 0 20px rgba(0,204,255,0.1); }
-        .mode-secure { border-color: var(--amber); background: rgba(245, 158, 11, 0.08); color: var(--amber); }
-        .mode-profit { border-color: var(--green); background: rgba(0, 255, 157, 0.08); color: var(--green); }
+            const coach = document.getElementById('coachPanel');
+            const msg = document.getElementById('coachText');
+            const zTxt = document.getElementById('zoneText');
+            let zone = "";
 
-        /* TARGET GRID */
-        .target-grid { margin-top: 30px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; text-align: center; }
-        .target-box { background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #1e293b; }
-        .target-lbl { font-size: 9px; margin-bottom: 5px; letter-spacing:1px; }
-        .target-val { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px; }
+            coach.className = "coach-banner"; 
 
-        /* LOGIC STREAM */
-        .logic-row { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
-        .logic-icon { width: 24px; text-align: center; font-size: 14px; margin-right: 10px; }
-        .logic-text { flex: 1; color: var(--text); }
-        .logic-status { font-family: 'JetBrains Mono'; font-size: 10px; padding: 2px 6px; border-radius: 3px; }
-        
-        .status-pass { background: rgba(0,255,157,0.15); color: var(--green); }
-        .status-warn { background: rgba(245,158,11,0.15); color: var(--amber); }
-        .status-wait { background: #1e293b; color: var(--dim); }
+            // If we have price but no trigger (Engine is Calibrating)
+            if (triggerPrice === 0) {
+                coach.classList.add('mode-wait');
+                msg.innerText = "CALIBRATING NY RANGE...";
+                zTxt.innerText = "STANDBY";
+                return; 
+            }
 
-        .shield-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
-        .shield-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; }
-    </style>
+            const bal = parseFloat(document.getElementById('inpBal').value) || 0;
+            const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
+            const stopPrice = parseFloat(document.getElementById('inpStop').value) || 0;
+
+            // Risk Math
+            const dollarRisk = bal * (riskPct / 100);
+            document.getElementById('riskAmt').innerText = "$" + dollarRisk.toFixed(0) + " RISK";
+
+            if (stopPrice > 0) {
+                const distPct = Math.abs(currentPrice - stopPrice) / currentPrice;
+                if (distPct > 0) {
+                    const size = dollarRisk / distPct;
+                    document.getElementById('outUSDT').innerText = Math.floor(size).toLocaleString();
+                }
+            }
+
+            const riskDist = Math.abs(triggerPrice - stopPrice);
+            const secure = triggerPrice + (riskDist * 0.5); 
+            const tp1 = triggerPrice + riskDist;
+            const tp2 = triggerPrice + (riskDist * 2);
+            const tp3 = triggerPrice + (riskDist * 3);
+
+            document.getElementById('txtSecure').innerText = secure.toLocaleString(undefined, {maximumFractionDigits:0});
+            document.getElementById('txtTP1').innerText = tp1.toLocaleString(undefined, {maximumFractionDigits:0});
+            document.getElementById('txtTP2').innerText = tp2.toLocaleString(undefined, {maximumFractionDigits:0});
+            document.getElementById('txtTP3').innerText = tp3.toLocaleString(undefined, {maximumFractionDigits:0});
+
+            if (currentPrice < triggerPrice) {
+                coach.classList.add('mode-wait');
+                msg.innerText = "WAITING FOR BREAKOUT";
+                zTxt.innerText = "PRE-GAME";
+                zone = "PRE";
+            } 
+            else if (currentPrice >= triggerPrice && currentPrice < secure) {
+                coach.classList.add('mode-entry');
+                msg.innerText = "MARKET BUY // ACTIVE";
+                zTxt.innerText = "ENTRY ZONE";
+                zone = "ENTRY";
+            }
+            else if (currentPrice >= secure && currentPrice < tp1) {
+                coach.classList.add('mode-secure');
+                msg.innerText = isBlueSky ? "HOLD (EAGLE MODE)" : "MOVE STOP TO B.E. (VULTURE)";
+                zTxt.innerText = "SECURE ZONE";
+                zone = "SECURE";
+            }
+            else if (currentPrice >= tp1) {
+                coach.classList.add('mode-profit');
+                msg.innerText = isBlueSky ? "HOLD FOR TP3 (EAGLE)" : "SELL 75% (VULTURE)";
+                zTxt.innerText = "PROFIT ZONE";
+                zone = "PROFIT";
+            }
+
+            if (zone !== lastZone && zone !== "") {
+                if (alertsEnabled) {
+                    playPing();
+                    if ("Notification" in window && Notification.permission === "granted") {
+                        new Notification("OMEGA // " + zTxt.innerText, { body: msg.innerText + "\nPrice: " + currentPrice.toLocaleString() });
+                    }
+                }
+                lastZone = zone;
+            }
+        }
+
+        setInterval(fetchLiveData, 2000);
+        fetchLiveData(); 
+    </script>
 </body>
 </html>
