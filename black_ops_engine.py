@@ -1,13 +1,11 @@
 # black_ops_engine.py
 # ==============================================================================
 # PROJECT OMEGA: INDEPENDENT OPERATIONS ENGINE (v11.1 NATIVE)
-# SOURCE: session_manager.py
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, Any, List
 from datetime import datetime, timezone
 
-# CORE SUITE INTEGRATION
 import session_manager  # <--- NEW AUTHORITY
 import battlebox_pipeline
 import sse_engine
@@ -94,12 +92,10 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
         # 3. LEVELS (SSE ENGINE)
         calibration_candles = [c for c in raw_5m if anchor_ts <= c["time"] < lock_end_ts]
         
-        # FAIL-SAFE: Allow 4 candles instead of 6 to prevent "Calibrating" freeze on small data gaps
         if len(calibration_candles) < 4:
             if session_info["energy"] == "CALIBRATING":
                 return {"ok": True, "status": "STANDBY", "price": current_price, "msg": "Calibrating (8:30-9:00)..."}
             elif session_info["elapsed_min"] > 30:
-                # Late entry? Use last 30 mins to force data
                 calibration_candles = raw_5m[-7:-1]
 
         r30_high = max(float(c["high"]) for c in calibration_candles) if calibration_candles else 0.0
@@ -155,7 +151,6 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
             
         strength = _calc_strength(trigger_px, stop_loss, dr, ds, active_side)
         
-        # Energy
         energy = abs(dr - ds)
         if energy == 0: energy = current_price * 0.01
 
