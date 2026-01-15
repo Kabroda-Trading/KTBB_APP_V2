@@ -1,6 +1,7 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE v5.1 (PUBLIC STRUCTURE LOGIC)
+# KABRODA BATTLEBOX PIPELINE v6.2 (FULL RESTORATION)
+# Connected to: session_manager.py
 # ==============================================================================
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
@@ -12,17 +13,13 @@ import ccxt.async_support as ccxt
 
 import sse_engine
 import structure_state_engine
+import session_manager  # <--- NEW AUTHORITY
 
 # ----------------------------
-# CONFIG
+# CONFIG (DELEGATED)
 # ----------------------------
-SESSION_CONFIGS = [
-    {"id": "us_ny_futures", "name": "NY Futures", "tz": "America/New_York", "open_h": 8, "open_m": 30},
-    {"id": "us_ny_equity",  "name": "NY Equity",  "tz": "America/New_York", "open_h": 9, "open_m": 30},
-    {"id": "eu_london",     "name": "London",     "tz": "Europe/London",    "open_h": 8, "open_m": 0},
-    {"id": "asia_tokyo",    "name": "Tokyo",      "tz": "Asia/Tokyo",       "open_h": 9, "open_m": 0},
-    {"id": "au_sydney",     "name": "Sydney",     "tz": "Australia/Sydney", "open_h": 10, "open_m": 0},
-]
+# We expose this reference so existing code doesn't break
+SESSION_CONFIGS = session_manager.SESSION_CONFIGS 
 
 LOCKED_SESSIONS: Dict[str, Dict[str, Any]] = {}
 _exchange_live = ccxt.kucoin({"enableRateLimit": True})
@@ -80,25 +77,19 @@ def _check_public_structure(levels: Dict[str, float], candles: List[Dict[str, An
     curr_rsi = rsis[-1]
 
     # 3. DIVERGENCE CHECK (Simplified Lookback)
-    # We look for price making a new extreme but RSI failing to follow
     lookback = candles[-15:-1] # Prior 15 bars excluding current
     has_divergence = False
     
     if side == "LONG":
-        # Price made a low recently?
         min_price_idx = min(range(len(lookback)), key=lambda i: lookback[i]["low"])
         recent_low_rsi = rsis[len(candles) - 15 + min_price_idx]
-        # If current low is lower than prev, but RSI is higher = Bull Div
         if float(current["low"]) < float(lookback[min_price_idx]["low"]) and curr_rsi > recent_low_rsi:
             has_divergence = True
-        # Also accept standard oversold bounce as "Structure" for public
         if curr_rsi < 35: has_divergence = True 
 
     elif side == "SHORT":
-        # Price made a high recently?
         max_price_idx = max(range(len(lookback)), key=lambda i: lookback[i]["high"])
         recent_high_rsi = rsis[len(candles) - 15 + max_price_idx]
-        # If current high is higher than prev, but RSI is lower = Bear Div
         if float(current["high"]) > float(lookback[max_price_idx]["high"]) and curr_rsi < recent_high_rsi:
             has_divergence = True
         if curr_rsi > 65: has_divergence = True
@@ -142,36 +133,12 @@ def _infer_energy(elapsed_min: float) -> str:
     if elapsed_min < 420: return "LATE"
     return "DEAD"
 
+# --- REPLACED WITH SESSION MANAGER CALLS ---
 def anchor_ts_for_utc_date(cfg: Dict, utc_date: datetime) -> int:
-    tz = pytz.timezone(cfg["tz"])
-    y, m, d = utc_date.year, utc_date.month, utc_date.day
-    local_open_naive = datetime(y, m, d, cfg["open_h"], cfg["open_m"], 0)
-    local_open = tz.localize(local_open_naive)
-    return int(local_open.astimezone(timezone.utc).timestamp())
+    return session_manager.anchor_ts_for_utc_date(cfg, utc_date)
 
 def resolve_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[str] = None) -> Dict[str, Any]:
-    mode = (mode or "AUTO").upper()
-    if mode == "MANUAL" and manual_id:
-        cfg = next((s for s in SESSION_CONFIGS if s["id"] == manual_id), SESSION_CONFIGS[0])
-        tz = pytz.timezone(cfg["tz"])
-        now_local = now_utc.astimezone(tz)
-        open_time = now_local.replace(hour=cfg["open_h"], minute=cfg["open_m"], second=0, microsecond=0)
-        if now_local < open_time: open_time -= timedelta(days=1)
-        elapsed = (now_local - open_time).total_seconds() / 60.0
-        return {"id": cfg["id"], "name": cfg["name"], "tz": cfg["tz"], "anchor_time": int(open_time.astimezone(timezone.utc).timestamp()), "date_key": open_time.strftime("%Y-%m-%d"), "energy": _infer_energy(elapsed)}
-
-    candidates = []
-    for cfg in SESSION_CONFIGS:
-        tz = pytz.timezone(cfg["tz"])
-        now_local = now_utc.astimezone(tz)
-        open_time = now_local.replace(hour=cfg["open_h"], minute=cfg["open_m"], second=0, microsecond=0)
-        if now_local < open_time: open_time -= timedelta(days=1)
-        elapsed = (now_local - open_time).total_seconds() / 60.0
-        candidates.append((elapsed, cfg, open_time))
-    
-    candidates.sort(key=lambda x: x[0])
-    elapsed, cfg, open_time = candidates[0]
-    return {"id": cfg["id"], "name": cfg["name"], "tz": cfg["tz"], "anchor_time": int(open_time.astimezone(timezone.utc).timestamp()), "date_key": open_time.strftime("%Y-%m-%d"), "energy": _infer_energy(elapsed)}
+    return session_manager.resolve_current_session(now_utc, mode, manual_id)
 
 # ----------------------------
 # DATA FETCHING
@@ -258,8 +225,6 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     state = structure_state_engine.compute_structure_state(levels, post_lock)
     
     # 2. PUBLIC STRUCTURE CHECK (The Update)
-    # Checks for 1-Candle Close + RSI Divergence
-    # Replaces "HOLD FIRE" with "STRUCTURE ACTIVE"
     public_chk = _check_public_structure(levels, post_lock)
     
     if public_chk["active"]:
@@ -286,11 +251,14 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     }
 
 async def get_session_review(symbol: str, session_tz: str) -> Dict[str, Any]:
-    # (Existing Logic - Unchanged)
     raw_5m = await fetch_live_5m(symbol)
     if not raw_5m: return {"ok": False, "error": "No Data"}
+    # Use session_manager configs
     cfg = next((s for s in SESSION_CONFIGS if s["tz"] == session_tz), SESSION_CONFIGS[0])
-    anchor_ts = anchor_ts_for_utc_date(cfg, datetime.now(timezone.utc))
+    
+    # Use session_manager logic
+    anchor_ts = session_manager.anchor_ts_for_utc_date(cfg, datetime.now(timezone.utc))
+    
     lock_end_ts = anchor_ts + 1800
     if anchor_ts > datetime.now(timezone.utc).timestamp():
          anchor_ts -= 86400

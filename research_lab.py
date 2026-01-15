@@ -1,6 +1,6 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB CONTROLLER v7.1 (FULL DATA PIPELINE)
+# RESEARCH LAB CONTROLLER v7.2 (SESSION MANAGER SYNC)
 # ==============================================================================
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone 
@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import traceback
 
 import battlebox_pipeline
+import session_manager # <--- NEW SOURCE OF TRUTH
 import sse_engine
 import structure_state_engine
 import battlebox_rules 
@@ -26,16 +27,15 @@ async def run_research_lab_from_candles(
 ) -> Dict[str, Any]:
     try:
         print(f"[LAB] Starting analysis for {symbol} ({len(raw_5m)} candles provided)")
-        
         if not raw_5m: return {"ok": False, "error": "No candles provided to Research Lab."}
-
         raw_5m.sort(key=lambda x: x["time"])
 
         start_dt = datetime.strptime(start_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         end_dt = datetime.strptime(end_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
-        target_ids = session_ids or [s["id"] for s in battlebox_pipeline.SESSION_CONFIGS]
-        active_cfgs = [s for s in battlebox_pipeline.SESSION_CONFIGS if s["id"] in target_ids]
+        # USE SESSION MANAGER CONFIGS
+        target_ids = session_ids or [s["id"] for s in session_manager.SESSION_CONFIGS]
+        active_cfgs = [s for s in session_manager.SESSION_CONFIGS if s["id"] in target_ids]
 
         tuning = tuning or {}
         req_vol = bool(tuning.get("require_volume", False))
@@ -54,7 +54,9 @@ async def run_research_lab_from_candles(
             day_str = curr_day.strftime("%Y-%m-%d")
             
             for cfg in active_cfgs:
-                anchor_ts = battlebox_pipeline.anchor_ts_for_utc_date(cfg, curr_day)
+                # USE SESSION MANAGER ANCHOR LOGIC
+                anchor_ts = session_manager.anchor_ts_for_utc_date(cfg, curr_day)
+                
                 lock_end_ts = anchor_ts + 1800
                 exec_end_ts = lock_end_ts + (exec_hours * 3600)
 
@@ -96,7 +98,6 @@ async def run_research_lab_from_candles(
                         confirmation_mode=confirm_mode
                     )
 
-                    # --- SIMULATION ---
                     if go["ok"]:
                         stop_price = 0.0
                         if side == "LONG": stop_price = min(c["low"] for c in calibration) 
@@ -129,7 +130,7 @@ async def run_research_lab_from_candles(
                         "had_acceptance": had_acceptance,
                         "had_alignment": (state["execution"]["gates_mode"] == "LOCKED"),
                         "had_go": bool(go["ok"]),
-                        "go_type": go["go_type"],
+                        "go_type": go.get("go_type"),
                     },
                     "events": {
                         "acceptance_side": side,
