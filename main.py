@@ -1,404 +1,80 @@
-# main.py
-# ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v11.0 (AUDITED)
-# ---------------------------------------------------------
-from __future__ import annotations
+# main.py — Unified KABRODA Backend Entry Point
 
-import os
-import traceback
-import asyncio  # <--- NEW IMPORT
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, Optional
-
-from fastapi import FastAPI, Request, Form, HTTPException, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from starlette.middleware.sessions import SessionMiddleware
-from starlette.templating import Jinja2Templates
+from fastapi.templating import Jinja2Templates
 
-# --- CORE IMPORTS ---
-import auth
-import billing
-import battlebox_pipeline
-import research_lab
-import black_ops_engine # <--- NEW
-
-from database import init_db, get_db, UserModel
-from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Route modules
+from auth import router as auth_router
+from billing import router as billing_router
+from black_ops_engine import router as black_ops_router
+from battle_control import router as battle_control_router
+from session_control import router as session_control_router
 
 app = FastAPI()
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
-def _bool_env(name: str, default: bool = False) -> bool:
-    v = os.getenv(name)
-    if v is None: return default
-    return v.strip().lower() in ("1", "true", "yes", "y", "on")
+# Register API routers
+app.include_router(auth_router)
+app.include_router(billing_router)
+app.include_router(black_ops_router)
+app.include_router(battle_control_router)
+app.include_router(session_control_router)
 
-SESSION_SECRET = os.getenv("SESSION_SECRET") or os.getenv("SECRET_KEY") or "dev-session-secret"
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
-IS_HTTPS = PUBLIC_BASE_URL.startswith("https://")
-SESSION_HTTPS_ONLY = _bool_env("SESSION_HTTPS_ONLY", default=IS_HTTPS)
+# Static file serving
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
-# --- SESSION CONFIGURATION ---
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=SESSION_SECRET,
-    https_only=SESSION_HTTPS_ONLY,
-    same_site="lax",
-    max_age=86400 * 30
-)
+# --- Frontend Pages (HTML) ---
 
-ALLOWED_ADMINS = ["spiritmaker79@gmail.com", "grossmonkeytrader@protonmail.com"]
-
-@app.on_event("startup")
-def _startup():
-    init_db()
-    db = next(get_db()) 
-    try:
-        try: db.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR")); db.commit()
-        except: db.rollback()
-        try: db.execute(text("ALTER TABLE users ADD COLUMN tradingview_id VARCHAR")); db.commit()
-        except: db.rollback()
-        try: db.execute(text("ALTER TABLE users ADD COLUMN operator_flex BOOLEAN")); db.commit()
-        except: db.rollback()
-    except Exception as e:
-        print(f"--- STARTUP SCHEMA LOG: {e}")
-    finally:
-        db.close()
-
-# --- HELPERS ---
-def _session_user_dict(request: Request) -> Optional[Dict[str, Any]]:
-    u = request.session.get("user")
-    return u if isinstance(u, dict) else None
-
-def _require_session_user(request: Request) -> Dict[str, Any]:
-    return auth.require_session_user(request)
-
-def _db_user_from_session(db: Session, sess: Dict[str, Any]) -> UserModel:
-    uid = sess.get("id")
-    if not uid: raise HTTPException(status_code=401, detail="Invalid session")
-    u = db.query(UserModel).filter(UserModel.id == uid).first()
-    if not u: raise HTTPException(status_code=401, detail="User not found")
-    return u
-
-def _plan_flags(u: UserModel) -> Dict[str, Any]:
-    ms = get_membership_state(u)
-    return {"is_paid": ms.is_paid, "plan": ms.plan, "plan_label": ms.label}
-
-# --- PUBLIC ROUTES ---
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request):
-    return templates.TemplateResponse("home.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
-
-@app.get("/analysis", response_class=HTMLResponse)
-def analysis(request: Request):
-    return templates.TemplateResponse("analysis.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
-
-@app.get("/how-it-works", response_class=HTMLResponse)
-def how_it_works(request: Request):
-    return templates.TemplateResponse("how_it_works.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
-
-@app.get("/pricing", response_class=HTMLResponse)
-def pricing(request: Request):
-    return templates.TemplateResponse("pricing.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
+async def read_root(request: Request):
+    return templates.TemplateResponse("home.html", {"request": request})
 
 @app.get("/about", response_class=HTMLResponse)
-def about(request: Request):
-    return templates.TemplateResponse("about.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
+async def read_about(request: Request):
+    return templates.TemplateResponse("about.html", {"request": request})
 
-@app.get("/privacy", response_class=HTMLResponse)
-def privacy_page(request: Request):
-    return templates.TemplateResponse("privacy.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
-
-# --- SUITE ROUTES ---
-@app.get("/suite", response_class=HTMLResponse)
-def suite(request: Request, db: Session = Depends(get_db)):
-    # 1. Standard Security Checks
-    sess = _session_user_dict(request)
-    if not sess: return RedirectResponse(url="/login", status_code=303)
-    u = _db_user_from_session(db, sess)
-    try: require_paid_access(u)
-    except HTTPException: return RedirectResponse(url="/pricing?paywall=1", status_code=303)
-    flags = _plan_flags(u)
-    
-    # 2. NEW: Admin Check
-    is_admin = u.email in ALLOWED_ADMINS
-    
-    # 3. Render Template with 'is_admin' flag
-    return templates.TemplateResponse("session_control.html", {
-        "request": request, 
-        "is_logged_in": True, 
-        "user": u, 
-        "plan_label": flags.get("plan_label", ""),
-        "is_admin": is_admin  # <--- The Key Update
-    })
-
-@app.get("/suite/battle-control", response_class=HTMLResponse)
-def battle_control_page(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-    flags = _plan_flags(u)
-    return templates.TemplateResponse("battle_control.html", {"request": request, "is_logged_in": True, "user": u, "plan_label": flags.get("plan_label", "")})
-
-@app.get("/suite/research-lab", response_class=HTMLResponse)
-def research_lab_page(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-    flags = _plan_flags(u)
-    return templates.TemplateResponse("research_lab.html", {"request": request, "is_logged_in": True, "user": u, "plan_label": flags.get("plan_label", "")})
-
-@app.get("/indicators", response_class=HTMLResponse)
-def indicators(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-    flags = _plan_flags(u)
-    return templates.TemplateResponse("indicators.html", {"request": request, "is_logged_in": True, "user": u, "plan_label": flags.get("plan_label", "")})
-
-# --- AUTH & ACCOUNT ---
-@app.get("/login", response_class=HTMLResponse)
-def login_get(request: Request):
-    sess = _session_user_dict(request)
-    if sess: return RedirectResponse(url="/suite", status_code=303)
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
-
-@app.post("/login")
-def login_post(request: Request, db: Session = Depends(get_db), email: str = Form(...), password: str = Form(...)):
-    u = auth.authenticate_user(db, email=email, password=password)
-    if not u: return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"}, status_code=401)
-    auth.set_user_session(request, u)
-    if not get_membership_state(u).is_paid: return RedirectResponse(url="/pricing?renewal=1", status_code=303)
-    return RedirectResponse(url="/suite", status_code=303)
-
-@app.get("/logout")
-def logout(request: Request):
-    auth.clear_user_session(request)
-    return RedirectResponse(url="/", status_code=303)
-
-@app.get("/register", response_class=HTMLResponse)
-def register_get(request: Request, plan: str = "monthly"):
-    if auth.registration_disabled(): return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("register.html", {"request": request, "error": None, "plan": plan})
-
-@app.post("/register")
-def register_post(request: Request, db: Session = Depends(get_db), email: str = Form(...), password: str = Form(...), plan: str = Form("monthly")):
-    if auth.registration_disabled(): raise HTTPException(status_code=403, detail="Registration disabled")
-    try: u = auth.create_user(db, email=email, password=password)
-    except HTTPException as e: return templates.TemplateResponse("register.html", {"request": request, "error": str(e.detail), "plan": plan}, status_code=e.status_code)
-    auth.set_user_session(request, u)
-    return RedirectResponse(url=billing.create_checkout_session(db=db, user_model=u, plan_key=plan), status_code=303)
+@app.get("/pricing", response_class=HTMLResponse)
+async def read_pricing(request: Request):
+    return templates.TemplateResponse("pricing.html", {"request": request})
 
 @app.get("/account", response_class=HTMLResponse)
-def account(request: Request, db: Session = Depends(get_db)):
-    sess = _session_user_dict(request)
-    if not sess: return RedirectResponse(url="/login", status_code=303)
-    u = _db_user_from_session(db, sess)
-    
-    is_admin = u.email in ALLOWED_ADMINS
-    
-    return templates.TemplateResponse("account.html", {
-        "request": request, 
-        "is_logged_in": True, 
-        "user": u, 
-        "tier_label": _plan_flags(u)["plan_label"],
-        "is_admin": is_admin
-    })
+async def read_account(request: Request):
+    return templates.TemplateResponse("account.html", {"request": request})
 
-@app.post("/account/settings")
-async def account_settings(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    data = await request.json()
-    u.operator_flex = bool(data.get("operator_flex", False))
-    db.commit()
-    return {"status": "ok"}
+@app.get("/register", response_class=HTMLResponse)
+async def register(request: Request):
+    return templates.TemplateResponse("register.html", {"request": request})
 
-@app.post("/account/profile")
-async def account_profile_update(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    data = await request.json()
-    
-    if "username" in data: u.username = str(data["username"]).strip()[:50]
-    if "tradingview_id" in data: u.tradingview_id = str(data["tradingview_id"]).strip()
-    if "session_tz" in data: u.session_tz = str(data["session_tz"]).strip()
-        
-    db.commit()
-    return {"status": "ok"}
+@app.get("/login", response_class=HTMLResponse)
+async def login(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
 
-@app.get("/admin", response_class=HTMLResponse)
-def admin_panel(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    if u.email not in ALLOWED_ADMINS:
-        return RedirectResponse(url="/suite", status_code=303)
-
-    users = db.query(UserModel).order_by(UserModel.created_at.desc()).all()
-    clean_list = []
-    now = datetime.now()
-    
-    for usr in users:
-        status = "INACTIVE"
-        joined = "N/A"
-        sub_end = getattr(usr, "subscription_end", None)
-        if sub_end and sub_end > now: status = "ACTIVE"
-        created = getattr(usr, "created_at", None)
-        if created: joined = created.strftime('%Y-%m-%d')
-            
-        clean_list.append({
-            "id": str(usr.id),
-            "email": usr.email,
-            "username": getattr(usr, "username", None),
-            "status": status,
-            "created_at": joined
-        })
-
-    return templates.TemplateResponse("admin.html", {"request": request, "users": clean_list})
-# --- PROJECT OMEGA ROUTES (ADMIN ONLY) ---
-@app.get("/suite/black-ops", response_class=HTMLResponse)
-def black_ops_ui(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    
-    # SECURITY CHECK
-    if u.email not in ALLOWED_ADMINS:
-        return RedirectResponse(url="/suite", status_code=303)
-        
+@app.get("/omega", response_class=HTMLResponse)
+async def omega_ui(request: Request):
     return templates.TemplateResponse("omega_ui.html", {"request": request})
 
-@app.post("/api/black-ops/status")
-async def black_ops_api(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    
-    # SECURITY CHECK
-    if u.email not in ALLOWED_ADMINS:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-        
-    payload = await request.json()
-    symbol = payload.get("symbol", "BTCUSDT")
-    
-    data = await black_ops_engine.get_omega_status(symbol)
-    return JSONResponse(data)
+@app.get("/research", response_class=HTMLResponse)
+async def research_ui(request: Request):
+    return templates.TemplateResponse("research.html", {"request": request})
 
-@app.post("/admin/delete-user")
-def delete_user(request: Request, user_id: str = Form(...), db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    admin_user = _db_user_from_session(db, sess)
-    if admin_user.email not in ALLOWED_ADMINS: return RedirectResponse(url="/suite", status_code=303)
-    try:
-        target_id = int(user_id)
-        target = db.query(UserModel).filter(UserModel.id == target_id).first()
-        if target:
-            if target.email == admin_user.email: return RedirectResponse(url="/admin?error=cannot_delete_self", status_code=303)
-            db.delete(target)
-            db.commit()
-    except ValueError: pass
-    return RedirectResponse(url="/admin", status_code=303)
+@app.get("/analysis", response_class=HTMLResponse)
+async def analysis_ui(request: Request):
+    return templates.TemplateResponse("analysis.html", {"request": request})
 
-@app.get("/sandbox", response_class=HTMLResponse)
-def ui_sandbox(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    if u.email not in ALLOWED_ADMINS: return RedirectResponse(url="/suite", status_code=303)
-    return templates.TemplateResponse("ui_sandbox.html", {"request": request})
+@app.get("/battle-control", response_class=HTMLResponse)
+async def battle_control_ui(request: Request):
+    return templates.TemplateResponse("battle_control.html", {"request": request})
 
-@app.post("/billing/checkout")
-async def billing_checkout(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    payload = await request.json()
-    return {"url": billing.create_checkout_session(db=db, user_model=u, plan_key=payload.get("plan", "monthly"))}
+@app.get("/session-control", response_class=HTMLResponse)
+async def session_control_ui(request: Request):
+    return templates.TemplateResponse("session_control.html", {"request": request})
 
-@app.post("/billing/portal")
-async def billing_portal(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    return {"url": billing.create_billing_portal(db=db, user_model=u)}
+@app.get("/indicators", response_class=HTMLResponse)
+async def indicators_ui(request: Request):
+    return templates.TemplateResponse("indicators.html", {"request": request})
 
-@app.post("/billing/webhook")
-async def billing_webhook(request: Request, db: Session = Depends(get_db)):
-    payload = await request.body()
-    return billing.handle_webhook(payload=payload, sig_header=request.headers.get("stripe-signature", ""), db=db, UserModel=UserModel)
-
-# --- UNIFIED API ENDPOINTS ---
-@app.post("/api/dmr/run-raw")
-async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-    payload = await request.json()
-    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    requested_tz = payload.get("session_tz") or (u.session_tz or "UTC")
-    ensure_symbol_allowed(u, symbol)
-    out = await battlebox_pipeline.get_session_review(symbol=symbol, session_tz=requested_tz)
-    return JSONResponse(out)
-
-@app.post("/api/dmr/live")
-async def dmr_live(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-    payload = await request.json()
-    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    ensure_symbol_allowed(u, symbol)
-    out = await battlebox_pipeline.get_live_battlebox(
-        symbol=symbol,
-        session_mode=(payload.get("session_mode") or "AUTO").upper(),
-        manual_id=payload.get("manual_session_id", None),
-        operator_flex=bool(payload.get("operator_flex", False))
-    )
-    return JSONResponse(out)
-
-@app.post("/api/research/run")
-async def research_run(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-    payload = await request.json()
-    try:
-        # 1. Extract Config
-        symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-        start_date = payload.get("start_date_utc")
-        end_date = payload.get("end_date_utc")
-        tuning_cfg = payload.get("tuning")
-        
-        # 2. Fetch Data (WITH TIMEOUT CIRCUIT BREAKER)
-        start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        
-        fetch_start = int((start_dt - timedelta(hours=48)).timestamp())
-        fetch_end = int((end_dt + timedelta(hours=30)).timestamp())
-        
-        print(f"[API] Requesting Pipeline Data for {symbol} ({fetch_start} -> {fetch_end})...")
-        
-        # FIX: Force a 45s timeout. If pipeline loops, this kills it.
-        try:
-            raw_5m = await asyncio.wait_for(
-                battlebox_pipeline.fetch_historical_pagination(symbol, fetch_start, fetch_end),
-                timeout=45.0
-            )
-            print(f"[API] Pipeline returned {len(raw_5m)} candles.")
-        except asyncio.TimeoutError:
-            raise Exception("Pipeline data fetch timed out. Check battlebox_pipeline.py for infinite loops.")
-
-        # 3. Pass Data to Research Lab
-        out = await research_lab.run_research_lab_from_candles(
-            symbol=symbol,
-            raw_5m=raw_5m,
-            start_date_utc=start_date,
-            end_date_utc=end_date,
-            session_ids=payload.get("session_ids"),
-            tuning=tuning_cfg
-        )
-        return JSONResponse(out)
-    except Exception as e:
-        traceback.print_exc()
-        return JSONResponse({"ok": False, "error": str(e)})
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_ui(request: Request):
+    return templates.TemplateResponse("privacy.html", {"request": request})

@@ -1,180 +1,140 @@
 # black_ops_engine.py
-# ==============================================================================
-# PROJECT OMEGA: INDEPENDENT OPERATIONS ENGINE (v12.3 LOCKED)
-# LOGIC: Pulls truth directly from session_manager.resolve_anchor_time
-# FIX: Enforces strict 24h context locking to match Session Control
-# ==============================================================================
-from __future__ import annotations
+# PROJECT OMEGA — BLACK OPS v13.0 UNIFIED ENGINE
+
 from typing import Dict, Any, List
+from fastapi import APIRouter
+from session_context import get_session_context
+from sse_engine import generate_levels
+from strategy_logic import evaluate_trade
 
-# CORE INTEGRATION
-import session_manager 
-import battlebox_pipeline
-import sse_engine
+router = APIRouter()
 
-# --- INTERNAL MATH HELPERS ---
+
 def _compute_stoch(candles: List[Dict], k_period: int = 14) -> Dict[str, float]:
-    if len(candles) < k_period: return {"k": 50.0, "d": 50.0}
-    try:
-        highs = [float(c["high"]) for c in candles]
-        lows = [float(c["low"]) for c in candles]
-        closes = [float(c["close"]) for c in candles]
-        hh = max(highs[-k_period:])
-        ll = min(lows[-k_period:])
-        curr = closes[-1]
-        if hh == ll: k_val = 50.0
-        else: k_val = ((curr - ll) / (hh - ll)) * 100.0
-        return {"k": k_val, "d": k_val} 
-    except: return {"k": 50.0, "d": 50.0}
+    if len(candles) < k_period:
+        return {"k": 50.0, "d": 50.0}
+    highs = [float(c["high"]) for c in candles]
+    lows = [float(c["low"]) for c in candles]
+    closes = [float(c["close"]) for c in candles]
+    hh = max(highs[-k_period:])
+    ll = min(lows[-k_period:])
+    curr = closes[-1]
+    k_val = 50.0 if hh == ll else ((curr - ll) / (hh - ll)) * 100.0
+    return {"k": k_val, "d": k_val}
+
 
 def _compute_rsi(candles: List[Dict], period: int = 14) -> float:
-    if len(candles) < period + 1: return 50.0
+    if len(candles) < period + 1:
+        return 50.0
+    closes = [float(c["close"]) for c in candles]
+    gains, losses = [], []
+    for i in range(1, len(closes)):
+        delta = closes[i] - closes[i - 1]
+        gains.append(max(delta, 0))
+        losses.append(max(-delta, 0))
+    avg_gain = sum(gains[-period:]) / period
+    avg_loss = sum(losses[-period:]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
+@router.get("/blackops/{session_id}")
+def blackops_directive(session_id: str = "us_ny_futures") -> Dict[str, Any]:
     try:
-        closes = [float(c["close"]) for c in candles]
-        gains, losses = [], []
-        for i in range(1, len(closes)):
-            delta = closes[i] - closes[i-1]
-            gains.append(max(delta, 0))
-            losses.append(max(-delta, 0))
-        avg_gain = sum(gains[-period:]) / period
-        avg_loss = sum(losses[-period:]) / period
-        if avg_loss == 0: return 100.0
-        rs = avg_gain / avg_loss
-        return 100.0 - (100.0 / (1.0 + rs))
-    except: return 50.0
+        # 1. Get locked session context
+        context = get_session_context(session_id)
 
-def _calc_strength(entry: float, stop: float, dr: float, ds: float, side: str) -> dict:
-    score = 0
-    is_blue_sky = False
-    if entry == 0: return {"score": 0, "rating": "WAITING", "tags": [], "is_blue_sky": False}
-    if side == "LONG" and entry > dr: is_blue_sky = True
-    if side == "SHORT" and entry < ds: is_blue_sky = True
-    return {"score": score, "rating": "GO", "tags": [], "is_blue_sky": is_blue_sky}
+        # 2. Compute level triggers using locked candles
+        levels = generate_levels(context["calibration_candles"], context)
 
-# --- MAIN ENGINE ---
-async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
-    current_price = 0.0
-    try:
-        # 1. GET CENTRAL TRUTH
-        session = session_manager.resolve_anchor_time("us_ny_futures")
-        
-        anchor_ts = session["anchor_ts"]
-        lock_end_ts = session["lock_end_ts"]
-        session_status = session["status"]
+        # 3. Set strategy config (can pull from DB later)
+        config = {
+            "confirmation_mode": "1-Candle Close (Standard)",
+            "acceptance_closes": 2,
+            "ignore_alignment": True,
+            "ignore_stoch": True,
+            "stop_risk_bps": 120
+        }
 
-        # 2. DATA FEED
-        raw_5m = await battlebox_pipeline.fetch_live_5m(symbol, limit=2000)
-        if not raw_5m or len(raw_5m) < 20:
-            return {"ok": False, "status": "OFFLINE", "msg": "Waiting for Data..."}
-        
-        current_price = float(raw_5m[-1]["close"])
+        # 4. Evaluate go/no-go directive
+        directive = evaluate_trade(context, levels, config)
 
-        # 3. COMPUTE LEVELS (Strictly Locked)
-        # Calibration: The 30m window (Anchor -> Lock Time)
-        calibration_candles = [c for c in raw_5m if anchor_ts <= c["time"] < lock_end_ts]
-        
-        # --- THE FIX: Context is FROZEN to the Lock Time ---
-        context_start = lock_end_ts - 86400
-        context_24h = [c for c in raw_5m if context_start <= c["time"] < lock_end_ts]
-        
-        r30_high, r30_low = 0.0, 0.0
-        dr, ds, bo, bd = 0.0, 0.0, 0.0, 0.0
-        
-        if len(calibration_candles) >= 4 and len(context_24h) > 100:
-            r30_high = max(float(c["high"]) for c in calibration_candles)
-            r30_low = min(float(c["low"]) for c in calibration_candles)
-            
-            # Use the FROZEN context for calculations (The Map)
-            sse_input = {
-                "locked_history_5m": context_24h,
-                "slice_24h_5m": context_24h, 
-                "session_open_price": float(calibration_candles[0]["open"]),
-                "r30_high": r30_high,
-                "r30_low": r30_low,
-                "last_price": current_price,
-                "tuning": {}
-            }
-            computed = sse_engine.compute_sse_levels(sse_input)
-            levels = computed.get("levels", {})
-            
-            bo = float(levels.get("breakout_trigger", 0))
-            bd = float(levels.get("breakdown_trigger", 0))
-            dr = float(levels.get("daily_resistance", 0))
-            ds = float(levels.get("daily_support", 0))
+        # 5. Compute live indicators
+        stoch = _compute_stoch(context["calibration_candles"][-20:])
+        rsi = _compute_rsi(context["calibration_candles"][-20:])
 
-        # 4. EXECUTION (The Live Car)
-        status = "STANDBY"
-        active_side = "NONE"
-        stop_loss = 0.0
+        # 6. Target logic
+        price = context["price"]
+        dr = context["r30_high"]
+        ds = context["r30_low"]
+        energy = abs(dr - ds) or price * 0.01
 
-        if session_status == "ACTIVE" or session_status == "CLOSED":
-            if bo > 0 and bd > 0:
-                # Use LIVE candles for triggers
-                last_candle = raw_5m[-2] if len(raw_5m) > 1 else raw_5m[-1]
-                
-                # Check LIVE price against LOCKED levels
-                if float(last_candle["close"]) > bo:
-                    status = "EXECUTING"; active_side = "LONG"; stop_loss = r30_low
-                elif float(last_candle["close"]) < bd:
-                    status = "EXECUTING"; active_side = "SHORT"; stop_loss = r30_high
-                else:
-                    if abs(current_price - bo) / bo < 0.001: status = "LOCKED"; active_side = "LONG"
-                    elif abs(current_price - bd) / bd < 0.001: status = "LOCKED"; active_side = "SHORT"
-        
-        if session_status == "CALIBRATING": status = "CALIBRATING"
-        if session_status == "CLOSED": status = "CLOSED" 
+        side = directive["active_side"]
+        entry = directive["entry"] or price
+        is_blue_sky = entry > dr if side == "LONG" else entry < ds if side == "SHORT" else False
 
-        # 5. PACKAGING
-        trigger_px = bo if active_side == "LONG" else bd
-        if active_side == "NONE" and bo > 0: 
-            trigger_px = bo if current_price > (bo+bd)/2 else bd
-            
-        strength = _calc_strength(trigger_px, stop_loss, dr, ds, active_side)
-        energy = abs(dr - ds)
-        if energy == 0: energy = current_price * 0.01
+        if side == "LONG":
+            t1 = dr if not is_blue_sky else entry + (energy * 0.5)
+            targets = [
+                {"id": "T1", "price": round(t1, 2)},
+                {"id": "T2", "price": round(entry + energy, 2)},
+                {"id": "T3", "price": round(entry + (energy * 3.0), 2)}
+            ]
+        elif side == "SHORT":
+            t1 = ds if not is_blue_sky else entry - (energy * 0.5)
+            targets = [
+                {"id": "T1", "price": round(t1, 2)},
+                {"id": "T2", "price": round(entry - energy, 2)},
+                {"id": "T3", "price": round(entry - (energy * 3.0), 2)}
+            ]
+        else:
+            targets = []
 
-        targets = []
-        if active_side == "LONG" or (active_side == "NONE" and bo > 0 and current_price > (bo+bd)/2):
-            t1 = dr if not strength["is_blue_sky"] else trigger_px + (energy * 0.5)
-            targets = [{"id": "T1", "price": round(t1, 2)}, {"id": "T2", "price": round(trigger_px + energy, 2)}, {"id": "T3", "price": round(trigger_px + (energy * 3.0), 2)}]
-        elif bd > 0:
-            t1 = ds if not strength["is_blue_sky"] else trigger_px - (energy * 0.5)
-            targets = [{"id": "T1", "price": round(t1, 2)}, {"id": "T2", "price": round(trigger_px - energy, 2)}, {"id": "T3", "price": round(trigger_px - (energy * 3.0), 2)}]
-
-        # Live Indicators
-        stoch = _compute_stoch(raw_5m[-20:])
-        rsi = _compute_rsi(raw_5m[-20:])
-
-        next_open_ts = anchor_ts + 86400
-        
         telemetry = {
-            "session_state": session_status,
-            "next_event_ts": lock_end_ts if session_status == "CALIBRATING" else next_open_ts,
+            "session_state": context["status"],
+            "next_event_ts": context["lock_end_ts"],
             "verification": {
-                "r30_high": r30_high,
-                "r30_low": r30_low,
-                "daily_res": dr,
-                "daily_sup": ds
+                "r30_high": dr,
+                "r30_low": ds,
+                "daily_res": levels.get("daily_resistance"),
+                "daily_sup": levels.get("daily_support")
             }
         }
 
         return {
             "ok": True,
-            "status": status,
-            "symbol": symbol,
-            "price": current_price,
-            "side": active_side,
-            "context": "BLUE SKY" if strength["is_blue_sky"] else "STRUCTURE",
-            "strength": strength,
-            "triggers": {"BO": bo, "BD": bd},
+            "status": directive["directive"],
+            "symbol": session_id,
+            "price": price,
+            "side": side,
+            "context": "BLUE SKY" if is_blue_sky else "STRUCTURE",
+            "strength": {
+                "score": 0,
+                "rating": directive["directive"],
+                "tags": [],
+                "is_blue_sky": is_blue_sky
+            },
+            "triggers": {
+                "BO": levels.get("breakout_trigger"),
+                "BD": levels.get("breakdown_trigger")
+            },
             "telemetry": telemetry,
             "execution": {
-                "entry": trigger_px,
-                "stop_loss": stop_loss,
+                "entry": entry,
+                "stop_loss": directive.get("stop_loss"),
                 "targets": targets,
-                "fusion_metrics": {"k": stoch["k"], "rsi": rsi}
+                "fusion_metrics": {
+                    "k": stoch["k"],
+                    "rsi": rsi
+                }
             }
         }
 
     except Exception as e:
-        return {"ok": False, "status": "ERROR", "price": current_price, "msg": str(e)}
+        return {
+            "ok": False,
+            "status": "ERROR",
+            "msg": str(e)
+        }
