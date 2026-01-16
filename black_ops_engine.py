@@ -1,17 +1,17 @@
 # black_ops_engine.py
 # ==============================================================================
-# PROJECT OMEGA: INDEPENDENT OPERATIONS ENGINE (v12.1 CENTRALIZED)
+# PROJECT OMEGA: INDEPENDENT OPERATIONS ENGINE (v12.2 CLEAN)
 # LOGIC: Pulls truth directly from session_manager.resolve_anchor_time
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, Any, List
 
 # CORE INTEGRATION
-import session_manager  # <--- NOW THE BRAIN
+import session_manager 
 import battlebox_pipeline
 import sse_engine
 
-# --- INTERNAL MATH HELPERS (Standard) ---
+# --- INTERNAL MATH HELPERS ---
 def _compute_stoch(candles: List[Dict], k_period: int = 14) -> Dict[str, float]:
     if len(candles) < k_period: return {"k": 50.0, "d": 50.0}
     try:
@@ -55,7 +55,6 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
     current_price = 0.0
     try:
         # 1. GET CENTRAL TRUTH
-        # No more custom time math here. We ask the Manager.
         session = session_manager.resolve_anchor_time("us_ny_futures")
         
         anchor_ts = session["anchor_ts"]
@@ -75,7 +74,6 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
         r30_high, r30_low = 0.0, 0.0
         dr, ds, bo, bd = 0.0, 0.0, 0.0, 0.0
         
-        # Only calculate if we have the data for the Anchor Time
         if len(calibration_candles) >= 4:
             r30_high = max(float(c["high"]) for c in calibration_candles)
             r30_low = min(float(c["low"]) for c in calibration_candles)
@@ -114,7 +112,7 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
                     elif abs(current_price - bd) / bd < 0.001: status = "LOCKED"; active_side = "SHORT"
         
         if session_status == "CALIBRATING": status = "CALIBRATING"
-        if session_status == "CLOSED": status = "CLOSED" # Visual override
+        if session_status == "CLOSED": status = "CLOSED" 
 
         # 5. PACKAGING
         trigger_px = bo if active_side == "LONG" else bd
@@ -136,7 +134,6 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
         stoch = _compute_stoch(raw_5m[-20:])
         rsi = _compute_rsi(raw_5m[-20:])
 
-        # Next Open for Timer
         next_open_ts = anchor_ts + 86400
         
         telemetry = {

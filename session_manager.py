@@ -6,8 +6,8 @@
 from datetime import datetime, timedelta, timezone
 import pytz
 
-# MASTER CONFIGURATION
-SESSIONS = {
+# MASTER CONFIGURATION (Restored to Original Name)
+SESSION_CONFIGS = {
     "us_ny_futures": {
         "name": "NY Futures",
         "tz": "America/New_York",
@@ -35,7 +35,7 @@ SESSIONS = {
 }
 
 def get_session_config(session_id: str):
-    return SESSIONS.get(session_id, SESSIONS["us_ny_futures"])
+    return SESSION_CONFIGS.get(session_id, SESSION_CONFIGS["us_ny_futures"])
 
 def resolve_anchor_time(session_id: str = "us_ny_futures") -> dict:
     """
