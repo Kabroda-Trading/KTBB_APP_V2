@@ -1,48 +1,52 @@
 # session_manager.py
 # ==============================================================================
-# PROJECT OMEGA: CENTRAL SESSION AUTHORITY
+# PROJECT OMEGA: CENTRAL SESSION AUTHORITY (Unified)
 # RESPONSIBILITY: Single Source of Truth for Time & Anchors
 # ==============================================================================
 from datetime import datetime, timedelta, timezone
 import pytz
 
-# MASTER CONFIGURATION (Restored to Original Name)
-SESSION_CONFIGS = {
-    "us_ny_futures": {
+# MASTER CONFIGURATION
+SESSION_CONFIGS = [
+    {
+        "id": "us_ny_futures",
         "name": "NY Futures",
         "tz": "America/New_York",
         "open_h": 8, "open_m": 30,
-        "duration": 480  # 8 hours active
+        "duration": 480
     },
-    "us_ny_equity": {
+    {
+        "id": "us_ny_equity",
         "name": "NY Equity",
         "tz": "America/New_York",
         "open_h": 9, "open_m": 30,
         "duration": 390
     },
-    "eu_london": {
+    {
+        "id": "eu_london",
         "name": "London",
         "tz": "Europe/London",
         "open_h": 8, "open_m": 0,
         "duration": 480
     },
-    "asia_tokyo": {
+    {
+        "id": "asia_tokyo",
         "name": "Tokyo",
         "tz": "Asia/Tokyo",
         "open_h": 9, "open_m": 0,
         "duration": 360
     }
-}
+]
 
 def get_session_config(session_id: str):
-    return SESSION_CONFIGS.get(session_id, SESSION_CONFIGS["us_ny_futures"])
+    # Search list for ID, default to first (NY Futures)
+    return next((s for s in SESSION_CONFIGS if s["id"] == session_id), SESSION_CONFIGS[0])
 
+# --- OMEGA LOGIC (New System) ---
 def resolve_anchor_time(session_id: str = "us_ny_futures") -> dict:
     """
-    THE SINGLE SOURCE OF TRUTH.
+    THE SINGLE SOURCE OF TRUTH for OMEGA.
     Calculates the correct 'Anchor Time' (Open) for the given session relative to NOW.
-    If we are before the open, it rolls back to yesterday.
-    If we are after the open, it locks to today.
     """
     cfg = get_session_config(session_id)
     tz = pytz.timezone(cfg["tz"])
@@ -76,4 +80,33 @@ def resolve_anchor_time(session_id: str = "us_ny_futures") -> dict:
         "status": status,
         "minutes_elapsed": minutes_since_open,
         "session_name": cfg["name"]
+    }
+
+# --- PIPELINE LOGIC (Restored for Backward Compatibility) ---
+def anchor_ts_for_utc_date(cfg: dict, utc_date: datetime) -> int:
+    """Restored helper for Research Lab and Reviews."""
+    tz = pytz.timezone(cfg["tz"])
+    local_dt = utc_date.astimezone(tz)
+    target = local_dt.replace(hour=cfg["open_h"], minute=cfg["open_m"], second=0, microsecond=0)
+    return int(target.astimezone(timezone.utc).timestamp())
+
+def resolve_current_session(now_utc: datetime, mode: str = "AUTO", manual_id: str = None) -> dict:
+    """Restored helper for Battle Control Dashboard."""
+    # 1. Select Config
+    if mode == "MANUAL" and manual_id:
+        cfg = get_session_config(manual_id)
+    else:
+        # Default to NY Futures for AUTO for now
+        cfg = SESSION_CONFIGS[0]
+
+    # 2. Use the robust Omega logic to get the time
+    omega_data = resolve_anchor_time(cfg["id"])
+    
+    # 3. Format strictly for BattleBox Pipeline expectations
+    return {
+        "id": cfg["id"],
+        "name": cfg["name"],
+        "anchor_time": omega_data["anchor_ts"],
+        "date_key": datetime.fromtimestamp(omega_data["anchor_ts"], tz=timezone.utc).strftime("%Y-%m-%d"),
+        "energy": omega_data["status"]
     }
