@@ -1,9 +1,11 @@
-# main.py — Unified KABRODA Backend Entry Point
+# main.py — Unified KABRODA Backend Entry Point (PRODUCTION SAFE)
 
+import os
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
 # Route modules
 from auth import router as auth_router
@@ -14,33 +16,57 @@ from session_control import router as session_control_router
 
 app = FastAPI()
 
-# Register API routers
+# ======================================================
+# SESSION MIDDLEWARE (REQUIRED — DO NOT REMOVE)
+# ======================================================
+
+SESSION_SECRET = os.getenv("SESSION_SECRET")
+
+if not SESSION_SECRET:
+    raise RuntimeError("SESSION_SECRET environment variable is not set")
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    same_site="lax",
+    https_only=True  # Render runs behind HTTPS
+)
+
+# ======================================================
+# Register API Routers
+# ======================================================
+
 app.include_router(auth_router)
 app.include_router(billing_router)
 app.include_router(black_ops_router)
 app.include_router(battle_control_router)
 app.include_router(session_control_router)
 
-# Static file serving
+# ======================================================
+# Static files & templates
+# ======================================================
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# --- Frontend Pages (HTML) ---
+# ======================================================
+# Frontend Pages (HTML)
+# ======================================================
 
 @app.get("/", response_class=HTMLResponse)
-async def read_root(request: Request):
+async def home(request: Request):
     return templates.TemplateResponse("home.html", {"request": request})
 
 @app.get("/about", response_class=HTMLResponse)
-async def read_about(request: Request):
+async def about(request: Request):
     return templates.TemplateResponse("about.html", {"request": request})
 
 @app.get("/pricing", response_class=HTMLResponse)
-async def read_pricing(request: Request):
+async def pricing(request: Request):
     return templates.TemplateResponse("pricing.html", {"request": request})
 
 @app.get("/account", response_class=HTMLResponse)
-async def read_account(request: Request):
+async def account(request: Request):
     return templates.TemplateResponse("account.html", {"request": request})
 
 @app.get("/register", response_class=HTMLResponse)
