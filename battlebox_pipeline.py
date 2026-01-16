@@ -108,6 +108,73 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
     except Exception:
         return []
 
+async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, limit: int = 1500) -> List[Dict[str, Any]]:
+    """
+    Historical 5m candles between [start_ts, end_ts).
+    Uses ccxt pagination via 'since' in milliseconds.
+    HARD STOP protections to prevent infinite loops.
+    """
+    s = _normalize_symbol(symbol)
+
+    since_ms = int(start_ts) * 1000
+    end_ms = int(end_ts) * 1000
+
+    out: List[Dict[str, Any]] = []
+    last_first_ts: Optional[int] = None
+    safety_iters = 0
+
+    while since_ms < end_ms:
+        safety_iters += 1
+        if safety_iters > 2000:
+            # absolute hard stop
+            break
+
+        rows = await _exchange_live.fetch_ohlcv(s, "5m", since=since_ms, limit=limit)
+        if not rows:
+            break
+
+        # Detect stuck pagination
+        first_ts = int(rows[0][0])
+        if last_first_ts is not None and first_ts == last_first_ts:
+            break
+        last_first_ts = first_ts
+
+        for r in rows:
+            t_ms = int(r[0])
+            if t_ms >= end_ms:
+                break
+            out.append(
+                {
+                    "time": int(t_ms / 1000),
+                    "open": float(r[1]),
+                    "high": float(r[2]),
+                    "low": float(r[3]),
+                    "close": float(r[4]),
+                    "volume": float(r[5]),
+                }
+            )
+
+        # Move forward by one candle to avoid duplication
+        last_ts = int(rows[-1][0])
+        if last_ts <= since_ms:
+            break
+        since_ms = last_ts + (5 * 60 * 1000)
+
+        # tiny yield to play nice with event loop
+        await asyncio.sleep(0)
+
+    # Deduplicate + sort (ccxt can overlap)
+    out.sort(key=lambda x: int(x["time"]))
+    dedup: List[Dict[str, Any]] = []
+    seen = set()
+    for c in out:
+        t = int(c["time"])
+        if t in seen:
+            continue
+        seen.add(t)
+        dedup.append(c)
+
+    return dedup
 
 # ----------------------------------------------------------------------
 # Helpers

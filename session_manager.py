@@ -1,100 +1,131 @@
 # session_manager.py
 # ==============================================================================
-# CENTRAL SESSION AUTHORITY (Single Source of Truth)
-# - Computes anchor/open timestamp for a session
-# - Handles "if session hasn't opened yet today, use yesterday's open"
-# - Exposes helpers used by battlebox_pipeline + research/review pages
+# KABRODA SESSION AUTHORITY — v3.0 (ANCHOR OF TRUTH)
+# ------------------------------------------------------------------------------
+# This module is the ONLY place that knows:
+# - which sessions exist
+# - when each session "opens" (anchor time)
+# - the 30-minute lock end
+# - whether we are CALIBRATING vs ACTIVE
+#
+# Consumers:
+# - battlebox_pipeline.py (Session Control + Live Battlebox)
+# - project_omega.py (Omega engine session picker)
+# - research_lab.py (backtest slicing)
 # ==============================================================================
 
 from __future__ import annotations
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, List
-import pytz
 
+from dataclasses import dataclass
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, List, Optional
+
+
+@dataclass(frozen=True)
+class SessionConfig:
+    id: str
+    name: str
+    # Anchor time expressed as UTC "HH:MM"
+    anchor_utc_hhmm: str
+
+
+# ------------------------------------------------------------------------------
+# Define your canonical sessions here.
+# NOTE: You can add more later, but keep IDs stable.
+# ------------------------------------------------------------------------------
 SESSION_CONFIGS: List[Dict[str, Any]] = [
-    {"id": "us_ny_futures", "name": "NY Futures", "tz": "America/New_York", "open_h": 8, "open_m": 30, "duration": 480},
-    {"id": "us_ny_equity",  "name": "NY Equity",  "tz": "America/New_York", "open_h": 9, "open_m": 30, "duration": 390},
-    {"id": "eu_london",     "name": "London",     "tz": "Europe/London",     "open_h": 8, "open_m": 0,  "duration": 480},
-    {"id": "asia_tokyo",    "name": "Tokyo",      "tz": "Asia/Tokyo",        "open_h": 9, "open_m": 0,  "duration": 360},
+    {"id": "us_ny_futures", "name": "NY Futures", "anchor_utc_hhmm": "13:30"},  # 7:30am CST standard
+    {"id": "tokyo",         "name": "Tokyo",      "anchor_utc_hhmm": "00:00"},
+    {"id": "london",        "name": "London",     "anchor_utc_hhmm": "07:00"},
+    {"id": "sydney",        "name": "Sydney",     "anchor_utc_hhmm": "21:00"},
 ]
 
-def get_session_config(session_id: str) -> Dict[str, Any]:
-    return next((s for s in SESSION_CONFIGS if s["id"] == session_id), SESSION_CONFIGS[0])
 
-def resolve_anchor_time(session_id: str = "us_ny_futures") -> Dict[str, Any]:
+def list_sessions() -> List[Dict[str, Any]]:
+    return list(SESSION_CONFIGS)
+
+
+def get_session_config(session_id: str) -> Dict[str, Any]:
+    sid = (session_id or "").strip()
+    for cfg in SESSION_CONFIGS:
+        if cfg["id"] == sid:
+            return cfg
+    # Default
+    return SESSION_CONFIGS[0]
+
+
+def _hhmm_to_hour_min(hhmm: str) -> tuple[int, int]:
+    hhmm = (hhmm or "").strip()
+    hh, mm = hhmm.split(":")
+    return int(hh), int(mm)
+
+
+def anchor_ts_for_utc_date(cfg: Dict[str, Any], now_utc: datetime) -> int:
     """
-    Single source of truth:
-    - Returns anchor_ts (UTC seconds) for the most recent session open.
-    - If now is before today's open time, returns yesterday's open.
+    For a given UTC date (from now_utc), return the anchor timestamp for that date.
+    """
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    else:
+        now_utc = now_utc.astimezone(timezone.utc)
+
+    h, m = _hhmm_to_hour_min(cfg["anchor_utc_hhmm"])
+    anchor_dt = datetime(now_utc.year, now_utc.month, now_utc.day, h, m, tzinfo=timezone.utc)
+    return int(anchor_dt.timestamp())
+
+
+def resolve_anchor_time(session_id: str, now_utc: Optional[datetime] = None) -> Dict[str, Any]:
+    """
+    Omega-friendly resolver.
+    Returns:
+      anchor_ts, lock_end_ts, status
+    where status is:
+      - CALIBRATING: now < lock_end
+      - ACTIVE: now >= lock_end
     """
     cfg = get_session_config(session_id)
-    tz = pytz.timezone(cfg["tz"])
-
-    now_utc = datetime.now(timezone.utc)
-    now_local = now_utc.astimezone(tz)
-
-    target_open_local = now_local.replace(
-        hour=int(cfg["open_h"]),
-        minute=int(cfg["open_m"]),
-        second=0,
-        microsecond=0,
-    )
-
-    if now_local < target_open_local:
-        target_open_local -= timedelta(days=1)
-
-    anchor_ts = int(target_open_local.astimezone(timezone.utc).timestamp())
-
-    minutes_since_open = (now_local - target_open_local).total_seconds() / 60.0
-
-    # Status ("energy") buckets
-    status = "ACTIVE"
-    if minutes_since_open < 30:
-        status = "CALIBRATING"
-    elif minutes_since_open > float(cfg["duration"]):
-        status = "CLOSED"
-
-    return {
-        "anchor_ts": anchor_ts,
-        "lock_end_ts": anchor_ts + 1800,  # 30m lock window
-        "status": status,
-        "minutes_elapsed": minutes_since_open,
-        "session_name": cfg["name"],
-        "session_id": cfg["id"],
-        "tz": cfg["tz"],
-    }
-
-def anchor_ts_for_utc_date(cfg: Dict[str, Any], utc_date: datetime) -> int:
-    """
-    Backward-compatible helper used by session reviews / research lab.
-    Given a UTC datetime, compute that date's open for the cfg.
-    """
-    tz = pytz.timezone(cfg["tz"])
-    local_dt = utc_date.astimezone(tz)
-    target = local_dt.replace(
-        hour=int(cfg["open_h"]),
-        minute=int(cfg["open_m"]),
-        second=0,
-        microsecond=0,
-    )
-    return int(target.astimezone(timezone.utc).timestamp())
-
-def resolve_current_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Used by battlebox_pipeline (live).
-    Returns a strict object the pipeline expects.
-    """
-    if mode == "MANUAL" and manual_id:
-        cfg = get_session_config(manual_id)
+    now_utc = now_utc or datetime.now(timezone.utc)
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
     else:
-        cfg = SESSION_CONFIGS[0]  # AUTO defaults to NY Futures
+        now_utc = now_utc.astimezone(timezone.utc)
 
-    omega = resolve_anchor_time(cfg["id"])
+    anchor_ts = anchor_ts_for_utc_date(cfg, now_utc)
+    lock_end_ts = anchor_ts + 1800  # +30 minutes
+
+    # If today's anchor is in the future, we want the most recent anchor (yesterday)
+    if anchor_ts > int(now_utc.timestamp()):
+        anchor_ts -= 86400
+        lock_end_ts -= 86400
+
+    status = "CALIBRATING" if int(now_utc.timestamp()) < lock_end_ts else "ACTIVE"
+
+    date_key = datetime.fromtimestamp(anchor_ts, tz=timezone.utc).strftime("%Y-%m-%d")
 
     return {
         "id": cfg["id"],
         "name": cfg["name"],
-        "anchor_time": omega["anchor_ts"],   # UTC seconds
-        "date_key": datetime.fromtimestamp(omega["anchor_ts"], tz=timezone.utc).strftime("%Y-%m-%d"),
-        "energy": omega["status"],
+        "anchor_ts": int(anchor_ts),
+        "lock_end_ts": int(lock_end_ts),
+        "status": status,
+        "date_key": date_key,
     }
+
+
+def resolve_current_session(
+    now_utc: datetime,
+    session_mode: str = "AUTO",
+    manual_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    battlebox_pipeline-friendly resolver.
+    session_mode:
+      - AUTO: always return us_ny_futures (your default operating mode)
+      - MANUAL: use manual_id
+    """
+    mode = (session_mode or "AUTO").strip().upper()
+    if mode == "MANUAL" and manual_id:
+        return resolve_anchor_time(manual_id, now_utc)
+
+    # Default: your daily operating session
+    return resolve_anchor_time("us_ny_futures", now_utc)

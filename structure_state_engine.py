@@ -1,146 +1,129 @@
 # structure_state_engine.py
 # ==============================================================================
-# STRUCTURE STATE ENGINE (DETERMINISTIC)
-# Consumes:
-#   - locked levels (from battlebox_pipeline locked truth)
-#   - post-lock candles (live 5m candles AFTER the lock time)
-# Produces:
-#   - stable action/reason/permission package for UI + downstream engines
+# KABRODA STRUCTURE STATE ENGINE — v2.0 (LAW LAYER)
+# ------------------------------------------------------------------------------
+# Purpose:
+# - Takes LOCKED levels (computed once per session after 30m lock)
+# - Evaluates ONLY post-lock 5m candles to prevent drift
+# - Produces a deterministic "what now?" packet the UI can render
+#
+# This is NOT the SSE level computation. This is the "structure + acceptance" logic.
 # ==============================================================================
 
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
 
-def placeholder_state(reason: str = "Waiting...") -> Dict[str, Any]:
-    return {
-        "action": "HOLD FIRE",
-        "reason": reason,
-        "permission": {"status": "NOT_EARNED", "side": "NONE"},
-        "acceptance_progress": {"count": 0, "required": 2, "side_hint": "NONE"},
-        "location": {"relative_to_triggers": "INSIDE_BAND"},
-        "execution": {
-            "pause_state": "NONE",
-            "resumption_state": "NONE",
-            "gates_mode": "PREVIEW",
-            "locked_at": None,
-            "levels": {"failure": 0.0, "continuation": 0.0},
-        },
-    }
+from typing import Dict, Any, List, Optional
 
-def _safe_float(x: Any, default: float = 0.0) -> float:
-    try:
-        return float(x)
-    except Exception:
-        return default
 
-def _candle_close(c: Dict[str, Any]) -> float:
-    return _safe_float(c.get("close", 0.0))
-
-def _side_from_close(px: float, bo: float, bd: float) -> str:
-    if bo and px > bo:
+def _side_from_price(last_close: float, bo: float, bd: float) -> str:
+    if bo and last_close > bo:
         return "LONG"
-    if bd and px < bd:
+    if bd and last_close < bd:
         return "SHORT"
     return "NONE"
 
-def _location(px: float, bo: float, bd: float) -> str:
-    if bo and px > bo:
+
+def _relative_location(last_close: float, bo: float, bd: float) -> str:
+    if bo and last_close > bo:
         return "ABOVE_BO"
-    if bd and px < bd:
+    if bd and last_close < bd:
         return "BELOW_BD"
-    return "INSIDE_BAND"
+    return "INSIDE"
+
 
 def compute_structure_state(
     levels: Dict[str, Any],
-    post_lock_candles: List[Dict[str, Any]],
+    candles_5m_post_lock: List[Dict[str, Any]],
     tuning: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Standard structure logic (clean & stable):
-      - Track 2-candle acceptance beyond BO/BD
-      - Provide a simple permission state:
-          NOT_EARNED -> WATCHING -> EARNED
-      - Provide basic failure / continuation rails derived from r30 high/low
+    Returns a stable, UI-friendly packet.
+
+    tuning options (optional):
+      - acceptance_required (int) default 2
+      - acceptance_mode: "CLOSES" (default)
     """
     tuning = tuning or {}
 
-    bo = _safe_float(levels.get("breakout_trigger", 0.0))
-    bd = _safe_float(levels.get("breakdown_trigger", 0.0))
-    r30_high = _safe_float(levels.get("range30m_high", 0.0))
-    r30_low = _safe_float(levels.get("range30m_low", 0.0))
+    bo = float(levels.get("breakout_trigger", 0.0) or 0.0)
+    bd = float(levels.get("breakdown_trigger", 0.0) or 0.0)
 
-    if bo <= 0 or bd <= 0 or not post_lock_candles:
-        return placeholder_state("Waiting for locked levels / post-lock candles...")
+    r30h = float(levels.get("range30m_high", 0.0) or 0.0)
+    r30l = float(levels.get("range30m_low", 0.0) or 0.0)
 
-    closes = [_candle_close(c) for c in post_lock_candles if c]
-    if not closes:
-        return placeholder_state("No usable post-lock closes yet.")
+    acceptance_required = int(tuning.get("acceptance_required", 2) or 2)
 
-    last_px = closes[-1]
-    loc = _location(last_px, bo, bd)
+    if not candles_5m_post_lock:
+        return {
+            "action": "HOLD FIRE",
+            "reason": "No post-lock candles yet.",
+            "permission": {"status": "NOT_EARNED", "side": "NONE"},
+            "acceptance_progress": {"count": 0, "required": acceptance_required, "side_hint": "NONE"},
+            "location": {"relative_to_triggers": "INSIDE"},
+            "execution": {
+                "pause_state": "NONE",
+                "resumption_state": "NONE",
+                "gates_mode": "PREVIEW",
+                "locked_at": None,
+                "levels": {"failure": r30l, "continuation": r30h},
+            },
+            "diagnostics": {"fail_reason": "WAITING_POST_LOCK"},
+        }
 
-    # Acceptance logic: count last N closes beyond trigger
-    # Required defaults to 2, but you can tune it in research
-    required = int(tuning.get("acceptance_required", 2) or 2)
-    required = max(1, min(required, 5))
+    # Evaluate last candle close
+    last = candles_5m_post_lock[-1]
+    last_close = float(last.get("close", 0.0) or 0.0)
+    last_ts = int(last.get("time", 0) or 0)
 
-    # Determine current side based on last close
-    side_hint = _side_from_close(last_px, bo, bd)
+    side_hint = _side_from_price(last_close, bo, bd)
+    location = _relative_location(last_close, bo, bd)
 
-    # Count consecutive closes in that direction
+    # Acceptance counting: count consecutive closes beyond trigger
     count = 0
-    if side_hint == "LONG":
-        for px in reversed(closes):
-            if px > bo:
+    if side_hint in ("LONG", "SHORT"):
+        for c in reversed(candles_5m_post_lock[-(acceptance_required + 6):]):
+            close = float(c.get("close", 0.0) or 0.0)
+            if side_hint == "LONG" and bo and close > bo:
                 count += 1
-            else:
-                break
-    elif side_hint == "SHORT":
-        for px in reversed(closes):
-            if px < bd:
+            elif side_hint == "SHORT" and bd and close < bd:
                 count += 1
             else:
                 break
 
-    # Permission
+    earned = count >= acceptance_required
+
+    # Output action
     if side_hint == "NONE":
-        perm = {"status": "NOT_EARNED", "side": "NONE"}
         action = "HOLD FIRE"
-        reason = "Inside triggers — no acceptance"
+        reason = "Inside triggers. Waiting for breakout/breakdown acceptance."
+    elif not earned:
+        action = "WAIT"
+        reason = f"{side_hint} pressure, but acceptance not earned ({count}/{acceptance_required})."
     else:
-        if count >= required:
-            perm = {"status": "EARNED", "side": side_hint}
-            action = f"GO {side_hint}"
-            reason = f"Acceptance confirmed ({count}/{required} closes)"
-        else:
-            perm = {"status": "WATCHING", "side": side_hint}
-            action = f"WATCH {side_hint}"
-            reason = f"Acceptance building ({count}/{required} closes)"
+        action = "GO"
+        reason = f"{side_hint} acceptance earned ({count}/{acceptance_required})."
 
-    # Rails (simple + consistent)
-    # - If long: failure = r30_low, continuation = r30_high
-    # - If short: failure = r30_high, continuation = r30_low
-    if side_hint == "LONG":
-        failure = r30_low
-        continuation = r30_high
-    elif side_hint == "SHORT":
-        failure = r30_high
-        continuation = r30_low
-    else:
-        failure = 0.0
-        continuation = 0.0
+    # Failure/continuation reference: for LONG, failure=r30_low, continuation=r30_high (and vice versa)
+    failure = r30l if side_hint != "SHORT" else r30h
+    continuation = r30h if side_hint != "SHORT" else r30l
 
     return {
         "action": action,
         "reason": reason,
-        "permission": perm,
-        "acceptance_progress": {"count": count, "required": required, "side_hint": side_hint},
-        "location": {"relative_to_triggers": loc},
+        "permission": {"status": "EARNED" if earned else "NOT_EARNED", "side": side_hint},
+        "acceptance_progress": {"count": count, "required": acceptance_required, "side_hint": side_hint},
+        "location": {"relative_to_triggers": location},
         "execution": {
             "pause_state": "NONE",
             "resumption_state": "NONE",
             "gates_mode": "LIVE",
-            "locked_at": None,
-            "levels": {"failure": failure, "continuation": continuation},
+            "locked_at": last_ts,
+            "levels": {"failure": float(failure), "continuation": float(continuation)},
+        },
+        "diagnostics": {
+            "fail_reason": "NONE" if earned or side_hint == "NONE" else "NO_ACCEPTANCE",
+            "bo": bo,
+            "bd": bd,
+            "last_close": last_close,
         },
     }
