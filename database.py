@@ -1,66 +1,31 @@
-import os
+# database.py — Core data access layer
+from typing import List, Dict
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean
-from sqlalchemy.orm import sessionmaker, declarative_base
 
-# ---------------------------------------------------------
-# 1. DATABASE CONNECTION
-# ---------------------------------------------------------
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    # Fallback for local testing
-    DATABASE_URL = "sqlite:///./kabroda.db"
+# Simulate a database with dummy values
+# Replace with actual DB logic when ready
 
-# FIX FOR RENDER: Use 'postgresql+psycopg://' to match the installed driver (v3)
-if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
-elif DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+def get_locked_candles(session: str, symbol: str) -> List[Dict]:
+    # This should query your candle/session lock system
+    return [
+        {"timestamp": "2024-01-15T10:00:00Z", "locked": True},
+        {"timestamp": "2024-01-15T10:15:00Z", "locked": False},
+    ]
 
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+def get_r30_levels(symbol: str) -> Dict[str, float]:
+    # R30 = 30-min high/low levels
+    return {
+        "high": 1.1450,
+        "low": 1.1320
+    }
 
-# ---------------------------------------------------------
-# 2. USER MODEL
-# ---------------------------------------------------------
-class UserModel(Base):
-    __tablename__ = "users"
+def get_price(symbol: str) -> float:
+    # This is your current live price from feed / snapshot
+    return 1.1382
 
-    id = Column(Integer, primary_key=True, index=True)
-
-    email = Column(String, unique=True, index=True, nullable=False)
-    password_hash = Column(String, nullable=False)
-    username = Column(String, nullable=True)
-
-    # --- NEW: TradingView Access ---
-    tradingview_id = Column(String, nullable=True)
-    # -------------------------------
-
-    # --- NEW: DEV SETTINGS ---
-    operator_flex = Column(Boolean, default=False)
-    # -------------------------
-
-    # Membership fields
-    tier = Column(String, default="tier1_manual", nullable=False)
-    session_tz = Column(String, default="UTC", nullable=False)
-
-    stripe_customer_id = Column(String, nullable=True)
-    stripe_subscription_id = Column(String, nullable=True)
-    stripe_price_id = Column(String, nullable=True)
-    subscription_status = Column(String, nullable=True)
-
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-# ---------------------------------------------------------
-# 3. HELPER FUNCTIONS
-# ---------------------------------------------------------
-def init_db():
-    Base.metadata.create_all(bind=engine)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+def get_daily_levels(symbol: str) -> Dict[str, float]:
+    # Daily support/resistance levels
+    return {
+        "support": 1.1300,
+        "resistance": 1.1480
+    }
