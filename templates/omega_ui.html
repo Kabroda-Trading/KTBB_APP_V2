@@ -9,76 +9,103 @@
         :root { 
             --bg: #050b14; --panel: #0f172a; --border: #1e293b; 
             --green: #00ff9d; --red: #ff3366; --blue: #00ccff; --amber: #f59e0b; --purple: #8b5cf6;
-            --text: #e2e8f0; --dim: #64748b; 
+            --text: #e2e8f0; --dim: #94a3b8; /* Lightened dim color for better readability */
         }
         body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; min-height: 100vh; display: flex; flex-direction: column; box-sizing: border-box; }
         
         .top-nav { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
-        .brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 20px; color: #fff; letter-spacing: -1px; display: flex; align-items: center; gap: 10px; }
+        .brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 22px; color: #fff; letter-spacing: -1px; display: flex; align-items: center; gap: 12px; }
         .blink { animation: blinker 2s linear infinite; width: 10px; height: 10px; background: var(--green); border-radius: 50%; }
         @keyframes blinker { 50% { opacity: 0; } }
         
         .controls { display: flex; gap: 10px; align-items: center; }
-        .status-pill { font-size: 10px; font-family: 'JetBrains Mono'; color: var(--green); border: 1px solid var(--green); padding: 4px 8px; border-radius: 4px; text-transform: uppercase; }
-        .session-timer { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--dim); background: #020617; padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border); text-transform: uppercase; }
-        .alert-toggle { background: transparent; border: 1px solid var(--dim); color: var(--dim); padding: 5px 10px; font-family: 'JetBrains Mono'; font-size: 10px; cursor: pointer; border-radius: 4px; transition: 0.2s; }
+        .status-pill { font-size: 11px; font-family: 'JetBrains Mono'; color: var(--green); border: 1px solid var(--green); padding: 5px 10px; border-radius: 4px; text-transform: uppercase; font-weight: 700; }
+        .session-timer { font-family: 'JetBrains Mono'; font-size: 12px; color: var(--text); background: #020617; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border); text-transform: uppercase; font-weight: 600; }
+        .alert-toggle { background: transparent; border: 1px solid var(--dim); color: var(--text); padding: 6px 12px; font-family: 'JetBrains Mono'; font-size: 11px; cursor: pointer; border-radius: 4px; transition: 0.2s; font-weight: 600; }
         .alert-toggle.active { border-color: var(--red); color: var(--red); box-shadow: 0 0 10px rgba(255, 51, 102, 0.2); }
-        .back-link { color: var(--dim); text-decoration: none; font-size: 11px; font-weight: 700; border: 1px solid var(--border); padding: 5px 10px; border-radius: 4px; }
+        .back-link { color: var(--dim); text-decoration: none; font-size: 12px; font-weight: 700; border: 1px solid var(--border); padding: 6px 12px; border-radius: 4px; }
+        .back-link:hover { color: #fff; border-color: #fff; }
 
-        .war-room { display: grid; grid-template-columns: 320px 1fr 320px; gap: 20px; height: 100%; }
-        @media (max-width: 1000px) {
+        .war-room { display: grid; grid-template-columns: 340px 1fr 340px; gap: 25px; height: 100%; }
+        @media (max-width: 1100px) {
             .war-room { grid-template-columns: 1fr; height: auto; }
-            .panel { min-height: auto; margin-bottom: 10px; }
+            .panel { min-height: auto; margin-bottom: 15px; }
             .status-pill { display: none; }
         }
 
-        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; display: flex; flex-direction: column; position: relative; }
-        .panel-head { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--dim); letter-spacing: 1px; margin-bottom: 15px; text-transform: uppercase; display: flex; justify-content: space-between; }
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 25px; display: flex; flex-direction: column; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
+        
+        /* UPDATED HEADER STYLE - BRIGHTER */
+        .panel-head { 
+            font-family: 'JetBrains Mono'; 
+            font-size: 13px; 
+            color: #fff; /* Bright White */
+            font-weight: 800; /* Bolder */
+            letter-spacing: 1.5px; 
+            margin-bottom: 20px; 
+            text-transform: uppercase; 
+            display: flex; 
+            justify-content: space-between;
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 8px;
+        }
 
-        .input-group { margin-bottom: 12px; }
-        .input-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-bottom: 4px; font-family: 'JetBrains Mono'; }
-        .input-field { width: 100%; background: #020617; border: 1px solid var(--border); color: #fff; padding: 10px; font-family: 'JetBrains Mono'; font-size: 14px; text-align: right; box-sizing: border-box; outline: none; border-radius: 4px; }
+        .input-group { margin-bottom: 15px; }
+        .input-label { 
+            display: flex; justify-content: space-between; 
+            font-size: 12px; color: var(--dim); 
+            margin-bottom: 6px; font-family: 'JetBrains Mono'; font-weight: 600; 
+        }
+        .input-field { 
+            width: 100%; background: #020617; border: 1px solid var(--border); 
+            color: #fff; padding: 12px; font-family: 'JetBrains Mono'; 
+            font-size: 16px; font-weight: 700; text-align: right; 
+            box-sizing: border-box; outline: none; border-radius: 6px; 
+            transition: border-color 0.2s;
+        }
         .input-field:focus { border-color: var(--blue); }
 
-        .magic-box { margin-top: 20px; background: #020617; border: 1px solid var(--blue); border-radius: 6px; padding: 20px; text-align: center; }
-        .magic-lbl { font-size: 9px; color: var(--blue); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 5px; }
-        .magic-val { font-size: 32px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; letter-spacing: -1px; }
+        .magic-box { margin-top: 25px; background: #020617; border: 1px solid var(--blue); border-radius: 8px; padding: 20px; text-align: center; }
+        .magic-lbl { font-size: 10px; color: var(--blue); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; font-weight: 700; }
+        .magic-val { font-size: 36px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; letter-spacing: -1px; }
 
-        .price-display { text-align: center; margin-bottom: 30px; }
-        .live-price { font-size: 72px; font-weight: 900; letter-spacing: -3px; line-height: 1; color: #fff; }
-        .trigger-info { font-family: 'JetBrains Mono'; font-size: 12px; color: var(--dim); margin-top: 8px; }
+        .price-display { text-align: center; margin-bottom: 35px; }
+        .live-price { font-size: 80px; font-weight: 900; letter-spacing: -4px; line-height: 1; color: #fff; text-shadow: 0 0 30px rgba(255,255,255,0.1); }
+        .trigger-info { font-family: 'JetBrains Mono'; font-size: 14px; color: var(--dim); margin-top: 10px; font-weight: 600; }
 
-        .coach-banner { padding: 25px; border-radius: 8px; text-align: center; border: 2px solid #333; background: #020617; transition: 0.3s; }
-        .coach-title { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; opacity: 0.7; }
-        .coach-action { font-size: 28px; font-weight: 900; font-family: 'JetBrains Mono'; line-height: 1.1; }
+        .coach-banner { padding: 30px; border-radius: 8px; text-align: center; border: 2px solid #333; background: #020617; transition: 0.3s; }
+        .coach-title { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 10px; opacity: 0.8; font-weight: 700; }
+        .coach-action { font-size: 32px; font-weight: 900; font-family: 'JetBrains Mono'; line-height: 1.1; }
         
         .mode-wait { border-color: #333; color: var(--dim); }
-        .mode-entry { border-color: var(--blue); background: rgba(0, 204, 255, 0.08); color: var(--blue); box-shadow: 0 0 20px rgba(0,204,255,0.1); }
+        .mode-entry { border-color: var(--blue); background: rgba(0, 204, 255, 0.08); color: var(--blue); box-shadow: 0 0 30px rgba(0,204,255,0.15); }
         .mode-secure { border-color: var(--amber); background: rgba(245, 158, 11, 0.08); color: var(--amber); }
         .mode-profit { border-color: var(--green); background: rgba(0, 255, 157, 0.08); color: var(--green); }
 
-        .target-grid { margin-top: 30px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; text-align: center; }
-        .target-box { background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #1e293b; }
-        .target-lbl { font-size: 9px; margin-bottom: 5px; letter-spacing:1px; }
-        .target-val { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px; }
+        .target-grid { margin-top: 35px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; }
+        .target-box { background: #020617; padding: 12px; border-radius: 6px; border: 1px solid #1e293b; }
+        .target-lbl { font-size: 10px; margin-bottom: 5px; letter-spacing:1px; font-weight: 700; }
+        .target-val { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 13px; color: #fff; }
 
-        .logic-row { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
-        .logic-icon { width: 24px; text-align: center; font-size: 14px; margin-right: 10px; }
-        .logic-text { flex: 1; color: var(--text); }
-        .logic-status { font-family: 'JetBrains Mono'; font-size: 10px; padding: 2px 6px; border-radius: 3px; }
+        .logic-row { display: flex; align-items: center; padding: 15px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+        .logic-icon { width: 30px; text-align: center; font-size: 16px; margin-right: 12px; }
+        .logic-text { flex: 1; color: var(--text); font-weight: 500; }
+        .logic-status { font-family: 'JetBrains Mono'; font-size: 11px; padding: 4px 8px; border-radius: 4px; font-weight: 700; }
         
         .status-pass { background: rgba(0,255,157,0.15); color: var(--green); }
         .status-warn { background: rgba(245,158,11,0.15); color: var(--amber); }
         .status-wait { background: #1e293b; color: var(--dim); }
 
-        .shield-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
-        .shield-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; }
+        .shield-section { margin-top: 25px; padding-top: 20px; border-top: 1px solid var(--border); }
+        .shield-row { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 13px; align-items: center; }
+        .shield-lbl { color: var(--dim); font-weight: 600; }
+        .shield-val { font-weight: 700; font-family: 'JetBrains Mono'; font-size: 14px; }
 
-        /* TELEMETRY BOX (UPDATED) */
-        .telemetry-box { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 20px; font-family: 'JetBrains Mono'; font-size: 11px; color: var(--dim); }
-        .tele-row { display: flex; justify-content: space-between; margin-bottom: 6px; align-items: center; }
-        .tele-val { color: #fff; font-weight: 700; }
-        .sep { border-bottom: 1px dashed #333; margin: 8px 0; }
+        /* TELEMETRY BOX (LARGER) */
+        .telemetry-box { margin-top: 25px; border-top: 1px solid var(--border); padding-top: 25px; font-family: 'JetBrains Mono'; font-size: 12px; color: var(--dim); }
+        .tele-row { display: flex; justify-content: space-between; margin-bottom: 8px; align-items: center; }
+        .tele-val { color: #fff; font-weight: 700; font-size: 13px; }
+        .sep { border-bottom: 1px dashed #333; margin: 12px 0; }
     </style>
 </head>
 <body>
@@ -104,10 +131,10 @@
                 <label class="input-label">RISK PER TRADE (%)</label>
                 <input type="number" id="inpRisk" class="input-field" value="10" oninput="calc()">
             </div>
-            <div class="input-group" style="margin-top: 20px;">
+            <div class="input-group" style="margin-top: 25px;">
                 <label class="input-label">
                     <span>STOP LOSS PRICE</span>
-                    <span id="riskAmt" style="color: var(--red); font-weight: 700;">--</span>
+                    <span id="riskAmt" style="color: var(--red); font-weight: 800;">--</span>
                 </label>
                 <input type="number" id="inpStop" class="input-field" value="94720" oninput="calc()">
             </div>
@@ -121,7 +148,7 @@
             <div class="panel-head">MARKET TELEMETRY</div>
             <div class="price-display">
                 <div class="live-price" id="livePrice">--</div>
-                <div class="trigger-info">TRIGGER: <span id="valTrigger" style="color: #fff;">--</span></div>
+                <div class="trigger-info">TRIGGER: <span id="valTrigger" style="color: #fff; font-weight: 700;">--</span></div>
             </div>
             <div id="coachPanel" class="coach-banner mode-wait">
                 <div class="coach-title">TACTICAL GUIDANCE</div>
@@ -139,37 +166,37 @@
             <div class="panel-head">LOGIC STREAM</div>
             <div class="logic-row">
                 <div class="logic-icon">🚀</div>
-                <div class="logic-text"><div>NY Open Levels</div><div style="font-size:10px; color:var(--dim)">The Foundation</div></div>
+                <div class="logic-text"><div>NY Open Levels</div><div style="font-size:11px; color:var(--dim)">The Foundation</div></div>
                 <div class="logic-status status-pass">LOCKED</div>
             </div>
             <div class="logic-row">
                 <div class="logic-icon">⚡</div>
-                <div class="logic-text"><div>FUSION MODE</div><div style="font-size:10px; color:var(--dim)">Stoch + RSI</div></div>
+                <div class="logic-text"><div>FUSION MODE</div><div style="font-size:11px; color:var(--dim)">Stoch + RSI</div></div>
                 <div class="logic-status status-pass">ACTIVE</div>
             </div>
             <div class="shield-section">
-                <div class="panel-head">TRADE MANAGEMENT</div>
+                <div class="panel-head" style="margin-bottom: 15px; border-bottom: none; font-size: 12px; color: var(--dim);">TRADE MANAGEMENT</div>
                 <div class="shield-row">
-                    <span class="shield-lbl">Current Zone</span>
+                    <span class="shield-lbl">CURRENT ZONE</span>
                     <span class="shield-val" style="color: var(--blue);" id="zoneText">--</span>
                 </div>
-                <div class="shield-row" style="margin-top: 15px;">
+                <div class="shield-row">
                     <span class="shield-lbl">CONTEXT</span>
                     <span class="shield-val" id="contextFlag" style="color: var(--purple);">--</span>
                 </div>
             </div>
 
             <div class="telemetry-box">
-                <div style="margin-bottom: 12px; font-weight: 700; color: var(--blue); font-size:11px; letter-spacing:1px;">VERIFICATION DATA</div>
+                <div style="margin-bottom: 15px; font-weight: 800; color: var(--blue); font-size:12px; letter-spacing:1px; text-transform: uppercase;">VERIFICATION DATA</div>
                 
-                <div class="tele-row"><span>DAILY RESISTANCE</span><span id="v-dr" class="tele-val" style="color:#fca5a5;">--</span></div>
-                <div class="tele-row"><span>BREAKOUT TRIG</span><span id="v-bo" class="tele-val" style="color:#6ee7b7;">--</span></div>
+                <div class="tele-row"><span style="color:#fca5a5;">DAILY RESISTANCE</span><span id="v-dr" class="tele-val" style="color:#fca5a5;">--</span></div>
+                <div class="tele-row"><span style="color:#6ee7b7;">BREAKOUT TRIG</span><span id="v-bo" class="tele-val" style="color:#6ee7b7;">--</span></div>
                 <div class="sep"></div>
-                <div class="tele-row"><span>BREAKDOWN TRIG</span><span id="v-bd" class="tele-val" style="color:#d8b4fe;">--</span></div>
-                <div class="tele-row"><span>DAILY SUPPORT</span><span id="v-ds" class="tele-val" style="color:#93c5fd;">--</span></div>
+                <div class="tele-row"><span style="color:#d8b4fe;">BREAKDOWN TRIG</span><span id="v-bd" class="tele-val" style="color:#d8b4fe;">--</span></div>
+                <div class="tele-row"><span style="color:#93c5fd;">DAILY SUPPORT</span><span id="v-ds" class="tele-val" style="color:#93c5fd;">--</span></div>
                 <div class="sep"></div>
-                <div class="tele-row"><span style="color:#64748b;">R30 HIGH</span><span id="v-r30h" class="tele-val" style="color:#94a3b8;">--</span></div>
-                <div class="tele-row"><span style="color:#64748b;">R30 LOW</span><span id="v-r30l" class="tele-val" style="color:#94a3b8;">--</span></div>
+                <div class="tele-row"><span style="color:#94a3b8;">R30 HIGH</span><span id="v-r30h" class="tele-val">--</span></div>
+                <div class="tele-row"><span style="color:#94a3b8;">R30 LOW</span><span id="v-r30l" class="tele-val">--</span></div>
             </div>
         </div>
     </div>
@@ -221,12 +248,17 @@
 
                     if (triggerPrice > 0) {
                         document.getElementById('valTrigger').innerText = triggerPrice.toLocaleString(undefined, {maximumFractionDigits: 0});
-                        const ctxText = isBlueSky ? "BLUE SKY (EAGLE)" : "STRUCTURE (VULTURE)";
-                        document.getElementById('contextFlag').innerText = ctxText;
-                        document.getElementById('contextFlag').style.color = isBlueSky ? "var(--purple)" : "var(--amber)";
+                        
+                        // --- UPDATED TERMINOLOGY LOGIC ---
+                        const ctxText = isBlueSky ? "SUPERSONIC" : "DOGFIGHT";
+                        const ctxColor = isBlueSky ? "var(--blue)" : "var(--amber)"; // Blue for Speed, Amber for Battle
+                        
+                        const flagEl = document.getElementById('contextFlag');
+                        flagEl.innerText = ctxText;
+                        flagEl.style.color = ctxColor;
                     }
 
-                    // --- NEW: POPULATE VERIFICATION BOX WITH TRIGGERS ---
+                    // Populate Verification Data
                     if (data.triggers) {
                         document.getElementById('v-bo').innerText = data.triggers.BO ? data.triggers.BO.toFixed(2) : "--";
                         document.getElementById('v-bd').innerText = data.triggers.BD ? data.triggers.BD.toFixed(2) : "--";
@@ -299,9 +331,9 @@
             } else if (currentPrice >= triggerPrice && currentPrice < secure) {
                 coach.classList.add('mode-entry'); msg.innerText = "MARKET BUY // ACTIVE"; zTxt.innerText = "ENTRY ZONE"; zone = "ENTRY";
             } else if (currentPrice >= secure && currentPrice < (triggerPrice + riskDist)) {
-                coach.classList.add('mode-secure'); msg.innerText = isBlueSky ? "HOLD (EAGLE MODE)" : "MOVE STOP TO B.E. (VULTURE)"; zTxt.innerText = "SECURE ZONE"; zone = "SECURE";
+                coach.classList.add('mode-secure'); msg.innerText = isBlueSky ? "HOLD (SUPERSONIC)" : "MOVE STOP TO B.E."; zTxt.innerText = "SECURE ZONE"; zone = "SECURE";
             } else if (currentPrice >= (triggerPrice + riskDist)) {
-                coach.classList.add('mode-profit'); msg.innerText = isBlueSky ? "HOLD FOR TP3 (EAGLE)" : "SELL 75% (VULTURE)"; zTxt.innerText = "PROFIT ZONE"; zone = "PROFIT";
+                coach.classList.add('mode-profit'); msg.innerText = isBlueSky ? "HOLD FOR TP3" : "SELL 75% (DOGFIGHT)"; zTxt.innerText = "PROFIT ZONE"; zone = "PROFIT";
             }
 
             if (zone !== lastZone && zone !== "") {
