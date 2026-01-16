@@ -23,7 +23,7 @@ import auth
 import billing
 import battlebox_pipeline
 import research_lab
-import black_ops_engine
+import project_omega
 
 from database import init_db, get_db, UserModel
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
