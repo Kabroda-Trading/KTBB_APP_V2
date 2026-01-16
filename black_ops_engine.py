@@ -1,16 +1,17 @@
 # black_ops_engine.py
 # ==============================================================================
-# PROJECT OMEGA: INDEPENDENT OPERATIONS ENGINE (v11.1 NATIVE)
+# PROJECT OMEGA: INDEPENDENT OPERATIONS ENGINE (v11.2 TELEMETRY)
+# SOURCE: session_manager.py
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, Any, List
 from datetime import datetime, timezone
 
-import session_manager  # <--- NEW AUTHORITY
+# CORE SUITE INTEGRATION
+import session_manager
 import battlebox_pipeline
 import sse_engine
 
-# --- OMEGA CONFIGURATION ---
 OMEGA_CONFIG = {
     "confirmation_mode": "1_CLOSE",
     "fusion_enabled": True
@@ -75,7 +76,7 @@ def _calc_strength(entry: float, stop: float, dr: float, ds: float, side: str) -
 async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
     current_price = 0.0
     try:
-        # 1. RESOLVE SESSION (Using Session Manager)
+        # 1. RESOLVE SESSION
         now_utc = datetime.now(timezone.utc)
         session_info = session_manager.resolve_current_session(now_utc, mode="MANUAL", manual_id="us_ny_futures")
         
@@ -89,14 +90,33 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
 
         current_price = float(raw_5m[-1]["close"])
 
-        # 3. LEVELS (SSE ENGINE)
+        # 3. LEVELS & STATUS CHECK
         calibration_candles = [c for c in raw_5m if anchor_ts <= c["time"] < lock_end_ts]
         
+        # Determine strict session state for UI Countdown
+        now_ts = now_utc.timestamp()
+        
+        # If we are seemingly "Active" (elapsed > 30) but it's been > 20 hours, we are actually Pre-Market for tomorrow
+        # (Simple logic: if elapsed > 1200 mins (20 hours), assume next session is approaching)
+        is_pre_market = False
+        next_open_ts = anchor_ts + 86400 # Default to next day
+        
+        if session_info["elapsed_min"] > 1200: 
+             is_pre_market = True
+             session_status = "CLOSED"
+        elif session_info["elapsed_min"] < 0:
+             is_pre_market = True
+             session_status = "CLOSED"
+             next_open_ts = anchor_ts # It's actually today later
+        elif session_info["elapsed_min"] < 30:
+             session_status = "CALIBRATING"
+        else:
+             session_status = "ACTIVE"
+
+        # Fail Safe Data Logic
         if len(calibration_candles) < 4:
-            if session_info["energy"] == "CALIBRATING":
-                return {"ok": True, "status": "STANDBY", "price": current_price, "msg": "Calibrating (8:30-9:00)..."}
-            elif session_info["elapsed_min"] > 30:
-                calibration_candles = raw_5m[-7:-1]
+            if session_status == "ACTIVE":
+                calibration_candles = raw_5m[-7:-1] # Force data
 
         r30_high = max(float(c["high"]) for c in calibration_candles) if calibration_candles else 0.0
         r30_low = min(float(c["low"]) for c in calibration_candles) if calibration_candles else 0.0
@@ -121,57 +141,53 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
         
         # 5. EXECUTION LOGIC
         last_candle = raw_5m[-2] if len(raw_5m) > 1 else raw_5m[-1]
-        
         status = "LOCKED"
         active_side = "NONE"
         stop_loss = 0.0
 
-        long_go = (float(last_candle["close"]) > bo)
-        short_go = (float(last_candle["close"]) < bd)
-
-        if long_go:
-            status = "EXECUTING"
-            active_side = "LONG"
-            stop_loss = r30_low
-        elif short_go:
-            status = "EXECUTING"
-            active_side = "SHORT"
-            stop_loss = r30_high
+        if session_status == "ACTIVE":
+            long_go = (float(last_candle["close"]) > bo)
+            short_go = (float(last_candle["close"]) < bd)
+            
+            if long_go:
+                status = "EXECUTING"; active_side = "LONG"; stop_loss = r30_low
+            elif short_go:
+                status = "EXECUTING"; active_side = "SHORT"; stop_loss = r30_high
+            else:
+                if bo > 0 and abs(current_price - bo) / bo < 0.001: status = "LOCKED"; active_side = "LONG"
+                elif bd > 0 and abs(current_price - bd) / bd < 0.001: status = "LOCKED"; active_side = "SHORT"
         else:
-            if bo > 0 and abs(current_price - bo) / bo < 0.001:
-                status = "LOCKED"
-                active_side = "LONG"
-            elif bd > 0 and abs(current_price - bd) / bd < 0.001:
-                status = "LOCKED"
-                active_side = "SHORT"
+            status = "STANDBY"
 
         trigger_px = bo if active_side == "LONG" else bd
-        if active_side == "NONE": 
-            trigger_px = bo if current_price > (bo+bd)/2 else bd
+        if active_side == "NONE": trigger_px = bo if current_price > (bo+bd)/2 else bd
             
         strength = _calc_strength(trigger_px, stop_loss, dr, ds, active_side)
-        
         energy = abs(dr - ds)
         if energy == 0: energy = current_price * 0.01
 
         targets = []
         if active_side == "LONG" or (active_side == "NONE" and current_price > (bo+bd)/2):
             t1 = dr if not strength["is_blue_sky"] else trigger_px + (energy * 0.5)
-            targets = [
-                {"id": "T1", "price": round(t1, 2)},
-                {"id": "T2", "price": round(trigger_px + energy, 2)},
-                {"id": "T3", "price": round(trigger_px + (energy * 3.0), 2)}
-            ]
+            targets = [{"id": "T1", "price": round(t1, 2)}, {"id": "T2", "price": round(trigger_px + energy, 2)}, {"id": "T3", "price": round(trigger_px + (energy * 3.0), 2)}]
         else:
             t1 = ds if not strength["is_blue_sky"] else trigger_px - (energy * 0.5)
-            targets = [
-                {"id": "T1", "price": round(t1, 2)},
-                {"id": "T2", "price": round(trigger_px - energy, 2)},
-                {"id": "T3", "price": round(trigger_px - (energy * 3.0), 2)}
-            ]
+            targets = [{"id": "T1", "price": round(t1, 2)}, {"id": "T2", "price": round(trigger_px - energy, 2)}, {"id": "T3", "price": round(trigger_px - (energy * 3.0), 2)}]
 
         stoch = _compute_stoch(raw_5m[-20:])
         rsi = _compute_rsi(raw_5m[-20:])
+
+        # --- TELEMETRY PACKET ---
+        telemetry = {
+            "session_state": session_status,  # CLOSED, CALIBRATING, ACTIVE
+            "next_event_ts": lock_end_ts if session_status == "CALIBRATING" else next_open_ts,
+            "verification": {
+                "r30_high": r30_high,
+                "r30_low": r30_low,
+                "daily_res": dr,
+                "daily_sup": ds
+            }
+        }
 
         return {
             "ok": True,
@@ -182,6 +198,7 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
             "context": "BLUE SKY" if strength["is_blue_sky"] else "STRUCTURE",
             "strength": strength,
             "triggers": {"BO": bo, "BD": bd},
+            "telemetry": telemetry,  # <--- NEW DATA FOR UI
             "execution": {
                 "entry": trigger_px,
                 "stop_loss": stop_loss,
