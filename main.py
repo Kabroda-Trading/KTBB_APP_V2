@@ -1,587 +1,202 @@
-# main.py
-# ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v12.0 (CLEAN REWRITE)
-# ---------------------------------------------------------
+"""
+main.py - Clean app entrypoint for Render
+
+Goals:
+- Serve the site's HTML pages (no Jinja/templates required)
+- Provide the /api/dmr/run-raw endpoint used by session_control.html
+- Remove all Black-Ops engine dependencies (endpoint returns 410 Gone)
+- Avoid importing missing DB helpers (init_db/UserModel) and avoid broken modules
+"""
+
 from __future__ import annotations
 
 import os
-import traceback
-import asyncio
-from datetime import datetime, timezone, timedelta
+import time
+import logging
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, Request, Form, HTTPException, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.orm import Session
-from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.templating import Jinja2Templates
 
-# --- CORE IMPORTS ---
 import auth
-import billing
 import battlebox_pipeline
-import research_lab
-import project_omega
 
-from database import init_db, get_db, UserModel
-from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
+# -----------------------------
+# App + logging
+# -----------------------------
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+log = logging.getLogger("kabroda")
 
-app = FastAPI()
+APP_ROOT = Path(__file__).resolve().parent
 
-# Templates / Static
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
-
-
-def _bool_env(name: str, default: bool = False) -> bool:
+def _env(name: str, default: str = "") -> str:
     v = os.getenv(name)
-    if v is None:
-        return default
-    return v.strip().lower() in ("1", "true", "yes", "y", "on")
+    return v if v is not None and v != "" else default
 
+SESSION_SECRET = _env("SESSION_SECRET", "dev-session-secret-change-me")
+ENV = _env("ENV", _env("RENDER", "local"))
 
-SESSION_SECRET = os.getenv("SESSION_SECRET") or os.getenv("SECRET_KEY") or "dev-session-secret"
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
-IS_HTTPS = PUBLIC_BASE_URL.startswith("https://")
-SESSION_HTTPS_ONLY = _bool_env("SESSION_HTTPS_ONLY", default=IS_HTTPS)
+app = FastAPI(title="Kabroda Site", version="1.0.0")
 
-# --- SESSION CONFIGURATION ---
+# Sessions (required for auth router)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
-    https_only=SESSION_HTTPS_ONLY,
     same_site="lax",
-    max_age=86400 * 30,
+    https_only=bool(_env("SESSION_HTTPS_ONLY", "1") == "1"),
 )
 
-ALLOWED_ADMINS = ["spiritmaker79@gmail.com", "grossmonkeytrader@protonmail.com"]
+# Auth routes (/auth/login, /auth/logout, /auth/me)
+app.include_router(auth.router)
+
+# Serve /static if you have it in your repo
+static_dir = APP_ROOT / "static"
+if static_dir.exists() and static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
-# ---------------------------------------------------------
-# Lifecycle
-# ---------------------------------------------------------
-@app.on_event("startup")
-def _startup():
-    init_db()
-
-    # Best-effort migrations (keep your current pattern, just safer)
-    db = next(get_db())
-    try:
-        for stmt in (
-            "ALTER TABLE users ADD COLUMN username VARCHAR",
-            "ALTER TABLE users ADD COLUMN tradingview_id VARCHAR",
-            "ALTER TABLE users ADD COLUMN operator_flex BOOLEAN",
-        ):
-            try:
-                db.execute(text(stmt))
-                db.commit()
-            except Exception:
-                db.rollback()
-    except Exception as e:
-        print(f"--- STARTUP SCHEMA LOG: {e}")
-    finally:
-        db.close()
-
-
-@app.on_event("shutdown")
-async def _shutdown():
-    """
-    Important on Render:
-    - closes ccxt connections cleanly
-    """
-    try:
-        close_fn = getattr(battlebox_pipeline, "close_exchange", None)
-        if callable(close_fn):
-            await close_fn()
-    except Exception:
-        pass
-
-
-# ---------------------------------------------------------
+# -----------------------------
 # Helpers
-# ---------------------------------------------------------
-def _session_user_dict(request: Request) -> Optional[Dict[str, Any]]:
-    u = request.session.get("user")
-    return u if isinstance(u, dict) else None
-
+# -----------------------------
 
 def _require_session_user(request: Request) -> Dict[str, Any]:
-    return auth.require_session_user(request)
-
-
-def _db_user_from_session(db: Session, sess: Dict[str, Any]) -> UserModel:
-    uid = sess.get("id")
-    if not uid:
-        raise HTTPException(status_code=401, detail="Invalid session")
-    u = db.query(UserModel).filter(UserModel.id == uid).first()
-    if not u:
-        raise HTTPException(status_code=401, detail="User not found")
-    return u
-
-
-def _plan_flags(u: UserModel) -> Dict[str, Any]:
-    ms = get_membership_state(u)
-    return {"is_paid": ms.is_paid, "plan": ms.plan, "plan_label": ms.label}
-
-
-def _is_admin(u: UserModel) -> bool:
-    return bool(u and u.email in ALLOWED_ADMINS)
-
-
-def _resolve_session_id_from_tz(session_tz: str) -> str:
     """
-    Backward-compat bridge:
-    - If the UI is still sending session_tz, we map it to a session config by tz.
-    - Default = us_ny_futures
+    Your auth.py stores the user in request.session["user"].
+    This replaces the missing auth.require_session_user().
     """
-    tz = (session_tz or "").strip()
+    sess = request.session.get("user")
+    if not sess or not isinstance(sess, dict) or not sess.get("username"):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return sess
+
+def _safe_int(v: Any, default: int) -> int:
     try:
-        cfgs = getattr(battlebox_pipeline, "SESSION_CONFIGS", None) or []
-        for cfg in cfgs:
-            if str(cfg.get("tz", "")).strip() == tz:
-                return str(cfg.get("id") or "us_ny_futures")
+        return int(v)
     except Exception:
-        pass
-    return "us_ny_futures"
+        return default
+
+def _page(path: str) -> FileResponse:
+    fp = APP_ROOT / path
+    if not fp.exists():
+        raise HTTPException(status_code=404, detail=f"Missing file: {path}")
+    return FileResponse(str(fp))
 
 
-async def _call_get_session_review(symbol: str, session_tz: str, session_id: str) -> Dict[str, Any]:
+# -----------------------------
+# Pages
+# -----------------------------
+
+@app.get("/")
+def home() -> RedirectResponse:
+    # Pick your default landing page
+    return RedirectResponse(url="/session-control")
+
+@app.get("/about")
+def about_page():
+    return _page("about.html")
+
+@app.get("/pricing")
+def pricing_page():
+    return _page("pricing.html")
+
+@app.get("/privacy")
+def privacy_page():
+    return _page("privacy.html")
+
+@app.get("/register")
+def register_page():
+    return _page("register.html")
+
+@app.get("/research")
+def research_page():
+    return _page("research.html")
+
+@app.get("/research-lab")
+def research_lab_page():
+    return _page("research_lab.html")
+
+@app.get("/project-omega")
+def project_omega_page():
+    return _page("project_omega.html")
+
+@app.get("/ui-sandbox")
+def ui_sandbox_page():
+    return _page("ui_sandbox.html")
+
+@app.get("/session-control")
+def session_control_page():
+    return _page("session_control.html")
+
+
+# -----------------------------
+# APIs
+# -----------------------------
+
+@app.get("/api/health")
+def health():
+    return {"ok": True, "env": ENV, "ts": int(time.time())}
+
+@app.post("/api/dmr/run-raw")
+async def dmr_run_raw(request: Request):
     """
-    Handles both possible battlebox_pipeline.get_session_review signatures:
-    - get_session_review(symbol, session_tz=...)
-    - get_session_review(symbol, session_id=...)
+    Called by session_control.html.
+    This runs the battlebox pipeline and returns a payload that
+    includes:
+      - levels
+      - range_30m: {high, low}
+      - session_packet (raw)
     """
-    fn = battlebox_pipeline.get_session_review
+    payload = await request.json()
 
-    # Try the "new" signature first
-    try:
-        return await fn(symbol=symbol, session_id=session_id)
-    except TypeError:
-        # Fall back to old signature
-        return await fn(symbol=symbol, session_tz=session_tz)
-    except Exception:
-        raise
+    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
+    exchange_id = (payload.get("exchange") or "binance").strip().lower()
+    tf = (payload.get("timeframe") or "15m").strip().lower()
 
+    # If not provided, use "now"
+    anchor_ts = _safe_int(payload.get("anchor_ts"), int(time.time()))
 
-async def _fetch_historical_5m(symbol: str, fetch_start: int, fetch_end: int) -> list:
-    """
-    Compatible with either:
-    - battlebox_pipeline.fetch_historical_pagination
-    - research_lab alternative (if you move it later)
-    """
-    fn = getattr(battlebox_pipeline, "fetch_historical_pagination", None)
-    if not callable(fn):
-        raise Exception("Missing battlebox_pipeline.fetch_historical_pagination(). Restore it or move fetch into research_lab.")
-    return await fn(symbol, fetch_start, fetch_end)
+    # Optional candles_json passthrough
+    candles_json = payload.get("candles_json")
 
-
-# ---------------------------------------------------------
-# Public Routes
-# ---------------------------------------------------------
-@app.get("/", response_class=HTMLResponse)
-def home(request: Request):
-    return templates.TemplateResponse("home.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
-
-
-@app.get("/analysis", response_class=HTMLResponse)
-def analysis(request: Request):
-    return templates.TemplateResponse("analysis.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
-
-
-@app.get("/how-it-works", response_class=HTMLResponse)
-def how_it_works(request: Request):
-    return templates.TemplateResponse("how_it_works.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
-
-
-@app.get("/pricing", response_class=HTMLResponse)
-def pricing(request: Request):
-    return templates.TemplateResponse("pricing.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
-
-
-@app.get("/about", response_class=HTMLResponse)
-def about(request: Request):
-    return templates.TemplateResponse("about.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
-
-
-@app.get("/privacy", response_class=HTMLResponse)
-def privacy_page(request: Request):
-    return templates.TemplateResponse("privacy.html", {"request": request, "is_logged_in": _session_user_dict(request) is not None})
-
-
-# ---------------------------------------------------------
-# Suite Routes
-# ---------------------------------------------------------
-@app.get("/suite", response_class=HTMLResponse)
-def suite(request: Request, db: Session = Depends(get_db)):
-    sess = _session_user_dict(request)
-    if not sess:
-        return RedirectResponse(url="/login", status_code=303)
-
-    u = _db_user_from_session(db, sess)
-    try:
-        require_paid_access(u)
-    except HTTPException:
-        return RedirectResponse(url="/pricing?paywall=1", status_code=303)
-
-    flags = _plan_flags(u)
-    return templates.TemplateResponse(
-        "session_control.html",
-        {
-            "request": request,
-            "is_logged_in": True,
-            "user": u,
-            "plan_label": flags.get("plan_label", ""),
-            "is_admin": _is_admin(u),
-        },
+    session_packet = await battlebox_pipeline.get_live_battlebox(
+        symbol=symbol,
+        exchange_id=exchange_id,
+        tf=tf,
+        anchor_ts=anchor_ts,
+        candles_json=candles_json,
     )
 
-
-@app.get("/suite/battle-control", response_class=HTMLResponse)
-def battle_control_page(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-    flags = _plan_flags(u)
-    return templates.TemplateResponse("battle_control.html", {"request": request, "is_logged_in": True, "user": u, "plan_label": flags.get("plan_label", "")})
-
-
-@app.get("/suite/research-lab", response_class=HTMLResponse)
-def research_lab_page(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-    flags = _plan_flags(u)
-    return templates.TemplateResponse("research_lab.html", {"request": request, "is_logged_in": True, "user": u, "plan_label": flags.get("plan_label", "")})
-
-
-@app.get("/indicators", response_class=HTMLResponse)
-def indicators(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    require_paid_access(u)
-    flags = _plan_flags(u)
-    return templates.TemplateResponse("indicators.html", {"request": request, "is_logged_in": True, "user": u, "plan_label": flags.get("plan_label", "")})
-
-
-# ---------------------------------------------------------
-# Auth & Account
-# ---------------------------------------------------------
-@app.get("/login", response_class=HTMLResponse)
-def login_get(request: Request):
-    sess = _session_user_dict(request)
-    if sess:
-        return RedirectResponse(url="/suite", status_code=303)
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
-
-
-@app.post("/login")
-def login_post(request: Request, db: Session = Depends(get_db), email: str = Form(...), password: str = Form(...)):
-    u = auth.authenticate_user(db, email=email, password=password)
-    if not u:
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"}, status_code=401)
-    auth.set_user_session(request, u)
-    if not get_membership_state(u).is_paid:
-        return RedirectResponse(url="/pricing?renewal=1", status_code=303)
-    return RedirectResponse(url="/suite", status_code=303)
-
-
-@app.get("/logout")
-def logout(request: Request):
-    auth.clear_user_session(request)
-    return RedirectResponse(url="/", status_code=303)
-
-
-@app.get("/register", response_class=HTMLResponse)
-def register_get(request: Request, plan: str = "monthly"):
-    if auth.registration_disabled():
-        return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("register.html", {"request": request, "error": None, "plan": plan})
-
-
-@app.post("/register")
-def register_post(request: Request, db: Session = Depends(get_db), email: str = Form(...), password: str = Form(...), plan: str = Form("monthly")):
-    if auth.registration_disabled():
-        raise HTTPException(status_code=403, detail="Registration disabled")
-    try:
-        u = auth.create_user(db, email=email, password=password)
-    except HTTPException as e:
-        return templates.TemplateResponse("register.html", {"request": request, "error": str(e.detail), "plan": plan}, status_code=e.status_code)
-
-    auth.set_user_session(request, u)
-    return RedirectResponse(url=billing.create_checkout_session(db=db, user_model=u, plan_key=plan), status_code=303)
-
-
-@app.get("/account", response_class=HTMLResponse)
-def account(request: Request, db: Session = Depends(get_db)):
-    sess = _session_user_dict(request)
-    if not sess:
-        return RedirectResponse(url="/login", status_code=303)
-    u = _db_user_from_session(db, sess)
-
-    return templates.TemplateResponse(
-        "account.html",
-        {
-            "request": request,
-            "is_logged_in": True,
-            "user": u,
-            "tier_label": _plan_flags(u)["plan_label"],
-            "is_admin": _is_admin(u),
+    # Normalize to what the UI expects
+    levels = session_packet.get("levels", {}) if isinstance(session_packet, dict) else {}
+    out = {
+        "ok": True,
+        "symbol": symbol,
+        "exchange": exchange_id,
+        "timeframe": tf,
+        "anchor_ts": anchor_ts,
+        "levels": levels,
+        "range_30m": {
+            "high": levels.get("range30m_high"),
+            "low": levels.get("range30m_low"),
         },
-    )
-
-
-@app.post("/account/settings")
-async def account_settings(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-
-    data = await request.json()
-    u.operator_flex = bool(data.get("operator_flex", False))
-    db.commit()
-    return {"status": "ok"}
-
-
-@app.post("/account/profile")
-async def account_profile_update(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-
-    data = await request.json()
-    if "username" in data:
-        u.username = str(data["username"]).strip()[:50]
-    if "tradingview_id" in data:
-        u.tradingview_id = str(data["tradingview_id"]).strip()
-    if "session_tz" in data:
-        u.session_tz = str(data["session_tz"]).strip()
-
-    db.commit()
-    return {"status": "ok"}
-
-
-# ---------------------------------------------------------
-# Admin
-# ---------------------------------------------------------
-@app.get("/admin", response_class=HTMLResponse)
-def admin_panel(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-
-    if not _is_admin(u):
-        return RedirectResponse(url="/suite", status_code=303)
-
-    users = db.query(UserModel).order_by(UserModel.created_at.desc()).all()
-    clean_list = []
-    now = datetime.now()
-
-    for usr in users:
-        status = "INACTIVE"
-        joined = "N/A"
-        sub_end = getattr(usr, "subscription_end", None)
-        if sub_end and sub_end > now:
-            status = "ACTIVE"
-        created = getattr(usr, "created_at", None)
-        if created:
-            joined = created.strftime("%Y-%m-%d")
-
-        clean_list.append(
-            {
-                "id": str(usr.id),
-                "email": usr.email,
-                "username": getattr(usr, "username", None),
-                "status": status,
-                "created_at": joined,
-            }
-        )
-
-    return templates.TemplateResponse("admin.html", {"request": request, "users": clean_list})
-
-
-@app.post("/admin/delete-user")
-def delete_user(request: Request, user_id: str = Form(...), db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    admin_user = _db_user_from_session(db, sess)
-
-    if not _is_admin(admin_user):
-        return RedirectResponse(url="/suite", status_code=303)
-
-    try:
-        target_id = int(user_id)
-        target = db.query(UserModel).filter(UserModel.id == target_id).first()
-        if target:
-            if target.email == admin_user.email:
-                return RedirectResponse(url="/admin?error=cannot_delete_self", status_code=303)
-            db.delete(target)
-            db.commit()
-    except ValueError:
-        pass
-
-    return RedirectResponse(url="/admin", status_code=303)
-
-
-# ---------------------------------------------------------
-# Project Omega (Admin Only)
-# ---------------------------------------------------------
-@app.get("/suite/black-ops", response_class=HTMLResponse)
-def black_ops_ui(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-
-    if not _is_admin(u):
-        return RedirectResponse(url="/suite", status_code=303)
-
-    return templates.TemplateResponse("omega_ui.html", {"request": request})
-
+        "session_packet": session_packet,
+    }
+    return JSONResponse(out)
 
 @app.post("/api/black-ops/status")
-async def black_ops_api(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-
-    if not _is_admin(u):
-        raise HTTPException(status_code=403, detail="Unauthorized")
-
-    payload = await request.json()
-    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-
-    data = await project_omega.get_omega_status(symbol)
-    return JSONResponse(data)
-
-
-@app.get("/sandbox", response_class=HTMLResponse)
-def ui_sandbox(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    if not _is_admin(u):
-        return RedirectResponse(url="/suite", status_code=303)
-    return templates.TemplateResponse("ui_sandbox.html", {"request": request})
-
-
-# ---------------------------------------------------------
-# Billing
-# ---------------------------------------------------------
-@app.post("/billing/checkout")
-async def billing_checkout(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-
-    payload = await request.json()
-    return {"url": billing.create_checkout_session(db=db, user_model=u, plan_key=payload.get("plan", "monthly"))}
-
-
-@app.post("/billing/portal")
-async def billing_portal(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-    return {"url": billing.create_billing_portal(db=db, user_model=u)}
-
-
-@app.post("/billing/webhook")
-async def billing_webhook(request: Request, db: Session = Depends(get_db)):
-    payload = await request.body()
-    return billing.handle_webhook(payload=payload, sig_header=request.headers.get("stripe-signature", ""), db=db, UserModel=UserModel)
-
-
-# ---------------------------------------------------------
-# Unified API Endpoints
-# ---------------------------------------------------------
-@app.post("/api/dmr/run-raw")
-async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-
-    require_paid_access(u)
-
-    payload = await request.json()
-    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    ensure_symbol_allowed(u, symbol)
-
-    # Backward compatible: UI might send session_tz, some engines want session_id
-    requested_tz = (payload.get("session_tz") or (getattr(u, "session_tz", None) or "UTC")).strip()
-    session_id = (payload.get("session_id") or "").strip() or _resolve_session_id_from_tz(requested_tz)
-
-    out = await _call_get_session_review(symbol=symbol, session_tz=requested_tz, session_id=session_id)
-    return JSONResponse(out)
-
-
-@app.post("/api/dmr/live")
-async def dmr_live(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-
-    require_paid_access(u)
-
-    payload = await request.json()
-    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    ensure_symbol_allowed(u, symbol)
-
-    out = await battlebox_pipeline.get_live_battlebox(
-        symbol=symbol,
-        session_mode=(payload.get("session_mode") or "AUTO").upper(),
-        manual_id=payload.get("manual_session_id", None),
-        operator_flex=bool(payload.get("operator_flex", False)),
-        tuning=payload.get("tuning"),
+async def black_ops_disabled(request: Request):
+    """
+    You said you are NOT using Black-Ops at all.
+    Keep this route to prevent random UI calls from crashing the app,
+    but explicitly disable it.
+    """
+    # If something is calling it from an admin UI, this prevents 500 spam.
+    _ = request  # unused
+    return JSONResponse(
+        {"ok": False, "disabled": True, "detail": "Black-Ops is disabled. Use Project Omega endpoints."},
+        status_code=410,
     )
-    return JSONResponse(out)
-
-
-@app.post("/api/research/run")
-async def research_run(request: Request, db: Session = Depends(get_db)):
-    sess = _require_session_user(request)
-    u = _db_user_from_session(db, sess)
-
-    require_paid_access(u)
-
-    payload = await request.json()
-
-    try:
-        symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-        ensure_symbol_allowed(u, symbol)
-
-        start_date = payload.get("start_date_utc")
-        end_date = payload.get("end_date_utc")
-        tuning_cfg = payload.get("tuning")
-
-        if not start_date or not end_date:
-            raise Exception("Missing start_date_utc or end_date_utc (YYYY-MM-DD).")
-
-        start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-
-        # Safety buffer
-        fetch_start = int((start_dt - timedelta(hours=48)).timestamp())
-        fetch_end = int((end_dt + timedelta(hours=30)).timestamp())
-
-        print(f"[API] Requesting Pipeline Data for {symbol} ({fetch_start} -> {fetch_end})...")
-
-        # Timeout circuit breaker
-        try:
-            raw_5m = await asyncio.wait_for(_fetch_historical_5m(symbol, fetch_start, fetch_end), timeout=45.0)
-            print(f"[API] Pipeline returned {len(raw_5m)} candles.")
-        except asyncio.TimeoutError:
-            raise Exception("Pipeline data fetch timed out. Check battlebox_pipeline pagination for loops/timeouts.")
-
-        out = await research_lab.run_research_lab_from_candles(
-            symbol=symbol,
-            raw_5m=raw_5m,
-            start_date_utc=start_date,
-            end_date_utc=end_date,
-            session_ids=payload.get("session_ids"),
-            tuning=tuning_cfg,
-        )
-        return JSONResponse(out)
-
-    except Exception as e:
-        traceback.print_exc()
-        return JSONResponse({"ok": False, "error": str(e)})
-
-
-# ---------------------------------------------------------
-# Health
-# ---------------------------------------------------------
-@app.get("/health")
-def health():
-    return {"ok": True, "ts": datetime.now(timezone.utc).isoformat()}
