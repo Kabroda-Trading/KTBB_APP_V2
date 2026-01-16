@@ -1,23 +1,17 @@
 # black_ops_engine.py
 # ==============================================================================
-# PROJECT OMEGA: INDEPENDENT OPERATIONS ENGINE (v11.2 TELEMETRY)
-# SOURCE: session_manager.py
+# PROJECT OMEGA: INDEPENDENT OPERATIONS ENGINE (v12.1 CENTRALIZED)
+# LOGIC: Pulls truth directly from session_manager.resolve_anchor_time
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, Any, List
-from datetime import datetime, timezone
 
-# CORE SUITE INTEGRATION
-import session_manager
+# CORE INTEGRATION
+import session_manager  # <--- NOW THE BRAIN
 import battlebox_pipeline
 import sse_engine
 
-OMEGA_CONFIG = {
-    "confirmation_mode": "1_CLOSE",
-    "fusion_enabled": True
-}
-
-# --- INTERNAL MATH HELPERS ---
+# --- INTERNAL MATH HELPERS (Standard) ---
 def _compute_stoch(candles: List[Dict], k_period: int = 14) -> Dict[str, float]:
     if len(candles) < k_period: return {"k": 50.0, "d": 50.0}
     try:
@@ -48,138 +42,105 @@ def _compute_rsi(candles: List[Dict], period: int = 14) -> float:
         return 100.0 - (100.0 / (1.0 + rs))
     except: return 50.0
 
-def _verify_breakout(side: str, trigger: float, history: List[Dict]) -> bool:
-    if trigger == 0 or not history: return False
-    close_px = float(history[-1]["close"])
-    if side == "LONG": return close_px > trigger
-    if side == "SHORT": return close_px < trigger
-    return False
-
 def _calc_strength(entry: float, stop: float, dr: float, ds: float, side: str) -> dict:
     score = 0
-    reasons = []
     is_blue_sky = False
-    
     if entry == 0: return {"score": 0, "rating": "WAITING", "tags": [], "is_blue_sky": False}
     if side == "LONG" and entry > dr: is_blue_sky = True
     if side == "SHORT" and entry < ds: is_blue_sky = True
-    
-    if is_blue_sky:
-        score += 50
-        reasons.append("BLUE SKY (EAGLE)")
-    else:
-        reasons.append("STRUCTURE (VULTURE)")
-    
-    return {"score": score, "rating": "GO", "tags": reasons, "is_blue_sky": is_blue_sky}
+    return {"score": score, "rating": "GO", "tags": [], "is_blue_sky": is_blue_sky}
 
 # --- MAIN ENGINE ---
 async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
     current_price = 0.0
     try:
-        # 1. RESOLVE SESSION
-        now_utc = datetime.now(timezone.utc)
-        session_info = session_manager.resolve_current_session(now_utc, mode="MANUAL", manual_id="us_ny_futures")
+        # 1. GET CENTRAL TRUTH
+        # No more custom time math here. We ask the Manager.
+        session = session_manager.resolve_anchor_time("us_ny_futures")
         
-        anchor_ts = session_info["anchor_time"]
-        lock_end_ts = anchor_ts + 1800 
-        
+        anchor_ts = session["anchor_ts"]
+        lock_end_ts = session["lock_end_ts"]
+        session_status = session["status"]
+
         # 2. DATA FEED
         raw_5m = await battlebox_pipeline.fetch_live_5m(symbol, limit=2000)
         if not raw_5m or len(raw_5m) < 20:
             return {"ok": False, "status": "OFFLINE", "msg": "Waiting for Data..."}
-
+        
         current_price = float(raw_5m[-1]["close"])
 
-        # 3. LEVELS & STATUS CHECK
+        # 3. COMPUTE LEVELS (Using the Central Anchor)
         calibration_candles = [c for c in raw_5m if anchor_ts <= c["time"] < lock_end_ts]
         
-        # Determine strict session state for UI Countdown
-        now_ts = now_utc.timestamp()
+        r30_high, r30_low = 0.0, 0.0
+        dr, ds, bo, bd = 0.0, 0.0, 0.0, 0.0
         
-        # If we are seemingly "Active" (elapsed > 30) but it's been > 20 hours, we are actually Pre-Market for tomorrow
-        # (Simple logic: if elapsed > 1200 mins (20 hours), assume next session is approaching)
-        is_pre_market = False
-        next_open_ts = anchor_ts + 86400 # Default to next day
-        
-        if session_info["elapsed_min"] > 1200: 
-             is_pre_market = True
-             session_status = "CLOSED"
-        elif session_info["elapsed_min"] < 0:
-             is_pre_market = True
-             session_status = "CLOSED"
-             next_open_ts = anchor_ts # It's actually today later
-        elif session_info["elapsed_min"] < 30:
-             session_status = "CALIBRATING"
-        else:
-             session_status = "ACTIVE"
+        # Only calculate if we have the data for the Anchor Time
+        if len(calibration_candles) >= 4:
+            r30_high = max(float(c["high"]) for c in calibration_candles)
+            r30_low = min(float(c["low"]) for c in calibration_candles)
+            
+            sse_input = {
+                "locked_history_5m": raw_5m,
+                "slice_24h_5m": raw_5m[-288:], 
+                "session_open_price": float(calibration_candles[0]["open"]),
+                "r30_high": r30_high,
+                "r30_low": r30_low,
+                "last_price": current_price,
+                "tuning": {}
+            }
+            computed = sse_engine.compute_sse_levels(sse_input)
+            levels = computed.get("levels", {})
+            
+            bo = float(levels.get("breakout_trigger", 0))
+            bd = float(levels.get("breakdown_trigger", 0))
+            dr = float(levels.get("daily_resistance", 0))
+            ds = float(levels.get("daily_support", 0))
 
-        # Fail Safe Data Logic
-        if len(calibration_candles) < 4:
-            if session_status == "ACTIVE":
-                calibration_candles = raw_5m[-7:-1] # Force data
-
-        r30_high = max(float(c["high"]) for c in calibration_candles) if calibration_candles else 0.0
-        r30_low = min(float(c["low"]) for c in calibration_candles) if calibration_candles else 0.0
-        
-        sse_input = {
-            "locked_history_5m": raw_5m,
-            "slice_24h_5m": raw_5m[-288:], 
-            "session_open_price": float(calibration_candles[0]["open"]) if calibration_candles else 0.0,
-            "r30_high": r30_high,
-            "r30_low": r30_low,
-            "last_price": current_price,
-            "tuning": {}
-        }
-        computed = sse_engine.compute_sse_levels(sse_input)
-        levels = computed.get("levels", {})
-
-        # 4. TRIGGERS
-        bo = float(levels.get("breakout_trigger", 0))
-        bd = float(levels.get("breakdown_trigger", 0))
-        dr = float(levels.get("daily_resistance", 0))
-        ds = float(levels.get("daily_support", 0))
-        
-        # 5. EXECUTION LOGIC
-        last_candle = raw_5m[-2] if len(raw_5m) > 1 else raw_5m[-1]
-        status = "LOCKED"
+        # 4. EXECUTION
+        status = "STANDBY"
         active_side = "NONE"
         stop_loss = 0.0
 
-        if session_status == "ACTIVE":
-            long_go = (float(last_candle["close"]) > bo)
-            short_go = (float(last_candle["close"]) < bd)
-            
-            if long_go:
-                status = "EXECUTING"; active_side = "LONG"; stop_loss = r30_low
-            elif short_go:
-                status = "EXECUTING"; active_side = "SHORT"; stop_loss = r30_high
-            else:
-                if bo > 0 and abs(current_price - bo) / bo < 0.001: status = "LOCKED"; active_side = "LONG"
-                elif bd > 0 and abs(current_price - bd) / bd < 0.001: status = "LOCKED"; active_side = "SHORT"
-        else:
-            status = "STANDBY"
+        if session_status == "ACTIVE" or session_status == "CLOSED":
+            if bo > 0 and bd > 0:
+                last_candle = raw_5m[-2] if len(raw_5m) > 1 else raw_5m[-1]
+                if float(last_candle["close"]) > bo:
+                    status = "EXECUTING"; active_side = "LONG"; stop_loss = r30_low
+                elif float(last_candle["close"]) < bd:
+                    status = "EXECUTING"; active_side = "SHORT"; stop_loss = r30_high
+                else:
+                    if abs(current_price - bo) / bo < 0.001: status = "LOCKED"; active_side = "LONG"
+                    elif abs(current_price - bd) / bd < 0.001: status = "LOCKED"; active_side = "SHORT"
+        
+        if session_status == "CALIBRATING": status = "CALIBRATING"
+        if session_status == "CLOSED": status = "CLOSED" # Visual override
 
+        # 5. PACKAGING
         trigger_px = bo if active_side == "LONG" else bd
-        if active_side == "NONE": trigger_px = bo if current_price > (bo+bd)/2 else bd
+        if active_side == "NONE" and bo > 0: 
+            trigger_px = bo if current_price > (bo+bd)/2 else bd
             
         strength = _calc_strength(trigger_px, stop_loss, dr, ds, active_side)
         energy = abs(dr - ds)
         if energy == 0: energy = current_price * 0.01
 
         targets = []
-        if active_side == "LONG" or (active_side == "NONE" and current_price > (bo+bd)/2):
+        if active_side == "LONG" or (active_side == "NONE" and bo > 0 and current_price > (bo+bd)/2):
             t1 = dr if not strength["is_blue_sky"] else trigger_px + (energy * 0.5)
             targets = [{"id": "T1", "price": round(t1, 2)}, {"id": "T2", "price": round(trigger_px + energy, 2)}, {"id": "T3", "price": round(trigger_px + (energy * 3.0), 2)}]
-        else:
+        elif bd > 0:
             t1 = ds if not strength["is_blue_sky"] else trigger_px - (energy * 0.5)
             targets = [{"id": "T1", "price": round(t1, 2)}, {"id": "T2", "price": round(trigger_px - energy, 2)}, {"id": "T3", "price": round(trigger_px - (energy * 3.0), 2)}]
 
         stoch = _compute_stoch(raw_5m[-20:])
         rsi = _compute_rsi(raw_5m[-20:])
 
-        # --- TELEMETRY PACKET ---
+        # Next Open for Timer
+        next_open_ts = anchor_ts + 86400
+        
         telemetry = {
-            "session_state": session_status,  # CLOSED, CALIBRATING, ACTIVE
+            "session_state": session_status,
             "next_event_ts": lock_end_ts if session_status == "CALIBRATING" else next_open_ts,
             "verification": {
                 "r30_high": r30_high,
@@ -198,7 +159,7 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
             "context": "BLUE SKY" if strength["is_blue_sky"] else "STRUCTURE",
             "strength": strength,
             "triggers": {"BO": bo, "BD": bd},
-            "telemetry": telemetry,  # <--- NEW DATA FOR UI
+            "telemetry": telemetry,
             "execution": {
                 "entry": trigger_px,
                 "stop_loss": stop_loss,
