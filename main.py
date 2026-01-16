@@ -447,7 +447,7 @@ async def black_ops_api(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
 
-    data = await black_ops_engine.get_omega_status(symbol)
+    data = await project_omega.get_omega_status(symbol)
     return JSONResponse(data)
 
 
