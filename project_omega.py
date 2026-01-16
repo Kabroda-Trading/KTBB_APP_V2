@@ -1,287 +1,218 @@
-# battlebox_pipeline.py
+# project_omega.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE v6.2 (FULL RESTORATION)
-# Connected to: session_manager.py
+# PROJECT OMEGA ENGINE (CLEAN + SESSION PICKER + FERRARI MODE)
+# - Truth source: session_manager.resolve_anchor_time(session_id)
+# - Data source: battlebox_pipeline.fetch_live_5m
+# - Levels: sse_engine.compute_sse_levels (frozen 24h context to lock_end_ts)
+# - Ferrari mode: tighter triggers / acceptance option (no research lab dependency)
 # ==============================================================================
+
 from __future__ import annotations
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
-import traceback
-import pytz
-import asyncio
-import ccxt.async_support as ccxt
+from typing import Dict, Any, List, Optional
 
+import session_manager
+import battlebox_pipeline
 import sse_engine
-import structure_state_engine
-import session_manager  # <--- NEW AUTHORITY
 
 # ----------------------------
-# CONFIG (DELEGATED)
+# Internal Indicators (simple)
 # ----------------------------
-# We expose this reference so existing code doesn't break
-SESSION_CONFIGS = session_manager.SESSION_CONFIGS 
+def _compute_stoch(candles: List[Dict[str, Any]], k_period: int = 14) -> Dict[str, float]:
+    if len(candles) < k_period:
+        return {"k": 50.0, "d": 50.0}
+    try:
+        highs = [float(c["high"]) for c in candles]
+        lows = [float(c["low"]) for c in candles]
+        closes = [float(c["close"]) for c in candles]
+        hh = max(highs[-k_period:])
+        ll = min(lows[-k_period:])
+        curr = closes[-1]
+        k_val = 50.0 if hh == ll else ((curr - ll) / (hh - ll)) * 100.0
+        return {"k": k_val, "d": k_val}
+    except Exception:
+        return {"k": 50.0, "d": 50.0}
 
-LOCKED_SESSIONS: Dict[str, Dict[str, Any]] = {}
-_exchange_live = ccxt.kucoin({"enableRateLimit": True})
+def _compute_rsi(candles: List[Dict[str, Any]], period: int = 14) -> float:
+    if len(candles) < period + 1:
+        return 50.0
+    try:
+        closes = [float(c["close"]) for c in candles]
+        gains, losses = [], []
+        for i in range(1, len(closes)):
+            delta = closes[i] - closes[i - 1]
+            gains.append(max(delta, 0))
+            losses.append(max(-delta, 0))
+        avg_gain = sum(gains[-period:]) / period
+        avg_loss = sum(losses[-period:]) / period
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return 100.0 - (100.0 / (1.0 + rs))
+    except Exception:
+        return 50.0
+
+def _calc_strength(entry: float, dr: float, ds: float, side: str) -> Dict[str, Any]:
+    is_blue_sky = False
+    if entry <= 0:
+        return {"score": 0, "rating": "WAITING", "tags": [], "is_blue_sky": False}
+    if side == "LONG" and entry > dr:
+        is_blue_sky = True
+    if side == "SHORT" and entry < ds:
+        is_blue_sky = True
+    return {"score": 0, "rating": "GO", "tags": [], "is_blue_sky": is_blue_sky}
 
 # ----------------------------
-# LOCAL HELPERS (RSI & DIV for Public View)
+# Core Omega
 # ----------------------------
-def _calculate_rsi(prices: List[float], period=14) -> List[float]:
-    if len(prices) < period + 1: return [50.0] * len(prices)
-    gains, losses = [], []
-    for i in range(1, len(prices)):
-        delta = prices[i] - prices[i-1]
-        gains.append(max(delta, 0))
-        losses.append(max(-delta, 0))
-    
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-    rsis = [50.0] * period 
-    
-    for i in range(period, len(prices)-1):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-        if avg_loss == 0: rsi = 100.0
-        else:
-            rs = avg_gain / avg_loss
-            rsi = 100.0 - (100.0 / (1.0 + rs))
-        rsis.append(rsi)
-    return rsis
-
-def _check_public_structure(levels: Dict[str, float], candles: List[Dict[str, Any]]) -> Dict[str, Any]:
+async def get_omega_status(
+    symbol: str = "BTCUSDT",
+    session_id: str = "us_ny_futures",
+    ferrari_mode: bool = False,
+) -> Dict[str, Any]:
     """
-    Logic: 1-Candle Close + RSI Divergence
-    Ignores Stochastics entirely.
+    ferrari_mode (aggressive):
+      - uses tighter "near trigger" lock window
+      - can be extended later to different entry logic
     """
-    if not candles or len(candles) < 20: 
-        return {"active": False}
+    current_price = 0.0
+    try:
+        # 1) Central truth (anchor + lock window)
+        resolve_fn = getattr(session_manager, "resolve_anchor_time", None)
+        if not callable(resolve_fn):
+            return {"ok": False, "status": "ERROR", "msg": "session_manager.resolve_anchor_time missing"}
 
-    bo = levels.get("breakout_trigger", 0.0)
-    bd = levels.get("breakdown_trigger", 0.0)
-    if bo == 0 or bd == 0: return {"active": False}
+        sess = resolve_fn(session_id)
+        anchor_ts = int(sess["anchor_ts"])
+        lock_end_ts = int(sess["lock_end_ts"])
+        session_status = str(sess.get("status") or "ACTIVE")
 
-    current = candles[-1]
-    px = float(current["close"])
-    
-    # 1. TRIGGER CHECK (1-Candle Close)
-    side = "NONE"
-    if px > bo: side = "LONG"
-    elif px < bd: side = "SHORT"
-    
-    if side == "NONE": return {"active": False}
+        # 2) Live 5m feed
+        raw_5m = await battlebox_pipeline.fetch_live_5m(symbol, limit=2000)
+        if not raw_5m or len(raw_5m) < 20:
+            return {"ok": False, "status": "OFFLINE", "msg": "Waiting for data..."}
 
-    # 2. RSI CALCULATION
-    closes = [float(c["close"]) for c in candles]
-    rsis = _calculate_rsi(closes)
-    curr_rsi = rsis[-1]
+        current_price = float(raw_5m[-1]["close"])
 
-    # 3. DIVERGENCE CHECK (Simplified Lookback)
-    lookback = candles[-15:-1] # Prior 15 bars excluding current
-    has_divergence = False
-    
-    if side == "LONG":
-        min_price_idx = min(range(len(lookback)), key=lambda i: lookback[i]["low"])
-        recent_low_rsi = rsis[len(candles) - 15 + min_price_idx]
-        if float(current["low"]) < float(lookback[min_price_idx]["low"]) and curr_rsi > recent_low_rsi:
-            has_divergence = True
-        if curr_rsi < 35: has_divergence = True 
+        # 3) Strict lock context
+        calibration = [c for c in raw_5m if anchor_ts <= int(c["time"]) < lock_end_ts]
+        context_start = lock_end_ts - 86400
+        context_24h = [c for c in raw_5m if context_start <= int(c["time"]) < lock_end_ts]
 
-    elif side == "SHORT":
-        max_price_idx = max(range(len(lookback)), key=lambda i: lookback[i]["high"])
-        recent_high_rsi = rsis[len(candles) - 15 + max_price_idx]
-        if float(current["high"]) > float(lookback[max_price_idx]["high"]) and curr_rsi < recent_high_rsi:
-            has_divergence = True
-        if curr_rsi > 65: has_divergence = True
+        r30_high = r30_low = 0.0
+        bo = bd = dr = ds = 0.0
 
-    if has_divergence:
+        if len(calibration) >= 4 and len(context_24h) > 100:
+            r30_high = max(float(c["high"]) for c in calibration)
+            r30_low = min(float(c["low"]) for c in calibration)
+
+            sse_input = {
+                "locked_history_5m": context_24h,
+                "slice_24h_5m": context_24h,
+                "slice_4h_5m": context_24h[-48:],
+                "session_open_price": float(calibration[0]["open"]),
+                "r30_high": r30_high,
+                "r30_low": r30_low,
+                "last_price": current_price,
+                "tuning": {"ferrari_mode": bool(ferrari_mode)},
+            }
+            computed = sse_engine.compute_sse_levels(sse_input)
+            levels = computed.get("levels", {}) if isinstance(computed, dict) else {}
+
+            bo = float(levels.get("breakout_trigger", 0.0))
+            bd = float(levels.get("breakdown_trigger", 0.0))
+            dr = float(levels.get("daily_resistance", 0.0))
+            ds = float(levels.get("daily_support", 0.0))
+
+        # 4) Execution state (live against locked levels)
+        status = "STANDBY"
+        side = "NONE"
+        stop_loss = 0.0
+
+        # Ferrari mode: tighter “near trigger” radius
+        near_radius = 0.0007 if ferrari_mode else 0.0010
+
+        if session_status in ("ACTIVE", "CLOSED"):
+            if bo > 0 and bd > 0:
+                last_candle = raw_5m[-2] if len(raw_5m) > 1 else raw_5m[-1]
+                last_close = float(last_candle["close"])
+
+                if last_close > bo:
+                    status = "EXECUTING"
+                    side = "LONG"
+                    stop_loss = r30_low
+                elif last_close < bd:
+                    status = "EXECUTING"
+                    side = "SHORT"
+                    stop_loss = r30_high
+                else:
+                    # "LOCKED" (near trigger)
+                    if abs(current_price - bo) / bo < near_radius:
+                        status = "LOCKED"
+                        side = "LONG"
+                    elif abs(current_price - bd) / bd < near_radius:
+                        status = "LOCKED"
+                        side = "SHORT"
+
+        if session_status == "CALIBRATING":
+            status = "CALIBRATING"
+        if session_status == "CLOSED":
+            status = "CLOSED"
+
+        # 5) Targets + telemetry
+        trigger_px = bo if side == "LONG" else bd
+        if side == "NONE" and bo > 0 and bd > 0:
+            mid = (bo + bd) / 2.0
+            trigger_px = bo if current_price >= mid else bd
+
+        strength = _calc_strength(trigger_px, dr, ds, side)
+
+        energy = abs(dr - ds)
+        if energy == 0:
+            energy = current_price * 0.01
+
+        targets = []
+        if side == "LONG" or (side == "NONE" and current_price >= (bo + bd) / 2.0):
+            t1 = dr if not strength["is_blue_sky"] else trigger_px + (energy * 0.5)
+            targets = [
+                {"id": "T1", "price": round(t1, 2)},
+                {"id": "T2", "price": round(trigger_px + energy, 2)},
+                {"id": "T3", "price": round(trigger_px + (energy * 3.0), 2)},
+            ]
+        elif bd > 0:
+            t1 = ds if not strength["is_blue_sky"] else trigger_px - (energy * 0.5)
+            targets = [
+                {"id": "T1", "price": round(t1, 2)},
+                {"id": "T2", "price": round(trigger_px - energy, 2)},
+                {"id": "T3", "price": round(trigger_px - (energy * 3.0), 2)},
+            ]
+
+        stoch = _compute_stoch(raw_5m[-20:])
+        rsi = _compute_rsi(raw_5m[-20:])
+
         return {
-            "active": True,
-            "action": f"STRUCTURE {side}",
-            "reason": "BREAKOUT + RSI DIV",
-            "side": side
+            "ok": True,
+            "status": status,
+            "symbol": symbol,
+            "session_id": session_id,
+            "ferrari_mode": bool(ferrari_mode),
+            "price": current_price,
+            "side": side,
+            "context": "BLUE SKY" if strength["is_blue_sky"] else "STRUCTURE",
+            "strength": strength,
+            "triggers": {"BO": bo, "BD": bd},
+            "telemetry": {
+                "session_state": session_status,
+                "anchor_ts": anchor_ts,
+                "lock_end_ts": lock_end_ts,
+                "verification": {"r30_high": r30_high, "r30_low": r30_low, "daily_res": dr, "daily_sup": ds},
+            },
+            "execution": {
+                "entry": trigger_px,
+                "stop_loss": stop_loss,
+                "targets": targets,
+                "fusion_metrics": {"k": stoch["k"], "rsi": rsi},
+            },
         }
-    
-    return {"active": False}
 
-# ----------------------------
-# HELPERS
-# ----------------------------
-def _normalize_symbol(symbol: str) -> str:
-    s = (symbol or "").upper().strip()
-    if s in ("BTC", "BTCUSDT"): return "BTC/USDT"
-    if s in ("ETH", "ETHUSDT"): return "ETH/USDT"
-    if s.endswith("USDT") and "/" not in s: return s.replace("USDT", "/USDT")
-    return s
-
-def _safe_placeholder_state(reason: str = "Waiting...") -> Dict[str, Any]:
-    return {
-        "action": "HOLD FIRE",
-        "reason": reason,
-        "permission": {"status": "NOT_EARNED", "side": "NONE"},
-        "acceptance_progress": {"count": 0, "required": 2, "side_hint": "NONE"},
-        "location": {"relative_to_triggers": "INSIDE_BAND"},
-        "execution": {
-            "pause_state": "NONE", "resumption_state": "NONE", "gates_mode": "PREVIEW",
-            "locked_at": None, "levels": {"failure": 0.0, "continuation": 0.0},
-        },
-    }
-
-def _infer_energy(elapsed_min: float) -> str:
-    if elapsed_min < 30: return "CALIBRATING"
-    if elapsed_min < 240: return "PRIME"
-    if elapsed_min < 420: return "LATE"
-    return "DEAD"
-
-# --- REPLACED WITH SESSION MANAGER CALLS ---
-def anchor_ts_for_utc_date(cfg: Dict, utc_date: datetime) -> int:
-    return session_manager.anchor_ts_for_utc_date(cfg, utc_date)
-
-def resolve_session(now_utc: datetime, mode: str = "AUTO", manual_id: Optional[str] = None) -> Dict[str, Any]:
-    return session_manager.resolve_current_session(now_utc, mode, manual_id)
-
-# ----------------------------
-# DATA FETCHING
-# ----------------------------
-async def fetch_live_5m(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
-    s = _normalize_symbol(symbol)
-    try:
-        rows = await _exchange_live.fetch_ohlcv(s, "5m", limit=limit)
-        return [{"time": int(r[0]/1000), "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "volume": float(r[5])} for r in rows]
-    except:
-        traceback.print_exc()
-        return []
-
-async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
-    s = _normalize_symbol(symbol)
-    try:
-        rows = await _exchange_live.fetch_ohlcv(s, "1h", limit=limit)
-        return [{"time": int(r[0]/1000), "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "volume": float(r[5])} for r in rows]
-    except: return []
-
-async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
-    exchange = ccxt.kucoin({'enableRateLimit': True})
-    s = _normalize_symbol(symbol)
-    all_candles = []
-    try:
-        current = start_ts * 1000
-        end = end_ts * 1000
-        while current < end:
-            ohlcv = await exchange.fetch_ohlcv(s, '5m', current, 1500) 
-            if not ohlcv: break
-            all_candles.extend(ohlcv)
-            current = ohlcv[-1][0] + (5*60*1000)
-            if len(ohlcv) < 1500: break
-    finally: await exchange.close()
-    
-    formatted = []
-    for c in all_candles:
-        ts = int(c[0]/1000)
-        if start_ts <= ts <= end_ts:
-            formatted.append({"time": ts, "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4]), "volume": float(c[5])})
-    return formatted
-
-def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
-    if not raw_1h: return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "UNCLEAR", "note": "No 1h data."}
-    closes = [c["close"] for c in raw_1h]
-    if len(closes) < 22: return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "TRANSITION", "note": "Insufficient history."}
-    alpha = 2.0 / (21.0 + 1.0)
-    ema = closes[0]
-    for px in closes[1:]: ema = (px * alpha) + (ema * (1 - alpha))
-    lean = "BULLISH" if closes[-1] > ema else "BEARISH"
-    return {"status": "LIVE", "lean": lean, "phase": "TRANSITION", "note": f"Pressure is {lean}."}
-
-# ----------------------------
-# PUBLIC API (LIVE & REVIEW)
-# ----------------------------
-async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id: str = None, operator_flex: bool = False) -> Dict[str, Any]:
-    raw_5m = await fetch_live_5m(symbol)
-    raw_1h = await fetch_live_1h(symbol)
-    if not raw_5m: return {"status": "ERROR", "message": "No Data"}
-    
-    now_utc = datetime.now(timezone.utc)
-    session = resolve_session(now_utc, session_mode, manual_id)
-    anchor_ts = session["anchor_time"]
-    lock_end_ts = anchor_ts + 1800
-
-    if int(now_utc.timestamp()) < lock_end_ts:
-        wm = _war_map_from_1h(raw_1h)
-        return {"status": "CALIBRATING", "timestamp": now_utc.strftime("%H:%M UTC"), "price": raw_5m[-1]["close"], "energy": "CALIBRATING", "battlebox": {"war_map_context": wm, "session_battle": _safe_placeholder_state("Calibrating..."), "session": session, "levels": {}}}
-
-    session_key = f"{symbol}_{session['id']}_{session['date_key']}"
-    if session_key not in LOCKED_SESSIONS:
-        pkt = _compute_sse_packet(raw_5m, anchor_ts)
-        if "error" in pkt:
-             wm = _war_map_from_1h(raw_1h)
-             return {"status": "ERROR", "message": pkt["error"], "battlebox": {"war_map_context": wm, "session_battle": _safe_placeholder_state(pkt["error"]), "levels": {}}}
-        LOCKED_SESSIONS[session_key] = pkt
-
-    pkt = LOCKED_SESSIONS[session_key]
-    levels = pkt["levels"]
-    lock_time = pkt["lock_time"]
-    post_lock = [c for c in raw_5m if c["time"] >= lock_time]
-    
-    # 1. Base State (Standard Logic)
-    state = structure_state_engine.compute_structure_state(levels, post_lock)
-    
-    # 2. PUBLIC STRUCTURE CHECK (The Update)
-    public_chk = _check_public_structure(levels, post_lock)
-    
-    if public_chk["active"]:
-        state["action"] = public_chk["action"]  # e.g., "STRUCTURE LONG"
-        state["reason"] = public_chk["reason"]  # e.g., "BREAKOUT + RSI DIV"
-        state["permission"]["status"] = "WATCHING"
-        state["permission"]["side"] = public_chk["side"]
-
-    wm = _war_map_from_1h(raw_1h)
-
-    return {
-        "status": "OK",
-        "timestamp": now_utc.strftime("%H:%M UTC"),
-        "price": raw_5m[-1]["close"],
-        "energy": session["energy"],
-        "battlebox": {
-            "war_map_context": wm,
-            "session_battle": state,
-            "levels": levels,
-            "session": session,
-            "bias_model": pkt.get("bias_model", {}),
-            "context": pkt.get("context", {}),
-        }
-    }
-
-async def get_session_review(symbol: str, session_tz: str) -> Dict[str, Any]:
-    raw_5m = await fetch_live_5m(symbol)
-    if not raw_5m: return {"ok": False, "error": "No Data"}
-    # Use session_manager configs
-    cfg = next((s for s in SESSION_CONFIGS if s["tz"] == session_tz), SESSION_CONFIGS[0])
-    
-    # Use session_manager logic
-    anchor_ts = session_manager.anchor_ts_for_utc_date(cfg, datetime.now(timezone.utc))
-    
-    lock_end_ts = anchor_ts + 1800
-    if anchor_ts > datetime.now(timezone.utc).timestamp():
-         anchor_ts -= 86400
-         lock_end_ts -= 86400
-    pkt = _compute_sse_packet(raw_5m, anchor_ts)
-    if "error" in pkt:
-        if int(datetime.now(timezone.utc).timestamp()) < lock_end_ts:
-             return {"ok": True, "mode": "CALIBRATING", "symbol": symbol, "session": {"name": cfg["name"]}, "message": "Calibrating..."}
-        return {"ok": False, "error": pkt["error"]}
-    open_time = datetime.fromtimestamp(anchor_ts, tz=timezone.utc).isoformat()
-    return {"ok": True, "mode": "LOCKED", "symbol": symbol, "price": raw_5m[-1]["close"], "session": {"name": cfg["name"], "anchor_time": open_time}, "levels": pkt["levels"], "bias_model": pkt.get("bias_model", {}), "context": pkt.get("context", {}), "htf_shelves": pkt.get("htf_shelves", {}), "range_30m": {"high": pkt["levels"].get("range30m_high", 0), "low": pkt["levels"].get("range30m_low", 0)}}
-
-# Core Computation Wrapper
-def _compute_sse_packet(raw_5m: List[Dict], anchor_ts: int, tuning: Dict = None) -> Dict[str, Any]:
-    lock_end_ts = anchor_ts + 1800
-    calibration = [c for c in raw_5m if anchor_ts <= c["time"] < lock_end_ts]
-    if len(calibration) < 6: return {"error": "Insufficient calibration data.", "lock_end_ts": lock_end_ts}
-    context_24h = [c for c in raw_5m if (lock_end_ts - 86400) <= c["time"] < lock_end_ts]
-    session_open = calibration[0]["open"]
-    r30_high = max(c["high"] for c in calibration)
-    r30_low = min(c["low"] for c in calibration)
-    last_price = context_24h[-1]["close"] if context_24h else session_open
-    sse_input = {"locked_history_5m": context_24h, "slice_24h_5m": context_24h, "slice_4h_5m": context_24h[-48:], "session_open_price": session_open, "r30_high": r30_high, "r30_low": r30_low, "last_price": last_price, "tuning": tuning or {}}
-    computed = sse_engine.compute_sse_levels(sse_input)
-    if "error" in computed: return computed
-    return {"levels": computed["levels"], "context": computed.get("context", {}), "bias_model": computed.get("bias_model", {}), "htf_shelves": computed.get("htf_shelves", {}), "lock_time": lock_end_ts}
+    except Exception as e:
+        return {"ok": False, "status": "ERROR", "price": current_price, "msg": str(e)}
