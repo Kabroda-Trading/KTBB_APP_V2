@@ -1,7 +1,8 @@
 # black_ops_engine.py
 # ==============================================================================
-# PROJECT OMEGA: INDEPENDENT OPERATIONS ENGINE (v12.2 CLEAN)
+# PROJECT OMEGA: INDEPENDENT OPERATIONS ENGINE (v12.3 LOCKED)
 # LOGIC: Pulls truth directly from session_manager.resolve_anchor_time
+# FIX: Enforces strict 24h context locking to match Session Control
 # ==============================================================================
 from __future__ import annotations
 from typing import Dict, Any, List
@@ -68,19 +69,25 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
         
         current_price = float(raw_5m[-1]["close"])
 
-        # 3. COMPUTE LEVELS (Using the Central Anchor)
+        # 3. COMPUTE LEVELS (Strictly Locked)
+        # Calibration: The 30m window (Anchor -> Lock Time)
         calibration_candles = [c for c in raw_5m if anchor_ts <= c["time"] < lock_end_ts]
+        
+        # --- THE FIX: Context is FROZEN to the Lock Time ---
+        context_start = lock_end_ts - 86400
+        context_24h = [c for c in raw_5m if context_start <= c["time"] < lock_end_ts]
         
         r30_high, r30_low = 0.0, 0.0
         dr, ds, bo, bd = 0.0, 0.0, 0.0, 0.0
         
-        if len(calibration_candles) >= 4:
+        if len(calibration_candles) >= 4 and len(context_24h) > 100:
             r30_high = max(float(c["high"]) for c in calibration_candles)
             r30_low = min(float(c["low"]) for c in calibration_candles)
             
+            # Use the FROZEN context for calculations (The Map)
             sse_input = {
-                "locked_history_5m": raw_5m,
-                "slice_24h_5m": raw_5m[-288:], 
+                "locked_history_5m": context_24h,
+                "slice_24h_5m": context_24h, 
                 "session_open_price": float(calibration_candles[0]["open"]),
                 "r30_high": r30_high,
                 "r30_low": r30_low,
@@ -95,14 +102,17 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
             dr = float(levels.get("daily_resistance", 0))
             ds = float(levels.get("daily_support", 0))
 
-        # 4. EXECUTION
+        # 4. EXECUTION (The Live Car)
         status = "STANDBY"
         active_side = "NONE"
         stop_loss = 0.0
 
         if session_status == "ACTIVE" or session_status == "CLOSED":
             if bo > 0 and bd > 0:
+                # Use LIVE candles for triggers
                 last_candle = raw_5m[-2] if len(raw_5m) > 1 else raw_5m[-1]
+                
+                # Check LIVE price against LOCKED levels
                 if float(last_candle["close"]) > bo:
                     status = "EXECUTING"; active_side = "LONG"; stop_loss = r30_low
                 elif float(last_candle["close"]) < bd:
@@ -131,6 +141,7 @@ async def get_omega_status(symbol: str = "BTCUSDT") -> Dict[str, Any]:
             t1 = ds if not strength["is_blue_sky"] else trigger_px - (energy * 0.5)
             targets = [{"id": "T1", "price": round(t1, 2)}, {"id": "T2", "price": round(trigger_px - energy, 2)}, {"id": "T3", "price": round(trigger_px - (energy * 3.0), 2)}]
 
+        # Live Indicators
         stoch = _compute_stoch(raw_5m[-20:])
         rsi = _compute_rsi(raw_5m[-20:])
 
