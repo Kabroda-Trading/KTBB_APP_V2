@@ -1,31 +1,75 @@
-# database.py — Core data access layer
-from typing import List, Dict
+# database.py
+# ------------------------------------------------------------------------------
+# Kabroda DB Layer (SQLite + SQLAlchemy)
+# Exposes:
+#   - init_db()
+#   - get_db()
+#   - UserModel
+# ------------------------------------------------------------------------------
+
+from __future__ import annotations
+
+import os
 from datetime import datetime
+from typing import Generator, Optional
 
-# Simulate a database with dummy values
-# Replace with actual DB logic when ready
+from sqlalchemy import (
+    create_engine,
+    Column,
+    Integer,
+    String,
+    DateTime,
+    Boolean,
+)
+from sqlalchemy.orm import sessionmaker, declarative_base, Session
 
-def get_locked_candles(session: str, symbol: str) -> List[Dict]:
-    # This should query your candle/session lock system
-    return [
-        {"timestamp": "2024-01-15T10:00:00Z", "locked": True},
-        {"timestamp": "2024-01-15T10:15:00Z", "locked": False},
-    ]
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "kabroda.db")
 
-def get_r30_levels(symbol: str) -> Dict[str, float]:
-    # R30 = 30-min high/low levels
-    return {
-        "high": 1.1450,
-        "low": 1.1320
-    }
+DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{DB_PATH}"
 
-def get_price(symbol: str) -> float:
-    # This is your current live price from feed / snapshot
-    return 1.1382
+connect_args = {}
+if DATABASE_URL.startswith("sqlite:///"):
+    connect_args = {"check_same_thread": False}
 
-def get_daily_levels(symbol: str) -> Dict[str, float]:
-    # Daily support/resistance levels
-    return {
-        "support": 1.1300,
-        "resistance": 1.1480
-    }
+engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+
+class UserModel(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Core identity
+    email = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+
+    # Account + UI profile fields your main.py expects to exist / may update
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Subscription / membership (keep loose — your billing.py can manage meaning)
+    subscription_end = Column(DateTime, nullable=True)
+    plan = Column(String, nullable=True)
+
+    # Preferences
+    session_tz = Column(String, nullable=True)
+
+    # “Best-effort migrations” in main.py try to add these; defining here prevents drift
+    username = Column(String, nullable=True)
+    tradingview_id = Column(String, nullable=True)
+    operator_flex = Column(Boolean, default=False, nullable=False)
+
+
+def init_db() -> None:
+    Base.metadata.create_all(bind=engine)
+
+
+def get_db() -> Generator[Session, None, None]:
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
