@@ -74,10 +74,11 @@
         .shield-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
         .shield-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; }
 
-        /* TELEMETRY BOX (NEW) */
-        .telemetry-box { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 20px; font-family: 'JetBrains Mono'; font-size: 10px; color: var(--dim); }
-        .tele-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        /* TELEMETRY BOX (UPDATED) */
+        .telemetry-box { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 20px; font-family: 'JetBrains Mono'; font-size: 11px; color: var(--dim); }
+        .tele-row { display: flex; justify-content: space-between; margin-bottom: 6px; align-items: center; }
         .tele-val { color: #fff; font-weight: 700; }
+        .sep { border-bottom: 1px dashed #333; margin: 8px 0; }
     </style>
 </head>
 <body>
@@ -159,11 +160,16 @@
             </div>
 
             <div class="telemetry-box">
-                <div style="margin-bottom: 10px; font-weight: 700; color: var(--blue); font-size:11px;">VERIFICATION DATA</div>
-                <div class="tele-row"><span>R30 HIGH</span><span id="v-r30h" class="tele-val">--</span></div>
-                <div class="tele-row"><span>R30 LOW</span><span id="v-r30l" class="tele-val">--</span></div>
-                <div class="tele-row"><span>DAILY RES</span><span id="v-dr" class="tele-val">--</span></div>
-                <div class="tele-row"><span>DAILY SUP</span><span id="v-ds" class="tele-val">--</span></div>
+                <div style="margin-bottom: 12px; font-weight: 700; color: var(--blue); font-size:11px; letter-spacing:1px;">VERIFICATION DATA</div>
+                
+                <div class="tele-row"><span>DAILY RESISTANCE</span><span id="v-dr" class="tele-val" style="color:#fca5a5;">--</span></div>
+                <div class="tele-row"><span>BREAKOUT TRIG</span><span id="v-bo" class="tele-val" style="color:#6ee7b7;">--</span></div>
+                <div class="sep"></div>
+                <div class="tele-row"><span>BREAKDOWN TRIG</span><span id="v-bd" class="tele-val" style="color:#d8b4fe;">--</span></div>
+                <div class="tele-row"><span>DAILY SUPPORT</span><span id="v-ds" class="tele-val" style="color:#93c5fd;">--</span></div>
+                <div class="sep"></div>
+                <div class="tele-row"><span style="color:#64748b;">R30 HIGH</span><span id="v-r30h" class="tele-val" style="color:#94a3b8;">--</span></div>
+                <div class="tele-row"><span style="color:#64748b;">R30 LOW</span><span id="v-r30l" class="tele-val" style="color:#94a3b8;">--</span></div>
             </div>
         </div>
     </div>
@@ -218,6 +224,12 @@
                         const ctxText = isBlueSky ? "BLUE SKY (EAGLE)" : "STRUCTURE (VULTURE)";
                         document.getElementById('contextFlag').innerText = ctxText;
                         document.getElementById('contextFlag').style.color = isBlueSky ? "var(--purple)" : "var(--amber)";
+                    }
+
+                    // --- NEW: POPULATE VERIFICATION BOX WITH TRIGGERS ---
+                    if (data.triggers) {
+                        document.getElementById('v-bo').innerText = data.triggers.BO ? data.triggers.BO.toFixed(2) : "--";
+                        document.getElementById('v-bd').innerText = data.triggers.BD ? data.triggers.BD.toFixed(2) : "--";
                     }
 
                     if (data.telemetry) {
