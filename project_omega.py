@@ -1,49 +1,53 @@
 # project_omega.py
 # ==============================================================================
-# PROJECT OMEGA ENGINE (KINETIC AUTHORITY)
+# PROJECT OMEGA ENGINE (v2025 - PLATINUM MASTER)
 # ==============================================================================
-# - Logic: "Current Mode" is now exclusively driven by Kinetic Readiness.
-# - Output: SUPERSONIC, SNIPER, or DOGFIGHT.
+# 1. TIME GATE: 10:30 AM CST (Soft Kill) -> Becomes "CLOSED" if no Override.
+# 2. ENERGY GATE: < 350 bps (Exhaustion Filter)
+# 3. WEEKLY GATE: Trend Slope Filter (Strength Check)
+# 4. MATH GATE: Targets calculated from LOCKED session levels only.
 # ==============================================================================
 
 from __future__ import annotations
-from typing import Dict, Any, List
+from typing import Dict, Any
+from datetime import datetime, timezone
+import pytz 
 
 import battlebox_pipeline
-import session_manager
 
 # ----------------------------
-# KINETIC MATH ENGINE
+# 1. KINETIC MATH ENGINE
 # ----------------------------
 def _calc_kinetic_score(
     anchor_price: float, 
     levels: Dict[str, float], 
     context: Dict[str, Any], 
     shelves: Dict[str, Any],
-    side: str
+    side: str,
+    current_time_utc: datetime
 ) -> Dict[str, Any]:
     
     score = 0
     breakdown = {}
-    
-    # 1. ENERGY (30 pts)
+    is_blocked = False
+    block_reason = ""
+
+    # --- A. ENERGY (Spring) ---
     dr = levels.get("daily_resistance", 0)
     ds = levels.get("daily_support", 0)
     range_size = abs(dr - ds)
     bps = (range_size / anchor_price) * 10000 if anchor_price > 0 else 500
     
-    energy_desc = ""
-    if bps < 150: 
-        score += 30; breakdown['energy'] = "COILED (+30)"
-        energy_desc = "⚡ Energy is super-coiled."
-    elif bps < 300: 
-        score += 15; breakdown['energy'] = "STANDARD (+15)"
-        energy_desc = "🔋 Energy reserves are standard."
+    if bps > 350:
+        is_blocked = True
+        block_reason = f"EXHAUSTED ({int(bps)}bps)"
+        score = 0
+    elif bps < 150: 
+        score += 30; breakdown['energy'] = f"SUPER COILED ({int(bps)}bps)"
     else: 
-        score += 0; breakdown['energy'] = "EXHAUSTED (+0)"
-        energy_desc = "🪫 Market energy is exhausted."
+        score += 15; breakdown['energy'] = f"STANDARD ({int(bps)}bps)"
 
-    # 2. SPACE (30 pts)
+    # --- B. SPACE (Runway) ---
     atr = levels.get("atr", range_size * 0.25) 
     if atr == 0: atr = anchor_price * 0.01 
     
@@ -52,176 +56,234 @@ def _calc_kinetic_score(
     gap = abs(target - trigger)
     r_multiple = gap / atr
     
-    space_desc = ""
-    if r_multiple > 2.0:
-        score += 30; breakdown['space'] = "BLUE SKY (+30)"
-        space_desc = "🚀 The runway is wide open."
-    elif r_multiple > 1.0:
-        score += 15; breakdown['space'] = "GRIND (+15)"
-        space_desc = "🚧 Structure is visible overhead."
-    else:
-        score += 0; breakdown['space'] = "BLOCKED (+0)"
-        space_desc = "🛑 The path is blocked by structure."
+    if r_multiple > 2.0: score += 30; breakdown['space'] = f"SUPER SONIC ({r_multiple:.1f}R)"
+    elif r_multiple > 1.0: score += 15; breakdown['space'] = f"GRIND ({r_multiple:.1f}R)"
+    else: score += 0; breakdown['space'] = "BLOCKED (<1.0R)"
 
-    # 3. MOMENTUM (20 pts)
-    slope = float(context.get("slope_score", 0))
-    if slope > 0.2: score += 20; breakdown['momentum'] = "HELPING (+20)"
-    elif slope > -0.2: score += 10; breakdown['momentum'] = "NEUTRAL (+10)"
-    else: score += 0; breakdown['momentum'] = "FIGHTING (+0)"
-
-    # 4. STRUCTURE (10 pts)
-    shelf_strength = float(shelves.get("strength", 0))
-    if shelf_strength > 0.5: score += 10; breakdown['structure'] = "SOLID (+10)"
-    else: score += 0; breakdown['structure'] = "MESSY (+0)"
-
-    # 5. LOCATION (10 pts)
-    dist_to_trigger = abs(price - trigger) if 'price' in locals() else 0 # Safety if needed, but we use anchor mostly
-    # For static score, we assume "Primed" if open is within range.
-    # Actually, let's use the anchor proximity to trigger.
-    bo = levels.get("breakout_trigger")
-    bd = levels.get("breakdown_trigger")
-    dist_long = abs(anchor_price - bo)
-    dist_short = abs(anchor_price - bd)
-    closest_dist = min(dist_long, dist_short)
-
-    if closest_dist < (atr * 0.5): score += 10; breakdown['location'] = "PRIMED (+10)"
-    else: score += 0; breakdown['location'] = "CHASING (+0)"
-
-    # PROTOCOL ROUTER (The Authority)
-    brief = f"{energy_desc} {space_desc}"
+    # --- C. TIME GATE (10:30 CST) ---
+    tz_cst = pytz.timezone('America/Chicago')
+    now_cst = current_time_utc.astimezone(tz_cst)
+    kill_end = now_cst.replace(hour=10, minute=30, second=0, microsecond=0)
     
-    if score >= 71:
+    time_penalty = 1.0
+    if now_cst > kill_end:
+        time_penalty = 0.5 
+        breakdown['time'] = "LATE SESSION"
+    else:
+        breakdown['time'] = "KILL ZONE"
+
+    # --- D. WEEKLY FORCE (Override) ---
+    slope = float(context.get("slope_score", 0))
+    weekly_force = "NEUTRAL"
+    if slope > 0.25: weekly_force = "BULLISH"
+    elif slope < -0.25: weekly_force = "BEARISH"
+    
+    if (side == "LONG" and weekly_force == "BULLISH") or \
+       (side == "SHORT" and weekly_force == "BEARISH"):
+        time_penalty = 1.0 # Override the Time Penalty
+        breakdown['momentum'] = f"WEEKLY PUSH ({weekly_force})"
+        if breakdown['time'] == "LATE SESSION":
+            breakdown['time'] = "LATE (OVERRIDE)"
+    else:
+        breakdown['momentum'] = f"NEUTRAL/FADE ({weekly_force})"
+
+    # --- SCORING ---
+    shelf_strength = float(shelves.get("strength", 0))
+    if shelf_strength > 0.5: score += 10; breakdown['structure'] = "SOLID"
+    else: score += 0; breakdown['structure'] = "MESSY"
+
+    dist_to_trigger = abs(anchor_price - trigger)
+    if dist_to_trigger < (atr * 0.5): score += 10; breakdown['location'] = "PRIMED"
+    else: score += 0; breakdown['location'] = "CHASING"
+
+    final_score = int(score * time_penalty)
+
+    # --- PROTOCOL ROUTER ---
+    brief = ""
+    
+    if is_blocked:
+        protocol = "BLOCKED"
+        color = "RED"
+        instruction = f"⛔ STAND DOWN. {block_reason}"
+        brief = "Market is over-extended. Probability of chop is >90%."
+        
+    elif breakdown['time'] == "LATE SESSION" and final_score < 40:
+        # THE KILL SWITCH (Gray Screen)
+        protocol = "CLOSED"
+        color = "GRAY"
+        instruction = "💤 SESSION CLOSED. GO HOME."
+        brief = "Volume has dried up. No Weekly Force detected. Come back tomorrow."
+        
+    elif final_score >= 71:
         protocol = "SUPERSONIC"
         color = "CYAN"
-        instruction = "🔥 MOMENTUM OVERRIDE ACTIVE. DEPLOY AGGRESSIVE."
-        brief += " Volatility expected to be impulsive. Strike fast."
-    elif score >= 41:
+        instruction = "🔥 MOMENTUM OVERRIDE. DEPLOY AGGRESSIVE."
+        brief = "Blue Sky breakout supported by structure. Uncap profits."
+        
+    elif final_score >= 41:
         protocol = "SNIPER"
         color = "GREEN"
-        instruction = "⌖ WAIT FOR CONFIRMED CLOSE. PRECISION ONLY."
-        brief += " Price action is technical. Adhere to strict structure rules."
+        instruction = "⌖ WAIT FOR 5M CLOSE. BANK 75%."
+        brief = "Standard technical breakout. Take income at T1."
+            
     else:
         protocol = "DOGFIGHT"
         color = "AMBER"
-        instruction = "🛡️ DEFENSIVE POSTURE. SHIELDS UP."
-        brief += " Environment is hostile. Protect capital at all costs."
+        instruction = "🛡️ DEFENSIVE. REDUCE RISK."
+        brief = "Low energy. Scalp or cash is the best position."
 
     return {
-        "total_score": score,
+        "total_score": final_score,
         "protocol": protocol,
         "color": color,
         "instruction": instruction,
         "brief": brief,
-        "breakdown": breakdown
+        "breakdown": breakdown,
+        "force_align": (weekly_force in breakdown['momentum'])
     }
 
-def _calc_targets(entry: float, stop: float, dr: float, ds: float, side: str) -> Dict[str, Any]:
-    if entry <= 0: return {"targets": [], "mode": "WAITING"}
+# ----------------------------
+# 2. EXECUTION PLANNER
+# ----------------------------
+def _calc_execution_plan(entry: float, stop: float, dr: float, ds: float, side: str, mode: str, force_align: bool) -> Dict[str, Any]:
+    if entry <= 0: return {"targets": [], "stop": 0, "valid": False, "bank_rule": "--", "reason": "--"}
     
-    # Just used for target calculation scaling, not mode determination anymore
-    is_supersonic = False
-    if side == "LONG" and entry > dr: is_supersonic = True
-    if side == "SHORT" and entry < ds: is_supersonic = True
+    risk = abs(entry - stop)
+    if risk == 0: return {"targets": [], "stop": 0, "valid": False, "bank_rule": "--", "reason": "--"}
+
+    # MATH GATE: R/R Check
+    min_req_dist = risk * 1.0 
+    dist_to_wall = abs(dr - entry) if side == "LONG" else abs(ds - entry)
     
-    energy = abs(dr - ds)
-    if energy == 0: energy = entry * 0.01
-    
+    # Block trades into walls unless Supersonic
+    if mode != "SUPERSONIC" and dist_to_wall < min_req_dist:
+        return {"targets": [], "stop": 0, "valid": False, "bank_rule": "BAD MATH", "reason": "Target < 1.0R (Blocked)"}
+
     targets = []
+    
     if side == "LONG":
-        shield = entry + (energy * 0.3) 
-        if is_supersonic:
-            t1 = entry + (energy * 0.6); t2 = entry + (energy * 1.2); t3 = entry + (energy * 2.0)
-        else: 
-            t1 = dr; t2 = dr + (energy * 0.5); t3 = dr + energy
+        shield = entry + (risk * 0.5) 
+        t1 = entry + risk
+        t2 = entry + (risk * 2.0)
+        t3 = entry + (risk * 4.0) 
         targets = [int(shield), int(t1), int(t2), int(t3)]
     else: 
-        shield = entry - (energy * 0.3)
-        if is_supersonic:
-            t1 = entry - (energy * 0.6); t2 = entry - (energy * 1.2); t3 = entry - (energy * 2.0)
-        else: 
-            t1 = ds; t2 = ds - (energy * 0.5); t3 = ds - energy
+        shield = entry - (risk * 0.5)
+        t1 = entry - risk
+        t2 = entry - (risk * 2.0)
+        t3 = entry - (risk * 4.0)
         targets = [int(shield), int(t1), int(t2), int(t3)]
 
-    return {"targets": targets, "stop": stop}
+    # EXECUTIVE ORDER
+    primary_target = t1
+    bank_rule = "BANK 75%"
+    reason = "Standard"
+
+    if mode == "SUPERSONIC":
+        primary_target = "OPEN" 
+        bank_rule = "TRAIL 15M"
+        reason = "Runner Mode"
+    elif mode == "SNIPER":
+        if force_align: 
+            primary_target = t2
+            bank_rule = "BANK 50%"
+            reason = "Weekly Assist"
+        else: 
+            primary_target = t1
+            bank_rule = "BANK 75%"
+            reason = "Standard"
+    elif mode == "CLOSED":
+        primary_target = "--"
+        bank_rule = "NO TRADE"
+        reason = "Session Closed"
+    elif mode == "DOGFIGHT":
+        primary_target = t1
+        bank_rule = "BANK 100%"
+        reason = "Scalp"
+
+    return {
+        "targets": targets, 
+        "stop": stop, 
+        "valid": True,
+        "primary_target": primary_target,
+        "bank_rule": bank_rule,
+        "reason": reason
+    }
 
 async def get_omega_status(
     symbol: str = "BTCUSDT",
     session_id: str = "us_ny_futures",
     ferrari_mode: bool = False,
 ) -> Dict[str, Any]:
-    current_price = 0.0
-    try:
-        pipeline_data = await battlebox_pipeline.get_live_battlebox(
-            symbol=symbol, session_mode="MANUAL", manual_id=session_id
-        )
-        if pipeline_data.get("status") == "ERROR":
-             pipeline_data = await battlebox_pipeline.get_live_battlebox(symbol)
+    
+    pipeline_data = await battlebox_pipeline.get_live_battlebox(
+        symbol=symbol, session_mode="MANUAL", manual_id=session_id
+    )
+    
+    if pipeline_data.get("status") in ["ERROR", "OFFLINE"]:
+         return {"ok": False, "status": "OFFLINE", "msg": "Pipeline Error"}
 
-        if pipeline_data.get("status") == "ERROR":
-            return {"ok": False, "status": "OFFLINE", "msg": "Pipeline Error"}
+    current_price = pipeline_data.get("price", 0.0)
+    box = pipeline_data.get("battlebox", {})
+    levels = box.get("levels", {})
+    context = box.get("context", {})
+    shelves = box.get("htf_shelves", {})
+    
+    anchor_price = levels.get("session_open_price") or current_price
+    
+    # 1. LEVELS
+    bo = float(levels.get("breakout_trigger", 0.0))
+    bd = float(levels.get("breakdown_trigger", 0.0))
+    dr = float(levels.get("daily_resistance", 0.0))
+    ds = float(levels.get("daily_support", 0.0))
+    r30_high = float(levels.get("range30m_high", 0.0))
+    r30_low = float(levels.get("range30m_low", 0.0))
+    
+    # 2. STATUS
+    active_side = "NONE"
+    status = "STANDBY"
+    
+    battle_state = box.get("session_battle", {})
+    if battle_state.get("action") == "GO":
+        status = "EXECUTING"
+        active_side = battle_state.get("permission", {}).get("side", "NONE")
+    
+    closest_side = "LONG" if (current_price >= (bo + bd)/2) else "SHORT"
+    calc_side = active_side if active_side != "NONE" else closest_side
 
-        current_price = pipeline_data.get("price", 0.0)
-        box = pipeline_data.get("battlebox", {})
-        levels = box.get("levels", {})
-        context = box.get("context", {})
-        shelves = box.get("htf_shelves", {})
-        session_meta = box.get("session", {})
-        
-        anchor_price = levels.get("session_open_price") or current_price
-        
-        bo = float(levels.get("breakout_trigger", 0.0))
-        bd = float(levels.get("breakdown_trigger", 0.0))
-        dr = float(levels.get("daily_resistance", 0.0))
-        ds = float(levels.get("daily_support", 0.0))
-        r30_high = float(levels.get("range30m_high", 0.0))
-        r30_low = float(levels.get("range30m_low", 0.0))
-        
-        plan_long = _calc_targets(bo, r30_low, dr, ds, "LONG")
-        plan_short = _calc_targets(bd, r30_high, dr, ds, "SHORT")
+    # 3. KINETIC ENGINE
+    now_utc = datetime.now(timezone.utc)
+    kinetic = _calc_kinetic_score(
+        anchor_price, levels, context, shelves, 
+        calc_side, now_utc
+    )
+    
+    # 4. PLANNER
+    plan_long = _calc_execution_plan(bo, r30_low, dr, ds, "LONG", kinetic["protocol"], kinetic["force_align"])
+    plan_short = _calc_execution_plan(bd, r30_high, dr, ds, "SHORT", kinetic["protocol"], kinetic["force_align"])
 
-        status = "STANDBY"
-        active_side = "NONE"
-        near_radius = 0.0007 if ferrari_mode else 0.0010
+    # 5. MATH GATE
+    active_plan = plan_long if calc_side == "LONG" else plan_short
+    if not active_plan["valid"] and kinetic["protocol"] not in ["BLOCKED", "CLOSED"]:
+        kinetic["protocol"] = "BLOCKED"
+        kinetic["instruction"] = "⛔ R/R INVALID. TRADE BLOCKED."
+        kinetic["color"] = "RED"
+        kinetic["brief"] = "Potential target is too close to resistance. Bad math."
 
-        if bo > 0 and bd > 0:
-            if current_price > bo: status = "EXECUTING"; active_side = "LONG"
-            elif current_price < bd: status = "EXECUTING"; active_side = "SHORT"
-            else:
-                if abs(current_price - bo) / bo < near_radius: status = "LOCKED"; active_side = "LONG"
-                elif abs(current_price - bd) / bd < near_radius: status = "LOCKED"; active_side = "SHORT"
-        
-        closest_side = "LONG" if (current_price >= (bo + bd)/2) else "SHORT"
-        
-        # 1. CALCULATE KINETIC SCORE
-        kinetic = _calc_kinetic_score(anchor_price, levels, context, shelves, active_side if active_side != "NONE" else closest_side)
-        
-        # 2. SET SESSION MODE FROM KINETIC (The New Authority)
-        session_mode = kinetic["protocol"] # SUPERSONIC, SNIPER, or DOGFIGHT
-
-        return {
-            "ok": True,
-            "status": status,
-            "symbol": symbol,
-            "session_id": session_id,
-            "ferrari_mode": bool(ferrari_mode),
-            "price": current_price,
-            "active_side": active_side,
-            "closest_side": closest_side,
-            "session_mode": session_mode, # Controlled by Kinetic now
-            "kinetic": kinetic,
-            "plans": {
-                "LONG": {"trigger": bo, "stop": r30_low, "targets": plan_long["targets"]},
-                "SHORT": {"trigger": bd, "stop": r30_high, "targets": plan_short["targets"]}
-            },
-            "telemetry": {
-                "session_state": "ACTIVE",
-                "anchor_ts": session_meta.get("anchor_ts"),
-                "verification": {
-                    "r30_high": r30_high, "r30_low": r30_low, 
-                    "daily_res": dr, "daily_sup": ds,
-                    "bo": bo, "bd": bd 
-                },
-            }
+    return {
+        "ok": True,
+        "status": status,
+        "symbol": symbol,
+        "price": current_price,
+        "active_side": active_side if active_side != "NONE" else closest_side,
+        "session_mode": kinetic["protocol"],
+        "kinetic": kinetic,
+        "plans": {
+            "LONG": {"trigger": bo, "stop": r30_low, "targets": plan_long["targets"], "bank": plan_long["bank_rule"], "prim": plan_long["primary_target"], "reason": plan_long["reason"]},
+            "SHORT": {"trigger": bd, "stop": r30_high, "targets": plan_short["targets"], "bank": plan_short["bank_rule"], "prim": plan_short["primary_target"], "reason": plan_short["reason"]}
+        },
+        "telemetry": {
+            "session_state": "ACTIVE",
+            "verification": { "bo": bo, "bd": bd },
         }
-    except Exception as e:
-        return {"ok": False, "status": "ERROR", "price": current_price, "msg": str(e)}
+    }
