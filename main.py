@@ -33,8 +33,7 @@ app = FastAPI()
 SECRET_KEY = os.getenv("SECRET_KEY") or "dev-secret-change-me"
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, same_site="lax", https_only=True)
 
-# --- CORRECT FOLDER CONFIG ---
-# Your screenshot shows folders named "static" and "templates". This matches that structure.
+# --- FOLDERS ---
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates") 
 
@@ -49,15 +48,13 @@ def health():
     return {"ok": True}
 
 # ==========================================
-# PUBLIC PAGES (Based on your file list)
+# PUBLIC PAGES
 # ==========================================
 
 @app.get("/", response_class=HTMLResponse)
-def home_page(request: Request, db: Session = Depends(get_db)):
-    # Loads home.html
+def home_page(request: Request):
     user_id = request.session.get(auth.SESSION_KEY)
-    is_logged_in = user_id is not None
-    return _template_or_fallback(request, templates, "home.html", {"request": request, "is_logged_in": is_logged_in})
+    return _template_or_fallback(request, templates, "home.html", {"request": request, "is_logged_in": user_id is not None})
 
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing_page(request: Request):
@@ -87,7 +84,7 @@ def about_page(request: Request):
 def privacy_page(request: Request):
     return _template_or_fallback(request, templates, "privacy.html", {"request": request})
 
-# --- OVERRIDE AUTH ROUTES TO USE YOUR TEMPLATES ---
+# --- AUTH UI ROUTES ---
 @app.get("/login", response_class=HTMLResponse)
 def login_page_ui(request: Request):
     return _template_or_fallback(request, templates, "login.html", {"request": request})
@@ -97,7 +94,7 @@ def register_page_ui(request: Request):
     return _template_or_fallback(request, templates, "register.html", {"request": request})
 
 # ==========================================
-# MEMBER SUITE (Protected Area)
+# MEMBER SUITE (CORRECTED FILENAMES)
 # ==========================================
 
 @app.get("/suite", response_class=HTMLResponse)
@@ -105,11 +102,10 @@ def suite_home(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
     
-    # Auto-login fallback for debugging (can remove later)
     if not user:
         user = UserModel(email="guest@kabroda.com", username="GUEST_COMMAND", is_admin=True)
 
-    # Loads session_control.html (The Dashboard)
+    # FIX: Maps to "session_control.html"
     return _template_or_fallback(
         request, templates, "session_control.html",
         {
@@ -125,15 +121,17 @@ def suite_home(request: Request, db: Session = Depends(get_db)):
 def battle_control_page(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
-    if not user: user = UserModel(email="guest@kabroda.com", username="GUEST_COMMAND", operator_flex=True)
     
+    if not user:
+        user = UserModel(email="guest@kabroda.com", username="GUEST_COMMAND", operator_flex=True)
+
     return _template_or_fallback(request, templates, "battle_control.html", {"request": request, "user": user})
 
 @app.get("/suite/omega", response_class=HTMLResponse)
 def omega_page(request: Request):
+    # FIX: Maps to "project_omega.html"
     return _template_or_fallback(request, templates, "project_omega.html", {"request": request})
 
-# Alias for backward compatibility
 @app.get("/suite/black-ops", include_in_schema=False)
 def omega_page_alias(request: Request):
     return RedirectResponse("/suite/omega")
@@ -146,13 +144,14 @@ def research_page(request: Request):
 def account_page(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
-    if not user: user = UserModel(email="guest@kabroda.com", username="GUEST_COMMAND")
+    
+    if not user: 
+        user = UserModel(email="guest@kabroda.com", username="GUEST_COMMAND")
     
     return _template_or_fallback(request, templates, "account.html", {"request": request, "user": user, "is_logged_in": True, "tier_label": "Active"})
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request, db: Session = Depends(get_db)):
-    # Simple user list for admin page
     users = db.query(UserModel).all()
     return _template_or_fallback(request, templates, "admin.html", {"request": request, "users": users})
 
