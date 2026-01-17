@@ -10,8 +10,8 @@
             --bg: #020617; --panel: #0f172a; --border: #1e293b; 
             --green: #10b981; --red: #ef4444; --amber: #f59e0b; --text-main: #ffffff; --text-dim: #94a3b8; 
             --sonic-color: #06b6d4; --sonic-glow: rgba(6, 182, 212, 0.2);
+            --sniper-color: #10b981; --sniper-glow: rgba(16, 185, 129, 0.2);
             --dog-color: #f59e0b; --dog-glow: rgba(245, 158, 11, 0.2);
-            --sniper-color: #10b981; 
         }
         body { background: var(--bg); color: var(--text-main); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; box-sizing: border-box; }
         
@@ -37,17 +37,14 @@
         .price-display { text-align: center; margin-bottom: 30px; }
         .live-price { font-size: 80px; font-weight: 900; letter-spacing: -3px; line-height: 1; color: #fff; text-shadow: 0 0 40px rgba(255,255,255,0.1); }
         
-        /* DYNAMIC THEME CARDS */
         .theme-card { padding: 30px; border-radius: 8px; text-align: center; border: 2px solid #333; background: #020617; transition: 0.3s; margin-bottom: 30px; position: relative; overflow: hidden; }
         .theme-lbl { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 12px; font-weight: 700; }
         .theme-val { font-size: 32px; font-weight: 900; font-family: 'JetBrains Mono'; line-height: 1.1; color: #fff; }
         
-        /* SUPERSONIC (Blue Sky) */
         .mode-sonic { border-color: var(--sonic-color); box-shadow: 0 0 40px var(--sonic-glow); }
         .mode-sonic .theme-lbl { color: var(--sonic-color); }
         .mode-sonic::before { content: "⚡ SUPERSONIC"; position: absolute; top: 10px; right: 10px; font-size: 10px; color: var(--sonic-color); font-family: 'JetBrains Mono'; font-weight: 800; border: 1px solid var(--sonic-color); padding: 2px 6px; border-radius: 4px; }
 
-        /* DOGFIGHT (Structure) */
         .mode-dogfight { border-color: var(--dog-color); box-shadow: 0 0 40px var(--dog-glow); }
         .mode-dogfight .theme-lbl { color: var(--dog-color); }
         .mode-dogfight::before { content: "⚠ DOGFIGHT"; position: absolute; top: 10px; right: 10px; font-size: 10px; color: var(--dog-color); font-family: 'JetBrains Mono'; font-weight: 800; border: 1px solid var(--dog-color); padding: 2px 6px; border-radius: 4px; }
@@ -123,11 +120,12 @@
                 <div class="live-price" id="livePrice">--</div>
                 <div style="font-family:'JetBrains Mono'; font-size:12px; color:var(--text-dim); margin-top:5px;">LIVE MARKET DATA</div>
             </div>
+            
             <div class="tactical-toggle">
                 <button id="btnPlanLong" class="side-btn" onclick="setManualSide('LONG')">LONG PLAN</button>
                 <button id="btnPlanShort" class="side-btn" onclick="setManualSide('SHORT')">SHORT PLAN</button>
             </div>
-            
+
             <div id="themeCard" class="theme-card">
                 <div class="theme-lbl" id="themeTitle">WAITING FOR DATA</div>
                 <div class="theme-val" id="triggerPrice">--</div>
@@ -232,23 +230,26 @@
             const trigger = plan.trigger;
             const stop = plan.stop;
             const targets = plan.targets || [0,0,0,0];
-            const mode = plan.mode; // SUPERSONIC or DOGFIGHT
+            
+            // LOCKED SESSION MODE (Data Stream)
+            const sessionMode = globalData.session_mode; // Fixed from backend
 
-            // UPDATE CARD THEME
             const card = document.getElementById('themeCard');
             const title = document.getElementById('themeTitle');
             const desc = document.getElementById('themeDesc');
             
+            // Card Theme follows SESSION MODE
             card.className = "theme-card";
-            if (mode === "SUPERSONIC") card.classList.add('mode-sonic');
+            if (sessionMode === "SUPERSONIC") card.classList.add('mode-sonic');
             else card.classList.add('mode-dogfight');
 
             document.getElementById('triggerPrice').innerText = trigger.toLocaleString();
-            title.innerText = activeSide + " ENTRY PLAN"; 
-            desc.innerText = activeSide + " TRIGGER (" + mode + " MODE)"; 
+            title.innerText = activeSide + " ENTRY PLAN"; // FIXED TITLE
+            desc.innerText = activeSide + " TRIGGER"; // CLEAN DESC
             
-            document.getElementById('txtMode').innerText = mode;
-            document.getElementById('txtMode').style.color = mode === "SUPERSONIC" ? "var(--sonic-color)" : "var(--dog-color)";
+            document.getElementById('txtMode').innerText = sessionMode; // LOCKED
+            if (sessionMode === "SUPERSONIC") document.getElementById('txtMode').style.color = "var(--sonic-color)";
+            else document.getElementById('txtMode').style.color = "var(--dog-color)";
 
             document.getElementById('tShield').innerText = targets[0].toLocaleString();
             document.getElementById('t1').innerText = targets[1].toLocaleString();
