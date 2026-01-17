@@ -1,4 +1,12 @@
 # main.py
+# ==============================================================================
+# KABRODA MAIN DISPATCHER (FIXED)
+# ==============================================================================
+# - Routes traffic for all pages
+# - Connecting Omega UI dropdowns to Pipeline
+# - Auto-repairs Database on startup
+# ==============================================================================
+
 import os
 from typing import Any, Dict
 
@@ -44,6 +52,7 @@ def on_startup():
     init_db()
     
     # --- DB REPAIR (SAFE) ---
+    # Ensures all columns exist without deleting data
     print(">>> RUNNING SAFE DB REPAIR...")
     try:
         with engine.connect() as conn:
@@ -245,21 +254,24 @@ async def delete_user(request: Request, user_id: int = Form(...), db: Session = 
 
 @app.post("/api/omega/status")
 async def omega_status_api(request: Request, db: Session = Depends(get_db)):
-    try: payload = await request.json()
-    except: payload = {}
+    # --- SMART SWITCHBOARD LOGIC ---
+    try:
+        payload = await request.json()
+    except:
+        payload = {}
     
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     
-    # --- CRITICAL FIX: READ PARAMETERS FROM PAYLOAD ---
-    # Previously, this was hardcoded to "us_ny_futures".
-    # Now it respects the session_id you pick in the dropdown (e.g., "asia_tokyo").
-    
+    # 1. READ THE DROPDOWN
     session_id = payload.get("session_id") or "us_ny_futures"
+    
+    # 2. READ THE BUTTONS
     ferrari_mode = bool(payload.get("ferrari_mode", False))
     
+    # 3. CALL THE EXPERT (With the specific session you requested)
     data = await project_omega.get_omega_status(
         symbol=symbol,
-        session_id=session_id,  # Passes "asia_tokyo" correctly now
+        session_id=session_id,  
         ferrari_mode=ferrari_mode
     )
     return JSONResponse(data)
