@@ -15,33 +15,29 @@
         }
         body { background: var(--bg); color: var(--text-main); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; box-sizing: border-box; }
         
-        /* UTILITIES */
         .top-nav { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 25px; flex-wrap: wrap; gap:10px; }
         .brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 24px; display: flex; align-items: center; gap: 12px; }
         .blink { animation: blinker 2s linear infinite; width: 12px; height: 12px; background: var(--green); border-radius: 50%; box-shadow: 0 0 10px var(--green); }
         @keyframes blinker { 50% { opacity: 0.3; } }
 
-        /* LAYOUT */
         .war-room { display: grid; grid-template-columns: 340px 1fr 340px; gap: 25px; }
         @media (max-width: 1100px) { .war-room { grid-template-columns: 1fr; } }
 
         .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 25px; display: flex; flex-direction: column; }
         .panel-head { font-family: 'JetBrains Mono'; font-size: 14px; font-weight: 800; letter-spacing: 1px; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px; display:flex; justify-content:space-between; }
 
-        /* INPUTS */
         .input-group { margin-bottom: 15px; }
         .input-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); margin-bottom: 6px; font-family: 'JetBrains Mono'; font-weight: 600; }
         .input-field { width: 100%; background: #020617; border: 1px solid var(--border); color: #fff; padding: 12px; font-family: 'JetBrains Mono'; font-size: 15px; text-align: right; box-sizing: border-box; outline: none; border-radius: 6px; }
         .copy-btn { background: #1e293b; border: none; color: #fff; border-radius: 4px; padding: 5px 10px; font-size: 10px; font-weight: 700; cursor: pointer; font-family: 'JetBrains Mono'; margin-left: 10px; }
         .copy-btn:hover { background: #334155; }
 
-        /* CENTER DISPLAY */
         .price-display { text-align: center; margin-bottom: 30px; }
         .live-price { font-size: 80px; font-weight: 900; letter-spacing: -3px; line-height: 1; color: #fff; text-shadow: 0 0 40px rgba(255,255,255,0.1); }
         
-        .theme-card { padding: 30px; border-radius: 8px; text-align: center; border: 2px solid #333; background: #020617; transition: 0.3s; margin-bottom: 30px; position: relative; overflow: hidden; }
-        .theme-lbl { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 12px; font-weight: 700; }
-        .theme-val { font-size: 32px; font-weight: 900; font-family: 'JetBrains Mono'; line-height: 1.1; color: #fff; }
+        .theme-card { padding: 40px 30px; border-radius: 8px; text-align: center; border: 2px solid #333; background: #020617; transition: 0.3s; margin-bottom: 30px; position: relative; overflow: hidden; }
+        .theme-lbl { font-size: 14px; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 15px; font-weight: 700; }
+        .theme-val { font-size: 42px; font-weight: 900; font-family: 'JetBrains Mono'; line-height: 1.1; color: #fff; }
         
         /* THEMES */
         .mode-sonic { border-color: var(--sonic-color); box-shadow: 0 0 40px var(--sonic-glow); }
@@ -62,22 +58,21 @@
         .exec-active .theme-val { color: #fff !important; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
-        /* TARGET GRID */
         .target-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center; }
         .target-box { background: #020617; padding: 15px 10px; border-radius: 6px; border: 1px solid var(--border); }
         .target-lbl { font-size: 10px; margin-bottom: 6px; letter-spacing:1px; font-weight: 700; text-transform: uppercase; color: var(--text-dim); }
         .target-val { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 14px; color: #fff; }
 
-        /* TOGGLES */
-        .tactical-toggle { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
-        .side-btn { background: #020617; border: 1px solid var(--border); color: var(--text-dim); padding: 8px 20px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 12px; cursor: pointer; font-weight: 700; text-transform: uppercase; }
+        /* TOGGLES MOVED TO SIDE */
+        .tactical-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+        .side-btn { background: #020617; border: 1px solid var(--border); color: var(--text-dim); padding: 12px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; cursor: pointer; font-weight: 800; text-transform: uppercase; width: 100%; text-align: center; }
         .side-btn:hover { border-color: #fff; color: #fff; }
         .side-btn.active-long { background: rgba(16, 185, 129, 0.1); border-color: var(--green); color: var(--green); }
         .side-btn.active-short { background: rgba(239, 68, 68, 0.1); border-color: var(--red); color: var(--red); }
 
         .cyber-select { background: #020617; color: #fff; border: 1px solid var(--border); padding: 8px 12px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; text-transform: uppercase; outline: none; cursor: pointer; height: 34px; }
         .toggle-btn { background: transparent; border: 1px solid var(--text-dim); color: var(--text-dim); padding: 0 14px; height: 34px; font-family: 'JetBrains Mono'; font-size: 11px; cursor: pointer; border-radius: 4px; transition: 0.2s; font-weight: 700; text-transform: uppercase; }
-        .toggle-btn.active { background: var(--red); color: #fff; border-color: var(--red); } /* FERRARI RED */
+        .toggle-btn.active { background: var(--red); color: #fff; border-color: var(--red); }
         
         .data-row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px; border-bottom: 1px dashed rgba(255,255,255,0.05); padding-bottom: 5px; }
 
@@ -131,21 +126,16 @@
         </div>
 
         <div class="panel">
-            <div class="panel-head">TACTICAL DISPLAY <span id="sessState" style="color:var(--green)">ACTIVE</span></div>
+            <div class="panel-head">TACTICAL GUIDANCE <span id="sessState" style="color:var(--green)">ACTIVE</span></div>
             <div class="price-display">
                 <div class="live-price" id="livePrice">--</div>
                 <div style="font-family:'JetBrains Mono'; font-size:12px; color:var(--text-dim); margin-top:5px;">LIVE MARKET DATA</div>
             </div>
             
-            <div class="tactical-toggle">
-                <button id="btnPlanLong" class="side-btn" onclick="setManualSide('LONG')">LONG PLAN</button>
-                <button id="btnPlanShort" class="side-btn" onclick="setManualSide('SHORT')">SHORT PLAN</button>
-            </div>
-
             <div id="themeCard" class="theme-card">
                 <div class="theme-lbl" id="themeTitle">WAITING FOR DATA</div>
                 <div class="theme-val" id="triggerPrice">--</div>
-                <div style="font-size:11px; margin-top:5px; color:var(--text-dim);" id="themeDesc">ENTRY TRIGGER</div>
+                <div style="font-size:12px; margin-top:10px; color:var(--text-dim);" id="themeDesc">ENTRY TRIGGER</div>
             </div>
 
             <div class="target-grid">
@@ -173,7 +163,14 @@
         </div>
 
         <div class="panel">
-            <div class="panel-head">DATA STREAM</div>
+            <div class="panel-head">BATTLE PLAN</div>
+            
+            <div class="tactical-toggle">
+                <button id="btnPlanLong" class="side-btn" onclick="setManualSide('LONG')">LONG</button>
+                <button id="btnPlanShort" class="side-btn" onclick="setManualSide('SHORT')">SHORT</button>
+            </div>
+
+            <div class="panel-head" style="margin-top:20px;">DATA STREAM</div>
             <div class="data-row"><span style="color:var(--text-dim)">CURRENT MODE</span><span id="txtMode" style="font-weight:700">--</span></div>
             <div class="data-row"><span style="color:var(--text-dim)">PLAN STOP LOSS</span><span id="txtStop" style="color:var(--red); font-weight:700">--</span></div>
             <br>
@@ -260,14 +257,14 @@
             else card.classList.add('mode-dogfight');
 
             // STATUS OVERRIDE: Is the Trade Live?
-            const status = globalData.status; // STANDBY, LOCKED, EXECUTING
+            const status = globalData.status; 
             
             if (status === "EXECUTING") {
                 // ACTIVE TRADE
                 card.classList.add("exec-active"); // Special Flash Theme
                 title.innerText = "MARKET EXECUTE // ACTIVE";
                 desc.innerText = activeSide + " BREAKOUT CONFIRMED - DEPLOY";
-                document.getElementById('triggerPrice').innerText = globalData.price.toLocaleString(undefined, {minimumFractionDigits:2}); // Show live price in box? Or Trigger? Keep Trigger for ref.
+                document.getElementById('triggerPrice').innerText = globalData.price.toLocaleString(undefined, {minimumFractionDigits:2}); 
             } else if (status === "LOCKED") {
                 // NEAR TRIGGER
                 title.innerText = "TARGET LOCKED // PREPARING";
