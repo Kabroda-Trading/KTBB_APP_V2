@@ -285,20 +285,52 @@ async def run_dmr_live(request: Request):
     )
     return JSONResponse(data)
 
-# 4. RESEARCH LAB (Already smart, kept consistent)
+# ==============================================================================
+# 4. RESEARCH LAB SWITCHBOARD (Fixed Data Connection)
+# ==============================================================================
 @app.post("/api/research/run")
 async def run_research_api(request: Request):
-    try: payload = await request.json()
-    except: payload = {}
+    try: 
+        payload = await request.json()
+    except: 
+        payload = {}
     
+    # 1. Parse Parameters from the Lab UI
     symbol = payload.get("symbol", "BTCUSDT")
     start_date = payload.get("start_date_utc", "2026-01-01")
     end_date = payload.get("end_date_utc", "2026-01-10")
     session_ids = payload.get("session_ids", ["us_ny_futures"])
     tuning = payload.get("tuning", {})
 
-    raw_5m = await battlebox_pipeline.fetch_live_5m(symbol, limit=2000) 
+    # 2. CONVERT DATES TO TIMESTAMPS FOR THE PIPELINE
+    # The pipeline needs integer timestamps to fetch historical data
+    from datetime import datetime, timezone
     
+    try:
+        dt_start = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        dt_end = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        
+        # Buffer: Add 24h before start (for indicators) and 24h after end (for trade completion)
+        fetch_start_ts = int(dt_start.timestamp()) - 86400
+        fetch_end_ts = int(dt_end.timestamp()) + 86400
+        
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Invalid Date Format"})
+
+    # 3. CALL THE CORPORATE PIPELINE (The "Boss" fetching the specific file)
+    # previously: raw_5m = await battlebox_pipeline.fetch_live_5m(...) <--- THIS WAS THE ERROR
+    print(f">>> [SWITCHBOARD] Ordering Historical Data for: {symbol} ({start_date} to {end_date})")
+    
+    raw_5m = await battlebox_pipeline.fetch_historical_pagination(
+        symbol=symbol,
+        start_ts=fetch_start_ts,
+        end_ts=fetch_end_ts
+    )
+    
+    print(f">>> [SWITCHBOARD] Pipeline delivered {len(raw_5m)} candles.")
+
+    # 4. HAND OFF TO THE LAB (The Employee)
+    # The lab logic remains exactly as you wrote it; we just feed it the right data now.
     data = await research_lab.run_research_lab_from_candles(
         symbol=symbol,
         raw_5m=raw_5m,
@@ -307,6 +339,7 @@ async def run_research_api(request: Request):
         session_ids=session_ids,
         tuning=tuning
     )
+    
     return JSONResponse(data)
 
 # Legacy alias for backward compatibility
