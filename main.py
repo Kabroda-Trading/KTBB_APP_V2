@@ -159,7 +159,6 @@ def account_page(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
     
-    # Enable Admin Button visibility
     is_admin = False
     if user:
         is_admin = getattr(user, "is_admin", False)
@@ -172,7 +171,6 @@ def admin_page(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     user = db.query(UserModel).filter(UserModel.id == user_id).first()
     
-    # Enforce Admin Check
     if not user or not user.is_admin:
         return RedirectResponse("/account")
 
@@ -180,7 +178,7 @@ def admin_page(request: Request, db: Session = Depends(get_db)):
     return _template_or_fallback(request, templates, "admin.html", {"request": request, "users": users})
 
 # ==========================================
-# ACCOUNT ACTIONS (PASSWORD, SETTINGS)
+# ACCOUNT ACTIONS
 # ==========================================
 
 @app.post("/account/profile")
@@ -220,7 +218,6 @@ async def update_password(request: Request, db: Session = Depends(get_db)):
     if new_pass:
         user = db.query(UserModel).filter(UserModel.id == user_id).first()
         if user:
-            # Use auth.hash_password to maintain compatibility
             user.password_hash = auth.hash_password(new_pass)
             db.commit()
             return JSONResponse({"ok": True})
@@ -245,12 +242,26 @@ async def delete_user(request: Request, user_id: int = Form(...), db: Session = 
 # ==========================================
 # API ENDPOINTS
 # ==========================================
+
 @app.post("/api/omega/status")
 async def omega_status_api(request: Request, db: Session = Depends(get_db)):
     try: payload = await request.json()
     except: payload = {}
+    
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    data = await project_omega.get_omega_status(symbol=symbol, session_id="us_ny_futures", ferrari_mode=False)
+    
+    # --- CRITICAL FIX: READ PARAMETERS FROM PAYLOAD ---
+    # Previously, this was hardcoded to "us_ny_futures".
+    # Now it respects the session_id you pick in the dropdown (e.g., "asia_tokyo").
+    
+    session_id = payload.get("session_id") or "us_ny_futures"
+    ferrari_mode = bool(payload.get("ferrari_mode", False))
+    
+    data = await project_omega.get_omega_status(
+        symbol=symbol,
+        session_id=session_id,  # Passes "asia_tokyo" correctly now
+        ferrari_mode=ferrari_mode
+    )
     return JSONResponse(data)
 
 @app.post("/api/black-ops/status")
