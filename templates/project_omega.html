@@ -2,62 +2,92 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PROJECT OMEGA // 2025</title>
+    <title>PROJECT OMEGA</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
         :root { 
             --bg: #020617; --panel: #0f172a; --border: #1e293b; 
             --green: #10b981; --red: #ef4444; --amber: #f59e0b; --cyan: #06b6d4; --gray: #64748b;
             --text-main: #ffffff; --text-dim: #94a3b8; 
         }
-        body { background: var(--bg); color: var(--text-main); font-family: 'Inter', sans-serif; padding: 20px; }
+        body { background: var(--bg); color: var(--text-main); font-family: 'Inter', sans-serif; padding: 20px; margin: 0; }
         
-        .war-room { display: grid; grid-template-columns: 300px 1fr 300px; gap: 20px; }
-        @media (max-width: 1100px) { .war-room { grid-template-columns: 1fr; } }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid var(--border); }
+        .brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 24px; letter-spacing: -1px; display:flex; align-items:center; gap:10px; }
+        
+        /* VISUAL ALERT BADGE */
+        .notify-badge { width:10px; height:10px; background:var(--border); border-radius:50%; display:inline-block; transition:0.3s; }
+        .notify-badge.active { background:var(--green); box-shadow: 0 0 10px var(--green); }
 
-        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; display: flex; flex-direction: column; }
-        .panel-head { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 13px; color: var(--text-dim); letter-spacing: 1px; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .war-room { display: grid; grid-template-columns: 320px 1fr 340px; gap: 20px; }
+        @media (max-width: 1200px) { .war-room { grid-template-columns: 1fr; } }
 
-        /* HUD STYLES */
-        .hud-box { text-align: center; padding: 20px; border: 2px solid var(--border); border-radius: 8px; background: #0b1121; margin-bottom: 20px; transition: 0.3s; }
-        .hud-title { font-family: 'JetBrains Mono'; font-size: 14px; letter-spacing: 2px; color: var(--text-dim); font-weight: 700; }
-        .hud-val { font-size: 42px; font-weight: 900; color: #fff; margin: 10px 0; line-height: 1; }
-        .hud-sub { font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; }
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 25px; display: flex; flex-direction: column; }
+        .panel-head { font-family: 'Inter'; font-weight: 900; font-size: 14px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
 
-        /* MODES */
-        .mode-SUPERSONIC { border-color: var(--cyan); box-shadow: 0 0 30px rgba(6, 182, 212, 0.15); }
-        .mode-SUPERSONIC .hud-val { color: var(--cyan); }
-        .mode-SNIPER { border-color: var(--green); box-shadow: 0 0 30px rgba(16, 185, 129, 0.15); }
-        .mode-SNIPER .hud-val { color: var(--green); }
-        .mode-DOGFIGHT { border-color: var(--amber); box-shadow: 0 0 30px rgba(245, 158, 11, 0.15); }
-        .mode-DOGFIGHT .hud-val { color: var(--amber); }
+        /* KINETIC HUD (Center) */
+        .hud-box { text-align: center; padding: 40px 20px; border: 2px solid var(--border); border-radius: 12px; background: #0b1121; margin-bottom: 20px; transition: 0.3s; position: relative; overflow: hidden; }
+        .hud-title { font-family: 'JetBrains Mono'; font-size: 18px; letter-spacing: 3px; color: var(--text-dim); font-weight: 800; text-transform: uppercase; margin-bottom: 10px; }
+        .hud-val { font-size: 60px; font-weight: 900; color: #fff; margin: 10px 0; line-height: 1; font-family: 'JetBrains Mono'; }
+        .hud-sub { font-size: 14px; font-weight: 700; color: #fff; text-transform: uppercase; margin-top: 15px; background: rgba(255,255,255,0.1); display: inline-block; padding: 6px 12px; border-radius: 6px; }
+
+        /* MODES COLORS */
+        .mode-SUPERSONIC { border-color: var(--cyan); box-shadow: 0 0 50px rgba(6, 182, 212, 0.2); }
+        .mode-SUPERSONIC .hud-val, .mode-SUPERSONIC .hud-title { color: var(--cyan); }
+        
+        .mode-SNIPER { border-color: var(--green); box-shadow: 0 0 50px rgba(16, 185, 129, 0.2); }
+        .mode-SNIPER .hud-val, .mode-SNIPER .hud-title { color: var(--green); }
+        
+        .mode-DOGFIGHT { border-color: var(--amber); box-shadow: 0 0 50px rgba(245, 158, 11, 0.2); }
+        .mode-DOGFIGHT .hud-val, .mode-DOGFIGHT .hud-title { color: var(--amber); }
+        
         .mode-BLOCKED { border-color: var(--red); opacity: 0.8; }
-        .mode-BLOCKED .hud-val { color: var(--red); }
+        .mode-BLOCKED .hud-val, .mode-BLOCKED .hud-title { color: var(--red); }
+        
         .mode-CLOSED { border-color: var(--gray); opacity: 0.5; filter: grayscale(100%); }
         .mode-CLOSED .hud-val { color: var(--gray); }
+        
+        .mode-CALIBRATING { border-color: var(--text-dim); border-style: dashed; }
 
-        /* EXECUTION CHEAT SHEET */
-        .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-family: 'JetBrains Mono'; font-size: 13px; }
-        .lbl { color: var(--text-dim); font-weight: 600; font-size: 11px; }
-        .val { color: #fff; font-weight: 700; }
+        /* DATA GRIDS */
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
+        .data-card { background: #020617; padding: 12px; border-radius: 6px; border: 1px solid var(--border); text-align: center; }
+        .dc-lbl { font-size: 10px; color: var(--text-dim); font-weight: 700; text-transform: uppercase; margin-bottom: 5px; }
+        .dc-val { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 14px; color: #fff; }
+
+        /* EXECUTION ROWS */
+        .exec-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; font-family: 'JetBrains Mono'; font-size: 14px; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 8px; }
+        .lbl { color: var(--text-dim); font-weight: 600; font-size: 12px; }
+        .val { color: #fff; font-weight: 800; font-size: 16px; }
         .highlight { color: var(--cyan); }
 
-        .inp { background: #020617; border: 1px solid var(--border); color: #fff; padding: 8px; width: 100%; box-sizing: border-box; font-family: 'JetBrains Mono'; text-align: right; border-radius: 4px; }
-        .btn-copy { background: #1e293b; border: none; color: #fff; padding: 2px 6px; font-size: 10px; border-radius: 3px; cursor: pointer; margin-left: 8px; }
-        .btn-copy:hover { background: #334155; }
+        .inp { background: #020617; border: 1px solid var(--border); color: #fff; padding: 12px; width: 100%; box-sizing: border-box; font-family: 'JetBrains Mono'; text-align: right; border-radius: 6px; font-size: 16px; font-weight: 700; }
         
-        .toggle-sound { background: transparent; border: 1px solid var(--text-dim); color: var(--text-dim); border-radius: 4px; padding: 4px 8px; font-size: 10px; cursor: pointer; }
-        .toggle-sound.on { border-color: var(--green); color: var(--green); }
+        .btn-copy { background: #1e293b; border: 1px solid var(--border); color: var(--text-dim); padding: 4px 8px; font-size: 10px; border-radius: 4px; cursor: pointer; margin-left: 10px; font-weight: 700; text-transform: uppercase; transition: 0.2s; }
+        .btn-copy:hover { background: #334155; color: #fff; border-color: #fff; }
+
+        /* CONTROLS */
+        .control-group { display: flex; gap: 8px; }
+        .btn-toggle { background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 8px 12px; font-size: 11px; border-radius: 6px; cursor: pointer; font-weight: 700; font-family: 'JetBrains Mono'; text-transform: uppercase; transition: 0.2s; }
+        .btn-toggle:hover { border-color: #fff; color: #fff; }
+        .btn-toggle.active { background: rgba(16, 185, 129, 0.1); border-color: var(--green); color: var(--green); }
+        
+        .side-select { display:flex; gap:10px; margin-bottom:20px; }
+        .btn-side { flex:1; padding:15px; background: #020617; border:1px solid var(--border); color:var(--text-dim); border-radius:6px; cursor:pointer; font-weight:900; font-family:'JetBrains Mono'; font-size:14px; text-transform:uppercase; transition:0.2s; }
+        .btn-side.long-active { border-color:var(--green); color:var(--green); background:rgba(16, 185, 129, 0.05); box-shadow: 0 0 15px rgba(16, 185, 129, 0.1); }
+        .btn-side.short-active { border-color:var(--red); color:var(--red); background:rgba(239, 68, 68, 0.05); box-shadow: 0 0 15px rgba(239, 68, 68, 0.1); }
+
+        .brief-text { font-size: 14px; line-height: 1.6; color: #cbd5e1; border-left: 4px solid var(--border); padding-left: 15px; margin-top: 20px; font-style: italic; }
     </style>
 </head>
 <body>
 
-    <div style="margin-bottom: 20px; display:flex; justify-content:space-between; align-items:center;">
-        <div style="font-family:'JetBrains Mono'; font-weight:800; font-size:18px;">PROJECT OMEGA <span style="color:var(--text-dim); font-size:12px;">// 2025 ENGINE</span></div>
-        <div style="display:flex; gap:10px;">
-            <button id="btnSound" class="toggle-sound" onclick="toggleSound()">SOUND: OFF</button>
-            <select id="sessionSelect" style="background:#0f172a; color:#fff; border:none; outline:none; font-family:'JetBrains Mono';" onchange="fetchData()">
+    <div class="top-bar">
+        <div class="brand">PROJECT OMEGA <div id="notifyBadge" class="notify-badge"></div></div>
+        <div class="control-group">
+            <button id="btnSound" class="btn-toggle" onclick="toggleSound()">SOUND: OFF</button>
+            <select id="sessionSelect" style="background:#0f172a; color:#fff; border:1px solid var(--border); padding:8px; border-radius:6px; outline:none; font-family:'JetBrains Mono'; font-size:11px; font-weight:700;" onchange="fetchData()">
                 <option value="us_ny_futures">NY FUTURES</option>
                 <option value="asia_tokyo">TOKYO</option>
                 <option value="eu_london">LONDON</option>
@@ -69,71 +99,87 @@
         
         <div class="panel">
             <div class="panel-head">RISK COMMAND</div>
-            <div style="margin-bottom:15px;">
-                <div class="lbl">BALANCE ($)</div>
-                <input type="number" id="inpBal" class="inp" value="1200" oninput="render()">
+            <div style="margin-bottom:20px;">
+                <div class="lbl" style="margin-bottom:8px;">ACCOUNT BALANCE ($)</div>
+                <input type="number" id="inpBal" class="inp" value="4000" oninput="render()">
             </div>
-            <div style="margin-bottom:15px;">
-                <div class="lbl">RISK PER TRADE (%)</div>
-                <input type="number" id="inpRisk" class="inp" value="1.0" step="0.1" oninput="render()">
+            <div style="margin-bottom:20px;">
+                <div class="lbl" style="margin-bottom:8px;">RISK PER TRADE (%)</div>
+                <input type="number" id="inpRisk" class="inp" value="10.0" step="0.1" oninput="render()">
             </div>
-            <div class="row" style="margin-top:20px; border-top:1px dashed var(--border); padding-top:15px;">
-                <span class="lbl">MAX LOSS</span>
+            <div class="exec-row" style="margin-top:auto; border-top:1px solid var(--border); padding-top:20px; border-bottom:none;">
+                <span class="lbl">MAX LOSS ALLOWED</span>
                 <span class="val" id="valRisk" style="color:var(--red)">$0.00</span>
             </div>
         </div>
 
         <div class="panel">
-            <div class="panel-head">MARKET STATUS</div>
+            <div class="panel-head">
+                <span>KINETIC STATUS</span>
+                <span id="livePrice" style="color:#fff; font-family:'JetBrains Mono';">--</span>
+            </div>
             
             <div id="hud" class="hud-box">
-                <div class="hud-title" id="kMode">CALCULATING</div>
+                <div class="hud-title" id="kMode">INITIALIZING</div>
                 <div class="hud-val" id="kScore">--</div>
-                <div class="hud-sub" id="kInstr">WAITING FOR DATA...</div>
+                <div class="hud-sub" id="kInstr">Connecting to Corporate Pipeline...</div>
             </div>
 
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align:center;">
-                <div style="background:#0b1121; padding:8px; border-radius:4px;">
-                    <div class="lbl">ENERGY</div><div class="val" id="kEnergy">--</div>
+            <div class="grid-2">
+                <div class="data-card">
+                    <div class="dc-lbl">ENERGY (SPRING)</div><div class="dc-val" id="kEnergy">--</div>
                 </div>
-                <div style="background:#0b1121; padding:8px; border-radius:4px;">
-                    <div class="lbl">TIME GATE</div><div class="val" id="kTime">--</div>
+                <div class="data-card">
+                    <div class="dc-lbl">SPACE (RUNWAY)</div><div class="dc-val" id="kSpace">--</div>
+                </div>
+                <div class="data-card">
+                    <div class="dc-lbl">TIME GATE</div><div class="dc-val" id="kTime">--</div>
+                </div>
+                <div class="data-card">
+                    <div class="dc-lbl">WEEKLY FORCE</div><div class="dc-val" id="kMom">--</div>
                 </div>
             </div>
             
-            <div style="margin-top:15px; font-size:12px; color:#cbd5e1; font-style:italic; line-height:1.4; border-left:3px solid var(--border); padding-left:10px;" id="brief">
-                Initializing Physics Engine...
-            </div>
+            <div class="brief-text" id="brief">System is checking pipeline status...</div>
         </div>
 
         <div class="panel">
-            <div class="panel-head">ORDER CHEAT SHEET</div>
+            <div class="panel-head">EXECUTION CHEAT SHEET</div>
             
-            <div style="display:flex; gap:5px; margin-bottom:15px;">
-                <button onclick="setSide('LONG')" style="flex:1; background:#0f172a; color:var(--green); border:1px solid var(--green); padding:8px; cursor:pointer; font-weight:700;">LONG</button>
-                <button onclick="setSide('SHORT')" style="flex:1; background:#0f172a; color:var(--red); border:1px solid var(--red); padding:8px; cursor:pointer; font-weight:700;">SHORT</button>
+            <div class="side-select">
+                <button id="btnLong" class="btn-side" onclick="setSide('LONG')">LONG</button>
+                <button id="btnShort" class="btn-side" onclick="setSide('SHORT')">SHORT</button>
             </div>
 
-            <div class="row">
+            <div class="exec-row">
                 <span class="lbl">ENTRY (STOP LIMIT)</span>
-                <div><span class="val highlight" id="pEntry">--</span><button class="btn-copy" onclick="cp('pEntry')">CP</button></div>
+                <div style="display:flex; align-items:center;">
+                    <span class="val highlight" id="pEntry">--</span>
+                    <button class="btn-copy" onclick="cp('pEntry')">COPY</button>
+                </div>
             </div>
-            <div class="row">
+            <div class="exec-row">
                 <span class="lbl">STOP LOSS</span>
-                <div><span class="val" style="color:var(--red)" id="pStop">--</span><button class="btn-copy" onclick="cp('pStop')">CP</button></div>
+                <div style="display:flex; align-items:center;">
+                    <span class="val" style="color:var(--red)" id="pStop">--</span>
+                    <button class="btn-copy" onclick="cp('pStop')">COPY</button>
+                </div>
             </div>
-            <div class="row">
-                <span class="lbl">LOT SIZE ($)</span>
-                <div><span class="val" id="pSize">--</span><button class="btn-copy" onclick="cp('pSize')">CP</button></div>
+            <div class="exec-row" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:6px; border-bottom:none;">
+                <span class="lbl">LOT SIZE (USD)</span>
+                <div style="display:flex; align-items:center;">
+                    <span class="val" id="pSize">--</span>
+                    <button class="btn-copy" onclick="cp('pSize')">COPY</button>
+                </div>
             </div>
 
-            <div style="margin: 15px 0; border-top:1px solid var(--border);"></div>
+            <div style="margin: 20px 0; border-top:1px solid var(--border);"></div>
 
-            <div class="row">
+            <div class="exec-row" style="border-bottom:none;">
                 <span class="lbl" style="color:var(--cyan)">PRIMARY TARGET</span>
                 <span class="val highlight" id="pPrim">--</span>
             </div>
-            <div class="row">
+            <div class="exec-row" style="border-bottom:none;">
                 <span class="lbl">BANK RULE</span>
                 <span class="val" id="pBank">--</span>
             </div>
@@ -147,11 +193,12 @@
         let soundOn = false;
         let lastStatus = "";
 
+        // --- SOUND ---
         function toggleSound() {
             soundOn = !soundOn;
             const btn = document.getElementById('btnSound');
             btn.innerText = soundOn ? "SOUND: ON" : "SOUND: OFF";
-            btn.className = soundOn ? "toggle-sound on" : "toggle-sound";
+            btn.className = soundOn ? "btn-toggle active" : "btn-toggle";
         }
 
         function playAlert(msg) {
@@ -160,6 +207,13 @@
             speechSynthesis.speak(u);
         }
 
+        function flashBadge() {
+            const badge = document.getElementById('notifyBadge');
+            badge.classList.add('active');
+            setTimeout(() => badge.classList.remove('active'), 2000);
+        }
+
+        // --- DATA LOOP ---
         async function fetchData() {
             const sess = document.getElementById('sessionSelect').value;
             try {
@@ -169,7 +223,10 @@
                 });
                 data = await res.json();
                 render();
-            } catch(e) {}
+            } catch(e) { 
+                console.error("Connection Error", e); 
+                document.getElementById('kInstr').innerText = "CONNECTION LOST - RETRYING";
+            }
         }
 
         function setSide(s) { manualSide = s; render(); }
@@ -177,18 +234,21 @@
 
         function render() {
             if(!data) return;
+            document.getElementById('livePrice').innerText = data.price ? data.price.toLocaleString() : "--";
+
             const k = data.kinetic || {};
             const bk = k.breakdown || {};
             
-            // 1. HUD & ALERT
+            // 1. HUD & ALERTS
             document.getElementById('kMode').innerText = k.protocol;
             document.getElementById('kScore').innerText = k.total_score;
             document.getElementById('kInstr').innerText = k.instruction;
             document.getElementById('brief').innerText = k.brief;
             document.getElementById('hud').className = "hud-box mode-" + k.protocol;
 
-            // Audio Logic: Announce changes
-            if(k.protocol !== lastStatus && k.protocol !== "CALCULATING") {
+            // Alert Logic (Sound + Visual)
+            if(k.protocol !== lastStatus && k.protocol !== "CALIBRATING" && k.protocol !== "INITIALIZING") {
+                flashBadge();
                 if(k.protocol === "SUPERSONIC") playAlert("Warning. Super Sonic Mode Activated.");
                 if(k.protocol === "SNIPER") playAlert("Sniper Mode Active.");
                 if(k.protocol === "BLOCKED") playAlert("Trade Blocked.");
@@ -196,28 +256,48 @@
             }
 
             // 2. BREAKDOWN
-            document.getElementById('kEnergy').innerText = bk.energy;
-            document.getElementById('kTime').innerText = bk.time;
+            document.getElementById('kEnergy').innerText = bk.energy || "--";
+            document.getElementById('kSpace').innerText = bk.space || "--";
+            document.getElementById('kTime').innerText = bk.time || "--";
+            document.getElementById('kMom').innerText = bk.momentum || "--";
 
             // 3. EXECUTION
             const side = manualSide || data.active_side || "LONG";
-            const plan = data.plans[side];
+            const btnL = document.getElementById('btnLong');
+            const btnS = document.getElementById('btnShort');
             
-            document.getElementById('pEntry').innerText = plan.trigger.toLocaleString();
-            document.getElementById('pStop').innerText = plan.stop.toLocaleString();
-            document.getElementById('pPrim').innerText = plan.prim.toLocaleString();
-            document.getElementById('pBank').innerText = plan.bank;
+            if(side === "LONG") {
+                btnL.className = "btn-side long-active";
+                btnS.className = "btn-side";
+            } else {
+                btnL.className = "btn-side";
+                btnS.className = "btn-side short-active";
+            }
 
-            // 4. RISK
-            const bal = parseFloat(document.getElementById('inpBal').value) || 0;
-            const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
-            const riskAmt = bal * (riskPct / 100);
-            document.getElementById('valRisk').innerText = "$" + riskAmt.toFixed(2);
+            const plan = data.plans ? data.plans[side] : null;
+            if (plan) {
+                document.getElementById('pEntry').innerText = plan.trigger ? plan.trigger.toLocaleString() : "--";
+                document.getElementById('pStop').innerText = plan.stop ? plan.stop.toLocaleString() : "--";
+                document.getElementById('pPrim').innerText = plan.prim ? plan.prim.toLocaleString() : "--";
+                document.getElementById('pBank').innerText = plan.bank || "--";
 
-            const riskPerShare = Math.abs(plan.trigger - plan.stop);
-            if(riskPerShare > 0) {
-                const size = (riskAmt / riskPerShare) * plan.trigger;
-                document.getElementById('pSize').innerText = Math.floor(size).toLocaleString();
+                // 4. RISK
+                const bal = parseFloat(document.getElementById('inpBal').value) || 0;
+                const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
+                
+                // Max risk cap of $5000 logic handled visually here
+                let riskAmt = bal * (riskPct / 100);
+                if (riskAmt > 5000) riskAmt = 5000;
+
+                document.getElementById('valRisk').innerText = "$" + riskAmt.toFixed(2);
+
+                const riskPerShare = Math.abs(plan.trigger - plan.stop);
+                if(riskPerShare > 0 && plan.trigger > 0) {
+                    const size = (riskAmt / riskPerShare) * plan.trigger;
+                    document.getElementById('pSize').innerText = Math.floor(size).toLocaleString();
+                } else {
+                    document.getElementById('pSize').innerText = "0";
+                }
             }
         }
 
