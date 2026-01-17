@@ -2,7 +2,7 @@
 import os
 from typing import Any, Dict
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -73,31 +73,6 @@ def on_startup():
 @app.get("/health")
 def health():
     return {"ok": True}
-
-# --- EMERGENCY BACKDOOR (REMOVE LATER) ---
-@app.get("/emergency-login")
-def emergency_login(request: Request, db: Session = Depends(get_db)):
-    target_email = "spiritmaker79@gmail.com"
-    user = db.query(UserModel).filter(UserModel.email == target_email).first()
-    
-    if not user:
-        # Create user if missing
-        user = UserModel(
-            email=target_email,
-            password_hash=auth.hash_password("kabroda123"),
-            is_admin=True,
-            operator_flex=True
-        )
-        db.add(user)
-        db.commit()
-    else:
-        # Upgrade existing user
-        user.is_admin = True
-        user.operator_flex = True
-        db.commit()
-        
-    request.session[auth.SESSION_KEY] = int(user.id)
-    return RedirectResponse("/suite", status_code=303)
 
 # ==========================================
 # PUBLIC PAGES
@@ -183,12 +158,89 @@ def research_page(request: Request):
 def account_page(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
-    return _template_or_fallback(request, templates, "account.html", {"request": request, "user": user, "is_logged_in": True, "tier_label": "Active"})
+    
+    # Enable Admin Button visibility
+    is_admin = False
+    if user:
+        is_admin = getattr(user, "is_admin", False)
+
+    return _template_or_fallback(request, templates, "account.html", 
+                                 {"request": request, "user": user, "is_logged_in": True, "tier_label": "Active", "is_admin": is_admin})
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get(auth.SESSION_KEY)
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    
+    # Enforce Admin Check
+    if not user or not user.is_admin:
+        return RedirectResponse("/account")
+
     users = db.query(UserModel).all()
     return _template_or_fallback(request, templates, "admin.html", {"request": request, "users": users})
+
+# ==========================================
+# ACCOUNT ACTIONS (PASSWORD, SETTINGS)
+# ==========================================
+
+@app.post("/account/profile")
+async def update_profile(request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get(auth.SESSION_KEY)
+    if not user_id: raise HTTPException(401)
+    
+    payload = await request.json()
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if user:
+        user.username = payload.get("username")
+        user.tradingview_id = payload.get("tradingview_id")
+        user.session_tz = payload.get("session_tz")
+        db.commit()
+    return JSONResponse({"ok": True})
+
+@app.post("/account/settings")
+async def update_settings(request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get(auth.SESSION_KEY)
+    if not user_id: raise HTTPException(401)
+    
+    payload = await request.json()
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if user:
+        user.operator_flex = bool(payload.get("operator_flex", False))
+        db.commit()
+    return JSONResponse({"ok": True})
+
+@app.post("/account/password")
+async def update_password(request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get(auth.SESSION_KEY)
+    if not user_id: raise HTTPException(401)
+    
+    payload = await request.json()
+    new_pass = payload.get("password")
+    
+    if new_pass:
+        user = db.query(UserModel).filter(UserModel.id == user_id).first()
+        if user:
+            # Use auth.hash_password to maintain compatibility
+            user.password_hash = auth.hash_password(new_pass)
+            db.commit()
+            return JSONResponse({"ok": True})
+            
+    return JSONResponse({"ok": False}, status_code=400)
+
+@app.post("/admin/delete-user")
+async def delete_user(request: Request, user_id: int = Form(...), db: Session = Depends(get_db)):
+    admin_id = request.session.get(auth.SESSION_KEY)
+    admin = db.query(UserModel).filter(UserModel.id == admin_id).first()
+    
+    if not admin or not admin.is_admin:
+        raise HTTPException(403)
+
+    target = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if target:
+        db.delete(target)
+        db.commit()
+        
+    return RedirectResponse("/admin", status_code=303)
 
 # ==========================================
 # API ENDPOINTS

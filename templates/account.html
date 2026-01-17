@@ -25,6 +25,7 @@
         .card { background: #0f1623; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 2.5rem; margin-bottom: 2rem; }
         .card.accent { border-left: 3px solid #06b6d4; }
         .card.admin { border-left: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.05); }
+        .card.danger { border-left: 3px solid #ef4444; }
         
         .card h2 { font-size: 1.1rem; margin-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 1rem; color: #fff; letter-spacing: 0.05em; text-transform: uppercase; }
         
@@ -45,6 +46,10 @@
         .btn-save:hover { box-shadow: 0 0 15px rgba(6, 182, 212, 0.4); }
 
         .btn-admin { background: #f59e0b; color: #000; border: none; padding: 12px 24px; font-weight: 700; border-radius: 4px; text-decoration: none; display: inline-block; text-transform: uppercase; letter-spacing: 1px; }
+        
+        /* NEW: Button for password updates */
+        .btn-danger { background: #ef4444; color: #fff; border: none; padding: 12px 24px; font-weight: 700; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; transition: 0.2s; }
+        .btn-danger:hover { box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
 
         .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
         .switch input { opacity: 0; width: 0; height: 0; }
@@ -124,6 +129,18 @@
 
             <div style="display: flex; justify-content: flex-end; margin-top: 20px;">
                 <button onclick="saveProfile()" class="btn-save">Save Identity</button>
+            </div>
+        </div>
+
+        <div class="card danger">
+            <h2 style="color: #ef4444;">Security Protocol</h2>
+            <div class="input-group">
+                <label class="label">Update Access Key (Password)</label>
+                <input type="password" id="newPassword" class="cyber-input" placeholder="••••••••">
+                <div style="font-size: 0.8rem; color: #64748b; margin-top: 5px;">Leave blank to keep current password.</div>
+            </div>
+            <div style="text-align: right;">
+                <button onclick="updatePassword()" id="btnSavePass" class="btn-danger">Update Key</button>
             </div>
         </div>
 
@@ -231,8 +248,36 @@
             }
         }
 
+        // NEW: Password Update Function
+        async function updatePassword() {
+            const pass = document.getElementById('newPassword').value;
+            if(!pass) return alert("Please enter a new password.");
+            
+            const btn = document.getElementById('btnSavePass');
+            const originalText = btn.innerText;
+            btn.innerText = "Updating...";
+
+            try {
+                const res = await fetch('/account/password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: pass })
+                });
+                
+                if (res.ok) {
+                    btn.innerText = "Updated ✓";
+                    document.getElementById('newPassword').value = "";
+                    alert("Password updated successfully.");
+                    setTimeout(() => { btn.innerText = originalText; }, 2000);
+                } else {
+                    btn.innerText = "Error";
+                    alert("Failed to update password.");
+                }
+            } catch (e) {
+                console.error(e);
+                btn.innerText = "Failed";
+            }
+        }
+
         function toggleDropdown() { const el = document.getElementById('suiteDropdown'); el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
-        document.addEventListener('click', function(e) { const wrapper = document.querySelector('.dropdown-wrapper'); const dropdown = document.getElementById('suiteDropdown'); if (!wrapper.contains(e.target) && dropdown.style.display === 'block') { dropdown.style.display = 'none'; } });
-    </script>
-</body>
-</html>
+        document.addEventListener('click', function(e) { const wrapper = document.querySelector('.dropdown-wrapper'); const
