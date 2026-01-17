@@ -1,10 +1,10 @@
 # project_omega.py
 # ==============================================================================
-# PROJECT OMEGA ENGINE (KINETIC + THEMES + VERBS)
+# PROJECT OMEGA ENGINE (FINAL: SUPERSONIC VS DOGFIGHT)
 # ==============================================================================
-# - Logic: Calculates Energy, Space, Momentum, Structure.
-# - Output: Determines Protocol (SUPERSONIC, SNIPER, DOGFIGHT).
-# - Feature: Generates "Tactical Brief" (Verbs) based on math.
+# - Data Stream Mode: Binary (SUPERSONIC or DOGFIGHT).
+# - Kinetic Score: Ternary (FERRARI, SNIPER, DOGFIGHT).
+# - Logic: Strict separation of Territory vs Risk.
 # ==============================================================================
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import battlebox_pipeline
 import session_manager
 
 # ----------------------------
-# KINETIC MATH ENGINE
+# KINETIC MATH ENGINE (The Risk Advisor)
 # ----------------------------
 def _calc_kinetic_score(
     price: float, 
@@ -23,9 +23,7 @@ def _calc_kinetic_score(
     shelves: Dict[str, Any],
     side: str
 ) -> Dict[str, Any]:
-    """
-    Calculates the Kabroda Kinetic Probability Score (0-100) and Narrative.
-    """
+    
     score = 0
     breakdown = {}
     
@@ -38,13 +36,13 @@ def _calc_kinetic_score(
     energy_desc = ""
     if bps < 150: 
         score += 30; breakdown['energy'] = "COILED (+30)"
-        energy_desc = "Energy is super-coiled."
+        energy_desc = "⚡ Energy is super-coiled."
     elif bps < 300: 
         score += 15; breakdown['energy'] = "STANDARD (+15)"
-        energy_desc = "Energy reserves are standard."
+        energy_desc = "🔋 Energy reserves are standard."
     else: 
         score += 0; breakdown['energy'] = "EXHAUSTED (+0)"
-        energy_desc = "Market energy is exhausted."
+        energy_desc = "🪫 Market energy is exhausted."
 
     # 2. SPACE (30 pts)
     atr = levels.get("atr", range_size * 0.25) 
@@ -58,13 +56,13 @@ def _calc_kinetic_score(
     space_desc = ""
     if r_multiple > 2.0:
         score += 30; breakdown['space'] = "BLUE SKY (+30)"
-        space_desc = "The runway is wide open."
+        space_desc = "🚀 The runway is wide open."
     elif r_multiple > 1.0:
         score += 15; breakdown['space'] = "GRIND (+15)"
-        space_desc = "Structure is visible overhead."
+        space_desc = "🚧 Structure is visible overhead."
     else:
         score += 0; breakdown['space'] = "BLOCKED (+0)"
-        space_desc = "The path is blocked by structure."
+        space_desc = "🛑 The path is blocked by structure."
 
     # 3. MOMENTUM (20 pts)
     slope = float(context.get("slope_score", 0))
@@ -82,23 +80,23 @@ def _calc_kinetic_score(
     if dist_to_trigger < (atr * 0.5): score += 10; breakdown['location'] = "PRIMED (+10)"
     else: score += 0; breakdown['location'] = "CHASING (+0)"
 
-    # PROTOCOL ROUTER & BRIEF
+    # PROTOCOL ROUTER (Risk Appetite)
     brief = f"{energy_desc} {space_desc}"
     
     if score >= 71:
-        protocol = "SUPERSONIC"
+        protocol = "FERRARI" # High Risk Appetite
         color = "CYAN"
-        instruction = "MOMENTUM OVERRIDE ACTIVE. DEPLOY AGGRESSIVE."
+        instruction = "🔥 MOMENTUM OVERRIDE ACTIVE. DEPLOY AGGRESSIVE."
         brief += " Volatility expected to be impulsive. Strike fast."
     elif score >= 41:
-        protocol = "SNIPER"
+        protocol = "SNIPER" # Medium Risk Appetite
         color = "GREEN"
-        instruction = "WAIT FOR CONFIRMED CLOSE. PRECISION ONLY."
+        instruction = "⌖ WAIT FOR CONFIRMED CLOSE. PRECISION ONLY."
         brief += " Price action is technical. Adhere to strict structure rules."
     else:
-        protocol = "DOGFIGHT"
+        protocol = "DOGFIGHT" # Low Risk Appetite
         color = "AMBER"
-        instruction = "DEFENSIVE POSTURE. SHIELDS UP."
+        instruction = "🛡️ DEFENSIVE POSTURE. SHIELDS UP."
         brief += " Environment is hostile. Protect capital at all costs."
 
     return {
@@ -106,19 +104,24 @@ def _calc_kinetic_score(
         "protocol": protocol,
         "color": color,
         "instruction": instruction,
-        "brief": brief, # <--- THE VERBS
+        "brief": brief,
         "breakdown": breakdown,
         "stats": {"bps": int(bps), "gap_r": round(r_multiple, 1)}
     }
 
+# ----------------------------
+# TARGET ENGINE (The Territory)
+# ----------------------------
 def _calc_targets(entry: float, stop: float, dr: float, ds: float, side: str) -> Dict[str, Any]:
     if entry <= 0: return {"targets": [], "mode": "WAITING"}
     
     is_supersonic = False
+    # If Long is above Daily Res, OR Short is below Daily Sup -> SUPERSONIC (Blue Sky)
     if side == "LONG" and entry > dr: is_supersonic = True
     if side == "SHORT" and entry < ds: is_supersonic = True
     
-    mode_name = "SUPERSONIC" if is_supersonic else "SNIPER" # Replaced Dogfight with Sniper for Structure
+    # BINARY MODE: SUPERSONIC or DOGFIGHT
+    mode_name = "SUPERSONIC" if is_supersonic else "DOGFIGHT"
     
     energy = abs(dr - ds)
     if energy == 0: energy = entry * 0.01
@@ -187,7 +190,6 @@ async def get_omega_status(
         
         closest_side = "LONG" if (current_price >= (bo + bd)/2) else "SHORT"
         
-        # --- EXECUTE KINETIC MATH ---
         kinetic = _calc_kinetic_score(current_price, levels, context, shelves, active_side if active_side != "NONE" else closest_side)
 
         return {
@@ -208,7 +210,9 @@ async def get_omega_status(
                 "session_state": "ACTIVE",
                 "anchor_ts": session_meta.get("anchor_ts"),
                 "verification": {
-                    "r30_high": r30_high, "r30_low": r30_low, "daily_res": dr, "daily_sup": ds
+                    "r30_high": r30_high, "r30_low": r30_low, 
+                    "daily_res": dr, "daily_sup": ds,
+                    "bo": bo, "bd": bd 
                 },
             }
         }

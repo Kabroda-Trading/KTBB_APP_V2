@@ -9,11 +9,9 @@
         :root { 
             --bg: #020617; --panel: #0f172a; --border: #1e293b; 
             --green: #10b981; --red: #ef4444; --amber: #f59e0b; --text-main: #ffffff; --text-dim: #94a3b8; 
-            
-            /* THEMES */
             --sonic-color: #06b6d4; --sonic-glow: rgba(6, 182, 212, 0.2);
-            --sniper-color: #10b981; --sniper-glow: rgba(16, 185, 129, 0.2);
             --dog-color: #f59e0b; --dog-glow: rgba(245, 158, 11, 0.2);
+            --sniper-color: #10b981; 
         }
         body { background: var(--bg); color: var(--text-main); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; box-sizing: border-box; }
         
@@ -32,22 +30,24 @@
         .input-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); margin-bottom: 6px; font-family: 'JetBrains Mono'; font-weight: 600; }
         .input-field { width: 100%; background: #020617; border: 1px solid var(--border); color: #fff; padding: 12px; font-family: 'JetBrains Mono'; font-size: 15px; text-align: right; box-sizing: border-box; outline: none; border-radius: 6px; }
         
+        .copy-btn { background: #1e293b; border: none; color: #fff; border-radius: 4px; padding: 5px 10px; font-size: 10px; font-weight: 700; cursor: pointer; font-family: 'JetBrains Mono'; margin-left: 10px; }
+        .copy-btn:hover { background: #334155; }
+        .copy-btn:active { background: var(--green); }
+
         .price-display { text-align: center; margin-bottom: 30px; }
         .live-price { font-size: 80px; font-weight: 900; letter-spacing: -3px; line-height: 1; color: #fff; text-shadow: 0 0 40px rgba(255,255,255,0.1); }
         
-        /* THEME CARDS */
+        /* DYNAMIC THEME CARDS */
         .theme-card { padding: 30px; border-radius: 8px; text-align: center; border: 2px solid #333; background: #020617; transition: 0.3s; margin-bottom: 30px; position: relative; overflow: hidden; }
         .theme-lbl { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 12px; font-weight: 700; }
         .theme-val { font-size: 32px; font-weight: 900; font-family: 'JetBrains Mono'; line-height: 1.1; color: #fff; }
         
+        /* SUPERSONIC (Blue Sky) */
         .mode-sonic { border-color: var(--sonic-color); box-shadow: 0 0 40px var(--sonic-glow); }
         .mode-sonic .theme-lbl { color: var(--sonic-color); }
         .mode-sonic::before { content: "⚡ SUPERSONIC"; position: absolute; top: 10px; right: 10px; font-size: 10px; color: var(--sonic-color); font-family: 'JetBrains Mono'; font-weight: 800; border: 1px solid var(--sonic-color); padding: 2px 6px; border-radius: 4px; }
 
-        .mode-sniper { border-color: var(--sniper-color); box-shadow: 0 0 40px var(--sniper-glow); background: radial-gradient(circle at center, rgba(16, 185, 129, 0.05) 0%, #020617 70%); }
-        .mode-sniper .theme-lbl { color: var(--sniper-color); }
-        .mode-sniper::before { content: "⌖ SNIPER"; position: absolute; top: 10px; right: 10px; font-size: 10px; color: var(--sniper-color); font-family: 'JetBrains Mono'; font-weight: 800; border: 1px solid var(--sniper-color); padding: 2px 6px; border-radius: 4px; }
-
+        /* DOGFIGHT (Structure) */
         .mode-dogfight { border-color: var(--dog-color); box-shadow: 0 0 40px var(--dog-glow); }
         .mode-dogfight .theme-lbl { color: var(--dog-color); }
         .mode-dogfight::before { content: "⚠ DOGFIGHT"; position: absolute; top: 10px; right: 10px; font-size: 10px; color: var(--dog-color); font-family: 'JetBrains Mono'; font-weight: 800; border: 1px solid var(--dog-color); padding: 2px 6px; border-radius: 4px; }
@@ -68,7 +68,6 @@
         .toggle-btn.active { background: var(--sonic-color); color: #000; border-color: var(--sonic-color); }
         .data-row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px; border-bottom: 1px dashed rgba(255,255,255,0.05); padding-bottom: 5px; }
 
-        /* KINETIC BAR & BRIEF */
         .kinetic-bar { margin-top: 20px; padding: 15px; background: #0f172a; border: 1px solid var(--border); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; }
         .k-score { font-family: 'JetBrains Mono'; font-size: 24px; font-weight: 800; color: #fff; }
         .k-mode { font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 1px; }
@@ -106,9 +105,15 @@
                 <label class="input-label">RISK %</label>
                 <input type="number" id="inpRisk" class="input-field" value="1.0" step="0.1" oninput="renderDisplay()">
             </div>
-            <div style="margin-top:20px; padding:15px; background:#020617; border:1px solid var(--border); border-radius:6px;">
-                <div class="input-label">EXECUTION SIZE (USDT)</div>
-                <div id="outSize" style="font-size:24px; font-family:'JetBrains Mono'; font-weight:800; color:#fff;">--</div>
+            <div style="text-align:right; font-size:12px; color:var(--red); font-weight:700; margin-bottom:20px;">
+                RISK: <span id="valRiskAmt">--</span>
+            </div>
+            <div style="margin-top:10px; padding:15px; background:#020617; border:1px solid var(--border); border-radius:6px;">
+                <div class="input-label" style="display:flex; align-items:center; justify-content:space-between;">
+                    <span>EXECUTION SIZE (USDT)</span>
+                    <button class="copy-btn" onclick="copySize()">COPY</button>
+                </div>
+                <div id="outSize" style="font-size:24px; font-family:'JetBrains Mono'; font-weight:800; color:#fff; margin-top:5px;">--</div>
             </div>
         </div>
 
@@ -118,12 +123,11 @@
                 <div class="live-price" id="livePrice">--</div>
                 <div style="font-family:'JetBrains Mono'; font-size:12px; color:var(--text-dim); margin-top:5px;">LIVE MARKET DATA</div>
             </div>
-            
             <div class="tactical-toggle">
                 <button id="btnPlanLong" class="side-btn" onclick="setManualSide('LONG')">LONG PLAN</button>
                 <button id="btnPlanShort" class="side-btn" onclick="setManualSide('SHORT')">SHORT PLAN</button>
             </div>
-
+            
             <div id="themeCard" class="theme-card">
                 <div class="theme-lbl" id="themeTitle">WAITING FOR DATA</div>
                 <div class="theme-val" id="triggerPrice">--</div>
@@ -164,6 +168,8 @@
             <div class="data-row"><span>R30 LOW</span><span id="vRl" style="font-family:'JetBrains Mono'">--</span></div>
             <div class="data-row"><span>DAILY RES</span><span id="vDr" style="font-family:'JetBrains Mono'">--</span></div>
             <div class="data-row"><span>DAILY SUP</span><span id="vDs" style="font-family:'JetBrains Mono'">--</span></div>
+            <div class="data-row" style="margin-top:10px;"><span>BREAKOUT (BO)</span><span id="vBo" style="font-family:'JetBrains Mono'; color:var(--green)">--</span></div>
+            <div class="data-row"><span>BREAKDOWN (BD)</span><span id="vBd" style="font-family:'JetBrains Mono'; color:var(--red)">--</span></div>
         </div>
     </div>
 
@@ -194,6 +200,16 @@
 
         function setManualSide(side) { manualOverrideSide = side; renderDisplay(); }
 
+        function copySize() {
+            const txt = document.getElementById('outSize').innerText.replace(/,/g, '');
+            navigator.clipboard.writeText(txt).then(() => {
+                const btn = document.querySelector('.copy-btn');
+                const orig = btn.innerText;
+                btn.innerText = "COPIED";
+                setTimeout(() => btn.innerText = orig, 1000);
+            });
+        }
+
         function renderDisplay() {
             if(!globalData || !globalData.price) return;
 
@@ -203,6 +219,8 @@
             document.getElementById('vRl').innerText = v.r30_low.toFixed(2);
             document.getElementById('vDr').innerText = v.daily_res.toFixed(2);
             document.getElementById('vDs').innerText = v.daily_sup.toFixed(2);
+            document.getElementById('vBo').innerText = v.bo.toFixed(2);
+            document.getElementById('vBd').innerText = v.bd.toFixed(2);
 
             let activeSide = manualOverrideSide || globalData.closest_side || "LONG";
             const btnL = document.getElementById('btnPlanLong');
@@ -214,7 +232,7 @@
             const trigger = plan.trigger;
             const stop = plan.stop;
             const targets = plan.targets || [0,0,0,0];
-            const mode = plan.mode; // SUPERSONIC or SNIPER
+            const mode = plan.mode; // SUPERSONIC or DOGFIGHT
 
             // UPDATE CARD THEME
             const card = document.getElementById('themeCard');
@@ -223,17 +241,14 @@
             
             card.className = "theme-card";
             if (mode === "SUPERSONIC") card.classList.add('mode-sonic');
-            else if (mode === "SNIPER") card.classList.add('mode-sniper');
             else card.classList.add('mode-dogfight');
 
             document.getElementById('triggerPrice').innerText = trigger.toLocaleString();
-            title.innerText = mode + " PROTOCOL";
-            desc.innerText = activeSide + " ENTRY TRIGGER";
+            title.innerText = activeSide + " ENTRY PLAN"; 
+            desc.innerText = activeSide + " TRIGGER (" + mode + " MODE)"; 
             
             document.getElementById('txtMode').innerText = mode;
-            if (mode === "SUPERSONIC") document.getElementById('txtMode').style.color = "var(--sonic-color)";
-            else if (mode === "SNIPER") document.getElementById('txtMode').style.color = "var(--sniper-color)";
-            else document.getElementById('txtMode').style.color = "var(--dog-color)";
+            document.getElementById('txtMode').style.color = mode === "SUPERSONIC" ? "var(--sonic-color)" : "var(--dog-color)";
 
             document.getElementById('tShield').innerText = targets[0].toLocaleString();
             document.getElementById('t1').innerText = targets[1].toLocaleString();
@@ -243,6 +258,9 @@
             const bal = parseFloat(document.getElementById('inpBal').value) || 0;
             const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
             const riskAmt = bal * (riskPct / 100);
+            
+            document.getElementById('valRiskAmt').innerText = "$" + riskAmt.toFixed(2) + " RISK";
+
             document.getElementById('txtStop').innerText = stop.toLocaleString();
             const riskPerShare = Math.abs(trigger - stop);
             if (riskPerShare > 0) {
@@ -252,7 +270,6 @@
                 document.getElementById('outSize').innerText = "0";
             }
 
-            // KINETIC & BRIEF
             if (globalData.kinetic) {
                 const k = globalData.kinetic;
                 document.getElementById('kScore').innerText = k.total_score + " / 100";
@@ -266,7 +283,7 @@
                 else kMode.classList.add('k-dogfight');
                 
                 document.getElementById('kDesc').innerText = k.instruction;
-                document.getElementById('briefText').innerText = k.brief; // The Verbs
+                document.getElementById('briefText').innerText = k.brief;
             }
         }
 
