@@ -14,6 +14,7 @@ router = APIRouter()
 
 SESSION_KEY = "kabroda_user_id"
 
+# --- LEGACY PASSWORD LOGIC (Keeps existing users working) ---
 def _pbkdf2_hash_password(password: str, salt: str) -> str:
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 200_000)
     return dk.hex()
@@ -32,6 +33,7 @@ def verify_password(password: str, stored: str) -> bool:
         return hmac.compare_digest(candidate, digest)
     except Exception:
         return False
+# -------------------------------------------------------------
 
 def require_session_user(request: Request) -> int:
     user_id = request.session.get(SESSION_KEY)
@@ -52,6 +54,7 @@ def ensure_bootstrap_admin(db: Session) -> None:
     if existing:
         return
 
+    # Create admin with LEGACY hash format
     u = UserModel(
         email=admin_email,
         password_hash=hash_password(admin_password),
@@ -60,7 +63,9 @@ def ensure_bootstrap_admin(db: Session) -> None:
     db.add(u)
     db.commit()
 
-# --- REMOVED GET /login ROUTE HERE TO PREVENT CONFLICT ---
+# --- ROUTES ---
+
+# REMOVED: @router.get("/login") -> This was blocking your UI template.
 
 @router.post("/login")
 def login_action(
@@ -74,8 +79,9 @@ def login_action(
 
     em = (email or "").strip().lower()
     u = db.query(UserModel).filter(UserModel.email == em).first()
+    
+    # Verify using the OLD logic
     if not u or not verify_password(password or "", u.password_hash):
-        # Redirect back to login with error param if failed
         return RedirectResponse(url="/login?error=Invalid Credentials", status_code=303)
 
     request.session[SESSION_KEY] = int(u.id)
