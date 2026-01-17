@@ -2,282 +2,163 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <title>KABRODA // ACCOUNT</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kabroda | Operator Profile</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        body { background-color: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; margin: 0; padding: 0; }
-        .navbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
-        .logo { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.2rem; color: #fff !important; display: flex; align-items: center; gap: 10px; text-decoration: none; }
-        .nav-links { display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0; align-items: center; }
-        .nav-links a, .nav-links span { font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none; cursor: pointer; }
-        .nav-links a:hover, .nav-links a.active, .nav-links span.active { color: #fff; }
+        /* SHARED STYLES FOR CONSISTENCY */
+        :root { --bg: #020617; --panel: #0f172a; --border: #1e293b; --green: #10b981; --red: #ef4444; --text-main: #ffffff; --text-dim: #94a3b8; }
+        body { background: var(--bg); color: var(--text-main); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; }
         
-        .container { max-width: 800px; margin: 0 auto; padding: 20px; }
-        .account-header { padding: 60px 0 40px; text-align: center; }
-        .pill { display: inline-block; background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.2); padding: 6px 16px; border-radius: 100px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #06b6d4; margin-bottom: 1.5rem; letter-spacing: 0.1em; text-transform: uppercase; }
-        h1 { font-size: 3rem; margin-bottom: 1rem; color: #fff; }
-        p { font-size: 1.1rem; color: #94a3b8; }
+        .navbar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 40px; }
+        .nav-brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 20px; color: #fff; }
+        .nav-links { display: flex; align-items: center; gap: 20px; }
+        .nav-item { color: var(--text-dim); text-decoration: none; font-size: 13px; font-weight: 700; transition: 0.2s; }
+        .nav-item:hover, .nav-item.active { color: #fff; }
 
-        .card { background: #0f1623; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 2.5rem; margin-bottom: 2rem; }
-        .card.accent { border-left: 3px solid #06b6d4; }
-        .card.admin { border-left: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.05); }
-        .card.danger { border-left: 3px solid #ef4444; }
-        
-        .card h2 { font-size: 1.1rem; margin-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 1rem; color: #fff; letter-spacing: 0.05em; text-transform: uppercase; }
-        
-        .info-row { display: flex; justify-content: space-between; margin-bottom: 1.2rem; font-size: 0.95rem; color: #94a3b8; align-items: center; }
-        .info-val { color: #fff; font-family: 'JetBrains Mono', monospace; }
-        .plan-badge { background: rgba(6, 182, 212, 0.1); color: #06b6d4; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 0.8rem; }
-        
-        .input-group { margin-bottom: 1.5rem; }
-        .label { display: block; color: #94a3b8; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem; font-weight: 600; }
-        .cyber-input { width: 100%; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; outline: none; transition: border-color 0.2s; }
-        .cyber-input:focus { border-color: #06b6d4; }
-        .cyber-select { width: 100%; background: #050b14; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 12px; border-radius: 4px; outline: none; }
+        /* DROPDOWN (Fixed) */
+        .ts-wrapper { position: relative; display: inline-block; padding-bottom: 10px; margin-bottom: -10px; }
+        .ts-btn { color: var(--red); font-weight: 800; font-family: 'JetBrains Mono'; cursor: pointer; padding: 6px 12px; border: 1px solid rgba(239,68,68,0.3); border-radius: 4px; font-size: 12px; }
+        .ts-btn:hover { background: rgba(239,68,68,0.1); }
+        .ts-menu { display: none; position: absolute; top: 100%; left: 0; background: #0f172a; border: 1px solid var(--red); border-radius: 6px; min-width: 180px; z-index: 100; box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-top: 2px; }
+        .ts-wrapper:hover .ts-menu { display: block; }
+        .ts-item { display: block; padding: 12px 15px; color: #fff; text-decoration: none; font-family: 'JetBrains Mono'; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .ts-item:hover { background: var(--red); color: #000; }
 
-        .btn-manage { display: block; width: 100%; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: #fff; text-align: center; border-radius: 4px; font-weight: 600; cursor: pointer; transition: 0.2s; text-transform: uppercase; letter-spacing: 0.05em; }
-        .btn-manage:hover { background: rgba(255,255,255,0.08); border-color: #fff; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 30px; margin-bottom: 25px; }
+        .section-title { font-family: 'JetBrains Mono'; font-size: 14px; color: var(--text-dim); margin-bottom: 20px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; border-left: 3px solid var(--text-dim); padding-left: 10px; }
         
-        .btn-save { background: #06b6d4; color: #000; border: none; padding: 12px 24px; font-weight: 700; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; transition: 0.2s; }
-        .btn-save:hover { box-shadow: 0 0 15px rgba(6, 182, 212, 0.4); }
+        .input-group { margin-bottom: 20px; }
+        .input-label { display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 8px; font-weight: 700; }
+        .cyber-input { width: 100%; background: #020617; border: 1px solid var(--border); color: #fff; padding: 12px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 14px; box-sizing: border-box; }
+        .cyber-input:focus { border-color: var(--green); outline: none; }
 
-        .btn-admin { background: #f59e0b; color: #000; border: none; padding: 12px 24px; font-weight: 700; border-radius: 4px; text-decoration: none; display: inline-block; text-transform: uppercase; letter-spacing: 1px; }
+        .btn-save { background: var(--green); color: #000; border: none; padding: 10px 20px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; cursor: pointer; float: right; }
+        .btn-danger { background: var(--red); color: #fff; border: none; padding: 10px 20px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; cursor: pointer; float: right; }
         
-        /* NEW: Button for password updates */
-        .btn-danger { background: #ef4444; color: #fff; border: none; padding: 12px 24px; font-weight: 700; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; transition: 0.2s; }
-        .btn-danger:hover { box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
-
-        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #334155; transition: .4s; border-radius: 34px; }
-        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
-        input:checked + .slider { background-color: #06b6d4; }
-        input:checked + .slider:before { transform: translateX(20px); }
+        .status-msg { font-size: 12px; font-family: 'JetBrains Mono'; margin-top: 10px; display: inline-block; }
     </style>
 </head>
 <body>
 
     <nav class="navbar">
-        <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; max-width: 1200px;">
-            <a href="/" class="logo">
-                <div style="width: 12px; height: 12px; background: #06b6d4; border-radius: 2px;"></div>
-                KABRODA
-            </a>
-            <ul class="nav-links">
-                <li class="dropdown-wrapper" style="position: relative; cursor: pointer;">
-                    <span class="active" onclick="toggleDropdown()" style="color: #fff;">SUITE ▼</span>
-                    <div id="suiteDropdown" style="display: none; position: absolute; top: 100%; left: 0; background: #0f1623; border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 4px; min-width: 180px; z-index: 9999; margin-top:10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
-                        <a href="/suite" style="display: block; padding: 8px 12px; color: #aaa; text-decoration: none;">Session Control</a>
-                        <a href="/suite/battle-control" style="display: block; padding: 8px 12px; color: #aaa; text-decoration: none;">Battle Control</a>
-                    </div>
-                </li>
-                <li><a href="/analysis">INTEL</a></li>
-                <li><a href="/indicators">INDICATORS</a></li>
-                <li><a href="/account" style="color: #06b6d4;">ACCOUNT</a></li>
-                <li><a href="/logout">LOGOUT</a></li>
-            </ul>
+        <div class="nav-brand">KABRODA // ACCOUNT</div>
+        <div class="nav-links">
+            <a href="/suite" class="nav-item">SESSION CONTROL</a>
+            <a href="/suite/battle-control" class="nav-item">BATTLE CONTROL</a>
+            
+            {% if is_admin %}
+            <div class="ts-wrapper">
+                <div class="ts-btn">⚠ TOP SECRET ▼</div>
+                <div class="ts-menu">
+                    <a href="/suite/omega" class="ts-item">PROJECT OMEGA</a>
+                    <a href="/suite/research-lab" class="ts-item">RESEARCH LAB</a>
+                </div>
+            </div>
+            {% endif %}
+            
+            <a href="/account" class="nav-item active" style="margin-left:20px;">ACCOUNT</a>
+            <a href="/logout" class="nav-item">LOGOUT</a>
         </div>
     </nav>
 
     <div class="container">
-        <div class="account-header">
-            <span class="pill">OPERATOR PROFILE</span>
-            <h1>Account Command</h1>
-            <p>Manage your identity, billing, and system preferences.</p>
-        </div>
-
-        {% if is_admin %}
-        <div class="card admin">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                    <h2 style="color:#f59e0b; border-bottom:none; margin-bottom:0;">GOD MODE ACCESS</h2>
-                    <p style="margin:5px 0 0 0; font-size:0.9rem;">You have elevated privileges.</p>
-                </div>
-                <a href="/admin" class="btn-admin">ENTER ADMIN CONSOLE ⚡</a>
-            </div>
-        </div>
-        {% endif %}
-
+        
         <div class="card">
-            <h2>Identity Protocol</h2>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                <div class="input-group">
-                    <label class="label">Operative ID (Callsign)</label>
-                    <input type="text" id="username" class="cyber-input" value="{{ user.username or '' }}" placeholder="Set Callsign...">
-                </div>
-                <div class="input-group">
-                    <label class="label">TradingView ID</label>
-                    <input type="text" id="tvId" class="cyber-input" value="{{ user.tradingview_id or '' }}" placeholder="username">
-                </div>
-            </div>
-            
-            <div class="input-group" style="max-width: 50%;">
-                <label class="label">Default Timezone</label>
-                <select id="defTz" class="cyber-select">
-                    <option value="" {% if not user.session_tz %}selected{% endif %}>Select Default...</option>
-                    <option value="America/New_York" {% if user.session_tz == 'America/New_York' %}selected{% endif %}>New York (ET)</option>
-                    <option value="Europe/London" {% if user.session_tz == 'Europe/London' %}selected{% endif %}>London (UK)</option>
-                    <option value="Asia/Tokyo" {% if user.session_tz == 'Asia/Tokyo' %}selected{% endif %}>Tokyo (JST)</option>
-                    <option value="Australia/Sydney" {% if user.session_tz == 'Australia/Sydney' %}selected{% endif %}>Sydney (AEDT)</option>
-                    <option value="UTC" {% if user.session_tz == 'UTC' %}selected{% endif %}>UTC (Crypto)</option>
-                </select>
-            </div>
-
-            <div style="display: flex; justify-content: flex-end; margin-top: 20px;">
-                <button onclick="saveProfile()" class="btn-save">Save Identity</button>
-            </div>
-        </div>
-
-        <div class="card danger">
-            <h2 style="color: #ef4444;">Security Protocol</h2>
+            <div class="section-title" style="border-color: #38bdf8;">OPERATIVE PROFILE</div>
             <div class="input-group">
-                <label class="label">Update Access Key (Password)</label>
-                <input type="password" id="newPassword" class="cyber-input" placeholder="••••••••">
-                <div style="font-size: 0.8rem; color: #64748b; margin-top: 5px;">Leave blank to keep current password.</div>
+                <label class="input-label">CODENAME (USERNAME)</label>
+                <input type="text" id="username" class="cyber-input" value="{{ user.username or '' }}">
             </div>
-            <div style="text-align: right;">
-                <button onclick="updatePassword()" id="btnSavePass" class="btn-danger">Update Key</button>
+            <div class="input-group">
+                <label class="input-label">TRADINGVIEW ID</label>
+                <input type="text" id="tvid" class="cyber-input" value="{{ user.tradingview_id or '' }}">
+            </div>
+            <div style="overflow: hidden;">
+                <span id="profileMsg" class="status-msg"></span>
+                <button onclick="saveProfile()" class="btn-save">UPDATE PROFILE</button>
             </div>
         </div>
 
-        <div class="card accent">
-            <h2>Billing Command</h2>
-            <div class="info-row">
-                <span>Current Plan</span>
-                <span class="info-val"><span class="plan-badge">{{ tier_label }}</span></span>
+        <div class="card" style="border-color: rgba(239,68,68,0.3);">
+            <div class="section-title" style="border-color: var(--red); color: var(--red);">SECURITY PROTOCOL</div>
+            <div class="input-group">
+                <label class="input-label">UPDATE ACCESS KEY (PASSWORD)</label>
+                <input type="password" id="newPass" class="cyber-input" placeholder="••••••••">
             </div>
-            <div class="info-row">
-                <span>Member Since</span>
-                <span class="info-val">{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else 'N/A' }}</span>
-            </div>
-            <div style="margin-top: 25px;">
-                <button onclick="openBillingPortal()" id="billingBtn" class="btn-manage">Manage Subscription & Invoices ↗</button>
-                <div style="text-align: center; margin-top: 10px; font-size: 0.8rem; color: #64748b;">
-                    Cancel, upgrade, or update payment method securely via Stripe.
-                </div>
+            <div style="overflow: hidden;">
+                <span id="passMsg" class="status-msg"></span>
+                <button onclick="updatePassword()" class="btn-danger">UPDATE KEY</button>
             </div>
         </div>
 
         <div class="card">
-            <h2>System Preferences</h2>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <strong style="display: block; color: #fff; margin-bottom: 5px;">Operator Flex Mode</strong>
-                    <span style="font-size: 0.85rem; color: #94a3b8;">Enable manual session overrides in Battle Control.</span>
-                </div>
-                <label class="switch">
-                    <input type="checkbox" id="flexToggle" {% if user.operator_flex %}checked{% endif %}>
-                    <span class="slider"></span>
-                </label>
+            <div class="section-title" style="border-color: #06b6d4;">BILLING COMMAND</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <span style="color: var(--text-dim); font-size: 13px;">CURRENT PLAN</span>
+                <span style="color: var(--green); font-weight: 800; font-family: 'JetBrains Mono';">ACTIVE</span>
             </div>
+            <button style="width: 100%; background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 12px; border-radius: 4px; cursor: pointer; font-family: 'JetBrains Mono'; font-size: 12px;">
+                MANAGE SUBSCRIPTION & INVOICES ↗
+            </button>
         </div>
+
     </div>
 
     <script>
-        async function openBillingPortal() {
-            const btn = document.getElementById('billingBtn');
-            const originalText = btn.innerText;
-            btn.innerText = "Accessing Portal...";
-            btn.disabled = true;
-
-            try {
-                const response = await fetch('/billing/portal', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                });
-                
-                const data = await response.json();
-                
-                if (data.url) {
-                    window.location.href = data.url;
-                } else {
-                    alert("Error accessing billing portal. Please contact support.");
-                    btn.innerText = originalText;
-                    btn.disabled = false;
-                }
-            } catch (e) {
-                console.error(e);
-                alert("Connection error.");
-                btn.innerText = originalText;
-                btn.disabled = false;
-            }
-        }
-
-        document.getElementById('flexToggle').addEventListener('change', async function() {
-            try {
-                await fetch('/account/settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ operator_flex: this.checked })
-                });
-            } catch (e) { console.error("Setting save failed", e); }
-        });
-
         async function saveProfile() {
             const btn = document.querySelector('.btn-save');
-            const originalText = btn.innerText;
-            btn.innerText = "Saving...";
+            const msg = document.getElementById('profileMsg');
+            btn.innerText = "SAVING...";
             
             const payload = {
                 username: document.getElementById('username').value,
-                tradingview_id: document.getElementById('tvId').value,
-                session_tz: document.getElementById('defTz').value
+                tradingview_id: document.getElementById('tvid').value
             };
 
             try {
                 const res = await fetch('/account/profile', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)
                 });
-                
-                if (res.ok) {
-                    btn.innerText = "Saved ✓";
-                    setTimeout(() => { btn.innerText = originalText; }, 2000);
-                } else {
-                    btn.innerText = "Error";
-                }
-            } catch (e) {
-                console.error(e);
-                btn.innerText = "Failed";
+                if(res.ok) {
+                    msg.innerText = "PROFILE UPDATED.";
+                    msg.style.color = "#10b981";
+                } else { throw new Error("Failed"); }
+            } catch(e) {
+                msg.innerText = "ERROR SAVING.";
+                msg.style.color = "#ef4444";
             }
+            setTimeout(() => { btn.innerText = "UPDATE PROFILE"; msg.innerText = ""; }, 2000);
         }
 
-        // NEW: Password Update Function
         async function updatePassword() {
-            const pass = document.getElementById('newPassword').value;
-            if(!pass) return alert("Please enter a new password.");
-            
-            const btn = document.getElementById('btnSavePass');
-            const originalText = btn.innerText;
-            btn.innerText = "Updating...";
+            const pass = document.getElementById('newPass').value;
+            const msg = document.getElementById('passMsg');
+            const btn = document.querySelector('.btn-danger');
 
+            if(!pass) { msg.innerText = "ENTER PASSWORD FIRST"; msg.style.color = "#ef4444"; return; }
+            
+            btn.innerText = "UPDATING...";
             try {
+                // THIS CALLS THE NEW ENDPOINT IN MAIN.PY
                 const res = await fetch('/account/password', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ password: pass })
                 });
-                
-                if (res.ok) {
-                    btn.innerText = "Updated ✓";
-                    document.getElementById('newPassword').value = "";
-                    alert("Password updated successfully.");
-                    setTimeout(() => { btn.innerText = originalText; }, 2000);
-                } else {
-                    btn.innerText = "Error";
-                    alert("Failed to update password.");
-                }
-            } catch (e) {
-                console.error(e);
-                btn.innerText = "Failed";
+                if(res.ok) {
+                    msg.innerText = "KEY UPDATED SUCCESSFULLY.";
+                    msg.style.color = "#10b981";
+                    document.getElementById('newPass').value = "";
+                } else { throw new Error("Failed"); }
+            } catch(e) {
+                msg.innerText = "UPDATE FAILED.";
+                msg.style.color = "#ef4444";
             }
+            setTimeout(() => { btn.innerText = "UPDATE KEY"; }, 2000);
         }
-
-        function toggleDropdown() { const el = document.getElementById('suiteDropdown'); el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
-        document.addEventListener('click', function(e) { const wrapper = document.querySelector('.dropdown-wrapper'); const
+    </script>
+</body>
+</html>
