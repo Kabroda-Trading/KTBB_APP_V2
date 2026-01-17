@@ -1,10 +1,10 @@
 # main.py
 # ==============================================================================
-# KABRODA MAIN DISPATCHER (FIXED)
+# KABRODA UNIVERSAL SWITCHBOARD (MAIN DISPATCHER)
 # ==============================================================================
-# - Routes traffic for all pages
-# - Connecting Omega UI dropdowns to Pipeline
-# - Auto-repairs Database on startup
+# - Architecture: "Gateway Pattern"
+# - Function: Receives 'session_id' from ANY page and routes to the correct Engine.
+# - Updates: Omega, Battlebox, and Session Control routes are now fully dynamic.
 # ==============================================================================
 
 import os
@@ -21,7 +21,7 @@ from sqlalchemy import text, inspect
 import auth
 from database import init_db, get_db, UserModel, engine
 
-# CORE MODULES
+# CORE ENGINES
 import project_omega
 import battlebox_pipeline
 import research_lab
@@ -50,10 +50,8 @@ app.include_router(auth.router)
 @app.on_event("startup")
 def on_startup():
     init_db()
-    
     # --- DB REPAIR (SAFE) ---
-    # Ensures all columns exist without deleting data
-    print(">>> RUNNING SAFE DB REPAIR...")
+    print(">>> SYSTEM CHECK: Verifying Database Schema...")
     try:
         with engine.connect() as conn:
             inspector = inspect(engine)
@@ -69,15 +67,15 @@ def on_startup():
 
             for col, dtype in required.items():
                 if col not in existing_cols:
-                    print(f">>> ADDING MISSING COLUMN: {col}")
+                    print(f">>> ADDING COLUMN: {col}")
                     try:
                         conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {dtype}"))
                         conn.commit()
                     except Exception as e:
                         print(f"Failed to add {col}: {e}")
-            print(">>> DB REPAIR COMPLETE.")
+            print(">>> DATABASE INTEGRITY: VERIFIED.")
     except Exception as e:
-        print(f">>> DB REPAIR WARNING: {str(e)}")
+        print(f">>> DB WARNING: {str(e)}")
 
 @app.get("/health")
 def health():
@@ -136,9 +134,7 @@ def suite_home(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
     
-    is_admin = False
-    if user:
-        is_admin = getattr(user, "is_admin", False)
+    is_admin = getattr(user, "is_admin", False) if user else False
 
     return _template_or_fallback(
         request, templates, "session_control.html",
@@ -167,10 +163,7 @@ def research_page(request: Request):
 def account_page(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
-    
-    is_admin = False
-    if user:
-        is_admin = getattr(user, "is_admin", False)
+    is_admin = getattr(user, "is_admin", False) if user else False
 
     return _template_or_fallback(request, templates, "account.html", 
                                  {"request": request, "user": user, "is_logged_in": True, "tier_label": "Active", "is_admin": is_admin})
@@ -189,12 +182,10 @@ def admin_page(request: Request, db: Session = Depends(get_db)):
 # ==========================================
 # ACCOUNT ACTIONS
 # ==========================================
-
 @app.post("/account/profile")
 async def update_profile(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     if not user_id: raise HTTPException(401)
-    
     payload = await request.json()
     user = db.query(UserModel).filter(UserModel.id == user_id).first()
     if user:
@@ -208,7 +199,6 @@ async def update_profile(request: Request, db: Session = Depends(get_db)):
 async def update_settings(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     if not user_id: raise HTTPException(401)
-    
     payload = await request.json()
     user = db.query(UserModel).filter(UserModel.id == user_id).first()
     if user:
@@ -220,90 +210,106 @@ async def update_settings(request: Request, db: Session = Depends(get_db)):
 async def update_password(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     if not user_id: raise HTTPException(401)
-    
     payload = await request.json()
     new_pass = payload.get("password")
-    
     if new_pass:
         user = db.query(UserModel).filter(UserModel.id == user_id).first()
         if user:
             user.password_hash = auth.hash_password(new_pass)
             db.commit()
             return JSONResponse({"ok": True})
-            
     return JSONResponse({"ok": False}, status_code=400)
 
 @app.post("/admin/delete-user")
 async def delete_user(request: Request, user_id: int = Form(...), db: Session = Depends(get_db)):
     admin_id = request.session.get(auth.SESSION_KEY)
     admin = db.query(UserModel).filter(UserModel.id == admin_id).first()
-    
     if not admin or not admin.is_admin:
         raise HTTPException(403)
-
     target = db.query(UserModel).filter(UserModel.id == user_id).first()
     if target:
         db.delete(target)
         db.commit()
-        
     return RedirectResponse("/admin", status_code=303)
 
-# ==========================================
-# API ENDPOINTS
-# ==========================================
+# ==============================================================================
+# UNIVERSAL SWITCHBOARD ROUTES (The "Smart" Dispatcher)
+# ==============================================================================
 
+# 1. OMEGA SWITCHBOARD
 @app.post("/api/omega/status")
 async def omega_status_api(request: Request, db: Session = Depends(get_db)):
-    # --- SMART SWITCHBOARD LOGIC ---
-    try:
-        payload = await request.json()
-    except:
-        payload = {}
+    try: payload = await request.json()
+    except: payload = {}
     
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    
-    # 1. READ THE DROPDOWN
-    session_id = payload.get("session_id") or "us_ny_futures"
-    
-    # 2. READ THE BUTTONS
+    session_id = payload.get("session_id") or "us_ny_futures" # Reads from dropdown
     ferrari_mode = bool(payload.get("ferrari_mode", False))
     
-    # 3. CALL THE EXPERT (With the specific session you requested)
     data = await project_omega.get_omega_status(
         symbol=symbol,
-        session_id=session_id,  
+        session_id=session_id, 
         ferrari_mode=ferrari_mode
     )
     return JSONResponse(data)
 
-@app.post("/api/black-ops/status")
-async def legacy_black_ops_status_alias(request: Request, db: Session = Depends(get_db)):
-    return await omega_status_api(request, db)
-
+# 2. SESSION CONTROL SWITCHBOARD (Now supports session selection)
 @app.post("/api/dmr/run-raw")
 async def run_dmr_raw(request: Request):
-    payload = await request.json()
+    try: payload = await request.json()
+    except: payload = {}
+    
     symbol = payload.get("symbol", "BTCUSDT")
-    data = await battlebox_pipeline.get_session_review(symbol)
+    session_id = payload.get("session_id") or "us_ny_futures" # Now listens for manual session!
+
+    data = await battlebox_pipeline.get_session_review(
+        symbol=symbol,
+        session_id=session_id 
+    )
     return JSONResponse(data)
 
+# 3. BATTLEBOX LIVE SWITCHBOARD
 @app.post("/api/dmr/live")
 async def run_dmr_live(request: Request):
-    payload = await request.json()
+    try: payload = await request.json()
+    except: payload = {}
+    
     symbol = payload.get("symbol", "BTCUSDT")
-    data = await battlebox_pipeline.get_live_battlebox(symbol)
+    manual_id = payload.get("session_id") # Allows manual override if sent
+    session_mode = "MANUAL" if manual_id else "AUTO"
+
+    data = await battlebox_pipeline.get_live_battlebox(
+        symbol=symbol,
+        session_mode=session_mode,
+        manual_id=manual_id
+    )
     return JSONResponse(data)
 
+# 4. RESEARCH LAB (Already smart, kept consistent)
 @app.post("/api/research/run")
 async def run_research_api(request: Request):
-    payload = await request.json()
+    try: payload = await request.json()
+    except: payload = {}
+    
     symbol = payload.get("symbol", "BTCUSDT")
     start_date = payload.get("start_date_utc", "2026-01-01")
     end_date = payload.get("end_date_utc", "2026-01-10")
     session_ids = payload.get("session_ids", ["us_ny_futures"])
     tuning = payload.get("tuning", {})
+
     raw_5m = await battlebox_pipeline.fetch_live_5m(symbol, limit=2000) 
+    
     data = await research_lab.run_research_lab_from_candles(
-        symbol=symbol, raw_5m=raw_5m, start_date_utc=start_date, end_date_utc=end_date, session_ids=session_ids, tuning=tuning
+        symbol=symbol,
+        raw_5m=raw_5m,
+        start_date_utc=start_date,
+        end_date_utc=end_date,
+        session_ids=session_ids,
+        tuning=tuning
     )
     return JSONResponse(data)
+
+# Legacy alias for backward compatibility
+@app.post("/api/black-ops/status")
+async def legacy_black_ops_status_alias(request: Request, db: Session = Depends(get_db)):
+    return await omega_status_api(request, db)
