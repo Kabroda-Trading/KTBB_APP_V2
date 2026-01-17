@@ -1,6 +1,6 @@
 # main.py
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -12,136 +12,149 @@ from sqlalchemy.orm import Session
 import auth
 from database import init_db, get_db, UserModel
 
-# Use Project Omega ONLY
+# CORE MODULES
 import project_omega
+import battlebox_pipeline
+import research_lab
 
-
-def _is_admin(u: UserModel) -> bool:
-    return bool(u and u.is_admin)
-
-
+# --- HELPERS ---
 def _db_user_from_session(db: Session, user_id: int) -> UserModel:
-    u = db.query(UserModel).filter(UserModel.id == user_id).first()
-    if not u:
-        raise HTTPException(status_code=401, detail="Invalid session")
-    return u
-
-
-def _require_session_user_id(request: Request) -> int:
-    return auth.require_session_user(request)
-
+    return db.query(UserModel).filter(UserModel.id == user_id).first()
 
 def _template_or_fallback(request: Request, templates: Jinja2Templates, name: str, context: Dict[str, Any]):
-    """
-    If a template is missing in production, don't 500 — show a helpful placeholder.
-    """
     try:
         return templates.TemplateResponse(name, context)
-    except Exception:
-        # Keeps the site alive even if templates are missing on deploy
+    except Exception as e:
         return HTMLResponse(
-            f"<h2>Missing template: {name}</h2><p>Deploy includes /templates?</p>",
-            status_code=200,
+            f"<h2>System Error</h2><p>Could not load {name}.<br>Error: {str(e)}</p>",
+            status_code=500,
         )
 
-
-# --- App ---
+# --- APP CONFIG ---
 app = FastAPI()
 
-# Sessions
 SECRET_KEY = os.getenv("SECRET_KEY") or "dev-secret-change-me"
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, same_site="lax", https_only=True)
 
-# Static + Templates
-if os.path.isdir("static"):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+# --- FOLDER CONFIG (CORRECT) ---
+# "static" and "templates" (plural) match your screenshots exactly.
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates") 
 
-# Auth router
 app.include_router(auth.router)
-
 
 @app.on_event("startup")
 def on_startup():
     init_db()
 
-
 @app.get("/health")
 def health():
     return {"ok": True}
 
-
-# --- Root / Suite Index ---
+# --- PAGE ROUTES ---
 @app.get("/", include_in_schema=False)
 def root():
     return RedirectResponse("/suite", status_code=302)
 
-
 @app.get("/suite", response_class=HTMLResponse, include_in_schema=False)
-def suite_home(request: Request):
-    # You can point this at your real index template
+def suite_home(request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get(auth.SESSION_KEY)
+    user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
+    
+    # Fallback user for display if not logged in (Bypasses Login Screen)
+    if not user:
+        user = UserModel(email="guest@kabroda.com", username="GUEST_COMMAND", is_admin=False)
+
+    # --- THE FIX IS HERE ---
+    # Changed "suite_index.html" to "session_control.html"
     return _template_or_fallback(
-        request,
-        templates,
-        "suite_index.html",
-        {"request": request, "title": "Kabroda Suite"},
+        request, templates, "session_control.html",
+        {
+            "request": request, 
+            "title": "Session Control",
+            "user": user,
+            "is_logged_in": True, 
+            "is_admin": True
+        },
     )
 
+@app.get("/suite/battle-control", response_class=HTMLResponse, include_in_schema=False)
+def battle_control_page(request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get(auth.SESSION_KEY)
+    user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
+    
+    if not user:
+        user = UserModel(email="guest@kabroda.com", username="GUEST_COMMAND", operator_flex=True)
 
-# --- Suite Pages (these were 404 for you) ---
+    return _template_or_fallback(request, templates, "battle_control.html", {"request": request, "user": user})
+
+@app.get("/suite/black-ops", response_class=HTMLResponse, include_in_schema=False)
+def omega_page(request: Request):
+    return _template_or_fallback(request, templates, "project_omega.html", {"request": request})
+
+@app.get("/suite/omega", response_class=HTMLResponse, include_in_schema=False)
+def omega_page_alias(request: Request):
+    return _template_or_fallback(request, templates, "project_omega.html", {"request": request})
+
 @app.get("/suite/research-lab", response_class=HTMLResponse, include_in_schema=False)
-def research_lab_page(request: Request):
+def research_page(request: Request):
     return _template_or_fallback(request, templates, "research_lab.html", {"request": request})
 
-
-@app.get("/suite/battle-control", response_class=HTMLResponse, include_in_schema=False)
-def battle_control_page(request: Request):
-    return _template_or_fallback(request, templates, "battle_control.html", {"request": request})
-
-
-# NEW: Omega page (replace black-ops)
-@app.get("/suite/omega", response_class=HTMLResponse, include_in_schema=False)
-def omega_page(request: Request):
-    # Reuse an existing template if you already have one.
-    # If you had "black_ops.html" before, you can rename it or keep it and just render it here.
-    return _template_or_fallback(request, templates, "omega.html", {"request": request})
-
-
-# Backward compat: if something still hits /suite/black-ops, redirect it.
-@app.get("/suite/black-ops", include_in_schema=False)
-def legacy_black_ops_ui():
-    return RedirectResponse("/suite/omega", status_code=302)
-
-
-# --- API: Omega ---
+# --- API: OMEGA (AUTH DISABLED) ---
 @app.post("/api/omega/status")
 async def omega_status_api(request: Request, db: Session = Depends(get_db)):
-    user_id = _require_session_user_id(request)
-    u = _db_user_from_session(db, user_id)
-    # if not _is_admin(u):
-    #     raise HTTPException(status_code=403, detail="Unauthorized")
-
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except:
+        payload = {}
+        
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    session_mode = (payload.get("session_mode") or "AUTO").strip().upper()
     
-    # FIX: Call 'get_omega_status' (the name in project_omega.py)
-    # NOT 'get_live_battlebox' (which does not exist there)
     data = await project_omega.get_omega_status(
         symbol=symbol,
-        session_id="us_ny_futures", # Default for now, or extract from payload
+        session_id="us_ny_futures",
         ferrari_mode=False
     )
     return JSONResponse(data)
 
-
-@app.get("/api/omega/review")
-async def omega_review_api(symbol: str = "BTCUSDT", session_tz: str = "UTC"):
-    data = await project_omega.get_session_review(symbol.strip().upper(), session_tz)
-    return JSONResponse(data)
-
-
-# Backward compat: if frontend still calls black-ops API, route it to omega so you stop crashing.
 @app.post("/api/black-ops/status")
 async def legacy_black_ops_status_alias(request: Request, db: Session = Depends(get_db)):
     return await omega_status_api(request, db)
+
+# --- API: SESSION CONTROL ---
+@app.post("/api/dmr/run-raw")
+async def run_dmr_raw(request: Request):
+    payload = await request.json()
+    symbol = payload.get("symbol", "BTCUSDT")
+    data = await battlebox_pipeline.get_session_review(symbol)
+    return JSONResponse(data)
+
+@app.post("/api/dmr/live")
+async def run_dmr_live(request: Request):
+    payload = await request.json()
+    symbol = payload.get("symbol", "BTCUSDT")
+    data = await battlebox_pipeline.get_live_battlebox(symbol)
+    return JSONResponse(data)
+
+# --- API: RESEARCH LAB ---
+@app.post("/api/research/run")
+async def run_research_api(request: Request):
+    payload = await request.json()
+    
+    symbol = payload.get("symbol", "BTCUSDT")
+    start_date = payload.get("start_date_utc", "2026-01-01")
+    end_date = payload.get("end_date_utc", "2026-01-10")
+    session_ids = payload.get("session_ids", ["us_ny_futures"])
+    tuning = payload.get("tuning", {})
+
+    raw_5m = await battlebox_pipeline.fetch_live_5m(symbol, limit=2000) 
+    
+    data = await research_lab.run_research_lab_from_candles(
+        symbol=symbol,
+        raw_5m=raw_5m,
+        start_date_utc=start_date,
+        end_date_utc=end_date,
+        session_ids=session_ids,
+        tuning=tuning
+    )
+    return JSONResponse(data)
