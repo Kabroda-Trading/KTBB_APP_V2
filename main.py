@@ -4,10 +4,11 @@
 # ==============================================================================
 # - Architecture: "Gateway Pattern"
 # - Function: Receives 'session_id' from ANY page and routes to the correct Engine.
-# - Updates: Omega, Battlebox, and Session Control routes are now fully dynamic.
+# - Updates: Includes fixes for Profile Saving and Research Lab Historical Data.
 # ==============================================================================
 
 import os
+from datetime import datetime, timezone 
 from typing import Any, Dict
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Form
@@ -180,20 +181,36 @@ def admin_page(request: Request, db: Session = Depends(get_db)):
     return _template_or_fallback(request, templates, "admin.html", {"request": request, "users": users})
 
 # ==========================================
-# ACCOUNT ACTIONS
+# ACCOUNT ACTIONS (FIXED)
 # ==========================================
 @app.post("/account/profile")
 async def update_profile(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     if not user_id: raise HTTPException(401)
-    payload = await request.json()
-    user = db.query(UserModel).filter(UserModel.id == user_id).first()
-    if user:
-        user.username = payload.get("username")
-        user.tradingview_id = payload.get("tradingview_id")
-        user.session_tz = payload.get("session_tz")
-        db.commit()
-    return JSONResponse({"ok": True})
+    
+    try:
+        payload = await request.json()
+        user = db.query(UserModel).filter(UserModel.id == user_id).first()
+        
+        if user:
+            # FIX: Only update fields if they are actually sent
+            if "username" in payload:
+                user.username = payload["username"]
+            
+            if "tradingview_id" in payload:
+                user.tradingview_id = payload["tradingview_id"]
+                
+            if "session_tz" in payload:
+                user.session_tz = payload["session_tz"]
+
+            db.commit()
+            return JSONResponse({"ok": True})
+            
+    except Exception as e:
+        print(f"PROFILE UPDATE ERROR: {e}")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    
+    return JSONResponse({"ok": False}, status_code=400)
 
 @app.post("/account/settings")
 async def update_settings(request: Request, db: Session = Depends(get_db)):
@@ -233,7 +250,7 @@ async def delete_user(request: Request, user_id: int = Form(...), db: Session = 
     return RedirectResponse("/admin", status_code=303)
 
 # ==============================================================================
-# UNIVERSAL SWITCHBOARD ROUTES (The "Smart" Dispatcher)
+# UNIVERSAL SWITCHBOARD ROUTES
 # ==============================================================================
 
 # 1. OMEGA SWITCHBOARD
@@ -243,7 +260,7 @@ async def omega_status_api(request: Request, db: Session = Depends(get_db)):
     except: payload = {}
     
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    session_id = payload.get("session_id") or "us_ny_futures" # Reads from dropdown
+    session_id = payload.get("session_id") or "us_ny_futures" 
     ferrari_mode = bool(payload.get("ferrari_mode", False))
     
     data = await project_omega.get_omega_status(
@@ -253,14 +270,14 @@ async def omega_status_api(request: Request, db: Session = Depends(get_db)):
     )
     return JSONResponse(data)
 
-# 2. SESSION CONTROL SWITCHBOARD (Now supports session selection)
+# 2. SESSION CONTROL SWITCHBOARD
 @app.post("/api/dmr/run-raw")
 async def run_dmr_raw(request: Request):
     try: payload = await request.json()
     except: payload = {}
     
     symbol = payload.get("symbol", "BTCUSDT")
-    session_id = payload.get("session_id") or "us_ny_futures" # Now listens for manual session!
+    session_id = payload.get("session_id") or "us_ny_futures"
 
     data = await battlebox_pipeline.get_session_review(
         symbol=symbol,
@@ -275,7 +292,7 @@ async def run_dmr_live(request: Request):
     except: payload = {}
     
     symbol = payload.get("symbol", "BTCUSDT")
-    manual_id = payload.get("session_id") # Allows manual override if sent
+    manual_id = payload.get("session_id")
     session_mode = "MANUAL" if manual_id else "AUTO"
 
     data = await battlebox_pipeline.get_live_battlebox(
@@ -285,40 +302,32 @@ async def run_dmr_live(request: Request):
     )
     return JSONResponse(data)
 
-# ==============================================================================
 # 4. RESEARCH LAB SWITCHBOARD (Fixed Data Connection)
-# ==============================================================================
 @app.post("/api/research/run")
 async def run_research_api(request: Request):
-    try: 
-        payload = await request.json()
-    except: 
-        payload = {}
+    try: payload = await request.json()
+    except: payload = {}
     
-    # 1. Parse Parameters from the Lab UI
+    # 1. Parse Parameters
     symbol = payload.get("symbol", "BTCUSDT")
     start_date = payload.get("start_date_utc", "2026-01-01")
     end_date = payload.get("end_date_utc", "2026-01-10")
     session_ids = payload.get("session_ids", ["us_ny_futures"])
     tuning = payload.get("tuning", {})
 
-    # 2. CONVERT DATES TO TIMESTAMPS FOR THE PIPELINE
-    # The pipeline needs integer timestamps to fetch historical data
-    from datetime import datetime, timezone
-    
+    # 2. CONVERT DATES TO TIMESTAMPS
     try:
         dt_start = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         dt_end = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         
-        # Buffer: Add 24h before start (for indicators) and 24h after end (for trade completion)
+        # Buffer: Add 24h before/after
         fetch_start_ts = int(dt_start.timestamp()) - 86400
         fetch_end_ts = int(dt_end.timestamp()) + 86400
         
     except ValueError:
         return JSONResponse({"ok": False, "error": "Invalid Date Format"})
 
-    # 3. CALL THE CORPORATE PIPELINE (The "Boss" fetching the specific file)
-    # previously: raw_5m = await battlebox_pipeline.fetch_live_5m(...) <--- THIS WAS THE ERROR
+    # 3. CALL THE CORPORATE PIPELINE (HISTORICAL)
     print(f">>> [SWITCHBOARD] Ordering Historical Data for: {symbol} ({start_date} to {end_date})")
     
     raw_5m = await battlebox_pipeline.fetch_historical_pagination(
@@ -329,8 +338,7 @@ async def run_research_api(request: Request):
     
     print(f">>> [SWITCHBOARD] Pipeline delivered {len(raw_5m)} candles.")
 
-    # 4. HAND OFF TO THE LAB (The Employee)
-    # The lab logic remains exactly as you wrote it; we just feed it the right data now.
+    # 4. HAND OFF TO THE LAB
     data = await research_lab.run_research_lab_from_candles(
         symbol=symbol,
         raw_5m=raw_5m,
@@ -342,7 +350,7 @@ async def run_research_api(request: Request):
     
     return JSONResponse(data)
 
-# Legacy alias for backward compatibility
+# Legacy alias
 @app.post("/api/black-ops/status")
 async def legacy_black_ops_status_alias(request: Request, db: Session = Depends(get_db)):
     return await omega_status_api(request, db)
