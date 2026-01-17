@@ -4,80 +4,89 @@
     <meta charset="UTF-8">
     <title>PROJECT OMEGA // COMMAND</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
     <style>
         :root { 
-            --bg: #050b14; --panel: #0f172a; --border: #1e293b; 
-            --green: #00ff9d; --red: #ff3366; --blue: #00ccff; --amber: #f59e0b; --purple: #8b5cf6;
-            --text: #e2e8f0; --dim: #64748b; 
+            --bg: #020617; --panel: #0f172a; --border: #1e293b; 
+            --green: #10b981; --red: #ef4444; --blue: #0ea5e9; --amber: #f59e0b; --purple: #8b5cf6;
+            --text-main: #ffffff; --text-dim: #94a3b8; 
         }
-        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; min-height: 100vh; display: flex; flex-direction: column; box-sizing: border-box; }
+        body { background: var(--bg); color: var(--text-main); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; min-height: 100vh; display: flex; flex-direction: column; box-sizing: border-box; }
         
-        .top-nav { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
-        .brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 20px; color: #fff; letter-spacing: -1px; display: flex; align-items: center; gap: 10px; }
-        .blink { animation: blinker 2s linear infinite; width: 10px; height: 10px; background: var(--green); border-radius: 50%; }
-        @keyframes blinker { 50% { opacity: 0; } }
+        /* TOP NAV */
+        .top-nav { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 25px; flex-wrap: wrap; gap: 15px; }
+        .brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 24px; color: #fff; letter-spacing: -1px; display: flex; align-items: center; gap: 12px; }
+        .blink { animation: blinker 2s linear infinite; width: 12px; height: 12px; background: var(--green); border-radius: 50%; box-shadow: 0 0 10px var(--green); }
+        @keyframes blinker { 50% { opacity: 0.3; } }
         
-        .controls { display: flex; gap: 10px; align-items: center; }
-        .status-pill { font-size: 10px; font-family: 'JetBrains Mono'; color: var(--green); border: 1px solid var(--green); padding: 4px 8px; border-radius: 4px; text-transform: uppercase; }
-        .session-timer { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--dim); background: #020617; padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border); text-transform: uppercase; }
-        .alert-toggle { background: transparent; border: 1px solid var(--dim); color: var(--dim); padding: 5px 10px; font-family: 'JetBrains Mono'; font-size: 10px; cursor: pointer; border-radius: 4px; transition: 0.2s; }
-        .alert-toggle.active { border-color: var(--red); color: var(--red); box-shadow: 0 0 10px rgba(255, 51, 102, 0.2); }
-        .back-link { color: var(--dim); text-decoration: none; font-size: 11px; font-weight: 700; border: 1px solid var(--border); padding: 5px 10px; border-radius: 4px; }
+        .controls { display: flex; gap: 12px; align-items: center; }
+        
+        /* DROPDOWN & BUTTONS */
+        .cyber-select { background: #020617; color: #fff; border: 1px solid var(--border); padding: 8px 12px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; text-transform: uppercase; outline: none; cursor: pointer; height: 34px; }
+        .cyber-select:focus { border-color: var(--blue); }
 
-        .war-room { display: grid; grid-template-columns: 320px 1fr 320px; gap: 20px; height: 100%; }
-        @media (max-width: 1000px) {
-            .war-room { grid-template-columns: 1fr; height: auto; }
-            .panel { min-height: auto; margin-bottom: 10px; }
-            .status-pill { display: none; }
-        }
+        .toggle-btn { background: transparent; border: 1px solid var(--text-dim); color: var(--text-dim); padding: 0 14px; height: 34px; font-family: 'JetBrains Mono'; font-size: 11px; cursor: pointer; border-radius: 4px; transition: 0.2s; font-weight: 700; display: flex; align-items: center; text-transform: uppercase; }
+        .toggle-btn.active { border-color: var(--green); color: #020617; background: var(--green); box-shadow: 0 0 15px rgba(16, 185, 129, 0.3); }
+        .toggle-btn.ferrari.active { border-color: var(--red); background: var(--red); color: #fff; box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
 
-        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; display: flex; flex-direction: column; position: relative; }
-        .panel-head { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--dim); letter-spacing: 1px; margin-bottom: 15px; text-transform: uppercase; display: flex; justify-content: space-between; }
+        .back-link { color: var(--text-dim); text-decoration: none; font-size: 11px; font-weight: 700; border: 1px solid var(--border); padding: 0 14px; height: 34px; display: flex; align-items: center; border-radius: 4px; text-transform: uppercase; font-family: 'JetBrains Mono'; }
+        .back-link:hover { color: #fff; border-color: #fff; }
 
-        .input-group { margin-bottom: 12px; }
-        .input-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-bottom: 4px; font-family: 'JetBrains Mono'; }
-        .input-field { width: 100%; background: #020617; border: 1px solid var(--border); color: #fff; padding: 10px; font-family: 'JetBrains Mono'; font-size: 14px; text-align: right; box-sizing: border-box; outline: none; border-radius: 4px; }
+        /* LAYOUT */
+        .war-room { display: grid; grid-template-columns: 340px 1fr 340px; gap: 25px; height: 100%; flex: 1; }
+        @media (max-width: 1100px) { .war-room { grid-template-columns: 1fr; height: auto; } }
+
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 25px; display: flex; flex-direction: column; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
+        
+        /* HEADERS - BIGGER & BRIGHTER */
+        .panel-head { font-family: 'JetBrains Mono'; font-size: 14px; color: #fff; font-weight: 800; letter-spacing: 1px; margin-bottom: 20px; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
+
+        /* INPUTS */
+        .input-group { margin-bottom: 15px; }
+        .input-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); margin-bottom: 6px; font-family: 'JetBrains Mono'; font-weight: 600; }
+        .input-field { width: 100%; background: #020617; border: 1px solid var(--border); color: #fff; padding: 12px; font-family: 'JetBrains Mono'; font-size: 15px; text-align: right; box-sizing: border-box; outline: none; border-radius: 6px; transition: border 0.2s; }
         .input-field:focus { border-color: var(--blue); }
 
-        .magic-box { margin-top: 20px; background: #020617; border: 1px solid var(--blue); border-radius: 6px; padding: 20px; text-align: center; }
-        .magic-lbl { font-size: 9px; color: var(--blue); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 5px; }
-        .magic-val { font-size: 32px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; letter-spacing: -1px; }
+        .magic-box { margin-top: 25px; background: #020617; border: 1px solid var(--blue); border-radius: 8px; padding: 20px; text-align: center; box-shadow: 0 0 20px rgba(14, 165, 233, 0.1); }
+        .magic-lbl { font-size: 10px; color: var(--blue); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; font-weight: 700; }
+        .magic-val { font-size: 36px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; letter-spacing: -1px; }
 
-        .price-display { text-align: center; margin-bottom: 30px; }
-        .live-price { font-size: 72px; font-weight: 900; letter-spacing: -3px; line-height: 1; color: #fff; }
-        .trigger-info { font-family: 'JetBrains Mono'; font-size: 12px; color: var(--dim); margin-top: 8px; }
+        /* MAIN DISPLAY */
+        .price-display { text-align: center; margin-bottom: 40px; }
+        .live-price { font-size: 80px; font-weight: 900; letter-spacing: -3px; line-height: 1; color: #fff; text-shadow: 0 0 40px rgba(255,255,255,0.1); }
+        .trigger-info { font-family: 'JetBrains Mono'; font-size: 14px; color: var(--text-dim); margin-top: 10px; font-weight: 600; }
 
-        .coach-banner { padding: 25px; border-radius: 8px; text-align: center; border: 2px solid #333; background: #020617; transition: 0.3s; }
-        .coach-title { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; opacity: 0.7; }
-        .coach-action { font-size: 28px; font-weight: 900; font-family: 'JetBrains Mono'; line-height: 1.1; }
+        .coach-banner { padding: 30px; border-radius: 8px; text-align: center; border: 2px solid #333; background: #020617; transition: 0.3s; margin-bottom: 30px; }
+        .coach-title { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 12px; color: var(--text-dim); font-weight: 700; }
+        .coach-action { font-size: 32px; font-weight: 900; font-family: 'JetBrains Mono'; line-height: 1.1; color: #fff; }
         
-        .mode-wait { border-color: #333; color: var(--dim); }
-        .mode-entry { border-color: var(--blue); background: rgba(0, 204, 255, 0.08); color: var(--blue); box-shadow: 0 0 20px rgba(0,204,255,0.1); }
+        /* MODES */
+        .mode-wait { border-color: var(--border); color: var(--text-dim); }
+        .mode-entry { border-color: var(--blue); background: rgba(14, 165, 233, 0.08); color: var(--blue); box-shadow: 0 0 30px rgba(14, 165, 233, 0.15); }
         .mode-secure { border-color: var(--amber); background: rgba(245, 158, 11, 0.08); color: var(--amber); }
-        .mode-profit { border-color: var(--green); background: rgba(0, 255, 157, 0.08); color: var(--green); }
+        .mode-profit { border-color: var(--green); background: rgba(16, 185, 129, 0.08); color: var(--green); }
 
-        .target-grid { margin-top: 30px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; text-align: center; }
-        .target-box { background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #1e293b; }
-        .target-lbl { font-size: 9px; margin-bottom: 5px; letter-spacing:1px; }
-        .target-val { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px; }
+        .target-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center; }
+        .target-box { background: #020617; padding: 15px 10px; border-radius: 6px; border: 1px solid var(--border); }
+        .target-lbl { font-size: 10px; margin-bottom: 6px; letter-spacing:1px; font-weight: 700; text-transform: uppercase; }
+        .target-val { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 14px; color: #fff; }
 
-        .logic-row { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
-        .logic-icon { width: 24px; text-align: center; font-size: 14px; margin-right: 10px; }
-        .logic-text { flex: 1; color: var(--text); }
-        .logic-status { font-family: 'JetBrains Mono'; font-size: 10px; padding: 2px 6px; border-radius: 3px; }
+        /* LOGIC STREAM */
+        .logic-row { display: flex; align-items: center; padding: 15px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; }
+        .logic-icon { width: 30px; text-align: center; font-size: 16px; margin-right: 12px; }
+        .logic-text { flex: 1; color: #fff; font-weight: 600; }
+        .logic-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; font-weight: 400; }
+        .logic-status { font-family: 'JetBrains Mono'; font-size: 11px; padding: 4px 8px; border-radius: 4px; font-weight: 700; }
         
-        .status-pass { background: rgba(0,255,157,0.15); color: var(--green); }
-        .status-warn { background: rgba(245,158,11,0.15); color: var(--amber); }
-        .status-wait { background: #1e293b; color: var(--dim); }
+        .status-pass { background: rgba(16, 185, 129, 0.15); color: var(--green); border: 1px solid rgba(16, 185, 129, 0.2); }
+        .status-wait { background: rgba(255,255,255,0.05); color: var(--text-dim); }
 
-        .shield-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
-        .shield-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; }
-
-        /* TELEMETRY BOX (NEW) */
-        .telemetry-box { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 20px; font-family: 'JetBrains Mono'; font-size: 10px; color: var(--dim); }
-        .tele-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
-        .tele-val { color: #fff; font-weight: 700; }
+        /* DATA TABLES */
+        .data-section { margin-top: 25px; }
+        .data-row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px; border-bottom: 1px dashed rgba(255,255,255,0.05); padding-bottom: 5px; }
+        .data-lbl { color: var(--text-dim); font-weight: 500; }
+        .data-val { color: #fff; font-weight: 700; font-family: 'JetBrains Mono'; }
+        .highlight { color: var(--blue); }
     </style>
 </head>
 <body>
@@ -85,9 +94,20 @@
     <div class="top-nav">
         <div class="brand"><div class="blink"></div>PROJECT OMEGA</div>
         <div class="controls">
-            <div id="sessionTimer" class="session-timer">NY FUTURES: LOADING...</div>
-            <div class="status-pill">FERRARI MODE</div>
-            <button id="btnAlert" class="alert-toggle" onclick="toggleAlerts()">ALERTS: OFF</button>
+            <select id="sessionSelect" class="cyber-select" onchange="fetchLiveData()">
+                <option value="us_ny_futures">NY FUTURES</option>
+                <option value="eu_london">LONDON</option>
+                <option value="asia_tokyo">TOKYO</option>
+            </select>
+
+            <button id="btnFerrari" class="toggle-btn ferrari" onclick="toggleFerrari()">
+                FERRARI: OFF
+            </button>
+
+            <button id="btnAlert" class="toggle-btn" onclick="toggleAlerts()">
+                ALERTS: OFF
+            </button>
+
             <a href="/suite" class="back-link">EXIT</a>
         </div>
     </div>
@@ -101,31 +121,37 @@
             </div>
             <div class="input-group">
                 <label class="input-label">RISK PER TRADE (%)</label>
-                <input type="number" id="inpRisk" class="input-field" value="10" oninput="calc()">
+                <input type="number" id="inpRisk" class="input-field" value="1.0" step="0.1" oninput="calc()">
             </div>
-            <div class="input-group" style="margin-top: 20px;">
+            <div class="input-group" style="margin-top: 25px;">
                 <label class="input-label">
                     <span>STOP LOSS PRICE</span>
                     <span id="riskAmt" style="color: var(--red); font-weight: 700;">--</span>
                 </label>
-                <input type="number" id="inpStop" class="input-field" value="94720" oninput="calc()">
+                <input type="number" id="inpStop" class="input-field" value="0" oninput="calc()">
             </div>
             <div class="magic-box">
-                <div class="magic-lbl">TYPE THIS INTO EXCHANGE (USDT)</div>
+                <div class="magic-lbl">EXECUTION SIZE (USDT)</div>
                 <div class="magic-val" id="outUSDT">0</div>
             </div>
         </div>
 
         <div class="panel">
-            <div class="panel-head">MARKET TELEMETRY</div>
+            <div class="panel-head">
+                MARKET TELEMETRY
+                <span id="sessionTimer" style="font-size:11px; color:var(--green); font-weight:700;">ACTIVE</span>
+            </div>
+            
             <div class="price-display">
                 <div class="live-price" id="livePrice">--</div>
-                <div class="trigger-info">TRIGGER: <span id="valTrigger" style="color: #fff;">--</span></div>
+                <div class="trigger-info">ACTIVE TRIGGER: <span id="valTrigger" style="color: #fff; font-weight:800;">WAITING</span></div>
             </div>
+
             <div id="coachPanel" class="coach-banner mode-wait">
                 <div class="coach-title">TACTICAL GUIDANCE</div>
-                <div class="coach-action" id="coachText">CONNECTING...</div>
+                <div class="coach-action" id="coachText">CONNECTING TO PIPELINE...</div>
             </div>
+
             <div class="target-grid">
                 <div class="target-box"><div class="target-lbl" style="color:var(--amber)">SHIELD</div><div class="target-val" id="txtSecure">--</div></div>
                 <div class="target-box"><div class="target-lbl" style="color:var(--green)">TARGET 1</div><div class="target-val" id="txtTP1">--</div></div>
@@ -136,44 +162,61 @@
 
         <div class="panel">
             <div class="panel-head">LOGIC STREAM</div>
+            
             <div class="logic-row">
                 <div class="logic-icon">🚀</div>
-                <div class="logic-text"><div>NY Open Levels</div><div style="font-size:10px; color:var(--dim)">The Foundation</div></div>
-                <div class="logic-status status-pass">LOCKED</div>
+                <div class="logic-text">Session Anchors<div class="logic-sub">Pipeline Connectivity</div></div>
+                <div class="logic-status status-pass" id="status-anchor">LOCKED</div>
             </div>
             <div class="logic-row">
                 <div class="logic-icon">⚡</div>
-                <div class="logic-text"><div>FUSION MODE</div><div style="font-size:10px; color:var(--dim)">Stoch + RSI</div></div>
-                <div class="logic-status status-pass">ACTIVE</div>
+                <div class="logic-text">Analysis Mode<div class="logic-sub" id="mode-text">Standard Logic</div></div>
+                <div class="logic-status status-pass" id="status-mode">ACTIVE</div>
             </div>
-            <div class="shield-section">
-                <div class="panel-head">TRADE MANAGEMENT</div>
-                <div class="shield-row">
-                    <span class="shield-lbl">Current Zone</span>
-                    <span class="shield-val" style="color: var(--blue);" id="zoneText">--</span>
+
+            <div class="data-section">
+                <div class="panel-head" style="margin-top: 10px; border-bottom: none; font-size: 12px; color: var(--blue);">TRADE MANAGEMENT</div>
+                <div class="data-row">
+                    <span class="data-lbl">CURRENT ZONE</span>
+                    <span class="data-val highlight" id="zoneText">--</span>
                 </div>
-                <div class="shield-row" style="margin-top: 15px;">
-                    <span class="shield-lbl">CONTEXT</span>
-                    <span class="shield-val" id="contextFlag" style="color: var(--purple);">--</span>
+                <div class="data-row">
+                    <span class="data-lbl">CONTEXT</span>
+                    <span class="data-val" id="contextFlag" style="color: var(--purple);">--</span>
                 </div>
             </div>
 
-            <div class="telemetry-box">
-                <div style="margin-bottom: 10px; font-weight: 700; color: var(--blue); font-size:11px;">VERIFICATION DATA</div>
-                <div class="tele-row"><span>R30 HIGH</span><span id="v-r30h" class="tele-val">--</span></div>
-                <div class="tele-row"><span>R30 LOW</span><span id="v-r30l" class="tele-val">--</span></div>
-                <div class="tele-row"><span>DAILY RES</span><span id="v-dr" class="tele-val">--</span></div>
-                <div class="tele-row"><span>DAILY SUP</span><span id="v-ds" class="tele-val">--</span></div>
+            <div class="data-section">
+                <div class="panel-head" style="margin-top: 10px; border-bottom: none; font-size: 12px; color: var(--green);">SESSION TRIGGERS</div>
+                <div class="data-row">
+                    <span class="data-lbl">BREAKOUT (BO)</span>
+                    <span class="data-val" id="v-bo" style="color: var(--green);">--</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-lbl">BREAKDOWN (BD)</span>
+                    <span class="data-val" id="v-bd" style="color: var(--red);">--</span>
+                </div>
+            </div>
+
+            <div class="data-section">
+                <div class="panel-head" style="margin-top: 10px; border-bottom: none; font-size: 12px; color: var(--text-dim);">VERIFICATION DATA</div>
+                <div class="data-row"><span class="data-lbl">R30 HIGH</span><span id="v-r30h" class="data-val">--</span></div>
+                <div class="data-row"><span class="data-lbl">R30 LOW</span><span id="v-r30l" class="data-val">--</span></div>
+                <div class="data-row"><span class="data-lbl">DAILY RES</span><span id="v-dr" class="data-val">--</span></div>
+                <div class="data-row"><span class="data-lbl">DAILY SUP</span><span id="v-ds" class="data-val">--</span></div>
             </div>
         </div>
     </div>
 
     <script>
-        const API_ENDPOINT = '/api/black-ops/status'; 
-        let currentPrice = 0, triggerPrice = 0, isBlueSky = false, alertsEnabled = false, lastZone = "PRE-GAME";
+        const API_ENDPOINT = '/api/omega/status'; 
+        let currentPrice = 0, triggerPrice = 0, isBlueSky = false;
+        let ferrariMode = false, alertsEnabled = false, lastZone = "PRE-GAME";
 
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
         function playPing() {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.connect(gain);
@@ -187,63 +230,88 @@
             const btn = document.getElementById('btnAlert');
             if(alertsEnabled) {
                 btn.innerText = "ALERTS: ON"; btn.classList.add('active');
-                if (audioCtx.state === 'suspended') audioCtx.resume();
                 playPing();
-                if ("Notification" in window && Notification.permission !== "granted") Notification.requestPermission();
             } else {
                 btn.innerText = "ALERTS: OFF"; btn.classList.remove('active');
             }
         }
 
+        function toggleFerrari() {
+            ferrariMode = !ferrariMode;
+            const btn = document.getElementById('btnFerrari');
+            const txt = document.getElementById('mode-text');
+            if(ferrariMode) {
+                btn.innerText = "FERRARI: ON"; btn.classList.add('active');
+                txt.innerText = "Aggressive Logic";
+            } else {
+                btn.innerText = "FERRARI: OFF"; btn.classList.remove('active');
+                txt.innerText = "Standard Logic";
+            }
+            fetchLiveData(); // Refresh immediately
+        }
+
         async function fetchLiveData() {
+            const sessId = document.getElementById('sessionSelect').value;
             try {
-                const res = await fetch(API_ENDPOINT, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ symbol: "BTCUSDT" }) });
+                const res = await fetch(API_ENDPOINT, { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ 
+                        symbol: "BTCUSDT",
+                        session_id: sessId,
+                        ferrari_mode: ferrariMode 
+                    }) 
+                });
                 const data = await res.json();
                 
                 if(data.price) {
                     currentPrice = data.price;
                     document.getElementById('livePrice').innerText = currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2});
                     
-                    if (data.execution && data.execution.entry) {
+                    // UPDATE TRIGGERS
+                    const t = data.triggers || {};
+                    const bo = t.BO || 0;
+                    const bd = t.BD || 0;
+                    
+                    document.getElementById('v-bo').innerText = bo > 0 ? bo.toLocaleString() : "--";
+                    document.getElementById('v-bd').innerText = bd > 0 ? bd.toLocaleString() : "--";
+
+                    // LOGIC STATE
+                    if (data.execution && data.execution.entry > 0) {
                         triggerPrice = data.execution.entry;
                         isBlueSky = (data.strength && data.strength.is_blue_sky);
-                        if(data.execution.stop_loss && document.getElementById('inpStop').value == 94720) document.getElementById('inpStop').value = data.execution.stop_loss;
-                    } else if (data.triggers) {
-                        const t = data.triggers;
-                        triggerPrice = t.BO > 0 ? t.BO : t.BD; 
+                        // Auto-fill Stop Loss if not set
+                        const inputStop = document.getElementById('inpStop');
+                        if (data.execution.stop_loss > 0 && (inputStop.value == "0" || inputStop.value == "")) {
+                            inputStop.value = data.execution.stop_loss;
+                        }
+                    } else {
+                        triggerPrice = 0;
                     }
 
                     if (triggerPrice > 0) {
-                        document.getElementById('valTrigger').innerText = triggerPrice.toLocaleString(undefined, {maximumFractionDigits: 0});
+                        document.getElementById('valTrigger').innerText = triggerPrice.toLocaleString();
                         const ctxText = isBlueSky ? "BLUE SKY (EAGLE)" : "STRUCTURE (VULTURE)";
                         document.getElementById('contextFlag').innerText = ctxText;
                         document.getElementById('contextFlag').style.color = isBlueSky ? "var(--purple)" : "var(--amber)";
+                    } else {
+                        document.getElementById('valTrigger').innerText = "WAITING";
                     }
 
-                    if (data.telemetry) {
-                        const t = data.telemetry;
-                        const now = Date.now() / 1000;
-                        const diff = (t.next_event_ts || 0) - now;
-                        let label = t.session_state === "CLOSED" ? "MARKET CLOSED" : "CALIBRATING";
-
-                        if (diff > 0 && t.session_state !== "ACTIVE") {
-                            const hrs = Math.floor(diff / 3600);
-                            const min = Math.floor((diff % 3600) / 60);
-                            const sec = Math.floor(diff % 60);
-                            document.getElementById('sessionTimer').innerText = `${label}: ${hrs}:${min.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
-                            document.getElementById('sessionTimer').style.color = "var(--dim)";
-                        } else {
-                            document.getElementById('sessionTimer').innerText = "NY FUTURES: ACTIVE";
-                            document.getElementById('sessionTimer').style.color = "var(--green)";
-                        }
-
-                        if (t.verification) {
-                            document.getElementById('v-r30h').innerText = t.verification.r30_high.toFixed(2);
-                            document.getElementById('v-r30l').innerText = t.verification.r30_low.toFixed(2);
-                            document.getElementById('v-dr').innerText = t.verification.daily_res.toFixed(2);
-                            document.getElementById('v-ds').innerText = t.verification.daily_sup.toFixed(2);
-                        }
+                    // UPDATE VERIFICATION DATA
+                    if (data.telemetry && data.telemetry.verification) {
+                        const v = data.telemetry.verification;
+                        document.getElementById('v-r30h').innerText = v.r30_high ? v.r30_high.toFixed(2) : "--";
+                        document.getElementById('v-r30l').innerText = v.r30_low ? v.r30_low.toFixed(2) : "--";
+                        document.getElementById('v-dr').innerText = v.daily_res ? v.daily_res.toFixed(2) : "--";
+                        document.getElementById('v-ds').innerText = v.daily_sup ? v.daily_sup.toFixed(2) : "--";
+                        
+                        // Status Pill
+                        const state = data.telemetry.session_state || "ACTIVE";
+                        document.getElementById('sessionTimer').innerText = state;
+                        document.getElementById('sessionTimer').style.color = state === "ACTIVE" ? "var(--green)" : "var(--amber)";
                     }
+                    
                     calc();
                 }
             } catch(e) { console.error(e); }
@@ -255,10 +323,15 @@
             const msg = document.getElementById('coachText');
             const zTxt = document.getElementById('zoneText');
             let zone = "";
+            
+            // Reset styles
             coach.className = "coach-banner"; 
 
             if (triggerPrice === 0) {
-                coach.classList.add('mode-wait'); msg.innerText = "CALIBRATING NY RANGE..."; zTxt.innerText = "STANDBY"; return; 
+                coach.classList.add('mode-wait'); 
+                msg.innerText = "WAITING FOR BREAKOUT"; 
+                zTxt.innerText = "PRE-GAME"; 
+                return; 
             }
 
             const bal = parseFloat(document.getElementById('inpBal').value) || 0;
@@ -276,31 +349,39 @@
             }
 
             const riskDist = Math.abs(triggerPrice - stopPrice);
-            const secure = triggerPrice + (riskDist * 0.5); 
+            // Default risk dist if stop is 0 (prevents div by zero visuals)
+            const safeDist = riskDist > 0 ? riskDist : (currentPrice * 0.005); 
+            
+            const secure = triggerPrice + (safeDist * 0.5); 
             document.getElementById('txtSecure').innerText = secure.toLocaleString(undefined, {maximumFractionDigits:0});
-            document.getElementById('txtTP1').innerText = (triggerPrice + riskDist).toLocaleString(undefined, {maximumFractionDigits:0});
-            document.getElementById('txtTP2').innerText = (triggerPrice + (riskDist*2)).toLocaleString(undefined, {maximumFractionDigits:0});
-            document.getElementById('txtTP3').innerText = (triggerPrice + (riskDist*3)).toLocaleString(undefined, {maximumFractionDigits:0});
+            document.getElementById('txtTP1').innerText = (triggerPrice + safeDist).toLocaleString(undefined, {maximumFractionDigits:0});
+            document.getElementById('txtTP2').innerText = (triggerPrice + (safeDist*2)).toLocaleString(undefined, {maximumFractionDigits:0});
+            document.getElementById('txtTP3').innerText = (triggerPrice + (safeDist*3)).toLocaleString(undefined, {maximumFractionDigits:0});
 
+            // ZONE LOGIC
+            // NOTE: This logic assumes LONG for simplicity in this view. 
+            // Ideally backend sends "Side" (Long/Short) to flip the math.
             if (currentPrice < triggerPrice) {
-                coach.classList.add('mode-wait'); msg.innerText = "WAITING FOR BREAKOUT"; zTxt.innerText = "PRE-GAME"; zone = "PRE";
+                coach.classList.add('mode-wait'); msg.innerText = "WAITING FOR ENTRY"; zTxt.innerText = "PRE-GAME"; zone = "PRE";
             } else if (currentPrice >= triggerPrice && currentPrice < secure) {
-                coach.classList.add('mode-entry'); msg.innerText = "MARKET BUY // ACTIVE"; zTxt.innerText = "ENTRY ZONE"; zone = "ENTRY";
-            } else if (currentPrice >= secure && currentPrice < (triggerPrice + riskDist)) {
-                coach.classList.add('mode-secure'); msg.innerText = isBlueSky ? "HOLD (EAGLE MODE)" : "MOVE STOP TO B.E. (VULTURE)"; zTxt.innerText = "SECURE ZONE"; zone = "SECURE";
-            } else if (currentPrice >= (triggerPrice + riskDist)) {
-                coach.classList.add('mode-profit'); msg.innerText = isBlueSky ? "HOLD FOR TP3 (EAGLE)" : "SELL 75% (VULTURE)"; zTxt.innerText = "PROFIT ZONE"; zone = "PROFIT";
+                coach.classList.add('mode-entry'); msg.innerText = "MARKET EXECUTE // ACTIVE"; zTxt.innerText = "ENTRY ZONE"; zone = "ENTRY";
+            } else if (currentPrice >= secure && currentPrice < (triggerPrice + safeDist)) {
+                coach.classList.add('mode-secure'); msg.innerText = "SECURE POSITION // B.E."; zTxt.innerText = "SECURE ZONE"; zone = "SECURE";
+            } else if (currentPrice >= (triggerPrice + safeDist)) {
+                coach.classList.add('mode-profit'); msg.innerText = "PROFIT RUNNING // SCALE OUT"; zTxt.innerText = "PROFIT ZONE"; zone = "PROFIT";
             }
 
             if (zone !== lastZone && zone !== "") {
                 if (alertsEnabled) {
                     playPing();
-                    if ("Notification" in window && Notification.permission === "granted") new Notification("OMEGA // " + zTxt.innerText, { body: msg.innerText + "\nPrice: " + currentPrice.toLocaleString() });
                 }
                 lastZone = zone;
             }
         }
-        setInterval(fetchLiveData, 2000); fetchLiveData(); 
+        
+        // Initial Load
+        setInterval(fetchLiveData, 2000); 
+        fetchLiveData(); 
     </script>
 </body>
 </html>
