@@ -43,54 +43,61 @@ app.include_router(auth.router)
 def on_startup():
     init_db()
     
-    # --- SAFE MIGRATION (DATA SAVER) ---
-    # This checks for missing columns and adds them WITHOUT deleting users.
-    print(">>> CHECKING DATABASE HEALTH...")
+    # --- DB REPAIR (SAFE) ---
+    print(">>> RUNNING SAFE DB REPAIR...")
     try:
         with engine.connect() as conn:
-            # Get existing columns
             inspector = inspect(engine)
             existing_cols = [c['name'] for c in inspector.get_columns("users")]
             
-            # 1. Fix 'is_admin' (Critical for login)
-            if "is_admin" not in existing_cols:
-                print(">>> MIGRATION: Adding missing 'is_admin' column...")
-                conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE"))
-                conn.commit()
+            required = {
+                "is_admin": "BOOLEAN DEFAULT FALSE",
+                "operator_flex": "BOOLEAN DEFAULT FALSE",
+                "tradingview_id": "VARCHAR",
+                "username": "VARCHAR",
+                "session_tz": "VARCHAR DEFAULT 'America/New_York'"
+            }
 
-            # 2. Fix 'operator_flex' (Critical for Battle Control)
-            if "operator_flex" not in existing_cols:
-                print(">>> MIGRATION: Adding missing 'operator_flex' column...")
-                conn.execute(text("ALTER TABLE users ADD COLUMN operator_flex BOOLEAN DEFAULT FALSE"))
-                conn.commit()
-
-            # 3. Fix 'tradingview_id' (For Account page)
-            if "tradingview_id" not in existing_cols:
-                print(">>> MIGRATION: Adding missing 'tradingview_id' column...")
-                conn.execute(text("ALTER TABLE users ADD COLUMN tradingview_id VARCHAR"))
-                conn.commit()
-                
-            # 4. Fix 'username' (For Account page)
-            if "username" not in existing_cols:
-                print(">>> MIGRATION: Adding missing 'username' column...")
-                conn.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR"))
-                conn.commit()
-
-            # 5. Fix 'session_tz'
-            if "session_tz" not in existing_cols:
-                print(">>> MIGRATION: Adding missing 'session_tz' column...")
-                conn.execute(text("ALTER TABLE users ADD COLUMN session_tz VARCHAR DEFAULT 'America/New_York'"))
-                conn.commit()
-
-            print(">>> DATABASE INTEGRITY SECURED.")
-            
+            for col, dtype in required.items():
+                if col not in existing_cols:
+                    print(f">>> ADDING MISSING COLUMN: {col}")
+                    try:
+                        conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {dtype}"))
+                        conn.commit()
+                    except Exception as e:
+                        print(f"Failed to add {col}: {e}")
+            print(">>> DB REPAIR COMPLETE.")
     except Exception as e:
-        print(f">>> MIGRATION WARNING: {str(e)}")
-        # We continue even if this fails, as the DB might be locked or fine.
+        print(f">>> DB REPAIR WARNING: {str(e)}")
 
 @app.get("/health")
 def health():
     return {"ok": True}
+
+# --- EMERGENCY BACKDOOR (REMOVE LATER) ---
+@app.get("/emergency-login")
+def emergency_login(request: Request, db: Session = Depends(get_db)):
+    target_email = "spiritmaker79@gmail.com"
+    user = db.query(UserModel).filter(UserModel.email == target_email).first()
+    
+    if not user:
+        # Create user if missing
+        user = UserModel(
+            email=target_email,
+            password_hash=auth.hash_password("kabroda123"),
+            is_admin=True,
+            operator_flex=True
+        )
+        db.add(user)
+        db.commit()
+    else:
+        # Upgrade existing user
+        user.is_admin = True
+        user.operator_flex = True
+        db.commit()
+        
+    request.session[auth.SESSION_KEY] = int(user.id)
+    return RedirectResponse("/suite", status_code=303)
 
 # ==========================================
 # PUBLIC PAGES
@@ -145,7 +152,6 @@ def suite_home(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
     
-    # Debug fallback if needed
     is_admin = False
     if user:
         is_admin = getattr(user, "is_admin", False)
