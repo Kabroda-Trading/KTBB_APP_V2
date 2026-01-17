@@ -15,25 +15,27 @@
         }
         body { background: var(--bg); color: var(--text-main); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; box-sizing: border-box; }
         
+        /* UTILITIES */
         .top-nav { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 25px; flex-wrap: wrap; gap:10px; }
         .brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 24px; display: flex; align-items: center; gap: 12px; }
         .blink { animation: blinker 2s linear infinite; width: 12px; height: 12px; background: var(--green); border-radius: 50%; box-shadow: 0 0 10px var(--green); }
         @keyframes blinker { 50% { opacity: 0.3; } }
 
+        /* LAYOUT */
         .war-room { display: grid; grid-template-columns: 340px 1fr 340px; gap: 25px; }
         @media (max-width: 1100px) { .war-room { grid-template-columns: 1fr; } }
 
         .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 25px; display: flex; flex-direction: column; }
         .panel-head { font-family: 'JetBrains Mono'; font-size: 14px; font-weight: 800; letter-spacing: 1px; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px; display:flex; justify-content:space-between; }
 
+        /* INPUTS */
         .input-group { margin-bottom: 15px; }
         .input-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); margin-bottom: 6px; font-family: 'JetBrains Mono'; font-weight: 600; }
         .input-field { width: 100%; background: #020617; border: 1px solid var(--border); color: #fff; padding: 12px; font-family: 'JetBrains Mono'; font-size: 15px; text-align: right; box-sizing: border-box; outline: none; border-radius: 6px; }
-        
         .copy-btn { background: #1e293b; border: none; color: #fff; border-radius: 4px; padding: 5px 10px; font-size: 10px; font-weight: 700; cursor: pointer; font-family: 'JetBrains Mono'; margin-left: 10px; }
         .copy-btn:hover { background: #334155; }
-        .copy-btn:active { background: var(--green); }
 
+        /* CENTER DISPLAY */
         .price-display { text-align: center; margin-bottom: 30px; }
         .live-price { font-size: 80px; font-weight: 900; letter-spacing: -3px; line-height: 1; color: #fff; text-shadow: 0 0 40px rgba(255,255,255,0.1); }
         
@@ -41,19 +43,32 @@
         .theme-lbl { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 12px; font-weight: 700; }
         .theme-val { font-size: 32px; font-weight: 900; font-family: 'JetBrains Mono'; line-height: 1.1; color: #fff; }
         
+        /* THEMES */
         .mode-sonic { border-color: var(--sonic-color); box-shadow: 0 0 40px var(--sonic-glow); }
         .mode-sonic .theme-lbl { color: var(--sonic-color); }
         .mode-sonic::before { content: "⚡ SUPERSONIC"; position: absolute; top: 10px; right: 10px; font-size: 10px; color: var(--sonic-color); font-family: 'JetBrains Mono'; font-weight: 800; border: 1px solid var(--sonic-color); padding: 2px 6px; border-radius: 4px; }
+
+        .mode-sniper { border-color: var(--sniper-color); box-shadow: 0 0 40px var(--sniper-glow); background: radial-gradient(circle at center, rgba(16, 185, 129, 0.05) 0%, #020617 70%); }
+        .mode-sniper .theme-lbl { color: var(--sniper-color); }
+        .mode-sniper::before { content: "⌖ SNIPER"; position: absolute; top: 10px; right: 10px; font-size: 10px; color: var(--sniper-color); font-family: 'JetBrains Mono'; font-weight: 800; border: 1px solid var(--sniper-color); padding: 2px 6px; border-radius: 4px; }
 
         .mode-dogfight { border-color: var(--dog-color); box-shadow: 0 0 40px var(--dog-glow); }
         .mode-dogfight .theme-lbl { color: var(--dog-color); }
         .mode-dogfight::before { content: "⚠ DOGFIGHT"; position: absolute; top: 10px; right: 10px; font-size: 10px; color: var(--dog-color); font-family: 'JetBrains Mono'; font-weight: 800; border: 1px solid var(--dog-color); padding: 2px 6px; border-radius: 4px; }
 
+        /* EXECUTION OVERRIDE */
+        .exec-active { border-color: #fff !important; box-shadow: 0 0 50px rgba(255,255,255,0.3) !important; background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, rgba(2,6,23,1) 70%) !important; }
+        .exec-active .theme-lbl { color: #fff !important; animation: pulse 1s infinite; }
+        .exec-active .theme-val { color: #fff !important; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+        /* TARGET GRID */
         .target-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center; }
         .target-box { background: #020617; padding: 15px 10px; border-radius: 6px; border: 1px solid var(--border); }
         .target-lbl { font-size: 10px; margin-bottom: 6px; letter-spacing:1px; font-weight: 700; text-transform: uppercase; color: var(--text-dim); }
         .target-val { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 14px; color: #fff; }
 
+        /* TOGGLES */
         .tactical-toggle { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
         .side-btn { background: #020617; border: 1px solid var(--border); color: var(--text-dim); padding: 8px 20px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 12px; cursor: pointer; font-weight: 700; text-transform: uppercase; }
         .side-btn:hover { border-color: #fff; color: #fff; }
@@ -62,7 +77,8 @@
 
         .cyber-select { background: #020617; color: #fff; border: 1px solid var(--border); padding: 8px 12px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; text-transform: uppercase; outline: none; cursor: pointer; height: 34px; }
         .toggle-btn { background: transparent; border: 1px solid var(--text-dim); color: var(--text-dim); padding: 0 14px; height: 34px; font-family: 'JetBrains Mono'; font-size: 11px; cursor: pointer; border-radius: 4px; transition: 0.2s; font-weight: 700; text-transform: uppercase; }
-        .toggle-btn.active { background: var(--sonic-color); color: #000; border-color: var(--sonic-color); }
+        .toggle-btn.active { background: var(--red); color: #fff; border-color: var(--red); } /* FERRARI RED */
+        
         .data-row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px; border-bottom: 1px dashed rgba(255,255,255,0.05); padding-bottom: 5px; }
 
         .kinetic-bar { margin-top: 20px; padding: 15px; background: #0f172a; border: 1px solid var(--border); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; }
@@ -86,7 +102,7 @@
                 <option value="us_ny_futures">NY FUTURES</option>
                 <option value="eu_london">LONDON</option>
             </select>
-            <button id="btnFerrari" class="toggle-btn" onclick="toggleFerrari()">SUPERSONIC: OFF</button>
+            <button id="btnFerrari" class="toggle-btn" onclick="toggleFerrari()">FERRARI: OFF</button>
             <a href="/suite" class="toggle-btn" style="display:flex; align-items:center; text-decoration:none;">EXIT</a>
         </div>
     </div>
@@ -191,8 +207,8 @@
         function toggleFerrari() {
             ferrari = !ferrari;
             const btn = document.getElementById('btnFerrari');
-            if(ferrari) { btn.innerText = "SUPERSONIC: ON"; btn.classList.add('active'); }
-            else { btn.innerText = "SUPERSONIC: OFF"; btn.classList.remove('active'); }
+            if(ferrari) { btn.innerText = "FERRARI: ON"; btn.classList.add('active'); }
+            else { btn.innerText = "FERRARI: OFF"; btn.classList.remove('active'); }
             fetchLiveData();
         }
 
@@ -230,25 +246,43 @@
             const trigger = plan.trigger;
             const stop = plan.stop;
             const targets = plan.targets || [0,0,0,0];
-            
-            // LOCKED SESSION MODE (Data Stream)
-            const sessionMode = globalData.session_mode; // Fixed from backend
+            const sessionMode = globalData.session_mode;
 
+            // --- CENTER CONSOLE LOGIC ---
             const card = document.getElementById('themeCard');
             const title = document.getElementById('themeTitle');
             const desc = document.getElementById('themeDesc');
             
-            // Card Theme follows SESSION MODE
+            // Default Theme
             card.className = "theme-card";
             if (sessionMode === "SUPERSONIC") card.classList.add('mode-sonic');
+            else if (sessionMode === "SNIPER") card.classList.add('mode-sniper');
             else card.classList.add('mode-dogfight');
 
-            document.getElementById('triggerPrice').innerText = trigger.toLocaleString();
-            title.innerText = activeSide + " ENTRY PLAN"; // FIXED TITLE
-            desc.innerText = activeSide + " TRIGGER"; // CLEAN DESC
+            // STATUS OVERRIDE: Is the Trade Live?
+            const status = globalData.status; // STANDBY, LOCKED, EXECUTING
             
-            document.getElementById('txtMode').innerText = sessionMode; // LOCKED
+            if (status === "EXECUTING") {
+                // ACTIVE TRADE
+                card.classList.add("exec-active"); // Special Flash Theme
+                title.innerText = "MARKET EXECUTE // ACTIVE";
+                desc.innerText = activeSide + " BREAKOUT CONFIRMED - DEPLOY";
+                document.getElementById('triggerPrice').innerText = globalData.price.toLocaleString(undefined, {minimumFractionDigits:2}); // Show live price in box? Or Trigger? Keep Trigger for ref.
+            } else if (status === "LOCKED") {
+                // NEAR TRIGGER
+                title.innerText = "TARGET LOCKED // PREPARING";
+                desc.innerText = "PRICE NEAR " + activeSide + " TRIGGER";
+                document.getElementById('triggerPrice').innerText = trigger.toLocaleString();
+            } else {
+                // STANDBY (PLANNING)
+                title.innerText = activeSide + " ENTRY PLAN";
+                desc.innerText = activeSide + " TRIGGER (" + sessionMode + " CONTEXT)";
+                document.getElementById('triggerPrice').innerText = trigger.toLocaleString();
+            }
+
+            document.getElementById('txtMode').innerText = sessionMode;
             if (sessionMode === "SUPERSONIC") document.getElementById('txtMode').style.color = "var(--sonic-color)";
+            else if (sessionMode === "SNIPER") document.getElementById('txtMode').style.color = "var(--sniper-color)";
             else document.getElementById('txtMode').style.color = "var(--dog-color)";
 
             document.getElementById('tShield').innerText = targets[0].toLocaleString();

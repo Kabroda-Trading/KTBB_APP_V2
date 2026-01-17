@@ -1,9 +1,9 @@
 # project_omega.py
 # ==============================================================================
-# PROJECT OMEGA ENGINE (LOCKED KINETIC + STABLE MODE)
+# PROJECT OMEGA ENGINE (KINETIC AUTHORITY)
 # ==============================================================================
-# - Kinetic Score: Now calculated against SESSION OPEN (Anchor), not live price.
-# - Stability: Score and Mode remain static unless session changes.
+# - Logic: "Current Mode" is now exclusively driven by Kinetic Readiness.
+# - Output: SUPERSONIC, SNIPER, or DOGFIGHT.
 # ==============================================================================
 
 from __future__ import annotations
@@ -13,19 +13,20 @@ import battlebox_pipeline
 import session_manager
 
 # ----------------------------
-# KINETIC MATH ENGINE (LOCKED)
+# KINETIC MATH ENGINE
 # ----------------------------
 def _calc_kinetic_score(
-    anchor_price: float, # CHANGED: Uses Session Open, not Live Price
+    anchor_price: float, 
     levels: Dict[str, float], 
     context: Dict[str, Any], 
-    shelves: Dict[str, Any]
+    shelves: Dict[str, Any],
+    side: str
 ) -> Dict[str, Any]:
     
     score = 0
     breakdown = {}
     
-    # 1. ENERGY (30 pts) - Calculated off Anchor Price
+    # 1. ENERGY (30 pts)
     dr = levels.get("daily_resistance", 0)
     ds = levels.get("daily_support", 0)
     range_size = abs(dr - ds)
@@ -42,20 +43,14 @@ def _calc_kinetic_score(
         score += 0; breakdown['energy'] = "EXHAUSTED (+0)"
         energy_desc = "🪫 Market energy is exhausted."
 
-    # 2. SPACE (30 pts) - Checks BOTH sides for Blue Sky
+    # 2. SPACE (30 pts)
     atr = levels.get("atr", range_size * 0.25) 
     if atr == 0: atr = anchor_price * 0.01 
     
-    bo = levels.get("breakout_trigger", 0)
-    bd = levels.get("breakdown_trigger", 0)
-    
-    # Check Gap for Long and Short
-    gap_long = abs(dr - bo)
-    gap_short = abs(ds - bd)
-    
-    # We score based on the BEST available runway (Optimistic Outlook)
-    best_gap = max(gap_long, gap_short)
-    r_multiple = best_gap / atr
+    trigger = levels.get("breakout_trigger") if side == "LONG" else levels.get("breakdown_trigger")
+    target = dr if side == "LONG" else ds
+    gap = abs(target - trigger)
+    r_multiple = gap / atr
     
     space_desc = ""
     if r_multiple > 2.0:
@@ -79,20 +74,24 @@ def _calc_kinetic_score(
     if shelf_strength > 0.5: score += 10; breakdown['structure'] = "SOLID (+10)"
     else: score += 0; breakdown['structure'] = "MESSY (+0)"
 
-    # 5. LOCATION (10 pts) - Proximity at Open
-    # Checks if we opened near a trigger
+    # 5. LOCATION (10 pts)
+    dist_to_trigger = abs(price - trigger) if 'price' in locals() else 0 # Safety if needed, but we use anchor mostly
+    # For static score, we assume "Primed" if open is within range.
+    # Actually, let's use the anchor proximity to trigger.
+    bo = levels.get("breakout_trigger")
+    bd = levels.get("breakdown_trigger")
     dist_long = abs(anchor_price - bo)
     dist_short = abs(anchor_price - bd)
     closest_dist = min(dist_long, dist_short)
-    
+
     if closest_dist < (atr * 0.5): score += 10; breakdown['location'] = "PRIMED (+10)"
     else: score += 0; breakdown['location'] = "CHASING (+0)"
 
-    # PROTOCOL ROUTER
+    # PROTOCOL ROUTER (The Authority)
     brief = f"{energy_desc} {space_desc}"
     
     if score >= 71:
-        protocol = "FERRARI"
+        protocol = "SUPERSONIC"
         color = "CYAN"
         instruction = "🔥 MOMENTUM OVERRIDE ACTIVE. DEPLOY AGGRESSIVE."
         brief += " Volatility expected to be impulsive. Strike fast."
@@ -119,12 +118,10 @@ def _calc_kinetic_score(
 def _calc_targets(entry: float, stop: float, dr: float, ds: float, side: str) -> Dict[str, Any]:
     if entry <= 0: return {"targets": [], "mode": "WAITING"}
     
-    # TERRITORY CHECK (Binary: Supersonic vs Dogfight)
+    # Just used for target calculation scaling, not mode determination anymore
     is_supersonic = False
     if side == "LONG" and entry > dr: is_supersonic = True
     if side == "SHORT" and entry < ds: is_supersonic = True
-    
-    mode_name = "SUPERSONIC" if is_supersonic else "DOGFIGHT"
     
     energy = abs(dr - ds)
     if energy == 0: energy = entry * 0.01
@@ -145,7 +142,7 @@ def _calc_targets(entry: float, stop: float, dr: float, ds: float, side: str) ->
             t1 = ds; t2 = ds - (energy * 0.5); t3 = ds - energy
         targets = [int(shield), int(t1), int(t2), int(t3)]
 
-    return {"targets": targets, "mode": mode_name, "stop": stop}
+    return {"targets": targets, "stop": stop}
 
 async def get_omega_status(
     symbol: str = "BTCUSDT",
@@ -170,7 +167,6 @@ async def get_omega_status(
         shelves = box.get("htf_shelves", {})
         session_meta = box.get("session", {})
         
-        # EXTRACT SESSION OPEN (ANCHOR) for Static Scoring
         anchor_price = levels.get("session_open_price") or current_price
         
         bo = float(levels.get("breakout_trigger", 0.0))
@@ -182,12 +178,6 @@ async def get_omega_status(
         
         plan_long = _calc_targets(bo, r30_low, dr, ds, "LONG")
         plan_short = _calc_targets(bd, r30_high, dr, ds, "SHORT")
-
-        # Determine DOMINANT SESSION MODE (Static)
-        # If either side offers Supersonic, the Session Potential is Supersonic
-        session_mode = "DOGFIGHT"
-        if plan_long["mode"] == "SUPERSONIC" or plan_short["mode"] == "SUPERSONIC":
-            session_mode = "SUPERSONIC"
 
         status = "STANDBY"
         active_side = "NONE"
@@ -202,8 +192,11 @@ async def get_omega_status(
         
         closest_side = "LONG" if (current_price >= (bo + bd)/2) else "SHORT"
         
-        # CALC STATIC KINETIC SCORE
-        kinetic = _calc_kinetic_score(anchor_price, levels, context, shelves)
+        # 1. CALCULATE KINETIC SCORE
+        kinetic = _calc_kinetic_score(anchor_price, levels, context, shelves, active_side if active_side != "NONE" else closest_side)
+        
+        # 2. SET SESSION MODE FROM KINETIC (The New Authority)
+        session_mode = kinetic["protocol"] # SUPERSONIC, SNIPER, or DOGFIGHT
 
         return {
             "ok": True,
@@ -214,7 +207,7 @@ async def get_omega_status(
             "price": current_price,
             "active_side": active_side,
             "closest_side": closest_side,
-            "session_mode": session_mode, # NEW: The locked mode for the session
+            "session_mode": session_mode, # Controlled by Kinetic now
             "kinetic": kinetic,
             "plans": {
                 "LONG": {"trigger": bo, "stop": r30_low, "targets": plan_long["targets"]},
