@@ -53,8 +53,8 @@ def generate_report(data_json: Dict[str, Any], api_key: str) -> str:
     try:
         genai.configure(api_key=api_key)
         
-        # UPGRADED MODEL: gemini-1.5-flash is faster and more stable
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # FIXED: Use 'gemini-pro' (The stable, universal standard)
+        model = genai.GenerativeModel('gemini-pro')
 
         # Convert JSON to string for the prompt
         prompt_content = f"""
