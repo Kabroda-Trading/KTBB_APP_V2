@@ -379,7 +379,14 @@ async def run_research_api(request: Request):
     # NEW: Simulation Inputs
     sim_settings = payload.get("simulation", {})
     use_ai = payload.get("use_ai", False)
-    ai_key = payload.get("ai_key", "") # Or get from os.getenv
+    
+    # SECURITY LOGIC: 
+    # 1. Try to get key from the Frontend Input
+    ai_key = payload.get("ai_key", "").strip()
+    
+    # 2. If Frontend input is empty, use the Render Environment Variable
+    if not ai_key:
+        ai_key = os.getenv("GEMINI_API_KEY", "")
 
     # 2. CONVERT DATES TO TIMESTAMPS
     try:
