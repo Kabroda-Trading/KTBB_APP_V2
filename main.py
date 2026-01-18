@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text, inspect
 
 import auth
-from database import init_db, get_db, UserModel, engine
+from database import init_db, get_db, UserModel, SystemLog, engine
 
 # CORE ENGINES
 import project_omega
@@ -179,6 +179,66 @@ def admin_page(request: Request, db: Session = Depends(get_db)):
 
     users = db.query(UserModel).all()
     return _template_or_fallback(request, templates, "admin.html", {"request": request, "users": users})
+
+# ==========================================
+# SYSTEM MONITOR (ADMIN DASHBOARD)
+# ==========================================
+
+@app.get("/suite/system-monitor", response_class=HTMLResponse)
+def system_monitor_page(request: Request, db: Session = Depends(get_db)):
+    # 1. Security Check
+    user_id = request.session.get(auth.SESSION_KEY)
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if not user or not user.is_admin:
+        return RedirectResponse("/account")
+
+    # 2. Fetch Logs (Last 50)
+    logs = db.query(SystemLog).order_by(SystemLog.timestamp.desc()).limit(50).all()
+
+    # 3. Drift Check Data
+    now_utc = datetime.now(timezone.utc)
+    
+    # 4. Render
+    return _template_or_fallback(
+        request, templates, "system_dashboard.html", 
+        {"request": request, "user": user, "logs": logs, "server_time": now_utc}
+    )
+
+@app.post("/api/system/log-clear")
+async def clear_system_logs(request: Request, db: Session = Depends(get_db)):
+    # Simple cleanup
+    user_id = request.session.get(auth.SESSION_KEY)
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if user and user.is_admin:
+        db.query(SystemLog).delete()
+        db.commit()
+        return JSONResponse({"ok": True})
+    return JSONResponse({"ok": False}, status_code=403)
+
+@app.post("/api/omega/simulate")
+async def omega_simulation_api(request: Request):
+    """
+    The Stress Test Endpoint.
+    Accepts fake time/price and returns what Omega WOULD do.
+    """
+    try:
+        payload = await request.json()
+        
+        # Inputs
+        sim_time = payload.get("time")  # "09:30"
+        sim_price = float(payload.get("price")) if payload.get("price") else None
+        
+        # Run Omega with Overrides
+        data = await project_omega.get_omega_status(
+            symbol="BTCUSDT", # Default for test
+            session_id="us_ny_futures",
+            force_time_utc=sim_time,
+            force_price=sim_price
+        )
+        return JSONResponse(data)
+        
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
 
 # ==========================================
 # ACCOUNT ACTIONS (FIXED)

@@ -32,13 +32,27 @@ class UserModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
-    username = Column(String(255), nullable=True)          # Added missing column
-    tradingview_id = Column(String(255), nullable=True)    # Added missing column
-    subscription_status = Column(String(50), default="active") # Added missing column
+    username = Column(String(255), nullable=True)          
+    tradingview_id = Column(String(255), nullable=True)    
+    subscription_status = Column(String(50), default="active") 
     is_admin = Column(Boolean, default=False, nullable=False)
-    operator_flex = Column(Boolean, default=False)         # Added missing column
-    session_tz = Column(String(50), default="America/New_York") # Added missing column
+    operator_flex = Column(Boolean, default=False)         
+    session_tz = Column(String(50), default="America/New_York") 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+class SystemLog(Base):
+    """
+    Stores critical system events (Errors, API failures, Drift Alerts).
+    Reviewable in the Admin Dashboard.
+    """
+    __tablename__ = "system_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    level = Column(String(20), default="INFO")  # INFO, WARNING, ERROR, CRITICAL
+    component = Column(String(50), nullable=False) # e.g., "Pipeline", "Omega", "Stripe"
+    message = Column(String(500), nullable=False)
+    resolved = Column(Boolean, default=False)
 
 def init_db() -> None:
     """Create tables."""

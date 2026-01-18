@@ -231,7 +231,8 @@ async def get_omega_status(
     symbol: str = "BTCUSDT",
     session_id: str = "us_ny_futures",
     ferrari_mode: bool = False,
-    force_time_utc: str = None
+    force_time_utc: str = None,
+    force_price: float = None # <--- NEW: Allow Price Injection
 ) -> Dict[str, Any]:
     
     # 1. TIME CONTROL
@@ -267,7 +268,16 @@ async def get_omega_status(
             "plans": {"LONG": {}, "SHORT": {}}
         }
 
-    current_price = float(pipeline_data.get("price", 0.0))
+    # === SIMULATION HOOK ===
+    # If we are forcing price, we override the pipeline's reality.
+    real_price = float(pipeline_data.get("price", 0.0))
+    current_price = force_price if force_price is not None else real_price
+    
+    # If simulating, we must flag the data so we know it's fake
+    if force_price is not None:
+        is_simulation = True
+    # ========================
+
     box = pipeline_data.get("battlebox", {})
     levels = box.get("levels", {})
     context = box.get("context", {})
@@ -276,7 +286,7 @@ async def get_omega_status(
     anchor_price = float(levels.get("session_open_price") or current_price)
     
     # 3. LEVELS
-    bo = float(levels.get("breakout_trigger", 0.0))
+    bo = float(levels.get("breakout_trigger", 0.0.))
     bd = float(levels.get("breakdown_trigger", 0.0))
     dr = float(levels.get("daily_resistance", 0.0))
     ds = float(levels.get("daily_support", 0.0))
