@@ -4,7 +4,7 @@
 # ==============================================================================
 # - Architecture: "Gateway Pattern"
 # - Function: Receives 'session_id' from ANY page and routes to the correct Engine.
-# - Updates: Includes fixes for Profile Saving and Research Lab Historical Data.
+# - Updates: Added AI Analyst Integration for Research Lab.
 # ==============================================================================
 
 import os
@@ -26,6 +26,7 @@ from database import init_db, get_db, UserModel, SystemLog, engine
 import project_omega
 import battlebox_pipeline
 import research_lab
+import ai_analyst # <--- NEW MODULE
 
 # --- HELPERS ---
 def _template_or_fallback(request: Request, templates: Jinja2Templates, name: str, context: Dict[str, Any]):
@@ -374,6 +375,11 @@ async def run_research_api(request: Request):
     end_date = payload.get("end_date_utc", "2026-01-10")
     session_ids = payload.get("session_ids", ["us_ny_futures"])
     tuning = payload.get("tuning", {})
+    
+    # NEW: Simulation Inputs
+    sim_settings = payload.get("simulation", {})
+    use_ai = payload.get("use_ai", False)
+    ai_key = payload.get("ai_key", "") # Or get from os.getenv
 
     # 2. CONVERT DATES TO TIMESTAMPS
     try:
@@ -405,8 +411,30 @@ async def run_research_api(request: Request):
         start_date_utc=start_date,
         end_date_utc=end_date,
         session_ids=session_ids,
-        tuning=tuning
+        tuning=tuning,
+        sim_settings=sim_settings # Pass it down
     )
+    
+    # 5. OPTIONAL: RUN AI ANALYST
+    if use_ai and data.get("ok"):
+        print(">>> [SWITCHBOARD] Running AI Analysis...")
+        # We send a summarized version to save tokens/costs
+        ai_payload = {
+            "simulation": data["simulation"],
+            "stats": data["stats"],
+            "session_log": [
+                {
+                    "date": s["date"], 
+                    "kinetic_score": s["kinetic"]["total_score"],
+                    "protocol": s["kinetic"]["protocol"],
+                    "trade_result": s["strategy"]["outcome"],
+                    "pnl_r": s["strategy"]["r_realized"]
+                }
+                for s in data["sessions"]
+            ]
+        }
+        report = ai_analyst.generate_report(ai_payload, ai_key)
+        data["ai_report"] = report
     
     return JSONResponse(data)
 

@@ -1,21 +1,114 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB CONTROLLER v7.2 (SESSION MANAGER SYNC)
+# KABRODA RESEARCH LAB v8.2 (AI ANALYST + SIMULATOR)
 # ==============================================================================
+# Updates:
+# - ADDED: Strategy Simulator (Equity Curve Math).
+# - FIXED: Full Session Lock Logic preserved.
+# - INTEGRATED: Prepared output for AI Analyst consumption.
+# ==============================================================================
+
 from __future__ import annotations
-from datetime import datetime, timedelta, timezone 
 from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+import pandas as pd
+import sse_engine
+import ccxt.async_support as ccxt
+import pytz
+import strategy_auditor
 import traceback
 
-import battlebox_pipeline
-import session_manager # <--- NEW SOURCE OF TRUTH
-import sse_engine
-import structure_state_engine
-import battlebox_rules 
+# --- GLOBAL PERSISTENCE (In-Memory Cache) ---
+# Stores locked levels to prevent re-computation/drift during a session.
+LOCKED_SESSIONS = {}
+
+# --- MATH HELPERS ---
+def calculate_ema(prices: List[float], period: int = 21) -> List[float]:
+    if len(prices) < period: return []
+    return pd.Series(prices).ewm(span=period, adjust=False).mean().tolist()
+
+def calculate_atr(highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> float:
+    if len(closes) < period + 1: return 0.0
+    tr_list = []
+    for i in range(1, len(closes)):
+        h = highs[i]; l = lows[i]; pc = closes[i-1]
+        tr = max(h - l, abs(h - pc), abs(l - pc))
+        tr_list.append(tr)
+    return sum(tr_list[-period:]) / period if tr_list else 0.0
 
 def _slice_by_ts(candles: List[Dict[str, Any]], start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
     return [c for c in candles if start_ts <= c["time"] < end_ts]
 
+# --- NEW: EQUITY SIMULATOR ENGINE ---
+def _simulate_equity(sessions: List[Dict], start_bal: float, risk_pct: float, risk_cap: float) -> Dict[str, Any]:
+    balance = start_bal
+    equity_curve = []
+    max_bal = start_bal
+    max_drawdown = 0.0
+    wins = 0
+    losses = 0
+    
+    biggest_win_amt = 0.0
+    biggest_win_date = ""
+
+    # Sort sessions by date to ensure curve is chronological
+    sessions.sort(key=lambda x: x["date"])
+
+    for s in sessions:
+        # Get result from the strategy auditor
+        res = s.get("strategy", {})
+        r_realized = res.get("r_realized", 0.0)
+        outcome = res.get("outcome", "NO_TRADE")
+        
+        if outcome == "NO_TRADE" or outcome == "SKIPPED":
+            equity_curve.append({"date": s["date"], "bal": int(balance)})
+            continue
+
+        # RISK CALCULATION
+        risk_amt = balance * (risk_pct / 100.0)
+        
+        # RISK CAP 
+        if risk_cap > 0 and risk_amt > risk_cap:
+            risk_amt = risk_cap
+
+        pnl = 0.0
+        if r_realized > 0:
+            pnl = risk_amt * r_realized
+            wins += 1
+            if pnl > biggest_win_amt:
+                biggest_win_amt = pnl
+                biggest_win_date = s["date"]
+        elif r_realized < 0:
+            # For losses, we assume full 1R loss if R is negative
+            pnl = -risk_amt
+            losses += 1
+        
+        balance += pnl
+        
+        # DRAWDOWN TRACKING
+        if balance > max_bal: max_bal = balance
+        dd = (max_bal - balance) / max_bal if max_bal > 0 else 0
+        if dd > max_drawdown: max_drawdown = dd
+
+        equity_curve.append({"date": s["date"], "bal": int(balance)})
+
+    is_bust = balance <= 0
+    total_trades = wins + losses
+    win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+
+    return {
+        "start_bal": start_bal,
+        "end_bal": int(balance),
+        "return_pct": round(((balance - start_bal) / start_bal) * 100, 2) if start_bal > 0 else 0,
+        "max_drawdown_pct": round(max_drawdown * 100, 2),
+        "win_rate": round(win_rate, 1),
+        "total_trades": total_trades,
+        "biggest_win": {"date": biggest_win_date, "amt": int(biggest_win_amt)},
+        "is_bust": is_bust,
+        "equity_curve": equity_curve
+    }
+
+# --- MAIN CONTROLLER ---
 async def run_research_lab_from_candles(
     symbol: str,
     raw_5m: List[Dict[str, Any]],
@@ -23,7 +116,8 @@ async def run_research_lab_from_candles(
     end_date_utc: str,
     session_ids: Optional[List[str]] = None,
     exec_hours: int = 12,
-    tuning: Dict[str, Any] = None
+    tuning: Dict[str, Any] = None,
+    sim_settings: Dict[str, Any] = None 
 ) -> Dict[str, Any]:
     try:
         print(f"[LAB] Starting analysis for {symbol} ({len(raw_5m)} candles provided)")
@@ -32,124 +126,115 @@ async def run_research_lab_from_candles(
 
         start_dt = datetime.strptime(start_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         end_dt = datetime.strptime(end_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        
+        sessions_result = []
+        
+        # Determine Session Configs
+        import session_manager
+        configs = []
+        if not session_ids: session_ids = ["us_ny_futures"]
+        for sid in session_ids:
+            cfg = session_manager.get_session_config(sid)
+            if cfg: configs.append(cfg)
 
-        # USE SESSION MANAGER CONFIGS
-        target_ids = session_ids or [s["id"] for s in session_manager.SESSION_CONFIGS]
-        active_cfgs = [s for s in session_manager.SESSION_CONFIGS if s["id"] in target_ids]
-
-        tuning = tuning or {}
-        req_vol = bool(tuning.get("require_volume", False))
-        req_div = bool(tuning.get("require_divergence", False))
-        fusion_mode = bool(tuning.get("fusion_mode", False))
-        ignore_15m = bool(tuning.get("ignore_15m_alignment", False))
-        ignore_5m = bool(tuning.get("ignore_5m_stoch", False))
-        confirm_mode = tuning.get("confirmation_mode", "TOUCH")
-        tol_bps = int(tuning.get("zone_tolerance_bps", 10)) 
-        zone_tol = tol_bps / 10000.0
-
-        sessions_result: List[Dict[str, Any]] = []
         curr_day = start_dt
-
         while curr_day <= end_dt:
-            day_str = curr_day.strftime("%Y-%m-%d")
-            
-            for cfg in active_cfgs:
-                # USE SESSION MANAGER ANCHOR LOGIC
+            for cfg in configs:
+                # 1. Resolve Anchor
                 anchor_ts = session_manager.anchor_ts_for_utc_date(cfg, curr_day)
+                open_dt_str = datetime.fromtimestamp(anchor_ts, timezone.utc).strftime("%Y-%m-%d")
+
+                # 2. Slice Data (Anchor -> Anchor + 12h)
+                session_end_ts = anchor_ts + (exec_hours * 3600)
+                session_candles = _slice_by_ts(raw_5m, anchor_ts, session_end_ts)
+
+                if not session_candles:
+                    continue
+
+                # 3. CHECK FOR LOCKED LEVELS (Prevent Drift)
+                lock_key = f"{symbol}_{cfg['id']}_{open_dt_str}"
                 
-                lock_end_ts = anchor_ts + 1800
-                exec_end_ts = lock_end_ts + (exec_hours * 3600)
-
-                calibration = _slice_by_ts(raw_5m, anchor_ts, lock_end_ts)
-                if len(calibration) < 6: continue
-
-                context_24h = _slice_by_ts(raw_5m, lock_end_ts - 86400, lock_end_ts)
-                post_lock = _slice_by_ts(raw_5m, lock_end_ts, exec_end_ts)
-
-                sse_input = {
-                    "locked_history_5m": context_24h,
-                    "slice_24h_5m": context_24h,
-                    "session_open_price": calibration[0]["open"],
-                    "r30_high": max(c["high"] for c in calibration),
-                    "r30_low": min(c["low"] for c in calibration),
-                    "last_price": context_24h[-1]["close"] if context_24h else 0.0,
-                    "tuning": tuning
-                }
-                computed = sse_engine.compute_sse_levels(sse_input)
-                if "error" in computed: continue
-
-                levels = computed["levels"]
-                state = structure_state_engine.compute_structure_state(levels, post_lock, tuning=tuning)
-                had_acceptance = (state["permission"]["status"] == "EARNED")
-                side = state["permission"]["side"]
-
-                go = {"ok": False, "go_type": "NONE", "go_ts": None, "reason": "NO_ACCEPTANCE", "evidence": {}}
-                
-                if had_acceptance and side in ("LONG", "SHORT") and post_lock:
-                    candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
-                    st15 = battlebox_rules.compute_stoch(candles_15m_proxy)
+                # A. GET LEVELS
+                if lock_key in LOCKED_SESSIONS:
+                    # Use persisted levels
+                    levels = LOCKED_SESSIONS[lock_key]["levels"]
+                    r30 = LOCKED_SESSIONS[lock_key]["range_30m"]
+                else:
+                    # Compute & Lock
+                    lock_end_ts = anchor_ts + 1800 # 30 mins
+                    lock_candles = _slice_by_ts(raw_5m, anchor_ts, lock_end_ts)
                     
-                    go = battlebox_rules.detect_pullback_go(
-                        side=side, levels=levels, post_accept_5m=post_lock, stoch_15m_at_accept=st15, 
-                        use_zone="TRIGGER", require_volume=req_vol, require_divergence=req_div,
-                        fusion_mode=fusion_mode, zone_tol=zone_tol,
-                        ignore_15m=ignore_15m,
-                        ignore_5m_stoch=ignore_5m,
-                        confirmation_mode=confirm_mode
-                    )
+                    if not lock_candles: continue
 
-                    if go["ok"]:
-                        stop_price = 0.0
-                        if side == "LONG": stop_price = min(c["low"] for c in calibration) 
-                        else: stop_price = max(c["high"] for c in calibration)
-
-                        trade_candles = [c for c in raw_5m if c["time"] > go["go_ts"] and c["time"] < exec_end_ts]
-                        
-                        sim = battlebox_rules.simulate_trade(
-                            entry_price=levels.get("breakout_trigger") if side == "LONG" else levels.get("breakdown_trigger"),
-                            entry_ts=go["go_ts"],
-                            stop_price=stop_price,
-                            direction=side,
-                            levels=levels,
-                            future_candles=trade_candles
-                        )
-                        go["simulation"] = sim
-
-                sessions_result.append({
-                    "ok": True,
-                    "date": day_str,
-                    "session_id": cfg["id"],
-                    "session_name": cfg["name"],
-                    "levels_compact": {
-                        "BO": levels.get("breakout_trigger"),
-                        "BD": levels.get("breakdown_trigger"),
-                        "DS": levels.get("daily_support"),
-                        "DR": levels.get("daily_resistance")
-                    },
-                    "counts": {
-                        "had_acceptance": had_acceptance,
-                        "had_alignment": (state["execution"]["gates_mode"] == "LOCKED"),
-                        "had_go": bool(go["ok"]),
-                        "go_type": go.get("go_type"),
-                    },
-                    "events": {
-                        "acceptance_side": side,
-                        "final_state": state.get("action"),
-                        "go_ts": go.get("go_ts"),
-                        "go_reason": go.get("reason"),
-                        "fail_reason": state.get("diagnostics", {}).get("fail_reason", "UNKNOWN"),
-                        "simulation": go.get("simulation") 
+                    # Compute SSE
+                    pkt = sse_engine.compute_sse_levels(raw_5m, anchor_ts, tuning=tuning)
+                    if "error" in pkt: continue
+                    
+                    levels = pkt["levels"]
+                    r30 = pkt["range_30m"]
+                    
+                    # Persist
+                    LOCKED_SESSIONS[lock_key] = {
+                        "levels": levels, "range_30m": r30, "ts": anchor_ts
                     }
+
+                # B. RUN STRUCTURE ENGINE
+                # We only pass candles that happened AFTER the 30m lock
+                post_lock_ts = anchor_ts + 1800
+                post_lock_candles = [c for c in session_candles if c["time"] >= post_lock_ts]
+
+                import structure_state_engine
+                state = structure_state_engine.compute_structure_state(
+                    levels, post_lock_candles, tuning=tuning
+                )
+                
+                # C. KINETIC SCORING (For AI)
+                # Calculate basic kinetic metrics for the log
+                dr = levels.get("daily_resistance", 0)
+                ds = levels.get("daily_support", 0)
+                anchor_price = levels.get("session_open_price", 0)
+                rg = abs(dr - ds)
+                bps = (rg / anchor_price * 10000) if anchor_price else 0
+                
+                # D. RUN STRATEGY AUDIT
+                import project_omega # Use Omega logic for audit
+                # Mock Omega status to get plan
+                omega_res = await project_omega.get_omega_status(
+                    symbol=symbol, session_id=cfg["id"], force_time_utc=None, force_price=None
+                )
+                
+                # Actual Audit
+                strat_res = strategy_auditor.audit_session(
+                    session_candles, levels, r30, 
+                    strategy_name="OMEGA_V8",
+                    tuning=tuning
+                )
+                
+                sessions_result.append({
+                    "date": open_dt_str,
+                    "session": cfg["name"],
+                    "kinetic": {
+                        "total_score": omega_res.get("kinetic", {}).get("total_score", 0),
+                        "protocol": omega_res.get("kinetic", {}).get("protocol", "UNKNOWN"),
+                        "bps": int(bps)
+                    },
+                    "levels": levels,
+                    "strategy": strat_res
                 })
+            
             curr_day += timedelta(days=1)
 
+        # --- RUN SIMULATION ---
+        sim_settings = sim_settings or {"start_bal": 10000, "risk_pct": 1.0, "risk_cap": 0}
+        simulation = _simulate_equity(
+            sessions_result, 
+            float(sim_settings.get("start_bal", 10000)),
+            float(sim_settings.get("risk_pct", 1.0)),
+            float(sim_settings.get("risk_cap", 0))
+        )
+
         total = len(sessions_result)
-        fail_reasons = {}
-        for s in sessions_result:
-            r = s["events"].get("fail_reason")
-            if r: fail_reasons[r] = fail_reasons.get(r, 0) + 1
-            
-        print(f"[LAB] Analysis complete. Sessions: {total}")
+        print(f"[LAB] Analysis complete. Sessions: {total}. End Bal: {simulation['end_bal']}")
 
         return {
             "ok": True,
@@ -157,14 +242,14 @@ async def run_research_lab_from_candles(
             "range": {"start": start_date_utc, "end": end_date_utc},
             "stats": {
                 "sessions_total": total,
-                "acceptance_count": sum(1 for s in sessions_result if s["counts"]["had_acceptance"]),
-                "go_count": sum(1 for s in sessions_result if s["counts"]["had_go"]),
-                "campaign_go_count": sum(1 for s in sessions_result if s["counts"]["go_type"] == "CAMPAIGN_GO"),
-                "scalp_go_count": sum(1 for s in sessions_result if s["counts"]["go_type"] == "SCALP_GO"),
-                "fail_reasons": fail_reasons
+                "win_rate": simulation["win_rate"],
+                "pnl_total": simulation["return_pct"]
             },
+            "simulation": simulation,
             "sessions": sessions_result
         }
+
     except Exception as e:
+        print(f"[LAB ERROR] {str(e)}")
         traceback.print_exc()
         return {"ok": False, "error": str(e)}
