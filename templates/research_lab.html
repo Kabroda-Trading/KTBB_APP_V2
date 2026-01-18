@@ -66,26 +66,9 @@
                 <label style="color: #06b6d4;">ACTIVE SESSIONS</label>
                 <div class="session-grid">
                     <div class="checkbox-group"><input type="checkbox" id="sessNYF" checked><label for="sessNYF" class="check-lbl">NY Futures</label></div>
-                    <div class="checkbox-group"><input type="checkbox" id="sessNYE" checked><label for="sessNYE" class="check-lbl">NY Equity</label></div>
+                    <div class="checkbox-group"><input type="checkbox" id="sessNYE"><label for="sessNYE" class="check-lbl">NY Equity</label></div>
                     <div class="checkbox-group"><input type="checkbox" id="sessLDN"><label for="sessLDN" class="check-lbl">London</label></div>
                     <div class="checkbox-group"><input type="checkbox" id="sessTKO"><label for="sessTKO" class="check-lbl">Tokyo</label></div>
-                </div>
-
-                <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
-                <label style="color: #10b981;">STRATEGY SIMULATOR</label>
-                <div class="session-grid">
-                    <div>
-                        <label>START BAL ($)</label>
-                        <input type="number" id="simBal" value="5000">
-                    </div>
-                    <div>
-                        <label>RISK %</label>
-                        <input type="number" id="simRisk" value="2.0">
-                    </div>
-                </div>
-                <div class="control-group">
-                    <label>RISK CAP ($)</label>
-                    <input type="number" id="simCap" value="0" placeholder="0 = No Cap">
                 </div>
 
                 <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
@@ -98,6 +81,14 @@
                         <option value="1_CLOSE">1-Candle Close (Standard)</option>
                         <option value="2_CLOSE">2-Candle Close (Anti-Fakeout)</option>
                     </select>
+                </div>
+
+                <div class="control-group">
+                    <label>SIMULATED LEVERAGE</label>
+                    <div class="range-wrap">
+                        <input type="range" id="simLev" min="1" max="50" value="20" oninput="updateVal('valLev', this.value + 'x')">
+                        <span id="valLev" class="range-val">20x</span>
+                    </div>
                 </div>
 
                 <div class="control-group">
@@ -127,6 +118,44 @@
                 <div class="checkbox-group" style="margin-top: 15px;">
                     <input type="checkbox" id="chkIgnore15m">
                     <label for="chkIgnore15m" class="check-lbl" style="color: #f87171; font-weight: 700;">IGNORE 15m ALIGNMENT</label>
+                </div>
+                
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chkIgnore5m">
+                    <label for="chkIgnore5m" class="check-lbl" style="color: #ef4444; font-weight: 700;">IGNORE 5m STOCH (Pure Touch)</label>
+                </div>
+
+                <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
+                <label style="color: #10b981;">ADVANCED FILTERS</label>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chkFusion">
+                    <label for="chkFusion" class="check-lbl" style="color:#fbbf24; font-weight:700;">FUSION MODE (Stoch + RSI)</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chkVol">
+                    <label for="chkVol" class="check-lbl">REQUIRE VOLUME (>1.5x Avg)</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chkDiv">
+                    <label for="chkDiv" class="check-lbl">REQUIRE RSI DIVERGENCE</label>
+                </div>
+
+                <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
+                <label style="color: #38bdf8;">STRATEGY SIMULATOR</label>
+                <div class="session-grid">
+                    <div>
+                        <label>START BAL ($)</label>
+                        <input type="number" id="simBal" value="5000">
+                    </div>
+                    <div>
+                        <label>RISK %</label>
+                        <input type="number" id="simRisk" value="2.0">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>RISK CAP ($)</label>
+                    <input type="number" id="simCap" value="0" placeholder="0 = No Cap">
                 </div>
 
                 <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
@@ -274,7 +303,7 @@
                 // NEW: AI INPUTS
                 use_ai: document.getElementById('useAi').checked,
                 ai_key: document.getElementById('aiKey').value,
-                // PRESERVED: TUNING INPUTS
+                // PRESERVED: TUNING INPUTS (ALL 100% RESTORED)
                 tuning: {
                     min_trigger_dist_bps: parseInt(document.getElementById('tuneDist').value),
                     acceptance_closes: parseInt(document.getElementById('tuneAcc').value),
@@ -282,10 +311,10 @@
                     zone_tolerance_bps: parseInt(document.getElementById('tuneTol').value),
                     confirmation_mode: document.getElementById('confirmMode').value,
                     ignore_15m_alignment: document.getElementById('chkIgnore15m').checked,
-                    // Advanced
-                    fusion_mode: false, // Hidden but preserved logic
-                    require_volume: false,
-                    require_divergence: false
+                    ignore_5m_stoch: document.getElementById('chkIgnore5m').checked,
+                    fusion_mode: document.getElementById('chkFusion').checked,
+                    require_volume: document.getElementById('chkVol').checked,
+                    require_divergence: document.getElementById('chkDiv').checked
                 }
             };
 
