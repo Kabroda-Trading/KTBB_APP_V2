@@ -9,6 +9,7 @@
         :root { 
             --bg: #020617; --panel: #0f172a; --border: #1e293b; 
             --green: #10b981; --red: #ef4444; --amber: #f59e0b; --cyan: #06b6d4; --gray: #64748b;
+            --neon-green: #39ff14; --alert-yellow: #ffc107;
             --text-main: #ffffff; --text-dim: #94a3b8; 
         }
         body { background: var(--bg); color: var(--text-main); font-family: 'Inter', sans-serif; padding: 20px; margin: 0; }
@@ -16,7 +17,6 @@
         .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid var(--border); }
         .brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 24px; letter-spacing: -1px; display:flex; align-items:center; gap:10px; }
         
-        /* VISUAL ALERT BADGE */
         .notify-badge { width:10px; height:10px; background:var(--border); border-radius:50%; display:inline-block; transition:0.3s; }
         .notify-badge.active { background:var(--green); box-shadow: 0 0 10px var(--green); }
 
@@ -26,13 +26,13 @@
         .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 25px; display: flex; flex-direction: column; }
         .panel-head { font-family: 'Inter'; font-weight: 900; font-size: 14px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
 
-        /* KINETIC HUD (Center) */
+        /* HUD STYLES */
         .hud-box { text-align: center; padding: 40px 20px; border: 2px solid var(--border); border-radius: 12px; background: #0b1121; margin-bottom: 20px; transition: 0.3s; position: relative; overflow: hidden; }
         .hud-title { font-family: 'JetBrains Mono'; font-size: 18px; letter-spacing: 3px; color: var(--text-dim); font-weight: 800; text-transform: uppercase; margin-bottom: 10px; }
         .hud-val { font-size: 60px; font-weight: 900; color: #fff; margin: 10px 0; line-height: 1; font-family: 'JetBrains Mono'; }
         .hud-sub { font-size: 14px; font-weight: 700; color: #fff; text-transform: uppercase; margin-top: 15px; background: rgba(255,255,255,0.1); display: inline-block; padding: 6px 12px; border-radius: 6px; }
 
-        /* MODES COLORS */
+        /* --- STANDARD MODES --- */
         .mode-SUPERSONIC { border-color: var(--cyan); box-shadow: 0 0 50px rgba(6, 182, 212, 0.2); }
         .mode-SUPERSONIC .hud-val, .mode-SUPERSONIC .hud-title { color: var(--cyan); }
         
@@ -50,13 +50,25 @@
         
         .mode-CALIBRATING { border-color: var(--text-dim); border-style: dashed; }
 
-        /* DATA GRIDS */
+        /* --- NEW WEEKLY PROTOCOLS --- */
+        .mode-SUPERNOVA { 
+            border-color: var(--neon-green); 
+            box-shadow: 0 0 60px rgba(57, 255, 20, 0.4); 
+        }
+        .mode-SUPERNOVA .hud-val, .mode-SUPERNOVA .hud-title { color: var(--neon-green); text-shadow: 0 0 15px rgba(57, 255, 20, 0.5); }
+
+        .mode-HYBRID { 
+            border-color: var(--alert-yellow); 
+            box-shadow: 0 0 40px rgba(255, 193, 7, 0.3);
+        }
+        .mode-HYBRID .hud-val, .mode-HYBRID .hud-title { color: var(--alert-yellow); }
+
+        /* UTILS */
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
         .data-card { background: #020617; padding: 12px; border-radius: 6px; border: 1px solid var(--border); text-align: center; }
         .dc-lbl { font-size: 10px; color: var(--text-dim); font-weight: 700; text-transform: uppercase; margin-bottom: 5px; }
         .dc-val { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 14px; color: #fff; }
 
-        /* EXECUTION ROWS */
         .exec-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; font-family: 'JetBrains Mono'; font-size: 14px; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 8px; }
         .lbl { color: var(--text-dim); font-weight: 600; font-size: 12px; }
         .val { color: #fff; font-weight: 800; font-size: 16px; }
@@ -67,7 +79,6 @@
         .btn-copy { background: #1e293b; border: 1px solid var(--border); color: var(--text-dim); padding: 4px 8px; font-size: 10px; border-radius: 4px; cursor: pointer; margin-left: 10px; font-weight: 700; text-transform: uppercase; transition: 0.2s; }
         .btn-copy:hover { background: #334155; color: #fff; border-color: #fff; }
 
-        /* CONTROLS */
         .control-group { display: flex; gap: 8px; }
         .btn-toggle { background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 8px 12px; font-size: 11px; border-radius: 6px; cursor: pointer; font-weight: 700; font-family: 'JetBrains Mono'; text-transform: uppercase; transition: 0.2s; }
         .btn-toggle:hover { border-color: #fff; color: #fff; }
@@ -244,14 +255,18 @@
             document.getElementById('kScore').innerText = k.total_score;
             document.getElementById('kInstr').innerText = k.instruction;
             document.getElementById('brief').innerText = k.brief;
-            document.getElementById('hud').className = "hud-box mode-" + k.protocol;
+            
+            // DYNAMIC COLOR CLASS
+            // This reads the specific color override sent from backend (e.g., 'SUPERNOVA')
+            const colorClass = k.color || "GRAY";
+            document.getElementById('hud').className = "hud-box mode-" + colorClass;
 
-            // Alert Logic (Sound + Visual)
+            // Alert Logic
             if(k.protocol !== lastStatus && k.protocol !== "CALIBRATING" && k.protocol !== "INITIALIZING") {
                 flashBadge();
-                if(k.protocol === "SUPERSONIC") playAlert("Warning. Super Sonic Mode Activated.");
+                if(k.protocol === "SUPERNOVA") playAlert("Warning. Supernova Protocol Engaged.");
+                if(k.protocol === "HYBRID") playAlert("Hybrid Defense Mode Active.");
                 if(k.protocol === "SNIPER") playAlert("Sniper Mode Active.");
-                if(k.protocol === "BLOCKED") playAlert("Trade Blocked.");
                 lastStatus = k.protocol;
             }
 
@@ -285,7 +300,6 @@
                 const bal = parseFloat(document.getElementById('inpBal').value) || 0;
                 const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
                 
-                // Max risk cap of $5000 logic handled visually here
                 let riskAmt = bal * (riskPct / 100);
                 if (riskAmt > 5000) riskAmt = 5000;
 

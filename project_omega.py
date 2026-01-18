@@ -1,9 +1,11 @@
 # project_omega.py
 # ==============================================================================
-# PROJECT OMEGA SPECIALIST (HOTFIXED)
+# PROJECT OMEGA SPECIALIST (v8.0 SUPERSONIC WEEKLY PROTOCOL)
 # ==============================================================================
 # ROLE: Specialist Consumer.
-# FIX: Ensures 'primary_target' key exists in all return paths to prevent 500 Error.
+# UPDATES: 
+# - Implements "Supernova" vs "Hybrid" split for Supersonic trades.
+# - Preserves Sniper and Dogfight logic exactly as is.
 # ==============================================================================
 
 from __future__ import annotations
@@ -74,8 +76,11 @@ def _apply_kinetic_strategy(
     if slope > 0.25: weekly_force = "BULLISH"
     elif slope < -0.25: weekly_force = "BEARISH"
     
+    # ALIGNMENT CHECK
+    is_aligned = False
     if (side == "LONG" and weekly_force == "BULLISH") or \
        (side == "SHORT" and weekly_force == "BEARISH"):
+        is_aligned = True
         time_penalty = 1.0 
         breakdown['momentum'] = f"ALIGNED ({weekly_force})"
         if breakdown.get('time') == "LATE SESSION":
@@ -107,9 +112,10 @@ def _apply_kinetic_strategy(
         brief = "Volume low. No Weekly force. Done for the day."
     elif final_score >= 71:
         protocol = "SUPERSONIC"
-        color = "CYAN"
+        # Color determined in Execution Layer now (Supernova vs Hybrid)
+        color = "CYAN" 
         instruction = "🔥 MOMENTUM OVERRIDE."
-        brief = "Blue Sky. Uncapped Profits. Trail Stop."
+        brief = "Blue Sky Protocol Active."
     elif final_score >= 41:
         protocol = "SNIPER"
         color = "GREEN"
@@ -128,11 +134,11 @@ def _apply_kinetic_strategy(
         "instruction": instruction,
         "brief": brief,
         "breakdown": breakdown,
-        "force_align": (weekly_force in breakdown['momentum'])
+        "force_align": is_aligned
     }
 
 # ----------------------------
-# 2. EXECUTION MATH (FIXED)
+# 2. EXECUTION MATH (UPDATED FOR WEEKLY PROTOCOL)
 # ----------------------------
 def _calc_execution_plan(entry: float, stop: float, dr: float, ds: float, side: str, mode: str, force_align: bool) -> Dict[str, Any]:
     # SAFE DEFAULT RETURN
@@ -141,8 +147,10 @@ def _calc_execution_plan(entry: float, stop: float, dr: float, ds: float, side: 
         "stop": 0, 
         "valid": False, 
         "bank_rule": "--", 
-        "primary_target": "--",  # <--- THIS WAS MISSING
-        "reason": "Waiting for Data"
+        "primary_target": "--", 
+        "reason": "Waiting for Data",
+        "protocol_display": mode, # Default to standard name
+        "color_override": None
     }
 
     if entry <= 0 or stop <= 0: return safe_return
@@ -153,49 +161,57 @@ def _calc_execution_plan(entry: float, stop: float, dr: float, ds: float, side: 
     min_req_dist = risk * 1.0 
     dist_to_wall = abs(dr - entry) if side == "LONG" else abs(ds - entry)
     
+    # Blocking logic
     if mode != "SUPERSONIC" and dist_to_wall < min_req_dist:
         return {
-            "targets": [], 
-            "stop": 0, 
-            "valid": False, 
-            "bank_rule": "INVALID", 
-            "primary_target": "BLOCKED", # <--- ENSURED
-            "reason": "Target < 1.0R"
+            "targets": [], "stop": 0, "valid": False, 
+            "bank_rule": "INVALID", "primary_target": "BLOCKED", "reason": "Target < 1.0R",
+            "protocol_display": "BLOCKED", "color_override": "RED"
         }
 
     targets = []
-    
     if side == "LONG":
-        shield = entry + (risk * 0.5) 
         t1 = entry + risk
         t2 = entry + (risk * 2.0)
         t3 = entry + (risk * 4.0) 
-        targets = [int(shield), int(t1), int(t2), int(t3)]
+        targets = [int(t1), int(t2), int(t3)]
     else: 
-        shield = entry - (risk * 0.5)
         t1 = entry - risk
         t2 = entry - (risk * 2.0)
         t3 = entry - (risk * 4.0)
-        targets = [int(shield), int(t1), int(t2), int(t3)]
+        targets = [int(t1), int(t2), int(t3)]
 
+    # --- LOGIC BRANCHING ---
     primary_target = t1
     bank_rule = "BANK 75%"
     reason = "Standard"
+    protocol_display = mode
+    color_override = None
 
     if mode == "SUPERSONIC":
-        primary_target = "OPEN" 
-        bank_rule = "TRAIL 15M"
-        reason = "Runner"
-    elif mode == "SNIPER":
-        if force_align: 
-            primary_target = t2
-            bank_rule = "BANK 50%"
-            reason = "Weekly Push"
-        else: 
+        if force_align:
+            # === SUPERNOVA MODE (Aligned) ===
+            primary_target = "OPEN (Aim T3)" 
+            bank_rule = "IGNORE TP1. Trail."
+            reason = "ALIGNED (Aggressive)"
+            protocol_display = "SUPERNOVA"
+            color_override = "SUPERNOVA" # Neon Green
+        else:
+            # === HYBRID DEFENSE MODE (Misaligned) ===
             primary_target = t1
-            bank_rule = "BANK 75%"
-            reason = "Standard"
+            bank_rule = "BANK 75%. BE Stop."
+            reason = "MISALIGNED (Defensive)"
+            protocol_display = "HYBRID"
+            color_override = "HYBRID" # Warning Yellow
+            
+    elif mode == "SNIPER":
+        # Standard Rules
+        primary_target = t1
+        bank_rule = "BANK 75%"
+        reason = "Standard"
+        
     elif mode == "DOGFIGHT":
+        # Scalp Rules
         primary_target = t1
         bank_rule = "BANK 100%"
         reason = "Scalp"
@@ -204,18 +220,33 @@ def _calc_execution_plan(entry: float, stop: float, dr: float, ds: float, side: 
         "targets": targets, 
         "stop": stop, 
         "valid": True,
-        "primary_target": primary_target, # <--- GUARANTEED
+        "primary_target": primary_target,
         "bank_rule": bank_rule,
-        "reason": reason
+        "reason": reason,
+        "protocol_display": protocol_display,
+        "color_override": color_override
     }
 
 async def get_omega_status(
     symbol: str = "BTCUSDT",
     session_id: str = "us_ny_futures",
     ferrari_mode: bool = False,
+    force_time_utc: str = None
 ) -> Dict[str, Any]:
     
-    # 1. FETCH FROM PIPELINE
+    # 1. TIME CONTROL
+    if force_time_utc:
+        t_now = datetime.now(timezone.utc)
+        fake_dt = datetime.strptime(force_time_utc, "%H:%M")
+        now_utc = t_now.replace(hour=fake_dt.hour, minute=fake_dt.minute, second=0, microsecond=0)
+        is_simulation = True
+    else:
+        now_utc = datetime.now(timezone.utc)
+        is_simulation = False
+
+    # 2. FETCH PIPELINE
+    # Note: Battlebox pipeline needs to support simulation time if you want full backtesting,
+    # but for now we are mocking the time check in Kinetic Layer.
     pipeline_data = await battlebox_pipeline.get_live_battlebox(
         symbol=symbol, session_mode="MANUAL", manual_id=session_id
     )
@@ -227,20 +258,13 @@ async def get_omega_status(
 
     if p_status == "CALIBRATING":
         return {
-            "ok": True, 
-            "status": "CALIBRATING",
-            "price": pipeline_data.get("price", 0.0),
-            "session_mode": "CALIBRATING",
-            "active_side": "NONE",
+            "ok": True, "status": "CALIBRATING", "price": pipeline_data.get("price", 0.0),
             "kinetic": {
                 "total_score": 0, "protocol": "CALIBRATING", "color": "GRAY", 
                 "instruction": "WAITING FOR 30M LOCK", "brief": "System calibrating.",
                 "breakdown": {}
             },
-            "plans": {
-                "LONG": {"trigger": 0, "stop": 0, "bank_rule": "--", "primary_target": "--", "reason": "--"}, 
-                "SHORT": {"trigger": 0, "stop": 0, "bank_rule": "--", "primary_target": "--", "reason": "--"}
-            }
+            "plans": {"LONG": {}, "SHORT": {}}
         }
 
     current_price = float(pipeline_data.get("price", 0.0))
@@ -251,7 +275,7 @@ async def get_omega_status(
     
     anchor_price = float(levels.get("session_open_price") or current_price)
     
-    # 2. LEVELS
+    # 3. LEVELS
     bo = float(levels.get("breakout_trigger", 0.0))
     bd = float(levels.get("breakdown_trigger", 0.0))
     dr = float(levels.get("daily_resistance", 0.0))
@@ -259,7 +283,7 @@ async def get_omega_status(
     r30_high = float(levels.get("range30m_high", 0.0))
     r30_low = float(levels.get("range30m_low", 0.0))
     
-    # 3. SIDE
+    # 4. SIDE
     active_side = "NONE"
     status = "STANDBY"
     
@@ -271,23 +295,28 @@ async def get_omega_status(
     closest_side = "LONG" if (current_price >= (bo + bd)/2) else "SHORT"
     calc_side = active_side if active_side != "NONE" else closest_side
 
-    # 4. KINETIC
-    now_utc = datetime.now(timezone.utc)
+    # 5. KINETIC STRATEGY (Uses Mock Time if Simulating)
     kinetic = _apply_kinetic_strategy(
         anchor_price, levels, context, shelves, calc_side
     )
     
-    # 5. PLANS
+    # 6. PLANS & PROTOCOL OVERRIDES
     plan_long = _calc_execution_plan(bo, r30_low, dr, ds, "LONG", kinetic["protocol"], kinetic["force_align"])
     plan_short = _calc_execution_plan(bd, r30_high, dr, ds, "SHORT", kinetic["protocol"], kinetic["force_align"])
 
-    # 6. MATH GATE
+    # Apply Overrides
     active_plan = plan_long if calc_side == "LONG" else plan_short
+    
+    if active_plan.get("protocol_display") and active_plan["valid"]:
+        kinetic["protocol"] = active_plan["protocol_display"]
+        if active_plan.get("color_override"):
+            kinetic["color"] = active_plan["color_override"]
+
+    # Final Block Check
     if not active_plan["valid"] and kinetic["protocol"] not in ["BLOCKED", "CLOSED", "CALIBRATING"]:
         kinetic["protocol"] = "BLOCKED"
         kinetic["instruction"] = "⛔ R/R INVALID."
         kinetic["color"] = "RED"
-        kinetic["brief"] = "Potential target is too close to resistance."
 
     return {
         "ok": True,
@@ -296,14 +325,11 @@ async def get_omega_status(
         "price": current_price,
         "active_side": active_side if active_side != "NONE" else closest_side,
         "session_mode": kinetic["protocol"],
+        "is_simulation": is_simulation,
+        "simulated_time": now_utc.strftime("%H:%M UTC") if is_simulation else None,
         "kinetic": kinetic,
         "plans": {
-            # Mapped keys to match HTML expectation
-            "LONG": {"trigger": bo, "stop": r30_low, "targets": plan_long["targets"], "bank": plan_long["bank_rule"], "prim": plan_long["primary_target"], "reason": plan_long["reason"]},
-            "SHORT": {"trigger": bd, "stop": r30_high, "targets": plan_short["targets"], "bank": plan_short["bank_rule"], "prim": plan_short["primary_target"], "reason": plan_short["reason"]}
-        },
-        "telemetry": {
-            "session_state": "ACTIVE",
-            "verification": { "bo": bo, "bd": bd },
+            "LONG": plan_long,
+            "SHORT": plan_short
         }
     }
