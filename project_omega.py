@@ -286,7 +286,7 @@ async def get_omega_status(
     anchor_price = float(levels.get("session_open_price") or current_price)
     
     # 3. LEVELS
-    bo = float(levels.get("breakout_trigger", 0.0.))
+    bo = float(levels.get("breakout_trigger", 0.0))
     bd = float(levels.get("breakdown_trigger", 0.0))
     dr = float(levels.get("daily_resistance", 0.0))
     ds = float(levels.get("daily_support", 0.0))
