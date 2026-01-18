@@ -4,7 +4,7 @@
 # ==============================================================================
 # - Architecture: "Gateway Pattern"
 # - Function: Receives 'session_id' from ANY page and routes to the correct Engine.
-# - Updates: Added AI Analyst Integration for Research Lab.
+# - Updates: Cleaned legacy aliases and hardened AI integration.
 # ==============================================================================
 
 import os
@@ -26,7 +26,7 @@ from database import init_db, get_db, UserModel, SystemLog, engine
 import project_omega
 import battlebox_pipeline
 import research_lab
-import ai_analyst # <--- NEW MODULE
+import ai_analyst
 
 # --- HELPERS ---
 def _template_or_fallback(request: Request, templates: Jinja2Templates, name: str, context: Dict[str, Any]):
@@ -153,10 +153,6 @@ def battle_control_page(request: Request, db: Session = Depends(get_db)):
 def omega_page(request: Request):
     return _template_or_fallback(request, templates, "project_omega.html", {"request": request})
 
-@app.get("/suite/black-ops", include_in_schema=False)
-def omega_page_alias(request: Request):
-    return RedirectResponse("/suite/omega")
-
 @app.get("/suite/research-lab", response_class=HTMLResponse)
 def research_page(request: Request):
     return _template_or_fallback(request, templates, "research_lab.html", {"request": request})
@@ -242,7 +238,7 @@ async def omega_simulation_api(request: Request):
         return JSONResponse({"ok": False, "error": str(e)})
 
 # ==========================================
-# ACCOUNT ACTIONS (FIXED)
+# ACCOUNT ACTIONS
 # ==========================================
 @app.post("/account/profile")
 async def update_profile(request: Request, db: Session = Depends(get_db)):
@@ -434,8 +430,8 @@ async def run_research_api(request: Request):
                     "date": s["date"], 
                     "kinetic_score": s["kinetic"]["total_score"],
                     "protocol": s["kinetic"]["protocol"],
-                    "trade_result": s["strategy"]["outcome"],
-                    "pnl_r": s["strategy"]["r_realized"]
+                    "trade_result": s["strategy"].get("outcome", "NO_TRADE"), # <--- SAFE GET
+                    "pnl_r": s["strategy"].get("r_realized", 0.0)             # <--- SAFE GET
                 }
                 for s in data["sessions"]
             ]
@@ -444,8 +440,3 @@ async def run_research_api(request: Request):
         data["ai_report"] = report
     
     return JSONResponse(data)
-
-# Legacy alias
-@app.post("/api/black-ops/status")
-async def legacy_black_ops_status_alias(request: Request, db: Session = Depends(get_db)):
-    return await omega_status_api(request, db)
