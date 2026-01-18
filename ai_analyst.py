@@ -53,17 +53,22 @@ def generate_report(data_json: Dict[str, Any], api_key: str) -> str:
     try:
         genai.configure(api_key=api_key)
         
-        # --- MODEL HUNTER ---
-        # 1. Try the standard stable model first
-        target_model = 'gemini-1.5-flash' 
+        # --- MODEL HUNTER (UPDATED FOR 2.0/2.5) ---
+        # Your logs confirmed you have access to the 2.x series.
+        # We prioritize 2.0-flash for speed/stability.
+        target_model = 'gemini-2.0-flash' 
         
-        # 2. Safety Check: If that fails, the library will throw, so we wrap in try/catch
         try:
             model = genai.GenerativeModel(target_model)
         except:
-            # Fallback to 'gemini-pro' if flash isn't found
-            target_model = 'gemini-pro'
-            model = genai.GenerativeModel(target_model)
+            # Fallback to 2.5 if 2.0 has issues
+            try:
+                target_model = 'gemini-2.5-flash'
+                model = genai.GenerativeModel(target_model)
+            except:
+                # Ultimate fallback
+                target_model = 'gemini-2.0-flash-exp'
+                model = genai.GenerativeModel(target_model)
 
         print(f">>> AI: Using Model [{target_model}]")
 
