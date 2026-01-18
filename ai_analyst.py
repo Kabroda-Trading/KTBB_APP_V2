@@ -7,6 +7,8 @@
 # ==============================================================================
 
 import os
+import time
+import random
 import google.generativeai as genai
 from typing import Dict, Any
 
@@ -45,61 +47,68 @@ End with a "CLOSING DIRECTIVE".
 def generate_report(data_json: Dict[str, Any], api_key: str) -> str:
     """
     Sends the Research Lab JSON to Gemini and gets the text report.
+    Includes RETRY LOGIC for Rate Limits (429 Errors).
     """
     if not api_key:
         print(">>> AI ERROR: No API Key provided.")
         return "ERROR: No API Key provided. Check Account settings or Render Env Vars."
 
+    genai.configure(api_key=api_key)
+    
+    # --- MODEL HUNTER ---
+    # Prioritize 2.0 Flash (Fastest/Smartest available)
+    target_model = 'gemini-2.0-flash'
+    
+    # Fallback logic for model selection
     try:
-        genai.configure(api_key=api_key)
-        
-        # --- MODEL HUNTER (UPDATED FOR 2.0/2.5) ---
-        # Your logs confirmed you have access to the 2.x series.
-        # We prioritize 2.0-flash for speed/stability.
-        target_model = 'gemini-2.0-flash' 
-        
+        model = genai.GenerativeModel(target_model)
+    except:
         try:
+            target_model = 'gemini-2.5-flash'
             model = genai.GenerativeModel(target_model)
         except:
-            # Fallback to 2.5 if 2.0 has issues
-            try:
-                target_model = 'gemini-2.5-flash'
-                model = genai.GenerativeModel(target_model)
-            except:
-                # Ultimate fallback
-                target_model = 'gemini-2.0-flash-exp'
-                model = genai.GenerativeModel(target_model)
+            target_model = 'gemini-pro'
+            model = genai.GenerativeModel(target_model)
 
-        print(f">>> AI: Using Model [{target_model}]")
+    print(f">>> AI: Selected Model [{target_model}]")
 
-        # Convert JSON to string for the prompt
-        prompt_content = f"""
-        Analyze this Trading Simulation Data:
-        {str(data_json)}
-        
-        Provide the Kabroda Kinetic DMR - Operational Order and Post-Game Analysis.
-        """
+    # Prepare Content
+    prompt_content = f"""
+    Analyze this Trading Simulation Data:
+    {str(data_json)}
+    
+    Provide the Kabroda Kinetic DMR - Operational Order and Post-Game Analysis.
+    """
 
-        # Generate
-        response = model.generate_content([
-            KINETIC_SYSTEM_PROMPT,
-            prompt_content
-        ])
-        
-        return response.text
+    # --- RETRY LOGIC (THE FIX) ---
+    max_retries = 3
+    base_delay = 5 # Start with 5 seconds
 
-    except Exception as e:
-        # LOG THE ERROR SO WE CAN SEE IT IN RENDER
-        error_msg = str(e)
-        print(f">>> AI CRITICAL FAILURE: {error_msg}")
-        
-        # DEBUG: List available models to the log to see what IS valid
+    for attempt in range(max_retries):
         try:
-            print(">>> AVAILABLE MODELS:")
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    print(f" - {m.name}")
-        except:
-            pass
+            response = model.generate_content([
+                KINETIC_SYSTEM_PROMPT,
+                prompt_content
+            ])
+            return response.text
+
+        except Exception as e:
+            error_str = str(e)
             
-        return f"AI ANALYSIS FAILED: {error_msg}. Check logs for available models."
+            # Check for Rate Limit (429)
+            if "429" in error_str or "quota" in error_str.lower():
+                if attempt < max_retries - 1:
+                    # Calculate backoff: 5s -> 10s -> 20s
+                    sleep_time = base_delay * (2 ** attempt) + random.uniform(0, 2)
+                    print(f">>> AI RATE LIMIT HIT. Cooling down for {int(sleep_time)}s... (Attempt {attempt+1}/{max_retries})")
+                    time.sleep(sleep_time)
+                    continue # Try again
+                else:
+                    print(">>> AI RATE LIMIT EXHAUSTED.")
+                    return "⚠️ AI BUSY: Rate limit hit. Please wait 30 seconds and try again."
+            
+            # Other errors (Auth, 404, etc) -> Fail immediately
+            print(f">>> AI CRITICAL FAILURE: {error_str}")
+            return f"AI ANALYSIS FAILED: {error_str}"
+            
+    return "AI ERROR: Unknown State"
