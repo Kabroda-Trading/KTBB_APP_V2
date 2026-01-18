@@ -53,8 +53,19 @@ def generate_report(data_json: Dict[str, Any], api_key: str) -> str:
     try:
         genai.configure(api_key=api_key)
         
-        # FIXED: Use 'gemini-pro' (The stable, universal standard)
-        model = genai.GenerativeModel('gemini-pro')
+        # --- MODEL HUNTER ---
+        # 1. Try the standard stable model first
+        target_model = 'gemini-1.5-flash' 
+        
+        # 2. Safety Check: If that fails, the library will throw, so we wrap in try/catch
+        try:
+            model = genai.GenerativeModel(target_model)
+        except:
+            # Fallback to 'gemini-pro' if flash isn't found
+            target_model = 'gemini-pro'
+            model = genai.GenerativeModel(target_model)
+
+        print(f">>> AI: Using Model [{target_model}]")
 
         # Convert JSON to string for the prompt
         prompt_content = f"""
@@ -76,4 +87,14 @@ def generate_report(data_json: Dict[str, Any], api_key: str) -> str:
         # LOG THE ERROR SO WE CAN SEE IT IN RENDER
         error_msg = str(e)
         print(f">>> AI CRITICAL FAILURE: {error_msg}")
-        return f"AI ANALYSIS FAILED: {error_msg}"
+        
+        # DEBUG: List available models to the log to see what IS valid
+        try:
+            print(">>> AVAILABLE MODELS:")
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    print(f" - {m.name}")
+        except:
+            pass
+            
+        return f"AI ANALYSIS FAILED: {error_msg}. Check logs for available models."
