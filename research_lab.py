@@ -37,6 +37,11 @@ def _simulate_equity(sessions: List[Dict], start_bal: float, risk_pct: float, ri
             continue
 
         sim_trade = go_data.get("simulation", {})
+        # Safety check for empty simulation dict
+        if not sim_trade:
+             equity_curve.append({"date": s["date"], "bal": int(balance)})
+             continue
+             
         r_realized = sim_trade.get("r_realized", 0.0)
         outcome = sim_trade.get("outcome", "NO_TRADE")
 
@@ -204,8 +209,8 @@ async def run_research_lab_from_candles(
                     "date": day_str,
                     "session_id": cfg["id"],
                     "session_name": cfg["name"],
-                    "kinetic": { # Added for AI
-                        "total_score": 0, # Calculated in next step if needed
+                    "kinetic": { 
+                        "total_score": 0, 
                         "protocol": state["action"], 
                         "bps": int(bps)
                     },
@@ -229,7 +234,7 @@ async def run_research_lab_from_candles(
                         "fail_reason": state.get("diagnostics", {}).get("fail_reason", "UNKNOWN"),
                         "simulation": go.get("simulation") 
                     },
-                    "strategy": go.get("simulation", {}) # Shim for AI Reader
+                    "strategy": go.get("simulation", {}) 
                 })
             curr_day += timedelta(days=1)
 

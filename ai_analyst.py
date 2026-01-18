@@ -47,11 +47,14 @@ def generate_report(data_json: Dict[str, Any], api_key: str) -> str:
     Sends the Research Lab JSON to Gemini and gets the text report.
     """
     if not api_key:
-        return "ERROR: No API Key provided."
+        print(">>> AI ERROR: No API Key provided.")
+        return "ERROR: No API Key provided. Check Account settings or Render Env Vars."
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-pro')
+        
+        # UPGRADED MODEL: gemini-1.5-flash is faster and more stable
+        model = genai.GenerativeModel('gemini-1.5-flash')
 
         # Convert JSON to string for the prompt
         prompt_content = f"""
@@ -70,4 +73,7 @@ def generate_report(data_json: Dict[str, Any], api_key: str) -> str:
         return response.text
 
     except Exception as e:
-        return f"AI ANALYSIS FAILED: {str(e)}"
+        # LOG THE ERROR SO WE CAN SEE IT IN RENDER
+        error_msg = str(e)
+        print(f">>> AI CRITICAL FAILURE: {error_msg}")
+        return f"AI ANALYSIS FAILED: {error_msg}"
