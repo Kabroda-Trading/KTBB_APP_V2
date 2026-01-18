@@ -46,7 +46,7 @@
         <div class="header">
             <div>
                 <a href="/suite" style="color: #94a3b8; text-decoration: none; font-size: 14px;">← Back to Suite</a>
-                <h1 style="margin-top: 10px;">RESEARCH LAB <span class="pill">AI + SIM</span></h1>
+                <h1 style="margin-top: 10px;">RESEARCH LAB <span class="pill">SIMULATION</span></h1>
             </div>
         </div>
 
@@ -158,28 +158,12 @@
                     <input type="number" id="simCap" value="0" placeholder="0 = No Cap">
                 </div>
 
-                <div style="border-top: 1px solid #333; margin: 20px 0;"></div>
-                <label style="color: #a855f7;">AI ANALYST</label>
-                <div class="control-group">
-                    <label>GEMINI API KEY (Optional)</label>
-                    <input type="password" id="aiKey" placeholder="Leave blank to use Server Key">
-                </div>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="useAi">
-                    <label for="useAi" class="check-lbl">Include Tactical Synthesis</label>
-                </div>
-
                 <button onclick="runLab()" class="btn-run" id="runBtn">INITIATE RUN</button>
             </div>
 
             <div class="panel">
                 <div id="resultsArea" style="display: none;">
                     
-                    <div id="aiResultArea" style="display:none; margin-bottom: 20px; background: rgba(168, 85, 247, 0.05); border: 1px solid rgba(168, 85, 247, 0.2); padding: 15px; border-radius: 6px;">
-                        <div class="card-head">GEMINI TACTICAL SYNTHESIS</div>
-                        <div id="aiMarkdown" style="font-family: 'Inter', sans-serif; line-height: 1.6; color: #e2e8f0; white-space: pre-wrap; font-size: 14px;"></div>
-                    </div>
-
                     <div class="stats-row">
                         <div class="stat-card">
                             <span class="stat-val" id="resTotal">0</span>
@@ -232,7 +216,7 @@
                     </div>
 
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top:30px; margin-bottom:10px;">
-                        <h3 style="color:#fff; font-size:14px; margin:0;">SESSION LOG</h3>
+                        <h3 style="color:#fff; font-size:14px; margin:0;">SESSION LOG (COPY FOR AI)</h3>
                         <button id="copyBtn" onclick="copyLog()" class="btn-copy">COPY LOG</button>
                     </div>
                     
@@ -280,7 +264,6 @@
             document.getElementById('runBtn').innerText = "RUNNING...";
             document.getElementById('resultsArea').style.display = 'none';
             document.getElementById('placeholder').style.display = 'none';
-            document.getElementById('aiResultArea').style.display = 'none';
             document.getElementById('loading').style.display = 'block';
 
             const activeSessions = [];
@@ -294,16 +277,14 @@
                 start_date_utc: document.getElementById('startDate').value,
                 end_date_utc: document.getElementById('endDate').value,
                 session_ids: activeSessions,
-                // NEW: SIMULATION INPUTS
                 simulation: {
                     start_bal: document.getElementById('simBal').value,
                     risk_pct: document.getElementById('simRisk').value,
                     risk_cap: document.getElementById('simCap').value
                 },
-                // NEW: AI INPUTS
-                use_ai: document.getElementById('useAi').checked,
-                ai_key: document.getElementById('aiKey').value,
-                // PRESERVED: TUNING INPUTS (ALL 100% RESTORED)
+                // DISABLED INTEGRATED AI
+                use_ai: false, 
+                ai_key: "",
                 tuning: {
                     min_trigger_dist_bps: parseInt(document.getElementById('tuneDist').value),
                     acceptance_closes: parseInt(document.getElementById('tuneAcc').value),
@@ -334,7 +315,6 @@
                 const goRate = stats.sessions_total > 0 ? ((stats.go_count / stats.sessions_total) * 100).toFixed(1) : "0.0";
                 document.getElementById('resRate').innerText = goRate + "%";
                 
-                // --- UPDATE NEW SIMULATOR STATS ---
                 const sim = data.simulation;
                 if(sim) {
                     document.getElementById('resWinRate').innerText = sim.win_rate + "%";
@@ -343,12 +323,6 @@
                     pnlEl.style.color = sim.return_pct >= 0 ? "#10b981" : "#ef4444";
                     document.getElementById('resEndBal').innerText = "$" + sim.end_bal.toLocaleString();
                     document.getElementById('resDD').innerText = "-" + sim.max_drawdown_pct + "%";
-                }
-
-                // --- UPDATE AI REPORT ---
-                if(data.ai_report) {
-                    document.getElementById('aiResultArea').style.display = 'block';
-                    document.getElementById('aiMarkdown').innerText = data.ai_report;
                 }
 
                 let goHtml = "";
