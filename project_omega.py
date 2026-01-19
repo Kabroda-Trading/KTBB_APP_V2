@@ -1,13 +1,14 @@
 # project_omega.py
 # ==============================================================================
-# PROJECT OMEGA SPECIALIST (v11.1 - FULL VERBOSE LOGIC)
+# PROJECT OMEGA SPECIALIST (v15.0 - HIERARCHY ENFORCED)
 # ==============================================================================
 # STRATEGY:
 # - Target: US NY FUTURES (Focused)
 # - Logic: 
 #    1. ASK PHASE 1 (Session Manager): "Are we open?"
 #    2. IF OPEN: Run Phase 2 (Math) & Phase 3 (Execution).
-#    3. IF CLOSED: Return clean "CLOSED" packet.
+#    3. IF CLOSED: Return clean "CLOSED" packet immediately.
+#    4. DATA FILTER: Ignore any candles before the Session Start.
 # ==============================================================================
 
 from __future__ import annotations
@@ -38,7 +39,6 @@ def _calculate_locked_strategy(
     dr = float(levels.get("daily_resistance", 0) or 0)
     ds = float(levels.get("daily_support", 0) or 0)
     
-    # SAFETY CHECK: If levels are missing, we are still calibrating
     if dr == 0 or ds == 0:
         return {
             "total_score": 0, 
@@ -157,7 +157,6 @@ def _calc_execution_plan(
     side: str, mode: str, force_align: bool
 ) -> Dict[str, Any]:
     
-    # Safe Defaults
     safe_return = {
         "trigger": 0, "targets": [], "stop": 0, "valid": False, 
         "bank_rule": "--", "be_trigger": 0, 
@@ -169,7 +168,6 @@ def _calc_execution_plan(
     risk = abs(entry - stop)
     if risk == 0: return safe_return
 
-    # Blocking Logic
     min_req_dist = risk * 1.0 
     dist_to_wall = abs(dr - entry) if side == "LONG" else abs(ds - entry)
     
@@ -181,7 +179,6 @@ def _calc_execution_plan(
             "protocol_display": "BLOCKED", "color_override": "RED"
         }
 
-    # Targets & Breakeven
     targets = []
     if side == "LONG":
         t1 = entry + risk
@@ -196,7 +193,6 @@ def _calc_execution_plan(
         targets = [int(t1), int(t2), int(t3)]
         be_trigger = entry - (risk * 0.6)
 
-    # Protocol Rules
     primary_target = t1
     bank_rule = "BANK 75%"
     reason = "Standard"
@@ -209,13 +205,13 @@ def _calc_execution_plan(
             bank_rule = "IGNORE TP1. Trail."
             reason = "ALIGNED (Aggressive)"
             protocol_display = "SUPERNOVA"
-            color_override = "SUPERNOVA" # Neon Green
+            color_override = "SUPERNOVA"
         else: 
             primary_target = t1
             bank_rule = "BANK 75%. BE Stop."
             reason = "MISALIGNED (Defensive)"
             protocol_display = "HYBRID"
-            color_override = "HYBRID" # Warning Yellow
+            color_override = "HYBRID"
     elif mode == "SNIPER":
         primary_target = t1
         bank_rule = "BANK 75%"
@@ -248,8 +244,8 @@ def _check_omega_triggers(
     start_time_filter: int
 ) -> Dict[str, Any]:
     """
-    CRITICAL FIX: Accepts 'start_time_filter'. 
-    It only considers candles that occurred AFTER this timestamp.
+    CRITICAL RULE: We only look at candles that happened AFTER the Official Session Start.
+    We get 'start_time_filter' from the Session Manager via the Pipeline.
     """
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
@@ -268,12 +264,12 @@ def _check_omega_triggers(
     for c in candles:
         t = int(c["time"])
         
-        # --- THE HIERARCHY ENFORCEMENT ---
-        # If candle happened before the session started, IGNORE IT.
+        # --- HIERARCHY CHECK (THE BOSS) ---
+        # If this candle is older than the Session Manager's start time, it does not exist.
         if t < start_time_filter: 
             continue 
-        # ---------------------------------
-
+        # ----------------------------------
+        
         high = float(c["high"])
         low = float(c["low"])
         close = float(c["close"])
@@ -305,7 +301,7 @@ async def get_omega_status(
     force_price: float = None 
 ) -> Dict[str, Any]:
     
-    # 1. SET TARGET: We only care about NY Futures
+    # 1. SET TARGET: We only care about NY Futures (08:30 - 16:00 ET)
     session_id = "us_ny_futures"
 
     if force_time_utc:
@@ -318,25 +314,27 @@ async def get_omega_status(
         is_simulation = False
 
     # 2. ASK THE BOSS (Session Manager)
+    # We retrieve the official config and anchor time.
     session_config = session_manager.get_session_config(session_id)
     anchor_ts = session_manager.anchor_ts_for_utc_date(session_config, now_utc)
     anchor_dt = datetime.fromtimestamp(anchor_ts, timezone.utc)
     
-    # Time Calculations
+    # Calculate elapsed time relative to the OFFICIAL ANCHOR
     elapsed = (now_utc - anchor_dt).total_seconds() / 3600.0
-    session_duration = float(session_config.get("duration_hours", 23.0)) 
     
-    # ZOMBIE KILLER: Hard stop if outside hours.
-    is_session_closed = elapsed > session_duration or elapsed < 0
+    # HARD RULE: If outside the 7.5 hour window, we are CLOSED.
+    # We ignore the '23h' config because we are the Day Session Specialist.
+    is_session_closed = elapsed > 7.5 or elapsed < 0
 
-    # 3. FETCH DATA
+    # 3. FETCH DATA (Pipeline)
     pipeline_data = await battlebox_pipeline.get_live_battlebox(
         symbol=symbol, session_mode="MANUAL", manual_id=session_id
     )
     real_price = float(pipeline_data.get("price", 0.0))
     current_price = force_price if force_price is not None else real_price
 
-    # 4. ENFORCE HIERARCHY (Hard Close)
+    # 4. ENFORCE HIERARCHY: CLOSED STATE
+    # If Session Manager says we are closed, we shut down. No runners. No overtime.
     if is_session_closed:
         return {
             "ok": True,
@@ -356,7 +354,7 @@ async def get_omega_status(
             "plans": {"LONG": {}, "SHORT": {}}
         }
 
-    # Calibration Check
+    # 5. CALIBRATION STATE (08:30 - 09:00 ET)
     if pipeline_data.get("status") == "CALIBRATING":
         return {
             "ok": True, 
@@ -373,7 +371,7 @@ async def get_omega_status(
             "plans": {"LONG": {}, "SHORT": {}}
         }
 
-    # Unpack Data
+    # 6. LIVE OPERATION (09:00 - 16:00 ET)
     box = pipeline_data.get("battlebox", {})
     levels = box.get("levels", {})
     context = box.get("context", {})
@@ -397,7 +395,8 @@ async def get_omega_status(
     # 6. PHASE 2 (MATH)
     kinetic = _calculate_locked_strategy(anchor_price, levels, context, shelves, calc_side)
     
-    # 7. PHASE 3 (EXECUTION - WITH HIERARCHY ENFORCEMENT)
+    # 7. PHASE 3 (EXECUTION - WITH HIERARCHY FILTER)
+    # We pass 'anchor_ts' to ensure we ignore any candles from yesterday/pre-market.
     exec_state = _check_omega_triggers(
         levels, raw_candles, kinetic["protocol"], start_time_filter=anchor_ts
     )
@@ -421,6 +420,8 @@ async def get_omega_status(
     # UI Warning
     if elapsed > 2.5: 
         kinetic["breakdown"]["time"] = "LATE (CAUTION)"
+    else:
+        kinetic["breakdown"]["time"] = "PRIME (OPEN)"
     
     # Plans
     plan_long = _calc_execution_plan(
