@@ -2,366 +2,415 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PROJECT OMEGA | NY COMMAND</title>
+    <title>PROJECT OMEGA | COMMAND</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
     <style>
         :root { 
-            --bg: #020617; --panel: #0f172a; --border: #1e293b; 
-            --green: #10b981; --red: #ef4444; --amber: #f59e0b; --cyan: #06b6d4; --gray: #64748b;
-            --neon-green: #39ff14; --gold: #ffd700;
-            --text-main: #ffffff; --text-dim: #94a3b8; 
+            --bg: #020617; --panel: rgba(15, 23, 42, 0.6); --border: rgba(56, 189, 248, 0.2); 
+            --cyan: #06b6d4; --green: #10b981; --red: #ef4444; --gold: #facc15; 
+            --text-glow: 0 0 10px rgba(6, 182, 212, 0.5);
         }
-        body { background: var(--bg); color: var(--text-main); font-family: 'Inter', sans-serif; padding: 20px; margin: 0; }
+        body { 
+            background: var(--bg); color: #fff; font-family: 'JetBrains Mono', monospace; 
+            margin: 0; padding: 20px; height: 100vh; box-sizing: border-box; 
+            background-image: radial-gradient(circle at 50% 50%, #0f172a 0%, #020617 100%);
+            overflow: hidden; /* Lock scroll like a cockpit */
+        }
+
+        /* --- LAYOUT GRID --- */
+        .cockpit { 
+            display: grid; 
+            grid-template-columns: 300px 1fr 320px; 
+            grid-template-rows: 60px 1fr 200px;
+            gap: 15px; 
+            height: 100%;
+        }
         
-        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid var(--border); }
-        .brand { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 24px; letter-spacing: -1px; display:flex; align-items:center; gap:10px; }
+        .header { grid-column: 1 / 4; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 15px; backdrop-filter: blur(5px); position: relative; }
+        .panel-left { grid-row: 2 / 3; grid-column: 1 / 2; }
+        .panel-center { grid-row: 2 / 3; grid-column: 2 / 3; display: flex; flex-direction: column; }
+        .panel-right { grid-row: 2 / 4; grid-column: 3 / 4; display: flex; flex-direction: column; } /* Full height right */
+        .panel-bottom { grid-row: 3 / 4; grid-column: 1 / 3; border-top: 1px solid var(--border); display: flex; flex-direction: column; }
+
+        /* --- TYPOGRAPHY --- */
+        .glitch-text { font-family: 'Rajdhani', sans-serif; font-weight: 700; font-size: 24px; color: var(--cyan); text-shadow: var(--text-glow); letter-spacing: 2px; }
+        .label { font-size: 10px; color: #64748b; letter-spacing: 1px; text-transform: uppercase; display: block; margin-bottom: 5px; }
+        .val-lg { font-size: 24px; font-weight: 800; color: #fff; }
         
-        .notify-badge { width:10px; height:10px; background:var(--border); border-radius:50%; display:inline-block; transition:0.3s; }
-        .notify-badge.active { background:var(--green); box-shadow: 0 0 10px var(--green); }
+        /* --- RADAR / HUD (CENTER) --- */
+        .hud-container { 
+            flex-grow: 1; border: 1px solid var(--cyan); border-radius: 12px; margin-bottom: 15px; 
+            position: relative; overflow: hidden; background: rgba(6, 182, 212, 0.05);
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: inset 0 0 50px rgba(6, 182, 212, 0.1);
+        }
+        .scan-line {
+            position: absolute; width: 100%; height: 2px; background: rgba(6, 182, 212, 0.5);
+            top: 0; animation: scan 3s linear infinite; box-shadow: 0 0 10px var(--cyan);
+        }
+        @keyframes scan { 0% { top: 0%; opacity: 0; } 50% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
 
-        .war-room { display: grid; grid-template-columns: 320px 1fr 340px; gap: 20px; }
-        @media (max-width: 1200px) { .war-room { grid-template-columns: 1fr; } }
+        .radar-circle {
+            width: 300px; height: 300px; border: 1px dashed rgba(6, 182, 212, 0.3); border-radius: 50%;
+            position: absolute; animation: rotate 10s linear infinite;
+        }
+        .radar-crosshair {
+            width: 20px; height: 20px; border: 1px solid var(--cyan); position: absolute;
+        }
+        @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 25px; display: flex; flex-direction: column; }
-        .panel-head { font-family: 'Inter'; font-weight: 900; font-size: 14px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+        .hud-overlay { position: absolute; text-align: center; z-index: 10; }
+        .hud-status { font-size: 48px; font-family: 'Rajdhani'; font-weight: 800; color: #fff; text-shadow: 0 0 20px var(--cyan); letter-spacing: 5px; }
+        .hud-sub { font-size: 16px; color: var(--cyan); font-weight: 700; background: rgba(0,0,0,0.5); padding: 5px 15px; border: 1px solid var(--cyan); display: inline-block; margin-top: 10px; }
 
-        /* HUD STYLES */
-        .hud-box { text-align: center; padding: 40px 20px; border: 2px solid var(--border); border-radius: 12px; background: #0b1121; margin-bottom: 20px; transition: 0.3s; position: relative; overflow: hidden; }
-        .hud-title { font-family: 'JetBrains Mono'; font-size: 18px; letter-spacing: 3px; color: var(--text-dim); font-weight: 800; text-transform: uppercase; margin-bottom: 10px; }
-        .hud-val { font-size: 60px; font-weight: 900; color: #fff; margin: 10px 0; line-height: 1; font-family: 'JetBrains Mono'; }
-        .hud-sub { font-size: 14px; font-weight: 700; color: #fff; text-transform: uppercase; margin-top: 15px; background: rgba(255,255,255,0.1); display: inline-block; padding: 6px 12px; border-radius: 6px; }
+        /* --- GAUGES --- */
+        .gauge-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .gauge-box { background: rgba(0,0,0,0.3); padding: 10px; border-left: 2px solid #334155; }
+        .bar-container { width: 100%; height: 6px; background: #1e293b; margin-top: 5px; position: relative; }
+        .bar-fill { height: 100%; background: var(--cyan); width: 0%; transition: width 1s ease; box-shadow: 0 0 8px var(--cyan); }
 
-        /* MODES */
-        .mode-SUPERSONIC { border-color: var(--cyan); box-shadow: 0 0 50px rgba(6, 182, 212, 0.2); }
-        .mode-SUPERSONIC .hud-val, .mode-SUPERSONIC .hud-title { color: var(--cyan); }
-        .mode-SNIPER { border-color: var(--green); box-shadow: 0 0 50px rgba(16, 185, 129, 0.2); }
-        .mode-SNIPER .hud-val, .mode-SNIPER .hud-title { color: var(--green); }
-        .mode-DOGFIGHT { border-color: var(--amber); box-shadow: 0 0 50px rgba(245, 158, 11, 0.2); }
-        .mode-DOGFIGHT .hud-val, .mode-DOGFIGHT .hud-title { color: var(--amber); }
-        .mode-BLOCKED { border-color: var(--red); opacity: 0.8; }
-        .mode-BLOCKED .hud-val, .mode-BLOCKED .hud-title { color: var(--red); }
-        .mode-CLOSED { border-color: var(--gray); opacity: 0.5; filter: grayscale(100%); }
-        .mode-CLOSED .hud-val { color: var(--gray); }
-        .mode-CALIBRATING { border-color: var(--text-dim); border-style: dashed; }
+        /* --- BLACK BOX (LOG) --- */
+        .log-terminal { 
+            flex-grow: 1; background: #000; font-family: 'Courier New', monospace; font-size: 12px; 
+            padding: 10px; overflow-y: auto; color: #33ff00; opacity: 0.8;
+        }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #111; padding-bottom: 2px; }
+        .log-time { color: #666; margin-right: 10px; }
 
-        @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
-        .mode-EXECUTING { border-color: var(--neon-green) !important; background: rgba(16, 185, 129, 0.1) !important; animation: pulse-green 1.5s infinite; }
-        .mode-EXECUTING .hud-val { color: var(--neon-green) !important; text-shadow: 0 0 10px var(--neon-green); }
+        /* --- CONTROLS --- */
+        .btn-action { width: 100%; background: transparent; border: 1px solid var(--cyan); color: var(--cyan); padding: 10px; font-family: 'JetBrains Mono'; font-weight: 800; cursor: pointer; transition: 0.2s; margin-bottom: 10px; }
+        .btn-action:hover { background: var(--cyan); color: #000; box-shadow: 0 0 15px var(--cyan); }
+        .inp-risk { background: #000; border: 1px solid #334155; color: #fff; width: 100%; padding: 8px; font-family: inherit; font-size: 14px; text-align: right; margin-bottom: 10px; }
 
-        /* UTILS */
-        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
-        .data-card { background: #020617; padding: 12px; border-radius: 6px; border: 1px solid var(--border); text-align: center; }
-        .dc-lbl { font-size: 10px; color: var(--text-dim); font-weight: 700; text-transform: uppercase; margin-bottom: 5px; }
-        .dc-val { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 14px; color: #fff; }
-
-        .exec-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; font-family: 'JetBrains Mono'; font-size: 14px; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 8px; }
-        .lbl { color: var(--text-dim); font-weight: 600; font-size: 12px; }
-        .val { color: #fff; font-weight: 800; font-size: 16px; }
-        .highlight { color: var(--cyan); }
-
-        .inp { background: #020617; border: 1px solid var(--border); color: #fff; padding: 12px; width: 100%; box-sizing: border-box; font-family: 'JetBrains Mono'; text-align: right; border-radius: 6px; font-size: 16px; font-weight: 700; }
-        .btn-copy { background: #1e293b; border: 1px solid var(--border); color: var(--text-dim); padding: 4px 8px; font-size: 10px; border-radius: 4px; cursor: pointer; margin-left: 10px; font-weight: 700; text-transform: uppercase; transition: 0.2s; }
-        .btn-copy:hover { background: #334155; color: #fff; border-color: #fff; }
-
-        .control-group { display: flex; gap: 8px; }
-        .btn-toggle { background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 8px 12px; font-size: 11px; border-radius: 6px; cursor: pointer; font-weight: 700; font-family: 'JetBrains Mono'; text-transform: uppercase; transition: 0.2s; }
-        .btn-toggle:hover { border-color: #fff; color: #fff; }
-        .btn-toggle.active { background: rgba(16, 185, 129, 0.1); border-color: var(--green); color: var(--green); }
+        /* --- STATES --- */
+        .state-RED .hud-status { color: var(--red); text-shadow: 0 0 20px var(--red); }
+        .state-RED .radar-circle { border-color: var(--red); }
+        .state-GOLD .hud-status { color: var(--gold); text-shadow: 0 0 20px var(--gold); }
         
-        .side-select { display:flex; gap:10px; margin-bottom:20px; }
-        .btn-side { flex:1; padding:15px; background: #020617; border:1px solid var(--border); color:var(--text-dim); border-radius:6px; cursor:pointer; font-weight:900; font-family:'JetBrains Mono'; font-size:14px; text-transform:uppercase; transition:0.2s; }
-        .btn-side.long-active { border-color:var(--green); color:var(--green); background:rgba(16, 185, 129, 0.05); box-shadow: 0 0 15px rgba(16, 185, 129, 0.1); }
-        .btn-side.short-active { border-color:var(--red); color:var(--red); background:rgba(239, 68, 68, 0.05); box-shadow: 0 0 15px rgba(239, 68, 68, 0.1); }
+        .copy-btn { float: right; font-size: 10px; background: #1e293b; border: 1px solid #475569; color: #fff; cursor: pointer; padding: 2px 6px; }
+        .copy-btn:active { background: var(--green); }
 
-        .session-label { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; background: #1e293b; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); color: var(--cyan); letter-spacing: 1px; }
-        .brief-text { font-size: 14px; line-height: 1.6; color: #cbd5e1; border-left: 4px solid var(--border); padding-left: 15px; margin-top: 20px; font-style: italic; }
     </style>
 </head>
 <body>
 
-    <div class="top-bar">
-        <div class="brand">PROJECT OMEGA <div id="notifyBadge" class="notify-badge"></div></div>
-        <div class="control-group">
-            <div class="session-label">TARGET: NY FUTURES</div>
-            <button id="btnSound" class="btn-toggle" onclick="toggleSound()">SOUND: OFF</button>
+<div class="cockpit">
+    
+    <div class="header">
+        <div class="glitch-text">PROJECT OMEGA <span style="font-size:12px; opacity:0.5;">v11.0</span></div>
+        <div style="display:flex; gap:15px; align-items:center;">
+            <div id="connectionStatus" style="width:8px; height:8px; background:var(--red); border-radius:50%; box-shadow:0 0 5px var(--red);"></div>
+            <span class="label" style="margin:0;">NY FUTURES</span>
+            <span class="label" id="clockUTC" style="color:#fff;">--:--:-- UTC</span>
         </div>
     </div>
 
-    <div class="war-room">
+    <div class="panel panel-left">
+        <div class="label">/// RISK THROTTLE</div>
+        <div style="margin-bottom: 20px;">
+            <label class="label">BALANCE ($)</label>
+            <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="updateRisk()">
+        </div>
+        <div style="margin-bottom: 20px;">
+            <label class="label">RISK %</label>
+            <input type="number" id="inpRisk" class="inp-risk" value="10.0" step="0.1" oninput="updateRisk()">
+        </div>
+        <div style="border-top: 1px dashed #334155; padding-top: 10px;">
+            <label class="label">MAX LOSS</label>
+            <div id="valRisk" class="val-lg" style="color:var(--red); font-size:20px;">$400.00</div>
+        </div>
         
-        <div class="panel">
-            <div class="panel-head">RISK COMMAND</div>
-            <div style="margin-bottom:20px;">
-                <div class="lbl" style="margin-bottom:8px;">ACCOUNT BALANCE ($)</div>
-                <input type="number" id="inpBal" class="inp" value="4000" oninput="render()">
-            </div>
-            <div style="margin-bottom:20px;">
-                <div class="lbl" style="margin-bottom:8px;">RISK PER TRADE (%)</div>
-                <input type="number" id="inpRisk" class="inp" value="10.0" step="0.1" oninput="render()">
-            </div>
-            <div class="exec-row" style="margin-top:auto; border-top:1px solid var(--border); padding-top:20px; border-bottom:none;">
-                <span class="lbl">MAX LOSS ALLOWED</span>
-                <span class="val" id="valRisk" style="color:var(--red)">$0.00</span>
-            </div>
+        <div style="margin-top:auto; padding-top:20px;">
+            <button class="btn-action" onclick="toggleAudio()">AUDIO: <span id="txtAudio">OFF</span></button>
+            <button class="btn-action" onclick="requestNotify()">ENABLE NOTIFY</button>
         </div>
-
-        <div class="panel">
-            <div class="panel-head">
-                <span>KINETIC STATUS</span>
-                <span id="livePrice" style="color:#fff; font-family:'JetBrains Mono';">--</span>
-            </div>
-            
-            <div id="hud" class="hud-box">
-                <div class="hud-title" id="kMode">INITIALIZING</div>
-                <div class="hud-val" id="kScore">--</div>
-                <div class="hud-sub" id="kInstr">Connecting to NY Session...</div>
-            </div>
-
-            <div class="grid-2">
-                <div class="data-card">
-                    <div class="dc-lbl">ENERGY (SPRING)</div><div class="dc-val" id="kEnergy">--</div>
-                </div>
-                <div class="data-card">
-                    <div class="dc-lbl">SPACE (RUNWAY)</div><div class="dc-val" id="kSpace">--</div>
-                </div>
-                <div class="data-card">
-                    <div class="dc-lbl">SESSION CLOCK</div><div class="dc-val" id="kTime">--</div>
-                </div>
-                <div class="data-card">
-                    <div class="dc-lbl">WEEKLY FORCE</div><div class="dc-val" id="kMom">--</div>
-                </div>
-            </div>
-            
-            <div class="brief-text" id="brief">Waiting for Data...</div>
-        </div>
-
-        <div class="panel">
-            <div class="panel-head">EXECUTION CHEAT SHEET</div>
-            
-            <div class="side-select">
-                <button id="btnLong" class="btn-side" onclick="setSide('LONG')">LONG</button>
-                <button id="btnShort" class="btn-side" onclick="setSide('SHORT')">SHORT</button>
-            </div>
-
-            <div class="exec-row">
-                <span class="lbl">ENTRY (STOP LIMIT)</span>
-                <div style="display:flex; align-items:center;">
-                    <span class="val highlight" id="pEntry">--</span>
-                    <button class="btn-copy" onclick="cp('pEntry')">COPY</button>
-                </div>
-            </div>
-            <div class="exec-row">
-                <span class="lbl">STOP LOSS</span>
-                <div style="display:flex; align-items:center;">
-                    <span class="val" style="color:var(--red)" id="pStop">--</span>
-                    <button class="btn-copy" onclick="cp('pStop')">COPY</button>
-                </div>
-            </div>
-            <div class="exec-row" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:6px; border-bottom:none;">
-                <span class="lbl">LOT SIZE (USD)</span>
-                <div style="display:flex; align-items:center;">
-                    <span class="val" id="pSize">--</span>
-                    <button class="btn-copy" onclick="cp('pSize')">COPY</button>
-                </div>
-            </div>
-
-            <div style="margin: 20px 0; border-top:1px solid var(--border);"></div>
-
-            <div class="exec-row" style="border-bottom:none; margin-bottom:5px;">
-                <span class="lbl" style="color:var(--text-dim)">MOVE STOP TO B.E. AT</span>
-                <span class="val" id="pBE" style="font-size:14px; color:#facc15;">--</span>
-            </div>
-
-            <div style="border-top:1px dashed rgba(255,255,255,0.1); margin:10px 0;"></div>
-
-            <div class="exec-row" style="border-bottom:none; margin-bottom:5px;">
-                <span class="lbl" style="color:var(--cyan)">TARGET 1 (BANK 75%)</span>
-                <span class="val" id="pT1" style="font-size:14px;">--</span>
-            </div>
-            <div class="exec-row" style="border-bottom:none; margin-bottom:5px;">
-                <span class="lbl" style="color:var(--text-dim)">TARGET 2</span>
-                <span class="val" id="pT2" style="font-size:14px;">--</span>
-            </div>
-            <div class="exec-row" style="border-bottom:none; margin-bottom:5px;">
-                <span class="lbl" style="color:var(--text-dim)">TARGET 3</span>
-                <span class="val" id="pT3" style="font-size:14px;">--</span>
-            </div>
-
-            <div style="border-top:1px solid var(--border); margin:15px 0;"></div>
-
-            <div class="exec-row" style="border-bottom:none;">
-                <span class="lbl">BANK RULE</span>
-                <span class="val" id="pBank">--</span>
-            </div>
-        </div>
-
     </div>
 
-    <script>
-        let data = null;
-        let manualSide = null;
-        let soundOn = false;
-        let lastStatus = "";
-
-        // --- SOUND ---
-        function toggleSound() {
-            soundOn = !soundOn;
-            const btn = document.getElementById('btnSound');
-            btn.innerText = soundOn ? "SOUND: ON" : "SOUND: OFF";
-            btn.className = soundOn ? "btn-toggle active" : "btn-toggle";
-        }
-
-        function playAlert(msg) {
-            if(!soundOn) return;
-            const u = new SpeechSynthesisUtterance(msg);
-            speechSynthesis.speak(u);
-        }
-
-        function flashBadge() {
-            const badge = document.getElementById('notifyBadge');
-            badge.classList.add('active');
-            setTimeout(() => badge.classList.remove('active'), 2000);
-        }
-
-        // --- DATA LOOP ---
-        async function fetchData() {
-            // No drop down reading. Always NY Futures.
-            try {
-                const res = await fetch('/api/omega/status', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ session_id: "us_ny_futures" })
-                });
-                data = await res.json();
-                render();
-            } catch(e) { 
-                console.error("Connection Error", e); 
-                document.getElementById('kInstr').innerText = "CONNECTION LOST - RETRYING";
-            }
-        }
-
-        function setSide(s) { manualSide = s; render(); }
-        function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText.replace(/,/g,'')); }
-
-        function render() {
-            if(!data) return;
-            const price = data.price;
-            document.getElementById('livePrice').innerText = price.toLocaleString();
-
-            const k = data.kinetic || {};
-            const bk = k.breakdown || {};
+    <div class="panel panel-center">
+        <div class="hud-container" id="hudFrame">
+            <div class="scan-line"></div>
+            <div class="radar-circle"></div>
+            <div class="radar-crosshair"></div>
             
-            // --- CO-PILOT LOGIC ---
-            let hudTitle = k.protocol;
-            let hudScore = k.total_score;
-            let hudInstr = k.instruction;
-            let hudClass = "hud-box";
-            let colorClass = k.color || "GRAY";
+            <div class="hud-overlay">
+                <div class="hud-status" id="hudMain">SCANNING</div>
+                <div class="hud-sub" id="hudSub">WAITING FOR LOCK</div>
+            </div>
+        </div>
 
-            // AUTO-SIDE SELECTION LOGIC
-            // If user hasn't clicked a tab, we auto-pick the closest or active side.
-            let side = manualSide;
-            if (!side) {
-                if (data.active_side && data.active_side !== "NONE") {
-                    side = data.active_side;
-                } else {
-                    side = "LONG"; // Fallback default
+        <div class="gauge-grid">
+            <div class="gauge-box">
+                <div style="display:flex; justify-content:space-between;">
+                    <span class="label">ENERGY (BPS)</span>
+                    <span class="label" id="valEnergy" style="color:#fff">--</span>
+                </div>
+                <div class="bar-container"><div class="bar-fill" id="barEnergy"></div></div>
+            </div>
+            <div class="gauge-box">
+                <div style="display:flex; justify-content:space-between;">
+                    <span class="label">RUNWAY (ATR)</span>
+                    <span class="label" id="valSpace" style="color:#fff">--</span>
+                </div>
+                <div class="bar-container"><div class="bar-fill" id="barSpace"></div></div>
+            </div>
+            <div class="gauge-box">
+                <div style="display:flex; justify-content:space-between;">
+                    <span class="label">WIND (SLOPE)</span>
+                    <span class="label" id="valSlope" style="color:#fff">--</span>
+                </div>
+                <div class="bar-container"><div class="bar-fill" id="barSlope"></div></div>
+            </div>
+            <div class="gauge-box">
+                <div style="display:flex; justify-content:space-between;">
+                    <span class="label">HULL (STRUCT)</span>
+                    <span class="label" id="valStruct" style="color:#fff">--</span>
+                </div>
+                <div class="bar-container"><div class="bar-fill" id="barStruct"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel panel-right">
+        <div class="label">/// TARGETING COMPUTER</div>
+        
+        <div style="display:flex; gap:5px; margin-bottom:15px;">
+            <button id="btnLong" class="btn-action" style="flex:1" onclick="forceSide('LONG')">LONG</button>
+            <button id="btnShort" class="btn-action" style="flex:1" onclick="forceSide('SHORT')">SHORT</button>
+        </div>
+
+        <div class="data-row">
+            <span class="label">ENTRY <button class="copy-btn" onclick="cp('pEntry')">CP</button></span>
+            <div id="pEntry" class="val-lg" style="color:var(--cyan)">--</div>
+        </div>
+        <br>
+        <div class="data-row">
+            <span class="label">STOP LOSS <button class="copy-btn" onclick="cp('pStop')">CP</button></span>
+            <div id="pStop" class="val-lg" style="color:var(--red); font-size:20px;">--</div>
+        </div>
+        <br>
+        <div class="data-row">
+            <span class="label">SIZE (USD) <button class="copy-btn" onclick="cp('pSize')">CP</button></span>
+            <div id="pSize" class="val-lg" style="font-size:20px;">--</div>
+        </div>
+
+        <hr style="border:0; border-top:1px solid #334155; margin:15px 0;">
+
+        <div class="data-row">
+            <span class="label">TARGET 1 (75%)</span>
+            <div id="pT1" style="color:var(--gold); font-weight:800;">--</div>
+        </div>
+        <div class="data-row" style="margin-top:5px;">
+            <span class="label">MOVE BE @</span>
+            <div id="pBE" style="color:#fff; font-weight:700;">--</div>
+        </div>
+        
+    </div>
+
+    <div class="panel panel-bottom">
+        <div class="label" style="background:#111; padding:5px;">/// BLACK BOX RECORDER [REC]</div>
+        <div id="logTerminal" class="log-terminal">
+            <div class="log-entry"><span class="log-time">SYS</span> SYSTEM BOOT SEQUENCE INITIATED...</div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    // --- STATE ---
+    let state = {
+        data: null,
+        lastStatus: "",
+        manualSide: null,
+        audio: false,
+        log: []
+    };
+
+    // --- UTILS ---
+    function log(msg) {
+        const now = new Date().toLocaleTimeString('en-US', {hour12:false});
+        const line = `<div class="log-entry"><span class="log-time">${now}</span> ${msg}</div>`;
+        const term = document.getElementById('logTerminal');
+        term.innerHTML += line;
+        term.scrollTop = term.scrollHeight;
+    }
+
+    function notify(title, body) {
+        if (Notification.permission === "granted") {
+            new Notification(title, { body: body, icon: '/static/icon.png' });
+        }
+    }
+
+    function requestNotify() { Notification.requestPermission().then(p => { if(p==="granted") log("COMMS LINK ESTABLISHED."); }); }
+    function toggleAudio() { state.audio = !state.audio; document.getElementById('txtAudio').innerText = state.audio ? "ON" : "OFF"; }
+    function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText.replace(/,/g,'')); log("COPIED TO CLIPBOARD."); }
+    
+    function speak(text) {
+        if(!state.audio) return;
+        const u = new SpeechSynthesisUtterance(text);
+        speechSynthesis.speak(u);
+    }
+
+    // --- RENDER LOGIC ---
+    function updateGauges(k) {
+        // Parse "SUPER COILED (43bps)" -> 43
+        let bps = 0; try { bps = parseInt(k.breakdown.energy.match(/\d+/)[0]); } catch(e){}
+        let atr = 0; try { atr = parseFloat(k.breakdown.space.match(/([\d\.]+)R/)[1]); } catch(e){}
+        
+        // Bars (0-100%)
+        // Energy: Lower is better (0-100bps is prime). Invert logic visually? 
+        // Actually, let's map: 0bps=100%, 300bps=0%
+        let ePct = Math.max(0, Math.min(100, (300 - bps)/3));
+        document.getElementById('barEnergy').style.width = ePct + "%";
+        document.getElementById('barEnergy').style.background = ePct > 66 ? "var(--green)" : "var(--red)";
+        document.getElementById('valEnergy').innerText = bps + " bps";
+
+        // Space: 2R is 100%
+        let sPct = Math.max(0, Math.min(100, (atr / 2.0) * 100));
+        document.getElementById('barSpace').style.width = sPct + "%";
+        document.getElementById('valSpace').innerText = atr + " R";
+
+        // Structure
+        let struct = k.breakdown.structure.includes("SOLID") ? 100 : 30;
+        document.getElementById('barStruct').style.width = struct + "%";
+        document.getElementById('valStruct').innerText = k.breakdown.structure;
+    }
+
+    function monitorSortie(plan, price) {
+        if (!plan || !plan.valid || !price) return;
+        
+        // Active Sortie Monitor
+        // Check T1
+        let t1 = plan.targets[0];
+        if (t1 && ((plan.trigger < t1 && price >= t1) || (plan.trigger > t1 && price <= t1))) {
+            // T1 HIT
+            document.getElementById('hudFrame').className = "hud-container state-GOLD";
+            document.getElementById('hudMain').innerText = "TARGET 1 HIT";
+            document.getElementById('hudSub').innerText = "BANK 75% NOW";
+            if (state.lastStatus !== "T1_HIT") {
+                log(`>>> OBJECTIVE ALPHA (T1) ACHIEVED @ ${price}`);
+                notify("PROJECT OMEGA", "Target 1 Hit. Bank 75%.");
+                speak("Target one hit. Bank profit.");
+                state.lastStatus = "T1_HIT";
+            }
+            return; // Priority display
+        }
+
+        // Check Stop
+        let stop = plan.stop;
+        if (stop && ((plan.trigger < t1 && price <= stop) || (plan.trigger > t1 && price >= stop))) {
+            document.getElementById('hudFrame').className = "hud-container state-RED";
+            document.getElementById('hudMain').innerText = "STOP HIT";
+            document.getElementById('hudSub').innerText = "SORTIE FAILED - EJECT";
+            if (state.lastStatus !== "STOP_HIT") {
+                log(`!!! CRITICAL FAILURE. STOP HIT @ ${price}`);
+                state.lastStatus = "STOP_HIT";
+            }
+            return;
+        }
+    }
+
+    async function fetchLoop() {
+        try {
+            const res = await fetch('/api/omega/status', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ session_id: "us_ny_futures" })
+            });
+            const d = await res.json();
+            state.data = d;
+
+            // Connection Dot
+            document.getElementById('connectionStatus').style.background = "var(--green)";
+            document.getElementById('connectionStatus').style.boxShadow = "0 0 5px var(--green)";
+            
+            // Clock
+            document.getElementById('clockUTC').innerText = new Date().toISOString().split('T')[1].split('.')[0] + " UTC";
+
+            // Price
+            const price = d.price;
+
+            // Determine Side
+            let side = state.manualSide || (d.active_side !== "NONE" ? d.active_side : "LONG");
+            const k = d.kinetic;
+            const plan = d.plans[side];
+
+            // Render HUD
+            const hudBox = document.getElementById('hudFrame');
+            const main = document.getElementById('hudMain');
+            const sub = document.getElementById('hudSub');
+
+            if (d.status === "CLOSED") {
+                main.innerText = "SESSION CLOSED";
+                sub.innerText = "MARKET OFFLINE";
+                hudBox.className = "hud-container";
+                hudBox.style.opacity = "0.5";
+            } else if (d.status === "EXECUTING") {
+                main.innerText = "EXECUTE " + side;
+                sub.innerText = "ENTRY TRIGGERED";
+                hudBox.className = "hud-container state-GOLD";
+                // Only alert once per signal
+                if (state.lastStatus !== "EXEC") {
+                    log(`>>> EXECUTION SIGNAL: ${side} @ ${price}`);
+                    notify("PROJECT OMEGA", `EXECUTE ${side} NOW`);
+                    speak(`Execute ${side} now.`);
+                    state.lastStatus = "EXEC";
                 }
-            }
-            // If executing, force the side
-            if (data.status === "EXECUTING") {
-                side = data.active_side;
-                manualSide = side; 
-            }
-
-            const plan = data.plans ? data.plans[side] : null;
-
-            // 1. HUD STATUS
-            if (data.status === "EXECUTING") {
-                hudTitle = "EXECUTE " + (data.active_side || "NOW");
-                hudScore = "GO";
-                hudInstr = "ENTRY TRIGGERED - CHECK CHEAT SHEET";
-                hudClass = "hud-box mode-EXECUTING";
-            } else if (data.status === "ACTIVE") {
-                hudTitle = "TRADE ACTIVE";
-                hudScore = "IN PLAY";
-                hudInstr = k.instruction || "MONITOR TARGETS";
-                hudClass = "hud-box mode-SUPERSONIC"; 
-            } else if (data.status === "CLOSED") {
-                hudTitle = "SESSION CLOSED";
-                hudScore = "--";
-                hudClass = "hud-box mode-CLOSED";
-                hudInstr = k.instruction || "MARKET CLOSED";
+            } else if (d.status === "ACTIVE") {
+                main.innerText = "IN COMBAT";
+                sub.innerText = "TRACKING TARGETS...";
+                hudBox.className = "hud-container";
+                monitorSortie(plan, price);
             } else {
-                hudClass = "hud-box mode-" + colorClass;
+                // Scanning
+                main.innerText = k.protocol || "SCANNING";
+                sub.innerText = `SCORE: ${k.total_score} // ${d.status}`;
+                hudBox.className = "hud-container";
             }
 
-            // Update HUD
-            document.getElementById('kMode').innerText = hudTitle;
-            document.getElementById('kScore').innerText = hudScore;
-            document.getElementById('kInstr').innerText = hudInstr;
-            document.getElementById('hud').className = hudClass;
-            document.getElementById('brief').innerText = k.brief;
+            // Render Gauges
+            if (k.breakdown) updateGauges(k);
 
-            // Alert Logic
-            if(data.status === "EXECUTING" && lastStatus !== "EXECUTING") {
-                flashBadge();
-                playAlert("Execution Signal Triggered. Check Entry.");
-                lastStatus = "EXECUTING";
-            }
-
-            // 2. BREAKDOWN
-            document.getElementById('kEnergy').innerText = bk.energy || "--";
-            document.getElementById('kSpace').innerText = bk.space || "--";
-            document.getElementById('kTime').innerText = bk.time || "--";
-            document.getElementById('kMom').innerText = bk.momentum || "--";
-
-            // 3. EXECUTION TAB LOGIC
-            const btnL = document.getElementById('btnLong');
-            const btnS = document.getElementById('btnShort');
-            
-            if(side === "LONG") {
-                btnL.className = "btn-side long-active";
-                btnS.className = "btn-side";
-            } else {
-                btnL.className = "btn-side";
-                btnS.className = "btn-side short-active";
-            }
-
-            // 4. CHEAT SHEET POPULATION
+            // Render Right Panel (Cheat Sheet)
             if (plan) {
                 document.getElementById('pEntry').innerText = plan.trigger ? plan.trigger.toLocaleString() : "--";
                 document.getElementById('pStop').innerText = plan.stop ? plan.stop.toLocaleString() : "--";
+                document.getElementById('pT1').innerText = plan.targets[0] ? plan.targets[0].toLocaleString() : "--";
                 document.getElementById('pBE').innerText = plan.be_trigger ? plan.be_trigger.toLocaleString() : "--";
 
-                const targets = plan.targets || [];
-                document.getElementById('pT1').innerText = targets[0] ? targets[0].toLocaleString() : "--";
-                document.getElementById('pT2').innerText = targets[1] ? targets[1].toLocaleString() : "--";
-                document.getElementById('pT3').innerText = targets[2] ? targets[2].toLocaleString() : "--";
-
-                document.getElementById('pBank').innerText = plan.bank_rule || "--";
-
-                // 5. RISK MATH
+                // Calc Size
                 const bal = parseFloat(document.getElementById('inpBal').value) || 0;
                 const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
-                
                 let riskAmt = bal * (riskPct / 100);
-                if (riskAmt > 5000) riskAmt = 5000;
-
+                if(riskAmt > 5000) riskAmt = 5000; // Safety cap
                 document.getElementById('valRisk').innerText = "$" + riskAmt.toFixed(2);
 
-                const riskPerShare = Math.abs(plan.trigger - plan.stop);
-                if(riskPerShare > 0 && plan.trigger > 0) {
-                    const size = (riskAmt / riskPerShare) * plan.trigger;
-                    document.getElementById('pSize').innerText = Math.floor(size).toLocaleString();
-                } else {
-                    document.getElementById('pSize').innerText = "0";
+                if (plan.trigger && plan.stop) {
+                    const riskPerUnit = Math.abs(plan.trigger - plan.stop);
+                    const units = riskAmt / riskPerUnit;
+                    const sizeUsd = units * plan.trigger;
+                    document.getElementById('pSize').innerText = Math.floor(sizeUsd).toLocaleString();
                 }
             }
-        }
 
-        setInterval(fetchData, 2000);
-        fetchData();
-    </script>
+            // Button highlights
+            document.getElementById('btnLong').style.border = side === "LONG" ? "2px solid var(--green)" : "1px solid var(--cyan)";
+            document.getElementById('btnShort').style.border = side === "SHORT" ? "2px solid var(--red)" : "1px solid var(--cyan)";
+
+        } catch(e) {
+            console.error(e);
+            document.getElementById('connectionStatus').style.background = "var(--red)";
+        }
+    }
+
+    function forceSide(s) { state.manualSide = s; fetchLoop(); }
+    function updateRisk() { fetchLoop(); } // Re-calc on input
+
+    // Init
+    setInterval(fetchLoop, 2000);
+    fetchLoop();
+    log("SYSTEM READY. WAITING FOR TELEMETRY...");
+
+</script>
 </body>
 </html>
