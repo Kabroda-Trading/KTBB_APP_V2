@@ -8,6 +8,15 @@
 # - Computes levels via sse_engine.compute_sse_levels
 # - Feeds post-lock candles into structure_state_engine (law layer)
 # - NEW: Fetches Weekly Candles to determine Macro Force (Green/Red)
+#
+# Session Authority:
+# - session_manager.py is the ONLY time anchor source
+#
+# Notes:
+# - This module should be consumed by:
+#   - Session Control page (review packet)
+#   - Research Lab (batch/backtest)
+#   - Battle Control / Omega (live packet + structure state)
 # ==============================================================================
 
 from __future__ import annotations
@@ -100,6 +109,7 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
     except Exception:
         return []
 
+# --- NEW: Weekly Fetcher ---
 async def fetch_live_weekly(symbol: str, limit: int = 5) -> List[Dict[str, Any]]:
     """Fetches Weekly candles to determine the Macro Force (Green/Red)."""
     s = _normalize_symbol(symbol)
@@ -190,6 +200,7 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, l
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
+# --- NEW: Weekly Force Logic ---
 def _calculate_weekly_force(weekly_candles: List[Dict[str, Any]]) -> str:
     """
     Determines the True Weekly Force based on the LAST COMPLETED candle.
@@ -399,6 +410,7 @@ async def get_live_battlebox(
             "htf_shelves": pkt.get("htf_shelves", {}),
             "meta": pkt.get("meta", {}),
         },
+        "candles": post_lock # <--- Pass raw ammo to strategies like Omega
     }
 
 
@@ -413,7 +425,7 @@ async def get_session_review(
     raw_5m = await fetch_live_5m(symbol)
     if not raw_5m:
         return {"ok": False, "error": "No Data"}
-        
+    
     # We also need weekly for review to be accurate
     raw_weekly = await fetch_live_weekly(symbol)
     weekly_force = _calculate_weekly_force(raw_weekly)
