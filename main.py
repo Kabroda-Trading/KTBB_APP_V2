@@ -4,7 +4,10 @@
 # ==============================================================================
 # - Architecture: "Gateway Pattern"
 # - Function: Receives 'session_id' from ANY page and routes to the correct Engine.
-# - Updates: Cleaned legacy aliases and hardened AI integration.
+# - Updates: 
+#    1. Removed Paywall (Session Control/Battle Control are now Free).
+#    2. Gated High-Value Tools (Omega/Research) to Admins Only.
+#    3. Fixed Simulation Mode wiring for off-hours testing.
 # ==============================================================================
 
 import os
@@ -64,6 +67,8 @@ def on_startup():
                 "operator_flex": "BOOLEAN DEFAULT FALSE",
                 "tradingview_id": "VARCHAR",
                 "username": "VARCHAR",
+                "first_name": "VARCHAR",  # Added for registration
+                "last_name": "VARCHAR",   # Added for registration
                 "session_tz": "VARCHAR DEFAULT 'America/New_York'"
             }
 
@@ -129,13 +134,17 @@ def register_page_ui(request: Request):
     return _template_or_fallback(request, templates, "register.html", {"request": request})
 
 # ==========================================
-# MEMBER SUITE
+# MEMBER SUITE (HIERARCHY ENFORCED)
 # ==========================================
+
+# 1. SESSION CONTROL (FREE ACCESS TO ALL REGISTERED USERS)
 @app.get("/suite", response_class=HTMLResponse)
 def suite_home(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
-    user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
-    
+    if not user_id: 
+        return RedirectResponse("/login") # The only gate is registration
+
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
     is_admin = getattr(user, "is_admin", False) if user else False
 
     return _template_or_fallback(
@@ -143,20 +152,42 @@ def suite_home(request: Request, db: Session = Depends(get_db)):
         {"request": request, "title": "Session Control", "user": user, "is_logged_in": True, "is_admin": is_admin}
     )
 
+# 2. BATTLE CONTROL (FREE ACCESS)
 @app.get("/suite/battle-control", response_class=HTMLResponse)
 def battle_control_page(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
+    if not user_id: 
+        return RedirectResponse("/login")
+    
     user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
     return _template_or_fallback(request, templates, "battle_control.html", {"request": request, "user": user})
 
+# 3. PROJECT OMEGA (GOD MODE / ADMIN ONLY)
 @app.get("/suite/omega", response_class=HTMLResponse)
-def omega_page(request: Request):
+def omega_page(request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get(auth.SESSION_KEY)
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    
+    # HIERARCHY CHECK
+    if not user or not user.is_admin:
+        # Kick them back to the free area
+        return RedirectResponse("/suite")
+
     return _template_or_fallback(request, templates, "project_omega.html", {"request": request})
 
+# 4. RESEARCH LAB (GOD MODE / ADMIN ONLY)
 @app.get("/suite/research-lab", response_class=HTMLResponse)
-def research_page(request: Request):
+def research_page(request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get(auth.SESSION_KEY)
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    
+    # HIERARCHY CHECK
+    if not user or not user.is_admin:
+        return RedirectResponse("/suite")
+
     return _template_or_fallback(request, templates, "research_lab.html", {"request": request})
 
+# 5. ACCOUNT PAGE (FREE)
 @app.get("/account", response_class=HTMLResponse)
 def account_page(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
@@ -164,8 +195,9 @@ def account_page(request: Request, db: Session = Depends(get_db)):
     is_admin = getattr(user, "is_admin", False) if user else False
 
     return _template_or_fallback(request, templates, "account.html", 
-                                 {"request": request, "user": user, "is_logged_in": True, "tier_label": "Active", "is_admin": is_admin})
+                                 {"request": request, "user": user, "is_logged_in": True, "tier_label": "Early Access", "is_admin": is_admin})
 
+# 6. ADMIN PANEL (GOD MODE ONLY)
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
@@ -310,7 +342,7 @@ async def delete_user(request: Request, user_id: int = Form(...), db: Session = 
 # UNIVERSAL SWITCHBOARD ROUTES
 # ==============================================================================
 
-# 1. OMEGA SWITCHBOARD
+# 1. OMEGA SWITCHBOARD (Fixed to handle Sim Mode params)
 @app.post("/api/omega/status")
 async def omega_status_api(request: Request, db: Session = Depends(get_db)):
     try: payload = await request.json()
@@ -321,7 +353,6 @@ async def omega_status_api(request: Request, db: Session = Depends(get_db)):
     ferrari_mode = bool(payload.get("ferrari_mode", False))
     
     # NEW: Pass Simulation Params
-    # This was the missing link!
     force_time = payload.get("force_time_utc")
     force_price = payload.get("force_price")
 
@@ -384,10 +415,7 @@ async def run_research_api(request: Request):
     use_ai = payload.get("use_ai", False)
     
     # SECURITY LOGIC: 
-    # 1. Try to get key from the Frontend Input
     ai_key = payload.get("ai_key", "").strip()
-    
-    # 2. If Frontend input is empty, use the Render Environment Variable
     if not ai_key:
         ai_key = os.getenv("GEMINI_API_KEY", "")
 
@@ -428,7 +456,6 @@ async def run_research_api(request: Request):
     # 5. OPTIONAL: RUN AI ANALYST
     if use_ai and data.get("ok"):
         print(">>> [SWITCHBOARD] Running AI Analysis...")
-        # We send a summarized version to save tokens/costs
         ai_payload = {
             "simulation": data["simulation"],
             "stats": data["stats"],
@@ -437,8 +464,8 @@ async def run_research_api(request: Request):
                     "date": s["date"], 
                     "kinetic_score": s["kinetic"]["total_score"],
                     "protocol": s["kinetic"]["protocol"],
-                    "trade_result": s["strategy"].get("outcome", "NO_TRADE"), # <--- SAFE GET
-                    "pnl_r": s["strategy"].get("r_realized", 0.0)             # <--- SAFE GET
+                    "trade_result": s["strategy"].get("outcome", "NO_TRADE"), 
+                    "pnl_r": s["strategy"].get("r_realized", 0.0)             
                 }
                 for s in data["sessions"]
             ]

@@ -3,78 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kabroda | Initialize Account</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <title>Kabroda | Register</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        :root { --bg-dark: #050b14; --bg-card: #0f1623; --text-main: #e2e8f0; --text-muted: #94a3b8; --accent-cyan: #06b6d4; --font-main: 'Inter', system-ui, -apple-system, sans-serif; --font-mono: 'JetBrains Mono', monospace; }
-        body { background-color: var(--bg-dark); color: var(--text-main); font-family: var(--font-main); margin: 0; padding: 0; }
-        .navbar { border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
-        .nav-container { max-width: 1200px; margin: 0 auto; padding: 20px; display: flex; justify-content: space-between; align-items: center; }
-        .logo { font-family: var(--font-mono); font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; text-decoration: none; }
-        .nav-links { display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0; }
-        .nav-links a { font-size: 0.95rem; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none; }
-        .nav-links a:hover { color: #fff; }
-        .login-wrapper { min-height: 70vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at center, rgba(6, 182, 212, 0.05) 0%, transparent 70%); padding: 20px; }
-        .bento-card { max-width: 400px; width: 100%; padding: 40px; box-shadow: 0 30px 60px rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.08); background: var(--bg-card); border-radius: 8px; }
-        .label { font-size: 0.75rem; letter-spacing: 0.1em; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 8px; display: block; }
-        .input { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 4px; width: 100%; outline: none; transition: border-color 0.2s; box-sizing: border-box; }
-        .input:focus { border-color: var(--accent-cyan); }
-        .btn.primary { margin-top: 12px; background: var(--accent-cyan); color: #000; font-weight: 700; padding: 14px; border-radius: 4px; cursor: pointer; border: none; width: 100%; transition: transform 0.1s, box-shadow 0.2s; letter-spacing: 0.05em; text-transform: uppercase; }
-        .btn.primary:hover { box-shadow: 0 0 15px rgba(6, 182, 212, 0.3); }
-        .plan-tag { display: inline-block; background: rgba(6, 182, 212, 0.1); color: var(--accent-cyan); padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-family: var(--font-mono); margin-bottom: 1rem; border: 1px solid rgba(6, 182, 212, 0.2); }
+        :root { --bg-dark: #050b14; --bg-card: #0f1623; --text-main: #e2e8f0; --accent-cyan: #06b6d4; }
+        body { background-color: var(--bg-dark); color: var(--text-main); font-family: 'Inter', sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .card { background: var(--bg-card); padding: 40px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); width: 100%; max-width: 400px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+        .input { width: 100%; padding: 12px; background: rgba(255,255,255,0.05); border: 1px solid #334155; color: #fff; border-radius: 4px; box-sizing: border-box; margin-bottom: 15px; }
+        .btn { width: 100%; padding: 14px; background: var(--accent-cyan); color: #000; font-weight: 700; border: none; border-radius: 4px; cursor: pointer; text-transform: uppercase; }
+        .btn:hover { background: #fff; }
+        .label { display: block; font-size: 12px; text-transform: uppercase; color: #94a3b8; margin-bottom: 5px; font-weight: 600; }
     </style>
 </head>
 <body>
-    <nav class="navbar">
-        <div class="nav-container">
-            <a href="/" class="logo">
-                <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
-                KABRODA
-            </a>
-            <ul class="nav-links">
-                <li><a href="/">Home</a></li>
-                <li><a href="/pricing">Pricing</a></li>
-                <li><a href="/login">Login</a></li>
-            </ul>
+    <div class="card">
+        <div style="text-align:center; margin-bottom:30px;">
+            <h2 style="margin:0;">Initialize Account</h2>
+            <p style="color:#64748b; font-size:14px;">Create your free operator profile.</p>
         </div>
-    </nav>
-    <div class="login-wrapper">
-        <div class="bento-card">
-            <div class="text-center" style="margin-bottom: 24px; text-align: center;">
-                <div style="width: 40px; height: 4px; background: var(--accent-cyan); margin: 0 auto 20px; border-radius: 2px;"></div>
-                <h3 style="font-size: 1.5rem; letter-spacing: -0.02em; margin-bottom: 0.5rem; color: #fff; margin-top:0;">Initialize Identity</h3>
-                
-                {% if plan and plan != 'monthly' %}
-                    <div class="plan-tag">SELECTED PLAN: {{ plan|upper }}</div>
-                {% endif %}
-                
-                <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0;">Establish your operator profile.</p>
+
+        <form action="/register" method="POST">
+            <div style="display:flex; gap:10px;">
+                <div style="flex:1;">
+                    <label class="label">First Name</label>
+                    <input type="text" name="first_name" class="input" required placeholder="John">
+                </div>
+                <div style="flex:1;">
+                    <label class="label">Last Name</label>
+                    <input type="text" name="last_name" class="input" required placeholder="Doe">
+                </div>
             </div>
 
-            {% if error %}
-            <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; color: #fca5a5; padding: 12px; border-radius: 4px; margin-bottom: 24px; font-size: 0.85rem; text-align: center;">{{ error }}</div>
-            {% endif %}
-            
-            <form method="post" action="/register" style="display: flex; flex-direction: column; gap: 20px;">
-                <input type="hidden" name="plan" value="{{ plan|default('monthly') }}">
-                
-                <div>
-                    <label class="label">Email Identity</label>
-                    <input name="email" type="email" class="input" required placeholder="operative@domain.com" />
-                </div>
-                <div>
-                    <label class="label">Create Access Key</label>
-                    <input name="password" type="password" class="input" required placeholder="••••••••" />
-                </div>
-                <button class="btn primary" type="submit">CREATE ACCOUNT</button>
-            </form>
-            <div style="text-align: center; margin-top: 32px; font-size: 0.85rem; padding-top: 24px; border-top: 1px solid rgba(255,255,255,0.05);">
-                <span style="color: var(--text-muted);">Already active?</span> 
-                <a href="/login" style="color: var(--accent-cyan); text-decoration: none; font-weight: 600; margin-left: 5px;">Login here</a>
-            </div>
+            <label class="label">Username (Callsign)</label>
+            <input type="text" name="username" class="input" required placeholder="Maverick">
+
+            <label class="label">Email Address</label>
+            <input type="email" name="email" class="input" required placeholder="pilot@domain.com">
+
+            <label class="label">Password</label>
+            <input type="password" name="password" class="input" required placeholder="••••••••">
+
+            <button type="submit" class="btn">Create Account</button>
+        </form>
+
+        <div style="text-align:center; margin-top:20px; font-size:12px; color:#64748b;">
+            Already have an account? <a href="/login" style="color:var(--accent-cyan);">Login here</a>
         </div>
     </div>
 </body>

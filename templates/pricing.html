@@ -3,283 +3,68 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kabroda | Pricing & Commitment</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <title>Kabroda | Pricing</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        /* Pricing Specific Styles */
-        :root { --bg-dark: #050b14; --bg-card: #0f1623; --text-main: #e2e8f0; --text-muted: #94a3b8; --accent-cyan: #06b6d4; --accent-glow: #22d3ee; --accent-red: #ef4444; --accent-green: #10b981; --font-main: 'Inter', system-ui, -apple-system, sans-serif; --font-mono: 'JetBrains Mono', monospace; }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background-color: var(--bg-dark); color: var(--text-main); font-family: var(--font-main); line-height: 1.6; overflow-x: hidden; }
-        h1, h2, h3, h4 { font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
-        a { text-decoration: none; color: inherit; transition: 0.3s ease; }
-
-        .navbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
-        .logo { font-family: var(--font-mono); font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; }
-        .logo span { color: var(--accent-cyan); }
-        .nav-links { display: flex; gap: 2rem; list-style: none; }
-        .nav-links a { font-size: 0.95rem; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
-        .nav-links a:hover, .nav-links a.active { color: #fff; }
-        .nav-cta .btn { width: auto; padding: 0.6rem 1.2rem; font-size: 0.9rem; }
+        :root { --bg-dark: #050b14; --bg-card: #0f1623; --accent-cyan: #06b6d4; --accent-green: #10b981; }
+        body { background-color: var(--bg-dark); color: #fff; font-family: 'Inter', sans-serif; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .pricing-hero { padding: 80px 0 60px; text-align: center; }
+        .pricing-hero h1 { font-size: 3rem; margin-bottom: 1rem; }
+        .pricing-hero p { font-size: 1.1rem; color: #94a3b8; }
         
-        .btn { display: inline-block; padding: 1rem 2rem; border-radius: 4px; font-weight: 600; cursor: pointer; text-align: center; width: 100%; border: none; font-size: 1rem; }
-        .btn-primary { background: var(--accent-cyan); color: var(--bg-dark); box-shadow: 0 0 15px rgba(6, 182, 212, 0.2); }
-        .btn-primary:hover { background: var(--accent-glow); box-shadow: 0 0 25px rgba(6, 182, 212, 0.4); }
-        .btn-outline { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: var(--text-main); }
-        .btn-outline:hover { border-color: #fff; background: rgba(255,255,255,0.05); }
-
-        .pricing-hero { padding: 100px 0 60px; text-align: center; }
-        .eyebrow { font-family: var(--font-mono); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--accent-cyan); margin-bottom: 1.5rem; display: block; }
-        .pricing-hero h1 { font-size: 3.5rem; margin-bottom: 1.5rem; color: #fff; }
-        .pricing-hero p { font-size: 1.2rem; color: var(--text-muted); max-width: 600px; margin: 0 auto; }
-
-        .pricing-section { padding: 60px 0 100px; }
-        .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem; align-items: center; }
-        .pricing-card { background: var(--bg-card); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 2.5rem; position: relative; transition: transform 0.3s ease; }
-        .pricing-card.featured { border: 1px solid var(--accent-cyan); background: rgba(6, 182, 212, 0.03); transform: scale(1.05); z-index: 2; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
-        .badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--accent-cyan); color: var(--bg-dark); font-family: var(--font-mono); font-size: 0.75rem; padding: 4px 12px; border-radius: 4px; font-weight: 700; text-transform: uppercase; }
-        .card-title { font-size: 1.25rem; color: var(--text-muted); margin-bottom: 1rem; font-weight: 500; }
-        .card-price { font-size: 2.5rem; font-weight: 700; color: #fff; margin-bottom: 0.5rem; }
-        .card-period { font-size: 1rem; color: var(--text-muted); font-weight: 400; }
-        .card-subtext { font-size: 0.9rem; color: var(--accent-green); margin-bottom: 2rem; min-height: 1.5rem; font-weight: 500; }
-        .feature-list { list-style: none; margin-bottom: 2.5rem; text-align: left; }
-        .feature-list li { margin-bottom: 1rem; color: var(--text-muted); font-size: 0.95rem; padding-left: 1.5rem; position: relative; }
-        .feature-list li::before { content: '✓'; color: var(--accent-cyan); position: absolute; left: 0; font-weight: bold; }
-
-        .value-section { padding: 80px 0; border-top: 1px solid rgba(255,255,255,0.05); background: rgba(255,255,255,0.01); }
-        .value-header { text-align: center; margin-bottom: 3rem; }
-        .value-header h2 { font-size: 2rem; }
-        .value-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem; }
-        .value-item h3 { font-size: 1.2rem; color: #fff; margin-bottom: 0.75rem; }
-        .value-item p { color: var(--text-muted); font-size: 0.95rem; }
-
-        .audience-section { padding: 100px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .audience-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem; }
-        .audience-col { padding: 2rem; border-radius: 8px; background: var(--bg-card); border: 1px solid rgba(255,255,255,0.05); }
-        .audience-col h3 { margin-bottom: 1.5rem; }
-        .audience-list div { padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05); color: var(--text-muted); display: flex; align-items: center; gap: 12px; }
-        .audience-list div:last-child { border-bottom: none; }
-        .icon-check { color: var(--accent-green); }
-        .icon-x { color: var(--accent-red); }
-
-        .risk-section { padding: 80px 0; text-align: center; }
-        .risk-bullets { display: flex; justify-content: center; gap: 2rem; margin: 2rem 0; flex-wrap: wrap; }
-        .risk-bullets span { color: var(--text-main); font-weight: 500; }
-        .anchor-line { color: var(--text-muted); font-style: italic; border-top: 1px solid rgba(255,255,255,0.1); display: inline-block; padding-top: 2rem; margin-top: 1rem; }
-
-        .final-cta { padding: 100px 0; text-align: center; background: radial-gradient(circle at bottom, rgba(6, 182, 212, 0.08) 0%, transparent 70%); }
-        .final-cta h2 { font-size: 3rem; margin-bottom: 2rem; }
-        .cta-container { max-width: 300px; margin: 0 auto; }
-        .micro-copy { margin-top: 1rem; font-size: 0.8rem; color: var(--text-muted); opacity: 0.7; }
-
-        @media (max-width: 768px) { .navbar { flex-direction: column; gap: 1rem; } .nav-links { gap: 1rem; flex-wrap: wrap; justify-content: center; } .pricing-hero h1 { font-size: 2.5rem; } .pricing-card.featured { transform: scale(1); } .audience-grid { grid-template-columns: 1fr; } }
+        .pricing-grid { display: flex; justify-content: center; gap: 2rem; margin-top: 40px; }
+        .pricing-card {
+            background: var(--bg-card); border: 1px solid rgba(255,255,255,0.1); 
+            border-radius: 12px; padding: 40px; width: 100%; max-width: 400px;
+            text-align: center; position: relative;
+        }
+        .pricing-card.featured { border-color: var(--accent-cyan); box-shadow: 0 0 30px rgba(6, 182, 212, 0.15); }
+        .price { margin: 20px 0; }
+        .btn-cta { background: var(--accent-cyan); color: #000; padding: 15px; border-radius: 6px; font-weight: 700; display: block; text-decoration: none; transition: 0.3s; }
+        .btn-cta:hover { background: #fff; }
+        
+        .features { text-align: left; margin: 30px 0; list-style: none; padding: 0; }
+        .features li { margin-bottom: 12px; color: #cbd5e1; }
     </style>
 </head>
 <body>
-
-    <nav class="navbar">
-        <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; flex-wrap: wrap;">
-            <a href="/" class="logo">
-                <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
-                KABRODA
-            </a>
-            <ul class="nav-links">
-                {% if is_logged_in %}
-                    <li><a href="/suite">Session Control</a></li>
-                    <li><a href="/suite/battle-control">Battle Control</a></li>
-                    <li><a href="/account">Account</a></li>
-                {% else %}
-                    <li><a href="/">Home</a></li>
-                    <li><a href="/analysis">Analysis</a></li>
-                    <li><a href="/how-it-works">How It Works</a></li>
-                    <li><a href="/pricing" class="active">Pricing</a></li>
-                    <li><a href="/login">Login</a></li>
-                {% endif %}
-            </ul>
-            <div class="nav-cta">
-                {% if is_logged_in %}
-                    <a href="/suite" class="btn btn-primary">OPEN SUITE &rarr;</a>
-                {% else %}
-                    <a href="/login" class="btn btn-primary">Member Access</a>
-                {% endif %}
-            </div>
-        </div>
-    </nav>
-
-    <section class="pricing-hero">
+    {% include 'nav.html' ignore missing %}
+    
+    <div class="pricing-hero">
         <div class="container">
-            <span class="eyebrow">OPERATIONAL ACCESS</span>
-            <h1>Choose Your Commitment.</h1>
-            <p>All plans include full access to the Kabroda system.<br>No feature gates. No tiers. Just commitment flexibility.</p>
+            <h1>Early Access Program</h1>
+            <p>We are currently waiving all membership fees for early adopters.</p>
         </div>
-    </section>
+    </div>
 
-    <section class="pricing-section">
-        <div class="container">
-            <div class="pricing-grid">
-                <div class="pricing-card">
-                    <div class="card-title">Standard</div>
-                    <div class="card-price">$89<span class="card-period">/mo</span></div>
-                    <div class="card-subtext" style="color: var(--text-muted);">Total flexibility. Month to month.</div>
-                    <ul class="feature-list">
-                        <li>Full Institutional Data Engine</li>
-                        <li>Daily Structural Calibration</li>
-                        <li>BattleBox AI Command Access</li>
-                        <li>TradingView Sync</li>
-                    </ul>
-                    <button onclick="checkout('monthly')" class="btn btn-outline">Start Monthly Trial</button>
-                </div>
-
-                <div class="pricing-card featured">
-                    <div class="badge">BEST VALUE</div>
-                    <div class="card-title">Annual</div>
-                    <div class="card-price">$890<span class="card-period">/yr</span></div>
-                    <div class="card-subtext">Save $178 (2 months free).</div>
-                    <ul class="feature-list">
-                        <li>Everything in Standard</li>
-                        <li>Locked-in rate for 12 months</li>
-                        <li>Priority support access</li>
-                    </ul>
-                    <button onclick="checkout('annual')" class="btn btn-primary">Start Annual Trial</button>
-                </div>
-
-                <div class="pricing-card">
-                    <div class="card-title">Semi-Annual</div>
-                    <div class="card-price">$499<span class="card-period">/6mo</span></div>
-                    <div class="card-subtext">Save ~$35 vs monthly.</div>
-                    <ul class="feature-list">
-                        <li>Full Institutional Data Engine</li>
-                        <li>Daily Structural Calibration</li>
-                        <li>BattleBox AI Command Access</li>
-                        <li>TradingView Sync</li>
-                    </ul>
-                    <button onclick="checkout('semi')" class="btn btn-outline">Start 6-Month Trial</button>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <section class="value-section">
-        <div class="container">
-            <div class="value-header">
-                <h2>What’s Included With Every Plan</h2>
-            </div>
-            <div class="value-grid">
-                <div class="value-item">
-                    <h3>Institutional Structure Engine</h3>
-                    <p>Daily support, resistance, and execution thresholds derived from real price behavior — not indicators.</p>
-                </div>
-                <div class="value-item">
-                    <h3>Session Calibration System</h3>
-                    <p>Each trading day begins with objective context so you’re not guessing direction.</p>
-                </div>
-                <div class="value-item">
-                    <h3>BattleBox AI Command</h3>
-                    <p>Turn session data into a clear operational posture: wait, prepare, or act.</p>
-                </div>
-                <div class="value-item">
-                    <h3>TradingView Integration</h3>
-                    <p>One-click sync keeps your charts clean and execution-focused.</p>
-                </div>
-                <div class="value-item">
-                    <h3>Decision Discipline Framework</h3>
-                    <p>Kabroda is designed to help you trade less, not more — and only when structure supports it.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <section class="audience-section">
-        <div class="container">
-            <h2 class="text-center" style="text-align: center;">Kabroda Is Built For Traders Who<br>Value Clarity Over Frequency.</h2>
-            <div class="audience-grid">
-                <div class="audience-col">
-                    <h3><span class="icon-check">✓</span> This IS for you if you:</h3>
-                    <div class="audience-list">
-                        <div><span class="icon-check">✓</span> Want to understand why price moves</div>
-                        <div><span class="icon-check">✓</span> Prefer fewer, higher-quality decisions</div>
-                        <div><span class="icon-check">✓</span> Are done chasing signals</div>
-                        <div><span class="icon-check">✓</span> Want structure before execution</div>
-                    </div>
-                </div>
-                <div class="audience-col" style="border-color: rgba(239, 68, 68, 0.2);">
-                    <h3><span class="icon-x">×</span> This is NOT for you if you:</h3>
-                    <div class="audience-list">
-                        <div><span class="icon-x">×</span> Want trade alerts or predictions</div>
-                        <div><span class="icon-x">×</span> Need constant action</div>
-                        <div><span class="icon-x">×</span> Believe more trades = more profits</div>
-                        <div><span class="icon-x">×</span> Are looking for shortcuts</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <section class="risk-section">
-        <div class="container">
-            <h2>Try Kabroda Without Pressure.</h2>
-            <div class="risk-bullets">
-                <span>• 7-day free trial</span>
-                <span>• Cancel anytime</span>
-                <span>• No contracts</span>
-                <span>• No hidden fees</span>
-            </div>
-            <div class="anchor-line">If Kabroda doesn’t bring clarity to your process, walk away — no friction.</div>
-        </div>
-    </section>
-
-    <section class="final-cta">
-        <div class="container">
-            <h2>Stop Paying for Tools.<br>Start Operating With Structure.</h2>
-            <div class="cta-container">
-                <button onclick="checkout('monthly')" class="btn btn-primary">Start 7-Day Free Trial</button>
-                <div class="micro-copy">Full access. Cancel anytime.</div>
-            </div>
-        </div>
-    </section>
-
-    <script>
-        async function checkout(plan) {
-            const btn = event.target;
-            const originalText = btn.innerText;
-            btn.innerText = "Processing...";
-            btn.disabled = true;
-
-            try {
-                // ATTEMPT TO CHECKOUT (Checks if logged in via cookie/session)
-                const response = await fetch('/billing/checkout', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ plan: plan })
-                });
+    <div class="container">
+        <div class="pricing-grid">
+            
+            <div class="pricing-card featured">
+                <div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:var(--accent-cyan); color:#000; padding:4px 12px; border-radius:12px; font-weight:800; font-size:12px;">LIMITED TIME OFFER</div>
                 
-                // If the server redirects, follow it (usually to Stripe or Login)
-                if (response.redirected) {
-                    window.location.href = response.url;
-                    return;
-                }
-
-                // Parse response
-                const data = await response.json();
+                <h3>EARLY ACCESS</h3>
+                <div class="price">
+                    <span style="text-decoration: line-through; color: #666; font-size: 24px;">$89.99</span>
+                    <span style="color: var(--accent-green); font-size: 48px; font-weight: 700;">$0</span>
+                    <span style="font-size: 16px; color: #888;">/mo</span>
+                </div>
                 
-                if (data.url) {
-                    // Logged in + Stripe URL created -> Go to Stripe
-                    window.location.href = data.url;
-                } else {
-                    // NOT LOGGED IN -> Send to Register with PLAN Param
-                    // This fixes the flow so they don't lose their choice
-                    window.location.href = "/register?plan=" + plan;
-                }
-            } catch (err) {
-                console.error(err);
-                // Fallback for network errors
-                window.location.href = "/register?plan=" + plan;
-            }
-        }
-    </script>
+                <ul class="features">
+                    <li>✅ <strong>Session Control</strong> (Market Awareness)</li>
+                    <li>✅ <strong>Battle Control</strong> (Live Intel)</li>
+                    <li>✅ <strong>Structure Engine</strong> (Levels)</li>
+                    <li>❌ <span style="opacity:0.5">Project Omega (Classified)</span></li>
+                    <li>❌ <span style="opacity:0.5">Research Lab (Classified)</span></li>
+                </ul>
 
+                <a href="/register" class="btn-cta">CLAIM FREE ACCESS</a>
+                <p style="text-align:center; font-size:12px; color:#666; margin-top:15px;">No credit card required.</p>
+            </div>
+
+        </div>
+    </div>
 </body>
 </html>
