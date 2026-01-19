@@ -1,11 +1,13 @@
 # project_omega.py
 # ==============================================================================
-# PROJECT OMEGA SPECIALIST (v9.5 HIERARCHY COMPLIANT)
+# PROJECT OMEGA SPECIALIST (v10.0 - NY FUTURES ONLY)
 # ==============================================================================
-# CORE ARCHITECTURE:
-# 1. PHASE 1: Respects Session Manager for Open/Close times.
-# 2. PHASE 2: Calculates Kinetic Score based on LOCKED Anchor.
-# 3. PHASE 3: EXECUTION - Keeps active trades alive in "Overtime" mode.
+# STRATEGY:
+# - Target: US NY FUTURES (Hardcoded)
+# - Logic: 
+#    1. CHECK PHASE 1 (Session Manager): Is market open?
+#    2. IF OPEN: Run Phase 2 (Math) & Phase 3 (Execution).
+#    3. IF CLOSED: Show Countdown/Offline Mode.
 # ==============================================================================
 
 from __future__ import annotations
@@ -153,24 +155,63 @@ def _check_omega_triggers(levels: Dict[str, float], candles: List[Dict[str, Any]
             
     return {"action": action, "side": side, "trigger_time": trigger_time}
 
-async def get_omega_status(symbol: str = "BTCUSDT", session_id: str = "us_ny_futures", ferrari_mode: bool = False, force_time_utc: str = None, force_price: float = None) -> Dict[str, Any]:
+async def get_omega_status(
+    symbol: str = "BTCUSDT",
+    session_id: str = "us_ny_futures", # <--- DEFAULTED TO NY
+    ferrari_mode: bool = False,
+    force_time_utc: str = None,
+    force_price: float = None 
+) -> Dict[str, Any]:
+    
+    # Force NY Session ID always
+    session_id = "us_ny_futures"
+
     if force_time_utc:
         t_now = datetime.now(timezone.utc); fake_dt = datetime.strptime(force_time_utc, "%H:%M")
         now_utc = t_now.replace(hour=fake_dt.hour, minute=fake_dt.minute, second=0, microsecond=0); is_simulation = True
     else:
         now_utc = datetime.now(timezone.utc); is_simulation = False
 
-    pipeline_data = await battlebox_pipeline.get_live_battlebox(symbol=symbol, session_mode="MANUAL", manual_id=session_id)
-    p_status = pipeline_data.get("status")
-    if p_status in ["ERROR", "OFFLINE"]: return {"ok": False, "status": "OFFLINE", "msg": "Pipeline Error"}
-
+    # 1. PHASE 1 CHECK (Corporate Hierarchy)
+    # Check if we are even in the session window before doing expensive math
     session_config = session_manager.get_session_config(session_id)
-    if p_status == "CALIBRATING":
-        return {"ok": True, "status": "CALIBRATING", "price": pipeline_data.get("price", 0.0), "kinetic": {"total_score": 0, "protocol": "CALIBRATING", "color": "GRAY", "instruction": "WAITING FOR 30M LOCK", "brief": "System calibrating.", "breakdown": {}}, "plans": {"LONG": {}, "SHORT": {}}}
+    anchor_ts = session_manager.anchor_ts_for_utc_date(session_config, now_utc)
+    anchor_dt = datetime.fromtimestamp(anchor_ts, timezone.utc)
+    elapsed = (now_utc - anchor_dt).total_seconds() / 3600.0
+    
+    session_duration = float(session_config.get("duration_hours", 23.0)) 
+    is_session_closed = elapsed > session_duration
 
+    # If closed and way past (e.g. > 12 hours), pure offline mode
+    # But we still fetch price for the ticker
+    
+    # 2. FETCH DATA
+    pipeline_data = await battlebox_pipeline.get_live_battlebox(symbol=symbol, session_mode="MANUAL", manual_id=session_id)
     real_price = float(pipeline_data.get("price", 0.0))
     current_price = force_price if force_price is not None else real_price
-    if force_price is not None: is_simulation = True
+
+    if is_session_closed:
+        # If pipeline didn't return valid levels because it's too late/early
+        # We return a CLEAN "Closed" packet.
+        return {
+            "ok": True,
+            "status": "CLOSED",
+            "symbol": symbol,
+            "price": current_price,
+            "next_open": anchor_dt.strftime("%H:%M UTC"), # Approximate
+            "kinetic": {
+                "total_score": 0, "protocol": "MARKET CLOSED", "color": "GRAY", 
+                "instruction": f"SESSION OPENS {session_config['utc_open']}", 
+                "brief": "Waiting for NY Open...",
+                "breakdown": {}
+            },
+            "plans": {"LONG": {}, "SHORT": {}}
+        }
+
+    # If Open, proceed with normal logic
+    p_status = pipeline_data.get("status")
+    if p_status == "CALIBRATING":
+        return {"ok": True, "status": "CALIBRATING", "price": current_price, "kinetic": {"total_score": 0, "protocol": "CALIBRATING", "color": "GRAY", "instruction": "WAITING FOR 30M LOCK", "brief": "System calibrating.", "breakdown": {}}, "plans": {"LONG": {}, "SHORT": {}}}
 
     box = pipeline_data.get("battlebox", {})
     levels = box.get("levels", {})
@@ -183,78 +224,44 @@ async def get_omega_status(symbol: str = "BTCUSDT", session_id: str = "us_ny_fut
     dr = float(levels.get("daily_resistance", 0.0)); ds = float(levels.get("daily_support", 0.0))
     r30_high = float(levels.get("range30m_high", 0.0)); r30_low = float(levels.get("range30m_low", 0.0))
     
-    closest_side = "LONG" if (current_price >= (bo + bd)/2) else "SHORT"
+    # 3. AUTO-SELECT SIDE (Fixing the bug)
+    dist_long = abs(current_price - bo)
+    dist_short = abs(current_price - bd)
+    closest_side = "LONG" if dist_long < dist_short else "SHORT"
     calc_side = closest_side 
 
-    # STEP 2: MATH
+    # 4. PHASE 2 (MATH)
     kinetic = _calculate_locked_strategy(anchor_price, levels, context, shelves, calc_side)
     
-    # STEP 3: EXECUTION WITH LIFECYCLE
+    # 5. PHASE 3 (EXECUTION)
     exec_state = _check_omega_triggers(levels, raw_candles, kinetic["protocol"])
     
     status = "STANDBY"
-    active_side = "NONE"
+    active_side = closest_side # Default for UI
     
-    # --- PHASE 1 CHECK (Corporate Hierarchy) ---
-    anchor_ts = session_manager.anchor_ts_for_utc_date(session_config, now_utc)
-    anchor_dt = datetime.fromtimestamp(anchor_ts, timezone.utc)
-    elapsed = (now_utc - anchor_dt).total_seconds() / 3600.0
-    
-    # Get official duration from Boss (Session Manager)
-    session_duration = float(session_config.get("duration_hours", 23.0)) 
-    is_session_closed = elapsed > session_duration
-
-    # Determine Trade Status
     if exec_state["action"] == "GO":
+        status = "EXECUTING"
         active_side = exec_state["side"]
         calc_side = active_side 
         kinetic = _calculate_locked_strategy(anchor_price, levels, context, shelves, active_side)
         
+        # Freshness Check
         trigger_ts = exec_state["trigger_time"]
         current_ts = int(now_utc.timestamp())
-        age_seconds = current_ts - trigger_ts
-        
-        if age_seconds < 900: # Fresh
-            status = "EXECUTING"
-        else:
-            status = "ACTIVE" # Monitoring Mode
-    
-    # --- OVERTIME LOGIC ---
-    # If session is closed, we kill it UNLESS we are in an Active Trade.
-    if is_session_closed:
-        if status in ["EXECUTING", "ACTIVE"]:
-            # OVERTIME: Keep the dashboard alive for the runner
-            status = "ACTIVE" # Force to Active (Monitoring)
-            kinetic["instruction"] = "SESSION CLOSED. MANAGING RUNNER."
-            if "SUPERSONIC" in kinetic["protocol"]:
-                kinetic["brief"] = "Monitor 15m candle close for exit."
-        else:
-            # HARD CLOSE: No active trade, shutdown.
-            status = "CLOSED"
-            kinetic["protocol"] = "CLOSED"
-            kinetic["color"] = "GRAY"
-            kinetic["instruction"] = "SESSION CLOSED."
-            kinetic["brief"] = "Liquidity window closed."
-            active_side = "NONE"
+        if (current_ts - trigger_ts) > 900: status = "ACTIVE" # Old signal
 
-    # UI Time Warning (Soft Warning, does not kill trade)
     if elapsed > 2.5: kinetic["breakdown"]["time"] = "LATE (CAUTION)"
     
-    atr = float(levels.get("atr", 0) or anchor_price * 0.01)
-    trigger_price = bo if calc_side == "LONG" else bd
-    dist_now = abs(current_price - trigger_price)
-    if dist_now > (atr * 0.5) and status == "STANDBY": kinetic["breakdown"]["location"] = "CHASING (LIVE)"
-    elif status == "STANDBY": kinetic["breakdown"]["location"] = "PRIMED (LIVE)"
-
     plan_long = _calc_execution_plan(bo, r30_low, dr, ds, "LONG", kinetic["protocol"], kinetic["force_align"])
     plan_short = _calc_execution_plan(bd, r30_high, dr, ds, "SHORT", kinetic["protocol"], kinetic["force_align"])
 
-    active_plan = plan_long if calc_side == "LONG" else plan_short
-    if active_plan.get("protocol_display") and active_plan["valid"]:
-        kinetic["protocol"] = active_plan["protocol_display"]
-        if active_plan.get("color_override"): kinetic["color"] = active_plan["color_override"]
+    # Update stops to be robust
+    plan_long["stop"] = r30_low
+    plan_short["stop"] = r30_high
 
-    if not active_plan["valid"] and kinetic["protocol"] not in ["BLOCKED", "CLOSED", "CALIBRATING"]:
-        kinetic["protocol"] = "BLOCKED"; kinetic["instruction"] = "⛔ R/R INVALID."; kinetic["color"] = "RED"
+    if active_plan := (plan_long if calc_side == "LONG" else plan_short):
+        if active_plan.get("protocol_display") and active_plan["valid"]:
+            kinetic["protocol"] = active_plan["protocol_display"]
+            if active_plan.get("color_override"): kinetic["color"] = active_plan["color_override"]
 
     return {"ok": True, "status": status, "symbol": symbol, "price": current_price, "active_side": active_side, "session_mode": kinetic["protocol"], "is_simulation": is_simulation, "simulated_time": now_utc.strftime("%H:%M UTC") if is_simulation else None, "kinetic": kinetic, "plans": {"LONG": plan_long, "SHORT": plan_short}}

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PROJECT OMEGA | COMMAND</title>
+    <title>PROJECT OMEGA | NY COMMAND</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
@@ -32,55 +32,22 @@
         .hud-val { font-size: 60px; font-weight: 900; color: #fff; margin: 10px 0; line-height: 1; font-family: 'JetBrains Mono'; }
         .hud-sub { font-size: 14px; font-weight: 700; color: #fff; text-transform: uppercase; margin-top: 15px; background: rgba(255,255,255,0.1); display: inline-block; padding: 6px 12px; border-radius: 6px; }
 
-        /* --- STANDARD MODES --- */
+        /* MODES */
         .mode-SUPERSONIC { border-color: var(--cyan); box-shadow: 0 0 50px rgba(6, 182, 212, 0.2); }
         .mode-SUPERSONIC .hud-val, .mode-SUPERSONIC .hud-title { color: var(--cyan); }
-        
         .mode-SNIPER { border-color: var(--green); box-shadow: 0 0 50px rgba(16, 185, 129, 0.2); }
         .mode-SNIPER .hud-val, .mode-SNIPER .hud-title { color: var(--green); }
-        
         .mode-DOGFIGHT { border-color: var(--amber); box-shadow: 0 0 50px rgba(245, 158, 11, 0.2); }
         .mode-DOGFIGHT .hud-val, .mode-DOGFIGHT .hud-title { color: var(--amber); }
-        
         .mode-BLOCKED { border-color: var(--red); opacity: 0.8; }
         .mode-BLOCKED .hud-val, .mode-BLOCKED .hud-title { color: var(--red); }
-        
         .mode-CLOSED { border-color: var(--gray); opacity: 0.5; filter: grayscale(100%); }
         .mode-CLOSED .hud-val { color: var(--gray); }
-        
         .mode-CALIBRATING { border-color: var(--text-dim); border-style: dashed; }
 
-        /* --- NEW WEEKLY PROTOCOLS --- */
-        .mode-SUPERNOVA { 
-            border-color: var(--neon-green); 
-            box-shadow: 0 0 60px rgba(57, 255, 20, 0.4); 
-        }
-        .mode-SUPERNOVA .hud-val, .mode-SUPERNOVA .hud-title { color: var(--neon-green); text-shadow: 0 0 15px rgba(57, 255, 20, 0.5); }
-
-        .mode-HYBRID { 
-            border-color: var(--alert-yellow); 
-            box-shadow: 0 0 40px rgba(255, 193, 7, 0.3);
-        }
-        .mode-HYBRID .hud-val, .mode-HYBRID .hud-title { color: var(--alert-yellow); }
-
-        /* --- ACTION OVERRIDES (CO-PILOT) --- */
         @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
-        @keyframes pulse-gold { 0% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(255, 215, 0, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0); } }
-        
-        .mode-EXECUTING { 
-            border-color: var(--neon-green) !important; 
-            background: rgba(16, 185, 129, 0.1) !important;
-            animation: pulse-green 1.5s infinite;
-        }
+        .mode-EXECUTING { border-color: var(--neon-green) !important; background: rgba(16, 185, 129, 0.1) !important; animation: pulse-green 1.5s infinite; }
         .mode-EXECUTING .hud-val { color: var(--neon-green) !important; text-shadow: 0 0 10px var(--neon-green); }
-        .mode-EXECUTING .hud-title { color: #fff !important; }
-        
-        .mode-BANKING {
-            border-color: var(--gold) !important;
-            background: rgba(255, 215, 0, 0.1) !important;
-            animation: pulse-gold 1.5s infinite;
-        }
-        .mode-BANKING .hud-val { color: var(--gold) !important; font-size: 40px !important; }
 
         /* UTILS */
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
@@ -94,7 +61,6 @@
         .highlight { color: var(--cyan); }
 
         .inp { background: #020617; border: 1px solid var(--border); color: #fff; padding: 12px; width: 100%; box-sizing: border-box; font-family: 'JetBrains Mono'; text-align: right; border-radius: 6px; font-size: 16px; font-weight: 700; }
-        
         .btn-copy { background: #1e293b; border: 1px solid var(--border); color: var(--text-dim); padding: 4px 8px; font-size: 10px; border-radius: 4px; cursor: pointer; margin-left: 10px; font-weight: 700; text-transform: uppercase; transition: 0.2s; }
         .btn-copy:hover { background: #334155; color: #fff; border-color: #fff; }
 
@@ -108,6 +74,7 @@
         .btn-side.long-active { border-color:var(--green); color:var(--green); background:rgba(16, 185, 129, 0.05); box-shadow: 0 0 15px rgba(16, 185, 129, 0.1); }
         .btn-side.short-active { border-color:var(--red); color:var(--red); background:rgba(239, 68, 68, 0.05); box-shadow: 0 0 15px rgba(239, 68, 68, 0.1); }
 
+        .session-label { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; background: #1e293b; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); color: var(--cyan); letter-spacing: 1px; }
         .brief-text { font-size: 14px; line-height: 1.6; color: #cbd5e1; border-left: 4px solid var(--border); padding-left: 15px; margin-top: 20px; font-style: italic; }
     </style>
 </head>
@@ -116,12 +83,8 @@
     <div class="top-bar">
         <div class="brand">PROJECT OMEGA <div id="notifyBadge" class="notify-badge"></div></div>
         <div class="control-group">
+            <div class="session-label">TARGET: NY FUTURES</div>
             <button id="btnSound" class="btn-toggle" onclick="toggleSound()">SOUND: OFF</button>
-            <select id="sessionSelect" style="background:#0f172a; color:#fff; border:1px solid var(--border); padding:8px; border-radius:6px; outline:none; font-family:'JetBrains Mono'; font-size:11px; font-weight:700;" onchange="fetchData()">
-                <option value="us_ny_futures">NY FUTURES</option>
-                <option value="asia_tokyo">TOKYO</option>
-                <option value="eu_london">LONDON</option>
-            </select>
         </div>
     </div>
 
@@ -152,7 +115,7 @@
             <div id="hud" class="hud-box">
                 <div class="hud-title" id="kMode">INITIALIZING</div>
                 <div class="hud-val" id="kScore">--</div>
-                <div class="hud-sub" id="kInstr">Connecting to Corporate Pipeline...</div>
+                <div class="hud-sub" id="kInstr">Connecting to NY Session...</div>
             </div>
 
             <div class="grid-2">
@@ -170,7 +133,7 @@
                 </div>
             </div>
             
-            <div class="brief-text" id="brief">System is checking pipeline status...</div>
+            <div class="brief-text" id="brief">Waiting for Data...</div>
         </div>
 
         <div class="panel">
@@ -263,11 +226,11 @@
 
         // --- DATA LOOP ---
         async function fetchData() {
-            const sess = document.getElementById('sessionSelect').value;
+            // No drop down reading. Always NY Futures.
             try {
                 const res = await fetch('/api/omega/status', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ session_id: sess })
+                    body: JSON.stringify({ session_id: "us_ny_futures" })
                 });
                 data = await res.json();
                 render();
@@ -282,77 +245,64 @@
 
         function render() {
             if(!data) return;
-            const price = data.price;
-            document.getElementById('livePrice').innerText = price.toLocaleString();
+            document.getElementById('livePrice').innerText = data.price ? data.price.toLocaleString() : "--";
 
             const k = data.kinetic || {};
             const bk = k.breakdown || {};
             
-            // --- CO-PILOT LOGIC (The Brain) ---
+            // --- CO-PILOT LOGIC ---
             let hudTitle = k.protocol;
             let hudScore = k.total_score;
             let hudInstr = k.instruction;
             let hudClass = "hud-box";
             let colorClass = k.color || "GRAY";
 
-            // Determine active side
-            let side = manualSide || "LONG";
-            
-            // UI Auto-Selection: Force the cheat sheet to the active side if entering
-            if(data.active_side !== "NONE" && data.status === "EXECUTING") {
+            // AUTO-SIDE SELECTION LOGIC
+            // If user hasn't clicked a tab, we auto-pick the closest or active side.
+            let side = manualSide;
+            if (!side) {
+                if (data.active_side && data.active_side !== "NONE") {
+                    side = data.active_side;
+                } else {
+                    side = "LONG"; // Fallback default
+                }
+            }
+            // If executing, force the side
+            if (data.status === "EXECUTING") {
                 side = data.active_side;
                 manualSide = side; 
-            } else if (data.active_side !== "NONE" && !manualSide) {
-                side = data.active_side;
             }
 
             const plan = data.plans ? data.plans[side] : null;
 
-            // 1. HUD STATE MACHINE
+            // 1. HUD STATUS
             if (data.status === "EXECUTING") {
-                // FRESH SIGNAL (< 15 mins) - FLASHING GREEN
                 hudTitle = "EXECUTE " + (data.active_side || "NOW");
                 hudScore = "GO";
                 hudInstr = "ENTRY TRIGGERED - CHECK CHEAT SHEET";
                 hudClass = "hud-box mode-EXECUTING";
             } else if (data.status === "ACTIVE") {
-                // OLD SIGNAL (> 15 mins) - STEADY BLUE (Monitoring)
                 hudTitle = "TRADE ACTIVE";
                 hudScore = "IN PLAY";
                 hudInstr = k.instruction || "MONITOR TARGETS";
                 hudClass = "hud-box mode-SUPERSONIC"; 
-                
-                // Banking Logic (Flash Gold on Hit)
-                if (plan) {
-                    const t1 = plan.targets ? plan.targets[0] : 0;
-                    if (t1 > 0) {
-                        if ((side === "LONG" && price >= t1) || (side === "SHORT" && price <= t1)) {
-                            hudTitle = "TARGET 1 HIT";
-                            hudScore = "BANK";
-                            hudInstr = "💰 CLOSE 75% - MOVE STOP TO BREAKEVEN";
-                            hudClass = "hud-box mode-BANKING";
-                            if (lastStatus !== "BANKING") { playAlert("Target one hit. Bank profit."); lastStatus = "BANKING"; }
-                        }
-                    }
-                }
             } else if (data.status === "CLOSED") {
-                // SESSION DEAD
                 hudTitle = "SESSION CLOSED";
                 hudScore = "--";
                 hudClass = "hud-box mode-CLOSED";
+                hudInstr = k.instruction || "MARKET CLOSED";
             } else {
-                // STANDBY
                 hudClass = "hud-box mode-" + colorClass;
             }
 
-            // Update HUD Elements
+            // Update HUD
             document.getElementById('kMode').innerText = hudTitle;
             document.getElementById('kScore').innerText = hudScore;
             document.getElementById('kInstr').innerText = hudInstr;
             document.getElementById('hud').className = hudClass;
             document.getElementById('brief').innerText = k.brief;
 
-            // Alert Logic (Sound for Execution)
+            // Alert Logic
             if(data.status === "EXECUTING" && lastStatus !== "EXECUTING") {
                 flashBadge();
                 playAlert("Execution Signal Triggered. Check Entry.");
@@ -381,8 +331,6 @@
             if (plan) {
                 document.getElementById('pEntry').innerText = plan.trigger ? plan.trigger.toLocaleString() : "--";
                 document.getElementById('pStop').innerText = plan.stop ? plan.stop.toLocaleString() : "--";
-                
-                // New: Breakeven Trigger
                 document.getElementById('pBE').innerText = plan.be_trigger ? plan.be_trigger.toLocaleString() : "--";
 
                 const targets = plan.targets || [];
