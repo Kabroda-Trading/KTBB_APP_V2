@@ -2,95 +2,93 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PROJECT OMEGA | COMMAND</title>
+    <title>PROJECT OMEGA | TACTICAL</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;800&display=swap" rel="stylesheet">
     <style>
         :root { 
-            --bg: #020617; --panel: rgba(15, 23, 42, 0.6); --border: rgba(56, 189, 248, 0.2); 
-            --cyan: #06b6d4; --green: #10b981; --red: #ef4444; --gold: #facc15; 
-            --text-glow: 0 0 10px rgba(6, 182, 212, 0.5);
+            --bg: #020617; --panel: #0f172a; --border: #334155; 
+            --cyan: #22d3ee; --green: #10b981; --red: #ef4444; --gold: #facc15; --white: #f8fafc;
+            --glass: rgba(15, 23, 42, 0.8);
         }
         body { 
-            background: var(--bg); color: #fff; font-family: 'JetBrains Mono', monospace; 
-            margin: 0; padding: 20px; height: 100vh; box-sizing: border-box; 
-            background-image: radial-gradient(circle at 50% 50%, #0f172a 0%, #020617 100%);
-            overflow: hidden; /* Lock scroll like a cockpit */
+            background: var(--bg); color: var(--white); font-family: 'JetBrains Mono', monospace; 
+            margin: 0; padding: 15px; height: 100vh; box-sizing: border-box; overflow: hidden;
         }
 
-        /* --- LAYOUT GRID --- */
+        /* --- LAYOUT --- */
         .cockpit { 
             display: grid; 
-            grid-template-columns: 300px 1fr 320px; 
-            grid-template-rows: 60px 1fr 200px;
-            gap: 15px; 
-            height: 100%;
+            grid-template-columns: 280px 1fr 320px; 
+            grid-template-rows: 50px 1fr 180px;
+            gap: 15px; height: 100%;
         }
         
-        .header { grid-column: 1 / 4; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
-        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 15px; backdrop-filter: blur(5px); position: relative; }
-        .panel-left { grid-row: 2 / 3; grid-column: 1 / 2; }
-        .panel-center { grid-row: 2 / 3; grid-column: 2 / 3; display: flex; flex-direction: column; }
-        .panel-right { grid-row: 2 / 4; grid-column: 3 / 4; display: flex; flex-direction: column; } /* Full height right */
-        .panel-bottom { grid-row: 3 / 4; grid-column: 1 / 3; border-top: 1px solid var(--border); display: flex; flex-direction: column; }
+        .header { grid-column: 1 / 4; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 15px; display:flex; flex-direction:column; }
+        
+        .panel-left { grid-row: 2 / 3; }
+        .panel-center { grid-row: 2 / 3; background: #0b1121; /* Darker for contrast */ }
+        .panel-right { grid-row: 2 / 4; grid-column: 3 / 4; } 
+        .panel-bottom { grid-row: 3 / 4; grid-column: 1 / 3; }
 
         /* --- TYPOGRAPHY --- */
-        .glitch-text { font-family: 'Rajdhani', sans-serif; font-weight: 700; font-size: 24px; color: var(--cyan); text-shadow: var(--text-glow); letter-spacing: 2px; }
-        .label { font-size: 10px; color: #64748b; letter-spacing: 1px; text-transform: uppercase; display: block; margin-bottom: 5px; }
-        .val-lg { font-size: 24px; font-weight: 800; color: #fff; }
+        .h-title { font-family: 'Rajdhani', sans-serif; font-weight: 800; font-size: 20px; color: var(--cyan); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
+        .lbl { font-size: 10px; color: #94a3b8; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; display:block; }
+        .val { font-size: 16px; font-weight: 700; color: #fff; }
         
-        /* --- RADAR / HUD (CENTER) --- */
-        .hud-container { 
-            flex-grow: 1; border: 1px solid var(--cyan); border-radius: 12px; margin-bottom: 15px; 
-            position: relative; overflow: hidden; background: rgba(6, 182, 212, 0.05);
-            display: flex; align-items: center; justify-content: center;
-            box-shadow: inset 0 0 50px rgba(6, 182, 212, 0.1);
+        /* --- BATTLE TRACK (THE NEW RADAR) --- */
+        .battle-track-container {
+            flex-grow: 1; display: flex; flex-direction: column; justify-content: center; position: relative;
+            padding: 0 40px; margin-bottom: 20px; border: 1px dashed #334155; border-radius: 8px;
+            background: rgba(0,0,0,0.3);
         }
-        .scan-line {
-            position: absolute; width: 100%; height: 2px; background: rgba(6, 182, 212, 0.5);
-            top: 0; animation: scan 3s linear infinite; box-shadow: 0 0 10px var(--cyan);
+        .track-line { height: 4px; background: #334155; position: relative; width: 100%; border-radius: 2px; }
+        .track-marker { position: absolute; top: -8px; width: 4px; height: 20px; background: #64748b; transform: translateX(-50%); }
+        .track-marker.entry { background: var(--cyan); height: 25px; top: -10px; z-index: 2; }
+        .track-marker.stop { background: var(--red); left: 0%; }
+        .track-marker.target { background: var(--gold); left: 100%; }
+        
+        .price-puck {
+            position: absolute; top: -12px; width: 10px; height: 28px; 
+            background: #fff; border: 2px solid var(--cyan); 
+            box-shadow: 0 0 15px var(--cyan); z-index: 10;
+            transform: translateX(-50%); transition: left 0.5s ease-out;
         }
-        @keyframes scan { 0% { top: 0%; opacity: 0; } 50% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+        .track-label { position: absolute; top: 20px; font-size: 10px; transform: translateX(-50%); color: #64748b; }
 
-        .radar-circle {
-            width: 300px; height: 300px; border: 1px dashed rgba(6, 182, 212, 0.3); border-radius: 50%;
-            position: absolute; animation: rotate 10s linear infinite;
-        }
-        .radar-crosshair {
-            width: 20px; height: 20px; border: 1px solid var(--cyan); position: absolute;
-        }
-        @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        /* --- GAUGES WITH TICKS --- */
+        .gauge-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: auto; }
+        .gauge-row { margin-bottom: 10px; }
+        .gauge-bar-bg { height: 8px; background: #1e293b; position: relative; border-radius: 2px; overflow: hidden; }
+        .gauge-fill { height: 100%; background: var(--cyan); width: 0%; transition: width 1s; }
+        .gauge-ticks { display: flex; justify-content: space-between; margin-top: 2px; }
+        .tick { width: 1px; height: 4px; background: #475569; }
 
-        .hud-overlay { position: absolute; text-align: center; z-index: 10; }
-        .hud-status { font-size: 48px; font-family: 'Rajdhani'; font-weight: 800; color: #fff; text-shadow: 0 0 20px var(--cyan); letter-spacing: 5px; }
-        .hud-sub { font-size: 16px; color: var(--cyan); font-weight: 700; background: rgba(0,0,0,0.5); padding: 5px 15px; border: 1px solid var(--cyan); display: inline-block; margin-top: 10px; }
-
-        /* --- GAUGES --- */
-        .gauge-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .gauge-box { background: rgba(0,0,0,0.3); padding: 10px; border-left: 2px solid #334155; }
-        .bar-container { width: 100%; height: 6px; background: #1e293b; margin-top: 5px; position: relative; }
-        .bar-fill { height: 100%; background: var(--cyan); width: 0%; transition: width 1s ease; box-shadow: 0 0 8px var(--cyan); }
-
-        /* --- BLACK BOX (LOG) --- */
-        .log-terminal { 
-            flex-grow: 1; background: #000; font-family: 'Courier New', monospace; font-size: 12px; 
-            padding: 10px; overflow-y: auto; color: #33ff00; opacity: 0.8;
+        /* --- FLIGHT PLAN (PERSISTENCE) --- */
+        .flight-plan-box {
+            display: flex; gap: 10px; margin-bottom: 15px;
+            background: #1e293b; padding: 10px; border-radius: 6px; border-left: 3px solid var(--cyan);
         }
-        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #111; padding-bottom: 2px; }
-        .log-time { color: #666; margin-right: 10px; }
+        .fp-item { flex: 1; text-align: center; }
+
+        /* --- DATA TABLE (RIGHT) --- */
+        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px dashed #334155; padding-bottom: 4px; }
+        .btn-cp { background: #334155; border: none; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 3px; cursor: pointer; margin-left: 8px; transition: 0.2s; }
+        .btn-cp:hover { background: var(--cyan); color: #000; }
+        .btn-cp:active { background: var(--green); }
+
+        .big-price { font-size: 28px; font-weight: 800; color: #fff; text-shadow: 0 0 20px rgba(255,255,255,0.2); }
+
+        /* --- LOG --- */
+        .log-box { height: 100%; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px; color: #cbd5e1; }
+        .log-ln { margin-bottom: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; display: flex; }
+        .ts { color: #64748b; min-width: 60px; margin-right: 10px; }
 
         /* --- CONTROLS --- */
-        .btn-action { width: 100%; background: transparent; border: 1px solid var(--cyan); color: var(--cyan); padding: 10px; font-family: 'JetBrains Mono'; font-weight: 800; cursor: pointer; transition: 0.2s; margin-bottom: 10px; }
-        .btn-action:hover { background: var(--cyan); color: #000; box-shadow: 0 0 15px var(--cyan); }
-        .inp-risk { background: #000; border: 1px solid #334155; color: #fff; width: 100%; padding: 8px; font-family: inherit; font-size: 14px; text-align: right; margin-bottom: 10px; }
-
-        /* --- STATES --- */
-        .state-RED .hud-status { color: var(--red); text-shadow: 0 0 20px var(--red); }
-        .state-RED .radar-circle { border-color: var(--red); }
-        .state-GOLD .hud-status { color: var(--gold); text-shadow: 0 0 20px var(--gold); }
-        
-        .copy-btn { float: right; font-size: 10px; background: #1e293b; border: 1px solid #475569; color: #fff; cursor: pointer; padding: 2px 6px; }
-        .copy-btn:active { background: var(--green); }
+        .inp-risk { background: #020617; border: 1px solid #475569; color: #fff; padding: 8px; width: 100%; text-align: right; font-family: inherit; font-weight: 700; margin-bottom: 10px; }
+        .btn-toggle { width: 100%; padding: 10px; background: transparent; border: 1px solid #475569; color: #94a3b8; cursor: pointer; font-weight: 700; margin-top: 5px; }
+        .btn-toggle.active { border-color: var(--green); color: var(--green); background: rgba(16, 185, 129, 0.1); }
 
     </style>
 </head>
@@ -99,317 +97,359 @@
 <div class="cockpit">
     
     <div class="header">
-        <div class="glitch-text">PROJECT OMEGA <span style="font-size:12px; opacity:0.5;">v11.0</span></div>
-        <div style="display:flex; gap:15px; align-items:center;">
-            <div id="connectionStatus" style="width:8px; height:8px; background:var(--red); border-radius:50%; box-shadow:0 0 5px var(--red);"></div>
-            <span class="label" style="margin:0;">NY FUTURES</span>
-            <span class="label" id="clockUTC" style="color:#fff;">--:--:-- UTC</span>
+        <div class="h-title" style="margin:0">PROJECT OMEGA <span style="font-size:12px; color:#64748b; margin-left:10px;">v12.0 TACTICAL</span></div>
+        <div style="display:flex; align-items:center; gap:15px;">
+            <div id="livePrice" class="big-price">--</div>
+            <div style="text-align:right;">
+                <div class="lbl">NY FUTURES</div>
+                <div id="clockLocal" class="val" style="font-size:12px;">--:--:--</div>
+            </div>
         </div>
     </div>
 
     <div class="panel panel-left">
-        <div class="label">/// RISK THROTTLE</div>
-        <div style="margin-bottom: 20px;">
-            <label class="label">BALANCE ($)</label>
-            <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="updateRisk()">
-        </div>
-        <div style="margin-bottom: 20px;">
-            <label class="label">RISK %</label>
-            <input type="number" id="inpRisk" class="inp-risk" value="10.0" step="0.1" oninput="updateRisk()">
-        </div>
-        <div style="border-top: 1px dashed #334155; padding-top: 10px;">
-            <label class="label">MAX LOSS</label>
-            <div id="valRisk" class="val-lg" style="color:var(--red); font-size:20px;">$400.00</div>
-        </div>
+        <div class="h-title">RISK CONTROL</div>
         
-        <div style="margin-top:auto; padding-top:20px;">
-            <button class="btn-action" onclick="toggleAudio()">AUDIO: <span id="txtAudio">OFF</span></button>
-            <button class="btn-action" onclick="requestNotify()">ENABLE NOTIFY</button>
+        <div class="lbl">ACCOUNT BALANCE</div>
+        <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="render()">
+        
+        <div class="lbl">RISK PER TRADE (%)</div>
+        <input type="number" id="inpRisk" class="inp-risk" value="10.0" step="0.1" oninput="render()">
+        
+        <div style="margin-top:15px; padding-top:15px; border-top:1px solid #334155;">
+            <div class="lbl">MAX ALLOWABLE LOSS</div>
+            <div id="valRisk" class="val" style="color:var(--red); font-size:20px;">$400.00</div>
+        </div>
+
+        <div style="margin-top:auto;">
+            <button id="btnAudio" class="btn-toggle" onclick="toggleAudio()">AUDIO: OFF</button>
+            <button class="btn-toggle" onclick="requestNotify()">ENABLE NOTIFY</button>
         </div>
     </div>
 
     <div class="panel panel-center">
-        <div class="hud-container" id="hudFrame">
-            <div class="scan-line"></div>
-            <div class="radar-circle"></div>
-            <div class="radar-crosshair"></div>
-            
-            <div class="hud-overlay">
-                <div class="hud-status" id="hudMain">SCANNING</div>
-                <div class="hud-sub" id="hudSub">WAITING FOR LOCK</div>
+        
+        <div class="flight-plan-box">
+            <div class="fp-item">
+                <div class="lbl">SESSION MODE</div>
+                <div class="val" id="fpMode" style="color:var(--cyan)">SCANNING</div>
             </div>
+            <div class="fp-item" style="border-left:1px solid #334155; border-right:1px solid #334155">
+                <div class="lbl">KINETIC SCORE</div>
+                <div class="val" id="fpScore">--</div>
+            </div>
+            <div class="fp-item">
+                <div class="lbl">STATUS</div>
+                <div class="val" id="fpStatus">WAIT</div>
+            </div>
+        </div>
+
+        <div class="battle-track-container" id="battleTrack">
+            <div style="text-align:center; color:#475569; font-size:12px; margin-bottom:10px;">MARKET POSITION TRACKER</div>
+            
+            <div class="track-line">
+                <div class="track-marker stop" style="left:0%;"></div>
+                <div class="track-marker entry" style="left:20%;"></div>
+                <div class="track-marker target" style="left:100%;"></div>
+                
+                <div class="track-label" style="left:0%; top:25px; color:var(--red);">STOP</div>
+                <div class="track-label" style="left:20%; top:25px; color:var(--cyan);">ENTRY</div>
+                <div class="track-label" style="left:100%; top:25px; color:var(--gold);">TARGET 1</div>
+
+                <div id="pricePuck" class="price-puck" style="left:20%;"></div>
+            </div>
+            
+            <div id="trackMsg" style="text-align:center; margin-top:40px; font-weight:800; color:#64748b; font-size:24px;">NO TARGET</div>
         </div>
 
         <div class="gauge-grid">
-            <div class="gauge-box">
+            <div class="gauge-row">
                 <div style="display:flex; justify-content:space-between;">
-                    <span class="label">ENERGY (BPS)</span>
-                    <span class="label" id="valEnergy" style="color:#fff">--</span>
+                    <span class="lbl">ENERGY (Volatility)</span>
+                    <span class="lbl" id="txtEnergy">--</span>
                 </div>
-                <div class="bar-container"><div class="bar-fill" id="barEnergy"></div></div>
+                <div class="gauge-bar-bg"><div class="gauge-fill" id="barEnergy"></div></div>
+                <div class="gauge-ticks">
+                    <span class="lbl">0</span><span class="lbl">150</span><span class="lbl">300+</span>
+                </div>
             </div>
-            <div class="gauge-box">
+            <div class="gauge-row">
                 <div style="display:flex; justify-content:space-between;">
-                    <span class="label">RUNWAY (ATR)</span>
-                    <span class="label" id="valSpace" style="color:#fff">--</span>
+                    <span class="lbl">SPACE (ATR Multi)</span>
+                    <span class="lbl" id="txtSpace">--</span>
                 </div>
-                <div class="bar-container"><div class="bar-fill" id="barSpace"></div></div>
+                <div class="gauge-bar-bg"><div class="gauge-fill" id="barSpace"></div></div>
+                <div class="gauge-ticks">
+                    <span class="lbl">0R</span><span class="lbl">1R</span><span class="lbl">2R+</span>
+                </div>
             </div>
-            <div class="gauge-box">
+            <div class="gauge-row">
                 <div style="display:flex; justify-content:space-between;">
-                    <span class="label">WIND (SLOPE)</span>
-                    <span class="label" id="valSlope" style="color:#fff">--</span>
+                    <span class="lbl">WIND (Momentum)</span>
+                    <span class="lbl" id="txtWind">--</span>
                 </div>
-                <div class="bar-container"><div class="bar-fill" id="barSlope"></div></div>
+                <div class="gauge-bar-bg"><div class="gauge-fill" id="barWind"></div></div>
+                <div class="gauge-ticks">
+                    <span class="lbl">BEAR</span><span class="lbl">NEUT</span><span class="lbl">BULL</span>
+                </div>
             </div>
-            <div class="gauge-box">
+            <div class="gauge-row">
                 <div style="display:flex; justify-content:space-between;">
-                    <span class="label">HULL (STRUCT)</span>
-                    <span class="label" id="valStruct" style="color:#fff">--</span>
+                    <span class="lbl">HULL (Structure)</span>
+                    <span class="lbl" id="txtHull">--</span>
                 </div>
-                <div class="bar-container"><div class="bar-fill" id="barStruct"></div></div>
+                <div class="gauge-bar-bg"><div class="gauge-fill" id="barHull"></div></div>
+                <div class="gauge-ticks">
+                    <span class="lbl">WEAK</span><span class="lbl"></span><span class="lbl">SOLID</span>
+                </div>
             </div>
         </div>
+
     </div>
 
     <div class="panel panel-right">
-        <div class="label">/// TARGETING COMPUTER</div>
-        
-        <div style="display:flex; gap:5px; margin-bottom:15px;">
-            <button id="btnLong" class="btn-action" style="flex:1" onclick="forceSide('LONG')">LONG</button>
-            <button id="btnShort" class="btn-action" style="flex:1" onclick="forceSide('SHORT')">SHORT</button>
+        <div class="h-title">
+            FLIGHT PATH
+            <div style="display:flex; gap:5px;">
+                <button id="btnLong" class="btn-cp" style="padding:5px 10px;" onclick="forceSide('LONG')">L</button>
+                <button id="btnShort" class="btn-cp" style="padding:5px 10px;" onclick="forceSide('SHORT')">S</button>
+            </div>
         </div>
 
         <div class="data-row">
-            <span class="label">ENTRY <button class="copy-btn" onclick="cp('pEntry')">CP</button></span>
-            <div id="pEntry" class="val-lg" style="color:var(--cyan)">--</div>
+            <span class="lbl">ENTRY (STOP LIMIT)</span>
+            <div><span class="val" id="pEntry" style="color:var(--cyan)">--</span> <button class="btn-cp" onclick="cp('pEntry')">CP</button></div>
         </div>
-        <br>
         <div class="data-row">
-            <span class="label">STOP LOSS <button class="copy-btn" onclick="cp('pStop')">CP</button></span>
-            <div id="pStop" class="val-lg" style="color:var(--red); font-size:20px;">--</div>
+            <span class="lbl">STOP LOSS</span>
+            <div><span class="val" id="pStop" style="color:var(--red)">--</span> <button class="btn-cp" onclick="cp('pStop')">CP</button></div>
         </div>
-        <br>
         <div class="data-row">
-            <span class="label">SIZE (USD) <button class="copy-btn" onclick="cp('pSize')">CP</button></span>
-            <div id="pSize" class="val-lg" style="font-size:20px;">--</div>
+            <span class="lbl">SIZE (USD)</span>
+            <div><span class="val" id="pSize">--</span> <button class="btn-cp" onclick="cp('pSize')">CP</button></div>
         </div>
 
-        <hr style="border:0; border-top:1px solid #334155; margin:15px 0;">
+        <div style="height:10px; border-bottom:1px solid #334155; margin-bottom:10px;"></div>
 
         <div class="data-row">
-            <span class="label">TARGET 1 (75%)</span>
-            <div id="pT1" style="color:var(--gold); font-weight:800;">--</div>
+            <span class="lbl" style="color:var(--gold)">TARGET 1 (75%)</span>
+            <div><span class="val" id="pT1">--</span> <button class="btn-cp" onclick="cp('pT1')">CP</button></div>
         </div>
-        <div class="data-row" style="margin-top:5px;">
-            <span class="label">MOVE BE @</span>
-            <div id="pBE" style="color:#fff; font-weight:700;">--</div>
+        <div class="data-row">
+            <span class="lbl">TARGET 2</span>
+            <div><span class="val" id="pT2">--</span> <button class="btn-cp" onclick="cp('pT2')">CP</button></div>
         </div>
-        
+        <div class="data-row">
+            <span class="lbl">TARGET 3</span>
+            <div><span class="val" id="pT3">--</span> <button class="btn-cp" onclick="cp('pT3')">CP</button></div>
+        </div>
+
+        <div style="height:10px; border-bottom:1px solid #334155; margin-bottom:10px;"></div>
+
+        <div class="data-row">
+            <span class="lbl" style="color:var(--cyan)">MOVE STOP TO B.E.</span>
+            <div><span class="val" id="pBE">--</span> <button class="btn-cp" onclick="cp('pBE')">CP</button></div>
+        </div>
+        <div class="data-row">
+            <span class="lbl">BANK RULE</span>
+            <div class="val" style="font-size:12px;" id="pBank">--</div>
+        </div>
+
     </div>
 
     <div class="panel panel-bottom">
-        <div class="label" style="background:#111; padding:5px;">/// BLACK BOX RECORDER [REC]</div>
-        <div id="logTerminal" class="log-terminal">
-            <div class="log-entry"><span class="log-time">SYS</span> SYSTEM BOOT SEQUENCE INITIATED...</div>
+        <div class="lbl" style="margin-bottom:5px;">/// BLACK BOX RECORDER [REC]</div>
+        <div id="logBox" class="log-box">
+            <div class="log-ln"><div class="ts">SYS</div> SYSTEM INITIALIZED. WAITING FOR DATA STREAM...</div>
         </div>
     </div>
 
 </div>
 
 <script>
-    // --- STATE ---
-    let state = {
-        data: null,
-        lastStatus: "",
-        manualSide: null,
-        audio: false,
-        log: []
-    };
+    let state = { data: null, manualSide: null, audio: false, lastStatus: "" };
 
     // --- UTILS ---
     function log(msg) {
         const now = new Date().toLocaleTimeString('en-US', {hour12:false});
-        const line = `<div class="log-entry"><span class="log-time">${now}</span> ${msg}</div>`;
-        const term = document.getElementById('logTerminal');
-        term.innerHTML += line;
-        term.scrollTop = term.scrollHeight;
+        const box = document.getElementById('logBox');
+        box.innerHTML += `<div class="log-ln"><div class="ts">${now}</div> ${msg}</div>`;
+        box.scrollTop = box.scrollHeight;
     }
-
-    function notify(title, body) {
-        if (Notification.permission === "granted") {
-            new Notification(title, { body: body, icon: '/static/icon.png' });
-        }
-    }
-
-    function requestNotify() { Notification.requestPermission().then(p => { if(p==="granted") log("COMMS LINK ESTABLISHED."); }); }
-    function toggleAudio() { state.audio = !state.audio; document.getElementById('txtAudio').innerText = state.audio ? "ON" : "OFF"; }
     function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText.replace(/,/g,'')); log("COPIED TO CLIPBOARD."); }
-    
-    function speak(text) {
-        if(!state.audio) return;
-        const u = new SpeechSynthesisUtterance(text);
-        speechSynthesis.speak(u);
+    function toggleAudio() { state.audio = !state.audio; document.getElementById('btnAudio').innerText = state.audio ? "AUDIO: ON" : "AUDIO: OFF"; document.getElementById('btnAudio').classList.toggle('active'); }
+    function forceSide(s) { state.manualSide = s; render(); }
+    function requestNotify() { Notification.requestPermission().then(p => { if(p==="granted") log("NOTIFICATIONS ENABLED."); }); }
+    function notify(msg) { if(Notification.permission==="granted") new Notification("PROJECT OMEGA", { body: msg, icon: '/static/icon.png' }); }
+    function speak(msg) { if(state.audio) speechSynthesis.speak(new SpeechSynthesisUtterance(msg)); }
+
+    // --- RENDERERS ---
+    function updateBattleTrack(plan, price, side) {
+        // Logic: 0% = Stop, 20% = Entry, 100% = Target 1
+        // We need to map price to this scale.
+        // Range 1 (Stop -> Entry): 20% of visual width
+        // Range 2 (Entry -> Target): 80% of visual width
+        
+        if (!plan || !plan.trigger || !plan.stop || !plan.targets[0]) return;
+        
+        const entry = plan.trigger;
+        const stop = plan.stop;
+        const t1 = plan.targets[0];
+        
+        let pct = 0;
+        
+        if (side === "LONG") {
+            if (price < stop) pct = 0; // Below Stop
+            else if (price < entry) {
+                // Between Stop and Entry (0-20%)
+                const range = entry - stop;
+                const progress = price - stop;
+                pct = (progress / range) * 20;
+            } else {
+                // Above Entry
+                const range = t1 - entry;
+                const progress = price - entry;
+                // Map to 20-100%
+                pct = 20 + ((progress / range) * 80);
+            }
+        } else { // SHORT
+            if (price > stop) pct = 0; // Above Stop (bad)
+            else if (price > entry) {
+                // Between Stop and Entry (0-20%)
+                const range = stop - entry;
+                const progress = stop - price;
+                pct = (progress / range) * 20;
+            } else {
+                // In profit
+                const range = entry - t1;
+                const progress = entry - price;
+                pct = 20 + ((progress / range) * 80);
+            }
+        }
+
+        // Clamp
+        pct = Math.max(0, Math.min(100, pct));
+        document.getElementById('pricePuck').style.left = pct + "%";
+        
+        // Status Text
+        const msgEl = document.getElementById('trackMsg');
+        if (pct <= 0) { msgEl.innerText = "STOP LOSS HIT"; msgEl.style.color = "var(--red)"; }
+        else if (pct >= 100) { msgEl.innerText = "TARGET 1 HIT"; msgEl.style.color = "var(--gold)"; }
+        else if (pct > 20) { msgEl.innerText = "IN PROFIT (" + Math.round(pct-20) + "%)"; msgEl.style.color = "var(--cyan)"; }
+        else { msgEl.innerText = "DRAWDOWN"; msgEl.style.color = "#94a3b8"; }
     }
 
-    // --- RENDER LOGIC ---
-    function updateGauges(k) {
-        // Parse "SUPER COILED (43bps)" -> 43
-        let bps = 0; try { bps = parseInt(k.breakdown.energy.match(/\d+/)[0]); } catch(e){}
-        let atr = 0; try { atr = parseFloat(k.breakdown.space.match(/([\d\.]+)R/)[1]); } catch(e){}
-        
-        // Bars (0-100%)
-        // Energy: Lower is better (0-100bps is prime). Invert logic visually? 
-        // Actually, let's map: 0bps=100%, 300bps=0%
-        let ePct = Math.max(0, Math.min(100, (300 - bps)/3));
-        document.getElementById('barEnergy').style.width = ePct + "%";
-        document.getElementById('barEnergy').style.background = ePct > 66 ? "var(--green)" : "var(--red)";
-        document.getElementById('valEnergy').innerText = bps + " bps";
+    function render() {
+        const d = state.data;
+        if (!d) return;
 
-        // Space: 2R is 100%
+        // 1. Header
+        document.getElementById('livePrice').innerText = d.price.toLocaleString();
+        document.getElementById('clockLocal').innerText = new Date().toLocaleTimeString();
+
+        // 2. Flight Plan (Persistent)
+        const k = d.kinetic || {};
+        document.getElementById('fpMode').innerText = k.protocol || "OFFLINE";
+        document.getElementById('fpScore').innerText = k.total_score || "--";
+        document.getElementById('fpStatus').innerText = d.status;
+
+        // Color coding status
+        const statEl = document.getElementById('fpStatus');
+        if (d.status === "EXECUTING") statEl.style.color = "var(--gold)";
+        else if (d.status === "CLOSED") statEl.style.color = "var(--red)";
+        else statEl.style.color = "#fff";
+
+        // 3. Gauges (With Tick Logic)
+        const bk = k.breakdown || {};
+        
+        // Energy (bps)
+        let bps = 0; try { bps = parseInt(bk.energy.match(/\d+/)[0]); } catch(e){}
+        let ePct = Math.max(0, Math.min(100, (300 - bps)/3)); // Inverse: Lower is better
+        document.getElementById('barEnergy').style.width = ePct + "%";
+        document.getElementById('txtEnergy').innerText = bk.energy;
+        document.getElementById('barEnergy').style.background = ePct > 66 ? "var(--green)" : "var(--red)";
+
+        // Space (ATR)
+        let atr = 0; try { atr = parseFloat(bk.space.match(/([\d\.]+)R/)[1]); } catch(e){}
         let sPct = Math.max(0, Math.min(100, (atr / 2.0) * 100));
         document.getElementById('barSpace').style.width = sPct + "%";
-        document.getElementById('valSpace').innerText = atr + " R";
+        document.getElementById('txtSpace').innerText = bk.space;
 
-        // Structure
-        let struct = k.breakdown.structure.includes("SOLID") ? 100 : 30;
-        document.getElementById('barStruct').style.width = struct + "%";
-        document.getElementById('valStruct').innerText = k.breakdown.structure;
-    }
+        // Wind (Momentum) - Fixed Parsing
+        // Expected format: "ALIGNED (BULLISH/0.8)" or "NEUTRAL (BULLISH)"
+        let momText = bk.momentum || "";
+        let isAligned = momText.includes("ALIGNED");
+        document.getElementById('barWind').style.width = isAligned ? "100%" : "30%";
+        document.getElementById('barWind').style.background = isAligned ? "var(--green)" : "#475569";
+        document.getElementById('txtWind').innerText = momText;
 
-    function monitorSortie(plan, price) {
-        if (!plan || !plan.valid || !price) return;
-        
-        // Active Sortie Monitor
-        // Check T1
-        let t1 = plan.targets[0];
-        if (t1 && ((plan.trigger < t1 && price >= t1) || (plan.trigger > t1 && price <= t1))) {
-            // T1 HIT
-            document.getElementById('hudFrame').className = "hud-container state-GOLD";
-            document.getElementById('hudMain').innerText = "TARGET 1 HIT";
-            document.getElementById('hudSub').innerText = "BANK 75% NOW";
-            if (state.lastStatus !== "T1_HIT") {
-                log(`>>> OBJECTIVE ALPHA (T1) ACHIEVED @ ${price}`);
-                notify("PROJECT OMEGA", "Target 1 Hit. Bank 75%.");
-                speak("Target one hit. Bank profit.");
-                state.lastStatus = "T1_HIT";
-            }
-            return; // Priority display
-        }
+        // Hull (Structure)
+        let isSolid = (bk.structure || "").includes("SOLID");
+        document.getElementById('barHull').style.width = isSolid ? "100%" : "30%";
+        document.getElementById('txtHull').innerText = bk.structure;
 
-        // Check Stop
-        let stop = plan.stop;
-        if (stop && ((plan.trigger < t1 && price <= stop) || (plan.trigger > t1 && price >= stop))) {
-            document.getElementById('hudFrame').className = "hud-container state-RED";
-            document.getElementById('hudMain').innerText = "STOP HIT";
-            document.getElementById('hudSub').innerText = "SORTIE FAILED - EJECT";
-            if (state.lastStatus !== "STOP_HIT") {
-                log(`!!! CRITICAL FAILURE. STOP HIT @ ${price}`);
-                state.lastStatus = "STOP_HIT";
-            }
-            return;
-        }
-    }
+        // 4. Execution Data
+        let side = state.manualSide || (d.active_side !== "NONE" ? d.active_side : "LONG");
+        const plan = d.plans ? d.plans[side] : null;
 
-    async function fetchLoop() {
-        try {
-            const res = await fetch('/api/omega/status', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ session_id: "us_ny_futures" })
-            });
-            const d = await res.json();
-            state.data = d;
+        // Highlight active side button
+        document.getElementById('btnLong').style.background = side==="LONG" ? "var(--green)" : "#334155";
+        document.getElementById('btnShort').style.background = side==="SHORT" ? "var(--red)" : "#334155";
 
-            // Connection Dot
-            document.getElementById('connectionStatus').style.background = "var(--green)";
-            document.getElementById('connectionStatus').style.boxShadow = "0 0 5px var(--green)";
+        if (plan) {
+            document.getElementById('pEntry').innerText = plan.trigger ? plan.trigger.toLocaleString() : "--";
+            document.getElementById('pStop').innerText = plan.stop ? plan.stop.toLocaleString() : "--";
             
-            // Clock
-            document.getElementById('clockUTC').innerText = new Date().toISOString().split('T')[1].split('.')[0] + " UTC";
+            // Targets
+            document.getElementById('pT1').innerText = plan.targets[0] ? plan.targets[0].toLocaleString() : "--";
+            document.getElementById('pT2').innerText = plan.targets[1] ? plan.targets[1].toLocaleString() : "--";
+            document.getElementById('pT3').innerText = plan.targets[2] ? plan.targets[2].toLocaleString() : "--";
+            
+            document.getElementById('pBE').innerText = plan.be_trigger ? plan.be_trigger.toLocaleString() : "--";
+            document.getElementById('pBank').innerText = plan.bank_rule;
 
-            // Price
-            const price = d.price;
+            // Risk Math
+            const bal = parseFloat(document.getElementById('inpBal').value) || 0;
+            const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
+            let riskAmt = bal * (riskPct / 100);
+            if(riskAmt > 5000) riskAmt = 5000;
+            document.getElementById('valRisk').innerText = "$" + riskAmt.toFixed(2);
 
-            // Determine Side
-            let side = state.manualSide || (d.active_side !== "NONE" ? d.active_side : "LONG");
-            const k = d.kinetic;
-            const plan = d.plans[side];
-
-            // Render HUD
-            const hudBox = document.getElementById('hudFrame');
-            const main = document.getElementById('hudMain');
-            const sub = document.getElementById('hudSub');
-
-            if (d.status === "CLOSED") {
-                main.innerText = "SESSION CLOSED";
-                sub.innerText = "MARKET OFFLINE";
-                hudBox.className = "hud-container";
-                hudBox.style.opacity = "0.5";
-            } else if (d.status === "EXECUTING") {
-                main.innerText = "EXECUTE " + side;
-                sub.innerText = "ENTRY TRIGGERED";
-                hudBox.className = "hud-container state-GOLD";
-                // Only alert once per signal
-                if (state.lastStatus !== "EXEC") {
-                    log(`>>> EXECUTION SIGNAL: ${side} @ ${price}`);
-                    notify("PROJECT OMEGA", `EXECUTE ${side} NOW`);
-                    speak(`Execute ${side} now.`);
-                    state.lastStatus = "EXEC";
-                }
-            } else if (d.status === "ACTIVE") {
-                main.innerText = "IN COMBAT";
-                sub.innerText = "TRACKING TARGETS...";
-                hudBox.className = "hud-container";
-                monitorSortie(plan, price);
-            } else {
-                // Scanning
-                main.innerText = k.protocol || "SCANNING";
-                sub.innerText = `SCORE: ${k.total_score} // ${d.status}`;
-                hudBox.className = "hud-container";
-            }
-
-            // Render Gauges
-            if (k.breakdown) updateGauges(k);
-
-            // Render Right Panel (Cheat Sheet)
-            if (plan) {
-                document.getElementById('pEntry').innerText = plan.trigger ? plan.trigger.toLocaleString() : "--";
-                document.getElementById('pStop').innerText = plan.stop ? plan.stop.toLocaleString() : "--";
-                document.getElementById('pT1').innerText = plan.targets[0] ? plan.targets[0].toLocaleString() : "--";
-                document.getElementById('pBE').innerText = plan.be_trigger ? plan.be_trigger.toLocaleString() : "--";
-
-                // Calc Size
-                const bal = parseFloat(document.getElementById('inpBal').value) || 0;
-                const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
-                let riskAmt = bal * (riskPct / 100);
-                if(riskAmt > 5000) riskAmt = 5000; // Safety cap
-                document.getElementById('valRisk').innerText = "$" + riskAmt.toFixed(2);
-
-                if (plan.trigger && plan.stop) {
-                    const riskPerUnit = Math.abs(plan.trigger - plan.stop);
+            if (plan.trigger && plan.stop) {
+                const riskPerUnit = Math.abs(plan.trigger - plan.stop);
+                if (riskPerUnit > 0) {
                     const units = riskAmt / riskPerUnit;
                     const sizeUsd = units * plan.trigger;
                     document.getElementById('pSize').innerText = Math.floor(sizeUsd).toLocaleString();
                 }
             }
 
-            // Button highlights
-            document.getElementById('btnLong').style.border = side === "LONG" ? "2px solid var(--green)" : "1px solid var(--cyan)";
-            document.getElementById('btnShort').style.border = side === "SHORT" ? "2px solid var(--red)" : "1px solid var(--cyan)";
+            // UPDATE BATTLE TRACK
+            updateBattleTrack(plan, d.price, side);
+        }
 
-        } catch(e) {
-            console.error(e);
-            document.getElementById('connectionStatus').style.background = "var(--red)";
+        // 5. Alerts
+        if (d.status === "EXECUTING" && state.lastStatus !== "EXEC") {
+            log(`>>> EXECUTION SIGNAL: ${side}`);
+            notify(`EXECUTE ${side}`);
+            speak("Execution Signal.");
+            state.lastStatus = "EXEC";
         }
     }
 
-    function forceSide(s) { state.manualSide = s; fetchLoop(); }
-    function updateRisk() { fetchLoop(); } // Re-calc on input
+    async function loop() {
+        try {
+            const res = await fetch('/api/omega/status', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ session_id: "us_ny_futures" })
+            });
+            state.data = await res.json();
+            render();
+        } catch(e) { console.error(e); }
+    }
 
-    // Init
-    setInterval(fetchLoop, 2000);
-    fetchLoop();
-    log("SYSTEM READY. WAITING FOR TELEMETRY...");
+    setInterval(loop, 2000);
+    loop();
 
 </script>
 </body>
