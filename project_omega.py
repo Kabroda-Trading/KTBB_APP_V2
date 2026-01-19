@@ -1,13 +1,13 @@
 # project_omega.py
 # ==============================================================================
-# PROJECT OMEGA SPECIALIST (v10.0 - NY FUTURES ONLY)
+# PROJECT OMEGA SPECIALIST (v10.1 - HIERARCHY COMPLIANT)
 # ==============================================================================
 # STRATEGY:
-# - Target: US NY FUTURES (Hardcoded)
+# - Target: US NY FUTURES (Focused)
 # - Logic: 
-#    1. CHECK PHASE 1 (Session Manager): Is market open?
+#    1. ASK PHASE 1 (Session Manager): "Are we open?"
 #    2. IF OPEN: Run Phase 2 (Math) & Phase 3 (Execution).
-#    3. IF CLOSED: Show Countdown/Offline Mode.
+#    3. IF CLOSED: Return clean "CLOSED" packet.
 # ==============================================================================
 
 from __future__ import annotations
@@ -157,13 +157,13 @@ def _check_omega_triggers(levels: Dict[str, float], candles: List[Dict[str, Any]
 
 async def get_omega_status(
     symbol: str = "BTCUSDT",
-    session_id: str = "us_ny_futures", # <--- DEFAULTED TO NY
+    session_id: str = "us_ny_futures", 
     ferrari_mode: bool = False,
     force_time_utc: str = None,
     force_price: float = None 
 ) -> Dict[str, Any]:
     
-    # Force NY Session ID always
+    # 1. SET TARGET: We only care about NY Futures
     session_id = "us_ny_futures"
 
     if force_time_utc:
@@ -172,37 +172,37 @@ async def get_omega_status(
     else:
         now_utc = datetime.now(timezone.utc); is_simulation = False
 
-    # 1. PHASE 1 CHECK (Corporate Hierarchy)
-    # Check if we are even in the session window before doing expensive math
+    # 2. ASK THE BOSS (Session Manager)
+    # We retrieve the rules from the manager. We do NOT invent them.
     session_config = session_manager.get_session_config(session_id)
     anchor_ts = session_manager.anchor_ts_for_utc_date(session_config, now_utc)
     anchor_dt = datetime.fromtimestamp(anchor_ts, timezone.utc)
     elapsed = (now_utc - anchor_dt).total_seconds() / 3600.0
     
+    # "The Law" comes from the config file, not here.
     session_duration = float(session_config.get("duration_hours", 23.0)) 
-    is_session_closed = elapsed > session_duration
-
-    # If closed and way past (e.g. > 12 hours), pure offline mode
-    # But we still fetch price for the ticker
     
-    # 2. FETCH DATA
+    # ZOMBIE KILLER: If we are outside the Manager's authorized window
+    is_session_closed = elapsed > session_duration or elapsed < 0
+
+    # 3. FETCH DATA
     pipeline_data = await battlebox_pipeline.get_live_battlebox(symbol=symbol, session_mode="MANUAL", manual_id=session_id)
     real_price = float(pipeline_data.get("price", 0.0))
     current_price = force_price if force_price is not None else real_price
 
+    # 4. ENFORCE HIERARCHY
     if is_session_closed:
-        # If pipeline didn't return valid levels because it's too late/early
-        # We return a CLEAN "Closed" packet.
         return {
             "ok": True,
             "status": "CLOSED",
             "symbol": symbol,
             "price": current_price,
-            "next_open": anchor_dt.strftime("%H:%M UTC"), # Approximate
+            "active_side": "NONE",
+            "next_open": anchor_dt.strftime("%H:%M UTC"), 
             "kinetic": {
                 "total_score": 0, "protocol": "MARKET CLOSED", "color": "GRAY", 
-                "instruction": f"SESSION OPENS {session_config['utc_open']}", 
-                "brief": "Waiting for NY Open...",
+                "instruction": f"SESSION OPENS 08:30 ET", 
+                "brief": "Waiting for Session Open...",
                 "breakdown": {}
             },
             "plans": {"LONG": {}, "SHORT": {}}
@@ -224,20 +224,20 @@ async def get_omega_status(
     dr = float(levels.get("daily_resistance", 0.0)); ds = float(levels.get("daily_support", 0.0))
     r30_high = float(levels.get("range30m_high", 0.0)); r30_low = float(levels.get("range30m_low", 0.0))
     
-    # 3. AUTO-SELECT SIDE (Fixing the bug)
+    # 5. AUTO-SELECT SIDE
     dist_long = abs(current_price - bo)
     dist_short = abs(current_price - bd)
     closest_side = "LONG" if dist_long < dist_short else "SHORT"
     calc_side = closest_side 
 
-    # 4. PHASE 2 (MATH)
+    # 6. PHASE 2 (MATH)
     kinetic = _calculate_locked_strategy(anchor_price, levels, context, shelves, calc_side)
     
-    # 5. PHASE 3 (EXECUTION)
+    # 7. PHASE 3 (EXECUTION)
     exec_state = _check_omega_triggers(levels, raw_candles, kinetic["protocol"])
     
     status = "STANDBY"
-    active_side = closest_side # Default for UI
+    active_side = closest_side 
     
     if exec_state["action"] == "GO":
         status = "EXECUTING"
@@ -250,12 +250,12 @@ async def get_omega_status(
         current_ts = int(now_utc.timestamp())
         if (current_ts - trigger_ts) > 900: status = "ACTIVE" # Old signal
 
+    # Renamed "Time Gate" to "Session Clock" to avoid confusion
     if elapsed > 2.5: kinetic["breakdown"]["time"] = "LATE (CAUTION)"
     
     plan_long = _calc_execution_plan(bo, r30_low, dr, ds, "LONG", kinetic["protocol"], kinetic["force_align"])
     plan_short = _calc_execution_plan(bd, r30_high, dr, ds, "SHORT", kinetic["protocol"], kinetic["force_align"])
 
-    # Update stops to be robust
     plan_long["stop"] = r30_low
     plan_short["stop"] = r30_high
 

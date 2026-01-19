@@ -126,7 +126,7 @@
                     <div class="dc-lbl">SPACE (RUNWAY)</div><div class="dc-val" id="kSpace">--</div>
                 </div>
                 <div class="data-card">
-                    <div class="dc-lbl">TIME GATE</div><div class="dc-val" id="kTime">--</div>
+                    <div class="dc-lbl">SESSION CLOCK</div><div class="dc-val" id="kTime">--</div>
                 </div>
                 <div class="data-card">
                     <div class="dc-lbl">WEEKLY FORCE</div><div class="dc-val" id="kMom">--</div>
@@ -183,7 +183,7 @@
                 <span class="lbl" style="color:var(--text-dim)">TARGET 2</span>
                 <span class="val" id="pT2" style="font-size:14px;">--</span>
             </div>
-            <div class="exec-row" style="border-bottom:none;">
+            <div class="exec-row" style="border-bottom:none; margin-bottom:5px;">
                 <span class="lbl" style="color:var(--text-dim)">TARGET 3</span>
                 <span class="val" id="pT3" style="font-size:14px;">--</span>
             </div>
@@ -245,7 +245,8 @@
 
         function render() {
             if(!data) return;
-            document.getElementById('livePrice').innerText = data.price ? data.price.toLocaleString() : "--";
+            const price = data.price;
+            document.getElementById('livePrice').innerText = price.toLocaleString();
 
             const k = data.kinetic || {};
             const bk = k.breakdown || {};
