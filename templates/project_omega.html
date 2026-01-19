@@ -19,25 +19,45 @@
         /* --- LAYOUT --- */
         .cockpit { 
             display: grid; 
-            grid-template-columns: 280px 1fr 320px; 
-            grid-template-rows: 50px 1fr 180px;
+            grid-template-columns: 280px 1fr 340px; /* Widened Right Panel */
+            grid-template-rows: 60px 1fr 180px;
             gap: 15px; height: 100%;
         }
         
-        .header { grid-column: 1 / 4; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
-        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 15px; display:flex; flex-direction:column; }
+        .header { grid-column: 1 / 4; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 5px; }
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; display:flex; flex-direction:column; }
         
         .panel-left { grid-row: 2 / 3; }
-        .panel-center { grid-row: 2 / 3; background: #0b1121; /* Darker for contrast */ }
+        .panel-center { grid-row: 2 / 3; background: #0b1121; }
         .panel-right { grid-row: 2 / 4; grid-column: 3 / 4; } 
         .panel-bottom { grid-row: 3 / 4; grid-column: 1 / 3; }
 
-        /* --- TYPOGRAPHY --- */
-        .h-title { font-family: 'Rajdhani', sans-serif; font-weight: 800; font-size: 20px; color: var(--cyan); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
-        .lbl { font-size: 10px; color: #94a3b8; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; display:block; }
-        .val { font-size: 16px; font-weight: 700; color: #fff; }
+        /* --- TYPOGRAPHY (UPGRADED) --- */
+        .h-title { 
+            font-family: 'Rajdhani', sans-serif; 
+            font-weight: 800; 
+            font-size: 26px; /* Bigger */
+            color: var(--cyan); 
+            letter-spacing: 1.5px; 
+            text-transform: uppercase; 
+            margin-bottom: 20px; 
+            text-shadow: 0 0 10px rgba(34, 211, 238, 0.3);
+            display: flex; justify-content: space-between; align-items: center;
+        }
         
-        /* --- BATTLE TRACK (THE NEW RADAR) --- */
+        .lbl { 
+            font-size: 12px; /* Bigger from 10px */
+            color: #cbd5e1; /* Brighter from #94a3b8 */
+            font-weight: 700; 
+            text-transform: uppercase; 
+            letter-spacing: 1px; 
+            margin-bottom: 6px; 
+            display:block; 
+        }
+        
+        .val { font-size: 18px; font-weight: 800; color: #fff; }
+        
+        /* --- BATTLE TRACK --- */
         .battle-track-container {
             flex-grow: 1; display: flex; flex-direction: column; justify-content: center; position: relative;
             padding: 0 40px; margin-bottom: 20px; border: 1px dashed #334155; border-radius: 8px;
@@ -55,40 +75,42 @@
             box-shadow: 0 0 15px var(--cyan); z-index: 10;
             transform: translateX(-50%); transition: left 0.5s ease-out;
         }
-        .track-label { position: absolute; top: 20px; font-size: 10px; transform: translateX(-50%); color: #64748b; }
+        .track-label { position: absolute; top: 25px; font-size: 11px; font-weight: 700; transform: translateX(-50%); }
 
-        /* --- GAUGES WITH TICKS --- */
-        .gauge-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: auto; }
-        .gauge-row { margin-bottom: 10px; }
-        .gauge-bar-bg { height: 8px; background: #1e293b; position: relative; border-radius: 2px; overflow: hidden; }
+        /* --- GAUGES --- */
+        .gauge-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: auto; }
+        .gauge-row { margin-bottom: 15px; }
+        .gauge-bar-bg { height: 10px; background: #1e293b; position: relative; border-radius: 2px; overflow: hidden; margin-bottom: 4px; }
         .gauge-fill { height: 100%; background: var(--cyan); width: 0%; transition: width 1s; }
-        .gauge-ticks { display: flex; justify-content: space-between; margin-top: 2px; }
-        .tick { width: 1px; height: 4px; background: #475569; }
+        .gauge-ticks { display: flex; justify-content: space-between; font-size: 10px; color: #64748b; }
 
-        /* --- FLIGHT PLAN (PERSISTENCE) --- */
+        /* --- FLIGHT PLAN --- */
         .flight-plan-box {
-            display: flex; gap: 10px; margin-bottom: 15px;
-            background: #1e293b; padding: 10px; border-radius: 6px; border-left: 3px solid var(--cyan);
+            display: flex; gap: 10px; margin-bottom: 20px;
+            background: #1e293b; padding: 15px; border-radius: 6px; border-left: 4px solid var(--cyan);
         }
         .fp-item { flex: 1; text-align: center; }
+        .fp-val { font-size: 24px; font-weight: 800; font-family: 'Rajdhani'; }
 
-        /* --- DATA TABLE (RIGHT) --- */
-        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px dashed #334155; padding-bottom: 4px; }
-        .btn-cp { background: #334155; border: none; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 3px; cursor: pointer; margin-left: 8px; transition: 0.2s; }
-        .btn-cp:hover { background: var(--cyan); color: #000; }
-        .btn-cp:active { background: var(--green); }
-
-        .big-price { font-size: 28px; font-weight: 800; color: #fff; text-shadow: 0 0 20px rgba(255,255,255,0.2); }
+        /* --- RIGHT PANEL --- */
+        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px dashed #334155; padding-bottom: 5px; }
+        .btn-cp { background: #334155; border: 1px solid #475569; color: #fff; font-size: 11px; padding: 4px 8px; border-radius: 3px; cursor: pointer; margin-left: 8px; font-weight: 700; }
+        .btn-cp:hover { background: var(--cyan); color: #000; border-color: var(--cyan); }
+        
+        .big-price { font-size: 32px; font-weight: 800; color: #fff; text-shadow: 0 0 20px rgba(255,255,255,0.2); font-family: 'Rajdhani'; }
 
         /* --- LOG --- */
-        .log-box { height: 100%; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px; color: #cbd5e1; }
-        .log-ln { margin-bottom: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; display: flex; }
-        .ts { color: #64748b; min-width: 60px; margin-right: 10px; }
+        .log-box { height: 100%; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 13px; color: #cbd5e1; }
+        .log-ln { margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; display: flex; }
+        .ts { color: #64748b; min-width: 70px; margin-right: 10px; }
 
         /* --- CONTROLS --- */
-        .inp-risk { background: #020617; border: 1px solid #475569; color: #fff; padding: 8px; width: 100%; text-align: right; font-family: inherit; font-weight: 700; margin-bottom: 10px; }
-        .btn-toggle { width: 100%; padding: 10px; background: transparent; border: 1px solid #475569; color: #94a3b8; cursor: pointer; font-weight: 700; margin-top: 5px; }
+        .inp-risk { background: #020617; border: 1px solid #475569; color: #fff; padding: 12px; width: 100%; text-align: right; font-family: inherit; font-size: 16px; font-weight: 700; margin-bottom: 15px; }
+        .btn-toggle { width: 100%; padding: 12px; background: transparent; border: 1px solid #475569; color: #94a3b8; cursor: pointer; font-weight: 700; margin-top: 5px; font-size: 12px; transition: 0.2s; }
+        .btn-toggle:hover { border-color: #fff; color: #fff; }
         .btn-toggle.active { border-color: var(--green); color: var(--green); background: rgba(16, 185, 129, 0.1); }
+        .btn-sim { border-color: var(--gold); color: var(--gold); }
+        .btn-sim.active { background: var(--gold); color: #000; }
 
     </style>
 </head>
@@ -97,12 +119,12 @@
 <div class="cockpit">
     
     <div class="header">
-        <div class="h-title" style="margin:0">PROJECT OMEGA <span style="font-size:12px; color:#64748b; margin-left:10px;">v12.0 TACTICAL</span></div>
-        <div style="display:flex; align-items:center; gap:15px;">
+        <div class="h-title" style="margin:0; font-size:32px;">PROJECT OMEGA <span style="font-size:14px; color:#64748b; margin-left:15px; font-weight:600;">v12.1 TACTICAL</span></div>
+        <div style="display:flex; align-items:center; gap:20px;">
             <div id="livePrice" class="big-price">--</div>
             <div style="text-align:right;">
-                <div class="lbl">NY FUTURES</div>
-                <div id="clockLocal" class="val" style="font-size:12px;">--:--:--</div>
+                <div class="lbl" style="margin:0">NY FUTURES</div>
+                <div id="clockLocal" style="color:#94a3b8; font-size:14px; font-weight:700;">--:--:--</div>
             </div>
         </div>
     </div>
@@ -110,7 +132,7 @@
     <div class="panel panel-left">
         <div class="h-title">RISK CONTROL</div>
         
-        <div class="lbl">ACCOUNT BALANCE</div>
+        <div class="lbl">ACCOUNT BALANCE ($)</div>
         <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="render()">
         
         <div class="lbl">RISK PER TRADE (%)</div>
@@ -118,12 +140,13 @@
         
         <div style="margin-top:15px; padding-top:15px; border-top:1px solid #334155;">
             <div class="lbl">MAX ALLOWABLE LOSS</div>
-            <div id="valRisk" class="val" style="color:var(--red); font-size:20px;">$400.00</div>
+            <div id="valRisk" class="val" style="color:var(--red); font-size:24px;">$400.00</div>
         </div>
 
         <div style="margin-top:auto;">
             <button id="btnAudio" class="btn-toggle" onclick="toggleAudio()">AUDIO: OFF</button>
             <button class="btn-toggle" onclick="requestNotify()">ENABLE NOTIFY</button>
+            <button id="btnSim" class="btn-toggle btn-sim" onclick="toggleSim()">SIMULATION: OFF</button>
         </div>
     </div>
 
@@ -132,20 +155,20 @@
         <div class="flight-plan-box">
             <div class="fp-item">
                 <div class="lbl">SESSION MODE</div>
-                <div class="val" id="fpMode" style="color:var(--cyan)">SCANNING</div>
+                <div class="fp-val" id="fpMode" style="color:var(--cyan)">--</div>
             </div>
             <div class="fp-item" style="border-left:1px solid #334155; border-right:1px solid #334155">
                 <div class="lbl">KINETIC SCORE</div>
-                <div class="val" id="fpScore">--</div>
+                <div class="fp-val" id="fpScore" style="color:#fff">--</div>
             </div>
             <div class="fp-item">
                 <div class="lbl">STATUS</div>
-                <div class="val" id="fpStatus">WAIT</div>
+                <div class="fp-val" id="fpStatus">--</div>
             </div>
         </div>
 
         <div class="battle-track-container" id="battleTrack">
-            <div style="text-align:center; color:#475569; font-size:12px; margin-bottom:10px;">MARKET POSITION TRACKER</div>
+            <div style="text-align:center; color:#64748b; font-size:10px; margin-bottom:15px; letter-spacing:2px;">MARKET POSITION TRACKER</div>
             
             <div class="track-line">
                 <div class="track-marker stop" style="left:0%;"></div>
@@ -159,49 +182,37 @@
                 <div id="pricePuck" class="price-puck" style="left:20%;"></div>
             </div>
             
-            <div id="trackMsg" style="text-align:center; margin-top:40px; font-weight:800; color:#64748b; font-size:24px;">NO TARGET</div>
+            <div id="trackMsg" style="text-align:center; margin-top:45px; font-weight:800; color:#64748b; font-size:20px; font-family:'Rajdhani';">NO TARGET LOCKED</div>
         </div>
 
         <div class="gauge-grid">
             <div class="gauge-row">
                 <div style="display:flex; justify-content:space-between;">
-                    <span class="lbl">ENERGY (Volatility)</span>
-                    <span class="lbl" id="txtEnergy">--</span>
+                    <span class="lbl">ENERGY (Volatility)</span><span class="lbl" id="txtEnergy" style="color:#fff">--</span>
                 </div>
                 <div class="gauge-bar-bg"><div class="gauge-fill" id="barEnergy"></div></div>
-                <div class="gauge-ticks">
-                    <span class="lbl">0</span><span class="lbl">150</span><span class="lbl">300+</span>
-                </div>
+                <div class="gauge-ticks"><span>0</span><span>150</span><span>300+</span></div>
             </div>
             <div class="gauge-row">
                 <div style="display:flex; justify-content:space-between;">
-                    <span class="lbl">SPACE (ATR Multi)</span>
-                    <span class="lbl" id="txtSpace">--</span>
+                    <span class="lbl">SPACE (ATR Multi)</span><span class="lbl" id="txtSpace" style="color:#fff">--</span>
                 </div>
                 <div class="gauge-bar-bg"><div class="gauge-fill" id="barSpace"></div></div>
-                <div class="gauge-ticks">
-                    <span class="lbl">0R</span><span class="lbl">1R</span><span class="lbl">2R+</span>
-                </div>
+                <div class="gauge-ticks"><span>0R</span><span>1R</span><span>2R+</span></div>
             </div>
             <div class="gauge-row">
                 <div style="display:flex; justify-content:space-between;">
-                    <span class="lbl">WIND (Momentum)</span>
-                    <span class="lbl" id="txtWind">--</span>
+                    <span class="lbl">WIND (Momentum)</span><span class="lbl" id="txtWind" style="color:#fff">--</span>
                 </div>
                 <div class="gauge-bar-bg"><div class="gauge-fill" id="barWind"></div></div>
-                <div class="gauge-ticks">
-                    <span class="lbl">BEAR</span><span class="lbl">NEUT</span><span class="lbl">BULL</span>
-                </div>
+                <div class="gauge-ticks"><span>BEAR</span><span>NEUT</span><span>BULL</span></div>
             </div>
             <div class="gauge-row">
                 <div style="display:flex; justify-content:space-between;">
-                    <span class="lbl">HULL (Structure)</span>
-                    <span class="lbl" id="txtHull">--</span>
+                    <span class="lbl">HULL (Structure)</span><span class="lbl" id="txtHull" style="color:#fff">--</span>
                 </div>
                 <div class="gauge-bar-bg"><div class="gauge-fill" id="barHull"></div></div>
-                <div class="gauge-ticks">
-                    <span class="lbl">WEAK</span><span class="lbl"></span><span class="lbl">SOLID</span>
-                </div>
+                <div class="gauge-ticks"><span>WEAK</span><span></span><span>SOLID</span></div>
             </div>
         </div>
 
@@ -211,8 +222,8 @@
         <div class="h-title">
             FLIGHT PATH
             <div style="display:flex; gap:5px;">
-                <button id="btnLong" class="btn-cp" style="padding:5px 10px;" onclick="forceSide('LONG')">L</button>
-                <button id="btnShort" class="btn-cp" style="padding:5px 10px;" onclick="forceSide('SHORT')">S</button>
+                <button id="btnLong" class="btn-cp" style="padding:6px 12px; font-size:12px;" onclick="forceSide('LONG')">L</button>
+                <button id="btnShort" class="btn-cp" style="padding:6px 12px; font-size:12px;" onclick="forceSide('SHORT')">S</button>
             </div>
         </div>
 
@@ -229,7 +240,7 @@
             <div><span class="val" id="pSize">--</span> <button class="btn-cp" onclick="cp('pSize')">CP</button></div>
         </div>
 
-        <div style="height:10px; border-bottom:1px solid #334155; margin-bottom:10px;"></div>
+        <div style="height:15px; border-bottom:1px solid #334155; margin-bottom:15px;"></div>
 
         <div class="data-row">
             <span class="lbl" style="color:var(--gold)">TARGET 1 (75%)</span>
@@ -244,7 +255,7 @@
             <div><span class="val" id="pT3">--</span> <button class="btn-cp" onclick="cp('pT3')">CP</button></div>
         </div>
 
-        <div style="height:10px; border-bottom:1px solid #334155; margin-bottom:10px;"></div>
+        <div style="height:15px; border-bottom:1px solid #334155; margin-bottom:15px;"></div>
 
         <div class="data-row">
             <span class="lbl" style="color:var(--cyan)">MOVE STOP TO B.E.</span>
@@ -252,7 +263,7 @@
         </div>
         <div class="data-row">
             <span class="lbl">BANK RULE</span>
-            <div class="val" style="font-size:12px;" id="pBank">--</div>
+            <div class="val" style="font-size:14px;" id="pBank">--</div>
         </div>
 
     </div>
@@ -267,7 +278,7 @@
 </div>
 
 <script>
-    let state = { data: null, manualSide: null, audio: false, lastStatus: "" };
+    let state = { data: null, manualSide: null, audio: false, lastStatus: "", simMode: false };
 
     // --- UTILS ---
     function log(msg) {
@@ -277,7 +288,23 @@
         box.scrollTop = box.scrollHeight;
     }
     function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText.replace(/,/g,'')); log("COPIED TO CLIPBOARD."); }
-    function toggleAudio() { state.audio = !state.audio; document.getElementById('btnAudio').innerText = state.audio ? "AUDIO: ON" : "AUDIO: OFF"; document.getElementById('btnAudio').classList.toggle('active'); }
+    
+    function toggleAudio() { 
+        state.audio = !state.audio; 
+        document.getElementById('btnAudio').innerText = state.audio ? "AUDIO: ON" : "AUDIO: OFF"; 
+        document.getElementById('btnAudio').classList.toggle('active'); 
+    }
+    
+    function toggleSim() {
+        state.simMode = !state.simMode;
+        const btn = document.getElementById('btnSim');
+        btn.innerText = state.simMode ? "SIMULATION: ON (10:30 ET)" : "SIMULATION: OFF";
+        btn.classList.toggle('active');
+        log(state.simMode ? "!!! SIMULATION MODE ENGAGED. DATA IS SYNTHETIC." : "SIMULATION ENDED. RETURNING TO REAL TIME.");
+        // Force refresh immediately
+        loop();
+    }
+
     function forceSide(s) { state.manualSide = s; render(); }
     function requestNotify() { Notification.requestPermission().then(p => { if(p==="granted") log("NOTIFICATIONS ENABLED."); }); }
     function notify(msg) { if(Notification.permission==="granted") new Notification("PROJECT OMEGA", { body: msg, icon: '/static/icon.png' }); }
@@ -285,11 +312,6 @@
 
     // --- RENDERERS ---
     function updateBattleTrack(plan, price, side) {
-        // Logic: 0% = Stop, 20% = Entry, 100% = Target 1
-        // We need to map price to this scale.
-        // Range 1 (Stop -> Entry): 20% of visual width
-        // Range 2 (Entry -> Target): 80% of visual width
-        
         if (!plan || !plan.trigger || !plan.stop || !plan.targets[0]) return;
         
         const entry = plan.trigger;
@@ -299,39 +321,32 @@
         let pct = 0;
         
         if (side === "LONG") {
-            if (price < stop) pct = 0; // Below Stop
+            if (price < stop) pct = 0;
             else if (price < entry) {
-                // Between Stop and Entry (0-20%)
                 const range = entry - stop;
                 const progress = price - stop;
                 pct = (progress / range) * 20;
             } else {
-                // Above Entry
                 const range = t1 - entry;
                 const progress = price - entry;
-                // Map to 20-100%
                 pct = 20 + ((progress / range) * 80);
             }
         } else { // SHORT
-            if (price > stop) pct = 0; // Above Stop (bad)
+            if (price > stop) pct = 0;
             else if (price > entry) {
-                // Between Stop and Entry (0-20%)
                 const range = stop - entry;
                 const progress = stop - price;
                 pct = (progress / range) * 20;
             } else {
-                // In profit
                 const range = entry - t1;
                 const progress = entry - price;
                 pct = 20 + ((progress / range) * 80);
             }
         }
 
-        // Clamp
         pct = Math.max(0, Math.min(100, pct));
         document.getElementById('pricePuck').style.left = pct + "%";
         
-        // Status Text
         const msgEl = document.getElementById('trackMsg');
         if (pct <= 0) { msgEl.innerText = "STOP LOSS HIT"; msgEl.style.color = "var(--red)"; }
         else if (pct >= 100) { msgEl.innerText = "TARGET 1 HIT"; msgEl.style.color = "var(--gold)"; }
@@ -362,45 +377,45 @@
         // 3. Gauges (With Tick Logic)
         const bk = k.breakdown || {};
         
-        // Energy (bps)
+        // Energy
         let bps = 0; try { bps = parseInt(bk.energy.match(/\d+/)[0]); } catch(e){}
-        let ePct = Math.max(0, Math.min(100, (300 - bps)/3)); // Inverse: Lower is better
+        let ePct = Math.max(0, Math.min(100, (300 - bps)/3));
         document.getElementById('barEnergy').style.width = ePct + "%";
-        document.getElementById('txtEnergy').innerText = bk.energy;
+        document.getElementById('txtEnergy').innerText = bk.energy || "--";
         document.getElementById('barEnergy').style.background = ePct > 66 ? "var(--green)" : "var(--red)";
 
-        // Space (ATR)
+        // Space
         let atr = 0; try { atr = parseFloat(bk.space.match(/([\d\.]+)R/)[1]); } catch(e){}
         let sPct = Math.max(0, Math.min(100, (atr / 2.0) * 100));
         document.getElementById('barSpace').style.width = sPct + "%";
-        document.getElementById('txtSpace').innerText = bk.space;
+        document.getElementById('txtSpace').innerText = bk.space || "--";
 
-        // Wind (Momentum) - Fixed Parsing
-        // Expected format: "ALIGNED (BULLISH/0.8)" or "NEUTRAL (BULLISH)"
+        // Wind
         let momText = bk.momentum || "";
         let isAligned = momText.includes("ALIGNED");
         document.getElementById('barWind').style.width = isAligned ? "100%" : "30%";
         document.getElementById('barWind').style.background = isAligned ? "var(--green)" : "#475569";
         document.getElementById('txtWind').innerText = momText;
 
-        // Hull (Structure)
+        // Hull
         let isSolid = (bk.structure || "").includes("SOLID");
         document.getElementById('barHull').style.width = isSolid ? "100%" : "30%";
-        document.getElementById('txtHull').innerText = bk.structure;
+        document.getElementById('txtHull').innerText = bk.structure || "--";
 
         // 4. Execution Data
         let side = state.manualSide || (d.active_side !== "NONE" ? d.active_side : "LONG");
         const plan = d.plans ? d.plans[side] : null;
 
         // Highlight active side button
-        document.getElementById('btnLong').style.background = side==="LONG" ? "var(--green)" : "#334155";
-        document.getElementById('btnShort').style.background = side==="SHORT" ? "var(--red)" : "#334155";
+        document.getElementById('btnLong').style.background = side==="LONG" ? "var(--green)" : "transparent";
+        document.getElementById('btnLong').style.color = side==="LONG" ? "#000" : "#fff";
+        document.getElementById('btnShort').style.background = side==="SHORT" ? "var(--red)" : "transparent";
+        document.getElementById('btnShort').style.color = side==="SHORT" ? "#000" : "#fff";
 
         if (plan) {
             document.getElementById('pEntry').innerText = plan.trigger ? plan.trigger.toLocaleString() : "--";
             document.getElementById('pStop').innerText = plan.stop ? plan.stop.toLocaleString() : "--";
             
-            // Targets
             document.getElementById('pT1').innerText = plan.targets[0] ? plan.targets[0].toLocaleString() : "--";
             document.getElementById('pT2').innerText = plan.targets[1] ? plan.targets[1].toLocaleString() : "--";
             document.getElementById('pT3').innerText = plan.targets[2] ? plan.targets[2].toLocaleString() : "--";
@@ -439,9 +454,15 @@
 
     async function loop() {
         try {
+            // Check Simulation Toggle
+            const payload = { session_id: "us_ny_futures" };
+            if (state.simMode) {
+                payload.force_time_utc = "14:30"; // 10:30 ET -> 14:30 UTC
+            }
+
             const res = await fetch('/api/omega/status', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ session_id: "us_ny_futures" })
+                body: JSON.stringify(payload)
             });
             state.data = await res.json();
             render();
