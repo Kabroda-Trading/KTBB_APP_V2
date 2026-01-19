@@ -320,10 +320,17 @@ async def omega_status_api(request: Request, db: Session = Depends(get_db)):
     session_id = payload.get("session_id") or "us_ny_futures" 
     ferrari_mode = bool(payload.get("ferrari_mode", False))
     
+    # NEW: Pass Simulation Params
+    # This was the missing link!
+    force_time = payload.get("force_time_utc")
+    force_price = payload.get("force_price")
+
     data = await project_omega.get_omega_status(
         symbol=symbol,
         session_id=session_id, 
-        ferrari_mode=ferrari_mode
+        ferrari_mode=ferrari_mode,
+        force_time_utc=force_time,
+        force_price=force_price
     )
     return JSONResponse(data)
 
