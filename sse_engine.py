@@ -1,12 +1,13 @@
 # sse_engine.py
 # ==============================================================================
-# STRATEGIC STRUCTURAL ENGINE (SSE) v2.1 - TUNABLE DIAGNOSTIC
+# STRATEGIC STRUCTURAL ENGINE (SSE) v2.3 - HEAVY DUTY & EXPOSED METRICS
 # ==============================================================================
 # Contract:
 # 1) Native input timeframe is 5m.
 # 2) 15m/1h/4h are derived internally via resampling.
 # 3) Triggers are calculated from 30m anchor range + 24h VRVP edges + pivot shelves.
 # 4) Now supports "Tuning" overrides for Research Lab optimization.
+# 5) EXPORTS: Now provides ATR, Slope, and Structure Score in the 'levels' dict.
 # ==============================================================================
 
 from __future__ import annotations
@@ -32,9 +33,11 @@ def _calculate_atr(candles: List[Dict[str, Any]], period: int = 14) -> float:
     for i in range(1, period + 1):
         c = candles[-i]
         p = candles[-i - 1]
-        hl = c["high"] - c["low"]
-        hc = abs(c["high"] - p["close"])
-        lc = abs(c["low"] - p["close"])
+        
+        hl = float(c["high"]) - float(c["low"])
+        hc = abs(float(c["high"]) - float(p["close"]))
+        lc = abs(float(c["low"]) - float(p["close"]))
+        
         tr_sum += max(hl, hc, lc)
     return tr_sum / period
 
@@ -167,17 +170,21 @@ def _find_pivots(candles: List[Dict[str, Any]], left: int = 3, right: int = 3) -
 
     return float(last_sup), float(last_dem)
 
-def _select_daily_levels(resistance: List[Shelf], support: List[Shelf]) -> Tuple[float, float, Dict[str, Any]]:
+# UPDATE: Now returns the Max Strength Score (Structure Score)
+def _select_daily_levels(resistance: List[Shelf], support: List[Shelf]) -> Tuple[float, float, Dict[str, Any], float]:
     if not resistance or not support:
-        return 0.0, 0.0, {"resistance": [], "support": []}
+        return 0.0, 0.0, {"resistance": [], "support": []}, 0.0
 
-    dr = max(resistance, key=lambda s: s.strength).level
-    ds = max(support, key=lambda s: s.strength).level
+    dr_shelf = max(resistance, key=lambda s: s.strength)
+    ds_shelf = max(support, key=lambda s: s.strength)
+    
+    # Calculate aggregate structure score (Max strength found)
+    max_strength = max(dr_shelf.strength, ds_shelf.strength)
 
-    return float(ds), float(dr), {
+    return float(ds_shelf.level), float(dr_shelf.level), {
         "resistance": [{"level": float(s.level), "tf": s.tf, "strength": float(s.strength)} for s in resistance],
         "support": [{"level": float(s.level), "tf": s.tf, "strength": float(s.strength)} for s in support],
-    }
+    }, float(max_strength)
 
 # ---------------------------------------------------------
 # 4) CONTEXT & TRIGGER LOGIC
@@ -387,7 +394,8 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
     if dem_1h > 0:
         sup_list.append(Shelf("1H", dem_1h, "demand", 0.6))
 
-    ds, dr, htf_out = _select_daily_levels(res_list, sup_list)
+    # UPDATE: Now capturing structure_score (Max Strength)
+    ds, dr, htf_out, structure_score = _select_daily_levels(res_list, sup_list)
 
     if dr == 0.0 and locked_15m:
         dr = max(float(c["high"]) for c in locked_15m[-96:])
@@ -398,12 +406,11 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
     vrvp_24h = _calculate_vrvp(context_24h_15m)
 
     # 3) Triggers (anchor-based)
-    # NEW: Extract tuning from inputs to pass down
     tuning_cfg = inputs.get("tuning", {}) 
     
     bo, bd = _pick_trigger_candidates(
         anchor_px, r30_h, r30_l, vrvp_24h, ds, dr, 
-        tuning=tuning_cfg # <--- PASS IT HERE
+        tuning=tuning_cfg 
     )
 
     # 4) Context & bias
@@ -420,6 +427,8 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
     )
     bias = _calculate_bias_model(ctx, anchor_px, bo, bd)
 
+    # --- CRITICAL DATA PASS (AUDITED) ---
+    # We explicitly inject ATR, Slope, and Structure Score here.
     return {
         "meta": meta,
         "levels": {
@@ -432,6 +441,11 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
             "f24_poc": float(vrvp_24h["poc"]),
             "f24_vah": float(vrvp_24h["vah"]),
             "f24_val": float(vrvp_24h["val"]),
+            
+            # --- NEW EXPORTS ---
+            "atr": ctx["volatility"]["atr_14"], 
+            "slope": ctx["htf"]["slope_score"],
+            "structure_score": structure_score
         },
         "bias_model": bias,
         "context": ctx,

@@ -1,22 +1,13 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v8.0 (Weekly Intelligence + Full Integrity)
+# KABRODA BATTLEBOX PIPELINE — v8.2 (Heavy Duty Audit)
 # ==============================================================================
 # Purpose:
 # - The single "Moment of Truth" for each session/day
 # - Locks session open + 30m anchor range (calibration)
 # - Computes levels via sse_engine.compute_sse_levels
 # - Feeds post-lock candles into structure_state_engine (law layer)
-# - NEW: Fetches Weekly Candles to determine Macro Force (Green/Red)
-#
-# Session Authority:
-# - session_manager.py is the ONLY time anchor source
-#
-# Notes:
-# - This module should be consumed by:
-#   - Session Control page (review packet)
-#   - Research Lab (batch/backtest)
-#   - Battle Control / Omega (live packet + structure state)
+# - Fetches Weekly Candles to determine Macro Force (Green/Red)
 # ==============================================================================
 
 from __future__ import annotations
@@ -109,7 +100,7 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
     except Exception:
         return []
 
-# --- NEW: Weekly Fetcher ---
+# --- WEEKLY FETCHING ---
 async def fetch_live_weekly(symbol: str, limit: int = 5) -> List[Dict[str, Any]]:
     """Fetches Weekly candles to determine the Macro Force (Green/Red)."""
     s = _normalize_symbol(symbol)
@@ -133,7 +124,6 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, l
     """
     Historical 5m candles between [start_ts, end_ts).
     Uses ccxt pagination via 'since' in milliseconds.
-    HARD STOP protections to prevent infinite loops.
     """
     s = _normalize_symbol(symbol)
 
@@ -147,7 +137,6 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, l
     while since_ms < end_ms:
         safety_iters += 1
         if safety_iters > 2000:
-            # absolute hard stop
             break
 
         rows = await _exchange_live.fetch_ohlcv(s, "5m", since=since_ms, limit=limit)
@@ -175,16 +164,12 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, l
                 }
             )
 
-        # Move forward by one candle to avoid duplication
         last_ts = int(rows[-1][0])
         if last_ts <= since_ms:
             break
         since_ms = last_ts + (5 * 60 * 1000)
-
-        # tiny yield to play nice with event loop
         await asyncio.sleep(0)
 
-    # Deduplicate + sort (ccxt can overlap)
     out.sort(key=lambda x: int(x["time"]))
     dedup: List[Dict[str, Any]] = []
     seen = set()
@@ -200,7 +185,6 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, l
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
-# --- NEW: Weekly Force Logic ---
 def _calculate_weekly_force(weekly_candles: List[Dict[str, Any]]) -> str:
     """
     Determines the True Weekly Force based on the LAST COMPLETED candle.
@@ -210,7 +194,6 @@ def _calculate_weekly_force(weekly_candles: List[Dict[str, Any]]) -> str:
         return "NEUTRAL"
     
     last_closed = weekly_candles[-2]
-    
     op = last_closed["open"]
     cl = last_closed["close"]
     
@@ -237,10 +220,6 @@ def _safe_placeholder_state(reason: str = "Waiting...") -> Dict[str, Any]:
 
 
 def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Lightweight 1H context for UI.
-    Not permission logic. Just pressure context.
-    """
     if not raw_1h:
         return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "UNCLEAR", "note": "No 1h data."}
 
@@ -278,9 +257,9 @@ def _compute_sse_packet(raw_5m: List[Dict[str, Any]], anchor_ts: int, weekly_for
     last_price = float(context_24h[-1]["close"]) if context_24h else session_open
 
     sse_input = {
-        "locked_history_5m": context_24h,     # 5m-native contract
+        "locked_history_5m": context_24h,
         "slice_24h_5m": context_24h,
-        "slice_4h_5m": context_24h[-48:],     # last 4h in 5m bars
+        "slice_4h_5m": context_24h[-48:],
         "session_open_price": session_open,
         "r30_high": r30_high,
         "r30_low": r30_low,
@@ -316,15 +295,10 @@ async def get_live_battlebox(
     operator_flex: bool = False,
     tuning: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Live view:
-    - fetch candles (5m, 1h, AND WEEKLY)
-    - resolve current session via session_manager
-    - compute locked packet using Real Weekly Data
-    """
+    
     raw_5m = await fetch_live_5m(symbol)
     raw_1h = await fetch_live_1h(symbol)
-    raw_weekly = await fetch_live_weekly(symbol) # <--- DATA SOURCE ADDED
+    raw_weekly = await fetch_live_weekly(symbol)
 
     if not raw_5m:
         return {"status": "ERROR", "message": "No Data"}
@@ -337,7 +311,6 @@ async def get_live_battlebox(
     anchor_ts = int(session["anchor_time"])
     lock_end_ts = anchor_ts + 1800
 
-    # If we are in the first 30 minutes, we do not lock levels yet
     if int(now_utc.timestamp()) < lock_end_ts:
         wm = _war_map_from_1h(raw_1h)
         return {
@@ -351,17 +324,15 @@ async def get_live_battlebox(
                 "session": session,
                 "levels": {},
                 "bias_model": {},
-                "context": {"weekly_force": weekly_force}, # Pass truth even during calibration
+                "context": {"weekly_force": weekly_force},
             },
         }
 
-    # Cache key: one locked packet per session/day per symbol
     date_key = session["date_key"]
     session_key = f"{_normalize_symbol(symbol)}::{session['id']}::{date_key}"
 
     async with _CACHE_LOCK:
         if session_key not in _LOCKED_PACKETS:
-            # PASS WEEKLY FORCE TO THE MATH ENGINE
             pkt = _compute_sse_packet(raw_5m, anchor_ts, weekly_force, tuning=tuning)
             if "error" in pkt:
                 wm = _war_map_from_1h(raw_1h)
@@ -384,7 +355,6 @@ async def get_live_battlebox(
     levels = pkt["levels"]
     lock_time = int(pkt["lock_time"])
 
-    # Only feed post-lock candles into law layer (prevents drift)
     post_lock = [c for c in raw_5m if int(c["time"]) >= lock_time]
 
     state = structure_state_engine.compute_structure_state(
@@ -406,11 +376,11 @@ async def get_live_battlebox(
             "levels": levels,
             "session": session,
             "bias_model": pkt.get("bias_model", {}),
-            "context": pkt.get("context", {}), # Contains the Locked Weekly Force
+            "context": pkt.get("context", {}),
             "htf_shelves": pkt.get("htf_shelves", {}),
             "meta": pkt.get("meta", {}),
         },
-        "candles": post_lock # <--- Pass raw ammo to strategies like Omega
+        "candles": post_lock
     }
 
 
@@ -419,14 +389,10 @@ async def get_session_review(
     session_id: str = "us_ny_futures",
     tuning: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Session Review (aka Session Control "moment of truth packet")
-    """
     raw_5m = await fetch_live_5m(symbol)
     if not raw_5m:
         return {"ok": False, "error": "No Data"}
     
-    # We also need weekly for review to be accurate
     raw_weekly = await fetch_live_weekly(symbol)
     weekly_force = _calculate_weekly_force(raw_weekly)
 
@@ -436,12 +402,10 @@ async def get_session_review(
     anchor_ts = session_manager.anchor_ts_for_utc_date(cfg, now_utc)
     lock_end_ts = anchor_ts + 1800
 
-    # If anchor is in the future for today (rare due to timezone edges), shift to yesterday
     if anchor_ts > int(now_utc.timestamp()):
         anchor_ts -= 86400
         lock_end_ts -= 86400
 
-    # If within lock window, return calibrating response
     if int(now_utc.timestamp()) < lock_end_ts:
         return {
             "ok": True,
