@@ -50,7 +50,20 @@
         
         .mode-CALIBRATING { border-color: var(--text-dim); border-style: dashed; }
 
-        /* --- ACTION OVERRIDES --- */
+        /* --- NEW WEEKLY PROTOCOLS --- */
+        .mode-SUPERNOVA { 
+            border-color: var(--neon-green); 
+            box-shadow: 0 0 60px rgba(57, 255, 20, 0.4); 
+        }
+        .mode-SUPERNOVA .hud-val, .mode-SUPERNOVA .hud-title { color: var(--neon-green); text-shadow: 0 0 15px rgba(57, 255, 20, 0.5); }
+
+        .mode-HYBRID { 
+            border-color: var(--alert-yellow); 
+            box-shadow: 0 0 40px rgba(255, 193, 7, 0.3);
+        }
+        .mode-HYBRID .hud-val, .mode-HYBRID .hud-title { color: var(--alert-yellow); }
+
+        /* --- ACTION OVERRIDES (CO-PILOT) --- */
         @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
         @keyframes pulse-gold { 0% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(255, 215, 0, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0); } }
         
@@ -60,6 +73,7 @@
             animation: pulse-green 1.5s infinite;
         }
         .mode-EXECUTING .hud-val { color: var(--neon-green) !important; text-shadow: 0 0 10px var(--neon-green); }
+        .mode-EXECUTING .hud-title { color: #fff !important; }
         
         .mode-BANKING {
             border-color: var(--gold) !important;
@@ -192,6 +206,13 @@
             <div style="margin: 20px 0; border-top:1px solid var(--border);"></div>
 
             <div class="exec-row" style="border-bottom:none; margin-bottom:5px;">
+                <span class="lbl" style="color:var(--text-dim)">MOVE STOP TO B.E. AT</span>
+                <span class="val" id="pBE" style="font-size:14px; color:#facc15;">--</span>
+            </div>
+
+            <div style="border-top:1px dashed rgba(255,255,255,0.1); margin:10px 0;"></div>
+
+            <div class="exec-row" style="border-bottom:none; margin-bottom:5px;">
                 <span class="lbl" style="color:var(--cyan)">TARGET 1 (BANK 75%)</span>
                 <span class="val" id="pT1" style="font-size:14px;">--</span>
             </div>
@@ -266,10 +287,8 @@
 
             const k = data.kinetic || {};
             const bk = k.breakdown || {};
-            const isExecuting = data.status === "EXECUTING"; 
             
             // --- CO-PILOT LOGIC (The Brain) ---
-            // This part acts as your trade manager.
             let hudTitle = k.protocol;
             let hudScore = k.total_score;
             let hudInstr = k.instruction;
@@ -278,46 +297,62 @@
 
             // Determine active side
             let side = manualSide || "LONG";
-            if (data.active_side !== "NONE") side = data.active_side;
             
-            // UI Auto-Selection: Force the cheat sheet to the active side
-            if(data.active_side !== "NONE" && !manualSide) {
+            // UI Auto-Selection: Force the cheat sheet to the active side if entering
+            if(data.active_side !== "NONE" && data.status === "EXECUTING") {
+                side = data.active_side;
+                manualSide = side; 
+            } else if (data.active_side !== "NONE" && !manualSide) {
                 side = data.active_side;
             }
 
             const plan = data.plans ? data.plans[side] : null;
 
-            if (isExecuting && plan) {
-                const t1 = plan.targets ? plan.targets[0] : 0;
-                
-                // 1. ENTRY SIGNAL
+            // 1. HUD STATE MACHINE
+            if (data.status === "EXECUTING") {
+                // FRESH SIGNAL (< 15 mins) - FLASHING GREEN
                 hudTitle = "EXECUTE " + (data.active_side || "NOW");
                 hudScore = "GO";
                 hudInstr = "ENTRY TRIGGERED - CHECK CHEAT SHEET";
                 hudClass = "hud-box mode-EXECUTING";
-
-                // 2. MANAGEMENT SIGNAL (If Price hits T1)
-                if (t1 > 0) {
-                    if ((side === "LONG" && price >= t1) || (side === "SHORT" && price <= t1)) {
-                        hudTitle = "TARGET 1 HIT";
-                        hudScore = "BANK";
-                        hudInstr = "💰 CLOSE 75% - MOVE STOP TO BREAKEVEN";
-                        hudClass = "hud-box mode-BANKING";
-                        if (lastStatus !== "BANKING") { playAlert("Target one hit. Bank profit."); lastStatus = "BANKING"; }
+            } else if (data.status === "ACTIVE") {
+                // OLD SIGNAL (> 15 mins) - STEADY BLUE (Monitoring)
+                hudTitle = "TRADE ACTIVE";
+                hudScore = "IN PLAY";
+                hudInstr = k.instruction || "MONITOR TARGETS";
+                hudClass = "hud-box mode-SUPERSONIC"; 
+                
+                // Banking Logic (Flash Gold on Hit)
+                if (plan) {
+                    const t1 = plan.targets ? plan.targets[0] : 0;
+                    if (t1 > 0) {
+                        if ((side === "LONG" && price >= t1) || (side === "SHORT" && price <= t1)) {
+                            hudTitle = "TARGET 1 HIT";
+                            hudScore = "BANK";
+                            hudInstr = "💰 CLOSE 75% - MOVE STOP TO BREAKEVEN";
+                            hudClass = "hud-box mode-BANKING";
+                            if (lastStatus !== "BANKING") { playAlert("Target one hit. Bank profit."); lastStatus = "BANKING"; }
+                        }
                     }
                 }
+            } else if (data.status === "CLOSED") {
+                // SESSION DEAD
+                hudTitle = "SESSION CLOSED";
+                hudScore = "--";
+                hudClass = "hud-box mode-CLOSED";
             } else {
+                // STANDBY
                 hudClass = "hud-box mode-" + colorClass;
             }
 
-            // Update HUD
+            // Update HUD Elements
             document.getElementById('kMode').innerText = hudTitle;
             document.getElementById('kScore').innerText = hudScore;
             document.getElementById('kInstr').innerText = hudInstr;
             document.getElementById('hud').className = hudClass;
             document.getElementById('brief').innerText = k.brief;
 
-            // Alert Logic (Entry)
+            // Alert Logic (Sound for Execution)
             if(data.status === "EXECUTING" && lastStatus !== "EXECUTING") {
                 flashBadge();
                 playAlert("Execution Signal Triggered. Check Entry.");
@@ -347,6 +382,9 @@
                 document.getElementById('pEntry').innerText = plan.trigger ? plan.trigger.toLocaleString() : "--";
                 document.getElementById('pStop').innerText = plan.stop ? plan.stop.toLocaleString() : "--";
                 
+                // New: Breakeven Trigger
+                document.getElementById('pBE').innerText = plan.be_trigger ? plan.be_trigger.toLocaleString() : "--";
+
                 const targets = plan.targets || [];
                 document.getElementById('pT1').innerText = targets[0] ? targets[0].toLocaleString() : "--";
                 document.getElementById('pT2').innerText = targets[1] ? targets[1].toLocaleString() : "--";
