@@ -1,16 +1,15 @@
 # project_omega.py
 # ==============================================================================
-# PROJECT OMEGA SPECIALIST (v9.1 LOCKED STATE ENGINE)
+# PROJECT OMEGA SPECIALIST (v9.3 INDEPENDENT GENERAL)
 # ==============================================================================
 # CORE ARCHITECTURE:
-# 1. STRATEGY LOCK: Kinetic Score is calculated based on the SESSION ANCHOR (Open).
-#    - It defines the "Day's Potential" (Sniper/Supersonic/Dogfight).
-#    - This mode DOES NOT CHANGE during the session.
-# 2. LIVE EXECUTION: Live price/time is compared against the Locked Strategy.
+# 1. DATA: Gets Session, Levels, and Raw Candles from Pipeline.
+# 2. MATH: Calculates Kinetic Score based on LOCKED Session Open (Anchor).
+# 3. EXECUTION: Internally watches candles to trigger "GO" signals based on Mode.
 # ==============================================================================
 
 from __future__ import annotations
-from typing import Dict, Any
+from typing import Dict, Any, List
 from datetime import datetime, timezone
 import session_manager 
 import battlebox_pipeline
@@ -73,7 +72,7 @@ def _calculate_locked_strategy(
     if (side == "LONG" and weekly_force == "BULLISH") or \
        (side == "SHORT" and weekly_force == "BEARISH"):
         is_aligned = True
-        score += 20 # <--- ADDED POINTS (Fixed the Math Error)
+        score += 20 # <--- MATH AUDIT: Points are now correctly added.
         breakdown['momentum'] = f"ALIGNED ({weekly_force})"
     else:
         breakdown['momentum'] = f"NEUTRAL ({weekly_force})"
@@ -90,7 +89,7 @@ def _calculate_locked_strategy(
     else: score += 0; breakdown['location'] = "WIDE (AT OPEN)"
 
     # --- 6. TIME (LOCKED) ---
-    # We assume the session starts in the Kill Zone. Live execution handles lateness.
+    # We assume the session starts in the Kill Zone. Live execution handles lateness separately.
     breakdown['time'] = "KILL ZONE (BASE)"
 
     # --- CLASSIFICATION ---
@@ -127,11 +126,12 @@ def _calculate_locked_strategy(
     }
 
 # ----------------------------
-# 2. EXECUTION MATH (LIVE OVERLAYS)
+# 2. EXECUTION MATH (THE PLAN)
 # ----------------------------
 def _calc_execution_plan(entry: float, stop: float, dr: float, ds: float, side: str, mode: str, force_align: bool) -> Dict[str, Any]:
+    # SAFE DEFAULT
     safe_return = {
-        "targets": [], "stop": 0, "valid": False, 
+        "trigger": 0, "targets": [], "stop": 0, "valid": False, 
         "bank_rule": "--", "primary_target": "--", 
         "reason": "Waiting for Data", "protocol_display": mode, "color_override": None
     }
@@ -146,7 +146,7 @@ def _calc_execution_plan(entry: float, stop: float, dr: float, ds: float, side: 
     
     if mode != "SUPERSONIC" and dist_to_wall < min_req_dist:
         return {
-            "targets": [], "stop": 0, "valid": False, 
+            "trigger": entry, "targets": [], "stop": 0, "valid": False, 
             "bank_rule": "INVALID", "primary_target": "BLOCKED", "reason": "Target < 1.0R",
             "protocol_display": "BLOCKED", "color_override": "RED"
         }
@@ -189,10 +189,57 @@ def _calc_execution_plan(entry: float, stop: float, dr: float, ds: float, side: 
         reason = "Scalp"
 
     return {
+        "trigger": entry, # <--- UI FIX: Sends the entry price so the cheat sheet works.
         "targets": targets, "stop": stop, "valid": True,
         "primary_target": primary_target, "bank_rule": bank_rule,
         "reason": reason, "protocol_display": protocol_display, "color_override": color_override
     }
+
+# ----------------------------
+# 3. INTERNAL EXECUTION LOGIC (STEP 3: THE ANARCHY)
+# ----------------------------
+# This logic is NOW housed inside Project Omega.
+# It does NOT go out to 'structure_state_engine'. It decides for itself.
+def _check_omega_triggers(levels: Dict[str, float], candles: List[Dict[str, Any]], mode: str) -> Dict[str, Any]:
+    """
+    Watches live candles against the triggers.
+    Enforces the rules: Sniper = Close, Supersonic = Touch.
+    """
+    bo = float(levels.get("breakout_trigger", 0))
+    bd = float(levels.get("breakdown_trigger", 0))
+    
+    if not candles: return {"action": "STANDBY", "side": "NONE"}
+
+    # OMEGA RULES OF ENGAGEMENT
+    # If we are in Supersonic or Supernova, we allow a TOUCH entry.
+    # Otherwise (Sniper/Dogfight), we REQUIRE a 5-minute candle CLOSE.
+    require_close = True
+    if "SUPERSONIC" in mode or "SUPERNOVA" in mode:
+        require_close = False # Aggressive Mode Active
+
+    action = "STANDBY"
+    side = "NONE"
+
+    # Scan the candles that happened AFTER the session locked
+    for c in candles:
+        high = float(c["high"])
+        low = float(c["low"])
+        close = float(c["close"])
+
+        # LONG CHECK
+        if require_close:
+            if close > bo: action = "GO"; side = "LONG"; break
+        else:
+            if high >= bo: action = "GO"; side = "LONG"; break
+            
+        # SHORT CHECK
+        if require_close:
+            if close < bd: action = "GO"; side = "SHORT"; break
+        else:
+            if low <= bd: action = "GO"; side = "SHORT"; break
+            
+    return {"action": action, "side": side}
+
 
 async def get_omega_status(
     symbol: str = "BTCUSDT",
@@ -213,6 +260,7 @@ async def get_omega_status(
         is_simulation = False
 
     # 2. FETCH PIPELINE (LOCKED DATA)
+    # The pipeline now returns 'candles' (The Ammo) which we need for Step 3.
     pipeline_data = await battlebox_pipeline.get_live_battlebox(
         symbol=symbol, session_mode="MANUAL", manual_id=session_id
     )
@@ -234,11 +282,12 @@ async def get_omega_status(
             "plans": {"LONG": {}, "SHORT": {}}
         }
 
-    # 4. UNPACK LOCKED DATA
+    # 4. UNPACK DATA
     box = pipeline_data.get("battlebox", {})
     levels = box.get("levels", {})
     context = box.get("context", {})
     shelves = box.get("htf_shelves", {})
+    raw_candles = pipeline_data.get("candles", []) # <--- STEP 3 AMMO
     
     # Anchor Price = The Truth (Session Open)
     real_price = float(pipeline_data.get("price", 0.0))
@@ -255,28 +304,37 @@ async def get_omega_status(
     r30_high = float(levels.get("range30m_high", 0.0))
     r30_low = float(levels.get("range30m_low", 0.0))
     
-    # 5. DETERMINE ACTIVE SIDE
-    active_side = "NONE"
-    status = "STANDBY"
-    battle_state = box.get("session_battle", {})
-    if battle_state.get("action") == "GO":
-        status = "EXECUTING"
-        active_side = battle_state.get("permission", {}).get("side", "NONE")
-    
+    # 5. DETERMINE ACTIVE SIDE (DEFAULT)
     closest_side = "LONG" if (current_price >= (bo + bd)/2) else "SHORT"
-    calc_side = active_side if active_side != "NONE" else closest_side
+    calc_side = closest_side 
 
-    # 6. RUN STRATEGY (ON LOCKED DATA + WEEKLY TRUTH)
+    # 6. RUN STEP 2: THE LOCKED MATH
+    # Calculates the Kinetic Score and Mode (Sniper/Supersonic).
+    # This dictates the rules for Step 3.
     kinetic = _calculate_locked_strategy(
         anchor_price, levels, context, shelves, calc_side
     )
     
-    # 7. APPLY LIVE FILTERS (TIME / LOCATION)
+    # 7. RUN STEP 3: THE LIVE EXECUTION
+    # This is the Independent Logic that watches the trade triggers.
+    exec_state = _check_omega_triggers(levels, raw_candles, kinetic["protocol"])
+    
+    status = "STANDBY"
+    active_side = "NONE"
+    
+    if exec_state["action"] == "GO":
+        status = "EXECUTING"
+        active_side = exec_state["side"]
+        calc_side = active_side # Force math to focus on the active side
+        # Re-run math for the active side to ensure colors match
+        kinetic = _calculate_locked_strategy(anchor_price, levels, context, shelves, active_side)
+
+    # 8. APPLY LIVE FILTERS (TIME / LOCATION)
+    # These update the text but do NOT change the Kinetic Score.
     anchor_ts = session_manager.anchor_ts_for_utc_date(session_config, now_utc)
     anchor_dt = datetime.fromtimestamp(anchor_ts, timezone.utc)
     elapsed = (now_utc - anchor_dt).total_seconds() / 3600.0
     
-    # Logic: Only update "Time" text if live (positive elapsed)
     if elapsed > 2.5:
         kinetic["breakdown"]["time"] = "LATE (CAUTION)"
     
@@ -289,7 +347,7 @@ async def get_omega_status(
     elif status == "STANDBY":
         kinetic["breakdown"]["location"] = "PRIMED (LIVE)"
 
-    # 8. PLANS
+    # 9. PLANS
     plan_long = _calc_execution_plan(bo, r30_low, dr, ds, "LONG", kinetic["protocol"], kinetic["force_align"])
     plan_short = _calc_execution_plan(bd, r30_high, dr, ds, "SHORT", kinetic["protocol"], kinetic["force_align"])
 
