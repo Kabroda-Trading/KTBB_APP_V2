@@ -2,98 +2,177 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Kabroda | Admin Console</title>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <title>KABRODA // GOD MODE</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        body { background: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 40px; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; border-bottom: 1px solid #333; padding-bottom: 20px; }
-        h1 { font-family: 'JetBrains Mono', monospace; color: #fff; margin: 0; }
-        .pill { background: #06b6d4; color: #000; padding: 4px 12px; border-radius: 4px; font-weight: 700; font-size: 12px; }
+        body { background: #020617; color: #fff; font-family: 'Inter', sans-serif; padding: 20px; }
         
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
-        th { text-align: left; padding: 12px; border-bottom: 1px solid #333; color: #94a3b8; font-family: 'JetBrains Mono', monospace; }
-        td { padding: 16px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        tr:hover { background: rgba(255,255,255,0.02); }
-        
-        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-        .paid { background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.2); }
-        .free { background: rgba(255, 255, 255, 0.05); color: #94a3b8; }
-        
-        .back-link { color: #94a3b8; text-decoration: none; font-size: 14px; display: inline-flex; align-items: center; gap: 5px; }
-        .back-link:hover { color: #fff; }
+        /* HEADER */
+        .nav-bar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
+        .brand { font-family: 'JetBrains Mono'; font-weight: 800; color: #facc15; font-size: 20px; letter-spacing: 1px; }
+        .nav-links a { color: #94a3b8; text-decoration: none; font-weight: 700; font-size: 13px; margin-left: 20px; transition: 0.2s; }
+        .nav-links a:hover { color: #fff; }
 
-        /* Delete Button Styles */
-        .btn-delete {
-            background: transparent;
-            border: 1px solid #ef4444;
-            color: #ef4444;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: 700;
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            transition: all 0.2s;
-        }
-        .btn-delete:hover {
-            background: #ef4444;
-            color: #fff;
-        }
+        /* TABLE CONTAINER */
+        .roster-card { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .card-header { background: #1e293b; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .card-title { font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: 1px; }
+        
+        /* DATA TABLE */
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th { background: #0f172a; color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 12px 20px; border-bottom: 1px solid #334155; }
+        td { padding: 15px 20px; border-bottom: 1px solid #1e293b; font-size: 14px; color: #e2e8f0; vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover { background: #1e293b; }
+
+        /* USER DETAILS */
+        .user-identity { display: flex; flex-direction: column; }
+        .user-name { font-weight: 600; color: #fff; }
+        .user-meta { font-size: 12px; color: #94a3b8; font-family: 'JetBrains Mono'; margin-top: 2px; }
+        
+        /* BADGES */
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 800; font-family: 'JetBrains Mono'; text-transform: uppercase; }
+        .badge-god { background: rgba(250, 204, 21, 0.1); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.3); }
+        .badge-op { background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
+
+        /* ACTIONS */
+        .btn-action { background: transparent; border: 1px solid #475569; color: #cbd5e1; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 700; transition: 0.2s; font-family: 'JetBrains Mono'; }
+        .btn-action:hover { background: #334155; color: #fff; }
+        .btn-delete { border-color: #7f1d1d; color: #fca5a5; margin-left: 10px; }
+        .btn-delete:hover { background: #450a0a; color: #fff; }
+
+        /* MODAL */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: 0.3s; z-index: 999; backdrop-filter: blur(5px); }
+        .modal-overlay.active { opacity: 1; pointer-events: all; }
+        .modal { background: #0f172a; padding: 30px; border-radius: 8px; border: 1px solid #334155; width: 100%; max-width: 400px; box-shadow: 0 20px 50px #000; }
+        .modal h3 { margin-top: 0; color: #fff; }
+        .inp-pass { width: 100%; padding: 12px; background: #020617; border: 1px solid #475569; color: #fff; border-radius: 4px; margin: 15px 0; font-family: 'JetBrains Mono'; box-sizing: border-box; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        .btn-save { background: #facc15; color: #000; border: none; padding: 10px 20px; font-weight: 700; border-radius: 4px; cursor: pointer; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <div>
-                <a href="/account" class="back-link">← Back to Account</a>
-                <h1 style="margin-top: 10px;">GOD MODE <span class="pill">ADMIN</span></h1>
-            </div>
-            <div style="text-align: right; color: #94a3b8;">
-                Total Members: <strong style="color: #fff;">{{ users|length }}</strong>
-            </div>
-        </div>
 
+    <div class="nav-bar">
+        <div class="brand">/// GOD MODE</div>
+        <div class="nav-links">
+            <a href="/suite">SESSION CONTROL</a>
+            <a href="/account">MY ACCOUNT</a>
+        </div>
+    </div>
+
+    <div class="roster-card">
+        <div class="card-header">
+            <span class="card-title">Active Operator Roster</span>
+            <span class="card-title">{{ users|length }} UNITS</span>
+        </div>
         <table>
             <thead>
                 <tr>
                     <th>ID</th>
-                    <th>EMAIL</th>
-                    <th>OPERATIVE ID</th>
-                    <th>STATUS</th>
-                    <th>JOINED</th>
-                    <th style="text-align: right;">ACTIONS</th>
+                    <th>Identity</th>
+                    <th>Clearance</th>
+                    <th>Status</th>
+                    <th style="text-align:right">Command</th>
                 </tr>
             </thead>
             <tbody>
                 {% for u in users %}
                 <tr>
-                    <td style="font-family: monospace; color: #64748b;">{{ u.id[:8] }}...</td>
-                    <td style="color: #fff; font-weight: 600;">{{ u.email }}</td>
-                    <td style="color: #06b6d4;">{{ u.username if u.username else '—' }}</td>
+                    <td style="color:#64748b; font-family:'JetBrains Mono'">#{{ u.id }}</td>
                     <td>
-                        {% if u.status == 'ACTIVE' %}
-                            <span class="status-badge paid">ACTIVE</span>
+                        <div class="user-identity">
+                            <span class="user-name">
+                                {{ u.first_name|default('Unknown') }} {{ u.last_name|default('') }}
+                            </span>
+                            <span class="user-meta">@{{ u.username }}</span>
+                            <span class="user-meta">{{ u.email }}</span>
+                        </div>
+                    </td>
+                    <td>
+                        {% if u.is_admin %}
+                            <span class="badge badge-god">ADMIN</span>
                         {% else %}
-                            <span class="status-badge free">INACTIVE</span>
+                            <span class="badge badge-op">OPERATOR</span>
                         {% endif %}
                     </td>
-                    <td style="color: #94a3b8;">{{ u.created_at }}</td>
-                    
-                    <td style="text-align: right;">
-                        <form action="/admin/delete-user" method="POST" onsubmit="return confirm('⚠️ WARNING: This will permanently delete user {{ u.email }}. Are you sure?');" style="display:inline;">
+                    <td>
+                        <span style="color:#94a3b8; font-size:12px;">Active</span>
+                    </td>
+                    <td style="text-align:right">
+                        <button class="btn-action" onclick="openReset('{{u.id}}', '{{u.username}}')">RESET KEY</button>
+                        {% if not u.is_admin %}
+                        <form action="/admin/delete-user" method="POST" style="display:inline" onsubmit="return confirm('TERMINATE USER: {{u.username}}? This cannot be undone.');">
                             <input type="hidden" name="user_id" value="{{ u.id }}">
-                            <button type="submit" class="btn-delete">
-                                DELETE ✕
-                            </button>
+                            <button type="submit" class="btn-action btn-delete">TERMINATE</button>
                         </form>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+
+    <div id="resetModal" class="modal-overlay">
+        <div class="modal">
+            <h3>Override Access Key</h3>
+            <p style="color:#94a3b8; font-size:14px;">Set a new manual password for operator <span id="targetName" style="color:#fff; font-weight:700;"></span>.</p>
+            
+            <input type="hidden" id="targetId">
+            <input type="text" id="newPass" class="inp-pass" placeholder="Enter new password...">
+            
+            <div class="modal-actions">
+                <button class="btn-action" onclick="closeReset()">CANCEL</button>
+                <button class="btn-save" onclick="submitReset()">CONFIRM OVERRIDE</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const modal = document.getElementById('resetModal');
+        const idInput = document.getElementById('targetId');
+        const nameSpan = document.getElementById('targetName');
+        const passInput = document.getElementById('newPass');
+
+        function openReset(id, name) {
+            idInput.value = id;
+            nameSpan.innerText = '@' + name;
+            passInput.value = ''; // clear previous
+            modal.classList.add('active');
+        }
+
+        function closeReset() {
+            modal.classList.remove('active');
+        }
+
+        async function submitReset() {
+            const uid = idInput.value;
+            const new_pw = passInput.value;
+            
+            if(!new_pw) return alert("Enter a password.");
+
+            try {
+                const res = await fetch('/admin/reset-password-manual', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ user_id: uid, new_password: new_pw })
+                });
+                
+                const data = await res.json();
+                if(data.ok) {
+                    alert("SUCCESS. Password updated.");
+                    closeReset();
+                } else {
+                    alert("ERROR: " + data.error);
+                }
+            } catch(e) {
+                alert("System Failure.");
+            }
+        }
+    </script>
+
 </body>
 </html>
