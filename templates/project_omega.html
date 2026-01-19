@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PROJECT OMEGA</title>
+    <title>PROJECT OMEGA | COMMAND</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
         :root { 
             --bg: #020617; --panel: #0f172a; --border: #1e293b; 
             --green: #10b981; --red: #ef4444; --amber: #f59e0b; --cyan: #06b6d4; --gray: #64748b;
-            --neon-green: #39ff14; --alert-yellow: #ffc107;
+            --neon-green: #39ff14; --gold: #ffd700;
             --text-main: #ffffff; --text-dim: #94a3b8; 
         }
         body { background: var(--bg); color: var(--text-main); font-family: 'Inter', sans-serif; padding: 20px; margin: 0; }
@@ -50,18 +50,23 @@
         
         .mode-CALIBRATING { border-color: var(--text-dim); border-style: dashed; }
 
-        /* --- NEW WEEKLY PROTOCOLS --- */
-        .mode-SUPERNOVA { 
-            border-color: var(--neon-green); 
-            box-shadow: 0 0 60px rgba(57, 255, 20, 0.4); 
+        /* --- ACTION OVERRIDES --- */
+        @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
+        @keyframes pulse-gold { 0% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(255, 215, 0, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0); } }
+        
+        .mode-EXECUTING { 
+            border-color: var(--neon-green) !important; 
+            background: rgba(16, 185, 129, 0.1) !important;
+            animation: pulse-green 1.5s infinite;
         }
-        .mode-SUPERNOVA .hud-val, .mode-SUPERNOVA .hud-title { color: var(--neon-green); text-shadow: 0 0 15px rgba(57, 255, 20, 0.5); }
-
-        .mode-HYBRID { 
-            border-color: var(--alert-yellow); 
-            box-shadow: 0 0 40px rgba(255, 193, 7, 0.3);
+        .mode-EXECUTING .hud-val { color: var(--neon-green) !important; text-shadow: 0 0 10px var(--neon-green); }
+        
+        .mode-BANKING {
+            border-color: var(--gold) !important;
+            background: rgba(255, 215, 0, 0.1) !important;
+            animation: pulse-gold 1.5s infinite;
         }
-        .mode-HYBRID .hud-val, .mode-HYBRID .hud-title { color: var(--alert-yellow); }
+        .mode-BANKING .hud-val { color: var(--gold) !important; font-size: 40px !important; }
 
         /* UTILS */
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
@@ -186,10 +191,21 @@
 
             <div style="margin: 20px 0; border-top:1px solid var(--border);"></div>
 
-            <div class="exec-row" style="border-bottom:none;">
-                <span class="lbl" style="color:var(--cyan)">PRIMARY TARGET</span>
-                <span class="val highlight" id="pPrim">--</span>
+            <div class="exec-row" style="border-bottom:none; margin-bottom:5px;">
+                <span class="lbl" style="color:var(--cyan)">TARGET 1 (BANK 75%)</span>
+                <span class="val" id="pT1" style="font-size:14px;">--</span>
             </div>
+            <div class="exec-row" style="border-bottom:none; margin-bottom:5px;">
+                <span class="lbl" style="color:var(--text-dim)">TARGET 2</span>
+                <span class="val" id="pT2" style="font-size:14px;">--</span>
+            </div>
+            <div class="exec-row" style="border-bottom:none;">
+                <span class="lbl" style="color:var(--text-dim)">TARGET 3</span>
+                <span class="val" id="pT3" style="font-size:14px;">--</span>
+            </div>
+
+            <div style="border-top:1px solid var(--border); margin:15px 0;"></div>
+
             <div class="exec-row" style="border-bottom:none;">
                 <span class="lbl">BANK RULE</span>
                 <span class="val" id="pBank">--</span>
@@ -245,29 +261,67 @@
 
         function render() {
             if(!data) return;
-            document.getElementById('livePrice').innerText = data.price ? data.price.toLocaleString() : "--";
+            const price = data.price;
+            document.getElementById('livePrice').innerText = price.toLocaleString();
 
             const k = data.kinetic || {};
             const bk = k.breakdown || {};
+            const isExecuting = data.status === "EXECUTING"; 
             
-            // 1. HUD & ALERTS
-            document.getElementById('kMode').innerText = k.protocol;
-            document.getElementById('kScore').innerText = k.total_score;
-            document.getElementById('kInstr').innerText = k.instruction;
-            document.getElementById('brief').innerText = k.brief;
-            
-            // DYNAMIC COLOR CLASS
-            // This reads the specific color override sent from backend (e.g., 'SUPERNOVA')
-            const colorClass = k.color || "GRAY";
-            document.getElementById('hud').className = "hud-box mode-" + colorClass;
+            // --- CO-PILOT LOGIC (The Brain) ---
+            // This part acts as your trade manager.
+            let hudTitle = k.protocol;
+            let hudScore = k.total_score;
+            let hudInstr = k.instruction;
+            let hudClass = "hud-box";
+            let colorClass = k.color || "GRAY";
 
-            // Alert Logic
-            if(k.protocol !== lastStatus && k.protocol !== "CALIBRATING" && k.protocol !== "INITIALIZING") {
+            // Determine active side
+            let side = manualSide || "LONG";
+            if (data.active_side !== "NONE") side = data.active_side;
+            
+            // UI Auto-Selection: Force the cheat sheet to the active side
+            if(data.active_side !== "NONE" && !manualSide) {
+                side = data.active_side;
+            }
+
+            const plan = data.plans ? data.plans[side] : null;
+
+            if (isExecuting && plan) {
+                const t1 = plan.targets ? plan.targets[0] : 0;
+                
+                // 1. ENTRY SIGNAL
+                hudTitle = "EXECUTE " + (data.active_side || "NOW");
+                hudScore = "GO";
+                hudInstr = "ENTRY TRIGGERED - CHECK CHEAT SHEET";
+                hudClass = "hud-box mode-EXECUTING";
+
+                // 2. MANAGEMENT SIGNAL (If Price hits T1)
+                if (t1 > 0) {
+                    if ((side === "LONG" && price >= t1) || (side === "SHORT" && price <= t1)) {
+                        hudTitle = "TARGET 1 HIT";
+                        hudScore = "BANK";
+                        hudInstr = "💰 CLOSE 75% - MOVE STOP TO BREAKEVEN";
+                        hudClass = "hud-box mode-BANKING";
+                        if (lastStatus !== "BANKING") { playAlert("Target one hit. Bank profit."); lastStatus = "BANKING"; }
+                    }
+                }
+            } else {
+                hudClass = "hud-box mode-" + colorClass;
+            }
+
+            // Update HUD
+            document.getElementById('kMode').innerText = hudTitle;
+            document.getElementById('kScore').innerText = hudScore;
+            document.getElementById('kInstr').innerText = hudInstr;
+            document.getElementById('hud').className = hudClass;
+            document.getElementById('brief').innerText = k.brief;
+
+            // Alert Logic (Entry)
+            if(data.status === "EXECUTING" && lastStatus !== "EXECUTING") {
                 flashBadge();
-                if(k.protocol === "SUPERNOVA") playAlert("Warning. Supernova Protocol Engaged.");
-                if(k.protocol === "HYBRID") playAlert("Hybrid Defense Mode Active.");
-                if(k.protocol === "SNIPER") playAlert("Sniper Mode Active.");
-                lastStatus = k.protocol;
+                playAlert("Execution Signal Triggered. Check Entry.");
+                lastStatus = "EXECUTING";
             }
 
             // 2. BREAKDOWN
@@ -276,8 +330,7 @@
             document.getElementById('kTime').innerText = bk.time || "--";
             document.getElementById('kMom').innerText = bk.momentum || "--";
 
-            // 3. EXECUTION
-            const side = manualSide || data.active_side || "LONG";
+            // 3. EXECUTION TAB LOGIC
             const btnL = document.getElementById('btnLong');
             const btnS = document.getElementById('btnShort');
             
@@ -289,14 +342,19 @@
                 btnS.className = "btn-side short-active";
             }
 
-            const plan = data.plans ? data.plans[side] : null;
+            // 4. CHEAT SHEET POPULATION
             if (plan) {
                 document.getElementById('pEntry').innerText = plan.trigger ? plan.trigger.toLocaleString() : "--";
                 document.getElementById('pStop').innerText = plan.stop ? plan.stop.toLocaleString() : "--";
-                document.getElementById('pPrim').innerText = plan.prim ? plan.prim.toLocaleString() : "--";
-                document.getElementById('pBank').innerText = plan.bank || "--";
+                
+                const targets = plan.targets || [];
+                document.getElementById('pT1').innerText = targets[0] ? targets[0].toLocaleString() : "--";
+                document.getElementById('pT2').innerText = targets[1] ? targets[1].toLocaleString() : "--";
+                document.getElementById('pT3').innerText = targets[2] ? targets[2].toLocaleString() : "--";
 
-                // 4. RISK
+                document.getElementById('pBank').innerText = plan.bank_rule || "--";
+
+                // 5. RISK MATH
                 const bal = parseFloat(document.getElementById('inpBal').value) || 0;
                 const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
                 
