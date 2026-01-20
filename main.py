@@ -9,6 +9,7 @@
 #    2. Gated High-Value Tools (Omega/Research) to Admins.
 #    3. Fixed Simulation Mode wiring.
 #    4. Added manual password reset tool.
+#    5. FIXED: Type casting for Admin IDs (String -> Int)
 # ==============================================================================
 
 import os
@@ -266,7 +267,7 @@ async def admin_reset_password(request: Request, db: Session = Depends(get_db)):
 
     try:
         payload = await request.json()
-        target_id = payload.get("user_id")
+        target_id = int(payload.get("user_id")) # <--- FIXED: FORCE INTEGER
         new_pass = payload.get("new_password")
         
         target_user = db.query(UserModel).filter(UserModel.id == target_id).first()
@@ -302,7 +303,7 @@ async def toggle_user_role(request: Request, db: Session = Depends(get_db)):
     try:
         # 2. Get Target User
         payload = await request.json()
-        target_id = payload.get("user_id")
+        target_id = int(payload.get("user_id")) # <--- FIXED: FORCE INTEGER
         target = db.query(UserModel).filter(UserModel.id == target_id).first()
         
         if target:
@@ -423,27 +424,64 @@ async def run_dmr_live(request: Request):
     return JSONResponse(data)
 
 @app.post("/api/research/run")
-async def run_res(request: Request):
-    try: pl = await request.json()
-    except: pl = {}
+async def run_research_api(request: Request):
+    try: payload = await request.json()
+    except: payload = {}
     
+    # 1. Parse Parameters
+    symbol = payload.get("symbol", "BTCUSDT")
+    start_date = payload.get("start_date_utc", "2026-01-01")
+    end_date = payload.get("end_date_utc", "2026-01-10")
+    session_ids = payload.get("session_ids", ["us_ny_futures"])
+    tuning = payload.get("tuning", {})
+    sim_settings = payload.get("simulation", {})
+    use_ai = payload.get("use_ai", False)
+    
+    ai_key = payload.get("ai_key", "").strip()
+    if not ai_key: ai_key = os.getenv("GEMINI_API_KEY", "")
+
+    # 2. Fetch Data
     try:
-        s_ts = int(datetime.strptime(pl.get("start_date_utc", "2026-01-01"), "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()) - 86400
-        e_ts = int(datetime.strptime(pl.get("end_date_utc", "2026-01-10"), "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()) + 86400
-    except: return JSONResponse({"ok": False, "error": "Bad Date"})
-    
-    # 1. Fetch Step 1 Data
-    raw = await battlebox_pipeline.fetch_historical_pagination(pl.get("symbol", "BTCUSDT"), s_ts, e_ts)
-    
-    # 2. Run Hybrid Engine (Passing everything: Tuning + Sensors)
-    data = await research_lab.run_hybrid_analysis(
-        symbol=pl.get("symbol", "BTCUSDT"),
-        raw_5m=raw,
-        start_date=pl.get("start_date_utc"),
-        end_date=pl.get("end_date_utc"),
-        session_ids=pl.get("session_ids", ["us_ny_futures"]),
-        tuning=pl.get("tuning", {}),
-        sensors=pl.get("sensors", {}),
-        min_score=pl.get("min_score", 70)
+        dt_start = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        dt_end = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        fetch_start_ts = int(dt_start.timestamp()) - 86400
+        fetch_end_ts = int(dt_end.timestamp()) + 86400
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Invalid Date Format"})
+
+    raw_5m = await battlebox_pipeline.fetch_historical_pagination(
+        symbol=symbol, start_ts=fetch_start_ts, end_ts=fetch_end_ts
     )
+
+    # 3. Run Lab
+    data = await research_lab.run_hybrid_analysis(
+        symbol=symbol,
+        raw_5m=raw_5m,
+        start_date=start_date,
+        end_date=end_date,
+        session_ids=session_ids,
+        tuning=tuning,
+        sensors=payload.get("sensors", {}),
+        min_score=payload.get("min_score", 70)
+    )
+    
+    # 4. AI Summary
+    if use_ai and data.get("ok"):
+        ai_payload = {
+            "simulation": data["simulation"],
+            "stats": data["stats"],
+            "session_log": [
+                {
+                    "date": s["date"], 
+                    "kinetic_score": s["kinetic"]["total_score"],
+                    "protocol": s["kinetic"]["protocol"],
+                    "trade_result": s["strategy"].get("outcome", "NO_TRADE"),
+                    "pnl_r": s["strategy"].get("r_realized", 0.0)             
+                }
+                for s in data["sessions"]
+            ]
+        }
+        report = ai_analyst.generate_report(ai_payload, ai_key)
+        data["ai_report"] = report
+    
     return JSONResponse(data)
