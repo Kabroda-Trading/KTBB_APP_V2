@@ -1,13 +1,13 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB: HYBRID ENGINE (Structure + Kinetics)
+# RESEARCH LAB: RESTORED TRADE ENGINE + KINETIC LAYER
 # ==============================================================================
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
 import traceback
 
-# CORE ENGINES (Restored)
+# CORE ENGINES
 import session_manager
 import sse_engine
 import structure_state_engine
@@ -57,26 +57,24 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
     try:
         if not raw_5m: return {"ok": False, "error": "No Data"}
         
-        # 1. PREPARE DATAFRAME FOR KINETICS (The Math Layer)
+        # 1. KINETIC MATH PREP
         df = pd.DataFrame(raw_5m)
         df['time'] = pd.to_datetime(df['time'], unit='ms', utc=True)
         df.set_index('time', inplace=True)
         df.sort_index(inplace=True)
         
-        # Calculate Indicators for Kinetics
+        # Indicators for Kinetics
         df['ma'] = df['close'].rolling(20).mean()
         df['std'] = df['close'].rolling(20).std()
-        df['bb_w'] = (4 * df['std']) / df['close'] # Energy
+        df['bb_w'] = (4 * df['std']) / df['close'] 
         df['tr'] = np.maximum(df['high'] - df['low'], abs(df['high'] - df['close'].shift(1)))
-        df['atr'] = df['tr'].rolling(14).mean() # Space
-        df['slope'] = df['close'].diff(5).abs() # Wind
-        df['z'] = (df['close'] - df['ma']) / df['std'] # Hull
+        df['atr'] = df['tr'].rolling(14).mean() 
+        df['slope'] = df['close'].diff(5).abs() 
+        df['z'] = (df['close'] - df['ma']) / df['std']
 
-        # 2. RUN STRUCTURE ENGINE (The Logic Layer)
+        # 2. STRUCTURE ENGINE SETUP
         start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        
-        # Map session IDs to configs
         active_cfgs = [s for s in session_manager.SESSION_CONFIGS if s["id"] in session_ids]
         
         results = []
@@ -96,19 +94,18 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
             day_str = curr_day.strftime("%Y-%m-%d")
             
             for cfg in active_cfgs:
-                # A. Get Anchor Time
+                # A. Time Slicing
                 anchor_ts = session_manager.anchor_ts_for_utc_date(cfg, curr_day)
-                lock_end_ts = anchor_ts + 1800 # 30m Calibration
-                exec_end_ts = lock_end_ts + (12 * 3600) # 12h Session
+                lock_end_ts = anchor_ts + 1800 
+                exec_end_ts = lock_end_ts + (12 * 3600) 
 
-                # B. Slice Data
                 calibration = _slice_by_ts(raw_5m, anchor_ts, lock_end_ts)
                 if len(calibration) < 6: continue
                 
                 context_24h = _slice_by_ts(raw_5m, lock_end_ts - 86400, lock_end_ts)
                 post_lock = _slice_by_ts(raw_5m, lock_end_ts, exec_end_ts)
 
-                # C. Run SSE (Levels)
+                # B. SSE Levels
                 sse_input = {
                     "locked_history_5m": context_24h,
                     "slice_24h_5m": context_24h,
@@ -122,13 +119,13 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                 if "error" in computed: continue
                 levels = computed["levels"]
 
-                # D. Run Structure State (Action)
+                # C. Structure State (The Protocol)
                 state = structure_state_engine.compute_structure_state(levels, post_lock, tuning=tuning)
                 had_acceptance = (state["permission"]["status"] == "EARNED")
                 side = state["permission"]["side"]
 
-                # E. Run Go Logic (Trade)
-                go = {"ok": False, "go_type": "NONE"}
+                # D. Go Logic (The Signal)
+                go = {"ok": False, "go_type": "NONE", "simulation": {}}
                 if had_acceptance and side in ("LONG", "SHORT"):
                     candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
                     st15 = battlebox_rules.compute_stoch(candles_15m_proxy)
@@ -140,16 +137,34 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                         ignore_5m_stoch=ignore_5, confirmation_mode=confirm_mode
                     )
 
-                # F. Run Kinetic Math (Score)
-                # Find DataFrame row at anchor time to score the "Start of Session"
+                    # E. TRADE SIMULATION (The Missing Piece RESTORED)
+                    if go["ok"]:
+                        stop_price = 0.0
+                        if side == "LONG": stop_price = min(c["low"] for c in calibration) 
+                        else: stop_price = max(c["high"] for c in calibration)
+
+                        trade_candles = [c for c in raw_5m if c["time"] > go["go_ts"] and c["time"] < exec_end_ts]
+                        
+                        # Full Simulation Logic
+                        sim = battlebox_rules.simulate_trade(
+                            entry_price=levels.get("breakout_trigger") if side == "LONG" else levels.get("breakdown_trigger"),
+                            entry_ts=go["go_ts"],
+                            stop_price=stop_price,
+                            direction=side,
+                            levels=levels,
+                            future_candles=trade_candles
+                        )
+                        go["simulation"] = sim
+
+                # F. Kinetic Math (The Layer)
                 try:
                     score_time = pd.to_datetime(anchor_ts, unit='s', utc=True)
-                    row = df.asof(score_time) # Get nearest data point
+                    row = df.asof(score_time) 
                     k_score, k_comps = _calculate_kinetic_score(row, sensors)
                 except:
                     k_score, k_comps = 0, {}
 
-                # G. Package Result
+                # G. Full Data Payload
                 results.append({
                     "date": f"{day_str} [{cfg['id']}]",
                     "protocol": state["action"],
@@ -157,27 +172,31 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                     "kinetic_comps": k_comps,
                     "trade_signal": go["ok"],
                     "trade_type": go.get("go_type", "NONE"),
+                    "simulation": go.get("simulation", {}), # <--- RESTORED: This holds PnL, Outcome, Exit Price
                     "levels": {
                         "BO": levels.get("breakout_trigger"),
-                        "BD": levels.get("breakdown_trigger")
+                        "BD": levels.get("breakdown_trigger"),
+                        "DR": levels.get("daily_resistance"),
+                        "DS": levels.get("daily_support")
                     }
                 })
 
             curr_day += timedelta(days=1)
 
-        # Summary
+        # Summary Calculation
         valid_trades = [r for r in results if r['trade_signal']]
-        valid_kinetic = [r for r in results if r['kinetic_score'] >= min_score]
-        
-        # Intersection: Trade Signal AND Kinetic Score >= Min
         prime_setups = [r for r in results if r['trade_signal'] and r['kinetic_score'] >= min_score]
+        
+        # Calculate Realized R for Summary
+        total_r = sum(r['simulation'].get('r_realized', 0) for r in valid_trades)
 
         return {
             "ok": True,
             "total_sessions": len(results),
             "trade_signals": len(valid_trades),
-            "kinetic_passes": len(valid_kinetic),
-            "prime_setups": len(prime_setups), # The Holy Grail count
+            "kinetic_passes": len([r for r in results if r['kinetic_score'] >= min_score]),
+            "prime_setups": len(prime_setups), 
+            "total_r_realized": round(total_r, 2),
             "avg_score": int(np.mean([r['kinetic_score'] for r in results])) if results else 0,
             "results": results
         }
