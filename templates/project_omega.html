@@ -18,85 +18,53 @@
         .cockpit { 
             display: grid; 
             grid-template-columns: 280px 1fr 340px; 
-            grid-template-rows: 60px 1fr 200px; 
+            grid-template-rows: 60px 1fr 180px; 
             gap: 15px; height: 100%;
         }
         
         .header { grid-column: 1 / 4; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 5px; }
         
-        /* PANEL FIX: Ensure flex containers handle scrolling correctly */
-        .panel { 
-            background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; 
-            display: flex; flex-direction: column; min-height: 0; /* Critical for scrolling */
-        }
-        
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; display: flex; flex-direction: column; min-height: 0; }
         .panel-left { grid-row: 2 / 3; }
         .panel-center { grid-row: 2 / 3; background: #0b1121; }
         .panel-right { grid-row: 2 / 4; grid-column: 3 / 4; } 
         .panel-bottom { grid-row: 3 / 4; grid-column: 1 / 3; }
 
-        .h-title { 
-            font-family: 'Rajdhani', sans-serif; font-weight: 800; font-size: 26px; 
-            color: var(--cyan); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 20px; 
-            display: flex; justify-content: space-between; align-items: center;
-        }
-        
+        .h-title { font-family: 'Rajdhani', sans-serif; font-weight: 800; font-size: 26px; color: var(--cyan); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
         .lbl { font-size: 12px; color: #cbd5e1; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; display:block; }
         .val { font-size: 18px; font-weight: 800; color: #fff; }
         
-        /* BATTLE TRACK */
-        .battle-track-container {
-            flex-grow: 1; display: flex; flex-direction: column; justify-content: center; position: relative;
-            padding: 0 40px; margin-bottom: 20px; border: 1px dashed #334155; border-radius: 8px;
-            background: rgba(0,0,0,0.3);
-        }
+        .battle-track-container { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; position: relative; padding: 0 40px; margin-bottom: 20px; border: 1px dashed #334155; border-radius: 8px; background: rgba(0,0,0,0.3); }
         .track-line { height: 4px; background: #334155; position: relative; width: 100%; border-radius: 2px; }
         .track-marker { position: absolute; top: -8px; width: 4px; height: 20px; background: #64748b; transform: translateX(-50%); }
         .track-marker.entry { background: var(--cyan); height: 25px; top: -10px; z-index: 2; }
         .track-marker.stop { background: var(--red); left: 0%; }
         .track-marker.target { background: var(--gold); left: 100%; }
         
-        .price-puck {
-            position: absolute; top: -12px; width: 10px; height: 28px; 
-            background: #fff; border: 2px solid var(--cyan); 
-            box-shadow: 0 0 15px var(--cyan); z-index: 10;
-            transform: translateX(-50%); transition: left 0.5s ease-out;
-        }
+        .price-puck { position: absolute; top: -12px; width: 10px; height: 28px; background: #fff; border: 2px solid var(--cyan); box-shadow: 0 0 15px var(--cyan); z-index: 10; transform: translateX(-50%); transition: left 0.5s ease-out; }
         .track-label { position: absolute; top: 25px; font-size: 11px; font-weight: 700; transform: translateX(-50%); }
 
-        /* GAUGES */
         .gauge-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: auto; }
         .gauge-row { margin-bottom: 15px; }
         .gauge-bar-bg { height: 10px; background: #1e293b; position: relative; border-radius: 2px; overflow: hidden; margin-bottom: 4px; }
         .gauge-fill { height: 100%; background: var(--cyan); width: 0%; transition: width 1s; }
         .gauge-ticks { display: flex; justify-content: space-between; font-size: 10px; color: #64748b; }
 
-        /* FLIGHT PLAN */
-        .flight-plan-box {
-            display: flex; gap: 10px; margin-bottom: 20px;
-            background: #1e293b; padding: 15px; border-radius: 6px; border-left: 4px solid var(--cyan);
-        }
+        .flight-plan-box { display: flex; gap: 10px; margin-bottom: 20px; background: #1e293b; padding: 15px; border-radius: 6px; border-left: 4px solid var(--cyan); }
         .fp-item { flex: 1; text-align: center; }
         .fp-val { font-size: 24px; font-weight: 800; font-family: 'Rajdhani'; }
 
-        /* RIGHT PANEL */
+        .advice-box { background: rgba(34, 211, 238, 0.1); border: 1px solid var(--cyan); padding: 10px; border-radius: 4px; color: var(--cyan); font-weight: 800; text-align: center; margin-bottom: 20px; font-size: 14px; }
+
         .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px dashed #334155; padding-bottom: 5px; }
         .btn-cp { background: #334155; border: 1px solid #475569; color: #fff; font-size: 11px; padding: 4px 8px; border-radius: 3px; cursor: pointer; margin-left: 8px; font-weight: 700; }
         .btn-cp:hover { background: var(--cyan); color: #000; border-color: var(--cyan); }
         .big-price { font-size: 32px; font-weight: 800; color: #fff; text-shadow: 0 0 20px rgba(255,255,255,0.2); font-family: 'Rajdhani'; }
 
-        /* LOG SCROLL FIX - UPDATED */
-        .log-box { 
-            flex-grow: 1; /* Takes remaining space */
-            overflow-y: auto; /* Enables scroll */
-            font-family: 'Courier New', monospace; font-size: 13px; color: #cbd5e1; 
-            scrollbar-width: thin; 
-            min-height: 0; /* Flexbox scroll fix */
-        }
+        .log-box { flex-grow: 1; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 13px; color: #cbd5e1; scrollbar-width: thin; }
         .log-ln { margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; display: flex; }
         .ts { color: #64748b; min-width: 70px; margin-right: 10px; }
 
-        /* CONTROLS */
         .inp-risk { background: #020617; border: 1px solid #475569; color: #fff; padding: 12px; width: 100%; text-align: right; font-family: inherit; font-size: 16px; font-weight: 700; margin-bottom: 15px; }
         .btn-toggle { width: 100%; padding: 12px; background: transparent; border: 1px solid #475569; color: #94a3b8; cursor: pointer; font-weight: 700; margin-top: 5px; font-size: 12px; transition: 0.2s; }
         .btn-toggle:hover { border-color: #fff; color: #fff; }
@@ -107,7 +75,7 @@
 
 <div class="cockpit">
     <div class="header">
-        <div class="h-title" style="margin:0; font-size:32px;">PROJECT OMEGA <span style="font-size:14px; color:#64748b; margin-left:15px; font-weight:600;">v16.3 TACTICAL</span></div>
+        <div class="h-title" style="margin:0; font-size:32px;">PROJECT OMEGA <span style="font-size:14px; color:#64748b; margin-left:15px; font-weight:600;">v16.6 ADVISOR</span></div>
         <div style="display:flex; align-items:center; gap:20px;">
             <div id="biasBadge" style="padding:4px 12px; border-radius:4px; font-weight:800; font-size:14px; background:#334155; color:#94a3b8;">BIAS: NEUTRAL</div>
             <div id="livePrice" class="big-price">--</div>
@@ -136,13 +104,15 @@
     </div>
 
     <div class="panel panel-center">
+        <div id="adviceBar" class="advice-box">SYSTEM INITIALIZING...</div>
+
         <div class="flight-plan-box">
             <div class="fp-item">
                 <div class="lbl">SESSION MODE</div>
                 <div class="fp-val" id="fpMode" style="color:var(--cyan)">--</div>
             </div>
             <div class="fp-item" style="border-left:1px solid #334155; border-right:1px solid #334155">
-                <div class="lbl">KINETIC SCORE</div>
+                <div class="lbl" id="scoreLabel">KINETIC SCORE</div>
                 <div class="fp-val" id="fpScore" style="color:#fff">--</div>
             </div>
             <div class="fp-item">
@@ -162,14 +132,14 @@
                 <div class="track-label" style="left:100%; top:25px; color:var(--gold);">TARGET 1</div>
                 <div id="pricePuck" class="price-puck" style="left:20%;"></div>
             </div>
-            <div id="trackMsg" style="text-align:center; margin-top:45px; font-weight:800; color:#64748b; font-size:20px; font-family:'Rajdhani';">WAITING FOR ENTRY...</div>
+            <div id="trackMsg" style="text-align:center; margin-top:45px; font-weight:800; color:#64748b; font-size:20px; font-family:'Rajdhani';">WAITING FOR DATA...</div>
         </div>
 
         <div class="gauge-grid">
             <div class="gauge-row">
                 <div style="display:flex; justify-content:space-between;"><span class="lbl">ENERGY</span><span class="lbl" id="txtEnergy" style="color:#fff">--</span></div>
                 <div class="gauge-bar-bg"><div class="gauge-fill" id="barEnergy"></div></div>
-                <div class="gauge-ticks"><span>0</span><span>150</span><span>300+</span></div>
+                <div class="gauge-ticks"><span>0</span><span>150</span><span>350+</span></div>
             </div>
             <div class="gauge-row">
                 <div style="display:flex; justify-content:space-between;"><span class="lbl">SPACE</span><span class="lbl" id="txtSpace" style="color:#fff">--</span></div>
@@ -228,31 +198,56 @@
     function forceSide(s) { state.manualSide = s; render(); }
     function notify(msg) { if(Notification.permission==="granted") new Notification("PROJECT OMEGA", { body: msg }); }
 
+    // FIXED RADAR MATH: Distinguish Active vs Passive Tracking
     function updateBattleTrack(plan, price, side) {
-        if (!plan || !plan.trigger) return;
+        if (!plan || !plan.trigger) {
+            document.getElementById('pricePuck').style.left = "20%";
+            document.getElementById('trackMsg').innerText = "NO DATA";
+            return;
+        }
         
-        // PUCK MOVEMENT
         const entry = plan.trigger;
         const stop = plan.stop;
-        const t1 = plan.targets[0];
+        const t1 = plan.targets[0] || entry;
         let pct = 20;
+        let msg = "WAITING FOR ENTRY";
+        let color = "#64748b";
+        const isLive = (state.data.status === "EXECUTING" || state.data.status === "ACTIVE");
 
-        if (state.data.status === "EXECUTING" || state.data.status === "ACTIVE") {
-            const range = side === "LONG" ? (t1 - entry) : (entry - t1);
-            const progress = side === "LONG" ? (price - entry) : (entry - price);
-            pct = 20 + ((progress / range) * 80);
-            pct = Math.max(0, Math.min(100, pct));
-            
-            if(pct <= 0) { document.getElementById('trackMsg').innerText = "STOP LOSS HIT"; document.getElementById('trackMsg').style.color="var(--red)"; }
-            else if(pct >= 100) { document.getElementById('trackMsg').innerText = "TARGET 1 HIT"; document.getElementById('trackMsg').style.color="var(--gold)"; }
-            else { document.getElementById('trackMsg').innerText = `IN TRADE (${Math.round(pct)}%)`; document.getElementById('trackMsg').style.color="#fff"; }
-        } else {
-            // STANDBY
-            pct = 20; 
-            document.getElementById('trackMsg').innerText = "WAITING FOR ENTRY...";
-            document.getElementById('trackMsg').style.color="#64748b";
+        if (side === "LONG") {
+            if (price <= stop) { 
+                pct = 0; 
+                msg = isLive ? "STOP LOSS HIT" : "PRICE BELOW STRUCTURE"; // Context Aware
+                color = "var(--red)"; 
+            }
+            else if (price < entry) {
+                pct = ((price - stop) / (entry - stop)) * 20;
+                msg = "PRE-ENTRY (WATCHING)"; color = "var(--cyan)";
+            } else {
+                pct = 20 + ((price - entry) / (t1 - entry)) * 80;
+                msg = isLive ? "IN TRADE - PUSHING" : "PRICE ABOVE ENTRY"; // Context Aware
+                color = isLive ? "var(--green)" : "var(--gold)";
+            }
+        } else { // SHORT
+            if (price >= stop) { 
+                pct = 0; 
+                msg = isLive ? "STOP LOSS HIT" : "PRICE ABOVE STRUCTURE"; 
+                color = "var(--red)"; 
+            }
+            else if (price > entry) {
+                pct = ((stop - price) / (stop - entry)) * 20;
+                msg = "PRE-ENTRY (WATCHING)"; color = "var(--cyan)";
+            } else {
+                pct = 20 + ((entry - price) / (entry - t1)) * 80;
+                msg = isLive ? "IN TRADE - PUSHING" : "PRICE BELOW ENTRY"; 
+                color = isLive ? "var(--green)" : "var(--gold)";
+            }
         }
+
+        pct = Math.max(0, Math.min(100, pct));
         document.getElementById('pricePuck').style.left = pct + "%";
+        document.getElementById('trackMsg').innerText = msg;
+        document.getElementById('trackMsg').style.color = color;
     }
 
     function render() {
@@ -262,13 +257,30 @@
         document.getElementById('livePrice').innerText = d.price.toLocaleString();
         document.getElementById('clockLocal').innerText = new Date().toLocaleTimeString();
 
-        // BIAS BADGE
+        // TACTICAL ADVICE & BIAS
         const bias = d.bias || "NEUTRAL";
         const bEl = document.getElementById('biasBadge');
+        const sLbl = document.getElementById('scoreLabel');
+        const aEl = document.getElementById('adviceBar');
+
+        aEl.innerText = d.advice || "SYSTEM CALIBRATING...";
+        
         bEl.innerText = `BIAS: ${bias}`;
-        if(bias === "LONG") { bEl.style.background="rgba(16,185,129,0.2)"; bEl.style.color="#10b981"; }
-        else if(bias === "SHORT") { bEl.style.background="rgba(239,68,68,0.2)"; bEl.style.color="#ef4444"; }
-        else { bEl.style.background="#334155"; bEl.style.color="#94a3b8"; }
+        if(bias === "LONG") { 
+            bEl.style.background="rgba(16,185,129,0.2)"; bEl.style.color="#10b981"; 
+            sLbl.innerText = "LONG POTENTIAL";
+            aEl.style.borderColor = "#10b981"; aEl.style.color = "#10b981"; aEl.style.background = "rgba(16,185,129,0.1)";
+        }
+        else if(bias === "SHORT") { 
+            bEl.style.background="rgba(239,68,68,0.2)"; bEl.style.color="#ef4444"; 
+            sLbl.innerText = "SHORT POTENTIAL";
+            aEl.style.borderColor = "#ef4444"; aEl.style.color = "#ef4444"; aEl.style.background = "rgba(239,68,68,0.1)";
+        }
+        else { 
+            bEl.style.background="#334155"; bEl.style.color="#94a3b8"; 
+            sLbl.innerText = "KINETIC SCORE";
+            aEl.style.borderColor = "#334155"; aEl.style.color = "#94a3b8"; aEl.style.background = "rgba(51,65,85,0.1)";
+        }
 
         // FLIGHT PLAN
         const k = d.kinetic || {};
@@ -283,17 +295,28 @@
 
         // GAUGES
         const bk = k.breakdown || {};
-        
         let bps = 0; try { bps = parseInt(bk.energy.match(/\d+/)[0]); } catch(e){}
-        let ePct = Math.max(0, Math.min(100, (300 - bps)/3));
+        let ePct = Math.min(100, (bps / 350) * 100); 
         document.getElementById('barEnergy').style.width = ePct + "%";
         document.getElementById('txtEnergy').innerText = bk.energy || "--";
-        document.getElementById('barEnergy').style.background = ePct > 66 ? "var(--green)" : "var(--red)";
+        document.getElementById('barEnergy').style.background = bps > 200 ? "var(--red)" : (bps < 100 ? "var(--cyan)" : "var(--green)");
 
         let atr = 0; try { atr = parseFloat(bk.space.match(/([\d\.]+)R/)[1]); } catch(e){}
         let sPct = Math.max(0, Math.min(100, (atr / 2.0) * 100));
         document.getElementById('barSpace').style.width = sPct + "%";
         document.getElementById('txtSpace').innerText = bk.space || "--";
+
+        let momText = bk.momentum || "NEUTRAL";
+        let isAligned = momText.includes("ALIGNED");
+        document.getElementById('barWind').style.width = isAligned ? "100%" : "30%";
+        document.getElementById('barWind').style.background = isAligned ? "var(--cyan)" : "#475569";
+        document.getElementById('txtWind').innerText = momText;
+
+        let structText = bk.structure || "MESSY";
+        let isSolid = structText.includes("SOLID");
+        document.getElementById('barHull').style.width = isSolid ? "100%" : "30%";
+        document.getElementById('barHull').style.background = isSolid ? "var(--cyan)" : "var(--red)";
+        document.getElementById('txtHull').innerText = structText;
 
         // SIDE & PLAN
         let side = state.manualSide || (d.active_side !== "NONE" ? d.active_side : bias === "SHORT" ? "SHORT" : "LONG");
@@ -305,27 +328,38 @@
         if (plan) {
             document.getElementById('pEntry').innerText = plan.trigger ? plan.trigger.toLocaleString() : "--";
             document.getElementById('pStop').innerText = plan.stop ? plan.stop.toLocaleString() : "--";
-            document.getElementById('pT1').innerText = plan.targets[0] ? plan.targets[0].toLocaleString() : "--";
-            document.getElementById('pT2').innerText = plan.targets[1] ? plan.targets[1].toLocaleString() : "--";
-            document.getElementById('pT3').innerText = plan.targets[2] ? plan.targets[2].toLocaleString() : "--";
-            document.getElementById('pBE').innerText = plan.be_trigger ? plan.be_trigger.toLocaleString() : "--";
+            
+            if (plan.valid && plan.targets.length > 0) {
+                document.getElementById('pT1').innerText = plan.targets[0].toLocaleString();
+                document.getElementById('pT2').innerText = plan.targets[1].toLocaleString();
+                document.getElementById('pT3').innerText = plan.targets[2].toLocaleString();
+                document.getElementById('pBE').innerText = plan.be_trigger.toLocaleString();
+            } else {
+                const reason = plan.reason || "BLOCKED";
+                document.getElementById('pT1').innerText = reason;
+                document.getElementById('pT2').innerText = reason;
+                document.getElementById('pT3').innerText = reason;
+                document.getElementById('pBE').innerText = "--";
+            }
             document.getElementById('pBank').innerText = plan.bank_rule;
 
-            // RISK
             const bal = parseFloat(document.getElementById('inpBal').value) || 0;
             const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
             let riskAmt = bal * (riskPct / 100);
             if(riskAmt > 5000) riskAmt = 5000;
             document.getElementById('valRisk').innerText = "$" + riskAmt.toFixed(2);
 
-            if (plan.trigger && plan.stop) {
+            if (plan.valid && plan.trigger && plan.stop) {
                 const riskPerUnit = Math.abs(plan.trigger - plan.stop);
                 if (riskPerUnit > 0) {
                     const units = riskAmt / riskPerUnit;
                     const sizeUsd = units * plan.trigger;
                     document.getElementById('pSize').innerText = Math.floor(sizeUsd).toLocaleString();
                 }
+            } else {
+                 document.getElementById('pSize').innerText = "--";
             }
+            
             updateBattleTrack(plan, d.price, side);
         }
 

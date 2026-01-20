@@ -1,10 +1,10 @@
 # project_omega.py
 # ==============================================================================
-# PROJECT OMEGA SPECIALIST (v16.4 - FULL INTEGRITY RESTORED)
+# PROJECT OMEGA SPECIALIST (v16.6 - TACTICAL ADVISOR UPGRADE)
 # ==============================================================================
-# 1. DRIFT FIX: Locks to Highest Score (No flipping).
-# 2. BIAS DETECTION: Explicitly calculates which side has higher potential.
-# 3. TEXT LOGIC RESTORED: Full "Supernova" and "Bank Rule" instructions.
+# 1. TACTICAL ADVICE: Explicit text directives (NO GO / FOCUS LONG).
+# 2. DRIFT FIX: Locks to Highest Score.
+# 3. BIAS DETECTION: Calculates Long vs Short strength.
 # ==============================================================================
 
 from __future__ import annotations
@@ -14,11 +14,11 @@ import session_manager
 import battlebox_pipeline
 
 # ----------------------------
-# 1. KINETIC STRATEGY (MATH)
+# 1. KINETIC STRATEGY
 # ----------------------------
 def _calculate_locked_strategy(anchor_price, levels, context, shelves, side):
     """
-    Calculates Score for a specific direction (LONG or SHORT).
+    Calculates Kinetic Score for a specific direction.
     """
     score = 0
     breakdown = {}
@@ -54,8 +54,7 @@ def _calculate_locked_strategy(anchor_price, levels, context, shelves, side):
     if atr == 0: atr = anchor_price * 0.01
 
     trigger = float(levels.get("breakout_trigger", 0)) if side == "LONG" else float(levels.get("breakdown_trigger", 0))
-    target = dr if side == "LONG" else ds
-    gap = abs(target - trigger)
+    gap = abs(dr - trigger) if side == "LONG" else abs(ds - trigger)
     r_multiple = gap / atr if atr > 0 else 0
 
     if r_multiple > 2.0:
@@ -80,7 +79,7 @@ def _calculate_locked_strategy(anchor_price, levels, context, shelves, side):
     if (side == "LONG" and slope_score > 0.2) or (side == "SHORT" and slope_score < -0.2):
         score += 10
 
-    breakdown['momentum'] = f"ALIGNED ({weekly_force})" if is_aligned else f"NEUTRAL ({weekly_force})"
+    breakdown['momentum'] = f"ALIGNED" if is_aligned else "NEUTRAL"
 
     # 4. STRUCTURE (10pts)
     structure_score = float(levels.get("structure_score", 0.0))
@@ -101,41 +100,33 @@ def _calculate_locked_strategy(anchor_price, levels, context, shelves, side):
     # CLASSIFICATION
     protocol = "DOGFIGHT"
     color = "AMBER"
-    instruction = "🛡️ DEFENSIVE / SCALP."
     
     if is_blocked:
-        protocol = "BLOCKED"; color = "RED"; instruction = f"⛔ STAND DOWN. {block_reason}"
+        protocol = "BLOCKED"; color = "RED"
     elif score >= 75: 
-        protocol = "SUPERSONIC"; color = "CYAN"; instruction = "🔥 MOMENTUM OVERRIDE."
+        protocol = "SUPERSONIC"; color = "CYAN"
     elif score >= 50: 
-        protocol = "SNIPER"; color = "GREEN"; instruction = "⌖ EXECUTE ON 5M CLOSE."
+        protocol = "SNIPER"; color = "GREEN"
     elif score <= 40:
-        protocol = "GROUNDED"; color = "RED"; instruction = "⛔ LOW ENERGY."
+        protocol = "GROUNDED"; color = "RED"
 
     return {
         "total_score": score,
         "protocol": protocol,
         "color": color,
-        "instruction": instruction,
         "breakdown": breakdown,
         "force_align": is_aligned
     }
 
 # ----------------------------
-# 2. EXECUTION MATH (RESTORED FULL LOGIC)
+# 2. EXECUTION PLAN
 # ----------------------------
 def _calc_execution_plan(entry, stop, dr, ds, side, mode, force_align):
-    
-    safe_return = {
-        "valid": False, "trigger": 0, "targets": [], "stop": 0,
-        "bank_rule": "--", "be_trigger": 0, "protocol_display": mode, "color_override": None
-    }
-
-    if entry <= 0 or stop <= 0: return safe_return
+    if entry <= 0 or stop <= 0: return {"valid": False}
     risk = abs(entry - stop)
-    if risk == 0: return safe_return
+    if risk == 0: return {"valid": False}
 
-    # Blocking Logic (Restored)
+    # Blocking Logic
     min_req_dist = risk * 1.0
     dist_to_wall = abs(dr - entry) if side == "LONG" else abs(ds - entry)
 
@@ -161,44 +152,22 @@ def _calc_execution_plan(entry, stop, dr, ds, side, mode, force_align):
         targets = [int(t1), int(t2), int(t3)]
         be_trigger = entry - (risk * 0.6)
 
-    # TEXT LOGIC (RESTORED)
-    primary_target = t1
-    bank_rule = "BANK 75%"
-    reason = "Standard"
     protocol_display = mode
     color_override = None
 
     if mode == "SUPERSONIC":
-        if force_align:
-            primary_target = "OPEN (Aim T3)"
-            bank_rule = "IGNORE TP1. Trail."
-            reason = "ALIGNED (Aggressive)"
-            protocol_display = "SUPERNOVA"
-            color_override = "SUPERNOVA" # Cyan/Gold hybrid handling in UI
-        else:
-            primary_target = t1
-            bank_rule = "BANK 75%. BE Stop."
-            reason = "MISALIGNED (Defensive)"
-            protocol_display = "HYBRID"
-            color_override = "HYBRID"
-    elif mode == "SNIPER":
-        primary_target = t1
-        bank_rule = "BANK 75%"
-        reason = "Standard"
-    elif mode == "DOGFIGHT":
-        primary_target = t1
-        bank_rule = "BANK 100%"
-        reason = "Scalp"
+        protocol_display = "SUPERNOVA" if force_align else "HYBRID"
+        color_override = "SUPERNOVA" if force_align else "HYBRID"
 
     return {
         "trigger": entry, "targets": targets, "stop": stop, "valid": True,
-        "primary_target": primary_target, "bank_rule": bank_rule,
-        "be_trigger": int(be_trigger), "reason": reason,
+        "primary_target": targets[0], "bank_rule": "BANK 75%",
+        "be_trigger": int(be_trigger), "reason": "Standard",
         "protocol_display": protocol_display, "color_override": color_override
     }
 
 # ----------------------------
-# 3. INTERNAL TRIGGER LOGIC
+# 3. TRIGGER MONITOR
 # ----------------------------
 def _check_omega_triggers(levels, candles, mode, start_time_filter):
     bo = float(levels.get("breakout_trigger", 0))
@@ -214,16 +183,11 @@ def _check_omega_triggers(levels, candles, mode, start_time_filter):
 
         h, l, c_price = float(c["high"]), float(c["low"]), float(c["close"])
 
-        # LONG CHECK
         if require_close:
             if c_price > bo: action, side, trigger_time = "GO", "LONG", t; break
-        else:
-            if h >= bo: action, side, trigger_time = "GO", "LONG", t; break # Supersonic takes wicks
-
-        # SHORT CHECK
-        if require_close:
             if c_price < bd: action, side, trigger_time = "GO", "SHORT", t; break
         else:
+            if h >= bo: action, side, trigger_time = "GO", "LONG", t; break
             if l <= bd: action, side, trigger_time = "GO", "SHORT", t; break
 
     return {"action": action, "side": side, "trigger_time": trigger_time}
@@ -237,8 +201,7 @@ async def get_omega_status(symbol="BTCUSDT", session_id="us_ny_futures", ferrari
     
     session_config = session_manager.get_session_config(session_id)
     anchor_ts = session_manager.anchor_ts_for_utc_date(session_config, now_utc)
-    anchor_dt = datetime.fromtimestamp(anchor_ts, timezone.utc)
-    elapsed = (now_utc - anchor_dt).total_seconds() / 3600.0
+    elapsed = (now_utc - datetime.fromtimestamp(anchor_ts, timezone.utc)).total_seconds() / 3600.0
     is_session_closed = elapsed > 7.5 or elapsed < 0
 
     pipeline_data = await battlebox_pipeline.get_live_battlebox(symbol=symbol, session_mode="MANUAL", manual_id=session_id)
@@ -247,12 +210,9 @@ async def get_omega_status(symbol="BTCUSDT", session_id="us_ny_futures", ferrari
     if is_session_closed or pipeline_data.get("status") == "CALIBRATING":
         return {
             "ok": True, "status": "CALIBRATING" if not is_session_closed else "CLOSED",
-            "price": current_price,
-            "kinetic": {"total_score": 0, "protocol": "CALIBRATING", "color": "GRAY", "breakdown": {}},
-            "plans": {"LONG": {}, "SHORT": {}}
+            "price": current_price, "kinetic": {"total_score": 0}, "plans": {"LONG": {}, "SHORT": {}}
         }
 
-    # Data Extraction
     box = pipeline_data.get("battlebox", {})
     levels = box.get("levels", {})
     context = box.get("context", {})
@@ -271,17 +231,20 @@ async def get_omega_status(symbol="BTCUSDT", session_id="us_ny_futures", ferrari
     kinetic_long = _calculate_locked_strategy(anchor_price, levels, context, shelves, "LONG")
     kinetic_short = _calculate_locked_strategy(anchor_price, levels, context, shelves, "SHORT")
 
-    # --- BIAS DETECTION (ANTI-DRIFT) ---
+    # --- BIAS & ADVICE ---
     bias_direction = "NEUTRAL"
-    if kinetic_long["total_score"] > kinetic_short["total_score"] + 10:
+    tactical_advice = "⚖️ BIAS NEUTRAL. FOLLOW TRIGGERS."
+
+    if kinetic_long["total_score"] > kinetic_short["total_score"] + 15:
         bias_direction = "LONG"
         kinetic_display = kinetic_long
-    elif kinetic_short["total_score"] > kinetic_long["total_score"] + 10:
+        tactical_advice = "🚫 SHORTS COMPROMISED. FOCUS LONG."
+    elif kinetic_short["total_score"] > kinetic_long["total_score"] + 15:
         bias_direction = "SHORT"
         kinetic_display = kinetic_short
+        tactical_advice = "🚫 LONGS COMPROMISED. FOCUS SHORT."
     else:
         bias_direction = "NEUTRAL"
-        # If neutral, default to the stronger one just for display
         kinetic_display = kinetic_long if kinetic_long["total_score"] >= kinetic_short["total_score"] else kinetic_short
 
     # --- PHASE 3: EXECUTION ---
@@ -294,6 +257,7 @@ async def get_omega_status(symbol="BTCUSDT", session_id="us_ny_futures", ferrari
         status = "EXECUTING"
         active_side = exec_state["side"]
         kinetic_display = kinetic_long if active_side == "LONG" else kinetic_short
+        tactical_advice = f"⚡ EXECUTION ACTIVE: {active_side}"
         
         if (int(now_utc.timestamp()) - exec_state["trigger_time"]) > 900:
             status = "ACTIVE"
@@ -316,7 +280,8 @@ async def get_omega_status(symbol="BTCUSDT", session_id="us_ny_futures", ferrari
         "symbol": symbol,
         "price": current_price,
         "active_side": active_side,
-        "bias": bias_direction, 
+        "bias": bias_direction,
+        "advice": tactical_advice, # <--- THE CRYSTAL BALL TEXT
         "session_mode": kinetic_display["protocol"],
         "kinetic": kinetic_display,
         "plans": {"LONG": plan_long, "SHORT": plan_short}
