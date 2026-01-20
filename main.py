@@ -432,16 +432,17 @@ async def run_res(request: Request):
         e_ts = int(datetime.strptime(pl.get("end_date_utc", "2026-01-10"), "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()) + 86400
     except: return JSONResponse({"ok": False, "error": "Bad Date"})
     
-    # 1. Fetch Step 1 Data (Candles)
+    # 1. Fetch Step 1 Data
     raw = await battlebox_pipeline.fetch_historical_pagination(pl.get("symbol", "BTCUSDT"), s_ts, e_ts)
     
-    # 2. Run Step 2 Math (Kinetic Engine)
-    data = await research_lab.run_kinetic_analysis(
+    # 2. Run Hybrid Engine (Passing everything: Tuning + Sensors)
+    data = await research_lab.run_hybrid_analysis(
         symbol=pl.get("symbol", "BTCUSDT"),
         raw_5m=raw,
         start_date=pl.get("start_date_utc"),
         end_date=pl.get("end_date_utc"),
         session_ids=pl.get("session_ids", ["us_ny_futures"]),
+        tuning=pl.get("tuning", {}),
         sensors=pl.get("sensors", {}),
         min_score=pl.get("min_score", 70)
     )
