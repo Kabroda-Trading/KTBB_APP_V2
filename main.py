@@ -22,7 +22,7 @@ import project_omega
 import battlebox_pipeline
 import research_lab
 import ai_analyst
-import market_radar # <--- NEW RADAR ENGINE
+import market_radar 
 
 # --- HELPERS ---
 def _template_or_fallback(request: Request, templates: Jinja2Templates, name: str, context: Dict[str, Any]):
@@ -144,14 +144,68 @@ def system_monitor_page(request: Request, db: Session = Depends(get_db)):
     logs = db.query(SystemLog).order_by(SystemLog.timestamp.desc()).limit(50).all()
     return _template_or_fallback(request, templates, "system_dashboard.html", {"request": request, "logs": logs, "server_time": datetime.now(timezone.utc), **ctx})
 
-# --- NEW: MARKET RADAR PAGE ---
+# --- RADAR & LOCK TARGET ---
 @app.get("/suite/market-radar", response_class=HTMLResponse)
 def market_radar_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_admin"]: return RedirectResponse("/suite")
     return _template_or_fallback(request, templates, "market_radar.html", {"request": request})
 
-# ADMIN ACTIONS (FIXED INTEGER CASTING)
+@app.get("/suite/lock-target", response_class=HTMLResponse)
+def lock_target_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx["is_admin"]: return RedirectResponse("/suite")
+    return _template_or_fallback(request, templates, "lock_target.html", {"request": request})
+
+# API ROUTES
+@app.post("/api/radar/scan")
+async def radar_scan_api(request: Request):
+    data = await market_radar.scan_sector()
+    return JSONResponse({"ok": True, "results": data})
+
+@app.post("/api/radar/target")
+async def radar_target_api(request: Request):
+    try: pl = await request.json()
+    except: pl = {}
+    data = await market_radar.analyze_target(pl.get("symbol", "BTCUSDT"))
+    return JSONResponse({"ok": True, "result": data})
+
+@app.post("/api/omega/status")
+async def omega_api(request: Request):
+    try: pl = await request.json()
+    except: pl = {}
+    return JSONResponse(await project_omega.get_omega_status(pl.get("symbol", "BTCUSDT"), "us_ny_futures", force_time_utc=pl.get("force_time_utc"), force_price=pl.get("force_price")))
+
+@app.post("/api/omega/simulate")
+async def omega_sim(request: Request):
+    try: pl = await request.json()
+    except: pl = {}
+    return JSONResponse(await project_omega.get_omega_status("BTCUSDT", "us_ny_futures", force_time_utc=pl.get("time"), force_price=float(pl.get("price")) if pl.get("price") else None))
+
+@app.post("/api/dmr/run-raw")
+async def dmr_api(request: Request):
+    try: pl = await request.json()
+    except: pl = {}
+    return JSONResponse(await battlebox_pipeline.get_session_review(pl.get("symbol", "BTCUSDT"), "us_ny_futures"))
+
+@app.post("/api/dmr/live")
+async def live_api(request: Request):
+    try: pl = await request.json()
+    except: pl = {}
+    return JSONResponse(await battlebox_pipeline.get_live_battlebox(pl.get("symbol", "BTCUSDT"), "MANUAL" if pl.get("session_id") else "AUTO", manual_id=pl.get("session_id")))
+
+@app.post("/api/research/run")
+async def res_api(request: Request):
+    try: pl = await request.json()
+    except: pl = {}
+    try:
+        s_ts = int(datetime.strptime(pl.get("start_date_utc", "2026-01-01"), "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()) - 86400
+        e_ts = int(datetime.strptime(pl.get("end_date_utc", "2026-01-10"), "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()) + 86400
+    except: return JSONResponse({"ok": False, "error": "Bad Date"})
+    raw = await battlebox_pipeline.fetch_historical_pagination(pl.get("symbol", "BTCUSDT"), s_ts, e_ts)
+    return JSONResponse(await research_lab.run_hybrid_analysis(pl.get("symbol", "BTCUSDT"), raw, pl.get("start_date_utc"), pl.get("end_date_utc"), pl.get("session_ids", ["us_ny_futures"]), pl.get("tuning", {}), pl.get("sensors", {}), pl.get("min_score", 70)))
+
+# ADMIN & SYSTEM
 @app.post("/admin/toggle-role")
 async def toggle_role(request: Request, db: Session = Depends(get_db)):
     uid = request.session.get(auth.SESSION_KEY)
@@ -193,49 +247,6 @@ async def delete_user(request: Request, user_id: int = Form(...), db: Session = 
     db.query(UserModel).filter(UserModel.id == user_id).delete()
     db.commit()
     return RedirectResponse("/admin", status_code=303)
-
-# API ENDPOINTS
-@app.post("/api/omega/status")
-async def omega_api(request: Request):
-    try: pl = await request.json()
-    except: pl = {}
-    return JSONResponse(await project_omega.get_omega_status(pl.get("symbol", "BTCUSDT"), "us_ny_futures", force_time_utc=pl.get("force_time_utc"), force_price=pl.get("force_price")))
-
-@app.post("/api/omega/simulate")
-async def omega_sim(request: Request):
-    try: pl = await request.json()
-    except: pl = {}
-    return JSONResponse(await project_omega.get_omega_status("BTCUSDT", "us_ny_futures", force_time_utc=pl.get("time"), force_price=float(pl.get("price")) if pl.get("price") else None))
-
-@app.post("/api/dmr/run-raw")
-async def dmr_api(request: Request):
-    try: pl = await request.json()
-    except: pl = {}
-    return JSONResponse(await battlebox_pipeline.get_session_review(pl.get("symbol", "BTCUSDT"), "us_ny_futures"))
-
-@app.post("/api/dmr/live")
-async def live_api(request: Request):
-    try: pl = await request.json()
-    except: pl = {}
-    return JSONResponse(await battlebox_pipeline.get_live_battlebox(pl.get("symbol", "BTCUSDT"), "MANUAL" if pl.get("session_id") else "AUTO", manual_id=pl.get("session_id")))
-
-@app.post("/api/research/run")
-async def res_api(request: Request):
-    try: pl = await request.json()
-    except: pl = {}
-    try:
-        s_ts = int(datetime.strptime(pl.get("start_date_utc", "2026-01-01"), "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()) - 86400
-        e_ts = int(datetime.strptime(pl.get("end_date_utc", "2026-01-10"), "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()) + 86400
-    except: return JSONResponse({"ok": False, "error": "Bad Date"})
-    raw = await battlebox_pipeline.fetch_historical_pagination(pl.get("symbol", "BTCUSDT"), s_ts, e_ts)
-    return JSONResponse(await research_lab.run_hybrid_analysis(pl.get("symbol", "BTCUSDT"), raw, pl.get("start_date_utc"), pl.get("end_date_utc"), pl.get("session_ids", ["us_ny_futures"]), pl.get("tuning", {}), pl.get("sensors", {}), pl.get("min_score", 70)))
-
-# --- NEW: RADAR API ---
-@app.post("/api/radar/scan")
-async def radar_scan_api(request: Request):
-    # Only admins reach here via UI check, but extra check if needed
-    data = await market_radar.scan_sector()
-    return JSONResponse({"ok": True, "results": data})
 
 @app.post("/api/system/log-clear")
 async def clear_logs(request: Request, db: Session = Depends(get_db)):

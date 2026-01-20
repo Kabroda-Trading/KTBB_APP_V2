@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Kabroda | Target Lock</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        body { background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; margin-top: 40px; }
+        
+        .header-row { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
+        .back-link { color: #64748b; text-decoration: none; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+        .back-link:hover { color: #fff; }
+        
+        .target-title { font-family: 'JetBrains Mono'; font-size: 48px; color: #fff; margin: 0; line-height: 1; }
+        .target-status { font-family: 'JetBrains Mono'; font-size: 14px; font-weight: 800; padding: 4px 12px; border-radius: 4px; display: inline-block; margin-top: 10px; }
+        
+        .grid-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .panel { background: #0f172a; border: 1px solid #1e293b; padding: 30px; border-radius: 8px; }
+        
+        .metric-row { display: flex; justify-content: space-between; margin-bottom: 15px; align-items: center; }
+        .metric-lbl { color: #94a3b8; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+        .metric-val { color: #fff; font-family: 'JetBrains Mono'; font-weight: 700; }
+        
+        .level-card { background: rgba(255,255,255,0.03); padding: 15px; border-left: 3px solid #334155; margin-bottom: 10px; }
+        .lvl-tag { font-size: 9px; text-transform: uppercase; color: #94a3b8; letter-spacing: 1px; display: block; margin-bottom: 5px; }
+        .lvl-price { font-family: 'JetBrains Mono'; font-size: 18px; color: #fff; font-weight: 700; }
+    </style>
+</head>
+<body>
+
+    {% include 'nav.html' %}
+
+    <div class="container">
+        <div class="header-row">
+            <div>
+                <a href="/suite/market-radar" class="back-link">← Return to Radar</a>
+                <h1 class="target-title" id="tSym">LOADING...</h1>
+                <div id="tStatus" class="target-status" style="background:#1e293b; color:#64748b;">CALCULATING...</div>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">KINETIC SCORE</div>
+                <div id="tScore" style="font-size: 64px; font-weight: 800; font-family: 'JetBrains Mono'; color: #334155; line-height: 1;">--</div>
+            </div>
+        </div>
+
+        <div class="grid-layout">
+            <div class="panel">
+                <h3 style="margin-top:0; margin-bottom:20px; font-size:14px; color:#0ea5e9;">KINETIC TELEMETRY</h3>
+                
+                <div class="metric-row">
+                    <span class="metric-lbl">ENERGY (VOLATILITY)</span>
+                    <span class="metric-val" id="vEnergy">--</span>
+                </div>
+                <div style="height:4px; background:#1e293b; margin-bottom:20px; border-radius:2px;"><div id="bEnergy" style="width:0%; height:100%; background:#0ea5e9;"></div></div>
+
+                <div class="metric-row">
+                    <span class="metric-lbl">SPACE (ATR RUNWAY)</span>
+                    <span class="metric-val" id="vSpace">--</span>
+                </div>
+                <div style="height:4px; background:#1e293b; margin-bottom:20px; border-radius:2px;"><div id="bSpace" style="width:0%; height:100%; background:#0ea5e9;"></div></div>
+
+                <div class="metric-row">
+                    <span class="metric-lbl">WIND (MOMENTUM)</span>
+                    <span class="metric-val" id="vWind">--</span>
+                </div>
+                <div style="height:4px; background:#1e293b; margin-bottom:20px; border-radius:2px;"><div id="bWind" style="width:0%; height:100%; background:#0ea5e9;"></div></div>
+
+                <div class="metric-row">
+                    <span class="metric-lbl">HULL (STRUCTURE)</span>
+                    <span class="metric-val" id="vHull">--</span>
+                </div>
+                <div style="height:4px; background:#1e293b; margin-bottom:20px; border-radius:2px;"><div id="bHull" style="width:0%; height:100%; background:#0ea5e9;"></div></div>
+            </div>
+
+            <div class="panel">
+                <h3 style="margin-top:0; margin-bottom:20px; font-size:14px; color:#facc15;">FLIGHT PATH (LEVELS)</h3>
+                
+                <div class="level-card" style="border-color: #ef4444;">
+                    <span class="lvl-tag">DAILY RESISTANCE</span>
+                    <span class="lvl-price" id="lRes">--</span>
+                </div>
+
+                <div class="level-card" style="border-color: #10b981;">
+                    <span class="lvl-tag">BREAKOUT TRIGGER (LONG)</span>
+                    <span class="lvl-price" id="lBo">--</span>
+                </div>
+
+                <div class="level-card" style="border-color: #a855f7;">
+                    <span class="lvl-tag">BREAKDOWN TRIGGER (SHORT)</span>
+                    <span class="lvl-price" id="lBd">--</span>
+                </div>
+
+                <div class="level-card" style="border-color: #3b82f6;">
+                    <span class="lvl-tag">DAILY SUPPORT</span>
+                    <span class="lvl-price" id="lSup">--</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Extract Symbol from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const symbol = urlParams.get('symbol') || 'BTCUSDT';
+
+        document.getElementById('tSym').innerText = symbol.replace('USDT', '');
+
+        async function loadTarget() {
+            try {
+                const res = await fetch('/api/radar/target', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ symbol: symbol })
+                });
+                const data = await res.json();
+                
+                if(!data.ok) throw new Error("Load Failed");
+                const r = data.result;
+
+                // Update Header
+                document.getElementById('tScore').innerText = r.score;
+                document.getElementById('tStatus').innerText = r.status;
+                
+                // Color Status
+                const statEl = document.getElementById('tStatus');
+                if(r.score >= 85) { statEl.style.background = "rgba(250, 204, 21, 0.2)"; statEl.style.color = "#facc15"; document.getElementById('tScore').style.color="#facc15"; }
+                else if(r.score >= 70) { statEl.style.background = "rgba(16, 185, 129, 0.2)"; statEl.style.color = "#10b981"; document.getElementById('tScore').style.color="#10b981"; }
+
+                // Update Metrics
+                const m = r.metrics;
+                document.getElementById('vEnergy').innerText = m.energy; document.getElementById('bEnergy').style.width = (m.energy*4)+"%";
+                document.getElementById('vSpace').innerText = m.space; document.getElementById('bSpace').style.width = (m.space*4)+"%";
+                document.getElementById('vWind').innerText = m.wind; document.getElementById('bWind').style.width = (m.wind*4)+"%";
+                document.getElementById('vHull').innerText = m.hull; document.getElementById('bHull').style.width = (m.hull*4)+"%";
+
+                // Update Levels
+                document.getElementById('lBo').innerText = r.levels.breakout.toFixed(4);
+                document.getElementById('lBd').innerText = r.levels.breakdown.toFixed(4);
+                document.getElementById('lRes').innerText = r.levels.resistance.toFixed(4);
+                document.getElementById('lSup').innerText = r.levels.support.toFixed(4);
+
+            } catch(e) {
+                alert("Error: " + e.message);
+            }
+        }
+
+        loadTarget();
+    </script>
+</body>
+</html>
