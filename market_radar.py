@@ -1,10 +1,10 @@
 # market_radar.py
 # ==============================================================================
-# MARKET RADAR ENGINE (v2.4 - TIGHTENED MATH)
+# MARKET RADAR ENGINE (v2.5 - PRECISION ALIGNMENT)
 # ==============================================================================
-# 1. MATH: Raised thresholds for "Solid" Structure and "Strong" Wind.
-# 2. LOGIC: Bias Detection (Long vs Short) to filter junk.
-# 3. PREP: Pre-calculates Flight Plans.
+# FIX: Aligns Scanner Math with Omega Cockpit Math.
+# CHANGE: Calculates Space based on TRIGGER distance, not just Daily Range.
+# RESULT: BTC Score will drop to match Omega (10) if Triggers are blocked.
 # ==============================================================================
 
 import asyncio
@@ -15,50 +15,37 @@ import session_manager
 TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "TRXUSDT"]
 
 # ------------------------------------------------------------------------------
-# 1. METRIC CALCULATOR (STRICTER WEIGHTS)
+# 1. METRIC CALCULATOR (RICH VISUALS)
 # ------------------------------------------------------------------------------
 def _calculate_rich_metrics(bps, r_mult, slope, struct_score):
-    """Generates the Text, Color, and Percentage objects with TIGHTER standards."""
+    """Generates the Text, Color, and Percentage objects for the UI."""
     metrics = {}
 
     # A. ENERGY (30pts) - Volatility
-    # < 100 is Coiled (Good), > 350 is Exhausted (Bad)
     e_val = 30 if bps < 100 else (15 if bps < 200 else 0)
-    e_text = f"SUPER COILED ({int(bps)})" if bps < 100 else (f"STANDARD ({int(bps)})" if bps < 250 else f"LOOSE ({int(bps)})")
-    e_color = "CYAN" if bps < 100 else ("GREEN" if bps < 250 else "RED")
+    e_text = f"SUPER COILED ({int(bps)})" if bps < 100 else (f"STANDARD ({int(bps)})" if bps < 200 else f"LOOSE ({int(bps)})")
+    e_color = "CYAN" if bps < 100 else ("GREEN" if bps < 200 else "RED")
     e_pct = min(100, (e_val / 30) * 100)
     metrics["energy"] = {"val": e_val, "text": e_text, "color": e_color, "pct": e_pct}
 
-    # B. SPACE (30pts) - R-Multiple
-    # Must be > 1.0 to trade. > 2.0 is Supersonic.
+    # B. SPACE (30pts) - R-Multiple (CRITICAL FIX HERE)
     s_val = 30 if r_mult > 2.0 else (15 if r_mult > 1.0 else 0)
     s_text = f"SUPERSONIC ({r_mult:.1f}R)" if r_mult > 2.0 else (f"GRIND ({r_mult:.1f}R)" if r_mult > 1.0 else f"BLOCKED ({r_mult:.1f}R)")
     s_color = "CYAN" if r_mult > 2.0 else ("GREEN" if r_mult > 1.0 else "RED")
     s_pct = min(100, (s_val / 30) * 100)
     metrics["space"] = {"val": s_val, "text": s_text, "color": s_color, "pct": s_pct}
 
-    # C. WIND (20pts) - Momentum / Slope
-    # Tightened: Needs > 0.25 for Strong. Added "HEADWIND" for negative against bias.
-    # Note: This function assumes we are checking the 'active' side logic in the caller
-    w_val = 0
-    w_text = "NEUTRAL"
-    w_color = "YELLOW"
-    
-    if abs(slope) > 0.25:
-        w_val = 20; w_text = "STRONG TAILWIND"; w_color = "CYAN"
-    elif abs(slope) > 0.1:
-        w_val = 10; w_text = "MILD BREEZE"; w_color = "GREEN"
-    else:
-        w_val = 0; w_text = "STAGNANT"; w_color = "YELLOW"
-
+    # C. WIND (20pts) - Momentum
+    w_val = 20 if abs(slope) > 0.25 else (10 if abs(slope) > 0.1 else 0)
+    w_text = "STRONG" if abs(slope) > 0.25 else ("MILD" if abs(slope) > 0.1 else "NEUTRAL")
+    w_color = "CYAN" if abs(slope) > 0.25 else ("GREEN" if abs(slope) > 0.1 else "YELLOW")
     w_pct = min(100, (w_val / 20) * 100)
     metrics["wind"] = {"val": w_val, "text": w_text, "color": w_color, "pct": w_pct}
 
-    # D. HULL (10pts) - Market Structure
-    # Tightened: Need > 0.70 to be SOLID. 0.5 is just okay.
-    h_val = 10 if struct_score > 0.7 else 0
-    h_text = f"SOLID ({struct_score:.1f})" if struct_score > 0.7 else (f"OKAY ({struct_score:.1f})" if struct_score > 0.4 else f"FRAGILE ({struct_score:.1f})")
-    h_color = "CYAN" if struct_score > 0.7 else ("YELLOW" if struct_score > 0.4 else "RED")
+    # D. HULL (10pts) - Structure
+    h_val = 10 if struct_score > 0.7 else 0 # Stricter 0.7 threshold
+    h_text = f"SOLID ({struct_score:.1f})" if struct_score > 0.7 else f"WEAK ({struct_score:.1f})"
+    h_color = "CYAN" if struct_score > 0.7 else "RED"
     h_pct = min(100, (h_val / 10) * 100)
     metrics["hull"] = {"val": h_val, "text": h_text, "color": h_color, "pct": h_pct}
 
@@ -66,10 +53,10 @@ def _calculate_rich_metrics(bps, r_mult, slope, struct_score):
     return metrics, total_score
 
 # ------------------------------------------------------------------------------
-# 2. ANALYSIS ENGINE (BIAS BRAIN)
+# 2. ANALYSIS ENGINE (THE OMEGA LOGIC)
 # ------------------------------------------------------------------------------
 def _analyze_session_kinetics(levels, price):
-    """Determines Bias based on dual-side analysis."""
+    """Determines Bias based on PRECISE Trigger Distance."""
     dr = float(levels.get("daily_resistance", 0) or 0)
     ds = float(levels.get("daily_support", 0) or 0)
     if dr == 0 or ds == 0: return {"score": 0, "status": "OFFLINE", "metrics": {}, "bias": "NONE"}
@@ -78,14 +65,20 @@ def _analyze_session_kinetics(levels, price):
     bd = float(levels.get("breakdown_trigger", 0))
     atr = float(levels.get("atr", 0)) or (price * 0.01)
     
+    # Common Data
     range_size = abs(dr - ds)
     bps = (range_size / price) * 10000 if price > 0 else 500
     slope = float(levels.get("slope", 0))
     struct = float(levels.get("structure_score", 0))
 
+    # --- CRITICAL FIX: Calculate R based on TRIGGER, not just Daily Range ---
+    # Long Room = Distance from Breakout Trigger to Resistance
     r_long = abs(dr - bo) / atr if atr > 0 else 0
+    
+    # Short Room = Distance from Breakdown Trigger to Support
     r_short = abs(ds - bd) / atr if atr > 0 else 0
 
+    # Calculate Metrics for both
     m_long, s_long = _calculate_rich_metrics(bps, r_long, slope, struct)
     m_short, s_short = _calculate_rich_metrics(bps, r_short, slope, struct)
 
@@ -94,10 +87,14 @@ def _analyze_session_kinetics(levels, price):
     final_metrics = m_long
     final_score = s_long
     
+    # If both sides are blocked (< 1.0R), it is GROUNDED regardless of score
     if r_long < 1.0 and r_short < 1.0:
         bias = "GROUNDED"
-        final_score = max(s_long, s_short)
-        # Even if score is 40, if R < 1.0, it is technically zero useful score
+        final_score = 10 # Force low score if blocked
+        # Default to showing Long metrics but marked Red
+        final_metrics = m_long 
+        for k in final_metrics: final_metrics[k]['color'] = 'RED'
+    
     elif r_long > r_short + 0.5:
         bias = "LONG"
         final_metrics = m_long
@@ -107,7 +104,7 @@ def _analyze_session_kinetics(levels, price):
         final_metrics = m_short
         final_score = s_short
     else:
-        # Neutral - Pick higher
+        # Neutral - Pick higher score
         final_score = max(s_long, s_short)
         final_metrics = m_long if s_long >= s_short else m_short
     
@@ -115,8 +112,6 @@ def _analyze_session_kinetics(levels, price):
     status = "DOGFIGHT"
     if bias == "GROUNDED" or final_score <= 40: 
         status = "GROUNDED"
-        # If Grounded, ensure colors reflect danger even if components are okay
-        for k in final_metrics: final_metrics[k]['color'] = 'RED' 
     elif final_score >= 75: status = "SUPERSONIC"
     elif final_score >= 50: status = "SNIPER"
 

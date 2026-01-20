@@ -6,7 +6,11 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        body { background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
+        body { 
+            background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px;
+            /* LAYOUT FIX: Ensures full height for scrolling */
+            min-height: 100vh; box-sizing: border-box; overflow-y: auto;
+        }
         .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
         .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
         .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
@@ -28,7 +32,7 @@
         .btn-scan:hover { background: #38bdf8; }
         .btn-scan:disabled { background: #334155; color: #64748b; box-shadow: none; cursor: not-allowed; }
 
-        .radar-grid { display: grid; gap: 10px; }
+        .radar-grid { display: grid; gap: 10px; padding-bottom: 50px; }
         .radar-row { 
             display: grid; grid-template-columns: 1.5fr 1fr 1fr 3fr 1.5fr; 
             background: #0f172a; border: 1px solid #1e293b; padding: 20px; border-radius: 6px; align-items: center;
@@ -50,33 +54,41 @@
 
         .stat-badge { display: inline-block; padding: 6px 12px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; text-transform: uppercase; }
         
+        /* BARS & METRICS */
         .bars-container { display: flex; gap: 15px; height: 40px; align-items: flex-end; justify-content: space-around; }
         .bar-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; height: 100%; text-align: center; }
         .bar-fill { width:100%; border-radius: 2px; transition: height 0.5s; background:#334155; }
         .bar-lbl { font-size: 9px; color: #64748b; text-align: center; font-family: 'JetBrains Mono'; }
         .bar-val { font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; margin-bottom: 2px; }
         
+        /* COLORS */
+        .metric-CYAN { color: #06b6d4; } .metric-GREEN { color: #10b981; } .metric-RED { color: #ef4444; } .metric-YELLOW { color: #facc15; }
+        .bg-CYAN { background: #06b6d4; } .bg-GREEN { background: #10b981; } .bg-RED { background: #ef4444; } .bg-YELLOW { background: #facc15; }
+        
         .bias-badge { font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 3px; margin-left: 10px; vertical-align: middle; }
         .bias-long { background: rgba(16, 185, 129, 0.2); color: #10b981; }
         .bias-short { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
         
-        .metric-CYAN { color: #06b6d4; } .metric-GREEN { color: #10b981; } .metric-RED { color: #ef4444; } .metric-YELLOW { color: #facc15; }
-        .bg-CYAN { background: #06b6d4; } .bg-GREEN { background: #10b981; } .bg-RED { background: #ef4444; } .bg-YELLOW { background: #facc15; }
-
         .lock-btn { font-size:10px; padding:8px 16px; background:#1e293b; color:#fff; box-shadow:none; border:1px solid #334155; cursor: pointer; transition: 0.2s; }
         .lock-btn:hover { background: #334155; border-color: #fff; }
         .lock-btn:disabled { opacity: 0.3; cursor: not-allowed; border-color: #334155; }
+        
+        .scan-complete { font-family: 'JetBrains Mono'; color: #10b981; font-weight: 800; letter-spacing: 1px; display: none; }
     </style>
 </head>
 <body>
     {% include 'nav.html' %}
     <div class="radar-container">
         <div class="radar-header">
-            <div><div class="radar-sub">/// TACTICAL OVERWATCH</div><h2 class="radar-title">Market Radar</h2></div>
-            <div class="controls-box">
+            <div>
+                <div class="radar-sub">/// TACTICAL OVERWATCH</div>
+                <h2 class="radar-title">Market Radar</h2>
+            </div>
+            <div id="scanControls" class="controls-box">
                 <div id="sessionTimer" class="timer-display"><span style="color:#06b6d4;">SYNCING...</span></div>
                 <button id="scanBtn" class="btn-scan" onclick="manualScan()">INITIATE SCAN</button>
             </div>
+            <div id="scanCompleteBadge" class="scan-complete">✓ SCAN COMPLETE</div>
         </div>
         <div id="loading" style="display:none; text-align:center; padding:50px;">
             <div style="font-family:'JetBrains Mono'; color:#0ea5e9; font-size:14px; letter-spacing:1px; animation: blink 1s infinite;">ACQUIRING TARGETS...</div>
@@ -101,7 +113,10 @@
 
             if (h < 8 || (h === 8 && m < 30)) { timerEl.innerHTML = `<span style="color:#facc15;">PRE-MARKET</span> NY OPENS IN ${8 - h}h ${30 - m}m`; }
             else if (h === 8 && m >= 30) { const minsLeft = 59 - m; timerEl.innerHTML = `<span style="color:#ef4444; animation:blink 1s infinite;">● CALIBRATING</span> READY IN ${minsLeft}m`; }
-            else if (h === 9 && m === 0 && s < 30) { if (!hasFiredToday) { hasFiredToday = true; runScan(true); } timerEl.innerHTML = `<span style="color:#10b981;">● EXECUTING SCAN...</span>`; }
+            else if (h === 9 && m === 0 && s < 30) { 
+                if (!hasFiredToday) { hasFiredToday = true; runScan(true); } 
+                timerEl.innerHTML = `<span style="color:#10b981;">● EXECUTING SCAN...</span>`; 
+            }
             else { timerEl.innerHTML = `<span style="color:#0ea5e9;">SESSION ACTIVE</span> DATA LIVE`; }
         }
 
@@ -148,6 +163,11 @@
                 });
                 grid.innerHTML = html;
                 if(isAuto) sendNotification(data.results.length);
+                
+                // ONE SHOT LOGIC: Hide controls after successful scan
+                document.getElementById('scanControls').style.display = 'none';
+                document.getElementById('scanCompleteBadge').style.display = 'block';
+
             } catch(e) { alert("Scan Error: " + e.message); } 
             finally { loader.style.display = 'none'; grid.style.display = 'grid'; btn.disabled = false; btn.innerText = "REFRESH SCAN"; }
         }
