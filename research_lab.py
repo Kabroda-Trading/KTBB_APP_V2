@@ -1,278 +1,121 @@
-# research_lab.py
-# ==============================================================================
-# RESEARCH LAB CONTROLLER v8.3 (RESTORED + AI/SIMULATOR INTEGRATION)
-# ==============================================================================
-from __future__ import annotations
-from datetime import datetime, timedelta, timezone 
-from typing import Any, Dict, List, Optional
-import traceback
-import math 
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone
 
-import battlebox_pipeline
-import session_manager
-import sse_engine
-import structure_state_engine
-import battlebox_rules 
+async def run_kinetic_analysis(symbol, raw_5m, start_date, end_date, session_ids, sensors, min_score):
+    """
+    Step 2 Kinetic Engine: Calculates Energy, Space, Wind, Hull scores.
+    """
+    if not raw_5m or len(raw_5m) < 100:
+        return {"ok": False, "error": "Insufficient Data"}
 
-# --- NEW: EQUITY SIMULATOR ENGINE ---
-def _simulate_equity(sessions: List[Dict], start_bal: float, risk_pct: float, risk_cap: float) -> Dict[str, Any]:
-    balance = start_bal
-    equity_curve = []
-    max_bal = start_bal
-    max_drawdown = 0.0
-    wins = 0
-    losses = 0
+    # 1. Prepare Dataframe
+    df = pd.DataFrame(raw_5m)
+    df['time'] = pd.to_datetime(df['time'], unit='ms', utc=True)
+    df.set_index('time', inplace=True)
+    df.sort_index(inplace=True)
+
+    # 2. Calculate Step 2 Metrics (The Math)
+    # Energy: Bollinger Band Width (Lower is better = Coiled)
+    df['ma'] = df['close'].rolling(20).mean()
+    df['std'] = df['close'].rolling(20).std()
+    df['bb_w'] = (4 * df['std']) / df['close']
     
-    biggest_win_amt = 0.0
-    biggest_win_date = ""
+    # Space: ATR (Higher is better = Room to run)
+    df['tr'] = np.maximum(df['high'] - df['low'], abs(df['high'] - df['close'].shift(1)))
+    df['atr'] = df['tr'].rolling(14).mean()
+    
+    # Wind: Momentum Slope (Absolute strength)
+    df['slope'] = df['close'].diff(5).abs()
+    
+    # Hull: Structure location (Z-Score proxy)
+    df['z'] = (df['close'] - df['ma']) / df['std']
 
-    # Sort sessions by date
-    sessions.sort(key=lambda x: x["date"])
-
-    for s in sessions:
-        # Check if trade happened
-        go_data = s.get("events", {})
-        if not s["counts"]["had_go"]:
-            equity_curve.append({"date": s["date"], "bal": int(balance)})
-            continue
-
-        sim_trade = go_data.get("simulation", {})
-        # Safety check for empty simulation dict
-        if not sim_trade:
-             equity_curve.append({"date": s["date"], "bal": int(balance)})
-             continue
-             
-        r_realized = sim_trade.get("r_realized", 0.0)
-        outcome = sim_trade.get("outcome", "NO_TRADE")
-
-        if outcome == "NO_TRADE":
-            equity_curve.append({"date": s["date"], "bal": int(balance)})
-            continue
-
-        # RISK CALCULATION
-        risk_amt = balance * (risk_pct / 100.0)
-        
-        # RISK CAP 
-        if risk_cap > 0 and risk_amt > risk_cap:
-            risk_amt = risk_cap
-
-        pnl = 0.0
-        if r_realized > 0:
-            pnl = risk_amt * r_realized
-            wins += 1
-            if pnl > biggest_win_amt:
-                biggest_win_amt = pnl
-                biggest_win_date = s["date"]
-        elif r_realized < 0:
-            # Full risk loss
-            pnl = -risk_amt
-            losses += 1
-        
-        balance += pnl
-        
-        # DRAWDOWN
-        if balance > max_bal: max_bal = balance
-        dd = (max_bal - balance) / max_bal if max_bal > 0 else 0
-        if dd > max_drawdown: max_drawdown = dd
-
-        equity_curve.append({"date": s["date"], "bal": int(balance)})
-
-    is_bust = balance <= 0
-    total_trades = wins + losses
-    win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
-
-    return {
-        "start_bal": start_bal,
-        "end_bal": int(balance),
-        "return_pct": round(((balance - start_bal) / start_bal) * 100, 2) if start_bal > 0 else 0,
-        "max_drawdown_pct": round(max_drawdown * 100, 2),
-        "win_rate": round(win_rate, 1),
-        "total_trades": total_trades,
-        "biggest_win": {"date": biggest_win_date, "amt": int(biggest_win_amt)},
-        "is_bust": is_bust,
-        "equity_curve": equity_curve
+    results = []
+    
+    # 3. Session Times Map
+    SESSION_MAP = {
+        "us_ny_futures": "13:30", # 08:30 ET
+        "us_ny_equity": "14:30",  # 09:30 ET
+        "eu_london": "08:00",     # 03:00 ET
     }
 
-def _slice_by_ts(candles: List[Dict[str, Any]], start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
-    return [c for c in candles if start_ts <= c["time"] < end_ts]
+    # 4. Iterate Days
+    unique_days = pd.to_datetime(df.index.date).unique()
+    
+    for day in unique_days:
+        day_str = day.strftime("%Y-%m-%d")
+        if day_str < start_date or day_str > end_date: continue
 
-async def run_research_lab_from_candles(
-    symbol: str,
-    raw_5m: List[Dict[str, Any]],
-    start_date_utc: str,
-    end_date_utc: str,
-    session_ids: Optional[List[str]] = None,
-    exec_hours: int = 12,
-    tuning: Dict[str, Any] = None,
-    sim_settings: Dict[str, Any] = None # <--- Added Sim Settings
-) -> Dict[str, Any]:
-    try:
-        print(f"[LAB] Starting analysis for {symbol} ({len(raw_5m)} candles provided)")
-        if not raw_5m: return {"ok": False, "error": "No candles provided to Research Lab."}
-        raw_5m.sort(key=lambda x: x["time"])
-
-        start_dt = datetime.strptime(start_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        end_dt = datetime.strptime(end_date_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-
-        # USE SESSION MANAGER CONFIGS
-        target_ids = session_ids or [s["id"] for s in session_manager.SESSION_CONFIGS]
-        active_cfgs = [s for s in session_manager.SESSION_CONFIGS if s["id"] in target_ids]
-
-        tuning = tuning or {}
-        req_vol = bool(tuning.get("require_volume", False))
-        req_div = bool(tuning.get("require_divergence", False))
-        fusion_mode = bool(tuning.get("fusion_mode", False))
-        ignore_15m = bool(tuning.get("ignore_15m_alignment", False))
-        ignore_5m = bool(tuning.get("ignore_5m_stoch", False))
-        confirm_mode = tuning.get("confirmation_mode", "TOUCH")
-        tol_bps = int(tuning.get("zone_tolerance_bps", 10)) 
-        zone_tol = tol_bps / 10000.0
-
-        sessions_result: List[Dict[str, Any]] = []
-        curr_day = start_dt
-
-        while curr_day <= end_dt:
-            day_str = curr_day.strftime("%Y-%m-%d")
+        for sess_id in session_ids:
+            if sess_id not in SESSION_MAP: continue
             
-            for cfg in active_cfgs:
-                # USE SESSION MANAGER ANCHOR LOGIC
-                anchor_ts = session_manager.anchor_ts_for_utc_date(cfg, curr_day)
-                
-                lock_end_ts = anchor_ts + 1800
-                exec_end_ts = lock_end_ts + (exec_hours * 3600)
+            # Target Time
+            target = f"{day_str} {SESSION_MAP[sess_id]}"
+            try:
+                row = df.loc[target]
+            except KeyError:
+                try: row = df.asof(pd.to_datetime(target).replace(tzinfo=timezone.utc))
+                except: continue
 
-                calibration = _slice_by_ts(raw_5m, anchor_ts, lock_end_ts)
-                if len(calibration) < 6: continue
+            if row is None or pd.isna(row['ma']): continue
 
-                context_24h = _slice_by_ts(raw_5m, lock_end_ts - 86400, lock_end_ts)
-                post_lock = _slice_by_ts(raw_5m, lock_end_ts, exec_end_ts)
+            # 5. The Scoring Logic
+            # Each component is worth 25 points. Total 100.
+            score = 0
+            comps = {"energy":0, "space":0, "wind":0, "hull":0}
 
-                # --- ORIGINAL INPUT STRUCTURE PRESERVED ---
-                sse_input = {
-                    "locked_history_5m": context_24h,
-                    "slice_24h_5m": context_24h,
-                    "session_open_price": calibration[0]["open"],
-                    "r30_high": max(c["high"] for c in calibration),
-                    "r30_low": min(c["low"] for c in calibration),
-                    "last_price": context_24h[-1]["close"] if context_24h else 0.0,
-                    "tuning": tuning
-                }
-                computed = sse_engine.compute_sse_levels(sse_input)
-                if "error" in computed: continue
+            # Energy (Inverse: Low volatility is good)
+            if sensors.get("energy"):
+                # Scale: 0.002 width = 25pts, 0.02 width = 0pts
+                val = max(0, min(25, 25 - (row['bb_w'] * 1000)))
+                score += val
+                comps['energy'] = int(val)
 
-                levels = computed["levels"]
-                state = structure_state_engine.compute_structure_state(levels, post_lock, tuning=tuning)
-                had_acceptance = (state["permission"]["status"] == "EARNED")
-                side = state["permission"]["side"]
+            # Space (Direct: High ATR is good)
+            if sensors.get("space"):
+                # Scale: 0.5% ATR = 25pts
+                atr_pct = row['atr'] / row['close']
+                val = max(0, min(25, atr_pct * 5000))
+                score += val
+                comps['space'] = int(val)
 
-                go = {"ok": False, "go_type": "NONE", "go_ts": None, "reason": "NO_ACCEPTANCE", "evidence": {}}
-                
-                if had_acceptance and side in ("LONG", "SHORT") and post_lock:
-                    candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
-                    st15 = battlebox_rules.compute_stoch(candles_15m_proxy)
-                    
-                    go = battlebox_rules.detect_pullback_go(
-                        side=side, levels=levels, post_accept_5m=post_lock, stoch_15m_at_accept=st15, 
-                        use_zone="TRIGGER", require_volume=req_vol, require_divergence=req_div,
-                        fusion_mode=fusion_mode, zone_tol=zone_tol,
-                        ignore_15m=ignore_15m,
-                        ignore_5m_stoch=ignore_5m,
-                        confirmation_mode=confirm_mode
-                    )
+            # Wind (Direct: Momentum)
+            if sensors.get("wind"):
+                val = max(0, min(25, (row['slope'] / row['close']) * 5000))
+                score += val
+                comps['wind'] = int(val)
 
-                    if go["ok"]:
-                        stop_price = 0.0
-                        if side == "LONG": stop_price = min(c["low"] for c in calibration) 
-                        else: stop_price = max(c["high"] for c in calibration)
+            # Hull (Inverse: Extreme Z-score is bad/extended)
+            if sensors.get("hull"):
+                z = abs(row['z'])
+                # < 1.5 sigma = 25pts, > 2.5 sigma = 0pts
+                val = 25 if z < 1.5 else max(0, 25 - ((z-1.5)*25))
+                score += val
+                comps['hull'] = int(val)
 
-                        trade_candles = [c for c in raw_5m if c["time"] > go["go_ts"] and c["time"] < exec_end_ts]
-                        
-                        sim = battlebox_rules.simulate_trade(
-                            entry_price=levels.get("breakout_trigger") if side == "LONG" else levels.get("breakdown_trigger"),
-                            entry_ts=go["go_ts"],
-                            stop_price=stop_price,
-                            direction=side,
-                            levels=levels,
-                            future_candles=trade_candles
-                        )
-                        go["simulation"] = sim
+            # 6. Normalize Score
+            # If user only checks 2 boxes, max raw score is 50.
+            # We scale that back to 0-100.
+            active_count = sum(1 for v in sensors.values() if v)
+            final_score = 0
+            if active_count > 0:
+                final_score = int((score / (active_count * 25)) * 100)
 
-                # CALCULATE BPS FOR AI
-                dr = levels.get("daily_resistance", 0)
-                ds = levels.get("daily_support", 0)
-                anchor_price = levels.get("session_open_price", 0)
-                rg = abs(dr - ds)
-                bps = (rg / anchor_price * 10000) if anchor_price else 0
+            results.append({
+                "date": f"{day_str} [{sess_id}]",
+                "score": final_score,
+                "comps": comps
+            })
 
-                sessions_result.append({
-                    "ok": True,
-                    "date": day_str,
-                    "session_id": cfg["id"],
-                    "session_name": cfg["name"],
-                    "kinetic": { 
-                        "total_score": 0, 
-                        "protocol": state["action"], 
-                        "bps": int(bps)
-                    },
-                    "levels_compact": {
-                        "BO": levels.get("breakout_trigger"),
-                        "BD": levels.get("breakdown_trigger"),
-                        "DS": levels.get("daily_support"),
-                        "DR": levels.get("daily_resistance")
-                    },
-                    "counts": {
-                        "had_acceptance": had_acceptance,
-                        "had_alignment": (state["execution"]["gates_mode"] == "LOCKED"),
-                        "had_go": bool(go["ok"]),
-                        "go_type": go.get("go_type"),
-                    },
-                    "events": {
-                        "acceptance_side": side,
-                        "final_state": state.get("action"),
-                        "go_ts": go.get("go_ts"),
-                        "go_reason": go.get("reason"),
-                        "fail_reason": state.get("diagnostics", {}).get("fail_reason", "UNKNOWN"),
-                        "simulation": go.get("simulation") 
-                    },
-                    "strategy": go.get("simulation", {}) 
-                })
-            curr_day += timedelta(days=1)
-
-        # --- RUN SIMULATION ---
-        sim_settings = sim_settings or {"start_bal": 10000, "risk_pct": 1.0, "risk_cap": 0}
-        simulation = _simulate_equity(
-            sessions_result, 
-            float(sim_settings.get("start_bal", 10000)),
-            float(sim_settings.get("risk_pct", 1.0)),
-            float(sim_settings.get("risk_cap", 0))
-        )
-
-        total = len(sessions_result)
-        fail_reasons = {}
-        for s in sessions_result:
-            r = s["events"].get("fail_reason")
-            if r: fail_reasons[r] = fail_reasons.get(r, 0) + 1
-            
-        print(f"[LAB] Analysis complete. Sessions: {total}. End Bal: {simulation['end_bal']}")
-
-        return {
-            "ok": True,
-            "symbol": symbol,
-            "range": {"start": start_date_utc, "end": end_date_utc},
-            "stats": {
-                "sessions_total": total,
-                "acceptance_count": sum(1 for s in sessions_result if s["counts"]["had_acceptance"]),
-                "go_count": sum(1 for s in sessions_result if s["counts"]["had_go"]),
-                "campaign_go_count": sum(1 for s in sessions_result if s["counts"]["go_type"] == "CAMPAIGN_GO"),
-                "scalp_go_count": sum(1 for s in sessions_result if s["counts"]["go_type"] == "SCALP_GO"),
-                "fail_reasons": fail_reasons,
-                # New Sim Stats
-                "win_rate": simulation["win_rate"],
-                "pnl_total": simulation["return_pct"]
-            },
-            "simulation": simulation,
-            "sessions": sessions_result
-        }
-    except Exception as e:
-        traceback.print_exc()
-        return {"ok": False, "error": str(e)}
+    # Summary
+    valid = [r for r in results if r['score'] >= min_score]
+    
+    return {
+        "ok": True,
+        "total_sessions": len(results),
+        "valid_signals": len(valid),
+        "avg_score": int(np.mean([r['score'] for r in results])) if results else 0,
+        "fire_rate": int((len(valid)/len(results))*100) if results else 0,
+        "results": results
+    }
