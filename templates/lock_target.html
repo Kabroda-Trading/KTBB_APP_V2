@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Kabroda | Target Lock</title>
+    <title>Kabroda | Target Lock v2.6</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <style>
         :root { 
@@ -10,20 +10,30 @@
             --cyan: #22d3ee; --green: #10b981; --red: #ef4444; --gold: #facc15; --white: #f8fafc;
             --gray: #94a3b8; --dark-gray: #475569;
         }
-        body { background: var(--bg); color: var(--white); font-family: 'JetBrains Mono', monospace; margin: 0; padding: 15px; height: 100vh; box-sizing: border-box; overflow: hidden; }
-        
-        /* UNIVERSAL LAYOUT (SAME AS OMEGA v17.4) */
+        body { 
+            background: var(--bg); color: var(--white); font-family: 'JetBrains Mono', monospace; 
+            margin: 0; padding: 15px; min-height: 100vh; box-sizing: border-box; 
+        }
+
+        /* RESPONSIVE GRID */
         .cockpit { 
-            display: grid; 
-            grid-template-columns: 320px 1fr 360px; 
-            grid-template-rows: 70px 1fr 180px; 
-            gap: 15px; height: 100%; 
+            display: grid; gap: 15px; min-height: 850px;
+            grid-template-columns: 320px 1fr 360px;
+            grid-template-rows: auto 1fr auto; 
+            grid-template-areas: "header header header" "left center right" "footer footer footer";
         }
         
-        .header { grid-column: 1 / 4; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 5px; }
-        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 25px; display: flex; flex-direction: column; min-height: 0; }
-        .panel-center { background: #0b1121; }
-        
+        @media (max-width: 1200px) {
+            .cockpit { display: flex; flex-direction: column; min-height: auto; }
+        }
+
+        .header { grid-area: header; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 5px; margin-bottom: 10px; }
+        .panel-left { grid-area: left; }
+        .panel-center { grid-area: center; background: #0b1121; }
+        .panel-right { grid-area: right; }
+        .footer-section { grid-area: footer; }
+
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 25px; display: flex; flex-direction: column; }
         .h-title { font-family: 'Rajdhani', sans-serif; font-weight: 800; font-size: 32px; color: var(--cyan); letter-spacing: 1.5px; margin: 0; text-shadow: 0 0 10px rgba(34, 211, 238, 0.2); }
         .panel-head { font-family: 'Rajdhani', sans-serif; font-weight: 800; font-size: 20px; color: var(--cyan); letter-spacing: 1px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 5px; text-transform: uppercase; }
         .back-link { display: block; font-size: 11px; font-weight: 800; color: var(--gray); text-decoration: none; margin-bottom: 5px; letter-spacing: 1px; transition: 0.2s; }
@@ -34,13 +44,18 @@
         .big-price { font-size: 42px; font-weight: 800; color: #fff; font-family: 'Rajdhani'; }
 
         /* WIDGETS */
+        .radar-box { background: #0f172a; padding: 15px; border-radius: 8px; border: 1px dashed var(--border); text-align: center; position: relative; margin-bottom: 20px; }
+        .radar-track { height: 8px; background: #1e293b; position: relative; border-radius: 4px; margin: 35px 0 15px 0; }
+        .radar-puck { position: absolute; top: -14px; width: 14px; height: 36px; background: #fff; border: 2px solid var(--cyan); transform: translateX(-50%); left: 50%; transition: left 0.5s; display: block; box-shadow: 0 0 10px var(--cyan); }
+        .radar-msg { font-family: 'Rajdhani'; font-weight: 800; font-size: 24px; color: var(--gray); margin-top: 10px; letter-spacing: 1px; }
+        .radar-label { position: absolute; top: 28px; font-size: 11px; font-weight: 800; color: var(--gray); width: 60px; transform: translateX(-30px); }
+
         .verdict-banner { background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border); border-left: 6px solid var(--gray); padding: 20px; border-radius: 6px; margin-bottom: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
         .verdict-score { font-size: 56px; font-weight: 800; font-family: 'Rajdhani'; line-height: 1; color: #fff; }
         .verdict-status { font-size: 32px; font-weight: 800; font-family: 'Rajdhani'; text-transform: uppercase; }
         
-        .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 15px; flex-grow: 1; }
+        .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; flex-grow: 1; }
         .dash-card { background: #0f172a; padding: 15px; border-radius: 6px; border: 1px solid var(--border); text-align: center; display: flex; flex-direction: column; justify-content: center; }
-        
         .gauge-bar-bg { height: 8px; background: #1e293b; position: relative; border-radius: 4px; overflow: hidden; margin-top: 8px; width: 100%; }
         .gauge-fill { height: 100%; background: var(--cyan); width: 0%; transition: width 1s; }
         
@@ -51,9 +66,8 @@
         .btn-cp { background: var(--border); border: none; color: var(--white); padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px; font-weight: 700; margin-left: 8px; }
         .inp-risk { background: #020617; border: 1px solid var(--gray); color: #fff; padding: 10px; width: 100%; text-align: right; font-family: inherit; font-weight: 700; margin-bottom: 15px; font-size: 16px; }
         
-        /* FOOTER (UNIVERSAL) */
-        .footer-toggle { grid-column: 1 / 4; background: var(--panel); color: var(--gray); padding: 8px 20px; font-size: 13px; font-weight: 700; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; display:flex; justify-content:space-between; }
-        .footer-content { grid-column: 1 / 4; background: #020617; height: 0; overflow: hidden; transition: height 0.3s; }
+        .footer-toggle { background: var(--panel); color: var(--gray); padding: 10px 20px; font-size: 13px; font-weight: 700; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; display:flex; justify-content:space-between; margin-top:10px; }
+        .footer-content { background: #020617; height: 0; overflow: hidden; transition: height 0.3s; }
         .footer-content.open { height: 150px; border: 1px solid var(--border); padding: 15px; overflow-y: auto; }
         .log-box { font-family: 'Courier New', monospace; font-size: 14px; color: #cbd5e1; }
     </style>
@@ -78,7 +92,7 @@
         </div>
     </div>
 
-    <div class="panel">
+    <div class="panel panel-left">
         <div class="panel-head">RISK MANAGEMENT</div>
         <div class="lbl">ACCOUNT BALANCE ($)</div>
         <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="render()">
@@ -105,7 +119,7 @@
         </div>
     </div>
 
-    <div class="panel">
+    <div class="panel panel-right">
         <div class="panel-head">FLIGHT PATH</div>
         <div class="data-row"><span class="lbl">ENTRY TRIGGER</span><div><span id="pEntry" class="val" style="color:var(--cyan)">--</span><button class="btn-cp" onclick="cp('pEntry')">CP</button></div></div>
         <div class="data-row"><span class="lbl">STOP LOSS</span><div><span id="pStop" class="val" style="color:var(--red)">--</span><button class="btn-cp" onclick="cp('pStop')">CP</button></div></div>
@@ -116,8 +130,10 @@
         <div class="data-row"><span class="lbl">TARGET 3</span><div><span id="pT3" class="val">--</span><button class="btn-cp" onclick="cp('pT3')">CP</button></div></div>
     </div>
 
-    <div class="footer-toggle" onclick="toggleFooter()"><span>/// BLACK BOX RECORDER</span><span>[EXPAND]</span></div>
-    <div id="footerContent" class="footer-content"><div id="logBox" class="log-box"></div></div>
+    <div class="footer-section">
+        <div class="footer-toggle" onclick="toggleFooter()"><span>/// BLACK BOX RECORDER</span><span>[EXPAND]</span></div>
+        <div id="footerContent" class="footer-content"><div id="logBox" class="log-box"></div></div>
+    </div>
 </div>
 
 <script>
