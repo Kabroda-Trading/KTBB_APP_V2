@@ -11,31 +11,36 @@
             --gray: #94a3b8; --dark-gray: #475569;
         }
         body { background: var(--bg); color: var(--white); font-family: 'JetBrains Mono', monospace; margin: 0; padding: 15px; height: 100vh; box-sizing: border-box; overflow: hidden; }
-        .cockpit { display: grid; grid-template-columns: 320px 1fr 360px; grid-template-rows: 70px 1fr 180px; gap: 15px; height: 100%; }
+        
+        /* UNIVERSAL LAYOUT (SAME AS OMEGA v17.4) */
+        .cockpit { 
+            display: grid; 
+            grid-template-columns: 320px 1fr 360px; 
+            grid-template-rows: 70px 1fr 180px; 
+            gap: 15px; height: 100%; 
+        }
+        
         .header { grid-column: 1 / 4; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 5px; }
         .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 25px; display: flex; flex-direction: column; min-height: 0; }
         .panel-center { background: #0b1121; }
+        
         .h-title { font-family: 'Rajdhani', sans-serif; font-weight: 800; font-size: 32px; color: var(--cyan); letter-spacing: 1.5px; margin: 0; text-shadow: 0 0 10px rgba(34, 211, 238, 0.2); }
         .panel-head { font-family: 'Rajdhani', sans-serif; font-weight: 800; font-size: 20px; color: var(--cyan); letter-spacing: 1px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 5px; text-transform: uppercase; }
-        .lbl { font-size: 12px; color: #cbd5e1; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; display:block; }
-        .val { font-size: 18px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
-        .big-price { font-size: 42px; font-weight: 800; color: #fff; font-family: 'Rajdhani'; }
         .back-link { display: block; font-size: 11px; font-weight: 800; color: var(--gray); text-decoration: none; margin-bottom: 5px; letter-spacing: 1px; transition: 0.2s; }
         .back-link:hover { color: var(--white); }
 
-        /* OMEGA WIDGETS */
-        .radar-box { background: #0f172a; padding: 15px; border-radius: 8px; border: 1px dashed var(--border); text-align: center; position: relative; margin-bottom: 20px; }
-        .radar-track { height: 8px; background: #1e293b; position: relative; border-radius: 4px; margin: 35px 0 15px 0; }
-        .radar-puck { position: absolute; top: -14px; width: 14px; height: 36px; background: #fff; border: 2px solid var(--cyan); transform: translateX(-50%); left: 50%; transition: left 0.5s; display: block; box-shadow: 0 0 10px var(--cyan); }
-        .radar-msg { font-family: 'Rajdhani'; font-weight: 800; font-size: 24px; color: var(--gray); margin-top: 10px; letter-spacing: 1px; }
-        .radar-label { position: absolute; top: 28px; font-size: 11px; font-weight: 800; color: var(--gray); width: 60px; transform: translateX(-30px); }
+        .lbl { font-size: 12px; color: #cbd5e1; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; display:block; }
+        .val { font-size: 18px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
+        .big-price { font-size: 42px; font-weight: 800; color: #fff; font-family: 'Rajdhani'; }
 
+        /* WIDGETS */
         .verdict-banner { background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border); border-left: 6px solid var(--gray); padding: 20px; border-radius: 6px; margin-bottom: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
         .verdict-score { font-size: 56px; font-weight: 800; font-family: 'Rajdhani'; line-height: 1; color: #fff; }
         .verdict-status { font-size: 32px; font-weight: 800; font-family: 'Rajdhani'; text-transform: uppercase; }
         
         .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 15px; flex-grow: 1; }
         .dash-card { background: #0f172a; padding: 15px; border-radius: 6px; border: 1px solid var(--border); text-align: center; display: flex; flex-direction: column; justify-content: center; }
+        
         .gauge-bar-bg { height: 8px; background: #1e293b; position: relative; border-radius: 4px; overflow: hidden; margin-top: 8px; width: 100%; }
         .gauge-fill { height: 100%; background: var(--cyan); width: 0%; transition: width 1s; }
         
@@ -45,7 +50,12 @@
         .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px dashed var(--dark-gray); padding-bottom: 8px; }
         .btn-cp { background: var(--border); border: none; color: var(--white); padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px; font-weight: 700; margin-left: 8px; }
         .inp-risk { background: #020617; border: 1px solid var(--gray); color: #fff; padding: 10px; width: 100%; text-align: right; font-family: inherit; font-weight: 700; margin-bottom: 15px; font-size: 16px; }
-        .footer-toggle { grid-column: 1 / 4; background: var(--panel); color: var(--gray); padding: 8px 20px; font-size: 13px; font-weight: 700; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; }
+        
+        /* FOOTER (UNIVERSAL) */
+        .footer-toggle { grid-column: 1 / 4; background: var(--panel); color: var(--gray); padding: 8px 20px; font-size: 13px; font-weight: 700; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; display:flex; justify-content:space-between; }
+        .footer-content { grid-column: 1 / 4; background: #020617; height: 0; overflow: hidden; transition: height 0.3s; }
+        .footer-content.open { height: 150px; border: 1px solid var(--border); padding: 15px; overflow-y: auto; }
+        .log-box { font-family: 'Courier New', monospace; font-size: 14px; color: #cbd5e1; }
     </style>
 </head>
 <body>
@@ -81,22 +91,9 @@
     </div>
 
     <div class="panel panel-center">
-        <div class="radar-box">
-            <div class="lbl" style="position:absolute; top:10px; left:15px; color:var(--cyan);">EXECUTION MONITOR</div>
-            <div class="radar-track">
-                <div class="radar-label" style="left: 0%;">STOP</div>
-                <div class="radar-label" style="left: 25%; color: var(--cyan);">ENTRY</div>
-                <div class="radar-label" style="left: 100%; color: var(--gold);">TARGET</div>
-                <div id="radarPuck" class="radar-puck"></div>
-            </div>
-            <div id="radarMsg" class="radar-msg">SYSTEM IDLE</div>
-        </div>
-
         <div id="verdictBanner" class="verdict-banner">
             <div class="lbl" style="font-size:14px; margin-bottom:10px;">SESSION VIABILITY</div>
-            <div class="verdict-score-row">
-                <div id="dScore" class="verdict-score">--</div>
-            </div>
+            <div class="verdict-score-row"><div id="dScore" class="verdict-score">--</div></div>
             <div id="dProtocol" class="verdict-status">OFFLINE</div>
         </div>
 
@@ -119,7 +116,8 @@
         <div class="data-row"><span class="lbl">TARGET 3</span><div><span id="pT3" class="val">--</span><button class="btn-cp" onclick="cp('pT3')">CP</button></div></div>
     </div>
 
-    <div class="footer-toggle" style="margin-top:15px;"><span>/// BLACK BOX RECORDER</span></div>
+    <div class="footer-toggle" onclick="toggleFooter()"><span>/// BLACK BOX RECORDER</span><span>[EXPAND]</span></div>
+    <div id="footerContent" class="footer-content"><div id="logBox" class="log-box"></div></div>
 </div>
 
 <script>
@@ -127,9 +125,21 @@
     const symbol = urlParams.get('symbol') || 'BTCUSDT';
     document.getElementById('tSym').innerText = symbol.replace('USDT', '') + " LOCK";
 
-    let state = { data: null };
+    let state = { data: null, footerOpen: false };
 
-    function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText.replace(/,/g,'')); }
+    function toggleFooter() {
+        state.footerOpen = !state.footerOpen;
+        document.getElementById('footerContent').classList.toggle('open', state.footerOpen);
+    }
+    
+    function log(msg) {
+        const ts = new Date().toLocaleTimeString('en-US', {hour12:false});
+        const box = document.getElementById('logBox');
+        box.innerHTML += `<div>[${ts}] ${msg}</div>`;
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText.replace(/,/g,'')); log("Copied to clipboard"); }
 
     function render() {
         if(!state.data) return;
@@ -138,7 +148,7 @@
         document.getElementById('dScore').innerText = d.score;
         document.getElementById('dProtocol').innerText = d.status;
         
-        // Colors & Bias
+        // BIAS & COLORS
         const bias = d.bias;
         const bEl = document.getElementById('biasBadge');
         bEl.innerText = `BIAS: ${bias}`;
@@ -151,9 +161,10 @@
         document.getElementById('verdictBanner').style.borderLeftColor = themeColor;
         document.getElementById('dProtocol').style.color = themeColor;
 
-        // Metrics
+        // METRICS
         const m = d.metrics;
         const updateMetric = (id, obj) => {
+            if(!obj) return;
             document.getElementById(id+'Val').innerText = obj.text.split(' ')[0];
             document.getElementById('bar'+id.substring(1)).style.width = obj.pct + "%";
             document.getElementById('bar'+id.substring(1)).style.background = (obj.color === 'CYAN' || obj.color === 'GREEN') ? '#10b981' : '#ef4444';
@@ -163,8 +174,8 @@
         updateMetric('dWind', m.wind);
         updateMetric('dHull', m.hull);
 
-        // Flight Plan
-        const p = d.plans[bias] || {valid:false}; // Auto-select based on Bias
+        // FLIGHT PLAN
+        const p = d.plans[bias] || {valid:false};
         if(p.valid) {
             document.getElementById('pEntry').innerText = p.entry.toLocaleString();
             document.getElementById('pStop').innerText = p.stop.toLocaleString();
@@ -184,6 +195,7 @@
             document.getElementById('pSize').innerText = Math.floor(sizeUsd).toLocaleString();
         } else {
             document.getElementById('pEntry').innerText = "BLOCKED";
+            document.getElementById('pSize').innerText = "--";
         }
     }
 
@@ -191,11 +203,11 @@
         try {
             const res = await fetch('/api/radar/target', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ symbol: symbol }) });
             const json = await res.json();
-            if(json.ok) { state.data = json.result; render(); }
+            if(json.ok) { state.data = json.result; render(); log("Target Data Locked."); }
         } catch(e) { console.error(e); }
     }
     loadData();
-    setInterval(loadData, 5000); // Live Updates
+    setInterval(loadData, 5000); 
 </script>
 </body>
 </html>
