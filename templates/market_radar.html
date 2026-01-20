@@ -8,12 +8,10 @@
     <style>
         body { background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
         .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
-        
         .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
         .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
         .radar-sub { font-size: 12px; color: #94a3b8; font-family: 'JetBrains Mono'; }
         
-        /* TIMER BOX - VISIBLE INDICATOR OF AUTOMATION */
         .controls-box { display: flex; gap: 20px; align-items: center; }
         .timer-display {
             font-family: 'JetBrains Mono'; font-size: 12px; color: #facc15; 
@@ -27,7 +25,7 @@
             text-transform: uppercase; letter-spacing: 1px; transition: 0.2s;
             box-shadow: 0 0 20px rgba(14, 165, 233, 0.3);
         }
-        .btn-scan:hover { background: #38bdf8; box-shadow: 0 0 30px rgba(56, 189, 248, 0.5); }
+        .btn-scan:hover { background: #38bdf8; }
         .btn-scan:disabled { background: #334155; color: #64748b; box-shadow: none; cursor: not-allowed; }
 
         .radar-grid { display: grid; gap: 10px; }
@@ -36,12 +34,11 @@
             background: #0f172a; border: 1px solid #1e293b; padding: 20px; border-radius: 6px; align-items: center;
             transition: transform 0.2s;
         }
-        .radar-row:hover { transform: translateX(5px); border-color: #38bdf8; }
         
         .status-super { border-left: 4px solid #facc15; box-shadow: 0 0 15px rgba(250, 204, 21, 0.1); }
         .status-sniper { border-left: 4px solid #10b981; }
-        .status-dog { border-left: 4px solid #64748b; opacity: 0.7; }
-        .status-ground { border-left: 4px solid #ef4444; opacity: 0.5; }
+        .status-dog { border-left: 4px solid #64748b; }
+        .status-ground { border-left: 4px solid #ef4444; opacity: 0.6; }
 
         .sym-box { display: flex; flex-direction: column; }
         .sym-name { font-size: 20px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
@@ -51,197 +48,109 @@
         .score-val { font-size: 32px; font-weight: 800; font-family: 'JetBrains Mono'; line-height: 1; }
         .score-lbl { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
 
-        .stat-badge { 
-            display: inline-block; padding: 6px 12px; border-radius: 4px; 
-            font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; text-transform: uppercase;
-        }
+        .stat-badge { display: inline-block; padding: 6px 12px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; text-transform: uppercase; }
         
-        .bars-container { display: flex; gap: 8px; height: 40px; align-items: flex-end; }
-        .bar-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; height: 100%; }
-        .bar-fill { background: #334155; width: 100%; border-radius: 2px; transition: height 0.5s; }
+        .bars-container { display: flex; gap: 15px; height: 40px; align-items: flex-end; justify-content: space-around; }
+        .bar-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; height: 100%; text-align: center; }
+        .bar-fill { width:100%; border-radius: 2px; transition: height 0.5s; background:#334155; }
         .bar-lbl { font-size: 9px; color: #64748b; text-align: center; font-family: 'JetBrains Mono'; }
+        .bar-val { font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; margin-bottom: 2px; }
+        
+        .bias-badge { font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 3px; margin-left: 10px; vertical-align: middle; }
+        .bias-long { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .bias-short { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        
+        .metric-CYAN { color: #06b6d4; } .metric-GREEN { color: #10b981; } .metric-RED { color: #ef4444; } .metric-YELLOW { color: #facc15; }
+        .bg-CYAN { background: #06b6d4; } .bg-GREEN { background: #10b981; } .bg-RED { background: #ef4444; } .bg-YELLOW { background: #facc15; }
+
+        .lock-btn { font-size:10px; padding:8px 16px; background:#1e293b; color:#fff; box-shadow:none; border:1px solid #334155; cursor: pointer; transition: 0.2s; }
+        .lock-btn:hover { background: #334155; border-color: #fff; }
+        .lock-btn:disabled { opacity: 0.3; cursor: not-allowed; border-color: #334155; }
     </style>
 </head>
 <body>
-
     {% include 'nav.html' %}
-
     <div class="radar-container">
         <div class="radar-header">
-            <div>
-                <div class="radar-sub">/// TACTICAL OVERWATCH</div>
-                <h2 class="radar-title">Market Radar</h2>
-            </div>
+            <div><div class="radar-sub">/// TACTICAL OVERWATCH</div><h2 class="radar-title">Market Radar</h2></div>
             <div class="controls-box">
-                <div id="sessionTimer" class="timer-display">
-                    <span style="color:#06b6d4;">SYNCING...</span>
-                </div>
-                <button id="scanBtn" class="btn-scan" onclick="manualScan()">REFRESH SCAN</button>
+                <div id="sessionTimer" class="timer-display"><span style="color:#06b6d4;">SYNCING...</span></div>
+                <button id="scanBtn" class="btn-scan" onclick="manualScan()">INITIATE SCAN</button>
             </div>
         </div>
-
         <div id="loading" style="display:none; text-align:center; padding:50px;">
-            <div style="font-family:'JetBrains Mono'; color:#0ea5e9; font-size:14px; letter-spacing:1px; animation: blink 1s infinite;">
-                ACQUIRING TARGETS (NY FUTURES PROTOCOL)...
-            </div>
+            <div style="font-family:'JetBrains Mono'; color:#0ea5e9; font-size:14px; letter-spacing:1px; animation: blink 1s infinite;">ACQUIRING TARGETS...</div>
         </div>
-
         <div id="radarTargetGrid" class="radar-grid">
-            <div style="text-align:center; color:#64748b; padding:40px; font-family:'JetBrains Mono';">
-                SYSTEM STANDBY. WAITING FOR 09:00 ET TRIGGER.
-            </div>
+            <div style="text-align:center; color:#64748b; padding:40px; font-family:'JetBrains Mono';">SYSTEM STANDBY. PRESS SCAN.</div>
         </div>
     </div>
-
     <style> @keyframes blink { 50% { opacity: 0.5; } } </style>
-
     <script>
-        // --- 1. NOTIFICATIONS (The "Ding") ---
-        function requestNotify() {
-            if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
-                Notification.requestPermission();
-            }
-        }
-        function sendNotification(count) {
-            if (Notification.permission === "granted") {
-                new Notification("BattleBox Radar", {
-                    body: `Calibration Complete. ${count} Targets Scanned. Review SuperSonics now.`,
-                    icon: "/static/favicon.ico"
-                });
-            }
-        }
+        function requestNotify() { if ("Notification" in window && Notification.permission !== "granted") Notification.requestPermission(); }
+        function sendNotification(count) { if (Notification.permission === "granted") new Notification("BattleBox Radar", { body: `Calibration Complete. ${count} Targets Scanned.` }); }
 
-        // --- 2. NY SESSION TIMER (THE AUTOMATION BRAIN) ---
-        // Logic: Checks time every second. Triggers scan exactly at 09:00:05 ET.
-        let timerInterval;
-        let hasFiredToday = false;
-
-        function startClock() {
-            requestNotify(); // Ask for permission immediately
-            updateClock();
-            timerInterval = setInterval(updateClock, 1000);
-        }
-
+        let timerInterval; let hasFiredToday = false;
+        function startClock() { requestNotify(); updateClock(); timerInterval = setInterval(updateClock, 1000); }
         function updateClock() {
-            // Get current time in New York
             const now = new Date();
             const nyTimeString = now.toLocaleString("en-US", {timeZone: "America/New_York"});
             const nyTime = new Date(nyTimeString);
-
-            // Extract NY Time components
-            const h = nyTime.getHours();
-            const m = nyTime.getMinutes();
-            const s = nyTime.getSeconds();
-            
+            const h = nyTime.getHours(); const m = nyTime.getMinutes(); const s = nyTime.getSeconds();
             const timerEl = document.getElementById('sessionTimer');
 
-            // CASE 1: PRE-MARKET (< 08:30)
-            if (h < 8 || (h === 8 && m < 30)) {
-                timerEl.innerHTML = `<span style="color:#facc15;">PRE-MARKET</span> NY OPENS IN ${8 - h}h ${30 - m}m`;
-            }
-            // CASE 2: CALIBRATION PHASE (08:30 - 09:00) -> The Countdown
-            else if (h === 8 && m >= 30) {
-                const minsLeft = 59 - m; // count down to 09:00
-                const secsLeft = 59 - s;
-                timerEl.innerHTML = `<span style="color:#ef4444; animation:blink 1s infinite;">● CALIBRATING</span> READY IN ${minsLeft}m ${secsLeft}s`;
-            }
-            // CASE 3: TRIGGER MOMENT (09:00:00 - 09:00:30)
-            // We give it a 30 second window to catch the trigger
-            else if (h === 9 && m === 0 && s < 30) {
-                if (!hasFiredToday) {
-                    hasFiredToday = true;
-                    console.log("MARKET OPEN CONFIRMED. FIRING RADAR.");
-                    runScan(true); // TRUE = "This is an Auto Scan"
-                }
-                timerEl.innerHTML = `<span style="color:#10b981;">● EXECUTING SCAN...</span>`;
-            }
-            // CASE 4: SESSION ACTIVE (> 09:00)
-            else {
-                timerEl.innerHTML = `<span style="color:#0ea5e9;">SESSION ACTIVE</span> DATA LIVE`;
-            }
+            if (h < 8 || (h === 8 && m < 30)) { timerEl.innerHTML = `<span style="color:#facc15;">PRE-MARKET</span> NY OPENS IN ${8 - h}h ${30 - m}m`; }
+            else if (h === 8 && m >= 30) { const minsLeft = 59 - m; timerEl.innerHTML = `<span style="color:#ef4444; animation:blink 1s infinite;">● CALIBRATING</span> READY IN ${minsLeft}m`; }
+            else if (h === 9 && m === 0 && s < 30) { if (!hasFiredToday) { hasFiredToday = true; runScan(true); } timerEl.innerHTML = `<span style="color:#10b981;">● EXECUTING SCAN...</span>`; }
+            else { timerEl.innerHTML = `<span style="color:#0ea5e9;">SESSION ACTIVE</span> DATA LIVE`; }
         }
 
-        // --- 3. SCANNER LOGIC ---
-        async function manualScan() {
-            await runScan(false);
-        }
-
+        async function manualScan() { await runScan(false); }
         async function runScan(isAuto) {
             const btn = document.getElementById('scanBtn');
             const grid = document.getElementById('radarTargetGrid');
             const loader = document.getElementById('loading');
-
-            btn.disabled = true;
-            btn.innerText = isAuto ? "AUTO SCANNING..." : "SCANNING...";
-            grid.style.display = 'none';
-            loader.style.display = 'block';
+            btn.disabled = true; btn.innerText = "SCANNING...";
+            grid.style.display = 'none'; loader.style.display = 'block';
 
             try {
-                // Call the Backend Engine
                 const res = await fetch('/api/radar/scan', { method: 'POST' });
                 const data = await res.json();
-                
                 if(!data.ok) throw new Error("Scan Failed");
 
-                // Render the Grid
                 let html = "";
                 data.results.forEach(t => {
-                    let rowClass = "status-dog";
-                    let scoreColor = "#94a3b8";
-                    let badgeBg = "#1e293b";
-                    let badgeColor = "#94a3b8";
+                    let rowClass = "status-dog"; let scoreColor = "#94a3b8"; let badgeBg = "#1e293b"; let badgeColor = "#94a3b8"; let isGrounded = false;
+                    if (t.status === "SUPERSONIC") { rowClass = "status-super"; scoreColor = "#facc15"; badgeBg = "rgba(250, 204, 21, 0.2)"; badgeColor = "#facc15"; }
+                    else if (t.status === "SNIPER") { rowClass = "status-sniper"; scoreColor = "#10b981"; badgeBg = "rgba(16, 185, 129, 0.2)"; badgeColor = "#10b981"; }
+                    else if (t.status === "GROUNDED") { rowClass = "status-ground"; scoreColor = "#ef4444"; badgeBg = "rgba(239, 68, 68, 0.2)"; badgeColor = "#ef4444"; isGrounded = true; }
 
-                    if (t.status === "SUPERSONIC") { 
-                        rowClass = "status-super"; scoreColor = "#facc15"; badgeBg = "rgba(250, 204, 21, 0.2)"; badgeColor = "#facc15";
-                    } else if (t.status === "SNIPER") {
-                        rowClass = "status-sniper"; scoreColor = "#10b981"; badgeBg = "rgba(16, 185, 129, 0.2)"; badgeColor = "#10b981";
-                    }
+                    const m = t.metrics || {};
+                    let biasHtml = "";
+                    if (t.bias === "LONG") biasHtml = `<span class="bias-badge bias-long">L</span>`;
+                    if (t.bias === "SHORT") biasHtml = `<span class="bias-badge bias-short">S</span>`;
 
-                    const m = t.metrics;
                     html += `
                     <div class="radar-row ${rowClass}">
-                        <div class="sym-box">
-                            <span class="sym-name">${t.symbol.replace('USDT','')}</span>
-                            <span class="sym-price">$${t.price.toLocaleString()}</span>
-                        </div>
-                        <div class="score-box">
-                            <div class="score-val" style="color:${scoreColor}">${t.score}</div>
-                            <div class="score-lbl">KINETIC</div>
-                        </div>
-                        <div style="text-align:center;">
-                            <span class="stat-badge" style="background:${badgeBg}; color:${badgeColor}">${t.status}</span>
-                        </div>
+                        <div class="sym-box"><div><span class="sym-name">${t.symbol}</span>${biasHtml}</div><span class="sym-price">$${t.price.toLocaleString()}</span></div>
+                        <div class="score-box"><div class="score-val" style="color:${scoreColor}">${t.score}</div><div class="score-lbl">KINETIC</div></div>
+                        <div style="text-align:center;"><span class="stat-badge" style="background:${badgeBg}; color:${badgeColor}">${t.status}</span></div>
                         <div class="bars-container">
-                            <div class="bar-col"><div class="bar-fill" style="height:${m.energy*4}%; background:${m.energy>15?'#10b981':'#334155'}"></div><span class="bar-lbl">NRG</span></div>
-                            <div class="bar-col"><div class="bar-fill" style="height:${m.space*4}%; background:${m.space>15?'#10b981':'#334155'}"></div><span class="bar-lbl">SPC</span></div>
-                            <div class="bar-col"><div class="bar-fill" style="height:${m.wind*4}%; background:${m.wind>15?'#10b981':'#334155'}"></div><span class="bar-lbl">WND</span></div>
-                            <div class="bar-col"><div class="bar-fill" style="height:${m.hull*4}%; background:${m.hull>15?'#10b981':'#334155'}"></div><span class="bar-lbl">HUL</span></div>
+                            <div class="bar-col"><span class="bar-val metric-${m.energy?.color}">${m.energy?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.energy?.color}" style="height:${m.energy?.pct}%"></div><span class="bar-lbl">NRG</span></div>
+                            <div class="bar-col"><span class="bar-val metric-${m.space?.color}">${m.space?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.space?.color}" style="height:${m.space?.pct}%"></div><span class="bar-lbl">SPC</span></div>
+                            <div class="bar-col"><span class="bar-val metric-${m.wind?.color}">${m.wind?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.wind?.color}" style="height:${m.wind?.pct}%"></div><span class="bar-lbl">WND</span></div>
+                            <div class="bar-col"><span class="bar-val metric-${m.hull?.color}">${m.hull?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.hull?.color}" style="height:${m.hull?.pct}%"></div><span class="bar-lbl">HUL</span></div>
                         </div>
                         <div style="text-align:right;">
-                            <button class="btn-scan" style="font-size:10px; padding:8px 16px; background:#1e293b; color:#fff; box-shadow:none; border:1px solid #334155;" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">
-                                LOCK TARGET →
-                            </button>
+                            <button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'" ${isGrounded ? 'disabled title="Target Grounded"' : ''}>${isGrounded ? 'NO GO 🚫' : 'LOCK TARGET →'}</button>
                         </div>
                     </div>`;
                 });
-
                 grid.innerHTML = html;
-                
-                // IF AUTO: SEND NOTIFICATION
                 if(isAuto) sendNotification(data.results.length);
-
-            } catch(e) {
-                console.error("Scan Error:", e);
-                if(!isAuto) alert("Scan Error: " + e.message);
-            } finally {
-                loader.style.display = 'none';
-                grid.style.display = 'grid';
-                btn.disabled = false;
-                btn.innerText = "REFRESH SCAN";
-            }
+            } catch(e) { alert("Scan Error: " + e.message); } 
+            finally { loader.style.display = 'none'; grid.style.display = 'grid'; btn.disabled = false; btn.innerText = "REFRESH SCAN"; }
         }
-
-        // START THE ENGINE ON LOAD
         document.addEventListener('DOMContentLoaded', startClock);
     </script>
 </body>
