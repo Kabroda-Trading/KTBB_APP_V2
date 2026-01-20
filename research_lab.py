@@ -1,6 +1,6 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB: RESTORED TRADE ENGINE + KINETIC LAYER
+# RESEARCH LAB: HYBRID ENGINE (Structure + Kinetics)
 # ==============================================================================
 import pandas as pd
 import numpy as np
@@ -55,15 +55,21 @@ def _calculate_kinetic_score(row, sensors):
 
 async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids, tuning, sensors, min_score):
     try:
-        if not raw_5m: return {"ok": False, "error": "No Data"}
+        if not raw_5m or len(raw_5m) < 100: return {"ok": False, "error": "Insufficient Data"}
         
-        # 1. KINETIC MATH PREP
+        # 1. PREPARE DATAFRAME (AUTO-DETECT TIME UNITS)
         df = pd.DataFrame(raw_5m)
-        df['time'] = pd.to_datetime(df['time'], unit='ms', utc=True)
+        
+        # Check if timestamp is likely seconds or milliseconds
+        # 1000000000000 roughly corresponds to year 2001 in milliseconds
+        first_time = df['time'].iloc[0]
+        time_unit = 'ms' if first_time > 1000000000000 else 's'
+        
+        df['time'] = pd.to_datetime(df['time'], unit=time_unit, utc=True)
         df.set_index('time', inplace=True)
         df.sort_index(inplace=True)
         
-        # Indicators for Kinetics
+        # Calculate Indicators for Kinetics
         df['ma'] = df['close'].rolling(20).mean()
         df['std'] = df['close'].rolling(20).std()
         df['bb_w'] = (4 * df['std']) / df['close'] 
@@ -137,7 +143,7 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                         ignore_5m_stoch=ignore_5, confirmation_mode=confirm_mode
                     )
 
-                    # E. TRADE SIMULATION (The Missing Piece RESTORED)
+                    # E. TRADE SIMULATION (Restored)
                     if go["ok"]:
                         stop_price = 0.0
                         if side == "LONG": stop_price = min(c["low"] for c in calibration) 
@@ -172,7 +178,7 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                     "kinetic_comps": k_comps,
                     "trade_signal": go["ok"],
                     "trade_type": go.get("go_type", "NONE"),
-                    "simulation": go.get("simulation", {}), # <--- RESTORED: This holds PnL, Outcome, Exit Price
+                    "simulation": go.get("simulation", {}), 
                     "levels": {
                         "BO": levels.get("breakout_trigger"),
                         "BD": levels.get("breakdown_trigger"),
