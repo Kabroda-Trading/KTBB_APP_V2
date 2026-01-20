@@ -9,14 +9,80 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        body { background-color: var(--bg-dark); color: var(--text-main); font-family: var(--font-main); margin: 0; padding: 0; }
-        .login-wrapper { min-height: 70vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at center, rgba(6, 182, 212, 0.05) 0%, transparent 70%); padding: 20px; }
-        .bento-card { max-width: 400px; width: 100%; padding: 40px; box-shadow: 0 30px 60px rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.08); background: var(--bg-card); border-radius: 8px; }
-        .label { font-size: 0.75rem; letter-spacing: 0.1em; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 8px; display: block; }
-        .input { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 4px; width: 100%; outline: none; transition: border-color 0.2s; box-sizing: border-box; }
-        .input:focus { border-color: var(--accent-cyan); }
-        .btn.primary { margin-top: 12px; background: var(--accent-cyan); color: #000; font-weight: 700; padding: 14px; border-radius: 4px; cursor: pointer; border: none; width: 100%; transition: transform 0.1s, box-shadow 0.2s; letter-spacing: 0.05em; text-transform: uppercase; }
-        .btn.primary:hover { box-shadow: 0 0 15px rgba(6, 182, 212, 0.3); }
+        /* FORCE DARK THEME (Bypasses CSS Variable Issues) */
+        body { 
+            background-color: #020617 !important; 
+            color: #e2e8f0; 
+            font-family: 'Inter', sans-serif; 
+            margin: 0; padding: 0; 
+        }
+        
+        .login-wrapper { 
+            min-height: 80vh; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            background: radial-gradient(circle at center, rgba(6, 182, 212, 0.05) 0%, transparent 70%); 
+            padding: 20px; 
+        }
+        
+        .bento-card { 
+            max-width: 400px; 
+            width: 100%; 
+            padding: 40px; 
+            box-shadow: 0 30px 60px rgba(0,0,0,0.6); 
+            border: 1px solid #1e293b; 
+            background: #0f1623; /* Dark Card Background */
+            border-radius: 8px; 
+        }
+        
+        .label { 
+            font-size: 0.75rem; 
+            letter-spacing: 0.1em; 
+            color: #94a3b8; 
+            text-transform: uppercase; 
+            font-weight: 600; 
+            margin-bottom: 8px; 
+            display: block; 
+        }
+        
+        /* INPUT FIELDS - High Contrast */
+        .input { 
+            background: #020617 !important; /* Force Black/Navy */
+            border: 1px solid #334155 !important; 
+            color: #ffffff !important; /* Force White Text */
+            padding: 14px; 
+            border-radius: 4px; 
+            width: 100%; 
+            outline: none; 
+            box-sizing: border-box; 
+            font-size: 16px;
+        }
+        
+        .input:focus { 
+            border-color: #06b6d4 !important; 
+            box-shadow: 0 0 0 1px #06b6d4;
+        }
+        
+        .btn.primary { 
+            margin-top: 12px; 
+            background: #06b6d4; 
+            color: #000; 
+            font-weight: 700; 
+            padding: 14px; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            border: none; 
+            width: 100%; 
+            transition: transform 0.1s, box-shadow 0.2s; 
+            letter-spacing: 0.05em; 
+            text-transform: uppercase; 
+        }
+        
+        .btn.primary:hover { 
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.3); 
+            background: #22d3ee;
+        }
     </style>
 </head>
 <body>
@@ -26,13 +92,15 @@
     <div class="login-wrapper">
         <div class="bento-card">
             <div class="text-center" style="margin-bottom: 32px; text-align: center;">
-                <div style="width: 40px; height: 4px; background: var(--accent-cyan); margin: 0 auto 20px; border-radius: 2px;"></div>
+                <div style="width: 40px; height: 4px; background: #06b6d4; margin: 0 auto 20px; border-radius: 2px;"></div>
                 <h3 style="font-size: 1.5rem; letter-spacing: -0.02em; margin-bottom: 0.5rem; color: #fff; margin-top:0;">System Access</h3>
-                <p style="color: var(--text-muted); font-size: 0.9rem;">Authenticate to enter Battle Control.</p>
+                <p style="color: #94a3b8; font-size: 0.9rem;">Authenticate to enter Battle Control.</p>
             </div>
+            
             {% if error %}
             <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; color: #fca5a5; padding: 12px; border-radius: 4px; margin-bottom: 24px; font-size: 0.85rem; text-align: center;">{{ error }}</div>
             {% endif %}
+            
             <form method="post" action="/login" style="display: flex; flex-direction: column; gap: 20px;">
                 <div>
                     <label class="label">Operative ID</label>
@@ -44,9 +112,10 @@
                 </div>
                 <button class="btn primary" type="submit">AUTHENTICATE</button>
             </form>
+            
             <div style="text-align: center; margin-top: 32px; font-size: 0.85rem; padding-top: 24px; border-top: 1px solid rgba(255,255,255,0.05);">
-                <span style="color: var(--text-muted);">New Operator?</span> 
-                <a href="/register" style="color: var(--accent-cyan); text-decoration: none; font-weight: 600; margin-left: 5px;">Initialize Account</a>
+                <span style="color: #94a3b8;">New Operator?</span> 
+                <a href="/register" style="color: #06b6d4; text-decoration: none; font-weight: 600; margin-left: 5px;">Initialize Account</a>
             </div>
         </div>
     </div>
