@@ -32,9 +32,15 @@
         .badge-op { background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
 
         /* ACTIONS */
-        .btn-action { background: transparent; border: 1px solid #475569; color: #cbd5e1; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 700; transition: 0.2s; font-family: 'JetBrains Mono'; }
+        .btn-action { background: transparent; border: 1px solid #475569; color: #cbd5e1; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 700; transition: 0.2s; font-family: 'JetBrains Mono'; margin-left: 5px; }
         .btn-action:hover { background: #334155; color: #fff; }
-        .btn-delete { border-color: #7f1d1d; color: #fca5a5; margin-left: 10px; }
+        
+        .btn-promote { border-color: #facc15; color: #facc15; }
+        .btn-promote:hover { background: rgba(250, 204, 21, 0.1); }
+        
+        .btn-demote { border-color: #475569; color: #64748b; }
+        
+        .btn-delete { border-color: #7f1d1d; color: #fca5a5; }
         .btn-delete:hover { background: #450a0a; color: #fff; }
 
         /* MODAL */
@@ -89,14 +95,19 @@
                     <td>
                         <span style="color:#94a3b8; font-size:12px;">Active</span>
                     </td>
-                    <td style="text-align:right">
+                    <td style="text-align:right; white-space:nowrap;">
+                        {% if u.is_admin %}
+                            <button class="btn-action btn-demote" onclick="toggleRole('{{u.id}}')">DEMOTE</button>
+                        {% else %}
+                            <button class="btn-action btn-promote" onclick="toggleRole('{{u.id}}')">PROMOTE</button>
+                        {% endif %}
+
                         <button class="btn-action" onclick="openReset('{{u.id}}', '{{u.username}}')">RESET KEY</button>
-                        {% if not u.is_admin %}
+                        
                         <form action="/admin/delete-user" method="POST" style="display:inline" onsubmit="return confirm('TERMINATE USER: {{u.username}}? This cannot be undone.');">
                             <input type="hidden" name="user_id" value="{{ u.id }}">
                             <button type="submit" class="btn-action btn-delete">TERMINATE</button>
                         </form>
-                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -120,6 +131,28 @@
     </div>
 
     <script>
+        // --- ROLE TOGGLE LOGIC ---
+        async function toggleRole(userId) {
+            if(!confirm("Change Admin Clearance for this user?")) return;
+            
+            try {
+                const res = await fetch('/admin/toggle-role', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ user_id: userId })
+                });
+                const data = await res.json();
+                if(data.ok) {
+                    window.location.reload(); // Refresh to see badge change
+                } else {
+                    alert("Error: " + data.error);
+                }
+            } catch(e) {
+                alert("Connection failed.");
+            }
+        }
+
+        // --- RESET MODAL LOGIC ---
         const modal = document.getElementById('resetModal');
         const idInput = document.getElementById('targetId');
         const nameSpan = document.getElementById('targetName');
@@ -128,7 +161,7 @@
         function openReset(id, name) {
             idInput.value = id;
             nameSpan.innerText = '@' + name;
-            passInput.value = ''; // clear previous
+            passInput.value = ''; 
             modal.classList.add('active');
         }
 

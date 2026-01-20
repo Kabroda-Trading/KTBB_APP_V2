@@ -291,6 +291,34 @@ async def delete_user(request: Request, user_id: int = Form(...), db: Session = 
         db.commit()
     return RedirectResponse("/admin", status_code=303)
 
+@app.post("/admin/toggle-role")
+async def toggle_user_role(request: Request, db: Session = Depends(get_db)):
+    # 1. Security Check (Only Admins can do this)
+    admin_id = request.session.get(auth.SESSION_KEY)
+    admin = db.query(UserModel).filter(UserModel.id == admin_id).first()
+    if not admin or not admin.is_admin:
+        raise HTTPException(403)
+
+    try:
+        # 2. Get Target User
+        payload = await request.json()
+        target_id = payload.get("user_id")
+        target = db.query(UserModel).filter(UserModel.id == target_id).first()
+        
+        if target:
+            # 3. Flip the Switch
+            # Prevent admin from demoting themselves to avoid lockout
+            if target.id == admin.id:
+                return JSONResponse({"ok": False, "error": "Cannot demote self."})
+                
+            target.is_admin = not target.is_admin
+            db.commit()
+            return JSONResponse({"ok": True, "new_status": target.is_admin})
+            
+        return JSONResponse({"ok": False, "error": "User not found"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    
 # ==========================================
 # OMEGA SIMULATION & API
 # ==========================================
