@@ -11,7 +11,6 @@
         
         .header-row { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
         .back-link { color: #64748b; text-decoration: none; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
-        .back-link:hover { color: #fff; }
         
         .target-title { font-family: 'JetBrains Mono'; font-size: 48px; color: #fff; margin: 0; line-height: 1; }
         .target-status { font-family: 'JetBrains Mono'; font-size: 14px; font-weight: 800; padding: 4px 12px; border-radius: 4px; display: inline-block; margin-top: 10px; }
@@ -21,16 +20,22 @@
         
         .metric-row { display: flex; justify-content: space-between; margin-bottom: 15px; align-items: center; }
         .metric-lbl { color: #94a3b8; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
-        .metric-val { color: #fff; font-family: 'JetBrains Mono'; font-weight: 700; }
+        .metric-val { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 12px; }
         
         .plan-box { background: rgba(255,255,255,0.03); padding: 15px; border-radius: 4px; margin-bottom: 15px; border-left: 4px solid #334155; }
-        .plan-title { font-size: 12px; font-weight: 800; color: #fff; margin-bottom: 10px; display: block; text-transform: uppercase; }
         .plan-detail { display: flex; justify-content: space-between; font-size: 12px; color: #94a3b8; margin-bottom: 5px; font-family: 'JetBrains Mono'; }
         .plan-val { color: #fff; font-weight: 700; }
         
-        .val-long { color: #10b981; }
-        .val-short { color: #a855f7; }
-        .val-stop { color: #ef4444; }
+        /* DYNAMIC COLORS */
+        .txt-RED { color: #ef4444; }
+        .txt-GREEN { color: #10b981; }
+        .txt-CYAN { color: #06b6d4; }
+        .txt-GRAY { color: #64748b; }
+        
+        .bg-RED { background: #ef4444; }
+        .bg-GREEN { background: #10b981; }
+        .bg-CYAN { background: #06b6d4; }
+        .bg-GRAY { background: #64748b; }
     </style>
 </head>
 <body>
@@ -58,48 +63,48 @@
                     <span class="metric-lbl">ENERGY (VOLATILITY)</span>
                     <span class="metric-val" id="vEnergy">--</span>
                 </div>
-                <div style="height:4px; background:#1e293b; margin-bottom:20px; border-radius:2px;"><div id="bEnergy" style="width:0%; height:100%; background:#0ea5e9;"></div></div>
+                <div style="height:4px; background:#1e293b; margin-bottom:20px; border-radius:2px;"><div id="bEnergy" style="width:0%; height:100%;"></div></div>
 
                 <div class="metric-row">
                     <span class="metric-lbl">SPACE (ATR RUNWAY)</span>
                     <span class="metric-val" id="vSpace">--</span>
                 </div>
-                <div style="height:4px; background:#1e293b; margin-bottom:20px; border-radius:2px;"><div id="bSpace" style="width:0%; height:100%; background:#0ea5e9;"></div></div>
+                <div style="height:4px; background:#1e293b; margin-bottom:20px; border-radius:2px;"><div id="bSpace" style="width:0%; height:100%;"></div></div>
 
                 <div class="metric-row">
                     <span class="metric-lbl">WIND (MOMENTUM)</span>
                     <span class="metric-val" id="vWind">--</span>
                 </div>
-                <div style="height:4px; background:#1e293b; margin-bottom:20px; border-radius:2px;"><div id="bWind" style="width:0%; height:100%; background:#0ea5e9;"></div></div>
+                <div style="height:4px; background:#1e293b; margin-bottom:20px; border-radius:2px;"><div id="bWind" style="width:0%; height:100%;"></div></div>
 
                 <div class="metric-row">
                     <span class="metric-lbl">HULL (STRUCTURE)</span>
                     <span class="metric-val" id="vHull">--</span>
                 </div>
-                <div style="height:4px; background:#1e293b; margin-bottom:20px; border-radius:2px;"><div id="bHull" style="width:0%; height:100%; background:#0ea5e9;"></div></div>
+                <div style="height:4px; background:#1e293b; margin-bottom:20px; border-radius:2px;"><div id="bHull" style="width:0%; height:100%;"></div></div>
             </div>
 
             <div class="panel">
                 <h3 style="margin-top:0; margin-bottom:20px; font-size:14px; color:#facc15;">FLIGHT PLAN (POTENTIAL)</h3>
                 
                 <div id="planLong" class="plan-box" style="border-color: #10b981; opacity:0.3;">
-                    <span class="plan-title" style="color:#10b981;">LONG SCENARIO</span>
-                    <div class="plan-detail">ENTRY (BO): <span class="plan-val val-long" id="lEntry">--</span></div>
-                    <div class="plan-detail">STOP (30m LOW): <span class="plan-val val-stop" id="lStop">--</span></div>
+                    <span style="font-size:12px; font-weight:800; color:#10b981; display:block; margin-bottom:10px;">LONG SCENARIO</span>
+                    <div class="plan-detail">ENTRY (BO): <span class="plan-val" style="color:#10b981" id="lEntry">--</span></div>
+                    <div class="plan-detail">STOP (30m LOW): <span class="plan-val" style="color:#ef4444" id="lStop">--</span></div>
                     <div style="margin:10px 0; border-top:1px dashed #334155;"></div>
-                    <div class="plan-detail">TARGET 1 (1R): <span class="plan-val" id="lT1">--</span></div>
-                    <div class="plan-detail">TARGET 2 (2R): <span class="plan-val" id="lT2">--</span></div>
-                    <div class="plan-detail">TARGET 3 (4R): <span class="plan-val" id="lT3">--</span></div>
+                    <div class="plan-detail">TARGET 1: <span class="plan-val" id="lT1">--</span></div>
+                    <div class="plan-detail">TARGET 2: <span class="plan-val" id="lT2">--</span></div>
+                    <div class="plan-detail">TARGET 3: <span class="plan-val" id="lT3">--</span></div>
                 </div>
 
                 <div id="planShort" class="plan-box" style="border-color: #a855f7; opacity:0.3;">
-                    <span class="plan-title" style="color:#a855f7;">SHORT SCENARIO</span>
-                    <div class="plan-detail">ENTRY (BD): <span class="plan-val val-short" id="sEntry">--</span></div>
-                    <div class="plan-detail">STOP (30m HIGH): <span class="plan-val val-stop" id="sStop">--</span></div>
+                    <span style="font-size:12px; font-weight:800; color:#a855f7; display:block; margin-bottom:10px;">SHORT SCENARIO</span>
+                    <div class="plan-detail">ENTRY (BD): <span class="plan-val" style="color:#a855f7" id="sEntry">--</span></div>
+                    <div class="plan-detail">STOP (30m HIGH): <span class="plan-val" style="color:#ef4444" id="sStop">--</span></div>
                     <div style="margin:10px 0; border-top:1px dashed #334155;"></div>
-                    <div class="plan-detail">TARGET 1 (1R): <span class="plan-val" id="sT1">--</span></div>
-                    <div class="plan-detail">TARGET 2 (2R): <span class="plan-val" id="sT2">--</span></div>
-                    <div class="plan-detail">TARGET 3 (4R): <span class="plan-val" id="sT3">--</span></div>
+                    <div class="plan-detail">TARGET 1: <span class="plan-val" id="sT1">--</span></div>
+                    <div class="plan-detail">TARGET 2: <span class="plan-val" id="sT2">--</span></div>
+                    <div class="plan-detail">TARGET 3: <span class="plan-val" id="sT3">--</span></div>
                 </div>
             </div>
         </div>
@@ -110,10 +115,8 @@
         const symbol = urlParams.get('symbol') || 'BTCUSDT';
         document.getElementById('tSym').innerText = symbol.replace('USDT', '');
 
-        // --- SMART PRICE FORMATTER ---
         function formatPrice(price) {
             if (!price || isNaN(price) || price === 0) return "--";
-            // If price < 1 (like TRX), use 5 decimals. Otherwise use 2.
             const opts = price < 1 ? { minimumFractionDigits: 5, maximumFractionDigits: 5 } : { minimumFractionDigits: 2, maximumFractionDigits: 2 };
             return price.toLocaleString('en-US', opts);
         }
@@ -130,23 +133,42 @@
                 
                 const r = data.result;
 
-                // 1. Header & Score
+                // 1. Header
                 document.getElementById('tScore').innerText = r.score;
                 document.getElementById('tStatus').innerText = r.status;
                 const statEl = document.getElementById('tStatus');
-                if(r.score >= 85) { statEl.style.background = "rgba(250, 204, 21, 0.2)"; statEl.style.color = "#facc15"; document.getElementById('tScore').style.color="#facc15"; }
-                else if(r.score >= 70) { statEl.style.background = "rgba(16, 185, 129, 0.2)"; statEl.style.color = "#10b981"; document.getElementById('tScore').style.color="#10b981"; }
+                if(r.score >= 75) { statEl.style.background = "rgba(250, 204, 21, 0.2)"; statEl.style.color = "#facc15"; document.getElementById('tScore').style.color="#facc15"; }
+                else if(r.score >= 50) { statEl.style.background = "rgba(16, 185, 129, 0.2)"; statEl.style.color = "#10b981"; document.getElementById('tScore').style.color="#10b981"; }
 
-                // 2. Metrics
+                // 2. Metrics (With Colors)
                 const m = r.metrics;
-                document.getElementById('vEnergy').innerText = m.energy; document.getElementById('bEnergy').style.width = (m.energy*4)+"%";
-                document.getElementById('vSpace').innerText = m.space; document.getElementById('bSpace').style.width = (m.space*4)+"%";
-                document.getElementById('vWind').innerText = m.wind; document.getElementById('bWind').style.width = (m.wind*4)+"%";
-                document.getElementById('vHull').innerText = m.hull; document.getElementById('bHull').style.width = (m.hull*4)+"%";
-
-                // 3. Trade Plans (Using smart formatPrice)
-                const p = r.plans;
                 
+                // Energy
+                document.getElementById('vEnergy').innerText = m.energy.text;
+                document.getElementById('vEnergy').className = `metric-val txt-${m.energy.color}`;
+                document.getElementById('bEnergy').className = `bg-${m.energy.color}`;
+                document.getElementById('bEnergy').style.width = m.energy.pct + "%";
+
+                // Space
+                document.getElementById('vSpace').innerText = m.space.text;
+                document.getElementById('vSpace').className = `metric-val txt-${m.space.color}`;
+                document.getElementById('bSpace').className = `bg-${m.space.color}`;
+                document.getElementById('bSpace').style.width = m.space.pct + "%";
+
+                // Wind
+                document.getElementById('vWind').innerText = m.wind.text;
+                document.getElementById('vWind').className = `metric-val txt-${m.wind.color}`;
+                document.getElementById('bWind').className = `bg-${m.wind.color}`;
+                document.getElementById('bWind').style.width = m.wind.pct + "%";
+
+                // Hull
+                document.getElementById('vHull').innerText = m.hull.text;
+                document.getElementById('vHull').className = `metric-val txt-${m.hull.color}`;
+                document.getElementById('bHull').className = `bg-${m.hull.color}`;
+                document.getElementById('bHull').style.width = m.hull.pct + "%";
+
+                // 3. Trade Plans
+                const p = r.plans;
                 if(p.LONG && p.LONG.valid) {
                     document.getElementById('planLong').style.opacity = "1";
                     document.getElementById('lEntry').innerText = formatPrice(p.LONG.entry);
@@ -155,7 +177,6 @@
                     document.getElementById('lT2').innerText = formatPrice(p.LONG.t2);
                     document.getElementById('lT3').innerText = formatPrice(p.LONG.t3);
                 }
-
                 if(p.SHORT && p.SHORT.valid) {
                     document.getElementById('planShort').style.opacity = "1";
                     document.getElementById('sEntry').innerText = formatPrice(p.SHORT.entry);
