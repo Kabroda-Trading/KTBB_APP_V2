@@ -2,144 +2,166 @@
 # ==============================================================================
 # MARKET RADAR ENGINE (PROJECT OVERWATCH)
 # ==============================================================================
+# ARCHITECTURE COMPLIANCE:
+# 1. BACKBONE: Calls 'battlebox_pipeline.get_live_battlebox' for the Truth.
+# 2. MATH: Applies Kinetic Scoring (Level 2) on top of Corporate Levels (Level 1).
+# 3. CONSISTENCY: Ensures Scanner matches Omega triggers 100%.
+# ==============================================================================
+
 import asyncio
-import pandas as pd
-import numpy as np
 from datetime import datetime, timezone
 
-# 1. CORE PIPELINE (Single Source of Truth)
-import battlebox_pipeline 
+# CORE PIPELINE (The Source of Truth)
+import battlebox_pipeline
 import session_manager
-import sse_engine # Needed for detailed levels in Single View
 
 # TARGET LIST
 TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "TRXUSDT"]
 
-def _calculate_kinetic_math(candles_5m):
+def _score_kinetic_metrics(price, levels, context):
     """
-    Performs Step 2 Math: Energy, Space, Wind, Hull.
+    Applies the KINETIC MATH (Level 2) on top of the verified LEVELS (Level 1).
+    Math sourced from Project Omega v16 logic.
     """
-    if not candles_5m or len(candles_5m) < 50:
-        return 0, "NO_DATA", {}
-
-    df = pd.DataFrame(candles_5m)
-    for col in ['close', 'high', 'low']:
-        df[col] = df[col].astype(float)
-
-    # 1. ENERGY (Bollinger Band Width)
-    df['ma'] = df['close'].rolling(20).mean()
-    df['std'] = df['close'].rolling(20).std()
-    row = df.iloc[-1]
+    # 1. UNPACK THE TRUTH (From Pipeline)
+    bo = float(levels.get("breakout_trigger", 0))
+    bd = float(levels.get("breakdown_trigger", 0))
+    dr = float(levels.get("daily_resistance", 0))
+    ds = float(levels.get("daily_support", 0))
+    atr = float(levels.get("atr", 0))
+    slope_score = float(levels.get("slope", 0))
+    struct_score = float(levels.get("structure_score", 0))
     
-    bb_w = (4 * row['std']) / row['close']
-    energy_val = max(0, min(25, 25 - (bb_w * 1000))) 
+    # Fallback for ATR if pipeline is calibrating
+    if atr == 0: atr = price * 0.01
 
-    # 2. SPACE (ATR)
-    df['tr'] = np.maximum(df['high'] - df['low'], abs(df['high'] - df['close'].shift(1)))
-    df['atr'] = df['tr'].rolling(14).mean()
-    row = df.iloc[-1] 
+    score = 0
+    metrics = {}
+
+    # --- A. ENERGY (Range BPS) ---
+    # Logic: How tight is the Daily Battlebox?
+    range_size = abs(dr - ds)
+    bps = (range_size / price) * 10000 if price > 0 else 500
     
-    atr_pct = row['atr'] / row['close']
-    space_val = max(0, min(25, atr_pct * 5000))
-
-    # 3. WIND (Momentum)
-    df['slope'] = df['close'].diff(5).abs()
-    row = df.iloc[-1]
+    energy_val = 5
+    if bps < 100: energy_val = 25   # Super Coiled
+    elif bps < 200: energy_val = 15 # Standard
     
-    slope_pct = row['slope'] / row['close']
-    wind_val = max(0, min(25, slope_pct * 5000))
+    score += energy_val
+    metrics["energy"] = energy_val
 
-    # 4. HULL (Structure / Z-Score)
-    z = abs((row['close'] - row['ma']) / row['std']) if row['std'] else 0
-    hull_val = 25 if z < 1.5 else max(0, 25 - ((z-1.5)*25))
+    # --- B. SPACE (R-Multiple) ---
+    # Logic: Room to run from Trigger to Wall
+    # We check the average distance to the walls
+    dist_to_dr = abs(dr - price)
+    dist_to_ds = abs(ds - price)
+    avg_gap = (dist_to_dr + dist_to_ds) / 2
+    r_mult = avg_gap / atr if atr > 0 else 0
 
-    # TOTAL & STATUS
-    total = int(energy_val + space_val + wind_val + hull_val)
+    space_val = 0
+    if r_mult > 2.0: space_val = 25
+    elif r_mult > 1.0: space_val = 15
     
+    score += space_val
+    metrics["space"] = space_val
+
+    # --- C. WIND (Momentum) ---
+    # Logic: Uses the 'slope' calculated by the Pipeline
+    wind_val = 0
+    if abs(slope_score) > 0.2: wind_val = 25
+    elif abs(slope_score) > 0.1: wind_val = 15
+    
+    score += wind_val
+    metrics["wind"] = wind_val
+
+    # --- D. HULL (Structure) ---
+    # Logic: Uses the 'structure_score' from the Pipeline
+    hull_val = 25 if struct_score > 0.5 else 10
+    score += hull_val
+    metrics["hull"] = hull_val
+
+    # STATUS
     status = "DOGFIGHT"
-    if total >= 85: status = "SUPERSONIC"
-    elif total >= 70: status = "SNIPER"
-    elif total <= 40: status = "GROUNDED"
+    if score >= 75: status = "SUPERSONIC"
+    elif score >= 50: status = "SNIPER"
+    elif score <= 40: status = "GROUNDED"
 
-    return total, status, {
-        "energy": int(energy_val),
-        "space": int(space_val),
-        "wind": int(wind_val),
-        "hull": int(hull_val),
-        "price": row['close'],
-        "atr": row['atr']
-    }
+    return score, status, metrics
 
 async def scan_sector(session_id="us_ny_futures"):
     """
-    Main entry point for the GRID view.
+    Main Grid Scanner.
+    Loops through targets and asks the PIPELINE for the Battlebox.
     """
+    # 1. VALIDATE SESSION
     session_config = next((s for s in session_manager.SESSION_CONFIGS if s["id"] == session_id), None)
     if not session_config: session_id = "us_ny_futures"
 
-    end_ts = int(datetime.now(timezone.utc).timestamp())
-    start_ts = end_ts - (48 * 3600)
-    
+    print(f">>> [RADAR] Asking Pipeline for Sector Status ({session_id})")
     radar_grid = []
 
+    # 2. ASK THE BACKBONE (Loop)
     for sym in TARGETS:
         try:
-            raw = await battlebox_pipeline.fetch_historical_pagination(symbol=sym, start_ts=start_ts, end_ts=end_ts)
-            score, status, metrics = _calculate_kinetic_math(raw)
-            
+            # CALL THE PIPELINE (The Moment of Truth)
+            # This returns the official levels (BO, BD, DR, DS) established by the engine.
+            data = await battlebox_pipeline.get_live_battlebox(
+                symbol=sym,
+                session_mode="MANUAL",
+                manual_id=session_id
+            )
+
+            if data.get("status") == "ERROR":
+                radar_grid.append({"symbol": sym, "score": 0, "status": "OFFLINE", "metrics": {}})
+                continue
+
+            # EXTRACT DATA
+            price = float(data.get("price", 0))
+            box = data.get("battlebox", {})
+            levels = box.get("levels", {})
+            context = box.get("context", {})
+
+            # RUN KINETIC MATH (The Scanner's Job)
+            # We only do the scoring; we trust the levels provided.
+            score, status, metrics = _score_kinetic_metrics(price, levels, context)
+
             radar_grid.append({
                 "symbol": sym,
                 "score": score,
                 "status": status,
-                "price": metrics.get("price", 0),
+                "price": price,
                 "metrics": metrics
             })
+
         except Exception as e:
-            print(f"[RADAR] Failed on {sym}: {e}")
+            print(f"[RADAR] Pipeline Error on {sym}: {e}")
             radar_grid.append({"symbol": sym, "score": 0, "status": "ERROR", "metrics": {}})
 
+    # Sort
     radar_grid.sort(key=lambda x: x['score'], reverse=True)
     return radar_grid
 
-# --- NEW: SINGLE TARGET ANALYZER ---
+# --- SINGLE TARGET VIEW ---
 async def analyze_target(symbol, session_id="us_ny_futures"):
     """
-    Detailed analysis for the 'Lock Target' page.
-    Combines Kinetic Math with Structure Levels (Flight Path).
+    Detailed view for Lock Target.
+    Again, asks the PIPELINE for the truth.
     """
-    # 1. Fetch Data
-    end_ts = int(datetime.now(timezone.utc).timestamp())
-    start_ts = end_ts - (48 * 3600)
-    
-    raw = await battlebox_pipeline.fetch_historical_pagination(symbol=symbol, start_ts=start_ts, end_ts=end_ts)
-    
-    # 2. Run Kinetic Math
-    score, status, metrics = _calculate_kinetic_math(raw)
-    
-    # 3. Run Structure Math (Get the Flight Path Levels)
-    # We use a simplified SSE call just to get the triggers
-    # This requires us to fake a session context briefly just to extract levels
-    session_config = next((s for s in session_manager.SESSION_CONFIGS if s["id"] == session_id), None)
-    if not session_config: session_config = session_manager.SESSION_CONFIGS[0]
+    data = await battlebox_pipeline.get_live_battlebox(
+        symbol=symbol,
+        session_mode="MANUAL",
+        manual_id=session_id
+    )
 
-    # Calculate levels using the last 24h of data
-    sse_input = {
-        "locked_history_5m": raw[-288:], # Approx 24h
-        "slice_24h_5m": raw[-288:],
-        "session_open_price": raw[-1]["open"], # Live proxy
-        "r30_high": max(c["high"] for c in raw[-6:]), # Last 30m proxy
-        "r30_low": min(c["low"] for c in raw[-6:]),
-        "last_price": raw[-1]["close"],
-        "tuning": {}
-    }
-    
-    levels = {}
-    try:
-        computed = sse_engine.compute_sse_levels(sse_input)
-        if "levels" in computed:
-            levels = computed["levels"]
-    except:
-        pass
+    if data.get("status") == "ERROR":
+        return {"ok": False, "msg": "Target Offline"}
+
+    price = float(data.get("price", 0))
+    box = data.get("battlebox", {})
+    levels = box.get("levels", {})
+    context = box.get("context", {})
+
+    score, status, metrics = _score_kinetic_metrics(price, levels, context)
 
     return {
         "symbol": symbol,
