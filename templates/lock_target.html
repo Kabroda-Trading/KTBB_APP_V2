@@ -110,6 +110,14 @@
         const symbol = urlParams.get('symbol') || 'BTCUSDT';
         document.getElementById('tSym').innerText = symbol.replace('USDT', '');
 
+        // --- SMART PRICE FORMATTER ---
+        function formatPrice(price) {
+            if (!price || isNaN(price) || price === 0) return "--";
+            // If price < 1 (like TRX), use 5 decimals. Otherwise use 2.
+            const opts = price < 1 ? { minimumFractionDigits: 5, maximumFractionDigits: 5 } : { minimumFractionDigits: 2, maximumFractionDigits: 2 };
+            return price.toLocaleString('en-US', opts);
+        }
+
         async function loadTarget() {
             try {
                 const res = await fetch('/api/radar/target', {
@@ -136,25 +144,25 @@
                 document.getElementById('vWind').innerText = m.wind; document.getElementById('bWind').style.width = (m.wind*4)+"%";
                 document.getElementById('vHull').innerText = m.hull; document.getElementById('bHull').style.width = (m.hull*4)+"%";
 
-                // 3. Trade Plans
+                // 3. Trade Plans (Using smart formatPrice)
                 const p = r.plans;
                 
                 if(p.LONG && p.LONG.valid) {
                     document.getElementById('planLong').style.opacity = "1";
-                    document.getElementById('lEntry').innerText = p.LONG.entry.toFixed(2);
-                    document.getElementById('lStop').innerText = p.LONG.stop.toFixed(2);
-                    document.getElementById('lT1').innerText = p.LONG.t1.toFixed(2);
-                    document.getElementById('lT2').innerText = p.LONG.t2.toFixed(2);
-                    document.getElementById('lT3').innerText = p.LONG.t3.toFixed(2);
+                    document.getElementById('lEntry').innerText = formatPrice(p.LONG.entry);
+                    document.getElementById('lStop').innerText = formatPrice(p.LONG.stop);
+                    document.getElementById('lT1').innerText = formatPrice(p.LONG.t1);
+                    document.getElementById('lT2').innerText = formatPrice(p.LONG.t2);
+                    document.getElementById('lT3').innerText = formatPrice(p.LONG.t3);
                 }
 
                 if(p.SHORT && p.SHORT.valid) {
                     document.getElementById('planShort').style.opacity = "1";
-                    document.getElementById('sEntry').innerText = p.SHORT.entry.toFixed(2);
-                    document.getElementById('sStop').innerText = p.SHORT.stop.toFixed(2);
-                    document.getElementById('sT1').innerText = p.SHORT.t1.toFixed(2);
-                    document.getElementById('sT2').innerText = p.SHORT.t2.toFixed(2);
-                    document.getElementById('sT3').innerText = p.SHORT.t3.toFixed(2);
+                    document.getElementById('sEntry').innerText = formatPrice(p.SHORT.entry);
+                    document.getElementById('sStop').innerText = formatPrice(p.SHORT.stop);
+                    document.getElementById('sT1').innerText = formatPrice(p.SHORT.t1);
+                    document.getElementById('sT2').innerText = formatPrice(p.SHORT.t2);
+                    document.getElementById('sT3').innerText = formatPrice(p.SHORT.t3);
                 }
 
             } catch(e) {
