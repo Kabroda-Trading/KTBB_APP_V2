@@ -14,7 +14,7 @@ from database import engine, SessionLocal, UserModel, SystemLog
 # PUT YOUR TWO ADMIN EMAILS HERE
 ADMIN_EMAILS = [
     "spiritmaker79@gmail.com", 
-    "grossmokey@protonmail.com"
+    "grossmonkeytrader@protonmail.com"
 ]
 
 def reset_and_restore():
