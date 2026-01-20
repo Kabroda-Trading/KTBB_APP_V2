@@ -7,38 +7,12 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        /* TOP SECRET DROPDOWN STYLE */
-        .ts-wrapper { position: relative; display: inline-block; margin-left: 15px; }
-        .ts-btn { color: #ef4444; font-weight: 800; font-family: 'JetBrains Mono'; cursor: pointer; text-decoration: none; padding: 5px 10px; border: 1px solid rgba(239,68,68,0.3); border-radius: 4px; transition: 0.2s; }
-        .ts-btn:hover { background: rgba(239,68,68,0.1); box-shadow: 0 0 10px rgba(239,68,68,0.2); }
-        .ts-menu { display: none; position: absolute; top: 100%; left: 0; background: #0f172a; border: 1px solid #ef4444; border-radius: 6px; min-width: 180px; z-index: 100; box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-top: 8px; }
-        .ts-wrapper:hover .ts-menu { display: block; }
-        .ts-item { display: block; padding: 12px 15px; color: #fff; text-decoration: none; font-family: 'JetBrains Mono'; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .ts-item:hover { background: #ef4444; color: #000; }
-        .ts-item:last-child { border-bottom: none; }
+        /* PAGE SPECIFIC STYLES */
     </style>
 </head>
 <body>
 
-    <nav class="navbar">
-        <div class="nav-brand"><span class="brand-blue">KABRODA</span> <span style="color:#64748b">//</span> BATTLE</div>
-        <div class="nav-links">
-            <a href="/suite" class="nav-item">SESSION CONTROL</a>
-            <a href="/suite/battle-control" class="nav-item active">BATTLE CONTROL</a>
-            {% if user and user.is_admin %}
-            <div class="ts-wrapper">
-                <div class="ts-btn">⚠ TOP SECRET ▼</div>
-                <div class="ts-menu">
-                    <a href="/suite/omega" class="ts-item">PROJECT OMEGA</a>
-                    <a href="/suite/research-lab" class="ts-item">RESEARCH LAB</a>
-                </div>
-            </div>
-            {% endif %}
-            <div style="margin-left: 20px; border-left: 1px solid #334155; height: 20px;"></div>
-            <a href="/account" class="nav-item">ACCOUNT</a>
-            <a href="/logout" class="nav-item">LOGOUT</a>
-        </div>
-    </nav>
+    {% include 'nav.html' %}
 
     <div class="container" style="margin-top:40px;">
         <div style="background:#0f172a; border:1px solid #1e293b; padding:20px; border-radius:8px; display:flex; gap:20px; align-items:flex-end;">
@@ -91,7 +65,7 @@
     <script>
         async function initiateCalibration() {
             const sym = document.getElementById('battleSymbol').value;
-            const sess = document.getElementById('battleSession').value; // <--- FIX HERE TOO
+            const sess = document.getElementById('battleSession').value; 
             
             try {
                 const res = await fetch('/api/dmr/live', {

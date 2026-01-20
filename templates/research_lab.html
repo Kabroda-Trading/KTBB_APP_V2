@@ -37,12 +37,14 @@
         .fail-fill { height: 100%; }
         .fail-count { width: 30px; text-align: right; color: #fff; font-weight: 700; }
         pre { background: #000; padding: 15px; border-radius: 6px; overflow-x: auto; color: #00ff9d; font-size: 12px; border: 1px solid #333; max-height: 400px; }
-        
         .card-head { font-family: 'JetBrains Mono'; font-size: 12px; color: #a855f7; margin-bottom: 10px; font-weight: 700; text-transform: uppercase; border-bottom: 1px solid #333; padding-bottom: 5px; }
     </style>
 </head>
 <body>
-    <div class="container">
+    
+    {% include 'nav.html' %}
+
+    <div class="container" style="padding-top:40px;">
         <div class="header">
             <div>
                 <a href="/suite" style="color: #94a3b8; text-decoration: none; font-size: 14px;">← Back to Suite</a>

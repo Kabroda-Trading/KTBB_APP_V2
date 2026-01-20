@@ -9,8 +9,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        :root { --bg-dark: #050b14; --bg-card: #0f1623; --text-main: #e2e8f0; --text-muted: #94a3b8; --accent-cyan: #06b6d4; --accent-glow: #22d3ee; --accent-purple: #a855f7; --font-main: 'Inter', system-ui, -apple-system, sans-serif; --font-mono: 'JetBrains Mono', monospace; }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background-color: var(--bg-dark); color: var(--text-main); font-family: var(--font-main); line-height: 1.6; overflow-x: hidden; }
         h1, h2, h3, h4 { font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; }
         .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
@@ -46,34 +44,12 @@
         .step-col p { font-size: 0.95rem; color: var(--text-muted); }
         .troubleshoot { margin-top: 2rem; padding-top: 2rem; border-top: 1px solid rgba(255,255,255,0.05); font-size: 0.9rem; color: var(--text-muted); opacity: 0.7; font-style: italic; }
 
-        @media (max-width: 768px) { .navbar { flex-direction: column; gap: 1rem; } .indicator-grid { grid-template-columns: 1fr; } .reminder-box { flex-direction: column; align-items: flex-start; } .sync-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 768px) { .indicator-grid { grid-template-columns: 1fr; } .reminder-box { flex-direction: column; align-items: flex-start; } .sync-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
 
-    <nav class="navbar" style="border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px);">
-        <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; max-width: 1200px; margin: 0 auto; padding: 20px;">
-            <a href="/" class="logo" style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; text-decoration: none;">
-                <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
-                KABRODA
-            </a>
-            <ul class="nav-links" style="display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0; align-items: center;">
-                <li class="dropdown-wrapper" style="position: relative; cursor: pointer;">
-                    <span class="active" onclick="toggleDropdown()" style="font-size: 0.95rem; color: #fff; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em;">
-                        SUITE ▼
-                    </span>
-                    <div id="suiteDropdown" style="display: none; position: absolute; top: 100%; left: 0; background: #0f1623; border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 4px; min-width: 180px; z-index: 9999; margin-top:10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
-                        <a href="/suite" style="display: block; padding: 8px 12px; color: #aaa; text-decoration: none; font-size: 0.9rem;">Session Control</a>
-                        <a href="/suite/battle-control" style="display: block; padding: 8px 12px; color: #aaa; text-decoration: none; font-size: 0.9rem;">Battle Control</a>
-                    </div>
-                </li>
-                <li><a href="/analysis" style="font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;">INTEL</a></li>
-                <li><a href="/indicators" style="font-size: 0.95rem; color: var(--accent-cyan); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;">INDICATORS</a></li>
-                <li><a href="/account" style="font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;">ACCOUNT</a></li>
-                <li><a href="/logout" style="font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none; opacity: 0.6;">LOGOUT</a></li>
-            </ul>
-        </div>
-    </nav>
+    {% include 'nav.html' %}
 
     <section class="header-section">
         <div class="container">
@@ -131,18 +107,5 @@
     </div>
     <div style="height: 100px;"></div>
 
-    <script>
-        function toggleDropdown() {
-            const el = document.getElementById('suiteDropdown');
-            el.style.display = el.style.display === 'none' ? 'block' : 'none';
-        }
-        document.addEventListener('click', function(e) {
-            const wrapper = document.querySelector('.dropdown-wrapper');
-            const dropdown = document.getElementById('suiteDropdown');
-            if (!wrapper.contains(e.target) && dropdown.style.display === 'block') {
-                dropdown.style.display = 'none';
-            }
-        });
-    </script>
 </body>
 </html>

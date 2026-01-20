@@ -9,78 +9,15 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        /* Shared Member Base Styles to match your Dark Theme */
-        body { background-color: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; margin: 0; padding: 0; }
-        .member-wrapper { width: 100%; }
-        .container { max-width: 1400px; margin: 0 auto; padding: 0 20px; }
         .gradient-text { background: linear-gradient(to right, #00ff9d, #06b6d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        
-        /* TOP SECRET DROPDOWN STYLE */
-        .ts-wrapper { position: relative; display: inline-block; margin-left: 15px; padding-bottom:10px; margin-bottom:-10px; }
-        .ts-btn { 
-            color: #ef4444; font-weight: 800; font-family: 'JetBrains Mono'; 
-            cursor: pointer; text-decoration: none; padding: 5px 10px; border: 1px solid rgba(239,68,68,0.3); border-radius: 4px;
-            transition: 0.2s; font-size: 0.85rem;
-        }
-        .ts-btn:hover { background: rgba(239,68,68,0.1); box-shadow: 0 0 10px rgba(239,68,68,0.2); }
-        
-        .ts-menu {
-            display: none; position: absolute; top: 100%; left: 0; 
-            background: #0f1623; border: 1px solid #ef4444; border-radius: 6px; 
-            min-width: 180px; z-index: 100; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            margin-top: 2px;
-        }
-        .ts-wrapper:hover .ts-menu { display: block; }
-        .ts-item { 
-            display: block; padding: 12px 15px; color: #fff; text-decoration: none; 
-            font-family: 'JetBrains Mono'; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); 
-        }
-        .ts-item:hover { background: #ef4444; color: #000; }
-        .ts-item:last-child { border-bottom: none; }
     </style>
 </head>
 <body>
     
-    <nav class="navbar" style="border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px);">
-    <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; max-width: 1200px; margin: 0 auto; padding: 20px;">
-        <a href="/" class="logo" style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; text-decoration: none;">
-            <div style="width: 12px; height: 12px; background: #06b6d4; border-radius: 2px;"></div>
-            KABRODA
-        </a>
-        <ul class="nav-links" style="display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0; align-items: center;">
-            
-            <li class="dropdown-wrapper" style="position: relative; cursor: pointer;">
-                <span class="active" onclick="toggleDropdown()" style="font-size: 0.95rem; color: #fff; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em;">
-                    SUITE ▼
-                </span>
-                <div id="suiteDropdown" style="display: none; position: absolute; top: 100%; left: 0; background: #0f1623; border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 4px; min-width: 180px; z-index: 9999; margin-top:10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
-                    <a href="/suite" style="display: block; padding: 8px 12px; color: #06b6d4; text-decoration: none; font-size: 0.9rem;">Session Control</a>
-                    <a href="/suite/battle-control" style="display: block; padding: 8px 12px; color: #aaa; text-decoration: none; font-size: 0.9rem;">Battle Control</a>
-                </div>
-            </li>
-
-            {% if is_admin %}
-            <li>
-                <div class="ts-wrapper">
-                    <div class="ts-btn">⚠ TOP SECRET ▼</div>
-                    <div class="ts-menu">
-                        <a href="/suite/omega" class="ts-item">PROJECT OMEGA</a>
-                        <a href="/suite/research-lab" class="ts-item">RESEARCH LAB</a>
-                    </div>
-                </div>
-            </li>
-            {% endif %}
-
-            <li><a href="/analysis" style="font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;">INTEL</a></li>
-            <li><a href="/indicators" style="font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;">INDICATORS</a></li>
-            <li><a href="/account" style="font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;">ACCOUNT</a></li>
-            <li><a href="/logout" style="font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none; opacity: 0.6;">LOGOUT</a></li>
-        </ul>
-    </div>
-</nav>
+    {% include 'nav.html' %}
 
     <div style="width: 100%; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 30px; padding-top: 40px;">
-
+      
       <div style="display: flex; justify-content: space-between; align-items: flex-end; padding-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1);">
         <div>
           <div class="pill" style="margin-bottom: 8px; font-size: 11px; letter-spacing: 2px; color: #06b6d4; border: 1px solid rgba(6,182,212,0.3); padding: 4px 10px; border-radius: 100px; display: inline-block;">BATTLEBOX COMMAND</div>
@@ -98,7 +35,6 @@
 
       <div class="bento-card wide" style="border-left: 4px solid #00ff9d; display: flex; flex-direction: column; gap: 24px; padding: 30px; background: #0f1623; border: 1px solid rgba(255,255,255,0.05);">
         <div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-end; justify-content: space-between;">
-          
           <div style="flex: 1; min-width: 240px;">
             <label class="label" style="color: #22d3ee; font-size: 12px; margin-bottom: 8px; letter-spacing: 1px;">TARGET ASSET</label>
             <div style="position: relative;">
@@ -110,7 +46,6 @@
               <span style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: #22d3ee; pointer-events: none;">▼</span>
             </div>
           </div>
-
           <div style="flex: 1; min-width: 240px;">
             <label class="label" style="color: #10b981; font-size: 12px; margin-bottom: 8px; letter-spacing: 1px;">TARGET SESSION</label>
             <div style="position: relative;">
@@ -125,14 +60,12 @@
               <span style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: #10b981; pointer-events: none;">▼</span>
             </div>
           </div>
-
           <div style="flex: 0 0 auto;">
             <button id="levelsBtn" class="btn primary" onclick="calibrateBattlefield()" style="height: 55px; padding: 0 32px; font-size: 14px; font-weight: 800; letter-spacing: 1px; white-space: nowrap; box-shadow: 0 0 20px rgba(0,255,157,0.2); background: #00ff9d; color: #000; border: none; cursor: pointer;">
               <span style="margin-right: 8px;">⚡ INITIATE CALIBRATION</span>
             </button>
           </div>
         </div>
-
         <div id="status" style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 15px; font-size: 13px; font-family: monospace; color: #94a3b8; text-align: right;">
           > SYSTEM STANDBY... SELECT TARGET
         </div>
@@ -168,9 +101,7 @@
 
       <div class="bento-card wide" style="position: relative; overflow: hidden; min-height: 320px; padding: 30px; background: #0f1623; border: 1px solid rgba(255,255,255,0.08);">
         <div style="position: absolute; inset: 0; background-image: radial-gradient(rgba(255,255,255,0.1) 1px, transparent 1px); background-size: 20px 20px; opacity: 0.1; pointer-events: none;"></div>
-
         <div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; position: relative;">
-          
           <div>
             <h3 style="display: flex; align-items: center; gap: 12px; margin: 0 0 8px 0; font-size: 18px; color: #fff;">
               <span style="width: 10px; height: 10px; background: #10b981; border-radius: 50%; box-shadow: 0 0 10px #10b981;"></span>
@@ -178,41 +109,36 @@
             </h3>
             <p style="font-size: 13px; color: #888; margin: 0;">Live Structural Levels & Triggers</p>
           </div>
-          
           <div style="display: flex; gap: 12px;">
             <button id="tvCopyBtn" class="btn secondary" onclick="copyForTV()" style="display:none; font-size: 12px; padding: 12px 20px; font-weight:700; background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #e2e8f0; cursor: pointer;">COPY INDICATOR DATA</button>
-            
             <button id="openGptBtn" onclick="openLaunchModal()" style="display:none; cursor: pointer; background: #00ff9d; color: #000; font-weight: 900; font-size: 12px; padding: 12px 24px; border: none; border-radius: 4px; box-shadow: 0 0 20px rgba(0, 255, 157, 0.4); text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s;">
               🚀 LAUNCH BATTLEBOX AI
             </button>
           </div>
         </div>
-
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; position: relative;">
-          <div class="lvl-card c-red" style="background: rgba(239, 68, 68, 0.05); padding: 20px; border-radius: 4px; border: 1px solid rgba(239, 68, 68, 0.1);">
-            <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px; color: #fca5a5;">DAILY RESISTANCE</div>
-            <div id="lv_dr" class="lvl-val" style="font-family: monospace; font-size: 24px; color: #fff;">—</div>
+          <div class="lvl-card c-red">
+            <div class="lvl-lbl" style="color: #fca5a5;">DAILY RESISTANCE</div>
+            <div id="lv_dr" class="lvl-val">—</div>
           </div>
-          <div class="lvl-card c-green" style="background: rgba(16, 185, 129, 0.05); padding: 20px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.1);">
-            <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px; color: #6ee7b7;">BREAKOUT TRIGGER</div>
-            <div id="lv_bo" class="lvl-val" style="font-family: monospace; font-size: 24px; color: #fff;">—</div>
+          <div class="lvl-card c-green">
+            <div class="lvl-lbl" style="color: #6ee7b7;">BREAKOUT TRIGGER</div>
+            <div id="lv_bo" class="lvl-val">—</div>
           </div>
-          <div class="lvl-card c-purple" style="background: rgba(168, 85, 247, 0.05); padding: 20px; border-radius: 4px; border: 1px solid rgba(168, 85, 247, 0.1);">
-            <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px; color: #d8b4fe;">BREAKDOWN TRIGGER</div>
-            <div id="lv_bd" class="lvl-val" style="font-family: monospace; font-size: 24px; color: #fff;">—</div>
+          <div class="lvl-card c-purple">
+            <div class="lvl-lbl" style="color: #d8b4fe;">BREAKDOWN TRIGGER</div>
+            <div id="lv_bd" class="lvl-val">—</div>
           </div>
-          <div class="lvl-card c-blue" style="background: rgba(59, 130, 246, 0.05); padding: 20px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.1);">
-            <div class="lvl-lbl" style="font-size:12px; letter-spacing:1px; color: #93c5fd;">DAILY SUPPORT</div>
-            <div id="lv_ds" class="lvl-val" style="font-family: monospace; font-size: 24px; color: #fff;">—</div>
+          <div class="lvl-card c-blue">
+            <div class="lvl-lbl" style="color: #93c5fd;">DAILY SUPPORT</div>
+            <div id="lv_ds" class="lvl-val">—</div>
           </div>
         </div>
-
         <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; color: #94a3b8; font-size: 13px; font-family: monospace;">
           <span>30M ANCHOR HIGH: <strong id="lv_30h" style="color: #fff;">—</strong></span>
           <span>30M ANCHOR LOW: <strong id="lv_30l" style="color: #fff;">—</strong></span>
         </div>
       </div>
-
     </div>
 
     <div id="launchModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); backdrop-filter:blur(5px); z-index:9999; align-items:center; justify-content:center;">
@@ -226,8 +152,7 @@
                 </div>
             </div>
             <p style="color:#888; font-size:14px; margin-bottom:30px; line-height:1.5;">
-                The BattleBox Command Prompt is ready.<br>
-                <strong>Paste (Ctrl+V)</strong> into the GPT to generate your battle plan immediately.
+                The BattleBox Command Prompt is ready.<br><strong>Paste (Ctrl+V)</strong> into the GPT.
             </p>
             <div style="display:flex; gap:10px; justify-content:center;">
                 <button onclick="closeLaunchModal()" style="background:transparent; border:1px solid #444; color:#888; padding:12px 24px; cursor:pointer; font-weight:bold; border-radius:4px;">CANCEL</button>
@@ -264,7 +189,7 @@
       function proceedToAI() { window.open(BATTLEBOX_GPT_URL, "_blank"); closeLaunchModal(); }
 
       function getSessionContext() {
-        const key = document.getElementById("sessionSelect").value; // UPDATED ID
+        const key = document.getElementById("sessionSelect").value;
         const spec = SPECS[key] || SPECS["us_ny_futures"];
         const now = new Date();
         const targetTimeStr = now.toLocaleString("en-US", {timeZone: spec.tz, hour12: false});
@@ -340,18 +265,15 @@
         const sess = document.getElementById("sessionSelect").value;
         const btn = document.getElementById("levelsBtn");
         const prevText = btn.innerText;
-        
         btn.innerText = "CALIBRATING...";
         btn.disabled = true;
-
         try {
           const r = await fetch("/api/dmr/run-raw", {
             method: "POST", headers: {"Content-Type":"application/json"},
-            body: JSON.stringify({ symbol: sym, session_id: sess }) // UPDATED PAYLOAD
+            body: JSON.stringify({ symbol: sym, session_id: sess })
           });
           const data = await r.json();
           _lastDmrPayload = data;
-
           const l = data.levels || {};
           const r30 = data.range_30m || {};
           document.getElementById("lv_ds").innerText = fmt(l.daily_support);
@@ -360,12 +282,10 @@
           document.getElementById("lv_bd").innerText = fmt(l.breakdown_trigger);
           document.getElementById("lv_30h").innerText = fmt(r30.high);
           document.getElementById("lv_30l").innerText = fmt(r30.low);
-
           document.getElementById("tvCopyBtn").style.display = "inline-flex";
           document.getElementById("openGptBtn").style.display = "inline-flex"; 
           document.getElementById("status").innerText = "> SYSTEM READY. DATA SYNCED.";
           document.getElementById("status").style.color = "#10b981";
-          
         } catch(e) {
           document.getElementById("status").innerText = "> ERROR: " + e.message;
         } finally {
@@ -387,9 +307,6 @@
       setInterval(updateSessionStatus, 1000);
       document.addEventListener("DOMContentLoaded", updateSessionStatus);
       document.getElementById("sessionSelect").addEventListener("change", updateSessionStatus);
-      
-      function toggleDropdown() { const el = document.getElementById('suiteDropdown'); el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
-      document.addEventListener('click', function(e) { const wrapper = document.querySelector('.dropdown-wrapper'); const dropdown = document.getElementById('suiteDropdown'); if (!wrapper.contains(e.target) && dropdown.style.display === 'block') { dropdown.style.display = 'none'; } });
     </script>
 </body>
 </html>

@@ -1,18 +1,19 @@
-/* KABRODA ELECTRIC THEME (Final Polish) */
+/* KABRODA ELECTRIC THEME (Master Sheet) */
 
 :root {
-  --bg-deep: #020617; /* Ink Black */
-  --primary: #0ea5e9; /* Electric Sky Blue */
-  --primary-bright: #38bdf8; /* Cyan Highlight */
+  --bg-deep: #020617;
+  --primary: #0ea5e9;
+  --primary-bright: #38bdf8;
   --primary-glow: rgba(14, 165, 233, 0.5);
   --glass: rgba(15, 23, 42, 0.7);
   --glass-border: rgba(56, 189, 248, 0.2);
   --text-main: #ffffff;
   --text-muted: #94a3b8;
-  --success: #10b981; /* Green for breakout */
-  --danger: #ef4444;  /* Red for resistance */
-  --purple: #a855f7;  /* Purple for breakdown */
-  --warning: #f59e0b; /* Orange/Gold */
+  --success: #10b981;
+  --danger: #ef4444; 
+  --purple: #a855f7;
+  --warning: #f59e0b;
+  --accent-cyan: #06b6d4; /* Added for compatibility */
 }
 
 body {
@@ -23,165 +24,61 @@ body {
   color: var(--text-main);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   margin: 0;
+  padding: 0;
 }
 
-/* --- NAVIGATION --- */
-.glass-nav {
-  position: fixed; top: 0; left: 0; right: 0; height: 80px; z-index: 100;
-  backdrop-filter: blur(16px); background: rgba(2, 6, 23, 0.9);
-  border-bottom: 1px solid var(--glass-border);
-  display: flex; align-items: center; justify-content: center;
+/* --- MASTER NAVIGATION (Standardized) --- */
+.navbar {
+    display: flex; justify-content: space-between; align-items: center; padding: 20px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95);
+    position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px);
 }
 .nav-container {
-  width: 100%; max-width: 1200px; padding: 0 24px;
-  display: flex; justify-content: space-between; align-items: center;
+    width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 20px;
+    display: flex; justify-content: space-between; align-items: center;
 }
-.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
-.brand-logo {
-  width: 28px; height: 28px; background: var(--primary);
-  box-shadow: 0 0 15px var(--primary-glow); border-radius: 6px;
+.logo {
+    font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.2rem;
+    color: #fff; display: flex; align-items: center; gap: 10px; text-decoration: none;
 }
-.brand-text { font-weight: 900; letter-spacing: 0.1em; color: #fff; font-size: 18px; text-transform: uppercase; }
-.nav-links { display: flex; align-items: center; gap: 32px; }
-.nav-item { font-size: 14px; color: var(--text-muted); text-decoration: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; transition: color 0.2s; }
-.nav-item:hover { color: var(--primary-bright); text-shadow: 0 0 8px var(--primary-glow); }
+.nav-links { display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0; align-items: center; }
+.nav-links a {
+    font-size: 0.95rem; color: var(--text-muted); font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;
+    transition: color 0.2s;
+}
+.nav-links a:hover { color: #fff; }
 
-/* --- DROPDOWN NAVIGATION (New for Suite) --- */
-.nav-item.dropdown { position: relative; display: inline-block; cursor: pointer; }
+/* --- BOSS CONTROL DROPDOWN --- */
+.dropdown { position: relative; display: inline-block; }
+.dropbtn { cursor: pointer; display: flex; align-items: center; gap: 5px; color: #facc15 !important; font-weight: 800 !important; }
 .dropdown-content {
-  display: none; position: absolute; top: 100%; left: 0;
-  background: rgba(2, 6, 23, 0.95); backdrop-filter: blur(12px);
-  min-width: 200px; border: 1px solid var(--glass-border);
-  border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 1000;
-  padding: 8px 0;
+    display: none; position: absolute; top: 100%; right: 0; /* Align right */
+    background-color: #0f172a; min-width: 200px;
+    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.5);
+    border: 1px solid #334155; border-radius: 4px; z-index: 2000;
 }
 .dropdown-content a {
-  display: block; padding: 12px 20px; color: var(--text-muted);
-  text-decoration: none; font-size: 13px; font-weight: 600; text-transform: uppercase;
-  transition: all 0.2s;
+    color: #cbd5e1; padding: 12px 16px; text-decoration: none;
+    display: block; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #1e293b;
 }
-.dropdown-content a:hover {
-  background: rgba(56, 189, 248, 0.1); color: #fff;
+.dropdown-content a:last-child { border-bottom: none; }
+.dropdown-content a:hover { background-color: #1e293b; color: #fff; }
+.dropdown:hover .dropdown-content { display: block; }
+
+/* --- GLOBAL BUTTONS --- */
+.btn-primary {
+    background: var(--accent-cyan); color: #050b14; padding: 10px 20px;
+    border-radius: 4px; font-weight: 600; text-decoration: none; display: inline-block;
 }
-.nav-item.dropdown:hover .dropdown-content { display: block; }
+.btn-primary:hover { background: #fff; }
 
-/* --- LAYOUT --- */
-.page-wrapper { padding-top: 120px; padding-bottom: 80px; max-width: 1200px; margin: 0 auto; padding-left: 24px; padding-right: 24px; }
-.text-center { text-align: center; }
-
-/* --- TYPOGRAPHY --- */
-h1, h2, h3 { margin: 0; font-weight: 800; letter-spacing: -0.02em; color: #fff; }
-.display-title { font-size: 56px; line-height: 1.1; margin-bottom: 24px; text-transform: uppercase; }
-.lead-text { font-size: 20px; color: var(--text-muted); max-width: 700px; margin: 0 auto 40px; line-height: 1.6; }
-.gradient-text { background: linear-gradient(135deg, #fff, var(--primary-bright)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-
-/* --- CARDS & BENTO --- */
-.bento-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; margin-bottom: 40px; }
-.bento-card {
-  background: var(--glass); border: 1px solid var(--glass-border);
-  padding: 32px; border-radius: 16px; position: relative; overflow: hidden;
-}
-.bento-card.wide { grid-column: 1 / -1; }
-
-/* --- INPUTS (FIXED) --- */
-.input {
-  width: 100%; padding: 14px 16px; border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05); /* Lighter background for contrast */
-  border: 1px solid var(--glass-border);
-  color: #ffffff; font-size: 16px; outline: none; transition: all 0.2s;
-}
-.input:focus { border-color: var(--primary-bright); box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.1); background: rgba(0,0,0,0.4); }
-.label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.1em; }
-
-/* --- BUTTONS --- */
-.btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 14px 32px; border-radius: 8px; font-weight: 700; text-decoration: none;
-  font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; cursor: pointer; border: none; transition: all 0.2s;
-}
-.btn.primary {
-  background: var(--primary); color: #000;
-  box-shadow: 0 0 20px var(--primary-glow); border: 1px solid var(--primary-bright);
-}
-.btn.primary:hover { background: var(--primary-bright); box-shadow: 0 0 40px var(--primary-glow); transform: translateY(-2px); }
-.btn.secondary { background: transparent; border: 1px solid var(--glass-border); color: var(--primary-bright); }
-.btn.secondary:hover { border-color: var(--primary-bright); background: rgba(14, 165, 233, 0.1); }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
-
-/* --- LEVEL CARDS (For Suite) --- */
-.lvl-card { padding: 20px; border-radius: 12px; text-align: center; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); }
-.lvl-val { font-size: 24px; font-weight: 900; margin-top: 8px; color: #fff; text-shadow: 0 0 10px rgba(0,0,0,0.5); }
-.lvl-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; opacity: 0.8; font-weight: 700; }
-.c-red { border-color: rgba(239, 68, 68, 0.3); color: #fca5a5; } .c-red .lvl-val { color: #fca5a5; }
-.c-green { border-color: rgba(16, 185, 129, 0.3); color: #6ee7b7; } .c-green .lvl-val { color: #6ee7b7; }
-.c-purple { border-color: rgba(168, 85, 247, 0.3); color: #d8b4fe; } .c-purple .lvl-val { color: #d8b4fe; }
-.c-blue { border-color: rgba(59, 130, 246, 0.3); color: #93c5fd; } .c-blue .lvl-val { color: #93c5fd; }
-
-/* --- SPECIAL NAV TRIAL BUTTON --- */
-.btn-nav-trial {
-  background: linear-gradient(135deg, var(--primary), var(--primary-bright));
-  color: #000;
-  font-weight: 800;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 10px 20px;
-  border-radius: 6px;
-  text-decoration: none;
-  box-shadow: 0 0 15px var(--primary-glow);
-  transition: all 0.2s ease;
-  border: 1px solid rgba(255,255,255,0.2);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.btn-nav-trial:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 0 30px var(--primary-bright);
-  filter: brightness(1.1);
-}
-
-.btn-nav-trial span {
-  display: flex; align-items: center; gap: 6px;
+/* --- MOBILE NAV --- */
+@media (max-width: 768px) {
+    .navbar { height: auto; padding: 15px 0; }
+    .nav-container { flex-direction: column; gap: 1rem; }
+    .nav-links { gap: 1rem; flex-wrap: wrap; justify-content: center; }
 }
 
 /* --- FOOTER --- */
 .footer { border-top: 1px solid var(--glass-border); padding: 40px 0; margin-top: 80px; text-align: center; color: var(--text-muted); font-size: 13px; }
-
-/* --- TOOLTIPS (New) --- */
-.tooltip-container {
-  position: relative;
-  display: inline-block;
-  cursor: help;
-  color: var(--primary-bright);
-  border-bottom: 1px dotted var(--primary-bright);
-}
-
-.tooltip-text {
-  visibility: hidden;
-  width: 280px;
-  background-color: #0f172a;
-  color: #fff;
-  text-align: left;
-  border-radius: 8px;
-  padding: 12px;
-  position: absolute;
-  z-index: 100;
-  bottom: 125%; /* Position above */
-  left: 50%;
-  margin-left: -140px; /* Center it */
-  opacity: 0;
-  transition: opacity 0.3s;
-  border: 1px solid var(--glass-border);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-  font-size: 12px;
-  line-height: 1.5;
-  font-weight: 400;
-  text-transform: none;
-}
-
-.tooltip-container:hover .tooltip-text {
-  visibility: visible;
-  opacity: 1;
-}

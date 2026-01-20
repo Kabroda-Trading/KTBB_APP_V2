@@ -9,59 +9,19 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        /* BASE */
         body { background-color: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; margin: 0; padding: 0; }
         .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
         a { text-decoration: none; color: inherit; transition: 0.3s ease; }
         
-        /* NAV */
-        .navbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
-        .logo { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.2rem; color: #fff; display: flex; align-items: center; gap: 10px; }
-        .logo span { color: #06b6d4; }
-        .nav-links { display: flex; gap: 2rem; list-style: none; }
-        .nav-links a { font-size: 0.95rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
-        .nav-links a:hover, .nav-links a.active { color: #fff; }
-        .btn-primary { background: #06b6d4; color: #050b14; padding: 10px 20px; border-radius: 4px; font-weight: 600; }
-        
-        /* ABOUT */
         .display-title { font-size: 3rem; line-height: 1.1; margin-bottom: 24px; text-transform: uppercase; font-weight: 800; color: #fff; }
         .lead-text { font-size: 1.25rem; color: #94a3b8; max-width: 700px; margin: 0 auto 40px; line-height: 1.6; }
         .gradient-text { background: linear-gradient(135deg, #fff, #38bdf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
         .bento-card { background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.2); padding: 32px; border-radius: 16px; position: relative; overflow: hidden; }
-        
-        @media (max-width: 768px) { .navbar { flex-direction: column; gap: 1rem; } .nav-links { gap: 1rem; flex-wrap: wrap; justify-content: center; } }
     </style>
 </head>
 <body>
 
-    <nav class="navbar">
-        <div class="container" style="display: flex; justify-content: space-between; width: 100%; align-items: center; flex-wrap: wrap;">
-            <a href="/" class="logo">
-                <div style="width: 12px; height: 12px; background: #06b6d4; border-radius: 2px;"></div>
-                KABRODA
-            </a>
-            <ul class="nav-links">
-                {% if is_logged_in %}
-                    <li><a href="/suite">Session Control</a></li>
-                    <li><a href="/suite/battle-control">Battle Control</a></li>
-                    <li><a href="/account">Account</a></li>
-                {% else %}
-                    <li><a href="/">Home</a></li>
-                    <li><a href="/analysis">Analysis</a></li>
-                    <li><a href="/how-it-works">How It Works</a></li>
-                    <li><a href="/pricing">Pricing</a></li>
-                    <li><a href="/login">Login</a></li>
-                {% endif %}
-            </ul>
-            <div class="nav-cta">
-                {% if is_logged_in %}
-                    <a href="/suite" class="btn-primary">OPEN SUITE &rarr;</a>
-                {% else %}
-                    <a href="/pricing" class="btn-primary">Start 7-Day Free Trial</a>
-                {% endif %}
-            </div>
-        </div>
-    </nav>
+    {% include 'nav.html' %}
 
     <div class="container" style="padding-top: 100px; padding-bottom: 80px;">
         <div style="text-align: center; margin-bottom: 60px;">

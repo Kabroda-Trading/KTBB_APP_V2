@@ -7,7 +7,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        :root { --bg-dark: #050b14; --bg-card: #0f1623; --accent-cyan: #06b6d4; --accent-green: #10b981; }
         body { background-color: var(--bg-dark); color: #fff; font-family: 'Inter', sans-serif; }
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
         .pricing-hero { padding: 80px 0 60px; text-align: center; }
@@ -30,7 +29,7 @@
     </style>
 </head>
 <body>
-    {% include 'nav.html' ignore missing %}
+    {% include 'nav.html' %}
     
     <div class="pricing-hero">
         <div class="container">
