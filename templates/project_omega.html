@@ -2,68 +2,104 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PROJECT OMEGA | TACTICAL v17</title>
+    <title>PROJECT OMEGA | TACTICAL v17.4</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <style>
         :root { 
             --bg: #020617; --panel: #1e293b; --border: #334155; 
             --cyan: #22d3ee; --green: #10b981; --red: #ef4444; --gold: #facc15; --white: #f8fafc;
-            --gray: #64748b;
+            --gray: #94a3b8; 
+            --dark-gray: #475569;
         }
         body { 
             background: var(--bg); color: var(--white); font-family: 'JetBrains Mono', monospace; 
             margin: 0; padding: 15px; height: 100vh; box-sizing: border-box; overflow: hidden;
         }
 
+        /* LAYOUT */
         .cockpit { 
             display: grid; 
-            grid-template-columns: 300px 1fr 340px; 
-            grid-template-rows: auto 1fr auto; /* Header, Main Content, Collapsible Footer */
+            grid-template-columns: 320px 1fr 360px; 
+            grid-template-rows: 70px 1fr 180px; 
             gap: 15px; height: 100%;
         }
         
-        .header { grid-column: 1 / 4; display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 2px solid var(--border); }
-        .main-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; display: flex; flex-direction: column; overflow-y: auto; }
+        .header { grid-column: 1 / 4; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 5px; }
         
-        /* COLLAPSIBLE FOOTER */
-        .footer-toggle { grid-column: 1 / 4; background: var(--border); color: var(--gray); padding: 5px 15px; font-size: 12px; font-weight: 700; cursor: pointer; border-radius: 4px; display: flex; justify-content: space-between; }
-        .footer-content { grid-column: 1 / 4; background: #0f172a; height: 0; overflow: hidden; transition: height 0.3s ease; }
-        .footer-content.open { height: 150px; border: 1px solid var(--border); border-top: none; overflow-y: auto; padding: 10px; }
+        .panel { 
+            background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 25px; 
+            display: flex; flex-direction: column; min-height: 0;
+        }
+        .panel-center { background: #0b1121; }
 
         /* TYPOGRAPHY */
-        .h-title { font-family: 'Rajdhani', sans-serif; font-weight: 800; font-size: 28px; color: var(--cyan); letter-spacing: 1px; margin: 0; }
-        .h-sub { font-size: 14px; color: var(--gray); font-weight: 600; margin-left: 10px; }
-        .lbl { font-size: 11px; color: var(--gray); font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; display:block; }
-        .val { font-size: 16px; font-weight: 800; color: #fff; }
-        .big-price { font-size: 36px; font-weight: 800; color: #fff; font-family: 'Rajdhani'; }
+        .h-title { font-family: 'Rajdhani', sans-serif; font-weight: 800; font-size: 32px; color: var(--cyan); letter-spacing: 1.5px; margin: 0; text-shadow: 0 0 10px rgba(34, 211, 238, 0.2); }
+        .back-link { display: block; font-size: 11px; font-weight: 800; color: var(--gray); text-decoration: none; margin-bottom: 5px; letter-spacing: 1px; transition: 0.2s; }
+        .back-link:hover { color: var(--white); }
+        
+        .panel-head {
+            font-family: 'Rajdhani', sans-serif; font-weight: 800; font-size: 20px; 
+            color: var(--cyan); letter-spacing: 1px; margin-bottom: 20px; 
+            border-bottom: 1px solid var(--border); padding-bottom: 5px;
+            text-transform: uppercase; display: flex; justify-content: space-between; align-items: center;
+        }
 
-        /* ADVICE BAR */
-        .advice-bar { grid-column: 1 / 4; background: rgba(34, 211, 238, 0.1); border-left: 4px solid var(--cyan); padding: 10px 15px; font-weight: 800; color: #cbd5e1; font-size: 14px; display: flex; align-items: center; letter-spacing: 1px; }
+        .lbl { font-size: 12px; color: #cbd5e1; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; display:block; }
+        .val { font-size: 18px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
+        .big-price { font-size: 42px; font-weight: 800; color: #fff; font-family: 'Rajdhani'; }
 
-        /* PHASE 2 DASHBOARD (R/Y/G) */
-        .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
-        .dash-card { background: #0f172a; padding: 15px; border-radius: 6px; border: 1px solid var(--border); text-align: center; }
-        .dash-status { font-size: 14px; font-weight: 800; margin-top: 5px; padding: 4px; border-radius: 4px; display: inline-block; }
-        .status-green { color: var(--green); background: rgba(16, 185, 129, 0.1); }
-        .status-red { color: var(--red); background: rgba(239, 68, 68, 0.1); }
-        .status-yellow { color: var(--gold); background: rgba(250, 204, 21, 0.1); }
-        .status-gray { color: var(--gray); background: rgba(100, 116, 139, 0.1); }
+        /* RADAR (PHASE 3) */
+        .radar-box { 
+            background: #0f172a; padding: 15px; border-radius: 8px; border: 1px dashed var(--border); 
+            text-align: center; position: relative; margin-bottom: 20px;
+        }
+        .radar-track { height: 8px; background: #1e293b; position: relative; border-radius: 4px; margin: 35px 0 15px 0; }
+        .radar-puck { position: absolute; top: -14px; width: 14px; height: 36px; background: #fff; border: 2px solid var(--cyan); transform: translateX(-50%); left: 50%; transition: left 0.5s; display: block; box-shadow: 0 0 10px var(--cyan); }
+        .radar-msg { font-family: 'Rajdhani'; font-weight: 800; font-size: 24px; color: var(--gray); margin-top: 10px; letter-spacing: 1px; }
+        .radar-label { position: absolute; top: 28px; font-size: 11px; font-weight: 800; color: var(--gray); width: 60px; transform: translateX(-30px); }
 
-        /* RADAR (SIMPLIFIED) */
-        .radar-box { background: #0b1121; padding: 20px; border-radius: 8px; border: 1px dashed var(--border); text-align: center; position: relative; margin-top: auto; }
-        .radar-track { height: 6px; background: #1e293b; position: relative; border-radius: 3px; margin: 30px 0; }
-        .radar-puck { position: absolute; top: -12px; width: 12px; height: 30px; background: var(--gray); border: 2px solid #fff; transform: translateX(-50%); left: 50%; transition: left 0.5s, background 0.5s; }
-        .radar-label { position: absolute; top: 25px; font-size: 10px; font-weight: 700; color: var(--gray); width: 60px; transform: translateX(-30px); }
-        .radar-msg { font-family: 'Rajdhani'; font-weight: 800; font-size: 20px; color: var(--gray); }
+        /* VERDICT BANNER (PHASE 2) */
+        .verdict-banner {
+            background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border); border-left: 6px solid var(--gray);
+            padding: 20px; border-radius: 6px; margin-bottom: 20px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+        }
+        .verdict-score-row { display: flex; align-items: baseline; gap: 15px; margin-bottom: 5px; }
+        .verdict-score { font-size: 56px; font-weight: 800; font-family: 'Rajdhani'; line-height: 1; color: #fff; }
+        .verdict-status { font-size: 32px; font-weight: 800; font-family: 'Rajdhani'; text-transform: uppercase; }
+        .verdict-advice { font-size: 16px; color: var(--cyan); font-weight: 800; letter-spacing: 1px; margin-top: 10px; background: rgba(34, 211, 238, 0.1); padding: 5px 15px; border-radius: 4px; }
 
-        /* FLIGHT PLAN & CONTROLS */
-        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px dashed var(--border); padding-bottom: 4px; }
-        .btn-cp { background: var(--border); border: none; color: var(--white); padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 10px; font-weight: 700; margin-left: 5px; }
+        /* DASHBOARD GRID */
+        .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 15px; flex-grow: 1; }
+        .dash-card { background: #0f172a; padding: 15px; border-radius: 6px; border: 1px solid var(--border); text-align: center; display: flex; flex-direction: column; justify-content: center; }
+        
+        .gauge-bar-bg { height: 8px; background: #1e293b; position: relative; border-radius: 4px; overflow: hidden; margin-top: 8px; width: 100%; }
+        .gauge-fill { height: 100%; background: var(--cyan); width: 0%; transition: width 1s; }
+        
+        /* STATUS PILLS */
+        .dash-status { font-size: 13px; font-weight: 800; padding: 4px 10px; border-radius: 4px; display: inline-block; margin-top: 5px; text-transform: uppercase; }
+        .status-green { color: #fff; background: #10b981; box-shadow: 0 0 10px rgba(16, 185, 129, 0.3); }
+        .status-red { color: #fff; background: #ef4444; box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
+        .status-yellow { color: #000; background: #facc15; box-shadow: 0 0 10px rgba(250, 204, 21, 0.3); }
+        .status-gray { color: #cbd5e1; background: #334155; }
+
+        /* DATA ROWS */
+        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px dashed var(--dark-gray); padding-bottom: 8px; }
+        .btn-cp { background: var(--border); border: none; color: var(--white); padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px; font-weight: 700; margin-left: 8px; }
         .btn-cp:hover { background: var(--cyan); color: #000; }
-        .inp-risk { background: #0b1121; border: 1px solid var(--border); color: #fff; padding: 8px; width: 100%; text-align: right; font-family: inherit; font-weight: 700; margin-bottom: 10px; }
-        .side-btns { display: flex; gap: 5px; margin-bottom: 15px; }
-        .side-btn { flex: 1; padding: 10px; border: 1px solid var(--border); background: transparent; color: var(--gray); font-weight: 700; cursor: pointer; transition: 0.2s; }
+        
+        /* INPUTS & BUTTONS */
+        .inp-risk { background: #020617; border: 1px solid var(--gray); color: #fff; padding: 10px; width: 100%; text-align: right; font-family: inherit; font-weight: 700; margin-bottom: 15px; font-size: 16px; }
+        .side-btns { display: flex; gap: 10px; margin-bottom: 20px; }
+        .side-btn { flex: 1; padding: 12px; border: 1px solid var(--border); background: transparent; color: var(--gray); font-weight: 800; cursor: pointer; transition: 0.2s; font-size: 14px; }
+        .side-btn:hover { border-color: #fff; color: #fff; }
+
+        /* FOOTER */
+        .footer-toggle { grid-column: 1 / 4; background: var(--panel); color: var(--gray); padding: 8px 20px; font-size: 13px; font-weight: 700; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; display:flex; justify-content:space-between;}
+        .footer-content { grid-column: 1 / 4; background: #020617; height: 0; overflow: hidden; transition: height 0.3s; }
+        .footer-content.open { height: 150px; border: 1px solid var(--border); padding: 15px; overflow-y: auto; }
+        .log-box { font-family: 'Courier New', monospace; font-size: 14px; color: #cbd5e1; }
     </style>
 </head>
 <body>
@@ -71,80 +107,114 @@
 <div class="cockpit">
     <div class="header">
         <div>
-            <span class="h-title">PROJECT OMEGA</span><span class="h-sub">v17.2 LAKE DAY</span>
+            <a href="/suite" class="back-link">← RETURN TO SUITE</a>
+            <div>
+                <span class="h-title">PROJECT OMEGA</span>
+                <span class="dash-status status-gray" style="vertical-align: middle; margin-left: 15px;">v17.4 CONNECTED</span>
+            </div>
         </div>
-        <div id="livePrice" class="big-price">--</div>
-        <div style="text-align: right;">
-            <span id="biasBadge" class="dash-status status-yellow">BIAS: CALIBRATING</span>
-            <div id="clockLocal" class="lbl" style="margin-top: 5px;">--:--:--</div>
+        <div style="display:flex; align-items:center; gap:30px;">
+            <div id="biasBadge" class="dash-status status-gray" style="font-size: 16px; padding: 6px 15px;">BIAS: CALIBRATING</div>
+            <div style="text-align:right;">
+                <div id="livePrice" class="big-price">--</div>
+                <div id="clockLocal" style="color:var(--cyan); font-weight:700; font-size:14px; letter-spacing:1px;">--:--:--</div>
+            </div>
         </div>
     </div>
 
-    <div id="adviceBar" class="advice-bar">SYSTEM CALIBRATING SESSION DATA...</div>
-
-    <div class="main-panel">
-        <div class="lbl">RISK MANAGEMENT</div>
-        <div class="lbl">BALANCE ($)</div>
+    <div class="panel">
+        <div class="panel-head">RISK MANAGEMENT</div>
+        
+        <div class="lbl">ACCOUNT BALANCE ($)</div>
         <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="render()">
-        <div class="lbl">RISK %</div>
+        
+        <div class="lbl">RISK PER TRADE (%)</div>
         <input type="number" id="inpRisk" class="inp-risk" value="10.0" step="0.1" oninput="render()">
-        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dotted var(--border);">
-            <div class="lbl">MAX LOSS</div>
-            <div id="valRisk" class="val" style="color:var(--red); font-size: 20px;">$400.00</div>
+        
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px dotted var(--gray);">
+            <div class="lbl">MAX ALLOWABLE LOSS</div>
+            <div id="valRisk" style="color:var(--red); font-size: 28px; font-weight: 800; font-family: 'Rajdhani';">$400.00</div>
+        </div>
+        
+        <div style="margin-top:auto;">
+            <button id="btnAudio" class="side-btn" style="width:100%; margin-bottom:5px;" onclick="toggleAudio()">AUDIO: OFF</button>
+            <button id="btnNotify" class="side-btn" style="width:100%; margin-bottom:5px;" onclick="requestNotify()">ENABLE NOTIFY</button>
+            <button id="btnSim" class="side-btn" style="width:100%;" onclick="toggleSim()">SIMULATION: OFF</button>
         </div>
     </div>
 
-    <div class="main-panel" style="background: #0b1121;">
-        <div class="lbl" style="text-align:center; margin-bottom: 10px;">PHASE 2: KINETIC STATUS (LOCKED)</div>
-        <div class="dashboard-grid">
-            <div class="dash-card">
-                <div class="lbl" id="scoreLabel">KINETIC SCORE</div>
-                <div id="dScore" class="val" style="font-size: 22px;">--</div>
-                <div id="dProtocol" class="dash-status status-yellow">OFFLINE</div>
-            </div>
-            <div class="dash-card">
-                <div class="lbl">ENERGY (VOLATILITY)</div>
-                <div id="dEnergyVal" class="val">-- bps</div>
-                <div id="dEnergyStatus" class="dash-status status-yellow">ANALYZING</div>
-            </div>
-            <div class="dash-card">
-                <div class="lbl">SPACE (R-MULTIPLE)</div>
-                <div id="dSpaceVal" class="val">-- R</div>
-                <div id="dSpaceStatus" class="dash-status status-yellow">ANALYZING</div>
-            </div>
-            <div class="dash-card">
-                <div class="lbl">STRUCTURE & WIND</div>
-                <div id="dHull" class="dash-status status-yellow" style="margin-bottom: 5px; display:block;">HULL: --</div>
-                <div id="dWind" class="dash-status status-yellow" style="display:block;">WIND: --</div>
-            </div>
-        </div>
-
+    <div class="panel panel-center">
+        
         <div class="radar-box">
-            <div class="lbl">PHASE 3: EXECUTION MONITOR</div>
+            <div class="lbl" style="position:absolute; top:10px; left:15px; color:var(--cyan);">PHASE 3: EXECUTION MONITOR</div>
             <div class="radar-track">
                 <div class="radar-label" style="left: 0%;">STOP</div>
                 <div class="radar-label" style="left: 25%; color: var(--cyan);">ENTRY</div>
                 <div class="radar-label" style="left: 100%; color: var(--gold);">TARGET</div>
                 <div id="radarPuck" class="radar-puck"></div>
             </div>
-            <div id="radarMsg" class="radar-msg">STALKING...</div>
+            <div id="radarMsg" class="radar-msg">WAITING FOR DATA...</div>
+        </div>
+
+        <div id="verdictBanner" class="verdict-banner">
+            <div class="lbl" id="scoreLabel" style="font-size:14px; margin-bottom:10px;">SESSION VIABILITY</div>
+            <div class="verdict-score-row">
+                <div id="dScore" class="verdict-score">--</div>
+                <div id="dProtocol" class="verdict-status">OFFLINE</div>
+            </div>
+            <div id="dAdvice" class="verdict-advice">SYSTEM INITIALIZING...</div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="dash-card">
+                <div class="lbl">ENERGY</div>
+                <div id="dEnergyVal" class="val">--</div>
+                <div class="gauge-bar-bg"><div class="gauge-fill" id="barEnergy"></div></div>
+                <div id="dEnergyStatus" class="dash-status status-gray">--</div>
+            </div>
+            <div class="dash-card">
+                <div class="lbl">SPACE</div>
+                <div id="dSpaceVal" class="val">--</div>
+                <div class="gauge-bar-bg"><div class="gauge-fill" id="barSpace"></div></div>
+                <div id="dSpaceStatus" class="dash-status status-gray">--</div>
+            </div>
+            <div class="dash-card">
+                <div class="lbl">WIND</div>
+                <div id="dWindVal" class="val">--</div>
+                <div class="gauge-bar-bg"><div class="gauge-fill" id="barWind"></div></div>
+                <div id="dWindStatus" class="dash-status status-gray">--</div>
+            </div>
+            <div class="dash-card">
+                <div class="lbl">STRUCTURE</div>
+                <div id="dHullVal" class="val">--</div>
+                <div class="gauge-bar-bg"><div class="gauge-fill" id="barHull"></div></div>
+                <div id="dHullStatus" class="dash-status status-gray">--</div>
+            </div>
         </div>
     </div>
 
-    <div class="main-panel">
-        <div class="lbl">FLIGHT PATH</div>
+    <div class="panel">
+        <div class="panel-head">FLIGHT PATH</div>
+        
         <div class="side-btns">
             <button id="btnLong" class="side-btn" onclick="forceSide('LONG')">LONG</button>
             <button id="btnShort" class="side-btn" onclick="forceSide('SHORT')">SHORT</button>
         </div>
-        <div class="data-row"><span class="lbl">ENTRY Trigger</span><div><span id="pEntry" class="val" style="color:var(--cyan)">--</span><button class="btn-cp" onclick="cp('pEntry')">CP</button></div></div>
+        
+        <div class="data-row"><span class="lbl">ENTRY TRIGGER</span><div><span id="pEntry" class="val" style="color:var(--cyan)">--</span><button class="btn-cp" onclick="cp('pEntry')">CP</button></div></div>
         <div class="data-row"><span class="lbl">STOP LOSS</span><div><span id="pStop" class="val" style="color:var(--red)">--</span><button class="btn-cp" onclick="cp('pStop')">CP</button></div></div>
         <div class="data-row"><span class="lbl">POSITION SIZE</span><div><span id="pSize" class="val">--</span><button class="btn-cp" onclick="cp('pSize')">CP</button></div></div>
-        <div style="margin: 15px 0; border-bottom: 1px solid var(--border);"></div>
+        
+        <div style="margin: 20px 0; border-bottom: 2px solid var(--border);"></div>
+        
         <div class="data-row"><span class="lbl" style="color:var(--gold)">TARGET 1</span><div><span id="pT1" class="val">--</span><button class="btn-cp" onclick="cp('pT1')">CP</button></div></div>
         <div class="data-row"><span class="lbl">TARGET 2</span><div><span id="pT2" class="val">--</span><button class="btn-cp" onclick="cp('pT2')">CP</button></div></div>
         <div class="data-row"><span class="lbl">TARGET 3</span><div><span id="pT3" class="val">--</span><button class="btn-cp" onclick="cp('pT3')">CP</button></div></div>
-        <div class="data-row"><span class="lbl">BANK RULE</span><span id="pBank" class="val" style="font-size:12px;">--</span></div>
+        
+        <div class="data-row" style="margin-top:auto; border:none;">
+            <span class="lbl">BANK RULE</span>
+            <span id="pBank" class="val" style="font-size:14px; color:var(--cyan);">--</span>
+        </div>
     </div>
 
     <div class="footer-toggle" onclick="toggleFooter()">
@@ -152,7 +222,7 @@
         <span>[EXPAND/COLLAPSE]</span>
     </div>
     <div id="footerContent" class="footer-content">
-        <div id="logBox" style="font-family:'Courier New'; font-size:12px; color:var(--gray);">SYSTEM READY.</div>
+        <div id="logBox" class="log-box"></div>
     </div>
 </div>
 
@@ -170,14 +240,30 @@
         box.innerHTML += `<div>[${ts}] ${msg}</div>`;
         box.scrollTop = box.scrollHeight;
     }
-    function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText.replace(/,/g,'')); log("Copied to clipboard."); }
-    function forceSide(s) { state.manualSide = s; render(); log(`Manual side forced: ${s}`); }
+    function forceSide(s) { state.manualSide = s; render(); }
+    function toggleAudio() { 
+        document.getElementById('btnAudio').innerText = "AUDIO: ON"; // Simple toggle visual
+    } 
+    function toggleSim() { state.simMode = !state.simMode; loop(); }
+    function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText.replace(/,/g,'')); }
+    
+    // RESTORED NOTIFICATION LOGIC
+    function requestNotify() { 
+        Notification.requestPermission().then(p => {
+            if(p === 'granted') {
+                log("NOTIFICATIONS ENABLED.");
+                document.getElementById('btnNotify').innerText = "NOTIFY: ON";
+                document.getElementById('btnNotify').style.color = "var(--green)";
+                document.getElementById('btnNotify').style.borderColor = "var(--green)";
+            }
+        }); 
+    }
 
     function updateRadar(plan, price, side, status, protocol) {
         const puck = document.getElementById('radarPuck');
         const msg = document.getElementById('radarMsg');
 
-        // LOCKOUT: If Grounded/Blocked, Radar is Dead.
+        // RADAR LOCKOUT
         if (protocol === "GROUNDED" || protocol === "BLOCKED") {
             puck.style.display = "none";
             msg.innerText = "RADAR OFFLINE (NO SIGNAL)";
@@ -185,22 +271,21 @@
             return;
         }
 
-        if (!plan || !plan.trigger || status === "CALIBRATING") {
-            puck.style.display = "block";
+        puck.style.display = "block";
+        const isLive = (status === "EXECUTING" || status === "ACTIVE");
+
+        if (!plan || !plan.trigger) {
             puck.style.left = "50%"; puck.style.background = "var(--gray)";
             msg.innerText = "SYSTEM IDLE"; msg.style.color = "var(--gray)";
             return;
         }
 
-        puck.style.display = "block";
-        const isLive = (status === "EXECUTING" || status === "ACTIVE");
-
         if (!isLive) {
             // MODE 1: STALKING
-            puck.style.left = "25%"; // Sit on Entry line
+            puck.style.left = "25%"; 
             puck.style.background = "var(--cyan)";
             puck.style.borderColor = "var(--cyan)";
-            msg.innerText = `STALKING ${side}...`;
+            msg.innerText = `STALKING ${side} ENTRY...`;
             msg.style.color = "var(--cyan)";
         } else {
             // MODE 2: ENGAGED
@@ -242,40 +327,31 @@
         document.getElementById('livePrice').innerText = d.price.toLocaleString();
         document.getElementById('clockLocal').innerText = new Date().toLocaleTimeString();
 
-        // ADVICE BAR & BIAS
-        const bias = d.bias || "NEUTRAL";
-        const adviceBar = document.getElementById('adviceBar');
-        adviceBar.innerText = d.advice || "BIAS NEUTRAL. FOLLOW TRIGGERS.";
-        
+        // 1. BIAS BADGE
+        const bias = d.bias || "NONE";
         const bEl = document.getElementById('biasBadge');
         bEl.innerText = `BIAS: ${bias}`;
+        if(bias === "LONG") bEl.className="dash-status status-green";
+        else if(bias === "SHORT") bEl.className="dash-status status-red";
+        else bEl.className="dash-status status-gray";
 
-        if(bias === "LONG") {
-            setStatus('biasBadge', 'BIAS: LONG', 'status-green');
-            adviceBar.style.borderLeftColor = "var(--green)"; adviceBar.style.color = "var(--green)"; adviceBar.style.background = "rgba(16,185,129,0.1)";
-        } else if (bias === "SHORT") {
-            setStatus('biasBadge', 'BIAS: SHORT', 'status-red');
-            adviceBar.style.borderLeftColor = "var(--red)"; adviceBar.style.color = "var(--red)"; adviceBar.style.background = "rgba(239,68,68,0.1)";
-        } else if (bias === "NONE") {
-            // LAKE DAY
-            setStatus('biasBadge', 'BIAS: NONE', 'status-gray');
-            adviceBar.style.borderLeftColor = "var(--gray)"; adviceBar.style.color = "#cbd5e1"; adviceBar.style.background = "rgba(100, 116, 139, 0.2)";
-        } else {
-            setStatus('biasBadge', 'BIAS: NEUTRAL', 'status-yellow');
-             adviceBar.style.borderLeftColor = "var(--cyan)"; adviceBar.style.color = "var(--cyan)"; adviceBar.style.background = "rgba(34,211,238,0.1)";
-        }
-
-        // PHASE 2 DASHBOARD
+        // 2. VERDICT BANNER
         const k = d.kinetic || {};
-        const bk = k.breakdown || {};
-        
         document.getElementById('dScore').innerText = k.total_score || "--";
-        let protoColor = 'status-yellow';
-        if(k.protocol === "SUPERSONIC" || k.protocol === "SNIPER") protoColor = 'status-green';
-        if(k.protocol === "GROUNDED" || k.protocol === "BLOCKED") protoColor = 'status-red';
-        setStatus('dProtocol', k.protocol || "OFFLINE", protoColor);
+        document.getElementById('dAdvice').innerText = d.advice || "--";
+        
+        let protoColor = 'var(--gold)';
+        if(k.protocol === "SUPERSONIC") protoColor = 'var(--green)';
+        if(k.protocol === "GROUNDED" || k.protocol === "BLOCKED") protoColor = 'var(--red)';
+        
+        const dProto = document.getElementById('dProtocol');
+        dProto.innerText = k.protocol || "OFFLINE";
+        dProto.style.color = protoColor;
 
-        // DYNAMIC LABEL
+        const banner = document.getElementById('verdictBanner');
+        banner.style.borderLeftColor = protoColor;
+        banner.style.background = (k.protocol === "GROUNDED" || k.protocol === "BLOCKED") ? "rgba(239, 68, 68, 0.05)" : "rgba(100, 116, 139, 0.1)";
+
         if (k.total_score < 40) {
             document.getElementById('scoreLabel').innerText = "SESSION VIABILITY";
             document.getElementById('scoreLabel').style.color = "var(--red)";
@@ -284,32 +360,45 @@
             document.getElementById('scoreLabel').style.color = "#cbd5e1";
         }
 
-        // Energy
+        // 3. METRICS GRID
+        const bk = k.breakdown || {};
+        
         let bps = 0; try { bps = parseInt(bk.energy.match(/\d+/)[0]); } catch(e){}
+        let ePct = Math.min(100, (bps / 350) * 100); 
+        document.getElementById('barEnergy').style.width = ePct + "%";
         document.getElementById('dEnergyVal').innerText = `${bps || '--'} bps`;
         if(bps > 350) setStatus('dEnergyStatus', 'EXHAUSTED', 'status-red');
         else if(bps < 100) setStatus('dEnergyStatus', 'COILED', 'status-green');
         else setStatus('dEnergyStatus', 'STANDARD', 'status-yellow');
 
-        // Space
         let atr = 0; try { atr = parseFloat(bk.space.match(/([\d\.]+)R/)[1]); } catch(e){}
+        let sPct = Math.max(0, Math.min(100, (atr / 2.0) * 100));
+        document.getElementById('barSpace').style.width = sPct + "%";
         document.getElementById('dSpaceVal').innerText = `${atr.toFixed(1) || '--'} R`;
         if(atr < 1.0) setStatus('dSpaceStatus', 'BLOCKED', 'status-red');
         else if(atr > 2.0) setStatus('dSpaceStatus', 'SUPERSONIC', 'status-green');
         else setStatus('dSpaceStatus', 'GRIND', 'status-yellow');
 
-        // Hull & Wind
-        setStatus('dHull', bk.structure || 'MESSY', (bk.structure||"").includes('SOLID') ? 'status-green' : 'status-red');
-        setStatus('dWind', bk.momentum || 'NEUTRAL', (bk.momentum||"").includes('ALIGNED') ? 'status-green' : 'status-yellow');
+        document.getElementById('dWindVal').innerText = bk.momentum || "--";
+        let isAligned = (bk.momentum||"").includes("ALIGNED");
+        document.getElementById('barWind').style.width = isAligned ? "100%" : "30%";
+        document.getElementById('barWind').style.background = isAligned ? "var(--cyan)" : "#475569";
+        setStatus('dWindStatus', isAligned ? "ALIGNED" : "NEUTRAL", isAligned ? "status-green" : "status-yellow");
 
-        // FLIGHT PLAN & RADAR
+        document.getElementById('dHullVal').innerText = bk.structure || "--";
+        let isSolid = (bk.structure||"").includes("SOLID");
+        document.getElementById('barHull').style.width = isSolid ? "100%" : "30%";
+        document.getElementById('barHull').style.background = isSolid ? "var(--cyan)" : "var(--red)";
+        setStatus('dHullStatus', isSolid ? "SOLID" : "WEAK", isSolid ? "status-green" : "status-red");
+
+        // 4. SIDE & PLAN
         let side = state.manualSide || (d.active_side !== "NONE" ? d.active_side : bias === "SHORT" ? "SHORT" : "LONG");
         const plan = d.plans ? d.plans[side] : null;
 
         document.getElementById('btnLong').style.background = side==="LONG" ? "var(--green)" : "transparent";
-        document.getElementById('btnLong').style.color = side==="LONG" ? "#000" : "var(--gray)";
+        document.getElementById('btnLong').style.color = side==="LONG" ? "#fff" : "var(--gray)";
         document.getElementById('btnShort').style.background = side==="SHORT" ? "var(--red)" : "transparent";
-        document.getElementById('btnShort').style.color = side==="SHORT" ? "#000" : "var(--gray)";
+        document.getElementById('btnShort').style.color = side==="SHORT" ? "#fff" : "var(--gray)";
 
         if (plan) {
             document.getElementById('pEntry').innerText = plan.trigger ? plan.trigger.toLocaleString() : "--";
@@ -327,7 +416,6 @@
             }
             document.getElementById('pBank').innerText = plan.bank_rule;
 
-            // RISK
             const bal = parseFloat(document.getElementById('inpBal').value) || 0;
             const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
             let riskAmt = bal * (riskPct / 100);
