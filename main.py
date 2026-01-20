@@ -1,6 +1,6 @@
 # main.py
 # ==============================================================================
-# KABRODA UNIVERSAL SWITCHBOARD
+# KABRODA UNIVERSAL SWITCHBOARD (MAIN DISPATCHER)
 # ==============================================================================
 import os
 from datetime import datetime, timezone 
@@ -22,8 +22,9 @@ import project_omega
 import battlebox_pipeline
 import research_lab
 import ai_analyst
-import market_radar # <--- NEW ENGINE
+import market_radar # <--- NEW RADAR ENGINE
 
+# --- HELPERS ---
 def _template_or_fallback(request: Request, templates: Jinja2Templates, name: str, context: Dict[str, Any]):
     try: return templates.TemplateResponse(name, context)
     except Exception as e: return HTMLResponse(f"<h2>System Error</h2><p>{str(e)}</p>", status_code=500)
@@ -150,7 +151,7 @@ def market_radar_page(request: Request, db: Session = Depends(get_db)):
     if not ctx["is_admin"]: return RedirectResponse("/suite")
     return _template_or_fallback(request, templates, "market_radar.html", {"request": request})
 
-# ADMIN ACTIONS
+# ADMIN ACTIONS (FIXED INTEGER CASTING)
 @app.post("/admin/toggle-role")
 async def toggle_role(request: Request, db: Session = Depends(get_db)):
     uid = request.session.get(auth.SESSION_KEY)
@@ -158,12 +159,14 @@ async def toggle_role(request: Request, db: Session = Depends(get_db)):
     if not admin or not admin.is_admin: raise HTTPException(403)
     try:
         pl = await request.json()
-        target = db.query(UserModel).filter(UserModel.id == int(pl["user_id"])).first()
-        if target and target.id != admin.id:
+        target_id = int(pl.get("user_id")) # Force Int
+        target = db.query(UserModel).filter(UserModel.id == target_id).first()
+        if target:
+            if target.id == admin.id: return JSONResponse({"ok": False, "error": "Cannot demote self."})
             target.is_admin = not target.is_admin
             db.commit()
             return JSONResponse({"ok": True})
-        return JSONResponse({"ok": False, "error": "Invalid target"})
+        return JSONResponse({"ok": False, "error": "User not found"})
     except Exception as e: return JSONResponse({"ok": False, "error": str(e)})
 
 @app.post("/admin/reset-password-manual")
@@ -173,7 +176,8 @@ async def reset_pass(request: Request, db: Session = Depends(get_db)):
     if not admin or not admin.is_admin: raise HTTPException(403)
     try:
         pl = await request.json()
-        target = db.query(UserModel).filter(UserModel.id == int(pl["user_id"])).first()
+        target_id = int(pl.get("user_id")) # Force Int
+        target = db.query(UserModel).filter(UserModel.id == target_id).first()
         if target:
             target.password_hash = auth.hash_password(pl["new_password"])
             db.commit()
