@@ -1,83 +1,315 @@
-<script>
-    // ... (upd, onload functions same as before) ...
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Kabroda | Research Lab</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        body { background-color: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
+        h1 { font-family: 'JetBrains Mono', monospace; margin: 0; color: #fff; }
+        .pill { background: #8b5cf6; color: #fff; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 700; letter-spacing: 1px; }
+        
+        .lab-grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
+        .panel { background: #0f1623; border: 1px solid rgba(255,255,255,0.1); padding: 20px; border-radius: 8px; max-height: 800px; overflow-y: auto; }
+        
+        .control-group { margin-bottom: 15px; }
+        label { display: block; color: #94a3b8; font-size: 11px; font-weight: 700; margin-bottom: 6px; letter-spacing: 0.5px; text-transform: uppercase; }
+        input, select { width: 100%; background: #050b14; border: 1px solid #333; color: #fff; padding: 8px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 13px; }
+        
+        .range-wrap { display: flex; align-items: center; gap: 10px; }
+        input[type=range] { flex: 1; accent-color: #06b6d4; }
+        .range-val { font-family: 'JetBrains Mono'; color: #06b6d4; width: 30px; text-align: right; font-size: 12px; }
+        
+        .checkbox-group { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        input[type=checkbox] { width: auto; accent-color: #10b981; cursor: pointer; }
+        .check-lbl { color: #cbd5e1; font-size: 12px; cursor: pointer; }
+        
+        .divider { border-top: 1px solid #333; margin: 20px 0 15px 0; }
+        .section-title { color: #fbbf24; font-size: 11px; font-weight: 800; letter-spacing: 1px; margin-bottom: 10px; display: block; }
+        
+        .btn-run { width: 100%; background: #06b6d4; color: #000; border: none; padding: 12px; font-weight: 700; border-radius: 4px; cursor: pointer; text-transform: uppercase; margin-top: 20px; font-size: 13px; }
+        .btn-run:hover { background: #22d3ee; }
+        .btn-copy { background: #334155; color: #fff; border: 1px solid #475569; padding: 4px 12px; font-size: 11px; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; }
+        .btn-copy:hover { background: #475569; }
 
-    async function runAnalysis() {
-        document.getElementById('runBtn').disabled = true;
-        document.getElementById('loader').style.display = 'block';
-        document.getElementById('results').style.display = 'none';
+        /* RESULTS STYLES */
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+        .stat-box { background: rgba(255,255,255,0.03); padding: 15px; border-radius: 6px; text-align: center; border: 1px solid rgba(255,255,255,0.05); }
+        .stat-num { font-size: 24px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; }
+        .stat-lbl { font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
+        
+        .log-row { background: rgba(255,255,255,0.02); padding: 10px; border-bottom: 1px solid #1e293b; font-family: 'JetBrains Mono'; font-size: 12px; }
+        .log-row:hover { background: rgba(255,255,255,0.05); }
+        .tag { padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; }
+        .tag-go { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .tag-wait { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
+    </style>
+</head>
+<body>
+    
+    {% include 'nav.html' %}
 
-        // Gather Inputs (Same as before)
-        // ...
+    <div class="container" style="padding-top:40px;">
+        <div class="header">
+            <div>
+                <a href="/suite" style="color: #94a3b8; text-decoration: none; font-size: 14px;">← Back to Suite</a>
+                <h1 style="margin-top: 10px;">RESEARCH LAB <span class="pill">HYBRID ENGINE</span></h1>
+            </div>
+        </div>
 
-        try {
-            const res = await fetch('/api/research/run', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
-            
-            if(!data.ok) throw new Error(data.error);
-
-            // Stats
-            document.getElementById('rTotal').innerText = data.total_sessions;
-            document.getElementById('rSignals').innerText = data.trade_signals;
-            document.getElementById('rKinetic').innerText = data.kinetic_passes;
-            document.getElementById('rPrime').innerText = data.prime_setups;
-            document.getElementById('lblMinScore').innerText = payload.min_score;
-            document.getElementById('rawJson').innerText = JSON.stringify(data.results, null, 2); // <--- FULL JSON IS BACK
-
-            // Visual Log
-            let html = "";
-            const minS = payload.min_score;
-            
-            data.results.forEach(r => {
-                const hasTrade = r.trade_signal;
-                const hasKinetic = r.kinetic_score >= minS;
+        <div class="lab-grid">
+            <div class="panel">
+                <div class="control-group">
+                    <label style="color:#06b6d4;">TARGET ASSET</label>
+                    <select id="symbol">
+                        <option value="BTCUSDT">BTC (Bitcoin)</option>
+                        <option value="ETHUSDT">ETH (Ethereum)</option>
+                        <option value="SOLUSDT">SOL (Solana)</option>
+                        <option value="XRPUSDT">XRP (Ripple)</option>
+                        <option value="DOGEUSDT">DOGE (Dogecoin)</option>
+                        <option value="TRXUSDT">TRX (Tron)</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>DATE RANGE</label>
+                    <input type="date" id="startDate">
+                    <input type="date" id="endDate" style="margin-top:5px;">
+                </div>
                 
-                // Color Logic
-                let bg = "rgba(255,255,255,0.02)";
-                let bord = "transparent";
-                if(hasTrade && hasKinetic) { bg = "rgba(6,182,212,0.1)"; bord = "#06b6d4"; } // Prime
-                else if(hasTrade) { bg = "rgba(16,185,129,0.1)"; bord = "#10b981"; } // Signal only
-                else if(hasKinetic) { bord = "#fbbf24"; } // Kinetic only
+                <div class="checkbox-group"><input type="checkbox" id="sessNYF" checked><label for="sessNYF" class="check-lbl">NY Futures</label></div>
+                <div class="checkbox-group"><input type="checkbox" id="sessNYE"><label for="sessNYE" class="check-lbl">NY Equity</label></div>
+                <div class="checkbox-group"><input type="checkbox" id="sessLDN"><label for="sessLDN" class="check-lbl">London</label></div>
 
-                // Trade Details (The "Data" you missed)
-                let tradeInfo = "";
-                if(hasTrade) {
-                    const sim = r.simulation || {};
-                    const outcomeColor = sim.r_realized > 0 ? "#10b981" : (sim.r_realized < 0 ? "#ef4444" : "#94a3b8");
-                    tradeInfo = `
-                        <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.1); font-size:11px; display:flex; justify-content:space-between;">
-                            <span>ENTRY: ${sim.entry_price}</span>
-                            <span style="color:${outcomeColor}; font-weight:700;">PnL: ${sim.r_realized}R (${sim.outcome})</span>
+                <div class="divider"></div>
+
+                <span class="section-title">STRUCTURE ENGINE</span>
+                
+                <div class="control-group">
+                    <label>CONFIRMATION MODE</label>
+                    <select id="confirmMode">
+                        <option value="TOUCH">Touch (Aggressive)</option>
+                        <option value="1_CLOSE">1-Candle Close</option>
+                        <option value="2_CLOSE">2-Candle Close</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>TOLERANCE (BPS)</label>
+                    <div class="range-wrap">
+                        <input type="range" id="tuneTol" min="5" max="50" value="10" oninput="upd('valTol', this.value)">
+                        <span id="valTol" class="range-val">10</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>MIN TRIGGER DIST (BPS)</label>
+                    <div class="range-wrap">
+                        <input type="range" id="tuneDist" min="5" max="50" value="20" oninput="upd('valDist', this.value)">
+                        <span id="valDist" class="range-val">20</span>
+                    </div>
+                </div>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chkIgnore15m">
+                    <label for="chkIgnore15m" class="check-lbl" style="color:#ef4444;">IGNORE 15m ALIGNMENT</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chkIgnore5m">
+                    <label for="chkIgnore5m" class="check-lbl" style="color:#ef4444;">IGNORE 5m STOCH</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chkFusion">
+                    <label for="chkFusion" class="check-lbl" style="color:#fbbf24;">FUSION MODE</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chkVol">
+                    <label for="chkVol" class="check-lbl">REQUIRE VOLUME</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chkDiv">
+                    <label for="chkDiv" class="check-lbl">REQUIRE DIVERGENCE</label>
+                </div>
+
+                <div class="divider"></div>
+
+                <span class="section-title">KINETIC MATH (OMEGA)</span>
+                
+                <div class="checkbox-group"><input type="checkbox" id="kEnergy" checked><label for="kEnergy" class="check-lbl">ENERGY (Volatility)</label></div>
+                <div class="checkbox-group"><input type="checkbox" id="kSpace" checked><label for="kSpace" class="check-lbl">SPACE (ATR)</label></div>
+                <div class="checkbox-group"><input type="checkbox" id="kWind" checked><label for="kWind" class="check-lbl">WIND (Momentum)</label></div>
+                <div class="checkbox-group"><input type="checkbox" id="kHull" checked><label for="kHull" class="check-lbl">HULL (Structure)</label></div>
+
+                <div class="control-group" style="margin-top:10px;">
+                    <label>SCORE THRESHOLD</label>
+                    <input type="number" id="minScore" value="70" min="0" max="100">
+                </div>
+
+                <button onclick="runAnalysis()" class="btn-run" id="runBtn">RUN FULL ANALYSIS</button>
+            </div>
+
+            <div class="panel">
+                <div id="loader" style="display:none; text-align:center; padding:50px; color:#94a3b8;">RUNNING HYBRID ENGINE...</div>
+                
+                <div id="results" style="display:none;">
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div class="stat-num" id="rTotal">0</div>
+                            <div class="stat-lbl">SESSIONS</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-num" id="rSignals" style="color:#10b981;">0</div>
+                            <div class="stat-lbl">TRADE SIGNALS</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-num" id="rKinetic" style="color:#fbbf24;">0</div>
+                            <div class="stat-lbl">KINETIC > <span id="lblMinScore">70</span></div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-num" id="rPrime" style="color:#06b6d4;">0</div>
+                            <div class="stat-lbl">PRIME (BOTH)</div>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; margin-top:30px;">
+                        <label style="margin:0; color:#fff;">SESSION LOG</label>
+                        <button class="btn-copy" onclick="copyLog()">COPY JSON LOG</button>
+                    </div>
+                    
+                    <div id="logArea" style="height:500px; overflow-y:auto; background:#000; border:1px solid #333; padding:15px; border-radius:4px;">
+                        </div>
+                    
+                    <pre id="rawJson" style="display:none;"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function upd(id, v) { document.getElementById(id).innerText = v; }
+        
+        window.onload = function() {
+            const t = new Date();
+            document.getElementById('endDate').valueAsDate = t;
+            const p = new Date(); p.setDate(t.getDate()-14);
+            document.getElementById('startDate').valueAsDate = p;
+        }
+
+        async function runAnalysis() {
+            document.getElementById('runBtn').disabled = true;
+            document.getElementById('loader').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+
+            // Gather Sessions
+            let sIds = [];
+            if(document.getElementById('sessNYF').checked) sIds.push("us_ny_futures");
+            if(document.getElementById('sessNYE').checked) sIds.push("us_ny_equity");
+            if(document.getElementById('sessLDN').checked) sIds.push("eu_london");
+
+            // Build Payload
+            const payload = {
+                symbol: document.getElementById('symbol').value,
+                start_date_utc: document.getElementById('startDate').value,
+                end_date_utc: document.getElementById('endDate').value,
+                session_ids: sIds,
+                tuning: {
+                    confirmation_mode: document.getElementById('confirmMode').value,
+                    zone_tolerance_bps: parseInt(document.getElementById('tuneTol').value),
+                    min_trigger_dist_bps: parseInt(document.getElementById('tuneDist').value),
+                    ignore_15m_alignment: document.getElementById('chkIgnore15m').checked,
+                    ignore_5m_stoch: document.getElementById('chkIgnore5m').checked,
+                    fusion_mode: document.getElementById('chkFusion').checked,
+                    require_volume: document.getElementById('chkVol').checked,
+                    require_divergence: document.getElementById('chkDiv').checked
+                },
+                sensors: {
+                    energy: document.getElementById('kEnergy').checked,
+                    space: document.getElementById('kSpace').checked,
+                    wind: document.getElementById('kWind').checked,
+                    hull: document.getElementById('kHull').checked
+                },
+                min_score: parseInt(document.getElementById('minScore').value)
+            };
+
+            try {
+                const res = await fetch('/api/research/run', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                
+                if(!data.ok) throw new Error(data.error);
+
+                // Stats
+                document.getElementById('rTotal').innerText = data.total_sessions;
+                document.getElementById('rSignals').innerText = data.trade_signals;
+                document.getElementById('rKinetic').innerText = data.kinetic_passes;
+                document.getElementById('rPrime').innerText = data.prime_setups;
+                document.getElementById('lblMinScore').innerText = payload.min_score;
+                
+                // FULL JSON RESTORED HERE
+                document.getElementById('rawJson').innerText = JSON.stringify(data.results, null, 2);
+
+                // Visual Log
+                let html = "";
+                const minS = payload.min_score;
+                
+                data.results.forEach(r => {
+                    const hasTrade = r.trade_signal;
+                    const hasKinetic = r.kinetic_score >= minS;
+                    
+                    let bg = "rgba(255,255,255,0.02)";
+                    let bord = "transparent";
+                    if(hasTrade && hasKinetic) { bg = "rgba(6,182,212,0.1)"; bord = "#06b6d4"; } 
+                    else if(hasTrade) { bg = "rgba(16,185,129,0.1)"; bord = "#10b981"; } 
+                    else if(hasKinetic) { bord = "#fbbf24"; } 
+
+                    let tradeInfo = "";
+                    if(hasTrade) {
+                        const sim = r.simulation || {};
+                        const outcomeColor = sim.r_realized > 0 ? "#10b981" : (sim.r_realized < 0 ? "#ef4444" : "#94a3b8");
+                        tradeInfo = `
+                            <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.1); font-size:11px; display:flex; justify-content:space-between;">
+                                <span>ENTRY: ${sim.entry_price}</span>
+                                <span style="color:${outcomeColor}; font-weight:700;">PnL: ${sim.r_realized}R (${sim.outcome})</span>
+                            </div>
+                        `;
+                    }
+
+                    html += `
+                        <div class="log-row" style="background:${bg}; border-left:3px solid ${bord}; margin-bottom:5px; padding:10px;">
+                            <div style="display:flex; justify-content:space-between;">
+                                <div>
+                                    <div style="color:#fff; font-weight:700; font-size:12px;">${r.date}</div>
+                                    <div style="color:#94a3b8; font-size:10px;">${r.protocol}</div>
+                                </div>
+                                <div style="text-align:right;">
+                                    ${hasTrade ? '<span class="tag tag-go">GO SIGNAL</span>' : '<span class="tag tag-wait">WAIT</span>'}
+                                    <div style="color:${hasKinetic ? '#facc15' : '#64748b'}; font-weight:700; font-size:11px;">K-SCORE: ${r.kinetic_score}</div>
+                                </div>
+                            </div>
+                            ${tradeInfo}
                         </div>
                     `;
-                }
+                });
+                document.getElementById('logArea').innerHTML = html;
+                document.getElementById('results').style.display = 'block';
 
-                html += `
-                    <div class="log-row" style="background:${bg}; border-left:3px solid ${bord}; margin-bottom:5px; padding:10px;">
-                        <div style="display:flex; justify-content:space-between;">
-                            <div>
-                                <div style="color:#fff; font-weight:700; font-size:12px;">${r.date}</div>
-                                <div style="color:#94a3b8; font-size:10px;">${r.protocol}</div>
-                            </div>
-                            <div style="text-align:right;">
-                                ${hasTrade ? '<span class="tag tag-go">GO SIGNAL</span>' : '<span class="tag tag-wait">WAIT</span>'}
-                                <div style="color:${hasKinetic ? '#facc15' : '#64748b'}; font-weight:700; font-size:11px;">K-SCORE: ${r.kinetic_score}</div>
-                            </div>
-                        </div>
-                        ${tradeInfo}
-                    </div>
-                `;
-            });
-            document.getElementById('logArea').innerHTML = html;
-            document.getElementById('results').style.display = 'block';
-
-        } catch(e) {
-            alert("Error: " + e.message);
-        } finally {
-            document.getElementById('loader').style.display = 'none';
-            document.getElementById('runBtn').disabled = false;
+            } catch(e) {
+                alert("Error: " + e.message);
+            } finally {
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('runBtn').disabled = false;
+            }
         }
-    }
-</script>
+
+        function copyLog() {
+            const txt = document.getElementById('rawJson').innerText;
+            navigator.clipboard.writeText(txt);
+            alert("JSON Log Copied to Clipboard");
+        }
+    </script>
+</body>
+</html>
