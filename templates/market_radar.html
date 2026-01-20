@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Kabroda | Market Radar</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        body { background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
+        .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
+        
+        /* HEADER */
+        .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
+        .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
+        .radar-sub { font-size: 12px; color: #94a3b8; font-family: 'JetBrains Mono'; }
+        
+        /* SCAN BUTTON */
+        .btn-scan { 
+            background: #0ea5e9; color: #000; font-weight: 800; font-family: 'JetBrains Mono'; 
+            border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; 
+            text-transform: uppercase; letter-spacing: 1px; transition: 0.2s;
+            box-shadow: 0 0 20px rgba(14, 165, 233, 0.3);
+        }
+        .btn-scan:hover { background: #38bdf8; box-shadow: 0 0 30px rgba(56, 189, 248, 0.5); }
+        .btn-scan:disabled { background: #334155; color: #64748b; box-shadow: none; cursor: not-allowed; }
+
+        /* GRID */
+        .radar-grid { display: grid; gap: 10px; }
+        .radar-row { 
+            display: grid; grid-template-columns: 1.5fr 1fr 1fr 3fr 1.5fr; 
+            background: #0f172a; border: 1px solid #1e293b; padding: 20px; border-radius: 6px; align-items: center;
+            transition: transform 0.2s;
+        }
+        .radar-row:hover { transform: translateX(5px); border-color: #38bdf8; }
+        
+        /* STATUS COLORS */
+        .status-super { border-left: 4px solid #facc15; box-shadow: 0 0 15px rgba(250, 204, 21, 0.1); }
+        .status-sniper { border-left: 4px solid #10b981; }
+        .status-dog { border-left: 4px solid #64748b; opacity: 0.7; }
+        .status-ground { border-left: 4px solid #ef4444; opacity: 0.5; }
+
+        /* METRICS */
+        .sym-box { display: flex; flex-direction: column; }
+        .sym-name { font-size: 20px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
+        .sym-price { font-size: 12px; color: #94a3b8; font-family: 'JetBrains Mono'; }
+        
+        .score-box { text-align: center; }
+        .score-val { font-size: 32px; font-weight: 800; font-family: 'JetBrains Mono'; line-height: 1; }
+        .score-lbl { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+
+        .stat-badge { 
+            display: inline-block; padding: 6px 12px; border-radius: 4px; 
+            font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; text-transform: uppercase;
+        }
+        
+        /* BARS */
+        .bars-container { display: flex; gap: 8px; height: 40px; align-items: flex-end; }
+        .bar-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; height: 100%; }
+        .bar-fill { background: #334155; width: 100%; border-radius: 2px; transition: height 0.5s; }
+        .bar-lbl { font-size: 9px; color: #64748b; text-align: center; font-family: 'JetBrains Mono'; }
+
+    </style>
+</head>
+<body>
+
+    {% include 'nav.html' %}
+
+    <div class="radar-container">
+        <div class="radar-header">
+            <div>
+                <div class="radar-sub">/// TACTICAL OVERWATCH</div>
+                <h2 class="radar-title">Market Radar</h2>
+            </div>
+            <div>
+                <button id="scanBtn" class="btn-scan" onclick="runScan()">INITIATE SCAN</button>
+            </div>
+        </div>
+
+        <div id="loading" style="display:none; text-align:center; padding:50px;">
+            <div style="font-family:'JetBrains Mono'; color:#0ea5e9; font-size:14px; letter-spacing:1px; animation: blink 1s infinite;">
+                SCANNING SECTOR... ACQUIRING TARGETS...
+            </div>
+        </div>
+
+        <div id="radarTargetGrid" class="radar-grid">
+            <div style="text-align:center; color:#64748b; padding:40px; font-family:'JetBrains Mono';">
+                SYSTEM STANDBY. PRESS SCAN.
+            </div>
+        </div>
+    </div>
+
+    <style>
+        @keyframes blink { 50% { opacity: 0.5; } }
+    </style>
+
+    <script>
+        async function runScan() {
+            const btn = document.getElementById('scanBtn');
+            const grid = document.getElementById('radarTargetGrid');
+            const loader = document.getElementById('loading');
+
+            btn.disabled = true;
+            btn.innerText = "SCANNING...";
+            grid.style.display = 'none';
+            loader.style.display = 'block';
+
+            try {
+                const res = await fetch('/api/radar/scan', { method: 'POST' });
+                const data = await res.json();
+
+                if(!data.ok) throw new Error("Scan Failed");
+
+                let html = "";
+                data.results.forEach(t => {
+                    // Determine Class
+                    let rowClass = "status-dog";
+                    let scoreColor = "#94a3b8";
+                    let badgeBg = "#1e293b";
+                    let badgeColor = "#94a3b8";
+
+                    if (t.status === "SUPERSONIC") { 
+                        rowClass = "status-super"; scoreColor = "#facc15"; badgeBg = "rgba(250, 204, 21, 0.2)"; badgeColor = "#facc15";
+                    } else if (t.status === "SNIPER") {
+                        rowClass = "status-sniper"; scoreColor = "#10b981"; badgeBg = "rgba(16, 185, 129, 0.2)"; badgeColor = "#10b981";
+                    }
+
+                    // Metrics for Bars (Max 25)
+                    const m = t.metrics;
+                    
+                    html += `
+                    <div class="radar-row ${rowClass}">
+                        <div class="sym-box">
+                            <span class="sym-name">${t.symbol.replace('USDT','')}</span>
+                            <span class="sym-price">$${t.price.toLocaleString()}</span>
+                        </div>
+                        
+                        <div class="score-box">
+                            <div class="score-val" style="color:${scoreColor}">${t.score}</div>
+                            <div class="score-lbl">KINETIC</div>
+                        </div>
+
+                        <div style="text-align:center;">
+                            <span class="stat-badge" style="background:${badgeBg}; color:${badgeColor}">${t.status}</span>
+                        </div>
+
+                        <div class="bars-container">
+                            <div class="bar-col">
+                                <div class="bar-fill" style="height:${m.energy*4}%; background:${m.energy>15?'#10b981':'#334155'}"></div>
+                                <span class="bar-lbl">NRG</span>
+                            </div>
+                            <div class="bar-col">
+                                <div class="bar-fill" style="height:${m.space*4}%; background:${m.space>15?'#10b981':'#334155'}"></div>
+                                <span class="bar-lbl">SPC</span>
+                            </div>
+                            <div class="bar-col">
+                                <div class="bar-fill" style="height:${m.wind*4}%; background:${m.wind>15?'#10b981':'#334155'}"></div>
+                                <span class="bar-lbl">WND</span>
+                            </div>
+                            <div class="bar-col">
+                                <div class="bar-fill" style="height:${m.hull*4}%; background:${m.hull>15?'#10b981':'#334155'}"></div>
+                                <span class="bar-lbl">HUL</span>
+                            </div>
+                        </div>
+
+                        <div style="text-align:right;">
+                            <button class="btn-scan" style="font-size:10px; padding:8px 16px; background:#1e293b; color:#fff; box-shadow:none; border:1px solid #334155;" onclick="window.location.href='/suite/omega?symbol=${t.symbol}'">
+                                LOCK TARGET →
+                            </button>
+                        </div>
+                    </div>
+                    `;
+                });
+
+                grid.innerHTML = html;
+
+            } catch(e) {
+                alert("Scan Error: " + e.message);
+            } finally {
+                loader.style.display = 'none';
+                grid.style.display = 'grid';
+                btn.disabled = false;
+                btn.innerText = "REFRESH SCAN";
+            }
+        }
+    </script>
+</body>
+</html>
