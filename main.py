@@ -5,9 +5,10 @@
 # - Architecture: "Gateway Pattern"
 # - Function: Receives 'session_id' from ANY page and routes to the correct Engine.
 # - Updates: 
-#    1. Removed Paywall (Session Control/Battle Control are now Free).
-#    2. Gated High-Value Tools (Omega/Research) to Admins Only.
-#    3. Fixed Simulation Mode wiring for off-hours testing.
+#    1. Removed Paywall (Session/Battle Control are Free).
+#    2. Gated High-Value Tools (Omega/Research) to Admins.
+#    3. Fixed Simulation Mode wiring.
+#    4. Added manual password reset tool.
 # ==============================================================================
 
 import os
@@ -40,6 +41,22 @@ def _template_or_fallback(request: Request, templates: Jinja2Templates, name: st
             f"<h2>System Error</h2><p>Could not load {name}.<br>Error: {str(e)}</p>",
             status_code=500,
         )
+
+# --- USER CONTEXT HELPER (For Nav Bar) ---
+def get_user_context(request: Request, db: Session):
+    user_id = request.session.get(auth.SESSION_KEY)
+    if not user_id:
+        return {"is_logged_in": False, "is_admin": False, "user": None}
+    
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if not user:
+        return {"is_logged_in": False, "is_admin": False, "user": None}
+        
+    return {
+        "is_logged_in": True,
+        "is_admin": getattr(user, "is_admin", False),
+        "user": user
+    }
 
 app = FastAPI()
 
@@ -92,37 +109,39 @@ def health():
 # PUBLIC PAGES
 # ==========================================
 @app.get("/", response_class=HTMLResponse)
-def home_page(request: Request):
-    user_id = request.session.get(auth.SESSION_KEY)
-    return _template_or_fallback(request, templates, "home.html", {"request": request, "is_logged_in": user_id is not None})
+def home_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    return _template_or_fallback(request, templates, "home.html", {"request": request, **ctx})
 
 @app.get("/pricing", response_class=HTMLResponse)
-def pricing_page(request: Request):
-    user_id = request.session.get(auth.SESSION_KEY)
-    return _template_or_fallback(request, templates, "pricing.html", {"request": request, "is_logged_in": user_id is not None})
+def pricing_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    return _template_or_fallback(request, templates, "pricing.html", {"request": request, **ctx})
 
 @app.get("/how-it-works", response_class=HTMLResponse)
-def how_it_works_page(request: Request):
-    user_id = request.session.get(auth.SESSION_KEY)
-    return _template_or_fallback(request, templates, "how_it_works.html", {"request": request, "is_logged_in": user_id is not None})
+def how_it_works_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    return _template_or_fallback(request, templates, "how_it_works.html", {"request": request, **ctx})
 
 @app.get("/analysis", response_class=HTMLResponse)
-def analysis_page(request: Request):
-    user_id = request.session.get(auth.SESSION_KEY)
-    return _template_or_fallback(request, templates, "analysis.html", {"request": request, "is_logged_in": user_id is not None})
+def analysis_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    return _template_or_fallback(request, templates, "analysis.html", {"request": request, **ctx})
 
 @app.get("/indicators", response_class=HTMLResponse)
-def indicators_page(request: Request):
-    user_id = request.session.get(auth.SESSION_KEY)
-    return _template_or_fallback(request, templates, "indicators.html", {"request": request, "is_logged_in": user_id is not None})
+def indicators_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    return _template_or_fallback(request, templates, "indicators.html", {"request": request, **ctx})
 
 @app.get("/about", response_class=HTMLResponse)
-def about_page(request: Request):
-    return _template_or_fallback(request, templates, "about.html", {"request": request})
+def about_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    return _template_or_fallback(request, templates, "about.html", {"request": request, **ctx})
 
 @app.get("/privacy", response_class=HTMLResponse)
-def privacy_page(request: Request):
-    return _template_or_fallback(request, templates, "privacy.html", {"request": request})
+def privacy_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    return _template_or_fallback(request, templates, "privacy.html", {"request": request, **ctx})
 
 # --- AUTH UI ---
 @app.get("/login", response_class=HTMLResponse)
@@ -137,30 +156,31 @@ def register_page_ui(request: Request):
 # MEMBER SUITE (HIERARCHY ENFORCED)
 # ==========================================
 
-# 1. SESSION CONTROL (FREE ACCESS TO ALL REGISTERED USERS)
+# 1. SESSION CONTROL (FREE ACCESS)
 @app.get("/suite", response_class=HTMLResponse)
 def suite_home(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
-    if not user_id: 
-        return RedirectResponse("/login") # The only gate is registration
+    if not user_id: return RedirectResponse("/login") 
 
     user = db.query(UserModel).filter(UserModel.id == user_id).first()
     is_admin = getattr(user, "is_admin", False) if user else False
 
     return _template_or_fallback(
         request, templates, "session_control.html",
-        {"request": request, "title": "Session Control", "user": user, "is_logged_in": True, "is_admin": is_admin}
+        {"request": request, "user": user, "is_logged_in": True, "is_admin": is_admin}
     )
 
 # 2. BATTLE CONTROL (FREE ACCESS)
 @app.get("/suite/battle-control", response_class=HTMLResponse)
 def battle_control_page(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
-    if not user_id: 
-        return RedirectResponse("/login")
+    if not user_id: return RedirectResponse("/login")
     
-    user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
-    return _template_or_fallback(request, templates, "battle_control.html", {"request": request, "user": user})
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    is_admin = getattr(user, "is_admin", False) if user else False
+    
+    return _template_or_fallback(request, templates, "battle_control.html", 
+                                 {"request": request, "user": user, "is_admin": is_admin})
 
 # 3. PROJECT OMEGA (GOD MODE / ADMIN ONLY)
 @app.get("/suite/omega", response_class=HTMLResponse)
@@ -168,9 +188,8 @@ def omega_page(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     user = db.query(UserModel).filter(UserModel.id == user_id).first()
     
-    # HIERARCHY CHECK
+    # GATEKEEPER
     if not user or not user.is_admin:
-        # Kick them back to the free area
         return RedirectResponse("/suite")
 
     return _template_or_fallback(request, templates, "project_omega.html", {"request": request})
@@ -181,7 +200,7 @@ def research_page(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get(auth.SESSION_KEY)
     user = db.query(UserModel).filter(UserModel.id == user_id).first()
     
-    # HIERARCHY CHECK
+    # GATEKEEPER
     if not user or not user.is_admin:
         return RedirectResponse("/suite")
 
@@ -210,24 +229,19 @@ def admin_page(request: Request, db: Session = Depends(get_db)):
     return _template_or_fallback(request, templates, "admin.html", {"request": request, "users": users})
 
 # ==========================================
-# SYSTEM MONITOR (ADMIN DASHBOARD)
+# SYSTEM MONITOR & ADMIN API
 # ==========================================
 
 @app.get("/suite/system-monitor", response_class=HTMLResponse)
 def system_monitor_page(request: Request, db: Session = Depends(get_db)):
-    # 1. Security Check
     user_id = request.session.get(auth.SESSION_KEY)
     user = db.query(UserModel).filter(UserModel.id == user_id).first()
     if not user or not user.is_admin:
         return RedirectResponse("/account")
 
-    # 2. Fetch Logs (Last 50)
     logs = db.query(SystemLog).order_by(SystemLog.timestamp.desc()).limit(50).all()
-
-    # 3. Drift Check Data
     now_utc = datetime.now(timezone.utc)
     
-    # 4. Render
     return _template_or_fallback(
         request, templates, "system_dashboard.html", 
         {"request": request, "user": user, "logs": logs, "server_time": now_utc}
@@ -235,7 +249,6 @@ def system_monitor_page(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/api/system/log-clear")
 async def clear_system_logs(request: Request, db: Session = Depends(get_db)):
-    # Simple cleanup
     user_id = request.session.get(auth.SESSION_KEY)
     user = db.query(UserModel).filter(UserModel.id == user_id).first()
     if user and user.is_admin:
@@ -244,33 +257,88 @@ async def clear_system_logs(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"ok": True})
     return JSONResponse({"ok": False}, status_code=403)
 
+@app.post("/admin/reset-password-manual")
+async def admin_reset_password(request: Request, db: Session = Depends(get_db)):
+    admin_id = request.session.get(auth.SESSION_KEY)
+    admin = db.query(UserModel).filter(UserModel.id == admin_id).first()
+    if not admin or not admin.is_admin:
+        raise HTTPException(403, detail="Unauthorized")
+
+    try:
+        payload = await request.json()
+        target_id = payload.get("user_id")
+        new_pass = payload.get("new_password")
+        
+        target_user = db.query(UserModel).filter(UserModel.id == target_id).first()
+        if target_user:
+            target_user.password_hash = auth.hash_password(new_pass)
+            db.commit()
+            return JSONResponse({"ok": True})
+        else:
+            return JSONResponse({"ok": False, "error": "User not found"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+@app.post("/admin/delete-user")
+async def delete_user(request: Request, user_id: int = Form(...), db: Session = Depends(get_db)):
+    admin_id = request.session.get(auth.SESSION_KEY)
+    admin = db.query(UserModel).filter(UserModel.id == admin_id).first()
+    if not admin or not admin.is_admin:
+        raise HTTPException(403)
+    target = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if target:
+        db.delete(target)
+        db.commit()
+    return RedirectResponse("/admin", status_code=303)
+
+# ==========================================
+# OMEGA SIMULATION & API
+# ==========================================
 @app.post("/api/omega/simulate")
 async def omega_simulation_api(request: Request):
     """
-    The Stress Test Endpoint.
-    Accepts fake time/price and returns what Omega WOULD do.
+    The Stress Test Endpoint (Simulation Mode)
     """
     try:
         payload = await request.json()
-        
-        # Inputs
         sim_time = payload.get("time")  # "09:30"
         sim_price = float(payload.get("price")) if payload.get("price") else None
         
-        # Run Omega with Overrides
+        # Calls Omega with overrides
         data = await project_omega.get_omega_status(
-            symbol="BTCUSDT", # Default for test
+            symbol="BTCUSDT",
             session_id="us_ny_futures",
             force_time_utc=sim_time,
             force_price=sim_price
         )
         return JSONResponse(data)
-        
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
 
+@app.post("/api/omega/status")
+async def omega_status_api(request: Request, db: Session = Depends(get_db)):
+    try: payload = await request.json()
+    except: payload = {}
+    
+    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
+    session_id = payload.get("session_id") or "us_ny_futures" 
+    ferrari_mode = bool(payload.get("ferrari_mode", False))
+    
+    # Captures simulation params if sent from front-end
+    force_time = payload.get("force_time_utc")
+    force_price = payload.get("force_price")
+
+    data = await project_omega.get_omega_status(
+        symbol=symbol,
+        session_id=session_id, 
+        ferrari_mode=ferrari_mode,
+        force_time_utc=force_time,
+        force_price=force_price
+    )
+    return JSONResponse(data)
+
 # ==========================================
-# ACCOUNT ACTIONS
+# OTHER API ROUTES
 # ==========================================
 @app.post("/account/profile")
 async def update_profile(request: Request, db: Session = Depends(get_db)):
@@ -280,37 +348,15 @@ async def update_profile(request: Request, db: Session = Depends(get_db)):
     try:
         payload = await request.json()
         user = db.query(UserModel).filter(UserModel.id == user_id).first()
-        
         if user:
-            # FIX: Only update fields if they are actually sent
-            if "username" in payload:
-                user.username = payload["username"]
-            
-            if "tradingview_id" in payload:
-                user.tradingview_id = payload["tradingview_id"]
-                
-            if "session_tz" in payload:
-                user.session_tz = payload["session_tz"]
-
+            if "username" in payload: user.username = payload["username"]
+            if "tradingview_id" in payload: user.tradingview_id = payload["tradingview_id"]
+            if "session_tz" in payload: user.session_tz = payload["session_tz"]
             db.commit()
             return JSONResponse({"ok": True})
-            
     except Exception as e:
-        print(f"PROFILE UPDATE ERROR: {e}")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-    
     return JSONResponse({"ok": False}, status_code=400)
-
-@app.post("/account/settings")
-async def update_settings(request: Request, db: Session = Depends(get_db)):
-    user_id = request.session.get(auth.SESSION_KEY)
-    if not user_id: raise HTTPException(401)
-    payload = await request.json()
-    user = db.query(UserModel).filter(UserModel.id == user_id).first()
-    if user:
-        user.operator_flex = bool(payload.get("operator_flex", False))
-        db.commit()
-    return JSONResponse({"ok": True})
 
 @app.post("/account/password")
 async def update_password(request: Request, db: Session = Depends(get_db)):
@@ -326,78 +372,28 @@ async def update_password(request: Request, db: Session = Depends(get_db)):
             return JSONResponse({"ok": True})
     return JSONResponse({"ok": False}, status_code=400)
 
-@app.post("/admin/delete-user")
-async def delete_user(request: Request, user_id: int = Form(...), db: Session = Depends(get_db)):
-    admin_id = request.session.get(auth.SESSION_KEY)
-    admin = db.query(UserModel).filter(UserModel.id == admin_id).first()
-    if not admin or not admin.is_admin:
-        raise HTTPException(403)
-    target = db.query(UserModel).filter(UserModel.id == user_id).first()
-    if target:
-        db.delete(target)
-        db.commit()
-    return RedirectResponse("/admin", status_code=303)
-
-# ==============================================================================
-# UNIVERSAL SWITCHBOARD ROUTES
-# ==============================================================================
-
-# 1. OMEGA SWITCHBOARD (Fixed to handle Sim Mode params)
-@app.post("/api/omega/status")
-async def omega_status_api(request: Request, db: Session = Depends(get_db)):
-    try: payload = await request.json()
-    except: payload = {}
-    
-    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    session_id = payload.get("session_id") or "us_ny_futures" 
-    ferrari_mode = bool(payload.get("ferrari_mode", False))
-    
-    # NEW: Pass Simulation Params
-    force_time = payload.get("force_time_utc")
-    force_price = payload.get("force_price")
-
-    data = await project_omega.get_omega_status(
-        symbol=symbol,
-        session_id=session_id, 
-        ferrari_mode=ferrari_mode,
-        force_time_utc=force_time,
-        force_price=force_price
-    )
-    return JSONResponse(data)
-
-# 2. SESSION CONTROL SWITCHBOARD
 @app.post("/api/dmr/run-raw")
 async def run_dmr_raw(request: Request):
     try: payload = await request.json()
     except: payload = {}
-    
-    symbol = payload.get("symbol", "BTCUSDT")
-    session_id = payload.get("session_id") or "us_ny_futures"
-
     data = await battlebox_pipeline.get_session_review(
-        symbol=symbol,
-        session_id=session_id 
+        symbol=payload.get("symbol", "BTCUSDT"),
+        session_id=payload.get("session_id", "us_ny_futures")
     )
     return JSONResponse(data)
 
-# 3. BATTLEBOX LIVE SWITCHBOARD
 @app.post("/api/dmr/live")
 async def run_dmr_live(request: Request):
     try: payload = await request.json()
     except: payload = {}
-    
-    symbol = payload.get("symbol", "BTCUSDT")
     manual_id = payload.get("session_id")
-    session_mode = "MANUAL" if manual_id else "AUTO"
-
     data = await battlebox_pipeline.get_live_battlebox(
-        symbol=symbol,
-        session_mode=session_mode,
+        symbol=payload.get("symbol", "BTCUSDT"),
+        session_mode="MANUAL" if manual_id else "AUTO",
         manual_id=manual_id
     )
     return JSONResponse(data)
 
-# 4. RESEARCH LAB SWITCHBOARD (Fixed Data Connection)
 @app.post("/api/research/run")
 async def run_research_api(request: Request):
     try: payload = await request.json()
@@ -409,40 +405,26 @@ async def run_research_api(request: Request):
     end_date = payload.get("end_date_utc", "2026-01-10")
     session_ids = payload.get("session_ids", ["us_ny_futures"])
     tuning = payload.get("tuning", {})
-    
-    # NEW: Simulation Inputs
     sim_settings = payload.get("simulation", {})
     use_ai = payload.get("use_ai", False)
     
-    # SECURITY LOGIC: 
     ai_key = payload.get("ai_key", "").strip()
-    if not ai_key:
-        ai_key = os.getenv("GEMINI_API_KEY", "")
+    if not ai_key: ai_key = os.getenv("GEMINI_API_KEY", "")
 
-    # 2. CONVERT DATES TO TIMESTAMPS
+    # 2. Fetch Data
     try:
         dt_start = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         dt_end = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        
-        # Buffer: Add 24h before/after
         fetch_start_ts = int(dt_start.timestamp()) - 86400
         fetch_end_ts = int(dt_end.timestamp()) + 86400
-        
     except ValueError:
         return JSONResponse({"ok": False, "error": "Invalid Date Format"})
 
-    # 3. CALL THE CORPORATE PIPELINE (HISTORICAL)
-    print(f">>> [SWITCHBOARD] Ordering Historical Data for: {symbol} ({start_date} to {end_date})")
-    
     raw_5m = await battlebox_pipeline.fetch_historical_pagination(
-        symbol=symbol,
-        start_ts=fetch_start_ts,
-        end_ts=fetch_end_ts
+        symbol=symbol, start_ts=fetch_start_ts, end_ts=fetch_end_ts
     )
-    
-    print(f">>> [SWITCHBOARD] Pipeline delivered {len(raw_5m)} candles.")
 
-    # 4. HAND OFF TO THE LAB
+    # 3. Run Lab
     data = await research_lab.run_research_lab_from_candles(
         symbol=symbol,
         raw_5m=raw_5m,
@@ -450,12 +432,11 @@ async def run_research_api(request: Request):
         end_date_utc=end_date,
         session_ids=session_ids,
         tuning=tuning,
-        sim_settings=sim_settings # Pass it down
+        sim_settings=sim_settings
     )
     
-    # 5. OPTIONAL: RUN AI ANALYST
+    # 4. AI Summary
     if use_ai and data.get("ok"):
-        print(">>> [SWITCHBOARD] Running AI Analysis...")
         ai_payload = {
             "simulation": data["simulation"],
             "stats": data["stats"],
@@ -464,7 +445,7 @@ async def run_research_api(request: Request):
                     "date": s["date"], 
                     "kinetic_score": s["kinetic"]["total_score"],
                     "protocol": s["kinetic"]["protocol"],
-                    "trade_result": s["strategy"].get("outcome", "NO_TRADE"), 
+                    "trade_result": s["strategy"].get("outcome", "NO_TRADE"),
                     "pnl_r": s["strategy"].get("r_realized", 0.0)             
                 }
                 for s in data["sessions"]
