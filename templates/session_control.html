@@ -176,7 +176,27 @@
       };
 
       let _lastDmrPayload = null;
-      function fmt(x){ return x ? parseFloat(x).toFixed(2) : "—"; }
+      
+      // UPDATED FORMATTER (v3.1)
+      function fmt(x){ 
+        if(!x && x !== 0) return "—";
+        const f = parseFloat(x);
+        if(isNaN(f)) return "—";
+        
+        // 1. Get current Asset
+        const sym = document.getElementById("symbol").value;
+        
+        // 2. Specific Asset Overrides
+        if(sym.includes("DOGE")) return f.toFixed(7);
+        if(sym.includes("TRX")) return f.toFixed(5);
+        if(sym.includes("XRP")) return f.toFixed(5);
+        
+        // 3. General Price Magnitude Rule
+        if(Math.abs(f) < 1.0 && Math.abs(f) > 0) return f.toFixed(6);
+        
+        // 4. Default for High Value Assets (BTC, SOL, ETH)
+        return f.toFixed(2); 
+      }
 
       function openLaunchModal() {
           if (!_lastDmrPayload) { alert("Please Initialize Sequence First"); return; }
@@ -279,12 +299,15 @@
           _lastDmrPayload = data;
           const l = data.levels || {};
           const r30 = data.range_30m || {};
+          
+          // Updated to use the smart fmt() function
           document.getElementById("lv_ds").innerText = fmt(l.daily_support);
           document.getElementById("lv_dr").innerText = fmt(l.daily_resistance);
           document.getElementById("lv_bo").innerText = fmt(l.breakout_trigger);
           document.getElementById("lv_bd").innerText = fmt(l.breakdown_trigger);
           document.getElementById("lv_30h").innerText = fmt(r30.high);
           document.getElementById("lv_30l").innerText = fmt(r30.low);
+          
           document.getElementById("tvCopyBtn").style.display = "inline-flex";
           document.getElementById("openGptBtn").style.display = "inline-flex"; 
           document.getElementById("status").innerText = "> SYSTEM READY. DATA SYNCED.";
@@ -302,6 +325,7 @@
         if (!_lastDmrPayload) return;
         const l = _lastDmrPayload.levels;
         const r = _lastDmrPayload.range_30m;
+        // Also apply formatting to copied text
         const text = `${fmt(l.breakout_trigger)},${fmt(l.breakdown_trigger)},${fmt(l.daily_resistance)},${fmt(l.daily_support)},${fmt(r.high)},${fmt(r.low)}`;
         await navigator.clipboard.writeText(text);
         alert("COPIED for Indicator: " + text);
