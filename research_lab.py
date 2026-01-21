@@ -1,6 +1,6 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB: HYBRID ENGINE (Structure + Kinetics)
+# RESEARCH LAB: HYBRID ENGINE v1.2 (DATE ALIGNMENT PATCH)
 # ==============================================================================
 import pandas as pd
 import numpy as np
@@ -61,7 +61,6 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
         df = pd.DataFrame(raw_5m)
         
         # Check if timestamp is likely seconds or milliseconds
-        # 1000000000000 roughly corresponds to year 2001 in milliseconds
         first_time = df['time'].iloc[0]
         time_unit = 'ms' if first_time > 1000000000000 else 's'
         
@@ -96,12 +95,26 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
         tol_bps = int(tuning.get("zone_tolerance_bps", 10))
         zone_tol = tol_bps / 10000.0
 
+        processed_anchors = set() # Prevent duplicates
+
         while curr_day <= end_dt:
-            day_str = curr_day.strftime("%Y-%m-%d")
+            # We add 12 hours to curr_day to query the MID-DAY status
+            # This ensures we grab the session starting ON this day, not the one carrying over from yesterday
+            query_time = curr_day + timedelta(hours=12)
             
             for cfg in active_cfgs:
                 # A. Time Slicing
-                anchor_ts = session_manager.anchor_ts_for_utc_date(cfg, curr_day)
+                # Updated: Use query_time to avoid "Midnight Fallacy"
+                anchor_ts = session_manager.anchor_ts_for_utc_date(cfg, query_time)
+                
+                # Deduplication Check
+                if anchor_ts in processed_anchors:
+                    continue
+                processed_anchors.add(anchor_ts)
+                
+                # DERIVE ACTUAL DATE FROM ANCHOR (The Fix)
+                actual_session_date = datetime.fromtimestamp(anchor_ts, tz=timezone.utc).strftime("%Y-%m-%d")
+
                 lock_end_ts = anchor_ts + 1800 
                 exec_end_ts = lock_end_ts + (12 * 3600) 
 
@@ -143,7 +156,7 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                         ignore_5m_stoch=ignore_5, confirmation_mode=confirm_mode
                     )
 
-                    # E. TRADE SIMULATION (Restored)
+                    # E. TRADE SIMULATION
                     if go["ok"]:
                         stop_price = 0.0
                         if side == "LONG": stop_price = min(c["low"] for c in calibration) 
@@ -151,7 +164,6 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
 
                         trade_candles = [c for c in raw_5m if c["time"] > go["go_ts"] and c["time"] < exec_end_ts]
                         
-                        # Full Simulation Logic
                         sim = battlebox_rules.simulate_trade(
                             entry_price=levels.get("breakout_trigger") if side == "LONG" else levels.get("breakdown_trigger"),
                             entry_ts=go["go_ts"],
@@ -162,7 +174,7 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                         )
                         go["simulation"] = sim
 
-                # F. Kinetic Math (The Layer)
+                # F. Kinetic Math
                 try:
                     score_time = pd.to_datetime(anchor_ts, unit='s', utc=True)
                     row = df.asof(score_time) 
@@ -171,8 +183,9 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                     k_score, k_comps = 0, {}
 
                 # G. Full Data Payload
+                # Using actual_session_date ensures Truth In Labeling
                 results.append({
-                    "date": f"{day_str} [{cfg['id']}]",
+                    "date": f"{actual_session_date} [{cfg['id']}]",
                     "protocol": state["action"],
                     "kinetic_score": k_score,
                     "kinetic_comps": k_comps,
