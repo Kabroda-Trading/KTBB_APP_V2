@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Kabroda | Target Lock v2.6</title>
+    <title>Kabroda | Target Lock v3.0</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <style>
         :root { 
@@ -44,12 +44,6 @@
         .big-price { font-size: 42px; font-weight: 800; color: #fff; font-family: 'Rajdhani'; }
 
         /* WIDGETS */
-        .radar-box { background: #0f172a; padding: 15px; border-radius: 8px; border: 1px dashed var(--border); text-align: center; position: relative; margin-bottom: 20px; }
-        .radar-track { height: 8px; background: #1e293b; position: relative; border-radius: 4px; margin: 35px 0 15px 0; }
-        .radar-puck { position: absolute; top: -14px; width: 14px; height: 36px; background: #fff; border: 2px solid var(--cyan); transform: translateX(-50%); left: 50%; transition: left 0.5s; display: block; box-shadow: 0 0 10px var(--cyan); }
-        .radar-msg { font-family: 'Rajdhani'; font-weight: 800; font-size: 24px; color: var(--gray); margin-top: 10px; letter-spacing: 1px; }
-        .radar-label { position: absolute; top: 28px; font-size: 11px; font-weight: 800; color: var(--gray); width: 60px; transform: translateX(-30px); }
-
         .verdict-banner { background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border); border-left: 6px solid var(--gray); padding: 20px; border-radius: 6px; margin-bottom: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
         .verdict-score { font-size: 56px; font-weight: 800; font-family: 'Rajdhani'; line-height: 1; color: #fff; }
         .verdict-status { font-size: 32px; font-weight: 800; font-family: 'Rajdhani'; text-transform: uppercase; }
@@ -64,12 +58,23 @@
 
         .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px dashed var(--dark-gray); padding-bottom: 8px; }
         .btn-cp { background: var(--border); border: none; color: var(--white); padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px; font-weight: 700; margin-left: 8px; }
+        .btn-cp:hover { background: var(--cyan); color: #000; }
+        
         .inp-risk { background: #020617; border: 1px solid var(--gray); color: #fff; padding: 10px; width: 100%; text-align: right; font-family: inherit; font-weight: 700; margin-bottom: 15px; font-size: 16px; }
         
         .footer-toggle { background: var(--panel); color: var(--gray); padding: 10px 20px; font-size: 13px; font-weight: 700; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; display:flex; justify-content:space-between; margin-top:10px; }
         .footer-content { background: #020617; height: 0; overflow: hidden; transition: height 0.3s; }
         .footer-content.open { height: 150px; border: 1px solid var(--border); padding: 15px; overflow-y: auto; }
         .log-box { font-family: 'Courier New', monospace; font-size: 14px; color: #cbd5e1; }
+
+        /* PHASE 3 BUTTON */
+        .btn-tv-copy {
+            width: 100%; background: var(--cyan); color: #000; 
+            font-weight: 800; padding: 12px; border: none; border-radius: 4px; 
+            cursor: pointer; font-family: 'Rajdhani'; font-size: 16px; letter-spacing: 1px;
+            margin-bottom: 20px; text-transform: uppercase;
+        }
+        .btn-tv-copy:hover { background: #fff; }
     </style>
 </head>
 <body>
@@ -121,6 +126,9 @@
 
     <div class="panel panel-right">
         <div class="panel-head">FLIGHT PATH</div>
+        
+        <button class="btn-tv-copy" onclick="copyForTV()">📋 COPY INDICATOR DATA</button>
+
         <div class="data-row"><span class="lbl">ENTRY TRIGGER</span><div><span id="pEntry" class="val" style="color:var(--cyan)">--</span><button class="btn-cp" onclick="cp('pEntry')">CP</button></div></div>
         <div class="data-row"><span class="lbl">STOP LOSS</span><div><span id="pStop" class="val" style="color:var(--red)">--</span><button class="btn-cp" onclick="cp('pStop')">CP</button></div></div>
         <div class="data-row"><span class="lbl">POSITION SIZE</span><div><span id="pSize" class="val">--</span><button class="btn-cp" onclick="cp('pSize')">CP</button></div></div>
@@ -136,12 +144,63 @@
     </div>
 </div>
 
+<input type="hidden" id="raw_bo">
+<input type="hidden" id="raw_bd">
+<input type="hidden" id="raw_dr">
+<input type="hidden" id="raw_ds">
+<input type="hidden" id="raw_h30">
+<input type="hidden" id="raw_l30">
+
 <script>
     const urlParams = new URLSearchParams(window.location.search);
     const symbol = urlParams.get('symbol') || 'BTCUSDT';
     document.getElementById('tSym').innerText = symbol.replace('USDT', '') + " LOCK";
 
     let state = { data: null, footerOpen: false };
+
+    // --- PHASE 3: PRECISION FORMATTER (MATCHING SESSION CONTROL) ---
+    function fmt(val) {
+        if(!val && val !== 0) return "—";
+        const f = parseFloat(val);
+        if(isNaN(f)) return "—";
+        
+        // Asset Logic
+        if(symbol.includes("DOGE")) return f.toFixed(7);
+        if(symbol.includes("TRX")) return f.toFixed(5);
+        if(symbol.includes("XRP")) return f.toFixed(5);
+        if(Math.abs(f) < 1.0 && Math.abs(f) > 0) return f.toFixed(6);
+        return f.toFixed(2); 
+    }
+
+    // --- PHASE 3: COPY LOGIC ---
+    function copyForTV() {
+        if(!state.data) return;
+        
+        // Grab values directly from hidden inputs to ensure we get raw data to format
+        const bo = document.getElementById("raw_bo").value;
+        const bd = document.getElementById("raw_bd").value;
+        const dr = document.getElementById("raw_dr").value;
+        const ds = document.getElementById("raw_ds").value;
+        const h30 = document.getElementById("raw_h30").value;
+        const l30 = document.getElementById("raw_l30").value;
+
+        // Format exactly like Session Control: BO, BD, DR, DS, 30H, 30L
+        const payload = `${fmt(bo)},${fmt(bd)},${fmt(dr)},${fmt(ds)},${fmt(h30)},${fmt(l30)}`;
+        
+        navigator.clipboard.writeText(payload).then(() => {
+            const btn = document.querySelector('.btn-tv-copy');
+            const orig = btn.innerText;
+            btn.innerText = "✓ DATA COPIED";
+            btn.style.background = "#fff";
+            btn.style.color = "#000";
+            setTimeout(() => {
+                btn.innerText = orig;
+                btn.style.background = "var(--cyan)";
+                btn.style.color = "#000";
+            }, 2000);
+            log("Indicator Data Copied: " + payload);
+        });
+    }
 
     function toggleFooter() {
         state.footerOpen = !state.footerOpen;
@@ -155,15 +214,26 @@
         box.scrollTop = box.scrollHeight;
     }
 
-    function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText.replace(/,/g,'')); log("Copied to clipboard"); }
+    function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText.replace(/,/g,'')); log("Copied value"); }
 
     function render() {
         if(!state.data) return;
         const d = state.data;
+        const l = d.levels;
+        
+        // Update Visuals with precision
         document.getElementById('livePrice').innerText = d.price.toLocaleString();
         document.getElementById('dScore').innerText = d.score;
         document.getElementById('dProtocol').innerText = d.status;
         
+        // Populate Hidden Fields for Clipboard
+        document.getElementById('raw_bo').value = l.breakout_trigger;
+        document.getElementById('raw_bd').value = l.breakdown_trigger;
+        document.getElementById('raw_dr').value = l.daily_resistance;
+        document.getElementById('raw_ds').value = l.daily_support;
+        document.getElementById('raw_h30').value = l.range30m_high;
+        document.getElementById('raw_l30').value = l.range30m_low;
+
         // BIAS & COLORS
         const bias = d.bias;
         const bEl = document.getElementById('biasBadge');
@@ -193,11 +263,11 @@
         // FLIGHT PLAN
         const p = d.plans[bias] || {valid:false};
         if(p.valid) {
-            document.getElementById('pEntry').innerText = p.entry.toLocaleString();
-            document.getElementById('pStop').innerText = p.stop.toLocaleString();
-            document.getElementById('pT1').innerText = p.targets[0].toLocaleString();
-            document.getElementById('pT2').innerText = p.targets[1].toLocaleString();
-            document.getElementById('pT3').innerText = p.targets[2].toLocaleString();
+            document.getElementById('pEntry').innerText = fmt(p.entry);
+            document.getElementById('pStop').innerText = fmt(p.stop);
+            document.getElementById('pT1').innerText = fmt(p.targets[0]);
+            document.getElementById('pT2').innerText = fmt(p.targets[1]);
+            document.getElementById('pT3').innerText = fmt(p.targets[2]);
             
             // Risk Calc
             const bal = parseFloat(document.getElementById('inpBal').value) || 0;

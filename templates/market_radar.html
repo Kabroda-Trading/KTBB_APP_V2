@@ -8,7 +8,6 @@
     <style>
         body { 
             background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px;
-            /* LAYOUT FIX: Ensures full height for scrolling */
             min-height: 100vh; box-sizing: border-box; overflow-y: auto;
         }
         .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
@@ -73,7 +72,7 @@
         .lock-btn:hover { background: #334155; border-color: #fff; }
         .lock-btn:disabled { opacity: 0.3; cursor: not-allowed; border-color: #334155; }
         
-        .scan-complete { font-family: 'JetBrains Mono'; color: #10b981; font-weight: 800; letter-spacing: 1px; display: none; }
+        .scan-msg { font-family: 'JetBrains Mono'; color: #94a3b8; font-size: 11px; margin-right: 15px; }
     </style>
 </head>
 <body>
@@ -86,92 +85,140 @@
             </div>
             <div id="scanControls" class="controls-box">
                 <div id="sessionTimer" class="timer-display"><span style="color:#06b6d4;">SYNCING...</span></div>
-                <button id="scanBtn" class="btn-scan" onclick="manualScan()">INITIATE SCAN</button>
+                <div id="lastSyncMsg" class="scan-msg"></div>
+                <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
             </div>
-            <div id="scanCompleteBadge" class="scan-complete">✓ SCAN COMPLETE</div>
         </div>
         <div id="loading" style="display:none; text-align:center; padding:50px;">
             <div style="font-family:'JetBrains Mono'; color:#0ea5e9; font-size:14px; letter-spacing:1px; animation: blink 1s infinite;">ACQUIRING TARGETS...</div>
         </div>
         <div id="radarTargetGrid" class="radar-grid">
-            <div style="text-align:center; color:#64748b; padding:40px; font-family:'JetBrains Mono';">SYSTEM STANDBY. PRESS SCAN.</div>
-        </div>
+            </div>
     </div>
     <style> @keyframes blink { 50% { opacity: 0.5; } } </style>
     <script>
         function requestNotify() { if ("Notification" in window && Notification.permission !== "granted") Notification.requestPermission(); }
         function sendNotification(count) { if (Notification.permission === "granted") new Notification("BattleBox Radar", { body: `Calibration Complete. ${count} Targets Scanned.` }); }
 
-        let timerInterval; let hasFiredToday = false;
+        let timerInterval; 
         function startClock() { requestNotify(); updateClock(); timerInterval = setInterval(updateClock, 1000); }
         function updateClock() {
             const now = new Date();
             const nyTimeString = now.toLocaleString("en-US", {timeZone: "America/New_York"});
             const nyTime = new Date(nyTimeString);
-            const h = nyTime.getHours(); const m = nyTime.getMinutes(); const s = nyTime.getSeconds();
+            const h = nyTime.getHours(); const m = nyTime.getMinutes();
             const timerEl = document.getElementById('sessionTimer');
 
             if (h < 8 || (h === 8 && m < 30)) { timerEl.innerHTML = `<span style="color:#facc15;">PRE-MARKET</span> NY OPENS IN ${8 - h}h ${30 - m}m`; }
             else if (h === 8 && m >= 30) { const minsLeft = 59 - m; timerEl.innerHTML = `<span style="color:#ef4444; animation:blink 1s infinite;">● CALIBRATING</span> READY IN ${minsLeft}m`; }
-            else if (h === 9 && m === 0 && s < 30) { 
-                if (!hasFiredToday) { hasFiredToday = true; runScan(true); } 
-                timerEl.innerHTML = `<span style="color:#10b981;">● EXECUTING SCAN...</span>`; 
-            }
             else { timerEl.innerHTML = `<span style="color:#0ea5e9;">SESSION ACTIVE</span> DATA LIVE`; }
         }
 
-        async function manualScan() { await runScan(false); }
-        async function runScan(isAuto) {
+        // PRECISION FORMATTER
+        function fmt(x, sym){ 
+            if(!x && x !== 0) return "—";
+            const f = parseFloat(x);
+            if(isNaN(f)) return "—";
+            
+            if(sym && sym.includes("DOGE")) return f.toFixed(7);
+            if(sym && sym.includes("TRX")) return f.toFixed(5);
+            if(sym && sym.includes("XRP")) return f.toFixed(5);
+            if(Math.abs(f) < 1.0 && Math.abs(f) > 0) return f.toFixed(6);
+            return f.toFixed(2); 
+        }
+
+        // --- NEW PERSISTENCE LOGIC ---
+        
+        // 1. On Load: Check Cache, Render immediately if found, else Scan.
+        document.addEventListener('DOMContentLoaded', () => {
+            startClock();
+            const cached = sessionStorage.getItem('radar_cache');
+            if(cached) {
+                console.log("Restoring Radar from Cache...");
+                const data = JSON.parse(cached);
+                renderGrid(data.results);
+                document.getElementById('lastSyncMsg').innerText = "RESTORED FROM CACHE";
+            } else {
+                console.log("No Cache. Auto-Scanning...");
+                forceScan();
+            }
+        });
+
+        // 2. The Renderer (Separated so we can call it from Cache or Scan)
+        function renderGrid(results) {
+            const grid = document.getElementById('radarTargetGrid');
+            let html = "";
+            
+            if(!results || results.length === 0) {
+                grid.innerHTML = `<div style="text-align:center; color:#64748b; padding:40px;">NO TARGETS ACQUIRED</div>`;
+                return;
+            }
+
+            results.forEach(t => {
+                let rowClass = "status-dog"; let scoreColor = "#94a3b8"; let badgeBg = "#1e293b"; let badgeColor = "#94a3b8"; let isGrounded = false;
+                if (t.status === "SUPERSONIC") { rowClass = "status-super"; scoreColor = "#facc15"; badgeBg = "rgba(250, 204, 21, 0.2)"; badgeColor = "#facc15"; }
+                else if (t.status === "SNIPER") { rowClass = "status-sniper"; scoreColor = "#10b981"; badgeBg = "rgba(16, 185, 129, 0.2)"; badgeColor = "#10b981"; }
+                else if (t.status === "GROUNDED") { rowClass = "status-ground"; scoreColor = "#ef4444"; badgeBg = "rgba(239, 68, 68, 0.2)"; badgeColor = "#ef4444"; isGrounded = true; }
+
+                const m = t.metrics || {};
+                let biasHtml = "";
+                if (t.bias === "LONG") biasHtml = `<span class="bias-badge bias-long">L</span>`;
+                if (t.bias === "SHORT") biasHtml = `<span class="bias-badge bias-short">S</span>`;
+
+                html += `
+                <div class="radar-row ${rowClass}">
+                    <div class="sym-box"><div><span class="sym-name">${t.symbol}</span>${biasHtml}</div><span class="sym-price">$${fmt(t.price, t.symbol)}</span></div>
+                    <div class="score-box"><div class="score-val" style="color:${scoreColor}">${t.score}</div><div class="score-lbl">KINETIC</div></div>
+                    <div style="text-align:center;"><span class="stat-badge" style="background:${badgeBg}; color:${badgeColor}">${t.status}</span></div>
+                    <div class="bars-container">
+                        <div class="bar-col"><span class="bar-val metric-${m.energy?.color}">${m.energy?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.energy?.color}" style="height:${m.energy?.pct}%"></div><span class="bar-lbl">NRG</span></div>
+                        <div class="bar-col"><span class="bar-val metric-${m.space?.color}">${m.space?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.space?.color}" style="height:${m.space?.pct}%"></div><span class="bar-lbl">SPC</span></div>
+                        <div class="bar-col"><span class="bar-val metric-${m.wind?.color}">${m.wind?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.wind?.color}" style="height:${m.wind?.pct}%"></div><span class="bar-lbl">WND</span></div>
+                        <div class="bar-col"><span class="bar-val metric-${m.hull?.color}">${m.hull?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.hull?.color}" style="height:${m.hull?.pct}%"></div><span class="bar-lbl">HUL</span></div>
+                    </div>
+                    <div style="text-align:right;">
+                        <button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'" ${isGrounded ? 'disabled title="Target Grounded"' : ''}>${isGrounded ? 'NO GO 🚫' : 'LOCK TARGET →'}</button>
+                    </div>
+                </div>`;
+            });
+            grid.innerHTML = html;
+        }
+
+        // 3. The Fetcher
+        async function forceScan() {
             const btn = document.getElementById('scanBtn');
             const grid = document.getElementById('radarTargetGrid');
             const loader = document.getElementById('loading');
-            btn.disabled = true; btn.innerText = "SCANNING...";
-            grid.style.display = 'none'; loader.style.display = 'block';
+            
+            btn.disabled = true; 
+            btn.innerText = "SCANNING...";
+            grid.style.display = 'none'; 
+            loader.style.display = 'block';
 
             try {
                 const res = await fetch('/api/radar/scan', { method: 'POST' });
                 const data = await res.json();
                 if(!data.ok) throw new Error("Scan Failed");
 
-                let html = "";
-                data.results.forEach(t => {
-                    let rowClass = "status-dog"; let scoreColor = "#94a3b8"; let badgeBg = "#1e293b"; let badgeColor = "#94a3b8"; let isGrounded = false;
-                    if (t.status === "SUPERSONIC") { rowClass = "status-super"; scoreColor = "#facc15"; badgeBg = "rgba(250, 204, 21, 0.2)"; badgeColor = "#facc15"; }
-                    else if (t.status === "SNIPER") { rowClass = "status-sniper"; scoreColor = "#10b981"; badgeBg = "rgba(16, 185, 129, 0.2)"; badgeColor = "#10b981"; }
-                    else if (t.status === "GROUNDED") { rowClass = "status-ground"; scoreColor = "#ef4444"; badgeBg = "rgba(239, 68, 68, 0.2)"; badgeColor = "#ef4444"; isGrounded = true; }
-
-                    const m = t.metrics || {};
-                    let biasHtml = "";
-                    if (t.bias === "LONG") biasHtml = `<span class="bias-badge bias-long">L</span>`;
-                    if (t.bias === "SHORT") biasHtml = `<span class="bias-badge bias-short">S</span>`;
-
-                    html += `
-                    <div class="radar-row ${rowClass}">
-                        <div class="sym-box"><div><span class="sym-name">${t.symbol}</span>${biasHtml}</div><span class="sym-price">$${t.price.toLocaleString()}</span></div>
-                        <div class="score-box"><div class="score-val" style="color:${scoreColor}">${t.score}</div><div class="score-lbl">KINETIC</div></div>
-                        <div style="text-align:center;"><span class="stat-badge" style="background:${badgeBg}; color:${badgeColor}">${t.status}</span></div>
-                        <div class="bars-container">
-                            <div class="bar-col"><span class="bar-val metric-${m.energy?.color}">${m.energy?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.energy?.color}" style="height:${m.energy?.pct}%"></div><span class="bar-lbl">NRG</span></div>
-                            <div class="bar-col"><span class="bar-val metric-${m.space?.color}">${m.space?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.space?.color}" style="height:${m.space?.pct}%"></div><span class="bar-lbl">SPC</span></div>
-                            <div class="bar-col"><span class="bar-val metric-${m.wind?.color}">${m.wind?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.wind?.color}" style="height:${m.wind?.pct}%"></div><span class="bar-lbl">WND</span></div>
-                            <div class="bar-col"><span class="bar-val metric-${m.hull?.color}">${m.hull?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.hull?.color}" style="height:${m.hull?.pct}%"></div><span class="bar-lbl">HUL</span></div>
-                        </div>
-                        <div style="text-align:right;">
-                            <button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'" ${isGrounded ? 'disabled title="Target Grounded"' : ''}>${isGrounded ? 'NO GO 🚫' : 'LOCK TARGET →'}</button>
-                        </div>
-                    </div>`;
-                });
-                grid.innerHTML = html;
-                if(isAuto) sendNotification(data.results.length);
+                // Save to Cache
+                sessionStorage.setItem('radar_cache', JSON.stringify(data));
                 
-                // ONE SHOT LOGIC: Hide controls after successful scan
-                document.getElementById('scanControls').style.display = 'none';
-                document.getElementById('scanCompleteBadge').style.display = 'block';
+                // Render
+                renderGrid(data.results);
+                
+                // Update UI Status
+                document.getElementById('lastSyncMsg').innerText = "LIVE DATA SYNCED";
+                sendNotification(data.results.length);
 
-            } catch(e) { alert("Scan Error: " + e.message); } 
-            finally { loader.style.display = 'none'; grid.style.display = 'grid'; btn.disabled = false; btn.innerText = "REFRESH SCAN"; }
+            } catch(e) { 
+                alert("Scan Error: " + e.message); 
+            } finally { 
+                loader.style.display = 'none'; 
+                grid.style.display = 'grid'; 
+                btn.disabled = false; 
+                btn.innerText = "REFRESH INTEL"; 
+            }
         }
-        document.addEventListener('DOMContentLoaded', startClock);
     </script>
 </body>
 </html>
