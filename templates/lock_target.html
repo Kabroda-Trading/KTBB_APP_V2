@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Kabroda | Target Lock v3.0</title>
+    <title>Kabroda | Target Lock v3.1</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <style>
         :root { 
@@ -67,7 +67,7 @@
         .footer-content.open { height: 150px; border: 1px solid var(--border); padding: 15px; overflow-y: auto; }
         .log-box { font-family: 'Courier New', monospace; font-size: 14px; color: #cbd5e1; }
 
-        /* PHASE 3 BUTTON */
+        /* PHASE 3 BUTTONS & ADVISOR */
         .btn-tv-copy {
             width: 100%; background: var(--cyan); color: #000; 
             font-weight: 800; padding: 12px; border: none; border-radius: 4px; 
@@ -75,6 +75,14 @@
             margin-bottom: 20px; text-transform: uppercase;
         }
         .btn-tv-copy:hover { background: #fff; }
+
+        .advisor-box {
+            margin-top: 20px; padding: 15px; border-radius: 4px; 
+            background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border);
+        }
+        .advisor-title { font-size: 11px; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
+        .advisor-rec { font-size: 16px; font-weight: 800; font-family: 'Rajdhani'; color: #fff; margin-bottom: 5px; }
+        .advisor-reason { font-size: 11px; color: #cbd5e1; line-height: 1.4; }
     </style>
 </head>
 <body>
@@ -136,6 +144,12 @@
         <div class="data-row"><span class="lbl" style="color:var(--gold)">TARGET 1</span><div><span id="pT1" class="val">--</span><button class="btn-cp" onclick="cp('pT1')">CP</button></div></div>
         <div class="data-row"><span class="lbl">TARGET 2</span><div><span id="pT2" class="val">--</span><button class="btn-cp" onclick="cp('pT2')">CP</button></div></div>
         <div class="data-row"><span class="lbl">TARGET 3</span><div><span id="pT3" class="val">--</span><button class="btn-cp" onclick="cp('pT3')">CP</button></div></div>
+
+        <div id="advisorBox" class="advisor-box" style="display:none;">
+            <div class="advisor-title">RECOMMENDED EXECUTION</div>
+            <div id="advRec" class="advisor-rec">--</div>
+            <div id="advReason" class="advisor-reason">--</div>
+        </div>
     </div>
 
     <div class="footer-section">
@@ -144,12 +158,8 @@
     </div>
 </div>
 
-<input type="hidden" id="raw_bo">
-<input type="hidden" id="raw_bd">
-<input type="hidden" id="raw_dr">
-<input type="hidden" id="raw_ds">
-<input type="hidden" id="raw_h30">
-<input type="hidden" id="raw_l30">
+<input type="hidden" id="raw_bo"><input type="hidden" id="raw_bd"><input type="hidden" id="raw_dr">
+<input type="hidden" id="raw_ds"><input type="hidden" id="raw_h30"><input type="hidden" id="raw_l30">
 
 <script>
     const urlParams = new URLSearchParams(window.location.search);
@@ -158,13 +168,43 @@
 
     let state = { data: null, footerOpen: false };
 
-    // --- PHASE 3: PRECISION FORMATTER (MATCHING SESSION CONTROL) ---
+    // --- LOGIC: EXECUTION TACTICS ---
+    function updateAdvisor(d) {
+        if(!d || !d.metrics) return;
+        
+        const score = d.score; // e.g. 65
+        const hull = d.metrics.hull ? d.metrics.hull.val : 0; // 0, 10, 20
+        const energy = d.metrics.energy ? d.metrics.energy.val : 0; // 0, 15, 30
+        
+        let rec = "🛡️ 5-MINUTE GUARD";
+        let reason = "Standard Protocol. Wait for full 5m candle close to confirm direction.";
+        let color = "#cbd5e1"; // Gray
+
+        // LOGIC FROM CHEAT SHEET
+        if (score >= 70 && hull >= 20) {
+            rec = "💣 TRIPWIRE (LIMIT ORDER)";
+            reason = "Structure is Solid & Score is High. Place pending order at Entry Trigger. Let the market come to you.";
+            color = "#facc15"; // Gold
+        } 
+        else if (score >= 60 && energy >= 20) {
+            rec = "⚡ 3-MINUTE SCALP";
+            reason = "High Energy detected. 5m might be too slow. Enter on a confirmed 3m Close past the trigger.";
+            color = "#22d3ee"; // Cyan
+        }
+
+        const box = document.getElementById('advisorBox');
+        box.style.display = 'block';
+        box.style.borderColor = color;
+        document.getElementById('advRec').innerText = rec;
+        document.getElementById('advRec').style.color = color;
+        document.getElementById('advReason').innerText = reason;
+    }
+
+    // --- PRECISION FORMATTER ---
     function fmt(val) {
         if(!val && val !== 0) return "—";
         const f = parseFloat(val);
         if(isNaN(f)) return "—";
-        
-        // Asset Logic
         if(symbol.includes("DOGE")) return f.toFixed(7);
         if(symbol.includes("TRX")) return f.toFixed(5);
         if(symbol.includes("XRP")) return f.toFixed(5);
@@ -172,19 +212,14 @@
         return f.toFixed(2); 
     }
 
-    // --- PHASE 3: COPY LOGIC ---
     function copyForTV() {
         if(!state.data) return;
-        
-        // Grab values directly from hidden inputs to ensure we get raw data to format
         const bo = document.getElementById("raw_bo").value;
         const bd = document.getElementById("raw_bd").value;
         const dr = document.getElementById("raw_dr").value;
         const ds = document.getElementById("raw_ds").value;
         const h30 = document.getElementById("raw_h30").value;
         const l30 = document.getElementById("raw_l30").value;
-
-        // Format exactly like Session Control: BO, BD, DR, DS, 30H, 30L
         const payload = `${fmt(bo)},${fmt(bd)},${fmt(dr)},${fmt(ds)},${fmt(h30)},${fmt(l30)}`;
         
         navigator.clipboard.writeText(payload).then(() => {
@@ -198,7 +233,7 @@
                 btn.style.background = "var(--cyan)";
                 btn.style.color = "#000";
             }, 2000);
-            log("Indicator Data Copied: " + payload);
+            log("Indicator Data Copied");
         });
     }
 
@@ -221,12 +256,11 @@
         const d = state.data;
         const l = d.levels;
         
-        // Update Visuals with precision
         document.getElementById('livePrice').innerText = d.price.toLocaleString();
         document.getElementById('dScore').innerText = d.score;
         document.getElementById('dProtocol').innerText = d.status;
         
-        // Populate Hidden Fields for Clipboard
+        // Populate Hidden
         document.getElementById('raw_bo').value = l.breakout_trigger;
         document.getElementById('raw_bd').value = l.breakdown_trigger;
         document.getElementById('raw_dr').value = l.daily_resistance;
@@ -234,12 +268,11 @@
         document.getElementById('raw_h30').value = l.range30m_high;
         document.getElementById('raw_l30').value = l.range30m_low;
 
-        // BIAS & COLORS
+        // Bias Colors
         const bias = d.bias;
         const bEl = document.getElementById('biasBadge');
         bEl.innerText = `BIAS: ${bias}`;
         let themeColor = "var(--gray)";
-        
         if (bias === "LONG") { bEl.className="dash-status status-green"; themeColor="#10b981"; }
         else if (bias === "SHORT") { bEl.className="dash-status status-red"; themeColor="#ef4444"; }
         else { bEl.className="dash-status status-gray"; }
@@ -247,7 +280,10 @@
         document.getElementById('verdictBanner').style.borderLeftColor = themeColor;
         document.getElementById('dProtocol').style.color = themeColor;
 
-        // METRICS
+        // Update Advisor
+        updateAdvisor(d);
+
+        // Metrics
         const m = d.metrics;
         const updateMetric = (id, obj) => {
             if(!obj) return;
@@ -260,7 +296,7 @@
         updateMetric('dWind', m.wind);
         updateMetric('dHull', m.hull);
 
-        // FLIGHT PLAN
+        // Flight Plan
         const p = d.plans[bias] || {valid:false};
         if(p.valid) {
             document.getElementById('pEntry').innerText = fmt(p.entry);
@@ -269,7 +305,6 @@
             document.getElementById('pT2').innerText = fmt(p.targets[1]);
             document.getElementById('pT3').innerText = fmt(p.targets[2]);
             
-            // Risk Calc
             const bal = parseFloat(document.getElementById('inpBal').value) || 0;
             const risk = parseFloat(document.getElementById('inpRisk').value) || 0;
             const riskAmt = bal * (risk/100);
