@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Kabroda | VECTOR</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg: #020617; --panel: #1e293b; --border: #334155; --cyan: #22d3ee; --green: #10b981; --red: #ef4444; --gold: #facc15; --white: #f8fafc; --gray: #94a3b8; }
+        body { background: var(--bg); color: var(--white); font-family: 'JetBrains Mono'; margin: 0; padding: 20px; }
+        
+        .cockpit { display: grid; gap: 20px; grid-template-columns: 300px 1fr 350px; grid-template-areas: "header header header" "left center right"; }
+        .header { grid-area: header; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 15px; }
+        
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+        .panel-head { font-family: 'Rajdhani'; font-weight: 800; font-size: 18px; color: var(--cyan); border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 15px; letter-spacing: 1px; }
+        
+        /* TEXT STYLES */
+        .h-title { font-family: 'Rajdhani'; font-weight: 800; font-size: 32px; letter-spacing: 2px; margin: 0; }
+        .lbl { font-size: 11px; color: var(--gray); font-weight: 700; display: block; margin-bottom: 5px; }
+        .val { font-size: 16px; font-weight: 800; font-family: 'JetBrains Mono'; }
+        
+        /* CENTER HUD */
+        .vector-hud { text-align: center; display: flex; flex-direction: column; justify-content: center; height: 100%; }
+        .mode-big { font-family: 'Rajdhani'; font-size: 64px; font-weight: 800; line-height: 1; margin-bottom: 10px; }
+        .advice-box { background: rgba(255,255,255,0.05); padding: 15px; border-radius: 4px; font-size: 14px; margin-top: 20px; border: 1px solid rgba(255,255,255,0.1); }
+        
+        /* CONTROLS */
+        input { background: var(--bg); border: 1px solid var(--border); color: #fff; padding: 8px; width: 100%; font-family: inherit; text-align: right; font-weight: 700; margin-bottom: 15px; }
+        .btn-cp { background: var(--border); border: none; color: #fff; padding: 2px 8px; border-radius: 3px; cursor: pointer; font-size: 10px; margin-left: 10px; }
+        .btn-cp:hover { background: var(--cyan); color: #000; }
+        
+        .btn-action { width: 100%; padding: 12px; font-weight: 800; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 10px; font-family: 'Rajdhani'; text-transform: uppercase; font-size: 14px; }
+        .btn-copy-data { background: var(--cyan); color: #000; }
+        .btn-copy-key { background: var(--gold); color: #000; }
+        
+        .data-row { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed var(--border); padding: 8px 0; }
+        
+        /* COLORS */
+        .c-CYAN { color: var(--cyan); text-shadow: 0 0 15px rgba(34,211,238,0.3); }
+        .c-AMBER { color: var(--gold); text-shadow: 0 0 15px rgba(250,204,21,0.3); }
+        .c-RED { color: var(--red); opacity: 0.8; }
+    </style>
+</head>
+<body>
+    {% include 'nav.html' %}
+
+    <div class="cockpit">
+        <div class="header">
+            <div>
+                <a href="/suite" style="color:var(--gray); text-decoration:none; font-size:12px;">← BACK TO SUITE</a>
+                <h1 class="h-title">PROJECT VECTOR</h1>
+            </div>
+            <div style="text-align:right;">
+                <div class="val" id="livePrice" style="font-size:24px;">--</div>
+                <div class="lbl">LIVE FEED</div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-head">RISK PROTOCOL</div>
+            <div class="lbl">ACCOUNT BALANCE</div>
+            <input type="number" id="inpBal" value="4000" oninput="render()">
+            <div class="lbl">RISK PER TRADE (%)</div>
+            <input type="number" id="inpRisk" value="10.0" oninput="render()">
+            <div style="border-top:1px dotted var(--gray); margin-top:10px; padding-top:10px;">
+                <div class="lbl">MAX LOSS</div>
+                <div id="valLoss" class="val" style="color:var(--red); font-size:20px;">$400.00</div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="vector-hud">
+                <div class="lbl">ACTIVE MODE</div>
+                <div id="vMode" class="mode-big c-RED">CALIBRATING</div>
+                <div id="vAdvice" class="advice-box">WAITING FOR UPLINK...</div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-head">FLIGHT PATH</div>
+            <button class="btn-action btn-copy-data" onclick="copyIndicator()">📋 COPY INDICATOR DATA</button>
+            <button class="btn-action btn-copy-key" onclick="copyKey()">🔑 COPY MISSION KEY</button>
+            
+            <div style="margin-top:20px;">
+                <div class="data-row"><span class="lbl">ENTRY</span><div><span id="pEntry" class="val" style="color:var(--cyan)">--</span><button class="btn-cp" onclick="cp('pEntry')">CP</button></div></div>
+                <div class="data-row"><span class="lbl">STOP</span><div><span id="pStop" class="val" style="color:var(--red)">--</span><button class="btn-cp" onclick="cp('pStop')">CP</button></div></div>
+                <div class="data-row"><span class="lbl">SIZE ($)</span><div><span id="pSize" class="val">--</span><button class="btn-cp" onclick="cp('pSize')">CP</button></div></div>
+                <div style="height:10px;"></div>
+                <div class="data-row"><span class="lbl">TARGET 1</span><div><span id="pT1" class="val" style="color:var(--gold)">--</span><button class="btn-cp" onclick="cp('pT1')">CP</button></div></div>
+                <div class="data-row"><span class="lbl">TARGET 2</span><div><span id="pT2" class="val">--</span><button class="btn-cp" onclick="cp('pT2')">CP</button></div></div>
+            </div>
+        </div>
+    </div>
+
+    <input type="hidden" id="raw_key">
+    <input type="hidden" id="raw_data">
+
+    <script>
+        function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText); }
+        
+        function copyKey() { 
+            navigator.clipboard.writeText(document.getElementById('raw_key').value);
+            alert("Mission Key Copied");
+        }
+        
+        function copyIndicator() {
+            navigator.clipboard.writeText(document.getElementById('raw_data').value);
+            alert("Indicator Data Copied");
+        }
+
+        async function scan() {
+            try {
+                const res = await fetch('/api/vector/scan', { method: 'POST' });
+                const json = await res.json();
+                
+                if(json.status === "CALIBRATING") return;
+                
+                const v = json.vector;
+                const p = json.plan;
+                const l = json.levels;
+                
+                // 1. UPDATE HUD
+                document.getElementById('livePrice').innerText = json.price.toFixed(2);
+                const modeEl = document.getElementById('vMode');
+                modeEl.innerText = v.mode;
+                modeEl.className = `mode-big c-${v.color}`;
+                document.getElementById('vAdvice').innerText = v.advice;
+                
+                // 2. STORE HIDDEN DATA (For Copy Buttons)
+                document.getElementById('raw_key').value = json.mission_key;
+                // Format: BO,BD,DR,DS,H30,L30
+                const indData = `${l.breakout_trigger},${l.breakdown_trigger},${l.daily_resistance},${l.daily_support},${l.range30m_high},${l.range30m_low}`;
+                document.getElementById('raw_data').value = indData;
+
+                // 3. FLIGHT PLAN & RISK
+                if (p.valid) {
+                    document.getElementById('pEntry').innerText = p.entry.toFixed(2);
+                    document.getElementById('pStop').innerText = p.stop.toFixed(2);
+                    document.getElementById('pT1').innerText = p.targets[0].toFixed(2);
+                    document.getElementById('pT2').innerText = p.targets[1].toFixed(2);
+                    
+                    // Risk Calc
+                    const bal = parseFloat(document.getElementById('inpBal').value) || 0;
+                    const riskPct = parseFloat(document.getElementById('inpRisk').value) || 0;
+                    const riskAmt = bal * (riskPct / 100);
+                    document.getElementById('valLoss').innerText = "$" + riskAmt.toFixed(2);
+                    
+                    const dist = Math.abs(p.entry - p.stop);
+                    if(dist > 0) {
+                        const units = riskAmt / dist;
+                        const sizeUsd = units * p.entry;
+                        document.getElementById('pSize').innerText = Math.floor(sizeUsd).toLocaleString();
+                    }
+                } else {
+                    document.getElementById('pEntry').innerText = "BLOCKED";
+                    document.getElementById('pSize').innerText = "--";
+                }
+
+            } catch(e) { console.error(e); }
+        }
+        
+        // Render triggers on input change
+        function render() { scan(); }
+        
+        // Auto-Run
+        scan();
+        setInterval(scan, 5000);
+    </script>
+</body>
+</html>
