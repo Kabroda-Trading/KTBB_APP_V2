@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Kabroda | Target Lock v3.1</title>
+    <title>Kabroda | Target Lock v3.2</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <style>
         :root { 
@@ -72,9 +72,12 @@
             width: 100%; background: var(--cyan); color: #000; 
             font-weight: 800; padding: 12px; border: none; border-radius: 4px; 
             cursor: pointer; font-family: 'Rajdhani'; font-size: 16px; letter-spacing: 1px;
-            margin-bottom: 20px; text-transform: uppercase;
+            margin-bottom: 10px; text-transform: uppercase;
         }
         .btn-tv-copy:hover { background: #fff; }
+        
+        .btn-mission { background: var(--gold); color: #000; margin-bottom: 20px; } 
+        .btn-mission:hover { background: #fff; }
 
         .advisor-box {
             margin-top: 20px; padding: 15px; border-radius: 4px; 
@@ -136,6 +139,7 @@
         <div class="panel-head">FLIGHT PATH</div>
         
         <button class="btn-tv-copy" onclick="copyForTV()">📋 COPY INDICATOR DATA</button>
+        <button class="btn-tv-copy btn-mission" onclick="copyKey()">🔑 COPY MISSION KEY</button>
 
         <div class="data-row"><span class="lbl">ENTRY TRIGGER</span><div><span id="pEntry" class="val" style="color:var(--cyan)">--</span><button class="btn-cp" onclick="cp('pEntry')">CP</button></div></div>
         <div class="data-row"><span class="lbl">STOP LOSS</span><div><span id="pStop" class="val" style="color:var(--red)">--</span><button class="btn-cp" onclick="cp('pStop')">CP</button></div></div>
@@ -160,6 +164,7 @@
 
 <input type="hidden" id="raw_bo"><input type="hidden" id="raw_bd"><input type="hidden" id="raw_dr">
 <input type="hidden" id="raw_ds"><input type="hidden" id="raw_h30"><input type="hidden" id="raw_l30">
+<input type="hidden" id="raw_mission_key">
 
 <script>
     const urlParams = new URLSearchParams(window.location.search);
@@ -172,15 +177,14 @@
     function updateAdvisor(d) {
         if(!d || !d.metrics) return;
         
-        const score = d.score; // e.g. 65
-        const hull = d.metrics.hull ? d.metrics.hull.val : 0; // 0, 10, 20
-        const energy = d.metrics.energy ? d.metrics.energy.val : 0; // 0, 15, 30
+        const score = d.score; 
+        const hull = d.metrics.hull ? d.metrics.hull.val : 0; 
+        const energy = d.metrics.energy ? d.metrics.energy.val : 0; 
         
         let rec = "🛡️ 5-MINUTE GUARD";
         let reason = "Standard Protocol. Wait for full 5m candle close to confirm direction.";
         let color = "#cbd5e1"; // Gray
 
-        // LOGIC FROM CHEAT SHEET
         if (score >= 70 && hull >= 20) {
             rec = "💣 TRIPWIRE (LIMIT ORDER)";
             reason = "Structure is Solid & Score is High. Place pending order at Entry Trigger. Let the market come to you.";
@@ -223,17 +227,20 @@
         const payload = `${fmt(bo)},${fmt(bd)},${fmt(dr)},${fmt(ds)},${fmt(h30)},${fmt(l30)}`;
         
         navigator.clipboard.writeText(payload).then(() => {
-            const btn = document.querySelector('.btn-tv-copy');
-            const orig = btn.innerText;
-            btn.innerText = "✓ DATA COPIED";
-            btn.style.background = "#fff";
-            btn.style.color = "#000";
-            setTimeout(() => {
-                btn.innerText = orig;
-                btn.style.background = "var(--cyan)";
-                btn.style.color = "#000";
-            }, 2000);
             log("Indicator Data Copied");
+            alert("Indicator Data Copied!");
+        });
+    }
+
+    function copyKey() {
+        const key = document.getElementById("raw_mission_key").value;
+        if(!key) { alert("No Key Generated Yet"); return; }
+        navigator.clipboard.writeText(key).then(() => {
+            log("Mission Key Copied");
+            const btn = document.querySelector('.btn-mission');
+            const orig = btn.innerText;
+            btn.innerText = "✓ KEY COPIED";
+            setTimeout(() => btn.innerText = orig, 2000);
         });
     }
 
@@ -267,6 +274,9 @@
         document.getElementById('raw_ds').value = l.daily_support;
         document.getElementById('raw_h30').value = l.range30m_high;
         document.getElementById('raw_l30').value = l.range30m_low;
+        
+        // --- NEW: Populate Mission Key ---
+        document.getElementById('raw_mission_key').value = d.mission_key || "";
 
         // Bias Colors
         const bias = d.bias;

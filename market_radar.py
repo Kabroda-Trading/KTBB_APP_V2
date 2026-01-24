@@ -1,10 +1,10 @@
 # market_radar.py
 # ==============================================================================
-# MARKET RADAR ENGINE v2.7 (TACTICAL COMMAND)
+# MARKET RADAR ENGINE v2.8 (Added Mission Key Generation)
 # ==============================================================================
 # 1. MATH: Exact replica of Project Omega v17 Kinetic Math.
-# 2. FILTERS: Enforces Asset-Specific Kill Switches (The PDF Rules).
-# 3. OUTPUT: Overrides status to "GROUNDED" if Kill Switch is hit.
+# 2. FILTERS: Enforces Asset-Specific Kill Switches.
+# 3. OUTPUT: Generates "Mission Key" for TradingView Handshake.
 # ==============================================================================
 
 import asyncio
@@ -206,7 +206,39 @@ def _generate_flight_plan(levels):
     return plans
 
 # ------------------------------------------------------------------------------
-# 3. API ENDPOINTS
+# 4. HANDSHAKE PROTOCOL (NEW FEATURE)
+# ------------------------------------------------------------------------------
+def _generate_mission_key(analysis, plans):
+    """
+    Generates the pipe-separated string for the TradingView HUD.
+    Format: BIAS|STATUS|ENTRY|STOP|TP1|TP2|TP3
+    """
+    bias = analysis.get("bias", "NEUTRAL")
+    status = "NEUTRAL"
+    advice = analysis.get("advice", "")
+    
+    # Map Status for HUD Color Logic
+    if analysis.get("status") == "GROUNDED": status = "WEAK"
+    elif analysis.get("status") == "SNIPER" or analysis.get("status") == "SUPERSONIC": status = "STRONG"
+    else: status = "NEUTRAL"
+
+    # Get Plan Data
+    active_plan = plans.get(bias, {}) if bias in ["LONG", "SHORT"] else {}
+    if not active_plan.get("valid", False):
+        return f"{bias}|WEAK|0|0|0|0|0"
+
+    entry = active_plan.get("entry", 0.0)
+    stop = active_plan.get("stop", 0.0)
+    targets = active_plan.get("targets", [0.0, 0.0, 0.0])
+    
+    t1 = targets[0] if len(targets) > 0 else 0.0
+    t2 = targets[1] if len(targets) > 1 else 0.0
+    t3 = targets[2] if len(targets) > 2 else 0.0
+
+    return f"{bias}|{status}|{entry:.2f}|{stop:.2f}|{t1:.2f}|{t2:.2f}|{t3:.2f}"
+
+# ------------------------------------------------------------------------------
+# 5. API ENDPOINTS
 # ------------------------------------------------------------------------------
 async def scan_sector(session_id="us_ny_futures"):
     radar_grid = []
@@ -247,9 +279,13 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
     
     analysis = _analyze_session_kinetics(levels, context, price, symbol)
     plans = _generate_flight_plan(levels)
+    
+    # Generate the key for the frontend
+    m_key = _generate_mission_key(analysis, plans)
 
     return {
         "symbol": symbol, "score": analysis["score"], "status": analysis["status"], 
         "bias": analysis["bias"], "metrics": analysis["metrics"], "advice": analysis["advice"],
-        "plans": plans, "levels": levels, "price": price
+        "plans": plans, "levels": levels, "price": price,
+        "mission_key": m_key # PASSED TO FRONTEND
     }
