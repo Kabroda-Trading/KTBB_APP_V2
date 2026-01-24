@@ -1,6 +1,6 @@
 # market_radar.py
 # ==============================================================================
-# MARKET RADAR ENGINE v2.8 (Added Mission Key Generation)
+# MARKET RADAR ENGINE v2.9 (Added Cache Nuke Protocol)
 # ==============================================================================
 # 1. MATH: Exact replica of Project Omega v17 Kinetic Math.
 # 2. FILTERS: Enforces Asset-Specific Kill Switches.
@@ -11,6 +11,21 @@ import asyncio
 from typing import Dict, Any, List
 import battlebox_pipeline
 import session_manager
+import os  # Added for Cache Nuke
+
+# --- NUKE PROTOCOL: FORCE FRESH START ---
+# This deletes any old "ghost data" immediately when the server starts.
+try:
+    if os.path.exists("cache.json"):
+        os.remove("cache.json")
+        print(">>> CACHE DELETED: STARTING FRESH <<<")
+    # Also check for common variations if you use them
+    if os.path.exists("__pycache__"):
+        import shutil
+        shutil.rmtree("__pycache__", ignore_errors=True)
+except Exception as e:
+    print(f">>> CACHE CLEAR WARNING: {e}")
+# ----------------------------------------
 
 TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "TRXUSDT"]
 
