@@ -1,6 +1,6 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB: HYBRID ENGINE v1.2 (DATE ALIGNMENT PATCH)
+# RESEARCH LAB: HYBRID ENGINE v1.3 (WITH WEEKLY BIAS LOGGING)
 # ==============================================================================
 import pandas as pd
 import numpy as np
@@ -17,9 +17,7 @@ def _slice_by_ts(candles, start_ts, end_ts):
     return [c for c in candles if start_ts <= c["time"] < end_ts]
 
 def _calculate_kinetic_score(row, sensors):
-    """Calculates the 0-100 score based on enabled sensors."""
     if row is None or pd.isna(row['ma']): return 0, {}
-    
     score = 0
     comps = {"energy":0, "space":0, "wind":0, "hull":0}
 
@@ -57,18 +55,15 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
     try:
         if not raw_5m or len(raw_5m) < 100: return {"ok": False, "error": "Insufficient Data"}
         
-        # 1. PREPARE DATAFRAME (AUTO-DETECT TIME UNITS)
+        # 1. PREPARE DATAFRAME
         df = pd.DataFrame(raw_5m)
-        
-        # Check if timestamp is likely seconds or milliseconds
         first_time = df['time'].iloc[0]
         time_unit = 'ms' if first_time > 1000000000000 else 's'
-        
         df['time'] = pd.to_datetime(df['time'], unit=time_unit, utc=True)
         df.set_index('time', inplace=True)
         df.sort_index(inplace=True)
         
-        # Calculate Indicators for Kinetics
+        # Indicators
         df['ma'] = df['close'].rolling(20).mean()
         df['std'] = df['close'].rolling(20).std()
         df['bb_w'] = (4 * df['std']) / df['close'] 
@@ -77,15 +72,15 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
         df['slope'] = df['close'].diff(5).abs() 
         df['z'] = (df['close'] - df['ma']) / df['std']
 
-        # 2. STRUCTURE ENGINE SETUP
+        # 2. STRUCTURE ENGINE
         start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         active_cfgs = [s for s in session_manager.SESSION_CONFIGS if s["id"] in session_ids]
         
         results = []
         curr_day = start_dt
-
-        # Unpack Tuning
+        
+        # Tuning
         req_vol = tuning.get("require_volume", False)
         req_div = tuning.get("require_divergence", False)
         fusion = tuning.get("fusion_mode", False)
@@ -95,26 +90,17 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
         tol_bps = int(tuning.get("zone_tolerance_bps", 10))
         zone_tol = tol_bps / 10000.0
 
-        processed_anchors = set() # Prevent duplicates
+        processed_anchors = set()
 
         while curr_day <= end_dt:
-            # We add 12 hours to curr_day to query the MID-DAY status
-            # This ensures we grab the session starting ON this day, not the one carrying over from yesterday
             query_time = curr_day + timedelta(hours=12)
             
             for cfg in active_cfgs:
-                # A. Time Slicing
-                # Updated: Use query_time to avoid "Midnight Fallacy"
                 anchor_ts = session_manager.anchor_ts_for_utc_date(cfg, query_time)
-                
-                # Deduplication Check
-                if anchor_ts in processed_anchors:
-                    continue
+                if anchor_ts in processed_anchors: continue
                 processed_anchors.add(anchor_ts)
                 
-                # DERIVE ACTUAL DATE FROM ANCHOR (The Fix)
                 actual_session_date = datetime.fromtimestamp(anchor_ts, tz=timezone.utc).strftime("%Y-%m-%d")
-
                 lock_end_ts = anchor_ts + 1800 
                 exec_end_ts = lock_end_ts + (12 * 3600) 
 
@@ -124,7 +110,22 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                 context_24h = _slice_by_ts(raw_5m, lock_end_ts - 86400, lock_end_ts)
                 post_lock = _slice_by_ts(raw_5m, lock_end_ts, exec_end_ts)
 
-                # B. SSE Levels
+                # --- WEEKLY BIAS CALCULATION (NEW) ---
+                # We check price 7 days ago vs Session Start
+                weekly_bias = "NEUTRAL"
+                try:
+                    week_ago_ts = anchor_ts - (7 * 86400)
+                    # Find closest candle to 7 days ago
+                    week_ago_idx = df.index.get_indexer([pd.to_datetime(week_ago_ts, unit='s', utc=True)], method='nearest')[0]
+                    price_week_ago = df.iloc[week_ago_idx]['close']
+                    price_now = calibration[0]['open']
+                    
+                    # Simple Trend Logic
+                    if price_now > price_week_ago * 1.01: weekly_bias = "BULLISH"
+                    elif price_now < price_week_ago * 0.99: weekly_bias = "BEARISH"
+                except: pass
+                # -------------------------------------
+
                 sse_input = {
                     "locked_history_5m": context_24h,
                     "slice_24h_5m": context_24h,
@@ -138,12 +139,10 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                 if "error" in computed: continue
                 levels = computed["levels"]
 
-                # C. Structure State (The Protocol)
                 state = structure_state_engine.compute_structure_state(levels, post_lock, tuning=tuning)
                 had_acceptance = (state["permission"]["status"] == "EARNED")
                 side = state["permission"]["side"]
 
-                # D. Go Logic (The Signal)
                 go = {"ok": False, "go_type": "NONE", "simulation": {}}
                 if had_acceptance and side in ("LONG", "SHORT"):
                     candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
@@ -156,7 +155,6 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                         ignore_5m_stoch=ignore_5, confirmation_mode=confirm_mode
                     )
 
-                    # E. TRADE SIMULATION
                     if go["ok"]:
                         stop_price = 0.0
                         if side == "LONG": stop_price = min(c["low"] for c in calibration) 
@@ -174,7 +172,6 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                         )
                         go["simulation"] = sim
 
-                # F. Kinetic Math
                 try:
                     score_time = pd.to_datetime(anchor_ts, unit='s', utc=True)
                     row = df.asof(score_time) 
@@ -182,10 +179,10 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                 except:
                     k_score, k_comps = 0, {}
 
-                # G. Full Data Payload
-                # Using actual_session_date ensures Truth In Labeling
+                # PAYLOAD
                 results.append({
                     "date": f"{actual_session_date} [{cfg['id']}]",
+                    "weekly_bias": weekly_bias, # <--- NEW DATA FIELD
                     "protocol": state["action"],
                     "kinetic_score": k_score,
                     "kinetic_comps": k_comps,
@@ -202,11 +199,8 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
 
             curr_day += timedelta(days=1)
 
-        # Summary Calculation
         valid_trades = [r for r in results if r['trade_signal']]
         prime_setups = [r for r in results if r['trade_signal'] and r['kinetic_score'] >= min_score]
-        
-        # Calculate Realized R for Summary
         total_r = sum(r['simulation'].get('r_realized', 0) for r in valid_trades)
 
         return {

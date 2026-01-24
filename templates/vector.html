@@ -4,88 +4,52 @@
     <meta charset="UTF-8">
     <title>Kabroda | PROJECT VECTOR</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/site.css"> 
     <style>
-        /* --- KABRODA MASTER THEME MERGE --- */
-        :root {
-            --bg-deep: #020617;
-            --panel: #1e293b;
-            --border: #334155;
-            --primary: #0ea5e9;
-            --accent-cyan: #06b6d4;
-            --cyan: #22d3ee;
-            --green: #10b981;
-            --red: #ef4444;
-            --gold: #facc15;
-            --white: #f8fafc;
-            --gray: #94a3b8;
-            --glass-border: rgba(56, 189, 248, 0.2);
-        }
+        /* --- KABRODA MASTER THEME --- */
+        :root { --bg-deep: #020617; --panel: #1e293b; --border: #334155; --primary: #0ea5e9; --accent-cyan: #06b6d4; --cyan: #22d3ee; --green: #10b981; --red: #ef4444; --gold: #facc15; --white: #f8fafc; --gray: #94a3b8; }
+        body { background-color: var(--bg-deep); background-image: radial-gradient(circle at 50% 0%, rgba(14, 165, 233, 0.15), transparent 50%), radial-gradient(circle at 80% 40%, rgba(56, 189, 248, 0.05), transparent 40%); color: var(--white); font-family: 'JetBrains Mono', monospace; margin: 0; padding: 0; }
 
-        body {
-            background-color: var(--bg-deep);
-            background-image: 
-                radial-gradient(circle at 50% 0%, rgba(14, 165, 233, 0.15), transparent 50%),
-                radial-gradient(circle at 80% 40%, rgba(56, 189, 248, 0.05), transparent 40%);
-            color: var(--white);
-            font-family: 'JetBrains Mono', monospace;
-            margin: 0; padding: 0;
-        }
-
-        /* --- NAVIGATION STYLES --- */
+        /* NAV STYLES */
         .navbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 40px; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95); position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px); }
         .nav-container { width: 100%; max-width: 1400px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
         .logo { font-family: 'Rajdhani', sans-serif; font-weight: 800; font-size: 24px; color: #fff; text-decoration: none; display: flex; align-items: center; gap: 10px; letter-spacing: 1px; }
         .nav-links { display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0; align-items: center; }
-        .nav-links a { font-size: 0.95rem; color: var(--gray); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none; transition: color 0.2s; font-family: 'Inter', sans-serif; }
+        .nav-links a { font-size: 0.95rem; color: var(--gray); font-weight: 600; text-transform: uppercase; text-decoration: none; transition: 0.2s; font-family: 'Inter', sans-serif; }
         .nav-links a:hover { color: #fff; }
-
-        /* BOSS CONTROL DROPDOWN */
         .dropdown { position: relative; display: inline-block; }
         .dropbtn { cursor: pointer; display: flex; align-items: center; gap: 5px; color: var(--gold) !important; font-weight: 800 !important; }
         .dropdown-content { display: none; position: absolute; top: 100%; right: 0; background-color: var(--panel); min-width: 220px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.5); border: 1px solid var(--border); border-radius: 4px; z-index: 2000; }
         .dropdown-content a { color: var(--gray); padding: 12px 16px; text-decoration: none; display: block; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.05); font-family: 'JetBrains Mono'; }
-        .dropdown-content a:last-child { border-bottom: none; }
-        .dropdown-content a:hover { background-color: rgba(255,255,255,0.05); color: #fff; }
         .dropdown:hover .dropdown-content { display: block; }
 
-        /* --- VECTOR COCKPIT --- */
+        /* COCKPIT LAYOUT */
         .cockpit-container { padding: 40px; max-width: 1600px; margin: 0 auto; }
-        
         .header-row { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
         .page-title { font-family: 'Rajdhani'; font-weight: 800; font-size: 42px; margin: 0; letter-spacing: 2px; text-transform: uppercase; color: #fff; }
-        .live-ticker { text-align: right; }
         .live-price { font-size: 32px; font-weight: 800; color: var(--white); line-height: 1; }
-        .live-lbl { font-size: 11px; color: var(--accent-cyan); letter-spacing: 1px; font-weight: 700; text-transform: uppercase; }
-
-        .cockpit-grid { display: grid; gap: 25px; grid-template-columns: 320px 1fr 380px; grid-template-areas: "left center right"; }
         
+        .cockpit-grid { display: grid; gap: 25px; grid-template-columns: 320px 1fr 380px; grid-template-areas: "left center right"; }
         .panel { background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border); border-radius: 8px; padding: 25px; backdrop-filter: blur(5px); }
         .panel-head { font-family: 'Rajdhani'; font-weight: 800; font-size: 18px; color: var(--accent-cyan); border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 20px; letter-spacing: 1px; text-transform: uppercase; }
 
-        /* LEFT: RISK */
+        /* LEFT PANEL: RISK */
         .input-group { margin-bottom: 20px; }
         .input-lbl { font-size: 11px; color: var(--gray); font-weight: 700; display: block; margin-bottom: 8px; letter-spacing: 0.5px; }
         input[type="number"] { background: rgba(0,0,0,0.3); border: 1px solid var(--border); color: #fff; padding: 12px; width: 100%; font-family: 'JetBrains Mono'; text-align: right; font-weight: 700; font-size: 16px; border-radius: 4px; box-sizing: border-box; }
         input:focus { outline: none; border-color: var(--accent-cyan); }
         .risk-display { border-top: 1px dashed var(--border); padding-top: 15px; margin-top: 10px; }
         
-        /* CENTER: HUD */
+        /* CENTER PANEL: HUD */
         .vector-hud { text-align: center; display: flex; flex-direction: column; justify-content: center; height: 100%; min-height: 400px; }
-        .mode-lbl { font-size: 14px; color: var(--gray); letter-spacing: 2px; margin-bottom: 10px; font-weight: 700; }
-        .mode-display { font-family: 'Rajdhani'; font-size: 96px; font-weight: 900; line-height: 0.9; margin-bottom: 10px; text-transform: uppercase; }
+        .mode-display { font-family: 'Rajdhani'; font-size: 80px; font-weight: 900; line-height: 0.9; margin-bottom: 10px; text-transform: uppercase; }
         
-        /* SCORE BADGE */
-        .score-box { 
-            background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: 50px; 
-            padding: 8px 24px; display: inline-flex; align-items: center; gap: 10px; margin-bottom: 20px;
-        }
+        .score-box { background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: 50px; padding: 8px 24px; display: inline-flex; align-items: center; gap: 10px; margin-bottom: 20px; }
         .score-val { font-size: 32px; font-weight: 800; font-family: 'JetBrains Mono'; line-height: 1; }
         .score-lbl { font-size: 11px; color: var(--gray); font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
 
         .advice-banner { background: rgba(255,255,255,0.03); border: 1px solid var(--border); padding: 15px 30px; border-radius: 4px; display: inline-block; font-size: 16px; color: var(--white); font-weight: 500; letter-spacing: 0.5px; }
 
-        /* RIGHT: FLIGHT PATH */
+        /* RIGHT PANEL: FLIGHT PATH */
         .action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 25px; }
         .btn-action { padding: 12px; font-weight: 800; border: none; border-radius: 4px; cursor: pointer; font-family: 'Rajdhani'; text-transform: uppercase; font-size: 13px; letter-spacing: 0.5px; transition: all 0.2s; }
         .btn-data { background: var(--panel); border: 1px solid var(--border); color: var(--accent-cyan); }
@@ -100,15 +64,16 @@
         .btn-mini-cp { background: transparent; border: 1px solid var(--border); color: var(--gray); padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 10px; margin-left: 10px; font-weight: 700; transition: 0.2s; }
         .btn-mini-cp:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
 
-        /* TACTICAL ADVISOR BOX */
+        /* ADVISOR BOX */
         .advisor-box { margin-top: 25px; padding: 20px; border-radius: 6px; background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-left-width: 4px; }
         .adv-head { font-size: 10px; color: var(--gray); font-weight: 800; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
         .adv-title { font-size: 18px; font-weight: 800; font-family: 'Rajdhani'; color: #fff; margin-bottom: 5px; }
         .adv-desc { font-size: 12px; color: var(--gray); line-height: 1.5; }
 
-        /* COLORS */
+        /* STATUS COLORS */
         .c-CYAN { color: var(--cyan); text-shadow: 0 0 30px rgba(34,211,238,0.25); }
         .c-AMBER { color: var(--gold); text-shadow: 0 0 30px rgba(250,204,21,0.25); }
+        .c-GOLD { color: #fbbf24; text-shadow: 0 0 30px rgba(251,191,36,0.4); } 
         .c-RED { color: var(--red); opacity: 0.8; }
         .t-CYAN { color: var(--cyan); } .t-RED { color: var(--red); } .t-GOLD { color: var(--gold); }
     </style>
@@ -121,11 +86,11 @@
         <div class="header-row">
             <div>
                 <a href="/suite" style="color:var(--gray); text-decoration:none; font-size:12px; font-weight:700;">← RETURN TO BASE</a>
-                <h1 class="page-title">PROJECT VECTOR <span style="font-size:14px; vertical-align:middle; background:var(--panel); padding:4px 8px; border-radius:4px; margin-left:10px; color:var(--gray); border:1px solid var(--border);">v2.2 HYBRID</span></h1>
+                <h1 class="page-title">PROJECT VECTOR <span style="font-size:14px; vertical-align:middle; background:var(--panel); padding:4px 8px; border-radius:4px; margin-left:10px; color:var(--gray); border:1px solid var(--border);">v2.4 FERRARI</span></h1>
             </div>
             <div class="live-ticker">
                 <div id="livePrice" class="live-price">--</div>
-                <div class="live-lbl">LIVE MARKET FEED</div>
+                <div style="font-size:11px; color:var(--accent-cyan); font-weight:700;">LIVE FEED</div>
             </div>
         </div>
 
@@ -148,7 +113,7 @@
 
             <div class="panel">
                 <div class="vector-hud">
-                    <div class="mode-lbl">CURRENT ATMOSPHERE</div>
+                    <div style="font-size:14px; color:var(--gray); letter-spacing:2px; font-weight:700;">CURRENT ATMOSPHERE</div>
                     <div id="vMode" class="mode-display c-RED">CALIBRATING</div>
                     
                     <div style="text-align: center;">
@@ -165,17 +130,20 @@
             <div class="panel">
                 <div class="panel-head">FLIGHT PATH</div>
                 <div class="action-row">
-                    <button class="btn-action btn-data" onclick="copyIndicator()">📋 DATA</button>
-                    <button class="btn-action btn-key" onclick="copyKey()">🔑 KEY</button>
+                    <button class="btn-action btn-data" onclick="copyIndicator()">📋 COPY DATA</button>
+                    <button class="btn-action btn-key" onclick="copyKey()">🔑 COPY KEY</button>
                 </div>
 
                 <div style="margin-bottom:20px;">
                     <div class="flight-row"><span class="flight-lbl">ENTRY</span><div><span id="pEntry" class="flight-val t-CYAN">--</span><button class="btn-mini-cp" onclick="cp('pEntry')">CP</button></div></div>
                     <div class="flight-row"><span class="flight-lbl">STOP</span><div><span id="pStop" class="flight-val t-RED">--</span><button class="btn-mini-cp" onclick="cp('pStop')">CP</button></div></div>
                     <div class="flight-row"><span class="flight-lbl">SIZE ($)</span><div><span id="pSize" class="flight-val">--</span><button class="btn-mini-cp" onclick="cp('pSize')">CP</button></div></div>
+                    
                     <div style="height:15px;"></div>
+                    
                     <div class="flight-row"><span class="flight-lbl t-GOLD">TARGET 1</span><div><span id="pT1" class="flight-val t-GOLD">--</span><button class="btn-mini-cp" onclick="cp('pT1')">CP</button></div></div>
                     <div class="flight-row"><span class="flight-lbl">TARGET 2</span><div><span id="pT2" class="flight-val">--</span><button class="btn-mini-cp" onclick="cp('pT2')">CP</button></div></div>
+                    <div class="flight-row"><span class="flight-lbl">TARGET 3</span><div><span id="pT3" class="flight-val">--</span><button class="btn-mini-cp" onclick="cp('pT3')">CP</button></div></div>
                 </div>
 
                 <div id="advisorBox" class="advisor-box" style="display:none;">
@@ -226,13 +194,12 @@
                 modeEl.className = `mode-display c-${v.color}`;
                 document.getElementById('vAdvice').innerText = v.advice;
                 
-                // 2. UPDATE SCORE (NEW)
+                // 2. UPDATE SCORE
                 const scoreEl = document.getElementById('vScore');
                 scoreEl.innerText = v.score;
-                // Color Code the Score
-                if(v.score >= 70) scoreEl.style.color = "#facc15"; // Gold
-                else if(v.score >= 50) scoreEl.style.color = "#10b981"; // Green
-                else scoreEl.style.color = "#ef4444"; // Red
+                if(v.score >= 70) scoreEl.style.color = "#facc15"; 
+                else if(v.score >= 50) scoreEl.style.color = "#10b981"; 
+                else scoreEl.style.color = "#ef4444";
 
                 // 3. STORE HIDDEN DATA
                 document.getElementById('raw_key').value = json.mission_key;
@@ -245,6 +212,8 @@
                     document.getElementById('pStop').innerText = p.stop.toLocaleString(undefined, {minimumFractionDigits: 2});
                     document.getElementById('pT1').innerText = p.targets[0].toLocaleString(undefined, {minimumFractionDigits: 2});
                     document.getElementById('pT2').innerText = p.targets[1].toLocaleString(undefined, {minimumFractionDigits: 2});
+                    // ADDED TARGET 3 HANDLER
+                    document.getElementById('pT3').innerText = p.targets[2].toLocaleString(undefined, {minimumFractionDigits: 2});
                     
                     // Risk Calc
                     const bal = parseFloat(document.getElementById('inpBal').value) || 0;
