@@ -1,6 +1,6 @@
 # market_radar.py
 # ==============================================================================
-# MARKET RADAR v4.2 (LOCKED ANCHOR + BUTTON LOGIC)
+# MARKET RADAR v4.2 (AUDITED PHASE 2)
 # ==============================================================================
 import asyncio
 import os
@@ -29,11 +29,11 @@ def _calc_kinetics(anchor, levels, context):
     if dr == 0 or ds == 0 or anchor == 0: 
         return {"score": 0, "wind": 0, "energy": 0, "hull": 0, "space": 0, "bias": "NEUTRAL"}
 
-    # 1. ENERGY (Range Compression) - LOCKED TO ANCHOR
+    # 1. ENERGY (Range Compression) - LOCKED TO CORP ANCHOR
     range_pct = (abs(dr - ds) / anchor) * 100
     e_val = 30 - _score_gradient(range_pct, 0.5, 2.0, 30)
 
-    # 2. SPACE (Room to Run) - LOCKED TO ANCHOR
+    # 2. SPACE (Room to Run) - LOCKED TO CORP ANCHOR
     dist_up = abs(dr - anchor) / anchor * 100
     dist_dn = abs(anchor - ds) / anchor * 100
     nearest = min(dist_up, dist_dn)
@@ -101,10 +101,16 @@ async def scan_sector(session_id="us_ny_futures"):
         box = res.get("battlebox", {})
         levels = box.get("levels", {})
         
-        # *** CRITICAL FIX: LOCK SCORE TO ANCHOR ***
-        static_anchor = float(levels.get("anchor_price", price))
+        # *** LOCKED ANCHOR: FROM PIPELINE (NO MAKESHIFT MATH) ***
+        # sse_engine.py now correctly exports "anchor_price".
+        static_anchor = float(levels.get("anchor_price", 0))
         
-        k = _calc_kinetics(static_anchor, levels, box.get("context", {}))
+        # If pipeline is still calibrating or data is incomplete, score stays 0.
+        if static_anchor == 0:
+            k = {"score": 0, "wind": 0, "energy": 0, "hull": 0, "space": 0, "bias": "NEUTRAL"}
+        else:
+            k = _calc_kinetics(static_anchor, levels, box.get("context", {}))
+
         mode, advice, color = _get_status(sym, k)
         plan = _get_plan(mode, levels, k["bias"])
 
@@ -138,10 +144,14 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
     box = data.get("battlebox", {})
     levels = box.get("levels", {})
     
-    # *** CRITICAL FIX: LOCK SCORE TO ANCHOR ***
-    static_anchor = float(levels.get("anchor_price", price))
+    # *** LOCKED ANCHOR: FROM PIPELINE ***
+    static_anchor = float(levels.get("anchor_price", 0))
     
-    k = _calc_kinetics(static_anchor, levels, box.get("context", {}))
+    if static_anchor == 0:
+        k = {"score": 0, "wind": 0, "energy": 0, "hull": 0, "space": 0, "bias": "NEUTRAL"}
+    else:
+        k = _calc_kinetics(static_anchor, levels, box.get("context", {}))
+
     mode, advice, color = _get_status(symbol, k)
     plan = _get_plan(mode, levels, k["bias"])
     
