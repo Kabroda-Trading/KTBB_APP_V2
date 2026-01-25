@@ -23,7 +23,7 @@ import battlebox_pipeline
 import research_lab
 import ai_analyst
 import market_radar
-import vector # <--- [NEW] PLUGGED IN VECTOR MODULE
+import vector 
 
 # --- HELPERS ---
 def _template_or_fallback(request: Request, templates: Jinja2Templates, name: str, context: Dict[str, Any]):
@@ -158,6 +158,14 @@ def lock_target_page(request: Request, db: Session = Depends(get_db)):
     if not ctx["is_admin"]: return RedirectResponse("/suite")
     return _template_or_fallback(request, templates, "lock_target.html", {"request": request})
 
+# --- [NEW] MISSION BRIEF ROUTE ---
+@app.get("/suite/mission-brief", response_class=HTMLResponse)
+def mission_brief_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx["is_admin"]: return RedirectResponse("/suite")
+    return _template_or_fallback(request, templates, "mission_brief.html", {"request": request, **ctx})
+# ---------------------------------
+
 # --- [NEW] VECTOR PROTOCOL ROUTE ---
 @app.get("/suite/vector", response_class=HTMLResponse)
 def vector_page(request: Request, db: Session = Depends(get_db)):
@@ -214,8 +222,8 @@ async def res_api(request: Request):
     raw = await battlebox_pipeline.fetch_historical_pagination(pl.get("symbol", "BTCUSDT"), s_ts, e_ts)
     return JSONResponse(await research_lab.run_hybrid_analysis(pl.get("symbol", "BTCUSDT"), raw, pl.get("start_date_utc"), pl.get("end_date_utc"), pl.get("session_ids", ["us_ny_futures"]), pl.get("tuning", {}), pl.get("sensors", {}), pl.get("min_score", 70)))
 
-# --- [NEW] VECTOR API HOOK ---
-@app.post("/api/vector/scan")
+# --- VECTOR API HOOK (FIXED) ---
+@app.post("/api/vector/intel")  # Renamed from 'scan' to match your HTML
 async def vector_api(request: Request):
     return JSONResponse(await vector.get_vector_intel("BTCUSDT", "us_ny_futures"))
 # -----------------------------

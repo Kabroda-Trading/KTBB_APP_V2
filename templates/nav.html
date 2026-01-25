@@ -1,25 +1,26 @@
 <nav class="navbar">
     <div class="nav-container">
         <a href="/" class="logo">
-            <div style="width: 12px; height: 12px; background: #22d3ee; border-radius: 2px;"></div>
+            <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
             KABRODA
         </a>
 
         <ul class="nav-links">
             {% if is_logged_in %}
-                <li><a href="/suite/market-radar" style="color:#fff; font-weight:800;">MARKET RADAR</a></li>
-                <li><a href="/suite/vector" style="color:#22d3ee;">PROJECT VECTOR</a></li>
-                <li><a href="/suite/session-control">Session Control</a></li>
+                <li><a href="/suite">Session Control</a></li>
+                <li><a href="/suite/vector">Project Vector</a></li>
+                <li><a href="/analysis">Analysis</a></li>
 
                 {% if is_admin %}
                 <li class="dropdown">
-                    <a href="#" class="dropbtn" style="color:#facc15;">
+                    <a href="#" class="dropbtn">
                         BOSS CONTROL ▼
                     </a>
                     <div class="dropdown-content">
-                        <a href="/suite/mission-brief" style="color:#facc15; border-bottom:1px dashed #333;">⚠️ MISSION BRIEF</a>
+                        <a href="/suite/mission-brief" style="color: #facc15;">⚠️ MISSION BRIEF</a>
                         
-                        <a href="/admin">👥 USER ROSTER</a>
+                        <a href="/suite/market-radar" style="color: #facc15;">📡 MARKET RADAR</a>
+                        <a href="/admin" style="color: #fff;">👥 USER ROSTER</a>
                         <a href="/suite/system-monitor">🖥️ SYSTEM MONITOR</a>
                         <a href="/suite/omega">🚀 PROJECT OMEGA</a>
                         <a href="/suite/research-lab">🧪 RESEARCH LAB</a>
@@ -40,7 +41,7 @@
         
         {% if not is_logged_in %}
         <div class="nav-cta" style="margin-left: 20px;">
-            <a href="/register" class="btn-primary" style="font-size: 0.9rem; padding: 8px 16px; background:#22d3ee; color:#000; font-weight:800; text-decoration:none; border-radius:4px;">START FREE</a>
+            <a href="/register" class="btn-primary" style="font-size: 0.9rem; padding: 8px 16px;">START FREE</a>
         </div>
         {% endif %}
     </div>
