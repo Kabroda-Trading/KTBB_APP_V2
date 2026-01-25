@@ -1,55 +1,65 @@
-<div class="nav-container">
-    <div class="nav-left">
-        <span class="brand-logo">■ KABRODA</span>
-    </div>
-    
-    <div class="nav-center">
-        <a href="/suite/market-radar" class="nav-link">MARKET RADAR</a>
-        <a href="/suite/vector" class="nav-link">PROJECT VECTOR</a>
-        <a href="/suite/session-control" class="nav-link">SESSION CONTROL</a>
-    </div>
+<nav class="navbar">
+    <div class="nav-container">
+        <a href="/" class="logo">
+            <div style="width: 12px; height: 12px; background: #22d3ee; border-radius: 2px;"></div>
+            KABRODA
+        </a>
 
-    <div class="nav-right">
-        <div class="dropdown">
-            <button class="dropbtn" style="color:#facc15;">BOSS CONTROL ▼</button>
-            <div class="dropdown-content">
-                <a href="/suite/mission-brief">MISSION BRIEF</a>
-                <a href="/admin/settings">SYSTEM SETTINGS</a> </div>
+        <ul class="nav-links">
+            {% if is_logged_in %}
+                <li><a href="/suite/market-radar" style="color:#fff; font-weight:800;">MARKET RADAR</a></li>
+                <li><a href="/suite/vector" style="color:#22d3ee;">PROJECT VECTOR</a></li>
+                <li><a href="/suite/session-control">Session Control</a></li>
+
+                {% if is_admin %}
+                <li class="dropdown">
+                    <a href="#" class="dropbtn" style="color:#facc15;">
+                        BOSS CONTROL ▼
+                    </a>
+                    <div class="dropdown-content">
+                        <a href="/suite/mission-brief" style="color:#facc15; border-bottom:1px dashed #333;">⚠️ MISSION BRIEF</a>
+                        
+                        <a href="/admin">👥 USER ROSTER</a>
+                        <a href="/suite/system-monitor">🖥️ SYSTEM MONITOR</a>
+                        <a href="/suite/omega">🚀 PROJECT OMEGA</a>
+                        <a href="/suite/research-lab">🧪 RESEARCH LAB</a>
+                    </div>
+                </li>
+                {% endif %}
+
+                <li><a href="/account">Account</a></li>
+                <li><a href="/logout" style="opacity:0.6;">Logout</a></li>
+            {% else %}
+                <li><a href="/">Home</a></li>
+                <li><a href="/analysis">Analysis</a></li>
+                <li><a href="/how-it-works">How It Works</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/login">Login</a></li>
+            {% endif %}
+        </ul>
+        
+        {% if not is_logged_in %}
+        <div class="nav-cta" style="margin-left: 20px;">
+            <a href="/register" class="btn-primary" style="font-size: 0.9rem; padding: 8px 16px; background:#22d3ee; color:#000; font-weight:800; text-decoration:none; border-radius:4px;">START FREE</a>
         </div>
-        <a href="/logout" class="nav-link">LOGOUT</a>
+        {% endif %}
     </div>
-</div>
+</nav>
 
 <style>
-    /* MASTER NAV STYLES */
-    .nav-container { 
-        display: flex; justify-content: space-between; align-items: center; 
-        padding: 0 30px; height: 70px; background: #020617; border-bottom: 1px solid #1e293b; 
-    }
-    .brand-logo { font-family: 'Inter', sans-serif; font-weight: 900; font-size: 18px; color: #fff; letter-spacing: 1px; }
+    /* Ensure the user's original CSS classes work if not already in site.css */
+    .navbar { background: #020617; border-bottom: 1px solid #1e293b; height: 70px; display: flex; align-items: center; }
+    .nav-container { max-width: 1400px; margin: 0 auto; width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; }
+    .logo { font-family: 'Inter', sans-serif; font-weight: 900; color: #fff; text-decoration: none; display: flex; align-items: center; gap: 10px; letter-spacing: 1px; }
+    .nav-links { list-style: none; display: flex; gap: 20px; align-items: center; margin: 0; padding: 0; }
+    .nav-links li a { text-decoration: none; color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 700; transition: 0.2s; text-transform: uppercase; letter-spacing: 0.5px; }
+    .nav-links li a:hover { color: #fff; }
     
-    .nav-link { 
-        font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 700; color: #94a3b8; 
-        text-decoration: none; margin: 0 20px; letter-spacing: 1px; transition: 0.2s; 
-    }
-    .nav-link:hover { color: #fff; }
-
-    /* DROPDOWN MAGIC */
-    .dropdown { position: relative; display: inline-block; margin-right: 20px; }
-    .dropbtn { 
-        background: none; border: none; font-family: 'JetBrains Mono'; font-size: 12px; 
-        font-weight: 800; cursor: pointer; letter-spacing: 1px; padding: 10px 0;
-    }
-    .dropdown-content { 
-        display: none; position: absolute; right: 0; background-color: #0f172a; 
-        min-width: 180px; box-shadow: 0 8px 16px rgba(0,0,0,0.5); border: 1px solid #334155; 
-        z-index: 1000; border-radius: 4px; padding: 5px 0;
-    }
-    .dropdown-content a { 
-        color: #cbd5e1; padding: 12px 16px; text-decoration: none; display: block; 
-        font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700; 
-    }
-    .dropdown-content a:hover { background-color: #1e293b; color: #fff; }
+    /* DROPDOWN LOGIC */
+    .dropdown { position: relative; }
+    .dropdown-content { display: none; position: absolute; top: 100%; right: 0; background: #0f172a; border: 1px solid #334155; min-width: 200px; border-radius: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 1000; padding: 5px 0; }
     .dropdown:hover .dropdown-content { display: block; }
-    .dropdown:hover .dropbtn { color: #fff !important; }
+    .dropdown-content a { display: block; padding: 12px 20px; color: #cbd5e1; border-bottom: 1px solid #1e293b; }
+    .dropdown-content a:last-child { border-bottom: none; }
+    .dropdown-content a:hover { background: #1e293b; color: #fff; }
 </style>
