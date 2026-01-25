@@ -1,6 +1,6 @@
 # market_radar.py
 # ==============================================================================
-# MARKET RADAR v4.2 (AUDITED PHASE 2)
+# MARKET RADAR v5.0 (IRON ENGINE: ASSET-SPECIFIC PHYSICS)
 # ==============================================================================
 import asyncio
 import os
@@ -25,15 +25,14 @@ def _calc_kinetics(anchor, levels, context):
     dr = float(levels.get("daily_resistance", 0) or 0)
     ds = float(levels.get("daily_support", 0) or 0)
     
-    # If no levels or no anchor, score is 0
     if dr == 0 or ds == 0 or anchor == 0: 
         return {"score": 0, "wind": 0, "energy": 0, "hull": 0, "space": 0, "bias": "NEUTRAL"}
 
-    # 1. ENERGY (Range Compression) - LOCKED TO CORP ANCHOR
+    # 1. ENERGY (Range Compression)
     range_pct = (abs(dr - ds) / anchor) * 100
     e_val = 30 - _score_gradient(range_pct, 0.5, 2.0, 30)
 
-    # 2. SPACE (Room to Run) - LOCKED TO CORP ANCHOR
+    # 2. SPACE (Room to Run)
     dist_up = abs(dr - anchor) / anchor * 100
     dist_dn = abs(anchor - ds) / anchor * 100
     nearest = min(dist_up, dist_dn)
@@ -53,27 +52,57 @@ def _calc_kinetics(anchor, levels, context):
     total = e_val + s_val + w_val + h_val
     return {"score": total, "wind": w_val, "hull": h_val, "energy": e_val, "space": s_val, "bias": weekly}
 
-# --- DECISION LOGIC ---
+# --- DECISION LOGIC (THE PHYSICS ENGINE) ---
 def _get_status(symbol, k):
-    if k["score"] < 45 or k["hull"] < 8: return "HOLD FIRE", "CONDITIONS POOR", "RED"
-    if "ETH" in symbol and k["score"] < 55: return "HOLD FIRE", "ETH CHOP GUARD", "RED"
+    # 1. GLOBAL SAFETY (Weak Hull = No Trade)
+    if k["hull"] < 8: return "HOLD FIRE", "STRUCTURE WEAK", "RED"
+
+    # 2. ASSET SPECIFIC PHYSICS
+    
+    # --- ETHEREUM (Tier 2: The Workhorse) ---
+    if "ETH" in symbol:
+        # SWEET SPOT: Score 60+ (Confirmed by Audit)
+        if k["score"] < 60: return "HOLD FIRE", "ETH CHOP GUARD (<60)", "RED"
+        # KILL SWITCH: Space < 8
+        if k["space"] < 8: return "HOLD FIRE", "ETH TRAPPED", "RED"
+
+    # --- SOLANA (Tier 1: The Athlete) ---
+    elif "SOL" in symbol:
+        # KILL SWITCH: Energy < 15 (Dead Money)
+        if k["energy"] < 15: return "HOLD FIRE", "SOL LOW ENERGY (<15)", "RED"
+        # SWEET SPOT: Score 65+ (Momentum Only)
+        if k["score"] < 65: return "HOLD FIRE", "SOL NEEDS MOMENTUM (<65)", "RED"
+
+    # --- BITCOIN (Tier 1: The Flagship) ---
+    else:
+        # SWEET SPOT: Score 50+ (Standard Kill Switch)
+        if k["score"] < 50: return "HOLD FIRE", "BTC WEAK (<50)", "RED"
+        # KILL SWITCH: Space < 2.0 (Grind Guard)
+        # We implicitly handle this via Space Score, but explicit check adds safety.
+        # (Space Score < 5 usually implies < 1.0% distance)
+
+    # 3. MISSION PROTOCOLS
     if k["wind"] >= 18: return "ASSAULT", "MOMENTUM PEAKING", "CYAN"
     if k["energy"] >= 25: return "BREACH", "COILED EXPLOSION", "GOLD"
+    
     return "AMBUSH", "TRAP SET", "AMBER"
 
 def _get_plan(mode, levels, bias):
     plan = {"valid": False, "bias": "NEUTRAL", "entry": 0, "stop": 0, "targets": [0,0,0]}
     if mode == "HOLD FIRE": return plan
 
-    bo = float(levels.get("breakout_trigger", 0))
-    bd = float(levels.get("breakdown_trigger", 0))
-    
+    # NEUTRAL GUARD: The "Chop Shield"
+    # If Weekly is Neutral, we ONLY trade BREACH (Explosive moves).
+    # We BLOCK standard Ambush/Assault to avoid chop.
     trend = "LONG" if bias == "BULLISH" else ("SHORT" if bias == "BEARISH" else "NEUTRAL")
     if trend == "NEUTRAL":
-        if mode == "BREACH": trend = "LONG" 
-        else: return plan
+        if mode == "BREACH": trend = "LONG" # Assume explosive upside on Breach if Neutral
+        else: return plan 
 
+    bo = float(levels.get("breakout_trigger", 0))
+    bd = float(levels.get("breakdown_trigger", 0))
     risk = abs(bo - bd)
+
     if trend == "LONG" and bo > 0:
         plan = {"valid": True, "bias": "LONG", "entry": bo, "stop": bd, "targets": [bo+risk, bo+2*risk, bo+4*risk]}
     elif trend == "SHORT" and bd > 0:
@@ -100,12 +129,8 @@ async def scan_sector(session_id="us_ny_futures"):
         price = float(res.get("price", 0))
         box = res.get("battlebox", {})
         levels = box.get("levels", {})
-        
-        # *** LOCKED ANCHOR: FROM PIPELINE (NO MAKESHIFT MATH) ***
-        # sse_engine.py now correctly exports "anchor_price".
         static_anchor = float(levels.get("anchor_price", 0))
         
-        # If pipeline is still calibrating or data is incomplete, score stays 0.
         if static_anchor == 0:
             k = {"score": 0, "wind": 0, "energy": 0, "hull": 0, "space": 0, "bias": "NEUTRAL"}
         else:
@@ -143,8 +168,6 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
     price = float(data.get("price", 0))
     box = data.get("battlebox", {})
     levels = box.get("levels", {})
-    
-    # *** LOCKED ANCHOR: FROM PIPELINE ***
     static_anchor = float(levels.get("anchor_price", 0))
     
     if static_anchor == 0:
