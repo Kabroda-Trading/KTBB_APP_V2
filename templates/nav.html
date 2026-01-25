@@ -2,27 +2,54 @@
     <div class="nav-left">
         <span class="brand-logo">■ KABRODA</span>
     </div>
+    
     <div class="nav-center">
         <a href="/suite/market-radar" class="nav-link">MARKET RADAR</a>
-        <a href="/suite/vector" class="nav-link active-link">PROJECT VECTOR</a>
+        <a href="/suite/vector" class="nav-link">PROJECT VECTOR</a>
         <a href="/suite/session-control" class="nav-link">SESSION CONTROL</a>
     </div>
+
     <div class="nav-right">
-        <a href="/suite/boss-control" class="nav-link" style="color:#facc15;">BOSS CONTROL ▼</a>
+        <div class="dropdown">
+            <button class="dropbtn" style="color:#facc15;">BOSS CONTROL ▼</button>
+            <div class="dropdown-content">
+                <a href="/suite/mission-brief">MISSION BRIEF</a>
+                <a href="/admin/settings">SYSTEM SETTINGS</a> </div>
+        </div>
         <a href="/logout" class="nav-link">LOGOUT</a>
     </div>
 </div>
 
 <style>
+    /* MASTER NAV STYLES */
     .nav-container { 
         display: flex; justify-content: space-between; align-items: center; 
-        padding: 0 20px; height: 60px; background: #020617; border-bottom: 1px solid #1e293b; 
+        padding: 0 30px; height: 70px; background: #020617; border-bottom: 1px solid #1e293b; 
     }
-    .brand-logo { font-family: 'Inter', sans-serif; font-weight: 900; color: #fff; letter-spacing: 1px; }
+    .brand-logo { font-family: 'Inter', sans-serif; font-weight: 900; font-size: 18px; color: #fff; letter-spacing: 1px; }
+    
     .nav-link { 
-        font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700; color: #94a3b8; 
-        text-decoration: none; margin: 0 15px; letter-spacing: 1px; transition: 0.2s; 
+        font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 700; color: #94a3b8; 
+        text-decoration: none; margin: 0 20px; letter-spacing: 1px; transition: 0.2s; 
     }
     .nav-link:hover { color: #fff; }
-    .active-link { color: #22d3ee; text-shadow: 0 0 10px rgba(34,211,238,0.4); }
+
+    /* DROPDOWN MAGIC */
+    .dropdown { position: relative; display: inline-block; margin-right: 20px; }
+    .dropbtn { 
+        background: none; border: none; font-family: 'JetBrains Mono'; font-size: 12px; 
+        font-weight: 800; cursor: pointer; letter-spacing: 1px; padding: 10px 0;
+    }
+    .dropdown-content { 
+        display: none; position: absolute; right: 0; background-color: #0f172a; 
+        min-width: 180px; box-shadow: 0 8px 16px rgba(0,0,0,0.5); border: 1px solid #334155; 
+        z-index: 1000; border-radius: 4px; padding: 5px 0;
+    }
+    .dropdown-content a { 
+        color: #cbd5e1; padding: 12px 16px; text-decoration: none; display: block; 
+        font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700; 
+    }
+    .dropdown-content a:hover { background-color: #1e293b; color: #fff; }
+    .dropdown:hover .dropdown-content { display: block; }
+    .dropdown:hover .dropbtn { color: #fff !important; }
 </style>
