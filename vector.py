@@ -1,6 +1,6 @@
 # vector.py
 # ==============================================================================
-# PROJECT VECTOR (v4.2 LOCKED ANCHOR) - AGGRESSIVE PROTOCOLS
+# PROJECT VECTOR (v4.3 LOCKED ANCHOR) - MEMBER PROTOCOLS
 # ==============================================================================
 import asyncio
 import battlebox_pipeline
@@ -97,7 +97,7 @@ def _generate_mission_key(plan, mode):
     status = "STRONG" if mode in ["ASSAULT", "BREACH"] else "WEAK"
     return f"{plan['bias']}|{status}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}"
 
-# --- 6. API (THE FIX) ---
+# --- 6. API (STRICT LOCK) ---
 async def get_vector_intel(symbol="BTCUSDT", session_id="us_ny_futures"):
     data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
     if data.get("status") in ["ERROR", "CALIBRATING"]: return {"ok": True, "status": "CALIBRATING"}
@@ -108,10 +108,10 @@ async def get_vector_intel(symbol="BTCUSDT", session_id="us_ny_futures"):
     levels = box.get("levels", {})
     context = box.get("context", {})
     
-    # *** CRITICAL FIX: LOCK SCORE TO ANCHOR ***
-    # We retrieve the 'anchor_price' (8:00 AM Open) from the levels.
-    # We pass THIS into the math, not the live price.
-    static_anchor = float(levels.get("anchor_price", live_price))
+    # *** CRITICAL FIX: READ OFFICIAL ANCHOR ***
+    # We ask for "anchor_price", which Phase 1 now exports.
+    # Default is 0. If 0, the math below returns 0 score. NO FLOATING.
+    static_anchor = float(levels.get("anchor_price", 0))
     
     k = _calculate_vector_kinetics(static_anchor, levels, context)
     mode, advice, color = _determine_vector_mode(k)
@@ -125,8 +125,8 @@ async def get_vector_intel(symbol="BTCUSDT", session_id="us_ny_futures"):
     m_key = _generate_mission_key(plan, mode)
     
     return {
-        "ok": True, "symbol": symbol, "price": live_price, # UI sees LIVE PRICE
-        "vector": {"mode": mode, "color": color, "advice": advice, "score": k["score"]}, # SCORE IS LOCKED
+        "ok": True, "symbol": symbol, "price": live_price,
+        "vector": {"mode": mode, "color": color, "advice": advice, "score": k["score"]}, 
         "metrics": {
             "energy": {"val": k["energy_score"], "pct": (k["energy_score"]/30)*100, "color": "CYAN" if k["energy_score"]>=25 else "GREEN"},
             "space": {"val": k["space_score"], "pct": (k["space_score"]/15)*100, "color": "GREEN"},
