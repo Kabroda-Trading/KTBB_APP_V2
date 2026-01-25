@@ -432,6 +432,7 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "meta": meta,
         "levels": {
+            "anchor_price": float(anchor_px), # <--- THIS IS THE ONE NEW LINE
             "daily_support": float(ds),
             "daily_resistance": float(dr),
             "breakout_trigger": float(bo),
