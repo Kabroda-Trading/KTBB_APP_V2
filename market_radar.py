@@ -1,6 +1,6 @@
 # market_radar.py
 # ==============================================================================
-# MARKET RADAR v4.2 (GRANULAR MATH + BUTTON LOGIC)
+# MARKET RADAR v4.2 (LOCKED ANCHOR + BUTTON LOGIC)
 # ==============================================================================
 import asyncio
 import os
@@ -13,28 +13,27 @@ try:
     if os.path.exists("radar_cache.json"): os.remove("radar_cache.json")
 except: pass
 
-# --- HELPER: GRADIENT SCORING (The "Dimmer Switch") ---
+# --- HELPER: GRADIENT SCORING ---
 def _score_gradient(val, min_v, max_v, max_score):
     if val < min_v: return 0
     if val > max_v: return max_score
     pct = (val - min_v) / (max_v - min_v)
     return round(pct * max_score)
 
-# --- CORE MATH ---
+# --- CORE MATH (LOCKED ANCHOR) ---
 def _calc_kinetics(anchor, levels, context):
     dr = float(levels.get("daily_resistance", 0) or 0)
     ds = float(levels.get("daily_support", 0) or 0)
+    
+    # If no levels or no anchor, score is 0
     if dr == 0 or ds == 0 or anchor == 0: 
         return {"score": 0, "wind": 0, "energy": 0, "hull": 0, "space": 0, "bias": "NEUTRAL"}
 
-    # 1. ENERGY (Range Compression)
-    # Tighter range = Higher potential.
+    # 1. ENERGY (Range Compression) - LOCKED TO ANCHOR
     range_pct = (abs(dr - ds) / anchor) * 100
-    # Score 0-30 based on how tight the range is (0.5% to 2.0%)
     e_val = 30 - _score_gradient(range_pct, 0.5, 2.0, 30)
 
-    # 2. SPACE (Room to Run)
-    # Score 0-15 based on distance to nearest resistance/support
+    # 2. SPACE (Room to Run) - LOCKED TO ANCHOR
     dist_up = abs(dr - anchor) / anchor * 100
     dist_dn = abs(anchor - ds) / anchor * 100
     nearest = min(dist_up, dist_dn)
@@ -56,16 +55,10 @@ def _calc_kinetics(anchor, levels, context):
 
 # --- DECISION LOGIC ---
 def _get_status(symbol, k):
-    # Global Kill Switch
     if k["score"] < 45 or k["hull"] < 8: return "HOLD FIRE", "CONDITIONS POOR", "RED"
-
-    # ETH Guard (From Backtest)
     if "ETH" in symbol and k["score"] < 55: return "HOLD FIRE", "ETH CHOP GUARD", "RED"
-
-    # Active Modes
     if k["wind"] >= 18: return "ASSAULT", "MOMENTUM PEAKING", "CYAN"
     if k["energy"] >= 25: return "BREACH", "COILED EXPLOSION", "GOLD"
-    
     return "AMBUSH", "TRAP SET", "AMBER"
 
 def _get_plan(mode, levels, bias):
@@ -75,13 +68,9 @@ def _get_plan(mode, levels, bias):
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
     
-    # Determine Direction
     trend = "LONG" if bias == "BULLISH" else ("SHORT" if bias == "BEARISH" else "NEUTRAL")
-    
-    # If Neutral, check triggers distance
     if trend == "NEUTRAL":
-        # Simplified: If Breach, assume breakout imminent
-        if mode == "BREACH": trend = "LONG" # Default bias for Breach in Neutral
+        if mode == "BREACH": trend = "LONG" 
         else: return plan
 
     risk = abs(bo - bd)
@@ -110,17 +99,20 @@ async def scan_sector(session_id="us_ny_futures"):
 
         price = float(res.get("price", 0))
         box = res.get("battlebox", {})
-        k = _calc_kinetics(price, box.get("levels", {}), box.get("context", {}))
+        levels = box.get("levels", {})
+        
+        # *** CRITICAL FIX: LOCK SCORE TO ANCHOR ***
+        static_anchor = float(levels.get("anchor_price", price))
+        
+        k = _calc_kinetics(static_anchor, levels, box.get("context", {}))
         mode, advice, color = _get_status(sym, k)
-        plan = _get_plan(mode, box.get("levels", {}), k["bias"])
+        plan = _get_plan(mode, levels, k["bias"])
 
-        # Override if plan fails
         if not plan["valid"] and mode != "HOLD FIRE":
             mode = "HOLD FIRE"
             color = "RED"
             advice = f"CONFLICT: BIAS IS {k['bias']}"
 
-        # Metric Colors for GUI
         metrics = {
             "energy": {"val": k["energy"], "pct": (k["energy"]/30)*100, "color": "CYAN" if k["energy"]>=25 else "GREEN"},
             "wind": {"val": k["wind"], "pct": (k["wind"]/20)*100, "color": "CYAN" if k["wind"]>=18 else "YELLOW"},
@@ -132,7 +124,7 @@ async def scan_sector(session_id="us_ny_futures"):
             "symbol": sym, "price": price, "score": k["score"], 
             "status": mode, "bias": k["bias"], 
             "metrics": metrics, "color_code": color,
-            "has_trade": plan["valid"] # FLAG FOR BUTTON VISIBILITY
+            "has_trade": plan["valid"]
         })
 
     radar_grid.sort(key=lambda x: x['score'], reverse=True)
@@ -144,9 +136,14 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
     
     price = float(data.get("price", 0))
     box = data.get("battlebox", {})
-    k = _calc_kinetics(price, box.get("levels", {}), box.get("context", {}))
+    levels = box.get("levels", {})
+    
+    # *** CRITICAL FIX: LOCK SCORE TO ANCHOR ***
+    static_anchor = float(levels.get("anchor_price", price))
+    
+    k = _calc_kinetics(static_anchor, levels, box.get("context", {}))
     mode, advice, color = _get_status(symbol, k)
-    plan = _get_plan(mode, box.get("levels", {}), k["bias"])
+    plan = _get_plan(mode, levels, k["bias"])
     
     if not plan["valid"] and mode != "HOLD FIRE":
         mode = "HOLD FIRE"
@@ -164,7 +161,7 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
                 "hull": {"val": k["hull"], "pct": (k["hull"]/20)*100, "color": "CYAN" if k["hull"]>=15 else "RED"},
                 "space": {"val": k["space"], "pct": (k["space"]/15)*100, "color": "GREEN"}
             },
-            "plan": plan, "levels": box.get("levels", {}),
+            "plan": plan, "levels": levels,
             "mission_key": _make_key(plan, mode)
         }
     }

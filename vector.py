@@ -1,6 +1,6 @@
 # vector.py
 # ==============================================================================
-# PROJECT VECTOR (v4.2 GRANULAR MATH) - AGGRESSIVE PROTOCOLS
+# PROJECT VECTOR (v4.2 LOCKED ANCHOR) - AGGRESSIVE PROTOCOLS
 # ==============================================================================
 import asyncio
 import battlebox_pipeline
@@ -13,21 +13,22 @@ def _score_gradient(val, min_v, max_v, max_score):
     pct = (val - min_v) / (max_v - min_v)
     return round(pct * max_score)
 
-# --- 2. KINETIC MATH (UPDATED TO v4.2) ---
+# --- 2. KINETIC MATH (LOCKED ANCHOR LOGIC) ---
 def _calculate_vector_kinetics(anchor, levels, context):
     dr = float(levels.get("daily_resistance", 0) or 0)
     ds = float(levels.get("daily_support", 0) or 0)
+    
+    # If we have no levels or no anchor, we can't score.
     if dr == 0 or ds == 0 or anchor == 0: 
         return {"score": 0, "wind_score": 0, "hull_score": 0, "energy_score": 0, "space_score": 0, "weekly_bias": "NEUTRAL"}
 
     # ENERGY (Volatility Compression)
-    # Tighter range = Higher potential energy.
+    # Calculated from the ANCHOR, ensuring the score is fixed for the day.
     range_pct = (abs(dr - ds) / anchor) * 100
-    # Score 0-30 based on how tight the range is (0.5% to 2.0%)
     e_val = 30 - _score_gradient(range_pct, 0.5, 2.0, 30)
 
     # SPACE (Room to Run)
-    # Score 0-15 based on distance to nearest resistance/support
+    # Calculated from the ANCHOR.
     dist_up = abs(dr - anchor) / anchor * 100
     dist_dn = abs(anchor - ds) / anchor * 100
     nearest = min(dist_up, dist_dn)
@@ -55,49 +56,38 @@ def _calculate_vector_kinetics(anchor, levels, context):
         "weekly_bias": weekly
     }
 
-# --- 3. COMBAT PROTOCOLS (UPDATED THRESHOLDS) ---
+# --- 3. COMBAT PROTOCOLS ---
 def _determine_vector_mode(kinetics):
-    # SAFETY VALVE (Updated to match Radar v4.2)
     if kinetics["score"] < 45 or kinetics["hull_score"] < 8:
         return "HOLD FIRE", "CONDITIONS POOR. STAND DOWN.", "RED"
     
-    # MODE 1: ASSAULT (Momentum)
     if kinetics["wind_score"] >= 18:
         return "ASSAULT", "MOMENTUM PEAKING. PRESS THE ATTACK.", "CYAN"
         
-    # MODE 2: BREACH (Volatility)
     if kinetics["energy_score"] >= 25: 
         return "BREACH", "MARKET COILED. EXPLOSION IMMINENT.", "GOLD"
 
-    # MODE 3: AMBUSH (Trap)
     return "AMBUSH", "WEAK PUSH DETECTED. SET THE TRAP.", "AMBER"
 
-# --- 4. MISSION PLANNER (UNCHANGED - LOGIC IS SOLID) ---
+# --- 4. MISSION PLANNER ---
 def _generate_vector_plan(mode, levels, bias_direction):
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
-    dr = float(levels.get("daily_resistance", 0))
     
     plan = {"valid": False, "bias": "NEUTRAL", "entry": 0, "stop": 0, "targets": [0,0,0]}
     if mode == "HOLD FIRE": return plan
 
-    allowed = "BOTH"
-    if bias_direction == "BULLISH": allowed = "LONG"
-    if bias_direction == "BEARISH": allowed = "SHORT"
+    # Bias Logic
+    trend_dir = "LONG" if bias_direction == "BULLISH" else ("SHORT" if bias_direction == "BEARISH" else "NEUTRAL")
+    if trend_dir == "NEUTRAL":
+         if mode == "BREACH": trend_dir = "LONG" 
+         else: return plan
 
-    # ASSAULT & BREACH (Trend Logic)
-    if mode in ["ASSAULT", "BREACH"]:
-        trend_dir = "LONG" if bias_direction == "BULLISH" else ("SHORT" if bias_direction == "BEARISH" else "NEUTRAL")
-        
-        if trend_dir == "NEUTRAL":
-             if mode == "BREACH": trend_dir = "LONG" 
-             else: return plan
-
-        risk = abs(bo - bd)
-        if trend_dir == "LONG" and bo > 0:
-            plan = {"valid": True, "bias": "LONG", "entry": bo, "stop": bd, "targets": [bo+risk, bo+2*risk, bo+4*risk]}
-        elif trend_dir == "SHORT" and bd > 0:
-            plan = {"valid": True, "bias": "SHORT", "entry": bd, "stop": bo, "targets": [bd-risk, bd-2*risk, bd-4*risk]}
+    risk = abs(bo - bd)
+    if trend_dir == "LONG" and bo > 0:
+        plan = {"valid": True, "bias": "LONG", "entry": bo, "stop": bd, "targets": [bo+risk, bo+2*risk, bo+4*risk]}
+    elif trend_dir == "SHORT" and bd > 0:
+        plan = {"valid": True, "bias": "SHORT", "entry": bd, "stop": bo, "targets": [bd-risk, bd-2*risk, bd-4*risk]}
 
     return plan
 
@@ -107,17 +97,23 @@ def _generate_mission_key(plan, mode):
     status = "STRONG" if mode in ["ASSAULT", "BREACH"] else "WEAK"
     return f"{plan['bias']}|{status}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}"
 
-# --- 6. API ---
+# --- 6. API (THE FIX) ---
 async def get_vector_intel(symbol="BTCUSDT", session_id="us_ny_futures"):
     data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
     if data.get("status") in ["ERROR", "CALIBRATING"]: return {"ok": True, "status": "CALIBRATING"}
 
-    price = float(data.get("price", 0))
+    # DATA EXTRACTION
+    live_price = float(data.get("price", 0))
     box = data.get("battlebox", {})
     levels = box.get("levels", {})
     context = box.get("context", {})
     
-    k = _calculate_vector_kinetics(price, levels, context)
+    # *** CRITICAL FIX: LOCK SCORE TO ANCHOR ***
+    # We retrieve the 'anchor_price' (8:00 AM Open) from the levels.
+    # We pass THIS into the math, not the live price.
+    static_anchor = float(levels.get("anchor_price", live_price))
+    
+    k = _calculate_vector_kinetics(static_anchor, levels, context)
     mode, advice, color = _determine_vector_mode(k)
     plan = _generate_vector_plan(mode, levels, k["weekly_bias"])
     
@@ -129,8 +125,8 @@ async def get_vector_intel(symbol="BTCUSDT", session_id="us_ny_futures"):
     m_key = _generate_mission_key(plan, mode)
     
     return {
-        "ok": True, "symbol": symbol, "price": price,
-        "vector": {"mode": mode, "color": color, "advice": advice, "score": k["score"]},
+        "ok": True, "symbol": symbol, "price": live_price, # UI sees LIVE PRICE
+        "vector": {"mode": mode, "color": color, "advice": advice, "score": k["score"]}, # SCORE IS LOCKED
         "metrics": {
             "energy": {"val": k["energy_score"], "pct": (k["energy_score"]/30)*100, "color": "CYAN" if k["energy_score"]>=25 else "GREEN"},
             "space": {"val": k["space_score"], "pct": (k["space_score"]/15)*100, "color": "GREEN"},
