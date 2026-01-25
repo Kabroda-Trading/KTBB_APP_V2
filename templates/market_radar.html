@@ -3,18 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <title>Kabroda | Market Radar</title>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        body { background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
+        /* --- CORE STYLES --- */
+        body { background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; overflow-x: hidden; }
         
-        /* HEADER */
-        .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
+        /* RADAR GRID STYLES */
+        .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; transition: filter 0.3s; }
         .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
         .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
-        .radar-sub { font-size: 12px; color: #94a3b8; font-family: 'JetBrains Mono'; letter-spacing: 1px; margin-bottom: 5px; }
-
-        /* SCAN BUTTON */
+        
         .btn-scan { 
             background: #0ea5e9; color: #000; font-weight: 800; font-family: 'JetBrains Mono'; 
             border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; 
@@ -24,7 +23,6 @@
         .btn-scan:hover { background: #38bdf8; box-shadow: 0 0 25px rgba(14, 165, 233, 0.4); }
         .btn-scan:disabled { background: #334155; color: #94a3b8; box-shadow: none; cursor: not-allowed; }
 
-        /* GRID LAYOUT */
         .radar-grid { display: grid; gap: 15px; }
         .radar-row { 
             display: grid; grid-template-columns: 1.5fr 1fr 1fr 3.5fr 1.5fr; 
@@ -34,51 +32,89 @@
         }
         .radar-row:hover { border-color: #334155; transform: translateY(-2px); }
 
-        /* STATUS COLORS */
+        /* COLORS */
         .border-CYAN { border-left: 4px solid #22d3ee; }
         .border-GOLD { border-left: 4px solid #facc15; box-shadow: 0 0 15px rgba(250, 204, 21, 0.1); }
         .border-AMBER { border-left: 4px solid #fbbf24; }
         .border-RED { border-left: 4px solid #ef4444; opacity: 0.7; }
 
-        /* SYMBOL INFO */
         .sym-name { font-size: 22px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
-        .sym-price { font-size: 13px; color: #94a3b8; font-family: 'JetBrains Mono'; margin-top: 4px; }
-        
-        /* SCORE */
         .score-val { font-size: 36px; font-weight: 800; font-family: 'JetBrains Mono'; line-height: 1; }
-        .score-lbl { font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
-
-        /* STATUS BADGE */
-        .stat-badge { 
-            display: inline-block; padding: 8px 16px; border-radius: 4px; 
-            font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; 
-            text-transform: uppercase; letter-spacing: 1px;
-        }
-
-        /* 4-BAR METRICS LAYOUT */
+        .stat-badge { display: inline-block; padding: 8px 16px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; text-transform: uppercase; }
+        
         .bars-container { display: flex; gap: 20px; height: 40px; align-items: flex-end; justify-content: center; }
         .bar-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; height: 100%; text-align: center; max-width: 60px; }
         .bar-fill { width: 100%; border-radius: 2px; background: #334155; min-height: 4px; transition: height 0.5s ease; }
-        .bar-lbl { font-size: 9px; color: #64748b; text-align: center; font-family: 'JetBrains Mono'; font-weight: 700; }
         
-        /* BUTTON */
         .lock-btn { 
             font-size: 11px; padding: 10px 20px; background: #1e293b; color: #fff; 
             border: 1px solid #334155; cursor: pointer; transition: 0.2s; 
             font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase;
         }
         .lock-btn:hover { background: #334155; border-color: #fff; }
-
         .bias-tag { font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 3px; margin-left: 8px; vertical-align: middle; border: 1px solid; }
+
+        /* --- THE HOLOGRAPHIC OVERLAY (POP-UP) --- */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(2, 6, 23, 0.95); z-index: 9999;
+            display: flex; justify-content: center; align-items: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+            backdrop-filter: blur(5px);
+        }
+        .modal-overlay.active { opacity: 1; pointer-events: all; }
+
+        .cockpit-container {
+            width: 90%; max-width: 1400px; height: 85vh;
+            background: #020617; border: 1px solid #334155; border-radius: 12px;
+            box-shadow: 0 0 50px rgba(0,0,0,0.8);
+            transform: scale(0.8); transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: grid; grid-template-rows: auto 1fr; padding: 30px; gap: 20px;
+            overflow: hidden;
+        }
+        .modal-overlay.active .cockpit-container { transform: scale(1); }
+
+        /* COCKPIT INTERNALS */
+        .cp-grid { display: grid; grid-template-columns: 300px 1fr 350px; gap: 20px; height: 100%; }
+        .cp-panel { background: rgba(30, 41, 59, 0.4); border: 1px solid #334155; border-radius: 8px; padding: 20px; display: flex; flex-direction: column; }
+        
+        .cp-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #334155; padding-bottom: 15px; }
+        .cp-title { font-family: 'Rajdhani'; font-size: 48px; font-weight: 800; color: #22d3ee; margin: 0; line-height: 1; }
+        .close-btn { background: none; border: none; color: #94a3b8; font-size: 24px; cursor: pointer; transition: 0.2s; }
+        .close-btn:hover { color: #fff; transform: scale(1.1); }
+
+        /* HUD ELEMENTS */
+        .hud-center { text-align: center; display: flex; flex-direction: column; justify-content: center; height: 100%; }
+        .hud-mode { font-family: 'Rajdhani'; font-size: 90px; font-weight: 900; line-height: 0.9; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 2px; }
+        .hud-advice { background: rgba(255,255,255,0.05); padding: 15px; border-radius: 4px; color: #fff; font-weight: 500; font-family: 'JetBrains Mono'; border: 1px solid #334155; }
+        
+        .lbl { font-size: 11px; color: #94a3b8; font-weight: 700; margin-bottom: 5px; display: block; }
+        .val { font-size: 18px; font-weight: 800; color: #fff; }
+        .inp-risk { background: #0f172a; border: 1px solid #334155; color: #fff; padding: 10px; width: 100%; text-align: right; font-family: inherit; font-weight: 700; font-size: 16px; margin-bottom: 15px; }
+        
+        .row-item { display: flex; justify-content: space-between; border-bottom: 1px dashed #334155; padding: 10px 0; align-items: center; }
+        .btn-mini { font-size: 10px; padding: 2px 6px; background: #334155; color: #fff; border: none; border-radius: 3px; cursor: pointer; margin-left: 10px; }
+        .btn-mini:hover { background: #22d3ee; color: #000; }
+
+        .gauges-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-top: auto; padding-top: 20px; border-top: 1px solid #334155; }
+        .mini-gauge { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; text-align: center; }
+        .g-fill { height: 4px; background: #334155; border-radius: 2px; overflow: hidden; margin-top: 5px; }
+        .g-bar { height: 100%; width: 0%; transition: width 1s; }
+
+        /* UTILS */
+        .c-CYAN { color: #22d3ee; text-shadow: 0 0 30px rgba(34,211,238,0.2); }
+        .c-GOLD { color: #facc15; text-shadow: 0 0 30px rgba(250,204,21,0.2); }
+        .c-RED { color: #ef4444; }
     </style>
 </head>
 <body>
     {% include 'nav.html' %}
-    <div class="radar-container">
+    
+    <div class="radar-container" id="radarScreen">
         <div class="radar-header">
             <div>
                 <div class="radar-sub">/// FLEET COMMAND</div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v3.3 HYBRID</span></h2>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v4.0 HOLOGRAPHIC</span></h2>
             </div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
@@ -90,96 +126,202 @@
         <div id="radarTargetGrid" class="radar-grid"></div>
     </div>
 
+    <div class="modal-overlay" id="cockpitModal">
+        <div class="cockpit-container">
+            <div class="cp-header">
+                <div>
+                    <div style="font-size:12px; font-weight:700; color:#94a3b8;">TARGET LOCK</div>
+                    <div class="cp-title" id="cpSym">--</div>
+                </div>
+                <div style="display:flex; align-items: center; gap: 20px;">
+                    <div style="text-align:right;">
+                        <div id="cpPrice" style="font-size:32px; font-weight:800; font-family:'Rajdhani'; line-height:1;">--</div>
+                        <div style="font-size:11px; font-weight:700; color:#22d3ee;">LIVE PRICE</div>
+                    </div>
+                    <button class="close-btn" onclick="closeCockpit()">×</button>
+                </div>
+            </div>
+
+            <div class="cp-grid">
+                <div class="cp-panel">
+                    <div class="lbl">RISK PROTOCOL</div>
+                    <div class="lbl">BALANCE</div>
+                    <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="updateRisk()">
+                    <div class="lbl">RISK %</div>
+                    <input type="number" id="inpRisk" class="inp-risk" value="10.0" step="0.1" oninput="updateRisk()">
+                    <div style="margin-top:auto; padding-top:20px; border-top:1px dotted #334155;">
+                        <div class="lbl">MAX LOSS</div>
+                        <div id="valLoss" style="font-size:32px; font-weight:800; font-family:'Rajdhani'; color:#ef4444;">$400.00</div>
+                    </div>
+                </div>
+
+                <div class="cp-panel" style="background: #0b1121;">
+                    <div class="hud-center">
+                        <div class="lbl" style="letter-spacing:2px; margin-bottom:15px;">CURRENT ATMOSPHERE</div>
+                        <div id="hudMode" class="hud-mode c-RED">--</div>
+                        <div id="hudScore" style="font-size:24px; font-weight:800; color:#94a3b8; margin-bottom:20px;">--</div>
+                        <div id="hudAdvice" class="hud-advice">--</div>
+                    </div>
+                    <div class="gauges-row">
+                        <div class="mini-gauge"><div class="lbl">ENERGY</div><div class="val" id="gEnergy">--</div><div class="g-fill"><div id="gbEnergy" class="g-bar" style="background:#22d3ee;"></div></div></div>
+                        <div class="mini-gauge"><div class="lbl">SPACE</div><div class="val" id="gSpace">--</div><div class="g-fill"><div id="gbSpace" class="g-bar" style="background:#10b981;"></div></div></div>
+                        <div class="mini-gauge"><div class="lbl">WIND</div><div class="val" id="gWind">--</div><div class="g-fill"><div id="gbWind" class="g-bar" style="background:#facc15;"></div></div></div>
+                        <div class="mini-gauge"><div class="lbl">HULL</div><div class="val" id="gHull">--</div><div class="g-fill"><div id="gbHull" class="g-bar" style="background:#ef4444;"></div></div></div>
+                    </div>
+                </div>
+
+                <div class="cp-panel">
+                    <div class="lbl">FLIGHT PATH</div>
+                    <button class="btn-scan" style="width:100%; margin-bottom:15px; font-size:12px;" onclick="copyKey()">COPY MISSION KEY</button>
+                    
+                    <div class="row-item"><span class="lbl">ENTRY</span><div><span id="pEntry" class="val" style="color:#22d3ee">--</span><button class="btn-mini" onclick="cp('pEntry')">CP</button></div></div>
+                    <div class="row-item"><span class="lbl">STOP</span><div><span id="pStop" class="val" style="color:#ef4444">--</span><button class="btn-mini" onclick="cp('pStop')">CP</button></div></div>
+                    <div class="row-item"><span class="lbl">SIZE</span><div><span id="pSize" class="val">--</span><button class="btn-mini" onclick="cp('pSize')">CP</button></div></div>
+                    
+                    <div style="height:20px;"></div>
+                    <div class="row-item"><span class="lbl" style="color:#facc15">TARGET 1</span><div><span id="pT1" class="val" style="color:#facc15">--</span><button class="btn-mini" onclick="cp('pT1')">CP</button></div></div>
+                    <div class="row-item"><span class="lbl">TARGET 2</span><div><span id="pT2" class="val">--</span><button class="btn-mini" onclick="cp('pT2')">CP</button></div></div>
+                    <div class="row-item"><span class="lbl">TARGET 3</span><div><span id="pT3" class="val">--</span><button class="btn-mini" onclick="cp('pT3')">CP</button></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <input type="hidden" id="raw_key">
+
     <script>
         function fmt(x){ if(!x) return "—"; return parseFloat(x).toLocaleString(undefined, {minimumFractionDigits: 2}); }
+        let fleetData = {};
+        let activeSymbol = null;
 
+        // 1. SCANNER LOGIC
         async function forceScan() {
             const btn = document.getElementById('scanBtn');
             const grid = document.getElementById('radarTargetGrid');
             const loader = document.getElementById('loading');
             
-            btn.disabled = true; 
-            btn.innerText = "SCANNING...";
-            grid.style.display = 'none'; 
-            loader.style.display = 'block';
+            btn.disabled = true; btn.innerText = "SCANNING...";
+            grid.style.display = 'none'; loader.style.display = 'block';
 
             try {
                 const res = await fetch('/api/radar/scan', { method: 'POST' });
                 const data = await res.json();
+                fleetData = {};
                 
                 let html = "";
                 data.results.forEach(t => {
-                    let colorClass = `border-${t.color_code}`;
+                    fleetData[t.symbol] = t; // Store for popup
                     
-                    // Style Logic
-                    let statusBg = '#1e293b'; let statusTxt = '#fff';
-                    if(t.color_code === 'GOLD') { statusBg = 'rgba(250, 204, 21, 0.2)'; statusTxt = '#facc15'; }
-                    else if(t.color_code === 'CYAN') { statusBg = 'rgba(34, 211, 238, 0.2)'; statusTxt = '#22d3ee'; }
-                    else if(t.color_code === 'RED') { statusBg = 'rgba(239, 68, 68, 0.2)'; statusTxt = '#ef4444'; }
+                    let colorClass = `border-${t.color_code}`;
+                    let statusBg = t.color_code === 'GOLD' ? '#facc15' : (t.color_code === 'CYAN' ? '#22d3ee' : '#1e293b');
+                    let statusTxt = t.color_code === 'RED' ? '#fff' : '#000';
+                    if(t.color_code === 'RED') statusBg = 'rgba(239, 68, 68, 0.2)';
                     
                     let biasColor = t.bias === 'BULLISH' ? '#10b981' : (t.bias === 'BEARISH' ? '#ef4444' : '#94a3b8');
 
-                    // Metric Colors
+                    // Metric Bars
                     const getBarColor = (c) => {
-                        if(c === 'CYAN') return '#22d3ee';
-                        if(c === 'GOLD') return '#facc15';
-                        if(c === 'GREEN') return '#10b981';
-                        if(c === 'RED') return '#ef4444';
-                        return '#64748b';
+                        if(c === 'CYAN') return '#22d3ee'; if(c === 'GOLD') return '#facc15'; if(c === 'GREEN') return '#10b981'; return '#ef4444';
                     };
 
                     html += `
                     <div class="radar-row ${colorClass}">
                         <div>
-                            <div>
-                                <span class="sym-name">${t.symbol}</span>
-                                <span class="bias-tag" style="color:${biasColor}; border-color:${biasColor}">${t.bias}</span>
-                            </div>
+                            <div><span class="sym-name">${t.symbol}</span><span class="bias-tag" style="color:${biasColor}; border:1px solid ${biasColor}">${t.bias[0]}</span></div>
                             <div class="sym-price">$${fmt(t.price)}</div>
                         </div>
-
-                        <div style="text-align:center;">
-                            <div class="score-val" style="color:${t.score >= 50 ? '#fff' : '#ef4444'}">${t.score}</div>
-                            <div class="score-lbl">KINETIC</div>
-                        </div>
-
-                        <div style="text-align:center;">
-                            <span class="stat-badge" style="background:${statusBg}; color:${statusTxt}">${t.status}</span>
-                        </div>
-
+                        <div style="text-align:center;"><div class="score-val" style="color:${t.score >= 50 ? '#fff' : '#ef4444'}">${t.score}</div><div style="font-size:10px; color:#64748b; font-weight:700;">SCORE</div></div>
+                        <div style="text-align:center;"><span class="stat-badge" style="background:${statusBg}; color:${statusTxt}">${t.status}</span></div>
                         <div class="bars-container">
-                            <div class="bar-col">
-                                <div class="bar-fill" style="height:${t.metrics.energy.pct}%; background:${getBarColor(t.metrics.energy.color)}"></div>
-                                <span class="bar-lbl">NRG</span>
-                            </div>
-                            <div class="bar-col">
-                                <div class="bar-fill" style="height:${t.metrics.space.pct}%; background:${getBarColor(t.metrics.space.color)}"></div>
-                                <span class="bar-lbl">SPC</span>
-                            </div>
-                            <div class="bar-col">
-                                <div class="bar-fill" style="height:${t.metrics.wind.pct}%; background:${getBarColor(t.metrics.wind.color)}"></div>
-                                <span class="bar-lbl">WND</span>
-                            </div>
-                            <div class="bar-col">
-                                <div class="bar-fill" style="height:${t.metrics.hull.pct}%; background:${getBarColor(t.metrics.hull.color)}"></div>
-                                <span class="bar-lbl">HUL</span>
-                            </div>
+                            <div class="bar-col"><div class="bar-fill" style="height:${t.metrics.energy.pct}%; background:${getBarColor(t.metrics.energy.color)}"></div><span style="font-size:9px; color:#64748b;">NRG</span></div>
+                            <div class="bar-col"><div class="bar-fill" style="height:${t.metrics.space.pct}%; background:${getBarColor(t.metrics.space.color)}"></div><span style="font-size:9px; color:#64748b;">SPC</span></div>
+                            <div class="bar-col"><div class="bar-fill" style="height:${t.metrics.wind.pct}%; background:${getBarColor(t.metrics.wind.color)}"></div><span style="font-size:9px; color:#64748b;">WND</span></div>
+                            <div class="bar-col"><div class="bar-fill" style="height:${t.metrics.hull.pct}%; background:${getBarColor(t.metrics.hull.color)}"></div><span style="font-size:9px; color:#64748b;">HUL</span></div>
                         </div>
-
                         <div style="text-align:right;">
-                            <button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">LOCK TARGET →</button>
+                            <button class="lock-btn" onclick="openCockpit('${t.symbol}')">LOCK TARGET →</button>
                         </div>
                     </div>`;
                 });
                 grid.innerHTML = html;
-            } catch(e) { alert("Scan Error: " + e.message); } 
-            finally { 
-                loader.style.display = 'none'; 
-                grid.style.display = 'grid'; 
-                btn.disabled = false;
-                btn.innerText = "REFRESH INTEL";
+            } catch(e) { console.error(e); } 
+            finally { loader.style.display = 'none'; grid.style.display = 'grid'; btn.disabled = false; btn.innerText = "REFRESH INTEL"; }
+        }
+
+        // 2. COCKPIT LOGIC (INSTANT POPUP)
+        function openCockpit(symbol) {
+            const d = fleetData[symbol];
+            if(!d) return;
+            activeSymbol = symbol;
+
+            // Blur Background
+            document.getElementById('radarScreen').style.filter = "blur(5px)";
+            
+            // Populate Data
+            document.getElementById('cpSym').innerText = symbol.replace('USDT', '');
+            document.getElementById('cpPrice').innerText = d.price.toLocaleString(undefined, {minimumFractionDigits: 2});
+            
+            // HUD
+            const hudMode = document.getElementById('hudMode');
+            hudMode.innerText = d.status;
+            hudMode.className = `hud-mode c-${d.color_code}`;
+            document.getElementById('hudAdvice').innerText = d.advice;
+            document.getElementById('hudScore').innerText = "KINETIC: " + d.score;
+
+            // Gauges
+            const setG = (id, val, pct, color) => {
+                document.getElementById(id).innerText = Math.round(val);
+                document.getElementById('b'+id).style.width = pct + "%";
+                const hex = (color === 'CYAN') ? '#22d3ee' : ((color === 'GOLD') ? '#facc15' : ((color === 'GREEN') ? '#10b981' : '#ef4444'));
+                document.getElementById('b'+id).style.background = hex;
+            };
+            setG('gEnergy', d.metrics.energy.val, d.metrics.energy.pct, d.metrics.energy.color);
+            setG('gSpace', d.metrics.space.val, d.metrics.space.pct, d.metrics.space.color);
+            setG('gWind', d.metrics.wind.val, d.metrics.wind.pct, d.metrics.wind.color);
+            setG('gHull', d.metrics.hull.val, d.metrics.hull.pct, d.metrics.hull.color);
+
+            // Flight Path
+            const p = d.plan;
+            if(p.valid) {
+                document.getElementById('pEntry').innerText = p.entry.toLocaleString();
+                document.getElementById('pStop').innerText = p.stop.toLocaleString();
+                document.getElementById('pT1').innerText = p.targets[0].toLocaleString();
+                document.getElementById('pT2').innerText = p.targets[1].toLocaleString();
+                document.getElementById('pT3').innerText = p.targets[2].toLocaleString();
+                document.getElementById('raw_key').value = d.mission_key;
+                updateRisk();
+            } else {
+                document.getElementById('pEntry').innerText = "BLOCKED";
+                document.getElementById('pSize').innerText = "--";
+            }
+
+            // Show Modal
+            document.getElementById('cockpitModal').classList.add('active');
+        }
+
+        function closeCockpit() {
+            document.getElementById('cockpitModal').classList.remove('active');
+            document.getElementById('radarScreen').style.filter = "none";
+        }
+
+        function updateRisk() {
+            if(!activeSymbol || !fleetData[activeSymbol].plan.valid) return;
+            const p = fleetData[activeSymbol].plan;
+            const bal = parseFloat(document.getElementById('inpBal').value) || 0;
+            const risk = parseFloat(document.getElementById('inpRisk').value) || 0;
+            const riskAmt = bal * (risk/100);
+            document.getElementById('valLoss').innerText = "$" + riskAmt.toFixed(2);
+            
+            const dist = Math.abs(p.entry - p.stop);
+            if(dist > 0) {
+                const units = riskAmt / dist;
+                const sizeUsd = units * p.entry;
+                document.getElementById('pSize').innerText = Math.floor(sizeUsd).toLocaleString();
             }
         }
+
+        function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText.replace(/,/g,'')); }
+        function copyKey() { navigator.clipboard.writeText(document.getElementById('raw_key').value); }
         
         document.addEventListener('DOMContentLoaded', forceScan);
     </script>
