@@ -170,8 +170,9 @@ def mission_brief_page(request: Request, db: Session = Depends(get_db)):
 @app.get("/suite/vector", response_class=HTMLResponse)
 def vector_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
-    if not ctx["is_admin"]: return RedirectResponse("/suite")
-    return _template_or_fallback(request, templates, "vector.html", {"request": request})
+    # Allows access to Admins OR standard Members
+    if not ctx["is_logged_in"]: return RedirectResponse("/login")
+    return _template_or_fallback(request, templates, "vector.html", {"request": request, **ctx})
 # -----------------------------------
 
 # API ROUTES
@@ -222,11 +223,13 @@ async def res_api(request: Request):
     raw = await battlebox_pipeline.fetch_historical_pagination(pl.get("symbol", "BTCUSDT"), s_ts, e_ts)
     return JSONResponse(await research_lab.run_hybrid_analysis(pl.get("symbol", "BTCUSDT"), raw, pl.get("start_date_utc"), pl.get("end_date_utc"), pl.get("session_ids", ["us_ny_futures"]), pl.get("tuning", {}), pl.get("sensors", {}), pl.get("min_score", 70)))
 
-# --- VECTOR API HOOK (FIXED) ---
-@app.post("/api/vector/intel")  # Renamed from 'scan' to match your HTML
+# --- VECTOR API HOOK ---
+@app.post("/api/vector/intel")
 async def vector_api(request: Request):
-    return JSONResponse(await vector.get_vector_intel("BTCUSDT", "us_ny_futures"))
-# -----------------------------
+    try: pl = await request.json()
+    except: pl = {}
+    return JSONResponse(await vector.get_vector_intel(pl.get("symbol", "BTCUSDT"), "us_ny_futures"))
+# -----------------------
 
 # ADMIN & SYSTEM
 @app.post("/admin/toggle-role")
