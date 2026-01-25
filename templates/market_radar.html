@@ -6,73 +6,70 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        body { 
-            background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px;
-            min-height: 100vh; box-sizing: border-box; overflow-y: auto;
-        }
+        body { background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
+        
+        /* HEADER */
         .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
         .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
         .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
-        .radar-sub { font-size: 12px; color: #94a3b8; font-family: 'JetBrains Mono'; }
-        
-        .controls-box { display: flex; gap: 20px; align-items: center; }
-        .timer-display {
-            font-family: 'JetBrains Mono'; font-size: 12px; color: #facc15; 
-            background: rgba(250, 204, 21, 0.1); padding: 10px 16px; border-radius: 4px;
-            border: 1px solid rgba(250, 204, 21, 0.3); display: flex; gap: 8px; align-items: center;
-        }
-        
+        .radar-sub { font-size: 12px; color: #94a3b8; font-family: 'JetBrains Mono'; letter-spacing: 1px; margin-bottom: 5px; }
+
+        /* SCAN BUTTON */
         .btn-scan { 
             background: #0ea5e9; color: #000; font-weight: 800; font-family: 'JetBrains Mono'; 
             border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; 
             text-transform: uppercase; letter-spacing: 1px; transition: 0.2s;
-            box-shadow: 0 0 20px rgba(14, 165, 233, 0.3);
+            box-shadow: 0 0 15px rgba(14, 165, 233, 0.2);
         }
-        .btn-scan:hover { background: #38bdf8; }
-        .btn-scan:disabled { background: #334155; color: #64748b; box-shadow: none; cursor: not-allowed; }
+        .btn-scan:hover { background: #38bdf8; box-shadow: 0 0 25px rgba(14, 165, 233, 0.4); }
+        .btn-scan:disabled { background: #334155; color: #94a3b8; box-shadow: none; cursor: not-allowed; }
 
-        .radar-grid { display: grid; gap: 10px; padding-bottom: 50px; }
+        /* GRID LAYOUT */
+        .radar-grid { display: grid; gap: 15px; }
         .radar-row { 
-            display: grid; grid-template-columns: 1.5fr 1fr 1fr 3fr 1.5fr; 
-            background: #0f172a; border: 1px solid #1e293b; padding: 20px; border-radius: 6px; align-items: center;
-            transition: transform 0.2s;
+            display: grid; grid-template-columns: 1.5fr 1fr 1fr 3.5fr 1.5fr; 
+            background: #0f172a; border: 1px solid #1e293b; padding: 25px 30px; 
+            border-radius: 6px; align-items: center; 
+            transition: transform 0.2s, border-color 0.2s;
         }
-        
-        .status-super { border-left: 4px solid #facc15; box-shadow: 0 0 15px rgba(250, 204, 21, 0.1); }
-        .status-sniper { border-left: 4px solid #10b981; }
-        .status-dog { border-left: 4px solid #64748b; }
-        .status-ground { border-left: 4px solid #ef4444; opacity: 0.6; }
+        .radar-row:hover { border-color: #334155; transform: translateY(-2px); }
 
-        .sym-box { display: flex; flex-direction: column; }
-        .sym-name { font-size: 20px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
-        .sym-price { font-size: 12px; color: #94a3b8; font-family: 'JetBrains Mono'; }
-        
-        .score-box { text-align: center; }
-        .score-val { font-size: 32px; font-weight: 800; font-family: 'JetBrains Mono'; line-height: 1; }
-        .score-lbl { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+        /* STATUS COLORS */
+        .border-CYAN { border-left: 4px solid #22d3ee; }
+        .border-GOLD { border-left: 4px solid #facc15; box-shadow: 0 0 15px rgba(250, 204, 21, 0.1); }
+        .border-AMBER { border-left: 4px solid #fbbf24; }
+        .border-RED { border-left: 4px solid #ef4444; opacity: 0.7; }
 
-        .stat-badge { display: inline-block; padding: 6px 12px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; text-transform: uppercase; }
+        /* SYMBOL INFO */
+        .sym-name { font-size: 22px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
+        .sym-price { font-size: 13px; color: #94a3b8; font-family: 'JetBrains Mono'; margin-top: 4px; }
         
-        /* BARS & METRICS */
-        .bars-container { display: flex; gap: 15px; height: 40px; align-items: flex-end; justify-content: space-around; }
-        .bar-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; height: 100%; text-align: center; }
-        .bar-fill { width:100%; border-radius: 2px; transition: height 0.5s; background:#334155; }
-        .bar-lbl { font-size: 9px; color: #64748b; text-align: center; font-family: 'JetBrains Mono'; }
-        .bar-val { font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; margin-bottom: 2px; }
+        /* SCORE */
+        .score-val { font-size: 36px; font-weight: 800; font-family: 'JetBrains Mono'; line-height: 1; }
+        .score-lbl { font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+
+        /* STATUS BADGE */
+        .stat-badge { 
+            display: inline-block; padding: 8px 16px; border-radius: 4px; 
+            font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; 
+            text-transform: uppercase; letter-spacing: 1px;
+        }
+
+        /* 4-BAR METRICS LAYOUT */
+        .bars-container { display: flex; gap: 20px; height: 40px; align-items: flex-end; justify-content: center; }
+        .bar-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; height: 100%; text-align: center; max-width: 60px; }
+        .bar-fill { width: 100%; border-radius: 2px; background: #334155; min-height: 4px; transition: height 0.5s ease; }
+        .bar-lbl { font-size: 9px; color: #64748b; text-align: center; font-family: 'JetBrains Mono'; font-weight: 700; }
         
-        /* COLORS */
-        .metric-CYAN { color: #06b6d4; } .metric-GREEN { color: #10b981; } .metric-RED { color: #ef4444; } .metric-YELLOW { color: #facc15; }
-        .bg-CYAN { background: #06b6d4; } .bg-GREEN { background: #10b981; } .bg-RED { background: #ef4444; } .bg-YELLOW { background: #facc15; }
-        
-        .bias-badge { font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 3px; margin-left: 10px; vertical-align: middle; }
-        .bias-long { background: rgba(16, 185, 129, 0.2); color: #10b981; }
-        .bias-short { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
-        
-        .lock-btn { font-size:10px; padding:8px 16px; background:#1e293b; color:#fff; box-shadow:none; border:1px solid #334155; cursor: pointer; transition: 0.2s; }
+        /* BUTTON */
+        .lock-btn { 
+            font-size: 11px; padding: 10px 20px; background: #1e293b; color: #fff; 
+            border: 1px solid #334155; cursor: pointer; transition: 0.2s; 
+            font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase;
+        }
         .lock-btn:hover { background: #334155; border-color: #fff; }
-        .lock-btn:disabled { opacity: 0.3; cursor: not-allowed; border-color: #334155; }
-        
-        .scan-msg { font-family: 'JetBrains Mono'; color: #94a3b8; font-size: 11px; margin-right: 15px; }
+
+        .bias-tag { font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 3px; margin-left: 8px; vertical-align: middle; border: 1px solid; }
     </style>
 </head>
 <body>
@@ -80,111 +77,22 @@
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <div class="radar-sub">/// TACTICAL OVERWATCH</div>
-                <h2 class="radar-title">Market Radar</h2>
+                <div class="radar-sub">/// FLEET COMMAND</div>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v3.3 HYBRID</span></h2>
             </div>
-            <div id="scanControls" class="controls-box">
-                <div id="sessionTimer" class="timer-display"><span style="color:#06b6d4;">SYNCING...</span></div>
-                <div id="lastSyncMsg" class="scan-msg"></div>
-                <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
-            </div>
+            <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
-        <div id="loading" style="display:none; text-align:center; padding:50px;">
-            <div style="font-family:'JetBrains Mono'; color:#0ea5e9; font-size:14px; letter-spacing:1px; animation: blink 1s infinite;">ACQUIRING TARGETS...</div>
+
+        <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono'; letter-spacing:1px;">
+            /// SCANNING FLEET PROTOCOLS...
         </div>
-        <div id="radarTargetGrid" class="radar-grid">
-            </div>
-    </div>
-    <style> @keyframes blink { 50% { opacity: 0.5; } } </style>
-    <script>
-        function requestNotify() { if ("Notification" in window && Notification.permission !== "granted") Notification.requestPermission(); }
-        function sendNotification(count) { if (Notification.permission === "granted") new Notification("BattleBox Radar", { body: `Calibration Complete. ${count} Targets Scanned.` }); }
-
-        let timerInterval; 
-        function startClock() { requestNotify(); updateClock(); timerInterval = setInterval(updateClock, 1000); }
-        function updateClock() {
-            const now = new Date();
-            const nyTimeString = now.toLocaleString("en-US", {timeZone: "America/New_York"});
-            const nyTime = new Date(nyTimeString);
-            const h = nyTime.getHours(); const m = nyTime.getMinutes();
-            const timerEl = document.getElementById('sessionTimer');
-
-            if (h < 8 || (h === 8 && m < 30)) { timerEl.innerHTML = `<span style="color:#facc15;">PRE-MARKET</span> NY OPENS IN ${8 - h}h ${30 - m}m`; }
-            else if (h === 8 && m >= 30) { const minsLeft = 59 - m; timerEl.innerHTML = `<span style="color:#ef4444; animation:blink 1s infinite;">● CALIBRATING</span> READY IN ${minsLeft}m`; }
-            else { timerEl.innerHTML = `<span style="color:#0ea5e9;">SESSION ACTIVE</span> DATA LIVE`; }
-        }
-
-        // PRECISION FORMATTER
-        function fmt(x, sym){ 
-            if(!x && x !== 0) return "—";
-            const f = parseFloat(x);
-            if(isNaN(f)) return "—";
-            
-            if(sym && sym.includes("DOGE")) return f.toFixed(7);
-            if(sym && sym.includes("TRX")) return f.toFixed(5);
-            if(sym && sym.includes("XRP")) return f.toFixed(5);
-            if(Math.abs(f) < 1.0 && Math.abs(f) > 0) return f.toFixed(6);
-            return f.toFixed(2); 
-        }
-
-        // --- NEW PERSISTENCE LOGIC ---
         
-        // 1. On Load: Check Cache, Render immediately if found, else Scan.
-        document.addEventListener('DOMContentLoaded', () => {
-            startClock();
-            const cached = sessionStorage.getItem('radar_cache');
-            if(cached) {
-                console.log("Restoring Radar from Cache...");
-                const data = JSON.parse(cached);
-                renderGrid(data.results);
-                document.getElementById('lastSyncMsg').innerText = "RESTORED FROM CACHE";
-            } else {
-                console.log("No Cache. Auto-Scanning...");
-                forceScan();
-            }
-        });
+        <div id="radarTargetGrid" class="radar-grid"></div>
+    </div>
 
-        // 2. The Renderer (Separated so we can call it from Cache or Scan)
-        function renderGrid(results) {
-            const grid = document.getElementById('radarTargetGrid');
-            let html = "";
-            
-            if(!results || results.length === 0) {
-                grid.innerHTML = `<div style="text-align:center; color:#64748b; padding:40px;">NO TARGETS ACQUIRED</div>`;
-                return;
-            }
+    <script>
+        function fmt(x){ if(!x) return "—"; return parseFloat(x).toLocaleString(undefined, {minimumFractionDigits: 2}); }
 
-            results.forEach(t => {
-                let rowClass = "status-dog"; let scoreColor = "#94a3b8"; let badgeBg = "#1e293b"; let badgeColor = "#94a3b8"; let isGrounded = false;
-                if (t.status === "SUPERSONIC") { rowClass = "status-super"; scoreColor = "#facc15"; badgeBg = "rgba(250, 204, 21, 0.2)"; badgeColor = "#facc15"; }
-                else if (t.status === "SNIPER") { rowClass = "status-sniper"; scoreColor = "#10b981"; badgeBg = "rgba(16, 185, 129, 0.2)"; badgeColor = "#10b981"; }
-                else if (t.status === "GROUNDED") { rowClass = "status-ground"; scoreColor = "#ef4444"; badgeBg = "rgba(239, 68, 68, 0.2)"; badgeColor = "#ef4444"; isGrounded = true; }
-
-                const m = t.metrics || {};
-                let biasHtml = "";
-                if (t.bias === "LONG") biasHtml = `<span class="bias-badge bias-long">L</span>`;
-                if (t.bias === "SHORT") biasHtml = `<span class="bias-badge bias-short">S</span>`;
-
-                html += `
-                <div class="radar-row ${rowClass}">
-                    <div class="sym-box"><div><span class="sym-name">${t.symbol}</span>${biasHtml}</div><span class="sym-price">$${fmt(t.price, t.symbol)}</span></div>
-                    <div class="score-box"><div class="score-val" style="color:${scoreColor}">${t.score}</div><div class="score-lbl">KINETIC</div></div>
-                    <div style="text-align:center;"><span class="stat-badge" style="background:${badgeBg}; color:${badgeColor}">${t.status}</span></div>
-                    <div class="bars-container">
-                        <div class="bar-col"><span class="bar-val metric-${m.energy?.color}">${m.energy?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.energy?.color}" style="height:${m.energy?.pct}%"></div><span class="bar-lbl">NRG</span></div>
-                        <div class="bar-col"><span class="bar-val metric-${m.space?.color}">${m.space?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.space?.color}" style="height:${m.space?.pct}%"></div><span class="bar-lbl">SPC</span></div>
-                        <div class="bar-col"><span class="bar-val metric-${m.wind?.color}">${m.wind?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.wind?.color}" style="height:${m.wind?.pct}%"></div><span class="bar-lbl">WND</span></div>
-                        <div class="bar-col"><span class="bar-val metric-${m.hull?.color}">${m.hull?.text.split(' ')[0] || '--'}</span><div class="bar-fill bg-${m.hull?.color}" style="height:${m.hull?.pct}%"></div><span class="bar-lbl">HUL</span></div>
-                    </div>
-                    <div style="text-align:right;">
-                        <button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'" ${isGrounded ? 'disabled title="Target Grounded"' : ''}>${isGrounded ? 'NO GO 🚫' : 'LOCK TARGET →'}</button>
-                    </div>
-                </div>`;
-            });
-            grid.innerHTML = html;
-        }
-
-        // 3. The Fetcher
         async function forceScan() {
             const btn = document.getElementById('scanBtn');
             const grid = document.getElementById('radarTargetGrid');
@@ -198,26 +106,82 @@
             try {
                 const res = await fetch('/api/radar/scan', { method: 'POST' });
                 const data = await res.json();
-                if(!data.ok) throw new Error("Scan Failed");
-
-                // Save to Cache
-                sessionStorage.setItem('radar_cache', JSON.stringify(data));
                 
-                // Render
-                renderGrid(data.results);
-                
-                // Update UI Status
-                document.getElementById('lastSyncMsg').innerText = "LIVE DATA SYNCED";
-                sendNotification(data.results.length);
+                let html = "";
+                data.results.forEach(t => {
+                    let colorClass = `border-${t.color_code}`;
+                    
+                    // Style Logic
+                    let statusBg = '#1e293b'; let statusTxt = '#fff';
+                    if(t.color_code === 'GOLD') { statusBg = 'rgba(250, 204, 21, 0.2)'; statusTxt = '#facc15'; }
+                    else if(t.color_code === 'CYAN') { statusBg = 'rgba(34, 211, 238, 0.2)'; statusTxt = '#22d3ee'; }
+                    else if(t.color_code === 'RED') { statusBg = 'rgba(239, 68, 68, 0.2)'; statusTxt = '#ef4444'; }
+                    
+                    let biasColor = t.bias === 'BULLISH' ? '#10b981' : (t.bias === 'BEARISH' ? '#ef4444' : '#94a3b8');
 
-            } catch(e) { 
-                alert("Scan Error: " + e.message); 
-            } finally { 
+                    // Metric Colors
+                    const getBarColor = (c) => {
+                        if(c === 'CYAN') return '#22d3ee';
+                        if(c === 'GOLD') return '#facc15';
+                        if(c === 'GREEN') return '#10b981';
+                        if(c === 'RED') return '#ef4444';
+                        return '#64748b';
+                    };
+
+                    html += `
+                    <div class="radar-row ${colorClass}">
+                        <div>
+                            <div>
+                                <span class="sym-name">${t.symbol}</span>
+                                <span class="bias-tag" style="color:${biasColor}; border-color:${biasColor}">${t.bias}</span>
+                            </div>
+                            <div class="sym-price">$${fmt(t.price)}</div>
+                        </div>
+
+                        <div style="text-align:center;">
+                            <div class="score-val" style="color:${t.score >= 50 ? '#fff' : '#ef4444'}">${t.score}</div>
+                            <div class="score-lbl">KINETIC</div>
+                        </div>
+
+                        <div style="text-align:center;">
+                            <span class="stat-badge" style="background:${statusBg}; color:${statusTxt}">${t.status}</span>
+                        </div>
+
+                        <div class="bars-container">
+                            <div class="bar-col">
+                                <div class="bar-fill" style="height:${t.metrics.energy.pct}%; background:${getBarColor(t.metrics.energy.color)}"></div>
+                                <span class="bar-lbl">NRG</span>
+                            </div>
+                            <div class="bar-col">
+                                <div class="bar-fill" style="height:${t.metrics.space.pct}%; background:${getBarColor(t.metrics.space.color)}"></div>
+                                <span class="bar-lbl">SPC</span>
+                            </div>
+                            <div class="bar-col">
+                                <div class="bar-fill" style="height:${t.metrics.wind.pct}%; background:${getBarColor(t.metrics.wind.color)}"></div>
+                                <span class="bar-lbl">WND</span>
+                            </div>
+                            <div class="bar-col">
+                                <div class="bar-fill" style="height:${t.metrics.hull.pct}%; background:${getBarColor(t.metrics.hull.color)}"></div>
+                                <span class="bar-lbl">HUL</span>
+                            </div>
+                        </div>
+
+                        <div style="text-align:right;">
+                            <button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">LOCK TARGET →</button>
+                        </div>
+                    </div>`;
+                });
+                grid.innerHTML = html;
+            } catch(e) { alert("Scan Error: " + e.message); } 
+            finally { 
                 loader.style.display = 'none'; 
                 grid.style.display = 'grid'; 
-                btn.disabled = false; 
-                btn.innerText = "REFRESH INTEL"; 
+                btn.disabled = false;
+                btn.innerText = "REFRESH INTEL";
             }
         }
+        
+        document.addEventListener('DOMContentLoaded', forceScan);
     </script>
 </body>
+</html>

@@ -1,263 +1,109 @@
 # market_radar.py
 # ==============================================================================
-# MARKET RADAR ENGINE v2.9 (Added Cache Nuke Protocol)
+# MARKET RADAR v3.3 (HYBRID PROTOCOL: FERRARI + ETH GUARD)
 # ==============================================================================
-# 1. MATH: Exact replica of Project Omega v17 Kinetic Math.
-# 2. FILTERS: Enforces Asset-Specific Kill Switches.
-# 3. OUTPUT: Generates "Mission Key" for TradingView Handshake.
-# ==============================================================================
-
 import asyncio
-from typing import Dict, Any, List
+import os
 import battlebox_pipeline
-import session_manager
-import os  # Added for Cache Nuke
 
-# --- NUKE PROTOCOL: FORCE FRESH START ---
-# This deletes any old "ghost data" immediately when the server starts.
+# THE FLEET
+TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+
+# CACHE CLEANUP
 try:
-    if os.path.exists("cache.json"):
-        os.remove("cache.json")
-        print(">>> CACHE DELETED: STARTING FRESH <<<")
-    # Also check for common variations if you use them
-    if os.path.exists("__pycache__"):
-        import shutil
-        shutil.rmtree("__pycache__", ignore_errors=True)
-except Exception as e:
-    print(f">>> CACHE CLEAR WARNING: {e}")
-# ----------------------------------------
+    if os.path.exists("radar_cache.json"): os.remove("radar_cache.json")
+except: pass
 
-TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "TRXUSDT"]
-
-# ------------------------------------------------------------------------------
-# 1. KINETIC MATH
-# ------------------------------------------------------------------------------
-def _calculate_side_score(anchor_price, levels, context, side):
-    """
-    Calculates Score & Rich Metrics for a specific direction.
-    """
+# --- 1. CORE KINETIC MATH ---
+def _calc_kinetics(anchor, levels, context):
     dr = float(levels.get("daily_resistance", 0) or 0)
     ds = float(levels.get("daily_support", 0) or 0)
-    if dr == 0 or ds == 0: return 0, {}, True # Blocked
+    if dr == 0 or ds == 0: 
+        return {"score": 0, "wind": 0, "energy": 0, "hull": 0, "bias": "NEUTRAL"}
 
-    # A. ENERGY (30pts) - Volatility
+    # Energy (Volatility)
     range_size = abs(dr - ds)
-    bps = (range_size / anchor_price) * 10000 if anchor_price > 0 else 500
-    is_exhausted = bps > 350
-    
+    bps = (range_size / anchor) * 10000 if anchor > 0 else 500
     e_val = 30 if bps < 100 else (15 if bps < 250 else 0)
-    e_text = f"SUPER COILED ({int(bps)})" if bps < 100 else (f"STANDARD ({int(bps)})" if bps < 250 else f"LOOSE ({int(bps)})")
-    e_color = "CYAN" if bps < 100 else ("GREEN" if bps < 250 else "RED")
-    e_pct = min(100, (e_val / 30) * 100)
 
-    # B. SPACE (30pts) - R-Multiple (Trigger to Wall)
-    atr = float(levels.get("atr", 0)) or (anchor_price * 0.01)
-    trigger = float(levels.get("breakout_trigger", 0)) if side == "LONG" else float(levels.get("breakdown_trigger", 0))
-    target = dr if side == "LONG" else ds
-    gap = abs(target - trigger)
-    r_mult = gap / atr if atr > 0 else 0
-    
-    is_blocked = r_mult < 1.0 # Hard Block
-    s_val = 30 if r_mult > 2.0 else (15 if r_mult > 1.0 else 0)
-    s_text = f"SUPERSONIC ({r_mult:.1f}R)" if r_mult > 2.0 else (f"GRIND ({r_mult:.1f}R)" if r_mult > 1.0 else f"BLOCKED ({r_mult:.1f}R)")
-    s_color = "CYAN" if r_mult > 2.0 else ("GREEN" if r_mult > 1.0 else "RED")
-    s_pct = min(100, (s_val / 30) * 100)
-
-    # C. WIND (20pts) - Momentum
-    weekly = context.get("weekly_force", "NEUTRAL")
-    slope = float(levels.get("slope", 0.0))
-    is_aligned = (side == "LONG" and weekly == "BULLISH") or (side == "SHORT" and weekly == "BEARISH")
+    # Wind (Momentum + Bias)
+    weekly = context.get("weekly_force", "NEUTRAL") 
+    slope = float(levels.get("slope", 0.0))         
     
     w_score = 0
-    if is_aligned: w_score += 10
-    if (side == "LONG" and slope > 0.1) or (side == "SHORT" and slope < -0.1): w_score += 10
-    
-    w_text = "TAILWIND" if w_score >= 10 else "HEADWIND"
-    w_color = "CYAN" if w_score == 20 else ("GREEN" if w_score == 10 else "YELLOW")
-    w_pct = min(100, (w_score / 20) * 100)
-
-    # D. HULL (20pts) - Structure (Boosted Weight)
+    if (slope > 0.1 and weekly == "BULLISH") or (slope < -0.1 and weekly == "BEARISH"): w_score += 10
+    if abs(slope) > 0.2: w_score += 10
+        
+    # Structure (Hull)
     struct = float(levels.get("structure_score", 0.0))
     h_val = 20 if struct > 0.7 else (10 if struct > 0.4 else 0)
-    h_text = f"SOLID ({struct:.1f})" if struct > 0.7 else f"WEAK ({struct:.1f})"
-    h_color = "CYAN" if struct > 0.7 else ("YELLOW" if struct > 0.4 else "RED")
-    h_pct = min(100, (h_val / 20) * 100)
-    
-    total_score = e_val + s_val + w_score + h_val
-    total_blocked = is_exhausted or is_blocked
+    s_val = 15 
 
-    metrics = {
-        "energy": {"val": e_val, "text": e_text, "color": e_color, "pct": e_pct},
-        "space": {"val": s_val, "text": s_text, "color": s_color, "pct": s_pct},
-        "wind": {"val": w_score, "text": w_text, "color": w_color, "pct": w_pct},
-        "hull": {"val": h_val, "text": h_text, "color": h_color, "pct": h_pct}
+    return {
+        "score": e_val + s_val + w_score + h_val,
+        "wind": w_score, "hull": h_val, "energy": e_val, "space": s_val,
+        "bias": weekly
     }
+
+# --- 2. HYBRID DECISION LOGIC ---
+def _get_combat_status(symbol, k):
+    # BASE RULE: Score must be decent
+    if k["score"] < 50 or k["hull"] < 10:
+        return "HOLD FIRE", "CONDITIONS POOR", "RED"
+
+    # HYBRID RULE: ETH needs higher conviction (The Audit Fix)
+    if "ETH" in symbol and k["score"] < 55:
+        return "HOLD FIRE", "ETH CHOP GUARD (SCORE < 55)", "RED"
+
+    # COMBAT MODES
+    if k["wind"] >= 15: return "ASSAULT", "MOMENTUM PEAKING", "CYAN"
+    if k["energy"] == 30: return "BREACH", "COILED EXPLOSION", "GOLD"
     
-    return total_score, metrics, total_blocked
+    return "AMBUSH", "TRAP SET", "AMBER"
 
-# ------------------------------------------------------------------------------
-# 2. TACTICAL FILTERS (THE KILL SWITCH)
-# ------------------------------------------------------------------------------
-def _apply_tactical_filter(symbol, analysis):
-    """
-    Applies ASSET-SPECIFIC Kill Switches based on Project Omega Protocol.
-    Overrides status to GROUNDED if rules are violated.
-    """
-    score = analysis["score"]
-    metrics = analysis["metrics"]
-    
-    kill_reason = None
-    
-    # Extract Values
-    s_val = metrics["space"]["val"]
-    e_val = metrics["energy"]["val"]
-    w_val = metrics["wind"]["val"]
-    h_val = metrics["hull"]["val"]
-
-    # --- TIER 1: BTC (The Flagship) ---
-    if "BTC" in symbol:
-        # Rule: Score > 50 AND Space > 1.5R (Value 15+)
-        if score < 50: kill_reason = "WEAK SIGNAL (<50)"
-        elif s_val < 15: kill_reason = "BLOCKED SPACE (<1.5R)"
-
-    # --- TIER 1: SOL (The Athlete) ---
-    elif "SOL" in symbol:
-        # Rule: High Energy Required (> 0)
-        if e_val == 0: kill_reason = "LOW ENERGY (DEAD MONEY)"
-        elif score < 60: kill_reason = "WEAK SIGNAL (<60)"
-
-    # --- TIER 2: ETH (The Workhorse) ---
-    elif "ETH" in symbol:
-        # Rule: Needs Space. 
-        if s_val == 0: kill_reason = "CONGESTED (NO SPACE)"
-        elif score < 55: kill_reason = "CHOP ZONE (50-55)"
-
-    # --- TIER 2: TRX (The Sniper) ---
-    elif "TRX" in symbol:
-        # Rule: Structure (Hull) must be solid (Value 20)
-        if h_val < 20: kill_reason = "WEAK STRUCTURE (MESSY)"
-        elif score < 55: kill_reason = "WEAK SIGNAL"
-
-    # --- TIER 3: DOGE (The Wildcard) ---
-    elif "DOGE" in symbol:
-        # Rule: Wind > 10 Mandatory
-        if w_val < 10: kill_reason = "NO MOMENTUM (NO WIND)"
-        elif score < 60: kill_reason = "KILL ZONE (<60)"
-
-    # --- TIER 4: XRP (The Event) ---
-    elif "XRP" in symbol:
-        # Rule: High Score Only
-        if score < 65: kill_reason = "NO CATALYST (WAIT FOR 65+)"
-
-    # --- APPLY OVERRIDE ---
-    if kill_reason:
-        analysis["status"] = "GROUNDED"
-        analysis["advice"] = f"⛔ KILL SWITCH: {kill_reason}"
-        # Visually grey out the bars to indicate 'Offline'
-        for k in metrics: metrics[k]['color'] = 'RED'
-    
-    return analysis
-
-def _analyze_session_kinetics(levels, context, price, symbol):
-    anchor = float(levels.get("session_open_price") or price)
-    
-    score_l, m_long, block_l = _calculate_side_score(anchor, levels, context, "LONG")
-    score_s, m_short, block_s = _calculate_side_score(anchor, levels, context, "SHORT")
-
-    bias = "NEUTRAL"
-    final_metrics = m_long
-    final_score = score_l
-    
-    # 1. Determine Raw Bias
-    if block_l and block_s:
-        bias = "GROUNDED"; final_score = max(score_l, score_s)
-    elif block_l:
-        bias = "SHORT"; final_score = score_s; final_metrics = m_short
-    elif block_s:
-        bias = "LONG"; final_score = score_l; final_metrics = m_long
-    elif score_l > score_s + 10:
-        bias = "LONG"; final_score = score_l; final_metrics = m_long
-    elif score_s > score_l + 10:
-        bias = "SHORT"; final_score = score_s; final_metrics = m_short
-    else:
-        final_score = max(score_l, score_s)
-        final_metrics = m_long if score_l >= score_s else m_short
-    
-    # 2. Determine Raw Status
-    status = "DOGFIGHT"
-    if bias == "GROUNDED" or final_score <= 45: status = "GROUNDED"
-    elif final_score >= 75: status = "SUPERSONIC"
-    elif final_score >= 50: status = "SNIPER"
-
-    advice = "WAIT FOR CONVICTION."
-    if bias == "LONG": advice = "LOOK FOR LONGS."
-    if bias == "SHORT": advice = "LOOK FOR SHORTS."
-
-    analysis = {
-        "score": final_score, "status": status, "bias": bias, 
-        "metrics": final_metrics, "advice": advice
-    }
-    
-    # 3. APPLY TACTICAL KILL SWITCH (The New Logic)
-    return _apply_tactical_filter(symbol, analysis)
-
-def _generate_flight_plan(levels):
+def _generate_plan(mode, levels, bias):
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
-    r30_high = float(levels.get("range30m_high", 0))
-    r30_low = float(levels.get("range30m_low", 0))
+    dr = float(levels.get("daily_resistance", 0))
     
-    plans = {"LONG": {"valid": False}, "SHORT": {"valid": False}}
-    
-    # Basic R Check
-    if bo > 0 and r30_low > 0:
-        risk = bo - r30_low
-        if risk > 0: plans["LONG"] = {"valid": True, "entry": bo, "stop": r30_low, "targets": [bo+risk, bo+2*risk, bo+3*risk]}
+    plan = {"valid": False, "bias": "NEUTRAL", "entry": 0, "stop": 0, "targets": [0,0,0]}
+    if mode == "HOLD FIRE": return plan
 
-    if bd > 0 and r30_high > 0:
-        risk = r30_high - bd
-        if risk > 0: plans["SHORT"] = {"valid": True, "entry": bd, "stop": r30_high, "targets": [bd-risk, bd-2*risk, bd-3*risk]}
-            
-    return plans
+    allowed = "BOTH"
+    if bias == "BULLISH": allowed = "LONG"
+    if bias == "BEARISH": allowed = "SHORT"
 
-# ------------------------------------------------------------------------------
-# 4. HANDSHAKE PROTOCOL (NEW FEATURE)
-# ------------------------------------------------------------------------------
-def _generate_mission_key(analysis, plans):
-    """
-    Generates the pipe-separated string for the TradingView HUD.
-    Format: BIAS|STATUS|ENTRY|STOP|TP1|TP2|TP3
-    """
-    bias = analysis.get("bias", "NEUTRAL")
-    status = "NEUTRAL"
-    advice = analysis.get("advice", "")
-    
-    # Map Status for HUD Color Logic
-    if analysis.get("status") == "GROUNDED": status = "WEAK"
-    elif analysis.get("status") == "SNIPER" or analysis.get("status") == "SUPERSONIC": status = "STRONG"
-    else: status = "NEUTRAL"
+    if mode in ["ASSAULT", "BREACH"]:
+        dist_up = abs(dr - bo)
+        dist_dn = abs(bd - dr) # Fix: Correct distance logic
+        # Simple Logic: If price is closer to BO than BD, look Long
+        # Real Logic: We trust the Bias and the Triggers.
+        
+        # Determine Trend Direction by Bias first
+        trend_dir = "LONG" if bias == "BULLISH" else ("SHORT" if bias == "BEARISH" else "NEUTRAL")
+        
+        # If Neutral, follow the triggers distance
+        if trend_dir == "NEUTRAL":
+             # This is a simplification; ideally we use current price proximity
+             return plan 
 
-    # Get Plan Data
-    active_plan = plans.get(bias, {}) if bias in ["LONG", "SHORT"] else {}
-    if not active_plan.get("valid", False):
-        return f"{bias}|WEAK|0|0|0|0|0"
+        risk = abs(bo - bd)
+        if trend_dir == "LONG" and bo > 0:
+            plan = {"valid": True, "bias": "LONG", "entry": bo, "stop": bd, "targets": [bo+risk, bo+2*risk, bo+4*risk]}
+        elif trend_dir == "SHORT" and bd > 0:
+            plan = {"valid": True, "bias": "SHORT", "entry": bd, "stop": bo, "targets": [bd-risk, bd-2*risk, bd-4*risk]}
 
-    entry = active_plan.get("entry", 0.0)
-    stop = active_plan.get("stop", 0.0)
-    targets = active_plan.get("targets", [0.0, 0.0, 0.0])
-    
-    t1 = targets[0] if len(targets) > 0 else 0.0
-    t2 = targets[1] if len(targets) > 1 else 0.0
-    t3 = targets[2] if len(targets) > 2 else 0.0
+    return plan
 
-    return f"{bias}|{status}|{entry:.2f}|{stop:.2f}|{t1:.2f}|{t2:.2f}|{t3:.2f}"
+def _make_key(plan, status):
+    if not plan["valid"]: return f"NEUTRAL|WEAK|0|0|0|0|0"
+    s_val = "STRONG" if status in ["ASSAULT", "BREACH"] else "WEAK"
+    return f"{plan['bias']}|{s_val}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}"
 
-# ------------------------------------------------------------------------------
-# 5. API ENDPOINTS
-# ------------------------------------------------------------------------------
+# --- 3. API ---
 async def scan_sector(session_id="us_ny_futures"):
     radar_grid = []
-    tasks = [battlebox_pipeline.get_live_battlebox(sym, session_mode="MANUAL", manual_id=session_id) for sym in TARGETS]
+    tasks = [battlebox_pipeline.get_live_battlebox(sym, "MANUAL", manual_id=session_id) for sym in TARGETS]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for sym, res in zip(TARGETS, results):
@@ -270,37 +116,63 @@ async def scan_sector(session_id="us_ny_futures"):
         levels = box.get("levels", {})
         context = box.get("context", {})
         
-        # Now passes SYMBOL to apply specific kill switches
-        analysis = _analyze_session_kinetics(levels, context, price, sym)
+        k = _calc_kinetics(price, levels, context)
+        mode, advice, color = _get_combat_status(sym, k)
+        
+        plan = _generate_plan(mode, levels, k["bias"])
+        if not plan["valid"] and mode != "HOLD FIRE":
+            mode = "HOLD FIRE"
+            color = "RED"
+            advice = f"CONFLICT: BIAS IS {k['bias']}"
+
+        metrics = {
+            "energy": {"val": k["energy"], "color": "CYAN" if k["energy"]==30 else "GREEN", "pct": (k["energy"]/30)*100},
+            "wind": {"val": k["wind"], "color": "CYAN" if k["wind"]>=20 else "YELLOW", "pct": (k["wind"]/20)*100},
+            "hull": {"val": k["hull"], "color": "CYAN" if k["hull"]>=20 else "RED", "pct": (k["hull"]/20)*100},
+            "space": {"val": 15, "color": "GREEN", "pct": 50}
+        }
 
         radar_grid.append({
             "symbol": sym, "price": price, 
-            "score": analysis["score"], "status": analysis["status"], 
-            "bias": analysis["bias"], "metrics": analysis["metrics"],
-            "advice": analysis.get("advice", "")
+            "score": k["score"], "status": mode, 
+            "bias": k["bias"], "metrics": metrics,
+            "advice": advice, "color_code": color
         })
 
     radar_grid.sort(key=lambda x: x['score'], reverse=True)
     return radar_grid
 
 async def analyze_target(symbol, session_id="us_ny_futures"):
-    data = await battlebox_pipeline.get_live_battlebox(symbol=symbol, session_mode="MANUAL", manual_id=session_id)
+    data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
     if data.get("status") == "ERROR": return {"ok": False}
 
     price = float(data.get("price", 0))
-    box = data.get("battlebox", {})
-    levels = box.get("levels", {})
-    context = box.get("context", {})
+    levels = data.get("battlebox", {}).get("levels", {})
+    context = data.get("battlebox", {}).get("context", {})
     
-    analysis = _analyze_session_kinetics(levels, context, price, symbol)
-    plans = _generate_flight_plan(levels)
+    k = _calc_kinetics(price, levels, context)
+    mode, advice, color = _get_combat_status(symbol, k)
+    plan = _generate_plan(mode, levels, k["bias"])
     
-    # Generate the key for the frontend
-    m_key = _generate_mission_key(analysis, plans)
+    if not plan["valid"] and mode != "HOLD FIRE":
+        mode = "HOLD FIRE"
+        color = "RED"
+        advice = f"CONFLICT: BIAS IS {k['bias']}"
+
+    m_key = _make_key(plan, mode)
 
     return {
-        "symbol": symbol, "score": analysis["score"], "status": analysis["status"], 
-        "bias": analysis["bias"], "metrics": analysis["metrics"], "advice": analysis["advice"],
-        "plans": plans, "levels": levels, "price": price,
-        "mission_key": m_key # PASSED TO FRONTEND
+        "ok": True,
+        "result": {
+            "symbol": symbol, "price": price,
+            "score": k["score"], "status": mode, "color": color,
+            "bias": k["bias"], "advice": advice,
+            "metrics": {
+                "energy": {"val": k["energy"], "pct": (k["energy"]/30)*100},
+                "wind": {"val": k["wind"], "pct": (k["wind"]/20)*100},
+                "hull": {"val": k["hull"], "pct": (k["hull"]/20)*100},
+                "space": {"val": 15, "pct": 50}
+            },
+            "plan": plan, "levels": levels, "mission_key": m_key
+        }
     }
