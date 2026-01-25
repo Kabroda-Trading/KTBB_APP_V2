@@ -130,13 +130,15 @@ def admin_page(request: Request, db: Session = Depends(get_db)):
 def omega_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_admin"]: return RedirectResponse("/suite")
-    return _template_or_fallback(request, templates, "project_omega.html", {"request": request})
+    # FIX: Added **ctx so Omega gets the right menu
+    return _template_or_fallback(request, templates, "project_omega.html", {"request": request, **ctx})
 
 @app.get("/suite/research-lab", response_class=HTMLResponse)
 def research_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_admin"]: return RedirectResponse("/suite")
-    return _template_or_fallback(request, templates, "research_lab.html", {"request": request})
+    # FIX: Added **ctx so Research Lab gets the right menu
+    return _template_or_fallback(request, templates, "research_lab.html", {"request": request, **ctx})
 
 @app.get("/suite/system-monitor", response_class=HTMLResponse)
 def system_monitor_page(request: Request, db: Session = Depends(get_db)):
@@ -150,13 +152,15 @@ def system_monitor_page(request: Request, db: Session = Depends(get_db)):
 def market_radar_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_admin"]: return RedirectResponse("/suite")
-    return _template_or_fallback(request, templates, "market_radar.html", {"request": request})
+    # FIX: Added **ctx so Market Radar gets the right menu
+    return _template_or_fallback(request, templates, "market_radar.html", {"request": request, **ctx})
 
 @app.get("/suite/lock-target", response_class=HTMLResponse)
 def lock_target_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_admin"]: return RedirectResponse("/suite")
-    return _template_or_fallback(request, templates, "lock_target.html", {"request": request})
+    # FIX: Added **ctx so Lock Target gets the right menu
+    return _template_or_fallback(request, templates, "lock_target.html", {"request": request, **ctx})
 
 # --- [NEW] MISSION BRIEF ROUTE ---
 @app.get("/suite/mission-brief", response_class=HTMLResponse)
@@ -170,7 +174,6 @@ def mission_brief_page(request: Request, db: Session = Depends(get_db)):
 @app.get("/suite/vector", response_class=HTMLResponse)
 def vector_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
-    # Allows access to Admins OR standard Members
     if not ctx["is_logged_in"]: return RedirectResponse("/login")
     return _template_or_fallback(request, templates, "vector.html", {"request": request, **ctx})
 # -----------------------------------
