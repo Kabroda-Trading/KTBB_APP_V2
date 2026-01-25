@@ -1,6 +1,6 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB: HYBRID ENGINE v1.3 (WITH WEEKLY BIAS LOGGING)
+# RESEARCH LAB: HYBRID ENGINE v1.6 (PORTABLE PHASE 2 DNA)
 # ==============================================================================
 import pandas as pd
 import numpy as np
@@ -16,31 +16,28 @@ import battlebox_rules
 def _slice_by_ts(candles, start_ts, end_ts):
     return [c for c in candles if start_ts <= c["time"] < end_ts]
 
+# --- KINETIC SENSORS (OPTIONAL) ---
 def _calculate_kinetic_score(row, sensors):
     if row is None or pd.isna(row['ma']): return 0, {}
     score = 0
-    comps = {"energy":0, "space":0, "wind":0, "hull":0}
+    comps = {} 
 
-    # 1. Energy (Inverse: Low BB Width = Coiled)
     if sensors.get("energy"):
         val = max(0, min(25, 25 - (row['bb_w'] * 1000)))
         score += val
         comps['energy'] = int(val)
 
-    # 2. Space (Direct: High ATR = Room)
     if sensors.get("space"):
         atr_pct = row['atr'] / row['close']
         val = max(0, min(25, atr_pct * 5000))
         score += val
         comps['space'] = int(val)
 
-    # 3. Wind (Direct: High Momentum)
     if sensors.get("wind"):
         val = max(0, min(25, (row['slope'] / row['close']) * 5000))
         score += val
         comps['wind'] = int(val)
 
-    # 4. Hull (Inverse: Z-Score < 1.5 is ideal)
     if sensors.get("hull"):
         z = abs(row['z'])
         val = 25 if z < 1.5 else max(0, 25 - ((z-1.5)*25))
@@ -72,7 +69,7 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
         df['slope'] = df['close'].diff(5).abs() 
         df['z'] = (df['close'] - df['ma']) / df['std']
 
-        # 2. STRUCTURE ENGINE
+        # 2. PHASE 1 SETUP
         start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         active_cfgs = [s for s in session_manager.SESSION_CONFIGS if s["id"] in session_ids]
@@ -80,15 +77,26 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
         results = []
         curr_day = start_dt
         
-        # Tuning
-        req_vol = tuning.get("require_volume", False)
-        req_div = tuning.get("require_divergence", False)
-        fusion = tuning.get("fusion_mode", False)
-        ignore_15 = tuning.get("ignore_15m_alignment", False)
-        ignore_5 = tuning.get("ignore_5m_stoch", False)
-        confirm_mode = tuning.get("confirmation_mode", "TOUCH")
-        tol_bps = int(tuning.get("zone_tolerance_bps", 10))
-        zone_tol = tol_bps / 10000.0
+        # --- PHASE 2 DNA (THE STRATEGY PROFILE) ---
+        # This acts as the "Default Settings".
+        # The HTML tuning will OVERRIDE these if the user changes the dials.
+        phase2_dna = {
+            "fusion_mode": True,             # Default: ON
+            "ignore_15m_alignment": True,    # Default: ON (Dead feature)
+            "ignore_5m_stoch": True,         # Default: ON (Dead feature)
+            "zone_tolerance_bps": 10,        # Default: 10bps
+            "min_trigger_dist_bps": 20,      # Default: 20bps
+            "confirmation_mode": "1_CANDLE_CLOSE", # Default: 1-Close
+            "require_volume": False,
+            "require_divergence": False
+        }
+        
+        # Merge User Overrides from HTML
+        if tuning:
+            phase2_dna.update(tuning)
+
+        # Pre-calc derived values
+        zone_tol = phase2_dna["zone_tolerance_bps"] / 10000.0
 
         processed_anchors = set()
 
@@ -110,22 +118,18 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                 context_24h = _slice_by_ts(raw_5m, lock_end_ts - 86400, lock_end_ts)
                 post_lock = _slice_by_ts(raw_5m, lock_end_ts, exec_end_ts)
 
-                # --- WEEKLY BIAS CALCULATION (NEW) ---
-                # We check price 7 days ago vs Session Start
+                # --- WEEKLY BIAS ---
                 weekly_bias = "NEUTRAL"
                 try:
                     week_ago_ts = anchor_ts - (7 * 86400)
-                    # Find closest candle to 7 days ago
                     week_ago_idx = df.index.get_indexer([pd.to_datetime(week_ago_ts, unit='s', utc=True)], method='nearest')[0]
                     price_week_ago = df.iloc[week_ago_idx]['close']
                     price_now = calibration[0]['open']
-                    
-                    # Simple Trend Logic
                     if price_now > price_week_ago * 1.01: weekly_bias = "BULLISH"
                     elif price_now < price_week_ago * 0.99: weekly_bias = "BEARISH"
                 except: pass
-                # -------------------------------------
 
+                # --- PHASE 1 EXECUTION (SSE ENGINE) ---
                 sse_input = {
                     "locked_history_5m": context_24h,
                     "slice_24h_5m": context_24h,
@@ -133,26 +137,34 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                     "r30_high": max(c["high"] for c in calibration),
                     "r30_low": min(c["low"] for c in calibration),
                     "last_price": context_24h[-1]["close"] if context_24h else 0.0,
-                    "tuning": tuning
+                    "tuning": phase2_dna # Triggers need to know min_dist
                 }
                 computed = sse_engine.compute_sse_levels(sse_input)
                 if "error" in computed: continue
                 levels = computed["levels"]
 
-                state = structure_state_engine.compute_structure_state(levels, post_lock, tuning=tuning)
+                # --- PHASE 2 EXECUTION (RULES ENGINE) ---
+                state = structure_state_engine.compute_structure_state(levels, post_lock, tuning=phase2_dna)
                 had_acceptance = (state["permission"]["status"] == "EARNED")
                 side = state["permission"]["side"]
 
                 go = {"ok": False, "go_type": "NONE", "simulation": {}}
+                
                 if had_acceptance and side in ("LONG", "SHORT"):
                     candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
                     st15 = battlebox_rules.compute_stoch(candles_15m_proxy)
                     
+                    # RUN RULES using Phase 2 DNA
                     go = battlebox_rules.detect_pullback_go(
                         side=side, levels=levels, post_accept_5m=post_lock, stoch_15m_at_accept=st15,
-                        use_zone="TRIGGER", require_volume=req_vol, require_divergence=req_div,
-                        fusion_mode=fusion, zone_tol=zone_tol, ignore_15m=ignore_15,
-                        ignore_5m_stoch=ignore_5, confirmation_mode=confirm_mode
+                        use_zone="TRIGGER", 
+                        require_volume=phase2_dna["require_volume"], 
+                        require_divergence=phase2_dna["require_divergence"],
+                        fusion_mode=phase2_dna["fusion_mode"], 
+                        zone_tol=zone_tol, 
+                        ignore_15m=phase2_dna["ignore_15m_alignment"],
+                        ignore_5m_stoch=phase2_dna["ignore_5m_stoch"], 
+                        confirmation_mode=phase2_dna["confirmation_mode"]
                     )
 
                     if go["ok"]:
@@ -172,45 +184,49 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                         )
                         go["simulation"] = sim
 
-                try:
-                    score_time = pd.to_datetime(anchor_ts, unit='s', utc=True)
-                    row = df.asof(score_time) 
-                    k_score, k_comps = _calculate_kinetic_score(row, sensors)
-                except:
-                    k_score, k_comps = 0, {}
+                # KINETIC MATH
+                k_score, k_comps = 0, {}
+                if sensors and any(sensors.values()):
+                    try:
+                        score_time = pd.to_datetime(anchor_ts, unit='s', utc=True)
+                        row = df.asof(score_time) 
+                        k_score, k_comps = _calculate_kinetic_score(row, sensors)
+                    except: pass
 
-                # PAYLOAD
+                # --- EXPORT RESULTS ---
                 results.append({
                     "date": f"{actual_session_date} [{cfg['id']}]",
-                    "weekly_bias": weekly_bias, # <--- NEW DATA FIELD
+                    "weekly_bias": weekly_bias,
                     "protocol": state["action"],
-                    "kinetic_score": k_score,
-                    "kinetic_comps": k_comps,
+                    "kinetic_score": k_score if any(sensors.values()) else None,
+                    "kinetic_comps": k_comps if any(sensors.values()) else None,
                     "trade_signal": go["ok"],
                     "trade_type": go.get("go_type", "NONE"),
                     "simulation": go.get("simulation", {}), 
+                    
+                    # PHASE 1 TRUTH
                     "levels": {
+                        "anchor_price": levels.get("anchor_price"),
                         "BO": levels.get("breakout_trigger"),
                         "BD": levels.get("breakdown_trigger"),
                         "DR": levels.get("daily_resistance"),
-                        "DS": levels.get("daily_support")
+                        "DS": levels.get("daily_support"),
+                        "r30_high": levels.get("range30m_high"),
+                        "r30_low": levels.get("range30m_low"),
+                        "structure_score": levels.get("structure_score", 0)
                     }
                 })
 
             curr_day += timedelta(days=1)
 
         valid_trades = [r for r in results if r['trade_signal']]
-        prime_setups = [r for r in results if r['trade_signal'] and r['kinetic_score'] >= min_score]
         total_r = sum(r['simulation'].get('r_realized', 0) for r in valid_trades)
 
         return {
             "ok": True,
             "total_sessions": len(results),
             "trade_signals": len(valid_trades),
-            "kinetic_passes": len([r for r in results if r['kinetic_score'] >= min_score]),
-            "prime_setups": len(prime_setups), 
             "total_r_realized": round(total_r, 2),
-            "avg_score": int(np.mean([r['kinetic_score'] for r in results])) if results else 0,
             "results": results
         }
 

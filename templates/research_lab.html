@@ -56,7 +56,7 @@
         <div class="header">
             <div>
                 <a href="/suite" style="color: #94a3b8; text-decoration: none; font-size: 14px;">← Back to Suite</a>
-                <h1 style="margin-top: 10px;">RESEARCH LAB <span class="pill">HYBRID ENGINE</span></h1>
+                <h1 style="margin-top: 10px;">RESEARCH LAB <span class="pill">PHASE 2 ARCHITECT</span></h1>
             </div>
         </div>
 
@@ -85,57 +85,41 @@
 
                 <div class="divider"></div>
 
-                <span class="section-title">STRUCTURE ENGINE</span>
+                <span class="section-title">PHASE 2 DNA (STRATEGY)</span>
                 
                 <div class="control-group">
                     <label>CONFIRMATION MODE</label>
                     <select id="confirmMode">
                         <option value="TOUCH">Touch (Aggressive)</option>
-                        <option value="1_CLOSE">1-Candle Close</option>
-                        <option value="2_CLOSE">2-Candle Close</option>
+                        <option value="1_CANDLE_CLOSE" selected>1-Candle Close (Standard)</option>
+                        <option value="2_CANDLE_CLOSE">2-Candle Close (Safe)</option>
                     </select>
                 </div>
 
                 <div class="control-group">
-                    <label>TOLERANCE (BPS)</label>
+                    <label>ZONE TOLERANCE (BPS)</label>
                     <div class="range-wrap">
-                        <input type="range" id="tuneTol" min="5" max="50" value="10" oninput="upd('valTol', this.value)">
+                        <input type="range" id="tuneTol" min="0" max="25" value="10" oninput="upd('valTol', this.value)">
                         <span id="valTol" class="range-val">10</span>
                     </div>
                 </div>
 
                 <div class="control-group">
-                    <label>MIN TRIGGER DIST (BPS)</label>
+                    <label>TRIGGER DISTANCE (BPS)</label>
                     <div class="range-wrap">
-                        <input type="range" id="tuneDist" min="5" max="50" value="20" oninput="upd('valDist', this.value)">
+                        <input type="range" id="tuneDist" min="0" max="50" value="20" oninput="upd('valDist', this.value)">
                         <span id="valDist" class="range-val">20</span>
                     </div>
                 </div>
 
                 <div class="checkbox-group">
-                    <input type="checkbox" id="chkIgnore15m">
-                    <label for="chkIgnore15m" class="check-lbl" style="color:#ef4444;">IGNORE 15m ALIGNMENT</label>
-                </div>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="chkIgnore5m">
-                    <label for="chkIgnore5m" class="check-lbl" style="color:#ef4444;">IGNORE 5m STOCH</label>
-                </div>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="chkFusion">
-                    <label for="chkFusion" class="check-lbl" style="color:#fbbf24;">FUSION MODE</label>
-                </div>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="chkVol">
-                    <label for="chkVol" class="check-lbl">REQUIRE VOLUME</label>
-                </div>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="chkDiv">
-                    <label for="chkDiv" class="check-lbl">REQUIRE DIVERGENCE</label>
+                    <input type="checkbox" id="chkFusion" checked>
+                    <label for="chkFusion" class="check-lbl" style="color:#fbbf24;">FUSION MODE (Recommend ON)</label>
                 </div>
 
                 <div class="divider"></div>
 
-                <span class="section-title">KINETIC MATH (OMEGA)</span>
+                <span class="section-title">KINETIC SENSORS</span>
                 
                 <div class="checkbox-group"><input type="checkbox" id="kEnergy" checked><label for="kEnergy" class="check-lbl">ENERGY (Volatility)</label></div>
                 <div class="checkbox-group"><input type="checkbox" id="kSpace" checked><label for="kSpace" class="check-lbl">SPACE (ATR)</label></div>
@@ -151,7 +135,7 @@
             </div>
 
             <div class="panel">
-                <div id="loader" style="display:none; text-align:center; padding:50px; color:#94a3b8;">RUNNING HYBRID ENGINE...</div>
+                <div id="loader" style="display:none; text-align:center; padding:50px; color:#94a3b8;">RUNNING PHASE 1 + 2 SIMULATION...</div>
                 
                 <div id="results" style="display:none;">
                     <div class="stats-grid">
@@ -164,22 +148,21 @@
                             <div class="stat-lbl">TRADE SIGNALS</div>
                         </div>
                         <div class="stat-box">
-                            <div class="stat-num" id="rKinetic" style="color:#fbbf24;">0</div>
-                            <div class="stat-lbl">KINETIC > <span id="lblMinScore">70</span></div>
+                            <div class="stat-num" id="rTotalR" style="color:#06b6d4;">0</div>
+                            <div class="stat-lbl">TOTAL R</div>
                         </div>
                         <div class="stat-box">
-                            <div class="stat-num" id="rPrime" style="color:#06b6d4;">0</div>
-                            <div class="stat-lbl">PRIME (BOTH)</div>
+                            <div class="stat-num" id="rPrime" style="color:#fbbf24;">0</div>
+                            <div class="stat-lbl">PRIME SETUPS</div>
                         </div>
                     </div>
 
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; margin-top:30px;">
-                        <label style="margin:0; color:#fff;">SESSION LOG</label>
-                        <button class="btn-copy" onclick="copyLog()">COPY JSON LOG</button>
+                        <label style="margin:0; color:#fff;">SESSION LOG (JSON SOURCE)</label>
+                        <button class="btn-copy" onclick="copyLog()">COPY JSON</button>
                     </div>
                     
-                    <div id="logArea" style="height:500px; overflow-y:auto; background:#000; border:1px solid #333; padding:15px; border-radius:4px;">
-                        </div>
+                    <div id="logArea" style="height:500px; overflow-y:auto; background:#000; border:1px solid #333; padding:15px; border-radius:4px;"></div>
                     
                     <pre id="rawJson" style="display:none;"></pre>
                 </div>
@@ -208,7 +191,7 @@
             if(document.getElementById('sessNYE').checked) sIds.push("us_ny_equity");
             if(document.getElementById('sessLDN').checked) sIds.push("eu_london");
 
-            // Build Payload
+            // Build Payload (Phase 2 DNA Overrides)
             const payload = {
                 symbol: document.getElementById('symbol').value,
                 start_date_utc: document.getElementById('startDate').value,
@@ -218,11 +201,9 @@
                     confirmation_mode: document.getElementById('confirmMode').value,
                     zone_tolerance_bps: parseInt(document.getElementById('tuneTol').value),
                     min_trigger_dist_bps: parseInt(document.getElementById('tuneDist').value),
-                    ignore_15m_alignment: document.getElementById('chkIgnore15m').checked,
-                    ignore_5m_stoch: document.getElementById('chkIgnore5m').checked,
                     fusion_mode: document.getElementById('chkFusion').checked,
-                    require_volume: document.getElementById('chkVol').checked,
-                    require_divergence: document.getElementById('chkDiv').checked
+                    // Hardcoded ignores are implicit in backend default, but good to send explicit false/true if we wanted.
+                    // We rely on backend defaults for the ignores.
                 },
                 sensors: {
                     energy: document.getElementById('kEnergy').checked,
@@ -245,9 +226,8 @@
                 // Stats
                 document.getElementById('rTotal').innerText = data.total_sessions;
                 document.getElementById('rSignals').innerText = data.trade_signals;
-                document.getElementById('rKinetic').innerText = data.kinetic_passes;
-                document.getElementById('rPrime').innerText = data.prime_setups;
-                document.getElementById('lblMinScore').innerText = payload.min_score;
+                document.getElementById('rTotalR').innerText = data.total_r_realized + "R";
+                document.getElementById('rPrime').innerText = data.prime_setups || 0; // Using prime_setups if backend sends it
                 
                 // FULL JSON RESTORED HERE
                 document.getElementById('rawJson').innerText = JSON.stringify(data.results, null, 2);
@@ -258,7 +238,8 @@
                 
                 data.results.forEach(r => {
                     const hasTrade = r.trade_signal;
-                    const hasKinetic = r.kinetic_score >= minS;
+                    const score = r.kinetic_score || 0;
+                    const hasKinetic = score >= minS;
                     
                     let bg = "rgba(255,255,255,0.02)";
                     let bord = "transparent";
@@ -272,8 +253,8 @@
                         const outcomeColor = sim.r_realized > 0 ? "#10b981" : (sim.r_realized < 0 ? "#ef4444" : "#94a3b8");
                         tradeInfo = `
                             <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.1); font-size:11px; display:flex; justify-content:space-between;">
-                                <span>ENTRY: ${sim.entry_price}</span>
-                                <span style="color:${outcomeColor}; font-weight:700;">PnL: ${sim.r_realized}R (${sim.outcome})</span>
+                                <span>ENTRY: ${sim.entry_price} | STOP: ${sim.stop_price}</span>
+                                <span style="color:${outcomeColor}; font-weight:700;">PnL: ${sim.r_realized}R</span>
                             </div>
                         `;
                     }
@@ -283,11 +264,11 @@
                             <div style="display:flex; justify-content:space-between;">
                                 <div>
                                     <div style="color:#fff; font-weight:700; font-size:12px;">${r.date}</div>
-                                    <div style="color:#94a3b8; font-size:10px;">${r.protocol}</div>
+                                    <div style="color:#94a3b8; font-size:10px;">${r.protocol} | BIAS: <span style="color:${r.weekly_bias === 'BULLISH' ? '#10b981' : (r.weekly_bias === 'BEARISH' ? '#ef4444' : '#fbbf24')}">${r.weekly_bias}</span></div>
                                 </div>
                                 <div style="text-align:right;">
-                                    ${hasTrade ? '<span class="tag tag-go">GO SIGNAL</span>' : '<span class="tag tag-wait">WAIT</span>'}
-                                    <div style="color:${hasKinetic ? '#facc15' : '#64748b'}; font-weight:700; font-size:11px;">K-SCORE: ${r.kinetic_score}</div>
+                                    ${hasTrade ? '<span class="tag tag-go">GO</span>' : '<span class="tag tag-wait">WAIT</span>'}
+                                    <div style="color:${hasKinetic ? '#facc15' : '#64748b'}; font-weight:700; font-size:11px;">SCORE: ${score}</div>
                                 </div>
                             </div>
                             ${tradeInfo}
