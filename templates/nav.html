@@ -1,45 +1,28 @@
-<nav class="navbar">
-    <div class="nav-container">
-        <a href="/" class="logo">
-            <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
-            KABRODA
-        </a>
-
-        <ul class="nav-links">
-            {% if is_logged_in %}
-                <li><a href="/suite">Session Control</a></li>
-                <li><a href="/suite/battle-control">Battle Control</a></li>
-
-                {% if is_admin %}
-                <li class="dropdown">
-                    <a href="#" class="dropbtn">
-                        BOSS CONTROL ▼
-                    </a>
-                    <div class="dropdown-content">
-                        <a href="/suite/market-radar" style="color: #facc15;">📡 MARKET RADAR</a>
-                        <a href="/suite/vector" style="color: #22d3ee;">⚡ PROJECT VECTOR</a> <a href="/admin" style="color: #fff;">👥 USER ROSTER</a>
-                        <a href="/suite/system-monitor">🖥️ SYSTEM MONITOR</a>
-                        <a href="/suite/omega">🚀 PROJECT OMEGA</a>
-                        <a href="/suite/research-lab">🧪 RESEARCH LAB</a>
-                    </div>
-                </li>
-                {% endif %}
-
-                <li><a href="/account">Account</a></li>
-                <li><a href="/logout" style="opacity:0.6;">Logout</a></li>
-            {% else %}
-                <li><a href="/">Home</a></li>
-                <li><a href="/analysis">Analysis</a></li>
-                <li><a href="/how-it-works">How It Works</a></li>
-                <li><a href="/pricing">Pricing</a></li>
-                <li><a href="/login">Login</a></li>
-            {% endif %}
-        </ul>
-        
-        {% if not is_logged_in %}
-        <div class="nav-cta" style="margin-left: 20px;">
-            <a href="/register" class="btn-primary" style="font-size: 0.9rem; padding: 8px 16px;">START FREE</a>
-        </div>
-        {% endif %}
+<div class="nav-container">
+    <div class="nav-left">
+        <span class="brand-logo">■ KABRODA</span>
     </div>
-</nav>
+    <div class="nav-center">
+        <a href="/suite/market-radar" class="nav-link">MARKET RADAR</a>
+        <a href="/suite/vector" class="nav-link active-link">PROJECT VECTOR</a>
+        <a href="/suite/session-control" class="nav-link">SESSION CONTROL</a>
+    </div>
+    <div class="nav-right">
+        <a href="/suite/boss-control" class="nav-link" style="color:#facc15;">BOSS CONTROL ▼</a>
+        <a href="/logout" class="nav-link">LOGOUT</a>
+    </div>
+</div>
+
+<style>
+    .nav-container { 
+        display: flex; justify-content: space-between; align-items: center; 
+        padding: 0 20px; height: 60px; background: #020617; border-bottom: 1px solid #1e293b; 
+    }
+    .brand-logo { font-family: 'Inter', sans-serif; font-weight: 900; color: #fff; letter-spacing: 1px; }
+    .nav-link { 
+        font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700; color: #94a3b8; 
+        text-decoration: none; margin: 0 15px; letter-spacing: 1px; transition: 0.2s; 
+    }
+    .nav-link:hover { color: #fff; }
+    .active-link { color: #22d3ee; text-shadow: 0 0 10px rgba(34,211,238,0.4); }
+</style>
