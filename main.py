@@ -223,9 +223,23 @@ async def res_api(request: Request):
         s_ts = int(datetime.strptime(pl.get("start_date_utc", "2026-01-01"), "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()) - 86400
         e_ts = int(datetime.strptime(pl.get("end_date_utc", "2026-01-10"), "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()) + 86400
     except: return JSONResponse({"ok": False, "error": "Bad Date"})
+    
+    # 1. FETCH RAW DATA (Pipeline)
     raw = await battlebox_pipeline.fetch_historical_pagination(pl.get("symbol", "BTCUSDT"), s_ts, e_ts)
-    return JSONResponse(await research_lab.run_hybrid_analysis(pl.get("symbol", "BTCUSDT"), raw, pl.get("start_date_utc"), pl.get("end_date_utc"), pl.get("session_ids", ["us_ny_futures"]), pl.get("tuning", {}), pl.get("sensors", {}), pl.get("min_score", 70)))
-
+    
+    # 2. RUN THE LAB (With the Candle Switch!)
+    # We explicitly pass 'include_candles' from the payload to the function.
+    return JSONResponse(await research_lab.run_hybrid_analysis(
+        symbol=pl.get("symbol", "BTCUSDT"),
+        raw_5m=raw,
+        start_date=pl.get("start_date_utc"),
+        end_date=pl.get("end_date_utc"),
+        session_ids=pl.get("session_ids", ["us_ny_futures"]),
+        tuning=pl.get("tuning", {}),
+        sensors=pl.get("sensors", {}),
+        min_score=pl.get("min_score", 70),
+        include_candles=pl.get("include_candles", False)  # <--- THE MISSING LINK
+    ))
 # --- VECTOR API HOOK ---
 @app.post("/api/vector/intel")
 async def vector_api(request: Request):
