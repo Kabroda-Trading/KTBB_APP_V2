@@ -38,6 +38,8 @@
         .no-go-badge { font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; border: 1px solid #334155; padding: 8px 16px; border-radius: 4px; display:inline-block; }
 
         .bias-tag { font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 3px; margin-left: 8px; vertical-align: middle; border: 1px solid; }
+        .copy-btn { background:#facc15; color:#000; border:none; border-radius:4px; padding:10px 12px; cursor:pointer; font-size:14px; margin-right:5px; }
+        .copy-btn:hover { background:#fde047; }
     </style>
 </head>
 <body>
@@ -46,7 +48,7 @@
         <div class="radar-header">
             <div>
                 <div style="font-size:12px; color:#94a3b8; font-family:'JetBrains Mono'; letter-spacing:1px; margin-bottom:5px;">/// FLEET COMMAND</div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v4.2</span></h2>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v5.0</span></h2>
             </div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
@@ -75,10 +77,14 @@
                     let biasColor = t.bias === 'BULLISH' ? '#10b981' : (t.bias === 'BEARISH' ? '#ef4444' : '#94a3b8');
                     const getBarColor = (c) => { if(c === 'CYAN') return '#22d3ee'; if(c === 'GOLD') return '#facc15'; if(c === 'GREEN') return '#10b981'; return '#ef4444'; };
 
-                    // BUTTON LOGIC: Hide if no trade
+                    // BUTTON LOGIC with COPY
                     let actionHtml = `<span class="no-go-badge">NO TRADE</span>`;
                     if (t.has_trade) {
-                        actionHtml = `<button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">LOCK TARGET →</button>`;
+                        actionHtml = `
+                        <div style="display:flex; justify-content:flex-end;">
+                            <button class="copy-btn" onclick="copyToClip('${t.indicator_string}')" title="Copy Indicator Data">📋</button>
+                            <button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">LOCK TARGET →</button>
+                        </div>`;
                     }
 
                     html += `
@@ -98,6 +104,12 @@
                 grid.innerHTML = html;
             } catch(e) { console.log(e); } finally { loader.style.display = 'none'; grid.style.display = 'grid'; btn.disabled = false; }
         }
+        
+        function copyToClip(str) {
+            navigator.clipboard.writeText(str);
+            alert("Level Data Copied!\nPaste into TradingView Indicator.");
+        }
+
         document.addEventListener('DOMContentLoaded', forceScan);
     </script>
 </body>

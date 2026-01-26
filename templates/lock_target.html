@@ -44,7 +44,7 @@
         /* DATA ROWS */
         .lbl { font-size: 12px; color: #cbd5e1; font-weight: 700; text-transform: uppercase; margin-bottom: 6px; display:block; }
         .val { font-size: 18px; font-weight: 800; color: #fff; }
-        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px dashed var(--dark-gray); padding-bottom: 8px; }
+        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px dashed var(--gray); padding-bottom: 8px; }
         .inp-risk { background: #020617; border: 1px solid var(--gray); color: #fff; padding: 10px; width: 100%; text-align: right; font-weight: 700; font-size: 16px; }
 
         /* BUTTONS */
@@ -112,12 +112,14 @@
 
     <div class="panel" style="grid-area: right;">
         <div class="panel-head">FLIGHT PATH</div>
-        <button class="btn-tv-copy" onclick="copyIndicator()">📋 COPY DATA</button>
-        <button class="btn-tv-copy" style="background:#facc15; color:#000;" onclick="copyKey()">🔑 COPY KEY</button>
+        <button class="btn-tv-copy" onclick="copyIndicator()">📋 COPY INDICATOR DATA</button>
+        <button class="btn-tv-copy" style="background:#facc15; color:#000; margin-top:5px;" onclick="copyKey()">🔑 COPY TRADE KEY</button>
         
-        <div class="data-row"><span class="lbl">ENTRY</span><div><span id="pEntry" class="val t-CYAN">--</span><button class="btn-cp" onclick="cp('pEntry')">CP</button></div></div>
-        <div class="data-row"><span class="lbl">STOP</span><div><span id="pStop" class="val t-RED">--</span><button class="btn-cp" onclick="cp('pStop')">CP</button></div></div>
-        <div class="data-row"><span class="lbl">SIZE</span><div><span id="pSize" class="val">--</span><button class="btn-cp" onclick="cp('pSize')">CP</button></div></div>
+        <div style="height:20px;"></div>
+
+        <div class="data-row"><span class="lbl">ENTRY TRIGGER</span><div><span id="pEntry" class="val t-CYAN">--</span><button class="btn-cp" onclick="cp('pEntry')">CP</button></div></div>
+        <div class="data-row"><span class="lbl">STOP LOSS</span><div><span id="pStop" class="val t-RED">--</span><button class="btn-cp" onclick="cp('pStop')">CP</button></div></div>
+        <div class="data-row"><span class="lbl">POS SIZE</span><div><span id="pSize" class="val">--</span><button class="btn-cp" onclick="cp('pSize')">CP</button></div></div>
         
         <div style="height:15px;"></div>
         
@@ -137,83 +139,107 @@
 
     async function init() {
         try {
-            // CALL RADAR API (NOT VECTOR)
             const res = await fetch('/api/radar/target', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ symbol: symbol }) });
             const json = await res.json();
-            if(json.ok) { render(json.result); }
+            if(json.ok) { activeData = json.result; render(json.result); }
         } catch(e) { console.error(e); }
     }
 
     function render(d) {
-        activeData = d;
-        const l = d.levels; 
-        const p = d.plan;
+        // --- 1. POPULATE RAW DATA ---
+        document.getElementById('raw_key').value = d.mission_key;
+        document.getElementById('raw_data').value = d.indicator_string; 
 
-        // Header
+        // Header Price
         document.getElementById('livePrice').innerText = d.price.toLocaleString(undefined, {minimumFractionDigits: 2});
 
-        // HUD
+        // --- 2. KINETIC LOGIC ENGINE ---
+        const score = d.score;
+        let modeText = "STAND DOWN";
+        let modeColor = "RED";
+        let adviceText = "MARKET WEAK. DO NOT ENGAGE.";
+
+        if (score >= 75) {
+            modeText = "BREACH";
+            modeColor = "GOLD";
+            adviceText = "SUPERSONIC ENERGY DETECTED. SINGLE LATCH ACTIVE: Trade on 15m Breakout immediately.";
+        } 
+        else if (score >= 60) {
+            modeText = "ASSAULT";
+            modeColor = "CYAN";
+            adviceText = "STRONG TREND. DOUBLE LATCH: Confirm 15m Breakout AND Daily Trigger.";
+        } 
+        else if (score >= 50) {
+            modeText = "AMBUSH";
+            modeColor = "CYAN";
+            adviceText = "CAUTION. STRICT DOUBLE LATCH REQUIRED. Take profits early (Target 1).";
+        }
+
+        // --- 3. HUD UPDATES ---
+        const modeEl = document.getElementById('vMode');
+        modeEl.innerText = modeText;
+        modeEl.className = `mode-display c-${modeColor}`;
+        
+        document.getElementById('vScore').innerText = score;
+        document.getElementById('vAdvice').innerText = adviceText;
+
         const bEl = document.getElementById('biasBadge');
         bEl.innerText = `BIAS: ${d.bias}`;
         bEl.style.background = (d.bias === "BULLISH") ? "#10b981" : ((d.bias === "BEARISH") ? "#ef4444" : "#334155");
 
-        const modeEl = document.getElementById('vMode');
-        modeEl.innerText = d.status;
-        modeEl.className = `mode-display c-${d.color_code || 'RED'}`;
-        
-        document.getElementById('vAdvice').innerText = d.advice;
-        
-        const scoreEl = document.getElementById('vScore');
-        scoreEl.innerText = d.score;
-        scoreEl.style.color = (d.score >= 50) ? '#fff' : '#ef4444';
-
         // Gauges
-        const setG = (id, obj) => {
-            if(!obj) return;
-            document.getElementById(id+'Val').innerText = Math.round(obj.val);
-            document.getElementById('bar'+id.substring(1)).style.width = obj.pct + "%";
-            document.getElementById('bar'+id.substring(1)).style.background = (obj.color === 'CYAN') ? '#22d3ee' : ((obj.color === 'GREEN') ? '#10b981' : ((obj.color === 'GOLD') ? '#facc15' : '#ef4444'));
-        };
-        setG('dEnergy', d.metrics.energy);
-        setG('dSpace', d.metrics.space);
-        setG('dWind', d.metrics.wind);
-        setG('dHull', d.metrics.hull);
+        setGauge('dEnergy', d.metrics.energy);
+        setGauge('dSpace', d.metrics.space);
+        setGauge('dWind', d.metrics.wind);
+        setGauge('dHull', d.metrics.hull);
 
-        // Inputs
-        document.getElementById('raw_key').value = d.mission_key;
-        document.getElementById('raw_data').value = `${l.breakout_trigger},${l.breakdown_trigger},${l.daily_resistance},${l.daily_support},${l.range30m_high},${l.range30m_low}`;
-
-        // Flight Path
-        if (p && p.valid) {
+        // --- 4. FLIGHT PATH (Levels) ---
+        if (score < 50) {
+            document.getElementById('pEntry').innerText = "BLOCKED";
+            document.getElementById('pStop').innerText = "BLOCKED";
+            document.getElementById('pSize').innerText = "--";
+        } else {
+            const p = d.plan;
             document.getElementById('pEntry').innerText = p.entry.toLocaleString();
             document.getElementById('pStop').innerText = p.stop.toLocaleString();
             document.getElementById('pT1').innerText = p.targets[0].toLocaleString();
             document.getElementById('pT2').innerText = p.targets[1].toLocaleString();
             document.getElementById('pT3').innerText = p.targets[2].toLocaleString();
-
+            
+            // Calculate Size
             const bal = parseFloat(document.getElementById('inpBal').value) || 0;
             const risk = parseFloat(document.getElementById('inpRisk').value) || 0;
             const riskAmt = bal * (risk/100);
             document.getElementById('valLoss').innerText = "$" + riskAmt.toFixed(2);
-            
+
             const dist = Math.abs(p.entry - p.stop);
             if(dist > 0) {
                 const units = riskAmt / dist;
-                const sizeUsd = units * p.entry;
-                document.getElementById('pSize').innerText = Math.floor(sizeUsd).toLocaleString();
+                document.getElementById('pSize').innerText = units.toFixed(3);
             }
-        } else {
-            document.getElementById('pEntry').innerText = "BLOCKED";
-            document.getElementById('pSize').innerText = "--";
         }
+    }
+
+    function setGauge(id, obj) {
+        if(!obj) return;
+        document.getElementById(id+'Val').innerText = Math.round(obj.val);
+        document.getElementById('bar'+id.substring(1)).style.width = obj.pct + "%";
+        
+        let c = '#ef4444'; // Default Red
+        if (obj.color === 'CYAN') c = '#22d3ee';
+        if (obj.color === 'GREEN') c = '#10b981';
+        if (obj.color === 'GOLD') c = '#facc15';
+        if (obj.color === 'YELLOW') c = '#facc15';
+        
+        document.getElementById('bar'+id.substring(1)).style.background = c;
     }
 
     function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText.replace(/,/g,'')); }
     function copyKey() { navigator.clipboard.writeText(document.getElementById('raw_key').value); alert("Mission Key Copied"); }
-    function copyIndicator() { navigator.clipboard.writeText(document.getElementById('raw_data').value); alert("Indicator Data Copied"); }
+    function copyIndicator() { navigator.clipboard.writeText(document.getElementById('raw_data').value); alert("Indicator Data Copied!\n\nPaste into 'Kabroda Predator Command' on TradingView."); }
 
     init();
-    setInterval(init, 5000); 
+    setInterval(init, 2000); 
 </script>
 </body>
 </html>
