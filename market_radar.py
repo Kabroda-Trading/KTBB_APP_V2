@@ -29,8 +29,11 @@ def _make_indicator_string(levels):
     bd = levels.get("breakdown_trigger", 0)
     res = levels.get("daily_resistance", 0)
     sup = levels.get("daily_support", 0)
-    r30h = levels.get("r30_high", 0)
-    r30l = levels.get("r30_low", 0)
+    
+    # FIX: Use 'range30m_' keys instead of 'r30_'
+    r30h = levels.get("range30m_high", 0) 
+    r30l = levels.get("range30m_low", 0)
+    
     return f"{bo},{bd},{res},{sup},{r30h},{r30l}"
 
 # --- CORE MATH (KINETIC PHYSICS) ---
