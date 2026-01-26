@@ -1,6 +1,6 @@
 # research_lab.py
 # ==============================================================================
-# RESEARCH LAB: HYBRID ENGINE v1.6 (PORTABLE PHASE 2 DNA)
+# RESEARCH LAB: HYBRID ENGINE v2.1 (FULL PHYSICS + DATA EXPORT)
 # ==============================================================================
 import pandas as pd
 import numpy as np
@@ -16,7 +16,7 @@ import battlebox_rules
 def _slice_by_ts(candles, start_ts, end_ts):
     return [c for c in candles if start_ts <= c["time"] < end_ts]
 
-# --- KINETIC SENSORS (OPTIONAL) ---
+# --- KINETIC SENSORS (FULL LOGIC RESTORED) ---
 def _calculate_kinetic_score(row, sensors):
     if row is None or pd.isna(row['ma']): return 0, {}
     score = 0
@@ -48,7 +48,8 @@ def _calculate_kinetic_score(row, sensors):
     final_score = int((score / (active_count * 25)) * 100) if active_count > 0 else 0
     return final_score, comps
 
-async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids, tuning, sensors, min_score):
+# UPDATED: Added include_candles=False to arguments
+async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids, tuning, sensors, min_score, include_candles=False):
     try:
         if not raw_5m or len(raw_5m) < 100: return {"ok": False, "error": "Insufficient Data"}
         
@@ -78,8 +79,6 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
         curr_day = start_dt
         
         # --- PHASE 2 DNA (THE STRATEGY PROFILE) ---
-        # This acts as the "Default Settings".
-        # The HTML tuning will OVERRIDE these if the user changes the dials.
         phase2_dna = {
             "fusion_mode": True,             # Default: ON
             "ignore_15m_alignment": True,    # Default: ON (Dead feature)
@@ -91,13 +90,10 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
             "require_divergence": False
         }
         
-        # Merge User Overrides from HTML
         if tuning:
             phase2_dna.update(tuning)
 
-        # Pre-calc derived values
         zone_tol = phase2_dna["zone_tolerance_bps"] / 10000.0
-
         processed_anchors = set()
 
         while curr_day <= end_dt:
@@ -137,7 +133,7 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                     "r30_high": max(c["high"] for c in calibration),
                     "r30_low": min(c["low"] for c in calibration),
                     "last_price": context_24h[-1]["close"] if context_24h else 0.0,
-                    "tuning": phase2_dna # Triggers need to know min_dist
+                    "tuning": phase2_dna
                 }
                 computed = sse_engine.compute_sse_levels(sse_input)
                 if "error" in computed: continue
@@ -154,7 +150,6 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                     candles_15m_proxy = sse_engine._resample(context_24h, 15) if hasattr(sse_engine, "_resample") else []
                     st15 = battlebox_rules.compute_stoch(candles_15m_proxy)
                     
-                    # RUN RULES using Phase 2 DNA
                     go = battlebox_rules.detect_pullback_go(
                         side=side, levels=levels, post_accept_5m=post_lock, stoch_15m_at_accept=st15,
                         use_zone="TRIGGER", 
@@ -193,8 +188,8 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                         k_score, k_comps = _calculate_kinetic_score(row, sensors)
                     except: pass
 
-                # --- EXPORT RESULTS ---
-                results.append({
+                # --- EXPORT RESULTS (WITH OPTIONAL CANDLE DUMP) ---
+                result_packet = {
                     "date": f"{actual_session_date} [{cfg['id']}]",
                     "weekly_bias": weekly_bias,
                     "protocol": state["action"],
@@ -203,8 +198,6 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                     "trade_signal": go["ok"],
                     "trade_type": go.get("go_type", "NONE"),
                     "simulation": go.get("simulation", {}), 
-                    
-                    # PHASE 1 TRUTH
                     "levels": {
                         "anchor_price": levels.get("anchor_price"),
                         "BO": levels.get("breakout_trigger"),
@@ -215,7 +208,21 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                         "r30_low": levels.get("range30m_low"),
                         "structure_score": levels.get("structure_score", 0)
                     }
-                })
+                }
+
+                # *** THE ADDITION: OPT-IN DATA DUMP ***
+                if include_candles:
+                    full_session = _slice_by_ts(raw_5m, anchor_ts, exec_end_ts)
+                    result_packet["session_candles"] = [
+                        {
+                            "t": datetime.fromtimestamp(c["time"], tz=timezone.utc).strftime("%H:%M"),
+                            "ts": c["time"], 
+                            "o": c["open"], "h": c["high"], "l": c["low"], "c": c["close"]
+                        }
+                        for c in full_session
+                    ]
+
+                results.append(result_packet)
 
             curr_day += timedelta(days=1)
 

@@ -46,6 +46,7 @@
         .tag { padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; }
         .tag-go { background: rgba(16, 185, 129, 0.2); color: #10b981; }
         .tag-wait { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
+        .warning { color: #ef4444; font-size: 10px; margin-top: 5px; display: none; }
     </style>
 </head>
 <body>
@@ -131,6 +132,15 @@
                     <input type="number" id="minScore" value="70" min="0" max="100">
                 </div>
 
+                <div class="divider"></div>
+                <span class="section-title">DATA EXPORT</span>
+                
+                <div class="checkbox-group">
+                    <input type="checkbox" id="chkCandles" onchange="toggleWarning()">
+                    <label for="chkCandles" class="check-lbl" style="color:#fbbf24;">INCLUDE CANDLE DATA</label>
+                </div>
+                <div id="warnMsg" class="warning">⚠️ WARNING: Only check this for short ranges (< 1 month). Large datasets will freeze browser.</div>
+
                 <button onclick="runAnalysis()" class="btn-run" id="runBtn">RUN FULL ANALYSIS</button>
             </div>
 
@@ -173,6 +183,11 @@
     <script>
         function upd(id, v) { document.getElementById(id).innerText = v; }
         
+        function toggleWarning() {
+            const chk = document.getElementById('chkCandles');
+            document.getElementById('warnMsg').style.display = chk.checked ? 'block' : 'none';
+        }
+
         window.onload = function() {
             const t = new Date();
             document.getElementById('endDate').valueAsDate = t;
@@ -185,13 +200,11 @@
             document.getElementById('loader').style.display = 'block';
             document.getElementById('results').style.display = 'none';
 
-            // Gather Sessions
             let sIds = [];
             if(document.getElementById('sessNYF').checked) sIds.push("us_ny_futures");
             if(document.getElementById('sessNYE').checked) sIds.push("us_ny_equity");
             if(document.getElementById('sessLDN').checked) sIds.push("eu_london");
 
-            // Build Payload (Phase 2 DNA Overrides)
             const payload = {
                 symbol: document.getElementById('symbol').value,
                 start_date_utc: document.getElementById('startDate').value,
@@ -202,8 +215,6 @@
                     zone_tolerance_bps: parseInt(document.getElementById('tuneTol').value),
                     min_trigger_dist_bps: parseInt(document.getElementById('tuneDist').value),
                     fusion_mode: document.getElementById('chkFusion').checked,
-                    // Hardcoded ignores are implicit in backend default, but good to send explicit false/true if we wanted.
-                    // We rely on backend defaults for the ignores.
                 },
                 sensors: {
                     energy: document.getElementById('kEnergy').checked,
@@ -211,7 +222,8 @@
                     wind: document.getElementById('kWind').checked,
                     hull: document.getElementById('kHull').checked
                 },
-                min_score: parseInt(document.getElementById('minScore').value)
+                min_score: parseInt(document.getElementById('minScore').value),
+                include_candles: document.getElementById('chkCandles').checked
             };
 
             try {
@@ -223,16 +235,13 @@
                 
                 if(!data.ok) throw new Error(data.error);
 
-                // Stats
                 document.getElementById('rTotal').innerText = data.total_sessions;
                 document.getElementById('rSignals').innerText = data.trade_signals;
                 document.getElementById('rTotalR').innerText = data.total_r_realized + "R";
-                document.getElementById('rPrime').innerText = data.prime_setups || 0; // Using prime_setups if backend sends it
+                document.getElementById('rPrime').innerText = data.prime_setups || 0; 
                 
-                // FULL JSON RESTORED HERE
                 document.getElementById('rawJson').innerText = JSON.stringify(data.results, null, 2);
 
-                // Visual Log
                 let html = "";
                 const minS = payload.min_score;
                 
