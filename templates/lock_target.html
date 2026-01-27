@@ -76,9 +76,9 @@
     <div class="panel" style="grid-area: left;">
         <div class="panel-head">RISK PROTOCOL</div>
         <div class="lbl">ACCOUNT BALANCE ($)</div>
-        <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="render()">
+        <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="recalc()">
         <div class="lbl" style="margin-top:10px;">RISK PER TRADE (%)</div>
-        <input type="number" id="inpRisk" class="inp-risk" value="10.0" step="0.1" oninput="render()">
+        <input type="number" id="inpRisk" class="inp-risk" value="10.0" step="0.1" oninput="recalc()">
         <div style="margin-top: 15px; padding-top: 15px; border-top: 1px dotted #475569;">
             <div class="lbl">MAX LOSS</div>
             <div id="valLoss" style="color:#ef4444; font-size: 28px; font-weight: 800; font-family: 'Rajdhani';">$400.00</div>
@@ -135,44 +135,89 @@
     const urlParams = new URLSearchParams(window.location.search);
     const symbol = urlParams.get('symbol') || 'BTCUSDT';
     document.getElementById('tSym').innerText = symbol.replace('USDT', '') + " LOCK";
+    
+    // Global State for current data
     let activeData = null;
 
     async function init() {
         try {
-            const res = await fetch('/api/radar/target', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ symbol: symbol }) });
+            const res = await fetch('/api/radar/target', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ symbol: symbol }) 
+            });
             const json = await res.json();
-            if(json.ok) { activeData = json.result; render(json.result); }
-        } catch(e) { console.error(e); }
+            
+            // --- CRITICAL FIX: SMART UNWRAP LOGIC ---
+            // Handles both {ok:true, result:{...}} AND {ok:true, result:{result:{...}}}
+            if(json.ok) { 
+                if (json.result && json.result.result) {
+                    // Double nested structure (common in Python wrapper)
+                    activeData = json.result.result;
+                } else if (json.result) {
+                    // Single nested structure
+                    activeData = json.result;
+                }
+                
+                // Only render if we actually found data
+                if (activeData && activeData.symbol) {
+                    render(activeData); 
+                } else {
+                    console.warn("Data structure incomplete:", json);
+                    setStandby("NO SIGNAL");
+                }
+            } else {
+                setStandby("CONNECTION ERR");
+            }
+        } catch(e) { 
+            console.error("Fetch Error:", e);
+            setStandby("OFFLINE"); 
+        }
+    }
+
+    function setStandby(msg) {
+        document.getElementById('vMode').innerText = msg;
+        document.getElementById('vMode').className = "mode-display c-RED";
+        document.getElementById('vAdvice').innerText = "SYSTEM WAITING FOR DATA STREAM...";
     }
 
     function render(d) {
         // --- 1. POPULATE RAW DATA ---
-        document.getElementById('raw_key').value = d.mission_key;
-        document.getElementById('raw_data').value = d.indicator_string; 
+        if(d.mission_key) document.getElementById('raw_key').value = d.mission_key;
+        if(d.indicator_string) document.getElementById('raw_data').value = d.indicator_string; 
 
-        // Header Price
-        document.getElementById('livePrice').innerText = d.price.toLocaleString(undefined, {minimumFractionDigits: 2});
+        // Header Price (Safe Check)
+        if(d.price) {
+            document.getElementById('livePrice').innerText = d.price.toLocaleString(undefined, {minimumFractionDigits: 2});
+        }
 
         // --- 2. KINETIC LOGIC ENGINE ---
-        const score = d.score;
+        const score = d.score || 0;
         let modeText = "STAND DOWN";
         let modeColor = "RED";
         let adviceText = "MARKET WEAK. DO NOT ENGAGE.";
 
-        if (score >= 75) {
+        if (score >= 70) {
             modeText = "BREACH";
             modeColor = "GOLD";
             adviceText = "SUPERSONIC ENERGY DETECTED. SINGLE LATCH ACTIVE: Trade on 15m Breakout immediately.";
         } 
-        else if (score >= 60) {
+        else if (score >= 50) {
             modeText = "ASSAULT";
             modeColor = "CYAN";
             adviceText = "STRONG TREND. DOUBLE LATCH: Confirm 15m Breakout AND Daily Trigger.";
         } 
-        else if (score >= 50) {
+        else if (score >= 35) {
             modeText = "AMBUSH";
             modeColor = "CYAN";
             adviceText = "CAUTION. STRICT DOUBLE LATCH REQUIRED. Take profits early (Target 1).";
+        }
+
+        // Override if backend Status says HOLD FIRE explicitly
+        if (d.status === "HOLD FIRE") {
+            modeText = "HOLD FIRE";
+            modeColor = "RED";
+            adviceText = d.advice || "CONFLICT DETECTED. HOLD POSITION.";
         }
 
         // --- 3. HUD UPDATES ---
@@ -187,32 +232,54 @@
         bEl.innerText = `BIAS: ${d.bias}`;
         bEl.style.background = (d.bias === "BULLISH") ? "#10b981" : ((d.bias === "BEARISH") ? "#ef4444" : "#334155");
 
-        // Gauges
-        setGauge('dEnergy', d.metrics.energy);
-        setGauge('dSpace', d.metrics.space);
-        setGauge('dWind', d.metrics.wind);
-        setGauge('dHull', d.metrics.hull);
+        // Gauges (Safe Check)
+        if(d.metrics) {
+            setGauge('dEnergy', d.metrics.energy);
+            setGauge('dSpace', d.metrics.space);
+            setGauge('dWind', d.metrics.wind);
+            setGauge('dHull', d.metrics.hull);
+        }
 
         // --- 4. FLIGHT PATH (Levels) ---
-        if (score < 50) {
+        if (modeText === "HOLD FIRE" || modeText === "STAND DOWN") {
             document.getElementById('pEntry').innerText = "BLOCKED";
             document.getElementById('pStop').innerText = "BLOCKED";
             document.getElementById('pSize').innerText = "--";
-        } else {
+            document.getElementById('pT1').innerText = "--";
+            document.getElementById('pT2').innerText = "--";
+            document.getElementById('pT3').innerText = "--";
+        } else if (d.plan) {
             const p = d.plan;
-            document.getElementById('pEntry').innerText = p.entry.toLocaleString();
-            document.getElementById('pStop').innerText = p.stop.toLocaleString();
-            document.getElementById('pT1').innerText = p.targets[0].toLocaleString();
-            document.getElementById('pT2').innerText = p.targets[1].toLocaleString();
-            document.getElementById('pT3').innerText = p.targets[2].toLocaleString();
+            document.getElementById('pEntry').innerText = p.entry ? p.entry.toLocaleString() : "--";
+            document.getElementById('pStop').innerText = p.stop ? p.stop.toLocaleString() : "--";
             
-            // Calculate Size
-            const bal = parseFloat(document.getElementById('inpBal').value) || 0;
-            const risk = parseFloat(document.getElementById('inpRisk').value) || 0;
-            const riskAmt = bal * (risk/100);
-            document.getElementById('valLoss').innerText = "$" + riskAmt.toFixed(2);
+            if(p.targets && p.targets.length === 3) {
+                document.getElementById('pT1').innerText = p.targets[0].toLocaleString();
+                document.getElementById('pT2').innerText = p.targets[1].toLocaleString();
+                document.getElementById('pT3').innerText = p.targets[2].toLocaleString();
+            }
 
-            const dist = Math.abs(p.entry - p.stop);
+            // Trigger Size Recalc
+            recalc();
+        }
+    }
+
+    // Recalculate Position Size locally so it updates when user types in box
+    function recalc() {
+        if(!activeData || !activeData.plan) return;
+        
+        const bal = parseFloat(document.getElementById('inpBal').value) || 0;
+        const risk = parseFloat(document.getElementById('inpRisk').value) || 0;
+        const riskAmt = bal * (risk/100);
+        document.getElementById('valLoss').innerText = "$" + riskAmt.toFixed(2);
+
+        const p = activeData.plan;
+        const entry = p.entry || 0;
+        const stop = p.stop || 0;
+        
+        if (entry > 0 && stop > 0) {
+            const dist = Math.abs(entry - stop);
+            // Protect against zero division
             if(dist > 0) {
                 const units = riskAmt / dist;
                 document.getElementById('pSize').innerText = units.toFixed(3);
@@ -222,19 +289,28 @@
 
     function setGauge(id, obj) {
         if(!obj) return;
-        document.getElementById(id+'Val').innerText = Math.round(obj.val);
-        document.getElementById('bar'+id.substring(1)).style.width = obj.pct + "%";
+        const elVal = document.getElementById(id+'Val');
+        const elBar = document.getElementById('bar'+id.substring(1));
         
-        let c = '#ef4444'; // Default Red
-        if (obj.color === 'CYAN') c = '#22d3ee';
-        if (obj.color === 'GREEN') c = '#10b981';
-        if (obj.color === 'GOLD') c = '#facc15';
-        if (obj.color === 'YELLOW') c = '#facc15';
-        
-        document.getElementById('bar'+id.substring(1)).style.background = c;
+        if(elVal) elVal.innerText = Math.round(obj.val || 0);
+        if(elBar) {
+            elBar.style.width = (obj.pct || 0) + "%";
+            let c = '#ef4444'; // Default Red
+            if (obj.color === 'CYAN') c = '#22d3ee';
+            if (obj.color === 'GREEN') c = '#10b981';
+            if (obj.color === 'GOLD') c = '#facc15';
+            if (obj.color === 'YELLOW') c = '#facc15';
+            elBar.style.background = c;
+        }
     }
 
-    function cp(id) { navigator.clipboard.writeText(document.getElementById(id).innerText.replace(/,/g,'')); }
+    function cp(id) { 
+        const txt = document.getElementById(id).innerText;
+        if(txt !== "--" && txt !== "BLOCKED") {
+            navigator.clipboard.writeText(txt.replace(/,/g,'')); 
+        }
+    }
+    
     function copyKey() { navigator.clipboard.writeText(document.getElementById('raw_key').value); alert("Mission Key Copied"); }
     function copyIndicator() { navigator.clipboard.writeText(document.getElementById('raw_data').value); alert("Indicator Data Copied!\n\nPaste into 'Kabroda Predator Command' on TradingView."); }
 
