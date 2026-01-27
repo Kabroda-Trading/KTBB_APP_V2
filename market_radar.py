@@ -1,7 +1,7 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v6.0 (STRICT KINETIC MATH)
-# AUDIT: Implements "Obstruction Gate" and "Slope Floor" Logic
+# KABRODA MARKET RADAR v6.2 (POLARITY PATCH APPLIED)
+# AUDIT: Fixed Logic Inversion on "Heavy Floor" (SOL Case)
 # ==============================================================================
 import asyncio
 import battlebox_pipeline
@@ -21,11 +21,35 @@ def _make_indicator_string(levels):
     if not levels: return "0,0,0,0,0,0"
     return f"{levels.get('breakout_trigger',0)},{levels.get('breakdown_trigger',0)},{levels.get('daily_resistance',0)},{levels.get('daily_support',0)},{levels.get('range30m_high',0)},{levels.get('range30m_low',0)}"
 
+# --- CORE MATH: KINETIC BIAS DETERMINATION (THE FIX) ---
+def _determine_kinetic_bias(anchor, dr, ds, weekly_force):
+    """
+    Solves the SOL Polarity Bug.
+    Rule: Physics overrides Weekly Trend.
+    If price is resting on Support, it is BULLISH, even if Weekly is Bearish.
+    """
+    if dr == 0 or ds == 0: return weekly_force
+
+    dist_to_res = abs(dr - anchor)
+    dist_to_sup = abs(anchor - ds)
+
+    # 1. BULLISH PHYSICS: Resting on Floor
+    # If above support AND (closer to support OR broken above resistance)
+    if anchor > ds and (dist_to_sup < dist_to_res or anchor > dr):
+        return "BULLISH"
+
+    # 2. BEARISH PHYSICS: Hanging from Ceiling
+    # If below resistance AND (closer to resistance OR broken below support)
+    if anchor < dr and (dist_to_res < dist_to_sup or anchor < ds):
+        return "BEARISH"
+
+    # 3. NEUTRAL ZONE: Fallback to Weekly Context
+    return weekly_force
+
 # --- CORE MATH: THE OBSTRUCTION GATE ---
 def _check_obstruction(anchor, levels, bias):
     """
     Returns True if a Daily Level stands BETWEEN the Anchor and the Trigger.
-    This is the anti-whipsaw shield.
     """
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
@@ -37,14 +61,12 @@ def _check_obstruction(anchor, levels, bias):
     # 1. LONG SCENARIO CHECK
     if bias == "BULLISH":
         # If Daily Resistance is LOWER than Breakout Trigger, it's in the way.
-        # Anchor < DR < Trigger
         if anchor < dr < bo:
             is_obstructed = True
 
-    # 2. SHORT SCENARIO CHECK (The Jan 1st Trap)
+    # 2. SHORT SCENARIO CHECK
     elif bias == "BEARISH":
         # If Daily Support is HIGHER than Breakdown Trigger, it's in the way.
-        # Anchor > DS > Trigger
         if anchor > ds > bd:
             is_obstructed = True
 
@@ -58,62 +80,53 @@ def _calc_kinetics(anchor, levels, context):
     if dr == 0 or ds == 0 or anchor == 0: 
         return {"score": 0, "wind": 0, "energy": 0, "hull": 0, "space": 0, "bias": "NEUTRAL"}
 
-    # 1. ENERGY (The Coil) - Max 30 pts
-    # Tighter range = Higher potential energy
-    range_pct = (abs(dr - ds) / anchor) * 100
-    e_val = 30 - _score_gradient(range_pct, 1.0, 6.0, 30) # Tuned for BTC volatility
+    # --- STEP 1: DETERMINE PHYSICS BIAS ---
+    # This fixes the logic. We calculate bias FIRST.
+    weekly = context.get("weekly_force", "NEUTRAL") 
+    kinetic_bias = _determine_kinetic_bias(anchor, dr, ds, weekly)
 
-    # 2. SPACE (Proximity) - Max 15 pts
-    # How close is price to the door?
+    # 2. ENERGY (The Coil) - Max 30 pts
+    range_pct = (abs(dr - ds) / anchor) * 100
+    e_val = 30 - _score_gradient(range_pct, 1.0, 6.0, 30)
+
+    # 3. SPACE (Proximity) - Max 15 pts
     dist_up = abs(dr - anchor) / anchor * 100
     dist_dn = abs(anchor - ds) / anchor * 100
     nearest = min(dist_up, dist_dn)
     
-    if nearest < 0.3: s_val = 15 # Hammering the door
+    if nearest < 0.3: s_val = 15 
     else: s_val = 15 - _score_gradient(nearest, 0.3, 3.0, 15)
 
-    # 3. WIND (The Slope Floor) - Max 25 pts
-    weekly = context.get("weekly_force", "NEUTRAL") 
+    # 4. WIND (The Slope Floor) - Max 25 pts
     slope = float(levels.get("slope", 0.0))
-    
     w_val = 0
-    # RULE: If Slope is 0 (Flat), Wind is 0 unless Weekly is aligned perfectly
+    
     if abs(slope) > 0.05:
         w_val += _score_gradient(abs(slope), 0.05, 0.5, 15)
     
-    # Alignment Bonus
-    if (slope > 0 and weekly == "BULLISH") or (slope < 0 and weekly == "BEARISH"):
+    # Alignment Bonus (Using calculated Kinetic Bias)
+    if (slope > 0 and kinetic_bias == "BULLISH") or (slope < 0 and kinetic_bias == "BEARISH"):
         w_val += 10
     
     w_val = min(25, w_val)
 
-    # 4. HULL (The Obstruction Gate) - Max 20 pts
-    # This is the critical filter.
-    is_blocked = _check_obstruction(anchor, levels, weekly)
+    # 5. HULL (The Obstruction Gate) - Max 20 pts
+    is_blocked = _check_obstruction(anchor, levels, kinetic_bias)
     
     if is_blocked:
         h_val = 0 # Fatal Flaw
     else:
-        # Standard structural integrity based on pivot strength
         struct = float(levels.get("structure_score", 0.0))
         h_val = _score_gradient(struct, 0.2, 0.9, 20)
 
     # --- FINAL SUMMATION ---
     total = e_val + s_val + w_val + h_val
 
-    # --- OVERRIDES (The "Strict Math") ---
-    
     # Rule 1: The Obstruction Cap
-    # If the path is blocked, you cannot score higher than 45 (HOLD FIRE).
     if h_val == 0:
         total = min(45, total)
 
-    # Rule 2: The Blue Sky Override
-    # If Energy is Massive (Coil > 25) AND Path is Clear (Hull > 15),
-    # We ignore weak wind (Slope 0) because explosion is imminent.
-    # (No change to score, just prevents a Wind penalty from killing the trade)
-    
-    return {"score": int(total), "wind": w_val, "hull": h_val, "energy": e_val, "space": s_val, "bias": weekly}
+    return {"score": int(total), "wind": w_val, "hull": h_val, "energy": e_val, "space": s_val, "bias": kinetic_bias}
 
 # --- DECISION LOGIC ---
 def _get_status(symbol, k):
@@ -184,11 +197,6 @@ async def scan_sector(session_id="us_ny_futures"):
             color = "RED"
             advice = f"CONFLICT: BIAS IS {k['bias']}"
 
-        # Color Coding for UI
-        # Energy > 20 is GREEN, else YELLOW
-        # Wind > 10 is GREEN, else RED (Slope Floor)
-        # Hull > 10 is GREEN, else RED (Obstruction)
-        
         metrics = {
             "energy": {"val": k["energy"], "pct": (k["energy"]/30)*100, "color": "GREEN" if k["energy"]>=20 else "YELLOW"},
             "wind": {"val": k["wind"], "pct": (k["wind"]/25)*100, "color": "GREEN" if k["wind"]>=10 else "RED"},
