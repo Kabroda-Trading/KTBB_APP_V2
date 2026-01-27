@@ -77,13 +77,11 @@
                     let biasColor = t.bias === 'BULLISH' ? '#10b981' : (t.bias === 'BEARISH' ? '#ef4444' : '#94a3b8');
                     const getBarColor = (c) => { if(c === 'CYAN') return '#22d3ee'; if(c === 'GOLD') return '#facc15'; if(c === 'GREEN') return '#10b981'; return '#ef4444'; };
 
-                    // BUTTON LOGIC - UPDATED: COPY BUTTON ALWAYS VISIBLE
                     let mainAction = `<span class="no-go-badge">NO TRADE</span>`;
                     if (t.has_trade) {
                         mainAction = `<button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">LOCK TARGET →</button>`;
                     }
 
-                    // We wrap both buttons in a container. The Copy Button is ALWAYS rendered.
                     let actionHtml = `
                     <div style="display:flex; justify-content:flex-end; align-items:center;">
                         <button class="copy-btn" onclick="copyToClip('${t.indicator_string}')" title="Copy Indicator Data">📋</button>

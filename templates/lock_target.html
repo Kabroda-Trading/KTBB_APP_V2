@@ -31,13 +31,15 @@
         .mode-lbl { font-size: 14px; color: var(--gray); letter-spacing: 2px; font-weight: 700; margin-bottom: 10px; text-transform: uppercase; }
         .mode-display { font-family: 'Rajdhani'; font-size: 80px; font-weight: 900; line-height: 0.9; margin-bottom: 20px; text-transform: uppercase; }
         .score-box { margin-bottom: 30px; }
-        .advice-banner { background: rgba(255,255,255,0.03); border: 1px solid var(--border); padding: 15px; border-radius: 4px; font-size: 16px; color: #fff; text-align: center; }
+        .advice-banner { background: rgba(255,255,255,0.03); border: 1px solid var(--border); padding: 15px; border-radius: 4px; font-size: 16px; color: #fff; text-align: center; margin-bottom: 10px; }
+        .tactic-banner { font-size: 14px; font-weight: 800; text-align: center; text-transform: uppercase; letter-spacing: 1px; padding: 10px; border-radius: 4px; border: 1px dashed var(--border); }
 
         /* GAUGES */
         .gauges-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-top: auto; padding-top: 20px; border-top: 1px solid #334155; }
         .mini-gauge { background: rgba(0,0,0,0.2); padding: 10px; border-radius: 4px; text-align: center; }
         .gauge-lbl { font-size: 10px; color: var(--gray); font-weight: 700; margin-bottom: 4px; }
         .gauge-val { font-size: 16px; font-weight: 800; font-family: 'JetBrains Mono'; margin-bottom: 4px; }
+        .gauge-txt { font-size: 10px; font-weight: 800; margin-top: 5px; text-transform: uppercase; letter-spacing: 1px; }
         .gauge-bar-bg { height: 4px; background: #334155; border-radius: 2px; width: 100%; }
         .gauge-fill { height: 100%; width: 0%; transition: width 0.5s; }
 
@@ -100,13 +102,30 @@
             </div>
 
             <div id="vAdvice" class="advice-banner">ESTABLISHING UPLINK...</div>
+            <div id="vTactic" class="tactic-banner"></div>
         </div>
 
         <div class="gauges-row">
-            <div class="mini-gauge"><div class="gauge-lbl">ENERGY</div><div id="dEnergyVal" class="gauge-val">--</div><div class="gauge-bar-bg"><div class="gauge-fill" id="barEnergy"></div></div></div>
-            <div class="mini-gauge"><div class="gauge-lbl">SPACE</div><div id="dSpaceVal" class="gauge-val">--</div><div class="gauge-bar-bg"><div class="gauge-fill" id="barSpace"></div></div></div>
-            <div class="mini-gauge"><div class="gauge-lbl">WIND</div><div id="dWindVal" class="gauge-val">--</div><div class="gauge-bar-bg"><div class="gauge-fill" id="barWind"></div></div></div>
-            <div class="mini-gauge"><div class="gauge-lbl">HULL</div><div id="dHullVal" class="gauge-val">--</div><div class="gauge-bar-bg"><div class="gauge-fill" id="barHull"></div></div></div>
+            <div class="mini-gauge">
+                <div class="gauge-lbl">ENERGY</div><div id="dEnergyVal" class="gauge-val">--</div>
+                <div class="gauge-bar-bg"><div class="gauge-fill" id="barEnergy"></div></div>
+                <div id="lblEnergy" class="gauge-txt">--</div>
+            </div>
+            <div class="mini-gauge">
+                <div class="gauge-lbl">SPACE</div><div id="dSpaceVal" class="gauge-val">--</div>
+                <div class="gauge-bar-bg"><div class="gauge-fill" id="barSpace"></div></div>
+                <div id="lblSpace" class="gauge-txt">--</div>
+            </div>
+            <div class="mini-gauge">
+                <div class="gauge-lbl">WIND</div><div id="dWindVal" class="gauge-val">--</div>
+                <div class="gauge-bar-bg"><div class="gauge-fill" id="barWind"></div></div>
+                <div id="lblWind" class="gauge-txt">--</div>
+            </div>
+            <div class="mini-gauge">
+                <div class="gauge-lbl">HULL</div><div id="dHullVal" class="gauge-val">--</div>
+                <div class="gauge-bar-bg"><div class="gauge-fill" id="barHull"></div></div>
+                <div id="lblHull" class="gauge-txt">--</div>
+            </div>
         </div>
     </div>
 
@@ -136,7 +155,6 @@
     const symbol = urlParams.get('symbol') || 'BTCUSDT';
     document.getElementById('tSym').innerText = symbol.replace('USDT', '') + " LOCK";
     
-    // Global State
     let activeData = null;
 
     async function init() {
@@ -148,22 +166,18 @@
             });
             const json = await res.json();
             
-            // --- CRITICAL FIX: SMART UNWRAP LOGIC ---
-            // Handles both {ok:true, result:{...}} AND {ok:true, result:{result:{...}}}
             if(json.ok) { 
+                // Handle nested wrapper from backend
                 if (json.result && json.result.result) {
-                    // Double nested structure (common in Python wrapper)
                     activeData = json.result.result;
                 } else if (json.result) {
-                    // Single nested structure
                     activeData = json.result;
                 }
                 
-                // Only render if we actually found data
                 if (activeData && activeData.symbol) {
                     render(activeData); 
                 } else {
-                    console.warn("Data structure incomplete:", json);
+                    console.warn("Data incomplete:", json);
                     setStandby("NO SIGNAL");
                 }
             } else {
@@ -182,16 +196,13 @@
     }
 
     function render(d) {
-        // --- 1. POPULATE RAW DATA ---
         if(d.mission_key) document.getElementById('raw_key').value = d.mission_key;
         if(d.indicator_string) document.getElementById('raw_data').value = d.indicator_string; 
 
-        // Header Price (Safe Check)
         if(d.price) {
             document.getElementById('livePrice').innerText = d.price.toLocaleString(undefined, {minimumFractionDigits: 2});
         }
 
-        // --- 2. KINETIC LOGIC ENGINE ---
         const score = d.score || 0;
         let modeText = "STAND DOWN";
         let modeColor = "RED";
@@ -200,27 +211,25 @@
         if (score >= 70) {
             modeText = "BREACH";
             modeColor = "GOLD";
-            adviceText = "SUPERSONIC ENERGY DETECTED. SINGLE LATCH ACTIVE: Trade on 15m Breakout immediately.";
+            adviceText = "SUPERSONIC ENERGY DETECTED.";
         } 
         else if (score >= 50) {
             modeText = "ASSAULT";
             modeColor = "CYAN";
-            adviceText = "STRONG TREND. DOUBLE LATCH: Confirm 15m Breakout AND Daily Trigger.";
+            adviceText = "STRONG TREND. HIGH VOLATILITY.";
         } 
         else if (score >= 35) {
             modeText = "AMBUSH";
             modeColor = "CYAN";
-            adviceText = "CAUTION. STRICT DOUBLE LATCH REQUIRED. Take profits early (Target 1).";
+            adviceText = "CAUTION. STRICT STOPS REQUIRED.";
         }
 
-        // Override if backend Status says HOLD FIRE explicitly
         if (d.status === "HOLD FIRE") {
             modeText = "HOLD FIRE";
             modeColor = "RED";
             adviceText = d.advice || "CONFLICT DETECTED. HOLD POSITION.";
         }
 
-        // --- 3. HUD UPDATES ---
         const modeEl = document.getElementById('vMode');
         modeEl.innerText = modeText;
         modeEl.className = `mode-display c-${modeColor}`;
@@ -232,16 +241,33 @@
         bEl.innerText = `BIAS: ${d.bias}`;
         bEl.style.background = (d.bias === "BULLISH") ? "#10b981" : ((d.bias === "BEARISH") ? "#ef4444" : "#334155");
 
-        // --- 4. GAUGES (FIXED DATA SOURCE) ---
-        // These values come directly from market_radar.py logic (computed once)
+        // --- NEW TACTIC LOGIC (Wind Filter) ---
+        let tactic = "";
+        let windScore = 0;
+        if (d.metrics && d.metrics.wind) windScore = d.metrics.wind;
+        
+        // If Wind is STRONG (>=15), Standard Entry.
+        // If Wind is WEAK (<15), Trap Defense.
+        if (windScore >= 15) {
+             tactic = "TACTIC: STANDARD (ENTER ON 5M CLOSE)";
+             document.getElementById('vTactic').style.color = "#22d3ee"; // Cyan
+             document.getElementById('vTactic').style.borderColor = "#22d3ee";
+        } else {
+             tactic = "TACTIC: TRAP DEFENSE (WAIT FOR BREAK OF HIGH/LOW)";
+             document.getElementById('vTactic').style.color = "#facc15"; // Gold
+             document.getElementById('vTactic').style.borderColor = "#facc15";
+        }
+        document.getElementById('vTactic').innerText = tactic;
+
+
+        // GAUGE UPDATES
         if(d.metrics) {
-            setGauge('dEnergy', d.metrics.energy, 30); // Max 30
-            setGauge('dSpace', d.metrics.space, 15);   // Max 15
-            setGauge('dWind', d.metrics.wind, 25);     // Max 25
-            setGauge('dHull', d.metrics.hull, 20);     // Max 20
+            setGauge('dEnergy', d.metrics.energy, 30);
+            setGauge('dSpace', d.metrics.space, 15);
+            setGauge('dWind', d.metrics.wind, 25);
+            setGauge('dHull', d.metrics.hull, 20);
         }
 
-        // --- 5. FLIGHT PATH (Levels) ---
         if (modeText === "HOLD FIRE" || modeText === "STAND DOWN") {
             document.getElementById('pEntry').innerText = "BLOCKED";
             document.getElementById('pStop').innerText = "BLOCKED";
@@ -249,6 +275,7 @@
             document.getElementById('pT1').innerText = "--";
             document.getElementById('pT2').innerText = "--";
             document.getElementById('pT3').innerText = "--";
+            document.getElementById('vTactic').innerText = "";
         } else if (d.plan) {
             const p = d.plan;
             document.getElementById('pEntry').innerText = p.entry ? p.entry.toLocaleString() : "--";
@@ -259,16 +286,12 @@
                 document.getElementById('pT2').innerText = p.targets[1].toLocaleString();
                 document.getElementById('pT3').innerText = p.targets[2].toLocaleString();
             }
-
-            // Trigger Size Recalc
             recalc();
         }
     }
 
-    // Recalculate Position Size locally so it updates when user types in box
     function recalc() {
         if(!activeData || !activeData.plan) return;
-        
         const bal = parseFloat(document.getElementById('inpBal').value) || 0;
         const risk = parseFloat(document.getElementById('inpRisk').value) || 0;
         const riskAmt = bal * (risk/100);
@@ -280,7 +303,6 @@
         
         if (entry > 0 && stop > 0) {
             const dist = Math.abs(entry - stop);
-            // Protect against zero division
             if(dist > 0) {
                 const units = riskAmt / dist;
                 document.getElementById('pSize').innerText = units.toFixed(3);
@@ -288,43 +310,60 @@
         }
     }
 
-    // --- NEW GAUGE LOGIC ---
-    // Takes raw value from backend and calculates visual % here
+    // --- NEW GAUGE LOGIC WITH TEXT LABELS ---
     function setGauge(id, value, max) {
         const elVal = document.getElementById(id+'Val');
         const elBar = document.getElementById('bar'+id.substring(1));
+        const elLbl = document.getElementById('lbl'+id.substring(1));
         
-        // 1. Update Text
-        if(elVal) elVal.innerText = Math.round(value || 0);
-
-        // 2. Calculate Percentage
         const safeVal = value || 0;
         const pct = (safeVal / max) * 100;
+        
+        let c = '#ef4444'; // Red
+        let txt = "WEAK";
 
-        // 3. Update Bar & Color
-        if(elBar) {
+        // ENERGY LOGIC
+        if (id === 'dEnergy') {
+            if (pct >= 80) { c = '#22d3ee'; txt = "EXPLOSIVE"; } 
+            else if (pct >= 50) { c = '#10b981'; txt = "ACTIVE"; }
+            else { c = '#ef4444'; txt = "LOW"; }
+        }
+        // WIND LOGIC
+        else if (id === 'dWind') {
+            if (pct >= 80) { c = '#22d3ee'; txt = "TAILWIND"; }
+            else if (pct >= 60) { c = '#10b981'; txt = "STABLE"; }
+            else { c = '#ef4444'; txt = "HEADWIND"; }
+        }
+        // SPACE LOGIC
+        else if (id === 'dSpace') {
+            if (pct >= 90) { c = '#22d3ee'; txt = "AT GATE"; }
+            else if (pct >= 50) { c = '#10b981'; txt = "OPEN"; }
+            else { c = '#ef4444'; txt = "DISTANT"; }
+        }
+        // HULL LOGIC
+        else {
+            if (pct >= 70) { c = '#22d3ee'; txt = "SOLID"; }
+            else { c = '#facc15'; txt = "MESSY"; }
+        }
+
+        if (elVal) elVal.innerText = Math.round(safeVal);
+        if (elLbl) {
+            elLbl.innerText = txt;
+            elLbl.style.color = c;
+        }
+        if (elBar) {
             elBar.style.width = pct + "%";
-            
-            let c = '#ef4444'; // Low = Red
-            if (pct >= 80) c = '#22d3ee';      // Max/High = Cyan
-            else if (pct >= 50) c = '#10b981'; // Mid/Good = Green
-            else if (pct >= 25) c = '#facc15'; // Low/Ok = Yellow
-            
             elBar.style.background = c;
         }
     }
 
-    // --- CLIPBOARD UTILS ---
     function cp(id) { 
         const txt = document.getElementById(id).innerText;
-        if(txt !== "--" && txt !== "BLOCKED") {
-            navigator.clipboard.writeText(txt.replace(/,/g,'')); 
-        }
+        if(txt !== "--" && txt !== "BLOCKED") navigator.clipboard.writeText(txt.replace(/,/g,'')); 
     }
     function copyKey() { navigator.clipboard.writeText(document.getElementById('raw_key').value); alert("Mission Key Copied"); }
-    function copyIndicator() { navigator.clipboard.writeText(document.getElementById('raw_data').value); alert("Indicator Data Copied!\n\nPaste into 'Kabroda Predator Command' on TradingView."); }
+    function copyIndicator() { navigator.clipboard.writeText(document.getElementById('raw_data').value); alert("Indicator Data Copied!"); }
 
-    // Start
     init();
     setInterval(init, 2000); 
 </script>
