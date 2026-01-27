@@ -9,8 +9,8 @@
             <div class="card-body p-4">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h2 class="text-white fw-bold mb-0">BACKTEST LAB <span class="badge bg-danger ms-2" style="font-size: 0.5em; vertical-align: middle;">ADMIN FACILITY</span></h2>
-                        <p class="text-muted mb-0">Historical Simulation & Strategy Verification</p>
+                        <h2 class="text-white fw-bold mb-0">BACKTEST LAB <span class="badge bg-danger ms-2" style="font-size: 0.5em; vertical-align: middle;">ADMIN</span></h2>
+                        <p class="text-muted mb-0">Historical Simulation & Strategy Verification Facility</p>
                     </div>
                     <div id="statusIndicator" class="text-muted small">SYSTEM STANDBY</div>
                 </div>
@@ -27,13 +27,23 @@
             </div>
             <div class="card-body">
                 <form id="simForm">
+                    
                     <div class="mb-3">
-                        <label class="form-label text-muted small">TARGET ASSET</label>
-                        <select class="form-select bg-dark text-white border-secondary" id="symbolInput">
-                            <option value="BTCUSDT">BTC/USDT</option>
-                            <option value="ETHUSDT">ETH/USDT</option>
-                            <option value="SOLUSDT">SOL/USDT</option>
-                        </select>
+                        <label class="form-label text-muted small">TARGET ASSETS (PORTFOLIO)</label>
+                        <div class="bg-black p-3 rounded border border-secondary">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="chk_btc" value="BTCUSDT" checked>
+                                <label class="form-check-label text-white" for="chk_btc">BTC/USDT</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="chk_eth" value="ETHUSDT">
+                                <label class="form-check-label text-white" for="chk_eth">ETH/USDT</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="chk_sol" value="SOLUSDT">
+                                <label class="form-check-label text-white" for="chk_sol">SOL/USDT</label>
+                            </div>
+                        </div>
                     </div>
                     
                     <div class="mb-3">
@@ -94,24 +104,24 @@
             <div class="col-md-4">
                 <div class="card bg-black border-secondary text-center p-2">
                     <span class="text-muted small" style="font-size: 0.7em;">MAX DRAWDOWN</span>
-                    <span class="text-danger fw-bold" id="maxDD">0%</span>
+                    <div class="text-danger fw-bold" id="maxDD">0%</div>
                 </div>
             </div>
             <div class="col-md-4">
                 <div class="card bg-black border-secondary text-center p-2">
                     <span class="text-muted small" style="font-size: 0.7em;">PROFIT FACTOR</span>
-                    <span class="text-warning fw-bold" id="profitFactor">0.00</span>
+                    <div class="text-warning fw-bold" id="profitFactor">0.00</div>
                 </div>
             </div>
             <div class="col-md-4">
                 <div class="card bg-black border-secondary text-center p-2">
-                    <span class="text-muted small" style="font-size: 0.7em;">MAX WIN / LOSS STREAK</span>
-                    <span class="text-white fw-bold"><span class="text-success" id="winStreak">0</span> / <span class="text-danger" id="lossStreak">0</span></span>
+                    <span class="text-muted small" style="font-size: 0.7em;">W/L STREAK</span>
+                    <div class="text-white fw-bold"><span class="text-success" id="winStreak">0</span> / <span class="text-danger" id="lossStreak">0</span></div>
                 </div>
             </div>
         </div>
 
-        <div class="card bg-dark border-secondary mb-4" id="chartContainer" style="display:none; height: 300px;">
+        <div class="card bg-dark border-secondary mb-4" id="chartContainer" style="display:none; height: 350px;">
             <div class="card-body p-2 h-100">
                 <canvas id="equityChart"></canvas>
             </div>
@@ -119,7 +129,7 @@
 
         <div class="card bg-dark border-secondary">
             <div class="card-header border-secondary bg-transparent d-flex justify-content-between">
-                <h6 class="text-white mb-0 align-self-center">TRADE LOG</h6>
+                <h6 class="text-white mb-0 align-self-center">MISSION LOGS</h6>
                 <span class="badge bg-secondary" id="tradeCount">0 TRADES</span>
             </div>
             <div class="card-body p-0" style="max-height: 400px; overflow-y: auto;">
@@ -128,6 +138,7 @@
                         <thead>
                             <tr class="text-muted text-uppercase">
                                 <th class="ps-4">Date</th>
+                                <th>Asset</th>
                                 <th>Bias</th>
                                 <th>Result</th>
                                 <th>PnL</th>
@@ -135,7 +146,7 @@
                             </tr>
                         </thead>
                         <tbody id="logBody">
-                            <tr><td colspan="5" class="text-center text-muted p-4">Select parameters and Initialize...</td></tr>
+                            <tr><td colspan="6" class="text-center text-muted p-4">Ready to initialize...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -154,13 +165,24 @@ async def runSimulation() {
     const status = document.getElementById('statusIndicator');
     const originalText = btn.innerHTML;
     
+    // GATHER SYMBOLS
+    const symbols = [];
+    if(document.getElementById('chk_btc').checked) symbols.push("BTCUSDT");
+    if(document.getElementById('chk_eth').checked) symbols.push("ETHUSDT");
+    if(document.getElementById('chk_sol').checked) symbols.push("SOLUSDT");
+
+    if(symbols.length === 0) {
+        alert("Please select at least one Asset.");
+        return;
+    }
+
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>CRUNCHING DATA...';
     btn.disabled = true;
     status.innerText = "SIMULATION RUNNING...";
     status.className = "text-warning small fw-bold blink";
 
     const payload = {
-        symbol: document.getElementById('symbolInput').value,
+        symbol: symbols, // Sends Array
         start_date: document.getElementById('startDate').value,
         end_date: document.getElementById('endDate').value,
         balance: document.getElementById('balanceInput').value,
@@ -198,7 +220,7 @@ function renderDashboard(data) {
     document.getElementById('scoreBoard').style.display = 'flex';
     document.getElementById('chartContainer').style.display = 'block';
     
-    // 1. UPDATE METRICS
+    // 1. METRICS
     const profitEl = document.getElementById('netProfit');
     profitEl.innerText = `$${data.net_profit.toFixed(2)}`;
     profitEl.className = data.net_profit >= 0 ? "text-success fw-bold mb-0" : "text-danger fw-bold mb-0";
@@ -218,15 +240,15 @@ function renderDashboard(data) {
     document.getElementById('winStreak').innerText = data.max_win_streak;
     document.getElementById('lossStreak').innerText = data.max_loss_streak;
 
-    // 2. RENDER CHART
+    // 2. CHART
     renderChart(data.equity_curve);
 
-    // 3. RENDER LOGS
+    // 3. TABLE
     const tbody = document.getElementById('logBody');
     tbody.innerHTML = '';
     
     if (data.trade_log.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-4">No trades triggered. "Hold Fire" discipline active.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted p-4">No trades triggered. "Hold Fire" discipline active.</td></tr>';
         return;
     }
 
@@ -237,6 +259,7 @@ function renderDashboard(data) {
         
         tr.innerHTML = `
             <td class="text-white ps-4">${t.date}</td>
+            <td><span class="badge bg-secondary text-white" style="font-size: 0.7em;">${t.symbol}</span></td>
             <td><span class="badge ${t.bias === 'LONG' ? 'bg-success' : 'bg-danger'}" style="font-size: 0.7em;">${t.bias}</span></td>
             <td><span class="badge ${badgeColor}" style="font-size: 0.7em;">${t.result}</span></td>
             <td class="${pnlColor} fw-bold">$${t.pnl.toFixed(2)}</td>
@@ -261,13 +284,13 @@ function renderChart(equityCurve) {
         data: {
             labels: labels,
             datasets: [{
-                label: 'Account Balance',
+                label: 'Portfolio Equity',
                 data: values,
                 borderColor: '#0dcaf0',
                 backgroundColor: 'rgba(13, 202, 240, 0.1)',
                 borderWidth: 2,
-                pointRadius: 3,
-                tension: 0.1,
+                pointRadius: 2,
+                tension: 0.2,
                 fill: true
             }]
         },
@@ -282,7 +305,7 @@ function renderChart(equityCurve) {
                 x: { display: false },
                 y: { 
                     grid: { color: '#333' },
-                    ticks: { color: '#888' }
+                    ticks: { color: '#aaa' }
                 }
             }
         }

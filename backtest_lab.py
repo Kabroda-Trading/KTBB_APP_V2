@@ -1,26 +1,22 @@
 # backtest_lab.py
 # ==============================================================================
-# KABRODA BACKTEST LAB v2.0 (PRO METRICS UPGRADE)
-# BASED ON: research_lab.py (Data Fetching Core)
-# UPGRADE: Adds "Cartridge" Logic + Wall Street Metrics (Drawdown, PF, Streaks)
+# KABRODA BACKTEST LAB v3.0 (PORTFOLIO EDITION)
+# CAPABILITY: Runs Single, Dual, or Triple Threat Simulations
 # ==============================================================================
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 import traceback
+import asyncio
 
-# CORE INFRASTRUCTURE (ReadOnly Access)
+# INFRASTRUCTURE
 import session_manager
 import sse_engine 
 import battlebox_pipeline
 
-# STRATEGY CARTRIDGES (Plug them in here)
-import market_radar  # <--- CARTRIDGE #1
+# CARTRIDGE
+import market_radar
 
-# --- HELPER: DATA SLICING ---
-def _slice_by_ts(candles, start_ts, end_ts):
-    return [c for c in candles if start_ts <= c["time"] < end_ts]
-
-# --- HELPER: WEEKLY BIAS RECONSTRUCTION ---
+# --- HELPER: WEEKLY BIAS ---
 def _reconstruct_weekly_bias(df, current_time_ts):
     try:
         week_ago_ts = current_time_ts - (7 * 86400)
@@ -29,11 +25,15 @@ def _reconstruct_weekly_bias(df, current_time_ts):
         t_now = pd.to_datetime(current_time_ts, unit='s', utc=True)
         t_week = pd.to_datetime(week_ago_ts, unit='s', utc=True)
         
-        idx_now = df.index.get_indexer([t_now], method='nearest')[0]
-        price_now = df.iloc[idx_now]['open']
-        
-        idx_week = df.index.get_indexer([t_week], method='nearest')[0]
-        price_week = df.iloc[idx_week]['close']
+        # Use 'nearest' to find closest candles in history
+        try:
+            idx_now = df.index.get_indexer([t_now], method='nearest')[0]
+            price_now = df.iloc[idx_now]['open']
+            
+            idx_week = df.index.get_indexer([t_week], method='nearest')[0]
+            price_week = df.iloc[idx_week]['close']
+        except:
+            return "NEUTRAL"
 
         if price_now > price_week: return "BULLISH"
         if price_now < price_week: return "BEARISH"
@@ -41,31 +41,51 @@ def _reconstruct_weekly_bias(df, current_time_ts):
     except:
         return "NEUTRAL"
 
-# --- THE SIMULATION ENGINE ---
+# --- HELPER: DATA FETCHER ---
+async def _fetch_asset_data(symbol, s_ts, e_ts):
+    """Fetches raw data for a single asset and prepares the DataFrame"""
+    raw = await battlebox_pipeline.fetch_historical_pagination(symbol, s_ts, e_ts)
+    if not raw or len(raw) < 100: return None
+    
+    df = pd.DataFrame(raw)
+    df['time_dt'] = pd.to_datetime(df['time'], unit='s', utc=True)
+    df.set_index('time_dt', inplace=True)
+    df.sort_index(inplace=True)
+    return {"raw": raw, "df": df}
+
+# --- THE PORTFOLIO ENGINE ---
 async def run_system_test(symbol, start_date, end_date, starting_balance=1000, strategy="MARKET_RADAR"):
+    # NOTE: 'symbol' arg can be a string "BTCUSDT" or a list ["BTCUSDT", "ETHUSDT"]
+    # The API payload maps 'symbol' to this argument.
+    
     try:
-        print(f"--- INITIALIZING BACKTEST LAB: {symbol} [{strategy}] ---")
+        # Handle Input: Support both string and list
+        target_symbols = symbol if isinstance(symbol, list) else [symbol]
         
-        # 1. SETUP DATE RANGE & DATA FETCH
+        print(f"--- INITIALIZING PORTFOLIO SIM: {target_symbols} ---")
+
+        # 1. SETUP DATES
         start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         
+        # Add buffer for weekly lookback
         s_ts = int(start_dt.timestamp()) - (86400 * 10)
         e_ts = int(end_dt.timestamp()) + 86400
-        
-        # FETCH RAW DATA
-        raw_5m = await battlebox_pipeline.fetch_historical_pagination(symbol, s_ts, e_ts)
-        
-        if not raw_5m or len(raw_5m) < 100:
-            return {"ok": False, "error": "Insufficient Data from Pipeline"}
 
-        # CREATE DATAFRAME
-        df = pd.DataFrame(raw_5m)
-        df['time_dt'] = pd.to_datetime(df['time'], unit='s', utc=True)
-        df.set_index('time_dt', inplace=True)
-        df.sort_index(inplace=True)
+        # 2. PRE-FETCH DATA FOR ALL TARGETS (Parallel)
+        fetch_tasks = [_fetch_asset_data(sym, s_ts, e_ts) for sym in target_symbols]
+        results = await asyncio.gather(*fetch_tasks)
+        
+        # Map Data: {"BTCUSDT": {df:..., raw:...}, "ETHUSDT": ...}
+        market_data = {}
+        for sym, res in zip(target_symbols, results):
+            if res: market_data[sym] = res
+            else: print(f"WARN: No data for {sym}, skipping.")
+            
+        if not market_data:
+            return {"ok": False, "error": "No valid data found for any target."}
 
-        # 2. SIMULATION STATE
+        # 3. SIMULATION LOOP
         balance = float(starting_balance)
         equity_curve = [{"date": start_date, "balance": balance}]
         trade_log = []
@@ -73,114 +93,116 @@ async def run_system_test(symbol, start_date, end_date, starting_balance=1000, s
         
         cfg = session_manager.get_session_config("us_ny_futures")
 
-        # 3. RUN THE TIMELINE
         while curr_day <= end_dt:
-            query_time = curr_day + timedelta(hours=14) 
-            anchor_ts = session_manager.anchor_ts_for_utc_date(cfg, query_time)
+            daily_total_pnl = 0
             
-            lock_end_ts = anchor_ts + 1800
-            session_close_ts = anchor_ts + 86400
-            
-            calibration = _slice_by_ts(raw_5m, anchor_ts, lock_end_ts)
-            context_24h = _slice_by_ts(raw_5m, lock_end_ts - 86400, lock_end_ts)
-            
-            if len(calibration) < 6: 
-                curr_day += timedelta(days=1)
-                continue
+            # --- LOOP THROUGH EACH ASSET FOR THIS DAY ---
+            for sym in market_data.keys():
+                asset_pack = market_data[sym]
+                raw_5m = asset_pack["raw"]
+                df = asset_pack["df"]
 
-            # C. CALCULATE PHASE 1
-            sse_input = {
-                "locked_history_5m": context_24h,
-                "slice_24h_5m": context_24h,
-                "session_open_price": calibration[0]["open"],
-                "r30_high": max(c["high"] for c in calibration),
-                "r30_low": min(c["low"] for c in calibration),
-                "last_price": context_24h[-1]["close"] if context_24h else 0.0,
-                "tuning": {}
-            }
-            
-            computed = sse_engine.compute_sse_levels(sse_input)
-            if "error" in computed: 
-                curr_day += timedelta(days=1)
-                continue
-            
-            levels = computed["levels"]
-            bias = _reconstruct_weekly_bias(df, anchor_ts)
-            context = {"weekly_force": bias}
-            anchor_price = float(levels.get("anchor_price", 0))
+                # A. Identify Session Anchor
+                query_time = curr_day + timedelta(hours=14) 
+                anchor_ts = session_manager.anchor_ts_for_utc_date(cfg, query_time)
+                
+                lock_end_ts = anchor_ts + 1800
+                session_close_ts = anchor_ts + 86400
+                
+                # B. Slices
+                # Manual slice for speed since we have the full array
+                calibration = [c for c in raw_5m if anchor_ts <= c["time"] < lock_end_ts]
+                context_24h = [c for c in raw_5m if (lock_end_ts - 86400) <= c["time"] < lock_end_ts]
+                
+                if len(calibration) < 6: continue 
 
-            # --- E. INSERT CARTRIDGE ---
-            plan = None
-            metrics = {}
-            
-            if strategy == "MARKET_RADAR":
-                if anchor_price > 0:
+                # C. Phase 1 Calc
+                sse_input = {
+                    "locked_history_5m": context_24h,
+                    "slice_24h_5m": context_24h,
+                    "session_open_price": calibration[0]["open"],
+                    "r30_high": max(c["high"] for c in calibration),
+                    "r30_low": min(c["low"] for c in calibration),
+                    "last_price": context_24h[-1]["close"] if context_24h else 0.0,
+                    "tuning": {}
+                }
+                
+                computed = sse_engine.compute_sse_levels(sse_input)
+                if "error" in computed: continue
+                
+                levels = computed["levels"]
+                bias = _reconstruct_weekly_bias(df, anchor_ts)
+                context = {"weekly_force": bias}
+                anchor_price = float(levels.get("anchor_price", 0))
+
+                # D. Cartridge Logic
+                plan = None
+                metrics = {}
+                
+                if strategy == "MARKET_RADAR" and anchor_price > 0:
                     metrics = market_radar._calc_kinetics(anchor_price, levels, context)
-                    mode, advice, color = market_radar._get_status(symbol, metrics)
+                    mode, advice, color = market_radar._get_status(sym, metrics)
+                    # SCORE FILTER: >= 50
                     if metrics['score'] >= 50:
                         plan = market_radar._get_plan(mode, levels, metrics['bias'])
-            
-            # --- F. EXECUTE THE TRADE ---
-            day_pnl = 0
-            outcome = "NO TRADE"
-            
-            if plan and plan['valid']:
-                session_candles = _slice_by_ts(raw_5m, lock_end_ts, session_close_ts)
-                entry = plan['entry']
-                stop = plan['stop']
-                target = plan['targets'][0] if len(plan['targets']) > 0 else 0
+
+                # E. Execution
+                outcome = "NO TRADE"
+                trade_pnl = 0
                 
-                in_trade = False
+                if plan and plan['valid']:
+                    session_candles = [c for c in raw_5m if lock_end_ts <= c["time"] < session_close_ts]
+                    entry = plan['entry']
+                    stop = plan['stop']
+                    target = plan['targets'][0] if len(plan['targets']) > 0 else 0
+                    
+                    in_trade = False
+                    for c in session_candles:
+                        h, l = c['high'], c['low']
+                        # Entry
+                        if not in_trade:
+                            if (plan['bias'] == "LONG" and h >= entry) or (plan['bias'] == "SHORT" and l <= entry):
+                                in_trade = True
+                        # Exit
+                        if in_trade:
+                            if plan['bias'] == "LONG":
+                                if l <= stop: 
+                                    trade_pnl = balance * ((stop - entry) / entry)
+                                    outcome = "LOSS"
+                                    break
+                                elif h >= target: 
+                                    trade_pnl = balance * ((target - entry) / entry)
+                                    outcome = "WIN"
+                                    break
+                            elif plan['bias'] == "SHORT":
+                                if h >= stop: 
+                                    trade_pnl = balance * ((entry - stop) / entry)
+                                    outcome = "LOSS"
+                                    break
+                                elif l <= target: 
+                                    trade_pnl = balance * ((entry - target) / entry)
+                                    outcome = "WIN"
+                                    break
                 
-                for c in session_candles:
-                    h = c['high']
-                    l = c['low']
-                    
-                    # CHECK ENTRY
-                    if not in_trade:
-                        if plan['bias'] == "LONG" and h >= entry: in_trade = True
-                        elif plan['bias'] == "SHORT" and l <= entry: in_trade = True
-                    
-                    # CHECK EXIT
-                    if in_trade:
-                        if plan['bias'] == "LONG":
-                            if l <= stop: 
-                                day_pnl = balance * ((stop - entry) / entry)
-                                outcome = "LOSS"
-                                break
-                            elif h >= target: 
-                                day_pnl = balance * ((target - entry) / entry)
-                                outcome = "WIN"
-                                break
-                        elif plan['bias'] == "SHORT":
-                            if h >= stop: 
-                                day_pnl = balance * ((entry - stop) / entry)
-                                outcome = "LOSS"
-                                break
-                            elif l <= target: 
-                                day_pnl = balance * ((entry - target) / entry)
-                                outcome = "WIN"
-                                break
-            
-            # G. UPDATE STATS
-            if outcome != "NO TRADE":
-                balance += day_pnl
-                trade_log.append({
-                    "date": curr_day.strftime("%Y-%m-%d"),
-                    "bias": plan['bias'],
-                    "result": outcome,
-                    "pnl": round(day_pnl, 2),
-                    "score": metrics.get('score', 0),
-                    "balance": round(balance, 2)
-                })
-            
-            # Only update equity curve if day is done
+                # F. Record Asset Result
+                if outcome != "NO TRADE":
+                    daily_total_pnl += trade_pnl
+                    trade_log.append({
+                        "date": curr_day.strftime("%Y-%m-%d"),
+                        "symbol": sym, # Track which asset fired
+                        "bias": plan['bias'],
+                        "result": outcome,
+                        "pnl": round(trade_pnl, 2),
+                        "score": metrics.get('score', 0),
+                        "balance": round(balance + daily_total_pnl, 2)
+                    })
+
+            # End of Day: Update Global Balance
+            balance += daily_total_pnl
             equity_curve.append({"date": curr_day.strftime("%Y-%m-%d"), "balance": round(balance, 2)})
             curr_day += timedelta(days=1)
 
-        # --- H. PRO METRICS CALCULATION (THE WALL STREET AUDIT) ---
-        
-        # 1. MAX DRAWDOWN
+        # --- METRICS (PRO UPGRADE) ---
         peak = starting_balance
         max_dd = 0
         for pt in equity_curve:
@@ -188,12 +210,11 @@ async def run_system_test(symbol, start_date, end_date, starting_balance=1000, s
             dd = (peak - pt["balance"]) / peak
             if dd > max_dd: max_dd = dd
             
-        # 2. PROFIT FACTOR
         gross_win = sum(t['pnl'] for t in trade_log if t['pnl'] > 0)
         gross_loss = abs(sum(t['pnl'] for t in trade_log if t['pnl'] < 0))
         profit_factor = round(gross_win / gross_loss, 2) if gross_loss > 0 else 99.99
 
-        # 3. STREAKS
+        # Streaks
         curr_win_streak = 0
         max_win_streak = 0
         curr_loss_streak = 0
@@ -209,21 +230,20 @@ async def run_system_test(symbol, start_date, end_date, starting_balance=1000, s
                 curr_win_streak = 0
                 if curr_loss_streak > max_loss_streak: max_loss_streak = curr_loss_streak
 
-        # 4. FINAL REPORT PACKET
         return {
             "ok": True,
-            "symbol": symbol,
+            "symbol": "PORTFOLIO" if len(target_symbols) > 1 else target_symbols[0],
             "strategy": strategy,
             "start_balance": starting_balance,
             "end_balance": round(balance, 2),
             "net_profit": round(balance - starting_balance, 2),
             "total_trades": len(trade_log),
-            # NEW PRO METRICS
+            # PRO METRICS
             "max_drawdown_pct": round(max_dd * 100, 2),
             "profit_factor": profit_factor,
             "max_win_streak": max_win_streak,
             "max_loss_streak": max_loss_streak,
-            # ARRAYS
+            # DATA
             "trade_log": trade_log,
             "equity_curve": equity_curve
         }
