@@ -10,6 +10,7 @@
         .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
         .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
         .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
+        
         .btn-scan { background: #0ea5e9; color: #000; font-weight: 800; font-family: 'JetBrains Mono'; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: 0.2s; box-shadow: 0 0 15px rgba(14, 165, 233, 0.2); }
         .btn-scan:hover { background: #38bdf8; }
         
@@ -23,6 +24,7 @@
 
         .sym-name { font-size: 22px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
         .sym-price { font-size: 13px; color: #94a3b8; font-family: 'JetBrains Mono'; margin-top: 4px; }
+        
         .score-val { font-size: 36px; font-weight: 800; font-family: 'JetBrains Mono'; line-height: 1; }
         .stat-badge { display: inline-block; padding: 8px 16px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
 
@@ -32,15 +34,19 @@
         .bar-lbl { font-size: 9px; color: #64748b; font-family: 'JetBrains Mono'; font-weight: 700; }
         .bar-score { font-size: 10px; font-weight: 800; font-family: 'JetBrains Mono'; }
 
+        /* BUTTONS */
         .lock-btn { font-size: 11px; padding: 10px 20px; background: #1e293b; color: #fff; border: 1px solid #334155; cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
         .lock-btn:hover { background: #facc15; color:#000; border-color: #facc15; }
+
+        .copy-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; margin-right: 8px; }
+        .copy-btn:hover { background: #334155; color: #fff; border-color: #fff; }
     </style>
 </head>
 <body>
     {% include 'nav.html' %}
     <div class="radar-container">
         <div class="radar-header">
-            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v6.0</span></h2></div>
+            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v6.1</span></h2></div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
         <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">/// SCANNING SECTOR...</div>
@@ -49,6 +55,22 @@
 
     <script>
         function fmt(x){ if(!x) return "—"; return parseFloat(x).toLocaleString(undefined, {minimumFractionDigits: 2}); }
+
+        // --- NEW COPY FUNCTION ---
+        function copyToClip(str) {
+            navigator.clipboard.writeText(str).then(() => {
+                // Visual feedback could go here, for now just a quick alert or console log
+                // console.log("Copied: " + str);
+                const btn = document.activeElement;
+                if(btn && btn.classList.contains('copy-btn')) {
+                    const orig = btn.innerHTML;
+                    btn.innerHTML = "✓";
+                    setTimeout(() => btn.innerHTML = orig, 1000);
+                }
+            }, (err) => {
+                console.error('Async: Could not copy text: ', err);
+            });
+        }
 
         async function forceScan() {
             const btn = document.getElementById('scanBtn'); const grid = document.getElementById('radarTargetGrid'); const loader = document.getElementById('loading');
@@ -59,13 +81,17 @@
                 const data = await res.json();
                 let html = "";
                 data.results.forEach(t => {
-                    // Universal Color Mapping
+                    // Universal Color Mapping for Status
                     let colorClass = `border-${t.color_code}`;
                     let statusBg = '#1e293b'; let statusTxt = '#fff';
-                    
                     if(t.color_code === 'GREEN') { statusBg = 'rgba(34, 197, 94, 0.2)'; statusTxt = '#22c55e'; }
                     else if(t.color_code === 'YELLOW') { statusBg = 'rgba(234, 179, 8, 0.2)'; statusTxt = '#eab308'; }
                     else { statusBg = 'rgba(239, 68, 68, 0.2)'; statusTxt = '#ef4444'; }
+
+                    // Bias Styling
+                    let biasColor = t.bias === 'BULLISH' ? '#22c55e' : (t.bias === 'BEARISH' ? '#ef4444' : '#94a3b8');
+                    let biasBg = t.bias === 'BULLISH' ? 'rgba(34, 197, 94, 0.1)' : (t.bias === 'BEARISH' ? 'rgba(239, 68, 68, 0.1)' : 'transparent');
+                    let biasBorder = t.bias === 'BULLISH' ? '#22c55e' : (t.bias === 'BEARISH' ? '#ef4444' : '#475569');
 
                     const getBarColor = (c) => { 
                         if(c === 'GREEN') return '#22c55e'; 
@@ -73,14 +99,23 @@
                         return '#ef4444'; 
                     };
 
-                    let mainAction = t.has_trade ? 
-                        `<button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">LOCK TARGET →</button>` :
-                        `<span style="font-size:10px; color:#64748b; font-weight:700;">NO TRADE</span>`;
+                    // Action Buttons
+                    let actionHtml = `
+                    <div style="display:flex; justify-content:flex-end; align-items:center;">
+                        <button class="copy-btn" onclick="copyToClip('${t.indicator_string}')" title="Copy Indicator Data">📋</button>
+                        ${t.has_trade ? 
+                            `<button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">LOCK TARGET →</button>` :
+                            `<span style="font-size:10px; color:#64748b; font-weight:700;">NO TRADE</span>`
+                        }
+                    </div>`;
 
                     html += `
                     <div class="radar-row ${colorClass}">
                         <div>
-                            <div><span class="sym-name">${t.symbol}</span></div>
+                            <div>
+                                <span class="sym-name">${t.symbol}</span>
+                                <span style="font-size:10px; margin-left:8px; padding:2px 6px; border-radius:4px; font-weight:800; background:${biasBg}; color:${biasColor}; border:1px solid ${biasBorder}">${t.bias}</span>
+                            </div>
                             <div class="sym-price">$${fmt(t.price)}</div>
                         </div>
                         <div style="text-align:center;">
@@ -112,7 +147,7 @@
                                 <span class="bar-lbl">HUL</span>
                             </div>
                         </div>
-                        <div style="text-align:right;">${mainAction}</div>
+                        ${actionHtml}
                     </div>`;
                 });
                 grid.innerHTML = html;
