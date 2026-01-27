@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% block title %}Backtest Lab | Kabroda{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card bg-dark border-0 shadow-lg">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h2 class="text-white fw-bold mb-0">BACKTEST LAB <span class="badge bg-danger ms-2" style="font-size: 0.5em; vertical-align: middle;">ADMIN</span></h2>
+                        <p class="text-muted mb-0">Historical Simulation & Strategy Verification Facility</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-4 mb-4">
+        <div class="card bg-dark border-secondary h-100">
+            <div class="card-header border-secondary bg-transparent">
+                <h5 class="text-white mb-0">SIMULATION CONFIG</h5>
+            </div>
+            <div class="card-body">
+                <form id="simForm">
+                    <div class="mb-3">
+                        <label class="form-label text-muted">TARGET ASSET</label>
+                        <select class="form-select bg-dark text-white border-secondary" id="symbolInput">
+                            <option value="BTCUSDT">BTC/USDT</option>
+                            <option value="ETHUSDT">ETH/USDT</option>
+                            <option value="SOLUSDT">SOL/USDT</option>
+                        </select>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <label class="form-label text-muted">START DATE</label>
+                            <input type="date" class="form-control bg-dark text-white border-secondary" id="startDate" value="2026-01-01">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-muted">END DATE</label>
+                            <input type="date" class="form-control bg-dark text-white border-secondary" id="endDate" value="2026-01-31">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label text-muted">STARTING BALANCE ($)</label>
+                        <input type="number" class="form-control bg-dark text-white border-secondary" id="balanceInput" value="1000">
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label text-muted">ACTIVE CARTRIDGE</label>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="radarSwitch" checked>
+                            <label class="form-check-label text-white" for="radarSwitch">MARKET RADAR (PHASE 2)</label>
+                        </div>
+                    </div>
+
+                    <button type="button" class="btn btn-primary w-100 fw-bold" onclick="runSimulation()">
+                        <i class="bi bi-play-fill me-2"></i>INITIATE SIMULATION
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-8 mb-4">
+        <div class="row mb-4" id="scoreBoard" style="display:none;">
+            <div class="col-md-4">
+                <div class="card bg-dark border-secondary text-center p-3">
+                    <h6 class="text-muted">NET PROFIT</h6>
+                    <h3 class="text-success fw-bold" id="netProfit">$0.00</h3>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card bg-dark border-secondary text-center p-3">
+                    <h6 class="text-muted">TOTAL RETURN</h6>
+                    <h3 class="text-white fw-bold" id="totalReturn">0.00%</h3>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card bg-dark border-secondary text-center p-3">
+                    <h6 class="text-muted">WIN RATE</h6>
+                    <h3 class="text-info fw-bold" id="winRate">0%</h3>
+                </div>
+            </div>
+        </div>
+
+        <div class="card bg-dark border-secondary h-100">
+            <div class="card-header border-secondary bg-transparent d-flex justify-content-between">
+                <h5 class="text-white mb-0">MISSION LOGS</h5>
+                <span class="badge bg-secondary" id="tradeCount">0 TRADES</span>
+            </div>
+            <div class="card-body p-0" style="max-height: 500px; overflow-y: auto;">
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover mb-0">
+                        <thead>
+                            <tr class="text-muted text-uppercase small">
+                                <th>Date</th>
+                                <th>Bias</th>
+                                <th>Result</th>
+                                <th>PnL</th>
+                                <th>Balance</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logBody">
+                            <tr><td colspan="5" class="text-center text-muted p-4">Ready to initialize...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async def runSimulation() {
+    const btn = document.querySelector('button[onclick="runSimulation()"]');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>PROCESSING...';
+    btn.disabled = true;
+
+    const payload = {
+        symbol: document.getElementById('symbolInput').value,
+        start_date: document.getElementById('startDate').value,
+        end_date: document.getElementById('endDate').value,
+        balance: document.getElementById('balanceInput').value,
+        strategy: document.getElementById('radarSwitch').checked ? "MARKET_RADAR" : "NONE"
+    };
+
+    try {
+        const res = await fetch('/api/backtest/run', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        
+        const data = await res.json();
+        
+        if (data.ok) {
+            renderResults(data);
+        } else {
+            alert("Simulation Error: " + (data.error || "Unknown"));
+        }
+    } catch (e) {
+        console.error(e);
+        alert("System Error. Check console.");
+    }
+
+    btn.innerHTML = originalText;
+    btn.disabled = false;
+}
+
+function renderResults(data) {
+    document.getElementById('scoreBoard').style.display = 'flex';
+    
+    // Update Scoreboard
+    const profitEl = document.getElementById('netProfit');
+    profitEl.innerText = `$${data.net_profit.toFixed(2)}`;
+    profitEl.className = data.net_profit >= 0 ? "text-success fw-bold" : "text-danger fw-bold";
+    
+    const returnPct = ((data.end_balance - data.start_balance) / data.start_balance) * 100;
+    document.getElementById('totalReturn').innerText = `${returnPct.toFixed(2)}%`;
+    
+    const wins = data.trade_log.filter(t => t.result === "WIN").length;
+    const rate = data.total_trades > 0 ? (wins / data.total_trades * 100) : 0;
+    document.getElementById('winRate').innerText = `${rate.toFixed(1)}%`;
+    
+    document.getElementById('tradeCount').innerText = `${data.total_trades} TRADES`;
+
+    // Render Table
+    const tbody = document.getElementById('logBody');
+    tbody.innerHTML = '';
+    
+    if (data.trade_log.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-4">No trades triggered in this period.</td></tr>';
+        return;
+    }
+
+    data.trade_log.forEach(t => {
+        const tr = document.createElement('tr');
+        const pnlColor = t.pnl >= 0 ? 'text-success' : 'text-danger';
+        const badgeColor = t.result === 'WIN' ? 'bg-success' : 'bg-danger';
+        
+        tr.innerHTML = `
+            <td class="text-white">${t.date}</td>
+            <td><span class="badge ${t.bias === 'LONG' ? 'bg-success' : 'bg-danger'}">${t.bias}</span></td>
+            <td><span class="badge ${badgeColor}">${t.result}</span></td>
+            <td class="${pnlColor} fw-bold">$${t.pnl.toFixed(2)}</td>
+            <td class="text-muted">$${t.balance.toFixed(2)}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+</script>
+{% endblock %}

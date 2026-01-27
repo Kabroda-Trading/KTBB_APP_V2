@@ -24,6 +24,7 @@ import research_lab
 import ai_analyst
 import market_radar
 import vector 
+import backtest_lab  # <--- [NEW] ADDED ENGINE IMPORT
 
 # --- HELPERS ---
 def _template_or_fallback(request: Request, templates: Jinja2Templates, name: str, context: Dict[str, Any]):
@@ -162,6 +163,14 @@ def lock_target_page(request: Request, db: Session = Depends(get_db)):
     # FIX: Added **ctx so Lock Target gets the right menu
     return _template_or_fallback(request, templates, "lock_target.html", {"request": request, **ctx})
 
+# --- [NEW] BACKTEST LAB ROUTE ---
+@app.get("/suite/backtest-lab", response_class=HTMLResponse)
+def backtest_lab_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx["is_admin"]: return RedirectResponse("/suite")
+    return _template_or_fallback(request, templates, "backtest_lab.html", {"request": request, **ctx})
+# --------------------------------
+
 # --- [NEW] MISSION BRIEF ROUTE ---
 @app.get("/suite/mission-brief", response_class=HTMLResponse)
 def mission_brief_page(request: Request, db: Session = Depends(get_db)):
@@ -240,6 +249,21 @@ async def res_api(request: Request):
         min_score=pl.get("min_score", 70),
         include_candles=pl.get("include_candles", False)  # <--- THE MISSING LINK
     ))
+
+# --- [NEW] BACKTEST API ---
+@app.post("/api/backtest/run")
+async def backtest_api(request: Request):
+    try: pl = await request.json()
+    except: pl = {}
+    return JSONResponse(await backtest_lab.run_system_test(
+        symbol=pl.get("symbol", "BTCUSDT"),
+        start_date=pl.get("start_date", "2026-01-01"),
+        end_date=pl.get("end_date", "2026-01-31"),
+        starting_balance=float(pl.get("balance", 1000)),
+        strategy=pl.get("strategy", "MARKET_RADAR")
+    ))
+# --------------------------
+
 # --- VECTOR API HOOK ---
 @app.post("/api/vector/intel")
 async def vector_api(request: Request):
