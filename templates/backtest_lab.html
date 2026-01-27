@@ -3,121 +3,116 @@
 {% block title %}Backtest Lab | Kabroda{% endblock %}
 
 {% block content %}
-<div class="container-fluid py-4" style="max-width: 1600px;">
+<style>
+    /* COMPACT LOG STYLES */
+    .log-row-hold { opacity: 0.5; }
+    .log-row-hold:hover { opacity: 1; }
+    .k-metric-pill { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; border: 1px solid #333; margin-right: 4px; display: inline-block; background: #000; }
+    .k-score-val { font-weight: 900; font-family: monospace; font-size: 1.1em; }
+</style>
+
+<div class="container-fluid py-4" style="max-width: 1800px;">
     
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card bg-dark border-secondary shadow-lg">
-                <div class="card-body p-4 d-flex justify-content-between align-items-center">
-                    <div>
-                        <h2 class="text-white fw-bold mb-0">BACKTEST LAB <span class="badge bg-danger ms-2" style="font-size: 0.4em; vertical-align: middle;">ADMIN</span></h2>
-                        <p class="text-muted mb-0 small">Historical Simulation & Verification Facility</p>
-                    </div>
-                    <div id="statusIndicator" class="text-secondary fw-bold small">SYSTEM READY</div>
-                </div>
+    <div class="card bg-dark border-secondary shadow-lg mb-4">
+        <div class="card-body p-4 d-flex justify-content-between align-items-center">
+            <div>
+                <h2 class="text-white fw-bold mb-0">BACKTEST LAB <span class="badge bg-danger ms-2" style="font-size: 0.4em; vertical-align: middle;">AUDIT MODE</span></h2>
+                <p class="text-muted mb-0 small">Verify Kinetic Logic & Historical Decisions</p>
             </div>
+            <div id="statusIndicator" class="text-secondary fw-bold small">SYSTEM READY</div>
         </div>
     </div>
 
     <div class="row">
-        <div class="col-md-3 mb-4">
+        <div class="col-xl-3 col-lg-4 mb-4">
             <div class="card bg-dark border-secondary h-100">
                 <div class="card-header border-secondary bg-transparent">
-                    <h6 class="text-white mb-0 fw-bold">CONFIGURATION</h6>
+                    <h6 class="text-white mb-0 fw-bold small">SIMULATION PARAMETERS</h6>
                 </div>
                 <div class="card-body">
                     <form id="simForm">
-                        
-                        <div class="mb-4">
+                        <div class="mb-3">
                             <label class="form-label text-muted small fw-bold">TARGET ASSETS</label>
-                            <div class="p-3 rounded border border-secondary" style="background: #000;">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="chk_btc" value="BTCUSDT" checked>
-                                    <label class="form-check-label text-white" for="chk_btc">BTC (Bitcoin)</label>
-                                </div>
-                                <div class="form-check mt-2">
-                                    <input class="form-check-input" type="checkbox" id="chk_eth" value="ETHUSDT">
-                                    <label class="form-check-label text-white" for="chk_eth">ETH (Ethereum)</label>
-                                </div>
-                                <div class="form-check mt-2">
-                                    <input class="form-check-input" type="checkbox" id="chk_sol" value="SOLUSDT">
-                                    <label class="form-check-label text-white" for="chk_sol">SOL (Solana)</label>
-                                </div>
+                            <div class="bg-black p-3 rounded border border-secondary">
+                                <div class="form-check"><input class="form-check-input" type="checkbox" id="chk_btc" value="BTCUSDT" checked><label class="form-check-label text-white small" for="chk_btc">BTC (Bitcoin)</label></div>
+                                <div class="form-check"><input class="form-check-input" type="checkbox" id="chk_eth" value="ETHUSDT"><label class="form-check-label text-white small" for="chk_eth">ETH (Ethereum)</label></div>
+                                <div class="form-check"><input class="form-check-input" type="checkbox" id="chk_sol" value="SOLUSDT"><label class="form-check-label text-white small" for="chk_sol">SOL (Solana)</label></div>
                             </div>
                         </div>
                         
                         <div class="mb-3">
-                            <label class="form-label text-muted small fw-bold">DATE RANGE</label>
-                            <div class="mb-2">
-                                <span class="text-muted small">START:</span>
+                            <label class="form-label text-muted small fw-bold">TIMELINE</label>
+                            <div class="input-group mb-2 input-group-sm">
+                                <span class="input-group-text bg-secondary border-secondary text-white">START</span>
                                 <input type="date" class="form-control bg-dark text-white border-secondary" id="startDate" value="2026-01-01">
                             </div>
-                            <div>
-                                <span class="text-muted small">END:</span>
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-secondary border-secondary text-white">END</span>
                                 <input type="date" class="form-control bg-dark text-white border-secondary" id="endDate" value="2026-01-26">
                             </div>
                         </div>
 
                         <div class="mb-4">
-                            <label class="form-label text-muted small fw-bold">STARTING CAPITAL ($)</label>
+                            <label class="form-label text-muted small fw-bold">CAPITAL ($)</label>
                             <input type="number" class="form-control bg-dark text-white border-secondary" id="balanceInput" value="1000">
                         </div>
 
-                        <button type="button" class="btn btn-info w-100 fw-bold py-2" onclick="runSimulation()">
-                            INITIATE SIMULATION
-                        </button>
+                        <button type="button" class="btn btn-info w-100 fw-bold shadow" onclick="runSimulation()">RUN DIAGNOSTIC</button>
                     </form>
                 </div>
             </div>
         </div>
 
-        <div class="col-md-9 mb-4">
+        <div class="col-xl-9 col-lg-8 mb-4">
             
             <div class="row mb-3" id="scoreBoard" style="display:none;">
-                <div class="col-md-4 mb-3">
-                    <div class="card bg-dark border-secondary text-center p-3">
-                        <h6 class="text-muted small mb-1">NET PROFIT</h6>
-                        <h2 class="text-success fw-bold mb-0" id="netProfit">$0.00</h2>
+                <div class="col-md-4">
+                    <div class="card bg-dark border-secondary p-3 text-center mb-3">
+                        <div class="text-muted small fw-bold">NET PROFIT</div>
+                        <div class="h2 mb-0 fw-bold" id="netProfit">$0.00</div>
                     </div>
                 </div>
-                <div class="col-md-4 mb-3">
-                    <div class="card bg-dark border-secondary text-center p-3">
-                        <h6 class="text-muted small mb-1">DRAWDOWN</h6>
-                        <h2 class="text-danger fw-bold mb-0" id="maxDD">0%</h2>
+                <div class="col-md-4">
+                    <div class="card bg-dark border-secondary p-3 text-center mb-3">
+                        <div class="text-muted small fw-bold">DRAWDOWN</div>
+                        <div class="h2 mb-0 text-danger fw-bold" id="maxDD">0%</div>
                     </div>
                 </div>
-                <div class="col-md-4 mb-3">
-                    <div class="card bg-dark border-secondary text-center p-3">
-                        <h6 class="text-muted small mb-1">PROFIT FACTOR</h6>
-                        <h2 class="text-warning fw-bold mb-0" id="profitFactor">0.00</h2>
+                <div class="col-md-4">
+                    <div class="card bg-dark border-secondary p-3 text-center mb-3">
+                        <div class="text-muted small fw-bold">PROFIT FACTOR</div>
+                        <div class="h2 mb-0 text-warning fw-bold" id="profitFactor">0.00</div>
                     </div>
                 </div>
             </div>
 
             <div class="card bg-dark border-secondary mb-3" id="chartContainer" style="display:none;">
-                <div class="card-body" style="height: 350px;">
+                <div class="card-body" style="height: 300px;">
                     <canvas id="equityChart"></canvas>
                 </div>
             </div>
 
             <div class="card bg-dark border-secondary">
-                <div class="card-header border-secondary">
-                    <h6 class="text-white mb-0">MISSION LOGS <span class="badge bg-secondary ms-2" id="tradeCount">0</span></h6>
+                <div class="card-header border-secondary d-flex justify-content-between align-items-center">
+                    <h6 class="text-white mb-0 fw-bold small">DAILY MISSION AUDIT</h6>
+                    <span class="badge bg-secondary" id="tradeCount">0 TRADES EXECUTED</span>
                 </div>
-                <div class="card-body p-0" style="max-height: 400px; overflow-y: auto;">
-                    <table class="table table-dark table-hover mb-0 small">
-                        <thead>
-                            <tr class="text-muted text-uppercase">
-                                <th class="ps-3">Date</th>
+                <div class="card-body p-0 table-responsive" style="max-height: 600px; overflow-y: auto;">
+                    <table class="table table-dark table-hover mb-0 text-nowrap small">
+                        <thead class="bg-black sticky-top">
+                            <tr class="text-secondary text-uppercase" style="font-size: 0.75rem;">
+                                <th class="ps-4">Date</th>
                                 <th>Asset</th>
-                                <th>Type</th>
+                                <th class="text-center">Score</th>
+                                <th>Status</th>
+                                <th>Advice / Reason</th>
+                                <th>Kinetic Intel (N | S | W | H)</th>
                                 <th>Result</th>
-                                <th>PnL</th>
-                                <th class="text-end pe-3">Balance</th>
+                                <th class="text-end pe-4">PnL</th>
                             </tr>
                         </thead>
-                        <tbody id="logBody" style="font-family: monospace;">
-                            <tr><td colspan="6" class="text-center text-muted p-4">SYSTEM STANDBY...</td></tr>
+                        <tbody id="logBody" style="font-family: 'JetBrains Mono', monospace;">
+                            <tr><td colspan="8" class="text-center text-muted p-5">Awaiting Diagnostic Run...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -135,51 +130,46 @@ async function runSimulation() {
     const status = document.getElementById('statusIndicator');
     const originalText = btn.innerHTML;
     
-    // GATHER SYMBOLS
+    // SYMBOLS
     const symbols = [];
     if(document.getElementById('chk_btc').checked) symbols.push("BTCUSDT");
     if(document.getElementById('chk_eth').checked) symbols.push("ETHUSDT");
     if(document.getElementById('chk_sol').checked) symbols.push("SOLUSDT");
 
-    if(symbols.length === 0) {
-        alert("Please select at least one Asset.");
-        return;
-    }
+    if(symbols.length === 0) { alert("Select at least one Asset."); return; }
 
-    btn.innerHTML = 'PROCESSING...';
+    btn.innerHTML = 'AUDITING...';
     btn.disabled = true;
-    status.innerText = "RUNNING...";
+    status.innerText = "RUNNING DIAGNOSTICS...";
     status.className = "text-warning fw-bold small blink";
-
-    const payload = {
-        symbol: symbols,
-        start_date: document.getElementById('startDate').value,
-        end_date: document.getElementById('endDate').value,
-        balance: document.getElementById('balanceInput').value,
-        strategy: "MARKET_RADAR"
-    };
 
     try {
         const res = await fetch('/api/backtest/run', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(payload)
+            body: JSON.stringify({
+                symbol: symbols,
+                start_date: document.getElementById('startDate').value,
+                end_date: document.getElementById('endDate').value,
+                balance: document.getElementById('balanceInput').value,
+                strategy: "MARKET_RADAR"
+            })
         });
         
         const data = await res.json();
         
         if (data.ok) {
             renderDashboard(data);
-            status.innerText = "COMPLETE";
+            status.innerText = "AUDIT COMPLETE";
             status.className = "text-success fw-bold small";
         } else {
-            alert("Simulation Error: " + (data.error || "Unknown"));
             status.innerText = "ERROR";
             status.className = "text-danger fw-bold small";
+            alert(data.error);
         }
     } catch (e) {
         console.error(e);
-        alert("System Error. Check console.");
+        alert("System Error.");
     }
 
     btn.innerHTML = originalText;
@@ -191,13 +181,13 @@ function renderDashboard(data) {
     document.getElementById('chartContainer').style.display = 'block';
     
     // METRICS
-    const profitEl = document.getElementById('netProfit');
-    profitEl.innerText = `$${data.net_profit.toFixed(2)}`;
-    profitEl.className = data.net_profit >= 0 ? "text-success fw-bold mb-0" : "text-danger fw-bold mb-0";
+    const pEl = document.getElementById('netProfit');
+    pEl.innerText = `$${data.net_profit.toFixed(2)}`;
+    pEl.className = data.net_profit >= 0 ? "h2 mb-0 text-success fw-bold" : "h2 mb-0 text-danger fw-bold";
     
     document.getElementById('maxDD').innerText = `-${data.max_drawdown_pct}%`;
     document.getElementById('profitFactor').innerText = data.profit_factor;
-    document.getElementById('tradeCount').innerText = data.total_trades;
+    document.getElementById('tradeCount').innerText = `${data.total_trades} EXECUTED`;
 
     // CHART
     renderChart(data.equity_curve);
@@ -206,23 +196,66 @@ function renderDashboard(data) {
     const tbody = document.getElementById('logBody');
     tbody.innerHTML = '';
     
-    if (data.trade_log.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted p-4">No trades triggered.</td></tr>';
-        return;
-    }
+    // Sort by date descending (newest first)
+    const sortedLogs = data.mission_log.sort((a,b) => new Date(b.date) - new Date(a.date));
 
-    data.trade_log.forEach(t => {
+    sortedLogs.forEach(t => {
         const tr = document.createElement('tr');
-        const pnlColor = t.pnl >= 0 ? 'text-success' : 'text-danger';
-        const badgeColor = t.result === 'WIN' ? 'bg-success' : 'bg-danger';
         
+        // STATUS COLOR LOGIC
+        let statusBadge = 'bg-secondary';
+        let rowClass = 'log-row-hold'; // Dimmed by default
+        if (t.status === 'ASSAULT' || t.status === 'BREACH') {
+            statusBadge = 'bg-success text-black';
+            rowClass = ''; // Full brightness
+        } else if (t.status === 'AMBUSH') {
+            statusBadge = 'bg-warning text-black';
+            rowClass = '';
+        }
+
+        // SCORE COLOR
+        let scoreColor = 'text-muted';
+        if (t.score >= 50) scoreColor = 'text-success';
+        else if (t.score >= 35) scoreColor = 'text-warning';
+
+        // RESULT BADGE
+        let resBadge = 'text-muted';
+        let pnlText = '<span class="text-muted">-</span>';
+        
+        if (t.result === 'WIN') {
+            resBadge = 'badge bg-success text-black';
+            pnlText = `<span class="text-success fw-bold">+$${t.pnl.toFixed(2)}</span>`;
+            rowClass = ''; // Highlight wins
+        } else if (t.result === 'LOSS') {
+            resBadge = 'badge bg-danger';
+            pnlText = `<span class="text-danger fw-bold">$${t.pnl.toFixed(2)}</span>`;
+            rowClass = ''; // Highlight losses
+        } else if (t.result === 'NO FILL') {
+            resBadge = 'badge bg-dark border border-secondary text-muted';
+        }
+
+        // KINETIC PILLS
+        const m = t.metrics || {};
+        // Hull Warning: If Hull is 0, make it RED
+        const hullStyle = (m.hull === 0) ? 'border-color: #dc3545; color: #dc3545;' : 'border-color: #444; color: #888;';
+
+        const kinetics = `
+            <span class="k-metric-pill" style="color: #0dcaf0;">N:${m.energy||0}</span>
+            <span class="k-metric-pill" style="color: #ffc107;">S:${m.space||0}</span>
+            <span class="k-metric-pill" style="color: #fff;">W:${m.wind||0}</span>
+            <span class="k-metric-pill" style="${hullStyle}">H:${m.hull||0}</span>
+        `;
+
+        tr.className = rowClass;
         tr.innerHTML = `
-            <td class="text-white ps-3">${t.date}</td>
-            <td><span class="badge bg-secondary">${t.symbol.replace("USDT","")}</span></td>
-            <td><span class="badge bg-dark border border-secondary">${t.bias}</span></td>
-            <td><span class="badge ${badgeColor}">${t.result}</span></td>
-            <td class="${pnlColor} fw-bold">$${t.pnl.toFixed(2)}</td>
-            <td class="text-muted text-end pe-3">$${t.balance.toFixed(2)}</td>
+            <td class="text-white ps-4">${t.date}</td>
+            <td class="text-info">${t.symbol.replace('USDT','')}</td>
+            <td class="text-center ${scoreColor} k-score-val">${t.score}</td>
+            <td><span class="badge ${statusBadge}">${t.status}</span></td>
+            <td class="text-secondary small">${t.advice}</td>
+            <td>${kinetics}</td>
+            <td><span class="${resBadge}">${t.result}</span></td>
+            <td class="text-end pe-4">${pnlText}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -245,8 +278,8 @@ function renderChart(equityCurve) {
                 borderColor: '#0dcaf0',
                 backgroundColor: 'rgba(13, 202, 240, 0.1)',
                 borderWidth: 2,
-                pointRadius: 0,
-                tension: 0.1,
+                pointRadius: 2,
+                tension: 0.2,
                 fill: true
             }]
         },
@@ -256,7 +289,7 @@ function renderChart(equityCurve) {
             plugins: { legend: { display: false } },
             scales: {
                 x: { display: false },
-                y: { grid: { color: '#333' } }
+                y: { grid: { color: '#222' } }
             }
         }
     });
