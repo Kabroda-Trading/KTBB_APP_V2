@@ -9,9 +9,10 @@
             <div class="card-body p-4">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h2 class="text-white fw-bold mb-0">BACKTEST LAB <span class="badge bg-danger ms-2" style="font-size: 0.5em; vertical-align: middle;">ADMIN</span></h2>
-                        <p class="text-muted mb-0">Historical Simulation & Strategy Verification Facility</p>
+                        <h2 class="text-white fw-bold mb-0">BACKTEST LAB <span class="badge bg-danger ms-2" style="font-size: 0.5em; vertical-align: middle;">ADMIN FACILITY</span></h2>
+                        <p class="text-muted mb-0">Historical Simulation & Strategy Verification</p>
                     </div>
+                    <div id="statusIndicator" class="text-muted small">SYSTEM STANDBY</div>
                 </div>
             </div>
         </div>
@@ -19,15 +20,15 @@
 </div>
 
 <div class="row">
-    <div class="col-md-4 mb-4">
+    <div class="col-md-3 mb-4">
         <div class="card bg-dark border-secondary h-100">
             <div class="card-header border-secondary bg-transparent">
-                <h5 class="text-white mb-0">SIMULATION CONFIG</h5>
+                <h6 class="text-white mb-0 fw-bold">CONFIGURATIONS</h6>
             </div>
             <div class="card-body">
                 <form id="simForm">
                     <div class="mb-3">
-                        <label class="form-label text-muted">TARGET ASSET</label>
+                        <label class="form-label text-muted small">TARGET ASSET</label>
                         <select class="form-select bg-dark text-white border-secondary" id="symbolInput">
                             <option value="BTCUSDT">BTC/USDT</option>
                             <option value="ETHUSDT">ETH/USDT</option>
@@ -35,79 +36,106 @@
                         </select>
                     </div>
                     
-                    <div class="row mb-3">
-                        <div class="col-6">
-                            <label class="form-label text-muted">START DATE</label>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">DATE RANGE</label>
+                        <div class="input-group mb-2">
+                            <span class="input-group-text bg-secondary border-secondary text-white small">START</span>
                             <input type="date" class="form-control bg-dark text-white border-secondary" id="startDate" value="2026-01-01">
                         </div>
-                        <div class="col-6">
-                            <label class="form-label text-muted">END DATE</label>
-                            <input type="date" class="form-control bg-dark text-white border-secondary" id="endDate" value="2026-01-31">
+                        <div class="input-group">
+                            <span class="input-group-text bg-secondary border-secondary text-white small">END</span>
+                            <input type="date" class="form-control bg-dark text-white border-secondary" id="endDate" value="2026-01-26">
                         </div>
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label text-muted">STARTING BALANCE ($)</label>
+                        <label class="form-label text-muted small">CAPITAL ($)</label>
                         <input type="number" class="form-control bg-dark text-white border-secondary" id="balanceInput" value="1000">
                     </div>
 
-                    <div class="mb-4">
-                        <label class="form-label text-muted">ACTIVE CARTRIDGE</label>
+                    <div class="mb-4 p-3 bg-black rounded border border-secondary">
+                        <label class="form-label text-white small fw-bold mb-2">ACTIVE CARTRIDGE</label>
                         <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="radarSwitch" checked>
-                            <label class="form-check-label text-white" for="radarSwitch">MARKET RADAR (PHASE 2)</label>
+                            <input class="form-check-input" type="checkbox" id="radarSwitch" checked disabled>
+                            <label class="form-check-label text-muted small" for="radarSwitch">MARKET RADAR (v6.3 LOCKED)</label>
                         </div>
                     </div>
 
-                    <button type="button" class="btn btn-primary w-100 fw-bold" onclick="runSimulation()">
-                        <i class="bi bi-play-fill me-2"></i>INITIATE SIMULATION
+                    <button type="button" class="btn btn-info w-100 fw-bold shadow" onclick="runSimulation()">
+                        <i class="bi bi-cpu-fill me-2"></i>INITIATE SIMULATION
                     </button>
                 </form>
             </div>
         </div>
     </div>
 
-    <div class="col-md-8 mb-4">
+    <div class="col-md-9 mb-4">
+        
         <div class="row mb-4" id="scoreBoard" style="display:none;">
+            <div class="col-md-4 mb-3">
+                <div class="card bg-dark border-secondary text-center p-3 h-100">
+                    <h6 class="text-muted small">NET PROFIT</h6>
+                    <h2 class="text-success fw-bold mb-0" id="netProfit">$0.00</h2>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div class="card bg-dark border-secondary text-center p-3 h-100">
+                    <h6 class="text-muted small">TOTAL RETURN</h6>
+                    <h2 class="text-white fw-bold mb-0" id="totalReturn">0.00%</h2>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div class="card bg-dark border-secondary text-center p-3 h-100">
+                    <h6 class="text-muted small">WIN RATE</h6>
+                    <h2 class="text-info fw-bold mb-0" id="winRate">0%</h2>
+                </div>
+            </div>
+
             <div class="col-md-4">
-                <div class="card bg-dark border-secondary text-center p-3">
-                    <h6 class="text-muted">NET PROFIT</h6>
-                    <h3 class="text-success fw-bold" id="netProfit">$0.00</h3>
+                <div class="card bg-black border-secondary text-center p-2">
+                    <span class="text-muted small" style="font-size: 0.7em;">MAX DRAWDOWN</span>
+                    <span class="text-danger fw-bold" id="maxDD">0%</span>
                 </div>
             </div>
             <div class="col-md-4">
-                <div class="card bg-dark border-secondary text-center p-3">
-                    <h6 class="text-muted">TOTAL RETURN</h6>
-                    <h3 class="text-white fw-bold" id="totalReturn">0.00%</h3>
+                <div class="card bg-black border-secondary text-center p-2">
+                    <span class="text-muted small" style="font-size: 0.7em;">PROFIT FACTOR</span>
+                    <span class="text-warning fw-bold" id="profitFactor">0.00</span>
                 </div>
             </div>
             <div class="col-md-4">
-                <div class="card bg-dark border-secondary text-center p-3">
-                    <h6 class="text-muted">WIN RATE</h6>
-                    <h3 class="text-info fw-bold" id="winRate">0%</h3>
+                <div class="card bg-black border-secondary text-center p-2">
+                    <span class="text-muted small" style="font-size: 0.7em;">MAX WIN / LOSS STREAK</span>
+                    <span class="text-white fw-bold"><span class="text-success" id="winStreak">0</span> / <span class="text-danger" id="lossStreak">0</span></span>
                 </div>
             </div>
         </div>
 
-        <div class="card bg-dark border-secondary h-100">
+        <div class="card bg-dark border-secondary mb-4" id="chartContainer" style="display:none; height: 300px;">
+            <div class="card-body p-2 h-100">
+                <canvas id="equityChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card bg-dark border-secondary">
             <div class="card-header border-secondary bg-transparent d-flex justify-content-between">
-                <h5 class="text-white mb-0">MISSION LOGS</h5>
+                <h6 class="text-white mb-0 align-self-center">TRADE LOG</h6>
                 <span class="badge bg-secondary" id="tradeCount">0 TRADES</span>
             </div>
-            <div class="card-body p-0" style="max-height: 500px; overflow-y: auto;">
+            <div class="card-body p-0" style="max-height: 400px; overflow-y: auto;">
                 <div class="table-responsive">
-                    <table class="table table-dark table-hover mb-0">
+                    <table class="table table-dark table-hover mb-0 small">
                         <thead>
-                            <tr class="text-muted text-uppercase small">
-                                <th>Date</th>
+                            <tr class="text-muted text-uppercase">
+                                <th class="ps-4">Date</th>
                                 <th>Bias</th>
                                 <th>Result</th>
                                 <th>PnL</th>
-                                <th>Balance</th>
+                                <th class="text-end pe-4">Balance</th>
                             </tr>
                         </thead>
                         <tbody id="logBody">
-                            <tr><td colspan="5" class="text-center text-muted p-4">Ready to initialize...</td></tr>
+                            <tr><td colspan="5" class="text-center text-muted p-4">Select parameters and Initialize...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -116,19 +144,27 @@
     </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <script>
+let equityChartInstance = null;
+
 async def runSimulation() {
     const btn = document.querySelector('button[onclick="runSimulation()"]');
+    const status = document.getElementById('statusIndicator');
     const originalText = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>PROCESSING...';
+    
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>CRUNCHING DATA...';
     btn.disabled = true;
+    status.innerText = "SIMULATION RUNNING...";
+    status.className = "text-warning small fw-bold blink";
 
     const payload = {
         symbol: document.getElementById('symbolInput').value,
         start_date: document.getElementById('startDate').value,
         end_date: document.getElementById('endDate').value,
         balance: document.getElementById('balanceInput').value,
-        strategy: document.getElementById('radarSwitch').checked ? "MARKET_RADAR" : "NONE"
+        strategy: "MARKET_RADAR"
     };
 
     try {
@@ -141,9 +177,13 @@ async def runSimulation() {
         const data = await res.json();
         
         if (data.ok) {
-            renderResults(data);
+            renderDashboard(data);
+            status.innerText = "SIMULATION COMPLETE";
+            status.className = "text-success small fw-bold";
         } else {
             alert("Simulation Error: " + (data.error || "Unknown"));
+            status.innerText = "ERROR";
+            status.className = "text-danger small fw-bold";
         }
     } catch (e) {
         console.error(e);
@@ -154,13 +194,14 @@ async def runSimulation() {
     btn.disabled = false;
 }
 
-function renderResults(data) {
+function renderDashboard(data) {
     document.getElementById('scoreBoard').style.display = 'flex';
+    document.getElementById('chartContainer').style.display = 'block';
     
-    // Update Scoreboard
+    // 1. UPDATE METRICS
     const profitEl = document.getElementById('netProfit');
     profitEl.innerText = `$${data.net_profit.toFixed(2)}`;
-    profitEl.className = data.net_profit >= 0 ? "text-success fw-bold" : "text-danger fw-bold";
+    profitEl.className = data.net_profit >= 0 ? "text-success fw-bold mb-0" : "text-danger fw-bold mb-0";
     
     const returnPct = ((data.end_balance - data.start_balance) / data.start_balance) * 100;
     document.getElementById('totalReturn').innerText = `${returnPct.toFixed(2)}%`;
@@ -171,12 +212,21 @@ function renderResults(data) {
     
     document.getElementById('tradeCount').innerText = `${data.total_trades} TRADES`;
 
-    // Render Table
+    // PRO METRICS
+    document.getElementById('maxDD').innerText = `-${data.max_drawdown_pct}%`;
+    document.getElementById('profitFactor').innerText = data.profit_factor;
+    document.getElementById('winStreak').innerText = data.max_win_streak;
+    document.getElementById('lossStreak').innerText = data.max_loss_streak;
+
+    // 2. RENDER CHART
+    renderChart(data.equity_curve);
+
+    // 3. RENDER LOGS
     const tbody = document.getElementById('logBody');
     tbody.innerHTML = '';
     
     if (data.trade_log.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-4">No trades triggered in this period.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-4">No trades triggered. "Hold Fire" discipline active.</td></tr>';
         return;
     }
 
@@ -186,13 +236,56 @@ function renderResults(data) {
         const badgeColor = t.result === 'WIN' ? 'bg-success' : 'bg-danger';
         
         tr.innerHTML = `
-            <td class="text-white">${t.date}</td>
-            <td><span class="badge ${t.bias === 'LONG' ? 'bg-success' : 'bg-danger'}">${t.bias}</span></td>
-            <td><span class="badge ${badgeColor}">${t.result}</span></td>
+            <td class="text-white ps-4">${t.date}</td>
+            <td><span class="badge ${t.bias === 'LONG' ? 'bg-success' : 'bg-danger'}" style="font-size: 0.7em;">${t.bias}</span></td>
+            <td><span class="badge ${badgeColor}" style="font-size: 0.7em;">${t.result}</span></td>
             <td class="${pnlColor} fw-bold">$${t.pnl.toFixed(2)}</td>
-            <td class="text-muted">$${t.balance.toFixed(2)}</td>
+            <td class="text-muted text-end pe-4">$${t.balance.toFixed(2)}</td>
         `;
         tbody.appendChild(tr);
+    });
+}
+
+function renderChart(equityCurve) {
+    const ctx = document.getElementById('equityChart').getContext('2d');
+    
+    if (equityChartInstance) {
+        equityChartInstance.destroy();
+    }
+
+    const labels = equityCurve.map(p => p.date);
+    const values = equityCurve.map(p => p.balance);
+
+    equityChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Account Balance',
+                data: values,
+                borderColor: '#0dcaf0',
+                backgroundColor: 'rgba(13, 202, 240, 0.1)',
+                borderWidth: 2,
+                pointRadius: 3,
+                tension: 0.1,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { mode: 'index', intersect: false }
+            },
+            scales: {
+                x: { display: false },
+                y: { 
+                    grid: { color: '#333' },
+                    ticks: { color: '#888' }
+                }
+            }
+        }
     });
 }
 </script>
