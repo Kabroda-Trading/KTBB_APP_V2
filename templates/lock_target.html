@@ -136,7 +136,7 @@
     const symbol = urlParams.get('symbol') || 'BTCUSDT';
     document.getElementById('tSym').innerText = symbol.replace('USDT', '') + " LOCK";
     
-    // Global State for current data
+    // Global State
     let activeData = null;
 
     async function init() {
@@ -232,15 +232,16 @@
         bEl.innerText = `BIAS: ${d.bias}`;
         bEl.style.background = (d.bias === "BULLISH") ? "#10b981" : ((d.bias === "BEARISH") ? "#ef4444" : "#334155");
 
-        // Gauges (Safe Check)
+        // --- 4. GAUGES (FIXED DATA SOURCE) ---
+        // These values come directly from market_radar.py logic (computed once)
         if(d.metrics) {
-            setGauge('dEnergy', d.metrics.energy);
-            setGauge('dSpace', d.metrics.space);
-            setGauge('dWind', d.metrics.wind);
-            setGauge('dHull', d.metrics.hull);
+            setGauge('dEnergy', d.metrics.energy, 30); // Max 30
+            setGauge('dSpace', d.metrics.space, 15);   // Max 15
+            setGauge('dWind', d.metrics.wind, 25);     // Max 25
+            setGauge('dHull', d.metrics.hull, 20);     // Max 20
         }
 
-        // --- 4. FLIGHT PATH (Levels) ---
+        // --- 5. FLIGHT PATH (Levels) ---
         if (modeText === "HOLD FIRE" || modeText === "STAND DOWN") {
             document.getElementById('pEntry').innerText = "BLOCKED";
             document.getElementById('pStop').innerText = "BLOCKED";
@@ -287,33 +288,43 @@
         }
     }
 
-    function setGauge(id, obj) {
-        if(!obj) return;
+    // --- NEW GAUGE LOGIC ---
+    // Takes raw value from backend and calculates visual % here
+    function setGauge(id, value, max) {
         const elVal = document.getElementById(id+'Val');
         const elBar = document.getElementById('bar'+id.substring(1));
         
-        if(elVal) elVal.innerText = Math.round(obj.val || 0);
+        // 1. Update Text
+        if(elVal) elVal.innerText = Math.round(value || 0);
+
+        // 2. Calculate Percentage
+        const safeVal = value || 0;
+        const pct = (safeVal / max) * 100;
+
+        // 3. Update Bar & Color
         if(elBar) {
-            elBar.style.width = (obj.pct || 0) + "%";
-            let c = '#ef4444'; // Default Red
-            if (obj.color === 'CYAN') c = '#22d3ee';
-            if (obj.color === 'GREEN') c = '#10b981';
-            if (obj.color === 'GOLD') c = '#facc15';
-            if (obj.color === 'YELLOW') c = '#facc15';
+            elBar.style.width = pct + "%";
+            
+            let c = '#ef4444'; // Low = Red
+            if (pct >= 80) c = '#22d3ee';      // Max/High = Cyan
+            else if (pct >= 50) c = '#10b981'; // Mid/Good = Green
+            else if (pct >= 25) c = '#facc15'; // Low/Ok = Yellow
+            
             elBar.style.background = c;
         }
     }
 
+    // --- CLIPBOARD UTILS ---
     function cp(id) { 
         const txt = document.getElementById(id).innerText;
         if(txt !== "--" && txt !== "BLOCKED") {
             navigator.clipboard.writeText(txt.replace(/,/g,'')); 
         }
     }
-    
     function copyKey() { navigator.clipboard.writeText(document.getElementById('raw_key').value); alert("Mission Key Copied"); }
     function copyIndicator() { navigator.clipboard.writeText(document.getElementById('raw_data').value); alert("Indicator Data Copied!\n\nPaste into 'Kabroda Predator Command' on TradingView."); }
 
+    // Start
     init();
     setInterval(init, 2000); 
 </script>
