@@ -18,8 +18,11 @@
                     </a>
                     <div class="dropdown-content">
                         <a href="/suite/mission-brief" style="color: #facc15;">⚠️ MISSION BRIEF</a>
-                        
                         <a href="/suite/market-radar" style="color: #facc15;">📡 MARKET RADAR</a>
+                        <a href="/suite/backtest-lab" style="color: #facc15;">🔬 BACKTEST LAB</a>
+                        
+                        <div style="height: 1px; background: #334155; margin: 5px 0;"></div>
+                        
                         <a href="/admin" style="color: #fff;">👥 USER ROSTER</a>
                         <a href="/suite/system-monitor">🖥️ SYSTEM MONITOR</a>
                         <a href="/suite/omega">🚀 PROJECT OMEGA</a>
@@ -48,19 +51,22 @@
 </nav>
 
 <style>
-    /* Ensure the user's original CSS classes work if not already in site.css */
+    /* NAVBAR CORE STYLES */
     .navbar { background: #020617; border-bottom: 1px solid #1e293b; height: 70px; display: flex; align-items: center; }
     .nav-container { max-width: 1400px; margin: 0 auto; width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; }
     .logo { font-family: 'Inter', sans-serif; font-weight: 900; color: #fff; text-decoration: none; display: flex; align-items: center; gap: 10px; letter-spacing: 1px; }
+    
     .nav-links { list-style: none; display: flex; gap: 20px; align-items: center; margin: 0; padding: 0; }
-    .nav-links li a { text-decoration: none; color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 700; transition: 0.2s; text-transform: uppercase; letter-spacing: 0.5px; }
-    .nav-links li a:hover { color: #fff; }
+    .nav-links li a, .dropbtn { text-decoration: none; color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 700; transition: 0.2s; text-transform: uppercase; letter-spacing: 0.5px; }
+    .nav-links li a:hover, .dropbtn:hover { color: #fff; }
     
     /* DROPDOWN LOGIC */
-    .dropdown { position: relative; }
-    .dropdown-content { display: none; position: absolute; top: 100%; right: 0; background: #0f172a; border: 1px solid #334155; min-width: 200px; border-radius: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 1000; padding: 5px 0; }
+    .dropdown { position: relative; height: 100%; display: flex; align-items: center; }
+    .dropdown-content { display: none; position: absolute; top: 50px; right: 0; background: #0f172a; border: 1px solid #334155; min-width: 220px; border-radius: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 1000; padding: 5px 0; }
     .dropdown:hover .dropdown-content { display: block; }
-    .dropdown-content a { display: block; padding: 12px 20px; color: #cbd5e1; border-bottom: 1px solid #1e293b; }
+    
+    /* DROPDOWN ITEMS */
+    .dropdown-content a { display: block; padding: 12px 20px; color: #cbd5e1; border-bottom: 1px solid #1e293b; font-size: 11px; }
     .dropdown-content a:last-child { border-bottom: none; }
-    .dropdown-content a:hover { background: #1e293b; color: #fff; }
+    .dropdown-content a:hover { background: #1e293b; color: #fff; padding-left: 25px; } /* Slight slide effect on hover */
 </style>
