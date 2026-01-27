@@ -11,48 +11,39 @@
         .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
         .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
         .btn-scan { background: #0ea5e9; color: #000; font-weight: 800; font-family: 'JetBrains Mono'; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: 0.2s; box-shadow: 0 0 15px rgba(14, 165, 233, 0.2); }
-        .btn-scan:hover { background: #38bdf8; box-shadow: 0 0 25px rgba(14, 165, 233, 0.4); }
+        .btn-scan:hover { background: #38bdf8; }
         
         .radar-grid { display: grid; gap: 15px; }
         .radar-row { display: grid; grid-template-columns: 1.5fr 1fr 1fr 3.5fr 1.5fr; background: #0f172a; border: 1px solid #1e293b; padding: 25px 30px; border-radius: 6px; align-items: center; transition: transform 0.2s, border-color 0.2s; }
         .radar-row:hover { border-color: #334155; transform: translateY(-2px); }
 
-        .border-CYAN { border-left: 4px solid #22d3ee; }
-        .border-GOLD { border-left: 4px solid #facc15; box-shadow: 0 0 15px rgba(250, 204, 21, 0.1); }
-        .border-AMBER { border-left: 4px solid #fbbf24; }
+        .border-GREEN { border-left: 4px solid #22c55e; }
+        .border-YELLOW { border-left: 4px solid #eab308; }
         .border-RED { border-left: 4px solid #ef4444; opacity: 0.7; }
 
         .sym-name { font-size: 22px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
         .sym-price { font-size: 13px; color: #94a3b8; font-family: 'JetBrains Mono'; margin-top: 4px; }
         .score-val { font-size: 36px; font-weight: 800; font-family: 'JetBrains Mono'; line-height: 1; }
-        .score-lbl { font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
         .stat-badge { display: inline-block; padding: 8px 16px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
 
         .bars-container { display: flex; gap: 20px; height: 40px; align-items: flex-end; justify-content: center; }
         .bar-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; height: 100%; text-align: center; max-width: 60px; }
-        .bar-fill { width: 100%; border-radius: 2px; background: #334155; min-height: 4px; transition: height 0.5s ease; }
-        .bar-lbl { font-size: 9px; color: #64748b; text-align: center; font-family: 'JetBrains Mono'; font-weight: 700; }
-        
-        .lock-btn { font-size: 11px; padding: 10px 20px; background: #1e293b; color: #fff; border: 1px solid #334155; cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
-        .lock-btn:hover { background: #334155; border-color: #fff; }
-        .no-go-badge { font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; border: 1px solid #334155; padding: 8px 16px; border-radius: 4px; display:inline-block; }
+        .bar-fill { width: 100%; border-radius: 2px; min-height: 4px; transition: height 0.5s ease; }
+        .bar-lbl { font-size: 9px; color: #64748b; font-family: 'JetBrains Mono'; font-weight: 700; }
+        .bar-score { font-size: 10px; font-weight: 800; font-family: 'JetBrains Mono'; }
 
-        .bias-tag { font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 3px; margin-left: 8px; vertical-align: middle; border: 1px solid; }
-        .copy-btn { background:#facc15; color:#000; border:none; border-radius:4px; padding:10px 12px; cursor:pointer; font-size:14px; margin-right:5px; transition:0.2s; }
-        .copy-btn:hover { background:#fde047; transform:scale(1.05); }
+        .lock-btn { font-size: 11px; padding: 10px 20px; background: #1e293b; color: #fff; border: 1px solid #334155; cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
+        .lock-btn:hover { background: #facc15; color:#000; border-color: #facc15; }
     </style>
 </head>
 <body>
     {% include 'nav.html' %}
     <div class="radar-container">
         <div class="radar-header">
-            <div>
-                <div style="font-size:12px; color:#94a3b8; font-family:'JetBrains Mono'; letter-spacing:1px; margin-bottom:5px;">/// FLEET COMMAND</div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v5.1</span></h2>
-            </div>
+            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v6.0</span></h2></div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
-        <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">/// SCANNING FLEET PROTOCOLS...</div>
+        <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">/// SCANNING SECTOR...</div>
         <div id="radarTargetGrid" class="radar-grid"></div>
     </div>
 
@@ -68,49 +59,65 @@
                 const data = await res.json();
                 let html = "";
                 data.results.forEach(t => {
+                    // Universal Color Mapping
                     let colorClass = `border-${t.color_code}`;
                     let statusBg = '#1e293b'; let statusTxt = '#fff';
-                    if(t.color_code === 'GOLD') { statusBg = 'rgba(250, 204, 21, 0.2)'; statusTxt = '#facc15'; }
-                    else if(t.color_code === 'CYAN') { statusBg = 'rgba(34, 211, 238, 0.2)'; statusTxt = '#22d3ee'; }
-                    else if(t.color_code === 'RED') { statusBg = 'rgba(239, 68, 68, 0.2)'; statusTxt = '#ef4444'; }
                     
-                    let biasColor = t.bias === 'BULLISH' ? '#10b981' : (t.bias === 'BEARISH' ? '#ef4444' : '#94a3b8');
-                    const getBarColor = (c) => { if(c === 'CYAN') return '#22d3ee'; if(c === 'GOLD') return '#facc15'; if(c === 'GREEN') return '#10b981'; return '#ef4444'; };
+                    if(t.color_code === 'GREEN') { statusBg = 'rgba(34, 197, 94, 0.2)'; statusTxt = '#22c55e'; }
+                    else if(t.color_code === 'YELLOW') { statusBg = 'rgba(234, 179, 8, 0.2)'; statusTxt = '#eab308'; }
+                    else { statusBg = 'rgba(239, 68, 68, 0.2)'; statusTxt = '#ef4444'; }
 
-                    let mainAction = `<span class="no-go-badge">NO TRADE</span>`;
-                    if (t.has_trade) {
-                        mainAction = `<button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">LOCK TARGET →</button>`;
-                    }
+                    const getBarColor = (c) => { 
+                        if(c === 'GREEN') return '#22c55e'; 
+                        if(c === 'YELLOW') return '#eab308'; 
+                        return '#ef4444'; 
+                    };
 
-                    let actionHtml = `
-                    <div style="display:flex; justify-content:flex-end; align-items:center;">
-                        <button class="copy-btn" onclick="copyToClip('${t.indicator_string}')" title="Copy Indicator Data">📋</button>
-                        ${mainAction}
-                    </div>`;
+                    let mainAction = t.has_trade ? 
+                        `<button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">LOCK TARGET →</button>` :
+                        `<span style="font-size:10px; color:#64748b; font-weight:700;">NO TRADE</span>`;
 
                     html += `
                     <div class="radar-row ${colorClass}">
-                        <div><div><span class="sym-name">${t.symbol}</span> <span class="bias-tag" style="color:${biasColor}; border-color:${biasColor}">${t.bias}</span></div><div class="sym-price">$${fmt(t.price)}</div></div>
-                        <div style="text-align:center;"><div class="score-val" style="color:${t.score >= 50 ? '#fff' : '#ef4444'}">${t.score}</div><div class="score-lbl">KINETIC</div></div>
-                        <div style="text-align:center;"><span class="stat-badge" style="background:${statusBg}; color:${statusTxt}">${t.status}</span></div>
-                        <div class="bars-container">
-                            <div class="bar-col"><div class="bar-fill" style="height:${t.metrics.energy.pct}%; background:${getBarColor(t.metrics.energy.color)}"></div><span class="bar-lbl">NRG</span></div>
-                            <div class="bar-col"><div class="bar-fill" style="height:${t.metrics.space.pct}%; background:${getBarColor(t.metrics.space.color)}"></div><span class="bar-lbl">SPC</span></div>
-                            <div class="bar-col"><div class="bar-fill" style="height:${t.metrics.wind.pct}%; background:${getBarColor(t.metrics.wind.color)}"></div><span class="bar-lbl">WND</span></div>
-                            <div class="bar-col"><div class="bar-fill" style="height:${t.metrics.hull.pct}%; background:${getBarColor(t.metrics.hull.color)}"></div><span class="bar-lbl">HUL</span></div>
+                        <div>
+                            <div><span class="sym-name">${t.symbol}</span></div>
+                            <div class="sym-price">$${fmt(t.price)}</div>
                         </div>
-                        <div style="text-align:right;">${actionHtml}</div>
+                        <div style="text-align:center;">
+                            <div class="score-val" style="color:${statusTxt}">${t.score}</div>
+                            <div style="font-size:10px; color:#64748b; font-weight:700;">SCORE</div>
+                        </div>
+                        <div style="text-align:center;">
+                            <span class="stat-badge" style="background:${statusBg}; color:${statusTxt}">${t.status}</span>
+                        </div>
+                        <div class="bars-container">
+                            <div class="bar-col">
+                                <div class="bar-score" style="color:${getBarColor(t.metrics.energy.color)}">${Math.round(t.metrics.energy.val)}</div>
+                                <div class="bar-fill" style="height:${t.metrics.energy.pct}%; background:${getBarColor(t.metrics.energy.color)}"></div>
+                                <span class="bar-lbl">NRG</span>
+                            </div>
+                            <div class="bar-col">
+                                <div class="bar-score" style="color:${getBarColor(t.metrics.space.color)}">${Math.round(t.metrics.space.val)}</div>
+                                <div class="bar-fill" style="height:${t.metrics.space.pct}%; background:${getBarColor(t.metrics.space.color)}"></div>
+                                <span class="bar-lbl">SPC</span>
+                            </div>
+                            <div class="bar-col">
+                                <div class="bar-score" style="color:${getBarColor(t.metrics.wind.color)}">${Math.round(t.metrics.wind.val)}</div>
+                                <div class="bar-fill" style="height:${t.metrics.wind.pct}%; background:${getBarColor(t.metrics.wind.color)}"></div>
+                                <span class="bar-lbl">WND</span>
+                            </div>
+                            <div class="bar-col">
+                                <div class="bar-score" style="color:${getBarColor(t.metrics.hull.color)}">${Math.round(t.metrics.hull.val)}</div>
+                                <div class="bar-fill" style="height:${t.metrics.hull.pct}%; background:${getBarColor(t.metrics.hull.color)}"></div>
+                                <span class="bar-lbl">HUL</span>
+                            </div>
+                        </div>
+                        <div style="text-align:right;">${mainAction}</div>
                     </div>`;
                 });
                 grid.innerHTML = html;
             } catch(e) { console.log(e); } finally { loader.style.display = 'none'; grid.style.display = 'grid'; btn.disabled = false; }
         }
-        
-        function copyToClip(str) {
-            navigator.clipboard.writeText(str);
-            alert("Level Data Copied!\nPaste into TradingView Indicator.");
-        }
-
         document.addEventListener('DOMContentLoaded', forceScan);
     </script>
 </body>
