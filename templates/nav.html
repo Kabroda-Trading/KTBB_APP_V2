@@ -1,7 +1,7 @@
 <nav class="navbar">
     <div class="nav-container">
         <a href="/" class="logo">
-            <div style="width: 12px; height: 12px; background: var(--accent-cyan); border-radius: 2px;"></div>
+            <div style="width: 12px; height: 12px; background: #0dcaf0; border-radius: 2px;"></div>
             KABRODA
         </a>
 
@@ -13,9 +13,7 @@
 
                 {% if is_admin %}
                 <li class="dropdown">
-                    <a href="#" class="dropbtn">
-                        BOSS CONTROL ▼
-                    </a>
+                    <a href="#" class="dropbtn" style="color: #facc15;">BOSS CONTROL ▼</a>
                     <div class="dropdown-content">
                         <a href="/suite/mission-brief" style="color: #facc15;">⚠️ MISSION BRIEF</a>
                         <a href="/suite/market-radar" style="color: #facc15;">📡 MARKET RADAR</a>
@@ -23,7 +21,7 @@
                         
                         <div style="height: 1px; background: #334155; margin: 5px 0;"></div>
                         
-                        <a href="/admin" style="color: #fff;">👥 USER ROSTER</a>
+                        <a href="/admin">👥 USER ROSTER</a>
                         <a href="/suite/system-monitor">🖥️ SYSTEM MONITOR</a>
                         <a href="/suite/omega">🚀 PROJECT OMEGA</a>
                         <a href="/suite/research-lab">🧪 RESEARCH LAB</a>
@@ -44,29 +42,52 @@
         
         {% if not is_logged_in %}
         <div class="nav-cta" style="margin-left: 20px;">
-            <a href="/register" class="btn-primary" style="font-size: 0.9rem; padding: 8px 16px;">START FREE</a>
+            <a href="/register" class="btn btn-primary" style="padding: 5px 15px; font-size: 0.9rem; background: #0dcaf0; border: none; color: #000; font-weight: bold;">START FREE</a>
         </div>
         {% endif %}
     </div>
 </nav>
 
 <style>
-    /* NAVBAR CORE STYLES */
-    .navbar { background: #020617; border-bottom: 1px solid #1e293b; height: 70px; display: flex; align-items: center; }
+    /* NAVBAR CORE */
+    .navbar { background: #020617; border-bottom: 1px solid #1e293b; height: 70px; display: flex; align-items: center; width: 100%; }
     .nav-container { max-width: 1400px; margin: 0 auto; width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; }
-    .logo { font-family: 'Inter', sans-serif; font-weight: 900; color: #fff; text-decoration: none; display: flex; align-items: center; gap: 10px; letter-spacing: 1px; }
+    .logo { font-family: sans-serif; font-weight: 900; color: #fff; text-decoration: none; display: flex; align-items: center; gap: 10px; letter-spacing: 1px; font-size: 1.2rem; }
     
-    .nav-links { list-style: none; display: flex; gap: 20px; align-items: center; margin: 0; padding: 0; }
-    .nav-links li a, .dropbtn { text-decoration: none; color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 700; transition: 0.2s; text-transform: uppercase; letter-spacing: 0.5px; }
-    .nav-links li a:hover, .dropbtn:hover { color: #fff; }
-    
-    /* DROPDOWN LOGIC */
-    .dropdown { position: relative; height: 100%; display: flex; align-items: center; }
-    .dropdown-content { display: none; position: absolute; top: 50px; right: 0; background: #0f172a; border: 1px solid #334155; min-width: 220px; border-radius: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 1000; padding: 5px 0; }
+    .nav-links { list-style: none; display: flex; gap: 25px; align-items: center; margin: 0; padding: 0; }
+    .nav-links li { position: relative; height: 100%; display: flex; align-items: center; }
+    .nav-links a { text-decoration: none; color: #94a3b8; font-family: monospace; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; transition: color 0.2s; }
+    .nav-links a:hover { color: #fff; }
+
+    /* FIXED DROPDOWN */
+    .dropdown { height: 70px; /* Match navbar height to catch hover */ }
+    .dropdown-content {
+        display: none;
+        position: absolute;
+        top: 60px; /* Moves it UP closer to text */
+        right: -10px;
+        background: #0f172a;
+        border: 1px solid #334155;
+        min-width: 220px;
+        border-radius: 6px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        z-index: 9999;
+        padding: 8px 0;
+    }
     .dropdown:hover .dropdown-content { display: block; }
     
-    /* DROPDOWN ITEMS */
-    .dropdown-content a { display: block; padding: 12px 20px; color: #cbd5e1; border-bottom: 1px solid #1e293b; font-size: 11px; }
+    /* INVISIBLE BRIDGE to prevent mouse slip */
+    .dropdown::after {
+        content: '';
+        position: absolute;
+        top: 40px;
+        left: 0;
+        width: 100%;
+        height: 30px; 
+        background: transparent;
+    }
+
+    .dropdown-content a { display: block; padding: 10px 20px; color: #cbd5e1; border-bottom: 1px solid #1e293b; font-size: 12px; }
     .dropdown-content a:last-child { border-bottom: none; }
-    .dropdown-content a:hover { background: #1e293b; color: #fff; padding-left: 25px; } /* Slight slide effect on hover */
+    .dropdown-content a:hover { background: #1e293b; color: #fff; padding-left: 24px; transition: 0.2s; }
 </style>
