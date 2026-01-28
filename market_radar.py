@@ -1,16 +1,16 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v6.7 (THE WICK GUARD)
-# UPDATE: Implements 'Wick Test' to avoid 'Retail Stops'.
-# LOGIC: Scans all floors, skips the ones that are too close (Wick Magnets),
-#        and selects the first 'Structural Moat' below the noise.
+# KABRODA MARKET RADAR v6.12 (PREDATOR PRIORITY)
+# AUDIT: 1. Stops HARD-CODED to prioritize 30m High/Low (Predator) + Buffer.
+#        2. Targets use Chart-Aligned Fib Extensions (0.618, 1.0, 1.618).
+#        3. Entries front-run targets to guarantee fills.
 # ==============================================================================
 import asyncio
 import battlebox_pipeline
 
 TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
-# --- HELPERS ---
+# --- HELPER: GRADIENT SCORING ---
 def _score_gradient(val, min_v, max_v, max_score):
     if val < min_v: return 0
     if val > max_v: return max_score
@@ -21,7 +21,7 @@ def _make_indicator_string(levels):
     if not levels: return "0,0,0,0,0,0"
     return f"{levels.get('breakout_trigger',0)},{levels.get('breakdown_trigger',0)},{levels.get('daily_resistance',0)},{levels.get('daily_support',0)},{levels.get('range30m_high',0)},{levels.get('range30m_low',0)}"
 
-# --- MISSION BRIEF TRANSLATOR ---
+# --- MISSION BRIEF TRANSLATOR (ROE) ---
 def _generate_roe(k, levels, anchor):
     bias = k['bias']
     score = k['score']
@@ -98,54 +98,47 @@ def _get_status(symbol, k):
     if score >= 35: return "AMBUSH", "AGGRESSIVE/RISKY", "YELLOW"
     return "HOLD FIRE", "INSUFFICIENT DATA", "RED"
 
-# --- THE WICK GUARD (SMART STOP LOGIC) ---
-def _find_smart_stop(entry, direction, levels):
+# --- PRIORITY STOP SELECTOR (PREDATOR LINES) ---
+def _find_predator_stop(entry, direction, levels):
     """
-    Scans all levels to find the 'Liquidity Moat' - a stop that is
-    protected by structure but not excessively wide.
+    PRIORITIZES the 30-minute High/Low (Predator Lines).
+    Only falls back to Daily Levels if Predator lines are missing or invalid.
+    Adds a 0.1% 'Wick Buffer' to survive retests.
     """
-    # 1. Collect all possible levels
-    candidates = [
-        float(levels.get("breakout_trigger", 0)),
-        float(levels.get("breakdown_trigger", 0)),
-        float(levels.get("daily_resistance", 0)),
-        float(levels.get("daily_support", 0)),
-        float(levels.get("range30m_high", 0)),
-        float(levels.get("range30m_low", 0))
-    ]
-    # Remove zeros
-    candidates = [x for x in candidates if x > 0]
-
-    valid_stops = []
+    pred_h = float(levels.get("range30m_high", 0))
+    pred_l = float(levels.get("range30m_low", 0))
+    dr = float(levels.get("daily_resistance", 0))
+    ds = float(levels.get("daily_support", 0))
     
+    # WICK BUFFER: 0.1% padding (e.g. $90 on BTC)
+    buffer = entry * 0.001 
+
     if direction == "LONG":
-        # Find levels BELOW entry
-        floors = sorted([x for x in candidates if x < entry], reverse=True) # Closest first
+        # 1. Try Predator Low (Highest Accuracy Intraday)
+        if pred_l > 0 and pred_l < entry:
+            return pred_l - buffer
         
-        for f in floors:
-            dist_pct = (entry - f) / entry
-            # RULE: Wick Guard
-            # If floor is too close (< 0.25%), it's a wick magnet. Skip it.
-            # If floor is moderately safe (> 0.25%), use it.
-            if dist_pct > 0.0025: 
-                return f
-        
-        # Fallback: If no safe floor found, use the lowest one (Basement)
-        return min(floors) if floors else (entry * 0.99)
+        # 2. Fallback: Daily Support (Structural Floor)
+        if ds > 0 and ds < entry:
+            return ds - buffer
+            
+        # 3. Last Resort: 1% Safety Net
+        return entry * 0.99
 
     elif direction == "SHORT":
-        # Find levels ABOVE entry
-        ceilings = sorted([x for x in candidates if x > entry]) # Closest first
-        
-        for c in ceilings:
-            dist_pct = (c - entry) / entry
-            if dist_pct > 0.0025:
-                return c
-                
-        return max(ceilings) if ceilings else (entry * 1.01)
+        # 1. Try Predator High
+        if pred_h > 0 and pred_h > entry:
+            return pred_h + buffer
+            
+        # 2. Fallback: Daily Resistance
+        if dr > 0 and dr > entry:
+            return dr + buffer
+            
+        return entry * 1.01
 
     return 0
 
+# --- TRADE PLANNER (CHART ALIGNED) ---
 def _get_plan(mode, levels, k, anchor):
     plan = {"valid": False, "bias": "NEUTRAL", "entry": 0, "stop": 0, "targets": [0,0,0]}
     if mode == "HOLD FIRE": return plan
@@ -155,19 +148,46 @@ def _get_plan(mode, levels, k, anchor):
     bd = float(levels.get("breakdown_trigger", 0))
     dr = float(levels.get("daily_resistance", 0))
     
+    # Calculate Stored Energy (Trigger Gap)
+    volatility_gap = abs(bo - bd)
+    if volatility_gap < (bo * 0.005): volatility_gap = bo * 0.02 
+
     active_trend = "LONG" if bias == "BULLISH" else ("SHORT" if bias == "BEARISH" else "NEUTRAL")
     if bias == "BEARISH" and anchor > dr: active_trend = "LONG"
     if bias == "BULLISH" and anchor < dr: active_trend = "SHORT"
 
+    # BANKER BUFFER: Front-run the chart line by 1.5% of the gap
+    front_run = volatility_gap * 0.015
+
     if active_trend == "LONG" and bo > 0:
-        stop_price = _find_smart_stop(bo, "LONG", levels)
-        risk = abs(bo - stop_price)
-        plan = {"valid": True, "bias": "LONG", "entry": bo, "stop": stop_price, "targets": [bo+risk, bo+(risk*2), bo+(risk*3)]}
+        # Stop prioritizes 30m Low
+        stop_price = _find_predator_stop(bo, "LONG", levels)
+        
+        # Chart-Aligned Fib Targets
+        plan = {
+            "valid": True, "bias": "LONG", 
+            "entry": bo, 
+            "stop": stop_price,
+            "targets": [
+                bo + (volatility_gap * 0.618) - front_run, # T1: Golden Pocket
+                bo + (volatility_gap * 1.0) - front_run,   # T2: Measured Move
+                bo + (volatility_gap * 1.618) - front_run  # T3: Extension
+            ]
+        }
 
     elif active_trend == "SHORT" and bd > 0:
-        stop_price = _find_smart_stop(bd, "SHORT", levels)
-        risk = abs(bd - stop_price)
-        plan = {"valid": True, "bias": "SHORT", "entry": bd, "stop": stop_price, "targets": [bd-risk, bd-(risk*2), bd-(risk*3)]}
+        stop_price = _find_predator_stop(bd, "SHORT", levels)
+        
+        plan = {
+            "valid": True, "bias": "SHORT", 
+            "entry": bd, 
+            "stop": stop_price, 
+            "targets": [
+                bd - (volatility_gap * 0.618) + front_run,
+                bd - (volatility_gap * 1.0) + front_run,
+                bd - (volatility_gap * 1.618) + front_run
+            ]
+        }
             
     return plan
 
