@@ -85,6 +85,13 @@
         </div>
         <div id="vAdvice" class="advice-banner">WAITING FOR DATA...</div>
 
+        <div style="margin-top:20px; text-align:left; background:rgba(0,0,0,0.3); border:1px solid #334155; padding:15px; border-radius:4px; border-left: 3px solid #334155;" id="roeContainer">
+            <div style="font-size:10px; color:#94a3b8; font-weight:700; margin-bottom:5px; letter-spacing:1px;">RULES OF ENGAGEMENT</div>
+            <div id="vROE" style="font-size:14px; line-height:1.4; color:#e2e8f0; font-family:'JetBrains Mono';">
+                // AWAITING BRIEF...
+            </div>
+        </div>
+
         <div class="gauges-row">
             <div class="gauge-box">
                 <div class="g-lbl">ENERGY</div>
@@ -175,7 +182,15 @@
         advEl.style.borderColor = `var(--${theme.toLowerCase()})`;
         advEl.style.color = `var(--${theme.toLowerCase()})`;
 
-        // 2. GAUGES (Red/Yellow/Green)
+        // --- NEW: RENDER MISSION BRIEF ---
+        const roeText = d.roe || "STANDARD OPERATING PROCEDURE.";
+        document.getElementById('vROE').innerText = roeText;
+        const roeCont = document.getElementById('roeContainer');
+        if(theme === "GREEN") roeCont.style.borderLeftColor = "#22c55e";
+        else if(theme === "YELLOW") roeCont.style.borderLeftColor = "#eab308";
+        else roeCont.style.borderLeftColor = "#ef4444";
+
+        // 2. GAUGES
         updateGauge('Energy', d.metrics.energy, 30);
         updateGauge('Space', d.metrics.space, 15);
         updateGauge('Wind', d.metrics.wind, 25);
@@ -190,7 +205,6 @@
             document.getElementById('pT3').innerText = d.plan.targets[2].toLocaleString();
             recalc(); // Update size
         } else {
-            // Clear if invalid
             ['pEntry','pStop','pT1','pT2','pT3','pSize'].forEach(id => document.getElementById(id).innerText = "--");
         }
     }
