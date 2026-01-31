@@ -1,76 +1,82 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v7.1 (STABILITY FIX)
-# RESTORED: _make_indicator_string (Required for frontend line rendering).
-# RETAINED: v7.0 Behavior Engine & Anti-Chop Logic.
+# KABRODA MARKET RADAR v7.2 (BETA PROTOCOL)
+# LOGIC:
+#   1. BTC: Standard Rules (0.5% Runway, All Jailbreaks Valid).
+#   2. ETH/SOL: Stricter Rules (0.8% Runway, Jailbreaks require BTC Confirmation).
+#   3. "The Death Zone" (0.5% - 0.8%) is now marked SUFFOCATED for Alts.
 # ==============================================================================
 import asyncio
 import battlebox_pipeline
 
 TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
-# --- HELPER: DATA PACKAGING (RESTORED) ---
+# --- HELPER: DATA PACKAGING ---
 def _make_indicator_string(levels):
-    """
-    Packs the raw levels into a CSV string for the frontend charts.
-    Format: BO, BD, Res, Sup, 30H, 30L
-    """
     if not levels: return "0,0,0,0,0,0"
     return f"{levels.get('breakout_trigger',0)},{levels.get('breakdown_trigger',0)},{levels.get('daily_resistance',0)},{levels.get('daily_support',0)},{levels.get('range30m_high',0)},{levels.get('range30m_low',0)}"
 
+# --- HELPER: ASSET-SPECIFIC THRESHOLDS ---
+def _get_thresholds(symbol):
+    """
+    Returns (Runway_Min_Pct, Allow_Solo_Jailbreak)
+    BTC: 0.5% Runway, Solo Jailbreak OK.
+    ALTS: 0.8% Runway, Solo Jailbreak RISKY.
+    """
+    if "BTC" in symbol:
+        return 0.005, True # 0.5%
+    return 0.008, False    # 0.8% for ETH/SOL
+
 # --- CORE: BEHAVIOR PREDICTION ENGINE ---
-def _analyze_topology(anchor, levels, bias):
-    """
-    Classifies the day into one of 4 behaviors based on Line Structure.
-    Returns: Verdict, Color, Score, Trade_Vector (Direction)
-    """
+def _analyze_topology(symbol, anchor, levels, bias):
     if anchor == 0: return "DATA_SYNC", "GRAY", 0, "NEUTRAL"
 
-    # 1. PARSE LEVELS
+    # 1. GET THRESHOLDS
+    runway_limit, allow_jailbreak = _get_thresholds(symbol)
+
+    # 2. PARSE LEVELS
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
     dr = float(levels.get("daily_resistance", 0))
     ds = float(levels.get("daily_support", 0))
     
-    # 2. DEFINE TOPOLOGY (The Structure)
-    # Normal: Triggers are INSIDE the Daily Walls
-    # Inverted: Triggers are OUTSIDE the Daily Walls
+    # 3. DEFINE TOPOLOGY
     is_inverted_up = bo > dr
     is_inverted_dn = bd < ds
     
-    # 3. CALCULATE RUNWAY (The "Empty Space" Ratio)
-    # How much profit room exists before hitting a concrete wall?
+    # 4. CALCULATE RUNWAY
     runway_up_pct = ((dr - bo) / anchor) * 100 if bo > 0 else 0
     runway_dn_pct = ((bd - ds) / anchor) * 100 if bd > 0 else 0
 
     # --- BEHAVIOR PROFILING ---
 
-    # PROFILE 1: THE JAILBREAK (Massive Expansion)
-    # Logic: Structural Wall is already broken. Sky/Floor is open.
+    # PROFILE 1: THE JAILBREAK
     if is_inverted_up and bias in ["BULLISH", "NEUTRAL"]:
-        return "JAILBREAK (UP)", "PURPLE", 95, "LONG"
+        if allow_jailbreak:
+            return "JAILBREAK (UP)", "PURPLE", 95, "LONG"
+        else:
+            return "JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL" # Alt Protection
     
     if is_inverted_dn and bias in ["BEARISH", "NEUTRAL"]:
-        return "JAILBREAK (DOWN)", "PURPLE", 95, "SHORT"
+        if allow_jailbreak:
+            return "JAILBREAK (DOWN)", "PURPLE", 95, "SHORT"
+        else:
+            return "JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL" # Alt Protection
 
-    # PROFILE 2: THE SUFFOCATION (The Chop Trap)
-    # Logic: Trigger is inside, but < 0.5% room to move.
-    # Result: Price hits wall and reverses. DO NOT TOUCH.
-    if bias == "BULLISH" and 0 < runway_up_pct < 0.5:
+    # PROFILE 2: THE SUFFOCATION (Variable Thresholds)
+    # Uses 'runway_limit' which is 0.5% for BTC but 0.8% for Alts.
+    if bias == "BULLISH" and 0 < runway_up_pct < runway_limit:
         return f"SUFFOCATED ({runway_up_pct:.2f}%)", "RED", 10, "NEUTRAL"
-    if bias == "BEARISH" and 0 < runway_dn_pct < 0.5:
+    if bias == "BEARISH" and 0 < runway_dn_pct < runway_limit:
         return f"SUFFOCATED ({runway_dn_pct:.2f}%)", "RED", 10, "NEUTRAL"
 
-    # PROFILE 3: THE MAGNET (Standard Base Hit)
-    # Logic: Clean runway (> 0.5%) and Aligned Bias.
-    # Result: Price runs to the wall.
-    if bias == "BULLISH" and runway_up_pct >= 0.5:
+    # PROFILE 3: THE MAGNET
+    if bias == "BULLISH" and runway_up_pct >= runway_limit:
         return f"MAGNET LONG ({runway_up_pct:.2f}%)", "GREEN", 75, "LONG"
-    if bias == "BEARISH" and runway_dn_pct >= 0.5:
+    if bias == "BEARISH" and runway_dn_pct >= runway_limit:
         return f"MAGNET SHORT ({runway_dn_pct:.2f}%)", "GREEN", 75, "SHORT"
 
-    # PROFILE 4: BIAS BLOCKADE / DRIFTER
-    # Logic: Bias is opposite to the trade, or Neutral with no Jailbreak.
+    # PROFILE 4: BIAS BLOCKADE
     if bias == "NEUTRAL":
         return "DRIFTER / NO GRAVITY", "YELLOW", 25, "NEUTRAL"
         
@@ -81,46 +87,39 @@ def _generate_roe(verdict, levels):
     dr = int(float(levels.get("daily_resistance", 0)))
     ds = int(float(levels.get("daily_support", 0)))
 
-    if "JAILBREAK" in verdict:
-        return "CRITICAL STRUCTURAL FAILURE. Triggers are OUTSIDE daily walls. High probability of MASSIVE EXPANSION. Aggressive pursuit authorized. Aim for Target 3."
+    if "JAILBREAK (UP)" in verdict or "JAILBREAK (DOWN)" in verdict:
+        return "CRITICAL STRUCTURAL FAILURE. Triggers are OUTSIDE walls. High probability of EXPANSION. Authorized."
     
+    if "JAILBREAK (UNCONFIRMED)" in verdict:
+        return "WARNING: VOLATILITY TRAP. Jailbreak detected on Altcoin without BTC confirmation. High risk of fake-out. Stand down or wait for BTC."
+
     if "SUFFOCATED" in verdict:
-        return "WARNING: CHOP ZONE. Trigger is too close to the Daily Wall (<0.5% Runway). Risk of immediate reversal is high. HOLD FIRE."
+        return "WARNING: CHOP ZONE. Trigger is too close to the Daily Wall (Insufficient Runway). Risk of immediate reversal. HOLD FIRE."
     
     if "MAGNET" in verdict:
         return f"STANDARD OPERATION. Clear runway detected. The Daily Wall ({dr} or {ds}) is the MAGNET. Take profit strictly at the Wall."
         
-    if "DRIFTER" in verdict:
-        return "LOW ENERGY ENVIRONMENT. No structural break and no weekly gravity. Market is drifting. Stand down."
-
-    return "BIAS CONFLICT. Market structure opposes Weekly Gravity. High failure rate. Stand down."
+    return "LOW ENERGY / CONFLICT. Market structure opposes gravity. Stand down."
 
 # --- PRIORITY STOP SELECTOR ---
 def _find_predator_stop(entry, direction, levels):
-    """
-    PRIORITIZES the 30-minute High/Low (Predator Lines).
-    """
     pred_h = float(levels.get("range30m_high", 0))
     pred_l = float(levels.get("range30m_low", 0))
-    
-    # 0.1% buffer for noise
     buffer = entry * 0.001 
 
     if direction == "LONG":
         if pred_l > 0 and pred_l < entry: return pred_l - buffer
-        return entry * 0.99 # Fallback 1%
+        return entry * 0.99 
 
     elif direction == "SHORT":
         if pred_h > 0 and pred_h > entry: return pred_h + buffer
-        return entry * 1.01 # Fallback 1%
-
+        return entry * 1.01 
     return 0
 
 # --- TRADE PLANNER ---
 def _get_plan(verdict, vector, levels, anchor):
     plan = {"valid": False, "bias": "NEUTRAL", "entry": 0, "stop": 0, "targets": [0,0,0]}
     
-    # FILTER: Only plan if the Behavior Engine authorized a specific vector
     if vector == "NEUTRAL": return plan
 
     bo = float(levels.get("breakout_trigger", 0))
@@ -128,25 +127,16 @@ def _get_plan(verdict, vector, levels, anchor):
     dr = float(levels.get("daily_resistance", 0))
     ds = float(levels.get("daily_support", 0))
     
-    # Determine Entry based on Vector
     entry_price = bo if vector == "LONG" else bd
-    
-    # Determine Stop
     stop_price = _find_predator_stop(entry_price, vector, levels)
-
-    # Determine Targets based on BEHAVIOR PROFILE
     volatility_gap = abs(bo - bd)
     if volatility_gap < (entry_price * 0.005): volatility_gap = entry_price * 0.02
 
-    # TARGET LOGIC
     if "MAGNET" in verdict:
-        # Magnet Trade: Target is the Daily Wall. Do not get greedy.
         t1 = dr if vector == "LONG" else ds
-        t2 = t1 # Force exit
-        t3 = t1 # Force exit
-        
+        t2 = t1 
+        t3 = t1 
     elif "JAILBREAK" in verdict:
-        # Jailbreak: Blue Sky. Use Fib Extensions.
         if vector == "LONG":
             t1 = entry_price + (volatility_gap * 0.618)
             t2 = entry_price + (volatility_gap * 1.0)
@@ -155,14 +145,12 @@ def _get_plan(verdict, vector, levels, anchor):
             t1 = entry_price - (volatility_gap * 0.618)
             t2 = entry_price - (volatility_gap * 1.0)
             t3 = entry_price - (volatility_gap * 1.618)
-    
     else:
-        return plan # Should be caught by NEUTRAL check, but safety first.
+        return plan 
 
     return {
         "valid": True, "bias": vector, 
-        "entry": entry_price, 
-        "stop": stop_price, 
+        "entry": entry_price, "stop": stop_price, 
         "targets": [t1, t2, t3]
     }
 
@@ -182,9 +170,7 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
     bias = context.get("weekly_force", "NEUTRAL")
 
     # --- EXECUTE BEHAVIOR ENGINE ---
-    verdict, color, score, vector = _analyze_topology(static_anchor, levels, bias)
-    
-    # --- GENERATE PLAN ---
+    verdict, color, score, vector = _analyze_topology(symbol, static_anchor, levels, bias)
     plan = _get_plan(verdict, vector, levels, static_anchor)
     roe_text = _generate_roe(verdict, levels)
 
@@ -193,7 +179,7 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
         "result": {
             "symbol": symbol, "price": price, "score": score,
             "status": verdict, "color": color, "advice": roe_text, "bias": bias,
-            "metrics": {"hull": score, "energy": 0, "wind": 0, "space": 0}, # Legacy placeholder
+            "metrics": {"hull": score, "energy": 0, "wind": 0, "space": 0},
             "roe": roe_text,
             "plan": plan, 
             "levels": levels,
@@ -220,10 +206,9 @@ async def scan_sector(session_id="us_ny_futures"):
         bias = context.get("weekly_force", "NEUTRAL")
 
         # --- EXECUTE BEHAVIOR ENGINE ---
-        verdict, color, score, vector = _analyze_topology(static_anchor, levels, bias)
+        verdict, color, score, vector = _analyze_topology(sym, static_anchor, levels, bias)
         plan = _get_plan(verdict, vector, levels, static_anchor)
 
-        # Visual Metrics for Dashboard (Simplified to show Behavior score)
         metrics = {
             "hull": {"val": score, "pct": score, "color": color},
             "energy": {"val": 0, "pct": 0, "color": "GRAY"},
