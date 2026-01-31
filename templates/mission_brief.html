@@ -5,159 +5,173 @@
     <title>Mission Brief | Admin Eyes Only</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <style>
-        body { background: #020617; color: #fff; font-family: 'JetBrains Mono'; padding: 40px; }
+        body { background: #020617; color: #fff; font-family: 'JetBrains Mono'; padding: 40px; line-height: 1.5; }
         .container { max-width: 1200px; margin: 0 auto; display: grid; gap: 30px; }
         
         .card { background: #0f172a; border: 1px solid #334155; padding: 30px; border-radius: 8px; }
-        .title { font-family: 'Rajdhani'; font-size: 32px; font-weight: 800; color: #22d3ee; margin-bottom: 20px; text-transform: uppercase; border-bottom: 2px solid #334155; padding-bottom: 10px; }
+        .title { font-family: 'Rajdhani'; font-size: 32px; font-weight: 800; color: #22d3ee; margin-bottom: 20px; text-transform: uppercase; border-bottom: 2px solid #334155; padding-bottom: 10px; display: flex; justify-content: space-between; }
         
-        /* DEFINITION GRID */
+        /* SIGNAL DEFINITIONS */
         .def-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 30px; }
         .def-box { background: #1e293b; padding: 20px; border-radius: 4px; border-left: 4px solid #334155; }
-        .def-name { font-size: 18px; font-weight: 800; font-family: 'Rajdhani'; margin-bottom: 5px; }
-        .def-desc { font-size: 11px; color: #cbd5e1; line-height: 1.4; }
+        .def-name { font-size: 24px; font-weight: 800; font-family: 'Rajdhani'; margin-bottom: 5px; }
+        .def-desc { font-size: 12px; color: #cbd5e1; line-height: 1.4; margin-top: 10px; }
 
-        /* EXECUTION TABLE */
-        .exec-row { display: grid; grid-template-columns: 1fr 2fr 1fr; padding: 15px 0; border-bottom: 1px dashed #334155; align-items: center; }
-        .exec-lbl { font-weight: 700; color: #fff; }
-        .exec-detail { font-size: 11px; color: #94a3b8; }
-        .exec-val { font-weight: 800; text-align: right; }
-
-        /* SCHEDULE HEATMAP */
-        .schedule-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-top:20px; }
-        .day-card { background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 15px 10px; text-align: center; display: flex; flex-direction: column; gap: 6px; position: relative; }
+        /* THE RULES GRID */
+        .rules-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
         
-        /* DAY STATUS COLORS */
-        .day-mvp { border-color: #facc15; background: rgba(250, 204, 21, 0.05); }
-        .day-high { border-color: #22d3ee; background: rgba(34, 211, 238, 0.05); }
-        .day-mid { border-color: #94a3b8; opacity: 0.8; }
-        .day-dead { border-color: #334155; opacity: 0.4; background: #0b1121; }
-
-        .day-header { font-size: 10px; font-weight: 800; color: #64748b; letter-spacing: 1px; }
-        .day-time { font-size: 11px; font-weight: 700; color: #fff; background: #020617; border: 1px solid #334155; padding: 2px 0; border-radius: 3px; margin: 2px 0; }
-        .day-action { font-family: 'Rajdhani'; font-size: 20px; font-weight: 800; text-transform: uppercase; line-height: 1; margin-top: 4px; }
-        .day-stars { font-size: 10px; letter-spacing: -2px; }
-        .mvp-badge { position: absolute; top: -8px; left: 50%; transform: translateX(-50%); background: #facc15; color: #000; font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 3px; }
+        .rule-block { margin-bottom: 20px; }
+        .rule-head { font-size: 14px; color: #94a3b8; font-weight: 800; text-transform: uppercase; border-bottom: 1px dashed #334155; margin-bottom: 8px; padding-bottom: 4px; }
+        .rule-text { font-size: 13px; color: #e2e8f0; }
+        
+        /* ASSET PROTOCOLS */
+        .asset-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .asset-table th { text-align: left; color: #94a3b8; padding: 10px 0; border-bottom: 1px solid #334155; }
+        .asset-table td { padding: 12px 0; border-bottom: 1px solid #1e293b; }
+        .tag { padding: 4px 8px; border-radius: 4px; font-weight: 800; font-size: 10px; }
 
         /* COLORS */
-        .c-AMBER { border-color: #fbbf24; color: #fbbf24; }
-        .c-CYAN { border-color: #22d3ee; color: #22d3ee; }
-        .c-GOLD { border-color: #facc15; color: #facc15; }
-        .t-GOLD { color: #facc15; } .t-CYAN { color: #22d3ee; } .t-GRAY { color: #94a3b8; }
+        .c-PURPLE { border-color: #a855f7; color: #a855f7; }
+        .c-GREEN { border-color: #22c55e; color: #22c55e; }
+        .c-RED { border-color: #ef4444; color: #ef4444; }
+        .bg-gray { background: #334155; color: #fff; }
+        
+        .highlight { color: #facc15; font-weight: 700; }
     </style>
 </head>
 <body>
     {% include 'nav.html' %}
 
     <div class="container">
+        
         <div class="card">
-            <div class="title">/// TACTICAL DEFINITIONS</div>
+            <div class="title">/// BEHAVIOR IDENTIFICATION (v7.2)</div>
             <div class="def-grid">
-                <div class="def-box c-AMBER">
-                    <div class="def-name">AMBUSH</div>
+                <div class="def-box c-PURPLE">
+                    <div class="def-name">JAILBREAK</div>
+                    <div style="font-size:10px; color:#a855f7; font-weight:700;">EXPANSION EVENT</div>
                     <div class="def-desc">
-                        <strong>Score: 45 - 60</strong><br>
-                        Market is trapped. Volatility is low but building. We are setting triggers at the extremes.
-                        <br><em>"Wait for them to step on the mine."</em>
+                        The "Blue Sky" Trade. The Breakout Trigger is <strong>OUTSIDE</strong> the Daily Wall. There is no friction overhead.
+                        <br><br>
+                        <strong>PROTOCOL:</strong> Aggressive Entry. Trailing Stops authorized to catch the runner.
                     </div>
                 </div>
-                <div class="def-box c-CYAN">
-                    <div class="def-name">ASSAULT</div>
+                <div class="def-box c-GREEN">
+                    <div class="def-name">MAGNET</div>
+                    <div style="font-size:10px; color:#22c55e; font-weight:700;">STANDARD TRADE</div>
                     <div class="def-desc">
-                        <strong>Score: 60 - 75</strong><br>
-                        Momentum confirmed. Bias is aligned. We enter on the 5m/15m breakout of local structure.
-                        <br><em>"Press the attack."</em>
+                        The "Base Hit." Trigger is inside, but there is a clear <strong>RUNWAY</strong> to the Wall.
+                        <br><br>
+                        <strong>PROTOCOL:</strong> Enter at Trigger. <strong>HARD EXIT</strong> at Target 1 (The Daily Wall). Do not get greedy.
                     </div>
                 </div>
-                <div class="def-box c-GOLD">
-                    <div class="def-name">BREACH</div>
+                <div class="def-box c-RED">
+                    <div class="def-name">SUFFOCATED</div>
+                    <div style="font-size:10px; color:#ef4444; font-weight:700;">CHOP ZONE</div>
                     <div class="def-desc">
-                        <strong>Score: > 75</strong><br>
-                        Maximum Energy. The spring is fully compressed. Expect a vertical move.
-                        <br><em>"The door is kicked in."</em>
+                        The Trap. Trigger is inside, and the Runway is too tight (< 0.5%). Price will likely wick the entry and reverse.
+                        <br><br>
+                        <strong>PROTOCOL:</strong> <strong>HOLD FIRE.</strong> Do not engage.
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="card">
-            <div class="title">/// 600K BATTLE RHYTHM (CST)</div>
-            <div style="font-size:12px; color:#94a3b8; margin-bottom:10px;">PROFITABILITY HEATMAP BASED ON 2025 AUDIT DATA</div>
-            
-            <div class="schedule-grid">
-                <div class="day-card day-mvp">
-                    <div class="mvp-badge">MVP</div>
-                    <div class="day-header">SUN</div>
-                    <div class="day-time">08:00 AM</div>
-                    <div class="day-action t-GOLD">TRAP</div>
-                    <div class="day-stars t-GOLD">⭐⭐⭐⭐⭐</div>
+            <div class="title">/// THE BETA PROTOCOL (ASSET RULES)</div>
+            <p style="font-size:13px; color:#94a3b8; margin-bottom:20px;">
+                Different assets have different gravity. Bitcoin is the King; Alts are Subjects. We do not apply the same math to both.
+            </p>
+            <table class="asset-table">
+                <thead>
+                    <tr>
+                        <th>ASSET CLASS</th>
+                        <th>MINIMUM RUNWAY</th>
+                        <th>JAILBREAK RULE</th>
+                        <th>WHY?</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="font-weight:800; font-size:16px;">BTC (KING)</td>
+                        <td class="c-GREEN">0.5% GAP</td>
+                        <td class="c-PURPLE">AUTHORIZED SOLO</td>
+                        <td>Bitcoin creates its own gravity. It can push through 0.5% friction alone.</td>
+                    </tr>
+                    <tr>
+                        <td style="font-weight:800; font-size:16px;">ETH / SOL (BETA)</td>
+                        <td class="c-RED">0.8% GAP</td>
+                        <td class="c-YELLOW" style="color:#eab308">REQUIRES BTC CONFIRMATION</td>
+                        <td>Alts fake out often. The 0.5% - 0.8% zone is a "Death Zone" for Alts. They need a wider net.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <div class="rules-grid">
+                
+                <div>
+                    <div class="title" style="font-size:24px; color:#fff; border:none;">/// TOPOLOGY MAP</div>
+                    <div class="rule-block">
+                        <div class="rule-head">1. THE TRIGGERS (ENTRY)</div>
+                        <div class="rule-text">The "Line in the Sand" where 15m momentum shifts. We never front-run the trigger. We wait for the price to cross.</div>
+                    </div>
+                    <div class="rule-block">
+                        <div class="rule-head">2. THE DAILY WALL (RESISTANCE/SUPPORT)</div>
+                        <div class="rule-text">Concrete. Price respects this 80% of the time. This is always <strong>TARGET 1</strong> for Magnet trades.</div>
+                    </div>
+                    <div class="rule-block">
+                        <div class="rule-head">3. THE RUNWAY (THE GAP)</div>
+                        <div class="rule-text">The empty space between #1 and #2. If this space is empty, we trade. If it is cluttered/small, we sit.</div>
+                    </div>
                 </div>
 
-                <div class="day-card day-high">
-                    <div class="day-header">MON</div>
-                    <div class="day-time">08:00 AM</div>
-                    <div class="day-action t-CYAN">MANAGE</div>
-                    <div class="day-stars t-CYAN">⭐⭐⭐⭐</div>
+                <div style="background:#1e293b; padding:20px; border-radius:4px; border:1px dashed #ef4444;">
+                    <div class="title" style="font-size:24px; color:#ef4444; border:none;">/// THE RISK MANTRA</div>
+                    
+                    <div style="margin-bottom:15px;">
+                        <span class="highlight">"A STOP LOSS PROTECTS ME FROM BEING WRONG, NOT FROM GIVING BACK PROFIT."</span>
+                    </div>
+
+                    <div class="rule-block">
+                        <div class="rule-head">RULE 1: THE ONE-WAY RATCHET</div>
+                        <div class="rule-text">I will only move my stop when <strong>Market Structure</strong> confirms a new safe floor (Higher Low). I never move it to "save" a loser.</div>
+                    </div>
+
+                    <div class="rule-block">
+                        <div class="rule-head">RULE 2: THE 3-STRIKE LAW</div>
+                        <div class="rule-text">If I move my stop 3 times out of fear, I have not accepted the risk. <strong>CLOSE THE TRADE.</strong></div>
+                    </div>
+
+                    <div class="rule-block">
+                        <div class="rule-head">RULE 3: THE SUFFOCATION</div>
+                        <div class="rule-text">Do not choke a winning trade. Give it room to breathe (ATR) until it hits the wall.</div>
+                    </div>
                 </div>
 
-                <div class="day-card day-mvp">
-                    <div class="mvp-badge">MVP</div>
-                    <div class="day-header">TUE</div>
-                    <div class="day-time">08:00 AM</div>
-                    <div class="day-action t-CYAN">ATTACK</div>
-                    <div class="day-stars t-GOLD">⭐⭐⭐⭐⭐</div>
-                </div>
-
-                <div class="day-card day-dead">
-                    <div class="day-header">WED</div>
-                    <div class="day-time" style="color:#334155;">--:--</div>
-                    <div class="day-action t-GRAY">REST</div>
-                    <div class="day-stars t-GRAY">⭐⭐</div>
-                </div>
-
-                <div class="day-card day-mid">
-                    <div class="day-header">THU</div>
-                    <div class="day-time">08:00 AM</div>
-                    <div class="day-action t-GRAY">CHECK</div>
-                    <div class="day-stars t-GRAY">⭐⭐⭐</div>
-                </div>
-
-                <div class="day-card day-dead">
-                    <div class="day-header">FRI</div>
-                    <div class="day-time" style="color:#334155;">--:--</div>
-                    <div class="day-action t-GRAY">OFF</div>
-                    <div class="day-stars t-GRAY">💀</div>
-                </div>
-
-                <div class="day-card day-dead">
-                    <div class="day-header">SAT</div>
-                    <div class="day-time" style="color:#334155;">--:--</div>
-                    <div class="day-action t-GRAY">OFF</div>
-                    <div class="day-stars t-GRAY">💀</div>
-                </div>
-            </div>
-            
-            <div style="margin-top:20px; text-align:center; font-size:11px; color:#64748b; font-style:italic;">
-                * ALL TIMES ARE CENTRAL STANDARD TIME (LOCAL SYNC)
             </div>
         </div>
 
         <div class="card">
-            <div class="title">/// EXECUTION PROTOCOLS</div>
-            <div class="exec-row">
-                <div class="exec-lbl">STANDARD RISK</div>
-                <div class="exec-detail">Used for ASSAULT/BREACH signals on BTC/SOL.</div>
-                <div class="exec-val" style="color:#22d3ee">1.0% ACCOUNT</div>
+            <div class="title">/// THE 50/50 LAW</div>
+            <div style="display:flex; align-items:center; justify-content:space-around; text-align:center; margin-top:20px;">
+                <div style="opacity:0.5;">
+                    <div style="font-size:60px;">🛑</div>
+                    <div class="rule-head">50% OF DAYS</div>
+                    <div style="font-size:24px; font-weight:800;">HOLD FIRE</div>
+                    <div class="rule-text">Suffocated / Chop / Conflict</div>
+                </div>
+                <div style="font-size:40px; color:#334155;">VS</div>
+                <div>
+                    <div style="font-size:60px;">🟢</div>
+                    <div class="rule-head">50% OF DAYS</div>
+                    <div style="font-size:24px; font-weight:800; color:#22c55e;">ENGAGE</div>
+                    <div class="rule-text">Magnet / Jailbreak</div>
+                </div>
             </div>
-            <div class="exec-row">
-                <div class="exec-lbl">HALF RISK</div>
-                <div class="exec-detail">Used for ETH (Choppy) or AMBUSH signals.</div>
-                <div class="exec-val" style="color:#fbbf24">0.5% ACCOUNT</div>
-            </div>
-            <div class="exec-row">
-                <div class="exec-lbl">SUNDAY PROTOCOL</div>
-                <div class="exec-detail">Pending Orders Only (Buy Stop / Sell Stop). No Market Orders.</div>
-                <div class="exec-val" style="color:#facc15">MANDATORY</div>
+            <div style="text-align:center; margin-top:30px; font-size:12px; color:#94a3b8;">
+                * SITTING ON YOUR HANDS IS A POSITION. IT PRESERVES CAPITAL FOR THE GREEN DAYS.
             </div>
         </div>
 
