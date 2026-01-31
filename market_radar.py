@@ -1,15 +1,22 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v7.0 (BEHAVIOR ENGINE)
-# AUDIT: 1. Logic shifted from "Linear Scoring" to "Topology Profiling".
-#        2. "Jailbreak" (Inverted Lines) overrides obstruction checks.
-#        3. "Suffocation" (Runway < 0.5%) forces HOLD FIRE.
-#        4. "Magnet" trades target the Daily Wall explicitly.
+# KABRODA MARKET RADAR v7.1 (STABILITY FIX)
+# RESTORED: _make_indicator_string (Required for frontend line rendering).
+# RETAINED: v7.0 Behavior Engine & Anti-Chop Logic.
 # ==============================================================================
 import asyncio
 import battlebox_pipeline
 
 TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+
+# --- HELPER: DATA PACKAGING (RESTORED) ---
+def _make_indicator_string(levels):
+    """
+    Packs the raw levels into a CSV string for the frontend charts.
+    Format: BO, BD, Res, Sup, 30H, 30L
+    """
+    if not levels: return "0,0,0,0,0,0"
+    return f"{levels.get('breakout_trigger',0)},{levels.get('breakdown_trigger',0)},{levels.get('daily_resistance',0)},{levels.get('daily_support',0)},{levels.get('range30m_high',0)},{levels.get('range30m_low',0)}"
 
 # --- CORE: BEHAVIOR PREDICTION ENGINE ---
 def _analyze_topology(anchor, levels, bias):
@@ -55,7 +62,7 @@ def _analyze_topology(anchor, levels, bias):
         return f"SUFFOCATED ({runway_dn_pct:.2f}%)", "RED", 10, "NEUTRAL"
 
     # PROFILE 3: THE MAGNET (Standard Base Hit)
-    # Logic: Clean runway (> 0.8%) and Aligned Bias.
+    # Logic: Clean runway (> 0.5%) and Aligned Bias.
     # Result: Price runs to the wall.
     if bias == "BULLISH" and runway_up_pct >= 0.5:
         return f"MAGNET LONG ({runway_up_pct:.2f}%)", "GREEN", 75, "LONG"
