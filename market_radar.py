@@ -1,10 +1,9 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v7.2 (BETA PROTOCOL)
-# LOGIC:
-#   1. BTC: Standard Rules (0.5% Runway, All Jailbreaks Valid).
-#   2. ETH/SOL: Stricter Rules (0.8% Runway, Jailbreaks require BTC Confirmation).
-#   3. "The Death Zone" (0.5% - 0.8%) is now marked SUFFOCATED for Alts.
+# KABRODA MARKET RADAR v7.3 (SCALING FIX)
+# BUG FIX: Corrected decimal thresholds to match percentage calculations.
+#   - BTC Threshold: 0.005 -> 0.5 (0.5%)
+#   - ETH/SOL Threshold: 0.008 -> 0.8 (0.8%)
 # ==============================================================================
 import asyncio
 import battlebox_pipeline
@@ -20,12 +19,11 @@ def _make_indicator_string(levels):
 def _get_thresholds(symbol):
     """
     Returns (Runway_Min_Pct, Allow_Solo_Jailbreak)
-    BTC: 0.5% Runway, Solo Jailbreak OK.
-    ALTS: 0.8% Runway, Solo Jailbreak RISKY.
+    FIX: Values must be in PERCENT format (e.g. 0.5 for 0.5%), not decimal.
     """
     if "BTC" in symbol:
-        return 0.005, True # 0.5%
-    return 0.008, False    # 0.8% for ETH/SOL
+        return 0.5, True   # <--- WAS 0.005, NOW 0.5
+    return 0.8, False      # <--- WAS 0.008, NOW 0.8
 
 # --- CORE: BEHAVIOR PREDICTION ENGINE ---
 def _analyze_topology(symbol, anchor, levels, bias):
@@ -44,7 +42,7 @@ def _analyze_topology(symbol, anchor, levels, bias):
     is_inverted_up = bo > dr
     is_inverted_dn = bd < ds
     
-    # 4. CALCULATE RUNWAY
+    # 4. CALCULATE RUNWAY (Note: Multiplied by 100 for Percentage)
     runway_up_pct = ((dr - bo) / anchor) * 100 if bo > 0 else 0
     runway_dn_pct = ((bd - ds) / anchor) * 100 if bd > 0 else 0
 
@@ -55,16 +53,16 @@ def _analyze_topology(symbol, anchor, levels, bias):
         if allow_jailbreak:
             return "JAILBREAK (UP)", "PURPLE", 95, "LONG"
         else:
-            return "JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL" # Alt Protection
+            return "JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL" 
     
     if is_inverted_dn and bias in ["BEARISH", "NEUTRAL"]:
         if allow_jailbreak:
             return "JAILBREAK (DOWN)", "PURPLE", 95, "SHORT"
         else:
-            return "JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL" # Alt Protection
+            return "JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL" 
 
-    # PROFILE 2: THE SUFFOCATION (Variable Thresholds)
-    # Uses 'runway_limit' which is 0.5% for BTC but 0.8% for Alts.
+    # PROFILE 2: THE SUFFOCATION (The Fix is Here)
+    # Now comparing 0.09 against 0.5 (Result: True -> Suffocated)
     if bias == "BULLISH" and 0 < runway_up_pct < runway_limit:
         return f"SUFFOCATED ({runway_up_pct:.2f}%)", "RED", 10, "NEUTRAL"
     if bias == "BEARISH" and 0 < runway_dn_pct < runway_limit:
