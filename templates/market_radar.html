@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Kabroda | Market Radar</title>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
         body { background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
@@ -15,30 +15,24 @@
         .btn-scan:hover { background: #38bdf8; }
         
         .radar-grid { display: grid; gap: 15px; }
-        .radar-row { display: grid; grid-template-columns: 1.5fr 1fr 1fr 3.5fr 1.5fr; background: #0f172a; border: 1px solid #1e293b; padding: 25px 30px; border-radius: 6px; align-items: center; transition: transform 0.2s, border-color 0.2s; }
+        .radar-row { display: grid; grid-template-columns: 1.5fr 1fr 2fr 1.5fr; background: #0f172a; border: 1px solid #1e293b; padding: 25px 30px; border-radius: 6px; align-items: center; transition: transform 0.2s, border-color 0.2s; }
         .radar-row:hover { border-color: #334155; transform: translateY(-2px); }
 
         .border-GREEN { border-left: 4px solid #22c55e; }
         .border-YELLOW { border-left: 4px solid #eab308; }
         .border-RED { border-left: 4px solid #ef4444; opacity: 0.7; }
+        .border-PURPLE { border-left: 4px solid #a855f7; }
 
         .sym-name { font-size: 22px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
-        .sym-price { font-size: 13px; color: #94a3b8; font-family: 'JetBrains Mono'; margin-top: 4px; }
+        .sym-price { font-size: 16px; color: #94a3b8; font-family: 'JetBrains Mono'; margin-top: 4px; }
         
         .score-val { font-size: 36px; font-weight: 800; font-family: 'JetBrains Mono'; line-height: 1; }
-        .stat-badge { display: inline-block; padding: 8px 16px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+        .stat-badge { display: inline-block; padding: 10px 20px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; width: 80%; text-align: center; }
 
-        .bars-container { display: flex; gap: 20px; height: 40px; align-items: flex-end; justify-content: center; }
-        .bar-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; height: 100%; text-align: center; max-width: 60px; }
-        .bar-fill { width: 100%; border-radius: 2px; min-height: 4px; transition: height 0.5s ease; }
-        .bar-lbl { font-size: 9px; color: #64748b; font-family: 'JetBrains Mono'; font-weight: 700; }
-        .bar-score { font-size: 10px; font-weight: 800; font-family: 'JetBrains Mono'; }
-
-        /* BUTTONS */
         .lock-btn { font-size: 11px; padding: 10px 20px; background: #1e293b; color: #fff; border: 1px solid #334155; cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
         .lock-btn:hover { background: #facc15; color:#000; border-color: #facc15; }
 
-        .copy-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; margin-right: 8px; }
+        .copy-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; margin-right: 8px; font-family: 'JetBrains Mono'; font-size: 14px; }
         .copy-btn:hover { background: #334155; color: #fff; border-color: #fff; }
     </style>
 </head>
@@ -46,7 +40,7 @@
     {% include 'nav.html' %}
     <div class="radar-container">
         <div class="radar-header">
-            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v6.4</span></h2></div>
+            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v7.4</span></h2></div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
         <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">/// SCANNING SECTOR...</div>
@@ -55,6 +49,30 @@
 
     <script>
         function fmt(x){ if(!x) return "—"; return parseFloat(x).toLocaleString(undefined, {minimumFractionDigits: 2}); }
+
+        // --- NEW: Copy Full Intel Packet Logic ---
+        async function copyIntel(symbol) {
+            try {
+                // Fetch the full packet from the session control API
+                const res = await fetch(`/api/session_control/get_packet?symbol=${symbol}`);
+                const data = await res.json();
+                
+                // Copy formatted JSON to clipboard
+                await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+                
+                // Visual Feedback
+                const btn = document.activeElement;
+                if(btn) {
+                    const orig = btn.innerHTML;
+                    btn.innerHTML = "✓";
+                    setTimeout(() => btn.innerHTML = orig, 1000);
+                }
+                // Optional: alert("INTEL COPIED: " + symbol);
+            } catch (err) {
+                console.error("Failed to copy intel:", err);
+                alert("ERROR: Could not fetch Session Packet.");
+            }
+        }
 
         function copyToClip(str) {
             navigator.clipboard.writeText(str).then(() => {
@@ -76,36 +94,30 @@
                 const data = await res.json();
                 let html = "";
                 data.results.forEach(t => {
-                    let colorClass = `border-${t.color_code}`;
+                    let colorCode = t.color_code; 
                     let statusBg = '#1e293b'; let statusTxt = '#fff';
-                    if(t.color_code === 'GREEN') { statusBg = 'rgba(34, 197, 94, 0.2)'; statusTxt = '#22c55e'; }
-                    else if(t.color_code === 'YELLOW') { statusBg = 'rgba(234, 179, 8, 0.2)'; statusTxt = '#eab308'; }
+                    
+                    if(colorCode === 'GREEN') { statusBg = 'rgba(34, 197, 94, 0.2)'; statusTxt = '#22c55e'; }
+                    else if(colorCode === 'YELLOW') { statusBg = 'rgba(234, 179, 8, 0.2)'; statusTxt = '#eab308'; }
+                    else if(colorCode === 'PURPLE') { statusBg = 'rgba(168, 85, 247, 0.2)'; statusTxt = '#a855f7'; }
                     else { statusBg = 'rgba(239, 68, 68, 0.2)'; statusTxt = '#ef4444'; }
 
                     let biasColor = t.bias === 'BULLISH' ? '#22c55e' : (t.bias === 'BEARISH' ? '#ef4444' : '#94a3b8');
                     let biasBg = t.bias === 'BULLISH' ? 'rgba(34, 197, 94, 0.1)' : (t.bias === 'BEARISH' ? 'rgba(239, 68, 68, 0.1)' : 'transparent');
                     let biasBorder = t.bias === 'BULLISH' ? '#22c55e' : (t.bias === 'BEARISH' ? '#ef4444' : '#475569');
 
-                    const getBarColor = (c) => { 
-                        if(c === 'GREEN') return '#22c55e'; 
-                        if(c === 'YELLOW') return '#eab308'; 
-                        return '#ef4444'; 
-                    };
-
-                    // --- UPDATED ACTION BUTTON LOGIC ---
                     let actionHtml = `
                     <div style="display:flex; justify-content:flex-end; align-items:center;">
+                        <button class="copy-btn" onclick="copyIntel('${t.symbol}')" title="Copy FULL Session Intel (JSON)">📡</button>
                         <button class="copy-btn" onclick="copyToClip('${t.indicator_string}')" title="Copy Indicator Data">📋</button>
                         ${t.has_trade ? 
-                            // Green/Yellow Light: Lock Target
                             `<button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">LOCK TARGET →</button>` :
-                            // Red Light: Monitor Intel (Allows entry to read ROE)
                             `<button class="lock-btn" style="background:#1e293b; color:#64748b; border-color:#334155;" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">MONITOR INTEL</button>`
                         }
                     </div>`;
 
                     html += `
-                    <div class="radar-row ${colorClass}">
+                    <div class="radar-row border-${colorCode}">
                         <div>
                             <div>
                                 <span class="sym-name">${t.symbol}</span>
@@ -119,28 +131,6 @@
                         </div>
                         <div style="text-align:center;">
                             <span class="stat-badge" style="background:${statusBg}; color:${statusTxt}">${t.status}</span>
-                        </div>
-                        <div class="bars-container">
-                            <div class="bar-col">
-                                <div class="bar-score" style="color:${getBarColor(t.metrics.energy.color)}">${Math.round(t.metrics.energy.val)}</div>
-                                <div class="bar-fill" style="height:${t.metrics.energy.pct}%; background:${getBarColor(t.metrics.energy.color)}"></div>
-                                <span class="bar-lbl">NRG</span>
-                            </div>
-                            <div class="bar-col">
-                                <div class="bar-score" style="color:${getBarColor(t.metrics.space.color)}">${Math.round(t.metrics.space.val)}</div>
-                                <div class="bar-fill" style="height:${t.metrics.space.pct}%; background:${getBarColor(t.metrics.space.color)}"></div>
-                                <span class="bar-lbl">SPC</span>
-                            </div>
-                            <div class="bar-col">
-                                <div class="bar-score" style="color:${getBarColor(t.metrics.wind.color)}">${Math.round(t.metrics.wind.val)}</div>
-                                <div class="bar-fill" style="height:${t.metrics.wind.pct}%; background:${getBarColor(t.metrics.wind.color)}"></div>
-                                <span class="bar-lbl">WND</span>
-                            </div>
-                            <div class="bar-col">
-                                <div class="bar-score" style="color:${getBarColor(t.metrics.hull.color)}">${Math.round(t.metrics.hull.val)}</div>
-                                <div class="bar-fill" style="height:${t.metrics.hull.pct}%; background:${getBarColor(t.metrics.hull.color)}"></div>
-                                <span class="bar-lbl">HUL</span>
-                            </div>
                         </div>
                         ${actionHtml}
                     </div>`;
