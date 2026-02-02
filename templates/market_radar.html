@@ -40,7 +40,7 @@
     {% include 'nav.html' %}
     <div class="radar-container">
         <div class="radar-header">
-            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v7.4</span></h2></div>
+            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v7.5</span></h2></div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
         <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">/// SCANNING SECTOR...</div>
@@ -50,30 +50,25 @@
     <script>
         function fmt(x){ if(!x) return "—"; return parseFloat(x).toLocaleString(undefined, {minimumFractionDigits: 2}); }
 
-        // --- NEW: Copy Full Intel Packet Logic ---
-        async function copyIntel(symbol) {
-            try {
-                // Fetch the full packet from the session control API
-                const res = await fetch(`/api/session_control/get_packet?symbol=${symbol}`);
-                const data = await res.json();
-                
-                // Copy formatted JSON to clipboard
-                await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-                
-                // Visual Feedback
+        // --- GLOBAL MEMORY FOR INTEL PACKETS ---
+        window.intelMap = {};
+
+        // 1. Function to Copy the FULL JSON (For the Gem)
+        function copyIntel(symbol) {
+            const data = window.intelMap[symbol];
+            if(!data) { alert("No Intel Available. Refresh Scan."); return; }
+            
+            navigator.clipboard.writeText(data).then(() => {
                 const btn = document.activeElement;
                 if(btn) {
                     const orig = btn.innerHTML;
                     btn.innerHTML = "✓";
                     setTimeout(() => btn.innerHTML = orig, 1000);
                 }
-                // Optional: alert("INTEL COPIED: " + symbol);
-            } catch (err) {
-                console.error("Failed to copy intel:", err);
-                alert("ERROR: Could not fetch Session Packet.");
-            }
+            });
         }
 
+        // 2. Function to Copy just the Indicators (For Charts/Manual)
         function copyToClip(str) {
             navigator.clipboard.writeText(str).then(() => {
                 const btn = document.activeElement;
@@ -93,7 +88,14 @@
                 const res = await fetch('/api/radar/scan', { method: 'POST' });
                 const data = await res.json();
                 let html = "";
+                
+                // Reset Intel Map
+                window.intelMap = {};
+
                 data.results.forEach(t => {
+                    // Store the full raw JSON in memory for the specific symbol
+                    window.intelMap[t.symbol] = t.full_intel;
+
                     let colorCode = t.color_code; 
                     let statusBg = '#1e293b'; let statusTxt = '#fff';
                     

@@ -1,11 +1,11 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v7.3 (SCALING FIX)
-# BUG FIX: Corrected decimal thresholds to match percentage calculations.
-#   - BTC Threshold: 0.005 -> 0.5 (0.5%)
-#   - ETH/SOL Threshold: 0.008 -> 0.8 (0.8%)
+# KABRODA MARKET RADAR v7.5 (INTEL UPGRADE)
+# UPDATE: Added 'full_intel' payload to allow "Copy to Gem" functionality.
+# PRESERVED: All v7.3 Thresholds and Logic.
 # ==============================================================================
 import asyncio
+import json
 import battlebox_pipeline
 
 TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
@@ -22,8 +22,8 @@ def _get_thresholds(symbol):
     FIX: Values must be in PERCENT format (e.g. 0.5 for 0.5%), not decimal.
     """
     if "BTC" in symbol:
-        return 0.5, True   # <--- WAS 0.005, NOW 0.5
-    return 0.8, False      # <--- WAS 0.008, NOW 0.8
+        return 0.5, True   # v7.3 Logic Preserved
+    return 0.8, False      # v7.3 Logic Preserved
 
 # --- CORE: BEHAVIOR PREDICTION ENGINE ---
 def _analyze_topology(symbol, anchor, levels, bias):
@@ -61,8 +61,7 @@ def _analyze_topology(symbol, anchor, levels, bias):
         else:
             return "JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL" 
 
-    # PROFILE 2: THE SUFFOCATION (The Fix is Here)
-    # Now comparing 0.09 against 0.5 (Result: True -> Suffocated)
+    # PROFILE 2: THE SUFFOCATION
     if bias == "BULLISH" and 0 < runway_up_pct < runway_limit:
         return f"SUFFOCATED ({runway_up_pct:.2f}%)", "RED", 10, "NEUTRAL"
     if bias == "BEARISH" and 0 < runway_dn_pct < runway_limit:
@@ -182,7 +181,8 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
             "plan": plan, 
             "levels": levels,
             "mission_key": _make_key(plan, verdict),
-            "indicator_string": _make_indicator_string(levels)
+            "indicator_string": _make_indicator_string(levels),
+            "full_intel": json.dumps(data, default=str) # Added for manual check
         }
     }
 
@@ -207,6 +207,10 @@ async def scan_sector(session_id="us_ny_futures"):
         verdict, color, score, vector = _analyze_topology(sym, static_anchor, levels, bias)
         plan = _get_plan(verdict, vector, levels, static_anchor)
 
+        # --- ADD RAW INTEL FOR FRONTEND COPY ---
+        # This captures the WHOLE packet (Bias, Levels, POC, etc.)
+        full_intel = json.dumps(res, default=str)
+
         metrics = {
             "hull": {"val": score, "pct": score, "color": color},
             "energy": {"val": 0, "pct": 0, "color": "GRAY"},
@@ -217,7 +221,8 @@ async def scan_sector(session_id="us_ny_futures"):
         radar_grid.append({
             "symbol": sym, price: price, "score": score, "status": verdict, "bias": bias, 
             "metrics": metrics, "color_code": color, "has_trade": plan["valid"], 
-            "indicator_string": _make_indicator_string(levels)
+            "indicator_string": _make_indicator_string(levels),
+            "full_intel": full_intel # <--- THIS IS THE NEW PAYLOAD
         })
     radar_grid.sort(key=lambda x: x['score'], reverse=True)
     return radar_grid
