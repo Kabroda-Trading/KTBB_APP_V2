@@ -133,7 +133,6 @@
                 end_date_utc: document.getElementById('endDate').value,
                 session_ids: sIds,
                 include_candles: document.getElementById('chkCandles').checked,
-                // These are null because we aren't tuning or scoring anymore
                 tuning: {},
                 sensors: {},
                 min_score: 0
@@ -157,6 +156,8 @@
                     const bias = r.battlebox?.context?.weekly_force || "NEUTRAL";
                     const levels = r.battlebox?.levels || {};
                     const structure = levels.structure_score || 0;
+                    // --- NEW: Visual confirmation of Sniper Data ---
+                    const sniperData = levels.daily_ema30 ? "ACTIVE" : "---";
 
                     html += `
                         <div class="log-row">
@@ -164,10 +165,11 @@
                                 <span style="color:#06b6d4; font-weight:700;">${r.date}</span>
                                 <span style="color:${bias === 'BULLISH' ? '#10b981' : (bias === 'BEARISH' ? '#ef4444' : '#94a3b8')}">${bias}</span>
                             </div>
-                            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; font-size:10px; color:#64748b;">
+                            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:10px; font-size:10px; color:#64748b;">
                                 <div>OPEN: <span style="color:#fff;">${price}</span></div>
                                 <div>RANGE: <span style="color:#fff;">${(Math.abs(levels.daily_resistance - levels.daily_support)).toFixed(2)}</span></div>
                                 <div>STRUCT: <span style="color:${structure > 0.6 ? '#10b981' : '#fbbf24'}">${structure}</span></div>
+                                <div>SNIPER: <span style="color:${sniperData === 'ACTIVE' ? '#10b981' : '#64748b'}">${sniperData}</span></div>
                             </div>
                         </div>
                     `;
@@ -185,8 +187,28 @@
 
         function copyLog() {
             const txt = document.getElementById('rawJson').innerText;
+            if(!txt) return;
+
+            // --- AUDIT: Verify Sniper Data Exists ---
+            try {
+                const data = JSON.parse(txt);
+                // Check first session for critical keys
+                if (data.length > 0 && data[0].battlebox && data[0].battlebox.levels) {
+                    const levels = data[0].battlebox.levels;
+                    if (!levels.daily_ema30 || levels.daily_ema30 === 0) {
+                        console.warn("AUDIT FAIL: Daily EMA 30 is missing.");
+                        alert("⚠️ ALERT: Sniper Data (EMAs) seems to be missing from this dataset.");
+                    } else {
+                        console.log("AUDIT PASS: Sniper Data Found.");
+                    }
+                }
+            } catch(err) {
+                console.log("Audit skipped (parse error).");
+            }
+            // ----------------------------------------
+
             navigator.clipboard.writeText(txt);
-            alert("JSON Data Packet Copied!");
+            alert("JSON Data Packet Copied! (Audit Complete)");
         }
     </script>
 </body>
