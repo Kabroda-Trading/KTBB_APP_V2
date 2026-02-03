@@ -2,145 +2,158 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Kabroda | Market Radar</title>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/site.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KABRODA MARKET RADAR v8.6</title>
     <style>
-        body { background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
-        .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
-        .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
-        .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
-        
-        .btn-scan { background: #0ea5e9; color: #000; font-weight: 800; font-family: 'JetBrains Mono'; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: 0.2s; box-shadow: 0 0 15px rgba(14, 165, 233, 0.2); }
-        .btn-scan:hover { background: #38bdf8; }
-        
-        .radar-grid { display: grid; gap: 15px; }
-        .radar-row { display: grid; grid-template-columns: 1.5fr 1fr 2fr 1.5fr; background: #0f172a; border: 1px solid #1e293b; padding: 25px 30px; border-radius: 6px; align-items: center; transition: transform 0.2s, border-color 0.2s; }
-        .radar-row:hover { border-color: #334155; transform: translateY(-2px); }
+        :root {
+            --bg-color: #0d1117;
+            --card-bg: #161b22;
+            --text-main: #c9d1d9;
+            --text-muted: #8b949e;
+            --border-color: #30363d;
+            --accent-green: #2ea043;
+            --accent-red: #da3633;
+            --accent-neon-red: #ff073a;
+            --accent-neon-green: #39ff14;
+        }
 
-        .border-GREEN { border-left: 4px solid #22c55e; }
-        .border-YELLOW { border-left: 4px solid #eab308; }
-        .border-RED { border-left: 4px solid #ef4444; opacity: 0.7; }
-        .border-PURPLE { border-left: 4px solid #a855f7; }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
 
-        .sym-name { font-size: 22px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
-        .sym-price { font-size: 16px; color: #94a3b8; font-family: 'JetBrains Mono'; margin-top: 4px; }
-        
-        .score-val { font-size: 36px; font-weight: 800; font-family: 'JetBrains Mono'; line-height: 1; }
-        .stat-badge { display: inline-block; padding: 10px 20px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; width: 80%; text-align: center; }
+        /* --- GRID LAYOUT --- */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
 
-        .lock-btn { font-size: 11px; padding: 10px 20px; background: #1e293b; color: #fff; border: 1px solid #334155; cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
-        .lock-btn:hover { background: #facc15; color:#000; border-color: #facc15; }
+        /* --- CARD STYLING --- */
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 15px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
 
-        .copy-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; margin-right: 8px; font-family: 'JetBrains Mono'; font-size: 14px; }
-        .copy-btn:hover { background: #334155; color: #fff; border-color: #fff; }
+        .card:hover {
+            transform: translateY(-2px);
+            border-color: #58a6ff;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+
+        /* --- SNIPER ANIMATIONS --- */
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(255, 7, 58, 0.4); border-color: var(--accent-neon-red); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 7, 58, 0); border-color: var(--accent-neon-red); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 7, 58, 0); border-color: var(--accent-neon-red); }
+        }
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(57, 255, 20, 0.4); border-color: var(--accent-neon-green); }
+            70% { box-shadow: 0 0 0 10px rgba(57, 255, 20, 0); border-color: var(--accent-neon-green); }
+            100% { box-shadow: 0 0 0 0 rgba(57, 255, 20, 0); border-color: var(--accent-neon-green); }
+        }
+
+        .sniper-mode-short { animation: pulse-red 2s infinite; }
+        .sniper-mode-long { animation: pulse-green 2s infinite; }
+
+        /* --- CARD CONTENT --- */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .symbol { font-size: 1.2rem; font-weight: 700; color: #fff; }
+        .score { font-family: monospace; font-size: 1.1rem; font-weight: bold; }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #000;
+            margin-bottom: 8px;
+        }
+
+        .metrics {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-top: 10px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 8px;
+        }
+
+        /* --- COLOR UTILITIES --- */
+        .bg-GREEN { background-color: var(--accent-green); color: #fff; }
+        .bg-RED { background-color: var(--accent-red); color: #fff; }
+        .bg-YELLOW { background-color: #d29922; color: #000; }
+        .bg-PURPLE { background-color: #8957e5; color: #fff; }
+        .bg-NEON_RED { background-color: var(--accent-neon-red); color: #fff; }
+        .bg-NEON_GREEN { background-color: var(--accent-neon-green); color: #000; }
+        .bg-GRAY { background-color: var(--border-color); color: var(--text-muted); }
+
     </style>
 </head>
 <body>
-    {% include 'nav.html' %}
-    <div class="radar-container">
-        <div class="radar-header">
-            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v7.5</span></h2></div>
-            <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
+
+    <div class="grid" id="radar-grid">
         </div>
-        <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">/// SCANNING SECTOR...</div>
-        <div id="radarTargetGrid" class="radar-grid"></div>
-    </div>
 
-    <script>
-        function fmt(x){ if(!x) return "—"; return parseFloat(x).toLocaleString(undefined, {minimumFractionDigits: 2}); }
+<script>
+    // --- CONNECT TO PYTHON STREAM ---
+    const evtSource = new EventSource("/stream/sector_scan");
 
-        // --- GLOBAL MEMORY FOR INTEL PACKETS ---
-        window.intelMap = {};
+    evtSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        const grid = document.getElementById('radar-grid');
+        grid.innerHTML = ''; // Clean refresh
 
-        // 1. Function to Copy the FULL JSON (For the Gem)
-        function copyIntel(symbol) {
-            const data = window.intelMap[symbol];
-            if(!data) { alert("No Intel Available. Refresh Scan."); return; }
-            
-            navigator.clipboard.writeText(data).then(() => {
-                const btn = document.activeElement;
-                if(btn) {
-                    const orig = btn.innerHTML;
-                    btn.innerHTML = "✓";
-                    setTimeout(() => btn.innerHTML = orig, 1000);
-                }
-            });
-        }
+        data.forEach(item => {
+            const card = document.createElement('div');
+            card.className = 'card';
 
-        // 2. Function to Copy just the Indicators (For Charts/Manual)
-        function copyToClip(str) {
-            navigator.clipboard.writeText(str).then(() => {
-                const btn = document.activeElement;
-                if(btn && btn.classList.contains('copy-btn')) {
-                    const orig = btn.innerHTML;
-                    btn.innerHTML = "✓";
-                    setTimeout(() => btn.innerHTML = orig, 1000);
-                }
-            }, (err) => { console.error('Async: Could not copy text: ', err); });
-        }
+            // --- SNIPER LOGIC ---
+            // If the Python file flags "is_sniper_mode", we activate the pulse
+            if (item.is_sniper_mode) {
+                if (item.bias === 'BEARISH') card.classList.add('sniper-mode-short');
+                else card.classList.add('sniper-mode-long');
+            }
 
-        async function forceScan() {
-            const btn = document.getElementById('scanBtn'); const grid = document.getElementById('radarTargetGrid'); const loader = document.getElementById('loading');
-            btn.disabled = true; grid.style.display = 'none'; loader.style.display = 'block';
+            // Click opens the Detail View
+            card.onclick = () => {
+                const url = `lock_target.html?symbol=${item.symbol}`;
+                window.open(url, '_blank', 'width=500,height=650');
+            };
 
-            try {
-                const res = await fetch('/api/radar/scan', { method: 'POST' });
-                const data = await res.json();
-                let html = "";
-                
-                // Reset Intel Map
-                window.intelMap = {};
+            // Status Badge Color
+            const badgeClass = `bg-${item.color_code}`;
 
-                data.results.forEach(t => {
-                    // Store the full raw JSON in memory for the specific symbol
-                    window.intelMap[t.symbol] = t.full_intel;
-
-                    let colorCode = t.color_code; 
-                    let statusBg = '#1e293b'; let statusTxt = '#fff';
-                    
-                    if(colorCode === 'GREEN') { statusBg = 'rgba(34, 197, 94, 0.2)'; statusTxt = '#22c55e'; }
-                    else if(colorCode === 'YELLOW') { statusBg = 'rgba(234, 179, 8, 0.2)'; statusTxt = '#eab308'; }
-                    else if(colorCode === 'PURPLE') { statusBg = 'rgba(168, 85, 247, 0.2)'; statusTxt = '#a855f7'; }
-                    else { statusBg = 'rgba(239, 68, 68, 0.2)'; statusTxt = '#ef4444'; }
-
-                    let biasColor = t.bias === 'BULLISH' ? '#22c55e' : (t.bias === 'BEARISH' ? '#ef4444' : '#94a3b8');
-                    let biasBg = t.bias === 'BULLISH' ? 'rgba(34, 197, 94, 0.1)' : (t.bias === 'BEARISH' ? 'rgba(239, 68, 68, 0.1)' : 'transparent');
-                    let biasBorder = t.bias === 'BULLISH' ? '#22c55e' : (t.bias === 'BEARISH' ? '#ef4444' : '#475569');
-
-                    let actionHtml = `
-                    <div style="display:flex; justify-content:flex-end; align-items:center;">
-                        <button class="copy-btn" onclick="copyIntel('${t.symbol}')" title="Copy FULL Session Intel (JSON)">📡</button>
-                        <button class="copy-btn" onclick="copyToClip('${t.indicator_string}')" title="Copy Indicator Data">📋</button>
-                        ${t.has_trade ? 
-                            `<button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">LOCK TARGET →</button>` :
-                            `<button class="lock-btn" style="background:#1e293b; color:#64748b; border-color:#334155;" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">MONITOR INTEL</button>`
-                        }
-                    </div>`;
-
-                    html += `
-                    <div class="radar-row border-${colorCode}">
-                        <div>
-                            <div>
-                                <span class="sym-name">${t.symbol}</span>
-                                <span style="font-size:10px; margin-left:8px; padding:2px 6px; border-radius:4px; font-weight:800; background:${biasBg}; color:${biasColor}; border:1px solid ${biasBorder}">${t.bias}</span>
-                            </div>
-                            <div class="sym-price">$${fmt(t.price)}</div>
-                        </div>
-                        <div style="text-align:center;">
-                            <div class="score-val" style="color:${statusTxt}">${t.score}</div>
-                            <div style="font-size:10px; color:#64748b; font-weight:700;">SCORE</div>
-                        </div>
-                        <div style="text-align:center;">
-                            <span class="stat-badge" style="background:${statusBg}; color:${statusTxt}">${t.status}</span>
-                        </div>
-                        ${actionHtml}
-                    </div>`;
-                });
-                grid.innerHTML = html;
-            } catch(e) { console.log(e); } finally { loader.style.display = 'none'; grid.style.display = 'grid'; btn.disabled = false; }
-        }
-        document.addEventListener('DOMContentLoaded', forceScan);
-    </script>
+            card.innerHTML = `
+                <div class="header">
+                    <span class="symbol">${item.symbol}</span>
+                    <span class="score">${item.score.toFixed(0)}</span>
+                </div>
+                <div class="status-badge ${badgeClass}">${item.status}</div>
+                <div class="metrics">
+                    <span>Price: ${item.price.toFixed(2)}</span>
+                    <span>Bias: ${item.bias}</span>
+                </div>
+            `;
+            grid.appendChild(card);
+        });
+    };
+</script>
 </body>
 </html>
