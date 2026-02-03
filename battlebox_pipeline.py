@@ -1,6 +1,6 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v8.2 (Heavy Duty Audit)
+# KABRODA BATTLEBOX PIPELINE — v8.3 (Sniper Upgrade)
 # ==============================================================================
 # Purpose:
 # - The single "Moment of Truth" for each session/day
@@ -8,6 +8,7 @@
 # - Computes levels via sse_engine.compute_sse_levels
 # - Feeds post-lock candles into structure_state_engine (law layer)
 # - Fetches Weekly Candles to determine Macro Force (Green/Red)
+# - NEW: Fetches Daily Candles for 30/50 EMA Walls
 # ==============================================================================
 
 from __future__ import annotations
@@ -106,6 +107,26 @@ async def fetch_live_weekly(symbol: str, limit: int = 5) -> List[Dict[str, Any]]
     s = _normalize_symbol(symbol)
     try:
         rows = await _exchange_live.fetch_ohlcv(s, "1w", limit=limit)
+        return [
+            {
+                "time": int(r[0] / 1000),
+                "open": float(r[1]),
+                "high": float(r[2]),
+                "low": float(r[3]),
+                "close": float(r[4]),
+                "volume": float(r[5]),
+            }
+            for r in rows
+        ]
+    except Exception:
+        return []
+
+# --- DAILY FETCHING (NEW) ---
+async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]]:
+    """Fetches Daily candles to calculate the 30/50 EMA Walls."""
+    s = _normalize_symbol(symbol)
+    try:
+        rows = await _exchange_live.fetch_ohlcv(s, "1d", limit=limit)
         return [
             {
                 "time": int(r[0] / 1000),
@@ -236,7 +257,13 @@ def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"status": "LIVE", "lean": lean, "phase": "TRANSITION", "note": f"Pressure is {lean}."}
 
 
-def _compute_sse_packet(raw_5m: List[Dict[str, Any]], anchor_ts: int, weekly_force: str, tuning: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _compute_sse_packet(
+    raw_5m: List[Dict[str, Any]], 
+    anchor_ts: int, 
+    weekly_force: str, 
+    tuning: Optional[Dict[str, Any]] = None,
+    raw_daily: List[Dict[str, Any]] = None  # <--- INJECT DAILY
+) -> Dict[str, Any]:
     """
     Builds a locked packet from calibration window.
     INJECTS the Weekly Force so it gets locked with the levels.
@@ -260,6 +287,7 @@ def _compute_sse_packet(raw_5m: List[Dict[str, Any]], anchor_ts: int, weekly_for
         "locked_history_5m": context_24h,
         "slice_24h_5m": context_24h,
         "slice_4h_5m": context_24h[-48:],
+        "raw_daily_candles": raw_daily or [], # <--- PASSED TO ENGINE
         "session_open_price": session_open,
         "r30_high": r30_high,
         "r30_low": r30_low,
@@ -299,6 +327,7 @@ async def get_live_battlebox(
     raw_5m = await fetch_live_5m(symbol)
     raw_1h = await fetch_live_1h(symbol)
     raw_weekly = await fetch_live_weekly(symbol)
+    raw_daily = await fetch_live_daily(symbol) # <--- NEW FETCH
 
     if not raw_5m:
         return {"status": "ERROR", "message": "No Data"}
@@ -333,7 +362,15 @@ async def get_live_battlebox(
 
     async with _CACHE_LOCK:
         if session_key not in _LOCKED_PACKETS:
-            pkt = _compute_sse_packet(raw_5m, anchor_ts, weekly_force, tuning=tuning)
+            # PASS RAW DAILY TO COMPUTATION
+            pkt = _compute_sse_packet(
+                raw_5m, 
+                anchor_ts, 
+                weekly_force, 
+                tuning=tuning,
+                raw_daily=raw_daily
+            )
+            
             if "error" in pkt:
                 wm = _war_map_from_1h(raw_1h)
                 return {
@@ -395,6 +432,9 @@ async def get_session_review(
     
     raw_weekly = await fetch_live_weekly(symbol)
     weekly_force = _calculate_weekly_force(raw_weekly)
+    
+    # NEW: Fetch daily for review accuracy
+    raw_daily = await fetch_live_daily(symbol)
 
     cfg = session_manager.get_session_config(session_id)
 
@@ -415,7 +455,14 @@ async def get_session_review(
             "message": "Calibrating... (first 30 minutes after open)",
         }
 
-    pkt = _compute_sse_packet(raw_5m, anchor_ts, weekly_force, tuning=tuning)
+    pkt = _compute_sse_packet(
+        raw_5m, 
+        anchor_ts, 
+        weekly_force, 
+        tuning=tuning, 
+        raw_daily=raw_daily
+    )
+    
     if "error" in pkt:
         return {"ok": False, "error": pkt["error"]}
 

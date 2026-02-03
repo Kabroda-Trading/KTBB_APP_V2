@@ -1,13 +1,13 @@
 # sse_engine.py
 # ==============================================================================
-# STRATEGIC STRUCTURAL ENGINE (SSE) v2.3 - HEAVY DUTY & EXPOSED METRICS
+# STRATEGIC STRUCTURAL ENGINE (SSE) v2.4 - SNIPER READY
 # ==============================================================================
 # Contract:
 # 1) Native input timeframe is 5m.
 # 2) 15m/1h/4h are derived internally via resampling.
 # 3) Triggers are calculated from 30m anchor range + 24h VRVP edges + pivot shelves.
 # 4) Now supports "Tuning" overrides for Research Lab optimization.
-# 5) EXPORTS: Now provides ATR, Slope, and Structure Score in the 'levels' dict.
+# 5) EXPORTS: ATR, Slope, Structure Score, and DAILY 30/50 EMAs.
 # ==============================================================================
 
 from __future__ import annotations
@@ -25,6 +25,21 @@ def _calculate_sma(prices: List[float], period: int) -> float:
     if len(prices) < period:
         return 0.0
     return sum(prices[-period:]) / period
+
+def _calculate_ema(prices: List[float], period: int) -> float:
+    """Calculates Exponential Moving Average"""
+    if not prices or len(prices) < period:
+        return 0.0
+    
+    # Initialize with SMA of the first 'period' elements
+    ema = sum(prices[:period]) / period
+    multiplier = 2 / (period + 1)
+    
+    # Iterate through the rest
+    for price in prices[period:]:
+        ema = (price - ema) * multiplier + ema
+        
+    return ema
 
 def _calculate_atr(candles: List[Dict[str, Any]], period: int = 14) -> float:
     if len(candles) < period + 1:
@@ -226,7 +241,7 @@ def _build_context(
 ) -> Dict[str, Any]:
     slope_score = 0.0
 
-    # Daily trend
+    # Daily trend (SMA) and NOW using EMA logic if needed
     trend_1d = "range"
     if len(daily_candles) > 50:
         d_closes = [float(c["close"]) for c in daily_candles]
@@ -350,6 +365,15 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
 
     daily_candles = inputs.get("raw_daily_candles", []) or []
 
+    # --- SNIPER LOGIC: CALCULATE 30/50 EMAs ---
+    daily_ema30 = 0.0
+    daily_ema50 = 0.0
+    if daily_candles and len(daily_candles) > 50:
+        # Use close prices for EMA calculation
+        d_closes = [float(c["close"]) for c in daily_candles]
+        daily_ema30 = _calculate_ema(d_closes, 30)
+        daily_ema50 = _calculate_ema(d_closes, 50)
+
     if is_5m_native:
         # Slices
         slice_24h_5m = inputs.get("slice_24h_5m") or raw_5m[-288:]
@@ -428,11 +452,11 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
     bias = _calculate_bias_model(ctx, anchor_px, bo, bd)
 
     # --- CRITICAL DATA PASS (AUDITED) ---
-    # We explicitly inject ATR, Slope, and Structure Score here.
+    # We explicitly inject ATR, Slope, Structure Score, and DAILY EMAs here.
     return {
         "meta": meta,
         "levels": {
-            "anchor_price": float(anchor_px), # <--- THIS IS THE ONE NEW LINE
+            "anchor_price": float(anchor_px), 
             "daily_support": float(ds),
             "daily_resistance": float(dr),
             "breakout_trigger": float(bo),
@@ -446,7 +470,9 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
             # --- NEW EXPORTS ---
             "atr": ctx["volatility"]["atr_14"], 
             "slope": ctx["htf"]["slope_score"],
-            "structure_score": structure_score
+            "structure_score": structure_score,
+            "daily_ema30": daily_ema30,
+            "daily_ema50": daily_ema50
         },
         "bias_model": bias,
         "context": ctx,
