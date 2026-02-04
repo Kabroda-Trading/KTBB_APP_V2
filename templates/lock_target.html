@@ -2,245 +2,298 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TARGET LOCK</title>
+    <title>Kabroda | TARGET LOCK</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <style>
-        :root {
-            --bg-color: #0d1117;
-            --card-bg: #161b22;
-            --text-main: #c9d1d9;
-            --text-muted: #8b949e;
-            --accent-green: #2ea043;
-            --accent-red: #da3633;
-            --accent-gold: #d29922;
-            --accent-neon-red: #ff073a;   /* Sniper Red */
-            --accent-neon-green: #39ff14; /* Sniper Green */
-            --border-radius: 6px;
+        :root { 
+            --bg-deep: #020617; 
+            --panel: #0f172a; 
+            --border: #334155; 
+            --green: #22c55e; 
+            --yellow: #eab308; 
+            --red: #ef4444; 
+            --purple: #a855f7; 
+            --white: #f8fafc; 
+            --gray: #94a3b8; 
+            /* NEW: Sniper Colors */
+            --neon-red: #ff073a;
+            --neon-green: #39ff14;
         }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            height: 100vh;
-            overflow: hidden;
-        }
-        .container {
-            width: 100%;
-            max-width: 480px;
-            background-color: var(--card-bg);
-            border-radius: var(--border-radius);
-            border: 1px solid #30363d;
-            padding: 20px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
+        body { background: var(--bg-deep); color: var(--white); font-family: 'JetBrains Mono', monospace; margin: 0; padding: 20px; box-sizing: border-box; }
 
-        /* --- HEADER SECTION --- */
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid #30363d;
-            padding-bottom: 10px;
-        }
-        .symbol { font-size: 1.5rem; font-weight: 700; color: #fff; }
-        .price { font-size: 1.5rem; font-weight: 400; font-family: monospace; }
+        .cockpit { display: grid; gap: 20px; grid-template-columns: 350px 1fr 400px; grid-template-rows: auto 1fr; grid-template-areas: "header header header" "left center right"; height: 90vh; }
+        .header { grid-area: header; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 15px; }
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 25px; display: flex; flex-direction: column; }
+        
+        .h-title { font-family: 'Rajdhani'; font-weight: 800; font-size: 36px; color: #fff; letter-spacing: 2px; margin: 0; }
+        .panel-head { font-family: 'Rajdhani'; font-weight: 800; font-size: 18px; color: var(--gray); border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 20px; letter-spacing: 1px; text-transform: uppercase; }
+        
+        .mode-display { font-family: 'Rajdhani'; font-size: 60px; font-weight: 900; line-height: 0.9; margin-bottom: 10px; text-transform: uppercase; text-shadow: 0 0 20px rgba(0,0,0,0.5); word-wrap: break-word; }
+        
+        .inp-risk { background: #020617; border: 1px solid var(--border); color: #fff; padding: 12px; width: 100%; text-align: right; font-weight: 700; font-size: 18px; border-radius: 4px; box-sizing: border-box; }
+        
+        /* DATA ROW WITH COPY BUTTON */
+        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px dashed #334155; padding-bottom: 8px; }
+        .d-lbl { font-size: 12px; color: var(--gray); font-weight: 700; }
+        .d-val { font-size: 18px; font-weight: 800; color: #fff; margin-right: 10px; }
+        
+        .mini-copy { background: none; border: none; color: #475569; cursor: pointer; font-size: 14px; transition: 0.2s; padding: 4px; }
+        .mini-copy:hover { color: var(--white); transform: scale(1.1); }
+        
+        .c-GREEN { color: var(--green); } .bg-GREEN { background: var(--green); }
+        .c-YELLOW { color: var(--yellow); } .bg-YELLOW { background: var(--yellow); }
+        .c-RED { color: var(--red); } .bg-RED { background: var(--red); }
+        .c-PURPLE { color: var(--purple); } .bg-PURPLE { background: var(--purple); }
+        
+        /* NEW: Sniper Theme Classes */
+        .c-NEON_RED { color: var(--neon-red); text-shadow: 0 0 10px rgba(255,7,58,0.5); }
+        .c-NEON_GREEN { color: var(--neon-green); text-shadow: 0 0 10px rgba(57,255,20,0.5); }
 
-        /* --- SNIPER PANEL (HIDDEN BY DEFAULT) --- */
-        #sniper-panel {
-            display: none; /* Only visible in Sniper Mode */
-            background-color: rgba(255, 7, 58, 0.1);
-            border: 1px solid var(--accent-neon-red);
-            padding: 15px;
-            border-radius: var(--border-radius);
-            text-align: center;
-            animation: pulse 2s infinite;
+        .btn-act { width: 100%; padding: 15px; border: none; border-radius: 4px; font-weight: 800; font-family: 'Rajdhani'; font-size: 16px; cursor: pointer; text-transform: uppercase; margin-bottom: 10px; transition: 0.2s; }
+        .btn-copy { background: #334155; color: #fff; } .btn-copy:hover { background: #475569; }
+        .btn-key { background: var(--yellow); color: #000; } .btn-key:hover { background: #fde047; }
+        
+        .back-btn { text-decoration: none; color: var(--gray); font-size: 12px; font-weight: 700; }
+        
+        .roe-box { background: rgba(0,0,0,0.3); border-left: 4px solid var(--gray); padding: 20px; font-family: 'JetBrains Mono'; font-size: 14px; line-height: 1.6; border-radius: 0 4px 4px 0; margin-top: 20px; text-align: left; }
+
+        /* NEW: Hidden Sniper Alert Box */
+        #sniper-alert {
+            display: none;
+            background: rgba(255, 7, 58, 0.1);
+            border: 2px solid var(--neon-red);
+            color: var(--neon-red);
+            padding: 10px;
+            font-family: 'Rajdhani';
+            font-weight: 800;
+            font-size: 14px;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            animation: pulse 1.5s infinite;
         }
         @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(255, 7, 58, 0.4); }
-            70% { box-shadow: 0 0 0 10px rgba(255, 7, 58, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(255, 7, 58, 0); }
-        }
-        .sniper-title {
-            font-size: 1.1rem; 
-            font-weight: 800; 
-            color: var(--accent-neon-red); 
-            margin-bottom: 5px;
-            text-transform: uppercase;
-        }
-        .sniper-sub { font-size: 0.9rem; color: #fff; margin-bottom: 10px; }
-
-        /* --- STANDARD TRADE PLAN --- */
-        .plan-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-        .plan-item {
-            background: #21262d;
-            padding: 10px;
-            border-radius: 4px;
-            display: flex;
-            flex-direction: column;
-            position: relative;
-        }
-        .label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; }
-        .value { font-size: 1.1rem; font-weight: 600; font-family: monospace; }
-        
-        /* Copy Button styling */
-        .copy-btn {
-            position: absolute;
-            top: 5px;
-            right: 5px;
-            background: none;
-            border: 1px solid #30363d;
-            color: var(--text-muted);
-            cursor: pointer;
-            border-radius: 4px;
-            font-size: 0.7rem;
-            padding: 2px 6px;
-        }
-        .copy-btn:hover { background: #30363d; color: #fff; }
-        .copy-btn:active { background: var(--accent-gold); color: #000; }
-
-        /* --- FOOTER / EXTRAS --- */
-        .footer-note {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            text-align: center;
-            border-top: 1px solid #30363d;
-            padding-top: 10px;
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
         }
     </style>
 </head>
 <body>
 
-<div class="container" id="main-container">
+<div class="cockpit">
     <div class="header">
-        <div class="symbol" id="symbol">LOADING...</div>
-        <div class="price" id="price">---</div>
-    </div>
-
-    <div id="sniper-panel">
-        <div class="sniper-title" id="sniper-title">SNIPER MODE ACTIVE</div>
-        <div class="sniper-sub" id="sniper-reason">Testing Daily 30 EMA Wall</div>
-    </div>
-
-    <div class="plan-grid">
-        <div class="plan-item" style="border-left: 3px solid #d29922;">
-            <span class="label">ENTRY PRICE</span>
-            <span class="value" id="entry">---</span>
-            <button class="copy-btn" onclick="copyText('entry')">COPY</button>
+        <div>
+            <a href="/suite/market-radar" class="back-btn">← BACK TO RADAR</a>
+            <h1 class="h-title" id="tSym">TARGET LOCK</h1>
         </div>
-
-        <div class="plan-item" style="border-left: 3px solid #da3633;">
-            <span class="label">STOP LOSS</span>
-            <span class="value" id="stop">---</span>
-            <button class="copy-btn" onclick="copyText('stop')">COPY</button>
+        <div style="text-align:right;">
+            <div id="livePrice" style="font-size:32px; font-weight:800;">--</div>
+            <div style="font-size:10px; color:var(--green);">LIVE FEED</div>
         </div>
     </div>
 
-    <div class="plan-item" style="border-left: 3px solid #2ea043; margin-top: 5px;">
-        <span class="label">TARGET 1 (SAFE)</span>
-        <span class="value" id="t1">---</span>
-        <button class="copy-btn" onclick="copyText('t1')">COPY</button>
-    </div>
-    <div class="plan-item" style="border-left: 3px solid #2ea043;">
-        <span class="label">TARGET 2 (STRUCTURE)</span>
-        <span class="value" id="t2">---</span>
-        <button class="copy-btn" onclick="copyText('t2')">COPY</button>
-    </div>
-    <div class="plan-item" style="border-left: 3px solid #2ea043;">
-        <span class="label">TARGET 3 (RUNNER)</span>
-        <span class="value" id="t3">---</span>
-        <button class="copy-btn" onclick="copyText('t3')">COPY</button>
+    <div class="panel" style="grid-area: left;">
+        <div class="panel-head">RISK PROTOCOL</div>
+        <div style="font-size:12px; color:var(--gray); margin-bottom:5px;">ACCOUNT BALANCE</div>
+        <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="recalc()">
+        
+        <div style="font-size:12px; color:var(--gray); margin-bottom:5px; margin-top:20px;">RISK PER TRADE (%)</div>
+        <input type="number" id="inpRisk" class="inp-risk" value="10.0" step="0.1" oninput="recalc()">
+        
+        <div style="margin-top:auto; padding-top:20px; border-top:1px solid var(--border);">
+            <div style="font-size:12px; color:var(--gray);">MAX LOSS ALLOWED</div>
+            <div id="valLoss" class="c-RED" style="font-size:32px; font-weight:800;">$400.00</div>
+        </div>
     </div>
 
-    <div class="footer-note" id="advice">
-        Waiting for data stream...
+    <div class="panel" style="grid-area: center; text-align:center; justify-content:center;">
+        <div style="margin-bottom:10px; font-size:12px; color:var(--gray); letter-spacing:2px;">BEHAVIOR ANALYSIS</div>
+        
+        <div id="sniper-alert">⚠ SNIPER SETUP DETECTED</div>
+
+        <div id="vMode" class="mode-display c-GRAY">LOADING</div>
+        <div style="margin-bottom:30px;">
+            <span id="vScore" style="font-size:42px; font-weight:800;">--</span>
+            <span style="font-size:12px; color:var(--gray);"> / 100</span>
+        </div>
+
+        <div id="roeContainer" class="roe-box">
+            <div id="vROE">Awaiting Satellite Data...</div>
+        </div>
+    </div>
+
+    <div class="panel" style="grid-area: right;">
+        <div class="panel-head">FLIGHT PATH</div>
+        <button class="btn-act btn-copy" onclick="copyIndicator()">COPY ALL DATA</button>
+        <button class="btn-act btn-key" onclick="copyKey()">COPY TRADE KEY</button>
+        
+        <div style="height:30px;"></div>
+
+        <div class="data-row">
+            <span style="color:var(--gray); font-weight:700;">ENTRY TRIGGER</span>
+            <div style="display:flex; align-items:center;">
+                <span id="pEntry" class="d-val c-GREEN">--</span>
+                <button class="mini-copy" onclick="copyText('pEntry')">📋</button>
+            </div>
+        </div>
+        
+        <div class="data-row">
+            <span style="color:var(--gray); font-weight:700;">STOP LOSS</span>
+            <div style="display:flex; align-items:center;">
+                <span id="pStop" class="d-val c-RED">--</span>
+                <button class="mini-copy" onclick="copyText('pStop')">📋</button>
+            </div>
+        </div>
+
+        <div class="data-row">
+            <span style="color:var(--gray); font-weight:700;">POS SIZE</span>
+            <div style="display:flex; align-items:center;">
+                <span id="pSize" class="d-val">--</span>
+                <button class="mini-copy" onclick="copyText('pSize')">📋</button>
+            </div>
+        </div>
+        
+        <div style="height:30px;"></div>
+
+        <div class="data-row">
+            <span style="color:var(--gray); font-weight:700;">TARGET 1</span>
+            <div style="display:flex; align-items:center;">
+                <span id="pT1" class="d-val c-YELLOW">--</span>
+                <button class="mini-copy" onclick="copyText('pT1')">📋</button>
+            </div>
+        </div>
+
+        <div class="data-row">
+            <span style="color:var(--gray); font-weight:700;">TARGET 2</span>
+            <div style="display:flex; align-items:center;">
+                <span id="pT2" class="d-val">--</span>
+                <button class="mini-copy" onclick="copyText('pT2')">📋</button>
+            </div>
+        </div>
+
+        <div class="data-row">
+            <span style="color:var(--gray); font-weight:700;">TARGET 3</span>
+            <div style="display:flex; align-items:center;">
+                <span id="pT3" class="d-val">--</span>
+                <button class="mini-copy" onclick="copyText('pT3')">📋</button>
+            </div>
+        </div>
     </div>
 </div>
 
+<input type="hidden" id="raw_key"><input type="hidden" id="raw_data">
+
 <script>
-    // --- PARSE URL PARAMS ---
-    const params = new URLSearchParams(window.location.search);
-    const symbolParam = params.get('symbol') || 'BTCUSDT';
+    const urlParams = new URLSearchParams(window.location.search);
+    const symbol = urlParams.get('symbol') || 'BTCUSDT';
+    document.getElementById('tSym').innerText = symbol.replace('USDT', '') + " LOCK";
     
-    // --- SSE CONNECTION ---
-    const evtSource = new EventSource(`/stream/market_radar?symbol=${symbolParam}`);
+    let activeData = null;
 
-    evtSource.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        if (!data.ok) return;
-
-        const res = data.result;
-        const plan = res.plan;
-        const isSniper = res.is_sniper_mode;
-
-        // 1. UPDATE HEADER
-        document.getElementById('symbol').innerText = res.symbol;
-        document.getElementById('price').innerText = res.price.toFixed(2);
-        document.getElementById('price').style.color = getBiasColor(res.bias);
-
-        // 2. SNIPER MODE TOGGLE
-        const sniperPanel = document.getElementById('sniper-panel');
-        if (isSniper) {
-            sniperPanel.style.display = 'block';
-            
-            // Set Color Scheme (Red/Green)
-            const color = res.bias === 'BEARISH' ? 'var(--accent-neon-red)' : 'var(--accent-neon-green)';
-            sniperPanel.style.borderColor = color;
-            sniperPanel.style.backgroundColor = res.bias === 'BEARISH' ? 'rgba(255, 7, 58, 0.1)' : 'rgba(57, 255, 20, 0.1)';
-            document.getElementById('sniper-title').style.color = color;
-            
-            // Update Text
-            document.getElementById('sniper-title').innerText = "SNIPER EXECUTION";
-            document.getElementById('sniper-reason').innerText = `Testing Daily 30 EMA (${res.levels.daily_ema30.toFixed(0)})`;
-        } else {
-            sniperPanel.style.display = 'none';
-        }
-
-        // 3. UPDATE VALUES
-        updateField('entry', plan.entry);
-        updateField('stop', plan.stop);
-        updateField('t1', plan.targets[0]);
-        updateField('t2', plan.targets[1]);
-        updateField('t3', plan.targets[2]);
-
-        // 4. UPDATE FOOTER
-        document.getElementById('advice').innerText = res.advice;
-    };
-
-    function updateField(id, val) {
-        const el = document.getElementById(id);
-        if (val && val > 0) el.innerText = val.toFixed(2);
-        else el.innerText = "---";
+    async function init() {
+        try {
+            const res = await fetch('/api/radar/target', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ symbol: symbol }) 
+            });
+            const json = await res.json();
+            if(json.ok && json.result) { 
+                activeData = json.result.result || json.result;
+                render(activeData); 
+            }
+        } catch(e) { console.error(e); }
     }
 
-    function getBiasColor(bias) {
-        if (bias === 'BULLISH') return 'var(--accent-green)';
-        if (bias === 'BEARISH') return 'var(--accent-red)';
-        return '#fff';
+    function render(d) {
+        document.getElementById('raw_key').value = d.mission_key;
+        document.getElementById('raw_data').value = d.indicator_string;
+        if(d.price) document.getElementById('livePrice').innerText = d.price.toLocaleString();
+
+        const modeEl = document.getElementById('vMode');
+        modeEl.innerText = d.status;
+        document.getElementById('vScore').innerText = d.score;
+        document.getElementById('vROE').innerText = d.advice;
+
+        // --- THEME & SNIPER LOGIC (INTEGRATED) ---
+        let theme = "GRAY";
+        const sniperAlert = document.getElementById('sniper-alert');
+
+        if(d.is_sniper_mode) {
+            // SNIPER INTERRUPT
+            sniperAlert.style.display = 'block';
+            if(d.bias === 'BEARISH') {
+                theme = "NEON_RED";
+                sniperAlert.style.borderColor = "var(--neon-red)";
+                sniperAlert.style.color = "var(--neon-red)";
+                sniperAlert.innerText = "⚡ SNIPER SHORT ACTIVE";
+            } else {
+                theme = "NEON_GREEN";
+                sniperAlert.style.borderColor = "var(--neon-green)";
+                sniperAlert.style.color = "var(--neon-green)";
+                sniperAlert.innerText = "⚡ SNIPER LONG ACTIVE";
+            }
+        } else {
+            // STANDARD MODES
+            sniperAlert.style.display = 'none';
+            if(d.color === "GREEN") theme = "GREEN";
+            else if(d.color === "YELLOW") theme = "YELLOW";
+            else if(d.color === "PURPLE") theme = "PURPLE";
+            else if(d.color === "RED") theme = "RED";
+        }
+
+        modeEl.className = `mode-display c-${theme}`;
+        
+        // Handle Border Color based on theme
+        let borderColor = `var(--${theme.toLowerCase()})`;
+        if(theme === "NEON_RED") borderColor = "var(--neon-red)";
+        if(theme === "NEON_GREEN") borderColor = "var(--neon-green)";
+        
+        document.getElementById('roeContainer').style.borderLeftColor = borderColor;
+
+        if(d.plan && d.plan.valid) {
+            document.getElementById('pEntry').innerText = d.plan.entry.toFixed(2);
+            document.getElementById('pStop').innerText = d.plan.stop.toFixed(2);
+            document.getElementById('pT1').innerText = d.plan.targets[0].toFixed(2);
+            document.getElementById('pT2').innerText = d.plan.targets[1].toFixed(2);
+            document.getElementById('pT3').innerText = d.plan.targets[2].toFixed(2);
+            recalc();
+        } else {
+             ['pEntry','pStop','pT1','pT2','pT3','pSize'].forEach(id => document.getElementById(id).innerText = "--");
+        }
+    }
+
+    function recalc() {
+        if(!activeData || !activeData.plan || !activeData.plan.valid) return;
+        const bal = parseFloat(document.getElementById('inpBal').value);
+        const riskPct = parseFloat(document.getElementById('inpRisk').value);
+        const riskAmt = bal * (riskPct / 100);
+        
+        document.getElementById('valLoss').innerText = "$" + riskAmt.toFixed(2);
+        
+        const entry = activeData.plan.entry;
+        const stop = activeData.plan.stop;
+        const dist = Math.abs(entry - stop);
+        
+        if(dist > 0) {
+            // Position Size = Risk Amount / Distance per Unit
+            const size = riskAmt / dist; 
+            // CLEAN DISPLAY: Shows raw size for the exchange
+            document.getElementById('pSize').innerText = size.toFixed(4);
+        }
     }
 
     function copyText(id) {
-        const val = document.getElementById(id).innerText;
-        if (val === "---") return;
-        navigator.clipboard.writeText(val).then(() => {
-            // Visual feedback
-            const btn = document.querySelector(`#${id} + .copy-btn`);
-            const original = btn.innerText;
-            btn.innerText = "COPIED";
-            setTimeout(() => btn.innerText = original, 1000);
-        });
+        const text = document.getElementById(id).innerText;
+        navigator.clipboard.writeText(text);
     }
+
+    function copyKey() { navigator.clipboard.writeText(document.getElementById('raw_key').value); }
+    function copyIndicator() { navigator.clipboard.writeText(document.getElementById('raw_data').value); }
+
+    init();
+    setInterval(init, 2000);
 </script>
 </body>
 </html>
