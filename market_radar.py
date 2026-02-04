@@ -1,7 +1,7 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v8.6 (SNIPER SURGICAL MERGE)
-# UPDATE: Added 'Sniper Logic' (Red/Green Line) as a Priority Interrupt.
+# KABRODA MARKET RADAR v8.5 (ASYMMETRIC SNIPER UPGRADE)
+# UPDATE: Implements Hybrid Logic: Bullish=20EMA, Bearish=30EMA
 # PRESERVED: User's v7.5 Thresholds, Jailbreak Logic, and Magnet Logic.
 # ==============================================================================
 import asyncio
@@ -29,25 +29,29 @@ def _get_thresholds(symbol):
 def _analyze_topology(symbol, anchor, levels, bias):
     if anchor == 0: return "DATA_SYNC", "GRAY", 0, "NEUTRAL"
 
-    # --- 1. SNIPER INTERRUPT (The New Alpha) ---
+    # --- 1. SNIPER INTERRUPT (ASYMMETRIC) ---
     # We check this FIRST. If the "Rare Event" is happening, we alert immediately.
+    d_ema20 = float(levels.get("daily_ema20", 0))
     d_ema30 = float(levels.get("daily_ema30", 0))
     d_ema50 = float(levels.get("daily_ema50", 0))
     
     # Only run logic if Pipeline provided the EMAs
     if d_ema30 > 0:
-        # Calculate distance to the "King" (30 EMA)
-        # We use a 0.5% buffer based on our "Wick Analysis"
-        dist_to_30 = (anchor - d_ema30) / d_ema30
-        is_touching = abs(dist_to_30) < 0.005 
-
-        if bias == "BEARISH" and is_touching and anchor < d_ema50:
-            # Bearish Force + Touching 30 EMA + Below 50 EMA = KILL ZONE
-            return "SNIPER: RED LINE SHORT", "NEON_RED", 100, "SHORT"
+        # BEARISH MODE: Short the Red Line (30 EMA)
+        if bias == "BEARISH":
+            dist_to_30 = (anchor - d_ema30) / d_ema30
+            is_touching_30 = abs(dist_to_30) < 0.005 
+            if is_touching_30 and anchor < d_ema50:
+                return "SNIPER: RED LINE SHORT", "NEON_RED", 100, "SHORT"
         
-        if bias == "BULLISH" and is_touching and anchor > d_ema50:
-            # Bullish Force + Touching 30 EMA + Above 50 EMA = LAUNCH PAD
-            return "SNIPER: GREEN LINE LONG", "NEON_GREEN", 100, "LONG"
+        # BULLISH MODE: Long the Green Line (20 EMA) - More Aggressive
+        # We use 20 EMA for Bull Runs to catch the "shallow" dips (FOMO).
+        if bias == "BULLISH" and d_ema20 > 0:
+            dist_to_20 = (anchor - d_ema20) / d_ema20
+            is_touching_20 = abs(dist_to_20) < 0.005
+            # Ensure Structure is valid (Price > 50 EMA)
+            if is_touching_20 and anchor > d_ema50:
+                return "SNIPER: GREEN LINE LONG", "NEON_GREEN", 100, "LONG"
 
     # --- 2. STANDARD LOGIC (Preserved) ---
     runway_limit, allow_jailbreak = _get_thresholds(symbol)
@@ -93,8 +97,13 @@ def _generate_roe(verdict, levels):
     ds = int(float(levels.get("daily_support", 0)))
     
     if "SNIPER" in verdict:
-        d_ema30 = int(float(levels.get("daily_ema30", 0)))
-        return f"CRITICAL ALPHA DETECTED. Price is grinding the Daily 30 EMA ({d_ema30}). Force aligns. EXECUTE CAMPAIGN MODE (1.7% Stop)."
+        # Dynamic advice based on bias
+        if "SHORT" in verdict:
+            d_ema30 = int(float(levels.get("daily_ema30", 0)))
+            return f"CRITICAL ALPHA. Bearish Force + 30 EMA Rejection ({d_ema30}). Structure is aligned. EXECUTE SHORT."
+        else:
+            d_ema20 = int(float(levels.get("daily_ema20", 0)))
+            return f"CRITICAL ALPHA. Bullish Force + 20 EMA Bounce ({d_ema20}). Momentum is strong. EXECUTE LONG."
 
     if "JAILBREAK" in verdict and "UNCONFIRMED" not in verdict:
         return "CRITICAL STRUCTURAL FAILURE. Triggers are OUTSIDE walls. High probability of EXPANSION. Authorized."
