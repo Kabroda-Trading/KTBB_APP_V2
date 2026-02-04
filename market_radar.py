@@ -1,8 +1,8 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v8.5 (ASYMMETRIC SNIPER UPGRADE)
-# UPDATE: Implements Hybrid Logic: Bullish=20EMA, Bearish=30EMA
-# PRESERVED: User's v7.5 Thresholds, Jailbreak Logic, and Magnet Logic.
+# KABRODA MARKET RADAR v8.7 (CALIBRATION PATCH)
+# UPDATE: Fixed bug where 'Calibrating' sessions generated fake scores.
+# NOW: Forces Score=0 and Status='CALIBRATING' during the first 30m.
 # ==============================================================================
 import asyncio
 import json
@@ -17,10 +17,6 @@ def _make_indicator_string(levels):
 
 # --- HELPER: ASSET-SPECIFIC THRESHOLDS ---
 def _get_thresholds(symbol):
-    """
-    Returns (Runway_Min_Pct, Allow_Solo_Jailbreak)
-    PRESERVED: User's logic (BTC tighter, Alts looser).
-    """
     if "BTC" in symbol:
         return 0.5, True 
     return 0.8, False 
@@ -30,30 +26,24 @@ def _analyze_topology(symbol, anchor, levels, bias):
     if anchor == 0: return "DATA_SYNC", "GRAY", 0, "NEUTRAL"
 
     # --- 1. SNIPER INTERRUPT (ASYMMETRIC) ---
-    # We check this FIRST. If the "Rare Event" is happening, we alert immediately.
     d_ema20 = float(levels.get("daily_ema20", 0))
     d_ema30 = float(levels.get("daily_ema30", 0))
     d_ema50 = float(levels.get("daily_ema50", 0))
     
-    # Only run logic if Pipeline provided the EMAs
     if d_ema30 > 0:
-        # BEARISH MODE: Short the Red Line (30 EMA)
         if bias == "BEARISH":
             dist_to_30 = (anchor - d_ema30) / d_ema30
             is_touching_30 = abs(dist_to_30) < 0.005 
             if is_touching_30 and anchor < d_ema50:
                 return "SNIPER: RED LINE SHORT", "NEON_RED", 100, "SHORT"
         
-        # BULLISH MODE: Long the Green Line (20 EMA) - More Aggressive
-        # We use 20 EMA for Bull Runs to catch the "shallow" dips (FOMO).
         if bias == "BULLISH" and d_ema20 > 0:
             dist_to_20 = (anchor - d_ema20) / d_ema20
             is_touching_20 = abs(dist_to_20) < 0.005
-            # Ensure Structure is valid (Price > 50 EMA)
             if is_touching_20 and anchor > d_ema50:
                 return "SNIPER: GREEN LINE LONG", "NEON_GREEN", 100, "LONG"
 
-    # --- 2. STANDARD LOGIC (Preserved) ---
+    # --- 2. STANDARD LOGIC ---
     runway_limit, allow_jailbreak = _get_thresholds(symbol)
 
     bo = float(levels.get("breakout_trigger", 0))
@@ -67,20 +57,17 @@ def _analyze_topology(symbol, anchor, levels, bias):
     runway_up_pct = ((dr - bo) / anchor) * 100 if bo > 0 else 0
     runway_dn_pct = ((bd - ds) / anchor) * 100 if bd > 0 else 0
 
-    # PROFILE 1: THE JAILBREAK
     if is_inverted_up and bias in ["BULLISH", "NEUTRAL"]:
         return ("JAILBREAK (UP)", "PURPLE", 95, "LONG") if allow_jailbreak else ("JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL")
     
     if is_inverted_dn and bias in ["BEARISH", "NEUTRAL"]:
         return ("JAILBREAK (DOWN)", "PURPLE", 95, "SHORT") if allow_jailbreak else ("JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL")
 
-    # PROFILE 2: THE SUFFOCATION
     if bias == "BULLISH" and 0 < runway_up_pct < runway_limit:
         return f"SUFFOCATED ({runway_up_pct:.2f}%)", "RED", 10, "NEUTRAL"
     if bias == "BEARISH" and 0 < runway_dn_pct < runway_limit:
         return f"SUFFOCATED ({runway_dn_pct:.2f}%)", "RED", 10, "NEUTRAL"
 
-    # PROFILE 3: THE MAGNET
     if bias == "BULLISH" and runway_up_pct >= runway_limit:
         return f"MAGNET LONG ({runway_up_pct:.2f}%)", "GREEN", 75, "LONG"
     if bias == "BEARISH" and runway_dn_pct >= runway_limit:
@@ -91,13 +78,11 @@ def _analyze_topology(symbol, anchor, levels, bias):
         
     return f"BIAS BLOCKADE ({bias})", "RED", 15, "NEUTRAL"
 
-# --- HELPER: ROE GENERATOR ---
 def _generate_roe(verdict, levels):
     dr = int(float(levels.get("daily_resistance", 0)))
     ds = int(float(levels.get("daily_support", 0)))
     
     if "SNIPER" in verdict:
-        # Dynamic advice based on bias
         if "SHORT" in verdict:
             d_ema30 = int(float(levels.get("daily_ema30", 0)))
             return f"CRITICAL ALPHA. Bearish Force + 30 EMA Rejection ({d_ema30}). Structure is aligned. EXECUTE SHORT."
@@ -116,14 +101,11 @@ def _generate_roe(verdict, levels):
         
     return "LOW ENERGY / CONFLICT. Market structure opposes gravity. Stand down."
 
-# --- PRIORITY STOP SELECTOR ---
 def _find_predator_stop(entry, direction, levels, verdict):
-    # NEW: Sniper Stop (1.7% Rule from Wick Analysis)
     if "SNIPER" in verdict:
         if direction == "SHORT": return entry * 1.017
         if direction == "LONG": return entry * 0.983
 
-    # STANDARD PRESERVED LOGIC
     pred_h = float(levels.get("range30m_high", 0))
     pred_l = float(levels.get("range30m_low", 0))
     buffer = entry * 0.001 
@@ -137,7 +119,6 @@ def _find_predator_stop(entry, direction, levels, verdict):
         return entry * 1.01 
     return 0
 
-# --- TRADE PLANNER ---
 def _get_plan(verdict, vector, levels, anchor):
     plan = {"valid": False, "bias": "NEUTRAL", "entry": 0, "stop": 0, "targets": [0,0,0]}
     
@@ -148,23 +129,19 @@ def _get_plan(verdict, vector, levels, anchor):
     dr = float(levels.get("daily_resistance", 0))
     ds = float(levels.get("daily_support", 0))
     
-    # Entry Logic
     if "SNIPER" in verdict:
-        entry_price = anchor # We enter AT price (the wall touch)
+        entry_price = anchor 
     else:
         entry_price = bo if vector == "LONG" else bd
 
     stop_price = _find_predator_stop(entry_price, vector, levels, verdict)
     
-    # Target Logic
     if "SNIPER" in verdict:
-        # Campaign Mode Targets
         if vector == "LONG":
             t1, t2, t3 = entry_price * 1.02, dr, entry_price * 1.05
         else:
             t1, t2, t3 = entry_price * 0.98, ds, entry_price * 0.95
     else:
-        # Standard Targets (Fib Expansion)
         gap = abs(bo - bd) or (entry_price * 0.02)
         if vector == "LONG":
             t1, t2, t3 = entry_price + (gap * 0.618), entry_price + gap, entry_price + (gap * 1.618)
@@ -181,16 +158,28 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
     data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
     if data.get("status") == "ERROR": return {"ok": False}
     
+    # --- FIX START: CHECK FOR CALIBRATION ---
+    if data.get("status") == "CALIBRATING":
+        return {
+            "ok": True,
+            "result": {
+                "symbol": symbol, "price": float(data.get("price", 0)), "score": 0,
+                "status": "CALIBRATING", "color": "YELLOW", "advice": "Waiting for 30m Candle Close...", 
+                "bias": "WAIT", "roe": "WAITING", "plan": {"valid": False}, "levels": {},
+                "mission_key": "WAIT", "indicator_string": "0,0,0,0,0,0", "full_intel": json.dumps(data, default=str),
+                "is_sniper_mode": False
+            }
+        }
+    # --- FIX END ---
+
     price = float(data.get("price", 0))
     levels = data.get("battlebox", {}).get("levels", {})
     bias = data.get("battlebox", {}).get("context", {}).get("weekly_force", "NEUTRAL")
 
-    # EXECUTE ENGINE
     verdict, color, score, vector = _analyze_topology(symbol, price, levels, bias)
     plan = _get_plan(verdict, vector, levels, price)
     roe_text = _generate_roe(verdict, levels)
 
-    # HTML HOOK: Helps the front-end know to show the "Sniper Panel"
     is_sniper = "SNIPER" in verdict
 
     return {
@@ -216,6 +205,18 @@ async def scan_sector(session_id="us_ny_futures"):
             radar_grid.append({"symbol": sym, "score": 0, "status": "OFFLINE", "metrics": {}})
             continue
         
+        # --- FIX START: CHECK FOR CALIBRATION IN GRID ---
+        if res.get("status") == "CALIBRATING":
+            price = float(res.get("price", 0))
+            metrics = {"hull": {"val": 0, "pct": 0, "color": "YELLOW"}, "energy": {"val": 0}, "wind": {"val": 0}, "space": {"val": 0}}
+            radar_grid.append({
+                "symbol": sym, "price": price, "score": 0, "status": "CALIBRATING", "bias": "WAIT", 
+                "metrics": metrics, "color_code": "YELLOW", "has_trade": False, 
+                "indicator_string": "0,0,0,0,0,0", "full_intel": json.dumps(res, default=str), "is_sniper_mode": False
+            })
+            continue
+        # --- FIX END ---
+
         price = float(res.get("price", 0))
         levels = res.get("battlebox", {}).get("levels", {})
         bias = res.get("battlebox", {}).get("context", {}).get("weekly_force", "NEUTRAL")
