@@ -1,6 +1,6 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v8.3 (Sniper Upgrade)
+# KABRODA BATTLEBOX PIPELINE — v8.4 (Sniper Upgrade: 20 EMA Added)
 # ==============================================================================
 # Purpose:
 # - The single "Moment of Truth" for each session/day
@@ -8,7 +8,7 @@
 # - Computes levels via sse_engine.compute_sse_levels
 # - Feeds post-lock candles into structure_state_engine (law layer)
 # - Fetches Weekly Candles to determine Macro Force (Green/Red)
-# - NEW: Fetches Daily Candles for 30/50 EMA Walls
+# - NEW: Fetches Daily Candles for 20/30/50 EMA Walls
 # ==============================================================================
 
 from __future__ import annotations
@@ -123,7 +123,7 @@ async def fetch_live_weekly(symbol: str, limit: int = 5) -> List[Dict[str, Any]]
 
 # --- DAILY FETCHING (NEW) ---
 async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]]:
-    """Fetches Daily candles to calculate the 30/50 EMA Walls."""
+    """Fetches Daily candles to calculate the 20/30/50 EMA Walls."""
     s = _normalize_symbol(symbol)
     try:
         rows = await _exchange_live.fetch_ohlcv(s, "1d", limit=limit)
@@ -283,11 +283,33 @@ def _compute_sse_packet(
 
     last_price = float(context_24h[-1]["close"]) if context_24h else session_open
 
+    # --- SNIPER ENGINE: CALCULATE EMAS (20, 30, 50) ---
+    # We pass these raw daily candles to the SSE Engine, but we can also calculate them here to ensure they exist in 'levels'
+    # Actually, sse_engine.compute_sse_levels handles the EMA calc if we pass 'raw_daily_candles'.
+    # We need to make sure sse_engine is updated to return the 20 EMA as well.
+    # Since we cannot update sse_engine right now, we will Inject them manually here into the result.
+    
+    d_ema20, d_ema30, d_ema50 = 0.0, 0.0, 0.0
+    if raw_daily and len(raw_daily) > 50:
+        # Simple pandas-free EMA calculation
+        closes = [float(c["close"]) for c in raw_daily]
+        
+        def calc_ema(period, values):
+            k = 2 / (period + 1)
+            ema = values[0]
+            for v in values[1:]:
+                ema = (v * k) + (ema * (1 - k))
+            return ema
+            
+        d_ema20 = calc_ema(20, closes)
+        d_ema30 = calc_ema(30, closes)
+        d_ema50 = calc_ema(50, closes)
+
     sse_input = {
         "locked_history_5m": context_24h,
         "slice_24h_5m": context_24h,
         "slice_4h_5m": context_24h[-48:],
-        "raw_daily_candles": raw_daily or [], # <--- PASSED TO ENGINE
+        "raw_daily_candles": raw_daily or [], 
         "session_open_price": session_open,
         "r30_high": r30_high,
         "r30_low": r30_low,
@@ -298,6 +320,13 @@ def _compute_sse_packet(
     computed = sse_engine.compute_sse_levels(sse_input)
     if "error" in computed:
         return computed
+
+    # --- INJECT SNIPER DATA (20/30/50) ---
+    # This ensures the 20 EMA is available even if sse_engine wasn't updated yet.
+    if "levels" in computed:
+        computed["levels"]["daily_ema20"] = d_ema20 # <--- NEW
+        computed["levels"]["daily_ema30"] = d_ema30
+        computed["levels"]["daily_ema50"] = d_ema50
 
     # --- INJECT WEEKLY TRUTH ---
     if "context" not in computed: computed["context"] = {}
