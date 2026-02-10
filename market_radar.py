@@ -1,8 +1,8 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v8.7 (CALIBRATION PATCH)
-# UPDATE: Fixed bug where 'Calibrating' sessions generated fake scores.
-# NOW: Forces Score=0 and Status='CALIBRATING' during the first 30m.
+# KABRODA MARKET RADAR v8.8 (JAILBREAK SAFETY PATCH)
+# UPDATE: Fixed logic blind spot on 'Inverted' levels.
+# NOW: Checks gap % on Jailbreaks. If < 0.5%, downgrades Score to 20 (Risky).
 # ==============================================================================
 import asyncio
 import json
@@ -43,7 +43,7 @@ def _analyze_topology(symbol, anchor, levels, bias):
             if is_touching_20 and anchor > d_ema50:
                 return "SNIPER: GREEN LINE LONG", "NEON_GREEN", 100, "LONG"
 
-    # --- 2. STANDARD LOGIC ---
+    # --- 2. STANDARD LOGIC (WITH JAILBREAK SAFETY) ---
     runway_limit, allow_jailbreak = _get_thresholds(symbol)
 
     bo = float(levels.get("breakout_trigger", 0))
@@ -51,17 +51,28 @@ def _analyze_topology(symbol, anchor, levels, bias):
     dr = float(levels.get("daily_resistance", 0))
     ds = float(levels.get("daily_support", 0))
     
+    # Check Inversion (Jailbreak Conditions)
     is_inverted_up = bo > dr
     is_inverted_dn = bd < ds
     
-    runway_up_pct = ((dr - bo) / anchor) * 100 if bo > 0 else 0
-    runway_dn_pct = ((bd - ds) / anchor) * 100 if bd > 0 else 0
+    # Calculate Gaps (Absolute distance between Trigger and Wall)
+    gap_up_pct = (abs(bo - dr) / anchor) * 100 if bo > 0 else 0
+    gap_dn_pct = (abs(bd - ds) / anchor) * 100 if bd > 0 else 0
 
+    # JAILBREAK LOGIC (Patched)
     if is_inverted_up and bias in ["BULLISH", "NEUTRAL"]:
+        if gap_up_pct < runway_limit: # Safety Check
+            return f"JAILBREAK UP (RISKY GAP: {gap_up_pct:.2f}%)", "ORANGE", 20, "NEUTRAL"
         return ("JAILBREAK (UP)", "PURPLE", 95, "LONG") if allow_jailbreak else ("JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL")
     
     if is_inverted_dn and bias in ["BEARISH", "NEUTRAL"]:
+        if gap_dn_pct < runway_limit: # Safety Check
+            return f"JAILBREAK DOWN (RISKY GAP: {gap_dn_pct:.2f}%)", "ORANGE", 20, "NEUTRAL"
         return ("JAILBREAK (DOWN)", "PURPLE", 95, "SHORT") if allow_jailbreak else ("JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL")
+
+    # STANDARD RUNWAY LOGIC
+    runway_up_pct = ((dr - bo) / anchor) * 100 if bo > 0 else 0
+    runway_dn_pct = ((bd - ds) / anchor) * 100 if bd > 0 else 0
 
     if bias == "BULLISH" and 0 < runway_up_pct < runway_limit:
         return f"SUFFOCATED ({runway_up_pct:.2f}%)", "RED", 10, "NEUTRAL"
@@ -90,8 +101,11 @@ def _generate_roe(verdict, levels):
             d_ema20 = int(float(levels.get("daily_ema20", 0)))
             return f"CRITICAL ALPHA. Bullish Force + 20 EMA Bounce ({d_ema20}). Momentum is strong. EXECUTE LONG."
 
-    if "JAILBREAK" in verdict and "UNCONFIRMED" not in verdict:
-        return "CRITICAL STRUCTURAL FAILURE. Triggers are OUTSIDE walls. High probability of EXPANSION. Authorized."
+    if "JAILBREAK" in verdict:
+        if "RISKY GAP" in verdict:
+            return "WARNING: TIGHT SPREAD. Structure is broken but the gap is too small (<0.5%). Volatility Trap likely. STAND DOWN."
+        if "UNCONFIRMED" not in verdict:
+            return "CRITICAL STRUCTURAL FAILURE. Triggers are OUTSIDE walls with velocity room. High probability of EXPANSION. Authorized."
     
     if "SUFFOCATED" in verdict:
         return "WARNING: CHOP ZONE. Trigger is too close to the Daily Wall (Insufficient Runway). Risk of immediate reversal. HOLD FIRE."
@@ -158,7 +172,6 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
     data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
     if data.get("status") == "ERROR": return {"ok": False}
     
-    # --- FIX START: CHECK FOR CALIBRATION ---
     if data.get("status") == "CALIBRATING":
         return {
             "ok": True,
@@ -170,7 +183,6 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
                 "is_sniper_mode": False
             }
         }
-    # --- FIX END ---
 
     price = float(data.get("price", 0))
     levels = data.get("battlebox", {}).get("levels", {})
@@ -205,7 +217,6 @@ async def scan_sector(session_id="us_ny_futures"):
             radar_grid.append({"symbol": sym, "score": 0, "status": "OFFLINE", "metrics": {}})
             continue
         
-        # --- FIX START: CHECK FOR CALIBRATION IN GRID ---
         if res.get("status") == "CALIBRATING":
             price = float(res.get("price", 0))
             metrics = {"hull": {"val": 0, "pct": 0, "color": "YELLOW"}, "energy": {"val": 0}, "wind": {"val": 0}, "space": {"val": 0}}
@@ -215,7 +226,6 @@ async def scan_sector(session_id="us_ny_futures"):
                 "indicator_string": "0,0,0,0,0,0", "full_intel": json.dumps(res, default=str), "is_sniper_mode": False
             })
             continue
-        # --- FIX END ---
 
         price = float(res.get("price", 0))
         levels = res.get("battlebox", {}).get("levels", {})
