@@ -40,12 +40,14 @@
         .highlight { color: #facc15; font-weight: 700; }
         
         /* STATS TABLE STYLING */
-        .stats-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
-        .stats-table th { background: #1e293b; color: #fff; padding: 8px; text-align: center; border: 1px solid #334155; }
-        .stats-table td { padding: 8px; text-align: center; border: 1px solid #334155; }
+        .stats-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }
+        .stats-table th { background: #1e293b; color: #fff; padding: 6px; text-align: center; border: 1px solid #334155; }
+        .stats-table td { padding: 6px; text-align: center; border: 1px solid #334155; }
         .win-high { background: rgba(34, 197, 94, 0.1); color: #22c55e; font-weight: bold; }
         .win-med { background: rgba(234, 179, 8, 0.1); color: #eab308; }
         .win-low { background: rgba(239, 68, 68, 0.1); color: #ef4444; font-weight: bold; }
+        
+        .subtitle { font-size: 14px; font-weight: 700; color: #94a3b8; margin-top: 15px; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px; }
     </style>
 </head>
 <body>
@@ -89,45 +91,77 @@
         <div class="card">
             <div class="title">/// STATISTICAL PROBABILITY MATRIX (2025 DATA)</div>
             <p style="font-size:13px; color:#94a3b8; margin-bottom:20px;">
-                Based on 12 months of backtested data. "Gap Size" is the distance between Trigger and Wall.
+                Based on 12 months of backtested data. "Gap Size" is the % distance between Trigger and Wall.
+                <br>
+                <span style="color:#22d3ee;">* ALIGNED = Trade matches Weekly Force Bias.</span>
             </p>
             
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                 <div>
                     <div class="rule-head" style="color:#ef4444;">SHORT TRADES (Breakdown Trigger)</div>
+                    
+                    <div class="subtitle">STANDARD SETUP (MAGNET)</div>
                     <table class="stats-table">
                         <thead>
                             <tr>
                                 <th>Gap Size</th>
-                                <th>Setup Type</th>
-                                <th>Win Rate</th>
+                                <th>Win Rate (Aligned)</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr>
-                                <td>0.00% - 0.50%</td>
-                                <td>ANY</td>
-                                <td class="win-low">22% - 31%</td>
+                                <td>0.00% - 0.25%</td>
+                                <td class="win-low">23.9%</td>
+                                <td class="win-low">BLOCK</td>
+                            </tr>
+                            <tr>
+                                <td>0.25% - 0.50%</td>
+                                <td class="win-low">32.0%</td>
                                 <td class="win-low">BLOCK</td>
                             </tr>
                             <tr>
                                 <td>0.50% - 0.75%</td>
-                                <td>Standard</td>
-                                <td class="win-med">48%</td>
+                                <td class="win-high">54.5% (GOLDEN)</td>
+                                <td class="win-high">GO</td>
+                            </tr>
+                            <tr>
+                                <td>0.75% - 1.00%</td>
+                                <td class="win-med">23.1%</td>
                                 <td class="win-med">CAUTION</td>
                             </tr>
+                             <tr>
+                                <td>1.75% - 2.00%</td>
+                                <td class="win-med">40.0%</td>
+                                <td class="win-med">OK</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="subtitle">JAILBREAK SETUP (INVERTED)</div>
+                    <table class="stats-table">
+                        <thead>
                             <tr>
-                                <td>0.75% - 1.50%</td>
-                                <td>Standard</td>
-                                <td class="win-high">52% - 61%</td>
-                                <td class="win-high">GO (PRIME)</td>
+                                <th>Gap Size</th>
+                                <th>Win Rate (Aligned)</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                             <tr>
+                                <td>0.00% - 0.50%</td>
+                                <td class="win-low">~19%</td>
+                                <td class="win-low">BLOCK</td>
                             </tr>
                             <tr>
-                                <td>> 2.00%</td>
-                                <td>Jailbreak</td>
-                                <td class="win-low">14%</td>
-                                <td class="win-low">FADE</td>
+                                <td>0.50% - 0.75%</td>
+                                <td class="win-med">33.3%</td>
+                                <td class="win-med">RISKY</td>
+                            </tr>
+                            <tr>
+                                <td>1.50% - 1.75%</td>
+                                <td class="win-high">50.0%</td>
+                                <td class="win-high">GO</td>
                             </tr>
                         </tbody>
                     </table>
@@ -135,46 +169,79 @@
 
                 <div>
                     <div class="rule-head" style="color:#22c55e;">LONG TRADES (Breakout Trigger)</div>
+                    
+                    <div class="subtitle">STANDARD SETUP (MAGNET)</div>
                     <table class="stats-table">
                         <thead>
                             <tr>
                                 <th>Gap Size</th>
-                                <th>Setup Type</th>
-                                <th>Win Rate</th>
+                                <th>Win Rate (Aligned)</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr>
-                                <td>0.00% - 0.50%</td>
-                                <td>ANY</td>
-                                <td class="win-low">29% - 34%</td>
+                                <td>0.00% - 0.25%</td>
+                                <td class="win-med">35.7%</td>
+                                <td class="win-med">CAUTION</td>
+                            </tr>
+                             <tr>
+                                <td>0.25% - 0.50%</td>
+                                <td class="win-low">29.0%</td>
                                 <td class="win-low">BLOCK</td>
                             </tr>
                             <tr>
-                                <td>0.50% - 1.00%</td>
-                                <td>Jailbreak</td>
-                                <td class="win-med">45%</td>
-                                <td class="win-med">GO (JB ONLY)</td>
+                                <td>0.50% - 0.75%</td>
+                                <td class="win-low">8.3%</td>
+                                <td class="win-low">AVOID</td>
                             </tr>
                             <tr>
-                                <td>1.25% - 1.50%</td>
-                                <td>Standard</td>
-                                <td class="win-high">64%</td>
-                                <td class="win-high">GO (GOLDEN)</td>
+                                <td>1.75% - 2.00%</td>
+                                <td class="win-high">100% (Low Vol)</td>
+                                <td class="win-high">GO</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="subtitle">JAILBREAK SETUP (INVERTED)</div>
+                    <table class="stats-table">
+                        <thead>
+                            <tr>
+                                <th>Gap Size</th>
+                                <th>Win Rate (Aligned)</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>0.00% - 0.25%</td>
+                                <td class="win-med">41.9%</td>
+                                <td class="win-med">OK</td>
                             </tr>
                             <tr>
-                                <td>> 2.00%</td>
-                                <td>Any</td>
-                                <td class="win-low">37% - 40%</td>
-                                <td class="win-low">FADE</td>
+                                <td>0.25% - 0.50%</td>
+                                <td class="win-low">28.6%</td>
+                                <td class="win-low">BLOCK</td>
+                            </tr>
+                            <tr>
+                                <td>0.50% - 0.75%</td>
+                                <td class="win-high">46.7% (PRIME)</td>
+                                <td class="win-high">GO</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
             </div>
-            <div style="margin-top: 15px; font-size: 11px; color: #64748b; text-align: center;">
-                * NOTE: "Standard" means Trigger is inside the Daily Walls. "Jailbreak" means Trigger is outside/inverted.
+            
+            <div style="margin-top: 20px; border-top: 1px solid #334155; padding-top: 15px;">
+                <div class="def-desc" style="font-size: 13px;">
+                    <strong>STRATEGIC NOTES:</strong>
+                    <ul style="list-style-type: square; margin-left: 20px; margin-top: 5px;">
+                        <li><strong>SHORT SWEET SPOT:</strong> Standard Shorts perform best with a gap between <strong>0.50% - 0.75%</strong> (Golden Zone).</li>
+                        <li><strong>LONG JAILBREAKS:</strong> Peak early at <strong>0.50% - 0.75%</strong>. If gap is > 1.0% on inverted long, failure rate increases.</li>
+                        <li><strong>THE < 0.5% RULE:</strong> Confirmed. Win rates drop significantly below 0.5% gap for almost all setups. Keep the filter active.</li>
+                    </ul>
+                </div>
             </div>
         </div>
 
@@ -210,51 +277,6 @@
                     </tr>
                 </tbody>
             </table>
-        </div>
-
-        <div class="card">
-            <div class="rules-grid">
-                
-                <div>
-                    <div class="title" style="font-size:24px; color:#fff; border:none;">/// TOPOLOGY MAP</div>
-                    <div class="rule-block">
-                        <div class="rule-head">1. THE TRIGGERS (ENTRY)</div>
-                        <div class="rule-text">The "Line in the Sand" where 15m momentum shifts. We never front-run the trigger. We wait for the price to cross.</div>
-                    </div>
-                    <div class="rule-block">
-                        <div class="rule-head">2. THE DAILY WALL (RESISTANCE/SUPPORT)</div>
-                        <div class="rule-text">Concrete. Price respects this 80% of the time. This is always <strong>TARGET 1</strong> for Magnet trades.</div>
-                    </div>
-                    <div class="rule-block">
-                        <div class="rule-head">3. THE RUNWAY (THE GAP)</div>
-                        <div class="rule-text">The empty space between #1 and #2. If this space is empty (0.5%+), we trade. If it is < 0.5%, we sit.</div>
-                    </div>
-                </div>
-
-                <div style="background:#1e293b; padding:20px; border-radius:4px; border:1px dashed #ef4444;">
-                    <div class="title" style="font-size:24px; color:#ef4444; border:none;">/// THE RISK MANTRA</div>
-                    
-                    <div style="margin-bottom:15px;">
-                        <span class="highlight">"A STOP LOSS PROTECTS ME FROM BEING WRONG, NOT FROM GIVING BACK PROFIT."</span>
-                    </div>
-
-                    <div class="rule-block">
-                        <div class="rule-head">RULE 1: THE ONE-WAY RATCHET</div>
-                        <div class="rule-text">I will only move my stop when <strong>Market Structure</strong> confirms a new safe floor (Higher Low). I never move it to "save" a loser.</div>
-                    </div>
-
-                    <div class="rule-block">
-                        <div class="rule-head">RULE 2: THE 3-STRIKE LAW</div>
-                        <div class="rule-text">If I move my stop 3 times out of fear, I have not accepted the risk. <strong>CLOSE THE TRADE.</strong></div>
-                    </div>
-
-                    <div class="rule-block">
-                        <div class="rule-head">RULE 3: THE SUFFOCATION</div>
-                        <div class="rule-text">Do not choke a winning trade. Give it room to breathe (ATR) until it hits the wall. Take partials to satisfy fear.</div>
-                    </div>
-                </div>
-
-            </div>
         </div>
 
         <div class="card">
