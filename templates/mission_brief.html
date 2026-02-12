@@ -24,7 +24,7 @@
         .rule-head { font-size: 14px; color: #94a3b8; font-weight: 800; text-transform: uppercase; border-bottom: 1px dashed #334155; margin-bottom: 8px; padding-bottom: 4px; }
         .rule-text { font-size: 13px; color: #e2e8f0; }
         
-        /* ASSET PROTOCOLS */
+        /* TABLES */
         .asset-table { width: 100%; border-collapse: collapse; font-size: 13px; }
         .asset-table th { text-align: left; color: #94a3b8; padding: 10px 0; border-bottom: 1px solid #334155; }
         .asset-table td { padding: 12px 0; border-bottom: 1px solid #1e293b; }
@@ -38,6 +38,14 @@
         .bg-gray { background: #334155; color: #fff; }
         
         .highlight { color: #facc15; font-weight: 700; }
+        
+        /* STATS TABLE STYLING */
+        .stats-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+        .stats-table th { background: #1e293b; color: #fff; padding: 8px; text-align: center; border: 1px solid #334155; }
+        .stats-table td { padding: 8px; text-align: center; border: 1px solid #334155; }
+        .win-high { background: rgba(34, 197, 94, 0.1); color: #22c55e; font-weight: bold; }
+        .win-med { background: rgba(234, 179, 8, 0.1); color: #eab308; }
+        .win-low { background: rgba(239, 68, 68, 0.1); color: #ef4444; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -46,7 +54,7 @@
     <div class="container">
         
         <div class="card">
-            <div class="title">/// BEHAVIOR IDENTIFICATION (v7.2)</div>
+            <div class="title">/// BEHAVIOR IDENTIFICATION (v8.8)</div>
             <div class="def-grid">
                 <div class="def-box c-PURPLE">
                     <div class="def-name">JAILBREAK</div>
@@ -54,7 +62,7 @@
                     <div class="def-desc">
                         The "Blue Sky" Trade. The Breakout Trigger is <strong>OUTSIDE</strong> the Daily Wall. There is no friction overhead.
                         <br><br>
-                        <strong>PROTOCOL:</strong> Aggressive Entry. Trailing Stops authorized to catch the runner.
+                        <strong>PROTOCOL:</strong> Aggressive Entry. Check Gap Distance (Must be > 0.5%).
                     </div>
                 </div>
                 <div class="def-box c-GREEN">
@@ -63,14 +71,14 @@
                     <div class="def-desc">
                         The "Base Hit." Trigger is inside, but there is a clear <strong>RUNWAY</strong> to the Wall.
                         <br><br>
-                        <strong>PROTOCOL:</strong> Enter at Trigger. <strong>HARD EXIT</strong> at Target 1 (The Daily Wall). Do not get greedy.
+                        <strong>PROTOCOL:</strong> Enter at Trigger. <strong>HARD EXIT</strong> at Target 1 (The Daily Wall).
                     </div>
                 </div>
                 <div class="def-box c-RED">
                     <div class="def-name">SUFFOCATED</div>
                     <div style="font-size:10px; color:#ef4444; font-weight:700;">CHOP ZONE</div>
                     <div class="def-desc">
-                        The Trap. Trigger is inside, and the Runway is too tight (< 0.5% for BTC, < 0.8% for Alts). Price will likely wick the entry and reverse.
+                        The Trap. Trigger is inside, and the Runway is too tight (< 0.5%). Price will likely wick the entry and reverse.
                         <br><br>
                         <strong>PROTOCOL:</strong> <strong>HOLD FIRE.</strong> Do not engage.
                     </div>
@@ -79,10 +87,99 @@
         </div>
 
         <div class="card">
-            <div class="title">/// THE BETA PROTOCOL (ASSET RULES)</div>
+            <div class="title">/// STATISTICAL PROBABILITY MATRIX (2025 DATA)</div>
             <p style="font-size:13px; color:#94a3b8; margin-bottom:20px;">
-                Different assets have different gravity. Bitcoin is the King; Alts are Subjects. We do not apply the same math to both.
+                Based on 12 months of backtested data. "Gap Size" is the distance between Trigger and Wall.
             </p>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div>
+                    <div class="rule-head" style="color:#ef4444;">SHORT TRADES (Breakdown Trigger)</div>
+                    <table class="stats-table">
+                        <thead>
+                            <tr>
+                                <th>Gap Size</th>
+                                <th>Setup Type</th>
+                                <th>Win Rate</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>0.00% - 0.50%</td>
+                                <td>ANY</td>
+                                <td class="win-low">22% - 31%</td>
+                                <td class="win-low">BLOCK</td>
+                            </tr>
+                            <tr>
+                                <td>0.50% - 0.75%</td>
+                                <td>Standard</td>
+                                <td class="win-med">48%</td>
+                                <td class="win-med">CAUTION</td>
+                            </tr>
+                            <tr>
+                                <td>0.75% - 1.50%</td>
+                                <td>Standard</td>
+                                <td class="win-high">52% - 61%</td>
+                                <td class="win-high">GO (PRIME)</td>
+                            </tr>
+                            <tr>
+                                <td>> 2.00%</td>
+                                <td>Jailbreak</td>
+                                <td class="win-low">14%</td>
+                                <td class="win-low">FADE</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div>
+                    <div class="rule-head" style="color:#22c55e;">LONG TRADES (Breakout Trigger)</div>
+                    <table class="stats-table">
+                        <thead>
+                            <tr>
+                                <th>Gap Size</th>
+                                <th>Setup Type</th>
+                                <th>Win Rate</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>0.00% - 0.50%</td>
+                                <td>ANY</td>
+                                <td class="win-low">29% - 34%</td>
+                                <td class="win-low">BLOCK</td>
+                            </tr>
+                            <tr>
+                                <td>0.50% - 1.00%</td>
+                                <td>Jailbreak</td>
+                                <td class="win-med">45%</td>
+                                <td class="win-med">GO (JB ONLY)</td>
+                            </tr>
+                            <tr>
+                                <td>1.25% - 1.50%</td>
+                                <td>Standard</td>
+                                <td class="win-high">64%</td>
+                                <td class="win-high">GO (GOLDEN)</td>
+                            </tr>
+                            <tr>
+                                <td>> 2.00%</td>
+                                <td>Any</td>
+                                <td class="win-low">37% - 40%</td>
+                                <td class="win-low">FADE</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div style="margin-top: 15px; font-size: 11px; color: #64748b; text-align: center;">
+                * NOTE: "Standard" means Trigger is inside the Daily Walls. "Jailbreak" means Trigger is outside/inverted.
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="title">/// THE BETA PROTOCOL (ASSET RULES)</div>
             <table class="asset-table">
                 <thead>
                     <tr>
@@ -130,7 +227,7 @@
                     </div>
                     <div class="rule-block">
                         <div class="rule-head">3. THE RUNWAY (THE GAP)</div>
-                        <div class="rule-text">The empty space between #1 and #2. If this space is empty, we trade. If it is cluttered/small, we sit.</div>
+                        <div class="rule-text">The empty space between #1 and #2. If this space is empty (0.5%+), we trade. If it is < 0.5%, we sit.</div>
                     </div>
                 </div>
 
