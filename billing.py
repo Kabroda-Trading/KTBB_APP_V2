@@ -1,10 +1,9 @@
 # billing.py
 # ==============================================================================
-# KABRODA BILLING ENGINE (WHOP INTEGRATION)
+# KABRODA BILLING ENGINE (WHOP LISTENER)
 # ==============================================================================
-# Purpose: Listens for webhook events from Whop.com.
-# - Validates payment success.
-# - Updates user subscription_status in the database.
+# Replaces Stripe logic with Whop Webhook logic.
+# Database interaction remains identical to preserve system stability.
 # ==============================================================================
 
 import os
@@ -14,8 +13,7 @@ from database import get_db, UserModel
 
 router = APIRouter()
 
-# SECURITY: This secret ensures the signal actually came from Whop.
-# Add 'WHOP_WEBHOOK_SECRET' to your Render Environment Variables.
+# SECURITY: Matches the key you put in Render Environment
 WHOP_SECRET = os.getenv("WHOP_WEBHOOK_SECRET")
 
 @router.post("/whop-webhook")
@@ -47,8 +45,8 @@ async def whop_webhook(request: Request, db: Session = Depends(get_db)):
 
     if not user:
         print(f"⚠️  USER NOT FOUND: {user_email}")
-        print("    -> They paid on Whop but have not created a Kabroda account yet.")
-        print("    -> Action: Waiting for user registration. (Status will remain pending)")
+        # They paid but haven't registered yet. 
+        # The system will simply wait for them to register with this email.
         return {"status": "user_not_found"}
 
     # 3. APPLY LOGIC (GRANT/REVOKE ACCESS)
