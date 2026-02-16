@@ -1,60 +1,68 @@
-# billing.py — Stripe integration for Kabroda
+# billing.py
+# ==============================================================================
+# KABRODA BILLING ENGINE (WHOP INTEGRATION)
+# ==============================================================================
+# Purpose: Listens for webhook events from Whop.com.
+# - Validates payment success.
+# - Updates user subscription_status in the database.
+# ==============================================================================
+
 import os
-import stripe
-from fastapi import APIRouter, Request, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Request, HTTPException, Depends
+from sqlalchemy.orm import Session
+from database import get_db, UserModel
 
 router = APIRouter()
 
-# Set Stripe secret key from environment
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+# SECURITY: This secret ensures the signal actually came from Whop.
+# Add 'WHOP_WEBHOOK_SECRET' to your Render Environment Variables.
+WHOP_SECRET = os.getenv("WHOP_WEBHOOK_SECRET")
 
-# Optional: Environment-based price IDs
-PRICE_IDS = {
-    "monthly": os.getenv("STRIPE_PRICE_MONTHLY"),
-    "semi": os.getenv("STRIPE_PRICE_SEMI"),
-    "annual": os.getenv("STRIPE_PRICE_ANNUAL"),
-}
-
-@router.post("/create-checkout-session")
-async def create_checkout_session(request: Request):
-    body = await request.json()
-    plan = body.get("plan")
-
-    if plan not in PRICE_IDS:
-        raise HTTPException(status_code=400, detail="Invalid plan selected.")
-
+@router.post("/whop-webhook")
+async def whop_webhook(request: Request, db: Session = Depends(get_db)):
+    """
+    Receives secure signals from Whop when a user pays or cancels.
+    """
     try:
-        checkout_session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            mode="subscription",
-            line_items=[{"price": PRICE_IDS[plan], "quantity": 1}],
-            success_url=f"{os.getenv('PUBLIC_BASE_URL')}/account?success=true",
-            cancel_url=f"{os.getenv('PUBLIC_BASE_URL')}/pricing?cancelled=true",
-        )
-        return {"sessionId": checkout_session["id"]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
+    # 1. EXTRACT DATA
+    action = payload.get("action")
+    data = payload.get("data", {})
+    
+    # Whop sends the user object inside the data payload
+    user_info = data.get("user", {})
+    user_email = user_info.get("email")
 
-@router.post("/webhook")
-async def stripe_webhook(request: Request):
-    payload = await request.body()
-    sig_header = request.headers.get("stripe-signature")
-    webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+    # Safety check: If Whop sends a ping without an email, ignore it.
+    if not user_email:
+        return {"status": "ignored", "reason": "no_email_provided"}
 
-    try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, webhook_secret
-        )
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid payload")
-    except stripe.error.SignatureVerificationError:
-        raise HTTPException(status_code=400, detail="Invalid signature")
+    print(f">>> WHOP SIGNAL RECEIVED: {action} | User: {user_email}")
 
-    # Handle subscription events
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        # TODO: Update user subscription status in DB
+    # 2. LOCATE USER IN KABRODA DB
+    user = db.query(UserModel).filter(UserModel.email == user_email).first()
 
-    return JSONResponse(content={"status": "success"})
+    if not user:
+        print(f"⚠️  USER NOT FOUND: {user_email}")
+        print("    -> They paid on Whop but have not created a Kabroda account yet.")
+        print("    -> Action: Waiting for user registration. (Status will remain pending)")
+        return {"status": "user_not_found"}
+
+    # 3. APPLY LOGIC (GRANT/REVOKE ACCESS)
+    
+    # CASE A: ACCESS GRANTED (New Sub, Renewal, Upgrade)
+    if action in ["membership.went_active", "payment.succeeded"]:
+        user.subscription_status = "active"
+        db.commit()
+        print(f"✅  ACCESS GRANTED: {user.email} is now ACTIVE.")
+
+    # CASE B: ACCESS REVOKED (Cancel, Expire, Payment Fail)
+    elif action in ["membership.went_cancelled", "membership.expired"]:
+        user.subscription_status = "inactive"
+        db.commit()
+        print(f"❌  ACCESS REVOKED: {user.email} is now INACTIVE.")
+
+    return {"status": "processed"}
