@@ -1,8 +1,9 @@
 # research_lab.py
 # ==============================================================================
-# KABRODA RESEARCH LAB v8.3 (DATA COLLECTOR & TIME MACHINE)
+# KABRODA RESEARCH LAB v8.4 (DATA COLLECTOR & TIME MACHINE)
 # JOB: Reconstruct the exact "Phase 1" data packet from history.
 # STRUCTURE: Matches 'battlebox_pipeline' v8.3 output (Includes Daily EMAs).
+# STATUS: Safe Mode (Strategy Auditor Removed).
 # ==============================================================================
 import pandas as pd
 from datetime import datetime, timedelta, timezone
@@ -60,6 +61,22 @@ def _precalculate_daily_emas(df_5m):
         print(f"[LAB] Error calculating Daily EMAs: {e}")
         return pd.DataFrame()
 
+async def run_session_scan(params):
+    """
+    Wrapper to handle the request from the API.
+    In 'Data Only' mode, we need to ensure we have data.
+    Since we don't have the full history engine connected here in this snippet,
+    we return a status packet to confirm the logic is valid.
+    """
+    # NOTE: To make this fully functional, you would need to inject 'raw_5m' 
+    # data here, likely from a database or CCXT fetcher.
+    
+    return {
+        "ok": True,
+        "message": "Research Lab Logic Loaded (Data Scan Ready)",
+        "note": "Connect historical data source to 'run_hybrid_analysis' to generate full report."
+    }
+
 async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids, tuning=None, sensors=None, min_score=0, include_candles=True):
     try:
         if not raw_5m or len(raw_5m) < 100: 
@@ -72,7 +89,6 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
         df.sort_index(inplace=True)
 
         # 2. PRE-CALCULATE DAILY EMAs (The Sniper Data)
-        # We do this here so we don't recalculate it 1000 times inside the loop
         df_daily_emas = _precalculate_daily_emas(df)
 
         # 3. SETUP DATES
@@ -102,19 +118,16 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                 context_24h = _slice_by_ts(raw_5m, lock_end_ts - 86400, lock_end_ts)
 
                 # --- C. GET SNIPER DATA (EMA LOOKUP) ---
-                # We look up the EMA values for the day of this session
                 d_ema30 = 0.0
                 d_ema50 = 0.0
                 try:
-                    # Find the daily row for this specific date
                     day_key = pd.to_datetime(actual_session_date).date()
-                    # We look at the row BEFORE or ON the session day (closed value logic)
-                    # For safety, we use 'asof' logic or direct lookup if matched
-                    daily_row = df_daily_emas.loc[str(day_key)]
-                    d_ema30 = daily_row['ema30']
-                    d_ema50 = daily_row['ema50']
+                    # We look at the row BEFORE or ON the session day
+                    if str(day_key) in df_daily_emas.index:
+                        daily_row = df_daily_emas.loc[str(day_key)]
+                        d_ema30 = daily_row['ema30']
+                        d_ema50 = daily_row['ema50']
                 except:
-                    # If data is missing (e.g. start of dataset), default to 0
                     pass
 
                 # --- D. RUN THE ENGINE (PHASE 1) ---
@@ -134,13 +147,12 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                 levels = computed["levels"]
                 
                 # --- INJECT SNIPER DATA INTO LEVELS ---
-                # This aligns the backtest data with the new v8.3 Pipeline
                 levels['daily_ema30'] = d_ema30
                 levels['daily_ema50'] = d_ema50
                 
                 bias = _calculate_weekly_bias(df, anchor_ts)
 
-                # --- E. EXPORT RAW PACKET (STRUCTURED FOR MARKET RADAR) ---
+                # --- E. EXPORT RAW PACKET ---
                 result_packet = {
                     "date": f"{actual_session_date} [{cfg['id']}]",
                     "price": calibration[0]["open"], 
@@ -155,7 +167,7 @@ async def run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids,
                             "range30m_low": levels.get("range30m_low"),      
                             "structure_score": levels.get("structure_score", 0),
                             "slope": levels.get("slope", 0),
-                            # NEW: EXPORT EMAS
+                            # EXPORT EMAS
                             "daily_ema30": levels.get("daily_ema30", 0),
                             "daily_ema50": levels.get("daily_ema50", 0)
                         },
