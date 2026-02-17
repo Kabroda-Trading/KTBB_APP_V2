@@ -6,95 +6,305 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        body { background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
+        /* --- RADAR BASE STYLES --- */
+        :root { 
+            --bg-deep: #020617; --panel: #0f172a; --border: #334155; 
+            --green: #22c55e; --yellow: #eab308; --red: #ef4444; 
+            --purple: #a855f7; --white: #f8fafc; --gray: #94a3b8; 
+            --neon-red: #ff073a; --neon-green: #39ff14;
+        }
+        body { background-color: var(--bg-deep); color: var(--white); font-family: 'Inter', sans-serif; padding: 20px; margin: 0; box-sizing: border-box;}
+        
         .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
-        .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
+        .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 30px; }
         .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
         
         .btn-scan { background: #0ea5e9; color: #000; font-weight: 800; font-family: 'JetBrains Mono'; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: 0.2s; box-shadow: 0 0 15px rgba(14, 165, 233, 0.2); }
         .btn-scan:hover { background: #38bdf8; }
         
         .radar-grid { display: grid; gap: 15px; }
-        .radar-row { display: grid; grid-template-columns: 1.5fr 1fr 2fr 1.5fr; background: #0f172a; border: 1px solid #1e293b; padding: 25px 30px; border-radius: 6px; align-items: center; transition: transform 0.2s, border-color 0.2s; }
-        .radar-row:hover { border-color: #334155; transform: translateY(-2px); }
+        .radar-row { display: grid; grid-template-columns: 1.5fr 1fr 2fr 1.5fr; background: var(--panel); border: 1px solid var(--border); padding: 25px 30px; border-radius: 6px; align-items: center; transition: transform 0.2s, border-color 0.2s; }
+        .radar-row:hover { border-color: #475569; transform: translateY(-2px); }
 
-        .border-GREEN { border-left: 4px solid #22c55e; }
-        .border-YELLOW { border-left: 4px solid #eab308; }
-        .border-RED { border-left: 4px solid #ef4444; opacity: 0.7; }
-        .border-PURPLE { border-left: 4px solid #a855f7; }
-        
-        /* SNIPER BORDERS (ADDED) */
-        .border-NEON_RED { border-left: 4px solid #ff073a; animation: pulse-red 2s infinite; }
-        .border-NEON_GREEN { border-left: 4px solid #39ff14; animation: pulse-green 2s infinite; }
+        .border-GREEN { border-left: 4px solid var(--green); }
+        .border-YELLOW { border-left: 4px solid var(--yellow); }
+        .border-RED { border-left: 4px solid var(--red); opacity: 0.7; }
+        .border-PURPLE { border-left: 4px solid var(--purple); }
+        .border-NEON_RED { border-left: 4px solid var(--neon-red); animation: pulse-red 2s infinite; }
+        .border-NEON_GREEN { border-left: 4px solid var(--neon-green); animation: pulse-green 2s infinite; }
 
-        @keyframes pulse-red {
-            0% { box-shadow: inset 4px 0 0 0 #ff073a, 0 0 0 0 rgba(255, 7, 58, 0.4); }
-            70% { box-shadow: inset 4px 0 0 0 #ff073a, 0 0 0 10px rgba(255, 7, 58, 0); }
-            100% { box-shadow: inset 4px 0 0 0 #ff073a, 0 0 0 0 rgba(255, 7, 58, 0); }
-        }
-        @keyframes pulse-green {
-            0% { box-shadow: inset 4px 0 0 0 #39ff14, 0 0 0 0 rgba(57, 255, 20, 0.4); }
-            70% { box-shadow: inset 4px 0 0 0 #39ff14, 0 0 0 10px rgba(57, 255, 20, 0); }
-            100% { box-shadow: inset 4px 0 0 0 #39ff14, 0 0 0 0 rgba(57, 255, 20, 0); }
-        }
+        @keyframes pulse-red { 0% { box-shadow: inset 4px 0 0 0 var(--neon-red), 0 0 0 0 rgba(255, 7, 58, 0.4); } 70% { box-shadow: inset 4px 0 0 0 var(--neon-red), 0 0 0 10px rgba(255, 7, 58, 0); } 100% { box-shadow: inset 4px 0 0 0 var(--neon-red), 0 0 0 0 rgba(255, 7, 58, 0); } }
+        @keyframes pulse-green { 0% { box-shadow: inset 4px 0 0 0 var(--neon-green), 0 0 0 0 rgba(57, 255, 20, 0.4); } 70% { box-shadow: inset 4px 0 0 0 var(--neon-green), 0 0 0 10px rgba(57, 255, 20, 0); } 100% { box-shadow: inset 4px 0 0 0 var(--neon-green), 0 0 0 0 rgba(57, 255, 20, 0); } }
 
         .sym-name { font-size: 22px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
-        .sym-price { font-size: 16px; color: #94a3b8; font-family: 'JetBrains Mono'; margin-top: 4px; }
-        
+        .sym-price { font-size: 16px; color: var(--gray); font-family: 'JetBrains Mono'; margin-top: 4px; }
         .score-val { font-size: 36px; font-weight: 800; font-family: 'JetBrains Mono'; line-height: 1; }
         .stat-badge { display: inline-block; padding: 10px 20px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; width: 80%; text-align: center; }
 
-        .lock-btn { font-size: 11px; padding: 10px 20px; background: #1e293b; color: #fff; border: 1px solid #334155; cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
-        .lock-btn:hover { background: #facc15; color:#000; border-color: #facc15; }
+        .lock-btn { font-size: 11px; padding: 10px 20px; background: #1e293b; color: #fff; border: 1px solid var(--border); cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
+        .lock-btn:hover { background: var(--yellow); color:#000; border-color: var(--yellow); }
 
-        .copy-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; margin-right: 8px; font-family: 'JetBrains Mono'; font-size: 14px; }
-        .copy-btn:hover { background: #334155; color: #fff; border-color: #fff; }
+        /* --- TARGET LOCK MODAL (OVERLAY) STYLES --- */
+        .modal-overlay {
+            display: none; 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(2, 6, 23, 0.95);
+            backdrop-filter: blur(8px);
+            z-index: 9999; overflow-y: auto; padding: 40px 20px;
+        }
+        .modal-content {
+            max-width: 1400px; margin: 0 auto; position: relative;
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .close-btn {
+            position: absolute; top: 0px; right: 0;
+            background: rgba(239, 68, 68, 0.1); border: 1px solid var(--red); color: var(--red);
+            font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px;
+            padding: 8px 16px; border-radius: 4px; cursor: pointer; transition: 0.2s;
+            z-index: 10;
+        }
+        .close-btn:hover { background: var(--red); color: #fff; }
+
+        /* Cockpit Internal Layout */
+        .cockpit { display: grid; gap: 20px; grid-template-columns: 350px 1fr 400px; grid-template-rows: auto 1fr; grid-template-areas: "header header header" "left center right"; }
+        .header { grid-area: header; border-bottom: 2px solid var(--border); padding-bottom: 15px; }
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 25px; display: flex; flex-direction: column; }
+        .h-title { font-family: 'Rajdhani'; font-weight: 800; font-size: 36px; color: #fff; letter-spacing: 2px; margin: 0; }
+        .panel-head { font-family: 'Rajdhani'; font-weight: 800; font-size: 18px; color: var(--gray); border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 20px; letter-spacing: 1px; text-transform: uppercase; }
+        .mode-display { font-family: 'Rajdhani'; font-size: 60px; font-weight: 900; line-height: 0.9; margin-bottom: 10px; text-transform: uppercase; text-shadow: 0 0 20px rgba(0,0,0,0.5); word-wrap: break-word; }
+        .inp-risk { background: #020617; border: 1px solid var(--border); color: #fff; padding: 12px; width: 100%; text-align: right; font-weight: 700; font-size: 18px; border-radius: 4px; box-sizing: border-box; }
+        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px dashed #334155; padding-bottom: 8px; font-family: 'JetBrains Mono', monospace; }
+        .d-val { font-size: 18px; font-weight: 800; color: #fff; margin-right: 10px; }
+        .mini-copy { background: none; border: none; color: #475569; cursor: pointer; font-size: 14px; transition: 0.2s; padding: 4px; }
+        .mini-copy:hover { color: var(--white); transform: scale(1.1); }
+        
+        .c-GREEN { color: var(--green); } .c-YELLOW { color: var(--yellow); } .c-RED { color: var(--red); } .c-PURPLE { color: var(--purple); } .c-GRAY { color: var(--gray); }
+        .c-NEON_RED { color: var(--neon-red); text-shadow: 0 0 10px rgba(255,7,58,0.5); } .c-NEON_GREEN { color: var(--neon-green); text-shadow: 0 0 10px rgba(57,255,20,0.5); }
+
+        .btn-act { width: 100%; padding: 15px; border: none; border-radius: 4px; font-weight: 800; font-family: 'Rajdhani'; font-size: 16px; cursor: pointer; text-transform: uppercase; margin-bottom: 10px; transition: 0.2s; }
+        .btn-key { background: var(--yellow); color: #000; } .btn-key:hover { background: #fde047; }
+        .roe-box { background: rgba(0,0,0,0.3); border-left: 4px solid var(--gray); padding: 20px; font-family: 'JetBrains Mono'; font-size: 14px; line-height: 1.6; border-radius: 0 4px 4px 0; margin-top: 20px; text-align: left; }
+        #sniper-alert { display: none; background: rgba(255, 7, 58, 0.1); border: 2px solid var(--neon-red); color: var(--neon-red); padding: 10px; font-family: 'Rajdhani'; font-weight: 800; font-size: 14px; letter-spacing: 1px; margin-bottom: 15px; border-radius: 4px; animation: pulse 1.5s infinite; }
     </style>
 </head>
 <body>
     {% include 'nav.html' %}
+    
     <div class="radar-container">
         <div class="radar-header">
-            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v8.6</span></h2></div>
+            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v9.0</span></h2></div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
         <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">/// SCANNING SECTOR...</div>
         <div id="radarTargetGrid" class="radar-grid"></div>
     </div>
 
+    <div id="targetModal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-btn" onclick="closeModal()">✕ CLOSE COCKPIT</button>
+            
+            <div class="cockpit">
+                <div class="header">
+                    <h1 class="h-title" id="tSym">TARGET LOCK</h1>
+                </div>
+
+                <div class="panel" style="grid-area: left;">
+                    <div class="panel-head">RISK PROTOCOL</div>
+                    <div style="font-size:12px; color:var(--gray); margin-bottom:5px;">ACCOUNT BALANCE</div>
+                    <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="recalc()">
+                    
+                    <div style="font-size:12px; color:var(--gray); margin-bottom:5px; margin-top:20px;">RISK PER TRADE (%)</div>
+                    <input type="number" id="inpRisk" class="inp-risk" value="10.0" step="0.1" oninput="recalc()">
+                    
+                    <div style="margin-top:auto; padding-top:20px; border-top:1px solid var(--border);">
+                        <div style="font-size:12px; color:var(--gray);">MAX LOSS ALLOWED</div>
+                        <div id="valLoss" class="c-RED" style="font-size:32px; font-weight:800;">$0.00</div>
+                    </div>
+                </div>
+
+                <div class="panel" style="grid-area: center; text-align:center; justify-content:center;">
+                    <div style="margin-bottom:10px; font-size:12px; color:var(--gray); letter-spacing:2px;">BEHAVIOR ANALYSIS</div>
+                    <div id="sniper-alert">⚠ SNIPER SETUP DETECTED</div>
+                    <div id="vMode" class="mode-display c-GRAY">LOADING</div>
+                    <div style="margin-bottom:30px;">
+                        <span id="vScore" style="font-size:42px; font-weight:800;">--</span>
+                        <span style="font-size:12px; color:var(--gray);"> / 100</span>
+                    </div>
+                    <div id="roeContainer" class="roe-box">
+                        <div id="vROE">Analyzing structural behavior...</div>
+                    </div>
+                </div>
+
+                <div class="panel" style="grid-area: right;">
+                    <div class="panel-head">FLIGHT PATH</div>
+                    <button class="btn-act btn-key" onclick="copyKey()">COPY TRADE KEY</button>
+                    <div style="height:30px;"></div>
+
+                    <div class="data-row">
+                        <span style="color:var(--gray); font-weight:700;">ENTRY</span>
+                        <div style="display:flex; align-items:center;">
+                            <span id="pEntry" class="d-val c-GREEN">--</span>
+                            <button class="mini-copy" onclick="copyText('pEntry')">📋</button>
+                        </div>
+                    </div>
+                    
+                    <div class="data-row">
+                        <span style="color:var(--gray); font-weight:700;">STOP LOSS</span>
+                        <div style="display:flex; align-items:center;">
+                            <span id="pStop" class="d-val c-RED">--</span>
+                            <button class="mini-copy" onclick="copyText('pStop')">📋</button>
+                        </div>
+                    </div>
+
+                    <div class="data-row">
+                        <span style="color:var(--gray); font-weight:700;">POS SIZE</span>
+                        <div style="display:flex; align-items:center;">
+                            <span id="pSize" class="d-val">--</span>
+                            <button class="mini-copy" onclick="copyText('pSize')">📋</button>
+                        </div>
+                    </div>
+                    
+                    <div style="height:30px;"></div>
+
+                    <div class="data-row">
+                        <span style="color:var(--gray); font-weight:700;">TARGET 1</span>
+                        <div style="display:flex; align-items:center;">
+                            <span id="pT1" class="d-val c-YELLOW">--</span>
+                            <button class="mini-copy" onclick="copyText('pT1')">📋</button>
+                        </div>
+                    </div>
+
+                    <div class="data-row">
+                        <span style="color:var(--gray); font-weight:700;">TARGET 2</span>
+                        <div style="display:flex; align-items:center;">
+                            <span id="pT2" class="d-val">--</span>
+                            <button class="mini-copy" onclick="copyText('pT2')">📋</button>
+                        </div>
+                    </div>
+
+                    <div class="data-row">
+                        <span style="color:var(--gray); font-weight:700;">TARGET 3</span>
+                        <div style="display:flex; align-items:center;">
+                            <span id="pT3" class="d-val">--</span>
+                            <button class="mini-copy" onclick="copyText('pT3')">📋</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <input type="hidden" id="raw_key">
+
     <script>
         function fmt(x){ if(!x) return "—"; return parseFloat(x).toLocaleString(undefined, {minimumFractionDigits: 2}); }
 
-        // --- GLOBAL MEMORY FOR INTEL PACKETS ---
-        window.intelMap = {};
+        // --- GLOBAL MEMORY ---
+        window.radarMemory = {};
+        let activeData = null;
+        
+        const balInput = document.getElementById('inpBal');
+        const riskInput = document.getElementById('inpRisk');
 
-        // 1. Function to Copy the FULL JSON (For the Gem)
-        function copyIntel(symbol) {
-            const data = window.intelMap[symbol];
-            if(!data) { alert("No Intel Available. Refresh Scan."); return; }
+        // Restore locked-in Balance/Risk instantly on page load
+        if(localStorage.getItem('kabroda_locked_bal')) balInput.value = localStorage.getItem('kabroda_locked_bal');
+        if(localStorage.getItem('kabroda_locked_risk')) riskInput.value = localStorage.getItem('kabroda_locked_risk');
+
+        // --- MODAL CONTROLS ---
+        function openModal(symbol) {
+            const data = window.radarMemory[symbol];
+            if (data) {
+                activeData = data;
+                document.getElementById('tSym').innerText = activeData.symbol.replace('USDT', '') + " LOCK";
+                renderModal(activeData);
+                document.getElementById('targetModal').style.display = 'block';
+                document.body.style.overflow = 'hidden'; // Stop background from scrolling
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('targetModal').style.display = 'none';
+            document.body.style.overflow = 'auto'; // Re-enable background scrolling
+        }
+
+        // --- TARGET LOCK RENDER & MATH ---
+        function renderModal(d) {
+            document.getElementById('raw_key').value = d.mission_key;
+            document.getElementById('vMode').innerText = d.status;
+            document.getElementById('vScore').innerText = d.score;
+            document.getElementById('vROE').innerText = d.advice;
+
+            let theme = "GRAY";
+            const sniperAlert = document.getElementById('sniper-alert');
+
+            if(d.is_sniper_mode) {
+                sniperAlert.style.display = 'block';
+                if(d.bias === 'BEARISH') {
+                    theme = "NEON_RED";
+                    sniperAlert.style.borderColor = "var(--neon-red)";
+                    sniperAlert.style.color = "var(--neon-red)";
+                    sniperAlert.innerText = "⚡ SNIPER SHORT ACTIVE";
+                } else {
+                    theme = "NEON_GREEN";
+                    sniperAlert.style.borderColor = "var(--neon-green)";
+                    sniperAlert.style.color = "var(--neon-green)";
+                    sniperAlert.innerText = "⚡ SNIPER LONG ACTIVE";
+                }
+            } else {
+                sniperAlert.style.display = 'none';
+                if(d.color_code === "GREEN") theme = "GREEN";
+                else if(d.color_code === "YELLOW") theme = "YELLOW";
+                else if(d.color_code === "PURPLE") theme = "PURPLE";
+                else if(d.color_code === "RED") theme = "RED";
+            }
+
+            document.getElementById('vMode').className = `mode-display c-${theme}`;
             
-            navigator.clipboard.writeText(data).then(() => {
-                const btn = document.activeElement;
-                if(btn) {
-                    const orig = btn.innerHTML;
-                    btn.innerHTML = "✓";
-                    setTimeout(() => btn.innerHTML = orig, 1000);
-                }
-            });
+            let borderColor = `var(--${theme.toLowerCase()})`;
+            if(theme === "NEON_RED") borderColor = "var(--neon-red)";
+            if(theme === "NEON_GREEN") borderColor = "var(--neon-green)";
+            document.getElementById('roeContainer').style.borderLeftColor = borderColor;
+
+            if(d.plan && d.plan.valid) {
+                document.getElementById('pEntry').innerText = d.plan.entry.toFixed(2);
+                document.getElementById('pStop').innerText = d.plan.stop.toFixed(2);
+                document.getElementById('pT1').innerText = d.plan.targets[0].toFixed(2);
+                document.getElementById('pT2').innerText = d.plan.targets[1].toFixed(2);
+                document.getElementById('pT3').innerText = d.plan.targets[2].toFixed(2);
+            } else {
+                 ['pEntry','pStop','pT1','pT2','pT3','pSize'].forEach(id => document.getElementById(id).innerText = "--");
+            }
+            recalc();
         }
 
-        // 2. Function to Copy just the Indicators (For Charts/Manual)
-        function copyToClip(str) {
-            navigator.clipboard.writeText(str).then(() => {
-                const btn = document.activeElement;
-                if(btn && btn.classList.contains('copy-btn')) {
-                    const orig = btn.innerHTML;
-                    btn.innerHTML = "✓";
-                    setTimeout(() => btn.innerHTML = orig, 1000);
-                }
-            }, (err) => { console.error('Async: Could not copy text: ', err); });
+        function recalc() {
+            localStorage.setItem('kabroda_locked_bal', balInput.value);
+            localStorage.setItem('kabroda_locked_risk', riskInput.value);
+
+            if(!activeData || !activeData.plan || !activeData.plan.valid) return;
+            
+            const bal = parseFloat(balInput.value);
+            const riskPct = parseFloat(riskInput.value);
+            const riskAmt = bal * (riskPct / 100);
+            
+            document.getElementById('valLoss').innerText = "$" + riskAmt.toFixed(2);
+            
+            const entry = activeData.plan.entry;
+            const stop = activeData.plan.stop;
+            const dist = Math.abs(entry - stop);
+            
+            if(dist > 0) {
+                const size = riskAmt / dist; 
+                document.getElementById('pSize').innerText = size.toFixed(4);
+            }
         }
 
+        function copyText(id) { navigator.clipboard.writeText(document.getElementById(id).innerText); }
+        function copyKey() { navigator.clipboard.writeText(document.getElementById('raw_key').value); }
+
+        // --- RADAR SCANNER LOGIC ---
         async function forceScan() {
             const btn = document.getElementById('scanBtn'); const grid = document.getElementById('radarTargetGrid'); const loader = document.getElementById('loading');
             btn.disabled = true; grid.style.display = 'none'; loader.style.display = 'block';
@@ -104,36 +314,31 @@
                 const data = await res.json();
                 let html = "";
                 
-                // Reset Intel Map
-                window.intelMap = {};
+                window.radarMemory = {};
 
                 data.results.forEach(t => {
-                    // Store the full raw JSON in memory for the specific symbol
-                    window.intelMap[t.symbol] = t.full_intel;
+                    window.radarMemory[t.symbol] = t;
 
-                    // --- SNIPER LOGIC (INTEGRATED) ---
-                    // We simply map the color_code directly now because the Python backend sends "NEON_RED" etc.
                     let colorCode = t.color_code; 
                     let statusBg = '#1e293b'; let statusTxt = '#fff';
                     
                     if(colorCode === 'GREEN') { statusBg = 'rgba(34, 197, 94, 0.2)'; statusTxt = '#22c55e'; }
                     else if(colorCode === 'YELLOW') { statusBg = 'rgba(234, 179, 8, 0.2)'; statusTxt = '#eab308'; }
                     else if(colorCode === 'PURPLE') { statusBg = 'rgba(168, 85, 247, 0.2)'; statusTxt = '#a855f7'; }
-                    else if(colorCode === 'NEON_RED') { statusBg = 'rgba(255, 7, 58, 0.2)'; statusTxt = '#ff073a'; } /* SNIPER */
-                    else if(colorCode === 'NEON_GREEN') { statusBg = 'rgba(57, 255, 20, 0.2)'; statusTxt = '#39ff14'; } /* SNIPER */
+                    else if(colorCode === 'NEON_RED') { statusBg = 'rgba(255, 7, 58, 0.2)'; statusTxt = '#ff073a'; } 
+                    else if(colorCode === 'NEON_GREEN') { statusBg = 'rgba(57, 255, 20, 0.2)'; statusTxt = '#39ff14'; } 
                     else { statusBg = 'rgba(239, 68, 68, 0.2)'; statusTxt = '#ef4444'; }
 
                     let biasColor = t.bias === 'BULLISH' ? '#22c55e' : (t.bias === 'BEARISH' ? '#ef4444' : '#94a3b8');
                     let biasBg = t.bias === 'BULLISH' ? 'rgba(34, 197, 94, 0.1)' : (t.bias === 'BEARISH' ? 'rgba(239, 68, 68, 0.1)' : 'transparent');
                     let biasBorder = t.bias === 'BULLISH' ? '#22c55e' : (t.bias === 'BEARISH' ? '#ef4444' : '#475569');
 
+                    // MODAL TRIGGER BUTTON
                     let actionHtml = `
                     <div style="display:flex; justify-content:flex-end; align-items:center;">
-                        <button class="copy-btn" onclick="copyIntel('${t.symbol}')" title="Copy FULL Session Intel (JSON)">📡</button>
-                        <button class="copy-btn" onclick="copyToClip('${t.indicator_string}')" title="Copy Indicator Data">📋</button>
                         ${t.has_trade ? 
-                            `<button class="lock-btn" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">LOCK TARGET →</button>` :
-                            `<button class="lock-btn" style="background:#1e293b; color:#64748b; border-color:#334155;" onclick="window.location.href='/suite/lock-target?symbol=${t.symbol}'">MONITOR INTEL</button>`
+                            `<button class="lock-btn" onclick="openModal('${t.symbol}')">LOCK TARGET →</button>` :
+                            `<button class="lock-btn" style="background:#1e293b; color:#64748b; border-color:#334155;" onclick="openModal('${t.symbol}')">MONITOR INTEL</button>`
                         }
                     </div>`;
 
@@ -159,6 +364,7 @@
                 grid.innerHTML = html;
             } catch(e) { console.log(e); } finally { loader.style.display = 'none'; grid.style.display = 'grid'; btn.disabled = false; }
         }
+        
         document.addEventListener('DOMContentLoaded', forceScan);
     </script>
 </body>
