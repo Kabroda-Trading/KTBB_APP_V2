@@ -44,6 +44,10 @@
         .lock-btn { font-size: 11px; padding: 10px 20px; background: #1e293b; color: #fff; border: 1px solid var(--border); cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
         .lock-btn:hover { background: var(--yellow); color:#000; border-color: var(--yellow); }
 
+        /* RESTORED: Quick Action Copy Buttons */
+        .copy-btn { background: #1e293b; border: 1px solid var(--border); color: var(--gray); padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; margin-right: 8px; font-family: 'JetBrains Mono'; font-size: 14px; }
+        .copy-btn:hover { background: #334155; color: #fff; border-color: #fff; }
+
         /* --- TARGET LOCK MODAL (OVERLAY) STYLES --- */
         .modal-overlay {
             display: none; 
@@ -94,7 +98,7 @@
     
     <div class="radar-container">
         <div class="radar-header">
-            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v9.0</span></h2></div>
+            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v9.1</span></h2></div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
         <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">/// SCANNING SECTOR...</div>
@@ -211,6 +215,32 @@
         // Restore locked-in Balance/Risk instantly on page load
         if(localStorage.getItem('kabroda_locked_bal')) balInput.value = localStorage.getItem('kabroda_locked_bal');
         if(localStorage.getItem('kabroda_locked_risk')) riskInput.value = localStorage.getItem('kabroda_locked_risk');
+
+        // --- RESTORED COPY FUNCTIONS ---
+        function copyIntel(symbol) {
+            const data = window.radarMemory[symbol];
+            if(!data || !data.full_intel) { alert("No Intel Available. Refresh Scan."); return; }
+            
+            navigator.clipboard.writeText(data.full_intel).then(() => {
+                const btn = document.activeElement;
+                if(btn) {
+                    const orig = btn.innerHTML;
+                    btn.innerHTML = "✓";
+                    setTimeout(() => btn.innerHTML = orig, 1000);
+                }
+            });
+        }
+
+        function copyToClip(str) {
+            navigator.clipboard.writeText(str).then(() => {
+                const btn = document.activeElement;
+                if(btn && btn.classList.contains('copy-btn')) {
+                    const orig = btn.innerHTML;
+                    btn.innerHTML = "✓";
+                    setTimeout(() => btn.innerHTML = orig, 1000);
+                }
+            }, (err) => { console.error('Async: Could not copy text: ', err); });
+        }
 
         // --- MODAL CONTROLS ---
         function openModal(symbol) {
@@ -333,9 +363,11 @@
                     let biasBg = t.bias === 'BULLISH' ? 'rgba(34, 197, 94, 0.1)' : (t.bias === 'BEARISH' ? 'rgba(239, 68, 68, 0.1)' : 'transparent');
                     let biasBorder = t.bias === 'BULLISH' ? '#22c55e' : (t.bias === 'BEARISH' ? '#ef4444' : '#475569');
 
-                    // MODAL TRIGGER BUTTON
+                    // RESTORED: Added the copy buttons back to the actionHtml
                     let actionHtml = `
                     <div style="display:flex; justify-content:flex-end; align-items:center;">
+                        <button class="copy-btn" onclick="copyIntel('${t.symbol}')" title="Copy FULL Session Intel (JSON)">📡</button>
+                        <button class="copy-btn" onclick="copyToClip('${t.indicator_string}')" title="Copy Indicator Data">📋</button>
                         ${t.has_trade ? 
                             `<button class="lock-btn" onclick="openModal('${t.symbol}')">LOCK TARGET →</button>` :
                             `<button class="lock-btn" style="background:#1e293b; color:#64748b; border-color:#334155;" onclick="openModal('${t.symbol}')">MONITOR INTEL</button>`
