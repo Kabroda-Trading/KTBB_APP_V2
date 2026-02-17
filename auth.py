@@ -100,8 +100,8 @@ def register_action(
     # Auto-login the user immediately
     request.session[SESSION_KEY] = int(new_user.id)
     
-    # Send them to pricing so they can click the Whop link to activate
-    return RedirectResponse(url="/pricing", status_code=303)
+    # THE FIX: Route them directly to the Whop Checkout link!
+    return RedirectResponse(url="https://whop.com/checkout/plan_TtQ6FGNPxooMc", status_code=303)
 
 @router.get("/logout")
 def logout_action(request: Request):
