@@ -9,6 +9,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
+        /* THE FIX: Added the missing root colors to force the dark theme */
+        :root { --bg-dark: #050b14; --text-main: #e2e8f0; --text-muted: #94a3b8; --accent-cyan: #06b6d4; --accent-green: #10b981; }
+        
         /* PAGE SPECIFIC */
         body { background-color: var(--bg-dark); color: var(--text-main); font-family: 'Inter', sans-serif; margin: 0; padding: 0; }
         .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
@@ -45,6 +48,7 @@
         .final-cta { padding: 120px 0; text-align: center; background: radial-gradient(circle at bottom, rgba(6, 182, 212, 0.08) 0%, transparent 70%); }
         .final-cta h2 { font-size: 3rem; margin-bottom: 1rem; color: #fff; font-weight: 700; }
         .final-sub { font-size: 1.25rem; color: var(--text-muted); margin-bottom: 2.5rem; }
+        .btn-primary { background-color: #06b6d4; color: #000; font-weight: 800; padding: 12px 24px; border-radius: 4px; display: inline-block; }
     </style>
 </head>
 <body>
@@ -123,7 +127,7 @@
         <div class="container">
             <h2>Trade Less. Understand More.</h2>
             <p class="final-sub">Kabroda is not a tool. It’s an operating system for decision-making.</p>
-            <a href="/pricing" class="btn-primary">Explore the System</a>
+            <a href="/register" class="btn-primary">Explore the System</a>
         </div>
     </section>
 

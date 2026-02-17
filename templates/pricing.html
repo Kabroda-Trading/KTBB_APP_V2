@@ -7,28 +7,24 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        body { background-color: #050b14; color: #fff; font-family: 'Inter', sans-serif; }
+        body { background-color: #050b14; color: #fff; font-family: 'Inter', sans-serif; margin:0; padding:0; }
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
         .pricing-hero { padding: 80px 0 60px; text-align: center; }
         .pricing-hero h1 { font-size: 3rem; margin-bottom: 1rem; font-weight: 800; letter-spacing: -1px; }
         .pricing-hero p { font-size: 1.1rem; color: #94a3b8; }
         
-        .pricing-grid { display: flex; justify-content: center; gap: 2rem; margin-top: 40px; }
+        .pricing-grid { display: flex; justify-content: center; gap: 2rem; margin-top: 20px; }
         .pricing-card {
             background: #0f172a; 
             border: 1px solid rgba(255,255,255,0.1);
             border-radius: 16px;
             padding: 40px;
             width: 100%;
-            max-width: 400px;
-            text-align: center;
+            max-width: 500px; /* Widened to fit the detailed copy */
             position: relative;
             box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-            transition: transform 0.3s ease;
         }
-        .pricing-card:hover { transform: translateY(-5px); border-color: #06b6d4; }
         
-        /* FEATURED GLOW */
         .pricing-card.featured {
             border: 1px solid #06b6d4;
             box-shadow: 0 0 30px rgba(6, 182, 212, 0.15);
@@ -38,7 +34,8 @@
             font-family: 'JetBrains Mono', monospace; 
             color: #fff; 
             font-size: 1.5rem; 
-            margin-bottom: 20px;
+            margin-bottom: 10px;
+            text-align: center;
         }
 
         .price { 
@@ -47,24 +44,19 @@
             align-items: baseline; 
             gap: 12px; 
             margin-bottom: 30px; 
+            padding-bottom: 30px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
         }
 
-        .features { 
-            list-style: none; 
-            padding: 0; 
-            margin-bottom: 40px; 
-            text-align: left; 
-            color: #cbd5e1;
-        }
-        .features li { 
-            margin-bottom: 12px; 
-            display: flex; 
-            align-items: center; 
-            gap: 10px; 
-            font-size: 0.95rem;
-        }
+        /* NEW FEATURE LIST STYLES */
+        .feature-block { margin-bottom: 25px; }
+        .feature-title { font-weight: 700; color: #e2e8f0; margin-bottom: 8px; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+        .feature-title::before { content: '✓'; color: #06b6d4; font-weight: 900; }
+        .feature-desc { color: #94a3b8; font-size: 0.9rem; line-height: 1.5; margin-left: 20px; margin-bottom: 5px; }
+        .feature-sublist { list-style-type: none; padding-left: 20px; margin-top: 5px; }
+        .feature-sublist li { color: #94a3b8; font-size: 0.85rem; margin-bottom: 4px; position: relative; padding-left: 12px; }
+        .feature-sublist li::before { content: '•'; color: #64748b; position: absolute; left: 0; }
 
-        /* WHOP BUTTON STYLE */
         .btn-buy {
             display: block;
             width: 100%;
@@ -77,13 +69,12 @@
             font-family: 'JetBrains Mono', monospace;
             text-transform: uppercase;
             letter-spacing: 1px;
+            text-align: center;
             transition: all 0.2s;
+            margin-top: 30px;
+            box-sizing: border-box;
         }
-        .btn-buy:hover {
-            background: #22d3ee;
-            box-shadow: 0 0 20px rgba(34, 211, 238, 0.4);
-            transform: scale(1.02);
-        }
+        .btn-buy:hover { background: #22d3ee; box-shadow: 0 0 20px rgba(34, 211, 238, 0.4); transform: scale(1.02); }
     </style>
 </head>
 <body>
@@ -92,37 +83,75 @@
 
     <div class="pricing-hero">
         <h1>OPERATIONAL ACCESS</h1>
-        <p>No tiers. No upsells. Just the full BattleBox system.</p>
+        <p>Complete System Components in one structured environment.</p>
     </div>
 
     <div class="container">
         <div class="pricing-grid">
             
             <div class="pricing-card featured">
-                <div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#06b6d4; color:#000; padding:4px 12px; border-radius:12px; font-weight:800; font-size:11px; letter-spacing:1px;">LIMITED OFFER</div>
+                <div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#06b6d4; color:#000; padding:4px 12px; border-radius:12px; font-weight:800; font-size:11px; letter-spacing:1px;">7 DAYS FREE</div>
                 
                 <h3>FULL ACCESS</h3>
                 
                 <div class="price">
-                    <span style="text-decoration: line-through; color: #64748b; font-size: 20px;">$149.00</span>
-                    
                     <span style="color: #fff; font-size: 48px; font-weight: 800; letter-spacing:-2px;">$29.99</span>
-                    
                     <span style="font-size: 14px; color: #94a3b8; font-weight:600;">/mo</span>
                 </div>
                 
-                <ul class="features">
-                    <li>✅ <strong>Session Control</strong> (Market Context)</li>
-                    <li>✅ <strong>Battle Control</strong> (Live Intel)</li>
-                    <li>✅ <strong>Structure Engine</strong> (Levels)</li>
-                    <li>✅ <strong>Project Omega</strong> (AI Analyst)</li>
-                    <li>✅ <strong>Research Lab</strong> (Backtesting)</li>
-                    <li>✅ <strong>TradingView Sync</strong> (Indicators)</li>
-                </ul>
+                <div class="feature-block">
+                    <div class="feature-title">Session Control Framework</div>
+                    <div class="feature-desc">Structured guidance for managing live market sessions with clarity and discipline.</div>
+                </div>
 
-                <a href="https://whop.com/checkout/plan_TtQ6FGNPxooMc" class="btn-buy" target="_blank">
-                    JOIN NOW ⚡
-                </a>
+                <div class="feature-block">
+                    <div class="feature-title">Trade Opportunity Radar</div>
+                    <div class="feature-desc">Real-time radar identifying potential trade setups based on key levels and structural confluence.</div>
+                </div>
+
+                <div class="feature-block">
+                    <div class="feature-title">TradingView Indicator Sync</div>
+                    <div class="feature-desc">Pre-configured indicators aligned with the system to ensure consistency across analysis.</div>
+                </div>
+
+                <div class="feature-block">
+                    <div class="feature-title">Key Level Identification Process</div>
+                    <div class="feature-desc">Step-by-step operating procedures for identifying:</div>
+                    <ul class="feature-sublist">
+                        <li>Daily levels & Structural zones</li>
+                        <li>Breakout and breakdown triggers</li>
+                    </ul>
+                </div>
+
+                <div class="feature-block">
+                    <div class="feature-title">System Workflow Integration</div>
+                    <div class="feature-desc">Clear operating procedures for:</div>
+                    <ul class="feature-sublist">
+                        <li>Pulling key levels directly from the platform</li>
+                        <li>Organizing data for execution</li>
+                        <li>Structuring trade opportunities within the system</li>
+                    </ul>
+                </div>
+
+                <div class="feature-block">
+                    <div class="feature-title">Step-by-Step Video Training</div>
+                    <div class="feature-desc">Guided walkthroughs covering platform setup, level extraction, execution logic, and full process flow.</div>
+                </div>
+
+                <div class="feature-block">
+                    <div class="feature-title">AI Agent Access</div>
+                    <div class="feature-desc">Direct access to AI-driven prompts and structured workflows to refine trade ideas, validate setups, and maintain discipline.</div>
+                </div>
+
+                {% if is_logged_in %}
+                    <a href="https://whop.com/checkout/plan_TtQ6FGNPxooMc" class="btn-buy" target="_blank">
+                        PROCEED TO CHECKOUT ⚡
+                    </a>
+                {% else %}
+                    <a href="/register" class="btn-buy">
+                        CREATE ACCOUNT TO JOIN ⚡
+                    </a>
+                {% endif %}
                 
                 <p style="text-align:center; font-size:12px; color:#64748b; margin-top:15px;">
                     Secure payment via Whop. Cancel anytime.
