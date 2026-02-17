@@ -1,7 +1,8 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v9.1 (TRI-ASSET UPGRADE)
-# UPDATE: Engine now applies bespoke math for BTC, ETH, and SOL automatically.
+# KABRODA MARKET RADAR v9.4 (THE 3-STATE SYSTEM)
+# UPDATE: Simplified to Magnet, Jailbreak, or Death Zone. 
+# NOW: Kills trades that are too tight (Chop) OR too wide (Exhaustion).
 # ==============================================================================
 import asyncio
 import json
@@ -9,135 +10,98 @@ import battlebox_pipeline
 
 TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
-# --- HELPER: DATA PACKAGING ---
 def _make_indicator_string(levels):
     if not levels: return "0,0,0,0,0,0"
     return f"{levels.get('breakout_trigger',0)},{levels.get('breakdown_trigger',0)},{levels.get('daily_resistance',0)},{levels.get('daily_support',0)},{levels.get('range30m_high',0)},{levels.get('range30m_low',0)}"
 
-# --- HELPER: ASSET-SPECIFIC THRESHOLDS ---
 def _get_thresholds(symbol):
-    if "BTC" in symbol:
-        return 0.5, True   # BTC: 0.5% Gap, Jailbreaks Allowed
-    if "ETH" in symbol:
-        return 0.8, True   # ETH: 0.8% Gap, Jailbreaks Allowed
-    if "SOL" in symbol:
-        return 1.5, True   # SOL: 1.5% Gap, Jailbreaks Allowed
-    return 0.8, False      # Default fallback
+    # Returns: (Min Gap %, Max Gap % before Exhaustion, Allow Jailbreaks)
+    if "BTC" in symbol: return 0.5, 1.5, True
+    if "ETH" in symbol: return 0.8, 2.5, True
+    if "SOL" in symbol: return 1.5, 4.0, True
+    return 0.8, 2.5, False
 
-# --- CORE: BEHAVIOR PREDICTION ENGINE ---
 def _analyze_topology(symbol, anchor, levels, bias):
-    if anchor == 0: return "DATA_SYNC", "GRAY", 0, "NEUTRAL"
+    if anchor == 0: return "DATA SYNC", "GRAY", 0, "NEUTRAL", 0.0, "WAITING"
 
-    # --- 1. SNIPER INTERRUPT (ASYMMETRIC) ---
     d_ema20 = float(levels.get("daily_ema20", 0))
     d_ema30 = float(levels.get("daily_ema30", 0))
     d_ema50 = float(levels.get("daily_ema50", 0))
     
+    # 1. SNIPER INTERRUPT
     if d_ema30 > 0:
         if bias == "BEARISH":
-            dist_to_30 = (anchor - d_ema30) / d_ema30
-            is_touching_30 = abs(dist_to_30) < 0.005 
-            if is_touching_30 and anchor < d_ema50:
-                return "SNIPER: RED LINE SHORT", "NEON_RED", 100, "SHORT"
-        
+            if abs((anchor - d_ema30) / d_ema30) < 0.005 and anchor < d_ema50:
+                return "SNIPER", "NEON_RED", 100, "SHORT", 0.0, "PERFECT SQUEEZE"
         if bias == "BULLISH" and d_ema20 > 0:
-            dist_to_20 = (anchor - d_ema20) / d_ema20
-            is_touching_20 = abs(dist_to_20) < 0.005
-            if is_touching_20 and anchor > d_ema50:
-                return "SNIPER: GREEN LINE LONG", "NEON_GREEN", 100, "LONG"
+            if abs((anchor - d_ema20) / d_ema20) < 0.005 and anchor > d_ema50:
+                return "SNIPER", "NEON_GREEN", 100, "LONG", 0.0, "PERFECT SQUEEZE"
 
-    # --- 2. STANDARD LOGIC ---
-    runway_limit, allow_jailbreak = _get_thresholds(symbol)
+    if bias == "NEUTRAL":
+        return "DEATH ZONE", "GRAY", 10, "NEUTRAL", 0.0, "NO TREND"
+
+    min_gap, max_gap, allow_jailbreak = _get_thresholds(symbol)
 
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
     dr = float(levels.get("daily_resistance", 0))
     ds = float(levels.get("daily_support", 0))
-    
-    # Check Inversion (Jailbreak Conditions)
-    is_inverted_up = bo > dr
-    is_inverted_dn = bd < ds
-    
-    gap_up_pct = (abs(bo - dr) / anchor) * 100 if bo > 0 else 0
-    gap_dn_pct = (abs(bd - ds) / anchor) * 100 if bd > 0 else 0
 
-    # JAILBREAK LOGIC
-    if is_inverted_up and bias in ["BULLISH", "NEUTRAL"]:
-        if gap_up_pct < runway_limit:
-            return f"JAILBREAK UP (RISKY GAP: {gap_up_pct:.2f}%)", "ORANGE", 20, "NEUTRAL"
-        return ("JAILBREAK (UP)", "PURPLE", 95, "LONG") if allow_jailbreak else ("JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL")
-    
-    if is_inverted_dn and bias in ["BEARISH", "NEUTRAL"]:
-        if gap_dn_pct < runway_limit:
-            return f"JAILBREAK DOWN (RISKY GAP: {gap_dn_pct:.2f}%)", "ORANGE", 20, "NEUTRAL"
-        return ("JAILBREAK (DOWN)", "PURPLE", 95, "SHORT") if allow_jailbreak else ("JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL")
+    if bias == "BULLISH":
+        gap_pct = (abs(dr - bo) / anchor) * 100 if bo > 0 else 0
+        is_inverted = bo > dr and bo > 0 and dr > 0
+        vector = "LONG"
+    else: # BEARISH
+        gap_pct = (abs(ds - bd) / anchor) * 100 if bd > 0 else 0
+        is_inverted = bd < ds and bd > 0 and ds > 0
+        vector = "SHORT"
 
-    # STANDARD RUNWAY LOGIC
-    runway_up_pct = ((dr - bo) / anchor) * 100 if bo > 0 else 0
-    runway_dn_pct = ((bd - ds) / anchor) * 100 if bd > 0 else 0
-
-    if bias == "BULLISH" and 0 < runway_up_pct < runway_limit:
-        return f"SUFFOCATED ({runway_up_pct:.2f}%)", "RED", 10, "NEUTRAL"
-    if bias == "BEARISH" and 0 < runway_dn_pct < runway_limit:
-        return f"SUFFOCATED ({runway_dn_pct:.2f}%)", "RED", 10, "NEUTRAL"
-
-    if bias == "BULLISH" and runway_up_pct >= runway_limit:
-        return f"MAGNET LONG ({runway_up_pct:.2f}%)", "GREEN", 75, "LONG"
-    if bias == "BEARISH" and runway_dn_pct >= runway_limit:
-        return f"MAGNET SHORT ({runway_dn_pct:.2f}%)", "GREEN", 75, "SHORT"
-
-    if bias == "NEUTRAL":
-        return "DRIFTER / NO GRAVITY", "YELLOW", 25, "NEUTRAL"
-        
-    return f"BIAS BLOCKADE ({bias})", "RED", 15, "NEUTRAL"
-
-def _generate_roe(verdict, levels):
-    dr = int(float(levels.get("daily_resistance", 0)))
-    ds = int(float(levels.get("daily_support", 0)))
-    
-    if "SNIPER" in verdict:
-        if "SHORT" in verdict:
-            d_ema30 = int(float(levels.get("daily_ema30", 0)))
-            return f"CRITICAL ALPHA. Bearish Force + 30 EMA Rejection ({d_ema30}). Structure is aligned. EXECUTE SHORT."
+    # 2. JAILBREAK ZONES
+    if is_inverted:
+        if gap_pct < min_gap:
+            return "DEATH ZONE", "RED", 15, "NEUTRAL", gap_pct, "JAILBREAK (TOO TIGHT)" 
+        if allow_jailbreak:
+            return "JAILBREAK", "PURPLE", 95, vector, gap_pct, "JAILBREAK"
         else:
-            d_ema20 = int(float(levels.get("daily_ema20", 0)))
-            return f"CRITICAL ALPHA. Bullish Force + 20 EMA Bounce ({d_ema20}). Momentum is strong. EXECUTE LONG."
+            return "DEATH ZONE", "RED", 15, "NEUTRAL", gap_pct, "JAILBREAK (UNCONFIRMED)"
 
-    if "JAILBREAK" in verdict:
-        if "RISKY GAP" in verdict:
-            return "WARNING: TIGHT SPREAD. Structure is broken but the gap is too small. Volatility Trap likely. STAND DOWN."
-        if "UNCONFIRMED" not in verdict:
-            return "CRITICAL STRUCTURAL FAILURE. Triggers are OUTSIDE walls with velocity room. High probability of EXPANSION. Authorized."
-    
-    if "SUFFOCATED" in verdict:
-        return "WARNING: CHOP ZONE. Trigger is too close to the Daily Wall (Insufficient Runway). Risk of immediate reversal. HOLD FIRE."
-    
-    if "MAGNET" in verdict:
-        return f"STANDARD OPERATION. Clear runway detected. The Daily Wall ({dr} or {ds}) is the MAGNET. Take profit strictly at the Wall."
-        
+    # 3. MAGNET ZONES & DEATH ZONES
+    if gap_pct < min_gap:
+        return "DEATH ZONE", "RED", 15, "NEUTRAL", gap_pct, "DEATH ZONE (CHOP)" 
+    elif gap_pct > max_gap:
+        return "DEATH ZONE", "RED", 15, "NEUTRAL", gap_pct, "DEATH ZONE (EXHAUSTION)"
+    else:
+        return "MAGNET", "GREEN", 90, vector, gap_pct, "MAGNET"
+
+def _generate_roe(verdict, levels, zone_tier):
+    if "CHOP" in zone_tier or "TOO TIGHT" in zone_tier:
+        return "WARNING: CHOP ZONE. Gap is too small. High risk of algorithm wicks and mean-reversion. STAND DOWN."
+    if "EXHAUSTION" in zone_tier:
+        return "WARNING: EXHAUSTION. The gap is massive. Price has likely exhausted its daily ATR. STAND DOWN."
+    if "JAILBREAK" in zone_tier:
+        return "CRITICAL STRUCTURAL FAILURE. Triggers are OUTSIDE walls with velocity room. Trail stop loosely."
+    if "MAGNET" in zone_tier:
+        return "STANDARD OPERATION. Gap is in the exact mathematical sweet spot. Take profit strictly at the Wall."
+    if "SQUEEZE" in zone_tier:
+        return "CRITICAL ALPHA. Price is touching the Daily EMA with momentum alignment. Execute."
     return "LOW ENERGY / CONFLICT. Market structure opposes gravity. Stand down."
 
 def _find_predator_stop(symbol, entry, direction, levels, verdict):
     pred_h = float(levels.get("range30m_high", 0))
     pred_l = float(levels.get("range30m_low", 0))
 
-    # --- ASSET SPECIFIC STOP LOSS LOGIC ---
-    
-    # 1. SOLANA: Extreme Volatility = WIDE Stops only (30m Range)
     if "SOL" in symbol:
         if direction == "LONG": return pred_l if pred_l > 0 else entry * 0.98
         elif direction == "SHORT": return pred_h if pred_h > 0 else entry * 1.02
         return 0
         
-    # 2. ETHEREUM: Moderate Volatility = Armored Stops (0.20% buffer)
     if "ETH" in symbol:
-        if "JAILBREAK" in verdict: # Wide stops for Jailbreaks
+        if "JAILBREAK" in verdict: 
             return pred_l if direction == "LONG" and pred_l > 0 else (pred_h if direction == "SHORT" and pred_h > 0 else entry)
         else:
             eth_buffer = entry * 0.002
             return entry - eth_buffer if direction == "LONG" else entry + eth_buffer
 
-    # 3. BITCOIN / DEFAULT: Low Volatility = Tight Stops (0.10% buffer)
     if "SNIPER" in verdict:
         if direction == "SHORT": return entry * 1.017
         if direction == "LONG": return entry * 0.983
@@ -207,15 +171,15 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
     levels = data.get("battlebox", {}).get("levels", {})
     bias = data.get("battlebox", {}).get("context", {}).get("weekly_force", "NEUTRAL")
 
-    verdict, color, score, vector = _analyze_topology(symbol, price, levels, bias)
+    verdict, color, sort_weight, vector, gap_pct, zone_tier = _analyze_topology(symbol, price, levels, bias)
     plan = _get_plan(symbol, verdict, vector, levels, price)
-    roe_text = _generate_roe(verdict, levels)
+    roe_text = _generate_roe(verdict, levels, zone_tier)
     is_sniper = "SNIPER" in verdict
 
     return {
         "ok": True,
         "result": {
-            "symbol": symbol, "price": price, "score": score,
+            "symbol": symbol, "price": price, "score": gap_pct, 
             "status": verdict, "color": color, "advice": roe_text, "bias": bias,
             "roe": roe_text, "plan": plan, "levels": levels,
             "mission_key": _make_key(plan, verdict),
@@ -232,15 +196,12 @@ async def scan_sector(session_id="us_ny_futures"):
 
     for sym, res in zip(TARGETS, results):
         if isinstance(res, Exception) or res.get("status") == "ERROR":
-            radar_grid.append({"symbol": sym, "score": 0, "status": "OFFLINE", "metrics": {}})
             continue
         
         if res.get("status") == "CALIBRATING":
-            price = float(res.get("price", 0))
-            metrics = {"hull": {"val": 0, "pct": 0, "color": "YELLOW"}, "energy": {"val": 0}, "wind": {"val": 0}, "space": {"val": 0}}
             radar_grid.append({
-                "symbol": sym, "price": price, "score": 0, "status": "CALIBRATING", "bias": "WAIT", 
-                "metrics": metrics, "color_code": "YELLOW", "has_trade": False, 
+                "symbol": sym, "price": float(res.get("price", 0)), "sort_weight": 0, "status": "CALIBRATING", 
+                "bias": "WAIT", "color_code": "YELLOW", "has_trade": False, "runway_pct": 0, "tier": "WAITING",
                 "indicator_string": "0,0,0,0,0,0", "full_intel": json.dumps(res, default=str), "is_sniper_mode": False
             })
             continue
@@ -249,19 +210,20 @@ async def scan_sector(session_id="us_ny_futures"):
         levels = res.get("battlebox", {}).get("levels", {})
         bias = res.get("battlebox", {}).get("context", {}).get("weekly_force", "NEUTRAL")
 
-        verdict, color, score, vector = _analyze_topology(sym, price, levels, bias)
+        verdict, color, sort_weight, vector, gap_pct, zone_tier = _analyze_topology(sym, price, levels, bias)
         plan = _get_plan(sym, verdict, vector, levels, price)
         is_sniper = "SNIPER" in verdict
-
-        metrics = {"hull": {"val": score, "pct": score, "color": color}, "energy": {"val": 0}, "wind": {"val": 0}, "space": {"val": 0}}
         
         radar_grid.append({
-            "symbol": sym, "price": price, "score": score, "status": verdict, "bias": bias, 
-            "metrics": metrics, "color_code": color, "has_trade": plan["valid"], 
+            "symbol": sym, "price": price, "sort_weight": sort_weight, "status": verdict, "bias": bias, 
+            "color_code": color, "has_trade": plan["valid"], 
+            "runway_pct": gap_pct, "tier": zone_tier, 
             "indicator_string": _make_indicator_string(levels),
-            "plan": plan, "advice": _generate_roe(verdict, levels), "mission_key": _make_key(plan, verdict),
+            "plan": plan, "advice": _generate_roe(verdict, levels, zone_tier), 
+            "mission_key": _make_key(plan, verdict),
             "full_intel": json.dumps(res, default=str),
             "is_sniper_mode": is_sniper
         })
-    radar_grid.sort(key=lambda x: x['score'], reverse=True)
+        
+    radar_grid.sort(key=lambda x: x['sort_weight'], reverse=True)
     return radar_grid
