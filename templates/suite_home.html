@@ -7,73 +7,55 @@
     <link rel="stylesheet" href="/static/site.css">
     <style>
         body { background-color: #020617; color: #fff; font-family: 'Inter', sans-serif; }
-        
         .suite-container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
-        
         .welcome-header { margin-bottom: 40px; border-bottom: 1px solid #1e293b; padding-bottom: 20px; }
         .welcome-title { font-size: 28px; font-weight: 800; margin: 0 0 10px 0; letter-spacing: -0.5px; }
         .welcome-sub { color: #94a3b8; font-size: 16px; margin: 0; }
-
         .module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
-        
-        .module-card { 
-            background: #0f172a; 
-            border: 1px solid #1e293b; 
-            border-radius: 12px; 
-            padding: 30px; 
-            text-decoration: none; 
-            transition: all 0.2s ease;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            min-height: 200px;
-        }
-        
-        .module-card:hover { transform: translateY(-5px); border-color: #06b6d4; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
-        
-        .icon { font-size: 32px; margin-bottom: 20px; }
-        .card-title { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 18px; color: #fff; margin-bottom: 8px; }
+        .module-card { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 25px; display: flex; flex-direction: column; justify-content: space-between; text-decoration: none; transition: transform 0.2s, border-color 0.2s; min-height: 180px; }
+        .module-card:hover { transform: translateY(-3px); border-color: #06b6d4; }
+        .icon { font-size: 24px; margin-bottom: 15px; }
+        .card-title { font-family: 'JetBrains Mono'; font-weight: 800; font-size: 16px; color: #fff; margin-bottom: 8px; }
         .card-desc { color: #94a3b8; font-size: 14px; line-height: 1.5; }
-        
-        .arrow { margin-top: 20px; font-weight: 700; color: #06b6d4; font-size: 14px; align-self: flex-start; }
-
-        .admin-tag { 
-            background: #facc15; color: #000; 
-            font-size: 10px; font-weight: 800; 
-            padding: 2px 6px; border-radius: 4px; 
-            margin-left: 8px; vertical-align: middle; 
-        }
+        .arrow { color: #06b6d4; font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 800; margin-top: 20px; }
+        .admin-tag { background: #facc15; color: #000; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-left: 8px; vertical-align: middle; }
     </style>
 </head>
 <body>
-
     {% include 'nav.html' %}
-
+    
     <div class="suite-container">
-        
         <div class="welcome-header">
-            <h1 class="welcome-title">OPERATOR SUITE</h1>
-            <p class="welcome-sub">System Online. Select a module to begin operations.</p>
+            <h1 class="welcome-title">Welcome to Battle Control, {{ username }}.</h1>
+            <p class="welcome-sub">System Status: ONLINE | Authorization: SECURE</p>
         </div>
 
         <div class="module-grid">
-            
-            <a href="/suite/session" class="module-card">
+            <a href="/suite" class="module-card">
                 <div>
                     <div class="icon">🎛️</div>
                     <div class="card-title">SESSION CONTROL</div>
-                    <div class="card-desc">Daily Market Review (DMR). Execute Phase 1 calculations and determine key levels for the session.</div>
+                    <div class="card-desc">Execute your daily calibration and lock in structural triggers.</div>
                 </div>
-                <div class="arrow">LAUNCH TOOL &rarr;</div>
+                <div class="arrow">ENTER &rarr;</div>
+            </a>
+
+            <a href="/suite/radar" class="module-card" style="border-color: #06b6d4;">
+                <div>
+                    <div class="icon">📡</div>
+                    <div class="card-title">MARKET RADAR</div>
+                    <div class="card-desc">Live multi-asset scanner for monitoring market-wide bias and structure.</div>
+                </div>
+                <div class="arrow" style="color: #06b6d4;">OPEN RADAR &rarr;</div>
             </a>
 
             <a href="/indicators" class="module-card">
                 <div>
-                    <div class="icon">📊</div>
-                    <div class="card-title">INDICATORS</div>
-                    <div class="card-desc">TradingView scripts and setup guides. Sync your charts with the Kabroda system.</div>
+                    <div class="icon">📈</div>
+                    <div class="card-title">INDICATOR SYNC</div>
+                    <div class="card-desc">Get the latest parameters to sync your TradingView charts.</div>
                 </div>
-                <div class="arrow">SETUP NOW &rarr;</div>
+                <div class="arrow">SYNC &rarr;</div>
             </a>
 
             <a href="/account" class="module-card">
@@ -86,27 +68,16 @@
             </a>
 
             {% if is_admin %}
-                <a href="/admin/radar" class="module-card" style="border-color: #facc15;">
+                <a href="/admin/research" class="module-card" style="border-color: #facc15;">
                     <div>
-                        <div class="icon">📡</div>
-                        <div class="card-title">MARKET RADAR <span class="admin-tag">ADMIN</span></div>
-                        <div class="card-desc">Live multi-asset scanner for monitoring market-wide bias and structure.</div>
+                        <div class="icon">🔬</div>
+                        <div class="card-title">RESEARCH LAB <span class="admin-tag">ADMIN</span></div>
+                        <div class="card-desc">Backtest the structural engine against historical datasets.</div>
                     </div>
-                    <div class="arrow" style="color: #facc15;">OPEN RADAR &rarr;</div>
-                </a>
-
-                <a href="/admin/target-lock" class="module-card" style="border-color: #facc15;">
-                    <div>
-                        <div class="icon">🎯</div>
-                        <div class="card-title">LOCK TARGET <span class="admin-tag">ADMIN</span></div>
-                        <div class="card-desc">Position size calculator and risk management tool.</div>
-                    </div>
-                    <div class="arrow" style="color: #facc15;">OPEN TOOL &rarr;</div>
+                    <div class="arrow" style="color: #facc15;">OPEN LAB &rarr;</div>
                 </a>
             {% endif %}
-
         </div>
     </div>
-
 </body>
 </html>
