@@ -281,22 +281,14 @@ async def run_radar_scan(request: Request):
     return {"ok": True, "results": results}
 
 @app.post("/api/research/run")
-async def research_run(request: Request, db: Session = Depends(get_db)):
-    uid = request.session.get(auth.SESSION_KEY)
-    if not uid: raise HTTPException(status_code=401)
-    user = db.query(UserModel).filter(UserModel.id == uid).first()
-    require_paid_access(user)
-    
-    payload = await request.json()
+async def run_research_scan(request: Request):
+    """Bridges the frontend UI to the Research Lab collector."""
     try:
-        # Connect to the research_lab data collector
-        out = await research_lab.run_research_lab(
-            symbol=(payload.get("symbol") or "BTCUSDT").strip().upper(),
-            start_date_utc=payload.get("start_date_utc"),
-            end_date_utc=payload.get("end_date_utc"),
-            session_ids=payload.get("session_ids")
-        )
-        return JSONResponse(out)
+        payload = await request.json()
+        
+        # Connects perfectly to the newly named function in research_lab.py
+        result = await research_lab.run_research_lab(payload)
+        
+        return JSONResponse(result)
     except Exception as e:
-        traceback.print_exc()
         return JSONResponse({"ok": False, "error": str(e)})
