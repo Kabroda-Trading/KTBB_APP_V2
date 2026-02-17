@@ -1,8 +1,7 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v9.0 (SOLANA ONE-PAGER UPGRADE)
-# UPDATE: Added asset-specific logic for SOLUSDT based on backtest data.
-# NOW: Forces 1.5% gaps and WIDE stops exclusively for Solana.
+# KABRODA MARKET RADAR v9.1 (TRI-ASSET UPGRADE)
+# UPDATE: Engine now applies bespoke math for BTC, ETH, and SOL automatically.
 # ==============================================================================
 import asyncio
 import json
@@ -19,9 +18,11 @@ def _make_indicator_string(levels):
 def _get_thresholds(symbol):
     if "BTC" in symbol:
         return 0.5, True   # BTC: 0.5% Gap, Jailbreaks Allowed
+    if "ETH" in symbol:
+        return 0.8, True   # ETH: 0.8% Gap, Jailbreaks Allowed
     if "SOL" in symbol:
-        return 1.5, True   # SOL: 1.5% Gap (High Volatility), Jailbreaks Allowed
-    return 0.8, False      # Default for others (e.g. ETH)
+        return 1.5, True   # SOL: 1.5% Gap, Jailbreaks Allowed
+    return 0.8, False      # Default fallback
 
 # --- CORE: BEHAVIOR PREDICTION ENGINE ---
 def _analyze_topology(symbol, anchor, levels, bias):
@@ -45,7 +46,7 @@ def _analyze_topology(symbol, anchor, levels, bias):
             if is_touching_20 and anchor > d_ema50:
                 return "SNIPER: GREEN LINE LONG", "NEON_GREEN", 100, "LONG"
 
-    # --- 2. STANDARD LOGIC (WITH JAILBREAK SAFETY) ---
+    # --- 2. STANDARD LOGIC ---
     runway_limit, allow_jailbreak = _get_thresholds(symbol)
 
     bo = float(levels.get("breakout_trigger", 0))
@@ -57,7 +58,6 @@ def _analyze_topology(symbol, anchor, levels, bias):
     is_inverted_up = bo > dr
     is_inverted_dn = bd < ds
     
-    # Calculate Gaps (Absolute distance between Trigger and Wall)
     gap_up_pct = (abs(bo - dr) / anchor) * 100 if bo > 0 else 0
     gap_dn_pct = (abs(bd - ds) / anchor) * 100 if bd > 0 else 0
 
@@ -121,30 +121,35 @@ def _find_predator_stop(symbol, entry, direction, levels, verdict):
     pred_h = float(levels.get("range30m_high", 0))
     pred_l = float(levels.get("range30m_low", 0))
 
-    # --- SOLANA ONE-PAGER PROTOCOL ---
-    # Solana is hyper-volatile. Tight stops get wicked immediately.
-    # We force the WIDE STOP (30m Range) for all SOL trades.
+    # --- ASSET SPECIFIC STOP LOSS LOGIC ---
+    
+    # 1. SOLANA: Extreme Volatility = WIDE Stops only (30m Range)
     if "SOL" in symbol:
-        if direction == "LONG":
-            return pred_l if pred_l > 0 else entry * 0.98
-        elif direction == "SHORT":
-            return pred_h if pred_h > 0 else entry * 1.02
+        if direction == "LONG": return pred_l if pred_l > 0 else entry * 0.98
+        elif direction == "SHORT": return pred_h if pred_h > 0 else entry * 1.02
         return 0
+        
+    # 2. ETHEREUM: Moderate Volatility = Armored Stops (0.20% buffer)
+    if "ETH" in symbol:
+        if "JAILBREAK" in verdict: # Wide stops for Jailbreaks
+            return pred_l if direction == "LONG" and pred_l > 0 else (pred_h if direction == "SHORT" and pred_h > 0 else entry)
+        else:
+            eth_buffer = entry * 0.002
+            return entry - eth_buffer if direction == "LONG" else entry + eth_buffer
 
-    # --- STANDARD / BTC PROTOCOL ---
+    # 3. BITCOIN / DEFAULT: Low Volatility = Tight Stops (0.10% buffer)
     if "SNIPER" in verdict:
         if direction == "SHORT": return entry * 1.017
         if direction == "LONG": return entry * 0.983
 
-    buffer = entry * 0.001 
-
+    btc_buffer = entry * 0.001 
     if direction == "LONG":
-        if pred_l > 0 and pred_l < entry: return pred_l - buffer
+        if pred_l > 0 and pred_l < entry: return pred_l - btc_buffer
         return entry * 0.99 
-
     elif direction == "SHORT":
-        if pred_h > 0 and pred_h > entry: return pred_h + buffer
+        if pred_h > 0 and pred_h > entry: return pred_h + btc_buffer
         return entry * 1.01 
+        
     return 0
 
 def _get_plan(symbol, verdict, vector, levels, anchor):
@@ -162,7 +167,6 @@ def _get_plan(symbol, verdict, vector, levels, anchor):
     else:
         entry_price = bo if vector == "LONG" else bd
 
-    # Passing the symbol to ensure SOL gets its custom wide stop
     stop_price = _find_predator_stop(symbol, entry_price, vector, levels, verdict)
     
     if "SNIPER" in verdict:
@@ -206,7 +210,6 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
     verdict, color, score, vector = _analyze_topology(symbol, price, levels, bias)
     plan = _get_plan(symbol, verdict, vector, levels, price)
     roe_text = _generate_roe(verdict, levels)
-
     is_sniper = "SNIPER" in verdict
 
     return {
