@@ -1,8 +1,8 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v8.8 (JAILBREAK SAFETY PATCH)
-# UPDATE: Fixed logic blind spot on 'Inverted' levels.
-# NOW: Checks gap % on Jailbreaks. If < 0.5%, downgrades Score to 20 (Risky).
+# KABRODA MARKET RADAR v9.0 (SOLANA ONE-PAGER UPGRADE)
+# UPDATE: Added asset-specific logic for SOLUSDT based on backtest data.
+# NOW: Forces 1.5% gaps and WIDE stops exclusively for Solana.
 # ==============================================================================
 import asyncio
 import json
@@ -18,8 +18,10 @@ def _make_indicator_string(levels):
 # --- HELPER: ASSET-SPECIFIC THRESHOLDS ---
 def _get_thresholds(symbol):
     if "BTC" in symbol:
-        return 0.5, True 
-    return 0.8, False 
+        return 0.5, True   # BTC: 0.5% Gap, Jailbreaks Allowed
+    if "SOL" in symbol:
+        return 1.5, True   # SOL: 1.5% Gap (High Volatility), Jailbreaks Allowed
+    return 0.8, False      # Default for others (e.g. ETH)
 
 # --- CORE: BEHAVIOR PREDICTION ENGINE ---
 def _analyze_topology(symbol, anchor, levels, bias):
@@ -59,14 +61,14 @@ def _analyze_topology(symbol, anchor, levels, bias):
     gap_up_pct = (abs(bo - dr) / anchor) * 100 if bo > 0 else 0
     gap_dn_pct = (abs(bd - ds) / anchor) * 100 if bd > 0 else 0
 
-    # JAILBREAK LOGIC (Patched)
+    # JAILBREAK LOGIC
     if is_inverted_up and bias in ["BULLISH", "NEUTRAL"]:
-        if gap_up_pct < runway_limit: # Safety Check
+        if gap_up_pct < runway_limit:
             return f"JAILBREAK UP (RISKY GAP: {gap_up_pct:.2f}%)", "ORANGE", 20, "NEUTRAL"
         return ("JAILBREAK (UP)", "PURPLE", 95, "LONG") if allow_jailbreak else ("JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL")
     
     if is_inverted_dn and bias in ["BEARISH", "NEUTRAL"]:
-        if gap_dn_pct < runway_limit: # Safety Check
+        if gap_dn_pct < runway_limit:
             return f"JAILBREAK DOWN (RISKY GAP: {gap_dn_pct:.2f}%)", "ORANGE", 20, "NEUTRAL"
         return ("JAILBREAK (DOWN)", "PURPLE", 95, "SHORT") if allow_jailbreak else ("JAILBREAK (UNCONFIRMED)", "YELLOW", 40, "NEUTRAL")
 
@@ -103,7 +105,7 @@ def _generate_roe(verdict, levels):
 
     if "JAILBREAK" in verdict:
         if "RISKY GAP" in verdict:
-            return "WARNING: TIGHT SPREAD. Structure is broken but the gap is too small (<0.5%). Volatility Trap likely. STAND DOWN."
+            return "WARNING: TIGHT SPREAD. Structure is broken but the gap is too small. Volatility Trap likely. STAND DOWN."
         if "UNCONFIRMED" not in verdict:
             return "CRITICAL STRUCTURAL FAILURE. Triggers are OUTSIDE walls with velocity room. High probability of EXPANSION. Authorized."
     
@@ -115,13 +117,25 @@ def _generate_roe(verdict, levels):
         
     return "LOW ENERGY / CONFLICT. Market structure opposes gravity. Stand down."
 
-def _find_predator_stop(entry, direction, levels, verdict):
+def _find_predator_stop(symbol, entry, direction, levels, verdict):
+    pred_h = float(levels.get("range30m_high", 0))
+    pred_l = float(levels.get("range30m_low", 0))
+
+    # --- SOLANA ONE-PAGER PROTOCOL ---
+    # Solana is hyper-volatile. Tight stops get wicked immediately.
+    # We force the WIDE STOP (30m Range) for all SOL trades.
+    if "SOL" in symbol:
+        if direction == "LONG":
+            return pred_l if pred_l > 0 else entry * 0.98
+        elif direction == "SHORT":
+            return pred_h if pred_h > 0 else entry * 1.02
+        return 0
+
+    # --- STANDARD / BTC PROTOCOL ---
     if "SNIPER" in verdict:
         if direction == "SHORT": return entry * 1.017
         if direction == "LONG": return entry * 0.983
 
-    pred_h = float(levels.get("range30m_high", 0))
-    pred_l = float(levels.get("range30m_low", 0))
     buffer = entry * 0.001 
 
     if direction == "LONG":
@@ -133,7 +147,7 @@ def _find_predator_stop(entry, direction, levels, verdict):
         return entry * 1.01 
     return 0
 
-def _get_plan(verdict, vector, levels, anchor):
+def _get_plan(symbol, verdict, vector, levels, anchor):
     plan = {"valid": False, "bias": "NEUTRAL", "entry": 0, "stop": 0, "targets": [0,0,0]}
     
     if vector == "NEUTRAL": return plan
@@ -148,7 +162,8 @@ def _get_plan(verdict, vector, levels, anchor):
     else:
         entry_price = bo if vector == "LONG" else bd
 
-    stop_price = _find_predator_stop(entry_price, vector, levels, verdict)
+    # Passing the symbol to ensure SOL gets its custom wide stop
+    stop_price = _find_predator_stop(symbol, entry_price, vector, levels, verdict)
     
     if "SNIPER" in verdict:
         if vector == "LONG":
@@ -189,7 +204,7 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
     bias = data.get("battlebox", {}).get("context", {}).get("weekly_force", "NEUTRAL")
 
     verdict, color, score, vector = _analyze_topology(symbol, price, levels, bias)
-    plan = _get_plan(verdict, vector, levels, price)
+    plan = _get_plan(symbol, verdict, vector, levels, price)
     roe_text = _generate_roe(verdict, levels)
 
     is_sniper = "SNIPER" in verdict
@@ -232,7 +247,7 @@ async def scan_sector(session_id="us_ny_futures"):
         bias = res.get("battlebox", {}).get("context", {}).get("weekly_force", "NEUTRAL")
 
         verdict, color, score, vector = _analyze_topology(sym, price, levels, bias)
-        plan = _get_plan(verdict, vector, levels, price)
+        plan = _get_plan(sym, verdict, vector, levels, price)
         is_sniper = "SNIPER" in verdict
 
         metrics = {"hull": {"val": score, "pct": score, "color": color}, "energy": {"val": 0}, "wind": {"val": 0}, "space": {"val": 0}}
@@ -241,6 +256,7 @@ async def scan_sector(session_id="us_ny_futures"):
             "symbol": sym, "price": price, "score": score, "status": verdict, "bias": bias, 
             "metrics": metrics, "color_code": color, "has_trade": plan["valid"], 
             "indicator_string": _make_indicator_string(levels),
+            "plan": plan, "advice": _generate_roe(verdict, levels), "mission_key": _make_key(plan, verdict),
             "full_intel": json.dumps(res, default=str),
             "is_sniper_mode": is_sniper
         })
