@@ -98,7 +98,7 @@
     
     <div class="radar-container">
         <div class="radar-header">
-            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v9.1</span></h2></div>
+            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v9.5</span></h2></div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
         <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">/// SCANNING SECTOR...</div>
@@ -134,7 +134,7 @@
                     <div id="vMode" class="mode-display c-GRAY">LOADING</div>
                     <div style="margin-bottom:30px;">
                         <span id="vScore" style="font-size:42px; font-weight:800;">--</span>
-                        <span style="font-size:12px; color:var(--gray);"> / 100</span>
+                        <span style="font-size:12px; color:var(--gray);"> GAP %</span>
                     </div>
                     <div id="roeContainer" class="roe-box">
                         <div id="vROE">Analyzing structural behavior...</div>
@@ -263,7 +263,9 @@
         function renderModal(d) {
             document.getElementById('raw_key').value = d.mission_key;
             document.getElementById('vMode').innerText = d.status;
-            document.getElementById('vScore').innerText = d.score;
+            
+            // UPDATE 2: Displays Gap Percentage
+            document.getElementById('vScore').innerText = d.runway_pct > 0 ? d.runway_pct.toFixed(2) + "%" : "N/A";
             document.getElementById('vROE').innerText = d.advice;
 
             let theme = "GRAY";
@@ -355,6 +357,7 @@
                     if(colorCode === 'GREEN') { statusBg = 'rgba(34, 197, 94, 0.2)'; statusTxt = '#22c55e'; }
                     else if(colorCode === 'YELLOW') { statusBg = 'rgba(234, 179, 8, 0.2)'; statusTxt = '#eab308'; }
                     else if(colorCode === 'PURPLE') { statusBg = 'rgba(168, 85, 247, 0.2)'; statusTxt = '#a855f7'; }
+                    else if(colorCode === 'RED') { statusBg = 'rgba(239, 68, 68, 0.2)'; statusTxt = '#ef4444'; }
                     else if(colorCode === 'NEON_RED') { statusBg = 'rgba(255, 7, 58, 0.2)'; statusTxt = '#ff073a'; } 
                     else if(colorCode === 'NEON_GREEN') { statusBg = 'rgba(57, 255, 20, 0.2)'; statusTxt = '#39ff14'; } 
                     else { statusBg = 'rgba(239, 68, 68, 0.2)'; statusTxt = '#ef4444'; }
@@ -363,7 +366,6 @@
                     let biasBg = t.bias === 'BULLISH' ? 'rgba(34, 197, 94, 0.1)' : (t.bias === 'BEARISH' ? 'rgba(239, 68, 68, 0.1)' : 'transparent');
                     let biasBorder = t.bias === 'BULLISH' ? '#22c55e' : (t.bias === 'BEARISH' ? '#ef4444' : '#475569');
 
-                    // RESTORED: Added the copy buttons back to the actionHtml
                     let actionHtml = `
                     <div style="display:flex; justify-content:flex-end; align-items:center;">
                         <button class="copy-btn" onclick="copyIntel('${t.symbol}')" title="Copy FULL Session Intel (JSON)">📡</button>
@@ -373,6 +375,10 @@
                             `<button class="lock-btn" style="background:#1e293b; color:#64748b; border-color:#334155;" onclick="openModal('${t.symbol}')">MONITOR INTEL</button>`
                         }
                     </div>`;
+
+                    // UPDATE 3: Displays Runway Gap % in the grid instead of score
+                    let runwayDisplay = t.runway_pct > 0 ? t.runway_pct.toFixed(2) + '%' : '---';
+                    if(t.is_sniper_mode) runwayDisplay = "TARGET";
 
                     html += `
                     <div class="radar-row border-${colorCode}">
@@ -384,10 +390,11 @@
                             <div class="sym-price">$${fmt(t.price)}</div>
                         </div>
                         <div style="text-align:center;">
-                            <div class="score-val" style="color:${statusTxt}">${t.score}</div>
-                            <div style="font-size:10px; color:#64748b; font-weight:700;">SCORE</div>
+                            <div class="score-val" style="color:${statusTxt}">${runwayDisplay}</div>
+                            <div style="font-size:10px; color:#64748b; font-weight:700;">RUNWAY GAP</div>
                         </div>
                         <div style="text-align:center;">
+                            <div style="font-family:'JetBrains Mono'; font-weight:800; font-size:14px; color:${statusTxt}; margin-bottom:6px;">${t.tier}</div>
                             <span class="stat-badge" style="background:${statusBg}; color:${statusTxt}">${t.status}</span>
                         </div>
                         ${actionHtml}
