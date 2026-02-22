@@ -222,6 +222,26 @@ def _calculate_weekly_force(weekly_candles: List[Dict[str, Any]]) -> str:
     if cl < op: return "BEARISH" # Red
     return "NEUTRAL"
 
+def _calculate_168h_micro_bias(raw_1h: List[Dict[str, Any]]) -> str:
+    """
+    Calculates the 168-Hour Rolling Micro Bias using the 1% threshold rule.
+    Requires at least 168 hours of data to compare current price to 7 days ago.
+    """
+    if not raw_1h or len(raw_1h) < 168:
+        return "NEUTRAL"
+    
+    current_price = float(raw_1h[-1]["close"])
+    past_price = float(raw_1h[-168]["close"]) # Exactly 168 hours ago
+    
+    pct_change = ((current_price - past_price) / past_price) * 100.0
+    
+    if pct_change > 1.00:
+        return "BULLISH"
+    elif pct_change < -1.00:
+        return "BEARISH"
+    
+    return "NEUTRAL"
+
 def _safe_placeholder_state(reason: str = "Waiting...") -> Dict[str, Any]:
     return {
         "action": "HOLD FIRE",
@@ -260,13 +280,14 @@ def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _compute_sse_packet(
     raw_5m: List[Dict[str, Any]], 
     anchor_ts: int, 
-    weekly_force: str, 
+    macro_bias: str,  # <--- STEP 3: Updated to accept Macro
+    micro_bias: str,  # <--- STEP 3: Updated to accept Micro
     tuning: Optional[Dict[str, Any]] = None,
-    raw_daily: List[Dict[str, Any]] = None  # <--- INJECT DAILY
+    raw_daily: List[Dict[str, Any]] = None  
 ) -> Dict[str, Any]:
     """
     Builds a locked packet from calibration window.
-    INJECTS the Weekly Force so it gets locked with the levels.
+    INJECTS the Biases so they get locked with the levels.
     """
     lock_end_ts = int(anchor_ts) + 1800
 
@@ -284,14 +305,8 @@ def _compute_sse_packet(
     last_price = float(context_24h[-1]["close"]) if context_24h else session_open
 
     # --- SNIPER ENGINE: CALCULATE EMAS (20, 30, 50) ---
-    # We pass these raw daily candles to the SSE Engine, but we can also calculate them here to ensure they exist in 'levels'
-    # Actually, sse_engine.compute_sse_levels handles the EMA calc if we pass 'raw_daily_candles'.
-    # We need to make sure sse_engine is updated to return the 20 EMA as well.
-    # Since we cannot update sse_engine right now, we will Inject them manually here into the result.
-    
     d_ema20, d_ema30, d_ema50 = 0.0, 0.0, 0.0
     if raw_daily and len(raw_daily) > 50:
-        # Simple pandas-free EMA calculation
         closes = [float(c["close"]) for c in raw_daily]
         
         def calc_ema(period, values):
@@ -322,15 +337,15 @@ def _compute_sse_packet(
         return computed
 
     # --- INJECT SNIPER DATA (20/30/50) ---
-    # This ensures the 20 EMA is available even if sse_engine wasn't updated yet.
     if "levels" in computed:
-        computed["levels"]["daily_ema20"] = d_ema20 # <--- NEW
+        computed["levels"]["daily_ema20"] = d_ema20 
         computed["levels"]["daily_ema30"] = d_ema30
         computed["levels"]["daily_ema50"] = d_ema50
 
-    # --- INJECT WEEKLY TRUTH ---
+    # --- INJECT BIAS TRUTH --- (STEP 3 Logic)
     if "context" not in computed: computed["context"] = {}
-    computed["context"]["weekly_force"] = weekly_force
+    computed["context"]["macro_bias"] = macro_bias
+    computed["context"]["micro_bias"] = micro_bias
 
     return {
         "levels": computed["levels"],
@@ -356,13 +371,14 @@ async def get_live_battlebox(
     raw_5m = await fetch_live_5m(symbol)
     raw_1h = await fetch_live_1h(symbol)
     raw_weekly = await fetch_live_weekly(symbol)
-    raw_daily = await fetch_live_daily(symbol) # <--- NEW FETCH
+    raw_daily = await fetch_live_daily(symbol)
 
     if not raw_5m:
         return {"status": "ERROR", "message": "No Data"}
 
-    # --- CALCULATE WEEKLY FORCE ---
-    weekly_force = _calculate_weekly_force(raw_weekly)
+    # --- CALCULATE BIASES (RAW DATA ONLY) ---
+    macro_bias = _calculate_weekly_force(raw_weekly)
+    micro_bias = _calculate_168h_micro_bias(raw_1h)
 
     now_utc = datetime.now(timezone.utc)
     session = session_manager.resolve_current_session(now_utc, session_mode, manual_id)
@@ -382,7 +398,7 @@ async def get_live_battlebox(
                 "session": session,
                 "levels": {},
                 "bias_model": {},
-                "context": {"weekly_force": weekly_force},
+                "context": {"macro_bias": macro_bias, "micro_bias": micro_bias}, # Updated placeholder
             },
         }
 
@@ -391,11 +407,12 @@ async def get_live_battlebox(
 
     async with _CACHE_LOCK:
         if session_key not in _LOCKED_PACKETS:
-            # PASS RAW DAILY TO COMPUTATION
+            # PASS RAW DAILY & BIASES TO COMPUTATION
             pkt = _compute_sse_packet(
                 raw_5m, 
                 anchor_ts, 
-                weekly_force, 
+                macro_bias, 
+                micro_bias,
                 tuning=tuning,
                 raw_daily=raw_daily
             )
@@ -459,11 +476,14 @@ async def get_session_review(
     if not raw_5m:
         return {"ok": False, "error": "No Data"}
     
+    # AUDITED: Added raw_1h fetch so the micro_bias function works!
+    raw_1h = await fetch_live_1h(symbol) 
     raw_weekly = await fetch_live_weekly(symbol)
-    weekly_force = _calculate_weekly_force(raw_weekly)
-    
-    # NEW: Fetch daily for review accuracy
     raw_daily = await fetch_live_daily(symbol)
+    
+    # AUDITED: Calculate both biases
+    macro_bias = _calculate_weekly_force(raw_weekly)
+    micro_bias = _calculate_168h_micro_bias(raw_1h)
 
     cfg = session_manager.get_session_config(session_id)
 
@@ -487,7 +507,8 @@ async def get_session_review(
     pkt = _compute_sse_packet(
         raw_5m, 
         anchor_ts, 
-        weekly_force, 
+        macro_bias, 
+        micro_bias,
         tuning=tuning, 
         raw_daily=raw_daily
     )
