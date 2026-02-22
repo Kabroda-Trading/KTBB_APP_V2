@@ -147,9 +147,9 @@ def _get_plan(symbol, verdict, vector, levels, anchor):
 
     return {"valid": True, "bias": vector, "entry": entry_price, "stop": stop_price, "targets": [t1, t2, t3]}
 
-def _make_key(plan, verdict):
-    if not plan["valid"]: return "NEUTRAL|HOLD|0|0|0|0|0"
-    return f"{plan['bias']}|{verdict}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}"
+def _make_key(plan, verdict, macro_bias, micro_bias):
+    if not plan["valid"]: return f"NEUTRAL|HOLD|0|0|0|0|0|{macro_bias}|{micro_bias}"
+    return f"{plan['bias']}|{verdict}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}|{macro_bias}|{micro_bias}"
 
 async def analyze_target(symbol, session_id="us_ny_futures"):
     data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
@@ -185,7 +185,7 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
             "status": verdict, "color": color, "advice": roe_text, 
             "macro_bias": macro_bias, "micro_bias": micro_bias,
             "roe": roe_text, "plan": plan, "levels": levels,
-            "mission_key": _make_key(plan, verdict),
+            "mission_key": _make_key(plan, verdict, macro_bias, micro_bias),
             "indicator_string": _make_indicator_string(levels),
             "full_intel": json.dumps(data, default=str),
             "is_sniper_mode": is_sniper 
@@ -226,7 +226,7 @@ async def scan_sector(session_id="us_ny_futures"):
             "runway_pct": gap_pct, "tier": zone_tier, 
             "indicator_string": _make_indicator_string(levels),
             "plan": plan, "advice": _generate_roe(verdict, levels, zone_tier), 
-            "mission_key": _make_key(plan, verdict),
+            "mission_key": _make_key(plan, verdict, macro_bias, micro_bias),
             "full_intel": json.dumps(res, default=str),
             "is_sniper_mode": is_sniper
         })
