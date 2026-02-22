@@ -1,8 +1,8 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v9.4 (THE 3-STATE SYSTEM)
-# UPDATE: Simplified to Magnet, Jailbreak, or Death Zone. 
-# NOW: Kills trades that are too tight (Chop) OR too wide (Exhaustion).
+# KABRODA MARKET RADAR v9.5 (DUAL-BIAS INTEGRATION)
+# UPDATE: Uses Micro Bias (168h) for intraday trade direction.
+# Passes Macro Bias to the UI purely for situational awareness.
 # ==============================================================================
 import asyncio
 import json
@@ -21,7 +21,7 @@ def _get_thresholds(symbol):
     if "SOL" in symbol: return 1.5, 4.0, True
     return 0.8, 2.5, False
 
-def _analyze_topology(symbol, anchor, levels, bias):
+def _analyze_topology(symbol, anchor, levels, micro_bias):
     if anchor == 0: return "DATA SYNC", "GRAY", 0, "NEUTRAL", 0.0, "WAITING"
 
     d_ema20 = float(levels.get("daily_ema20", 0))
@@ -30,14 +30,14 @@ def _analyze_topology(symbol, anchor, levels, bias):
     
     # 1. SNIPER INTERRUPT
     if d_ema30 > 0:
-        if bias == "BEARISH":
+        if micro_bias == "BEARISH":
             if abs((anchor - d_ema30) / d_ema30) < 0.005 and anchor < d_ema50:
                 return "SNIPER", "NEON_RED", 100, "SHORT", 0.0, "PERFECT SQUEEZE"
-        if bias == "BULLISH" and d_ema20 > 0:
+        if micro_bias == "BULLISH" and d_ema20 > 0:
             if abs((anchor - d_ema20) / d_ema20) < 0.005 and anchor > d_ema50:
                 return "SNIPER", "NEON_GREEN", 100, "LONG", 0.0, "PERFECT SQUEEZE"
 
-    if bias == "NEUTRAL":
+    if micro_bias == "NEUTRAL":
         return "DEATH ZONE", "GRAY", 10, "NEUTRAL", 0.0, "NO TREND"
 
     min_gap, max_gap, allow_jailbreak = _get_thresholds(symbol)
@@ -47,7 +47,7 @@ def _analyze_topology(symbol, anchor, levels, bias):
     dr = float(levels.get("daily_resistance", 0))
     ds = float(levels.get("daily_support", 0))
 
-    if bias == "BULLISH":
+    if micro_bias == "BULLISH":
         gap_pct = (abs(dr - bo) / anchor) * 100 if bo > 0 else 0
         is_inverted = bo > dr and bo > 0 and dr > 0
         vector = "LONG"
@@ -161,7 +161,7 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
             "result": {
                 "symbol": symbol, "price": float(data.get("price", 0)), "score": 0,
                 "status": "CALIBRATING", "color": "YELLOW", "advice": "Waiting for 30m Candle Close...", 
-                "bias": "WAIT", "roe": "WAITING", "plan": {"valid": False}, "levels": {},
+                "macro_bias": "WAIT", "micro_bias": "WAIT", "roe": "WAITING", "plan": {"valid": False}, "levels": {},
                 "mission_key": "WAIT", "indicator_string": "0,0,0,0,0,0", "full_intel": json.dumps(data, default=str),
                 "is_sniper_mode": False
             }
@@ -169,9 +169,11 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
 
     price = float(data.get("price", 0))
     levels = data.get("battlebox", {}).get("levels", {})
-    bias = data.get("battlebox", {}).get("context", {}).get("weekly_force", "NEUTRAL")
+    context = data.get("battlebox", {}).get("context", {})
+    macro_bias = context.get("macro_bias", "NEUTRAL")
+    micro_bias = context.get("micro_bias", "NEUTRAL")
 
-    verdict, color, sort_weight, vector, gap_pct, zone_tier = _analyze_topology(symbol, price, levels, bias)
+    verdict, color, sort_weight, vector, gap_pct, zone_tier = _analyze_topology(symbol, price, levels, micro_bias)
     plan = _get_plan(symbol, verdict, vector, levels, price)
     roe_text = _generate_roe(verdict, levels, zone_tier)
     is_sniper = "SNIPER" in verdict
@@ -180,7 +182,8 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
         "ok": True,
         "result": {
             "symbol": symbol, "price": price, "score": gap_pct, 
-            "status": verdict, "color": color, "advice": roe_text, "bias": bias,
+            "status": verdict, "color": color, "advice": roe_text, 
+            "macro_bias": macro_bias, "micro_bias": micro_bias,
             "roe": roe_text, "plan": plan, "levels": levels,
             "mission_key": _make_key(plan, verdict),
             "indicator_string": _make_indicator_string(levels),
@@ -201,21 +204,24 @@ async def scan_sector(session_id="us_ny_futures"):
         if res.get("status") == "CALIBRATING":
             radar_grid.append({
                 "symbol": sym, "price": float(res.get("price", 0)), "sort_weight": 0, "status": "CALIBRATING", 
-                "bias": "WAIT", "color_code": "YELLOW", "has_trade": False, "runway_pct": 0, "tier": "WAITING",
+                "macro_bias": "WAIT", "micro_bias": "WAIT", "color_code": "YELLOW", "has_trade": False, "runway_pct": 0, "tier": "WAITING",
                 "indicator_string": "0,0,0,0,0,0", "full_intel": json.dumps(res, default=str), "is_sniper_mode": False
             })
             continue
 
         price = float(res.get("price", 0))
         levels = res.get("battlebox", {}).get("levels", {})
-        bias = res.get("battlebox", {}).get("context", {}).get("weekly_force", "NEUTRAL")
+        context = res.get("battlebox", {}).get("context", {})
+        macro_bias = context.get("macro_bias", "NEUTRAL")
+        micro_bias = context.get("micro_bias", "NEUTRAL")
 
-        verdict, color, sort_weight, vector, gap_pct, zone_tier = _analyze_topology(sym, price, levels, bias)
+        verdict, color, sort_weight, vector, gap_pct, zone_tier = _analyze_topology(sym, price, levels, micro_bias)
         plan = _get_plan(sym, verdict, vector, levels, price)
         is_sniper = "SNIPER" in verdict
         
         radar_grid.append({
-            "symbol": sym, "price": price, "sort_weight": sort_weight, "status": verdict, "bias": bias, 
+            "symbol": sym, "price": price, "sort_weight": sort_weight, "status": verdict, 
+            "macro_bias": macro_bias, "micro_bias": micro_bias, 
             "color_code": color, "has_trade": plan["valid"], 
             "runway_pct": gap_pct, "tier": zone_tier, 
             "indicator_string": _make_indicator_string(levels),

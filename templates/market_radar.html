@@ -88,8 +88,7 @@
         .video-box { margin-bottom: 30px; }
         .video-header { font-family: 'Rajdhani'; font-weight: 800; font-size: 16px; color: var(--accent-cyan, #0ea5e9); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 1px; }
         
-        /* NEW RESPONSIVE VIDEO WRAPPER */
-        .video-wrapper { position: relative; width: 100%; padding-bottom: 56.25%; /* 16:9 Aspect Ratio */ height: 0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; border: 1px solid var(--border); background: #000; }
+        .video-wrapper { position: relative; width: 100%; padding-bottom: 56.25%; height: 0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; border: 1px solid var(--border); background: #000; }
         .video-wrapper iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
         
         .video-desc { font-size: 13px; color: var(--gray); line-height: 1.5; }
@@ -103,7 +102,7 @@
     
     <div class="radar-container">
         <div class="radar-header">
-            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v9.5</span></h2></div>
+            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v9.6</span></h2></div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
         <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">/// SCANNING SECTOR...</div>
@@ -326,7 +325,7 @@
 
             if(d.is_sniper_mode) {
                 sniperAlert.style.display = 'block';
-                if(d.bias === 'BEARISH') {
+                if(d.micro_bias === 'BEARISH') {
                     theme = "NEON_RED";
                     sniperAlert.style.borderColor = "var(--neon-red)";
                     sniperAlert.style.color = "var(--neon-red)";
@@ -415,9 +414,14 @@
                     else if(colorCode === 'NEON_GREEN') { statusBg = 'rgba(57, 255, 20, 0.2)'; statusTxt = '#39ff14'; } 
                     else { statusBg = 'rgba(239, 68, 68, 0.2)'; statusTxt = '#ef4444'; }
 
-                    let biasColor = t.bias === 'BULLISH' ? '#22c55e' : (t.bias === 'BEARISH' ? '#ef4444' : '#94a3b8');
-                    let biasBg = t.bias === 'BULLISH' ? 'rgba(34, 197, 94, 0.1)' : (t.bias === 'BEARISH' ? 'rgba(239, 68, 68, 0.1)' : 'transparent');
-                    let biasBorder = t.bias === 'BULLISH' ? '#22c55e' : (t.bias === 'BEARISH' ? '#ef4444' : '#475569');
+                    // --- NEW DUAL BIAS PILLS UI ---
+                    let macColor = t.macro_bias === 'BULLISH' ? '#22c55e' : (t.macro_bias === 'BEARISH' ? '#ef4444' : '#94a3b8');
+                    let macBg = t.macro_bias === 'BULLISH' ? 'rgba(34, 197, 94, 0.1)' : (t.macro_bias === 'BEARISH' ? 'rgba(239, 68, 68, 0.1)' : 'transparent');
+                    let macBorder = t.macro_bias === 'BULLISH' ? '#22c55e' : (t.macro_bias === 'BEARISH' ? '#ef4444' : '#475569');
+
+                    let micColor = t.micro_bias === 'BULLISH' ? '#0ea5e9' : (t.micro_bias === 'BEARISH' ? '#f97316' : '#94a3b8');
+                    let micBg = t.micro_bias === 'BULLISH' ? 'rgba(14, 165, 233, 0.1)' : (t.micro_bias === 'BEARISH' ? 'rgba(249, 115, 22, 0.1)' : 'transparent');
+                    let micBorder = t.micro_bias === 'BULLISH' ? '#0ea5e9' : (t.micro_bias === 'BEARISH' ? '#f97316' : '#475569');
 
                     let actionHtml = `
                     <div style="display:flex; justify-content:flex-end; align-items:center;">
@@ -435,11 +439,12 @@
                     html += `
                     <div class="radar-row border-${colorCode}">
                         <div>
-                            <div>
-                                <span class="sym-name">${t.symbol}</span>
-                                <span style="font-size:10px; margin-left:8px; padding:2px 6px; border-radius:4px; font-weight:800; background:${biasBg}; color:${biasColor}; border:1px solid ${biasBorder}">${t.bias}</span>
+                            <div><span class="sym-name">${t.symbol}</span></div>
+                            <div style="margin-top: 6px; display: flex; gap: 8px;">
+                                <span style="font-size:10px; padding:2px 6px; border-radius:4px; font-weight:800; background:${macBg}; color:${macColor}; border:1px solid ${macBorder}">MACRO: ${t.macro_bias}</span>
+                                <span style="font-size:10px; padding:2px 6px; border-radius:4px; font-weight:800; background:${micBg}; color:${micColor}; border:1px solid ${micBorder}">MICRO: ${t.micro_bias}</span>
                             </div>
-                            <div class="sym-price">$${fmt(t.price)}</div>
+                            <div class="sym-price" style="margin-top: 8px;">$${fmt(t.price)}</div>
                         </div>
                         <div style="text-align:center;">
                             <div class="score-val" style="color:${statusTxt}">${runwayDisplay}</div>
