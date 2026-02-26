@@ -8,23 +8,92 @@
     <style>
         /* --- RADAR BASE STYLES --- */
         :root { 
-            --bg-deep: #020617; --panel: #0f172a; --border: #334155; 
-            --green: #22c55e; --yellow: #eab308; --red: #ef4444; 
-            --purple: #a855f7; --white: #f8fafc; --gray: #94a3b8; 
-            --neon-red: #ff073a; --neon-green: #39ff14;
+            --bg-deep: #020617; 
+            --panel: #0f172a; 
+            --border: #334155; 
+            --green: #22c55e; 
+            --yellow: #eab308; 
+            --red: #ef4444; 
+            --purple: #a855f7; 
+            --white: #f8fafc; 
+            --gray: #94a3b8; 
+            --neon-red: #ff073a; 
+            --neon-green: #39ff14;
         }
-        body { background-color: var(--bg-deep); color: var(--white); font-family: 'Inter', sans-serif; padding: 20px; margin: 0; box-sizing: border-box; overflow-x: hidden;}
         
-        .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
-        .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 30px; }
-        .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
+        body { 
+            background-color: var(--bg-deep); 
+            color: var(--white); 
+            font-family: 'Inter', sans-serif; 
+            padding: 20px; 
+            margin: 0; 
+            box-sizing: border-box; 
+            overflow-x: hidden;
+        }
         
-        .btn-scan { background: #0ea5e9; color: #000; font-weight: 800; font-family: 'JetBrains Mono'; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: 0.2s; box-shadow: 0 0 15px rgba(14, 165, 233, 0.2); }
-        .btn-scan:hover { background: #38bdf8; }
+        .radar-container { 
+            max-width: 1400px; 
+            margin: 0 auto; 
+            margin-top: 40px; 
+        }
         
-        .radar-grid { display: grid; gap: 15px; }
-        .radar-row { display: grid; grid-template-columns: 1.5fr 1fr 2fr 1.5fr; background: var(--panel); border: 1px solid var(--border); padding: 25px 30px; border-radius: 6px; align-items: center; transition: transform 0.2s, border-color 0.2s; }
-        .radar-row:hover { border-color: #475569; transform: translateY(-2px); }
+        .radar-header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: flex-end; 
+            border-bottom: 1px solid var(--border); 
+            padding-bottom: 20px; 
+            margin-bottom: 30px; 
+        }
+        
+        .radar-title { 
+            font-family: 'JetBrains Mono'; 
+            font-size: 32px; 
+            color: #fff; 
+            margin: 0; 
+            text-transform: uppercase; 
+            letter-spacing: 2px; 
+        }
+        
+        .btn-scan { 
+            background: #0ea5e9; 
+            color: #000; 
+            font-weight: 800; 
+            font-family: 'JetBrains Mono'; 
+            border: none; 
+            padding: 12px 30px; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            text-transform: uppercase; 
+            letter-spacing: 1px; 
+            transition: 0.2s; 
+            box-shadow: 0 0 15px rgba(14, 165, 233, 0.2); 
+        }
+        
+        .btn-scan:hover { 
+            background: #38bdf8; 
+        }
+        
+        .radar-grid { 
+            display: grid; 
+            gap: 15px; 
+        }
+        
+        .radar-row { 
+            display: grid; 
+            grid-template-columns: 1fr 2fr 1fr; /* Updated for Omni-Directional UI */
+            background: var(--panel); 
+            border: 1px solid var(--border); 
+            padding: 20px 30px; 
+            border-radius: 6px; 
+            align-items: center; 
+            transition: transform 0.2s, border-color 0.2s; 
+        }
+        
+        .radar-row:hover { 
+            border-color: #475569; 
+            transform: translateY(-2px); 
+        }
 
         .border-GREEN { border-left: 4px solid var(--green); }
         .border-YELLOW { border-left: 4px solid var(--yellow); }
@@ -33,54 +102,256 @@
         .border-NEON_RED { border-left: 4px solid var(--neon-red); animation: pulse-red 2s infinite; }
         .border-NEON_GREEN { border-left: 4px solid var(--neon-green); animation: pulse-green 2s infinite; }
 
-        @keyframes pulse-red { 0% { box-shadow: inset 4px 0 0 0 var(--neon-red), 0 0 0 0 rgba(255, 7, 58, 0.4); } 70% { box-shadow: inset 4px 0 0 0 var(--neon-red), 0 0 0 10px rgba(255, 7, 58, 0); } 100% { box-shadow: inset 4px 0 0 0 var(--neon-red), 0 0 0 0 rgba(255, 7, 58, 0); } }
-        @keyframes pulse-green { 0% { box-shadow: inset 4px 0 0 0 var(--neon-green), 0 0 0 0 rgba(57, 255, 20, 0.4); } 70% { box-shadow: inset 4px 0 0 0 var(--neon-green), 0 0 0 10px rgba(57, 255, 20, 0); } 100% { box-shadow: inset 4px 0 0 0 var(--neon-green), 0 0 0 0 rgba(57, 255, 20, 0); } }
+        @keyframes pulse-red { 
+            0% { box-shadow: inset 4px 0 0 0 var(--neon-red), 0 0 0 0 rgba(255, 7, 58, 0.4); } 
+            70% { box-shadow: inset 4px 0 0 0 var(--neon-red), 0 0 0 10px rgba(255, 7, 58, 0); } 
+            100% { box-shadow: inset 4px 0 0 0 var(--neon-red), 0 0 0 0 rgba(255, 7, 58, 0); } 
+        }
+        
+        @keyframes pulse-green { 
+            0% { box-shadow: inset 4px 0 0 0 var(--neon-green), 0 0 0 0 rgba(57, 255, 20, 0.4); } 
+            70% { box-shadow: inset 4px 0 0 0 var(--neon-green), 0 0 0 10px rgba(57, 255, 20, 0); } 
+            100% { box-shadow: inset 4px 0 0 0 var(--neon-green), 0 0 0 0 rgba(57, 255, 20, 0); } 
+        }
 
-        .sym-name { font-size: 22px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
-        .sym-price { font-size: 16px; color: var(--gray); font-family: 'JetBrains Mono'; margin-top: 4px; }
-        .score-val { font-size: 36px; font-weight: 800; font-family: 'JetBrains Mono'; line-height: 1; }
-        .stat-badge { display: inline-block; padding: 10px 20px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; width: 80%; text-align: center; }
+        .sym-name { font-size: 24px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
+        .sym-price { font-size: 14px; color: var(--gray); font-family: 'JetBrains Mono'; margin-top: 4px; }
+        
+        .stat-badge { 
+            display: inline-block; 
+            padding: 10px 20px; 
+            border-radius: 4px; 
+            font-family: 'JetBrains Mono'; 
+            font-weight: 800; 
+            font-size: 12px; 
+            text-transform: uppercase; 
+            letter-spacing: 1px; 
+            width: 80%; 
+            text-align: center; 
+        }
 
-        .lock-btn { font-size: 11px; padding: 10px 20px; background: #1e293b; color: #fff; border: 1px solid var(--border); cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
-        .lock-btn:hover { background: var(--yellow); color:#000; border-color: var(--yellow); }
-        .copy-btn { background: #1e293b; border: 1px solid var(--border); color: var(--gray); padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; margin-right: 8px; font-family: 'JetBrains Mono'; font-size: 14px; }
-        .copy-btn:hover { background: #334155; color: #fff; border-color: #fff; }
+        .lock-btn { 
+            font-size: 11px; 
+            padding: 12px 20px; 
+            background: #1e293b; 
+            color: #fff; 
+            border: 1px solid var(--border); 
+            border-radius: 4px;
+            cursor: pointer; 
+            transition: 0.2s; 
+            font-family: 'JetBrains Mono'; 
+            font-weight: 700; 
+            text-transform: uppercase; 
+        }
+        
+        .lock-btn:hover { 
+            background: var(--yellow); 
+            color:#000; 
+            border-color: var(--yellow); 
+        }
+        
+        .copy-btn { 
+            background: #1e293b; 
+            border: 1px solid var(--border); 
+            color: var(--gray); 
+            padding: 10px; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            transition: 0.2s; 
+            margin-right: 8px; 
+            font-family: 'JetBrains Mono'; 
+            font-size: 14px; 
+        }
+        
+        .copy-btn:hover { 
+            background: #334155; 
+            color: #fff; 
+            border-color: #fff; 
+        }
 
         /* --- TARGET LOCK MODAL (OVERLAY) STYLES --- */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(2, 6, 23, 0.95); backdrop-filter: blur(8px); z-index: 9999; overflow-y: auto; padding: 40px 20px; }
-        .modal-content { max-width: 1400px; margin: 0 auto; position: relative; animation: slideIn 0.3s ease-out; }
-        @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        .close-btn { position: absolute; top: 0px; right: 0; background: rgba(239, 68, 68, 0.1); border: 1px solid var(--red); color: var(--red); font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; padding: 8px 16px; border-radius: 4px; cursor: pointer; transition: 0.2s; z-index: 10; }
-        .close-btn:hover { background: var(--red); color: #fff; }
+        .modal-overlay { 
+            display: none; 
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            background-color: rgba(2, 6, 23, 0.95); 
+            backdrop-filter: blur(8px); 
+            z-index: 9999; 
+            overflow-y: auto; 
+            padding: 40px 20px; 
+        }
+        
+        .modal-content { 
+            max-width: 1500px; 
+            margin: 0 auto; 
+            position: relative; 
+            animation: slideIn 0.3s ease-out; 
+        }
+        
+        @keyframes slideIn { 
+            from { opacity: 0; transform: translateY(20px); } 
+            to { opacity: 1; transform: translateY(0); } 
+        }
+        
+        .close-btn { 
+            position: absolute; 
+            top: 0px; 
+            right: 0; 
+            background: rgba(239, 68, 68, 0.1); 
+            border: 1px solid var(--red); 
+            color: var(--red); 
+            font-family: 'JetBrains Mono'; 
+            font-weight: 800; 
+            font-size: 12px; 
+            padding: 8px 16px; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            transition: 0.2s; 
+            z-index: 10; 
+        }
+        
+        .close-btn:hover { 
+            background: var(--red); 
+            color: #fff; 
+        }
 
-        .cockpit { display: grid; gap: 20px; grid-template-columns: 350px 1fr 400px; grid-template-rows: auto 1fr; grid-template-areas: "header header header" "left center right"; }
-        .header { grid-area: header; border-bottom: 2px solid var(--border); padding-bottom: 15px; }
-        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 25px; display: flex; flex-direction: column; }
+        .cockpit { 
+            display: grid; 
+            gap: 20px; 
+            grid-template-columns: 350px 1fr 600px; /* Widened to fit both long and short paths */
+            grid-template-rows: auto 1fr; 
+            grid-template-areas: "header header header" "left center right"; 
+        }
+        
+        .header { 
+            grid-area: header; 
+            border-bottom: 2px solid var(--border); 
+            padding-bottom: 15px; 
+        }
+        
+        .panel { 
+            background: var(--panel); 
+            border: 1px solid var(--border); 
+            border-radius: 8px; 
+            padding: 25px; 
+            display: flex; 
+            flex-direction: column; 
+        }
+        
         .h-title { font-family: 'Rajdhani'; font-weight: 800; font-size: 36px; color: #fff; letter-spacing: 2px; margin: 0; }
         .panel-head { font-family: 'Rajdhani'; font-weight: 800; font-size: 18px; color: var(--gray); border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 20px; letter-spacing: 1px; text-transform: uppercase; }
-        .mode-display { font-family: 'Rajdhani'; font-size: 60px; font-weight: 900; line-height: 0.9; margin-bottom: 10px; text-transform: uppercase; text-shadow: 0 0 20px rgba(0,0,0,0.5); word-wrap: break-word; }
+        .mode-display { font-family: 'Rajdhani'; font-size: 42px; font-weight: 900; line-height: 1; margin-bottom: 10px; text-transform: uppercase; text-shadow: 0 0 20px rgba(0,0,0,0.5); word-wrap: break-word; }
         .inp-risk { background: #020617; border: 1px solid var(--border); color: #fff; padding: 12px; width: 100%; text-align: right; font-weight: 700; font-size: 18px; border-radius: 4px; box-sizing: border-box; }
-        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px dashed #334155; padding-bottom: 8px; font-family: 'JetBrains Mono', monospace; }
-        .d-val { font-size: 18px; font-weight: 800; color: #fff; margin-right: 10px; }
-        .mini-copy { background: none; border: none; color: #475569; cursor: pointer; font-size: 14px; transition: 0.2s; padding: 4px; }
-        .mini-copy:hover { color: var(--white); transform: scale(1.1); }
         
-        .c-GREEN { color: var(--green); } .c-YELLOW { color: var(--yellow); } .c-RED { color: var(--red); } .c-PURPLE { color: var(--purple); } .c-GRAY { color: var(--gray); }
-        .c-NEON_RED { color: var(--neon-red); text-shadow: 0 0 10px rgba(255,7,58,0.5); } .c-NEON_GREEN { color: var(--neon-green); text-shadow: 0 0 10px rgba(57,255,20,0.5); }
+        .data-row { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            margin-bottom: 12px; 
+            border-bottom: 1px dashed #334155; 
+            padding-bottom: 6px; 
+            font-family: 'JetBrains Mono', monospace; 
+        }
+        
+        .d-val { font-size: 16px; font-weight: 800; color: #fff; margin-right: 10px; }
+        
+        .c-GREEN { color: var(--green); } 
+        .c-YELLOW { color: var(--yellow); } 
+        .c-RED { color: var(--red); } 
+        .c-PURPLE { color: var(--purple); } 
+        .c-GRAY { color: var(--gray); }
+        .c-NEON_RED { color: var(--neon-red); text-shadow: 0 0 10px rgba(255,7,58,0.5); } 
+        .c-NEON_GREEN { color: var(--neon-green); text-shadow: 0 0 10px rgba(57,255,20,0.5); }
 
-        .btn-act { width: 100%; padding: 15px; border: none; border-radius: 4px; font-weight: 800; font-family: 'Rajdhani'; font-size: 16px; cursor: pointer; text-transform: uppercase; margin-bottom: 10px; transition: 0.2s; }
-        .btn-key { background: var(--yellow); color: #000; } .btn-key:hover { background: #fde047; }
-        .roe-box { background: rgba(0,0,0,0.3); border-left: 4px solid var(--gray); padding: 20px; font-family: 'JetBrains Mono'; font-size: 14px; line-height: 1.6; border-radius: 0 4px 4px 0; margin-top: 20px; text-align: left; }
-        #sniper-alert { display: none; background: rgba(255, 7, 58, 0.1); border: 2px solid var(--neon-red); color: var(--neon-red); padding: 10px; font-family: 'Rajdhani'; font-weight: 800; font-size: 14px; letter-spacing: 1px; margin-bottom: 15px; border-radius: 4px; animation: pulse 1.5s infinite; }
+        .btn-act { 
+            width: 100%; 
+            padding: 15px; 
+            border: none; 
+            border-radius: 4px; 
+            font-weight: 800; 
+            font-family: 'Rajdhani'; 
+            font-size: 16px; 
+            cursor: pointer; 
+            text-transform: uppercase; 
+            margin-bottom: 10px; 
+            transition: 0.2s; 
+        }
+        
+        .btn-l { background: rgba(34, 197, 94, 0.2); color: var(--green); border: 1px solid var(--green); } 
+        .btn-l:hover { background: var(--green); color: #000; }
+        .btn-s { background: rgba(239, 68, 68, 0.2); color: var(--red); border: 1px solid var(--red); } 
+        .btn-s:hover { background: var(--red); color: #fff; }
+        
+        .roe-box { 
+            background: rgba(0,0,0,0.3); 
+            border-left: 4px solid var(--gray); 
+            padding: 20px; 
+            font-family: 'Inter'; 
+            font-size: 14px; 
+            line-height: 1.6; 
+            border-radius: 0 4px 4px 0; 
+            margin-top: 20px; 
+            text-align: left; 
+        }
 
         /* --- ACADEMY DRAWER STYLES --- */
-        .drawer-toggle { position: fixed; top: 50%; right: 0; transform: translateY(-50%); background: var(--accent-cyan, #0ea5e9); color: #000; padding: 15px 10px; writing-mode: vertical-rl; text-orientation: mixed; cursor: pointer; border-radius: 8px 0 0 8px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; z-index: 10001; border: none; letter-spacing: 2px; transition: 0.2s; box-shadow: -2px 0 10px rgba(14, 165, 233, 0.3); }
-        .drawer-toggle:hover { padding-right: 15px; background: #38bdf8; }
+        .drawer-toggle { 
+            position: fixed; 
+            top: 50%; 
+            right: 0; 
+            transform: translateY(-50%); 
+            background: var(--accent-cyan, #0ea5e9); 
+            color: #000; 
+            padding: 15px 10px; 
+            writing-mode: vertical-rl; 
+            text-orientation: mixed; 
+            cursor: pointer; 
+            border-radius: 8px 0 0 8px; 
+            font-family: 'JetBrains Mono'; 
+            font-weight: 800; 
+            font-size: 14px; 
+            z-index: 10001; 
+            border: none; 
+            letter-spacing: 2px; 
+            transition: 0.2s; 
+            box-shadow: -2px 0 10px rgba(14, 165, 233, 0.3); 
+        }
         
-        .academy-drawer { position: fixed; top: 0; right: -450px; width: 450px; height: 100vh; background: var(--panel); border-left: 1px solid var(--border); z-index: 10000; transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: -10px 0 30px rgba(0,0,0,0.8); padding: 30px; overflow-y: auto; box-sizing: border-box; }
+        .drawer-toggle:hover { 
+            padding-right: 15px; 
+            background: #38bdf8; 
+        }
+        
+        .academy-drawer { 
+            position: fixed; 
+            top: 0; 
+            right: -450px; 
+            width: 450px; 
+            height: 100vh; 
+            background: var(--panel); 
+            border-left: 1px solid var(--border); 
+            z-index: 10000; 
+            transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+            box-shadow: -10px 0 30px rgba(0,0,0,0.8); 
+            padding: 30px; 
+            overflow-y: auto; 
+            box-sizing: border-box; 
+        }
+        
         .academy-drawer.open { right: 0; }
         
-        .drawer-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 25px; }
+        .drawer-header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            border-bottom: 1px solid var(--border); 
+            padding-bottom: 15px; 
+            margin-bottom: 25px; 
+        }
+        
         .drawer-title { font-family: 'JetBrains Mono'; font-size: 20px; color: #fff; margin: 0; text-transform: uppercase; }
         .drawer-close { background: none; border: none; color: var(--gray); font-size: 24px; cursor: pointer; transition: 0.2s; }
         .drawer-close:hover { color: var(--red); }
@@ -93,8 +364,26 @@
         
         .video-desc { font-size: 13px; color: var(--gray); line-height: 1.5; }
         
-        .pdf-btn { display: block; text-align: center; background: #1e293b; color: #fff; text-decoration: none; padding: 15px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; border: 1px solid var(--border); transition: 0.2s; margin-bottom: 30px; }
-        .pdf-btn:hover { background: var(--green); color: #000; border-color: var(--green); }
+        .pdf-btn { 
+            display: block; 
+            text-align: center; 
+            background: #1e293b; 
+            color: #fff; 
+            text-decoration: none; 
+            padding: 15px; 
+            border-radius: 4px; 
+            font-family: 'JetBrains Mono'; 
+            font-weight: 800; 
+            border: 1px solid var(--border); 
+            transition: 0.2s; 
+            margin-bottom: 30px; 
+        }
+        
+        .pdf-btn:hover { 
+            background: var(--green); 
+            color: #000; 
+            border-color: var(--green); 
+        }
     </style>
 </head>
 <body>
@@ -102,10 +391,16 @@
     
     <div class="radar-container">
         <div class="radar-header">
-            <div><h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v9.6</span></h2></div>
+            <div>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v10.2</span></h2>
+            </div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
-        <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">/// SCANNING SECTOR...</div>
+        
+        <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">
+            /// SCANNING SECTOR...
+        </div>
+        
         <div id="radarTargetGrid" class="radar-grid"></div>
     </div>
 
@@ -163,6 +458,7 @@
 
                 <div class="panel" style="grid-area: left;">
                     <div class="panel-head"><span style="color:var(--accent-cyan, #0ea5e9);">STEP 01:</span> RISK PROTOCOL</div>
+                    
                     <div style="font-size:12px; color:var(--gray); margin-bottom:5px;">ACCOUNT BALANCE</div>
                     <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="recalc()">
                     
@@ -177,102 +473,116 @@
 
                 <div class="panel" style="grid-area: center; text-align:center; justify-content:center;">
                     <div class="panel-head" style="border:none; margin-bottom:0;"><span style="color:var(--yellow);">STEP 02:</span> BEHAVIOR ANALYSIS</div>
-                    <div id="sniper-alert">⚠ SNIPER SETUP DETECTED</div>
+                    
                     <div id="vMode" class="mode-display c-GRAY">LOADING</div>
-                    <div style="margin-bottom:30px;">
-                        <span id="vScore" style="font-size:42px; font-weight:800;">--</span>
-                        <span style="font-size:12px; color:var(--gray);"> GAP %</span>
-                    </div>
+                    
                     <div id="roeContainer" class="roe-box">
                         <div id="vROE">Analyzing structural behavior...</div>
                     </div>
                 </div>
 
                 <div class="panel" style="grid-area: right;">
-                    <div class="panel-head"><span style="color:var(--green);">STEP 03:</span> COPY FLIGHT PATH</div>
-                    <button class="btn-act btn-key" onclick="copyKey()">COPY TRADE KEY</button>
-                    <div style="height:30px;"></div>
-
-                    <div class="data-row">
-                        <span style="color:var(--gray); font-weight:700;">ENTRY</span>
-                        <div style="display:flex; align-items:center;">
-                            <span id="pEntry" class="d-val c-GREEN">--</span>
-                            <button class="mini-copy" onclick="copyText('pEntry')">📋</button>
-                        </div>
-                    </div>
+                    <div class="panel-head"><span style="color:var(--green);">STEP 03:</span> SELECT FLIGHT PATH</div>
                     
-                    <div class="data-row">
-                        <span style="color:var(--gray); font-weight:700;">STOP LOSS</span>
-                        <div style="display:flex; align-items:center;">
-                            <span id="pStop" class="d-val c-RED">--</span>
-                            <button class="mini-copy" onclick="copyText('pStop')">📋</button>
+                    <div style="display:flex; gap:30px; margin-top:10px;">
+                        
+                        <div style="flex:1;">
+                            <button class="btn-act btn-l" onclick="copyKey('L')" id="btnL">COPY LONG KEY</button>
+                            <input type="hidden" id="keyL">
+                            
+                            <div class="data-row" style="margin-top:20px;">
+                                <span style="color:var(--gray); font-size:12px;">ENTRY</span>
+                                <div><span id="pEntL" class="d-val c-GREEN">--</span></div>
+                            </div>
+                            <div class="data-row">
+                                <span style="color:var(--gray); font-size:12px;">STOP LOSS</span>
+                                <div><span id="pStpL" class="d-val c-RED">--</span></div>
+                            </div>
+                            <div class="data-row" style="border-bottom: 2px solid #334155; padding-bottom:12px;">
+                                <span style="color:var(--gray); font-size:12px;">CONTRACTS</span>
+                                <div><span id="pSizL" class="d-val">--</span></div>
+                            </div>
+                            <div class="data-row" style="margin-top:12px;">
+                                <span style="color:var(--gray); font-size:12px;">TARGET 1</span>
+                                <div><span id="pT1L" class="d-val c-YELLOW">--</span></div>
+                            </div>
+                            <div class="data-row">
+                                <span style="color:var(--gray); font-size:12px;">TARGET 2</span>
+                                <div><span id="pT2L" class="d-val">--</span></div>
+                            </div>
+                            <div class="data-row">
+                                <span style="color:var(--gray); font-size:12px;">TARGET 3</span>
+                                <div><span id="pT3L" class="d-val">--</span></div>
+                            </div>
                         </div>
-                    </div>
 
-                    <div class="data-row">
-                        <span style="color:var(--gray); font-weight:700;">POS SIZE</span>
-                        <div style="display:flex; align-items:center;">
-                            <span id="pSize" class="d-val">--</span>
-                            <button class="mini-copy" onclick="copyText('pSize')">📋</button>
+                        <div style="flex:1; border-left: 1px solid var(--border); padding-left: 30px;">
+                            <button class="btn-act btn-s" onclick="copyKey('S')" id="btnS">COPY SHORT KEY</button>
+                            <input type="hidden" id="keyS">
+                            
+                            <div class="data-row" style="margin-top:20px;">
+                                <span style="color:var(--gray); font-size:12px;">ENTRY</span>
+                                <div><span id="pEntS" class="d-val c-GREEN">--</span></div>
+                            </div>
+                            <div class="data-row">
+                                <span style="color:var(--gray); font-size:12px;">STOP LOSS</span>
+                                <div><span id="pStpS" class="d-val c-RED">--</span></div>
+                            </div>
+                            <div class="data-row" style="border-bottom: 2px solid #334155; padding-bottom:12px;">
+                                <span style="color:var(--gray); font-size:12px;">CONTRACTS</span>
+                                <div><span id="pSizS" class="d-val">--</span></div>
+                            </div>
+                            <div class="data-row" style="margin-top:12px;">
+                                <span style="color:var(--gray); font-size:12px;">TARGET 1</span>
+                                <div><span id="pT1S" class="d-val c-YELLOW">--</span></div>
+                            </div>
+                            <div class="data-row">
+                                <span style="color:var(--gray); font-size:12px;">TARGET 2</span>
+                                <div><span id="pT2S" class="d-val">--</span></div>
+                            </div>
+                            <div class="data-row">
+                                <span style="color:var(--gray); font-size:12px;">TARGET 3</span>
+                                <div><span id="pT3S" class="d-val">--</span></div>
+                            </div>
                         </div>
-                    </div>
-                    
-                    <div style="height:30px;"></div>
 
-                    <div class="data-row">
-                        <span style="color:var(--gray); font-weight:700;">TARGET 1</span>
-                        <div style="display:flex; align-items:center;">
-                            <span id="pT1" class="d-val c-YELLOW">--</span>
-                            <button class="mini-copy" onclick="copyText('pT1')">📋</button>
-                        </div>
-                    </div>
-
-                    <div class="data-row">
-                        <span style="color:var(--gray); font-weight:700;">TARGET 2</span>
-                        <div style="display:flex; align-items:center;">
-                            <span id="pT2" class="d-val">--</span>
-                            <button class="mini-copy" onclick="copyText('pT2')">📋</button>
-                        </div>
-                    </div>
-
-                    <div class="data-row">
-                        <span style="color:var(--gray); font-weight:700;">TARGET 3</span>
-                        <div style="display:flex; align-items:center;">
-                            <span id="pT3" class="d-val">--</span>
-                            <button class="mini-copy" onclick="copyText('pT3')">📋</button>
-                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <input type="hidden" id="raw_key">
-
     <script>
-        function fmt(x){ if(!x) return "—"; return parseFloat(x).toLocaleString(undefined, {minimumFractionDigits: 2}); }
+        function fmt(x){ 
+            if(!x) return "—"; 
+            return parseFloat(x).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}); 
+        }
 
-        // --- GLOBAL MEMORY ---
         window.radarMemory = {};
         let activeData = null;
         
         const balInput = document.getElementById('inpBal');
         const riskInput = document.getElementById('inpRisk');
 
-        // Restore locked-in Balance/Risk instantly on page load
-        if(localStorage.getItem('kabroda_locked_bal')) balInput.value = localStorage.getItem('kabroda_locked_bal');
-        if(localStorage.getItem('kabroda_locked_risk')) riskInput.value = localStorage.getItem('kabroda_locked_risk');
+        if(localStorage.getItem('kabroda_locked_bal')) {
+            balInput.value = localStorage.getItem('kabroda_locked_bal');
+        }
+        
+        if(localStorage.getItem('kabroda_locked_risk')) {
+            riskInput.value = localStorage.getItem('kabroda_locked_risk');
+        }
 
-        // --- DRAWER LOGIC ---
         function toggleDrawer() {
             const drawer = document.getElementById('academyDrawer');
             drawer.classList.toggle('open');
         }
 
-        // --- RESTORED COPY FUNCTIONS ---
         function copyIntel(symbol) {
             const data = window.radarMemory[symbol];
-            if(!data || !data.full_intel) { alert("No Intel Available. Refresh Scan."); return; }
+            if(!data || !data.full_intel) { 
+                alert("No Intel Available. Refresh Scan."); 
+                return; 
+            }
             
             navigator.clipboard.writeText(data.full_intel).then(() => {
                 const btn = document.activeElement;
@@ -292,10 +602,19 @@
                     btn.innerHTML = "✓";
                     setTimeout(() => btn.innerHTML = orig, 1000);
                 }
-            }, (err) => { console.error('Async: Could not copy text: ', err); });
+            }, (err) => { 
+                console.error('Async: Could not copy text: ', err); 
+            });
         }
 
-        // --- MODAL CONTROLS ---
+        function copyKey(side) { 
+            navigator.clipboard.writeText(document.getElementById('key' + side).value); 
+            const btn = document.getElementById('btn' + side);
+            const orig = btn.innerText;
+            btn.innerText = "COPIED TO HUD ✓";
+            setTimeout(() => btn.innerText = orig, 1000);
+        }
+
         function openModal(symbol) {
             const data = window.radarMemory[symbol];
             if (data) {
@@ -312,53 +631,48 @@
             document.body.style.overflow = 'auto'; 
         }
 
-        // --- TARGET LOCK RENDER & MATH ---
         function renderModal(d) {
-            document.getElementById('raw_key').value = d.mission_key;
-            document.getElementById('vMode').innerText = d.status;
+            document.getElementById('vROE').innerText = d.roe;
+            document.getElementById('vMode').innerText = d.favored + " FAVORED";
             
-            document.getElementById('vScore').innerText = d.runway_pct > 0 ? d.runway_pct.toFixed(2) + "%" : "N/A";
-            document.getElementById('vROE').innerText = d.advice;
-
-            let theme = "GRAY";
-            const sniperAlert = document.getElementById('sniper-alert');
-
-            if(d.is_sniper_mode) {
-                sniperAlert.style.display = 'block';
-                if(d.micro_bias === 'BEARISH') {
-                    theme = "NEON_RED";
-                    sniperAlert.style.borderColor = "var(--neon-red)";
-                    sniperAlert.style.color = "var(--neon-red)";
-                    sniperAlert.innerText = "⚡ SNIPER SHORT ACTIVE";
-                } else {
-                    theme = "NEON_GREEN";
-                    sniperAlert.style.borderColor = "var(--neon-green)";
-                    sniperAlert.style.color = "var(--neon-green)";
-                    sniperAlert.innerText = "⚡ SNIPER LONG ACTIVE";
-                }
-            } else {
-                sniperAlert.style.display = 'none';
-                if(d.color_code === "GREEN") theme = "GREEN";
-                else if(d.color_code === "YELLOW") theme = "YELLOW";
-                else if(d.color_code === "PURPLE") theme = "PURPLE";
-                else if(d.color_code === "RED") theme = "RED";
-            }
-
-            document.getElementById('vMode').className = `mode-display c-${theme}`;
+            let modeTheme = 'GRAY';
+            if (d.favored === 'LONG') { modeTheme = 'GREEN'; }
+            if (d.favored === 'SHORT') { modeTheme = 'RED'; }
+            if (d.color_code === 'YELLOW') { modeTheme = 'YELLOW'; }
             
-            let borderColor = `var(--${theme.toLowerCase()})`;
-            if(theme === "NEON_RED") borderColor = "var(--neon-red)";
-            if(theme === "NEON_GREEN") borderColor = "var(--neon-green)";
+            document.getElementById('vMode').className = `mode-display c-${modeTheme}`;
+            
+            let borderColor = 'var(--gray)';
+            if (d.favored === 'LONG') { borderColor = 'var(--green)'; }
+            if (d.favored === 'SHORT') { borderColor = 'var(--red)'; }
             document.getElementById('roeContainer').style.borderLeftColor = borderColor;
 
-            if(d.plan && d.plan.valid) {
-                document.getElementById('pEntry').innerText = d.plan.entry.toFixed(2);
-                document.getElementById('pStop').innerText = d.plan.stop.toFixed(2);
-                document.getElementById('pT1').innerText = d.plan.targets[0].toFixed(2);
-                document.getElementById('pT2').innerText = d.plan.targets[1].toFixed(2);
-                document.getElementById('pT3').innerText = d.plan.targets[2].toFixed(2);
+            // Render LONG side
+            document.getElementById('keyL').value = d.long.key;
+            if(d.long.plan.valid) {
+                document.getElementById('pEntL').innerText = d.long.plan.entry.toFixed(2);
+                document.getElementById('pStpL').innerText = d.long.plan.stop.toFixed(2);
+                document.getElementById('pT1L').innerText = d.long.plan.targets[0].toFixed(2);
+                document.getElementById('pT2L').innerText = d.long.plan.targets[1].toFixed(2);
+                document.getElementById('pT3L').innerText = d.long.plan.targets[2].toFixed(2);
             } else {
-                 ['pEntry','pStop','pT1','pT2','pT3','pSize'].forEach(id => document.getElementById(id).innerText = "--");
+                 ['pEntL','pStpL','pT1L','pT2L','pT3L','pSizL'].forEach(id => {
+                     document.getElementById(id).innerText = "--";
+                 });
+            }
+
+            // Render SHORT side
+            document.getElementById('keyS').value = d.short.key;
+            if(d.short.plan.valid) {
+                document.getElementById('pEntS').innerText = d.short.plan.entry.toFixed(2);
+                document.getElementById('pStpS').innerText = d.short.plan.stop.toFixed(2);
+                document.getElementById('pT1S').innerText = d.short.plan.targets[0].toFixed(2);
+                document.getElementById('pT2S').innerText = d.short.plan.targets[1].toFixed(2);
+                document.getElementById('pT3S').innerText = d.short.plan.targets[2].toFixed(2);
+            } else {
+                 ['pEntS','pStpS','pT1S','pT2S','pT3S','pSizS'].forEach(id => {
+                     document.getElementById(id).innerText = "--";
+                 });
             }
             recalc();
         }
@@ -367,7 +681,7 @@
             localStorage.setItem('kabroda_locked_bal', balInput.value);
             localStorage.setItem('kabroda_locked_risk', riskInput.value);
 
-            if(!activeData || !activeData.plan || !activeData.plan.valid) return;
+            if(!activeData) return;
             
             const bal = parseFloat(balInput.value);
             const riskPct = parseFloat(riskInput.value);
@@ -375,23 +689,29 @@
             
             document.getElementById('valLoss').innerText = "$" + riskAmt.toFixed(2);
             
-            const entry = activeData.plan.entry;
-            const stop = activeData.plan.stop;
-            const dist = Math.abs(entry - stop);
+            if(activeData.long.plan.valid) {
+                const distL = Math.abs(activeData.long.plan.entry - activeData.long.plan.stop);
+                if(distL > 0) {
+                    document.getElementById('pSizL').innerText = (riskAmt / distL).toFixed(4);
+                }
+            }
             
-            if(dist > 0) {
-                const size = riskAmt / dist; 
-                document.getElementById('pSize').innerText = size.toFixed(4);
+            if(activeData.short.plan.valid) {
+                const distS = Math.abs(activeData.short.plan.entry - activeData.short.plan.stop);
+                if(distS > 0) {
+                    document.getElementById('pSizS').innerText = (riskAmt / distS).toFixed(4);
+                }
             }
         }
 
-        function copyText(id) { navigator.clipboard.writeText(document.getElementById(id).innerText); }
-        function copyKey() { navigator.clipboard.writeText(document.getElementById('raw_key').value); }
-
-        // --- RADAR SCANNER LOGIC ---
         async function forceScan() {
-            const btn = document.getElementById('scanBtn'); const grid = document.getElementById('radarTargetGrid'); const loader = document.getElementById('loading');
-            btn.disabled = true; grid.style.display = 'none'; loader.style.display = 'block';
+            const btn = document.getElementById('scanBtn'); 
+            const grid = document.getElementById('radarTargetGrid'); 
+            const loader = document.getElementById('loading');
+            
+            btn.disabled = true; 
+            grid.style.display = 'none'; 
+            loader.style.display = 'block';
 
             try {
                 const res = await fetch('/api/radar/scan', { method: 'POST' });
@@ -403,62 +723,103 @@
                 data.results.forEach(t => {
                     window.radarMemory[t.symbol] = t;
 
-                    let colorCode = t.color_code; 
-                    let statusBg = '#1e293b'; let statusTxt = '#fff';
+                    if(t.status === "CALIBRATING") return; 
+
+                    let macColor = '#94a3b8';
+                    let macBg = 'transparent';
+                    let macBorder = '#475569';
                     
-                    if(colorCode === 'GREEN') { statusBg = 'rgba(34, 197, 94, 0.2)'; statusTxt = '#22c55e'; }
-                    else if(colorCode === 'YELLOW') { statusBg = 'rgba(234, 179, 8, 0.2)'; statusTxt = '#eab308'; }
-                    else if(colorCode === 'PURPLE') { statusBg = 'rgba(168, 85, 247, 0.2)'; statusTxt = '#a855f7'; }
-                    else if(colorCode === 'RED') { statusBg = 'rgba(239, 68, 68, 0.2)'; statusTxt = '#ef4444'; }
-                    else if(colorCode === 'NEON_RED') { statusBg = 'rgba(255, 7, 58, 0.2)'; statusTxt = '#ff073a'; } 
-                    else if(colorCode === 'NEON_GREEN') { statusBg = 'rgba(57, 255, 20, 0.2)'; statusTxt = '#39ff14'; } 
-                    else { statusBg = 'rgba(239, 68, 68, 0.2)'; statusTxt = '#ef4444'; }
+                    if (t.macro_bias === 'BULLISH') {
+                        macColor = '#22c55e';
+                        macBg = 'rgba(34, 197, 94, 0.1)';
+                        macBorder = '#22c55e';
+                    } else if (t.macro_bias === 'BEARISH') {
+                        macColor = '#ef4444';
+                        macBg = 'rgba(239, 68, 68, 0.1)';
+                        macBorder = '#ef4444';
+                    }
 
-                    // --- NEW DUAL BIAS PILLS UI ---
-                    let macColor = t.macro_bias === 'BULLISH' ? '#22c55e' : (t.macro_bias === 'BEARISH' ? '#ef4444' : '#94a3b8');
-                    let macBg = t.macro_bias === 'BULLISH' ? 'rgba(34, 197, 94, 0.1)' : (t.macro_bias === 'BEARISH' ? 'rgba(239, 68, 68, 0.1)' : 'transparent');
-                    let macBorder = t.macro_bias === 'BULLISH' ? '#22c55e' : (t.macro_bias === 'BEARISH' ? '#ef4444' : '#475569');
+                    let micColor = '#94a3b8';
+                    let micBg = 'transparent';
+                    let micBorder = '#475569';
+                    
+                    if (t.micro_bias === 'BULLISH') {
+                        micColor = '#0ea5e9';
+                        micBg = 'rgba(14, 165, 233, 0.1)';
+                        micBorder = '#0ea5e9';
+                    } else if (t.micro_bias === 'BEARISH') {
+                        micColor = '#f97316';
+                        micBg = 'rgba(249, 115, 22, 0.1)';
+                        micBorder = '#f97316';
+                    }
 
-                    let micColor = t.micro_bias === 'BULLISH' ? '#0ea5e9' : (t.micro_bias === 'BEARISH' ? '#f97316' : '#94a3b8');
-                    let micBg = t.micro_bias === 'BULLISH' ? 'rgba(14, 165, 233, 0.1)' : (t.micro_bias === 'BEARISH' ? 'rgba(249, 115, 22, 0.1)' : 'transparent');
-                    let micBorder = t.micro_bias === 'BULLISH' ? '#0ea5e9' : (t.micro_bias === 'BEARISH' ? '#f97316' : '#475569');
+                    let lGap = 'N/A';
+                    if (t.long.gap > 0) {
+                        lGap = t.long.gap.toFixed(2) + '%';
+                    }
+                    
+                    let sGap = 'N/A';
+                    if (t.short.gap > 0) {
+                        sGap = t.short.gap.toFixed(2) + '%';
+                    }
+                    
+                    let lStar = '';
+                    if (t.favored === 'LONG') { lStar = '⭐'; }
+                    
+                    let sStar = '';
+                    if (t.favored === 'SHORT') { sStar = '⭐'; }
 
-                    let actionHtml = `
-                    <div style="display:flex; justify-content:flex-end; align-items:center;">
-                        <button class="copy-btn" onclick="copyIntel('${t.symbol}')" title="Copy FULL Session Intel (JSON)">📡</button>
-                        <button class="copy-btn" onclick="copyToClip('${t.indicator_string}')" title="Copy Indicator Data">📋</button>
-                        ${t.has_trade ? 
-                            `<button class="lock-btn" onclick="openModal('${t.symbol}')">LOCK TARGET →</button>` :
-                            `<button class="lock-btn" style="background:#1e293b; color:#64748b; border-color:#334155;" onclick="openModal('${t.symbol}')">MONITOR INTEL</button>`
-                        }
-                    </div>`;
-
-                    let runwayDisplay = t.runway_pct > 0 ? t.runway_pct.toFixed(2) + '%' : '---';
-                    if(t.is_sniper_mode) runwayDisplay = "TARGET";
+                    let borderTheme = t.color_code;
+                    
+                    let lBorderColor = '#334155';
+                    if (t.favored === 'LONG') { lBorderColor = 'var(--green)'; }
+                    
+                    let sBorderColor = '#334155';
+                    if (t.favored === 'SHORT') { sBorderColor = 'var(--red)'; }
 
                     html += `
-                    <div class="radar-row border-${colorCode}">
+                    <div class="radar-row border-${borderTheme}">
                         <div>
                             <div><span class="sym-name">${t.symbol}</span></div>
                             <div style="margin-top: 6px; display: flex; gap: 8px;">
                                 <span style="font-size:10px; padding:2px 6px; border-radius:4px; font-weight:800; background:${macBg}; color:${macColor}; border:1px solid ${macBorder}">MACRO: ${t.macro_bias}</span>
                                 <span style="font-size:10px; padding:2px 6px; border-radius:4px; font-weight:800; background:${micBg}; color:${micColor}; border:1px solid ${micBorder}">MICRO: ${t.micro_bias}</span>
                             </div>
-                            <div class="sym-price" style="margin-top: 8px;">$${fmt(t.price)}</div>
+                            <div class="sym-price" style="margin-top: 8px;">PRICE: $${fmt(t.price)}</div>
                         </div>
-                        <div style="text-align:center;">
-                            <div class="score-val" style="color:${statusTxt}">${runwayDisplay}</div>
-                            <div style="font-size:10px; color:#64748b; font-weight:700;">RUNWAY GAP</div>
+
+                        <div style="display:flex; flex-direction:column; gap:8px; padding-right: 30px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; background:#020617; padding:10px 15px; border-radius:4px; border: 1px solid ${lBorderColor}">
+                                <span style="color:var(--green); font-weight:800; font-size:14px;">LONG ${lStar}</span>
+                                <span style="color:#fff; font-weight:800; font-size:16px;">${lGap}</span>
+                                <span style="font-size:11px; color:#94a3b8; font-weight:700;">${t.long.tier}</span>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; align-items:center; background:#020617; padding:10px 15px; border-radius:4px; border: 1px solid ${sBorderColor}">
+                                <span style="color:var(--red); font-weight:800; font-size:14px;">SHORT ${sStar}</span>
+                                <span style="color:#fff; font-weight:800; font-size:16px;">${sGap}</span>
+                                <span style="font-size:11px; color:#94a3b8; font-weight:700;">${t.short.tier}</span>
+                            </div>
                         </div>
-                        <div style="text-align:center;">
-                            <div style="font-family:'JetBrains Mono'; font-weight:800; font-size:14px; color:${statusTxt}; margin-bottom:6px;">${t.tier}</div>
-                            <span class="stat-badge" style="background:${statusBg}; color:${statusTxt}">${t.status}</span>
+
+                        <div style="display:flex; flex-direction:column; gap:8px; justify-content:center; align-items:flex-end;">
+                            <button class="lock-btn" style="width:100%; text-align:center; padding: 15px;" onclick="openModal('${t.symbol}')">LOCK TARGET →</button>
+                            <div style="display:flex; gap:5px; width:100%;">
+                                <button class="copy-btn" style="flex:1; margin:0;" onclick="copyIntel('${t.symbol}')" title="Copy JSON">📡 JSON</button>
+                                <button class="copy-btn" style="flex:1; margin:0;" onclick="copyToClip('${t.indicator_string}')" title="Copy Info">📋 DATA</button>
+                            </div>
                         </div>
-                        ${actionHtml}
                     </div>`;
                 });
+                
                 grid.innerHTML = html;
-            } catch(e) { console.log(e); } finally { loader.style.display = 'none'; grid.style.display = 'grid'; btn.disabled = false; }
+                
+            } catch(e) { 
+                console.log(e); 
+            } finally { 
+                loader.style.display = 'none'; 
+                grid.style.display = 'grid'; 
+                btn.disabled = false; 
+            }
         }
         
         document.addEventListener('DOMContentLoaded', forceScan);
