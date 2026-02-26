@@ -1,14 +1,14 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v8.4 (Sniper Upgrade: 20 EMA Added)
+# KABRODA BATTLEBOX PIPELINE — v10.3 (THE TIME-TRAVEL VAULT)
 # ==============================================================================
 # Purpose:
 # - The single "Moment of Truth" for each session/day
 # - Locks session open + 30m anchor range (calibration)
 # - Computes levels via sse_engine.compute_sse_levels
 # - Feeds post-lock candles into structure_state_engine (law layer)
-# - Fetches Weekly Candles to determine Macro Force (Green/Red)
-# - NEW: Fetches Daily Candles for 20/30/50 EMA Walls
+# - Fetches HTF Candles (1H, 1D, 1W) and dynamically slices out all future
+#   data based on the session's specific lock time.
 # ==============================================================================
 
 from __future__ import annotations
@@ -101,9 +101,7 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
     except Exception:
         return []
 
-# --- WEEKLY FETCHING ---
 async def fetch_live_weekly(symbol: str, limit: int = 5) -> List[Dict[str, Any]]:
-    """Fetches Weekly candles to determine the Macro Force (Green/Red)."""
     s = _normalize_symbol(symbol)
     try:
         rows = await _exchange_live.fetch_ohlcv(s, "1w", limit=limit)
@@ -121,9 +119,7 @@ async def fetch_live_weekly(symbol: str, limit: int = 5) -> List[Dict[str, Any]]
     except Exception:
         return []
 
-# --- DAILY FETCHING (NEW) ---
 async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]]:
-    """Fetches Daily candles to calculate the 20/30/50 EMA Walls."""
     s = _normalize_symbol(symbol)
     try:
         rows = await _exchange_live.fetch_ohlcv(s, "1d", limit=limit)
@@ -142,15 +138,9 @@ async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]
         return []
 
 async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, limit: int = 1500) -> List[Dict[str, Any]]:
-    """
-    Historical 5m candles between [start_ts, end_ts).
-    Uses ccxt pagination via 'since' in milliseconds.
-    """
     s = _normalize_symbol(symbol)
-
     since_ms = int(start_ts) * 1000
     end_ms = int(end_ts) * 1000
-
     out: List[Dict[str, Any]] = []
     last_first_ts: Optional[int] = None
     safety_iters = 0
@@ -164,7 +154,6 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, l
         if not rows:
             break
 
-        # Detect stuck pagination
         first_ts = int(rows[0][0])
         if last_first_ts is not None and first_ts == last_first_ts:
             break
@@ -203,14 +192,28 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, l
 
     return dedup
 
+
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
+def _time_travel_slice(candles: List[Dict[str, Any]], lock_end_ts: int, lock_price: float) -> List[Dict[str, Any]]:
+    """
+    Strips out ALL future data points if the server reboots mid-day.
+    Overwrites the 'close' price of the forming candle to exactly match the price
+    at the lock timestamp.
+    """
+    if not candles:
+        return []
+    
+    sliced = [dict(c) for c in candles if int(c["time"]) < lock_end_ts]
+    
+    if sliced:
+        sliced[-1]["close"] = float(lock_price)
+        
+    return sliced
+
+
 def _calculate_weekly_force(weekly_candles: List[Dict[str, Any]]) -> str:
-    """
-    Determines the True Weekly Force based on the LAST COMPLETED candle.
-    [-1] is live/forming. [-2] is the truth.
-    """
     if not weekly_candles or len(weekly_candles) < 2:
         return "NEUTRAL"
     
@@ -218,20 +221,16 @@ def _calculate_weekly_force(weekly_candles: List[Dict[str, Any]]) -> str:
     op = last_closed["open"]
     cl = last_closed["close"]
     
-    if cl > op: return "BULLISH" # Green
-    if cl < op: return "BEARISH" # Red
+    if cl > op: return "BULLISH" 
+    if cl < op: return "BEARISH" 
     return "NEUTRAL"
 
 def _calculate_168h_micro_bias(raw_1h: List[Dict[str, Any]]) -> str:
-    """
-    Calculates the 168-Hour Rolling Micro Bias using the 1% threshold rule.
-    Requires at least 168 hours of data to compare current price to 7 days ago.
-    """
     if not raw_1h or len(raw_1h) < 168:
         return "NEUTRAL"
     
     current_price = float(raw_1h[-1]["close"])
-    past_price = float(raw_1h[-168]["close"]) # Exactly 168 hours ago
+    past_price = float(raw_1h[-168]["close"]) 
     
     pct_change = ((current_price - past_price) / past_price) * 100.0
     
@@ -259,7 +258,6 @@ def _safe_placeholder_state(reason: str = "Waiting...") -> Dict[str, Any]:
         "diagnostics": {"fail_reason": "WAITING"},
     }
 
-
 def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not raw_1h:
         return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "UNCLEAR", "note": "No 1h data."}
@@ -276,26 +274,20 @@ def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
     lean = "BULLISH" if closes[-1] > ema else "BEARISH"
     return {"status": "LIVE", "lean": lean, "phase": "TRANSITION", "note": f"Pressure is {lean}."}
 
-
 def _compute_sse_packet(
     raw_5m: List[Dict[str, Any]], 
     anchor_ts: int, 
-    macro_bias: str,  # <--- STEP 3: Updated to accept Macro
-    micro_bias: str,  # <--- STEP 3: Updated to accept Micro
+    macro_bias: str,  
+    micro_bias: str,  
     tuning: Optional[Dict[str, Any]] = None,
     raw_daily: List[Dict[str, Any]] = None  
 ) -> Dict[str, Any]:
-    """
-    Builds a locked packet from calibration window.
-    INJECTS the Biases so they get locked with the levels.
-    """
     lock_end_ts = int(anchor_ts) + 1800
 
     calibration = [c for c in raw_5m if anchor_ts <= int(c["time"]) < lock_end_ts]
     if len(calibration) < 6:
         return {"error": "Insufficient calibration data.", "lock_end_ts": lock_end_ts}
 
-    # 24h history ending at lock end
     context_24h = [c for c in raw_5m if (lock_end_ts - 86400) <= int(c["time"]) < lock_end_ts]
     
     session_open = float(calibration[0]["open"])
@@ -304,7 +296,6 @@ def _compute_sse_packet(
 
     last_price = float(context_24h[-1]["close"]) if context_24h else session_open
 
-    # --- SNIPER ENGINE: CALCULATE EMAS (20, 30, 50) ---
     d_ema20, d_ema30, d_ema50 = 0.0, 0.0, 0.0
     if raw_daily and len(raw_daily) > 50:
         closes = [float(c["close"]) for c in raw_daily]
@@ -336,13 +327,11 @@ def _compute_sse_packet(
     if "error" in computed:
         return computed
 
-    # --- INJECT SNIPER DATA (20/30/50) ---
     if "levels" in computed:
         computed["levels"]["daily_ema20"] = d_ema20 
         computed["levels"]["daily_ema30"] = d_ema30
         computed["levels"]["daily_ema50"] = d_ema50
 
-    # --- INJECT BIAS TRUTH --- (STEP 3 Logic)
     if "context" not in computed: computed["context"] = {}
     computed["context"]["macro_bias"] = macro_bias
     computed["context"]["micro_bias"] = micro_bias
@@ -376,17 +365,29 @@ async def get_live_battlebox(
     if not raw_5m:
         return {"status": "ERROR", "message": "No Data"}
 
-    # --- CALCULATE BIASES (RAW DATA ONLY) ---
-    macro_bias = _calculate_weekly_force(raw_weekly)
-    micro_bias = _calculate_168h_micro_bias(raw_1h)
-
     now_utc = datetime.now(timezone.utc)
     session = session_manager.resolve_current_session(now_utc, session_mode, manual_id)
     anchor_ts = int(session["anchor_time"])
     lock_end_ts = anchor_ts + 1800
 
+    # Locate the exact price at the moment the 30m lock completed
+    lock_history_5m = [c for c in raw_5m if int(c["time"]) < lock_end_ts]
+    if not lock_history_5m:
+        return {"status": "ERROR", "message": "No historical data to locate lock price."}
+    
+    lock_price = float(lock_history_5m[-1]["close"])
+
+    # Slice HTF data so it does not contain anything past the lock end
+    sliced_1h = _time_travel_slice(raw_1h, lock_end_ts, lock_price)
+    sliced_weekly = _time_travel_slice(raw_weekly, lock_end_ts, lock_price)
+    sliced_daily = _time_travel_slice(raw_daily, lock_end_ts, lock_price)
+
+    # Calculate biases purely on the frozen data
+    macro_bias = _calculate_weekly_force(sliced_weekly)
+    micro_bias = _calculate_168h_micro_bias(sliced_1h)
+
     if int(now_utc.timestamp()) < lock_end_ts:
-        wm = _war_map_from_1h(raw_1h)
+        wm = _war_map_from_1h(sliced_1h)
         return {
             "status": "CALIBRATING",
             "timestamp": now_utc.strftime("%H:%M UTC"),
@@ -398,7 +399,7 @@ async def get_live_battlebox(
                 "session": session,
                 "levels": {},
                 "bias_model": {},
-                "context": {"macro_bias": macro_bias, "micro_bias": micro_bias}, # Updated placeholder
+                "context": {"macro_bias": macro_bias, "micro_bias": micro_bias}, 
             },
         }
 
@@ -407,18 +408,17 @@ async def get_live_battlebox(
 
     async with _CACHE_LOCK:
         if session_key not in _LOCKED_PACKETS:
-            # PASS RAW DAILY & BIASES TO COMPUTATION
             pkt = _compute_sse_packet(
                 raw_5m, 
                 anchor_ts, 
                 macro_bias, 
                 micro_bias,
                 tuning=tuning,
-                raw_daily=raw_daily
+                raw_daily=sliced_daily
             )
             
             if "error" in pkt:
-                wm = _war_map_from_1h(raw_1h)
+                wm = _war_map_from_1h(sliced_1h)
                 return {
                     "status": "ERROR",
                     "message": pkt["error"],
@@ -446,12 +446,12 @@ async def get_live_battlebox(
         tuning=tuning or {},
     )
 
-    wm = _war_map_from_1h(raw_1h)
+    wm = _war_map_from_1h(sliced_1h)
 
     return {
         "status": "OK",
         "timestamp": now_utc.strftime("%H:%M UTC"),
-        "price": float(raw_5m[-1]["close"]),
+        "price": float(raw_5m[-1]["close"]), 
         "energy": session.get("energy", "ACTIVE"),
         "battlebox": {
             "war_map_context": wm,
@@ -476,15 +476,10 @@ async def get_session_review(
     if not raw_5m:
         return {"ok": False, "error": "No Data"}
     
-    # AUDITED: Added raw_1h fetch so the micro_bias function works!
     raw_1h = await fetch_live_1h(symbol) 
     raw_weekly = await fetch_live_weekly(symbol)
     raw_daily = await fetch_live_daily(symbol)
     
-    # AUDITED: Calculate both biases
-    macro_bias = _calculate_weekly_force(raw_weekly)
-    micro_bias = _calculate_168h_micro_bias(raw_1h)
-
     cfg = session_manager.get_session_config(session_id)
 
     now_utc = datetime.now(timezone.utc)
@@ -504,13 +499,24 @@ async def get_session_review(
             "message": "Calibrating... (first 30 minutes after open)",
         }
 
+    # Slice HTF data for review mode
+    lock_history_5m = [c for c in raw_5m if int(c["time"]) < lock_end_ts]
+    lock_price = float(lock_history_5m[-1]["close"]) if lock_history_5m else 0.0
+
+    sliced_1h = _time_travel_slice(raw_1h, lock_end_ts, lock_price)
+    sliced_weekly = _time_travel_slice(raw_weekly, lock_end_ts, lock_price)
+    sliced_daily = _time_travel_slice(raw_daily, lock_end_ts, lock_price)
+
+    macro_bias = _calculate_weekly_force(sliced_weekly)
+    micro_bias = _calculate_168h_micro_bias(sliced_1h)
+
     pkt = _compute_sse_packet(
         raw_5m, 
         anchor_ts, 
         macro_bias, 
         micro_bias,
         tuning=tuning, 
-        raw_daily=raw_daily
+        raw_daily=sliced_daily
     )
     
     if "error" in pkt:
