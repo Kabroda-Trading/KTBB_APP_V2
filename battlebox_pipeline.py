@@ -1,19 +1,19 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v8.4 (Sniper Upgrade: 20 EMA Added)
+# KABRODA BATTLEBOX PIPELINE — v8.5 (TradingView Weekly Sync)
 # ==============================================================================
 # Purpose:
 # - The single "Moment of Truth" for each session/day
 # - Locks session open + 30m anchor range (calibration)
 # - Computes levels via sse_engine.compute_sse_levels
 # - Feeds post-lock candles into structure_state_engine (law layer)
-# - Fetches Weekly Candles to determine Macro Force (Green/Red)
-# - NEW: Fetches Daily Candles for 20/30/50 EMA Walls
+# - NEW (v8.5): Synthesizes Monday-Sunday Macro Bias from 1D candles to
+#   bypass KuCoin's native Thursday 1W offset.
 # ==============================================================================
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 import traceback
 import asyncio
@@ -101,29 +101,9 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
     except Exception:
         return []
 
-# --- WEEKLY FETCHING ---
-async def fetch_live_weekly(symbol: str, limit: int = 5) -> List[Dict[str, Any]]:
-    """Fetches Weekly candles to determine the Macro Force (Green/Red)."""
-    s = _normalize_symbol(symbol)
-    try:
-        rows = await _exchange_live.fetch_ohlcv(s, "1w", limit=limit)
-        return [
-            {
-                "time": int(r[0] / 1000),
-                "open": float(r[1]),
-                "high": float(r[2]),
-                "low": float(r[3]),
-                "close": float(r[4]),
-                "volume": float(r[5]),
-            }
-            for r in rows
-        ]
-    except Exception:
-        return []
 
-# --- DAILY FETCHING (NEW) ---
 async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]]:
-    """Fetches Daily candles to calculate the 20/30/50 EMA Walls."""
+    """Fetches Daily candles to calculate the 20/30/50 EMA Walls and Macro Bias."""
     s = _normalize_symbol(symbol)
     try:
         rows = await _exchange_live.fetch_ohlcv(s, "1d", limit=limit)
@@ -140,6 +120,7 @@ async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]
         ]
     except Exception:
         return []
+
 
 async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, limit: int = 1500) -> List[Dict[str, Any]]:
     """
@@ -206,20 +187,41 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, l
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
-def _calculate_weekly_force(weekly_candles: List[Dict[str, Any]]) -> str:
+def _calculate_weekly_force(raw_daily: List[Dict[str, Any]], anchor_ts: int) -> str:
     """
-    Determines the True Weekly Force based on the LAST COMPLETED candle.
-    [-1] is live/forming. [-2] is the truth.
+    Synthesizes the True Weekly Force directly from Daily candles.
+    KuCoin's native '1w' candles start on Thursdays, which desyncs from TradingView (Monday starts).
+    This manually extracts the last closed Monday-Sunday week to guarantee absolute accuracy.
     """
-    if not weekly_candles or len(weekly_candles) < 2:
+    if not raw_daily:
         return "NEUTRAL"
     
-    last_closed = weekly_candles[-2]
-    op = last_closed["open"]
-    cl = last_closed["close"]
+    anchor_dt = datetime.fromtimestamp(anchor_ts, tz=timezone.utc)
     
-    if cl > op: return "BULLISH" # Green
-    if cl < op: return "BEARISH" # Red
+    # Find the most recent Sunday 23:59:59 UTC strictly before the anchor
+    days_since_sunday = (anchor_dt.weekday() + 1) % 7
+    if days_since_sunday == 0:
+        days_since_sunday = 7
+        
+    last_sunday_dt = anchor_dt - timedelta(days=days_since_sunday)
+    last_sunday_dt = last_sunday_dt.replace(hour=23, minute=59, second=59, microsecond=0)
+    
+    last_monday_dt = last_sunday_dt - timedelta(days=6)
+    last_monday_dt = last_monday_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    start_ts = int(last_monday_dt.timestamp())
+    end_ts = int(last_sunday_dt.timestamp())
+    
+    week_candles = [c for c in raw_daily if start_ts <= int(c["time"]) <= end_ts]
+    
+    if not week_candles:
+        return "NEUTRAL"
+        
+    op = float(week_candles[0]["open"])
+    cl = float(week_candles[-1]["close"])
+    
+    if cl > op: return "BULLISH"
+    if cl < op: return "BEARISH"
     return "NEUTRAL"
 
 def _calculate_168h_micro_bias(raw_1h: List[Dict[str, Any]]) -> str:
@@ -280,8 +282,8 @@ def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _compute_sse_packet(
     raw_5m: List[Dict[str, Any]], 
     anchor_ts: int, 
-    macro_bias: str,  # <--- STEP 3: Updated to accept Macro
-    micro_bias: str,  # <--- STEP 3: Updated to accept Micro
+    macro_bias: str,
+    micro_bias: str,
     tuning: Optional[Dict[str, Any]] = None,
     raw_daily: List[Dict[str, Any]] = None  
 ) -> Dict[str, Any]:
@@ -342,7 +344,7 @@ def _compute_sse_packet(
         computed["levels"]["daily_ema30"] = d_ema30
         computed["levels"]["daily_ema50"] = d_ema50
 
-    # --- INJECT BIAS TRUTH --- (STEP 3 Logic)
+    # --- INJECT BIAS TRUTH ---
     if "context" not in computed: computed["context"] = {}
     computed["context"]["macro_bias"] = macro_bias
     computed["context"]["micro_bias"] = micro_bias
@@ -370,20 +372,19 @@ async def get_live_battlebox(
     
     raw_5m = await fetch_live_5m(symbol)
     raw_1h = await fetch_live_1h(symbol)
-    raw_weekly = await fetch_live_weekly(symbol)
     raw_daily = await fetch_live_daily(symbol)
 
     if not raw_5m:
         return {"status": "ERROR", "message": "No Data"}
 
-    # --- CALCULATE BIASES (RAW DATA ONLY) ---
-    macro_bias = _calculate_weekly_force(raw_weekly)
-    micro_bias = _calculate_168h_micro_bias(raw_1h)
-
     now_utc = datetime.now(timezone.utc)
     session = session_manager.resolve_current_session(now_utc, session_mode, manual_id)
     anchor_ts = int(session["anchor_time"])
     lock_end_ts = anchor_ts + 1800
+
+    # --- CALCULATE BIASES ---
+    macro_bias = _calculate_weekly_force(raw_daily, anchor_ts)
+    micro_bias = _calculate_168h_micro_bias(raw_1h)
 
     if int(now_utc.timestamp()) < lock_end_ts:
         wm = _war_map_from_1h(raw_1h)
@@ -398,7 +399,7 @@ async def get_live_battlebox(
                 "session": session,
                 "levels": {},
                 "bias_model": {},
-                "context": {"macro_bias": macro_bias, "micro_bias": micro_bias}, # Updated placeholder
+                "context": {"macro_bias": macro_bias, "micro_bias": micro_bias}, 
             },
         }
 
@@ -476,15 +477,9 @@ async def get_session_review(
     if not raw_5m:
         return {"ok": False, "error": "No Data"}
     
-    # AUDITED: Added raw_1h fetch so the micro_bias function works!
     raw_1h = await fetch_live_1h(symbol) 
-    raw_weekly = await fetch_live_weekly(symbol)
     raw_daily = await fetch_live_daily(symbol)
     
-    # AUDITED: Calculate both biases
-    macro_bias = _calculate_weekly_force(raw_weekly)
-    micro_bias = _calculate_168h_micro_bias(raw_1h)
-
     cfg = session_manager.get_session_config(session_id)
 
     now_utc = datetime.now(timezone.utc)
@@ -494,6 +489,10 @@ async def get_session_review(
     if anchor_ts > int(now_utc.timestamp()):
         anchor_ts -= 86400
         lock_end_ts -= 86400
+
+    # Calculate biases
+    macro_bias = _calculate_weekly_force(raw_daily, anchor_ts)
+    micro_bias = _calculate_168h_micro_bias(raw_1h)
 
     if int(now_utc.timestamp()) < lock_end_ts:
         return {
