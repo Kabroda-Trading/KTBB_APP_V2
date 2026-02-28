@@ -2,32 +2,32 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Kabroda | Market Simulator</title>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <title>Kabroda | Market Simulator Pro</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        body { background-color: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
+        body { background-color: #020617; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
         .container { max-width: 1400px; margin: 0 auto; }
-        .header { border-bottom: 1px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
-        h1 { font-family: 'JetBrains Mono', monospace; margin: 0; color: #fff; }
-        .pill { background: #f59e0b; color: #000; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 700; letter-spacing: 1px; }
-        
-        .sim-grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
-        .panel { background: #0f1623; border: 1px solid rgba(255,255,255,0.1); padding: 20px; border-radius: 8px; }
+        .header { border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center; }
+        .sim-grid { display: grid; grid-template-columns: 350px 1fr; gap: 25px; }
+        .panel { background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
         
         .control-group { margin-bottom: 15px; }
         label { display: block; color: #94a3b8; font-size: 11px; font-weight: 700; margin-bottom: 6px; letter-spacing: 0.5px; text-transform: uppercase; }
-        select, input { width: 100%; background: #050b14; border: 1px solid #333; color: #fff; padding: 8px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 13px; }
+        select, input { width: 100%; background: #050b14; border: 1px solid #334155; color: #fff; padding: 10px; border-radius: 6px; font-family: 'Inter'; font-size: 13px; }
         
-        .divider { border-top: 1px solid #333; margin: 20px 0 15px 0; }
-        .section-title { color: #8b5cf6; font-size: 11px; font-weight: 800; letter-spacing: 1px; margin-bottom: 10px; display: block; }
+        .divider { border-top: 1px solid #334155; margin: 20px 0 15px 0; }
+        .section-title { color: #facc15; font-size: 12px; font-weight: 800; letter-spacing: 1px; margin-bottom: 10px; display: block; text-transform: uppercase; }
         
-        .btn-run { width: 100%; background: #f59e0b; color: #000; border: none; padding: 12px; font-weight: 700; border-radius: 4px; cursor: pointer; text-transform: uppercase; margin-top: 10px; }
+        .btn-run { background: #facc15; color: #000; width: 100%; padding: 15px; border: none; border-radius: 6px; font-weight: 800; cursor: pointer; margin-top: 20px; font-size: 14px;}
         .btn-run:hover { background: #fbbf24; }
 
-        .stat-box { background:#000; border:1px solid #333; padding:15px; border-radius:4px; text-align:center; }
-        .stat-val { font-size:28px; font-weight:700; font-family:'JetBrains Mono'; color:#fff; }
-        .log-row { background: rgba(255,255,255,0.02); padding: 10px; border-bottom: 1px solid #1e293b; font-family: 'JetBrains Mono'; font-size: 12px; }
+        .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px; }
+        .stat-card { background: #1e293b; padding: 15px; border-radius: 8px; text-align: center; border-bottom: 4px solid #334155; }
+        .stat-val { font-size: 24px; font-weight: 800; display: block; color: #fff; font-family: 'JetBrains Mono'; }
+        .stat-label { font-size: 11px; color: #94a3b8; font-weight: 700; text-transform: uppercase; }
+        
+        .log-row { background: #1e293b; margin-bottom: 8px; padding: 12px; border-radius: 6px; border-left: 4px solid #64748b; font-family: 'JetBrains Mono'; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -36,72 +36,99 @@
 
     <div class="container" style="padding-top:40px;">
         <div class="header">
-            <a href="/suite" style="color: #94a3b8; text-decoration: none; font-size: 14px;">← Back to Suite</a>
-            <h1 style="margin-top: 10px;">MARKET SIMULATOR <span class="pill">BACKTEST ENGINE</span></h1>
+            <div>
+                <h1 style="color: #facc15;">MARKET SIMULATOR <span style="font-size: 14px; opacity: 0.6; color: #fff;">v3.0 (RADAR SYNC)</span></h1>
+            </div>
+            <a href="/suite" style="color:#94a3b8; text-decoration:none; font-weight:bold; font-size: 14px;">← BACK TO SUITE</a>
         </div>
 
         <div class="sim-grid">
             <div class="panel">
+                <span class="section-title">DATA SELECTION</span>
                 <div class="control-group">
-                    <label>DATE RANGE</label>
-                    <input type="date" id="startDate">
-                    <input type="date" id="endDate" style="margin-top:5px;">
-                </div>
-
-                <div class="divider"></div>
-                <span class="section-title">TRADE PLAN SCENARIO</span>
-
-                <div class="control-group">
-                    <label>TARGET TO TEST</label>
-                    <select id="targetType">
-                        <option value="pole">Measured Pole (Breakout - Breakdown)</option>
-                        <option value="t1">Market Radar Target 1 (Coming Soon)</option>
+                    <label>ASSET</label>
+                    <select id="symbol">
+                        <option value="BTCUSDT">BTC/USDT</option>
+                        <option value="ETHUSDT">ETH/USDT</option>
+                        <option value="SOLUSDT">SOL/USDT</option>
                     </select>
                 </div>
 
                 <div class="control-group">
-                    <label>ENTRY TRIGGER</label>
+                    <label>TEST WINDOW (UTC)</label>
+                    <input type="date" id="startDate" style="margin-bottom:10px;">
+                    <input type="date" id="endDate">
+                </div>
+
+                <div class="divider"></div>
+                <span class="section-title">RADAR LOGIC FILTERS</span>
+                <div class="control-group">
+                    <label>ALLOWED TIERS</label>
+                    <select id="minTier">
+                        <option value="ALL">All Valid Gaps (Primal & Exhaustion)</option>
+                        <option value="PRIMAL">Strict (Primal Only)</option>
+                    </select>
+                </div>
+
+                <div class="divider"></div>
+                <span class="section-title">EXECUTION RULES</span>
+                
+                <div class="control-group">
+                    <label>ENTRY STYLE</label>
                     <select id="entryType">
-                        <option value="15m_close">15-Minute Candle Close Outside Line</option>
-                        <option value="instant">Instant Execution (Touches Line)</option>
+                        <option value="15m_close">15-Minute Candle Close</option>
+                        <option value="instant">Instant Trigger Cross</option>
                     </select>
                 </div>
 
                 <div class="control-group">
                     <label>STOP LOSS PLACEMENT</label>
                     <select id="stopType">
-                        <option value="30m_range">Standard (Above/Below 30m Range)</option>
-                        <option value="15m_candle">Aggressive (Above/Below Entry 15m Candle)</option>
+                        <option value="radar_default">Market Radar Default (30m Range Edge)</option>
+                        <option value="15m_candle">Aggressive (Entry 15m Candle Edge)</option>
                     </select>
                 </div>
 
-                <button onclick="runSim()" class="btn-run" id="runBtn">RUN SIMULATION</button>
+                <div class="control-group">
+                    <label>MAIN TARGET METRIC</label>
+                    <select id="targetType">
+                        <option value="t2">Target 2 (Primal Pole)</option>
+                        <option value="t1">Target 1 (Daily S/R)</option>
+                        <option value="t3">Target 3 (Exhaustion Pole)</option>
+                    </select>
+                </div>
+
+                <button onclick="runSimulation()" class="btn-run" id="runBtn">INITIATE SIMULATION</button>
+                <div id="loader" style="display:none; text-align:center; margin-top:20px; color:#facc15; font-weight:bold; font-size:12px;">CALCULATING HISTORICAL PROBABILITIES...</div>
             </div>
 
-            <div class="panel">
-                <div id="loader" style="display:none; text-align:center; padding:50px; color:#94a3b8;">
-                    SIMULATING HISTORICAL TRADES...<br>
-                    <span style="font-size:10px; opacity:0.7;">APPLYING RADAR MATH TO PRICE ACTION</span>
-                </div>
-                
-                <div id="results" style="display:none;">
-                    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-bottom:20px;">
-                        <div class="stat-box">
-                            <div style="color:#94a3b8; font-size:10px; margin-bottom:5px;">WIN RATE</div>
-                            <div class="stat-val" id="btWinRate" style="color:#10b981;">0%</div>
-                        </div>
-                        <div class="stat-box">
-                            <div style="color:#94a3b8; font-size:10px; margin-bottom:5px;">WINS</div>
-                            <div class="stat-val" id="btWins">0</div>
-                        </div>
-                        <div class="stat-box">
-                            <div style="color:#94a3b8; font-size:10px; margin-bottom:5px;">LOSSES</div>
-                            <div class="stat-val" id="btLosses" style="color:#ef4444;">0</div>
-                        </div>
+            <div id="results" style="display:none;">
+                <div class="stat-grid">
+                    <div class="stat-card" style="border-color: #facc15;">
+                        <span class="stat-label">MAIN WIN RATE</span>
+                        <span class="stat-val" id="btWinRate" style="color:#facc15;">0%</span>
                     </div>
-                    
-                    <h4 style="color:#94a3b8; margin-bottom:10px;">TRADE LOG</h4>
-                    <div id="btLogArea" style="height:450px; overflow-y:auto; border:1px solid #333; border-radius:4px;"></div>
+                    <div class="stat-card" style="border-color: #10b981;">
+                        <span class="stat-label">T1 HIT RATE</span>
+                        <span class="stat-val" id="t1Rate">0%</span>
+                    </div>
+                    <div class="stat-card" style="border-color: #06b6d4;">
+                        <span class="stat-label">T2 HIT RATE</span>
+                        <span class="stat-val" id="t2Rate">0%</span>
+                    </div>
+                    <div class="stat-card" style="border-color: #a855f7;">
+                        <span class="stat-label">T3 HIT RATE</span>
+                        <span class="stat-val" id="t3Rate">0%</span>
+                    </div>
+                </div>
+
+                <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-size:12px; color:#94a3b8; font-weight:bold; padding: 0 10px;">
+                    <span id="tradesCount">0 Total Trades Executed</span>
+                    <span id="skippedCount" style="color:#ef4444;">0 Skipped (Bad Gap)</span>
+                </div>
+
+                <div class="panel" style="padding:0;">
+                    <div id="btLogArea" style="height:550px; overflow-y:auto; padding:15px;"></div>
                 </div>
             </div>
         </div>
@@ -111,49 +138,58 @@
         window.onload = function() {
             const t = new Date();
             document.getElementById('endDate').valueAsDate = t;
-            const p = new Date(); p.setDate(t.getDate()-30); // Default to 30 days
+            const p = new Date(); p.setDate(t.getDate()-30);
             document.getElementById('startDate').valueAsDate = p;
         }
 
-        async function runSim() {
-            document.getElementById('runBtn').disabled = true;
-            document.getElementById('loader').style.display = 'block';
+        async function runSimulation() {
+            const btn = document.getElementById('runBtn');
+            const loader = document.getElementById('loader');
+            btn.disabled = true; loader.style.display = 'block';
             document.getElementById('results').style.display = 'none';
 
             const payload = {
-                symbol: "BTCUSDT",
+                symbol: document.getElementById('symbol').value,
                 start_date_utc: document.getElementById('startDate').value,
                 end_date_utc: document.getElementById('endDate').value,
                 session_ids: ["us_ny_futures"],
                 target_type: document.getElementById('targetType').value,
                 entry_type: document.getElementById('entryType').value,
-                stop_type: document.getElementById('stopType').value
+                stop_type: document.getElementById('stopType').value,
+                min_tier: document.getElementById('minTier').value
             };
 
             try {
-                // Point this to your new backend route!
-                const res = await fetch('/api/simulator/run', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                const resp = await fetch('/api/simulator/run', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)
                 });
-                const data = await res.json();
+                const data = await resp.json();
                 
                 if(!data.ok) throw new Error(data.error);
 
+                const s = data.stats;
+                const total = s.total_trades || 1;
+                
                 document.getElementById('btWinRate').innerText = data.win_rate + '%';
-                document.getElementById('btWins').innerText = data.total_wins;
-                document.getElementById('btLosses').innerText = data.total_losses;
+                document.getElementById('t1Rate').innerText = Math.round((s.t1_hits/total)*100) + '%';
+                document.getElementById('t2Rate').innerText = Math.round((s.t2_hits/total)*100) + '%';
+                document.getElementById('t3Rate').innerText = Math.round((s.t3_hits/total)*100) + '%';
+                
+                document.getElementById('tradesCount').innerText = `${s.total_trades} Executed Trades`;
+                document.getElementById('skippedCount').innerText = `${s.skipped} Skipped (No Gap)`;
 
                 let html = "";
                 data.log.forEach(r => {
-                    let color = r.status === 'WIN' ? '#10b981' : (r.status === 'LOSS' ? '#ef4444' : '#64748b');
+                    let border = r.status.includes('WIN') ? '#10b981' : (r.status.includes('STOP') ? '#ef4444' : '#64748b');
                     html += `
-                        <div class="log-row">
+                        <div class="log-row" style="border-left-color:${border}">
                             <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                                <span style="color:#f59e0b; font-weight:700;">${r.date}</span>
-                                <span style="color:${color}; font-weight:bold;">${r.status}</span>
+                                <span style="color:#facc15; font-weight:700;">${r.date}</span>
+                                <span style="color:${border}; font-weight:bold;">${r.status}</span>
                             </div>
-                            <div style="font-size:10px; color:#94a3b8;">${r.msg}</div>
+                            <div style="color:#94a3b8;">${r.msg}</div>
                         </div>
                     `;
                 });
@@ -163,8 +199,7 @@
             } catch(e) {
                 alert("Simulation Error: " + e.message);
             } finally {
-                document.getElementById('loader').style.display = 'none';
-                document.getElementById('runBtn').disabled = false;
+                btn.disabled = false; loader.style.display = 'none';
             }
         }
     </script>

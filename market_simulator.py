@@ -1,21 +1,76 @@
 # market_simulator.py
 # ==============================================================================
-# KABRODA MARKET SIMULATOR v1.0
-# JOB: Standalone backtesting engine. Duplicates Market Radar math and Research 
-#      Lab data fetching to test historical probabilities safely.
+# KABRODA MARKET SIMULATOR v3.0 (TRUE RADAR DUPLICATION)
+# JOB: Exact duplication of Market Radar logic to test historical probabilities.
 # ==============================================================================
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 import traceback
 
-# CORE ENGINES (Directly asking the site, not other pages)
+# CORE ENGINES
 import session_manager
 import sse_engine 
 import battlebox_pipeline
 
-def _slice_by_ts(candles, start_ts, end_ts):
-    """Helper to cut candle arrays by timestamp"""
-    return [c for c in candles if start_ts <= c["time"] < end_ts]
+# -------------------------------------------------------------------------
+# EXACT LOGIC DUPLICATED FROM MARKET_RADAR.PY
+# -------------------------------------------------------------------------
+def _get_thresholds(symbol):
+    if "BTC" in symbol: return 0.5, 1.5, 2.25
+    if "ETH" in symbol: return 0.8, 2.5, 3.50
+    if "SOL" in symbol: return 1.5, 4.0, 6.00
+    return 0.8, 2.0, 3.0
+
+def _build_dossier(symbol, side, price, trigger, target_level, structure, ema30, ema50, pole, alt_edge):
+    if not trigger or not target_level or price == 0:
+        return {"status": "INVALID", "reason": "Missing Core Levels"}
+
+    gap_pct = abs(target_level - trigger) / trigger * 100
+    min_g, primal_max, exhaust_max = _get_thresholds(symbol)
+
+    if gap_pct < min_g:
+        return {"status": "NO TRADE", "reason": f"Gap Too Small ({gap_pct:.2f}%)"}
+    elif gap_pct <= primal_max:
+        tier = "PRIMAL"
+    elif gap_pct <= exhaust_max:
+        tier = "EXHAUSTION"
+    else:
+        return {"status": "NO TRADE", "reason": f"Beyond Exhaustion ({gap_pct:.2f}%)"}
+
+    is_bullish = ema30 > ema50 if ema30 and ema50 else None
+    align = "ALIGNED" if (side == "LONG" and is_bullish) or (side == "SHORT" and not is_bullish) else "COUNTER"
+
+    if side == "LONG":
+        t1 = target_level
+        t2 = trigger + pole
+        t3 = trigger + (pole * 1.618)
+        stop = alt_edge
+    else:
+        t1 = target_level
+        t2 = trigger - pole
+        t3 = trigger - (pole * 1.618)
+        stop = alt_edge
+
+    risk = abs(trigger - stop)
+    reward_t1 = abs(t1 - trigger)
+    reward_t2 = abs(t2 - trigger)
+    reward_t3 = abs(t3 - trigger)
+
+    return {
+        "status": "ACTIVE",
+        "tier": tier,
+        "alignment": align,
+        "gap_pct": gap_pct,
+        "structure": structure,
+        "entry": trigger,
+        "stop": stop,
+        "t1": t1,
+        "t2": t2,
+        "t3": t3,
+        "rr_t1": reward_t1 / risk if risk else 0,
+        "rr_t2": reward_t2 / risk if risk else 0,
+        "rr_t3": reward_t3 / risk if risk else 0
+    }
 
 def _precalculate_daily_emas(df_5m):
     try:
@@ -28,25 +83,29 @@ def _precalculate_daily_emas(df_5m):
     except:
         return pd.DataFrame()
 
+def _slice_by_ts(candles, start_ts, end_ts):
+    return [c for c in candles if start_ts <= c["time"] < end_ts]
+
+# -------------------------------------------------------------------------
+# SIMULATION ENGINE
+# -------------------------------------------------------------------------
 async def run_simulation(payload: dict):
-    """
-    Main entry point for the Simulator.
-    """
     symbol = payload.get("symbol", "BTCUSDT").strip().upper()
     start_date = payload.get("start_date_utc")
     end_date = payload.get("end_date_utc")
     session_ids = payload.get("session_ids", ["us_ny_futures"])
     
-    # Simulation Parameters
-    target_type = payload.get("target_type", "pole") # 'pole', 't1', 't2', 't3'
-    entry_type = payload.get("entry_type", "15m_close") # 'instant', '15m_close'
-    stop_type = payload.get("stop_type", "30m_range") # '30m_range', '15m_candle'
+    # Simulation Parameters from UI
+    target_to_test = payload.get("target_type", "t2") # Which target counts as a "Win" for the main stat
+    entry_type = payload.get("entry_type", "15m_close") 
+    stop_type = payload.get("stop_type", "radar_default") 
+    min_tier = payload.get("min_tier", "ALL")
 
     if not start_date or not end_date:
         return {"ok": False, "error": "Start and End dates are required."}
 
     try:
-        # 1. FETCH HISTORICAL DATA (Duplicated from Research Lab)
+        # Fetch Data
         start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         fetch_start_dt = start_dt - timedelta(days=40)
         end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
@@ -66,13 +125,15 @@ async def run_simulation(payload: dict):
 
         active_cfgs = [s for s in session_manager.SESSION_CONFIGS if s["id"] in session_ids]
         
-        # SIMULATION TRACKING
-        wins = 0
-        losses = 0
+        # Stats
+        stats = {
+            "total_trades": 0, "skipped_gap": 0, "stops": 0,
+            "t1_hits": 0, "t2_hits": 0, "t3_hits": 0,
+            "main_wins": 0, "main_losses": 0
+        }
         trade_log = []
         curr_day = start_dt
         
-        # 2. ITERATE DAYS & RUN SIMULATION
         while curr_day <= end_dt:
             query_time = curr_day + timedelta(hours=12)
             
@@ -89,6 +150,16 @@ async def run_simulation(payload: dict):
                 context_24h = _slice_by_ts(raw_5m, lock_end_ts - 86400, lock_end_ts)
                 session_candles = _slice_by_ts(raw_5m, lock_end_ts, exec_end_ts)
 
+                d_ema30 = 0.0
+                d_ema50 = 0.0
+                try:
+                    day_key = pd.to_datetime(actual_session_date).date()
+                    if str(day_key) in df_daily_emas.index:
+                        daily_row = df_daily_emas.loc[str(day_key)]
+                        d_ema30 = daily_row['ema30']
+                        d_ema50 = daily_row['ema50']
+                except: pass
+
                 sse_input = {
                     "locked_history_5m": context_24h,
                     "slice_24h_5m": context_24h,
@@ -103,20 +174,24 @@ async def run_simulation(payload: dict):
                 if "error" in computed: continue
                 levels = computed["levels"]
 
-                # 3. DUPLICATE MARKET RADAR MATH
                 breakout = levels.get("breakout_trigger")
                 breakdown = levels.get("breakdown_trigger")
-                if not breakout or not breakdown: continue
-
-                pole = breakout - breakdown
                 r30_high = levels.get("range30m_high")
                 r30_low = levels.get("range30m_low")
+                daily_res = levels.get("daily_resistance")
+                daily_sup = levels.get("daily_support")
+                struct = levels.get("structure_score", 0)
 
-                # Trackers for the day
+                if not breakout or not breakdown: continue
+                pole = breakout - breakdown
+
+                # BUILD RADAR DOSSIERS
+                long_dossier = _build_dossier(symbol, "LONG", sse_input["last_price"], breakout, daily_res, struct, d_ema30, d_ema50, pole, r30_low)
+                short_dossier = _build_dossier(symbol, "SHORT", sse_input["last_price"], breakdown, daily_sup, struct, d_ema30, d_ema50, pole, r30_high)
+
+                # Find the Trigger
                 triggered_dir = None
                 trigger_idx = -1
-                
-                # A. Find the Trigger
                 for i, c in enumerate(session_candles):
                     if c['high'] >= breakout:
                         triggered_dir = 'LONG'
@@ -128,21 +203,33 @@ async def run_simulation(payload: dict):
                         break
 
                 if not triggered_dir:
-                    trade_log.append({"date": actual_session_date, "status": "NO TRIGGER", "msg": "Price stayed inside triggers."})
                     continue
 
-                # B. Determine Entry and Stop
+                dossier = long_dossier if triggered_dir == 'LONG' else short_dossier
+
+                # Skip if Radar says NO TRADE
+                if dossier["status"] == "NO TRADE":
+                    stats["skipped_gap"] += 1
+                    trade_log.append({
+                        "date": actual_session_date, "status": "SKIPPED", 
+                        "msg": f"Skipped {triggered_dir}: {dossier['reason']}"
+                    })
+                    continue
+                
+                # Apply User Tier Filter
+                if min_tier == "PRIMAL" and dossier["tier"] == "EXHAUSTION":
+                    stats["skipped_gap"] += 1
+                    continue
+
+                # Determine Actual Entry Price & Dynamic Stop
                 entry_price = 0
-                stop_loss = 0
+                stop_loss = dossier["stop"] # Default Radar Stop
                 entry_idx = -1
 
                 if entry_type == "instant":
                     entry_price = breakout if triggered_dir == 'LONG' else breakdown
                     entry_idx = trigger_idx
-                    stop_loss = r30_low if triggered_dir == 'LONG' else r30_high
-
                 elif entry_type == "15m_close":
-                    # Wait for 15m candle close (minutes 10, 25, 40, 55 in Kabroda framework)
                     found = False
                     for i in range(trigger_idx, len(session_candles)):
                         c = session_candles[i]
@@ -151,71 +238,68 @@ async def run_simulation(payload: dict):
                             entry_price = c['close']
                             entry_idx = i
                             found = True
-                            
-                            # Calculate Stop based on selection
                             if stop_type == "15m_candle":
                                 stop_loss = c['low'] if triggered_dir == 'LONG' else c['high']
-                            else:
-                                stop_loss = r30_low if triggered_dir == 'LONG' else r30_high
                             break
-                    
                     if not found:
-                        trade_log.append({"date": actual_session_date, "status": "NO ENTRY", "msg": "Triggered too late for 15m close."})
                         continue
 
-                # C. Determine Target
-                if target_type == "pole":
-                    target = entry_price + pole if triggered_dir == 'LONG' else entry_price - pole
-                else:
-                    # Fallback if testing specific ATR targets later
-                    target = entry_price + pole if triggered_dir == 'LONG' else entry_price - pole
-
-                # D. Run the Trade Simulation
-                result_status = "PENDING"
+                # RUN THE TRADE (Watch for Stop and Targets)
+                hit_t1, hit_t2, hit_t3, stopped = False, False, False, False
+                
                 for i in range(entry_idx + 1, len(session_candles)):
                     c = session_candles[i]
                     
-                    # Check Stop Loss First (Pessimistic execution)
+                    # Check Stop Loss First
                     if triggered_dir == 'LONG' and c['low'] <= stop_loss:
-                        result_status = "LOSS"
-                        break
+                        stopped = True; break
                     elif triggered_dir == 'SHORT' and c['high'] >= stop_loss:
-                        result_status = "LOSS"
-                        break
+                        stopped = True; break
                     
-                    # Check Target
-                    if triggered_dir == 'LONG' and c['high'] >= target:
-                        result_status = "WIN"
-                        break
-                    elif triggered_dir == 'SHORT' and c['low'] <= target:
-                        result_status = "WIN"
-                        break
+                    # Check Targets
+                    if triggered_dir == 'LONG':
+                        if c['high'] >= dossier['t1']: hit_t1 = True
+                        if c['high'] >= dossier['t2']: hit_t2 = True
+                        if c['high'] >= dossier['t3']: hit_t3 = True
+                    else:
+                        if c['low'] <= dossier['t1']: hit_t1 = True
+                        if c['low'] <= dossier['t2']: hit_t2 = True
+                        if c['low'] <= dossier['t3']: hit_t3 = True
+                    
+                    if hit_t3: break # Max target hit, done
 
-                if result_status == "PENDING":
-                    result_status = "LOSS" # Didn't hit target before session end
+                # Tally Results
+                stats["total_trades"] += 1
+                if stopped: stats["stops"] += 1
+                if hit_t1: stats["t1_hits"] += 1
+                if hit_t2: stats["t2_hits"] += 1
+                if hit_t3: stats["t3_hits"] += 1
 
-                if result_status == "WIN": wins += 1
-                if result_status == "LOSS": losses += 1
+                # Determine Main Win/Loss based on user selection
+                is_win = False
+                if target_to_test == "t1" and hit_t1: is_win = True
+                elif target_to_test == "t2" and hit_t2: is_win = True
+                elif target_to_test == "t3" and hit_t3: is_win = True
+                
+                if is_win: stats["main_wins"] += 1
+                else: stats["main_losses"] += 1
+
+                status_str = "WIN" if is_win else ("LOSS (STOP)" if stopped else "LOSS (TIME)")
 
                 trade_log.append({
                     "date": actual_session_date,
-                    "status": result_status,
-                    "direction": triggered_dir,
-                    "entry": round(entry_price, 1),
-                    "target": round(target, 1),
-                    "stop": round(stop_loss, 1),
-                    "msg": f"Entered {triggered_dir} @ {round(entry_price,1)}. Target: {round(target,1)}, Stop: {round(stop_loss,1)}"
+                    "status": status_str,
+                    "msg": f"{triggered_dir} {dossier['tier']} | Target Tested: {target_to_test.upper()} | Hit: T1:{hit_t1} T2:{hit_t2} T3:{hit_t3}"
                 })
 
             curr_day += timedelta(days=1)
 
-        win_rate = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0
+        win_rate = (stats["main_wins"] / stats["total_trades"] * 100) if stats["total_trades"] > 0 else 0
 
         return {
             "ok": True,
-            "total_wins": wins,
-            "total_losses": losses,
             "win_rate": round(win_rate, 2),
+            "stats": stats,
             "log": trade_log
         }
 
