@@ -28,6 +28,9 @@
         .stat-label { font-size: 11px; color: #94a3b8; font-weight: 700; text-transform: uppercase; }
         
         .log-row { background: #1e293b; margin-bottom: 8px; padding: 12px; border-radius: 6px; border-left: 4px solid #64748b; font-family: 'JetBrains Mono'; font-size: 12px; }
+        .text-green { color: #10b981; }
+        .text-red { color: #ef4444; }
+        .text-yellow { color: #facc15; }
     </style>
 </head>
 <body>
@@ -37,7 +40,7 @@
     <div class="container" style="padding-top:40px;">
         <div class="header">
             <div>
-                <h1 style="color: #facc15;">MARKET SIMULATOR <span style="font-size: 14px; opacity: 0.6; color: #fff;">v3.0 (RADAR SYNC)</span></h1>
+                <h1 style="color: #facc15;">MARKET SIMULATOR <span style="font-size: 14px; opacity: 0.6; color: #fff;">1:1 RADAR ENGINE</span></h1>
             </div>
             <a href="/suite" style="color:#94a3b8; text-decoration:none; font-weight:bold; font-size: 14px;">← BACK TO SUITE</a>
         </div>
@@ -53,7 +56,6 @@
                         <option value="SOLUSDT">SOL/USDT</option>
                     </select>
                 </div>
-
                 <div class="control-group">
                     <label>TEST WINDOW (UTC)</label>
                     <input type="date" id="startDate" style="margin-bottom:10px;">
@@ -61,74 +63,84 @@
                 </div>
 
                 <div class="divider"></div>
-                <span class="section-title">RADAR LOGIC FILTERS</span>
+                <span class="section-title">WHAT-IF SCENARIOS (RADAR OVERRIDES)</span>
+                
                 <div class="control-group">
-                    <label>ALLOWED TIERS</label>
-                    <select id="minTier">
-                        <option value="ALL">All Valid Gaps (Primal & Exhaustion)</option>
-                        <option value="PRIMAL">Strict (Primal Only)</option>
-                    </select>
+                    <label style="display:flex; align-items:center; gap:8px;">
+                        <input type="checkbox" id="useCustomGaps" style="width:auto;"> Enable Gap Overrides
+                    </label>
+                </div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                    <div class="control-group">
+                        <label>Min Gap %</label>
+                        <input type="number" step="0.1" id="minGap" value="0.5">
+                    </div>
+                    <div class="control-group">
+                        <label>Max Primal %</label>
+                        <input type="number" step="0.1" id="maxPrimal" value="1.5">
+                    </div>
+                    <div class="control-group">
+                        <label>Max Exhaust %</label>
+                        <input type="number" step="0.1" id="maxExhaust" value="2.25">
+                    </div>
+                    <div class="control-group">
+                        <label>Jailbreaks?</label>
+                        <select id="allowJb">
+                            <option value="true">YES</option>
+                            <option value="false">NO</option>
+                        </select>
+                    </div>
                 </div>
 
                 <div class="divider"></div>
                 <span class="section-title">EXECUTION RULES</span>
-                
                 <div class="control-group">
-                    <label>ENTRY STYLE</label>
-                    <select id="entryType">
-                        <option value="15m_close">15-Minute Candle Close</option>
-                        <option value="instant">Instant Trigger Cross</option>
+                    <label>ENTRY LOGIC</label>
+                    <select id="entryStyle">
+                        <option value="15m_close">15-Minute Candle Close Outside Trigger</option>
+                        <option value="pullback">15-Min Close + Wait for Pullback to Line</option>
+                        <option value="instant">Instant Trigger Cross (Limit Order)</option>
                     </select>
                 </div>
-
                 <div class="control-group">
-                    <label>STOP LOSS PLACEMENT</label>
-                    <select id="stopType">
-                        <option value="radar_default">Market Radar Default (30m Range Edge)</option>
-                        <option value="15m_candle">Aggressive (Entry 15m Candle Edge)</option>
-                    </select>
-                </div>
-
-                <div class="control-group">
-                    <label>MAIN TARGET METRIC</label>
-                    <select id="targetType">
-                        <option value="t2">Target 2 (Primal Pole)</option>
-                        <option value="t1">Target 1 (Daily S/R)</option>
-                        <option value="t3">Target 3 (Exhaustion Pole)</option>
+                    <label>STOP LOSS</label>
+                    <select id="stopStyle">
+                        <option value="radar_default">Market Radar Default</option>
+                        <option value="15m_candle">Aggressive (Edge of 15m Entry Candle)</option>
                     </select>
                 </div>
 
                 <button onclick="runSimulation()" class="btn-run" id="runBtn">INITIATE SIMULATION</button>
-                <div id="loader" style="display:none; text-align:center; margin-top:20px; color:#facc15; font-weight:bold; font-size:12px;">CALCULATING HISTORICAL PROBABILITIES...</div>
+                <div id="loader" style="display:none; text-align:center; margin-top:20px; color:#facc15; font-weight:bold; font-size:12px;">SIMULATING HISTORICAL TRADES...</div>
             </div>
 
             <div id="results" style="display:none;">
                 <div class="stat-grid">
-                    <div class="stat-card" style="border-color: #facc15;">
-                        <span class="stat-label">MAIN WIN RATE</span>
-                        <span class="stat-val" id="btWinRate" style="color:#facc15;">0%</span>
-                    </div>
                     <div class="stat-card" style="border-color: #10b981;">
-                        <span class="stat-label">T1 HIT RATE</span>
-                        <span class="stat-val" id="t1Rate">0%</span>
+                        <span class="stat-label">T1 REACHED (S/R)</span>
+                        <span class="stat-val text-green" id="t1Rate">0%</span>
                     </div>
                     <div class="stat-card" style="border-color: #06b6d4;">
-                        <span class="stat-label">T2 HIT RATE</span>
-                        <span class="stat-val" id="t2Rate">0%</span>
+                        <span class="stat-label">T2 REACHED (POLE)</span>
+                        <span class="stat-val text-green" id="t2Rate">0%</span>
                     </div>
                     <div class="stat-card" style="border-color: #a855f7;">
-                        <span class="stat-label">T3 HIT RATE</span>
-                        <span class="stat-val" id="t3Rate">0%</span>
+                        <span class="stat-label">T3 REACHED (1.618)</span>
+                        <span class="stat-val text-green" id="t3Rate">0%</span>
+                    </div>
+                    <div class="stat-card" style="border-color: #ef4444;">
+                        <span class="stat-label">STOPPED OUT</span>
+                        <span class="stat-val text-red" id="stopRate">0%</span>
                     </div>
                 </div>
 
                 <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-size:12px; color:#94a3b8; font-weight:bold; padding: 0 10px;">
-                    <span id="tradesCount">0 Total Trades Executed</span>
-                    <span id="skippedCount" style="color:#ef4444;">0 Skipped (Bad Gap)</span>
+                    <span id="tradesCount">0 Total Executions</span>
+                    <span id="skippedCount" style="color:#facc15;">0 Trades Skipped by Radar</span>
                 </div>
 
                 <div class="panel" style="padding:0;">
-                    <div id="btLogArea" style="height:550px; overflow-y:auto; padding:15px;"></div>
+                    <div id="btLogArea" style="height:650px; overflow-y:auto; padding:15px;"></div>
                 </div>
             </div>
         </div>
@@ -153,10 +165,15 @@
                 start_date_utc: document.getElementById('startDate').value,
                 end_date_utc: document.getElementById('endDate').value,
                 session_ids: ["us_ny_futures"],
-                target_type: document.getElementById('targetType').value,
-                entry_type: document.getElementById('entryType').value,
-                stop_type: document.getElementById('stopType').value,
-                min_tier: document.getElementById('minTier').value
+                
+                entry_style: document.getElementById('entryStyle').value,
+                stop_style: document.getElementById('stopStyle').value,
+                
+                use_custom_gaps: document.getElementById('useCustomGaps').checked,
+                min_gap: document.getElementById('minGap').value,
+                primal_max: document.getElementById('maxPrimal').value,
+                exhaust_max: document.getElementById('maxExhaust').value,
+                allow_jb: document.getElementById('allowJb').value === "true"
             };
 
             try {
@@ -172,17 +189,17 @@
                 const s = data.stats;
                 const total = s.total_trades || 1;
                 
-                document.getElementById('btWinRate').innerText = data.win_rate + '%';
-                document.getElementById('t1Rate').innerText = Math.round((s.t1_hits/total)*100) + '%';
-                document.getElementById('t2Rate').innerText = Math.round((s.t2_hits/total)*100) + '%';
-                document.getElementById('t3Rate').innerText = Math.round((s.t3_hits/total)*100) + '%';
+                document.getElementById('t1Rate').innerText = Math.round((s.wins_t1/total)*100) + '%';
+                document.getElementById('t2Rate').innerText = Math.round((s.wins_t2/total)*100) + '%';
+                document.getElementById('t3Rate').innerText = Math.round((s.wins_t3/total)*100) + '%';
+                document.getElementById('stopRate').innerText = Math.round((s.stops/total)*100) + '%';
                 
-                document.getElementById('tradesCount').innerText = `${s.total_trades} Executed Trades`;
-                document.getElementById('skippedCount').innerText = `${s.skipped} Skipped (No Gap)`;
+                document.getElementById('tradesCount').innerText = `${s.total_trades} Executions`;
+                document.getElementById('skippedCount').innerText = `${s.skipped} Skipped by Radar`;
 
                 let html = "";
                 data.log.forEach(r => {
-                    let border = r.status.includes('WIN') ? '#10b981' : (r.status.includes('STOP') ? '#ef4444' : '#64748b');
+                    let border = r.status.includes('STOP') ? '#ef4444' : (r.status.includes('HIT') ? '#10b981' : '#64748b');
                     html += `
                         <div class="log-row" style="border-left-color:${border}">
                             <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
