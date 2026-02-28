@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Kabroda | Market Simulator</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        body { background-color: #050b14; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { border-bottom: 1px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
+        h1 { font-family: 'JetBrains Mono', monospace; margin: 0; color: #fff; }
+        .pill { background: #f59e0b; color: #000; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 700; letter-spacing: 1px; }
+        
+        .sim-grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
+        .panel { background: #0f1623; border: 1px solid rgba(255,255,255,0.1); padding: 20px; border-radius: 8px; }
+        
+        .control-group { margin-bottom: 15px; }
+        label { display: block; color: #94a3b8; font-size: 11px; font-weight: 700; margin-bottom: 6px; letter-spacing: 0.5px; text-transform: uppercase; }
+        select, input { width: 100%; background: #050b14; border: 1px solid #333; color: #fff; padding: 8px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 13px; }
+        
+        .divider { border-top: 1px solid #333; margin: 20px 0 15px 0; }
+        .section-title { color: #8b5cf6; font-size: 11px; font-weight: 800; letter-spacing: 1px; margin-bottom: 10px; display: block; }
+        
+        .btn-run { width: 100%; background: #f59e0b; color: #000; border: none; padding: 12px; font-weight: 700; border-radius: 4px; cursor: pointer; text-transform: uppercase; margin-top: 10px; }
+        .btn-run:hover { background: #fbbf24; }
+
+        .stat-box { background:#000; border:1px solid #333; padding:15px; border-radius:4px; text-align:center; }
+        .stat-val { font-size:28px; font-weight:700; font-family:'JetBrains Mono'; color:#fff; }
+        .log-row { background: rgba(255,255,255,0.02); padding: 10px; border-bottom: 1px solid #1e293b; font-family: 'JetBrains Mono'; font-size: 12px; }
+    </style>
+</head>
+<body>
+    
+    {% include 'nav.html' %}
+
+    <div class="container" style="padding-top:40px;">
+        <div class="header">
+            <a href="/suite" style="color: #94a3b8; text-decoration: none; font-size: 14px;">← Back to Suite</a>
+            <h1 style="margin-top: 10px;">MARKET SIMULATOR <span class="pill">BACKTEST ENGINE</span></h1>
+        </div>
+
+        <div class="sim-grid">
+            <div class="panel">
+                <div class="control-group">
+                    <label>DATE RANGE</label>
+                    <input type="date" id="startDate">
+                    <input type="date" id="endDate" style="margin-top:5px;">
+                </div>
+
+                <div class="divider"></div>
+                <span class="section-title">TRADE PLAN SCENARIO</span>
+
+                <div class="control-group">
+                    <label>TARGET TO TEST</label>
+                    <select id="targetType">
+                        <option value="pole">Measured Pole (Breakout - Breakdown)</option>
+                        <option value="t1">Market Radar Target 1 (Coming Soon)</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>ENTRY TRIGGER</label>
+                    <select id="entryType">
+                        <option value="15m_close">15-Minute Candle Close Outside Line</option>
+                        <option value="instant">Instant Execution (Touches Line)</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>STOP LOSS PLACEMENT</label>
+                    <select id="stopType">
+                        <option value="30m_range">Standard (Above/Below 30m Range)</option>
+                        <option value="15m_candle">Aggressive (Above/Below Entry 15m Candle)</option>
+                    </select>
+                </div>
+
+                <button onclick="runSim()" class="btn-run" id="runBtn">RUN SIMULATION</button>
+            </div>
+
+            <div class="panel">
+                <div id="loader" style="display:none; text-align:center; padding:50px; color:#94a3b8;">
+                    SIMULATING HISTORICAL TRADES...<br>
+                    <span style="font-size:10px; opacity:0.7;">APPLYING RADAR MATH TO PRICE ACTION</span>
+                </div>
+                
+                <div id="results" style="display:none;">
+                    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-bottom:20px;">
+                        <div class="stat-box">
+                            <div style="color:#94a3b8; font-size:10px; margin-bottom:5px;">WIN RATE</div>
+                            <div class="stat-val" id="btWinRate" style="color:#10b981;">0%</div>
+                        </div>
+                        <div class="stat-box">
+                            <div style="color:#94a3b8; font-size:10px; margin-bottom:5px;">WINS</div>
+                            <div class="stat-val" id="btWins">0</div>
+                        </div>
+                        <div class="stat-box">
+                            <div style="color:#94a3b8; font-size:10px; margin-bottom:5px;">LOSSES</div>
+                            <div class="stat-val" id="btLosses" style="color:#ef4444;">0</div>
+                        </div>
+                    </div>
+                    
+                    <h4 style="color:#94a3b8; margin-bottom:10px;">TRADE LOG</h4>
+                    <div id="btLogArea" style="height:450px; overflow-y:auto; border:1px solid #333; border-radius:4px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        window.onload = function() {
+            const t = new Date();
+            document.getElementById('endDate').valueAsDate = t;
+            const p = new Date(); p.setDate(t.getDate()-30); // Default to 30 days
+            document.getElementById('startDate').valueAsDate = p;
+        }
+
+        async function runSim() {
+            document.getElementById('runBtn').disabled = true;
+            document.getElementById('loader').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+
+            const payload = {
+                symbol: "BTCUSDT",
+                start_date_utc: document.getElementById('startDate').value,
+                end_date_utc: document.getElementById('endDate').value,
+                session_ids: ["us_ny_futures"],
+                target_type: document.getElementById('targetType').value,
+                entry_type: document.getElementById('entryType').value,
+                stop_type: document.getElementById('stopType').value
+            };
+
+            try {
+                // Point this to your new backend route!
+                const res = await fetch('/api/simulator/run', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                
+                if(!data.ok) throw new Error(data.error);
+
+                document.getElementById('btWinRate').innerText = data.win_rate + '%';
+                document.getElementById('btWins').innerText = data.total_wins;
+                document.getElementById('btLosses').innerText = data.total_losses;
+
+                let html = "";
+                data.log.forEach(r => {
+                    let color = r.status === 'WIN' ? '#10b981' : (r.status === 'LOSS' ? '#ef4444' : '#64748b');
+                    html += `
+                        <div class="log-row">
+                            <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                                <span style="color:#f59e0b; font-weight:700;">${r.date}</span>
+                                <span style="color:${color}; font-weight:bold;">${r.status}</span>
+                            </div>
+                            <div style="font-size:10px; color:#94a3b8;">${r.msg}</div>
+                        </div>
+                    `;
+                });
+                document.getElementById('btLogArea').innerHTML = html;
+                document.getElementById('results').style.display = 'block';
+
+            } catch(e) {
+                alert("Simulation Error: " + e.message);
+            } finally {
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('runBtn').disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
