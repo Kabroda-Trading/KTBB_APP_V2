@@ -5,9 +5,13 @@
 # Integrates EXTENDED MAGNET tier for wide gaps before hitting Exhaustion.
 # 100% of original execution math and flavor text is safely restored.
 # ==============================================================================
-import asyncio
+import os
 import json
+import asyncio
 import battlebox_pipeline
+import datetime
+import gspread
+from google.oauth2.service_account import Credentials
 
 TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
@@ -16,14 +20,12 @@ def _make_indicator_string(levels):
     return f"{levels.get('breakout_trigger',0)},{levels.get('breakdown_trigger',0)},{levels.get('daily_resistance',0)},{levels.get('daily_support',0)},{levels.get('range30m_high',0)},{levels.get('range30m_low',0)}"
 
 def _get_thresholds(symbol):
-    # Returns: (Min Gap %, Primal Max %, Exhaustion Max %, Allow Jailbreaks)
     if "BTC" in symbol: return 0.5, 1.5, 2.25, True
     if "ETH" in symbol: return 0.8, 2.5, 3.50, True
     if "SOL" in symbol: return 1.5, 4.0, 6.00, True
     return 0.8, 2.5, 3.5, False
 
 def _find_predator_stop(symbol, entry, direction, levels, verdict):
-    # 100% ORIGINAL STOP LOSS LOGIC RESTORED
     pred_h = float(levels.get("range30m_high", 0))
     pred_l = float(levels.get("range30m_low", 0))
 
@@ -69,7 +71,6 @@ def _eval_side(symbol, anchor, trigger, wall, is_inverted):
         return gap_pct, "MAGNET"
 
 def _get_plan(symbol, anchor, vector, tier, levels):
-    # 100% ORIGINAL TARGET LOGIC RESTORED
     plan = {"valid": False, "bias": vector, "entry": 0, "stop": 0, "targets": [0,0,0]}
     if "WAITING" in tier or "DEATH ZONE" in tier: return plan
     
@@ -102,7 +103,6 @@ def _make_key(plan, verdict, macro_bias, micro_bias):
     return f"{plan['bias']}|{clean_verdict}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}|{macro_bias}|{micro_bias}"
 
 def _generate_omni_roe(favored, fav_tier, macro_bias, micro_bias):
-    # 100% ORIGINAL FLAVOR TEXT MERGED WITH MACRO ALIGNMENT & EXTENDED MAGNETS
     bias_text = ""
     if favored == "NEUTRAL":
         return "MARKET NEUTRAL: 168h bias is flat. Stand down and wait for momentum."
@@ -143,11 +143,9 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias):
     dr = float(levels.get("daily_resistance", 0))
     ds = float(levels.get("daily_support", 0))
 
-    # Evaluate BOTH sides simultaneously
     l_gap, l_tier = _eval_side(symbol, anchor, bo, dr, (bo > dr and dr > 0))
     s_gap, s_tier = _eval_side(symbol, anchor, bd, ds, (bd < ds and ds > 0))
     
-    # 100% ORIGINAL SNIPER INTERRUPT LOGIC RESTORED
     d_ema20 = float(levels.get("daily_ema20", 0))
     d_ema30 = float(levels.get("daily_ema30", 0))
     d_ema50 = float(levels.get("daily_ema50", 0))
@@ -161,7 +159,6 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias):
     l_plan = _get_plan(symbol, anchor, "LONG", l_tier, levels)
     s_plan = _get_plan(symbol, anchor, "SHORT", s_tier, levels)
     
-    # Assign the Star based on 168h Micro momentum
     favored = "NEUTRAL"
     if micro_bias == "BULLISH": favored = "LONG"
     elif micro_bias == "BEARISH": favored = "SHORT"
@@ -182,6 +179,62 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias):
         "long": {"gap": l_gap, "tier": l_tier, "plan": l_plan, "key": _make_key(l_plan, l_tier, macro_bias, micro_bias)},
         "short": {"gap": s_gap, "tier": s_tier, "plan": s_plan, "key": _make_key(s_plan, s_tier, macro_bias, micro_bias)}
     }
+
+def log_btc_to_google_sheet(radar_item):
+    """
+    Takes the generated radar data, formats it, and appends it 
+    as a new row to the specified Google Sheet.
+    """
+    if radar_item.get("symbol") != "BTCUSDT":
+        return
+
+    try:
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        
+        google_creds_str = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+        
+        if not google_creds_str:
+            print("❌ Error: GOOGLE_CREDENTIALS_JSON environment variable is missing.")
+            return
+
+        creds_dict = json.loads(google_creds_str)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+
+        client = gspread.authorize(creds)
+        sheet = client.open("Market Radar Tracking").sheet1
+
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        favored = radar_item["favored"]
+        
+        plan_dir = "long" if favored == "LONG" else ("short" if favored == "SHORT" else "long")
+        tier = radar_item[plan_dir]["tier"]
+        plan = radar_item[plan_dir]["plan"]
+        
+        permission = "Yes" if ("MAGNET" in tier or "SNIPER" in tier or "JAILBREAK" in tier) else "No"
+
+        row_data = [
+            timestamp,                             
+            radar_item["symbol"],                  
+            radar_item["macro_bias"],              
+            radar_item["micro_bias"],              
+            favored,                               
+            tier,                                  
+            permission,                            
+            plan.get("entry", 0),                  
+            plan.get("stop", 0),                   
+            plan.get("targets", [0,0,0])[0],       
+            plan.get("targets", [0,0,0])[1],       
+            plan.get("targets", [0,0,0])[2]        
+        ]
+
+        sheet.append_row(row_data)
+        print(f"✅ Successfully logged {radar_item['symbol']} to Google Sheets.")
+
+    except Exception as e:
+        print(f"❌ Failed to log to Google Sheets: {e}")
 
 async def analyze_target(symbol, session_id="us_ny_futures"):
     data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
@@ -223,11 +276,17 @@ async def scan_sector(session_id="us_ny_futures"):
         micro_bias = context.get("micro_bias", "NEUTRAL")
 
         dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias)
-        radar_grid.append({
+        
+        radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,
             "indicator_string": _make_indicator_string(levels), "full_intel": json.dumps(res, default=str),
             **dossier
-        })
+        }
+        
+        radar_grid.append(radar_item)
+        
+        # We must call the logger here inside the loop!
+        log_btc_to_google_sheet(radar_item)
         
     radar_grid.sort(key=lambda x: x['sort_weight'], reverse=True)
     return radar_grid
