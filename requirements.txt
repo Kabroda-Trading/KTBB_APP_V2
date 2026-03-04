@@ -13,3 +13,5 @@ psycopg-binary==3.3.2
 pandas==2.2.0
 google-generativeai==0.8.3
 python-dotenv==1.0.0
+gspread
+google-auth
