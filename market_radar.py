@@ -183,7 +183,7 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias):
 def log_btc_to_google_sheet(radar_item):
     """
     Takes the generated radar data, formats it, and appends it 
-    as a new row to the specified Google Sheet.
+    as a new row ONLY if it hasn't already logged today.
     """
     if radar_item.get("symbol") != "BTCUSDT":
         return
@@ -206,7 +206,22 @@ def log_btc_to_google_sheet(radar_item):
         client = gspread.authorize(creds)
         sheet = client.open("Market Radar Tracking").sheet1
 
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # --- THE NEW GATEKEEPER LOGIC ---
+        # 1. Get today's date as a string (e.g., "2026-03-04")
+        now = datetime.datetime.now()
+        today_string = now.strftime("%Y-%m-%d")
+        
+        # 2. Grab all the dates currently in Column A of your spreadsheet
+        existing_dates = sheet.col_values(1)
+        
+        # 3. Check if today's date is already anywhere in that list
+        # We use a partial match because your sheet includes the time as well
+        if any(today_string in date_cell for date_cell in existing_dates):
+            print(f"⏭️ Already logged {radar_item['symbol']} for {today_string}. Skipping.")
+            return
+        # --------------------------------
+
+        timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
         favored = radar_item["favored"]
         
         plan_dir = "long" if favored == "LONG" else ("short" if favored == "SHORT" else "long")
@@ -235,7 +250,6 @@ def log_btc_to_google_sheet(radar_item):
 
     except Exception as e:
         print(f"❌ Failed to log to Google Sheets: {e}")
-
 async def analyze_target(symbol, session_id="us_ny_futures"):
     data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
     if data.get("status") == "ERROR": return {"ok": False}
