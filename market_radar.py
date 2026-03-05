@@ -236,6 +236,10 @@ def log_to_google_sheet(radar_item):
         plan = radar_item[plan_dir]["plan"]
         
         permission = "Yes" if ("MAGNET" in tier or "SNIPER" in tier or "JAILBREAK" in tier) else "No"
+        
+        # --- NEW: EXTRACT THE GAP PERCENTAGE ---
+        # Grabs the raw math gap, rounds it to 2 decimal places for clean viewing
+        gap_percentage = round(radar_item[plan_dir].get("gap", 0), 2)
 
         row_data = [
             timestamp,                             
@@ -249,7 +253,8 @@ def log_to_google_sheet(radar_item):
             plan.get("stop", 0),                   
             plan.get("targets", [0,0,0])[0],       
             plan.get("targets", [0,0,0])[1],       
-            plan.get("targets", [0,0,0])[2]        
+            plan.get("targets", [0,0,0])[2],
+            gap_percentage  # <--- ADDED TO THE END OF THE SHEET ROW
         ]
 
         sheet.append_row(row_data)
