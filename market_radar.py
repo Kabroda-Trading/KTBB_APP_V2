@@ -180,12 +180,13 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias):
         "short": {"gap": s_gap, "tier": s_tier, "plan": s_plan, "key": _make_key(s_plan, s_tier, macro_bias, micro_bias)}
     }
 
-def log_btc_to_google_sheet(radar_item):
+def log_to_google_sheet(radar_item):
     """
     Takes the generated radar data, formats it, and appends it 
-    as a new row ONLY if it hasn't already logged today.
+    as a new row ONLY if that specific symbol hasn't already logged today.
     """
-    if radar_item.get("symbol") != "BTCUSDT":
+    # Allow BTC, ETH, and SOL to pass through
+    if radar_item.get("symbol") not in ["BTCUSDT", "ETHUSDT", "SOLUSDT"]:
         return
 
     try:
@@ -206,20 +207,26 @@ def log_btc_to_google_sheet(radar_item):
         client = gspread.authorize(creds)
         sheet = client.open("Market Radar Tracking").sheet1
 
-        # --- THE NEW GATEKEEPER LOGIC ---
-        # 1. Get today's date as a string (e.g., "2026-03-04")
+        # --- UPGRADED GATEKEEPER FOR MULTIPLE SYMBOLS ---
         now = datetime.datetime.now()
         today_string = now.strftime("%Y-%m-%d")
         
-        # 2. Grab all the dates currently in Column A of your spreadsheet
+        # Pull down both Dates (Col A) and Symbols (Col B)
         existing_dates = sheet.col_values(1)
+        existing_symbols = sheet.col_values(2)
         
-        # 3. Check if today's date is already anywhere in that list
-        # We use a partial match because your sheet includes the time as well
-        if any(today_string in date_cell for date_cell in existing_dates):
+        already_logged = False
+        
+        # Check if we have a match for BOTH today's date AND the current symbol
+        for i in range(min(len(existing_dates), len(existing_symbols))):
+            if today_string in existing_dates[i] and existing_symbols[i] == radar_item["symbol"]:
+                already_logged = True
+                break
+                
+        if already_logged:
             print(f"⏭️ Already logged {radar_item['symbol']} for {today_string}. Skipping.")
             return
-        # --------------------------------
+        # ------------------------------------------------
 
         timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
         favored = radar_item["favored"]
@@ -250,6 +257,7 @@ def log_btc_to_google_sheet(radar_item):
 
     except Exception as e:
         print(f"❌ Failed to log to Google Sheets: {e}")
+
 async def analyze_target(symbol, session_id="us_ny_futures"):
     data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
     if data.get("status") == "ERROR": return {"ok": False}
@@ -299,8 +307,8 @@ async def scan_sector(session_id="us_ny_futures"):
         
         radar_grid.append(radar_item)
         
-        # We must call the logger here inside the loop!
-        log_btc_to_google_sheet(radar_item)
+        # Fixed the function call here to properly match the multi-symbol gatekeeper!
+        log_to_google_sheet(radar_item)
         
     radar_grid.sort(key=lambda x: x['sort_weight'], reverse=True)
     return radar_grid
