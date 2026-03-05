@@ -5,7 +5,7 @@ sqlalchemy==2.0.32
 jinja2==3.1.4
 argon2-cffi==23.1.0
 tzdata==2025.1
-ccxt
+ccxt==4.2.20
 itsdangerous==2.2.0
 starlette==0.38.6
 psycopg==3.3.2
