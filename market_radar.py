@@ -4,6 +4,7 @@
 # UPDATE: Scans BOTH Long and Short setups simultaneously.
 # Integrates EXTENDED MAGNET tier for wide gaps before hitting Exhaustion.
 # 100% of original execution math and flavor text is safely restored.
+# FIX: Setup math decoupled from live price. Locked to Phase 1 Triggers.
 # ==============================================================================
 import os
 import json
@@ -55,10 +56,13 @@ def _find_predator_stop(symbol, entry, direction, levels, verdict):
         
     return 0
 
-def _eval_side(symbol, anchor, trigger, wall, is_inverted):
-    if anchor == 0 or trigger == 0: return 0.0, "WAITING"
+# SURGICAL FIX: Removed live 'anchor' price. Math is now statically locked to the Phase 1 Trigger.
+def _eval_side(symbol, trigger, wall, is_inverted):
+    if trigger == 0: return 0.0, "WAITING"
     min_gap, primal_max, exhaust_max, allow_jb = _get_thresholds(symbol)
-    gap_pct = (abs(wall - trigger) / anchor) * 100
+    
+    # Gap percentage is permanently locked to the distance between Trigger and Wall
+    gap_pct = (abs(wall - trigger) / trigger) * 100
     
     if is_inverted:
         if gap_pct < min_gap: return gap_pct, "DEATH ZONE (TOO TIGHT)"
@@ -70,7 +74,8 @@ def _eval_side(symbol, anchor, trigger, wall, is_inverted):
         if gap_pct > primal_max: return gap_pct, "EXTENDED MAGNET"
         return gap_pct, "MAGNET"
 
-def _get_plan(symbol, anchor, vector, tier, levels):
+# SURGICAL FIX: Replaced 'anchor' with 'static_entry' to lock entry math
+def _get_plan(symbol, static_entry, vector, tier, levels):
     plan = {"valid": False, "bias": vector, "entry": 0, "stop": 0, "targets": [0,0,0]}
     if "WAITING" in tier or "DEATH ZONE" in tier: return plan
     
@@ -79,7 +84,7 @@ def _get_plan(symbol, anchor, vector, tier, levels):
     dr = float(levels.get("daily_resistance", 0))
     ds = float(levels.get("daily_support", 0))
     
-    entry_price = anchor if "SNIPER" in tier else (bo if vector == "LONG" else bd)
+    entry_price = static_entry if "SNIPER" in tier else (bo if vector == "LONG" else bd)
     stop_price = _find_predator_stop(symbol, entry_price, vector, levels, tier)
     
     if "SNIPER" in tier:
@@ -143,21 +148,24 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias):
     dr = float(levels.get("daily_resistance", 0))
     ds = float(levels.get("daily_support", 0))
 
-    l_gap, l_tier = _eval_side(symbol, anchor, bo, dr, (bo > dr and dr > 0))
-    s_gap, s_tier = _eval_side(symbol, anchor, bd, ds, (bd < ds and ds > 0))
+    # SURGICAL FIX: Gap calculation strictly uses the locked Triggers (bo & bd), entirely ignoring live price.
+    l_gap, l_tier = _eval_side(symbol, bo, dr, (bo > dr and dr > 0))
+    s_gap, s_tier = _eval_side(symbol, bd, ds, (bd < ds and ds > 0))
     
     d_ema20 = float(levels.get("daily_ema20", 0))
     d_ema30 = float(levels.get("daily_ema30", 0))
     d_ema50 = float(levels.get("daily_ema50", 0))
     
     if d_ema30 > 0:
-        if micro_bias == "BEARISH" and abs((anchor - d_ema30)/d_ema30) < 0.005 and anchor < d_ema50:
+        # SURGICAL FIX: Sniper check now evaluates if the static Phase 1 Trigger is touching the EMA. 
+        if micro_bias == "BEARISH" and bd > 0 and abs((bd - d_ema30)/d_ema30) < 0.005 and bd < d_ema50:
             s_tier, s_gap = "SNIPER", 100.0
-        if micro_bias == "BULLISH" and d_ema20 > 0 and abs((anchor - d_ema20)/d_ema20) < 0.005 and anchor > d_ema50:
+        if micro_bias == "BULLISH" and d_ema20 > 0 and bo > 0 and abs((bo - d_ema20)/d_ema20) < 0.005 and bo > d_ema50:
             l_tier, l_gap = "SNIPER", 100.0
             
-    l_plan = _get_plan(symbol, anchor, "LONG", l_tier, levels)
-    s_plan = _get_plan(symbol, anchor, "SHORT", s_tier, levels)
+    # SURGICAL FIX: Lock the entry plans using the static triggers instead of the live anchor.
+    l_plan = _get_plan(symbol, bo, "LONG", l_tier, levels)
+    s_plan = _get_plan(symbol, bd, "SHORT", s_tier, levels)
     
     favored = "NEUTRAL"
     if micro_bias == "BULLISH": favored = "LONG"
@@ -181,11 +189,6 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias):
     }
 
 def log_to_google_sheet(radar_item):
-    """
-    Takes the generated radar data, formats it, and appends it 
-    as a new row ONLY if that specific symbol hasn't already logged today.
-    """
-    # Allow BTC, ETH, and SOL to pass through
     if radar_item.get("symbol") not in ["BTCUSDT", "ETHUSDT", "SOLUSDT"]:
         return
 
@@ -207,24 +210,30 @@ def log_to_google_sheet(radar_item):
         client = gspread.authorize(creds)
         sheet = client.open("Market Radar Tracking").sheet1
 
-        # --- UPGRADED GATEKEEPER FOR MULTIPLE SYMBOLS ---
+        # --- BULLETPROOF GOOGLE SHEETS GATEKEEPER ---
+        # Checks multiple auto-formatting variants from Looker Studio to prevent duplicates.
         now = datetime.datetime.now()
-        today_string = now.strftime("%Y-%m-%d")
+        day_str = str(now.day)
+        today_iso = now.strftime("%Y-%m-%d")                       
+        today_slash = now.strftime("%m/%d/%Y")                     
+        today_text = now.strftime("%b ") + day_str + now.strftime(", %Y")  
+        today_text_padded = now.strftime("%b %d, %Y")              
         
-        # Pull down both Dates (Col A) and Symbols (Col B)
         existing_dates = sheet.col_values(1)
         existing_symbols = sheet.col_values(2)
         
         already_logged = False
         
-        # Check if we have a match for BOTH today's date AND the current symbol
         for i in range(min(len(existing_dates), len(existing_symbols))):
-            if today_string in existing_dates[i] and existing_symbols[i] == radar_item["symbol"]:
-                already_logged = True
-                break
+            date_cell = str(existing_dates[i])
+            if (today_iso in date_cell or today_slash in date_cell or 
+                today_text in date_cell or today_text_padded in date_cell):
+                if existing_symbols[i] == radar_item["symbol"]:
+                    already_logged = True
+                    break
                 
         if already_logged:
-            print(f"⏭️ Already logged {radar_item['symbol']} for {today_string}. Skipping.")
+            print(f"⏭️ Already logged {radar_item['symbol']} for today. Skipping duplicate.")
             return
         # ------------------------------------------------
 
@@ -236,9 +245,6 @@ def log_to_google_sheet(radar_item):
         plan = radar_item[plan_dir]["plan"]
         
         permission = "Yes" if ("MAGNET" in tier or "SNIPER" in tier or "JAILBREAK" in tier) else "No"
-        
-        # --- NEW: EXTRACT THE GAP PERCENTAGE ---
-        # Grabs the raw math gap, rounds it to 2 decimal places for clean viewing
         gap_percentage = round(radar_item[plan_dir].get("gap", 0), 2)
 
         row_data = [
@@ -254,7 +260,7 @@ def log_to_google_sheet(radar_item):
             plan.get("targets", [0,0,0])[0],       
             plan.get("targets", [0,0,0])[1],       
             plan.get("targets", [0,0,0])[2],
-            gap_percentage  # <--- ADDED TO THE END OF THE SHEET ROW
+            gap_percentage  
         ]
 
         sheet.append_row(row_data)
@@ -302,7 +308,7 @@ async def scan_sector(session_id="us_ny_futures"):
         macro_bias = context.get("macro_bias", "NEUTRAL")
         micro_bias = context.get("micro_bias", "NEUTRAL")
 
-        dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias)
+        dossier = _build_dossier(symbol=sym, anchor=price, levels=levels, macro_bias=macro_bias, micro_bias=micro_bias)
         
         radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,
@@ -311,8 +317,6 @@ async def scan_sector(session_id="us_ny_futures"):
         }
         
         radar_grid.append(radar_item)
-        
-        # Fixed the function call here to properly match the multi-symbol gatekeeper!
         log_to_google_sheet(radar_item)
         
     radar_grid.sort(key=lambda x: x['sort_weight'], reverse=True)
