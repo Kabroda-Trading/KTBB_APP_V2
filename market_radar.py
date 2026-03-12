@@ -4,8 +4,9 @@
 # UPDATE: Scans BOTH Long and Short setups simultaneously.
 # Integrates EXTENDED MAGNET tier for wide gaps before hitting Exhaustion.
 # 100% of original execution math and flavor text is safely restored.
-# FIX: Setup math decoupled from live price. Locked to Phase 1 Triggers.
-# EMA REMOVED: Daily EMA Sniper override ripped out per user request for pure gap math.
+# FIX 1: Setup math decoupled from live price. Locked to Phase 1 Triggers.
+# FIX 2: Daily EMA Sniper override ripped out per user request for pure gap math.
+# FIX 3: ETH stop loss upgraded to utilize 30m high/low structure safely.
 # ==============================================================================
 import os
 import json
@@ -37,11 +38,17 @@ def _find_predator_stop(symbol, entry, direction, levels, verdict):
         return 0
         
     if "ETH" in symbol:
+        eth_buffer = entry * 0.002
         if "JAILBREAK" in verdict: 
             return pred_l if direction == "LONG" and pred_l > 0 else (pred_h if direction == "SHORT" and pred_h > 0 else entry)
         else:
-            eth_buffer = entry * 0.002
-            return entry - eth_buffer if direction == "LONG" else entry + eth_buffer
+            # ETH now actively seeks the 30m High/Low just like BTC
+            if direction == "LONG":
+                if pred_l > 0 and pred_l < entry: return pred_l - eth_buffer
+                return entry - eth_buffer
+            elif direction == "SHORT":
+                if pred_h > 0 and pred_h > entry: return pred_h + eth_buffer
+                return entry + eth_buffer
 
     if "SNIPER" in verdict:
         if direction == "SHORT": return entry * 1.017
@@ -149,9 +156,6 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias):
     # Gap percentage is perfectly locked to the structural triggers
     l_gap, l_tier = _eval_side(symbol, bo, dr, (bo > dr and dr > 0))
     s_gap, s_tier = _eval_side(symbol, bd, ds, (bd < ds and ds > 0))
-    
-    # NOTE: Daily EMA 'Sniper' override logic has been completely removed per user request.
-    # The system will now strictly evaluate pure gap math (Magnet, Jailbreak, Death Zone).
 
     # Lock the entry plans using the static triggers
     l_plan = _get_plan(symbol, bo, "LONG", l_tier, levels)
