@@ -5,6 +5,7 @@
 # Integrates EXTENDED MAGNET tier for wide gaps before hitting Exhaustion.
 # 100% of original execution math and flavor text is safely restored.
 # FIX: Setup math decoupled from live price. Locked to Phase 1 Triggers.
+# EMA REMOVED: Daily EMA Sniper override ripped out per user request for pure gap math.
 # ==============================================================================
 import os
 import json
@@ -56,12 +57,10 @@ def _find_predator_stop(symbol, entry, direction, levels, verdict):
         
     return 0
 
-# SURGICAL FIX: Removed live 'anchor' price. Math is now statically locked to the Phase 1 Trigger.
 def _eval_side(symbol, trigger, wall, is_inverted):
     if trigger == 0: return 0.0, "WAITING"
     min_gap, primal_max, exhaust_max, allow_jb = _get_thresholds(symbol)
     
-    # Gap percentage is permanently locked to the distance between Trigger and Wall
     gap_pct = (abs(wall - trigger) / trigger) * 100
     
     if is_inverted:
@@ -74,7 +73,6 @@ def _eval_side(symbol, trigger, wall, is_inverted):
         if gap_pct > primal_max: return gap_pct, "EXTENDED MAGNET"
         return gap_pct, "MAGNET"
 
-# SURGICAL FIX: Replaced 'anchor' with 'static_entry' to lock entry math
 def _get_plan(symbol, static_entry, vector, tier, levels):
     plan = {"valid": False, "bias": vector, "entry": 0, "stop": 0, "targets": [0,0,0]}
     if "WAITING" in tier or "DEATH ZONE" in tier: return plan
@@ -148,22 +146,14 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias):
     dr = float(levels.get("daily_resistance", 0))
     ds = float(levels.get("daily_support", 0))
 
-    # SURGICAL FIX: Gap calculation strictly uses the locked Triggers (bo & bd), entirely ignoring live price.
+    # Gap percentage is perfectly locked to the structural triggers
     l_gap, l_tier = _eval_side(symbol, bo, dr, (bo > dr and dr > 0))
     s_gap, s_tier = _eval_side(symbol, bd, ds, (bd < ds and ds > 0))
     
-    d_ema20 = float(levels.get("daily_ema20", 0))
-    d_ema30 = float(levels.get("daily_ema30", 0))
-    d_ema50 = float(levels.get("daily_ema50", 0))
-    
-    if d_ema30 > 0:
-        # SURGICAL FIX: Sniper check now evaluates if the static Phase 1 Trigger is touching the EMA. 
-        if micro_bias == "BEARISH" and bd > 0 and abs((bd - d_ema30)/d_ema30) < 0.005 and bd < d_ema50:
-            s_tier, s_gap = "SNIPER", 100.0
-        if micro_bias == "BULLISH" and d_ema20 > 0 and bo > 0 and abs((bo - d_ema20)/d_ema20) < 0.005 and bo > d_ema50:
-            l_tier, l_gap = "SNIPER", 100.0
-            
-    # SURGICAL FIX: Lock the entry plans using the static triggers instead of the live anchor.
+    # NOTE: Daily EMA 'Sniper' override logic has been completely removed per user request.
+    # The system will now strictly evaluate pure gap math (Magnet, Jailbreak, Death Zone).
+
+    # Lock the entry plans using the static triggers
     l_plan = _get_plan(symbol, bo, "LONG", l_tier, levels)
     s_plan = _get_plan(symbol, bd, "SHORT", s_tier, levels)
     
@@ -210,8 +200,6 @@ def log_to_google_sheet(radar_item):
         client = gspread.authorize(creds)
         sheet = client.open("Market Radar Tracking").sheet1
 
-        # --- BULLETPROOF GOOGLE SHEETS GATEKEEPER ---
-        # Checks multiple auto-formatting variants from Looker Studio to prevent duplicates.
         now = datetime.datetime.now()
         day_str = str(now.day)
         today_iso = now.strftime("%Y-%m-%d")                       
@@ -235,7 +223,6 @@ def log_to_google_sheet(radar_item):
         if already_logged:
             print(f"⏭️ Already logged {radar_item['symbol']} for today. Skipping duplicate.")
             return
-        # ------------------------------------------------
 
         timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
         favored = radar_item["favored"]
