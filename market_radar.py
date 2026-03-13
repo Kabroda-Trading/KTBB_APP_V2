@@ -238,24 +238,46 @@ def log_to_google_sheet(radar_item):
         permission = "Yes" if ("MAGNET" in tier or "SNIPER" in tier or "JAILBREAK" in tier) else "No"
         gap_percentage = round(radar_item[plan_dir].get("gap", 0), 2)
 
+        # --- RAW DATA EXTRACTION ---
+        long_gap = round(radar_item.get("long", {}).get("gap", 0), 2)
+        short_gap = round(radar_item.get("short", {}).get("gap", 0), 2)
+        
+        # Safely unpack the raw structural levels
+        try:
+            bo, bd, dr, ds, r30h, r30l = radar_item.get("indicator_string", "0,0,0,0,0,0").split(',')
+        except:
+            bo = bd = dr = ds = r30h = r30l = 0
+
         row_data = [
-            timestamp,                             
-            radar_item["symbol"],                  
-            radar_item["macro_bias"],              
-            radar_item["micro_bias"],              
-            favored,                               
-            tier,                                  
-            permission,                            
-            plan.get("entry", 0),                  
-            plan.get("stop", 0),                   
-            plan.get("targets", [0,0,0])[0],       
-            plan.get("targets", [0,0,0])[1],       
-            plan.get("targets", [0,0,0])[2],
-            gap_percentage  
+            timestamp,                             # Col A
+            radar_item["symbol"],                  # Col B
+            radar_item["macro_bias"],              # Col C
+            radar_item["micro_bias"],              # Col D
+            favored,                               # Col E
+            tier,                                  # Col F
+            permission,                            # Col G
+            plan.get("entry", 0),                  # Col H
+            plan.get("stop", 0),                   # Col I
+            plan.get("targets", [0,0,0])[0],       # Col J
+            plan.get("targets", [0,0,0])[1],       # Col K
+            plan.get("targets", [0,0,0])[2],       # Col L
+            gap_percentage,                        # Col M
+            "",                                    # Col N (SKIPS "Trade Executed")
+            "",                                    # Col O (SKIPS "Target Reached")
+            "",                                    # Col P (SKIPS "Final Result")
+            "",                                    # Col Q (SKIPS "Setup Quality Notes")
+            long_gap,                              # Col R
+            short_gap,                             # Col S
+            r30h,                                  # Col T
+            r30l,                                  # Col U
+            bo,                                    # Col V
+            bd,                                    # Col W
+            dr,                                    # Col X
+            ds                                     # Col Y
         ]
 
         sheet.append_row(row_data)
-        print(f"✅ Successfully logged {radar_item['symbol']} to Google Sheets.")
+        print(f"✅ Successfully logged {radar_item['symbol']} and raw data dump to Google Sheets.")
 
     except Exception as e:
         print(f"❌ Failed to log to Google Sheets: {e}")
