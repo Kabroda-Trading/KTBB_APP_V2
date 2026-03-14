@@ -148,14 +148,19 @@ async def _run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids
                 
                 bias = _calculate_weekly_bias(df, anchor_ts)
 
+                # --- NEW SAFELY ADDED FUEL GAUGE MATH ---
+                bo = levels.get("breakout_trigger", 0)
+                bd = levels.get("breakdown_trigger", 0)
+                trigger_spread = ((bo - bd) / bd * 100) if bd and bd > 0 else 0
+
                 result_packet = {
                     "date": f"{actual_session_date} [{cfg['id']}]",
                     "price": calibration[0]["open"], 
                     "battlebox": {
                         "levels": {
                             "anchor_price": levels.get("anchor_price"),
-                            "breakout_trigger": levels.get("breakout_trigger"),       
-                            "breakdown_trigger": levels.get("breakdown_trigger"),      
+                            "breakout_trigger": bo,       
+                            "breakdown_trigger": bd,      
                             "daily_resistance": levels.get("daily_resistance"),       
                             "daily_support": levels.get("daily_support"),          
                             "range30m_high": levels.get("range30m_high"),    
@@ -163,7 +168,8 @@ async def _run_hybrid_analysis(symbol, raw_5m, start_date, end_date, session_ids
                             "structure_score": levels.get("structure_score", 0),
                             "slope": levels.get("slope", 0),
                             "daily_ema30": levels.get("daily_ema30", 0),
-                            "daily_ema50": levels.get("daily_ema50", 0)
+                            "daily_ema50": levels.get("daily_ema50", 0),
+                            "trigger_spread": round(trigger_spread, 2) # <-- ADDED HERE
                         },
                         "context": {
                             "weekly_force": bias
