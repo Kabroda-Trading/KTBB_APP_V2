@@ -26,7 +26,9 @@ class UserModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
-    username = Column(String(255), nullable=True)          
+    username = Column(String(255), nullable=True)
+    first_name = Column(String(255), nullable=True)        # <-- ADDED
+    last_name = Column(String(255), nullable=True)         # <-- ADDED
     tradingview_id = Column(String(255), nullable=True)    
     subscription_status = Column(String(50), default="inactive") 
     is_admin = Column(Boolean, default=False, nullable=False)
@@ -57,6 +59,17 @@ def init_db() -> None:
             
         try:
             conn.execute(text("ALTER TABLE users ADD COLUMN operator_flex BOOLEAN DEFAULT 0"))
+        except Exception:
+            pass # Column already exists
+
+        # --- NEW SAFE PATCHES FOR FIRST AND LAST NAME ---
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN first_name VARCHAR(255)"))
+        except Exception:
+            pass # Column already exists
+
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN last_name VARCHAR(255)"))
         except Exception:
             pass # Column already exists
 
