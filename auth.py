@@ -88,6 +88,8 @@ def register_action(
     new_user = UserModel(
         email=em,
         username=username,
+        first_name=first_name, # <-- HERE IS THE FIX FOR THE 500 ERROR!
+        last_name=last_name,   # <-- HERE IS THE FIX FOR THE 500 ERROR!
         password_hash=hash_password(password),
         subscription_status="inactive",
         is_admin=False
