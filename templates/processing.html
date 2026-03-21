@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kabroda | Secure Access</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        body { 
+            background-color: #050b14; 
+            color: #e2e8f0; 
+            font-family: 'Inter', sans-serif; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            min-height: 100vh; 
+            margin: 0; 
+            text-align: center;
+        }
+        .processing-card {
+            background: #0f1623;
+            padding: 50px 40px;
+            border-radius: 8px;
+            border: 1px solid rgba(6, 182, 212, 0.2);
+            box-shadow: 0 0 50px rgba(6, 182, 212, 0.1);
+            max-width: 400px;
+            width: 100%;
+        }
+        /* RADAR ANIMATION */
+        .radar {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: 2px solid rgba(6, 182, 212, 0.3);
+            margin: 0 auto 30px auto;
+            position: relative;
+            overflow: hidden;
+            background: radial-gradient(circle, rgba(6,182,212,0.1) 0%, rgba(5,11,20,0) 70%);
+        }
+        .radar::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 120px;
+            height: 120px;
+            background: conic-gradient(from 0deg, transparent 70%, rgba(6, 182, 212, 0.8) 100%);
+            transform-origin: 0 0;
+            animation: sweep 2s linear infinite;
+        }
+        .radar::after {
+            content: '';
+            position: absolute;
+            top: 50%; left: 0; right: 0;
+            height: 1px; background: rgba(6, 182, 212, 0.3);
+        }
+        .radar-v {
+            position: absolute;
+            left: 50%; top: 0; bottom: 0;
+            width: 1px; background: rgba(6, 182, 212, 0.3);
+        }
+        @keyframes sweep {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        h2 { font-family: 'JetBrains Mono', monospace; color: #06b6d4; margin-bottom: 10px; font-size: 20px; text-transform: uppercase; }
+        p { color: #94a3b8; font-size: 14px; line-height: 1.6; }
+        .console-text { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #64748b; margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+    <div class="processing-card">
+        <div class="radar">
+            <div class="radar-v"></div>
+        </div>
+        <h2>Initializing...</h2>
+        <p>Payment confirmed. Decrypting secure access and booting your BattleBox environment.</p>
+        <div class="console-text" id="consoleOutput">> Handshake initiated...</div>
+    </div>
+
+    <script>
+        // Fake terminal text for the premium feel
+        const logs = [
+            "> Verifying clearance...",
+            "> Synchronizing webhook data...",
+            "> Connection secured. Routing to Suite..."
+        ];
+        
+        let i = 0;
+        setInterval(() => {
+            if (i < logs.length) {
+                document.getElementById('consoleOutput').innerText = logs[i];
+                i++;
+            }
+        }, 800);
+
+        // The Magic Fix: Wait exactly 3.5 seconds, then drop them in the suite
+        setTimeout(() => {
+            window.location.href = "/suite";
+        }, 3500);
+    </script>
+</body>
+</html>
