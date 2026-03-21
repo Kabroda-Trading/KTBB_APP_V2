@@ -32,6 +32,7 @@ class UserModel(Base):
     last_name = Column(String(255), nullable=True)         
     tradingview_id = Column(String(255), nullable=True)    
     subscription_status = Column(String(50), default="inactive") 
+    tier = Column(String(50), default="basic", nullable=False)   # <-- AUDIT FIX: Added the missing tier column
     is_admin = Column(Boolean, default=False, nullable=False)
     operator_flex = Column(Boolean, default=False)         
     session_tz = Column(String(50), default="America/New_York") 
@@ -63,6 +64,8 @@ def init_db() -> None:
             conn.execute(text("ALTER TABLE users ADD COLUMN first_name VARCHAR(255)"))
         if 'last_name' not in existing_columns:
             conn.execute(text("ALTER TABLE users ADD COLUMN last_name VARCHAR(255)"))
+        if 'tier' not in existing_columns:                                                              # <-- AUDIT FIX
+            conn.execute(text("ALTER TABLE users ADD COLUMN tier VARCHAR(50) DEFAULT 'basic' NOT NULL"))
 
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
