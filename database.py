@@ -2,7 +2,7 @@
 import os
 from datetime import datetime
 from typing import Generator
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, create_engine, text
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, create_engine, text, inspect
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./kabroda.db")
@@ -47,29 +47,22 @@ class SystemLog(Base):
     resolved = Column(Boolean, default=False)
 
 def init_db() -> None:
-    """Creates tables and safely injects missing columns with STRICT logging."""
+    """Creates tables and safely injects missing columns using SQLAlchemy Inspector."""
     Base.metadata.create_all(bind=engine)
     
-    # Updated '0' to 'FALSE' to ensure Postgres compatibility
-    patches = [
-        "ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE NOT NULL",
-        "ALTER TABLE users ADD COLUMN operator_flex BOOLEAN DEFAULT FALSE",
-        "ALTER TABLE users ADD COLUMN first_name VARCHAR(255)",
-        "ALTER TABLE users ADD COLUMN last_name VARCHAR(255)"
-    ]
+    # The bulletproof way to check columns without causing database crash errors
+    inspector = inspect(engine)
+    existing_columns = [col['name'] for col in inspector.get_columns('users')]
     
-    for patch in patches:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(patch))
-                print(f"✅ DB PATCH SUCCESS: {patch}")
-        except Exception as e:
-            # We catch the error so the server doesn't crash, BUT we print it so we can see it!
-            error_str = str(e).lower()
-            if "duplicate column" in error_str or "already exists" in error_str:
-                print(f"⏩ DB PATCH SKIPPED (Already exists): {patch}")
-            else:
-                print(f"❌ DB PATCH FAILED: {patch} | EXACT ERROR: {e}")
+    with engine.begin() as conn:
+        if 'is_admin' not in existing_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0 NOT NULL"))
+        if 'operator_flex' not in existing_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN operator_flex BOOLEAN DEFAULT 0"))
+        if 'first_name' not in existing_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN first_name VARCHAR(255)"))
+        if 'last_name' not in existing_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN last_name VARCHAR(255)"))
 
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
