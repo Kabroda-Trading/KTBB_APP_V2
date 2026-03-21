@@ -309,3 +309,24 @@ async def simulator_run(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         traceback.print_exc()
         return JSONResponse({"ok": False, "error": str(e)})
+    # ---------------------------------------------------------
+# 🚨 SYSTEM DIAGNOSTIC AUTOPSY (CATCHES SILENT 500 ERRORS)
+# ---------------------------------------------------------
+from fastapi.responses import HTMLResponse
+import traceback
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    error_trace = traceback.format_exc()
+    print(f"CRITICAL CRASH:\n{error_trace}") # Forces it into the Render logs too
+    return HTMLResponse(
+        content=f"""
+        <div style="background-color: #0f172a; color: #ef4444; padding: 40px; font-family: 'JetBrains Mono', monospace; min-height: 100vh; box-sizing: border-box;">
+            <h1 style="border-bottom: 2px solid #ef4444; padding-bottom: 10px; margin-top:0;">🚨 FATAL SYSTEM CRASH 🚨</h1>
+            <p style="color: #cbd5e1; font-size: 14px;">The registration sequence failed. Here is the exact internal autopsy of the code:</p>
+            <pre style="background: #020617; padding: 20px; border: 1px solid #334155; border-radius: 8px; overflow-x: auto; font-size: 12px; line-height: 1.5;">{error_trace}</pre>
+        </div>
+        """,
+        status_code=500
+    )
+# ---------------------------------------------------------
