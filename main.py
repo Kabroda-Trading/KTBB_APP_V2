@@ -232,6 +232,53 @@ async def admin_roster_page(request: Request, db: Session = Depends(get_db)):
     ctx["users"] = users
     return _template_or_fallback(request, templates, "admin.html", ctx)
 
+@app.post("/admin/delete-user")
+async def admin_delete_user(request: Request, user_id: str = Form(...), db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"): return RedirectResponse("/suite")
+    
+    # Find the user by ID and delete them
+    user_to_delete = db.query(UserModel).filter(UserModel.id == int(user_id)).first()
+    if user_to_delete:
+        db.delete(user_to_delete)
+        db.commit()
+    
+    # Refresh the admin page
+    return RedirectResponse(url="/admin", status_code=303)
+
+@app.post("/admin/toggle-role")
+async def admin_toggle_role(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"): return JSONResponse({"ok": False, "error": "Unauthorized"})
+    
+    payload = await request.json()
+    target_id = payload.get("user_id")
+    
+    user_to_toggle = db.query(UserModel).filter(UserModel.id == int(target_id)).first()
+    if user_to_toggle:
+        user_to_toggle.is_admin = not user_to_toggle.is_admin
+        db.commit()
+        return JSONResponse({"ok": True})
+    return JSONResponse({"ok": False, "error": "User not found"})
+
+@app.post("/admin/reset-password-manual")
+async def admin_reset_password(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"): return JSONResponse({"ok": False, "error": "Unauthorized"})
+    
+    payload = await request.json()
+    target_id = payload.get("user_id")
+    new_password = payload.get("new_password")
+    
+    if not new_password: return JSONResponse({"ok": False, "error": "No password provided"})
+    
+    user = db.query(UserModel).filter(UserModel.id == int(target_id)).first()
+    if user:
+        user.password_hash = auth.hash_password(new_password)
+        db.commit()
+        return JSONResponse({"ok": True})
+    return JSONResponse({"ok": False, "error": "User not found"})
+
 # --- UNIFIED API ENDPOINTS (PIPELINE) ---
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
