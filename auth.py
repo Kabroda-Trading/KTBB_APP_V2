@@ -43,7 +43,14 @@ def ensure_bootstrap_admin(db: Session) -> None:
     if not admin_email or not admin_password: return
     existing = db.query(UserModel).filter(UserModel.email == admin_email).first()
     if existing: return
-    u = UserModel(email=admin_email, password_hash=hash_password(admin_password), is_admin=True)
+    
+    # AUDIT FIX: Added 'tier' to satisfy Postgres NOT NULL constraint
+    u = UserModel(
+        email=admin_email, 
+        password_hash=hash_password(admin_password), 
+        tier="admin", 
+        is_admin=True
+    )
     db.add(u)
     db.commit()
 
@@ -94,6 +101,7 @@ def register_action(
         last_name=last_name,   
         password_hash=hash_password(password),
         subscription_status="inactive",
+        tier="basic",            # <-- AUDIT FIX: Satisfies the Postgres NOT NULL constraint
         is_admin=False
     )
     
