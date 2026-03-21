@@ -27,8 +27,8 @@ class UserModel(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     username = Column(String(255), nullable=True)
-    first_name = Column(String(255), nullable=True)        # <-- ADDED
-    last_name = Column(String(255), nullable=True)         # <-- ADDED
+    first_name = Column(String(255), nullable=True)        
+    last_name = Column(String(255), nullable=True)         
     tradingview_id = Column(String(255), nullable=True)    
     subscription_status = Column(String(50), default="inactive") 
     is_admin = Column(Boolean, default=False, nullable=False)
@@ -47,31 +47,29 @@ class SystemLog(Base):
     resolved = Column(Boolean, default=False)
 
 def init_db() -> None:
-    """Creates tables and safely injects missing columns so existing users are never lost."""
+    """Creates tables and safely injects missing columns with STRICT logging."""
     Base.metadata.create_all(bind=engine)
     
-    # Safe schema patch for existing SQLite DBs without dropping tables
-    with engine.begin() as conn:
+    # Updated '0' to 'FALSE' to ensure Postgres compatibility
+    patches = [
+        "ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE NOT NULL",
+        "ALTER TABLE users ADD COLUMN operator_flex BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE users ADD COLUMN first_name VARCHAR(255)",
+        "ALTER TABLE users ADD COLUMN last_name VARCHAR(255)"
+    ]
+    
+    for patch in patches:
         try:
-            conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0 NOT NULL"))
-        except Exception:
-            pass # Column already exists
-            
-        try:
-            conn.execute(text("ALTER TABLE users ADD COLUMN operator_flex BOOLEAN DEFAULT 0"))
-        except Exception:
-            pass # Column already exists
-
-        # --- NEW SAFE PATCHES FOR FIRST AND LAST NAME ---
-        try:
-            conn.execute(text("ALTER TABLE users ADD COLUMN first_name VARCHAR(255)"))
-        except Exception:
-            pass # Column already exists
-
-        try:
-            conn.execute(text("ALTER TABLE users ADD COLUMN last_name VARCHAR(255)"))
-        except Exception:
-            pass # Column already exists
+            with engine.begin() as conn:
+                conn.execute(text(patch))
+                print(f"✅ DB PATCH SUCCESS: {patch}")
+        except Exception as e:
+            # We catch the error so the server doesn't crash, BUT we print it so we can see it!
+            error_str = str(e).lower()
+            if "duplicate column" in error_str or "already exists" in error_str:
+                print(f"⏩ DB PATCH SKIPPED (Already exists): {patch}")
+            else:
+                print(f"❌ DB PATCH FAILED: {patch} | EXACT ERROR: {e}")
 
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
