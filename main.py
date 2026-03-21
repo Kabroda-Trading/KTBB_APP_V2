@@ -356,6 +356,12 @@ async def simulator_run(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         traceback.print_exc()
         return JSONResponse({"ok": False, "error": str(e)})
+    
+@app.get("/processing")
+async def processing_route(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    return _template_or_fallback(request, templates, "processing.html", ctx)
+
     # ---------------------------------------------------------
 # 🚨 SYSTEM DIAGNOSTIC AUTOPSY (CATCHES SILENT 500 ERRORS)
 # ---------------------------------------------------------
