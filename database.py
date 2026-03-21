@@ -5,9 +5,10 @@ from typing import Generator
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, create_engine, text, inspect
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
+# Defaults to SQLite locally, but we MUST use Postgres on Render
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./kabroda.db")
 
-# Render postgres formatting fix
+# Render postgres formatting fix (Corrected for psycopg version 3)
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
 elif DATABASE_URL.startswith("postgresql://") and "+psycopg" not in DATABASE_URL:
@@ -50,15 +51,14 @@ def init_db() -> None:
     """Creates tables and safely injects missing columns using SQLAlchemy Inspector."""
     Base.metadata.create_all(bind=engine)
     
-    # The bulletproof way to check columns without causing database crash errors
     inspector = inspect(engine)
     existing_columns = [col['name'] for col in inspector.get_columns('users')]
     
     with engine.begin() as conn:
         if 'is_admin' not in existing_columns:
-            conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0 NOT NULL"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE NOT NULL"))
         if 'operator_flex' not in existing_columns:
-            conn.execute(text("ALTER TABLE users ADD COLUMN operator_flex BOOLEAN DEFAULT 0"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN operator_flex BOOLEAN DEFAULT FALSE"))
         if 'first_name' not in existing_columns:
             conn.execute(text("ALTER TABLE users ADD COLUMN first_name VARCHAR(255)"))
         if 'last_name' not in existing_columns:
