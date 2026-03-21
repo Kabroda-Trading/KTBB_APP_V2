@@ -7,9 +7,17 @@ from dataclasses import dataclass
 from typing import Optional
 from fastapi import HTTPException, status
 
-# Valid statuses that grant access
-# We added 'lifetime' just in case you manually grant that in the future.
-ACTIVE_STATUSES = {"active", "trialing", "lifetime"}
+# AUDIT FIX: Expanded the valid statuses to catch ALL possible Whop webhook signals
+ACTIVE_STATUSES = {
+    "active", 
+    "trialing", 
+    "lifetime", 
+    "valid", 
+    "paid", 
+    "approved",
+    "membership.active",
+    "pro"
+}
 
 @dataclass(frozen=True)
 class MembershipState:
@@ -21,10 +29,19 @@ def get_membership_state(user_model) -> MembershipState:
     """
     Checks if the user has a valid subscription status in the DB.
     """
-    # Safe check: ensures we don't crash if user_model is None
+    if not user_model:
+        return MembershipState(is_paid=False, plan=None, label="Inactive")
+
+    # Safely extract whatever words Whop wrote into the database
     sub_status = (getattr(user_model, "subscription_status", None) or "").strip().lower()
+    tier = (getattr(user_model, "tier", None) or "").strip().lower()
     
-    if sub_status not in ACTIVE_STATUSES:
+    # AUDIT FIX: We check BOTH subscription_status and tier. 
+    # If the webhook updated either one of these to a positive status, we let them in.
+    is_valid_sub = sub_status in ACTIVE_STATUSES
+    is_valid_tier = tier in {"pro", "premium", "lifetime", "active"}
+
+    if not (is_valid_sub or is_valid_tier):
         return MembershipState(is_paid=False, plan=None, label="Inactive")
     
     return MembershipState(is_paid=True, plan="pro", label="Kabroda Operator")
