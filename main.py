@@ -5,6 +5,7 @@
 import os
 import traceback
 from typing import Any, Dict, Optional
+from contextlib import asynccontextmanager # <-- ADDED FOR MODERN STARTUP
 
 from fastapi import FastAPI, Request, Form, HTTPException, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -26,7 +27,17 @@ from membership import get_membership_state, require_paid_access, ensure_symbol_
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-app = FastAPI(title="Kabroda BattleBox", version="10.3")
+# --- THE FIX: MODERN LIFESPAN STARTUP ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print(">>> BOOTING KABRODA SYSTEM: Initializing Database Schema...")
+    init_db()
+    yield
+    print(">>> SHUTTING DOWN KABRODA SYSTEM...")
+
+app = FastAPI(title="Kabroda BattleBox", version="10.3", lifespan=lifespan)
+# ----------------------------------------
+
 SECRET_KEY = os.getenv("SESSION_SECRET", "kabroda_prod_key_999")
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -51,10 +62,6 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 app.include_router(auth.router)
 app.include_router(billing.router, prefix="/billing")
-
-@app.on_event("startup")
-def _startup():
-    init_db()
 
 def _template_or_fallback(request: Request, templates: Jinja2Templates, name: str, context: Dict[str, Any]):
     try: 

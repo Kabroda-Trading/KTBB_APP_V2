@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
 from starlette.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-from database import get_db, UserModel, init_db
+from database import get_db, UserModel
+
+# NOTE: Removed 'init_db' from imports as it should only be handled by main.py at startup
 
 router = APIRouter()
 SESSION_KEY = "kabroda_user_id"
@@ -52,7 +54,7 @@ async def login_page(request: Request):
 
 @router.post("/login")
 def login_action(request: Request, email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
-    init_db()
+    # AUDIT FIX: Removed init_db() to prevent SQLite deadlocks.
     ensure_bootstrap_admin(db)
     em = (email or "").strip().lower()
     u = db.query(UserModel).filter(UserModel.email == em).first()
@@ -77,7 +79,7 @@ def register_action(
     password: str = Form(...), 
     db: Session = Depends(get_db)
 ):
-    init_db() 
+    # AUDIT FIX: Removed init_db() to prevent SQLite deadlocks.
     em = email.strip().lower()
     
     existing = db.query(UserModel).filter(UserModel.email == em).first()
@@ -88,8 +90,8 @@ def register_action(
     new_user = UserModel(
         email=em,
         username=username,
-        first_name=first_name, # <-- HERE IS THE FIX FOR THE 500 ERROR!
-        last_name=last_name,   # <-- HERE IS THE FIX FOR THE 500 ERROR!
+        first_name=first_name, 
+        last_name=last_name,   
         password_hash=hash_password(password),
         subscription_status="inactive",
         is_admin=False
@@ -102,7 +104,7 @@ def register_action(
     # Auto-login the user immediately
     request.session[SESSION_KEY] = int(new_user.id)
     
-    # THE FIX: Route them directly to the Whop Checkout link!
+    # Route them directly to the Whop Checkout link!
     return RedirectResponse(url="https://whop.com/checkout/plan_TtQ6FGNPxooMc", status_code=303)
 
 @router.get("/logout")
