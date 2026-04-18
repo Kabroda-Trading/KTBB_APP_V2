@@ -1,6 +1,6 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v8.5 (TradingView Weekly Sync)
+# KABRODA BATTLEBOX PIPELINE — v8.6 (TradingView Weekly Sync + CoinGlass Oracle)
 # ==============================================================================
 # Purpose:
 # - The single "Moment of Truth" for each session/day
@@ -9,6 +9,7 @@
 # - Feeds post-lock candles into structure_state_engine (law layer)
 # - NEW (v8.5): Synthesizes Monday-Sunday Macro Bias from 1D candles to
 #   bypass KuCoin's native Thursday 1W offset.
+# - NEW (v8.6): Phase 1 CoinGlass Liquidity Gravity Injection.
 # ==============================================================================
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import ccxt.async_support as ccxt
 import session_manager
 import sse_engine
 import structure_state_engine
+import liquidity_oracle # <--- NEW INJECTION: Phase 1 Oracle
 
 # Public re-export for compatibility
 SESSION_CONFIGS = session_manager.SESSION_CONFIGS
@@ -432,6 +434,11 @@ async def get_live_battlebox(
                         "context": {},
                     },
                 }
+            
+            # --- PHASE 1 INJECTION: COINGLASS ORACLE FETCH ---
+            liquidity_data = await liquidity_oracle.fetch_liquidation_magnets(symbol)
+            pkt["liquidity_walls"] = liquidity_data
+            
             _LOCKED_PACKETS[session_key] = pkt
 
         pkt = _LOCKED_PACKETS[session_key]
@@ -463,6 +470,7 @@ async def get_live_battlebox(
             "context": pkt.get("context", {}),
             "htf_shelves": pkt.get("htf_shelves", {}),
             "meta": pkt.get("meta", {}),
+            "liquidity_walls": pkt.get("liquidity_walls", {}) # <--- PHASE 1 SECURED DATA 
         },
         "candles": post_lock
     }
@@ -515,6 +523,9 @@ async def get_session_review(
     if "error" in pkt:
         return {"ok": False, "error": pkt["error"]}
 
+    # --- PHASE 1 INJECTION: HISTORICAL FETCH ---
+    liquidity_data = await liquidity_oracle.fetch_liquidation_magnets(symbol)
+
     return {
         "ok": True,
         "mode": "LOCKED",
@@ -530,6 +541,7 @@ async def get_session_review(
         "context": pkt.get("context", {}),
         "htf_shelves": pkt.get("htf_shelves", {}),
         "meta": pkt.get("meta", {}),
+        "liquidity_walls": liquidity_data, # <--- PHASE 1 SECURED DATA
         "range_30m": {
             "high": float(pkt["levels"].get("range30m_high", 0.0)),
             "low": float(pkt["levels"].get("range30m_low", 0.0)),
