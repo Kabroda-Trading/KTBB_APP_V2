@@ -81,7 +81,7 @@
         
         .radar-row { 
             display: grid; 
-            grid-template-columns: 1fr 2fr 1fr; /* Updated for Omni-Directional UI */
+            grid-template-columns: 1fr 2fr 1fr; 
             background: var(--panel); 
             border: 1px solid var(--border); 
             padding: 20px 30px; 
@@ -221,7 +221,7 @@
         .cockpit { 
             display: grid; 
             gap: 20px; 
-            grid-template-columns: 350px 1fr 600px; /* Widened to fit both long and short paths */
+            grid-template-columns: 350px 1fr 600px; 
             grid-template-rows: auto 1fr; 
             grid-template-areas: "header header header" "left center right"; 
         }
@@ -398,7 +398,7 @@
             opacity: 1; 
             color: var(--white); 
         }
-</style>
+    </style>
 </head>
 <body>
     {% include 'nav.html' %}
@@ -406,7 +406,7 @@
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v10.2</span></h2>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v10.3</span></h2>
             </div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
@@ -528,6 +528,7 @@
                                 <span style="color:var(--gray); font-size:12px;">TARGET 3</span>
                                 <div><span id="pT3L" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT3L')" title="Copy">📋</button></div>
                             </div>
+                            <div id="oNoteL" style="font-size:11px; color:#eab308; text-align:right; margin-top:8px;"></div>
                         </div>
 
                         <div style="flex:1; border-left: 1px solid var(--border); padding-left: 30px;">
@@ -558,6 +559,7 @@
                                 <span style="color:var(--gray); font-size:12px;">TARGET 3</span>
                                 <div><span id="pT3S" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT3S')" title="Copy">📋</button></div>
                             </div>
+                            <div id="oNoteS" style="font-size:11px; color:#eab308; text-align:right; margin-top:8px;"></div>
                         </div>
 
                     </div>
@@ -676,6 +678,7 @@
 
             // Render LONG side
             document.getElementById('keyL').value = d.long.key;
+            document.getElementById('oNoteL').innerText = d.long.oracle_note || '';
             if(d.long.plan.valid) {
                 document.getElementById('pEntL').innerText = d.long.plan.entry.toFixed(2);
                 document.getElementById('pStpL').innerText = d.long.plan.stop.toFixed(2);
@@ -690,6 +693,7 @@
 
             // Render SHORT side
             document.getElementById('keyS').value = d.short.key;
+            document.getElementById('oNoteS').innerText = d.short.oracle_note || '';
             if(d.short.plan.valid) {
                 document.getElementById('pEntS').innerText = d.short.plan.entry.toFixed(2);
                 document.getElementById('pStpS').innerText = d.short.plan.stop.toFixed(2);
@@ -790,11 +794,23 @@
                         sGap = t.short.gap.toFixed(2) + '%';
                     }
                     
+                    // --- PHASE 2 INJECTIONS ---
                     let lStar = '';
-                    if (t.favored === 'LONG') { lStar = '⭐'; }
+                    if (t.oracle_star === 'LONG') { 
+                        lStar = '<span style="font-size:12px; background:rgba(234, 179, 8, 0.2); color:#eab308; padding:2px 4px; border-radius:4px; margin-left:8px;">⭐ LIQUIDITY PULL</span>'; 
+                    }
                     
                     let sStar = '';
-                    if (t.favored === 'SHORT') { sStar = '⭐'; }
+                    if (t.oracle_star === 'SHORT') { 
+                        sStar = '<span style="font-size:12px; background:rgba(234, 179, 8, 0.2); color:#eab308; padding:2px 4px; border-radius:4px; margin-left:8px;">⭐ LIQUIDITY PULL</span>'; 
+                    }
+
+                    let oracleBadge = '';
+                    if (t.liquidity_status === 'SUCCESS') {
+                        oracleBadge = '<span style="color:#eab308; font-size:11px; font-weight:bold; border:1px solid #eab308; padding:2px 6px; border-radius:4px;">🟢 ORACLE SYNCED</span>';
+                    } else {
+                        oracleBadge = '<span style="color:#64748b; font-size:11px; border:1px solid #64748b; padding:2px 6px; border-radius:4px;">⚪ ORACLE STANDBY</span>';
+                    }
 
                     let borderTheme = t.color_code;
                     
@@ -807,7 +823,10 @@
                     html += `
                     <div class="radar-row border-${borderTheme}">
                         <div>
-                            <div><span class="sym-name">${t.symbol}</span></div>
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <span class="sym-name">${t.symbol}</span>
+                                ${oracleBadge}
+                            </div>
                             <div style="margin-top: 6px; display: flex; gap: 8px;">
                                 <span style="font-size:10px; padding:2px 6px; border-radius:4px; font-weight:800; background:${macBg}; color:${macColor}; border:1px solid ${macBorder}">MACRO: ${t.macro_bias}</span>
                                 <span style="font-size:10px; padding:2px 6px; border-radius:4px; font-weight:800; background:${micBg}; color:${micColor}; border:1px solid ${micBorder}">MICRO: ${t.micro_bias}</span>

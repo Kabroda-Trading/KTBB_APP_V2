@@ -1,12 +1,10 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v10.2 (OMNI-DIRECTIONAL + EXTENDED GAPS)
-# UPDATE: Scans BOTH Long and Short setups simultaneously.
-# Integrates EXTENDED MAGNET tier for wide gaps before hitting Exhaustion.
-# 100% of original execution math and flavor text is safely restored.
-# FIX 1: Setup math decoupled from live price. Locked to Phase 1 Triggers.
-# FIX 2: Daily EMA Sniper override ripped out per user request for pure gap math.
-# FIX 3: ETH stop loss upgraded to utilize 30m high/low structure safely.
+# KABRODA MARKET RADAR v10.3 (PHASE 2 COINGLASS EVALUATION)
+# UPDATE: Integrates Liquidity Oracle data locked by Phase 1.
+# - Parses raw liquidity JSON to find massive Asks/Bids.
+# - Assigns the ⭐ (Directional Star) to the heaviest gravitational pull.
+# - Automatically adjusts Stop Losses to hide behind liquidity walls.
 # ==============================================================================
 import os
 import json
@@ -42,7 +40,6 @@ def _find_predator_stop(symbol, entry, direction, levels, verdict):
         if "JAILBREAK" in verdict: 
             return pred_l if direction == "LONG" and pred_l > 0 else (pred_h if direction == "SHORT" and pred_h > 0 else entry)
         else:
-            # ETH now actively seeks the 30m High/Low just like BTC
             if direction == "LONG":
                 if pred_l > 0 and pred_l < entry: return pred_l - eth_buffer
                 return entry - eth_buffer
@@ -107,6 +104,52 @@ def _get_plan(symbol, static_entry, vector, tier, levels):
     plan.update({"valid": True, "entry": entry_price, "stop": stop_price, "targets": [t1, t2, t3]})
     return plan
 
+# --- PHASE 2 INJECTION: ORACLE EVALUATOR ---
+def _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls):
+    oracle_star = "NONE"
+    l_note = "⚪ Oracle Standby"
+    s_note = "⚪ Oracle Standby"
+    
+    status = liquidity_walls.get("status", "NONE")
+    
+    if status == "SUCCESS":
+        raw = liquidity_walls.get("raw_data", {})
+        try:
+            # Defensively extract asks (above) and bids (below)
+            asks = raw.get("asks", [])
+            bids = raw.get("bids", [])
+            
+            # Find strongest magnet within 5% radius
+            max_ask = max([a for a in asks if a[0] < anchor * 1.05], key=lambda x: x[1], default=[0,0])
+            max_bid = max([b for b in bids if b[0] > anchor * 0.95], key=lambda x: x[1], default=[0,0])
+            
+            # Star Assignment: Requires 50% dominance in liquidity
+            if max_ask[1] > (max_bid[1] * 1.5):
+                oracle_star = "LONG"
+            elif max_bid[1] > (max_ask[1] * 1.5):
+                oracle_star = "SHORT"
+                
+            # Stop Loss Shielding
+            if l_plan["valid"] and max_bid[0] > 0:
+                if l_plan["stop"] > max_bid[0]:
+                    l_plan["stop"] = max_bid[0] * 0.999
+                    l_note = f"⚠️ VULNERABLE STOP SHIFTED: Behind {max_bid[0]} Wall"
+                else:
+                    l_note = "🛡️ STOP SECURE: Protected by Lower Wall"
+                    
+            if s_plan["valid"] and max_ask[0] > 0:
+                if s_plan["stop"] < max_ask[0]:
+                    s_plan["stop"] = max_ask[0] * 1.001
+                    s_note = f"⚠️ VULNERABLE STOP SHIFTED: Behind {max_ask[0]} Wall"
+                else:
+                    s_note = "🛡️ STOP SECURE: Protected by Upper Wall"
+                    
+        except Exception as e:
+            print(f"Oracle Eval Error: {e}")
+            
+    return oracle_star, l_note, s_note
+# -------------------------------------------
+
 def _make_key(plan, verdict, macro_bias, micro_bias):
     if not plan["valid"]: return f"NEUTRAL|HOLD|0|0|0|0|0|{macro_bias}|{micro_bias}"
     clean_verdict = verdict.split(" (")[0]
@@ -118,48 +161,49 @@ def _generate_omni_roe(favored, fav_tier, macro_bias, micro_bias):
         return "MARKET NEUTRAL: 168h bias is flat. Stand down and wait for momentum."
     elif favored == "LONG":
         if macro_bias == "BEARISH":
-            bias_text = "⚠ COUNTER-TREND LONG: Micro is UP, but Macro is DOWN. Take strict profits at Target 2. DO NOT leave runners."
+            bias_text = "⚠ COUNTER-TREND LONG: Micro is UP, but Macro is DOWN. Strict targets."
         elif macro_bias == "BULLISH":
-            bias_text = "🟢 FULL ALIGNMENT: Both Macro and Micro are BULLISH. Wind is at your back. Runners permitted."
+            bias_text = "🟢 FULL ALIGNMENT: Both Macro and Micro are BULLISH. Runners permitted."
         else: 
             bias_text = "Micro momentum is Bullish. Execute strictly level-to-level."
     elif favored == "SHORT":
         if macro_bias == "BULLISH":
-            bias_text = "⚠ COUNTER-TREND SHORT: Micro is DOWN, but Macro is UP. Take strict profits at Target 2. DO NOT leave runners."
+            bias_text = "⚠ COUNTER-TREND SHORT: Micro is DOWN, but Macro is UP. Strict targets."
         elif macro_bias == "BEARISH":
-            bias_text = "🔴 FULL ALIGNMENT: Both Macro and Micro are BEARISH. Wind is at your back. Runners permitted."
+            bias_text = "🔴 FULL ALIGNMENT: Both Macro and Micro are BEARISH. Runners permitted."
         else: 
             bias_text = "Micro momentum is Bearish. Execute strictly level-to-level."
 
     struct_text = ""
     if "CHOP" in fav_tier or "TOO TIGHT" in fav_tier:
-        struct_text = "WARNING: CHOP ZONE. Gap is too small. High risk of algorithm wicks and mean-reversion. STAND DOWN."
+        struct_text = "WARNING: CHOP ZONE. Gap is too small. STAND DOWN."
     elif "EXHAUSTION" in fav_tier:
-        struct_text = "WARNING: EXHAUSTION. The gap is massive. Price has likely exhausted its daily ATR. STAND DOWN."
+        struct_text = "WARNING: EXHAUSTION. Gap is massive. STAND DOWN."
     elif "JAILBREAK" in fav_tier:
-        struct_text = "CRITICAL STRUCTURAL FAILURE. Triggers are OUTSIDE walls with velocity room. Trail stop loosely."
+        struct_text = "CRITICAL STRUCTURAL FAILURE. Triggers are OUTSIDE walls. Trail stop loosely."
     elif fav_tier == "EXTENDED MAGNET":
-        struct_text = "CAUTION: EXTENDED RUNWAY. Gap exceeds Primal Zone parameters. Probability is lower. Secure profits early."
+        struct_text = "CAUTION: EXTENDED RUNWAY. Secure profits early."
     elif fav_tier == "MAGNET":
-        struct_text = "STANDARD OPERATION. Gap is in the exact mathematical sweet spot. Take profit strictly at the Wall."
+        struct_text = "STANDARD OPERATION. Gap is in sweet spot. Take profit at the Wall."
     elif "SNIPER" in fav_tier:
-        struct_text = "CRITICAL ALPHA. Price is touching the Daily EMA with momentum alignment. Execute."
+        struct_text = "CRITICAL ALPHA. Price is touching Daily EMA. Execute."
 
     return f"{bias_text} | {struct_text}"
 
-def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias):
+def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, liquidity_walls):
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
     dr = float(levels.get("daily_resistance", 0))
     ds = float(levels.get("daily_support", 0))
 
-    # Gap percentage is perfectly locked to the structural triggers
     l_gap, l_tier = _eval_side(symbol, bo, dr, (bo > dr and dr > 0))
     s_gap, s_tier = _eval_side(symbol, bd, ds, (bd < ds and ds > 0))
 
-    # Lock the entry plans using the static triggers
     l_plan = _get_plan(symbol, bo, "LONG", l_tier, levels)
     s_plan = _get_plan(symbol, bd, "SHORT", s_tier, levels)
+    
+    # Run Phase 2 Oracle Evaluation
+    oracle_star, l_note, s_note = _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls)
     
     favored = "NEUTRAL"
     if micro_bias == "BULLISH": favored = "LONG"
@@ -178,131 +222,57 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias):
 
     return {
         "favored": favored, "color_code": color, "sort_weight": sort_weight, "roe": roe_text,
-        "long": {"gap": l_gap, "tier": l_tier, "plan": l_plan, "key": _make_key(l_plan, l_tier, macro_bias, micro_bias)},
-        "short": {"gap": s_gap, "tier": s_tier, "plan": s_plan, "key": _make_key(s_plan, s_tier, macro_bias, micro_bias)}
+        "oracle_star": oracle_star, 
+        "liquidity_status": liquidity_walls.get("status", "NONE"),
+        "long": {"gap": l_gap, "tier": l_tier, "plan": l_plan, "key": _make_key(l_plan, l_tier, macro_bias, micro_bias), "oracle_note": l_note},
+        "short": {"gap": s_gap, "tier": s_tier, "plan": s_plan, "key": _make_key(s_plan, s_tier, macro_bias, micro_bias), "oracle_note": s_note}
     }
 
 def log_to_google_sheet(radar_item):
     if radar_item.get("symbol") not in ["BTCUSDT", "ETHUSDT", "SOLUSDT"]:
         return
-
     try:
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         google_creds_str = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-        
-        if not google_creds_str:
-            print("❌ Error: GOOGLE_CREDENTIALS_JSON environment variable is missing.")
-            return
+        if not google_creds_str: return
 
         creds_dict = json.loads(google_creds_str)
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-
         client = gspread.authorize(creds)
         sheet = client.open("Market Radar Tracking").sheet1
 
         now = datetime.datetime.now()
-        day_str = str(now.day)
         today_iso = now.strftime("%Y-%m-%d")                       
-        today_slash = now.strftime("%m/%d/%Y")                     
-        today_text = now.strftime("%b ") + day_str + now.strftime(", %Y")  
-        today_text_padded = now.strftime("%b %d, %Y")              
         
         existing_dates = sheet.col_values(1)
         existing_symbols = sheet.col_values(2)
         
-        already_logged = False
-        
         for i in range(min(len(existing_dates), len(existing_symbols))):
-            date_cell = str(existing_dates[i])
-            if (today_iso in date_cell or today_slash in date_cell or 
-                today_text in date_cell or today_text_padded in date_cell):
-                if existing_symbols[i] == radar_item["symbol"]:
-                    already_logged = True
-                    break
-                
-        if already_logged:
-            print(f"⏭️ Already logged {radar_item['symbol']} for today. Skipping duplicate.")
-            return
+            if today_iso in str(existing_dates[i]) and existing_symbols[i] == radar_item["symbol"]:
+                return
 
         timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
         favored = radar_item["favored"]
-        
         plan_dir = "long" if favored == "LONG" else ("short" if favored == "SHORT" else "long")
         tier = radar_item[plan_dir]["tier"]
         plan = radar_item[plan_dir]["plan"]
-        
         permission = "Yes" if ("MAGNET" in tier or "SNIPER" in tier or "JAILBREAK" in tier) else "No"
-        gap_percentage = round(radar_item[plan_dir].get("gap", 0), 2)
 
-        # --- RAW DATA EXTRACTION ---
-        long_gap = round(radar_item.get("long", {}).get("gap", 0), 2)
-        short_gap = round(radar_item.get("short", {}).get("gap", 0), 2)
-        
-        # Safely unpack the raw structural levels
         try:
             bo, bd, dr, ds, r30h, r30l = radar_item.get("indicator_string", "0,0,0,0,0,0").split(',')
         except:
             bo = bd = dr = ds = r30h = r30l = 0
 
         row_data = [
-            timestamp,                             # Col A
-            radar_item["symbol"],                  # Col B
-            radar_item["macro_bias"],              # Col C
-            radar_item["micro_bias"],              # Col D
-            favored,                               # Col E
-            tier,                                  # Col F
-            permission,                            # Col G
-            plan.get("entry", 0),                  # Col H
-            plan.get("stop", 0),                   # Col I
-            plan.get("targets", [0,0,0])[0],       # Col J
-            plan.get("targets", [0,0,0])[1],       # Col K
-            plan.get("targets", [0,0,0])[2],       # Col L
-            gap_percentage,                        # Col M
-            "",                                    # Col N (SKIPS "Trade Executed")
-            "",                                    # Col O (SKIPS "Target Reached")
-            "",                                    # Col P (SKIPS "Final Result")
-            "",                                    # Col Q (SKIPS "Setup Quality Notes")
-            long_gap,                              # Col R
-            short_gap,                             # Col S
-            r30h,                                  # Col T
-            r30l,                                  # Col U
-            bo,                                    # Col V
-            bd,                                    # Col W
-            dr,                                    # Col X
-            ds                                     # Col Y
+            timestamp, radar_item["symbol"], radar_item["macro_bias"], radar_item["micro_bias"], favored, tier, permission,
+            plan.get("entry", 0), plan.get("stop", 0), plan.get("targets", [0,0,0])[0], plan.get("targets", [0,0,0])[1], plan.get("targets", [0,0,0])[2],
+            round(radar_item[plan_dir].get("gap", 0), 2), "", "", "", "", 
+            round(radar_item.get("long", {}).get("gap", 0), 2), round(radar_item.get("short", {}).get("gap", 0), 2),
+            r30h, r30l, bo, bd, dr, ds 
         ]
-
         sheet.append_row(row_data)
-        print(f"✅ Successfully logged {radar_item['symbol']} and raw data dump to Google Sheets.")
-
     except Exception as e:
         print(f"❌ Failed to log to Google Sheets: {e}")
-
-async def analyze_target(symbol, session_id="us_ny_futures"):
-    data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
-    if data.get("status") == "ERROR": return {"ok": False}
-    if data.get("status") == "CALIBRATING": return {"ok": True, "result": {"status": "CALIBRATING"}}
-
-    price = float(data.get("price", 0))
-    levels = data.get("battlebox", {}).get("levels", {})
-    context = data.get("battlebox", {}).get("context", {})
-    macro_bias = context.get("macro_bias", "NEUTRAL")
-    micro_bias = context.get("micro_bias", "NEUTRAL")
-
-    dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias)
-    
-    return {
-        "ok": True,
-        "result": {
-            "symbol": symbol, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,
-            "levels": levels, "indicator_string": _make_indicator_string(levels),
-            "full_intel": json.dumps(data, default=str), **dossier
-        }
-    }
 
 async def scan_sector(session_id="us_ny_futures"):
     radar_grid = []
@@ -318,10 +288,11 @@ async def scan_sector(session_id="us_ny_futures"):
         price = float(res.get("price", 0))
         levels = res.get("battlebox", {}).get("levels", {})
         context = res.get("battlebox", {}).get("context", {})
+        liquidity_walls = res.get("battlebox", {}).get("liquidity_walls", {})
         macro_bias = context.get("macro_bias", "NEUTRAL")
         micro_bias = context.get("micro_bias", "NEUTRAL")
 
-        dossier = _build_dossier(symbol=sym, anchor=price, levels=levels, macro_bias=macro_bias, micro_bias=micro_bias)
+        dossier = _build_dossier(symbol=sym, anchor=price, levels=levels, macro_bias=macro_bias, micro_bias=micro_bias, liquidity_walls=liquidity_walls)
         
         radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,
