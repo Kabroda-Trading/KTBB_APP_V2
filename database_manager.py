@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 raw_url = os.getenv("DATABASE_URL", "")
 DB_URL = raw_url.replace("postgresql+psycopg://", "postgresql://") if raw_url else None
 
-async def init_db():
+async def init_db_async():
     """
     Called on startup to ensure the state table exists.
     """
@@ -38,7 +38,7 @@ async def init_db():
         await conn.close()
         print("[DB SUCCESS] Campaign State table verified and locked.")
     except Exception as e:
-        print(f"[DB ERROR] Failed to initialize database: {e}")
+        print(f"[DB ERROR] Failed to initialize async database: {e}")
 
 async def get_campaign_state(symbol: str) -> dict:
     """
@@ -72,8 +72,8 @@ async def get_campaign_state(symbol: str) -> dict:
 
 async def update_campaign_state(symbol: str, bias: str, target_price: float, status: str):
     """
-    Upserts the campaign state. If the symbol exists, it overwrites it.
-    Statuses: ACTIVE, COMPLETED, INVALIDATED
+        Upserts the campaign state. If the symbol exists, it overwrites it.
+        Statuses: ACTIVE, COMPLETED, INVALIDATED
     """
     if not DB_URL:
         return
