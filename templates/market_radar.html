@@ -80,7 +80,7 @@
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v10.4</span></h2>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v10.5</span></h2>
             </div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
         </div>
@@ -206,6 +206,12 @@
                     if (t.micro_bias === 'BULLISH') { micColor = '#0ea5e9'; micBg = 'rgba(14, 165, 233, 0.1)'; micBorder = '#0ea5e9'; } 
                     else if (t.micro_bias === 'BEARISH') { micColor = '#f97316'; micBg = 'rgba(249, 115, 22, 0.1)'; micBorder = '#f97316'; }
 
+                    // --- NEW CAMPAIGN STATE BADGE ---
+                    let campBadge = '';
+                    if (t.campaign_bias && t.campaign_bias !== 'NEUTRAL') {
+                        campBadge = `<span style="font-size:10px; padding:2px 6px; border-radius:4px; font-weight:800; background:rgba(168, 85, 247, 0.1); color:#a855f7; border:1px solid #a855f7">MEMORY: ${t.campaign_bias}</span>`;
+                    }
+
                     let lGap = t.long.gap > 0 ? t.long.gap.toFixed(2) + '%' : 'N/A';
                     let sGap = t.short.gap > 0 ? t.short.gap.toFixed(2) + '%' : 'N/A';
                     
@@ -224,14 +230,18 @@
                                 <span class="sym-name">${t.symbol}</span>
                                 ${oracleBadge}
                             </div>
-                            <div style="margin-top: 6px; display: flex; gap: 8px;">
+                            <div style="margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap;">
                                 <span style="font-size:10px; padding:2px 6px; border-radius:4px; font-weight:800; background:${macBg}; color:${macColor}; border:1px solid ${macBorder}">MACRO: ${t.macro_bias}</span>
                                 <span style="font-size:10px; padding:2px 6px; border-radius:4px; font-weight:800; background:${micBg}; color:${micColor}; border:1px solid ${micBorder}">MICRO: ${t.micro_bias}</span>
+                                ${campBadge}
                             </div>
                             <div class="sym-price" style="margin-top: 8px;">PRICE: $${fmt(t.price)}</div>
+                            <div style="margin-top: 12px; font-size: 11px; color: var(--yellow); font-family: 'JetBrains Mono'; background: rgba(234, 179, 8, 0.1); padding: 8px; border-radius: 4px; border: 1px solid rgba(234, 179, 8, 0.3);">
+                                >> VERDICT: ${t.roe}
+                            </div>
                         </div>
 
-                        <div style="display:flex; flex-direction:column; gap:8px; padding-right: 30px;">
+                        <div style="display:flex; flex-direction:column; gap:8px; padding-right: 30px; padding-left: 20px;">
                             <div style="display:flex; justify-content:space-between; align-items:center; background:#020617; padding:10px 15px; border-radius:4px; border: 1px solid ${lBorderColor}">
                                 <span style="color:var(--green); font-weight:800; font-size:14px;">LONG ${lStar}</span>
                                 <span style="color:#fff; font-weight:800; font-size:16px;">${lGap}</span>
