@@ -1,8 +1,8 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v10.4 (DEEP LIQUIDITY EXTRACTION)
-# UPDATE: Extracts Top 3 Macro Magnets (Upper/Lower) for the Execution Terminal
-# to provide "Over-the-Horizon" context for holding runners.
+# KABRODA MARKET RADAR v10.5 (THE DISPLAY LAYER)
+# UPDATE: Stripped of heavy math. Now acts as a clean display formatter that 
+# reads the True Gap, Volume Ratios, and Database Memory from the Middle Brain.
 # ==============================================================================
 import os
 import json
@@ -17,12 +17,6 @@ TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 def _make_indicator_string(levels):
     if not levels: return "0,0,0,0,0,0"
     return f"{levels.get('breakout_trigger',0)},{levels.get('breakdown_trigger',0)},{levels.get('daily_resistance',0)},{levels.get('daily_support',0)},{levels.get('range30m_high',0)},{levels.get('range30m_low',0)}"
-
-def _get_thresholds(symbol):
-    if "BTC" in symbol: return 0.5, 1.5, 2.25, True
-    if "ETH" in symbol: return 0.8, 2.5, 3.50, True
-    if "SOL" in symbol: return 1.5, 4.0, 6.00, True
-    return 0.8, 2.5, 3.5, False
 
 def _find_predator_stop(symbol, entry, direction, levels, verdict):
     pred_h = float(levels.get("range30m_high", 0))
@@ -59,24 +53,10 @@ def _find_predator_stop(symbol, entry, direction, levels, verdict):
         
     return 0
 
-def _eval_side(symbol, trigger, wall, is_inverted):
-    if trigger == 0: return 0.0, "WAITING"
-    min_gap, primal_max, exhaust_max, allow_jb = _get_thresholds(symbol)
-    
-    gap_pct = (abs(wall - trigger) / trigger) * 100
-    
-    if is_inverted:
-        if gap_pct < min_gap: return gap_pct, "DEATH ZONE (TOO TIGHT)"
-        if allow_jb: return gap_pct, "JAILBREAK"
-        return gap_pct, "DEATH ZONE (UNCONFIRMED)"
-    else:
-        if gap_pct < min_gap: return gap_pct, "DEATH ZONE (CHOP)"
-        if gap_pct > exhaust_max: return gap_pct, "DEATH ZONE (EXHAUSTION)"
-        if gap_pct > primal_max: return gap_pct, "EXTENDED MAGNET"
-        return gap_pct, "MAGNET"
-
-def _get_plan(symbol, static_entry, vector, tier, levels):
+def _get_plan(symbol, static_entry, vector, tier, levels, true_target):
     plan = {"valid": False, "bias": vector, "entry": 0, "stop": 0, "targets": [0,0,0]}
+    
+    # SAFETY KILL-SWITCH
     if "WAITING" in tier or "DEATH ZONE" in tier: return plan
     
     bo = float(levels.get("breakout_trigger", 0))
@@ -87,22 +67,18 @@ def _get_plan(symbol, static_entry, vector, tier, levels):
     entry_price = static_entry if "SNIPER" in tier else (bo if vector == "LONG" else bd)
     stop_price = _find_predator_stop(symbol, entry_price, vector, levels, tier)
     
-    if "SNIPER" in tier:
-        if vector == "LONG":
-            t1, t2, t3 = entry_price * 1.02, dr, entry_price * 1.05
-        else:
-            t1, t2, t3 = entry_price * 0.98, ds, entry_price * 0.95
+    # STEPPING STONE TARGETS (Anchored to True Target)
+    t2 = true_target if true_target > 0 else (dr if vector == "LONG" else ds)
+    gap = abs(t2 - entry_price)
+
+    if vector == "LONG":
+        t1, t3 = entry_price + (gap * 0.618), entry_price + (gap * 1.618)
     else:
-        gap = abs(bo - bd) or (entry_price * 0.02)
-        if vector == "LONG":
-            t1, t2, t3 = entry_price + (gap * 0.618), entry_price + gap, entry_price + (gap * 1.618)
-        else:
-            t1, t2, t3 = entry_price - (gap * 0.618), entry_price - gap, entry_price - (gap * 1.618)
+        t1, t3 = entry_price - (gap * 0.618), entry_price - (gap * 1.618)
     
     plan.update({"valid": True, "entry": entry_price, "stop": stop_price, "targets": [t1, t2, t3]})
     return plan
 
-# --- PHASE 2/3 UPGRADE: DEEP ORACLE EVALUATOR ---
 def _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls):
     oracle_star = "NONE"
     l_note = "⚪ Oracle Standby"
@@ -118,19 +94,14 @@ def _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls):
             asks = raw.get("asks", [])
             bids = raw.get("bids", [])
             
-            # Find the strongest immediate magnets
             max_ask = max([a for a in asks if a[0] < anchor * 1.05], key=lambda x: x[1], default=[0,0])
             max_bid = max([b for b in bids if b[0] > anchor * 0.95], key=lambda x: x[1], default=[0,0])
             
-            # --- DEEP LIQUIDITY EXTRACTION (Top 3 by Volume) ---
-            # Sort asks and bids purely by volume strength (x[1])
             top_asks = sorted(asks, key=lambda x: x[1], reverse=True)[:3]
             top_bids = sorted(bids, key=lambda x: x[1], reverse=True)[:3]
             
-            # Re-sort them by price for clean UI display
             macro_upper = [{"price": a[0], "vol": a[1]} for a in sorted(top_asks, key=lambda x: x[0])]
             macro_lower = [{"price": b[0], "vol": b[1]} for b in sorted(top_bids, key=lambda x: x[0], reverse=True)]
-            # ---------------------------------------------------
 
             if max_ask[1] > (max_bid[1] * 1.5): oracle_star = "LONG"
             elif max_bid[1] > (max_ask[1] * 1.5): oracle_star = "SHORT"
@@ -153,59 +124,47 @@ def _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls):
             print(f"Oracle Eval Error: {e}")
             
     return oracle_star, l_note, s_note, macro_upper, macro_lower
-# -------------------------------------------
 
 def _make_key(plan, verdict, macro_bias, micro_bias):
     if not plan["valid"]: return f"NEUTRAL|HOLD|0|0|0|0|0|{macro_bias}|{micro_bias}"
     clean_verdict = verdict.split(" (")[0]
     return f"{plan['bias']}|{clean_verdict}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}|{macro_bias}|{micro_bias}"
 
-def _generate_omni_roe(favored, fav_tier, macro_bias, micro_bias):
-    bias_text = ""
-    if favored == "NEUTRAL":
-        return "MARKET NEUTRAL: 168h bias is flat. Stand down and wait for momentum."
-    elif favored == "LONG":
-        if macro_bias == "BEARISH":
-            bias_text = "⚠ COUNTER-TREND LONG: Micro is UP, but Macro is DOWN. Strict targets."
-        elif macro_bias == "BULLISH":
-            bias_text = "🟢 FULL ALIGNMENT: Both Macro and Micro are BULLISH. Runners permitted."
-        else: 
-            bias_text = "Micro momentum is Bullish. Execute strictly level-to-level."
-    elif favored == "SHORT":
-        if macro_bias == "BULLISH":
-            bias_text = "⚠ COUNTER-TREND SHORT: Micro is DOWN, but Macro is UP. Strict targets."
-        elif macro_bias == "BEARISH":
-            bias_text = "🔴 FULL ALIGNMENT: Both Macro and Micro are BEARISH. Runners permitted."
-        else: 
-            bias_text = "Micro momentum is Bearish. Execute strictly level-to-level."
-
+def _generate_omni_roe(favored, fav_tier, macro_bias, micro_bias, campaign_state):
+    # Check Database Memory First
+    camp_bias = campaign_state.get("bias", "NEUTRAL")
+    
+    if camp_bias == "SHORT" and favored == "LONG":
+        return "RELOAD ZONE (TRAP): Macro Campaign is SHORT. Current bounce is a liquidity sweep. DO NOT LONG."
+    if camp_bias == "LONG" and favored == "SHORT":
+        return "RELOAD ZONE (TRAP): Macro Campaign is LONG. Current drop is a liquidity sweep. DO NOT SHORT."
+    
+    # Standard Structural Verdict
     struct_text = ""
-    if "CHOP" in fav_tier or "TOO TIGHT" in fav_tier:
-        struct_text = "WARNING: CHOP ZONE. Gap is too small. STAND DOWN."
-    elif "EXHAUSTION" in fav_tier:
-        struct_text = "WARNING: EXHAUSTION. Gap is massive. STAND DOWN."
-    elif "JAILBREAK" in fav_tier:
-        struct_text = "CRITICAL STRUCTURAL FAILURE. Triggers are OUTSIDE walls. Trail stop loosely."
-    elif fav_tier == "EXTENDED MAGNET":
-        struct_text = "CAUTION: EXTENDED RUNWAY. Secure profits early."
-    elif fav_tier == "MAGNET":
-        struct_text = "STANDARD OPERATION. Gap is in sweet spot. Take profit at the Wall."
-    elif "SNIPER" in fav_tier:
-        struct_text = "CRITICAL ALPHA. Price is touching Daily EMA. Execute."
+    if "CRATER" in fav_tier: struct_text = "DEATH ZONE (CRATER): Immediate wall absorbing energy. STAND DOWN."
+    elif "EXHAUSTION" in fav_tier: struct_text = "DEATH ZONE (EXHAUSTION): Target is too far away. STAND DOWN."
+    elif "SPEEDBUMP" in fav_tier: struct_text = "PRIMAL ZONE: Obstacle is a speedbump. Target confirmed. EXECUTE."
+    elif "DIRECT MAGNET" in fav_tier: struct_text = "PRIMAL ZONE: Open runway to target. EXECUTE."
+    elif "JAILBREAK" in fav_tier: struct_text = "JAILBREAK: Triggers outside walls. Trail stop loosely."
+    elif "EXTENDED" in fav_tier: struct_text = "CAUTION: EXTENDED RUNWAY. Secure profits early."
+    else: struct_text = "WAITING ON SYSTEM ALIGNMENT."
 
-    return f"{bias_text} | {struct_text}"
+    return struct_text
 
-def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, liquidity_walls):
+def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, liquidity_walls, middle_brain, campaign_state):
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
-    dr = float(levels.get("daily_resistance", 0))
-    ds = float(levels.get("daily_support", 0))
 
-    l_gap, l_tier = _eval_side(symbol, bo, dr, (bo > dr and dr > 0))
-    s_gap, s_tier = _eval_side(symbol, bd, ds, (bd < ds and ds > 0))
+    l_gap = middle_brain.get("long_gap", 0)
+    l_tier = middle_brain.get("long_tier", "WAITING")
+    l_target = middle_brain.get("long_target", 0)
+    
+    s_gap = middle_brain.get("short_gap", 0)
+    s_tier = middle_brain.get("short_tier", "WAITING")
+    s_target = middle_brain.get("short_target", 0)
 
-    l_plan = _get_plan(symbol, bo, "LONG", l_tier, levels)
-    s_plan = _get_plan(symbol, bd, "SHORT", s_tier, levels)
+    l_plan = _get_plan(symbol, bo, "LONG", l_tier, levels, l_target)
+    s_plan = _get_plan(symbol, bd, "SHORT", s_tier, levels, s_target)
     
     oracle_star, l_note, s_note, macro_upper, macro_lower = _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls)
     
@@ -216,17 +175,17 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, liquidity_wal
     fav_tier = l_tier if favored == "LONG" else (s_tier if favored == "SHORT" else "DEATH ZONE")
     
     color, sort_weight = "GRAY", 0
-    if "SNIPER" in fav_tier: color, sort_weight = ("NEON_GREEN" if favored=="LONG" else "NEON_RED"), 100
-    elif fav_tier == "MAGNET": color, sort_weight = "GREEN", 90
-    elif fav_tier == "EXTENDED MAGNET": color, sort_weight = "YELLOW", 85
+    if "PRIMAL" in fav_tier: color, sort_weight = "GREEN", 90
+    elif "EXTENDED" in fav_tier: color, sort_weight = "YELLOW", 85
     elif "JAILBREAK" in fav_tier: color, sort_weight = "PURPLE", 80
     elif "DEATH ZONE" in fav_tier: color, sort_weight = "RED", 10
     
-    roe_text = _generate_omni_roe(favored, fav_tier, macro_bias, micro_bias)
+    roe_text = _generate_omni_roe(favored, fav_tier, macro_bias, micro_bias, campaign_state)
 
     return {
         "favored": favored, "color_code": color, "sort_weight": sort_weight, "roe": roe_text,
         "oracle_star": oracle_star, 
+        "campaign_bias": campaign_state.get("bias", "NEUTRAL"),
         "liquidity_status": liquidity_walls.get("status", "NONE"),
         "macro_upper": macro_upper, "macro_lower": macro_lower,
         "long": {"gap": l_gap, "tier": l_tier, "plan": l_plan, "key": _make_key(l_plan, l_tier, macro_bias, micro_bias), "oracle_note": l_note},
@@ -234,8 +193,7 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, liquidity_wal
     }
 
 def log_to_google_sheet(radar_item):
-    if radar_item.get("symbol") not in ["BTCUSDT", "ETHUSDT", "SOLUSDT"]:
-        return
+    if radar_item.get("symbol") not in ["BTCUSDT", "ETHUSDT", "SOLUSDT"]: return
     try:
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         google_creds_str = os.environ.get("GOOGLE_CREDENTIALS_JSON")
@@ -261,7 +219,7 @@ def log_to_google_sheet(radar_item):
         plan_dir = "long" if favored == "LONG" else ("short" if favored == "SHORT" else "long")
         tier = radar_item[plan_dir]["tier"]
         plan = radar_item[plan_dir]["plan"]
-        permission = "Yes" if ("MAGNET" in tier or "SNIPER" in tier or "JAILBREAK" in tier) else "No"
+        permission = "Yes" if ("PRIMAL" in tier or "MAGNET" in tier or "JAILBREAK" in tier) else "No"
 
         try:
             bo, bd, dr, ds, r30h, r30l = radar_item.get("indicator_string", "0,0,0,0,0,0").split(',')
@@ -294,10 +252,13 @@ async def scan_sector(session_id="us_ny_futures"):
         levels = res.get("battlebox", {}).get("levels", {})
         context = res.get("battlebox", {}).get("context", {})
         liquidity_walls = res.get("battlebox", {}).get("liquidity_walls", {})
+        campaign_state = res.get("battlebox", {}).get("campaign_state", {})
+        middle_brain = res.get("battlebox", {}).get("middle_brain", {})
+        
         macro_bias = context.get("macro_bias", "NEUTRAL")
         micro_bias = context.get("micro_bias", "NEUTRAL")
 
-        dossier = _build_dossier(symbol=sym, anchor=price, levels=levels, macro_bias=macro_bias, micro_bias=micro_bias, liquidity_walls=liquidity_walls)
+        dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias, liquidity_walls, middle_brain, campaign_state)
         
         radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,
