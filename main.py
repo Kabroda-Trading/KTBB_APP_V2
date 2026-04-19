@@ -21,6 +21,7 @@ import battlebox_pipeline
 import market_radar
 import research_lab
 import market_simulator  # <-- ADDED FOR SIMULATOR
+import live_telemetry  # <-- ADDED FOR PHASE 3
 
 from database import init_db, get_db, UserModel
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
@@ -146,13 +147,21 @@ async def suite_research_lab_page(request: Request, db: Session = Depends(get_db
     require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "research_lab.html", ctx)
 
-# THE FIX: Market Radar is now a protected suite route, not an admin route
 @app.get("/suite/radar")
 async def radar_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
     require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "market_radar.html", ctx)
+
+@app.get("/suite/terminal/{symbol}")
+async def terminal_page(request: Request, symbol: str, db: Session = Depends(get_db)):
+    """ NEW ROUTE: Dedicated Execution Terminal in a new tab """
+    ctx = get_user_context(request, db)
+    if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
+    require_paid_access(ctx["user"])
+    ctx["symbol"] = symbol.upper()
+    return _template_or_fallback(request, templates, "terminal.html", ctx)
 
 @app.get("/indicators")
 async def indicators(request: Request, db: Session = Depends(get_db)):
@@ -318,6 +327,25 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
     )
     return JSONResponse(out)
 
+@app.post("/api/telemetry/live")
+async def get_live_telemetry(request: Request, db: Session = Depends(get_db)):
+    """ NEW ROUTE: Phase 3 Live Execution Monitor """
+    uid = request.session.get(auth.SESSION_KEY)
+    if not uid: raise HTTPException(status_code=401)
+    user = db.query(UserModel).filter(UserModel.id == uid).first()
+    require_paid_access(user)
+    
+    payload = await request.json()
+    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
+    ensure_symbol_allowed(user, symbol)
+    
+    try:
+        telemetry_data = await live_telemetry.fetch_live_telemetry(symbol)
+        return JSONResponse({"ok": True, "telemetry": telemetry_data})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse({"ok": False, "error": str(e)})
+
 @app.post("/api/radar/scan")
 async def run_radar_scan(request: Request):
     results = await market_radar.scan_sector()
@@ -362,7 +390,7 @@ async def processing_route(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     return _template_or_fallback(request, templates, "processing.html", ctx)
 
-    # ---------------------------------------------------------
+# ---------------------------------------------------------
 # 🚨 SYSTEM DIAGNOSTIC AUTOPSY (CATCHES SILENT 500 ERRORS)
 # ---------------------------------------------------------
 from fastapi.responses import HTMLResponse

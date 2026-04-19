@@ -10,22 +10,6 @@
     <link rel="stylesheet" href="/static/site.css">
     <style>
         .gradient-text { background: linear-gradient(to right, #00ff9d, #06b6d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        
-        /* Phase 3 Pulse Animation */
-        @keyframes ping-green {
-            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-        }
-        .live-ping {
-            border-radius: 50%;
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            background-color: #10b981;
-            margin-right: 6px;
-            animation: ping-green 2s infinite;
-        }
     </style>
 </head>
 <body>
@@ -128,13 +112,10 @@
             </h3>
             <p style="font-size: 13px; color: #888; margin: 0;">Live Structural Levels & Triggers</p>
           </div>
-          <div style="display: flex; gap: 12px; align-items: center;">
+          <div style="display: flex; gap: 12px;">
             <button id="tvCopyBtn" class="btn secondary" onclick="copyForTV()" style="display:none; font-size: 12px; padding: 12px 20px; font-weight:700; background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #e2e8f0; cursor: pointer;">COPY INDICATOR DATA</button>
             <button id="openGptBtn" onclick="openLaunchModal()" style="display:none; cursor: pointer; background: #00ff9d; color: #000; font-weight: 900; font-size: 12px; padding: 12px 24px; border: none; border-radius: 4px; box-shadow: 0 0 20px rgba(0, 255, 157, 0.4); text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s;">
               🚀 LAUNCH BATTLEBOX AI
-            </button>
-            <button id="armMonitorBtn" onclick="toggleMonitor()" style="display:none; cursor: pointer; background: transparent; color: #f59e0b; border: 1px solid #f59e0b; font-weight: 900; font-size: 12px; padding: 12px 24px; border-radius: 4px; text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s;">
-              🎯 ARM LIVE MONITOR
             </button>
           </div>
         </div>
@@ -160,30 +141,6 @@
           <span>30M ANCHOR HIGH: <strong id="lv_30h" style="color: #fff;">—</strong></span>
           <span>30M ANCHOR LOW: <strong id="lv_30l" style="color: #fff;">—</strong></span>
         </div>
-
-        <div id="phase3_panel" style="display:none; margin-top: 25px; padding: 20px; background: rgba(0,0,0,0.6); border: 1px solid #1e293b; border-radius: 8px; position: relative;">
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
-                <h4 style="margin:0; color:#f59e0b; font-size: 14px; letter-spacing: 2px;">LIVE TELEMETRY (PHASE 3)</h4>
-                <span style="font-size: 11px; color: #10b981; font-weight: 700; letter-spacing: 1px;">
-                    <span class="live-ping"></span> POLLING ACTIVE
-                </span>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 15px;">
-                <div style="background: #020617; padding: 15px; border-radius: 4px; border: 1px solid #0f172a;">
-                    <div style="font-size: 11px; color: #94a3b8; margin-bottom: 5px; font-weight: 700; letter-spacing: 1px;">OI DELTA (15M)</div>
-                    <div id="tel_oi" style="font-size: 24px; font-weight: 800; font-family: monospace; color: #fff;">--%</div>
-                </div>
-                <div style="background: #020617; padding: 15px; border-radius: 4px; border: 1px solid #0f172a;">
-                    <div style="font-size: 11px; color: #94a3b8; margin-bottom: 5px; font-weight: 700; letter-spacing: 1px;">FUNDING RATE</div>
-                    <div id="tel_fr" style="font-size: 24px; font-weight: 800; font-family: monospace; color: #fff;">--%</div>
-                </div>
-            </div>
-            <div style="background: #020617; padding: 15px; border-radius: 4px; border: 1px solid #0f172a; text-align: center;">
-                <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px; font-weight: 700; letter-spacing: 1px;">SYSTEM ALERT</div>
-                <div id="tel_alert" style="font-size: 16px; font-weight: 800; color: #94a3b8; letter-spacing: 1px;">AWAITING DATA PULL...</div>
-            </div>
-        </div>
-
       </div>
     </div>
 
@@ -219,27 +176,17 @@
       };
 
       let _lastDmrPayload = null;
-      let _monitorInterval = null;
-      let _isMonitorArmed = false;
       
-      // UPDATED FORMATTER (v3.1)
       function fmt(x){ 
         if(!x && x !== 0) return "—";
         const f = parseFloat(x);
         if(isNaN(f)) return "—";
         
-        // 1. Get current Asset
         const sym = document.getElementById("symbol").value;
-        
-        // 2. Specific Asset Overrides
         if(sym.includes("DOGE")) return f.toFixed(7);
         if(sym.includes("TRX")) return f.toFixed(5);
         if(sym.includes("XRP")) return f.toFixed(5);
-        
-        // 3. General Price Magnitude Rule
         if(Math.abs(f) < 1.0 && Math.abs(f) > 0) return f.toFixed(6);
-        
-        // 4. Default for High Value Assets (BTC, SOL, ETH)
         return f.toFixed(2); 
       }
 
@@ -345,7 +292,6 @@
           const l = data.levels || {};
           const r30 = data.range_30m || {};
           
-          // Updated to use the smart fmt() function
           document.getElementById("lv_ds").innerText = fmt(l.daily_support);
           document.getElementById("lv_dr").innerText = fmt(l.daily_resistance);
           document.getElementById("lv_bo").innerText = fmt(l.breakout_trigger);
@@ -355,7 +301,6 @@
           
           document.getElementById("tvCopyBtn").style.display = "inline-flex";
           document.getElementById("openGptBtn").style.display = "inline-flex"; 
-          document.getElementById("armMonitorBtn").style.display = "inline-flex"; // PHASE 3 UNLOCKED
           
           document.getElementById("status").innerText = "> SYSTEM READY. DATA SYNCED.";
           document.getElementById("status").style.color = "#10b981";
@@ -372,97 +317,9 @@
         if (!_lastDmrPayload) return;
         const l = _lastDmrPayload.levels;
         const r = _lastDmrPayload.range_30m;
-        // Also apply formatting to copied text
         const text = `${fmt(l.breakout_trigger)},${fmt(l.breakdown_trigger)},${fmt(l.daily_resistance)},${fmt(l.daily_support)},${fmt(r.high)},${fmt(r.low)}`;
         await navigator.clipboard.writeText(text);
         alert("COPIED for Indicator: " + text);
-      }
-
-      // --- PHASE 3: LIVE TELEMETRY ENGINE ---
-      async function pollTelemetry() {
-          if(!_lastDmrPayload) return;
-          const sym = document.getElementById("symbol").value;
-          
-          try {
-              const res = await fetch("/api/telemetry/live", {
-                  method: "POST", headers: {"Content-Type": "application/json"},
-                  body: JSON.stringify({symbol: sym})
-              });
-              const data = await res.json();
-              
-              if(data.ok && data.telemetry.status === "SUCCESS") {
-                  const tel = data.telemetry;
-                  const oiElement = document.getElementById('tel_oi');
-                  
-                  // Update UI Values
-                  let oiPrefix = tel.oi_delta_pct > 0 ? "+" : "";
-                  oiElement.innerText = oiPrefix + tel.oi_delta_pct.toFixed(2) + "%";
-                  oiElement.style.color = tel.oi_delta_pct > 0 ? "#10b981" : (tel.oi_delta_pct < 0 ? "#ef4444" : "#fff");
-                  
-                  document.getElementById('tel_fr').innerText = tel.funding_rate.toFixed(4) + "%";
-
-                  // Convergence Math & Algorithmic Alerts
-                  let alertMsg = "MONITORING LIVE FLOW... NO ANOMALIES.";
-                  let alertColor = "#94a3b8";
-
-                  if (tel.oi_delta_pct > 1.5) {
-                      alertMsg = "🟢 CAPITAL INJECTION DETECTED: Breakouts validated. High Conviction.";
-                      alertColor = "#10b981";
-                  } else if (tel.oi_delta_pct < -1.0) {
-                      alertMsg = "🔴 CAPITAL DRAIN DETECTED: Fake-out risk high. Reversals probable.";
-                      alertColor = "#ef4444";
-                  } else if (tel.funding_rate > 0.05) {
-                      alertMsg = "⚠️ TRAP ALERT: High positive funding. Flush risk imminent.";
-                      alertColor = "#f59e0b";
-                  }
-
-                  const alertEl = document.getElementById('tel_alert');
-                  alertEl.innerText = alertMsg;
-                  alertEl.style.color = alertColor;
-              }
-          } catch(e) {
-              console.error("Phase 3 Telemetry error", e);
-          }
-      }
-
-      function toggleMonitor() {
-          const btn = document.getElementById('armMonitorBtn');
-          if(!_lastDmrPayload) {
-              alert("Initiate Calibration first to lock structural triggers.");
-              return;
-          }
-
-          _isMonitorArmed = !_isMonitorArmed;
-          
-          if(_isMonitorArmed) {
-              // ARM
-              btn.innerText = "🛑 DISARM MONITOR";
-              btn.style.background = "rgba(239, 68, 68, 0.2)";
-              btn.style.border = "1px solid #ef4444";
-              btn.style.color = "#ef4444";
-              btn.style.boxShadow = "0 0 15px rgba(239, 68, 68, 0.4)";
-              
-              document.getElementById('phase3_panel').style.display = "block";
-              
-              pollTelemetry(); // Execute immediate first ping
-              _monitorInterval = setInterval(pollTelemetry, 30000); // Ping every 30 seconds
-          } else {
-              // DISARM
-              btn.innerText = "🎯 ARM LIVE MONITOR";
-              btn.style.background = "transparent";
-              btn.style.border = "1px solid #f59e0b";
-              btn.style.color = "#f59e0b";
-              btn.style.boxShadow = "none";
-              
-              clearInterval(_monitorInterval);
-              document.getElementById('phase3_panel').style.display = "none";
-              
-              // Reset values
-              document.getElementById('tel_oi').innerText = "--%";
-              document.getElementById('tel_fr').innerText = "--%";
-              document.getElementById('tel_alert').innerText = "AWAITING DATA PULL...";
-              document.getElementById('tel_alert').style.color = "#94a3b8";
-          }
       }
 
       setInterval(updateSessionStatus, 1000);
