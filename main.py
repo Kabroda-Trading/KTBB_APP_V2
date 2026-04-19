@@ -22,6 +22,7 @@ import market_radar
 import research_lab
 import market_simulator  # <-- ADDED FOR SIMULATOR
 import live_telemetry  # <-- ADDED FOR PHASE 3
+import database_manager # <--- ADD THIS IMPORT
 
 from database import init_db, get_db, UserModel
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
@@ -32,7 +33,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(">>> BOOTING KABRODA SYSTEM: Initializing Database Schema...")
-    init_db()
+    init_db() # Your existing sync db
+    await database_manager.init_db_async() # <--- ADD THIS LINE
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
 
