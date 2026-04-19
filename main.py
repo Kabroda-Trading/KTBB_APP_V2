@@ -5,7 +5,7 @@
 import os
 import traceback
 from typing import Any, Dict, Optional
-from contextlib import asynccontextmanager # <-- ADDED FOR MODERN STARTUP
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Form, HTTPException, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -20,21 +20,21 @@ import billing
 import battlebox_pipeline
 import market_radar
 import research_lab
-import market_simulator  # <-- ADDED FOR SIMULATOR
-import live_telemetry  # <-- ADDED FOR PHASE 3
-import database_manager # <--- ADD THIS IMPORT
+import market_simulator
+import live_telemetry
+import database_manager 
 
 from database import init_db, get_db, UserModel
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# --- THE FIX: MODERN LIFESPAN STARTUP ---
+# --- MODERN LIFESPAN STARTUP ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(">>> BOOTING KABRODA SYSTEM: Initializing Database Schema...")
-    init_db() # Your existing sync db
-    await database_manager.init_db_async() # <--- ADD THIS LINE
+    init_db() 
+    await database_manager.init_db_async() 
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
 
@@ -158,7 +158,6 @@ async def radar_page(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/suite/terminal/{symbol}")
 async def terminal_page(request: Request, symbol: str, db: Session = Depends(get_db)):
-    """ NEW ROUTE: Dedicated Execution Terminal in a new tab """
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
     require_paid_access(ctx["user"])
@@ -218,7 +217,6 @@ async def account_settings(request: Request, db: Session = Depends(get_db)):
 # --- ADMIN ROUTES ---
 @app.get("/admin/simulator")
 async def admin_simulator_page(request: Request, db: Session = Depends(get_db)):
-    """ NEW ROUTE: Protects the Market Simulator UI page, rendering market_simulator.html """
     ctx = get_user_context(request, db)
     if not ctx["is_admin"]: return RedirectResponse("/suite")
     return _template_or_fallback(request, templates, "market_simulator.html", ctx)
@@ -248,13 +246,11 @@ async def admin_delete_user(request: Request, user_id: str = Form(...), db: Sess
     ctx = get_user_context(request, db)
     if not ctx.get("is_admin"): return RedirectResponse("/suite")
     
-    # Find the user by ID and delete them
     user_to_delete = db.query(UserModel).filter(UserModel.id == int(user_id)).first()
     if user_to_delete:
         db.delete(user_to_delete)
         db.commit()
     
-    # Refresh the admin page
     return RedirectResponse(url="/admin", status_code=303)
 
 @app.post("/admin/toggle-role")
@@ -331,7 +327,6 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/api/telemetry/live")
 async def get_live_telemetry(request: Request, db: Session = Depends(get_db)):
-    """ NEW ROUTE: Phase 3 Live Execution Monitor """
     uid = request.session.get(auth.SESSION_KEY)
     if not uid: raise HTTPException(status_code=401)
     user = db.query(UserModel).filter(UserModel.id == uid).first()
@@ -370,7 +365,6 @@ async def research_run(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/api/simulator/run")
 async def simulator_run(request: Request, db: Session = Depends(get_db)):
-    """ NEW ROUTE: Safely routes the payload to your standalone Market Simulator """
     uid = request.session.get(auth.SESSION_KEY)
     if not uid: raise HTTPException(status_code=401)
     
@@ -395,18 +389,15 @@ async def processing_route(request: Request, db: Session = Depends(get_db)):
 # ---------------------------------------------------------
 # 🚨 SYSTEM DIAGNOSTIC AUTOPSY (CATCHES SILENT 500 ERRORS)
 # ---------------------------------------------------------
-from fastapi.responses import HTMLResponse
-import traceback
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     error_trace = traceback.format_exc()
-    print(f"CRITICAL CRASH:\n{error_trace}") # Forces it into the Render logs too
+    print(f"CRITICAL CRASH:\n{error_trace}")
     return HTMLResponse(
         content=f"""
         <div style="background-color: #0f172a; color: #ef4444; padding: 40px; font-family: 'JetBrains Mono', monospace; min-height: 100vh; box-sizing: border-box;">
             <h1 style="border-bottom: 2px solid #ef4444; padding-bottom: 10px; margin-top:0;">🚨 FATAL SYSTEM CRASH 🚨</h1>
-            <p style="color: #cbd5e1; font-size: 14px;">The registration sequence failed. Here is the exact internal autopsy of the code:</p>
+            <p style="color: #cbd5e1; font-size: 14px;">The system encountered a fatal error. Autopsy data below:</p>
             <pre style="background: #020617; padding: 20px; border: 1px solid #334155; border-radius: 8px; overflow-x: auto; font-size: 12px; line-height: 1.5;">{error_trace}</pre>
         </div>
         """,
