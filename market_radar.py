@@ -1,10 +1,8 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v10.3 (PHASE 2 COINGLASS EVALUATION)
-# UPDATE: Integrates Liquidity Oracle data locked by Phase 1.
-# - Parses raw liquidity JSON to find massive Asks/Bids.
-# - Assigns the ⭐ (Directional Star) to the heaviest gravitational pull.
-# - Automatically adjusts Stop Losses to hide behind liquidity walls.
+# KABRODA MARKET RADAR v10.4 (DEEP LIQUIDITY EXTRACTION)
+# UPDATE: Extracts Top 3 Macro Magnets (Upper/Lower) for the Execution Terminal
+# to provide "Over-the-Horizon" context for holding runners.
 # ==============================================================================
 import os
 import json
@@ -104,32 +102,39 @@ def _get_plan(symbol, static_entry, vector, tier, levels):
     plan.update({"valid": True, "entry": entry_price, "stop": stop_price, "targets": [t1, t2, t3]})
     return plan
 
-# --- PHASE 2 INJECTION: ORACLE EVALUATOR ---
+# --- PHASE 2/3 UPGRADE: DEEP ORACLE EVALUATOR ---
 def _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls):
     oracle_star = "NONE"
     l_note = "⚪ Oracle Standby"
     s_note = "⚪ Oracle Standby"
+    macro_upper = []
+    macro_lower = []
     
     status = liquidity_walls.get("status", "NONE")
     
     if status == "SUCCESS":
         raw = liquidity_walls.get("raw_data", {})
         try:
-            # Defensively extract asks (above) and bids (below)
             asks = raw.get("asks", [])
             bids = raw.get("bids", [])
             
-            # Find strongest magnet within 5% radius
+            # Find the strongest immediate magnets
             max_ask = max([a for a in asks if a[0] < anchor * 1.05], key=lambda x: x[1], default=[0,0])
             max_bid = max([b for b in bids if b[0] > anchor * 0.95], key=lambda x: x[1], default=[0,0])
             
-            # Star Assignment: Requires 50% dominance in liquidity
-            if max_ask[1] > (max_bid[1] * 1.5):
-                oracle_star = "LONG"
-            elif max_bid[1] > (max_ask[1] * 1.5):
-                oracle_star = "SHORT"
+            # --- DEEP LIQUIDITY EXTRACTION (Top 3 by Volume) ---
+            # Sort asks and bids purely by volume strength (x[1])
+            top_asks = sorted(asks, key=lambda x: x[1], reverse=True)[:3]
+            top_bids = sorted(bids, key=lambda x: x[1], reverse=True)[:3]
+            
+            # Re-sort them by price for clean UI display
+            macro_upper = [{"price": a[0], "vol": a[1]} for a in sorted(top_asks, key=lambda x: x[0])]
+            macro_lower = [{"price": b[0], "vol": b[1]} for b in sorted(top_bids, key=lambda x: x[0], reverse=True)]
+            # ---------------------------------------------------
+
+            if max_ask[1] > (max_bid[1] * 1.5): oracle_star = "LONG"
+            elif max_bid[1] > (max_ask[1] * 1.5): oracle_star = "SHORT"
                 
-            # Stop Loss Shielding
             if l_plan["valid"] and max_bid[0] > 0:
                 if l_plan["stop"] > max_bid[0]:
                     l_plan["stop"] = max_bid[0] * 0.999
@@ -147,7 +152,7 @@ def _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls):
         except Exception as e:
             print(f"Oracle Eval Error: {e}")
             
-    return oracle_star, l_note, s_note
+    return oracle_star, l_note, s_note, macro_upper, macro_lower
 # -------------------------------------------
 
 def _make_key(plan, verdict, macro_bias, micro_bias):
@@ -202,8 +207,7 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, liquidity_wal
     l_plan = _get_plan(symbol, bo, "LONG", l_tier, levels)
     s_plan = _get_plan(symbol, bd, "SHORT", s_tier, levels)
     
-    # Run Phase 2 Oracle Evaluation
-    oracle_star, l_note, s_note = _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls)
+    oracle_star, l_note, s_note, macro_upper, macro_lower = _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls)
     
     favored = "NEUTRAL"
     if micro_bias == "BULLISH": favored = "LONG"
@@ -224,6 +228,7 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, liquidity_wal
         "favored": favored, "color_code": color, "sort_weight": sort_weight, "roe": roe_text,
         "oracle_star": oracle_star, 
         "liquidity_status": liquidity_walls.get("status", "NONE"),
+        "macro_upper": macro_upper, "macro_lower": macro_lower,
         "long": {"gap": l_gap, "tier": l_tier, "plan": l_plan, "key": _make_key(l_plan, l_tier, macro_bias, micro_bias), "oracle_note": l_note},
         "short": {"gap": s_gap, "tier": s_tier, "plan": s_plan, "key": _make_key(s_plan, s_tier, macro_bias, micro_bias), "oracle_note": s_note}
     }

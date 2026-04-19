@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kabroda | Execution Terminal</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        :root { 
+            --bg-deep: #020617; --panel: #0f172a; --border: #334155; 
+            --green: #22c55e; --yellow: #eab308; --red: #ef4444; 
+            --white: #f8fafc; --gray: #94a3b8;
+        }
+        body { background-color: var(--bg-deep); color: var(--white); font-family: 'Inter', sans-serif; padding: 0; margin: 0; }
+        .terminal-container { max-width: 1600px; margin: 0 auto; padding: 40px 20px; }
+        
+        .header { border-bottom: 2px solid var(--border); padding-bottom: 15px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center;}
+        .h-title { font-family: 'Rajdhani'; font-weight: 800; font-size: 36px; color: #fff; letter-spacing: 2px; margin: 0; }
+        
+        .cockpit { display: grid; gap: 20px; grid-template-columns: 350px 1fr 600px; }
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 25px; display: flex; flex-direction: column; }
+        .panel-head { font-family: 'Rajdhani'; font-weight: 800; font-size: 18px; color: var(--gray); border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 20px; letter-spacing: 1px; text-transform: uppercase; }
+        
+        .inp-risk { background: #020617; border: 1px solid var(--border); color: #fff; padding: 12px; width: 100%; text-align: right; font-weight: 700; font-size: 18px; border-radius: 4px; box-sizing: border-box; }
+        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px dashed #334155; padding-bottom: 6px; font-family: 'JetBrains Mono', monospace; }
+        .d-val { font-size: 16px; font-weight: 800; color: #fff; margin-right: 10px; }
+        
+        .c-GREEN { color: var(--green); } .c-YELLOW { color: var(--yellow); } .c-RED { color: var(--red); }
+        .btn-act { width: 100%; padding: 15px; border: none; border-radius: 4px; font-weight: 800; font-family: 'Rajdhani'; font-size: 16px; cursor: pointer; text-transform: uppercase; margin-bottom: 10px; transition: 0.2s; }
+        .btn-l { background: rgba(34, 197, 94, 0.2); color: var(--green); border: 1px solid var(--green); } 
+        .btn-l:hover { background: var(--green); color: #000; }
+        .btn-s { background: rgba(239, 68, 68, 0.2); color: var(--red); border: 1px solid var(--red); } 
+        .btn-s:hover { background: var(--red); color: #fff; }
+        
+        .mini-copy { background: none; border: none; color: var(--gray); cursor: pointer; font-size: 14px; opacity: 0.5; transition: opacity 0.2s; padding: 0 0 0 5px; }
+        .mini-copy:hover { opacity: 1; color: var(--white); }
+
+        .live-ping { border-radius: 50%; display: inline-block; width: 8px; height: 8px; background-color: #10b981; margin-right: 6px; box-shadow: 0 0 10px #10b981; }
+        
+        #borderGuardPanel { background: #020617; border: 1px solid #1e293b; padding: 20px; border-radius: 8px; margin-top: 20px; }
+        .magnet-row { display:flex; justify-content:space-between; margin-bottom:8px; font-family:'JetBrains Mono'; font-size:13px; }
+    </style>
+</head>
+<body>
+    {% include 'nav.html' %}
+    
+    <div class="terminal-container">
+        <div class="header">
+            <h1 class="h-title">{{ symbol }} <span style="color:var(--gray);">// EXECUTION TERMINAL</span></h1>
+            <div style="font-family: 'JetBrains Mono'; font-size: 12px; color: var(--green); font-weight: 800;">
+                <span class="live-ping"></span> SECURE UPLINK ESTABLISHED
+            </div>
+        </div>
+
+        <div id="loadingMsg" style="text-align:center; padding:50px; font-family:'JetBrains Mono'; color:#0ea5e9;">
+            /// SYNCING TARGET DATA...
+        </div>
+
+        <div id="terminalGrid" class="cockpit" style="display:none;">
+            
+            <div style="display:flex; flex-direction:column; gap:20px;">
+                <div class="panel">
+                    <div class="panel-head"><span style="color:#0ea5e9;">STEP 01:</span> RISK PROTOCOL</div>
+                    <div style="font-size:12px; color:var(--gray); margin-bottom:5px;">ACCOUNT BALANCE</div>
+                    <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="recalc()">
+                    <div style="font-size:12px; color:var(--gray); margin-bottom:5px; margin-top:20px;">RISK PER TRADE (%)</div>
+                    <input type="number" id="inpRisk" class="inp-risk" value="10.0" step="0.1" oninput="recalc()">
+                    <div style="margin-top:20px; padding-top:20px; border-top:1px solid var(--border);">
+                        <div style="font-size:12px; color:var(--gray);">MAX LOSS ALLOWED</div>
+                        <div id="valLoss" class="c-RED" style="font-size:32px; font-weight:800;">$0.00</div>
+                    </div>
+                </div>
+
+                <div class="panel" style="padding: 20px;">
+                    <div class="panel-head" style="font-size:14px; margin-bottom:15px; padding-bottom:8px;"><span style="color:#a855f7;">ORACLE:</span> MACRO MAGNETS (24H)</div>
+                    <div style="font-size:10px; color:#94a3b8; letter-spacing:1px; margin-bottom:10px;">TOP 3 UPPER WALLS (ASKS)</div>
+                    <div id="macroUpper">
+                        <div class="magnet-row c-GRAY">Loading data...</div>
+                    </div>
+                    <div style="border-top:1px dashed #334155; margin:15px 0;"></div>
+                    <div style="font-size:10px; color:#94a3b8; letter-spacing:1px; margin-bottom:10px;">TOP 3 LOWER WALLS (BIDS)</div>
+                    <div id="macroLower">
+                        <div class="magnet-row c-GRAY">Loading data...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel" style="justify-content:flex-start;">
+                <div class="panel-head" style="border:none; margin-bottom:0;"><span style="color:var(--yellow);">STEP 02:</span> THE BORDER GUARD</div>
+                
+                <div style="background: rgba(0,0,0,0.3); border-left: 4px solid var(--gray); padding: 20px; font-size: 14px; line-height: 1.6; margin-top: 10px;" id="staticRoe">
+                    Loading structural bias...
+                </div>
+
+                <div id="borderGuardPanel">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:15px; border-bottom:1px dashed #334155; padding-bottom:10px;">
+                        <span style="font-family:'JetBrains Mono'; font-size:11px; color:#94a3b8;">LIVE PRICE</span>
+                        <span id="livePrice" style="font-family:'JetBrains Mono'; font-weight:800; color:#fff;">--</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:15px; border-bottom:1px dashed #334155; padding-bottom:10px;">
+                        <span style="font-family:'JetBrains Mono'; font-size:11px; color:#94a3b8;">OI DELTA (FUEL)</span>
+                        <span id="liveOi" style="font-family:'JetBrains Mono'; font-weight:800; color:#fff;">--%</span>
+                    </div>
+                    
+                    <div style="text-align:center; margin-top:20px;">
+                        <div style="font-size:11px; color:#94a3b8; letter-spacing:1px; margin-bottom:10px; font-weight:700;">TRIGGER STATUS</div>
+                        <div id="guardAlert" style="font-family:'Rajdhani'; font-size:18px; font-weight:800; color:#64748b; padding:15px; border:1px solid #334155; border-radius:4px;">
+                            MONITORING BORDERS...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-head"><span style="color:var(--green);">STEP 03:</span> SELECT FLIGHT PATH</div>
+                <div style="display:flex; gap:30px; margin-top:10px;">
+                    <div style="flex:1;">
+                        <button class="btn-act btn-l" onclick="copyKey('L')" id="btnL">COPY LONG KEY</button>
+                        <input type="hidden" id="keyL">
+                        <div class="data-row" style="margin-top:20px;">
+                            <span style="color:var(--gray); font-size:12px;">ENTRY</span>
+                            <div><span id="pEntL" class="d-val c-GREEN">--</span><button class="mini-copy" onclick="copyVal('pEntL')">📋</button></div>
+                        </div>
+                        <div class="data-row">
+                            <span style="color:var(--gray); font-size:12px;">STOP LOSS</span>
+                            <div><span id="pStpL" class="d-val c-RED">--</span><button class="mini-copy" onclick="copyVal('pStpL')">📋</button></div>
+                        </div>
+                        <div class="data-row" style="border-bottom: 2px solid #334155; padding-bottom:12px;">
+                            <span style="color:var(--gray); font-size:12px;">CONTRACTS</span>
+                            <div><span id="pSizL" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pSizL')">📋</button></div>
+                        </div>
+                        <div class="data-row" style="margin-top:12px;">
+                            <span style="color:var(--gray); font-size:12px;">TARGET 1</span>
+                            <div><span id="pT1L" class="d-val c-YELLOW">--</span><button class="mini-copy" onclick="copyVal('pT1L')">📋</button></div>
+                        </div>
+                        <div class="data-row">
+                            <span style="color:var(--gray); font-size:12px;">TARGET 2</span>
+                            <div><span id="pT2L" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT2L')">📋</button></div>
+                        </div>
+                        <div class="data-row">
+                            <span style="color:var(--gray); font-size:12px;">TARGET 3</span>
+                            <div><span id="pT3L" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT3L')">📋</button></div>
+                        </div>
+                        <div id="oNoteL" style="font-size:11px; color:#eab308; text-align:right; margin-top:8px;"></div>
+                    </div>
+
+                    <div style="flex:1; border-left: 1px solid var(--border); padding-left: 30px;">
+                        <button class="btn-act btn-s" onclick="copyKey('S')" id="btnS">COPY SHORT KEY</button>
+                        <input type="hidden" id="keyS">
+                        <div class="data-row" style="margin-top:20px;">
+                            <span style="color:var(--gray); font-size:12px;">ENTRY</span>
+                            <div><span id="pEntS" class="d-val c-GREEN">--</span><button class="mini-copy" onclick="copyVal('pEntS')">📋</button></div>
+                        </div>
+                        <div class="data-row">
+                            <span style="color:var(--gray); font-size:12px;">STOP LOSS</span>
+                            <div><span id="pStpS" class="d-val c-RED">--</span><button class="mini-copy" onclick="copyVal('pStpS')">📋</button></div>
+                        </div>
+                        <div class="data-row" style="border-bottom: 2px solid #334155; padding-bottom:12px;">
+                            <span style="color:var(--gray); font-size:12px;">CONTRACTS</span>
+                            <div><span id="pSizS" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pSizS')">📋</button></div>
+                        </div>
+                        <div class="data-row" style="margin-top:12px;">
+                            <span style="color:var(--gray); font-size:12px;">TARGET 1</span>
+                            <div><span id="pT1S" class="d-val c-YELLOW">--</span><button class="mini-copy" onclick="copyVal('pT1S')">📋</button></div>
+                        </div>
+                        <div class="data-row">
+                            <span style="color:var(--gray); font-size:12px;">TARGET 2</span>
+                            <div><span id="pT2S" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT2S')">📋</button></div>
+                        </div>
+                        <div class="data-row">
+                            <span style="color:var(--gray); font-size:12px;">TARGET 3</span>
+                            <div><span id="pT3S" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT3S')">📋</button></div>
+                        </div>
+                        <div id="oNoteS" style="font-size:11px; color:#eab308; text-align:right; margin-top:8px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const targetSymbol = "{{ symbol }}";
+        let activeData = null;
+
+        function copyVal(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const val = el.innerText.replace(/,/g, '').trim();
+            if (val === "--" || val === "") return;
+            navigator.clipboard.writeText(val).then(() => {
+                const btn = event.currentTarget;
+                const orig = btn.innerHTML;
+                btn.innerHTML = "✓";
+                setTimeout(() => btn.innerHTML = orig, 1000);
+            });
+        }
+
+        function copyKey(side) { 
+            navigator.clipboard.writeText(document.getElementById('key' + side).value); 
+            const btn = document.getElementById('btn' + side);
+            const orig = btn.innerText;
+            btn.innerText = "COPIED ✓";
+            setTimeout(() => btn.innerText = orig, 1000);
+        }
+
+        function recalc() {
+            if(!activeData) return;
+            const bal = parseFloat(document.getElementById('inpBal').value);
+            const riskPct = parseFloat(document.getElementById('inpRisk').value);
+            const riskAmt = bal * (riskPct / 100);
+            
+            localStorage.setItem('kabroda_locked_bal', bal);
+            localStorage.setItem('kabroda_locked_risk', riskPct);
+            document.getElementById('valLoss').innerText = "$" + riskAmt.toFixed(2);
+            
+            if(activeData.long.plan.valid) {
+                const distL = Math.abs(activeData.long.plan.entry - activeData.long.plan.stop);
+                if(distL > 0) document.getElementById('pSizL').innerText = (riskAmt / distL).toFixed(4);
+            }
+            if(activeData.short.plan.valid) {
+                const distS = Math.abs(activeData.short.plan.entry - activeData.short.plan.stop);
+                if(distS > 0) document.getElementById('pSizS').innerText = (riskAmt / distS).toFixed(4);
+            }
+        }
+
+        function renderMacroMagnets(myAsset) {
+            const formatPrice = (val) => parseFloat(val).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            
+            // Render Upper Walls (Asks)
+            let upperHtml = "";
+            if (myAsset.macro_upper && myAsset.macro_upper.length > 0) {
+                myAsset.macro_upper.forEach(wall => {
+                    upperHtml += `<div class="magnet-row"><span class="c-RED">$${formatPrice(wall.price)}</span><span class="c-GRAY" style="font-size:11px;">WALL</span></div>`;
+                });
+            } else {
+                upperHtml = '<div class="magnet-row c-GRAY">No Oracle Data</div>';
+            }
+            document.getElementById('macroUpper').innerHTML = upperHtml;
+
+            // Render Lower Walls (Bids)
+            let lowerHtml = "";
+            if (myAsset.macro_lower && myAsset.macro_lower.length > 0) {
+                myAsset.macro_lower.forEach(wall => {
+                    lowerHtml += `<div class="magnet-row"><span class="c-GREEN">$${formatPrice(wall.price)}</span><span class="c-GRAY" style="font-size:11px;">WALL</span></div>`;
+                });
+            } else {
+                lowerHtml = '<div class="magnet-row c-GRAY">No Oracle Data</div>';
+            }
+            document.getElementById('macroLower').innerHTML = lowerHtml;
+        }
+
+        async function initTerminal() {
+            if(localStorage.getItem('kabroda_locked_bal')) document.getElementById('inpBal').value = localStorage.getItem('kabroda_locked_bal');
+            if(localStorage.getItem('kabroda_locked_risk')) document.getElementById('inpRisk').value = localStorage.getItem('kabroda_locked_risk');
+
+            try {
+                // Fetch the static Market Radar payload to populate the targets
+                const res = await fetch('/api/radar/scan', { method: 'POST' });
+                const data = await res.json();
+                
+                const myAsset = data.results.find(t => t.symbol === targetSymbol);
+                if(!myAsset || myAsset.status === "CALIBRATING") {
+                    document.getElementById('loadingMsg').innerText = "/// WAITING FOR CALIBRATION LOCK...";
+                    return;
+                }
+
+                activeData = myAsset;
+                
+                document.getElementById('staticRoe').innerHTML = `<strong>${myAsset.favored} FAVORED</strong><br><br>${myAsset.roe}`;
+
+                // Populate Macro Magnets
+                renderMacroMagnets(myAsset);
+
+                // Populate Long
+                document.getElementById('keyL').value = myAsset.long.key;
+                document.getElementById('oNoteL').innerText = myAsset.long.oracle_note || '';
+                if(myAsset.long.plan.valid) {
+                    document.getElementById('pEntL').innerText = myAsset.long.plan.entry.toFixed(2);
+                    document.getElementById('pStpL').innerText = myAsset.long.plan.stop.toFixed(2);
+                    document.getElementById('pT1L').innerText = myAsset.long.plan.targets[0].toFixed(2);
+                    document.getElementById('pT2L').innerText = myAsset.long.plan.targets[1].toFixed(2);
+                    document.getElementById('pT3L').innerText = myAsset.long.plan.targets[2].toFixed(2);
+                }
+
+                // Populate Short
+                document.getElementById('keyS').value = myAsset.short.key;
+                document.getElementById('oNoteS').innerText = myAsset.short.oracle_note || '';
+                if(myAsset.short.plan.valid) {
+                    document.getElementById('pEntS').innerText = myAsset.short.plan.entry.toFixed(2);
+                    document.getElementById('pStpS').innerText = myAsset.short.plan.stop.toFixed(2);
+                    document.getElementById('pT1S').innerText = myAsset.short.plan.targets[0].toFixed(2);
+                    document.getElementById('pT2S').innerText = myAsset.short.plan.targets[1].toFixed(2);
+                    document.getElementById('pT3S').innerText = myAsset.short.plan.targets[2].toFixed(2);
+                }
+
+                recalc();
+                
+                document.getElementById('loadingMsg').style.display = 'none';
+                document.getElementById('terminalGrid').style.display = 'grid';
+
+                // Start the Border Guard
+                pollBorderGuard();
+                setInterval(pollBorderGuard, 30000);
+
+            } catch(e) {
+                console.error(e);
+                document.getElementById('loadingMsg').innerText = "/// ERROR SECURING DATA";
+            }
+        }
+
+        // --- PHASE 3: THE BORDER GUARD LOGIC ---
+        async function pollBorderGuard() {
+            if(!activeData) return;
+            try {
+                // Fetch live telemetry
+                const res = await fetch("/api/telemetry/live", {
+                    method: "POST", headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({symbol: targetSymbol})
+                });
+                const data = await res.json();
+                
+                if(data.ok && data.telemetry.status === "SUCCESS") {
+                    const tel = data.telemetry;
+                    
+                    document.getElementById('livePrice').innerText = "$" + activeData.price.toFixed(2);
+                    
+                    let oiPrefix = tel.oi_delta_pct > 0 ? "+" : "";
+                    document.getElementById('liveOi').innerText = oiPrefix + tel.oi_delta_pct.toFixed(2) + "%";
+                    document.getElementById('liveOi').style.color = tel.oi_delta_pct > 0 ? "#10b981" : (tel.oi_delta_pct < 0 ? "#ef4444" : "#fff");
+
+                    const bo_trigger = activeData.long.plan.entry;
+                    const bd_trigger = activeData.short.plan.entry;
+
+                    let alertMsg = "CHOP ZONE: Price is between triggers. Wait.";
+                    let alertColor = "#64748b";
+                    let borderColor = "#334155";
+
+                    // The actual "Border Guard" Math
+                    if (bo_trigger > 0 && Math.abs(activeData.price - bo_trigger) / bo_trigger < 0.005) {
+                        if (tel.oi_delta_pct < -0.5) {
+                            alertMsg = "🚨 FAKE-OUT WARNING: Price testing Breakout, but Capital is Draining. DO NOT LONG.";
+                            alertColor = "#ef4444";
+                            borderColor = "#ef4444";
+                        } else {
+                            alertMsg = "🟢 CONFIRMED PUSH: Price testing Breakout with Fuel. Wait for 15m Close.";
+                            alertColor = "#10b981";
+                            borderColor = "#10b981";
+                        }
+                    } 
+                    else if (bd_trigger > 0 && Math.abs(activeData.price - bd_trigger) / bd_trigger < 0.005) {
+                        if (tel.oi_delta_pct < -0.5) {
+                            alertMsg = "🚨 FAKE-OUT WARNING: Price testing Breakdown, but Capital is Draining. DO NOT SHORT.";
+                            alertColor = "#ef4444";
+                            borderColor = "#ef4444";
+                        } else {
+                            alertMsg = "🔴 CONFIRMED FLUSH: Price testing Breakdown with Fuel. Wait for 15m Close.";
+                            alertColor = "#ef4444";
+                            borderColor = "#ef4444";
+                        }
+                    }
+
+                    const alertBox = document.getElementById('guardAlert');
+                    alertBox.innerText = alertMsg;
+                    alertBox.style.color = alertColor;
+                    alertBox.style.borderColor = borderColor;
+                }
+            } catch(e) {
+                console.error(e);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', initTerminal);
+    </script>
+    {% include 'footer.html' %}
+</body>
+</html>
