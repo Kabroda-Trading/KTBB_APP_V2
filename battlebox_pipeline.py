@@ -1,13 +1,14 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v9.0 (THE MIDDLE BRAIN)
+# KABRODA BATTLEBOX PIPELINE — v10.0 (PHASE 1: GEOMETRY + FUEL)
 # ==============================================================================
 # Purpose:
 # - The single "Moment of Truth" for each session/day
 # - Locks session open + 30m anchor range (calibration)
 # - Computes levels via sse_engine.compute_sse_levels
 # - Synthesizes Monday-Sunday Macro Bias from 1D candles.
-# - INJECTS Postgres Memory, KuCoin Order Book, and CoinGlass Fuel (Hybrid Engine).
+# - INJECTS Postgres Memory and Coinalyze Macro Fuel.
+# - (L2 Order Book Heatmap temporarily sterilized for pure structural math).
 # ==============================================================================
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import sse_engine
 import structure_state_engine
 import liquidity_oracle 
 import database_manager 
-import live_telemetry # <--- INJECTING TELEMETRY (FUEL GAUGE)
+import live_telemetry 
 
 # Public re-export for compatibility
 SESSION_CONFIGS = session_manager.SESSION_CONFIGS
@@ -36,7 +37,7 @@ _LOCKED_PACKETS: Dict[str, Dict[str, Any]] = {}
 _CACHE_LOCK = asyncio.Lock()
 
 # ----------------------------------------------------------------------
-# Exchange (KuCoin)
+# Exchange (KuCoin - Used purely for raw candle data, NOT depth)
 # ----------------------------------------------------------------------
 _exchange_live = ccxt.kucoin({"enableRateLimit": True})
 
@@ -233,7 +234,7 @@ def _compute_sse_packet(raw_5m: List[Dict[str, Any]], anchor_ts: int, macro_bias
     }
 
 # ----------------------------------------------------------------------
-# THE MIDDLE BRAIN MATH (Crater vs Speedbump) - HYBRID FUEL INJECTED
+# THE MIDDLE BRAIN MATH (PHASE 1: GEOMETRY + FUEL)
 # ----------------------------------------------------------------------
 def _analyze_true_gap(symbol, trigger, static_level, order_book, direction, fuel_multiplier=1.0):
     min_gap, primal_max, exhaust_max = 0.50, 1.50, 2.25
@@ -242,47 +243,22 @@ def _analyze_true_gap(symbol, trigger, static_level, order_book, direction, fuel
     
     if trigger == 0: return 0.0, "WAITING", 0.0
 
-    if not order_book:
-        fallback_gap = (abs(static_level - trigger) / trigger) * 100 if static_level > 0 else 0
-        if fallback_gap < min_gap: return fallback_gap, "DEATH ZONE (STATIC)", static_level
-        return fallback_gap, "MAGNET (STATIC)", static_level
+    # Phase 1: We ignore the localized order_book parameter entirely.
+    # We strictly calculate the gap to the static Daily Resistance/Support.
+    static_gap = (abs(static_level - trigger) / trigger) * 100 if static_level > 0 else 0
 
-    if direction == "LONG":
-        valid_walls = [x for x in order_book if x[0] > trigger]
-        valid_walls.sort(key=lambda x: x[0]) 
+    if static_gap < min_gap: 
+        return static_gap, "DEATH ZONE (STATIC NOISE)", static_level
+    elif static_gap > exhaust_max: 
+        return static_gap, "DEATH ZONE (EXHAUSTION)", static_level
+    
+    # Apply Coinalyze Fuel Multiplier
+    if fuel_multiplier >= 1.2:
+        return static_gap, "PRIMAL ZONE (HIGH FUEL)", static_level
+    elif fuel_multiplier <= 0.8:
+        return static_gap, "CHOP ZONE (LOW FUEL)", static_level
     else:
-        valid_walls = [x for x in order_book if x[0] < trigger]
-        valid_walls.sort(key=lambda x: x[0], reverse=True) 
-        
-    if not valid_walls:
-        fallback_gap = (abs(static_level - trigger) / trigger) * 100
-        return fallback_gap, "JAILBREAK (NO WALLS)", static_level
-
-    search_range = trigger * 1.01 if direction == "LONG" else trigger * 0.99
-    immediate_zone = [x for x in valid_walls if (x[0] <= search_range if direction == "LONG" else x[0] >= search_range)]
-    immediate_wall = max(immediate_zone, key=lambda x: x[1]) if immediate_zone else valid_walls[0]
-
-    macro_wall = max(valid_walls, key=lambda x: x[1])
-
-    current_day = datetime.now(timezone.utc).weekday()
-    vol_multiplier = 2.0 if current_day in [0, 4, 5, 6] else 1.5
-
-    is_speedbump = False
-    if macro_wall[0] != immediate_wall[0]: 
-        # HYBRID MATH: Apply the CoinGlass Fuel Multiplier to the Macro Wall
-        boosted_macro_vol = macro_wall[1] * fuel_multiplier
-        if boosted_macro_vol >= (immediate_wall[1] * vol_multiplier):
-            is_speedbump = True
-
-    true_target = macro_wall[0] if is_speedbump else immediate_wall[0]
-    true_gap = (abs(true_target - trigger) / trigger) * 100
-
-    if true_gap < min_gap: return true_gap, "DEATH ZONE (CRATER)", true_target
-    elif true_gap > exhaust_max: return true_gap, "DEATH ZONE (EXHAUSTION)", true_target
-    elif true_gap > primal_max: return true_gap, "EXTENDED MAGNET", true_target
-    else:
-        if is_speedbump: return true_gap, "PRIMAL ZONE (SPEEDBUMP CLEARED)", true_target
-        return true_gap, "PRIMAL ZONE (DIRECT MAGNET)", true_target
+        return static_gap, "PRIMAL ZONE (STATIC TARGET)", static_level
 
 # ----------------------------------------------------------------------
 # Public API
@@ -316,9 +292,9 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                 wm = _war_map_from_1h(raw_1h)
                 return {"status": "ERROR", "message": pkt["error"], "battlebox": {"war_map_context": wm, "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
             
-            # --- PHASE 1/2 INJECTION: HYBRID ORACLE & MEMORY ---
+            # --- INJECTION: MEMORY & COINALYZE FUEL ---
             telemetry_data = await live_telemetry.fetch_live_telemetry(symbol)
-            liquidity_data = await liquidity_oracle.fetch_liquidation_magnets(symbol)
+            liquidity_data = await liquidity_oracle.fetch_liquidation_magnets(symbol) # Sterilized placeholder
             db_state = await database_manager.get_campaign_state(symbol)
             
             pkt["liquidity_walls"] = liquidity_data
@@ -331,11 +307,12 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
             dr = float(pkt["levels"].get("daily_resistance", 0))
             ds = float(pkt["levels"].get("daily_support", 0))
 
+            # These will be empty lists in Phase 1, the math ignores them
             raw_walls = liquidity_data.get("raw_data", {})
             asks = raw_walls.get("asks", [])
             bids = raw_walls.get("bids", [])
             
-            # Apply the CoinGlass Fuel Gauge to the KuCoin Order Book Math
+            # Apply the Coinalyze Fuel Gauge to the Static Geometry Math
             fuel_mult = float(telemetry_data.get("fuel_multiplier", 1.0))
 
             l_gap, l_tier, l_target = _analyze_true_gap(symbol, bo, dr, asks, "LONG", fuel_mult)
