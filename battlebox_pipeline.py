@@ -7,7 +7,7 @@
 # - Locks session open + 30m anchor range (calibration)
 # - Computes levels via sse_engine.compute_sse_levels
 # - Synthesizes Monday-Sunday Macro Bias from 1D candles.
-# - INJECTS Postgres Memory (Campaign State) and CoinGlass Oracle Math.
+# - INJECTS Postgres Memory, KuCoin Order Book, and CoinGlass Fuel (Hybrid Engine).
 # ==============================================================================
 
 from __future__ import annotations
@@ -23,7 +23,8 @@ import session_manager
 import sse_engine
 import structure_state_engine
 import liquidity_oracle 
-import database_manager # <--- INJECTING POSTGRES MEMORY
+import database_manager 
+import live_telemetry # <--- INJECTING TELEMETRY (FUEL GAUGE)
 
 # Public re-export for compatibility
 SESSION_CONFIGS = session_manager.SESSION_CONFIGS
@@ -232,9 +233,9 @@ def _compute_sse_packet(raw_5m: List[Dict[str, Any]], anchor_ts: int, macro_bias
     }
 
 # ----------------------------------------------------------------------
-# THE MIDDLE BRAIN MATH (Crater vs Speedbump)
+# THE MIDDLE BRAIN MATH (Crater vs Speedbump) - HYBRID FUEL INJECTED
 # ----------------------------------------------------------------------
-def _analyze_true_gap(symbol, trigger, static_level, order_book, direction):
+def _analyze_true_gap(symbol, trigger, static_level, order_book, direction, fuel_multiplier=1.0):
     min_gap, primal_max, exhaust_max = 0.50, 1.50, 2.25
     if "ETH" in symbol: min_gap, primal_max, exhaust_max = 0.80, 2.50, 3.50
     if "SOL" in symbol: min_gap, primal_max, exhaust_max = 1.50, 4.00, 6.00
@@ -268,7 +269,9 @@ def _analyze_true_gap(symbol, trigger, static_level, order_book, direction):
 
     is_speedbump = False
     if macro_wall[0] != immediate_wall[0]: 
-        if macro_wall[1] >= (immediate_wall[1] * vol_multiplier):
+        # HYBRID MATH: Apply the CoinGlass Fuel Multiplier to the Macro Wall
+        boosted_macro_vol = macro_wall[1] * fuel_multiplier
+        if boosted_macro_vol >= (immediate_wall[1] * vol_multiplier):
             is_speedbump = True
 
     true_target = macro_wall[0] if is_speedbump else immediate_wall[0]
@@ -313,12 +316,14 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                 wm = _war_map_from_1h(raw_1h)
                 return {"status": "ERROR", "message": pkt["error"], "battlebox": {"war_map_context": wm, "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
             
-            # --- PHASE 1/2 INJECTION: ORACLE & MEMORY ---
+            # --- PHASE 1/2 INJECTION: HYBRID ORACLE & MEMORY ---
+            telemetry_data = await live_telemetry.fetch_live_telemetry(symbol)
             liquidity_data = await liquidity_oracle.fetch_liquidation_magnets(symbol)
             db_state = await database_manager.get_campaign_state(symbol)
             
             pkt["liquidity_walls"] = liquidity_data
             pkt["campaign_state"] = db_state
+            pkt["telemetry_data"] = telemetry_data
             
             # --- MIDDLE BRAIN MATH ---
             bo = float(pkt["levels"].get("breakout_trigger", 0))
@@ -329,9 +334,12 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
             raw_walls = liquidity_data.get("raw_data", {})
             asks = raw_walls.get("asks", [])
             bids = raw_walls.get("bids", [])
+            
+            # Apply the CoinGlass Fuel Gauge to the KuCoin Order Book Math
+            fuel_mult = float(telemetry_data.get("fuel_multiplier", 1.0))
 
-            l_gap, l_tier, l_target = _analyze_true_gap(symbol, bo, dr, asks, "LONG")
-            s_gap, s_tier, s_target = _analyze_true_gap(symbol, bd, ds, bids, "SHORT")
+            l_gap, l_tier, l_target = _analyze_true_gap(symbol, bo, dr, asks, "LONG", fuel_mult)
+            s_gap, s_tier, s_target = _analyze_true_gap(symbol, bd, ds, bids, "SHORT", fuel_mult)
             
             pkt["middle_brain"] = {
                 "long_tier": l_tier, "long_target": l_target, "long_gap": l_gap,

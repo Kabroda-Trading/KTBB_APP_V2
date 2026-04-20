@@ -1,52 +1,42 @@
 # liquidity_oracle.py
 # ==============================================================================
-# KABRODA LIQUIDITY ORACLE v1.0 (COINGLASS API v4)
+# KABRODA CUSTOM LIQUIDITY ORACLE v2.0 (L2 ORDER BOOK ENGINE)
 # ==============================================================================
-# Purpose: Single Source of Truth for live institutional liquidation magnets.
-# Integrates with CoinGlass Aggregated Map endpoint.
+# Purpose: Pulls live resting limit orders to find exact Craters and Speedbumps.
+# Bypasses US Geofencing by routing through KuCoin via CCXT.
 # ==============================================================================
 
-import os
-import aiohttp
-import asyncio
+import ccxt.async_support as ccxt
+import traceback
 from typing import Dict, Any
 
-COINGLASS_API_KEY = os.getenv("COINGLASS_API_KEY")
-BASE_URL = "https://open-api-v4.coinglass.com/api/futures/liquidation/aggregated-map"
+def _normalize_symbol(symbol: str) -> str:
+    s = (symbol or "").upper().strip()
+    if s in ("BTC", "BTCUSDT"): return "BTC/USDT"
+    if s in ("ETH", "ETHUSDT"): return "ETH/USDT"
+    if s in ("SOL", "SOLUSDT"): return "SOL/USDT"
+    if s.endswith("USDT") and "/" not in s: return s.replace("USDT", "/USDT")
+    return s
 
-async def fetch_liquidation_magnets(symbol: str = "BTC", timeframe_range: str = "1d") -> Dict[str, Any]:
-    if not COINGLASS_API_KEY:
-        return {"status": "BYPASSED", "raw_data": {}}
-
-    cg_symbol = symbol.replace("USDT", "")
-
-    headers = {
-        "accept": "application/json",
-        "CG-API-KEY": COINGLASS_API_KEY
-    }
+async def fetch_liquidation_magnets(symbol: str = "BTCUSDT") -> Dict[str, Any]:
+    s = _normalize_symbol(symbol)
+    exchange = ccxt.kucoin({'enableRateLimit': True})
     
-    params = {
-        "symbol": cg_symbol,
-        "range": timeframe_range
-    }
-
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(BASE_URL, headers=headers, params=params, timeout=10) as response:
-                if response.status != 200:
-                    return {"status": "ERROR", "message": f"HTTP {response.status}", "raw_data": {}}
-                
-                payload = await response.json()
-                data = payload.get("data", {})
-                
-                # DIAGNOSTIC PROBE: Print the entire payload to catch internal CoinGlass errors
-                print(f">>> FULL COINGLASS API RESPONSE for {cg_symbol}: {payload}")
-                
-                return {
-                    "status": "SUCCESS",
-                    "symbol": symbol,
-                    "raw_data": data
-                }
-
+        # Pull the top 500 levels of the order book (Creates a massive 5% heatmap radius on BTC)
+        orderbook = await exchange.fetch_order_book(s, limit=500)
+        
+        # CCXT returns standard lists: [[price, volume], ...]
+        return {
+            "status": "SUCCESS",
+            "symbol": symbol,
+            "raw_data": {
+                "asks": orderbook.get('asks', []), 
+                "bids": orderbook.get('bids', [])  
+            }
+        }
     except Exception as e:
+        print(f"[CUSTOM ORACLE ERROR] Failed to fetch order book for {s}: {e}")
         return {"status": "ERROR", "message": str(e), "raw_data": {}}
+    finally:
+        await exchange.close()
