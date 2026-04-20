@@ -47,8 +47,9 @@ async def fetch_liquidation_magnets(symbol: str = "BTC", timeframe_range: str = 
                 payload = await response.json()
                 data = payload.get("data", {})
                 
+                print(f">>> COINGLASS RAW PAYLOAD for {cg_symbol}: {data}")
                 print(f">>> COINGLASS PHASE 1 DATA SECURED for {cg_symbol}")
-                
+
                 # We return the raw data block. 
                 # Phase 2 (Market Radar) will do the math to evaluate the walls.
                 return {
