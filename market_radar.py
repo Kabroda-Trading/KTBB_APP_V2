@@ -1,8 +1,6 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v10.5 (THE DISPLAY LAYER)
-# UPDATE: Stripped of heavy math. Now acts as a clean display formatter that 
-# reads the True Gap, Volume Ratios, and Database Memory from the Middle Brain.
+# KABRODA MARKET RADAR v10.6
 # ==============================================================================
 import os
 import json
@@ -56,7 +54,6 @@ def _find_predator_stop(symbol, entry, direction, levels, verdict):
 def _get_plan(symbol, static_entry, vector, tier, levels, true_target):
     plan = {"valid": False, "bias": vector, "entry": 0, "stop": 0, "targets": [0,0,0]}
     
-    # SAFETY KILL-SWITCH
     if "WAITING" in tier or "DEATH ZONE" in tier: return plan
     
     bo = float(levels.get("breakout_trigger", 0))
@@ -67,7 +64,6 @@ def _get_plan(symbol, static_entry, vector, tier, levels, true_target):
     entry_price = static_entry if "SNIPER" in tier else (bo if vector == "LONG" else bd)
     stop_price = _find_predator_stop(symbol, entry_price, vector, levels, tier)
     
-    # STEPPING STONE TARGETS (Anchored to True Target)
     t2 = true_target if true_target > 0 else (dr if vector == "LONG" else ds)
     gap = abs(t2 - entry_price)
 
@@ -80,7 +76,6 @@ def _get_plan(symbol, static_entry, vector, tier, levels, true_target):
     return plan
 
 def _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls):
-    oracle_star = "NONE"
     l_note = "⚪ Oracle Standby"
     s_note = "⚪ Oracle Standby"
     macro_upper = []
@@ -102,9 +97,6 @@ def _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls):
             
             macro_upper = [{"price": a[0], "vol": a[1]} for a in sorted(top_asks, key=lambda x: x[0])]
             macro_lower = [{"price": b[0], "vol": b[1]} for b in sorted(top_bids, key=lambda x: x[0], reverse=True)]
-
-            if max_ask[1] > (max_bid[1] * 1.5): oracle_star = "LONG"
-            elif max_bid[1] > (max_ask[1] * 1.5): oracle_star = "SHORT"
                 
             if l_plan["valid"] and max_bid[0] > 0:
                 if l_plan["stop"] > max_bid[0]:
@@ -123,7 +115,25 @@ def _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls):
         except Exception as e:
             print(f"Oracle Eval Error: {e}")
             
-    return oracle_star, l_note, s_note, macro_upper, macro_lower
+    return l_note, s_note, macro_upper, macro_lower
+
+def _enforce_risk_reward(plan, tier, note):
+    """Calculates R:R based on TARGET 2 (The True Magnet)."""
+    if not plan["valid"] or plan["stop"] == 0:
+        return plan, tier, note, 0.0
+        
+    risk = abs(plan["entry"] - plan["stop"])
+    # Target 2 is index 1
+    reward = abs(plan["targets"][1] - plan["entry"]) 
+    
+    rr_ratio = reward / risk if risk > 0 else 0.0
+    
+    if rr_ratio < 0.50:
+        plan["valid"] = False
+        tier = "DEATH ZONE (BAD R:R)"
+        note = f"⛔ TRADE INVALIDATED: Target 2 R:R is only {rr_ratio:.2f}."
+        
+    return plan, tier, note, rr_ratio
 
 def _make_key(plan, verdict, macro_bias, micro_bias):
     if not plan["valid"]: return f"NEUTRAL|HOLD|0|0|0|0|0|{macro_bias}|{micro_bias}"
@@ -131,7 +141,6 @@ def _make_key(plan, verdict, macro_bias, micro_bias):
     return f"{plan['bias']}|{clean_verdict}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}|{macro_bias}|{micro_bias}"
 
 def _generate_omni_roe(favored, fav_tier, macro_bias, micro_bias, campaign_state):
-    # Check Database Memory First
     camp_bias = campaign_state.get("bias", "NEUTRAL")
     
     if camp_bias == "SHORT" and favored == "LONG":
@@ -139,10 +148,10 @@ def _generate_omni_roe(favored, fav_tier, macro_bias, micro_bias, campaign_state
     if camp_bias == "LONG" and favored == "SHORT":
         return "RELOAD ZONE (TRAP): Macro Campaign is LONG. Current drop is a liquidity sweep. DO NOT SHORT."
     
-    # Standard Structural Verdict
     struct_text = ""
     if "CRATER" in fav_tier: struct_text = "DEATH ZONE (CRATER): Immediate wall absorbing energy. STAND DOWN."
     elif "EXHAUSTION" in fav_tier: struct_text = "DEATH ZONE (EXHAUSTION): Target is too far away. STAND DOWN."
+    elif "BAD R:R" in fav_tier: struct_text = "DEATH ZONE: Risk to Reward is terrible. STAND DOWN."
     elif "SPEEDBUMP" in fav_tier: struct_text = "PRIMAL ZONE: Obstacle is a speedbump. Target confirmed. EXECUTE."
     elif "DIRECT MAGNET" in fav_tier: struct_text = "PRIMAL ZONE: Open runway to target. EXECUTE."
     elif "JAILBREAK" in fav_tier: struct_text = "JAILBREAK: Triggers outside walls. Trail stop loosely."
@@ -166,7 +175,10 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, liquidity_wal
     l_plan = _get_plan(symbol, bo, "LONG", l_tier, levels, l_target)
     s_plan = _get_plan(symbol, bd, "SHORT", s_tier, levels, s_target)
     
-    oracle_star, l_note, s_note, macro_upper, macro_lower = _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls)
+    l_note, s_note, macro_upper, macro_lower = _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls)
+    
+    l_plan, l_tier, l_note, l_rr = _enforce_risk_reward(l_plan, l_tier, l_note)
+    s_plan, s_tier, s_note, s_rr = _enforce_risk_reward(s_plan, s_tier, s_note)
     
     favored = "NEUTRAL"
     if micro_bias == "BULLISH": favored = "LONG"
@@ -184,12 +196,11 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, liquidity_wal
 
     return {
         "favored": favored, "color_code": color, "sort_weight": sort_weight, "roe": roe_text,
-        "oracle_star": oracle_star, 
         "campaign_bias": campaign_state.get("bias", "NEUTRAL"),
         "liquidity_status": liquidity_walls.get("status", "NONE"),
         "macro_upper": macro_upper, "macro_lower": macro_lower,
-        "long": {"gap": l_gap, "tier": l_tier, "plan": l_plan, "key": _make_key(l_plan, l_tier, macro_bias, micro_bias), "oracle_note": l_note},
-        "short": {"gap": s_gap, "tier": s_tier, "plan": s_plan, "key": _make_key(s_plan, s_tier, macro_bias, micro_bias), "oracle_note": s_note}
+        "long": {"gap": l_gap, "tier": l_tier, "plan": l_plan, "key": _make_key(l_plan, l_tier, macro_bias, micro_bias), "oracle_note": l_note, "rr": l_rr},
+        "short": {"gap": s_gap, "tier": s_tier, "plan": s_plan, "key": _make_key(s_plan, s_tier, macro_bias, micro_bias), "oracle_note": s_note, "rr": s_rr}
     }
 
 def log_to_google_sheet(radar_item):
