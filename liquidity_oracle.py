@@ -2,9 +2,6 @@
 # ==============================================================================
 # KABRODA CUSTOM LIQUIDITY ORACLE v2.0 (L2 ORDER BOOK ENGINE)
 # ==============================================================================
-# Purpose: Pulls live resting limit orders to find exact Craters and Speedbumps.
-# Bypasses US Geofencing by routing through KuCoin via CCXT.
-# ==============================================================================
 
 import ccxt.async_support as ccxt
 import traceback
@@ -23,10 +20,9 @@ async def fetch_liquidation_magnets(symbol: str = "BTCUSDT") -> Dict[str, Any]:
     exchange = ccxt.kucoin({'enableRateLimit': True})
     
     try:
-        # Pull the top 500 levels of the order book (Creates a massive 5% heatmap radius on BTC)
-        orderbook = await exchange.fetch_order_book(s, limit=500)
+        # FIX: KuCoin API strictly demands limit=20 or limit=100
+        orderbook = await exchange.fetch_order_book(s, limit=100)
         
-        # CCXT returns standard lists: [[price, volume], ...]
         return {
             "status": "SUCCESS",
             "symbol": symbol,
