@@ -1,11 +1,11 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v10.0 (PHASE 2: HEATMAP + FUEL)
+# KABRODA BATTLEBOX PIPELINE — v10.1 (STRICT TEMPORAL LOCKDOWN)
 # ==============================================================================
 # Purpose:
 # - Locks session open + 30m anchor range (calibration)
+# - Filters ALL live data past lock_time to prevent mid-day bias flips on reboot.
 # - Computes levels via sse_engine.compute_sse_levels
-# - Synthesizes Monday-Sunday Macro Bias from 1D candles.
 # - INJECTS Postgres Memory, Coinalyze Fuel, AND Binance L2 Proxy Depth.
 # ==============================================================================
 
@@ -25,28 +25,18 @@ import liquidity_oracle
 import database_manager 
 import live_telemetry 
 
-# Public re-export for compatibility
 SESSION_CONFIGS = session_manager.SESSION_CONFIGS
 
-# ----------------------------------------------------------------------
-# Cache / Locks
-# ----------------------------------------------------------------------
 _LOCKED_PACKETS: Dict[str, Dict[str, Any]] = {}
 _CACHE_LOCK = asyncio.Lock()
 
-# ----------------------------------------------------------------------
-# Exchange (KuCoin - Used purely for raw candle data, NOT depth)
-# ----------------------------------------------------------------------
 _exchange_live = ccxt.kucoin({"enableRateLimit": True})
 
 def _normalize_symbol(symbol: str) -> str:
     s = (symbol or "").upper().strip()
-    if s in ("BTC", "BTCUSDT"):
-        return "BTC/USDT"
-    if s in ("ETH", "ETHUSDT"):
-        return "ETH/USDT"
-    if s.endswith("USDT") and "/" not in s:
-        return s.replace("USDT", "/USDT")
+    if s in ("BTC", "BTCUSDT"): return "BTC/USDT"
+    if s in ("ETH", "ETHUSDT"): return "ETH/USDT"
+    if s.endswith("USDT") and "/" not in s: return s.replace("USDT", "/USDT")
     return s
 
 async def close_exchange() -> None:
@@ -57,9 +47,6 @@ async def close_exchange() -> None:
     except Exception:
         pass
 
-# ----------------------------------------------------------------------
-# Fetching
-# ----------------------------------------------------------------------
 async def fetch_live_5m(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
     s = _normalize_symbol(symbol)
     try:
@@ -85,49 +72,6 @@ async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]
     except Exception:
         return []
 
-async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, limit: int = 1500) -> List[Dict[str, Any]]:
-    s = _normalize_symbol(symbol)
-    since_ms = int(start_ts) * 1000
-    end_ms = int(end_ts) * 1000
-    out: List[Dict[str, Any]] = []
-    last_first_ts: Optional[int] = None
-    safety_iters = 0
-
-    while since_ms < end_ms:
-        safety_iters += 1
-        if safety_iters > 2000: break
-
-        rows = await _exchange_live.fetch_ohlcv(s, "5m", since=since_ms, limit=limit)
-        if not rows: break
-
-        first_ts = int(rows[0][0])
-        if last_first_ts is not None and first_ts == last_first_ts: break
-        last_first_ts = first_ts
-
-        for r in rows:
-            t_ms = int(r[0])
-            if t_ms >= end_ms: break
-            out.append({"time": int(t_ms / 1000), "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "volume": float(r[5])})
-
-        last_ts = int(rows[-1][0])
-        if last_ts <= since_ms: break
-        since_ms = last_ts + (5 * 60 * 1000)
-        await asyncio.sleep(0)
-
-    out.sort(key=lambda x: int(x["time"]))
-    dedup: List[Dict[str, Any]] = []
-    seen = set()
-    for c in out:
-        t = int(c["time"])
-        if t in seen: continue
-        seen.add(t)
-        dedup.append(c)
-
-    return dedup
-
-# ----------------------------------------------------------------------
-# Helpers
-# ----------------------------------------------------------------------
 def _calculate_weekly_force(raw_daily: List[Dict[str, Any]], anchor_ts: int) -> str:
     if not raw_daily: return "NEUTRAL"
     anchor_dt = datetime.fromtimestamp(anchor_ts, tz=timezone.utc)
@@ -148,10 +92,13 @@ def _calculate_weekly_force(raw_daily: List[Dict[str, Any]], anchor_ts: int) -> 
     if cl < op: return "BEARISH"
     return "NEUTRAL"
 
-def _calculate_168h_micro_bias(raw_1h: List[Dict[str, Any]]) -> str:
-    if not raw_1h or len(raw_1h) < 168: return "NEUTRAL"
-    current_price = float(raw_1h[-1]["close"])
-    past_price = float(raw_1h[-168]["close"])
+def _calculate_168h_micro_bias(raw_1h: List[Dict[str, Any]], lock_ts: int) -> str:
+    # ARCHITECT FIX: Filter out ANY candles that occurred after 9:30 AM to prevent reboot bias flips
+    locked_1h = [c for c in raw_1h if int(c["time"]) <= lock_ts]
+    if not locked_1h or len(locked_1h) < 168: return "NEUTRAL"
+    
+    current_price = float(locked_1h[-1]["close"])
+    past_price = float(locked_1h[-168]["close"])
     pct_change = ((current_price - past_price) / past_price) * 100.0
     if pct_change > 1.00: return "BULLISH"
     elif pct_change < -1.00: return "BEARISH"
@@ -160,9 +107,11 @@ def _calculate_168h_micro_bias(raw_1h: List[Dict[str, Any]]) -> str:
 def _safe_placeholder_state(reason: str = "Waiting...") -> Dict[str, Any]:
     return {"action": "HOLD FIRE", "reason": reason, "permission": {"status": "NOT_EARNED", "side": "NONE"}, "acceptance_progress": {"count": 0, "required": 2, "side_hint": "NONE"}, "location": {"relative_to_triggers": "INSIDE"}, "execution": {"pause_state": "NONE", "resumption_state": "NONE", "gates_mode": "PREVIEW", "locked_at": None, "levels": {"failure": 0.0, "continuation": 0.0}}, "diagnostics": {"fail_reason": "WAITING"}}
 
-def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
-    if not raw_1h: return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "UNCLEAR", "note": "No 1h data."}
-    closes = [float(c["close"]) for c in raw_1h]
+def _war_map_from_1h(raw_1h: List[Dict[str, Any]], lock_ts: int) -> Dict[str, Any]:
+    # ARCHITECT FIX: Freeze the War Map at 9:30 AM
+    locked_1h = [c for c in raw_1h if int(c["time"]) <= lock_ts]
+    if not locked_1h: return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "UNCLEAR", "note": "No 1h data."}
+    closes = [float(c["close"]) for c in locked_1h]
     if len(closes) < 22: return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "TRANSITION", "note": "Insufficient history."}
     alpha = 2.0 / (21.0 + 1.0)
     ema = closes[0]
@@ -226,9 +175,6 @@ def _compute_sse_packet(raw_5m: List[Dict[str, Any]], anchor_ts: int, macro_bias
         "meta": computed.get("meta", {}),
     }
 
-# ----------------------------------------------------------------------
-# THE MIDDLE BRAIN MATH (PHASE 2: PROPRIETARY HEATMAP + FUEL)
-# ----------------------------------------------------------------------
 def _analyze_true_gap(symbol, trigger, static_level, order_book, direction, fuel_multiplier=1.0):
     min_gap, primal_max, exhaust_max = 0.50, 1.50, 2.25
     if "ETH" in symbol: min_gap, primal_max, exhaust_max = 0.80, 2.50, 3.50
@@ -236,13 +182,11 @@ def _analyze_true_gap(symbol, trigger, static_level, order_book, direction, fuel
     
     if trigger == 0: return 0.0, "WAITING", 0.0
 
-    # Failsafe: If the proxy fails or Binance drops, rely on pure geometry
     if not order_book:
         fallback_gap = (abs(static_level - trigger) / trigger) * 100 if static_level > 0 else 0
         if fallback_gap < min_gap: return fallback_gap, "DEATH ZONE (STATIC NOISE)", static_level
         return fallback_gap, "MAGNET (STATIC NOISE)", static_level
 
-    # Sort the walls based on direction
     if direction == "LONG":
         valid_walls = [x for x in order_book if x[0] > trigger]
         valid_walls.sort(key=lambda x: x[0]) 
@@ -254,29 +198,24 @@ def _analyze_true_gap(symbol, trigger, static_level, order_book, direction, fuel
         fallback_gap = (abs(static_level - trigger) / trigger) * 100 if static_level > 0 else 0
         return fallback_gap, "JAILBREAK (NO WALLS)", static_level
 
-    # Locate Immediate Friction vs Macro Magnets
     search_range = trigger * 1.01 if direction == "LONG" else trigger * 0.99
     immediate_zone = [x for x in valid_walls if (x[0] <= search_range if direction == "LONG" else x[0] >= search_range)]
     immediate_wall = max(immediate_zone, key=lambda x: x[1]) if immediate_zone else valid_walls[0]
 
     macro_wall = max(valid_walls, key=lambda x: x[1])
 
-    # Weekend volume suppression logic
     current_day = datetime.now(timezone.utc).weekday()
     vol_multiplier = 2.0 if current_day in [4, 5, 6] else 1.5
 
     is_speedbump = False
     if macro_wall[0] != immediate_wall[0]: 
-        # INJECTION: Coinalyze Fuel boosts the gravitational pull of the Macro Wall
         boosted_macro_vol = macro_wall[1] * fuel_multiplier
         if boosted_macro_vol >= (immediate_wall[1] * vol_multiplier):
             is_speedbump = True
 
-    # Lock in the actual target dictated by the capital walls
     true_target = macro_wall[0] if is_speedbump else immediate_wall[0]
     true_gap = (abs(true_target - trigger) / trigger) * 100
 
-    # Output the definitive verdict
     if true_gap < min_gap: return true_gap, "DEATH ZONE (CRATER)", true_target
     elif true_gap > exhaust_max: return true_gap, "DEATH ZONE (EXHAUSTION)", true_target
     elif true_gap > primal_max: return true_gap, "EXTENDED MAGNET", true_target
@@ -284,9 +223,6 @@ def _analyze_true_gap(symbol, trigger, static_level, order_book, direction, fuel
         if is_speedbump: return true_gap, "PRIMAL ZONE (SPEEDBUMP CLEARED)", true_target
         return true_gap, "PRIMAL ZONE (DIRECT MAGNET)", true_target
 
-# ----------------------------------------------------------------------
-# Public API
-# ----------------------------------------------------------------------
 async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id: Optional[str] = None, operator_flex: bool = False, tuning: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     raw_5m = await fetch_live_5m(symbol)
     raw_1h = await fetch_live_1h(symbol)
@@ -299,29 +235,29 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     anchor_ts = int(session["anchor_time"])
     lock_end_ts = anchor_ts + 1800
 
+    # Ensure biases are calculated strictly at the lock time
     macro_bias = _calculate_weekly_force(raw_daily, anchor_ts)
-    micro_bias = _calculate_168h_micro_bias(raw_1h)
+    micro_bias = _calculate_168h_micro_bias(raw_1h, lock_end_ts)
 
     if int(now_utc.timestamp()) < lock_end_ts:
-        wm = _war_map_from_1h(raw_1h)
+        wm = _war_map_from_1h(raw_1h, int(now_utc.timestamp()))
         return {"status": "CALIBRATING", "timestamp": now_utc.strftime("%H:%M UTC"), "price": float(raw_5m[-1]["close"]), "energy": "CALIBRATING", "battlebox": {"war_map_context": wm, "session_battle": _safe_placeholder_state("Calibrating..."), "session": session, "levels": {}, "bias_model": {}, "context": {"macro_bias": macro_bias, "micro_bias": micro_bias}}}
 
     date_key = session["date_key"]
     session_key = f"{_normalize_symbol(symbol)}::{session['id']}::{date_key}"
 
-    # ONLY CACHE THE STATIC LEVELS (The Map)
     async with _CACHE_LOCK:
         if session_key not in _LOCKED_PACKETS:
             pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, tuning=tuning, raw_daily=raw_daily)
             if "error" in pkt:
-                wm = _war_map_from_1h(raw_1h)
+                wm = _war_map_from_1h(raw_1h, lock_end_ts)
                 return {"status": "ERROR", "message": pkt["error"], "battlebox": {"war_map_context": wm, "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
             
             _LOCKED_PACKETS[session_key] = pkt
 
         pkt = _LOCKED_PACKETS[session_key]
 
-    # FETCH LIVE DATA EVERY TIME (The Radar)
+    # Live Pipeline Execution
     telemetry_data = await live_telemetry.fetch_live_telemetry(symbol)
     liquidity_data = await liquidity_oracle.fetch_liquidation_magnets(symbol)
     db_state = await database_manager.get_campaign_state(symbol)
@@ -350,7 +286,9 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     post_lock = [c for c in raw_5m if int(c["time"]) >= lock_time]
 
     state = structure_state_engine.compute_structure_state(levels=levels, candles_5m_post_lock=post_lock, tuning=tuning or {})
-    wm = _war_map_from_1h(raw_1h)
+    
+    # Freeze the War Map at lock time as well
+    wm = _war_map_from_1h(raw_1h, lock_end_ts)
 
     return {
         "status": "OK",
@@ -388,7 +326,7 @@ async def get_session_review(symbol: str, session_id: str = "us_ny_futures", tun
         lock_end_ts -= 86400
 
     macro_bias = _calculate_weekly_force(raw_daily, anchor_ts)
-    micro_bias = _calculate_168h_micro_bias(raw_1h)
+    micro_bias = _calculate_168h_micro_bias(raw_1h, lock_end_ts)
 
     if int(now_utc.timestamp()) < lock_end_ts:
         return {"ok": True, "mode": "CALIBRATING", "symbol": symbol, "session": {"id": cfg["id"], "name": cfg["name"], "anchor_time": datetime.fromtimestamp(anchor_ts, tz=timezone.utc).isoformat()}, "message": "Calibrating... (first 30 minutes after open)"}
