@@ -1,6 +1,6 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v10.6
+# KABRODA MARKET RADAR v10.7 (RAW DOM PASSTHROUGH)
 # ==============================================================================
 import os
 import json
@@ -118,12 +118,10 @@ def _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls):
     return l_note, s_note, macro_upper, macro_lower
 
 def _enforce_risk_reward(plan, tier, note):
-    """Calculates R:R based on TARGET 2 (The True Magnet)."""
     if not plan["valid"] or plan["stop"] == 0:
         return plan, tier, note, 0.0
         
     risk = abs(plan["entry"] - plan["stop"])
-    # Target 2 is index 1
     reward = abs(plan["targets"][1] - plan["entry"]) 
     
     rr_ratio = reward / risk if risk > 0 else 0.0
@@ -274,6 +272,7 @@ async def scan_sector(session_id="us_ny_futures"):
         radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,
             "indicator_string": _make_indicator_string(levels), "full_intel": json.dumps(res, default=str),
+            "raw_walls": liquidity_walls.get("raw_data", {}), # INJECTION: Sending raw DOM data to frontend
             **dossier
         }
         
