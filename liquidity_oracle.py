@@ -1,14 +1,16 @@
 # liquidity_oracle.py
 # ==============================================================================
-# KABRODA CUSTOM LIQUIDITY ORACLE v5.1 (SURGICAL L2 TELESCOPE)
+# KABRODA CUSTOM LIQUIDITY ORACLE v5.2 (SURGICAL L2 TELESCOPE)
 # ==============================================================================
 # Purpose: Bypasses CCXT to avoid the massive 'exchangeInfo' payload block.
 # Hits the raw Binance /depth endpoint directly through the Residential Proxy.
+# Explicitly handles proxy authentication to prevent 407 drops.
 # ==============================================================================
 
 import os
 import aiohttp
 import asyncio
+from urllib.parse import urlparse
 from typing import Dict, Any
 
 # Pull the proxy tunnel from Render Environment Variables
@@ -34,7 +36,13 @@ async def fetch_liquidation_magnets(symbol: str = "BTCUSDT") -> Dict[str, Any]:
         async with aiohttp.ClientSession() as session:
             kwargs = {}
             if BINANCE_PROXY_URL:
-                kwargs['proxy'] = BINANCE_PROXY_URL
+                parsed = urlparse(BINANCE_PROXY_URL)
+                if parsed.username and parsed.password:
+                    # Explicitly format auth for aiohttp to prevent 407 Auth errors
+                    kwargs['proxy'] = f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"
+                    kwargs['proxy_auth'] = aiohttp.BasicAuth(parsed.username, parsed.password)
+                else:
+                    kwargs['proxy'] = BINANCE_PROXY_URL
 
             # 15-second timeout to allow the Residential proxy time to route
             async with session.get(url, timeout=15, **kwargs) as response:
