@@ -309,6 +309,7 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     date_key = session["date_key"]
     session_key = f"{_normalize_symbol(symbol)}::{session['id']}::{date_key}"
 
+    # ONLY CACHE THE STATIC LEVELS (The Map)
     async with _CACHE_LOCK:
         if session_key not in _LOCKED_PACKETS:
             pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, tuning=tuning, raw_daily=raw_daily)
@@ -316,38 +317,33 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                 wm = _war_map_from_1h(raw_1h)
                 return {"status": "ERROR", "message": pkt["error"], "battlebox": {"war_map_context": wm, "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
             
-            # --- INJECTION: MEMORY, FUEL & DEPTH ---
-            telemetry_data = await live_telemetry.fetch_live_telemetry(symbol)
-            liquidity_data = await liquidity_oracle.fetch_liquidation_magnets(symbol)
-            db_state = await database_manager.get_campaign_state(symbol)
-            
-            pkt["liquidity_walls"] = liquidity_data
-            pkt["campaign_state"] = db_state
-            pkt["telemetry_data"] = telemetry_data
-            
-            # --- MIDDLE BRAIN MATH ---
-            bo = float(pkt["levels"].get("breakout_trigger", 0))
-            bd = float(pkt["levels"].get("breakdown_trigger", 0))
-            dr = float(pkt["levels"].get("daily_resistance", 0))
-            ds = float(pkt["levels"].get("daily_support", 0))
-
-            raw_walls = liquidity_data.get("raw_data", {})
-            asks = raw_walls.get("asks", [])
-            bids = raw_walls.get("bids", [])
-            
-            fuel_mult = float(telemetry_data.get("fuel_multiplier", 1.0))
-
-            l_gap, l_tier, l_target = _analyze_true_gap(symbol, bo, dr, asks, "LONG", fuel_mult)
-            s_gap, s_tier, s_target = _analyze_true_gap(symbol, bd, ds, bids, "SHORT", fuel_mult)
-            
-            pkt["middle_brain"] = {
-                "long_tier": l_tier, "long_target": l_target, "long_gap": l_gap,
-                "short_tier": s_tier, "short_target": s_target, "short_gap": s_gap
-            }
-            
             _LOCKED_PACKETS[session_key] = pkt
 
         pkt = _LOCKED_PACKETS[session_key]
+
+    # FETCH LIVE DATA EVERY TIME (The Radar)
+    telemetry_data = await live_telemetry.fetch_live_telemetry(symbol)
+    liquidity_data = await liquidity_oracle.fetch_liquidation_magnets(symbol)
+    db_state = await database_manager.get_campaign_state(symbol)
+
+    bo = float(pkt["levels"].get("breakout_trigger", 0))
+    bd = float(pkt["levels"].get("breakdown_trigger", 0))
+    dr = float(pkt["levels"].get("daily_resistance", 0))
+    ds = float(pkt["levels"].get("daily_support", 0))
+
+    raw_walls = liquidity_data.get("raw_data", {})
+    asks = raw_walls.get("asks", [])
+    bids = raw_walls.get("bids", [])
+    
+    fuel_mult = float(telemetry_data.get("fuel_multiplier", 1.0))
+
+    l_gap, l_tier, l_target = _analyze_true_gap(symbol, bo, dr, asks, "LONG", fuel_mult)
+    s_gap, s_tier, s_target = _analyze_true_gap(symbol, bd, ds, bids, "SHORT", fuel_mult)
+    
+    middle_brain = {
+        "long_tier": l_tier, "long_target": l_target, "long_gap": l_gap,
+        "short_tier": s_tier, "short_target": s_target, "short_gap": s_gap
+    }
 
     levels = pkt["levels"]
     lock_time = int(pkt["lock_time"])
@@ -370,9 +366,9 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
             "context": pkt.get("context", {}),
             "htf_shelves": pkt.get("htf_shelves", {}),
             "meta": pkt.get("meta", {}),
-            "liquidity_walls": pkt.get("liquidity_walls", {}),
-            "campaign_state": pkt.get("campaign_state", {}),
-            "middle_brain": pkt.get("middle_brain", {})
+            "liquidity_walls": liquidity_data,
+            "campaign_state": db_state,
+            "middle_brain": middle_brain
         },
         "candles": post_lock
     }
