@@ -150,7 +150,8 @@
                     let lBadge = t.favored === 'LONG' ? '<span style="background:var(--green); color:#000; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:800; margin-left:10px; box-shadow: 0 0 8px var(--green);">⭐ SYSTEM FAVORED</span>' : '';
                     let sBadge = t.favored === 'SHORT' ? '<span style="background:var(--red); color:#000; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:800; margin-left:10px; box-shadow: 0 0 8px var(--red);">⭐ SYSTEM FAVORED</span>' : ''; 
 
-                    let oracleBadge = t.liquidity_status === 'SUCCESS' ? '<span style="color:#eab308; font-size:11px; font-weight:bold; border:1px solid #eab308; padding:2px 6px; border-radius:4px;">🟢 ORACLE SYNCED</span>' : '<span style="color:#64748b; font-size:11px; border:1px solid #64748b; padding:2px 6px; border-radius:4px;">⚪ ORACLE STANDBY</span>';
+                    // FIX: completely erased the Oracle Standby badge to clean up UI noise
+                    let oracleBadge = '';
 
                     let lBorderColor = t.favored === 'LONG' ? 'var(--green)' : '#334155';
                     let sBorderColor = t.favored === 'SHORT' ? 'var(--red)' : '#334155';

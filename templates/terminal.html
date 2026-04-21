@@ -39,7 +39,6 @@
         .live-ping { border-radius: 50%; display: inline-block; width: 8px; height: 8px; background-color: #10b981; margin-right: 6px; box-shadow: 0 0 10px #10b981; }
         
         #borderGuardPanel { background: #020617; border: 1px solid #1e293b; padding: 20px; border-radius: 8px; margin-top: 20px; }
-        .magnet-row { display:flex; justify-content:space-between; margin-bottom:8px; font-family:'JetBrains Mono'; font-size:13px; }
     </style>
 </head>
 <body>
@@ -69,19 +68,6 @@
                     <div style="margin-top:20px; padding-top:20px; border-top:1px solid var(--border);">
                         <div style="font-size:12px; color:var(--gray);">MAX LOSS ALLOWED</div>
                         <div id="valLoss" class="c-RED" style="font-size:32px; font-weight:800;">$0.00</div>
-                    </div>
-                </div>
-
-                <div class="panel" style="padding: 20px;">
-                    <div class="panel-head" style="font-size:14px; margin-bottom:15px; padding-bottom:8px;"><span style="color:#a855f7;">ORACLE:</span> MACRO MAGNETS (24H)</div>
-                    <div style="font-size:10px; color:#94a3b8; letter-spacing:1px; margin-bottom:10px;">TOP 3 UPPER WALLS (ASKS)</div>
-                    <div id="macroUpper">
-                        <div class="magnet-row c-GRAY">Loading data...</div>
-                    </div>
-                    <div style="border-top:1px dashed #334155; margin:15px 0;"></div>
-                    <div style="font-size:10px; color:#94a3b8; letter-spacing:1px; margin-bottom:10px;">TOP 3 LOWER WALLS (BIDS)</div>
-                    <div id="macroLower">
-                        <div class="magnet-row c-GRAY">Loading data...</div>
                     </div>
                 </div>
             </div>
@@ -142,7 +128,6 @@
                             <span style="color:var(--gray); font-size:12px;">TARGET 3</span>
                             <div><span id="pT3L" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT3L')">📋</button></div>
                         </div>
-                        <div id="oNoteL" style="font-size:11px; color:#eab308; text-align:right; margin-top:8px;"></div>
                     </div>
 
                     <div style="flex:1; border-left: 1px solid var(--border); padding-left: 30px;">
@@ -172,7 +157,6 @@
                             <span style="color:var(--gray); font-size:12px;">TARGET 3</span>
                             <div><span id="pT3S" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT3S')">📋</button></div>
                         </div>
-                        <div id="oNoteS" style="font-size:11px; color:#eab308; text-align:right; margin-top:8px;"></div>
                     </div>
                 </div>
             </div>
@@ -224,38 +208,11 @@
             }
         }
 
-        function renderMacroMagnets(myAsset) {
-            const formatPrice = (val) => parseFloat(val).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-            
-            // Render Upper Walls (Asks)
-            let upperHtml = "";
-            if (myAsset.macro_upper && myAsset.macro_upper.length > 0) {
-                myAsset.macro_upper.forEach(wall => {
-                    upperHtml += `<div class="magnet-row"><span class="c-RED">$${formatPrice(wall.price)}</span><span class="c-GRAY" style="font-size:11px;">WALL</span></div>`;
-                });
-            } else {
-                upperHtml = '<div class="magnet-row c-GRAY">No Oracle Data</div>';
-            }
-            document.getElementById('macroUpper').innerHTML = upperHtml;
-
-            // Render Lower Walls (Bids)
-            let lowerHtml = "";
-            if (myAsset.macro_lower && myAsset.macro_lower.length > 0) {
-                myAsset.macro_lower.forEach(wall => {
-                    lowerHtml += `<div class="magnet-row"><span class="c-GREEN">$${formatPrice(wall.price)}</span><span class="c-GRAY" style="font-size:11px;">WALL</span></div>`;
-                });
-            } else {
-                lowerHtml = '<div class="magnet-row c-GRAY">No Oracle Data</div>';
-            }
-            document.getElementById('macroLower').innerHTML = lowerHtml;
-        }
-
         async function initTerminal() {
             if(localStorage.getItem('kabroda_locked_bal')) document.getElementById('inpBal').value = localStorage.getItem('kabroda_locked_bal');
             if(localStorage.getItem('kabroda_locked_risk')) document.getElementById('inpRisk').value = localStorage.getItem('kabroda_locked_risk');
 
             try {
-                // Fetch the static Market Radar payload to populate the targets
                 const res = await fetch('/api/radar/scan', { method: 'POST' });
                 const data = await res.json();
                 
@@ -269,12 +226,8 @@
                 
                 document.getElementById('staticRoe').innerHTML = `<strong>${myAsset.favored} FAVORED</strong><br><br>${myAsset.roe}`;
 
-                // Populate Macro Magnets
-                renderMacroMagnets(myAsset);
-
                 // Populate Long
                 document.getElementById('keyL').value = myAsset.long.key;
-                document.getElementById('oNoteL').innerText = myAsset.long.oracle_note || '';
                 if(myAsset.long.plan.valid) {
                     document.getElementById('pEntL').innerText = myAsset.long.plan.entry.toFixed(2);
                     document.getElementById('pStpL').innerText = myAsset.long.plan.stop.toFixed(2);
@@ -285,7 +238,6 @@
 
                 // Populate Short
                 document.getElementById('keyS').value = myAsset.short.key;
-                document.getElementById('oNoteS').innerText = myAsset.short.oracle_note || '';
                 if(myAsset.short.plan.valid) {
                     document.getElementById('pEntS').innerText = myAsset.short.plan.entry.toFixed(2);
                     document.getElementById('pStpS').innerText = myAsset.short.plan.stop.toFixed(2);
@@ -309,11 +261,11 @@
             }
         }
 
-        // --- PHASE 3: THE BORDER GUARD LOGIC ---
+        // --- PHASE 1: REFINED BORDER GUARD LOGIC ---
         async function pollBorderGuard() {
             if(!activeData) return;
             try {
-                // Fetch live telemetry
+                // Fetch live telemetry (Coinalyze Fuel)
                 const res = await fetch("/api/telemetry/live", {
                     method: "POST", headers: {"Content-Type": "application/json"},
                     body: JSON.stringify({symbol: targetSymbol})
@@ -323,38 +275,40 @@
                 if(data.ok && data.telemetry.status === "SUCCESS") {
                     const tel = data.telemetry;
                     
-                    document.getElementById('livePrice').innerText = "$" + activeData.price.toFixed(2);
+                    const currentPrice = parseFloat(activeData.price);
+                    // Extract triggers from the static levels, defaulting to 0 if none exist
+                    const bo_trigger = parseFloat(activeData.levels?.breakout_trigger || 0);
+                    const bd_trigger = parseFloat(activeData.levels?.breakdown_trigger || 0);
+
+                    document.getElementById('livePrice').innerText = "$" + currentPrice.toFixed(2);
                     
                     let oiPrefix = tel.oi_delta_pct > 0 ? "+" : "";
                     document.getElementById('liveOi').innerText = oiPrefix + tel.oi_delta_pct.toFixed(2) + "%";
                     document.getElementById('liveOi').style.color = tel.oi_delta_pct > 0 ? "#10b981" : (tel.oi_delta_pct < 0 ? "#ef4444" : "#fff");
 
-                    const bo_trigger = activeData.long.plan.entry;
-                    const bd_trigger = activeData.short.plan.entry;
-
                     let alertMsg = "CHOP ZONE: Price is between triggers. Wait.";
                     let alertColor = "#64748b";
                     let borderColor = "#334155";
 
-                    // The actual "Border Guard" Math
-                    if (bo_trigger > 0 && Math.abs(activeData.price - bo_trigger) / bo_trigger < 0.005) {
-                        if (tel.oi_delta_pct < -0.5) {
-                            alertMsg = "🚨 FAKE-OUT WARNING: Price testing Breakout, but Capital is Draining. DO NOT LONG.";
-                            alertColor = "#ef4444";
-                            borderColor = "#ef4444";
+                    // The True "Border Guard" Math
+                    if (bo_trigger > 0 && currentPrice >= bo_trigger) {
+                        if (tel.fuel_multiplier < 1.0) {
+                            alertMsg = "⚠️ LONG BREACHED (LOW FUEL): Price breached Breakout, but capital is draining.";
+                            alertColor = "#eab308";
+                            borderColor = "#eab308";
                         } else {
-                            alertMsg = "🟢 CONFIRMED PUSH: Price testing Breakout with Fuel. Wait for 15m Close.";
+                            alertMsg = "🟢 LONG ACTIVATED: Clean Breakout with positive Fuel.";
                             alertColor = "#10b981";
                             borderColor = "#10b981";
                         }
                     } 
-                    else if (bd_trigger > 0 && Math.abs(activeData.price - bd_trigger) / bd_trigger < 0.005) {
-                        if (tel.oi_delta_pct < -0.5) {
-                            alertMsg = "🚨 FAKE-OUT WARNING: Price testing Breakdown, but Capital is Draining. DO NOT SHORT.";
-                            alertColor = "#ef4444";
-                            borderColor = "#ef4444";
+                    else if (bd_trigger > 0 && currentPrice <= bd_trigger) {
+                        if (tel.fuel_multiplier < 1.0) {
+                            alertMsg = "⚠️ SHORT BREACHED (LOW FUEL): Price breached Breakdown, but capital is draining.";
+                            alertColor = "#eab308";
+                            borderColor = "#eab308";
                         } else {
-                            alertMsg = "🔴 CONFIRMED FLUSH: Price testing Breakdown with Fuel. Wait for 15m Close.";
+                            alertMsg = "🔴 SHORT ACTIVATED: Clean Breakdown with positive Fuel.";
                             alertColor = "#ef4444";
                             borderColor = "#ef4444";
                         }
