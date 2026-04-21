@@ -23,7 +23,7 @@
         .panel-head { font-family: 'Rajdhani'; font-weight: 800; font-size: 18px; color: var(--gray); border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 20px; letter-spacing: 1px; text-transform: uppercase; }
         
         .inp-risk { background: #020617; border: 1px solid var(--border); color: #fff; padding: 12px; width: 100%; text-align: right; font-weight: 700; font-size: 18px; border-radius: 4px; box-sizing: border-box; }
-        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px dashed #334155; padding-bottom: 6px; font-family: 'JetBrains Mono', monospace; }
+        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px dashed #334155; padding-bottom: 6px; font-family: 'JetBrains Mono', monospace; transition: 0.3s; }
         .d-val { font-size: 16px; font-weight: 800; color: #fff; margin-right: 10px; }
         
         .c-GREEN { color: var(--green); } .c-YELLOW { color: var(--yellow); } .c-RED { color: var(--red); }
@@ -33,12 +33,27 @@
         .btn-s { background: rgba(239, 68, 68, 0.2); color: var(--red); border: 1px solid var(--red); } 
         .btn-s:hover { background: var(--red); color: #fff; }
         
-        .mini-copy { background: none; border: none; color: var(--gray); cursor: pointer; font-size: 14px; opacity: 0.5; transition: opacity 0.2s; padding: 0 0 0 5px; }
+        .mini-copy { background: none; border: none; color: var(--gray); cursor: pointer; font-size: 14px; opacity: 0.5; transition: 0.2s; padding: 0 0 0 5px; font-family: 'Inter', sans-serif;}
         .mini-copy:hover { opacity: 1; color: var(--white); }
 
         .live-ping { border-radius: 50%; display: inline-block; width: 8px; height: 8px; background-color: #10b981; margin-right: 6px; box-shadow: 0 0 10px #10b981; }
         
         #borderGuardPanel { background: #020617; border: 1px solid #1e293b; padding: 20px; border-radius: 8px; margin-top: 20px; }
+        
+        /* DOM Canvas styling */
+        #domCanvas { width: 100%; height: 350px; background: #020617; border: 1px solid #1e293b; border-radius: 4px; margin-top: 15px; }
+        
+        /* High Probability Target Highlighting */
+        .target-prime {
+            border: 1px solid #0ea5e9; 
+            background: rgba(14, 165, 233, 0.1); 
+            padding: 8px; 
+            border-radius: 4px;
+            box-shadow: 0 0 10px rgba(14, 165, 233, 0.3);
+        }
+        .prime-badge {
+            font-size: 10px; background: #0ea5e9; color: #000; padding: 2px 4px; border-radius: 2px; margin-left: 8px; vertical-align: middle;
+        }
     </style>
 </head>
 <body>
@@ -85,16 +100,19 @@
                         <span id="livePrice" style="font-family:'JetBrains Mono'; font-weight:800; color:#fff;">--</span>
                     </div>
                     <div style="display:flex; justify-content:space-between; margin-bottom:15px; border-bottom:1px dashed #334155; padding-bottom:10px;">
-                        <span style="font-family:'JetBrains Mono'; font-size:11px; color:#94a3b8;">OI DELTA (FUEL)</span>
+                        <span style="font-family:'JetBrains Mono'; font-size:11px; color:#94a3b8;">OI DELTA (24H FUEL)</span>
                         <span id="liveOi" style="font-family:'JetBrains Mono'; font-weight:800; color:#fff;">--%</span>
                     </div>
                     
-                    <div style="text-align:center; margin-top:20px;">
+                    <div style="text-align:center; margin-top:20px; margin-bottom: 20px;">
                         <div style="font-size:11px; color:#94a3b8; letter-spacing:1px; margin-bottom:10px; font-weight:700;">TRIGGER STATUS</div>
                         <div id="guardAlert" style="font-family:'Rajdhani'; font-size:18px; font-weight:800; color:#64748b; padding:15px; border:1px solid #334155; border-radius:4px;">
                             MONITORING BORDERS...
                         </div>
                     </div>
+                    
+                    <div style="font-size:11px; color:#94a3b8; letter-spacing:1px; margin-bottom:5px; font-weight:700;">MACRO LIQUIDITY SCANNER</div>
+                    <canvas id="domCanvas"></canvas>
                 </div>
             </div>
 
@@ -106,27 +124,27 @@
                         <input type="hidden" id="keyL">
                         <div class="data-row" style="margin-top:20px;">
                             <span style="color:var(--gray); font-size:12px;">ENTRY</span>
-                            <div><span id="pEntL" class="d-val c-GREEN">--</span><button class="mini-copy" onclick="copyVal('pEntL')">📋</button></div>
+                            <div><span id="pEntL" class="d-val c-GREEN">--</span><button class="mini-copy" onclick="copyVal(this, 'pEntL')">📋</button></div>
                         </div>
                         <div class="data-row">
                             <span style="color:var(--gray); font-size:12px;">STOP LOSS</span>
-                            <div><span id="pStpL" class="d-val c-RED">--</span><button class="mini-copy" onclick="copyVal('pStpL')">📋</button></div>
+                            <div><span id="pStpL" class="d-val c-RED">--</span><button class="mini-copy" onclick="copyVal(this, 'pStpL')">📋</button></div>
                         </div>
                         <div class="data-row" style="border-bottom: 2px solid #334155; padding-bottom:12px;">
                             <span style="color:var(--gray); font-size:12px;">CONTRACTS</span>
-                            <div><span id="pSizL" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pSizL')">📋</button></div>
+                            <div><span id="pSizL" class="d-val">--</span><button class="mini-copy" onclick="copyVal(this, 'pSizL')">📋</button></div>
                         </div>
-                        <div class="data-row" style="margin-top:12px;">
+                        <div class="data-row" id="rowT1L" style="margin-top:12px;">
                             <span style="color:var(--gray); font-size:12px;">TARGET 1</span>
-                            <div><span id="pT1L" class="d-val c-YELLOW">--</span><button class="mini-copy" onclick="copyVal('pT1L')">📋</button></div>
+                            <div><span id="pT1L" class="d-val c-YELLOW">--</span><button class="mini-copy" onclick="copyVal(this, 'pT1L')">📋</button></div>
                         </div>
-                        <div class="data-row">
+                        <div class="data-row" id="rowT2L">
                             <span style="color:var(--gray); font-size:12px;">TARGET 2</span>
-                            <div><span id="pT2L" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT2L')">📋</button></div>
+                            <div><span id="pT2L" class="d-val">--</span><button class="mini-copy" onclick="copyVal(this, 'pT2L')">📋</button></div>
                         </div>
-                        <div class="data-row">
+                        <div class="data-row" id="rowT3L">
                             <span style="color:var(--gray); font-size:12px;">TARGET 3</span>
-                            <div><span id="pT3L" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT3L')">📋</button></div>
+                            <div><span id="pT3L" class="d-val">--</span><button class="mini-copy" onclick="copyVal(this, 'pT3L')">📋</button></div>
                         </div>
                     </div>
 
@@ -135,27 +153,27 @@
                         <input type="hidden" id="keyS">
                         <div class="data-row" style="margin-top:20px;">
                             <span style="color:var(--gray); font-size:12px;">ENTRY</span>
-                            <div><span id="pEntS" class="d-val c-GREEN">--</span><button class="mini-copy" onclick="copyVal('pEntS')">📋</button></div>
+                            <div><span id="pEntS" class="d-val c-GREEN">--</span><button class="mini-copy" onclick="copyVal(this, 'pEntS')">📋</button></div>
                         </div>
                         <div class="data-row">
                             <span style="color:var(--gray); font-size:12px;">STOP LOSS</span>
-                            <div><span id="pStpS" class="d-val c-RED">--</span><button class="mini-copy" onclick="copyVal('pStpS')">📋</button></div>
+                            <div><span id="pStpS" class="d-val c-RED">--</span><button class="mini-copy" onclick="copyVal(this, 'pStpS')">📋</button></div>
                         </div>
                         <div class="data-row" style="border-bottom: 2px solid #334155; padding-bottom:12px;">
                             <span style="color:var(--gray); font-size:12px;">CONTRACTS</span>
-                            <div><span id="pSizS" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pSizS')">📋</button></div>
+                            <div><span id="pSizS" class="d-val">--</span><button class="mini-copy" onclick="copyVal(this, 'pSizS')">📋</button></div>
                         </div>
-                        <div class="data-row" style="margin-top:12px;">
+                        <div class="data-row" id="rowT1S" style="margin-top:12px;">
                             <span style="color:var(--gray); font-size:12px;">TARGET 1</span>
-                            <div><span id="pT1S" class="d-val c-YELLOW">--</span><button class="mini-copy" onclick="copyVal('pT1S')">📋</button></div>
+                            <div><span id="pT1S" class="d-val c-YELLOW">--</span><button class="mini-copy" onclick="copyVal(this, 'pT1S')">📋</button></div>
                         </div>
-                        <div class="data-row">
+                        <div class="data-row" id="rowT2S">
                             <span style="color:var(--gray); font-size:12px;">TARGET 2</span>
-                            <div><span id="pT2S" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT2S')">📋</button></div>
+                            <div><span id="pT2S" class="d-val">--</span><button class="mini-copy" onclick="copyVal(this, 'pT2S')">📋</button></div>
                         </div>
-                        <div class="data-row">
+                        <div class="data-row" id="rowT3S">
                             <span style="color:var(--gray); font-size:12px;">TARGET 3</span>
-                            <div><span id="pT3S" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT3S')">📋</button></div>
+                            <div><span id="pT3S" class="d-val">--</span><button class="mini-copy" onclick="copyVal(this, 'pT3S')">📋</button></div>
                         </div>
                     </div>
                 </div>
@@ -167,25 +185,42 @@
         const targetSymbol = "{{ symbol }}";
         let activeData = null;
 
-        function copyVal(id) {
+        // UI Feedback: Copy Action
+        function copyVal(btnEl, id) {
             const el = document.getElementById(id);
             if (!el) return;
             const val = el.innerText.replace(/,/g, '').trim();
             if (val === "--" || val === "") return;
             navigator.clipboard.writeText(val).then(() => {
-                const btn = event.currentTarget;
-                const orig = btn.innerHTML;
-                btn.innerHTML = "✓";
-                setTimeout(() => btn.innerHTML = orig, 1000);
+                const orig = btnEl.innerHTML;
+                const origColor = btnEl.style.color;
+                btnEl.innerHTML = "COPIED ✓";
+                btnEl.style.color = "#22c55e";
+                btnEl.style.opacity = "1";
+                setTimeout(() => {
+                    btnEl.innerHTML = orig;
+                    btnEl.style.color = origColor;
+                    btnEl.style.opacity = "";
+                }, 1500);
             });
         }
 
+        // UI Feedback: Copy Key
         function copyKey(side) { 
             navigator.clipboard.writeText(document.getElementById('key' + side).value); 
             const btn = document.getElementById('btn' + side);
             const orig = btn.innerText;
+            const origBg = btn.style.background;
+            
             btn.innerText = "COPIED ✓";
-            setTimeout(() => btn.innerText = orig, 1000);
+            btn.style.background = "#22c55e";
+            btn.style.color = "#000";
+            
+            setTimeout(() => {
+                btn.innerText = orig;
+                btn.style.background = origBg;
+                btn.style.color = "";
+            }, 1500);
         }
 
         function recalc() {
@@ -206,6 +241,97 @@
                 const distS = Math.abs(activeData.short.plan.entry - activeData.short.plan.stop);
                 if(distS > 0) document.getElementById('pSizS').innerText = (riskAmt / distS).toFixed(4);
             }
+        }
+        
+        function highlightTarget(tierStr, side) {
+            // Reset formats
+            ['1','2','3'].forEach(num => {
+                const row = document.getElementById(`rowT${num}${side}`);
+                if(row) row.className = 'data-row';
+            });
+            
+            // If Middle Brain says PRIMAL or SPEEDBUMP, Target 2 is the highest probability
+            if(tierStr.includes('PRIMAL') || tierStr.includes('SPEEDBUMP') || tierStr.includes('MAGNET')) {
+                const bestRow = document.getElementById(`rowT2${side}`);
+                if(bestRow) {
+                    bestRow.className = 'data-row target-prime';
+                    if(!bestRow.innerHTML.includes('prime-badge')) {
+                        const labelSpan = bestRow.querySelector('span');
+                        labelSpan.innerHTML += '<span class="prime-badge">⭐ PRIME TARGET</span>';
+                        labelSpan.style.color = '#fff';
+                        labelSpan.style.fontWeight = '800';
+                    }
+                }
+            }
+        }
+
+        function drawDOM(rawWalls, currentPrice) {
+            const canvas = document.getElementById('domCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Handle retina displays
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            
+            const w = rect.width;
+            const h = rect.height;
+            
+            ctx.clearRect(0, 0, w, h);
+            
+            if (!rawWalls || (!rawWalls.asks && !rawWalls.bids)) {
+                ctx.fillStyle = '#64748b';
+                ctx.font = '12px JetBrains Mono';
+                ctx.fillText("/// SCANNER OFFLINE", w/2 - 60, h/2);
+                return;
+            }
+            
+            // Focus range: +/- 3% from current price
+            const range = currentPrice * 0.03;
+            const maxPrice = currentPrice + range;
+            const minPrice = currentPrice - range;
+            
+            const asks = (rawWalls.asks || []).filter(x => x[0] <= maxPrice && x[0] >= currentPrice);
+            const bids = (rawWalls.bids || []).filter(x => x[0] >= minPrice && x[0] <= currentPrice);
+            
+            // Find max volume to normalize bar width
+            let maxVol = 0;
+            asks.forEach(x => { if(x[1] > maxVol) maxVol = x[1]; });
+            bids.forEach(x => { if(x[1] > maxVol) maxVol = x[1]; });
+            if(maxVol === 0) maxVol = 1;
+            
+            // Draw Asks (Resistance - Red)
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.6)'; // Red
+            asks.forEach(ask => {
+                const price = ask[0];
+                const vol = ask[1];
+                const y = h/2 - ((price - currentPrice) / range) * (h/2);
+                const barWidth = (vol / maxVol) * (w * 0.8); // max 80% width
+                ctx.fillRect(w - barWidth, y, barWidth, 1);
+            });
+            
+            // Draw Bids (Support - Green)
+            ctx.fillStyle = 'rgba(34, 197, 94, 0.6)'; // Green
+            bids.forEach(bid => {
+                const price = bid[0];
+                const vol = bid[1];
+                const y = h/2 + ((currentPrice - price) / range) * (h/2);
+                const barWidth = (vol / maxVol) * (w * 0.8);
+                ctx.fillRect(w - barWidth, y, barWidth, 1);
+            });
+            
+            // Draw Current Price Line
+            ctx.strokeStyle = '#0ea5e9';
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(0, h/2);
+            ctx.lineTo(w, h/2);
+            ctx.stroke();
+            
+            ctx.fillStyle = '#0ea5e9';
+            ctx.font = 'bold 12px JetBrains Mono';
+            ctx.fillText(`$${currentPrice.toFixed(2)}`, 10, h/2 - 5);
         }
 
         async function initTerminal() {
@@ -234,6 +360,7 @@
                     document.getElementById('pT1L').innerText = myAsset.long.plan.targets[0].toFixed(2);
                     document.getElementById('pT2L').innerText = myAsset.long.plan.targets[1].toFixed(2);
                     document.getElementById('pT3L').innerText = myAsset.long.plan.targets[2].toFixed(2);
+                    highlightTarget(myAsset.long.tier, 'L');
                 }
 
                 // Populate Short
@@ -244,14 +371,20 @@
                     document.getElementById('pT1S').innerText = myAsset.short.plan.targets[0].toFixed(2);
                     document.getElementById('pT2S').innerText = myAsset.short.plan.targets[1].toFixed(2);
                     document.getElementById('pT3S').innerText = myAsset.short.plan.targets[2].toFixed(2);
+                    highlightTarget(myAsset.short.tier, 'S');
                 }
 
                 recalc();
                 
+                // Draw Initial DOM
+                if(myAsset.raw_walls) {
+                    drawDOM(myAsset.raw_walls, myAsset.price);
+                }
+                
                 document.getElementById('loadingMsg').style.display = 'none';
                 document.getElementById('terminalGrid').style.display = 'grid';
 
-                // Start the Border Guard
+                // Start the Border Guard Telemetry Loop
                 pollBorderGuard();
                 setInterval(pollBorderGuard, 30000);
 
@@ -261,11 +394,9 @@
             }
         }
 
-        // --- PHASE 1: REFINED BORDER GUARD LOGIC ---
         async function pollBorderGuard() {
             if(!activeData) return;
             try {
-                // Fetch live telemetry (Coinalyze Fuel)
                 const res = await fetch("/api/telemetry/live", {
                     method: "POST", headers: {"Content-Type": "application/json"},
                     body: JSON.stringify({symbol: targetSymbol})
@@ -276,7 +407,6 @@
                     const tel = data.telemetry;
                     
                     const currentPrice = parseFloat(activeData.price);
-                    // Extract triggers from the static levels, defaulting to 0 if none exist
                     const bo_trigger = parseFloat(activeData.levels?.breakout_trigger || 0);
                     const bd_trigger = parseFloat(activeData.levels?.breakdown_trigger || 0);
 
@@ -290,27 +420,22 @@
                     let alertColor = "#64748b";
                     let borderColor = "#334155";
 
-                    // The True "Border Guard" Math
                     if (bo_trigger > 0 && currentPrice >= bo_trigger) {
                         if (tel.fuel_multiplier < 1.0) {
                             alertMsg = "⚠️ LONG BREACHED (LOW FUEL): Price breached Breakout, but capital is draining.";
-                            alertColor = "#eab308";
-                            borderColor = "#eab308";
+                            alertColor = "#eab308"; borderColor = "#eab308";
                         } else {
                             alertMsg = "🟢 LONG ACTIVATED: Clean Breakout with positive Fuel.";
-                            alertColor = "#10b981";
-                            borderColor = "#10b981";
+                            alertColor = "#10b981"; borderColor = "#10b981";
                         }
                     } 
                     else if (bd_trigger > 0 && currentPrice <= bd_trigger) {
                         if (tel.fuel_multiplier < 1.0) {
                             alertMsg = "⚠️ SHORT BREACHED (LOW FUEL): Price breached Breakdown, but capital is draining.";
-                            alertColor = "#eab308";
-                            borderColor = "#eab308";
+                            alertColor = "#eab308"; borderColor = "#eab308";
                         } else {
                             alertMsg = "🔴 SHORT ACTIVATED: Clean Breakdown with positive Fuel.";
-                            alertColor = "#ef4444";
-                            borderColor = "#ef4444";
+                            alertColor = "#ef4444"; borderColor = "#ef4444";
                         }
                     }
 
@@ -323,6 +448,22 @@
                 console.error(e);
             }
         }
+
+        // Add copy feedback to Radar "Copy JSON" and "Copy DATA" buttons
+        document.addEventListener('click', function(e) {
+            if(e.target && e.target.classList.contains('copy-btn')) {
+                const orig = e.target.innerText;
+                const origBg = e.target.style.background;
+                e.target.innerText = "COPIED ✓";
+                e.target.style.background = "#22c55e";
+                e.target.style.color = "#000";
+                setTimeout(() => {
+                    e.target.innerText = orig;
+                    e.target.style.background = origBg;
+                    e.target.style.color = "";
+                }, 1500);
+            }
+        });
 
         document.addEventListener('DOMContentLoaded', initTerminal);
     </script>
