@@ -40,10 +40,6 @@
         
         #borderGuardPanel { background: #020617; border: 1px solid #1e293b; padding: 20px; border-radius: 8px; margin-top: 20px; }
         
-        /* DOM Canvas styling */
-        #domCanvas { width: 100%; height: 350px; background: #020617; border: 1px solid #1e293b; border-radius: 4px; margin-top: 10px; }
-        
-        /* High Probability Target Highlighting */
         .target-prime {
             border: 1px solid #0ea5e9; 
             background: rgba(14, 165, 233, 0.1); 
@@ -110,16 +106,6 @@
                             MONITORING BORDERS...
                         </div>
                     </div>
-                    
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
-                        <div style="font-size:11px; color:#94a3b8; font-weight:700; letter-spacing:1px;">MACRO LIQUIDITY SCANNER</div>
-                        <div style="display:flex; align-items:center; gap:10px;">
-                            <span style="font-size:10px; color:#94a3b8; letter-spacing:1px;">ZOOM RANGE</span>
-                            <input type="range" id="zoomSlider" min="0.5" max="5.0" step="0.1" value="2.5" style="width:100px; cursor:pointer;" oninput="reDrawCurrentDOM()">
-                            <span id="zoomLabel" style="font-size:11px; font-family:'JetBrains Mono'; color:#0ea5e9; width:35px; text-align:right;">2.5%</span>
-                        </div>
-                    </div>
-                    <canvas id="domCanvas"></canvas>
                 </div>
             </div>
 
@@ -191,8 +177,6 @@
     <script>
         const targetSymbol = "{{ symbol }}";
         let activeData = null;
-        let currentRawWalls = null;
-        let currentLivePrice = 0;
 
         function copyVal(btnEl, id) {
             const el = document.getElementById(id);
@@ -270,129 +254,6 @@
             }
         }
 
-        function reDrawCurrentDOM() {
-            if(currentRawWalls && currentLivePrice) {
-                drawDOM(currentRawWalls, currentLivePrice);
-            }
-        }
-
-        function drawDOM(rawWalls, currentPrice) {
-            currentRawWalls = rawWalls;
-            currentLivePrice = currentPrice;
-            
-            const canvas = document.getElementById('domCanvas');
-            const ctx = canvas.getContext('2d');
-            const slider = document.getElementById('zoomSlider');
-            
-            const zoomPct = parseFloat(slider.value) / 100;
-            document.getElementById('zoomLabel').innerText = parseFloat(slider.value).toFixed(1) + '%';
-            
-            const rect = canvas.getBoundingClientRect();
-            if(rect.width === 0) return; 
-            
-            canvas.width = rect.width * window.devicePixelRatio;
-            canvas.height = rect.height * window.devicePixelRatio;
-            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-            
-            const w = rect.width;
-            const h = rect.height;
-            
-            ctx.clearRect(0, 0, w, h);
-            
-            if (!rawWalls || (!rawWalls.asks && !rawWalls.bids)) {
-                ctx.fillStyle = '#64748b';
-                ctx.font = '12px JetBrains Mono';
-                ctx.fillText("/// SCANNER OFFLINE", w/2 - 60, h/2);
-                return;
-            }
-            
-            const range = currentPrice * zoomPct; 
-            const maxPrice = currentPrice + range;
-            const minPrice = currentPrice - range;
-            
-            const asks = (rawWalls.asks || []).filter(x => x[0] <= maxPrice && x[0] >= currentPrice);
-            const bids = (rawWalls.bids || []).filter(x => x[0] >= minPrice && x[0] <= currentPrice);
-            
-            let maxVol = 0;
-            asks.forEach(x => { if(x[1] > maxVol) maxVol = x[1]; });
-            bids.forEach(x => { if(x[1] > maxVol) maxVol = x[1]; });
-            if(maxVol === 0) maxVol = 1;
-            
-            // Draw Asks
-            ctx.fillStyle = 'rgba(239, 68, 68, 0.4)';
-            asks.forEach(ask => {
-                const price = ask[0];
-                const vol = ask[1];
-                const y = h/2 - ((price - currentPrice) / range) * (h/2);
-                const barWidth = (vol / maxVol) * (w * 0.8);
-                ctx.fillRect(w - barWidth, y, barWidth, 1);
-                
-                // Highlight Macro Walls
-                if(vol > maxVol * 0.8) {
-                    ctx.fillStyle = 'rgba(239, 68, 68, 0.8)';
-                    ctx.fillRect(w - barWidth, y-1, barWidth, 3);
-                    ctx.fillStyle = 'rgba(239, 68, 68, 0.4)';
-                }
-            });
-            
-            // Draw Bids
-            ctx.fillStyle = 'rgba(34, 197, 94, 0.4)';
-            bids.forEach(bid => {
-                const price = bid[0];
-                const vol = bid[1];
-                const y = h/2 + ((currentPrice - price) / range) * (h/2);
-                const barWidth = (vol / maxVol) * (w * 0.8);
-                ctx.fillRect(w - barWidth, y, barWidth, 1);
-                
-                // Highlight Macro Walls
-                if(vol > maxVol * 0.8) {
-                    ctx.fillStyle = 'rgba(34, 197, 94, 0.8)';
-                    ctx.fillRect(w - barWidth, y-1, barWidth, 3);
-                    ctx.fillStyle = 'rgba(34, 197, 94, 0.4)';
-                }
-            });
-            
-            // Draw Center Price Line
-            ctx.strokeStyle = '#0ea5e9';
-            ctx.setLineDash([4, 4]);
-            ctx.beginPath();
-            ctx.moveTo(0, h/2);
-            ctx.lineTo(w, h/2);
-            ctx.stroke();
-            ctx.setLineDash([]);
-            
-            // Overlay Anchored Target Lines
-            if(activeData) {
-                let activePlan = null;
-                if(activeData.favored === 'LONG') activePlan = activeData.long.plan;
-                else if(activeData.favored === 'SHORT') activePlan = activeData.short.plan;
-                // Fallback for neutral
-                else activePlan = activeData.short.plan.valid ? activeData.short.plan : activeData.long.plan;
-                
-                if(activePlan && activePlan.valid) {
-                    [
-                        {price: activePlan.entry, label: "ENTRY", color: '#22c55e'},
-                        {price: activePlan.targets[0], label: "T1", color: '#eab308'},
-                        {price: activePlan.targets[1], label: "T2", color: '#0ea5e9'}
-                    ].forEach(target => {
-                        if(target.price <= maxPrice && target.price >= minPrice) {
-                            const y = h/2 - ((target.price - currentPrice) / range) * (h/2);
-                            ctx.strokeStyle = target.color;
-                            ctx.globalAlpha = 0.5;
-                            ctx.beginPath();
-                            ctx.moveTo(0, y);
-                            ctx.lineTo(w, y);
-                            ctx.stroke();
-                            ctx.globalAlpha = 1.0;
-                            ctx.fillStyle = target.color;
-                            ctx.font = 'bold 10px JetBrains Mono';
-                            ctx.fillText(target.label, 5, y - 4);
-                        }
-                    });
-                }
-            }
-        }
-
         async function initTerminal() {
             if(localStorage.getItem('kabroda_locked_bal')) document.getElementById('inpBal').value = localStorage.getItem('kabroda_locked_bal');
             if(localStorage.getItem('kabroda_locked_risk')) document.getElementById('inpRisk').value = localStorage.getItem('kabroda_locked_risk');
@@ -433,14 +294,8 @@
 
                 recalc();
                 
-                // Reveal Grid FIRST so the Canvas actually has dimensions
                 document.getElementById('loadingMsg').style.display = 'none';
                 document.getElementById('terminalGrid').style.display = 'grid';
-
-                // THEN Draw DOM
-                if(myAsset.raw_walls) {
-                    drawDOM(myAsset.raw_walls, myAsset.price);
-                }
 
                 pollBorderGuard();
                 setInterval(pollBorderGuard, 30000);
@@ -500,11 +355,6 @@
                     alertBox.innerText = alertMsg;
                     alertBox.style.color = alertColor;
                     alertBox.style.borderColor = borderColor;
-                    
-                    // Re-draw DOM if price shifts slightly while waiting
-                    if(currentRawWalls) {
-                        drawDOM(currentRawWalls, currentPrice);
-                    }
                 }
             } catch(e) {
                 console.error(e);
