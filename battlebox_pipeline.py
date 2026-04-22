@@ -1,12 +1,11 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v10.1 (STRICT TEMPORAL LOCKDOWN)
+# KABRODA BATTLEBOX PIPELINE — v10.2 (TOTAL MORNING LOCKDOWN)
 # ==============================================================================
 # Purpose:
-# - Locks session open + 30m anchor range (calibration)
-# - Filters ALL live data past lock_time to prevent mid-day bias flips on reboot.
-# - Computes levels via sse_engine.compute_sse_levels
-# - INJECTS Postgres Memory, Coinalyze Fuel, AND Binance L2 Proxy Depth.
+# - Locks session open + 30m anchor range (calibration).
+# - Locks Structure, Biases, AND Liquidity DOM strictly at the anchor time.
+# - Eliminates mid-day FOMO and rearview mirror signals.
 # ==============================================================================
 
 from __future__ import annotations
@@ -93,7 +92,6 @@ def _calculate_weekly_force(raw_daily: List[Dict[str, Any]], anchor_ts: int) -> 
     return "NEUTRAL"
 
 def _calculate_168h_micro_bias(raw_1h: List[Dict[str, Any]], lock_ts: int) -> str:
-    # ARCHITECT FIX: Filter out ANY candles that occurred after 9:30 AM to prevent reboot bias flips
     locked_1h = [c for c in raw_1h if int(c["time"]) <= lock_ts]
     if not locked_1h or len(locked_1h) < 168: return "NEUTRAL"
     
@@ -108,7 +106,6 @@ def _safe_placeholder_state(reason: str = "Waiting...") -> Dict[str, Any]:
     return {"action": "HOLD FIRE", "reason": reason, "permission": {"status": "NOT_EARNED", "side": "NONE"}, "acceptance_progress": {"count": 0, "required": 2, "side_hint": "NONE"}, "location": {"relative_to_triggers": "INSIDE"}, "execution": {"pause_state": "NONE", "resumption_state": "NONE", "gates_mode": "PREVIEW", "locked_at": None, "levels": {"failure": 0.0, "continuation": 0.0}}, "diagnostics": {"fail_reason": "WAITING"}}
 
 def _war_map_from_1h(raw_1h: List[Dict[str, Any]], lock_ts: int) -> Dict[str, Any]:
-    # ARCHITECT FIX: Freeze the War Map at 9:30 AM
     locked_1h = [c for c in raw_1h if int(c["time"]) <= lock_ts]
     if not locked_1h: return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "UNCLEAR", "note": "No 1h data."}
     closes = [float(c["close"]) for c in locked_1h]
@@ -253,36 +250,44 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                 wm = _war_map_from_1h(raw_1h, lock_end_ts)
                 return {"status": "ERROR", "message": pkt["error"], "battlebox": {"war_map_context": wm, "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
             
+            # --- THE ARCHITECTURAL FIX: LOCK THE LIQUIDITY AND TELEMETRY ---
+            # These are now physically inside the CACHE_LOCK. They run exactly ONCE at calibration.
+            telemetry_data = await live_telemetry.fetch_live_telemetry(symbol)
+            liquidity_data = await liquidity_oracle.fetch_liquidation_magnets(symbol)
+            db_state = await database_manager.get_campaign_state(symbol)
+
+            pkt["liquidity_walls"] = liquidity_data
+            pkt["campaign_state"] = db_state
+            pkt["telemetry_data"] = telemetry_data
+
+            bo = float(pkt["levels"].get("breakout_trigger", 0))
+            bd = float(pkt["levels"].get("breakdown_trigger", 0))
+            dr = float(pkt["levels"].get("daily_resistance", 0))
+            ds = float(pkt["levels"].get("daily_support", 0))
+
+            raw_walls = liquidity_data.get("raw_data", {})
+            asks = raw_walls.get("asks", [])
+            bids = raw_walls.get("bids", [])
+            
+            fuel_mult = float(telemetry_data.get("fuel_multiplier", 1.0))
+
+            l_gap, l_tier, l_target = _analyze_true_gap(symbol, bo, dr, asks, "LONG", fuel_mult)
+            s_gap, s_tier, s_target = _analyze_true_gap(symbol, bd, ds, bids, "SHORT", fuel_mult)
+            
+            pkt["middle_brain"] = {
+                "long_tier": l_tier, "long_target": l_target, "long_gap": l_gap,
+                "short_tier": s_tier, "short_target": s_target, "short_gap": s_gap
+            }
+            
             _LOCKED_PACKETS[session_key] = pkt
 
+        # If it's 2 PM, we just grab the frozen packet. No new calls.
         pkt = _LOCKED_PACKETS[session_key]
-
-    # Live Pipeline Execution
-    telemetry_data = await live_telemetry.fetch_live_telemetry(symbol)
-    liquidity_data = await liquidity_oracle.fetch_liquidation_magnets(symbol)
-    db_state = await database_manager.get_campaign_state(symbol)
-
-    bo = float(pkt["levels"].get("breakout_trigger", 0))
-    bd = float(pkt["levels"].get("breakdown_trigger", 0))
-    dr = float(pkt["levels"].get("daily_resistance", 0))
-    ds = float(pkt["levels"].get("daily_support", 0))
-
-    raw_walls = liquidity_data.get("raw_data", {})
-    asks = raw_walls.get("asks", [])
-    bids = raw_walls.get("bids", [])
-    
-    fuel_mult = float(telemetry_data.get("fuel_multiplier", 1.0))
-
-    l_gap, l_tier, l_target = _analyze_true_gap(symbol, bo, dr, asks, "LONG", fuel_mult)
-    s_gap, s_tier, s_target = _analyze_true_gap(symbol, bd, ds, bids, "SHORT", fuel_mult)
-    
-    middle_brain = {
-        "long_tier": l_tier, "long_target": l_target, "long_gap": l_gap,
-        "short_tier": s_tier, "short_target": s_target, "short_gap": s_gap
-    }
 
     levels = pkt["levels"]
     lock_time = int(pkt["lock_time"])
+    
+    # We still fetch live price candles so the system knows if the frozen trigger was broken
     post_lock = [c for c in raw_5m if int(c["time"]) >= lock_time]
 
     state = structure_state_engine.compute_structure_state(levels=levels, candles_5m_post_lock=post_lock, tuning=tuning or {})
@@ -304,9 +309,9 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
             "context": pkt.get("context", {}),
             "htf_shelves": pkt.get("htf_shelves", {}),
             "meta": pkt.get("meta", {}),
-            "liquidity_walls": liquidity_data,
-            "campaign_state": db_state,
-            "middle_brain": middle_brain
+            "liquidity_walls": pkt.get("liquidity_walls", {}),
+            "campaign_state": pkt.get("campaign_state", {}),
+            "middle_brain": pkt.get("middle_brain", {})
         },
         "candles": post_lock
     }
