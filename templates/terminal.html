@@ -106,6 +106,12 @@
                             MONITORING BORDERS...
                         </div>
                     </div>
+
+                    <button class="btn-act" style="background:#0ea5e9; color:#000; margin-top:20px; width:100%;" onclick="pingLiveOracle(event)">PING LIVE ORACLE (TACTICAL OVERRIDE)</button>
+                    
+                    <div id="liveOverrideBox" style="display:none; margin-top:15px; border:1px solid #0ea5e9; background:rgba(14, 165, 233, 0.1); padding:15px; border-radius:4px;">
+                        </div>
+
                 </div>
             </div>
 
@@ -251,6 +257,63 @@
                         labelSpan.style.fontWeight = '800';
                     }
                 }
+            }
+        }
+
+        async function pingLiveOracle(event) {
+            const btn = event.target;
+            const origText = btn.innerText;
+            btn.innerText = "/// SCANNING LIVE BINANCE DOM ///";
+            btn.disabled = true;
+
+            try {
+                const res = await fetch("/api/terminal/override", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({symbol: targetSymbol})
+                });
+                const data = await res.json();
+                
+                if(data.status === "SUCCESS") {
+                    const liveDossier = data.live_dossier;
+                    let morningPlan = activeData.favored === 'LONG' ? activeData.long : activeData.short;
+                    let livePlan = liveDossier.favored === 'LONG' ? liveDossier.long : liveDossier.short;
+
+                    // Fallback to whichever is valid if favored is neutral
+                    if (!morningPlan.plan.valid) morningPlan = activeData.short.plan.valid ? activeData.short : activeData.long;
+                    if (!livePlan.plan.valid) livePlan = liveDossier.short.plan.valid ? liveDossier.short : liveDossier.long;
+
+                    const overrideBox = document.getElementById("liveOverrideBox");
+                    overrideBox.style.display = "block";
+                    overrideBox.innerHTML = `
+                        <div style="font-family:'JetBrains Mono'; font-size:12px; color:#0ea5e9; font-weight:800; margin-bottom:10px;">TACTICAL RECONNAISSANCE RETURNED</div>
+                        
+                        <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                            <div style="color:var(--gray); font-size:11px;">8:30 AM LOCKED VERDICT:</div>
+                            <div style="color:#fff; font-size:11px; text-align:right;">${activeData.roe.split(':')[0]}</div>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; margin-bottom:10px; border-bottom:1px solid rgba(14, 165, 233, 0.3); padding-bottom:10px;">
+                            <div style="color:var(--yellow); font-size:11px;">LIVE ORACLE VERDICT:</div>
+                            <div style="color:var(--yellow); font-size:11px; font-weight:800; text-align:right;">${liveDossier.roe.split(':')[0]}</div>
+                        </div>
+                        
+                        <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                            <div style="color:var(--gray); font-size:11px;">LOCKED TARGET 2 DESTINATION:</div>
+                            <div style="color:#fff; font-size:11px;">$${morningPlan.plan.targets[1].toFixed(2)}</div>
+                        </div>
+                        <div style="display:flex; justify-content:space-between;">
+                            <div style="color:var(--green); font-size:11px;">LIVE TARGET 2 DESTINATION:</div>
+                            <div style="color:var(--green); font-size:11px; font-weight:800;">$${livePlan.plan.targets[1].toFixed(2)}</div>
+                        </div>
+                    `;
+                } else {
+                    alert("Oracle Error: " + data.message);
+                }
+            } catch(e) {
+                console.error(e);
+            } finally {
+                btn.innerText = origText;
+                btn.disabled = false;
             }
         }
 
