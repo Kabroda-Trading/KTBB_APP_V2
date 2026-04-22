@@ -261,7 +261,7 @@
         }
 
         // =====================================================================
-        // BOOKMAP VISUALIZER CANVAS ENGINE
+        // BOOKMAP VISUALIZER CANVAS ENGINE (LOGARITHMIC HEATMAP EDITION)
         // =====================================================================
         function drawTacticalScanner(rawWalls, currentPrice, depthPct, plan) {
             const canvas = document.getElementById('tacticalCanvas');
@@ -296,41 +296,46 @@
             asks.forEach(x => maxVol = Math.max(maxVol, x[1]));
             bids.forEach(x => maxVol = Math.max(maxVol, x[1]));
 
-            // Draw Asks (Red)
+            // Draw Asks (Red Heatmap Bands)
             asks.forEach(ask => {
                 const price = ask[0];
                 const vol = ask[1];
                 const y = h/2 - ((price - currentPrice) / range) * (h/2);
-                const barWidth = (vol / maxVol) * (w * 0.7); 
-                const intensity = 0.3 + (0.7 * (vol / maxVol)); // Brighter for heavier volume
-
-                ctx.fillStyle = `rgba(239, 68, 68, ${intensity})`;
-                const thickness = vol > maxVol * 0.7 ? 4 : 1; // Thicker for magnets
-                ctx.fillRect(w - barWidth, y - thickness/2, barWidth, thickness);
                 
-                if(vol > maxVol * 0.7) {
-                    ctx.fillStyle = '#ef4444';
-                    ctx.font = '10px JetBrains Mono';
-                    ctx.fillText(`$${price.toFixed(0)} (${vol.toFixed(0)}v)`, 5, y + 3);
+                // ARCHITECT FIX: Square-Root Scaling to boost visibility of smaller walls
+                const ratio = Math.pow(vol / maxVol, 0.4); 
+                const alpha = 0.2 + (0.8 * ratio); 
+                const thickness = ratio > 0.8 ? 4 : (ratio > 0.5 ? 2 : 1);
+                
+                ctx.fillStyle = `rgba(239, 68, 68, ${alpha})`;
+                ctx.fillRect(0, y - thickness/2, w, thickness);
+                
+                // Only label the significant walls to keep the UI clean
+                if(ratio > 0.6) {
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 10px JetBrains Mono';
+                    ctx.fillText(`$${price.toFixed(0)} (${vol.toFixed(0)}v)`, 10, y + 3);
                 }
             });
 
-            // Draw Bids (Green)
+            // Draw Bids (Green Heatmap Bands)
             bids.forEach(bid => {
                 const price = bid[0];
                 const vol = bid[1];
                 const y = h/2 - ((price - currentPrice) / range) * (h/2);
-                const barWidth = (vol / maxVol) * (w * 0.7);
-                const intensity = 0.3 + (0.7 * (vol / maxVol));
+                
+                // ARCHITECT FIX: Square-Root Scaling
+                const ratio = Math.pow(vol / maxVol, 0.4);
+                const alpha = 0.2 + (0.8 * ratio);
+                const thickness = ratio > 0.8 ? 4 : (ratio > 0.5 ? 2 : 1);
 
-                ctx.fillStyle = `rgba(34, 197, 94, ${intensity})`;
-                const thickness = vol > maxVol * 0.7 ? 4 : 1;
-                ctx.fillRect(w - barWidth, y - thickness/2, barWidth, thickness);
+                ctx.fillStyle = `rgba(34, 197, 94, ${alpha})`;
+                ctx.fillRect(0, y - thickness/2, w, thickness);
 
-                if(vol > maxVol * 0.7) {
-                    ctx.fillStyle = '#22c55e';
-                    ctx.font = '10px JetBrains Mono';
-                    ctx.fillText(`$${price.toFixed(0)} (${vol.toFixed(0)}v)`, 5, y + 3);
+                if(ratio > 0.6) {
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 10px JetBrains Mono';
+                    ctx.fillText(`$${price.toFixed(0)} (${vol.toFixed(0)}v)`, 10, y + 3);
                 }
             });
 
@@ -342,11 +347,15 @@
             ctx.lineTo(w, h/2);
             ctx.stroke();
             ctx.setLineDash([]);
+            
+            // Text background pill for readability
+            ctx.fillStyle = '#020617';
+            ctx.fillRect(w/2 - 40, h/2 - 10, 80, 20); 
             ctx.fillStyle = '#0ea5e9';
             ctx.font = 'bold 12px JetBrains Mono';
-            ctx.fillText(`$${currentPrice.toFixed(2)}`, w/2 - 30, h/2 - 5);
+            ctx.fillText(`$${currentPrice.toFixed(2)}`, w/2 - 35, h/2 + 4);
 
-            // Overlay Structural Plan
+            // Overlay Structural Plan (Entry, T1, T2)
             if (plan && plan.valid) {
                 [
                     {price: plan.entry, label: "ENTRY", color: '#22c55e'},
@@ -355,16 +364,21 @@
                 ].forEach(target => {
                     if(target.price <= maxPrice && target.price >= minPrice) {
                         const y = h/2 - ((target.price - currentPrice) / range) * (h/2);
+                        
                         ctx.strokeStyle = target.color;
-                        ctx.globalAlpha = 0.5;
+                        ctx.globalAlpha = 1.0;
+                        ctx.setLineDash([2, 2]);
                         ctx.beginPath();
                         ctx.moveTo(0, y);
                         ctx.lineTo(w, y);
                         ctx.stroke();
-                        ctx.globalAlpha = 1.0;
+                        ctx.setLineDash([]);
+                        
+                        ctx.fillStyle = '#020617';
+                        ctx.fillRect(w - 50, y - 10, 50, 20);
                         ctx.fillStyle = target.color;
                         ctx.font = 'bold 10px JetBrains Mono';
-                        ctx.fillText(target.label, w/2 + 20, y - 4);
+                        ctx.fillText(target.label, w - 45, y + 3);
                     }
                 });
             }
@@ -411,8 +425,8 @@
                                 <span style="font-size:11px; color:#94a3b8; font-weight:700;">TACTICAL SCANNER</span>
                                 <div style="display:flex; align-items:center; gap:10px;">
                                     <span style="font-size:10px; color:#94a3b8;">SCAN DEPTH</span>
-                                    <input type="range" id="scannerDepth" min="0.5" max="8.0" step="0.5" value="3.0" style="width:100px; cursor:pointer;">
-                                    <span id="depthLabel" style="font-size:11px; font-family:'JetBrains Mono'; color:#0ea5e9; width:35px; text-align:right;">3.0%</span>
+                                    <input type="range" id="scannerDepth" min="0.5" max="5.0" step="0.5" value="1.5" style="width:100px; cursor:pointer;">
+                                    <span id="depthLabel" style="font-size:11px; font-family:'JetBrains Mono'; color:#0ea5e9; width:35px; text-align:right;">1.5%</span>
                                 </div>
                             </div>
                             <div style="width:100%; height:400px; position:relative;">
@@ -430,7 +444,6 @@
                         </div>
                     `;
 
-                    // Attach slider event listener for interactive re-drawing
                     const slider = document.getElementById('scannerDepth');
                     const depthLabel = document.getElementById('depthLabel');
                     
@@ -440,7 +453,6 @@
                         drawTacticalScanner(liveDossier.raw_liquidity, activeData.price, val, livePlan.plan);
                     });
 
-                    // Draw the initial map
                     drawTacticalScanner(liveDossier.raw_liquidity, activeData.price, parseFloat(slider.value), livePlan.plan);
 
                 } else {
