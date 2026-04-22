@@ -1,6 +1,6 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v11.0 (TACTICAL BOOKMAP INJECTION)
+# KABRODA MARKET RADAR v11.1 (STRICT 8:30 AM LOCK + MAGNET OVERRIDE)
 # ==============================================================================
 import os
 import json
@@ -117,7 +117,7 @@ def _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls):
             
     return l_note, s_note, macro_upper, macro_lower
 
-def _enforce_risk_reward(plan, tier, note):
+def _enforce_risk_reward(plan, tier, note, vector, macro_upper, macro_lower):
     if not plan["valid"] or plan["stop"] == 0:
         return plan, tier, note, 0.0
         
@@ -127,9 +127,20 @@ def _enforce_risk_reward(plan, tier, note):
     rr_ratio = reward / risk if risk > 0 else 0.0
     
     if rr_ratio < 0.50:
-        tier = "DEATH ZONE (BAD R:R)"
-        note = f"⛔ TRADE INVALIDATED: Target 2 R:R is only {rr_ratio:.2f}."
+        # THE FAKEOUT BREAKOUT LOGIC
+        max_up_vol = max([w["vol"] for w in macro_upper]) if macro_upper else 0
+        max_dn_vol = max([w["vol"] for w in macro_lower]) if macro_lower else 0
         
+        if vector == "LONG" and max_up_vol > (max_dn_vol * 1.5):
+            tier = "PRIMAL ZONE (MAGNET OVERRIDE)"
+            note = f"⚠️ R:R is tight ({rr_ratio:.2f}), but UPPER MAGNET ({max_up_vol:.0f}v) overpowers floor. Breakout expected."
+        elif vector == "SHORT" and max_dn_vol > (max_up_vol * 1.5):
+            tier = "PRIMAL ZONE (MAGNET OVERRIDE)"
+            note = f"⚠️ R:R is tight ({rr_ratio:.2f}), but LOWER MAGNET ({max_dn_vol:.0f}v) overpowers ceiling. Breakdown expected."
+        else:
+            tier = "DEATH ZONE (FAKEOUT TRAP)"
+            note = f"⛔ TRADE INVALIDATED: Tight Gap ({rr_ratio:.2f}) with counter-liquidity. High probability of fakeout."
+            
     return plan, tier, note, rr_ratio
 
 def _make_key(plan, verdict, macro_bias, micro_bias):
@@ -148,7 +159,9 @@ def _generate_omni_roe(favored, fav_tier, macro_bias, micro_bias, campaign_state
     struct_text = ""
     if "CRATER" in fav_tier: struct_text = "DEATH ZONE (CRATER): Immediate wall absorbing energy. STAND DOWN."
     elif "EXHAUSTION" in fav_tier: struct_text = "DEATH ZONE (EXHAUSTION): Target is too far away. STAND DOWN."
+    elif "FAKEOUT TRAP" in fav_tier: struct_text = "DEATH ZONE: Fakeout trap detected. Counter-liquidity is too high. STAND DOWN."
     elif "BAD R:R" in fav_tier: struct_text = "DEATH ZONE: Risk to Reward is terrible. STAND DOWN."
+    elif "MAGNET OVERRIDE" in fav_tier: struct_text = "PRIMAL ZONE: Tight gap overridden by massive macro magnet. EXECUTE."
     elif "SPEEDBUMP" in fav_tier: struct_text = "PRIMAL ZONE: Obstacle is a speedbump. Target confirmed. EXECUTE."
     elif "DIRECT MAGNET" in fav_tier: struct_text = "PRIMAL ZONE: Open runway to target. EXECUTE."
     elif "JAILBREAK" in fav_tier: struct_text = "JAILBREAK: Triggers outside walls. Trail stop loosely."
@@ -174,8 +187,9 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, liquidity_wal
     
     l_note, s_note, macro_upper, macro_lower = _evaluate_oracle(anchor, l_plan, s_plan, liquidity_walls)
     
-    l_plan, l_tier, l_note, l_rr = _enforce_risk_reward(l_plan, l_tier, l_note)
-    s_plan, s_tier, s_note, s_rr = _enforce_risk_reward(s_plan, s_tier, s_note)
+    # PASS THE WALLS INTO THE R:R ENFORCER TO CHECK FOR OVERRIDES
+    l_plan, l_tier, l_note, l_rr = _enforce_risk_reward(l_plan, l_tier, l_note, "LONG", macro_upper, macro_lower)
+    s_plan, s_tier, s_note, s_rr = _enforce_risk_reward(s_plan, s_tier, s_note, "SHORT", macro_upper, macro_lower)
     
     favored = "NEUTRAL"
     if micro_bias == "BULLISH": favored = "LONG"
@@ -196,7 +210,6 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, liquidity_wal
         "campaign_bias": campaign_state.get("bias", "NEUTRAL"),
         "liquidity_status": liquidity_walls.get("status", "NONE"),
         "macro_upper": macro_upper, "macro_lower": macro_lower,
-        "raw_liquidity": liquidity_walls.get("raw_data", {}), 
         "long": {"gap": l_gap, "tier": l_tier, "plan": l_plan, "key": _make_key(l_plan, l_tier, macro_bias, micro_bias), "oracle_note": l_note, "rr": l_rr},
         "short": {"gap": s_gap, "tier": s_tier, "plan": s_plan, "key": _make_key(s_plan, s_tier, macro_bias, micro_bias), "oracle_note": s_note, "rr": s_rr}
     }
@@ -280,42 +293,3 @@ async def scan_sector(session_id="us_ny_futures"):
         
     radar_grid.sort(key=lambda x: x['sort_weight'], reverse=True)
     return radar_grid
-
-async def generate_tactical_override(symbol: str, session_id: str = "us_ny_futures"):
-    res = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
-    if res.get("status") in ["CALIBRATING", "ERROR"]:
-        return {"status": "ERROR", "message": "Radar is not locked. Wait for calibration."}
-
-    live_liquidity = await liquidity_oracle.fetch_liquidation_magnets(symbol)
-    live_telemetry_data = await live_telemetry.fetch_live_telemetry(symbol)
-
-    levels = res["battlebox"]["levels"]
-    campaign_state = res["battlebox"]["campaign_state"]
-    macro_bias = res["battlebox"]["context"].get("macro_bias", "NEUTRAL")
-    micro_bias = res["battlebox"]["context"].get("micro_bias", "NEUTRAL")
-    price = res["price"]
-
-    bo = float(levels.get("breakout_trigger", 0))
-    bd = float(levels.get("breakdown_trigger", 0))
-    dr = float(levels.get("daily_resistance", 0))
-    ds = float(levels.get("daily_support", 0))
-
-    asks = live_liquidity.get("raw_data", {}).get("asks", [])
-    bids = live_liquidity.get("raw_data", {}).get("bids", [])
-    fuel_mult = float(live_telemetry_data.get("fuel_multiplier", 1.0))
-
-    l_gap, l_tier, l_target = battlebox_pipeline._analyze_true_gap(symbol, bo, dr, asks, "LONG", fuel_mult)
-    s_gap, s_tier, s_target = battlebox_pipeline._analyze_true_gap(symbol, bd, ds, bids, "SHORT", fuel_mult)
-
-    live_middle_brain = {
-        "long_tier": l_tier, "long_target": l_target, "long_gap": l_gap,
-        "short_tier": s_tier, "short_target": s_target, "short_gap": s_gap
-    }
-
-    live_dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias, live_liquidity, live_middle_brain, campaign_state)
-
-    return {
-        "status": "SUCCESS",
-        "symbol": symbol,
-        "live_dossier": live_dossier
-    }
