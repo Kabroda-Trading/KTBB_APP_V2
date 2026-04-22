@@ -1,6 +1,6 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v10.9 (LIVE TACTICAL OVERRIDE + ALWAYS-ON GEOMETRY)
+# KABRODA MARKET RADAR v11.0 (TACTICAL BOOKMAP INJECTION)
 # ==============================================================================
 import os
 import json
@@ -54,8 +54,6 @@ def _find_predator_stop(symbol, entry, direction, levels, verdict):
     return 0
 
 def _get_plan(symbol, static_entry, vector, tier, levels, true_target):
-    # ARCHITECT FIX: We set valid to True by default to ensure the Terminal 
-    # ALWAYS renders the map, regardless of the Death Zone text verdict.
     plan = {"valid": True, "bias": vector, "entry": 0, "stop": 0, "targets": [0,0,0]}
     
     bo = float(levels.get("breakout_trigger", 0))
@@ -129,7 +127,6 @@ def _enforce_risk_reward(plan, tier, note):
     rr_ratio = reward / risk if risk > 0 else 0.0
     
     if rr_ratio < 0.50:
-        # ARCHITECT FIX: We warn the operator via the text string, but we NO LONGER invalidate the plan.
         tier = "DEATH ZONE (BAD R:R)"
         note = f"⛔ TRADE INVALIDATED: Target 2 R:R is only {rr_ratio:.2f}."
         
@@ -199,6 +196,7 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, liquidity_wal
         "campaign_bias": campaign_state.get("bias", "NEUTRAL"),
         "liquidity_status": liquidity_walls.get("status", "NONE"),
         "macro_upper": macro_upper, "macro_lower": macro_lower,
+        "raw_liquidity": liquidity_walls.get("raw_data", {}), 
         "long": {"gap": l_gap, "tier": l_tier, "plan": l_plan, "key": _make_key(l_plan, l_tier, macro_bias, micro_bias), "oracle_note": l_note, "rr": l_rr},
         "short": {"gap": s_gap, "tier": s_tier, "plan": s_plan, "key": _make_key(s_plan, s_tier, macro_bias, micro_bias), "oracle_note": s_note, "rr": s_rr}
     }
@@ -283,23 +281,14 @@ async def scan_sector(session_id="us_ny_futures"):
     radar_grid.sort(key=lambda x: x['sort_weight'], reverse=True)
     return radar_grid
 
-# ==============================================================================
-# THE TACTICAL OVERRIDE (NEW PHASE 4 INTELLIGENCE)
-# ==============================================================================
 async def generate_tactical_override(symbol: str, session_id: str = "us_ny_futures"):
-    """
-    Grabs the FROZEN structural geometry from the morning lock, 
-    but fetches LIVE Binance walls and recalculates the verdict.
-    """
     res = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
     if res.get("status") in ["CALIBRATING", "ERROR"]:
         return {"status": "ERROR", "message": "Radar is not locked. Wait for calibration."}
 
-    # 1. Fetch FRESH LIVE data
     live_liquidity = await liquidity_oracle.fetch_liquidation_magnets(symbol)
     live_telemetry_data = await live_telemetry.fetch_live_telemetry(symbol)
 
-    # 2. Extract FROZEN structure and biases
     levels = res["battlebox"]["levels"]
     campaign_state = res["battlebox"]["campaign_state"]
     macro_bias = res["battlebox"]["context"].get("macro_bias", "NEUTRAL")
@@ -315,7 +304,6 @@ async def generate_tactical_override(symbol: str, session_id: str = "us_ny_futur
     bids = live_liquidity.get("raw_data", {}).get("bids", [])
     fuel_mult = float(live_telemetry_data.get("fuel_multiplier", 1.0))
 
-    # 3. Recalculate Middle Brain math using FROZEN lines but LIVE walls
     l_gap, l_tier, l_target = battlebox_pipeline._analyze_true_gap(symbol, bo, dr, asks, "LONG", fuel_mult)
     s_gap, s_tier, s_target = battlebox_pipeline._analyze_true_gap(symbol, bd, ds, bids, "SHORT", fuel_mult)
 
@@ -324,7 +312,6 @@ async def generate_tactical_override(symbol: str, session_id: str = "us_ny_futur
         "short_tier": s_tier, "short_target": s_target, "short_gap": s_gap
     }
 
-    # 4. Generate the new live dossier
     live_dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias, live_liquidity, live_middle_brain, campaign_state)
 
     return {

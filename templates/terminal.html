@@ -260,6 +260,116 @@
             }
         }
 
+        // =====================================================================
+        // BOOKMAP VISUALIZER CANVAS ENGINE
+        // =====================================================================
+        function drawTacticalScanner(rawWalls, currentPrice, depthPct, plan) {
+            const canvas = document.getElementById('tacticalCanvas');
+            if(!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const rect = canvas.parentElement.getBoundingClientRect();
+            
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = 400 * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+            const w = rect.width;
+            const h = 400;
+
+            ctx.clearRect(0, 0, w, h);
+
+            if (!rawWalls || (!rawWalls.asks && !rawWalls.bids)) {
+                ctx.fillStyle = '#64748b';
+                ctx.font = '12px JetBrains Mono';
+                ctx.fillText("/// SCANNER OFFLINE", w/2 - 60, h/2);
+                return;
+            }
+
+            const range = currentPrice * (depthPct / 100);
+            const maxPrice = currentPrice + range;
+            const minPrice = currentPrice - range;
+
+            const asks = (rawWalls.asks || []).filter(x => x[0] <= maxPrice && x[0] >= currentPrice);
+            const bids = (rawWalls.bids || []).filter(x => x[0] >= minPrice && x[0] <= currentPrice);
+
+            let maxVol = 1;
+            asks.forEach(x => maxVol = Math.max(maxVol, x[1]));
+            bids.forEach(x => maxVol = Math.max(maxVol, x[1]));
+
+            // Draw Asks (Red)
+            asks.forEach(ask => {
+                const price = ask[0];
+                const vol = ask[1];
+                const y = h/2 - ((price - currentPrice) / range) * (h/2);
+                const barWidth = (vol / maxVol) * (w * 0.7); 
+                const intensity = 0.3 + (0.7 * (vol / maxVol)); // Brighter for heavier volume
+
+                ctx.fillStyle = `rgba(239, 68, 68, ${intensity})`;
+                const thickness = vol > maxVol * 0.7 ? 4 : 1; // Thicker for magnets
+                ctx.fillRect(w - barWidth, y - thickness/2, barWidth, thickness);
+                
+                if(vol > maxVol * 0.7) {
+                    ctx.fillStyle = '#ef4444';
+                    ctx.font = '10px JetBrains Mono';
+                    ctx.fillText(`$${price.toFixed(0)} (${vol.toFixed(0)}v)`, 5, y + 3);
+                }
+            });
+
+            // Draw Bids (Green)
+            bids.forEach(bid => {
+                const price = bid[0];
+                const vol = bid[1];
+                const y = h/2 - ((price - currentPrice) / range) * (h/2);
+                const barWidth = (vol / maxVol) * (w * 0.7);
+                const intensity = 0.3 + (0.7 * (vol / maxVol));
+
+                ctx.fillStyle = `rgba(34, 197, 94, ${intensity})`;
+                const thickness = vol > maxVol * 0.7 ? 4 : 1;
+                ctx.fillRect(w - barWidth, y - thickness/2, barWidth, thickness);
+
+                if(vol > maxVol * 0.7) {
+                    ctx.fillStyle = '#22c55e';
+                    ctx.font = '10px JetBrains Mono';
+                    ctx.fillText(`$${price.toFixed(0)} (${vol.toFixed(0)}v)`, 5, y + 3);
+                }
+            });
+
+            // Draw Center Line (Current Price)
+            ctx.strokeStyle = '#0ea5e9';
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(0, h/2);
+            ctx.lineTo(w, h/2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#0ea5e9';
+            ctx.font = 'bold 12px JetBrains Mono';
+            ctx.fillText(`$${currentPrice.toFixed(2)}`, w/2 - 30, h/2 - 5);
+
+            // Overlay Structural Plan
+            if (plan && plan.valid) {
+                [
+                    {price: plan.entry, label: "ENTRY", color: '#22c55e'},
+                    {price: plan.targets[0], label: "T1", color: '#eab308'},
+                    {price: plan.targets[1], label: "T2", color: '#0ea5e9'}
+                ].forEach(target => {
+                    if(target.price <= maxPrice && target.price >= minPrice) {
+                        const y = h/2 - ((target.price - currentPrice) / range) * (h/2);
+                        ctx.strokeStyle = target.color;
+                        ctx.globalAlpha = 0.5;
+                        ctx.beginPath();
+                        ctx.moveTo(0, y);
+                        ctx.lineTo(w, y);
+                        ctx.stroke();
+                        ctx.globalAlpha = 1.0;
+                        ctx.fillStyle = target.color;
+                        ctx.font = 'bold 10px JetBrains Mono';
+                        ctx.fillText(target.label, w/2 + 20, y - 4);
+                    }
+                });
+            }
+        }
+
         async function pingLiveOracle(event) {
             const btn = event.target;
             const origText = btn.innerText;
@@ -279,22 +389,35 @@
                     let morningPlan = activeData.favored === 'LONG' ? activeData.long : activeData.short;
                     let livePlan = liveDossier.favored === 'LONG' ? liveDossier.long : liveDossier.short;
 
-                    // Fallback to whichever is valid if favored is neutral
                     if (!morningPlan.plan.valid) morningPlan = activeData.short.plan.valid ? activeData.short : activeData.long;
                     if (!livePlan.plan.valid) livePlan = liveDossier.short.plan.valid ? liveDossier.short : liveDossier.long;
 
                     const overrideBox = document.getElementById("liveOverrideBox");
                     overrideBox.style.display = "block";
                     overrideBox.innerHTML = `
-                        <div style="font-family:'JetBrains Mono'; font-size:12px; color:#0ea5e9; font-weight:800; margin-bottom:10px;">TACTICAL RECONNAISSANCE RETURNED</div>
+                        <div style="font-family:'JetBrains Mono'; font-size:12px; color:#0ea5e9; font-weight:800; margin-bottom:15px; border-bottom:1px solid rgba(14, 165, 233, 0.3); padding-bottom:5px;">TACTICAL RECONNAISSANCE RETURNED</div>
                         
                         <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
                             <div style="color:var(--gray); font-size:11px;">8:30 AM LOCKED VERDICT:</div>
                             <div style="color:#fff; font-size:11px; text-align:right;">${activeData.roe.split(':')[0]}</div>
                         </div>
-                        <div style="display:flex; justify-content:space-between; margin-bottom:10px; border-bottom:1px solid rgba(14, 165, 233, 0.3); padding-bottom:10px;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
                             <div style="color:var(--yellow); font-size:11px;">LIVE ORACLE VERDICT:</div>
                             <div style="color:var(--yellow); font-size:11px; font-weight:800; text-align:right;">${liveDossier.roe.split(':')[0]}</div>
+                        </div>
+
+                        <div style="background:#020617; border:1px solid #1e293b; padding:10px; border-radius:4px; margin-bottom:15px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                                <span style="font-size:11px; color:#94a3b8; font-weight:700;">TACTICAL SCANNER</span>
+                                <div style="display:flex; align-items:center; gap:10px;">
+                                    <span style="font-size:10px; color:#94a3b8;">SCAN DEPTH</span>
+                                    <input type="range" id="scannerDepth" min="0.5" max="8.0" step="0.5" value="3.0" style="width:100px; cursor:pointer;">
+                                    <span id="depthLabel" style="font-size:11px; font-family:'JetBrains Mono'; color:#0ea5e9; width:35px; text-align:right;">3.0%</span>
+                                </div>
+                            </div>
+                            <div style="width:100%; height:400px; position:relative;">
+                                <canvas id="tacticalCanvas" style="width:100%; height:100%; display:block;"></canvas>
+                            </div>
                         </div>
                         
                         <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
@@ -306,6 +429,20 @@
                             <div style="color:var(--green); font-size:11px; font-weight:800;">$${livePlan.plan.targets[1].toFixed(2)}</div>
                         </div>
                     `;
+
+                    // Attach slider event listener for interactive re-drawing
+                    const slider = document.getElementById('scannerDepth');
+                    const depthLabel = document.getElementById('depthLabel');
+                    
+                    slider.addEventListener('input', (e) => {
+                        const val = parseFloat(e.target.value);
+                        depthLabel.innerText = val.toFixed(1) + '%';
+                        drawTacticalScanner(liveDossier.raw_liquidity, activeData.price, val, livePlan.plan);
+                    });
+
+                    // Draw the initial map
+                    drawTacticalScanner(liveDossier.raw_liquidity, activeData.price, parseFloat(slider.value), livePlan.plan);
+
                 } else {
                     alert("Oracle Error: " + data.message);
                 }
