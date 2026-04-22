@@ -1,6 +1,6 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v10.8 (WITH LIVE TACTICAL OVERRIDE)
+# KABRODA MARKET RADAR v10.9 (LIVE TACTICAL OVERRIDE + ALWAYS-ON GEOMETRY)
 # ==============================================================================
 import os
 import json
@@ -54,9 +54,9 @@ def _find_predator_stop(symbol, entry, direction, levels, verdict):
     return 0
 
 def _get_plan(symbol, static_entry, vector, tier, levels, true_target):
-    plan = {"valid": False, "bias": vector, "entry": 0, "stop": 0, "targets": [0,0,0]}
-    
-    if "WAITING" in tier or "DEATH ZONE" in tier: return plan
+    # ARCHITECT FIX: We set valid to True by default to ensure the Terminal 
+    # ALWAYS renders the map, regardless of the Death Zone text verdict.
+    plan = {"valid": True, "bias": vector, "entry": 0, "stop": 0, "targets": [0,0,0]}
     
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
@@ -129,7 +129,7 @@ def _enforce_risk_reward(plan, tier, note):
     rr_ratio = reward / risk if risk > 0 else 0.0
     
     if rr_ratio < 0.50:
-        plan["valid"] = False
+        # ARCHITECT FIX: We warn the operator via the text string, but we NO LONGER invalidate the plan.
         tier = "DEATH ZONE (BAD R:R)"
         note = f"⛔ TRADE INVALIDATED: Target 2 R:R is only {rr_ratio:.2f}."
         
