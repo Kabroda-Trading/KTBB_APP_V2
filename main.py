@@ -343,6 +343,13 @@ async def get_live_telemetry(request: Request, db: Session = Depends(get_db)):
         traceback.print_exc()
         return JSONResponse({"ok": False, "error": str(e)})
 
+@app.post("/api/terminal/override")
+async def api_terminal_override(payload: dict):
+    symbol = payload.get("symbol", "BTCUSDT")
+    import market_radar
+    data = await market_radar.generate_tactical_override(symbol)
+    return data
+
 @app.post("/api/radar/scan")
 async def run_radar_scan(request: Request):
     results = await market_radar.scan_sector()

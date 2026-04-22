@@ -1,6 +1,6 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v10.7 (RAW DOM PASSTHROUGH)
+# KABRODA MARKET RADAR v10.8 (WITH LIVE TACTICAL OVERRIDE)
 # ==============================================================================
 import os
 import json
@@ -9,6 +9,8 @@ import battlebox_pipeline
 import datetime
 import gspread
 from google.oauth2.service_account import Credentials
+import liquidity_oracle
+import live_telemetry
 
 TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
@@ -272,7 +274,6 @@ async def scan_sector(session_id="us_ny_futures"):
         radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,
             "indicator_string": _make_indicator_string(levels), "full_intel": json.dumps(res, default=str),
-            "raw_walls": liquidity_walls.get("raw_data", {}), # INJECTION: Sending raw DOM data to frontend
             **dossier
         }
         
@@ -281,3 +282,53 @@ async def scan_sector(session_id="us_ny_futures"):
         
     radar_grid.sort(key=lambda x: x['sort_weight'], reverse=True)
     return radar_grid
+
+# ==============================================================================
+# THE TACTICAL OVERRIDE (NEW PHASE 4 INTELLIGENCE)
+# ==============================================================================
+async def generate_tactical_override(symbol: str, session_id: str = "us_ny_futures"):
+    """
+    Grabs the FROZEN structural geometry from the morning lock, 
+    but fetches LIVE Binance walls and recalculates the verdict.
+    """
+    res = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
+    if res.get("status") in ["CALIBRATING", "ERROR"]:
+        return {"status": "ERROR", "message": "Radar is not locked. Wait for calibration."}
+
+    # 1. Fetch FRESH LIVE data
+    live_liquidity = await liquidity_oracle.fetch_liquidation_magnets(symbol)
+    live_telemetry_data = await live_telemetry.fetch_live_telemetry(symbol)
+
+    # 2. Extract FROZEN structure and biases
+    levels = res["battlebox"]["levels"]
+    campaign_state = res["battlebox"]["campaign_state"]
+    macro_bias = res["battlebox"]["context"].get("macro_bias", "NEUTRAL")
+    micro_bias = res["battlebox"]["context"].get("micro_bias", "NEUTRAL")
+    price = res["price"]
+
+    bo = float(levels.get("breakout_trigger", 0))
+    bd = float(levels.get("breakdown_trigger", 0))
+    dr = float(levels.get("daily_resistance", 0))
+    ds = float(levels.get("daily_support", 0))
+
+    asks = live_liquidity.get("raw_data", {}).get("asks", [])
+    bids = live_liquidity.get("raw_data", {}).get("bids", [])
+    fuel_mult = float(live_telemetry_data.get("fuel_multiplier", 1.0))
+
+    # 3. Recalculate Middle Brain math using FROZEN lines but LIVE walls
+    l_gap, l_tier, l_target = battlebox_pipeline._analyze_true_gap(symbol, bo, dr, asks, "LONG", fuel_mult)
+    s_gap, s_tier, s_target = battlebox_pipeline._analyze_true_gap(symbol, bd, ds, bids, "SHORT", fuel_mult)
+
+    live_middle_brain = {
+        "long_tier": l_tier, "long_target": l_target, "long_gap": l_gap,
+        "short_tier": s_tier, "short_target": s_target, "short_gap": s_gap
+    }
+
+    # 4. Generate the new live dossier
+    live_dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias, live_liquidity, live_middle_brain, campaign_state)
+
+    return {
+        "status": "SUCCESS",
+        "symbol": symbol,
+        "live_dossier": live_dossier
+    }
