@@ -31,14 +31,9 @@ _LOCKED_PACKETS: Dict[str, Dict[str, Any]] = {}
 _CACHE_LOCK = asyncio.Lock()
 
 # ----------------------------------------------------------------------
-# Exchange (Binance + Proxy)
+# Exchange (MEXC - No Proxy Required)
 # ----------------------------------------------------------------------
-_proxy = os.getenv("BINANCE_PROXY_URL")
-_ccxt_cfg = {"enableRateLimit": True}
-if _proxy:
-    _ccxt_cfg["proxies"] = {"http": _proxy, "https": _proxy}
-
-_exchange_live = ccxt.binance(_ccxt_cfg)
+_exchange_live = ccxt.mexc({"enableRateLimit": True})
 
 
 def _normalize_symbol(symbol: str) -> str:

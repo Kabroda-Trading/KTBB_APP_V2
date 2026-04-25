@@ -63,8 +63,7 @@
 
         async function fetchCandles(symbol) {
             const sym = symbol.replace('/', '');
-            // REVERTED to Binance API endpoint
-            const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=15m&limit=300`);
+            const res = await fetch(`https://api.mexc.com/api/v3/klines?symbol=${sym}&interval=15m&limit=300`);
             const data = await res.json();
             return data.map(d => ({ time: d[0]/1000, open: parseFloat(d[1]), high: parseFloat(d[2]), low: parseFloat(d[3]), close: parseFloat(d[4]) }));
         }
