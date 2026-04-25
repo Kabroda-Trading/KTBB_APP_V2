@@ -22,6 +22,7 @@ import ccxt.async_support as ccxt
 import session_manager
 import sse_engine
 import structure_state_engine
+import gravity_engine  # <-- PHASE 5: Added to log daily levels to the Gravity Vault
 
 # Public re-export for compatibility
 SESSION_CONFIGS = session_manager.SESSION_CONFIGS
@@ -431,6 +432,10 @@ async def get_live_battlebox(
                     },
                 }
             _LOCKED_PACKETS[session_key] = pkt
+            
+            # --- PHASE 5: BEDROCK INTEGRATION ---
+            # Quietly log the locked 8:30 AM levels into the Gravity Vault
+            gravity_engine.log_kabroda_bedrock(symbol, pkt["levels"], pkt["lock_time"])
 
         pkt = _LOCKED_PACKETS[session_key]
 
