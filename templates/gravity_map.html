@@ -5,13 +5,13 @@
     <title>Kabroda | Gravity Map</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <style>
         body { background-color: #020617; color: #f8fafc; font-family: 'Inter', sans-serif; margin: 0; }
-        .map-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 40px; border-bottom: 1px solid #334155; }
+        .map-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 40px; border-bottom: 1px solid #334155; height: 80px; box-sizing: border-box; }
         .h-title { font-family: 'JetBrains Mono'; font-size: 24px; font-weight: 800; margin: 0; color: #fff; text-transform: uppercase; letter-spacing: 2px;}
-        .container { display: flex; height: calc(100vh - 80px); }
-        #chart-container { flex: 1; border-right: 1px solid #334155; position: relative;}
+        .container { display: flex; height: calc(100vh - 80px); width: 100%; overflow: hidden; }
+        #chart-container { flex: 1; border-right: 1px solid #334155; position: relative; background: #020617; }
         .sidebar { width: 450px; background: #0f172a; padding: 20px; overflow-y: auto; box-sizing: border-box;}
         
         .zone-card { background: #1e293b; border: 1px solid #334155; padding: 15px; margin-bottom: 15px; border-radius: 6px; }
@@ -41,21 +41,28 @@
     <div class="container">
         <div id="chart-container"></div>
         <div class="sidebar" id="sidebar-zones">
-            <div style="text-align:center; padding: 40px; color: #94a3b8; font-family: 'JetBrains Mono';">SCANNING GRAVITY WELLS...</div>
+            <div id="status-text" style="text-align:center; padding: 40px; color: #94a3b8; font-family: 'JetBrains Mono';">INITIALIZING SENSORS...</div>
         </div>
     </div>
 
     <script>
         let chart, candlestickSeries;
         
+        // Force explicit dimensions for the TradingView canvas
         function initChart() {
-            chart = LightweightCharts.createChart(document.getElementById('chart-container'), {
+            const container = document.getElementById('chart-container');
+            if (!container) return;
+
+            chart = LightweightCharts.createChart(container, {
+                width: container.clientWidth,
+                height: container.clientHeight,
                 layout: { background: { type: 'solid', color: '#020617' }, textColor: '#cbd5e1' },
                 grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
                 crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-                rightPriceScale: { borderColor: '#334155' },
-                timeScale: { borderColor: '#334155', timeVisible: true }
+                rightPriceScale: { borderColor: '#334155', autoScale: true },
+                timeScale: { borderColor: '#334155', timeVisible: true, secondsVisible: false }
             });
+
             candlestickSeries = chart.addCandlestickSeries({
                 upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444'
             });
@@ -64,81 +71,75 @@
         async function loadGrid() {
             const sym = document.getElementById('symSelect').value;
             const sidebar = document.getElementById('sidebar-zones');
-            sidebar.innerHTML = `<div style="text-align:center; padding: 40px; color: #0ea5e9; font-family: 'JetBrains Mono';">/// CALCULATING MASS & MACRO FIBS...</div>`;
+            
+            sidebar.innerHTML = `<div style="text-align:center; padding: 40px; color: #0ea5e9; font-family: 'JetBrains Mono';">/// PULLING MACRO DATA...</div>`;
             
             try {
-                // Fetch EVERYTHING through the secure backend proxy
-                const res = await fetch(`/api/gravity/scan?symbol=${sym}`);
-                const data = await res.json();
+                const res = await fetch(`/api/gravity/scan?symbol=${encodeURIComponent(sym)}`);
+                if (!res.ok) throw new Error(`Server Error: ${res.status}`);
                 
+                const data = await res.json();
                 sidebar.innerHTML = '';
                 
-                // 1. Render Chart Data
+                // 1. Hydrate Chart
                 if (data.macro_fibs && data.macro_fibs.chart_data && data.macro_fibs.chart_data.length > 0) {
                     candlestickSeries.setData(data.macro_fibs.chart_data);
+                    chart.timeScale().fitContent();
+                } else {
+                    sidebar.innerHTML = `<div style="padding:20px; color:#ef4444; font-family:'JetBrains Mono';">WARNING: No candle data returned from Pipeline.</div>`;
                 }
                 
-                // 2. Render Fib Lines
+                // 2. Render Macro Fibs
                 if (data.macro_fibs && data.macro_fibs.swing_high) {
                     const f = data.macro_fibs;
-                    
-                    candlestickSeries.createPriceLine({ price: f.swing_high, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'MACRO HIGH' });
-                    candlestickSeries.createPriceLine({ price: f.swing_low, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'MACRO LOW' });
-                    candlestickSeries.createPriceLine({ price: f.fib_0500, color: '#a855f7', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: '0.500 POCKET' });
-                    candlestickSeries.createPriceLine({ price: f.fib_0618, color: '#eab308', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: '0.618 POCKET' });
-                    candlestickSeries.createPriceLine({ price: f.fib_0786, color: '#ef4444', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: '0.786 DEEP' });
+                    // Add price lines (removed old ones first if needed, but for simplicity on load:)
+                    candlestickSeries.createPriceLine({ price: f.swing_high, color: '#f8fafc', lineWidth: 1, lineStyle: 2, title: 'SWING HIGH' });
+                    candlestickSeries.createPriceLine({ price: f.swing_low, color: '#f8fafc', lineWidth: 1, lineStyle: 2, title: 'SWING LOW' });
+                    candlestickSeries.createPriceLine({ price: f.fib_0500, color: '#a855f7', lineWidth: 2, lineStyle: 1, title: '0.500' });
+                    candlestickSeries.createPriceLine({ price: f.fib_0618, color: '#eab308', lineWidth: 2, lineStyle: 1, title: '0.618' });
                     
                     sidebar.innerHTML += `
                     <div class="fib-card">
-                        <div style="color:#a855f7; font-family:'JetBrains Mono'; font-weight:800; font-size:14px; margin-bottom:10px;">MACRO ANCHORS (30-DAY)</div>
-                        <div style="display:flex; justify-content:space-between; font-family:'JetBrains Mono'; font-size:12px; color:#fff;">
-                            <span>HIGH: $${f.swing_high}</span>
-                            <span>LOW: $${f.swing_low}</span>
-                        </div>
-                        <div style="height:1px; background:#a855f7; opacity:0.3; margin:10px 0;"></div>
+                        <div style="color:#a855f7; font-family:'JetBrains Mono'; font-weight:800; font-size:14px; margin-bottom:10px;">MACRO ANCHORS</div>
                         <div style="font-family:'JetBrains Mono'; font-size:13px; color:#cbd5e1; line-height:1.6;">
-                            <span style="color:#a855f7;">0.500:</span> $${f.fib_0500} <br>
-                            <span style="color:#eab308;">0.618:</span> $${f.fib_0618} (Golden)<br>
-                            <span style="color:#ef4444;">0.786:</span> $${f.fib_0786} (Deep)
+                            0.500: $${f.fib_0500}<br>
+                            0.618: $${f.fib_0618} (Golden)
                         </div>
                     </div>`;
                 }
                 
-                // 3. Render Heatmap Zones
-                if(!data.heatmap || data.heatmap.length === 0) {
-                    sidebar.innerHTML += `<div style="padding:20px; color:#94a3b8; font-family:'Inter';">No structural trauma logged in vault yet. Engine is running.</div>`;
-                    return;
+                // 3. Render Heatmap
+                if (!data.heatmap || data.heatmap.length === 0) {
+                    sidebar.innerHTML += `<div style="padding:20px; color:#94a3b8; font-family:'Inter'; font-size:12px;">The Gravity Vault is currently building. Structural confluence will appear here as the engine logs more daily pivots.</div>`;
+                } else {
+                    data.heatmap.forEach(zone => {
+                        sidebar.innerHTML += `
+                        <div class="zone-card zone-${zone.intensity}">
+                            <div><span class="z-price">$${zone.bottom.toFixed(2)} - $${zone.top.toFixed(2)}</span><span class="z-score">HEAT: ${zone.heat_score}</span></div>
+                            <div class="z-desc">Contributors: ${zone.contributors.join(', ')}</div>
+                        </div>`;
+                    });
                 }
-
-                data.heatmap.forEach(zone => {
-                    let boxColor = 'rgba(59, 130, 246, 0.1)'; 
-                    if(zone.intensity === 'HEAVY') boxColor = 'rgba(234, 179, 8, 0.2)'; 
-                    if(zone.intensity === 'MAXIMUM') boxColor = 'rgba(239, 68, 68, 0.2)'; 
-
-                    candlestickSeries.createPriceLine({ price: zone.top, color: boxColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, title: 'ZONE TOP' });
-                    candlestickSeries.createPriceLine({ price: zone.bottom, color: boxColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, title: 'ZONE BOT' });
-
-                    let guardBadge = zone.contains_guardrail ? `<span style="background:#ef4444; color:#fff; padding:2px 6px; border-radius:4px; font-size:10px; margin-left:8px;">4H GUARDRAIL</span>` : '';
-                    
-                    sidebar.innerHTML += `
-                    <div class="zone-card zone-${zone.intensity}">
-                        <div>
-                            <span class="z-price">$${zone.bottom.toFixed(2)} - $${zone.top.toFixed(2)}</span>
-                            <span class="z-score">HEAT: ${zone.heat_score}</span>
-                        </div>
-                        <div style="margin-top:5px;">${guardBadge} <span style="font-size:10px; color:#94a3b8;">${zone.level_count} Clustered Levels</span></div>
-                        <div class="z-desc">Contributors: ${zone.contributors.join(', ')}</div>
-                    </div>`;
-                });
                 
             } catch(e) {
-                console.error(e);
-                sidebar.innerHTML = `<div style="text-align:center; padding: 40px; color: #ef4444; font-family: 'JetBrains Mono';">/// SYSTEM ERROR<br><br>Failed to retrieve Gravity Intel.</div>`;
+                console.error("KABRODA CRITICAL UI ERROR:", e);
+                sidebar.innerHTML = `<div style="text-align:center; padding: 40px; color: #ef4444; font-family: 'JetBrains Mono';">/// SYSTEM ERROR<br><br>${e.message}</div>`;
             }
         }
 
-        window.addEventListener('resize', () => { chart.applyOptions({ width: document.getElementById('chart-container').clientWidth, height: document.getElementById('chart-container').clientHeight }); });
-        document.addEventListener('DOMContentLoaded', () => { initChart(); loadGrid(); });
+        // Final Reliability Loop
+        window.addEventListener('resize', () => { 
+            const container = document.getElementById('chart-container');
+            chart.applyOptions({ width: container.clientWidth, height: container.clientHeight }); 
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Delay slightly to ensure browser has calculated flexbox dimensions
+            setTimeout(() => {
+                initChart();
+                loadGrid();
+            }, 100);
+        });
     </script>
 </body>
 </html>
