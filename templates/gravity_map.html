@@ -61,76 +61,80 @@
             });
         }
 
-        async function fetchCandles(symbol) {
-            const sym = symbol.replace('/', '');
-            const res = await fetch(`https://api.mexc.com/api/v3/klines?symbol=${sym}&interval=15m&limit=300`);
-            const data = await res.json();
-            return data.map(d => ({ time: d[0]/1000, open: parseFloat(d[1]), high: parseFloat(d[2]), low: parseFloat(d[3]), close: parseFloat(d[4]) }));
-        }
-
         async function loadGrid() {
             const sym = document.getElementById('symSelect').value;
             const sidebar = document.getElementById('sidebar-zones');
             sidebar.innerHTML = `<div style="text-align:center; padding: 40px; color: #0ea5e9; font-family: 'JetBrains Mono';">/// CALCULATING MASS & MACRO FIBS...</div>`;
             
-            const candles = await fetchCandles(sym);
-            candlestickSeries.setData(candles);
+            try {
+                // Fetch EVERYTHING through the secure backend proxy
+                const res = await fetch(`/api/gravity/scan?symbol=${sym}`);
+                const data = await res.json();
+                
+                sidebar.innerHTML = '';
+                
+                // 1. Render Chart Data
+                if (data.macro_fibs && data.macro_fibs.chart_data && data.macro_fibs.chart_data.length > 0) {
+                    candlestickSeries.setData(data.macro_fibs.chart_data);
+                }
+                
+                // 2. Render Fib Lines
+                if (data.macro_fibs && data.macro_fibs.swing_high) {
+                    const f = data.macro_fibs;
+                    
+                    candlestickSeries.createPriceLine({ price: f.swing_high, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'MACRO HIGH' });
+                    candlestickSeries.createPriceLine({ price: f.swing_low, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'MACRO LOW' });
+                    candlestickSeries.createPriceLine({ price: f.fib_0500, color: '#a855f7', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: '0.500 POCKET' });
+                    candlestickSeries.createPriceLine({ price: f.fib_0618, color: '#eab308', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: '0.618 POCKET' });
+                    candlestickSeries.createPriceLine({ price: f.fib_0786, color: '#ef4444', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: '0.786 DEEP' });
+                    
+                    sidebar.innerHTML += `
+                    <div class="fib-card">
+                        <div style="color:#a855f7; font-family:'JetBrains Mono'; font-weight:800; font-size:14px; margin-bottom:10px;">MACRO ANCHORS (30-DAY)</div>
+                        <div style="display:flex; justify-content:space-between; font-family:'JetBrains Mono'; font-size:12px; color:#fff;">
+                            <span>HIGH: $${f.swing_high}</span>
+                            <span>LOW: $${f.swing_low}</span>
+                        </div>
+                        <div style="height:1px; background:#a855f7; opacity:0.3; margin:10px 0;"></div>
+                        <div style="font-family:'JetBrains Mono'; font-size:13px; color:#cbd5e1; line-height:1.6;">
+                            <span style="color:#a855f7;">0.500:</span> $${f.fib_0500} <br>
+                            <span style="color:#eab308;">0.618:</span> $${f.fib_0618} (Golden)<br>
+                            <span style="color:#ef4444;">0.786:</span> $${f.fib_0786} (Deep)
+                        </div>
+                    </div>`;
+                }
+                
+                // 3. Render Heatmap Zones
+                if(!data.heatmap || data.heatmap.length === 0) {
+                    sidebar.innerHTML += `<div style="padding:20px; color:#94a3b8; font-family:'Inter';">No structural trauma logged in vault yet. Engine is running.</div>`;
+                    return;
+                }
 
-            const res = await fetch(`/api/gravity/scan?symbol=${sym}`);
-            const data = await res.json();
-            
-            sidebar.innerHTML = '';
-            
-            if (data.macro_fibs && data.macro_fibs.swing_high) {
-                const f = data.macro_fibs;
+                data.heatmap.forEach(zone => {
+                    let boxColor = 'rgba(59, 130, 246, 0.1)'; 
+                    if(zone.intensity === 'HEAVY') boxColor = 'rgba(234, 179, 8, 0.2)'; 
+                    if(zone.intensity === 'MAXIMUM') boxColor = 'rgba(239, 68, 68, 0.2)'; 
+
+                    candlestickSeries.createPriceLine({ price: zone.top, color: boxColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, title: 'ZONE TOP' });
+                    candlestickSeries.createPriceLine({ price: zone.bottom, color: boxColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, title: 'ZONE BOT' });
+
+                    let guardBadge = zone.contains_guardrail ? `<span style="background:#ef4444; color:#fff; padding:2px 6px; border-radius:4px; font-size:10px; margin-left:8px;">4H GUARDRAIL</span>` : '';
+                    
+                    sidebar.innerHTML += `
+                    <div class="zone-card zone-${zone.intensity}">
+                        <div>
+                            <span class="z-price">$${zone.bottom.toFixed(2)} - $${zone.top.toFixed(2)}</span>
+                            <span class="z-score">HEAT: ${zone.heat_score}</span>
+                        </div>
+                        <div style="margin-top:5px;">${guardBadge} <span style="font-size:10px; color:#94a3b8;">${zone.level_count} Clustered Levels</span></div>
+                        <div class="z-desc">Contributors: ${zone.contributors.join(', ')}</div>
+                    </div>`;
+                });
                 
-                candlestickSeries.createPriceLine({ price: f.swing_high, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'MACRO HIGH' });
-                candlestickSeries.createPriceLine({ price: f.swing_low, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'MACRO LOW' });
-                candlestickSeries.createPriceLine({ price: f.fib_0500, color: '#a855f7', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: '0.500 POCKET' });
-                candlestickSeries.createPriceLine({ price: f.fib_0618, color: '#eab308', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: '0.618 POCKET' });
-                candlestickSeries.createPriceLine({ price: f.fib_0786, color: '#ef4444', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: '0.786 DEEP' });
-                
-                sidebar.innerHTML += `
-                <div class="fib-card">
-                    <div style="color:#a855f7; font-family:'JetBrains Mono'; font-weight:800; font-size:14px; margin-bottom:10px;">MACRO ANCHORS (30-DAY)</div>
-                    <div style="display:flex; justify-content:space-between; font-family:'JetBrains Mono'; font-size:12px; color:#fff;">
-                        <span>HIGH: $${f.swing_high}</span>
-                        <span>LOW: $${f.swing_low}</span>
-                    </div>
-                    <div style="height:1px; background:#a855f7; opacity:0.3; margin:10px 0;"></div>
-                    <div style="font-family:'JetBrains Mono'; font-size:13px; color:#cbd5e1; line-height:1.6;">
-                        <span style="color:#a855f7;">0.500:</span> $${f.fib_0500} <br>
-                        <span style="color:#eab308;">0.618:</span> $${f.fib_0618} (Golden)<br>
-                        <span style="color:#ef4444;">0.786:</span> $${f.fib_0786} (Deep)
-                    </div>
-                </div>`;
+            } catch(e) {
+                console.error(e);
+                sidebar.innerHTML = `<div style="text-align:center; padding: 40px; color: #ef4444; font-family: 'JetBrains Mono';">/// SYSTEM ERROR<br><br>Failed to retrieve Gravity Intel.</div>`;
             }
-            
-            if(!data.heatmap || data.heatmap.length === 0) {
-                sidebar.innerHTML += `<div style="padding:20px; color:#94a3b8; font-family:'Inter';">No structural trauma logged in vault yet. Engine is running.</div>`;
-                return;
-            }
-
-            data.heatmap.forEach(zone => {
-                let boxColor = 'rgba(59, 130, 246, 0.1)'; 
-                if(zone.intensity === 'HEAVY') boxColor = 'rgba(234, 179, 8, 0.2)'; 
-                if(zone.intensity === 'MAXIMUM') boxColor = 'rgba(239, 68, 68, 0.2)'; 
-
-                candlestickSeries.createPriceLine({ price: zone.top, color: boxColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, title: 'ZONE TOP' });
-                candlestickSeries.createPriceLine({ price: zone.bottom, color: boxColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, title: 'ZONE BOT' });
-
-                let guardBadge = zone.contains_guardrail ? `<span style="background:#ef4444; color:#fff; padding:2px 6px; border-radius:4px; font-size:10px; margin-left:8px;">4H GUARDRAIL</span>` : '';
-                
-                sidebar.innerHTML += `
-                <div class="zone-card zone-${zone.intensity}">
-                    <div>
-                        <span class="z-price">$${zone.bottom.toFixed(2)} - $${zone.top.toFixed(2)}</span>
-                        <span class="z-score">HEAT: ${zone.heat_score}</span>
-                    </div>
-                    <div style="margin-top:5px;">${guardBadge} <span style="font-size:10px; color:#94a3b8;">${zone.level_count} Clustered Levels</span></div>
-                    <div class="z-desc">Contributors: ${zone.contributors.join(', ')}</div>
-                </div>`;
-            });
         }
 
         window.addEventListener('resize', () => { chart.applyOptions({ width: document.getElementById('chart-container').clientWidth, height: document.getElementById('chart-container').clientHeight }); });
