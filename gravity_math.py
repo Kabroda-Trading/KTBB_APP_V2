@@ -77,12 +77,7 @@ def calculate_gravity_heatmap(symbol: str, sensitivity_pct: float = 0.20) -> Lis
 
 
 async def calculate_macro_fibs(symbol: str) -> Dict[str, float]:
-    _proxy = os.getenv("BINANCE_PROXY_URL")
-    _ccxt_cfg = {"enableRateLimit": True}
-    if _proxy:
-        _ccxt_cfg["proxies"] = {"http": _proxy, "https": _proxy}
-        
-    exchange = ccxt.binance(_ccxt_cfg)
+    exchange = ccxt.mexc({"enableRateLimit": True})
     try:
         candles = await exchange.fetch_ohlcv(symbol, "1d", limit=30)
         if not candles:

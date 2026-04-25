@@ -12,14 +12,9 @@ from database import SessionLocal, GravityMemory
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 
 # ----------------------------------------------------------------------
-# Exchange (Binance + Proxy)
+# Exchange (MEXC - No Proxy Required)
 # ----------------------------------------------------------------------
-_proxy = os.getenv("BINANCE_PROXY_URL")
-_ccxt_cfg = {"enableRateLimit": True}
-if _proxy:
-    _ccxt_cfg["proxies"] = {"http": _proxy, "https": _proxy}
-
-_exchange = ccxt.binance(_ccxt_cfg)
+_exchange = ccxt.mexc({"enableRateLimit": True})
 
 
 def log_kabroda_bedrock(symbol: str, levels: dict, lock_ts: int):
