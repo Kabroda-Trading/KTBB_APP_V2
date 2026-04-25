@@ -1,18 +1,15 @@
 # gravity_math.py
 # ==============================================================================
-# KABRODA GRAVITY MATH ENGINE (KDE CLUSTERING)
-# ==============================================================================
-# Purpose: Transforms raw historical price lines into weighted Gravity Zones.
-# Uses the strict 0.2% sensitivity clustering logic from Predator Command.
+# KABRODA GRAVITY MATH ENGINE (KDE CLUSTERING & MACRO FIBS)
 # ==============================================================================
 
 from database import SessionLocal, GravityMemory
 from typing import List, Dict, Any
+import ccxt.async_support as ccxt
 
 def calculate_gravity_heatmap(symbol: str, sensitivity_pct: float = 0.20) -> List[Dict[str, Any]]:
     db = SessionLocal()
     try:
-        # 1. Pull all active structural memory for the symbol
         db_sym = symbol.replace("/", "")
         levels = db.query(GravityMemory).filter(
             GravityMemory.symbol == db_sym,
@@ -22,14 +19,12 @@ def calculate_gravity_heatmap(symbol: str, sensitivity_pct: float = 0.20) -> Lis
         if not levels:
             return []
 
-        # 2. Sort by price from lowest to highest
         sorted_levels = sorted(levels, key=lambda x: x.price)
 
         clusters = []
         current_cluster = []
         current_base = sorted_levels[0].price
 
-        # 3. The Confluence Loop (0.2% Variance Threshold)
         threshold = sensitivity_pct / 100.0
 
         for lvl in sorted_levels:
@@ -45,25 +40,19 @@ def calculate_gravity_heatmap(symbol: str, sensitivity_pct: float = 0.20) -> Lis
         if current_cluster:
             clusters.append(current_cluster)
 
-        # 4. Score and Weight the Clusters
         heatmap = []
         for cluster in clusters:
             top_price = max(l.price for l in cluster)
             bot_price = min(l.price for l in cluster)
             
-            # Add micro-padding if the cluster is exactly on one price tick
             if top_price == bot_price:
                 top_price *= 1.0005
                 bot_price *= 0.9995
 
-            # Calculate Heat Mass
             total_heat = sum(l.heat_multiplier for l in cluster)
-            
-            # Apply Permanence Weight (4H Guardrails add massive gravity)
             guardrail_count = sum(1 for l in cluster if l.permanence_class == 1)
-            total_heat += (guardrail_count * 3.0) # 3x weight for 4H structural walls
+            total_heat += (guardrail_count * 3.0) 
 
-            # Determine color intensity based on total heat mass
             intensity = "LIGHT"
             if total_heat >= 10:
                 intensity = "MAXIMUM"
@@ -80,8 +69,40 @@ def calculate_gravity_heatmap(symbol: str, sensitivity_pct: float = 0.20) -> Lis
                 "contributors": [f"{l.source} ({l.level_type})" for l in cluster]
             })
 
-        # Sort heatmap by heaviest gravity zones first
         return sorted(heatmap, key=lambda x: x["heat_score"], reverse=True)
         
     finally:
         db.close()
+
+
+async def calculate_macro_fibs(symbol: str) -> Dict[str, float]:
+    """
+    Automated Fractal Anchoring. Sweeps 30 days to find true Swing High/Low.
+    """
+    exchange = ccxt.binance({"enableRateLimit": True})
+    try:
+        # Fetch 30 days of daily candles to establish the macro trend
+        candles = await exchange.fetch_ohlcv(symbol, "1d", limit=30)
+        if not candles:
+            return {}
+
+        highs = [float(c[2]) for c in candles]
+        lows = [float(c[3]) for c in candles]
+        
+        swing_high = max(highs)
+        swing_low = min(lows)
+        
+        diff = swing_high - swing_low
+        
+        return {
+            "swing_high": round(swing_high, 2),
+            "swing_low": round(swing_low, 2),
+            "fib_0500": round(swing_high - (diff * 0.5), 2),
+            "fib_0618": round(swing_high - (diff * 0.618), 2),
+            "fib_0786": round(swing_high - (diff * 0.786), 2)
+        }
+    except Exception as e:
+        print(f"Gravity Macro Fib Error: {e}")
+        return {}
+    finally:
+        await exchange.close()
