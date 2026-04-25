@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Kabroda | Gravity Map</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        body { background-color: #020617; color: #f8fafc; font-family: 'Inter', sans-serif; margin: 0; }
+        .map-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 40px; border-bottom: 1px solid #334155; }
+        .h-title { font-family: 'JetBrains Mono'; font-size: 24px; font-weight: 800; margin: 0; color: #fff; text-transform: uppercase; letter-spacing: 2px;}
+        .container { display: flex; height: calc(100vh - 80px); }
+        #chart-container { flex: 1; border-right: 1px solid #334155; position: relative;}
+        .sidebar { width: 400px; background: #0f172a; padding: 20px; overflow-y: auto; box-sizing: border-box;}
+        
+        .zone-card { background: #1e293b; border: 1px solid #334155; padding: 15px; margin-bottom: 15px; border-radius: 6px; }
+        .zone-MAXIMUM { border-left: 4px solid #ef4444; box-shadow: 0 0 15px rgba(239, 68, 68, 0.1); }
+        .zone-HEAVY { border-left: 4px solid #eab308; }
+        .zone-LIGHT { border-left: 4px solid #3b82f6; }
+        
+        .z-price { font-family: 'JetBrains Mono'; font-size: 18px; font-weight: 800; color: #fff; }
+        .z-score { float: right; font-family: 'Rajdhani'; font-size: 16px; font-weight: 800; color: #94a3b8; }
+        .z-desc { font-size: 12px; color: #94a3b8; margin-top: 8px; line-height: 1.4; }
+        
+        .target-btn { background: #0ea5e9; color: #000; font-family: 'JetBrains Mono'; font-weight: 800; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; text-transform: uppercase; width: 100%; transition: 0.2s;}
+        .target-btn:hover { background: #38bdf8; }
+    </style>
+</head>
+<body>
+    {% include 'nav.html' %}
+    
+    <div class="map-header">
+        <h1 class="h-title">Historical Gravity Map <span style="font-size:12px; color:#0ea5e9;">[STRUCTURAL CONFLUENCE]</span></h1>
+        <select id="symSelect" style="padding: 10px; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; font-family: 'JetBrains Mono';" onchange="loadGrid()">
+            <option value="BTC/USDT">BTC/USDT</option>
+            <option value="ETH/USDT">ETH/USDT</option>
+            <option value="SOL/USDT">SOL/USDT</option>
+        </select>
+    </div>
+
+    <div class="container">
+        <div id="chart-container"></div>
+        <div class="sidebar" id="sidebar-zones">
+            <div style="text-align:center; padding: 40px; color: #94a3b8; font-family: 'JetBrains Mono';">SCANNING GRAVITY WELLS...</div>
+        </div>
+    </div>
+
+    <script>
+        let chart, candlestickSeries;
+        
+        function initChart() {
+            chart = LightweightCharts.createChart(document.getElementById('chart-container'), {
+                layout: { background: { type: 'solid', color: '#020617' }, textColor: '#cbd5e1' },
+                grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+                rightPriceScale: { borderColor: '#334155' },
+                timeScale: { borderColor: '#334155', timeVisible: true }
+            });
+            candlestickSeries = chart.addCandlestickSeries({
+                upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444'
+            });
+        }
+
+        async function fetchCandles(symbol) {
+            const sym = symbol.replace('/', '');
+            const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=15m&limit=200`);
+            const data = await res.json();
+            return data.map(d => ({ time: d[0]/1000, open: parseFloat(d[1]), high: parseFloat(d[2]), low: parseFloat(d[3]), close: parseFloat(d[4]) }));
+        }
+
+        async function loadGrid() {
+            const sym = document.getElementById('symSelect').value;
+            const sidebar = document.getElementById('sidebar-zones');
+            sidebar.innerHTML = `<div style="text-align:center; padding: 40px; color: #0ea5e9; font-family: 'JetBrains Mono';">/// CALCULATING MASS...</div>`;
+            
+            // Render Live Chart
+            const candles = await fetchCandles(sym);
+            candlestickSeries.setData(candles);
+
+            // Fetch Gravity Data from backend
+            const res = await fetch(`/api/gravity/scan?symbol=${sym}`);
+            const data = await res.json();
+            
+            sidebar.innerHTML = '';
+            
+            if(!data.heatmap || data.heatmap.length === 0) {
+                sidebar.innerHTML = `<div style="padding:20px; color:#94a3b8; font-family:'Inter';">No structural trauma logged in vault yet. Engine is running.</div>`;
+                return;
+            }
+
+            data.heatmap.forEach(zone => {
+                // Draw Box on Chart
+                let boxColor = 'rgba(59, 130, 246, 0.1)'; // Light
+                if(zone.intensity === 'HEAVY') boxColor = 'rgba(234, 179, 8, 0.2)'; // Yellow
+                if(zone.intensity === 'MAXIMUM') boxColor = 'rgba(239, 68, 68, 0.2)'; // Red
+
+                // Draw Top and Bottom lines for the Zone on the Chart
+                candlestickSeries.createPriceLine({ price: zone.top, color: boxColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, title: 'ZONE TOP' });
+                candlestickSeries.createPriceLine({ price: zone.bottom, color: boxColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, title: 'ZONE BOT' });
+
+                // Render Sidebar Card
+                let guardBadge = zone.contains_guardrail ? `<span style="background:#ef4444; color:#fff; padding:2px 6px; border-radius:4px; font-size:10px; margin-left:8px;">4H GUARDRAIL</span>` : '';
+                
+                sidebar.innerHTML += `
+                <div class="zone-card zone-${zone.intensity}">
+                    <div>
+                        <span class="z-price">$${zone.bottom.toFixed(2)} - $${zone.top.toFixed(2)}</span>
+                        <span class="z-score">HEAT: ${zone.heat_score}</span>
+                    </div>
+                    <div style="margin-top:5px;">${guardBadge} <span style="font-size:10px; color:#94a3b8;">${zone.level_count} Clustered Levels</span></div>
+                    <div class="z-desc">Contributors: ${zone.contributors.join(', ')}</div>
+                </div>`;
+            });
+        }
+
+        window.addEventListener('resize', () => { chart.applyOptions({ width: document.getElementById('chart-container').clientWidth, height: document.getElementById('chart-container').clientHeight }); });
+        document.addEventListener('DOMContentLoaded', () => { initChart(); loadGrid(); });
+    </script>
+</body>
+</html>
