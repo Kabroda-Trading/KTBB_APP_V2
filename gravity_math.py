@@ -5,8 +5,6 @@
 
 from database import SessionLocal, GravityMemory
 from typing import List, Dict, Any
-import ccxt.async_support as ccxt
-import os
 
 def calculate_gravity_heatmap(symbol: str, sensitivity_pct: float = 0.20) -> List[Dict[str, Any]]:
     db = SessionLocal()
@@ -76,21 +74,17 @@ def calculate_gravity_heatmap(symbol: str, sensitivity_pct: float = 0.20) -> Lis
         db.close()
 
 
-async def calculate_macro_fibs(symbol: str) -> Dict[str, Any]:
+def calculate_macro_fibs(candles_1d: List[Dict[str, Any]], candles_15m: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Automated Fractal Anchoring. Sweeps 30 days to find true Swing High/Low.
-    Now also securely routes 15m chart data to bypass browser CORS blocks.
+    Pure math function. Receives pre-fetched data from the pipeline to ensure 
+    Single Source of Truth and prevent rate-limit deadlocks.
     """
-    exchange = ccxt.mexc({"enableRateLimit": True})
     try:
-        # Fetch both Daily (for Fibs) and 15m (for the UI Chart)
-        candles_1d = await exchange.fetch_ohlcv(symbol, "1d", limit=30)
-        candles_15m = await exchange.fetch_ohlcv(symbol, "15m", limit=300)
-        
         fib_data = {}
         if candles_1d:
-            highs = [float(c[2]) for c in candles_1d]
-            lows = [float(c[3]) for c in candles_1d]
+            # We already formatted the data in the pipeline to standard dictionaries
+            highs = [float(c["high"]) for c in candles_1d]
+            lows = [float(c["low"]) for c in candles_1d]
             
             swing_high = max(highs)
             swing_low = min(lows)
@@ -104,17 +98,8 @@ async def calculate_macro_fibs(symbol: str) -> Dict[str, Any]:
                 "fib_0786": round(swing_high - (diff * 0.786), 2)
             }
             
-        chart_data = []
-        if candles_15m:
-            chart_data = [
-                {"time": int(c[0]/1000), "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])}
-                for c in candles_15m
-            ]
-            
-        return {**fib_data, "chart_data": chart_data}
+        return {**fib_data, "chart_data": candles_15m}
         
     except Exception as e:
         print(f"Gravity Macro Fib Error: {e}")
         return {"chart_data": []}
-    finally:
-        await exchange.close()

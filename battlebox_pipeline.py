@@ -75,6 +75,24 @@ async def fetch_live_5m(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
         traceback.print_exc()
         return []
 
+async def fetch_live_15m(symbol: str, limit: int = 300) -> List[Dict[str, Any]]:
+    s = _normalize_symbol(symbol)
+    try:
+        rows = await _exchange_live.fetch_ohlcv(s, "15m", limit=limit)
+        return [
+            {
+                "time": int(r[0] / 1000),
+                "open": float(r[1]),
+                "high": float(r[2]),
+                "low": float(r[3]),
+                "close": float(r[4]),
+                "volume": float(r[5]),
+            }
+            for r in rows
+        ]
+    except Exception:
+        traceback.print_exc()
+        return []
 
 async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
     s = _normalize_symbol(symbol)
