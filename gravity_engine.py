@@ -1,15 +1,72 @@
 # gravity_engine.py
 # ==============================================================================
-# KABRODA GRAVITY ENGINE (BACKGROUND INGESTION)
+# KABRODA GRAVITY ENGINE (BACKGROUND INGESTION & BEDROCK LOGGING)
 # ==============================================================================
 import asyncio
 import traceback
+import os
 from datetime import datetime, timezone
 import ccxt.async_support as ccxt
 from database import SessionLocal, GravityMemory
 
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
-_exchange = ccxt.binance({"enableRateLimit": True})
+
+# ----------------------------------------------------------------------
+# Exchange (Binance + Proxy)
+# ----------------------------------------------------------------------
+_proxy = os.getenv("BINANCE_PROXY_URL")
+_ccxt_cfg = {"enableRateLimit": True}
+if _proxy:
+    _ccxt_cfg["proxies"] = {"http": _proxy, "https": _proxy}
+
+_exchange = ccxt.binance(_ccxt_cfg)
+
+
+def log_kabroda_bedrock(symbol: str, levels: dict, lock_ts: int):
+    db = SessionLocal()
+    try:
+        db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
+        dt = datetime.fromtimestamp(lock_ts, tz=timezone.utc)
+        
+        exists = db.query(GravityMemory).filter(
+            GravityMemory.symbol == db_sym,
+            GravityMemory.timestamp == dt,
+            GravityMemory.source == "7_DAY_KABRODA"
+        ).first()
+        
+        if exists: 
+            return
+        
+        mapping = {
+            "BREAKOUT": levels.get("breakout_trigger", 0),
+            "BREAKDOWN": levels.get("breakdown_trigger", 0),
+            "DAILY_RESISTANCE": levels.get("daily_resistance", 0),
+            "DAILY_SUPPORT": levels.get("daily_support", 0),
+            "30M_HIGH": levels.get("range30m_high", 0),
+            "30M_LOW": levels.get("range30m_low", 0),
+        }
+        
+        for l_type, price in mapping.items():
+            if float(price) > 0:
+                mem = GravityMemory(
+                    symbol=db_sym,
+                    timestamp=dt,
+                    source="7_DAY_KABRODA",
+                    level_type=l_type,
+                    price=float(price),
+                    permanence_class=2,
+                    heat_multiplier=1.0
+                )
+                db.add(mem)
+                
+        db.commit()
+        print(f"|| GRAVITY BEDROCK LOGGED || {db_sym} | 6 Daily Levels Locked")
+        
+    except Exception as e:
+        traceback.print_exc()
+    finally:
+        db.close()
+
 
 def _calculate_average_volume(candles, current_idx, period=20):
     if current_idx < period:
@@ -18,34 +75,26 @@ def _calculate_average_volume(candles, current_idx, period=20):
     return sum(vols) / len(vols) if vols else 1.0
 
 def _scan_for_pivots(symbol, candles, timeframe, left=3, right=3):
-    """
-    STRICT 7-CANDLE GEOMETRY.
-    Will NOT confirm until `right` number of candles have fully closed.
-    """
     pivots_found = []
     
-    # Ensure we have enough data to check the right-side closure
     if len(candles) < left + right + 1:
         return pivots_found
 
     for i in range(left, len(candles) - right):
-        ch = float(candles[i][2]) # High
-        cl = float(candles[i][3]) # Low
+        ch = float(candles[i][2]) 
+        cl = float(candles[i][3]) 
         ts = int(candles[i][0] / 1000)
         vol = float(candles[i][5])
         
-        # Check Supply (Top)
         is_supply = all(float(candles[i - j][2]) <= ch for j in range(1, left + 1)) and \
                     all(float(candles[i + j][2]) < ch for j in range(1, right + 1))
                     
-        # Check Demand (Bottom)
         is_demand = all(float(candles[i - j][3]) >= cl for j in range(1, left + 1)) and \
                     all(float(candles[i + j][3]) > cl for j in range(1, right + 1))
 
         if is_supply or is_demand:
             avg_vol = _calculate_average_volume(candles, i)
             multiplier = 2.0 if (vol > avg_vol * 2.0) else 1.0
-            
             p_class = 1 if timeframe == "4h" else 2
             
             if is_supply:
@@ -63,7 +112,6 @@ async def run_gravity_ingestion_loop():
             for symbol in TARGETS:
                 db_sym = symbol.replace("/", "")
                 
-                # Fetch recent candles to find newly locked pivots
                 candles_4h = await _exchange.fetch_ohlcv(symbol, "4h", limit=50)
                 candles_1h = await _exchange.fetch_ohlcv(symbol, "1h", limit=50)
                 
@@ -75,7 +123,6 @@ async def run_gravity_ingestion_loop():
                     dt = datetime.fromtimestamp(p["ts"], tz=timezone.utc)
                     src = "4H_PIVOT" if p["class"] == 1 else "1H_PIVOT"
                     
-                    # Prevent duplicate logging of the exact same structural scar
                     exists = db.query(GravityMemory).filter(
                         GravityMemory.symbol == db_sym,
                         GravityMemory.timestamp == dt,
@@ -101,5 +148,4 @@ async def run_gravity_ingestion_loop():
         finally:
             db.close()
             
-        # Wait 15 minutes before sweeping the exchange again
         await asyncio.sleep(900)
