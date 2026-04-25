@@ -16,27 +16,29 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 import traceback
 import asyncio
+import os
 
 import ccxt.async_support as ccxt
 
 import session_manager
 import sse_engine
 import structure_state_engine
-import gravity_engine  # <-- PHASE 5: Added to log daily levels to the Gravity Vault
+import gravity_engine
 
-# Public re-export for compatibility
 SESSION_CONFIGS = session_manager.SESSION_CONFIGS
 
-# ----------------------------------------------------------------------
-# Cache / Locks
-# ----------------------------------------------------------------------
 _LOCKED_PACKETS: Dict[str, Dict[str, Any]] = {}
 _CACHE_LOCK = asyncio.Lock()
 
 # ----------------------------------------------------------------------
-# Exchange (Binance)
+# Exchange (Binance + Proxy)
 # ----------------------------------------------------------------------
-_exchange_live = ccxt.binance({"enableRateLimit": True})
+_proxy = os.getenv("BINANCE_PROXY_URL")
+_ccxt_cfg = {"enableRateLimit": True}
+if _proxy:
+    _ccxt_cfg["proxies"] = {"http": _proxy, "https": _proxy}
+
+_exchange_live = ccxt.binance(_ccxt_cfg)
 
 
 def _normalize_symbol(symbol: str) -> str:
@@ -51,7 +53,6 @@ def _normalize_symbol(symbol: str) -> str:
 
 
 async def close_exchange() -> None:
-    """Call this on app shutdown to avoid Render/network weirdness."""
     global _exchange_live
     try:
         if _exchange_live is not None:
@@ -60,9 +61,6 @@ async def close_exchange() -> None:
         pass
 
 
-# ----------------------------------------------------------------------
-# Fetching
-# ----------------------------------------------------------------------
 async def fetch_live_5m(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
     s = _normalize_symbol(symbol)
     try:
@@ -103,7 +101,6 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
 
 
 async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]]:
-    """Fetches Daily candles to calculate the 20/30/50 EMA Walls and Macro Bias."""
     s = _normalize_symbol(symbol)
     try:
         rows = await _exchange_live.fetch_ohlcv(s, "1d", limit=limit)
@@ -123,10 +120,6 @@ async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]
 
 
 async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, limit: int = 1500) -> List[Dict[str, Any]]:
-    """
-    Historical 5m candles between [start_ts, end_ts).
-    Uses ccxt pagination via 'since' in milliseconds.
-    """
     s = _normalize_symbol(symbol)
 
     since_ms = int(start_ts) * 1000
@@ -145,7 +138,6 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, l
         if not rows:
             break
 
-        # Detect stuck pagination
         first_ts = int(rows[0][0])
         if last_first_ts is not None and first_ts == last_first_ts:
             break
@@ -184,20 +176,13 @@ async def fetch_historical_pagination(symbol: str, start_ts: int, end_ts: int, l
 
     return dedup
 
-# ----------------------------------------------------------------------
-# Helpers
-# ----------------------------------------------------------------------
+
 def _calculate_weekly_force(raw_daily: List[Dict[str, Any]], anchor_ts: int) -> str:
-    """
-    Synthesizes the True Weekly Force directly from Daily candles.
-    This manually extracts the last closed Monday-Sunday week to guarantee absolute accuracy.
-    """
     if not raw_daily:
         return "NEUTRAL"
     
     anchor_dt = datetime.fromtimestamp(anchor_ts, tz=timezone.utc)
     
-    # Find the most recent Sunday 23:59:59 UTC strictly before the anchor
     days_since_sunday = (anchor_dt.weekday() + 1) % 7
     if days_since_sunday == 0:
         days_since_sunday = 7
@@ -223,16 +208,13 @@ def _calculate_weekly_force(raw_daily: List[Dict[str, Any]], anchor_ts: int) -> 
     if cl < op: return "BEARISH"
     return "NEUTRAL"
 
+
 def _calculate_168h_micro_bias(raw_1h: List[Dict[str, Any]]) -> str:
-    """
-    Calculates the 168-Hour Rolling Micro Bias using the 1% threshold rule.
-    Requires at least 168 hours of data to compare current price to 7 days ago.
-    """
     if not raw_1h or len(raw_1h) < 168:
         return "NEUTRAL"
     
     current_price = float(raw_1h[-1]["close"])
-    past_price = float(raw_1h[-168]["close"]) # Exactly 168 hours ago
+    past_price = float(raw_1h[-168]["close"])
     
     pct_change = ((current_price - past_price) / past_price) * 100.0
     
@@ -242,6 +224,7 @@ def _calculate_168h_micro_bias(raw_1h: List[Dict[str, Any]]) -> str:
         return "BEARISH"
     
     return "NEUTRAL"
+
 
 def _safe_placeholder_state(reason: str = "Waiting...") -> Dict[str, Any]:
     return {
@@ -286,17 +269,12 @@ def _compute_sse_packet(
     tuning: Optional[Dict[str, Any]] = None,
     raw_daily: List[Dict[str, Any]] = None  
 ) -> Dict[str, Any]:
-    """
-    Builds a locked packet from calibration window.
-    INJECTS the Biases so they get locked with the levels.
-    """
     lock_end_ts = int(anchor_ts) + 1800
 
     calibration = [c for c in raw_5m if anchor_ts <= int(c["time"]) < lock_end_ts]
     if len(calibration) < 6:
         return {"error": "Insufficient calibration data.", "lock_end_ts": lock_end_ts}
 
-    # 24h history ending at lock end
     context_24h = [c for c in raw_5m if (lock_end_ts - 86400) <= int(c["time"]) < lock_end_ts]
     
     session_open = float(calibration[0]["open"])
@@ -305,7 +283,6 @@ def _compute_sse_packet(
 
     last_price = float(context_24h[-1]["close"]) if context_24h else session_open
 
-    # --- SNIPER ENGINE: CALCULATE EMAS (20, 30, 50) ---
     d_ema20, d_ema30, d_ema50 = 0.0, 0.0, 0.0
     if raw_daily and len(raw_daily) > 50:
         closes = [float(c["close"]) for c in raw_daily]
@@ -337,13 +314,11 @@ def _compute_sse_packet(
     if "error" in computed:
         return computed
 
-    # --- INJECT SNIPER DATA (20/30/50) ---
     if "levels" in computed:
         computed["levels"]["daily_ema20"] = d_ema20 
         computed["levels"]["daily_ema30"] = d_ema30
         computed["levels"]["daily_ema50"] = d_ema50
 
-    # --- INJECT BIAS TRUTH ---
     if "context" not in computed: computed["context"] = {}
     computed["context"]["macro_bias"] = macro_bias
     computed["context"]["micro_bias"] = micro_bias
@@ -358,9 +333,6 @@ def _compute_sse_packet(
     }
 
 
-# ----------------------------------------------------------------------
-# Public API
-# ----------------------------------------------------------------------
 async def get_live_battlebox(
     symbol: str,
     session_mode: str = "AUTO",
@@ -381,7 +353,6 @@ async def get_live_battlebox(
     anchor_ts = int(session["anchor_time"])
     lock_end_ts = anchor_ts + 1800
 
-    # --- CALCULATE BIASES ---
     macro_bias = _calculate_weekly_force(raw_daily, anchor_ts)
     micro_bias = _calculate_168h_micro_bias(raw_1h)
 
@@ -407,7 +378,6 @@ async def get_live_battlebox(
 
     async with _CACHE_LOCK:
         if session_key not in _LOCKED_PACKETS:
-            # PASS RAW DAILY & BIASES TO COMPUTATION
             pkt = _compute_sse_packet(
                 raw_5m, 
                 anchor_ts, 
@@ -433,8 +403,6 @@ async def get_live_battlebox(
                 }
             _LOCKED_PACKETS[session_key] = pkt
             
-            # --- PHASE 5: BEDROCK INTEGRATION ---
-            # Quietly log the locked 8:30 AM levels into the Gravity Vault
             gravity_engine.log_kabroda_bedrock(symbol, pkt["levels"], pkt["lock_time"])
 
         pkt = _LOCKED_PACKETS[session_key]
@@ -493,7 +461,6 @@ async def get_session_review(
         anchor_ts -= 86400
         lock_end_ts -= 86400
 
-    # Calculate biases
     macro_bias = _calculate_weekly_force(raw_daily, anchor_ts)
     micro_bias = _calculate_168h_micro_bias(raw_1h)
 

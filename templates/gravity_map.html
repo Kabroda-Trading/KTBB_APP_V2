@@ -63,6 +63,7 @@
 
         async function fetchCandles(symbol) {
             const sym = symbol.replace('/', '');
+            // REVERTED to Binance API endpoint
             const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=15m&limit=300`);
             const data = await res.json();
             return data.map(d => ({ time: d[0]/1000, open: parseFloat(d[1]), high: parseFloat(d[2]), low: parseFloat(d[3]), close: parseFloat(d[4]) }));
@@ -73,21 +74,17 @@
             const sidebar = document.getElementById('sidebar-zones');
             sidebar.innerHTML = `<div style="text-align:center; padding: 40px; color: #0ea5e9; font-family: 'JetBrains Mono';">/// CALCULATING MASS & MACRO FIBS...</div>`;
             
-            // Render Live Chart
             const candles = await fetchCandles(sym);
             candlestickSeries.setData(candles);
 
-            // Fetch Data
             const res = await fetch(`/api/gravity/scan?symbol=${sym}`);
             const data = await res.json();
             
             sidebar.innerHTML = '';
             
-            // Render Fibs First (Layer 3)
             if (data.macro_fibs && data.macro_fibs.swing_high) {
                 const f = data.macro_fibs;
                 
-                // Draw Fib Lines
                 candlestickSeries.createPriceLine({ price: f.swing_high, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'MACRO HIGH' });
                 candlestickSeries.createPriceLine({ price: f.swing_low, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'MACRO LOW' });
                 candlestickSeries.createPriceLine({ price: f.fib_0500, color: '#a855f7', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: '0.500 POCKET' });
@@ -110,7 +107,6 @@
                 </div>`;
             }
             
-            // Render Heatmap
             if(!data.heatmap || data.heatmap.length === 0) {
                 sidebar.innerHTML += `<div style="padding:20px; color:#94a3b8; font-family:'Inter';">No structural trauma logged in vault yet. Engine is running.</div>`;
                 return;

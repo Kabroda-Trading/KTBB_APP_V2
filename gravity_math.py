@@ -6,6 +6,7 @@
 from database import SessionLocal, GravityMemory
 from typing import List, Dict, Any
 import ccxt.async_support as ccxt
+import os
 
 def calculate_gravity_heatmap(symbol: str, sensitivity_pct: float = 0.20) -> List[Dict[str, Any]]:
     db = SessionLocal()
@@ -76,12 +77,13 @@ def calculate_gravity_heatmap(symbol: str, sensitivity_pct: float = 0.20) -> Lis
 
 
 async def calculate_macro_fibs(symbol: str) -> Dict[str, float]:
-    """
-    Automated Fractal Anchoring. Sweeps 30 days to find true Swing High/Low.
-    """
-    exchange = ccxt.binance({"enableRateLimit": True})
+    _proxy = os.getenv("BINANCE_PROXY_URL")
+    _ccxt_cfg = {"enableRateLimit": True}
+    if _proxy:
+        _ccxt_cfg["proxies"] = {"http": _proxy, "https": _proxy}
+        
+    exchange = ccxt.binance(_ccxt_cfg)
     try:
-        # Fetch 30 days of daily candles to establish the macro trend
         candles = await exchange.fetch_ohlcv(symbol, "1d", limit=30)
         if not candles:
             return {}
