@@ -1,75 +1,72 @@
 # database.py
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime
+from sqlalchemy.orm import declarative_base, sessionmaker
+import datetime
 import os
-from datetime import datetime
-from typing import Generator
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, create_engine, text, inspect
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
-# Defaults to SQLite locally, but we MUST use Postgres on Render
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./kabroda.db")
 
-# Render postgres formatting fix (Corrected for psycopg version 3)
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
-elif DATABASE_URL.startswith("postgresql://") and "+psycopg" not in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
-
-connect_args = {"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
-
-engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
+engine = create_engine(
+    DATABASE_URL, 
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
 Base = declarative_base()
 
-class UserModel(Base):
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String(255), unique=True, index=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
-    username = Column(String(255), nullable=True)
-    first_name = Column(String(255), nullable=True)        
-    last_name = Column(String(255), nullable=True)         
-    tradingview_id = Column(String(255), nullable=True)    
-    subscription_status = Column(String(50), default="inactive") 
-    tier = Column(String(50), default="basic", nullable=False)   # <-- AUDIT FIX: Added the missing tier column
-    is_admin = Column(Boolean, default=False, nullable=False)
-    operator_flex = Column(Boolean, default=False)         
-    session_tz = Column(String(50), default="America/New_York") 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-class SystemLog(Base):
-    __tablename__ = "system_logs"
-
-    id = Column(Integer, primary_key=True, index=True)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
-    level = Column(String(20), default="INFO") 
-    component = Column(String(50), nullable=False) 
-    message = Column(String(500), nullable=False)
-    resolved = Column(Boolean, default=False)
-
-def init_db() -> None:
-    """Creates tables and safely injects missing columns using SQLAlchemy Inspector."""
-    Base.metadata.create_all(bind=engine)
-    
-    inspector = inspect(engine)
-    existing_columns = [col['name'] for col in inspector.get_columns('users')]
-    
-    with engine.begin() as conn:
-        if 'is_admin' not in existing_columns:
-            conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE NOT NULL"))
-        if 'operator_flex' not in existing_columns:
-            conn.execute(text("ALTER TABLE users ADD COLUMN operator_flex BOOLEAN DEFAULT FALSE"))
-        if 'first_name' not in existing_columns:
-            conn.execute(text("ALTER TABLE users ADD COLUMN first_name VARCHAR(255)"))
-        if 'last_name' not in existing_columns:
-            conn.execute(text("ALTER TABLE users ADD COLUMN last_name VARCHAR(255)"))
-        if 'tier' not in existing_columns:                                                              # <-- AUDIT FIX
-            conn.execute(text("ALTER TABLE users ADD COLUMN tier VARCHAR(50) DEFAULT 'basic' NOT NULL"))
-
-def get_db() -> Generator[Session, None, None]:
+def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
+
+# ---------------------------------------------------------
+# EXISTING USER MODEL (DO NOT ALTER)
+# ---------------------------------------------------------
+class UserModel(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    username = Column(String)
+    tradingview_id = Column(String)
+    tier = Column(String, nullable=False, default="basic")
+    session_tz = Column(String, nullable=False, default="UTC")
+    
+    stripe_customer_id = Column(String)
+    stripe_subscription_id = Column(String)
+    stripe_price_id = Column(String)
+    subscription_status = Column(String, default="inactive")
+    
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    
+    # Internal app settings
+    is_admin = Column(Boolean, default=False)
+    operator_flex = Column(Boolean, default=False)
+
+# ---------------------------------------------------------
+# NEW: GRAVITY GRID MEMORY VAULT
+# ---------------------------------------------------------
+class GravityMemory(Base):
+    __tablename__ = "gravity_memory"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True, nullable=False)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    
+    source = Column(String, nullable=False)      # e.g., "4H_PIVOT", "1H_PIVOT"
+    level_type = Column(String, nullable=False)  # e.g., "SUPPLY", "DEMAND"
+    price = Column(Float, nullable=False)
+    
+    # 1 = Immortal Guardrail (4H), 2 = Intraday Dotted Line (1H)
+    permanence_class = Column(Integer, nullable=False)
+    
+    # 1.0 = Normal, >1.0 = High Volume Node
+    heat_multiplier = Column(Float, default=1.0)
+    
+    # Active state for unmitigated trauma
+    active = Column(Boolean, default=True)
