@@ -22,29 +22,24 @@ import battlebox_pipeline
 import market_radar
 import research_lab
 import market_simulator  
-import gravity_engine  # <-- GRAVITY MODULE
-import gravity_math    # <-- GRAVITY MODULE
+import gravity_engine  
+import gravity_math    
 
 from database import init_db, get_db, UserModel
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# --- THE FIX: MODERN LIFESPAN STARTUP ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(">>> BOOTING KABRODA SYSTEM: Initializing Database Schema...")
     init_db()
-    
-    # Ignite Gravity Background Engine
     gravity_task = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
-    
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     gravity_task.cancel()
 
 app = FastAPI(title="Kabroda BattleBox", version="10.3", lifespan=lifespan)
-# ----------------------------------------
 
 SECRET_KEY = os.getenv("SESSION_SECRET", "kabroda_prod_key_999")
 
@@ -161,7 +156,6 @@ async def radar_page(request: Request, db: Session = Depends(get_db)):
     require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "market_radar.html", ctx)
 
-# --- NEW: GRAVITY MAP ROUTE ---
 @app.get("/suite/gravity-map")
 async def gravity_map_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
@@ -169,11 +163,12 @@ async def gravity_map_page(request: Request, db: Session = Depends(get_db)):
     require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "gravity_map.html", ctx)
 
+# --- UPDATED: Automated Fib Execution ---
 @app.get("/api/gravity/scan")
 async def api_gravity_scan(symbol: str = "BTC/USDT"):
     heatmap = gravity_math.calculate_gravity_heatmap(symbol)
-    return JSONResponse({"ok": True, "symbol": symbol, "heatmap": heatmap})
-# ------------------------------
+    macro_fibs = await gravity_math.calculate_macro_fibs(symbol)
+    return JSONResponse({"ok": True, "symbol": symbol, "heatmap": heatmap, "macro_fibs": macro_fibs})
 
 @app.get("/indicators")
 async def indicators(request: Request, db: Session = Depends(get_db)):
@@ -189,7 +184,6 @@ async def account(request: Request, db: Session = Depends(get_db)):
     ctx["tier_label"] = ctx.get("plan_label", "")
     return _template_or_fallback(request, templates, "account.html", ctx)
 
-# --- PROFILE UPDATE API ---
 @app.post("/account/profile")
 async def update_profile(request: Request, payload: Dict[str, Any], db: Session = Depends(get_db)):
     uid = request.session.get(auth.SESSION_KEY)
@@ -225,7 +219,6 @@ async def account_settings(request: Request, db: Session = Depends(get_db)):
         db.commit()
     return {"status": "ok"}
 
-# --- ADMIN ROUTES ---
 @app.get("/admin/simulator")
 async def admin_simulator_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
@@ -290,7 +283,6 @@ async def admin_reset_password(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"ok": True})
     return JSONResponse({"ok": False, "error": "User not found"})
 
-# --- UNIFIED API ENDPOINTS (PIPELINE) ---
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     uid = request.session.get(auth.SESSION_KEY)
@@ -357,7 +349,7 @@ async def simulator_run(request: Request, db: Session = Depends(get_db)):
     user = db.query(UserModel).filter(UserModel.id == uid).first()
     
     if not getattr(user, "is_admin", False): 
-        return JSONResponse({"ok": False, "error": "Admin access required for heavy backtesting computations."}, status_code=403)
+        return JSONResponse({"ok": False, "error": "Admin access required."}, status_code=403)
     
     payload = await request.json()
     try:
@@ -372,24 +364,19 @@ async def processing_route(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     return _template_or_fallback(request, templates, "processing.html", ctx)
 
-# ---------------------------------------------------------
-# 🚨 SYSTEM DIAGNOSTIC AUTOPSY (CATCHES SILENT 500 ERRORS)
-# ---------------------------------------------------------
 from fastapi.responses import HTMLResponse
 import traceback
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     error_trace = traceback.format_exc()
-    print(f"CRITICAL CRASH:\n{error_trace}") # Forces it into the Render logs too
+    print(f"CRITICAL CRASH:\n{error_trace}")
     return HTMLResponse(
         content=f"""
-        <div style="background-color: #0f172a; color: #ef4444; padding: 40px; font-family: 'JetBrains Mono', monospace; min-height: 100vh; box-sizing: border-box;">
-            <h1 style="border-bottom: 2px solid #ef4444; padding-bottom: 10px; margin-top:0;">🚨 FATAL SYSTEM CRASH 🚨</h1>
-            <p style="color: #cbd5e1; font-size: 14px;">The registration sequence failed. Here is the exact internal autopsy of the code:</p>
-            <pre style="background: #020617; padding: 20px; border: 1px solid #334155; border-radius: 8px; overflow-x: auto; font-size: 12px; line-height: 1.5;">{error_trace}</pre>
+        <div style="background-color: #0f172a; color: #ef4444; padding: 40px; font-family: monospace;">
+            <h1>🚨 FATAL SYSTEM CRASH 🚨</h1>
+            <pre>{error_trace}</pre>
         </div>
         """,
         status_code=500
     )
-# ---------------------------------------------------------
