@@ -65,6 +65,10 @@
         let globalKDE = null; // Stores the curve data
         let maxDensity = 0;   // Stores peak amplitude
         
+        // NEW: Sync trackers for the Price Scale
+        let lastYCoord = null;
+        let syncAnimation = null;
+        
         function initChart() {
             const container = document.getElementById('chart-container');
             
@@ -82,10 +86,46 @@
                 upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444'
             });
             
-            // Sync the Canvas overlay to TradingView's rendering loop
+            // Horizontal Pan/Zoom Sync
             chart.timeScale().subscribeVisibleLogicalRangeChange(renderKDEWave);
             
+            // NEW: Aggressive Vertical Scale Sync via Interaction Tracking
+            container.addEventListener('mousedown', startPriceScaleSync);
+            container.addEventListener('touchstart', startPriceScaleSync, {passive: true});
+            window.addEventListener('mouseup', stopPriceScaleSync);
+            window.addEventListener('touchend', stopPriceScaleSync);
+            container.addEventListener('wheel', renderKDEWave, {passive: true});
+            
             resizeCanvas();
+        }
+
+        // --- NEW ALIGNMENT ENGINE ---
+        function startPriceScaleSync() {
+            if (syncAnimation) cancelAnimationFrame(syncAnimation);
+            
+            function checkYShift() {
+                if (globalKDE && globalKDE.length > 0) {
+                    // Monitor a stable anchor point in the middle of our density array
+                    const anchorPrice = globalKDE[Math.floor(globalKDE.length / 2)].price;
+                    const currentY = candlestickSeries.priceToCoordinate(anchorPrice);
+                    
+                    // If the Y coordinate moved without the time scale changing, redraw immediately
+                    if (currentY !== null && currentY !== lastYCoord) {
+                        lastYCoord = currentY;
+                        renderKDEWave();
+                    }
+                }
+                syncAnimation = requestAnimationFrame(checkYShift);
+            }
+            checkYShift();
+        }
+
+        function stopPriceScaleSync() {
+            if (syncAnimation) {
+                cancelAnimationFrame(syncAnimation);
+                syncAnimation = null;
+            }
+            renderKDEWave(); // Final snap to ensure perfect alignment
         }
 
         function resizeCanvas() {
