@@ -1,13 +1,14 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v8.5 (TradingView Weekly Sync)
+# KABRODA BATTLEBOX PIPELINE — v8.6 (Single Source of Truth Enforced)
 # ==============================================================================
 # Purpose:
 # - The single "Moment of Truth" for each session/day
 # - Locks session open + 30m anchor range (calibration)
 # - Computes levels via sse_engine.compute_sse_levels
 # - Feeds post-lock candles into structure_state_engine (law layer)
-# - NEW (v8.5): Synthesizes Monday-Sunday Macro Bias from 1D candles
+# - Synthesizes Monday-Sunday Macro Bias from 1D candles
+# - NOW SERVES AS EXCLUSIVE DATA ROUTER FOR ALL KABRODA ENGINES
 # ==============================================================================
 
 from __future__ import annotations
@@ -112,6 +113,23 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
     except Exception:
         return []
 
+async def fetch_live_4h(symbol: str, limit: int = 200) -> List[Dict[str, Any]]:
+    s = _normalize_symbol(symbol)
+    try:
+        rows = await _exchange_live.fetch_ohlcv(s, "4h", limit=limit)
+        return [
+            {
+                "time": int(r[0] / 1000),
+                "open": float(r[1]),
+                "high": float(r[2]),
+                "low": float(r[3]),
+                "close": float(r[4]),
+                "volume": float(r[5]),
+            }
+            for r in rows
+        ]
+    except Exception:
+        return []
 
 async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]]:
     s = _normalize_symbol(symbol)
