@@ -9,58 +9,23 @@
     <style>
         body { background-color: #020617; color: #f8fafc; font-family: 'Inter', sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
         
-        /* THE BOXED WORKSPACE */
-        .workspace-wrapper {
-            flex: 1;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-            background: radial-gradient(circle at center, #0f172a 0%, #020617 100%);
-            overflow: hidden;
-        }
-
-        .map-container {
-            width: 100%;
-            max-width: 1600px;
-            height: 100%;
-            max-height: 850px; /* Locked height to prevent vertical spill */
-            background: #020617;
-            border: 1px solid #1e293b;
-            border-radius: 12px;
-            display: flex;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            overflow: hidden;
-        }
-
-        /* HEADER ADJUSTMENTS */
-        .map-header { 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center; 
-            padding: 15px 30px; 
-            background: #0f172a;
-            border-bottom: 1px solid #334155; 
-        }
+        .workspace-wrapper { flex: 1; display: flex; justify-content: center; align-items: center; padding: 20px; background: radial-gradient(circle at center, #0f172a 0%, #020617 100%); overflow: hidden; }
+        .map-container { width: 100%; max-width: 1600px; height: 100%; max-height: 850px; background: #020617; border: 1px solid #1e293b; border-radius: 12px; display: flex; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); overflow: hidden; }
+        .map-header { display: flex; justify-content: space-between; align-items: center; padding: 15px 30px; background: #0f172a; border-bottom: 1px solid #334155; z-index: 10; position: relative;}
         .h-title { font-family: 'JetBrains Mono'; font-size: 20px; font-weight: 800; margin: 0; color: #fff; text-transform: uppercase; letter-spacing: 2px;}
 
-        /* CHART & SIDEBAR BOXING */
-        #chart-container { flex: 1; position: relative; background: #020617; }
-        .sidebar { 
-            width: 420px; 
-            background: #0f172a; 
-            padding: 20px; 
-            overflow-y: auto; 
-            box-sizing: border-box;
-            border-left: 1px solid #334155;
-        }
+        /* The Chart area requires relative positioning to hold the absolute overlay */
+        #chart-wrapper { flex: 1; position: relative; background: #020617; display: flex; flex-direction: column; }
+        #chart-container { flex: 1; position: relative; }
         
-        /* SCROLLBAR STYLING */
+        /* The invisible Bookmap Canvas Overlay */
+        #kde-overlay { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 5; }
+
+        .sidebar { width: 420px; background: #0f172a; padding: 20px; overflow-y: auto; box-sizing: border-box; border-left: 1px solid #334155; z-index: 10; position: relative;}
         .sidebar::-webkit-scrollbar { width: 6px; }
         .sidebar::-webkit-scrollbar-track { background: #0f172a; }
         .sidebar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
 
-        /* INTEL CARDS */
         .zone-card { background: #1e293b; border: 1px solid #334155; padding: 15px; margin-bottom: 12px; border-radius: 6px; border-left: 4px solid #3b82f6; transition: transform 0.2s; }
         .zone-card:hover { transform: translateX(4px); background: #243146; }
         .zone-MAXIMUM { border-left-color: #ef4444; }
@@ -69,7 +34,6 @@
         .fib-card { background: rgba(168, 85, 247, 0.1); border: 1px solid #a855f7; border-left: 4px solid #a855f7; padding: 15px; margin-bottom: 20px; border-radius: 6px; }
         .z-price { font-family: 'JetBrains Mono'; font-size: 16px; font-weight: 800; color: #fff; }
         .z-score { float: right; font-family: 'Rajdhani'; font-size: 14px; font-weight: 800; color: #94a3b8; }
-        .z-desc { font-size: 11px; color: #94a3b8; margin-top: 6px; line-height: 1.4; }
     </style>
 </head>
 <body>
@@ -77,37 +41,39 @@
     
     <div class="workspace-wrapper">
         <div class="map-container">
-            <div id="chart-container">
+            <div id="chart-wrapper">
                 <div class="map-header">
-                    <h1 class="h-title">Gravity Map <span style="font-size:10px; color:#0ea5e9;">[SYSTEMATIC STRUCTURAL CLUSTERS]</span></h1>
+                    <h1 class="h-title">Gravity Map <span style="font-size:10px; color:#0ea5e9;">[KDE STRUCTURAL DENSITY]</span></h1>
                     <select id="symSelect" style="padding: 6px 12px; background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 12px;" onchange="loadGrid()">
                         <option value="BTC/USDT">BTC/USDT</option>
                         <option value="ETH/USDT">ETH/USDT</option>
                         <option value="SOL/USDT">SOL/USDT</option>
                     </select>
                 </div>
+                <div id="chart-container">
+                    <canvas id="kde-overlay"></canvas>
+                </div>
             </div>
             <div class="sidebar" id="sidebar-zones">
-                <div style="text-align:center; padding: 40px; color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 12px;">SYNCHRONIZING WITH VAULT...</div>
+                <div style="text-align:center; padding: 40px; color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 12px;">SYNCHRONIZING WITH KABRODA CORE...</div>
             </div>
         </div>
     </div>
 
     <script>
         let chart, candlestickSeries;
+        let globalKDE = null; // Stores the curve data
+        let maxDensity = 0;   // Stores peak amplitude
         
         function initChart() {
             const container = document.getElementById('chart-container');
-            const header = document.querySelector('.map-header');
             
-            // Calculate height subtracting the internal header
-            const chartHeight = container.clientHeight - header.offsetHeight;
-
             chart = LightweightCharts.createChart(container, {
                 width: container.clientWidth,
-                height: chartHeight,
+                height: container.clientHeight,
                 layout: { background: { type: 'solid', color: '#020617' }, textColor: '#cbd5e1' },
                 grid: { vertLines: { color: '#161e2e' }, horzLines: { color: '#161e2e' } },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
                 rightPriceScale: { borderColor: '#334155', autoScale: true },
                 timeScale: { borderColor: '#334155', timeVisible: true }
             });
@@ -115,6 +81,77 @@
             candlestickSeries = chart.addCandlestickSeries({
                 upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444'
             });
+            
+            // Sync the Canvas overlay to TradingView's rendering loop
+            chart.timeScale().subscribeVisibleLogicalRangeChange(renderKDEWave);
+            
+            resizeCanvas();
+        }
+
+        function resizeCanvas() {
+            const container = document.getElementById('chart-container');
+            const canvas = document.getElementById('kde-overlay');
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            if (globalKDE) renderKDEWave();
+        }
+
+        // The Engine that draws the Bookmap Histogram
+        function renderKDEWave() {
+            if (!globalKDE || globalKDE.length === 0) return;
+            
+            const canvas = document.getElementById('kde-overlay');
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            
+            ctx.clearRect(0, 0, width, height);
+            
+            // Determine the width of the right price scale to start drawing precisely on its edge
+            const priceAxisWidth = chart.priceScale('right').width();
+            const startX = width - priceAxisWidth;
+            
+            // Max stretch of the wave into the screen (e.g., 35% of chart width)
+            const maxWaveExtent = width * 0.35; 
+
+            ctx.beginPath();
+            ctx.moveTo(startX, height);
+
+            // Create a fluid gradient for the structural mass (Blue -> Purple -> Red)
+            const gradient = ctx.createLinearGradient(startX, 0, startX - maxWaveExtent, 0);
+            gradient.addColorStop(0, 'rgba(59, 130, 246, 0.1)');  // Light pull
+            gradient.addColorStop(0.5, 'rgba(168, 85, 247, 0.4)'); // Heavy pull
+            gradient.addColorStop(1, 'rgba(239, 68, 68, 0.7)');    // Maximum pull
+
+            // Map Price points to Pixels via TradingView API
+            let started = false;
+            for (let i = 0; i < globalKDE.length; i++) {
+                const point = globalKDE[i];
+                const yCoord = candlestickSeries.priceToCoordinate(point.price);
+                
+                // If the price is completely off screen, skip calculating to save CPU
+                if (yCoord === null) continue; 
+                
+                const waveIntensity = (point.density / maxDensity) * maxWaveExtent;
+                const xCoord = startX - waveIntensity;
+
+                if (!started) {
+                    ctx.moveTo(startX, yCoord);
+                    started = true;
+                }
+                ctx.lineTo(xCoord, yCoord);
+            }
+            
+            ctx.lineTo(startX, 0);
+            ctx.closePath();
+            
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            
+            // Draw a harsh structural edge line
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
         }
 
         async function loadGrid() {
@@ -123,48 +160,72 @@
             sidebar.innerHTML = `<div style="text-align:center; padding: 40px; color: #0ea5e9; font-family: 'JetBrains Mono'; font-size: 12px;">/// SCANNING STRUCTURAL SCARS...</div>`;
             
             try {
+                // Fetch Phase 2 KDE Math
                 const res = await fetch(`/api/gravity/scan?symbol=${encodeURIComponent(sym)}`);
+                if (!res.ok) throw new Error(`Server Error: ${res.status}`);
                 const data = await res.json();
+                
                 sidebar.innerHTML = '';
                 
+                // 1. Hydrate Base Chart
                 if (data.macro_fibs && data.macro_fibs.chart_data) {
                     candlestickSeries.setData(data.macro_fibs.chart_data);
                     chart.timeScale().fitContent();
                 }
                 
+                // 2. Hydrate the KDE Engine Memory
+                if (data.kde_data && data.kde_data.curve) {
+                    globalKDE = data.kde_data.curve;
+                    maxDensity = data.kde_data.max_density;
+                    renderKDEWave(); // Trigger first paint
+                }
+                
+                // 3. Project Macro Fibs
                 if (data.macro_fibs && data.macro_fibs.swing_high) {
                     const f = data.macro_fibs;
+                    candlestickSeries.createPriceLine({ price: f.swing_high, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'HIGH' });
+                    candlestickSeries.createPriceLine({ price: f.swing_low, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'LOW' });
+                    candlestickSeries.createPriceLine({ price: f.fib_0500, color: '#a855f7', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Solid, title: '0.500 POCKET' });
+                    candlestickSeries.createPriceLine({ price: f.fib_0618, color: '#eab308', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Solid, title: '0.618 GOLDEN' });
+                    
                     sidebar.innerHTML += `
                     <div class="fib-card">
                         <div style="color:#a855f7; font-family:'JetBrains Mono'; font-weight:800; font-size:12px; margin-bottom:8px;">MACRO ANCHORS (30D)</div>
-                        <div style="font-family:'JetBrains Mono'; font-size:12px; color:#cbd5e1;">
-                            0.500: $${f.fib_0500}<br>
-                            0.618: $${f.fib_0618}
-                        </div>
+                        <div style="font-family:'JetBrains Mono'; font-size:12px; color:#cbd5e1;">0.500: $${f.fib_0500} | 0.618: $${f.fib_0618}</div>
                     </div>`;
                 }
                 
-                if (data.heatmap && data.heatmap.length > 0) {
-                    data.heatmap.forEach(zone => {
+                // 4. Project KDE Peaks (The Centers of Gravity) to the Sidebar
+                if (data.kde_data && data.kde_data.peaks.length > 0) {
+                    sidebar.innerHTML += `<div style="color:#94a3b8; font-family:'JetBrains Mono'; font-size:11px; margin-bottom:15px; text-transform:uppercase;">Identified Centers of Gravity</div>`;
+                    
+                    data.kde_data.peaks.forEach(peak => {
+                        let lineColor = '#3b82f6';
+                        if (peak.intensity === 'HEAVY') lineColor = '#eab308';
+                        if (peak.intensity === 'MAXIMUM') lineColor = '#ef4444';
+
+                        candlestickSeries.createPriceLine({ price: peak.price, color: lineColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: 'GRAVITY WELL' });
+
                         sidebar.innerHTML += `
-                        <div class="zone-card zone-${zone.intensity}">
-                            <div><span class="z-price">$${zone.bottom.toFixed(2)}</span><span class="z-score">HEAT: ${zone.heat_score}</span></div>
-                            <div class="z-desc">${zone.contributors.join(' + ')}</div>
+                        <div class="zone-card zone-${peak.intensity}">
+                            <div><span class="z-price">$${peak.price.toFixed(2)}</span><span class="z-score">PULL: ${peak.heat_score}</span></div>
+                            <div style="font-size:10px; color:#94a3b8; margin-top:4px; text-transform:uppercase;">Structure: ${peak.intensity} DENSITY</div>
                         </div>`;
                     });
                 } else {
-                    sidebar.innerHTML += `<div style="padding:20px; color:#64748b; font-family:'Inter'; font-size:12px;">Memory Vault is currently recording. Full structural confluence clusters will manifest as the engine logs daily pivots.</div>`;
+                    sidebar.innerHTML += `<div style="padding:20px; color:#64748b; font-family:'Inter'; font-size:12px;">Memory Vault is currently logging structural footprints. KDE waves will generate automatically as volume aggregates.</div>`;
                 }
                 
             } catch(e) {
-                sidebar.innerHTML = `<div style="color:#ef4444; padding:20px;">SYSTEM ERROR: Check Logs.</div>`;
+                console.error("KDE Render Failure:", e);
+                sidebar.innerHTML = `<div style="color:#ef4444; padding:20px; font-family:'JetBrains Mono'; font-size:12px;">SYSTEM ERROR: Failed to compute density wave.</div>`;
             }
         }
 
         window.addEventListener('resize', () => { 
             const container = document.getElementById('chart-container');
-            const header = document.querySelector('.map-header');
-            chart.applyOptions({ width: container.clientWidth, height: container.clientHeight - header.offsetHeight }); 
+            chart.applyOptions({ width: container.clientWidth, height: container.clientHeight }); 
+            resizeCanvas();
         });
 
         document.addEventListener('DOMContentLoaded', () => {
