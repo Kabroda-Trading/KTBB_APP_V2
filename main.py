@@ -163,18 +163,23 @@ async def gravity_map_page(request: Request, db: Session = Depends(get_db)):
     require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "gravity_map.html", ctx)
 
-# --- UPDATED: Automated Fib Execution & Single Source Routing ---
+# --- UPDATED: Automated Fib Execution & Single Source Routing (KDE DEPLOYED) ---
 @app.get("/api/gravity/scan")
 async def api_gravity_scan(symbol: str = "BTC/USDT"):
     # 1. Fetch from the Single Source of Truth
     candles_1d = await battlebox_pipeline.fetch_live_daily(symbol, limit=30)
     candles_15m = await battlebox_pipeline.fetch_live_15m(symbol, limit=300)
     
-    # 2. Compute logic without triggering external API calls
-    heatmap = gravity_math.calculate_gravity_heatmap(symbol)
+    # 2. Compute KDE Gravity Math (Replaces the old flat heatmap)
+    kde_data = gravity_math.calculate_gravity_kde(symbol)
     macro_fibs = gravity_math.calculate_macro_fibs(candles_1d, candles_15m)
     
-    return JSONResponse({"ok": True, "symbol": symbol, "heatmap": heatmap, "macro_fibs": macro_fibs})
+    return JSONResponse({
+        "ok": True, 
+        "symbol": symbol, 
+        "kde_data": kde_data, 
+        "macro_fibs": macro_fibs
+    })
 
 @app.get("/indicators")
 async def indicators(request: Request, db: Session = Depends(get_db)):

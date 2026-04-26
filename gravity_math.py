@@ -1,12 +1,23 @@
 # gravity_math.py
 # ==============================================================================
-# KABRODA GRAVITY MATH ENGINE (KDE CLUSTERING & MACRO FIBS)
+# KABRODA GRAVITY MATH ENGINE (TRUE KDE DENSITY MODEL)
 # ==============================================================================
 
+import math
 from database import SessionLocal, GravityMemory
 from typing import List, Dict, Any
 
-def calculate_gravity_heatmap(symbol: str, sensitivity_pct: float = 0.20) -> List[Dict[str, Any]]:
+def _gaussian_kernel(x: float, mu: float, sigma: float) -> float:
+    """Calculates the gravitational pull (Gaussian curve) at price x for a pivot at mu."""
+    if sigma == 0:
+        return 0.0
+    return math.exp(-0.5 * (((x - mu) / sigma) ** 2))
+
+def calculate_gravity_kde(symbol: str, bandwidth_bps: int = 15, resolution: int = 400) -> Dict[str, Any]:
+    """
+    Phase 2: True Kernel Density Estimation (KDE).
+    Transforms discrete pivot levels into a continuous, Bookmap-style gravity wave.
+    """
     db = SessionLocal()
     try:
         db_sym = symbol.replace("/", "")
@@ -16,73 +27,85 @@ def calculate_gravity_heatmap(symbol: str, sensitivity_pct: float = 0.20) -> Lis
         ).all()
 
         if not levels:
-            return []
+            return {"curve": [], "peaks": [], "max_density": 0.0}
 
-        sorted_levels = sorted(levels, key=lambda x: x.price)
+        # 1. Determine the scan range (Min/Max price + 2% padding for wave tails)
+        prices = [l.price for l in levels]
+        min_p = min(prices) * 0.98 
+        max_p = max(prices) * 1.02 
+        
+        # 2. Setup KDE Parameters
+        # Sigma represents the "width" of the gravitational pull. 
+        # (e.g., 15 bps of $75,000 is a $112 radius of influence)
+        sigma = ((min_p + max_p) / 2.0) * (bandwidth_bps / 10000.0)
+        step_size = (max_p - min_p) / resolution
+        
+        kde_curve = []
+        max_density = 0.0
 
-        clusters = []
-        current_cluster = []
-        current_base = sorted_levels[0].price
-
-        threshold = sensitivity_pct / 100.0
-
-        for lvl in sorted_levels:
-            upper_limit = current_base * (1 + threshold)
+        # 3. Compute the Continuous Density Wave
+        for i in range(resolution + 1):
+            current_price = min_p + (i * step_size)
+            total_density = 0.0
             
-            if lvl.price <= upper_limit:
-                current_cluster.append(lvl)
-            else:
-                clusters.append(current_cluster)
-                current_cluster = [lvl]
-                current_base = lvl.price
-                
-        if current_cluster:
-            clusters.append(current_cluster)
-
-        heatmap = []
-        for cluster in clusters:
-            top_price = max(l.price for l in cluster)
-            bot_price = min(l.price for l in cluster)
+            for lvl in levels:
+                # Compound weight based on Kabroda Bedrock strength
+                weight = lvl.heat_multiplier
+                if lvl.permanence_class == 1:
+                    weight += 3.0  # Massive pull for 4H Guardrails
+                elif lvl.source == "7_DAY_KABRODA":
+                    weight += 1.5  # Heavy pull for Session Ranges / Daily Triggers
+                    
+                pull = _gaussian_kernel(current_price, lvl.price, sigma)
+                total_density += (pull * weight)
             
-            if top_price == bot_price:
-                top_price *= 1.0005
-                bot_price *= 0.9995
-
-            total_heat = sum(l.heat_multiplier for l in cluster)
-            guardrail_count = sum(1 for l in cluster if l.permanence_class == 1)
-            total_heat += (guardrail_count * 3.0) 
-
-            intensity = "LIGHT"
-            if total_heat >= 10:
-                intensity = "MAXIMUM"
-            elif total_heat >= 5:
-                intensity = "HEAVY"
-
-            heatmap.append({
-                "top": round(top_price, 2),
-                "bottom": round(bot_price, 2),
-                "heat_score": round(total_heat, 2),
-                "intensity": intensity,
-                "level_count": len(cluster),
-                "contains_guardrail": guardrail_count > 0,
-                "contributors": [f"{l.source} ({l.level_type})" for l in cluster]
+            kde_curve.append({
+                "price": round(current_price, 2),
+                "density": round(total_density, 4)
             })
+            
+            if total_density > max_density:
+                max_density = total_density
 
-        return sorted(heatmap, key=lambda x: x["heat_score"], reverse=True)
+        # 4. Extract "Peaks" (The exact Center of Gravity for the UI)
+        peaks = []
+        for i in range(1, len(kde_curve) - 1):
+            prev_d = kde_curve[i-1]["density"]
+            curr_d = kde_curve[i]["density"]
+            next_d = kde_curve[i+1]["density"]
+            
+            # Local Maxima check: Is it a peak? Is it mathematically significant?
+            if curr_d > prev_d and curr_d > next_d and curr_d > (max_density * 0.15):
+                intensity = "LIGHT"
+                if curr_d >= max_density * 0.80:
+                    intensity = "MAXIMUM"
+                elif curr_d >= max_density * 0.40:
+                    intensity = "HEAVY"
+                    
+                peaks.append({
+                    "price": kde_curve[i]["price"],
+                    "heat_score": round(curr_d, 2),
+                    "intensity": intensity
+                })
+        
+        # Sort actionable targets by Highest Heat first
+        peaks = sorted(peaks, key=lambda x: x["heat_score"], reverse=True)
+        
+        return {
+            "curve": kde_curve,
+            "peaks": peaks,
+            "max_density": round(max_density, 4)
+        }
         
     finally:
         db.close()
 
 
 def calculate_macro_fibs(candles_1d: List[Dict[str, Any]], candles_15m: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Pure math function. Receives pre-fetched data from the pipeline to ensure 
-    Single Source of Truth and prevent rate-limit deadlocks.
-    """
+    """Pure math function. Single Source of Truth enforced."""
     try:
         fib_data = {}
         if candles_1d:
-            # We already formatted the data in the pipeline to standard dictionaries
             highs = [float(c["high"]) for c in candles_1d]
             lows = [float(c["low"]) for c in candles_1d]
             
