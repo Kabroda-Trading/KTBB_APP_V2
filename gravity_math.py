@@ -1,6 +1,7 @@
 # gravity_math.py
 # ==============================================================================
 # KABRODA GRAVITY MATH ENGINE (TRUE KDE DENSITY MODEL)
+# UPDATE: Macro Swing Auditor injected for Deep-Space Extension Targeting.
 # ==============================================================================
 
 import math
@@ -102,12 +103,18 @@ def calculate_gravity_kde(symbol: str, bandwidth_bps: int = 15, resolution: int 
 
 
 def calculate_macro_fibs(candles_1d: List[Dict[str, Any]], candles_15m: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Pure math function. Single Source of Truth enforced."""
+    """
+    Pure math function. Single Source of Truth enforced.
+    Calculates both internal retracements AND deep-space extensions for blue-sky breakouts.
+    """
     try:
         fib_data = {}
         if candles_1d:
-            highs = [float(c["high"]) for c in candles_1d]
-            lows = [float(c["low"]) for c in candles_1d]
+            # Isolate the 30-Day Macro Swing
+            macro_slice = candles_1d[-30:] if len(candles_1d) > 30 else candles_1d
+            
+            highs = [float(c["high"]) for c in macro_slice]
+            lows = [float(c["low"]) for c in macro_slice]
             
             swing_high = max(highs)
             swing_low = min(lows)
@@ -116,6 +123,18 @@ def calculate_macro_fibs(candles_1d: List[Dict[str, Any]], candles_15m: List[Dic
             fib_data = {
                 "swing_high": round(swing_high, 2),
                 "swing_low": round(swing_low, 2),
+                
+                # Upside Extensions (Blue Sky Breakouts)
+                "ext_up_1272": round(swing_high + (diff * 0.272), 2),
+                "ext_up_1618": round(swing_high + (diff * 0.618), 2),
+                "ext_up_2000": round(swing_high + (diff * 1.000), 2),
+                
+                # Downside Extensions (Price Discovery Shorts)
+                "ext_dn_1272": round(swing_low - (diff * 0.272), 2),
+                "ext_dn_1618": round(swing_low - (diff * 0.618), 2),
+                "ext_dn_2000": round(swing_low - (diff * 1.000), 2),
+                
+                # Internal Retracements
                 "fib_0500": round(swing_high - (diff * 0.5), 2),
                 "fib_0618": round(swing_high - (diff * 0.618), 2),
                 "fib_0786": round(swing_high - (diff * 0.786), 2)
