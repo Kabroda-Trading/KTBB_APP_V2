@@ -34,6 +34,7 @@
         .border-GREEN { border-left: 4px solid #22c55e; }
         .border-YELLOW { border-left: 4px solid #eab308; }
         .border-RED { border-left: 4px solid #ef4444; opacity: 0.7; }
+        .border-GRAY { border-left: 4px solid #94a3b8; }
 
         .sym-name { font-size: 24px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
         .sym-price { font-size: 14px; color: #94a3b8; font-family: 'JetBrains Mono'; margin-top: 4px; }
@@ -99,7 +100,7 @@
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v11.1</span></h2>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v11.2</span></h2>
             </div>
             <div style="display: flex; align-items: center;">
                 <div class="session-toggle">
@@ -245,7 +246,7 @@
 
         window.radarMemory = {};
         let activeData = null;
-        let activeSession = 'us_ny_futures'; // Default to AM
+        let activeSession = 'us_ny_futures'; 
         
         const balInput = document.getElementById('inpBal');
         const riskInput = document.getElementById('inpRisk');
@@ -376,7 +377,25 @@
 
                 data.results.forEach(t => {
                     window.radarMemory[t.symbol] = t;
-                    if(t.status === "CALIBRATING") return; 
+                    
+                    // NEW: Render a Calibrating UI instead of a blank screen
+                    if(t.status === "CALIBRATING") {
+                        html += `
+                        <div class="radar-row border-GRAY" style="opacity: 0.6;">
+                            <div>
+                                <div><span class="sym-name">${t.symbol}</span></div>
+                                <div class="sym-price" style="margin-top: 8px; color: #0ea5e9;">[ ENGINE CALIBRATING ]</div>
+                            </div>
+                            <div style="display:flex; flex-direction:column; justify-content:center; align-items:center;">
+                                <div style="font-family:'Rajdhani'; font-size:24px; font-weight:800; color:#94a3b8;">GATHERING DATA</div>
+                                <div style="font-size:12px; color:#64748b; font-family:'JetBrains Mono'; margin-top:4px;">LOCKS AT 30M MARK</div>
+                            </div>
+                            <div style="display:flex; flex-direction:column; gap:8px; justify-content:center; align-items:flex-end;">
+                                <button class="lock-btn" style="width:100%; text-align:center; padding: 15px; background:transparent; border-color:#334155; color:#94a3b8;" disabled>STANDBY</button>
+                            </div>
+                        </div>`;
+                        return; 
+                    }
 
                     let borderTheme = t.color_code;
                     let actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px;" onclick="openModal('${t.symbol}')">LOCK TARGET →</button>`;
