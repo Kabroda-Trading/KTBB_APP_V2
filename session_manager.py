@@ -16,6 +16,7 @@ import pytz  # Requires: pip install pytz
 SESSION_CONFIGS = [
     {"id": "us_ny_futures", "name": "NY FUTURES", "tz": "America/New_York", "open_h": 8, "open_m": 30},
     {"id": "us_ny_equity",  "name": "NY EQUITY",  "tz": "America/New_York", "open_h": 9, "open_m": 30},
+    {"id": "us_ny_pm",      "name": "NY PM FUTURES", "tz": "America/New_York", "open_h": 13, "open_m": 0}, # NEW: PM Session
     {"id": "eu_london",     "name": "LONDON",     "tz": "Europe/London",    "open_h": 8, "open_m": 0},
     {"id": "asia_tokyo",    "name": "TOKYO",      "tz": "Asia/Tokyo",       "open_h": 9, "open_m": 0},
     {"id": "au_sydney",     "name": "SYDNEY",     "tz": "Australia/Sydney", "open_h": 10, "open_m": 0},
@@ -45,8 +46,6 @@ def anchor_ts_for_utc_date(config: dict, now_utc: datetime) -> int:
     
     # Logic: If "Now" is BEFORE the open, we are technically looking at 
     # the session that started Yesterday.
-    # Example: It's 8:00 AM Tokyo. Open is 9:00 AM. 
-    # We want the session from yesterday, not the one that hasn't started yet.
     if now_local < target_open:
         target_open -= timedelta(days=1)
         
@@ -59,34 +58,25 @@ def resolve_current_session(now_utc: datetime, mode: str = "AUTO", manual_id: st
     Returns the complete Session Packet with the calculated Anchor Time.
     This is what the Pipeline consumes.
     """
-    # 1. Determine which config to use
     if mode == "MANUAL" and manual_id:
         config = get_session_config(manual_id)
     else:
-        # AUTO logic (Simplified for stability: Defaults to NY Futures or active logic)
-        # You can expand this later to auto-detect "Which session is active right now?"
         config = get_session_config("us_ny_futures")
 
-    # 2. Calculate the Anchor Time (CRITICAL STEP)
-    # This ensures "Tokyo" gets a Tokyo timestamp, not a NY one.
     anchor_ts = anchor_ts_for_utc_date(config, now_utc)
     
-    # 3. Return the Packet
     return {
         "id": config["id"],
         "name": config["name"],
         "date_key": datetime.fromtimestamp(anchor_ts, timezone.utc).strftime("%Y-%m-%d"),
-        "anchor_time": anchor_ts, # <--- The key that was missing!
-        "status": "ACTIVE",       # Placeholder, pipeline determines actual status based on time diff
+        "anchor_time": anchor_ts, 
+        "status": "ACTIVE",       
         "energy": "ACTIVE"
     }
 
-# --- 4. BACKWARD COMPATIBILITY (Safety) ---
-# If other files call 'resolve_anchor_time', we map it to the new logic.
 def resolve_anchor_time(session_id: str) -> dict:
     now = datetime.now(timezone.utc)
     pkt = resolve_current_session(now, mode="MANUAL", manual_id=session_id)
-    # Map to old format if needed by older files
     return {
         "anchor_ts": pkt["anchor_time"],
         "lock_end_ts": pkt["anchor_time"] + 1800,
