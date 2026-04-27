@@ -17,6 +17,13 @@
         .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
         .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #334155; padding-bottom: 20px; margin-bottom: 30px; }
         .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
+        
+        /* --- SESSION TOGGLE --- */
+        .session-toggle { display: inline-flex; background: #0f172a; border: 1px solid #334155; border-radius: 4px; overflow: hidden; margin-right: 20px; }
+        .session-btn { background: transparent; border: none; color: #94a3b8; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; padding: 10px 20px; cursor: pointer; transition: 0.2s; }
+        .session-btn:hover { color: #fff; }
+        .session-btn.active { background: #0ea5e9; color: #000; }
+
         .btn-scan { background: #0ea5e9; color: #000; font-weight: 800; font-family: 'JetBrains Mono'; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; text-transform: uppercase; transition: 0.2s; box-shadow: 0 0 15px rgba(14, 165, 233, 0.2); }
         .btn-scan:hover { background: #38bdf8; }
         
@@ -68,7 +75,7 @@
         .mini-copy { background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 14px; opacity: 0.5; padding: 0 0 0 5px; }
         .mini-copy:hover { opacity: 1; color: #f8fafc; }
 
-        /* --- ACADEMY DRAWER STYLES (RESTORED) --- */
+        /* --- ACADEMY DRAWER STYLES --- */
         .drawer-toggle { position: fixed; top: 50%; right: 0; transform: translateY(-50%); background: #0ea5e9; color: #000; padding: 15px 10px; writing-mode: vertical-rl; text-orientation: mixed; cursor: pointer; border-radius: 8px 0 0 8px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; z-index: 10001; border: none; letter-spacing: 2px; transition: 0.2s; box-shadow: -2px 0 10px rgba(14, 165, 233, 0.3); }
         .drawer-toggle:hover { padding-right: 15px; background: #38bdf8; }
         .academy-drawer { position: fixed; top: 0; right: -450px; width: 450px; height: 100vh; background: #0f172a; border-left: 1px solid #334155; z-index: 10000; transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: -10px 0 30px rgba(0,0,0,0.8); padding: 30px; overflow-y: auto; box-sizing: border-box; }
@@ -92,9 +99,15 @@
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v11.0</span></h2>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v11.1</span></h2>
             </div>
-            <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
+            <div style="display: flex; align-items: center;">
+                <div class="session-toggle">
+                    <button id="btn-am" class="session-btn active" onclick="switchSession('us_ny_futures')">AM SESSION</button>
+                    <button id="btn-pm" class="session-btn" onclick="switchSession('us_ny_pm')">PM SESSION</button>
+                </div>
+                <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
+            </div>
         </div>
         
         <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">
@@ -232,6 +245,7 @@
 
         window.radarMemory = {};
         let activeData = null;
+        let activeSession = 'us_ny_futures'; // Default to AM
         
         const balInput = document.getElementById('inpBal');
         const riskInput = document.getElementById('inpRisk');
@@ -328,6 +342,21 @@
             }
         }
 
+        function switchSession(sessionId) {
+            activeSession = sessionId;
+            
+            document.getElementById('btn-am').classList.remove('active');
+            document.getElementById('btn-pm').classList.remove('active');
+            
+            if(sessionId === 'us_ny_futures') {
+                document.getElementById('btn-am').classList.add('active');
+            } else {
+                document.getElementById('btn-pm').classList.add('active');
+            }
+            
+            forceScan();
+        }
+
         async function forceScan() {
             const btn = document.getElementById('scanBtn'); 
             const grid = document.getElementById('radarTargetGrid'); 
@@ -336,7 +365,11 @@
             btn.disabled = true; grid.style.display = 'none'; loader.style.display = 'block';
 
             try {
-                const res = await fetch('/api/radar/scan', { method: 'POST' });
+                const res = await fetch('/api/radar/scan', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: activeSession })
+                });
                 const data = await res.json();
                 let html = "";
                 window.radarMemory = {};
