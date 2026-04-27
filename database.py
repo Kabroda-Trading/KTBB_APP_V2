@@ -49,7 +49,7 @@ class UserModel(Base):
     operator_flex = Column(Boolean, default=False)
 
 # ---------------------------------------------------------
-# NEW: GRAVITY GRID MEMORY VAULT
+# EXISTING: GRAVITY GRID MEMORY VAULT
 # ---------------------------------------------------------
 class GravityMemory(Base):
     __tablename__ = "gravity_memory"
@@ -70,3 +70,18 @@ class GravityMemory(Base):
     
     # Active state for unmitigated trauma
     active = Column(Boolean, default=True)
+
+# ---------------------------------------------------------
+# NEW: PERMANENT SESSION LOCKS (ANTI-AMNESIA)
+# ---------------------------------------------------------
+class SessionLock(Base):
+    __tablename__ = "session_locks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True, nullable=False)
+    session_id = Column(String, index=True, nullable=False)
+    date_key = Column(String, index=True, nullable=False)
+    lock_time = Column(Integer, nullable=False)
+    
+    # Stores the entire compiled SSE packet as a JSON string
+    packet_data = Column(String, nullable=False)

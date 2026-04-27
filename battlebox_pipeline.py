@@ -1,12 +1,13 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v9.1 (GRAVITY SSOT INTEGRATION)
+# KABRODA BATTLEBOX PIPELINE — v9.2 (DATABASE SSOT INTEGRATION)
 # ==============================================================================
 # Purpose:
 # - Computes Multi-Timeframe Fuel (1H/4H EMAs, MACD, RSI).
 # - Locks session open + 30m anchor range.
-# - NEW: Now permanently locks the Live Gravity KDE Map to prevent Radar Drift.
-# - SERVES AS EXCLUSIVE DATA ROUTER FOR ALL KABRODA ENGINES
+# - Permanently locks the Live Gravity KDE Map to prevent Radar Drift.
+# - NEW: Connects to Postgres/SQLite to permanently lock session data, surviving
+#   server reboots and eliminating AM session drift.
 # ==============================================================================
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Any, Dict, List, Optional
 import traceback
 import asyncio
 import os
+import json
 
 import ccxt.async_support as ccxt
 
@@ -24,6 +26,7 @@ import sse_engine
 import structure_state_engine
 import gravity_engine
 import gravity_math
+from database import SessionLocal, SessionLock
 
 SESSION_CONFIGS = session_manager.SESSION_CONFIGS
 
@@ -276,12 +279,52 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
 
     async with _CACHE_LOCK:
         if session_key not in _LOCKED_PACKETS:
-            pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, tuning=tuning, raw_daily=raw_daily)
-            if "error" in pkt: return {"status": "ERROR", "message": pkt["error"], "battlebox": {"war_map_context": _war_map_from_1h(raw_1h), "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
-            _LOCKED_PACKETS[session_key] = pkt
-            gravity_engine.log_kabroda_bedrock(symbol, pkt["levels"], pkt["lock_time"])
+            db = SessionLocal()
+            try:
+                # 1. DATABASE SSOT: Check if this exact session was already locked today.
+                existing_lock = db.query(SessionLock).filter(
+                    SessionLock.symbol == symbol,
+                    SessionLock.session_id == session['id'],
+                    SessionLock.date_key == date_key
+                ).first()
+
+                if existing_lock:
+                    # Serve directly from permanent memory
+                    _LOCKED_PACKETS[session_key] = json.loads(existing_lock.packet_data)
+                else:
+                    # 2. Compute fresh meta-signal packet
+                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, tuning=tuning, raw_daily=raw_daily)
+                    if "error" in pkt: 
+                        return {"status": "ERROR", "message": pkt["error"], "battlebox": {"war_map_context": _war_map_from_1h(raw_1h), "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
+                    
+                    _LOCKED_PACKETS[session_key] = pkt
+                    
+                    # 3. Commit permanent lock to the database vault
+                    new_lock = SessionLock(
+                        symbol=symbol,
+                        session_id=session['id'],
+                        date_key=date_key,
+                        lock_time=int(pkt["lock_time"]),
+                        packet_data=json.dumps(pkt)
+                    )
+                    db.add(new_lock)
+                    db.commit()
+                    
+                    gravity_engine.log_kabroda_bedrock(symbol, pkt["levels"], pkt["lock_time"])
+            except Exception as e:
+                print(f"DATABASE VAULT ERROR: {e}")
+                traceback.print_exc()
+                # Fallback to RAM if database connection gets interrupted
+                if session_key not in _LOCKED_PACKETS:
+                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, tuning=tuning, raw_daily=raw_daily)
+                    if "error" not in pkt:
+                        _LOCKED_PACKETS[session_key] = pkt
+            finally:
+                db.close()
             
-        pkt = _LOCKED_PACKETS[session_key]
+        pkt = _LOCKED_PACKETS.get(session_key)
+        if not pkt:
+            return {"status": "ERROR", "message": "Failed to initialize and lock session data."}
 
     levels = pkt["levels"]
     lock_time = int(pkt["lock_time"])
@@ -324,8 +367,23 @@ async def get_session_review(symbol: str, session_id: str = "us_ny_futures", tun
 
     if int(now_utc.timestamp()) < lock_end_ts: return {"ok": True, "mode": "CALIBRATING", "symbol": symbol, "session": {"id": cfg["id"], "name": cfg["name"], "anchor_time": datetime.fromtimestamp(anchor_ts, tz=timezone.utc).isoformat()}, "message": "Calibrating..."}
     
-    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, tuning=tuning, raw_daily=raw_daily)
-    if "error" in pkt: return {"ok": False, "error": pkt["error"]}
+    date_key = datetime.fromtimestamp(anchor_ts, timezone.utc).strftime("%Y-%m-%d")
+    
+    db = SessionLocal()
+    try:
+        existing_lock = db.query(SessionLock).filter(
+            SessionLock.symbol == symbol,
+            SessionLock.session_id == session_id,
+            SessionLock.date_key == date_key
+        ).first()
+        
+        if existing_lock:
+            pkt = json.loads(existing_lock.packet_data)
+        else:
+            pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, tuning=tuning, raw_daily=raw_daily)
+            if "error" in pkt: return {"ok": False, "error": pkt["error"]}
+    finally:
+        db.close()
     
     return {
         "ok": True, "mode": "LOCKED", "symbol": symbol, "price": float(raw_5m[-1]["close"]), "session": {"id": cfg["id"], "name": cfg["name"], "anchor_time": datetime.fromtimestamp(anchor_ts, tz=timezone.utc).isoformat()}, 
