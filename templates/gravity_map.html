@@ -65,7 +65,7 @@
         let globalKDE = null; // Stores the curve data
         let maxDensity = 0;   // Stores peak amplitude
         
-        // NEW: Sync trackers for the Price Scale
+        // Sync trackers for the Price Scale
         let lastYCoord = null;
         let syncAnimation = null;
         
@@ -89,7 +89,7 @@
             // Horizontal Pan/Zoom Sync
             chart.timeScale().subscribeVisibleLogicalRangeChange(renderKDEWave);
             
-            // NEW: Aggressive Vertical Scale Sync via Interaction Tracking
+            // Aggressive Vertical Scale Sync via Interaction Tracking
             container.addEventListener('mousedown', startPriceScaleSync);
             container.addEventListener('touchstart', startPriceScaleSync, {passive: true});
             window.addEventListener('mouseup', stopPriceScaleSync);
@@ -99,7 +99,7 @@
             resizeCanvas();
         }
 
-        // --- NEW ALIGNMENT ENGINE ---
+        // --- ALIGNMENT ENGINE ---
         function startPriceScaleSync() {
             if (syncAnimation) cancelAnimationFrame(syncAnimation);
             
@@ -268,6 +268,7 @@
             }
         }
 
+        // UNIFIED EVENT LISTENER - NO DUPLICATES
         document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => { 
                 initChart(); 
@@ -280,14 +281,13 @@
             }, 60000);
         });
 
+        // UNIFIED RESIZE LISTENER
         window.addEventListener('resize', () => { 
-            const container = document.getElementById('chart-container');
-            chart.applyOptions({ width: container.clientWidth, height: container.clientHeight }); 
-            resizeCanvas();
-        });
-
-        document.addEventListener('DOMContentLoaded', () => {
-            setTimeout(() => { initChart(); loadGrid(); }, 150);
+            if (chart) {
+                const container = document.getElementById('chart-container');
+                chart.applyOptions({ width: container.clientWidth, height: container.clientHeight }); 
+                resizeCanvas();
+            }
         });
     </script>
 </body>
