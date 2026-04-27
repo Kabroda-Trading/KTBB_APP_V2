@@ -194,73 +194,91 @@
             ctx.stroke();
         }
 
-        async function loadGrid() {
+        // Add an 'isBackgroundUpdate' flag so we don't wipe the screen every 60 seconds
+        async function loadGrid(isBackgroundUpdate = false) {
             const sym = document.getElementById('symSelect').value;
             const sidebar = document.getElementById('sidebar-zones');
-            sidebar.innerHTML = `<div style="text-align:center; padding: 40px; color: #0ea5e9; font-family: 'JetBrains Mono'; font-size: 12px;">/// SCANNING STRUCTURAL SCARS...</div>`;
+            
+            if (!isBackgroundUpdate) {
+                sidebar.innerHTML = `<div style="text-align:center; padding: 40px; color: #0ea5e9; font-family: 'JetBrains Mono'; font-size: 12px;">/// SCANNING STRUCTURAL SCARS...</div>`;
+            }
             
             try {
-                // Fetch Phase 2 KDE Math
                 const res = await fetch(`/api/gravity/scan?symbol=${encodeURIComponent(sym)}`);
                 if (!res.ok) throw new Error(`Server Error: ${res.status}`);
                 const data = await res.json();
                 
-                sidebar.innerHTML = '';
+                if (!isBackgroundUpdate) sidebar.innerHTML = '';
                 
-                // 1. Hydrate Base Chart
+                // 1. Hydrate Base Chart (TradingView handles silent updates cleanly)
                 if (data.macro_fibs && data.macro_fibs.chart_data) {
                     candlestickSeries.setData(data.macro_fibs.chart_data);
-                    chart.timeScale().fitContent();
+                    if (!isBackgroundUpdate) chart.timeScale().fitContent(); // Only fit content on initial load
                 }
                 
                 // 2. Hydrate the KDE Engine Memory
                 if (data.kde_data && data.kde_data.curve) {
                     globalKDE = data.kde_data.curve;
                     maxDensity = data.kde_data.max_density;
-                    renderKDEWave(); // Trigger first paint
+                    renderKDEWave(); // Redraw the wave
                 }
                 
-                // 3. Project Macro Fibs
-                if (data.macro_fibs && data.macro_fibs.swing_high) {
-                    const f = data.macro_fibs;
-                    candlestickSeries.createPriceLine({ price: f.swing_high, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'HIGH' });
-                    candlestickSeries.createPriceLine({ price: f.swing_low, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'LOW' });
-                    candlestickSeries.createPriceLine({ price: f.fib_0500, color: '#a855f7', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Solid, title: '0.500 POCKET' });
-                    candlestickSeries.createPriceLine({ price: f.fib_0618, color: '#eab308', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Solid, title: '0.618 GOLDEN' });
-                    
-                    sidebar.innerHTML += `
-                    <div class="fib-card">
-                        <div style="color:#a855f7; font-family:'JetBrains Mono'; font-weight:800; font-size:12px; margin-bottom:8px;">MACRO ANCHORS (30D)</div>
-                        <div style="font-family:'JetBrains Mono'; font-size:12px; color:#cbd5e1;">0.500: $${f.fib_0500} | 0.618: $${f.fib_0618}</div>
-                    </div>`;
-                }
-                
-                // 4. Project KDE Peaks (The Centers of Gravity) to the Sidebar
-                if (data.kde_data && data.kde_data.peaks.length > 0) {
-                    sidebar.innerHTML += `<div style="color:#94a3b8; font-family:'JetBrains Mono'; font-size:11px; margin-bottom:15px; text-transform:uppercase;">Identified Centers of Gravity</div>`;
-                    
-                    data.kde_data.peaks.forEach(peak => {
-                        let lineColor = '#3b82f6';
-                        if (peak.intensity === 'HEAVY') lineColor = '#eab308';
-                        if (peak.intensity === 'MAXIMUM') lineColor = '#ef4444';
-
-                        candlestickSeries.createPriceLine({ price: peak.price, color: lineColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: 'GRAVITY WELL' });
-
+                // Only rebuild the sidebar HTML if it's the initial load to prevent flickering
+                if (!isBackgroundUpdate) {
+                    // 3. Project Macro Fibs
+                    if (data.macro_fibs && data.macro_fibs.swing_high) {
+                        const f = data.macro_fibs;
+                        candlestickSeries.createPriceLine({ price: f.swing_high, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'HIGH' });
+                        candlestickSeries.createPriceLine({ price: f.swing_low, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'LOW' });
+                        candlestickSeries.createPriceLine({ price: f.fib_0500, color: '#a855f7', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Solid, title: '0.500 POCKET' });
+                        candlestickSeries.createPriceLine({ price: f.fib_0618, color: '#eab308', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Solid, title: '0.618 GOLDEN' });
+                        
                         sidebar.innerHTML += `
-                        <div class="zone-card zone-${peak.intensity}">
-                            <div><span class="z-price">$${peak.price.toFixed(2)}</span><span class="z-score">PULL: ${peak.heat_score}</span></div>
-                            <div style="font-size:10px; color:#94a3b8; margin-top:4px; text-transform:uppercase;">Structure: ${peak.intensity} DENSITY</div>
+                        <div class="fib-card">
+                            <div style="color:#a855f7; font-family:'JetBrains Mono'; font-weight:800; font-size:12px; margin-bottom:8px;">MACRO ANCHORS (30D)</div>
+                            <div style="font-family:'JetBrains Mono'; font-size:12px; color:#cbd5e1;">0.500: $${f.fib_0500} | 0.618: $${f.fib_0618}</div>
                         </div>`;
-                    });
-                } else {
-                    sidebar.innerHTML += `<div style="padding:20px; color:#64748b; font-family:'Inter'; font-size:12px;">Memory Vault is currently logging structural footprints. KDE waves will generate automatically as volume aggregates.</div>`;
+                    }
+                    
+                    // 4. Project KDE Peaks
+                    if (data.kde_data && data.kde_data.peaks.length > 0) {
+                        sidebar.innerHTML += `<div style="color:#94a3b8; font-family:'JetBrains Mono'; font-size:11px; margin-bottom:15px; text-transform:uppercase;">Identified Centers of Gravity</div>`;
+                        
+                        data.kde_data.peaks.forEach(peak => {
+                            let lineColor = '#3b82f6';
+                            if (peak.intensity === 'HEAVY') lineColor = '#eab308';
+                            if (peak.intensity === 'MAXIMUM') lineColor = '#ef4444';
+
+                            candlestickSeries.createPriceLine({ price: peak.price, color: lineColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: 'GRAVITY WELL' });
+
+                            sidebar.innerHTML += `
+                            <div class="zone-card zone-${peak.intensity}">
+                                <div><span class="z-price">$${peak.price.toFixed(2)}</span><span class="z-score">PULL: ${peak.heat_score}</span></div>
+                                <div style="font-size:10px; color:#94a3b8; margin-top:4px; text-transform:uppercase;">Structure: ${peak.intensity} DENSITY</div>
+                            </div>`;
+                        });
+                    }
                 }
                 
             } catch(e) {
                 console.error("KDE Render Failure:", e);
-                sidebar.innerHTML = `<div style="color:#ef4444; padding:20px; font-family:'JetBrains Mono'; font-size:12px;">SYSTEM ERROR: Failed to compute density wave.</div>`;
+                if (!isBackgroundUpdate) {
+                    sidebar.innerHTML = `<div style="color:#ef4444; padding:20px; font-family:'JetBrains Mono'; font-size:12px;">SYSTEM ERROR: Failed to compute density wave.</div>`;
+                }
             }
         }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => { 
+                initChart(); 
+                loadGrid(); // Initial Load
+            }, 150);
+
+            // LIVE RADAR LINK: Auto-refresh data silently every 60 seconds
+            setInterval(() => {
+                loadGrid(true); 
+            }, 60000);
+        });
 
         window.addEventListener('resize', () => { 
             const container = document.getElementById('chart-container');
