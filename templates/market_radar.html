@@ -100,7 +100,7 @@
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v11.2</span></h2>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v11.3</span></h2>
             </div>
             <div style="display: flex; align-items: center;">
                 <div class="session-toggle">
@@ -206,9 +206,22 @@
                             <span style="color:#94a3b8; font-size:12px;">STOP LOSS</span>
                             <div><span id="pStp" class="d-val c-RED">--</span><button class="mini-copy" onclick="copyVal('pStp')">📋</button></div>
                         </div>
-                        <div class="data-row" style="border-bottom: 2px solid #334155; padding-bottom:12px;">
-                            <span style="color:#94a3b8; font-size:12px;">CONTRACTS</span>
+                        
+                        <div class="data-row" style="margin-bottom: 6px;">
+                            <span style="color:#94a3b8; font-size:12px;">TOTAL CONTRACTS</span>
                             <div><span id="pSiz" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pSiz')">📋</button></div>
+                        </div>
+                        <div class="data-row" style="margin-top: -6px; margin-bottom: 12px; padding-left: 10px; border-left: 2px solid #334155; border-bottom: 2px solid #334155; padding-bottom: 12px;">
+                            <div style="display: flex; flex-direction: column; width: 100%; gap: 6px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="color:#eab308; font-size:11px; font-family:'JetBrains Mono';">↳ SELL AT TARGET 1</span>
+                                    <div><span id="pT1Vol" class="d-val" style="color:#eab308; font-size:14px;">--</span><button class="mini-copy" onclick="copyVal('pT1Vol')">📋</button></div>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="color:#0ea5e9; font-size:11px; font-family:'JetBrains Mono';">↳ RUNNER (KEEP)</span>
+                                    <div><span id="pRunVol" class="d-val" style="color:#0ea5e9; font-size:14px;">--</span><button class="mini-copy" onclick="copyVal('pRunVol')">📋</button></div>
+                                </div>
+                            </div>
                         </div>
                         <div class="data-row" style="margin-top:12px;">
                             <span style="color:#94a3b8; font-size:12px;">TARGET 1</span>
@@ -339,7 +352,22 @@
             
             if(activeData.plan.valid) {
                 const dist = Math.abs(activeData.plan.entry - activeData.plan.stop);
-                if(dist > 0) document.getElementById('pSiz').innerText = (riskAmt / dist).toFixed(4);
+                if(dist > 0) {
+                    const totalContracts = riskAmt / dist;
+                    document.getElementById('pSiz').innerText = totalContracts.toFixed(4);
+
+                    // NEW: Dynamic Volume Split Calculation
+                    let scalePct = 0.30; // Default to Grade A (Sell 30%, Keep 70%)
+                    let runPct = 0.70;
+                    
+                    if (activeData.grade === "GRADE B") {
+                        scalePct = 0.70; // Grade B (Sell 70%, Keep 30%)
+                        runPct = 0.30;
+                    }
+                    
+                    document.getElementById('pT1Vol').innerText = (totalContracts * scalePct).toFixed(4);
+                    document.getElementById('pRunVol').innerText = (totalContracts * runPct).toFixed(4);
+                }
             }
         }
 
@@ -378,7 +406,6 @@
                 data.results.forEach(t => {
                     window.radarMemory[t.symbol] = t;
                     
-                    // NEW: Render a Calibrating UI instead of a blank screen
                     if(t.status === "CALIBRATING") {
                         html += `
                         <div class="radar-row border-GRAY" style="opacity: 0.6;">
