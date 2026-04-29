@@ -1,9 +1,9 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v11.0 (THE DECISION ENGINE)
+# KABRODA MARKET RADAR v11.4 (THE DECISION ENGINE)
 # UPDATE: 10-Point Weighted Scorecard Integrated.
-# FIX 1: Fuses Pipeline Fuel (1H/4H) + Gravity Mass into a single Grade.
-# FIX 2: Maps Macro Fibonacci extensions for deep-space targeting.
+# FIX: Radar now strictly consumes locked KDE and Fib data from the Pipeline SSOT.
+#      Live math bypasses removed to permanently eliminate intraday drift.
 # ==============================================================================
 import os
 import json
@@ -41,20 +41,17 @@ def _run_gravity_audit(entry: float, vector: str, peaks: list, fibs: dict, level
     if vector == "LONG":
         audit["t1"] = entry + (gap * 0.618)
         
-        # Shield Check (Nearest Heavy mass below)
         heavy_und = [p for p in underneath if p["intensity"] in ["HEAVY", "MAXIMUM"]]
         if heavy_und:
             audit["shield_price"] = heavy_und[0]["price"] * 0.998
             audit["has_shield"] = True
         else:
-            audit["shield_price"] = entry * 0.99 # Fallback
+            audit["shield_price"] = entry * 0.99 
             
-        # Airspace Check (Are we blocked before T1?)
         heavy_ovr = [p for p in overhead if p["intensity"] in ["HEAVY", "MAXIMUM"]]
         if heavy_ovr and heavy_ovr[0]["price"] < audit["t1"]:
             audit["airspace_clear"] = False
             
-        # Target 2 & 3 Assignment
         if heavy_ovr:
             audit["t2"] = heavy_ovr[0]["price"]
             audit["t3"] = heavy_ovr[1]["price"] if len(heavy_ovr) > 1 else fibs.get("ext_up_1618", entry * 1.05)
@@ -70,7 +67,7 @@ def _run_gravity_audit(entry: float, vector: str, peaks: list, fibs: dict, level
             audit["shield_price"] = heavy_ovr[0]["price"] * 1.002
             audit["has_shield"] = True
         else:
-            audit["shield_price"] = entry * 1.01 # Fallback
+            audit["shield_price"] = entry * 1.01 
             
         heavy_und = [p for p in underneath if p["intensity"] in ["HEAVY", "MAXIMUM"]]
         if heavy_und and heavy_und[0]["price"] > audit["t1"]:
@@ -108,7 +105,6 @@ def _score_setup(vector: str, macro: str, micro: str, fuel: dict, audit: dict):
     if audit["airspace_clear"]: score += 3; checks.append("Clear Structural Airspace")
     if audit["has_shield"]: score += 2; checks.append("Gravity Shield Protected")
     
-    # Primal Gap Check (1 point)
     score += 1; checks.append("Primal Gap Confirmed")
 
     pct = (score / max_score) * 100
@@ -162,7 +158,6 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
         "targets": [audit["t1"], audit["t2"], audit["t3"]]
     }
     
-    # Generate the payload string for TV copy-paste
     key = f"{plan['bias']}|{grade}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}|{macro_bias}|{micro_bias}" if plan["valid"] else ""
 
     return {
@@ -211,7 +206,6 @@ def log_to_google_sheet(radar_item):
         except:
             bo = bd = dr = ds = r30h = r30l = 0
 
-        # Maintained columns for DB integrity
         row_data = [
             timestamp,                             
             radar_item["symbol"],                  
@@ -225,9 +219,9 @@ def log_to_google_sheet(radar_item):
             plan.get("targets", [0,0,0])[0],       
             plan.get("targets", [0,0,0])[1],       
             plan.get("targets", [0,0,0])[2],       
-            radar_item.get("score_pct", 0), # Replaced gap% with Score %                        
+            radar_item.get("score_pct", 0),                       
             "", "", "", "",                        
-            0, 0, # Empty gaps                             
+            0, 0,                             
             r30h, r30l, bo, bd, dr, ds                                     
         ]
 
@@ -243,15 +237,16 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
     price = float(data.get("price", 0))
     levels = data.get("battlebox", {}).get("levels", {})
     context = data.get("battlebox", {}).get("context", {})
+    
     macro_bias = context.get("macro_bias", "NEUTRAL")
     micro_bias = context.get("micro_bias", "NEUTRAL")
     fuel_gauge = context.get("fuel_gauge", {})
+    
+    # FIX: Pull locked peaks and fibs directly from the Pipeline context vault.
+    kde_peaks = context.get("kde_peaks", [])
+    macro_fibs = context.get("macro_fibs", {})
 
-    # Fetch Gravity & Fibs
-    kde_data = gravity_math.calculate_gravity_kde(symbol)
-    macro_fibs = gravity_math.calculate_macro_fibs([], []) # Re-fetch not needed if cached, but passed in scan_sector
-
-    dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias, fuel_gauge, kde_data.get("peaks", []), macro_fibs)
+    dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs)
     
     return {
         "ok": True,
@@ -276,16 +271,16 @@ async def scan_sector(session_id="us_ny_futures"):
         price = float(res.get("price", 0))
         levels = res.get("battlebox", {}).get("levels", {})
         context = res.get("battlebox", {}).get("context", {})
+        
         macro_bias = context.get("macro_bias", "NEUTRAL")
         micro_bias = context.get("micro_bias", "NEUTRAL")
         fuel_gauge = context.get("fuel_gauge", {})
 
-        # Pull Gravity + Fibs
-        kde_data = gravity_math.calculate_gravity_kde(sym)
-        c_1d = await battlebox_pipeline.fetch_live_daily(sym, limit=30)
-        macro_fibs = gravity_math.calculate_macro_fibs(c_1d, [])
+        # FIX: Pull locked peaks and fibs directly from the Pipeline context vault.
+        kde_peaks = context.get("kde_peaks", [])
+        macro_fibs = context.get("macro_fibs", {})
 
-        dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias, fuel_gauge, kde_data.get("peaks", []), macro_fibs)
+        dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs)
         
         radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,
@@ -293,7 +288,6 @@ async def scan_sector(session_id="us_ny_futures"):
             **dossier
         }
         
-        # Sort weight prioritizes A+ grades
         radar_item["sort_weight"] = dossier["score_pct"]
         radar_grid.append(radar_item)
         log_to_google_sheet(radar_item)

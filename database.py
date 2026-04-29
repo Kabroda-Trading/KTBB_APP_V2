@@ -44,7 +44,6 @@ class UserModel(Base):
     
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     
-    # Internal app settings
     is_admin = Column(Boolean, default=False)
     operator_flex = Column(Boolean, default=False)
 
@@ -58,21 +57,16 @@ class GravityMemory(Base):
     symbol = Column(String, index=True, nullable=False)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     
-    source = Column(String, nullable=False)      # e.g., "4H_PIVOT", "1H_PIVOT"
-    level_type = Column(String, nullable=False)  # e.g., "SUPPLY", "DEMAND"
+    source = Column(String, nullable=False)      
+    level_type = Column(String, nullable=False)  
     price = Column(Float, nullable=False)
     
-    # 1 = Immortal Guardrail (4H), 2 = Intraday Dotted Line (1H)
     permanence_class = Column(Integer, nullable=False)
-    
-    # 1.0 = Normal, >1.0 = High Volume Node
     heat_multiplier = Column(Float, default=1.0)
-    
-    # Active state for unmitigated trauma
     active = Column(Boolean, default=True)
 
 # ---------------------------------------------------------
-# NEW: PERMANENT SESSION LOCKS (ANTI-AMNESIA)
+# EXISTING: PERMANENT SESSION LOCKS (ANTI-AMNESIA)
 # ---------------------------------------------------------
 class SessionLock(Base):
     __tablename__ = "session_locks"
@@ -83,5 +77,33 @@ class SessionLock(Base):
     date_key = Column(String, index=True, nullable=False)
     lock_time = Column(Integer, nullable=False)
     
-    # Stores the entire compiled SSE packet as a JSON string
-    packet_data = Column(String, nullable=False)
+    packet_data = Column(String, nullable=False) 
+
+# ---------------------------------------------------------
+# NEW: MISSION LEDGER (AUTOMATED TRADE TRACKER)
+# ---------------------------------------------------------
+class CampaignLog(Base):
+    __tablename__ = "campaign_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True, nullable=False)
+    date_key = Column(String, index=True, nullable=False)
+    session_id = Column(String, nullable=False)
+
+    bias = Column(String, nullable=False)     # LONG / SHORT
+    grade = Column(String, nullable=False)    # GRADE A / GRADE B
+
+    entry_price = Column(Float, nullable=False)
+    stop_loss = Column(Float, nullable=False)
+    t1 = Column(Float, nullable=False)
+    t2 = Column(Float, nullable=False)
+    t3 = Column(Float, nullable=False)
+
+    total_contracts = Column(Float, nullable=False)
+
+    # State Machine Status: PENDING, ACTIVE, T1_HIT, T2_HIT, CLOSED_WIN, CLOSED_LOSS, CLOSED_SCRATCH
+    status = Column(String, default="PENDING", nullable=False) 
+    realized_pnl = Column(Float, default=0.0)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
