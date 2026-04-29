@@ -1,5 +1,5 @@
 # database.py
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
 import os
@@ -22,9 +22,18 @@ def get_db():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    
+    # --- MIGRATION PATCH ---
+    # Forces the database to append the new time-tracking columns if they are missing.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN activated_at DATETIME"))
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN closed_at DATETIME"))
+    except Exception:
+        pass # Columns already exist, move on silently.
 
 # ---------------------------------------------------------
-# EXISTING USER MODEL (DO NOT ALTER)
+# EXISTING USER MODEL
 # ---------------------------------------------------------
 class UserModel(Base):
     __tablename__ = "users"
@@ -66,7 +75,7 @@ class GravityMemory(Base):
     active = Column(Boolean, default=True)
 
 # ---------------------------------------------------------
-# EXISTING: PERMANENT SESSION LOCKS (ANTI-AMNESIA)
+# EXISTING: PERMANENT SESSION LOCKS
 # ---------------------------------------------------------
 class SessionLock(Base):
     __tablename__ = "session_locks"
@@ -80,7 +89,7 @@ class SessionLock(Base):
     packet_data = Column(String, nullable=False) 
 
 # ---------------------------------------------------------
-# UPGRADED: MISSION LEDGER (AUTOMATED TRADE TRACKER)
+# MISSION LEDGER (AUTOMATED TRADE TRACKER)
 # ---------------------------------------------------------
 class CampaignLog(Base):
     __tablename__ = "campaign_logs"
@@ -104,7 +113,6 @@ class CampaignLog(Base):
     status = Column(String, default="PENDING", nullable=False) 
     realized_pnl = Column(Float, default=0.0)
 
-    # NEW: Granular Time Tracking for Advanced Analytics
     activated_at = Column(DateTime, nullable=True) 
     closed_at = Column(DateTime, nullable=True)    
 
