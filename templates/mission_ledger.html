@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Kabroda | Mission Ledger</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #020617; color: #f8fafc; font-family: 'Inter', sans-serif; padding: 20px; margin: 0; }
+        .ledger-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
+        .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #334155; padding-bottom: 20px; margin-bottom: 30px; }
+        .h-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
+        
+        .btn-export { background: #1e293b; color: #fff; font-weight: 800; font-family: 'JetBrains Mono'; border: 1px solid #334155; padding: 12px 30px; border-radius: 4px; cursor: pointer; text-transform: uppercase; transition: 0.2s; }
+        .btn-export:hover { background: #22c55e; border-color: #22c55e; color: #000; }
+
+        .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
+        .metric-card { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 25px; text-align: center; }
+        .m-val { font-family: 'Rajdhani'; font-size: 48px; font-weight: 800; color: #fff; line-height: 1; }
+        .m-lbl { font-family: 'JetBrains Mono'; font-size: 12px; color: #94a3b8; text-transform: uppercase; margin-top: 10px; }
+        
+        .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+        .chart-card { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 20px; height: 350px; }
+        
+        .table-card { background: #0f172a; border: 1px solid #334155; border-radius: 8px; overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th { background: #1e293b; color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 12px; padding: 15px 20px; font-weight: 700; text-transform: uppercase; border-bottom: 1px solid #334155; }
+        td { padding: 15px 20px; font-family: 'JetBrains Mono'; font-size: 14px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+        tr:hover td { background: #1e293b; }
+        
+        .status-ACTIVE { color: #0ea5e9; font-weight: 800; }
+        .status-T1_HIT { color: #eab308; font-weight: 800; }
+        .status-CLOSED_WIN { color: #22c55e; font-weight: 800; }
+        .status-CLOSED_LOSS { color: #ef4444; font-weight: 800; }
+        .status-CLOSED_SCRATCH { color: #94a3b8; font-weight: 800; }
+    </style>
+</head>
+<body>
+    {% include 'nav.html' %}
+    
+    <div class="ledger-container">
+        <div class="header">
+            <div>
+                <h2 class="h-title">Mission Ledger</h2>
+                <div style="color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 12px; margin-top: 5px;">AUTOMATED CAMPAIGN STATE TRACKER</div>
+            </div>
+            <button class="btn-export" onclick="exportCSV()">⬇ DOWNLOAD RAW CSV</button>
+        </div>
+
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="m-val" id="valTrades">0</div>
+                <div class="m-lbl">Total Audited Campaigns</div>
+            </div>
+            <div class="metric-card">
+                <div class="m-val" id="valWinRate">0%</div>
+                <div class="m-lbl">T1 Hit / Win Rate</div>
+            </div>
+            <div class="metric-card">
+                <div class="m-val" id="valPnL" style="color: #22c55e;">$0.00</div>
+                <div class="m-lbl">Net Realized PnL</div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-card">
+                <canvas id="statusChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <canvas id="gradeChart"></canvas>
+            </div>
+        </div>
+
+        <div class="table-card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Session</th>
+                        <th>Symbol</th>
+                        <th>Direction</th>
+                        <th>Grade</th>
+                        <th>Entry Price</th>
+                        <th>Live Status</th>
+                        <th>Realized PnL</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <tr><td colspan="8" style="text-align: center; padding: 40px; color: #0ea5e9;">/// FETCHING LEDGER ARCHIVE...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let allLogs = [];
+        let pieChartInstance = null;
+        let barChartInstance = null;
+
+        async function initLedger() {
+            try {
+                const res = await fetch('/api/campaign/logs');
+                const data = await res.json();
+                if(data.ok) {
+                    allLogs = data.logs;
+                    renderDashboard();
+                }
+            } catch(e) {
+                console.error("Failed to load ledger:", e);
+            }
+        }
+
+        function renderDashboard() {
+            let wins = 0;
+            let losses = 0;
+            let netPnl = 0;
+            
+            const statusCounts = { 'ACTIVE': 0, 'T1_HIT': 0, 'CLOSED_WIN': 0, 'CLOSED_LOSS': 0, 'CLOSED_SCRATCH': 0, 'PENDING': 0 };
+            const gradePnl = { 'GRADE A': 0, 'GRADE B': 0 };
+
+            let html = "";
+            allLogs.forEach(l => {
+                netPnl += l.realized_pnl;
+                statusCounts[l.status] = (statusCounts[l.status] || 0) + 1;
+                
+                if(l.status === 'T1_HIT' || l.status === 'CLOSED_WIN') wins++;
+                if(l.status === 'CLOSED_LOSS') losses++;
+                
+                gradePnl[l.grade] = (gradePnl[l.grade] || 0) + l.realized_pnl;
+
+                const dateStr = l.created_at.split('T')[0];
+                const pnlStr = l.realized_pnl >= 0 ? `+$${l.realized_pnl.toFixed(2)}` : `-$${Math.abs(l.realized_pnl).toFixed(2)}`;
+                const pnlColor = l.realized_pnl > 0 ? '#22c55e' : (l.realized_pnl < 0 ? '#ef4444' : '#94a3b8');
+
+                html += `
+                <tr>
+                    <td>${dateStr}</td>
+                    <td>${l.session_id.toUpperCase().replace('US_', '')}</td>
+                    <td style="color:#fff; font-weight:800;">${l.symbol}</td>
+                    <td style="color:${l.bias === 'LONG' ? '#22c55e' : '#ef4444'}">${l.bias}</td>
+                    <td style="color:${l.grade === 'GRADE A' ? '#22c55e' : '#eab308'}">${l.grade}</td>
+                    <td>$${l.entry_price.toFixed(2)}</td>
+                    <td class="status-${l.status}">${l.status.replace('_', ' ')}</td>
+                    <td style="color:${pnlColor}; font-weight:800;">${pnlStr}</td>
+                </tr>`;
+            });
+
+            document.getElementById('tableBody').innerHTML = html || '<tr><td colspan="8" style="text-align:center;">No data available.</td></tr>';
+
+            const totalFinished = wins + losses;
+            const winRate = totalFinished > 0 ? (wins / totalFinished) * 100 : 0;
+
+            document.getElementById('valTrades').innerText = allLogs.length;
+            document.getElementById('valWinRate').innerText = winRate.toFixed(1) + '%';
+            document.getElementById('valPnL').innerText = (netPnl >= 0 ? '+$' : '-$') + Math.abs(netPnl).toFixed(2);
+            document.getElementById('valPnL').style.color = netPnl >= 0 ? '#22c55e' : '#ef4444';
+
+            renderCharts(statusCounts, gradePnl);
+        }
+
+        function renderCharts(statusCounts, gradePnl) {
+            Chart.defaults.color = '#94a3b8';
+            Chart.defaults.font.family = "'JetBrains Mono', monospace";
+
+            const ctxPie = document.getElementById('statusChart').getContext('2d');
+            if(pieChartInstance) pieChartInstance.destroy();
+            pieChartInstance = new Chart(ctxPie, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Active', 'T1 Hit', 'Full Win', 'Loss', 'Scratch'],
+                    datasets: [{
+                        data: [
+                            statusCounts['ACTIVE'], statusCounts['T1_HIT'], 
+                            statusCounts['CLOSED_WIN'], statusCounts['CLOSED_LOSS'], 
+                            statusCounts['CLOSED_SCRATCH']
+                        ],
+                        backgroundColor: ['#0ea5e9', '#eab308', '#22c55e', '#ef4444', '#64748b'],
+                        borderColor: '#0f172a',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { position: 'right' }, title: { display: true, text: 'CAMPAIGN RESOLUTION' } }
+                }
+            });
+
+            const ctxBar = document.getElementById('gradeChart').getContext('2d');
+            if(barChartInstance) barChartInstance.destroy();
+            barChartInstance = new Chart(ctxBar, {
+                type: 'bar',
+                data: {
+                    labels: ['GRADE A', 'GRADE B'],
+                    datasets: [{
+                        label: 'Net PnL ($)',
+                        data: [gradePnl['GRADE A'], gradePnl['GRADE B']],
+                        backgroundColor: [gradePnl['GRADE A'] >= 0 ? '#22c55e' : '#ef4444', gradePnl['GRADE B'] >= 0 ? '#22c55e' : '#ef4444'],
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, title: { display: true, text: 'PERFORMANCE BY GRADE' } },
+                    scales: { y: { grid: { color: '#1e293b' } }, x: { grid: { display: false } } }
+                }
+            });
+        }
+
+        function exportCSV() {
+            if(!allLogs.length) return alert("No data to export.");
+            
+            const headers = ["Date", "Session", "Symbol", "Bias", "Grade", "Entry Price", "Stop Loss", "T1", "T2", "Status", "Realized PnL"];
+            let csvContent = headers.join(",") + "\n";
+            
+            allLogs.forEach(l => {
+                const date = l.created_at.split('T')[0];
+                csvContent += `${date},${l.session_id},${l.symbol},${l.bias},${l.grade},${l.entry_price},${l.stop_loss || 0},${l.t1 || 0},${l.t2 || 0},${l.status},${l.realized_pnl}\n`;
+            });
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", `kabroda_mission_ledger_${new Date().toISOString().split('T')[0]}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        document.addEventListener('DOMContentLoaded', initLedger);
+    </script>
+</body>
+</html>
