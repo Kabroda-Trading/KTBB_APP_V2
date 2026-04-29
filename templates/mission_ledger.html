@@ -67,6 +67,12 @@
         </div>
 
         <div class="control-bar">
+            <select class="filter-select" id="filterSymbol" onchange="runAnalyticsEngine()">
+                <option value="ALL">ALL ASSETS</option>
+                <option value="BTCUSDT">BTC/USDT</option>
+                <option value="ETHUSDT">ETH/USDT</option>
+                <option value="SOLUSDT">SOL/USDT</option>
+            </select>
             <select class="filter-select" id="filterTime" onchange="runAnalyticsEngine()">
                 <option value="ALL">ALL TIME</option>
                 <option value="7D">LAST 7 DAYS</option>
@@ -187,7 +193,6 @@
         }
 
         function initCharts() {
-            // 1. PnL Line Chart
             apexCharts.pnl = new ApexCharts(document.getElementById("chartLinePnL"), {
                 ...darkTheme, type: 'area', series: [], stroke: { curve: 'smooth', width: 2 },
                 colors: ['#22c55e'], fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.0 } },
@@ -195,7 +200,6 @@
             });
             apexCharts.pnl.render();
 
-            // 2. Status Donut
             apexCharts.status = new ApexCharts(document.getElementById("chartDonutStatus"), {
                 ...darkTheme, type: 'donut', series: [], labels: [],
                 colors: ['#0ea5e9', '#eab308', '#22c55e', '#ef4444', '#64748b'],
@@ -203,21 +207,18 @@
             });
             apexCharts.status.render();
 
-            // 3. Day of Week Bar
             apexCharts.day = new ApexCharts(document.getElementById("chartBarDay"), {
                 ...darkTheme, type: 'bar', series: [], xaxis: { categories: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] },
                 colors: ['#8b5cf6'], plotOptions: { bar: { borderRadius: 4, columnWidth: '50%' } }, dataLabels: { enabled: false }
             });
             apexCharts.day.render();
 
-            // 4. Session Bar
             apexCharts.session = new ApexCharts(document.getElementById("chartBarSession"), {
                 ...darkTheme, type: 'bar', series: [], xaxis: { categories: ['AM Session', 'PM Session'] },
                 colors: ['#0ea5e9'], plotOptions: { bar: { borderRadius: 4, distributed: true } }, legend: { show: false }, dataLabels: { enabled: false }
             });
             apexCharts.session.render();
 
-            // 5. Time in Trade (Duration)
             apexCharts.duration = new ApexCharts(document.getElementById("chartBarTime"), {
                 ...darkTheme, type: 'bar', series: [], xaxis: { categories: ['Grade A', 'Grade B'] },
                 colors: ['#eab308'], plotOptions: { bar: { borderRadius: 4, horizontal: true } }, dataLabels: { enabled: false }
@@ -229,6 +230,7 @@
             const fTime = document.getElementById('filterTime').value;
             const fGrade = document.getElementById('filterGrade').value;
             const fSession = document.getElementById('filterSession').value;
+            const fSymbol = document.getElementById('filterSymbol').value;
 
             // Date filtering math
             const now = new Date();
@@ -239,13 +241,16 @@
             // Apply Filters
             let filtered = rawLogs.filter(l => {
                 const lDate = new Date(l.created_at);
+                const lSym = l.symbol.replace('/', '');
+                
                 if(lDate < cutoff) return false;
                 if(fGrade !== 'ALL' && l.grade !== fGrade) return false;
                 if(fSession !== 'ALL' && l.session_id !== fSession) return false;
+                if(fSymbol !== 'ALL' && lSym !== fSymbol) return false;
+                
                 return true;
             });
 
-            // Sort chronologically for charts
             filtered.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
 
             updateMetricsAndTable(filtered);
@@ -265,7 +270,6 @@
                 const pnlStr = l.realized_pnl >= 0 ? `+$${l.realized_pnl.toFixed(2)}` : `-$${Math.abs(l.realized_pnl).toFixed(2)}`;
                 const pnlColor = l.realized_pnl > 0 ? '#22c55e' : (l.realized_pnl < 0 ? '#ef4444' : '#94a3b8');
                 
-                // Calculate Duration
                 let durationStr = "—";
                 if(l.activated_at && l.closed_at) {
                     const diffMs = new Date(l.closed_at) - new Date(l.activated_at);
@@ -295,8 +299,6 @@
             document.getElementById('valPnL').innerText = (netPnl >= 0 ? '+$' : '-$') + Math.abs(netPnl).toFixed(2);
             document.getElementById('valPnL').style.color = netPnl >= 0 ? '#22c55e' : '#ef4444';
 
-            // Quantum Simulator Logic
-            // The daemon defaults to $1000 risk. The multiplier is user_input / 1000.
             const userRisk = parseFloat(document.getElementById('simRisk').value) || 1000;
             const simMultiplier = userRisk / 1000.0;
             const projectedPnL = netPnl * simMultiplier;
@@ -306,7 +308,6 @@
         }
 
         function updateDataVisualizations(data) {
-            // 1. Line PnL Data
             let cumulative = 0;
             const pnlSeries = data.map(l => {
                 cumulative += l.realized_pnl;
@@ -314,22 +315,19 @@
             });
             apexCharts.pnl.updateSeries([{ name: 'Net PnL', data: pnlSeries }]);
 
-            // 2. Status Donut Data
             const sCounts = { 'ACTIVE':0, 'T1_HIT':0, 'CLOSED_WIN':0, 'CLOSED_LOSS':0, 'CLOSED_SCRATCH':0 };
             data.forEach(l => { if(sCounts[l.status] !== undefined) sCounts[l.status]++; });
             apexCharts.status.updateOptions({ labels: Object.keys(sCounts).map(s=>s.replace('_',' ')) });
             apexCharts.status.updateSeries(Object.values(sCounts));
 
-            // 3. Day of Week Data (0=Sun, 1=Mon...)
-            const dayPnl = [0,0,0,0,0,0,0]; // Mon to Sun mapping: Mon=0, Sun=6
+            const dayPnl = [0,0,0,0,0,0,0]; 
             data.forEach(l => {
                 let day = new Date(l.created_at).getDay();
-                let adjDay = day === 0 ? 6 : day - 1; // shift so Mon is index 0
+                let adjDay = day === 0 ? 6 : day - 1; 
                 dayPnl[adjDay] += l.realized_pnl;
             });
             apexCharts.day.updateSeries([{ name: 'PnL', data: dayPnl }]);
 
-            // 4. Session Data
             let amPnl = 0; let pmPnl = 0;
             data.forEach(l => {
                 if(l.session_id === 'us_ny_futures') amPnl += l.realized_pnl;
@@ -337,7 +335,6 @@
             });
             apexCharts.session.updateSeries([{ name: 'PnL', data: [amPnl, pmPnl] }]);
 
-            // 5. Duration Data
             let durA = { total:0, count:0 }; let durB = { total:0, count:0 };
             data.forEach(l => {
                 if(l.activated_at && l.closed_at) {
