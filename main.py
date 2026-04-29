@@ -1,6 +1,6 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v10.3 (RADAR PROMOTION)
+# KABRODA UNIFIED SERVER: BATTLEBOX v10.4 (CAMPAIGN DAEMON)
 # ---------------------------------------------------------
 import os
 import traceback
@@ -23,9 +23,10 @@ import market_radar
 import research_lab
 import market_simulator  
 import gravity_engine  
-import gravity_math    
+import gravity_math
+import campaign_engine  # NEW: The Mission Ledger Daemon
 
-from database import init_db, get_db, UserModel
+from database import init_db, get_db, UserModel, CampaignLog
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,11 +36,13 @@ async def lifespan(app: FastAPI):
     print(">>> BOOTING KABRODA SYSTEM: Initializing Database Schema...")
     init_db()
     gravity_task = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
+    campaign_task = asyncio.create_task(campaign_engine.run_campaign_tracker_loop()) # DAEMON ACTIVATED
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     gravity_task.cancel()
+    campaign_task.cancel()
 
-app = FastAPI(title="Kabroda BattleBox", version="10.3", lifespan=lifespan)
+app = FastAPI(title="Kabroda BattleBox", version="10.4", lifespan=lifespan)
 
 SECRET_KEY = os.getenv("SESSION_SECRET", "kabroda_prod_key_999")
 
@@ -163,6 +166,14 @@ async def gravity_map_page(request: Request, db: Session = Depends(get_db)):
     require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "gravity_map.html", ctx)
 
+# NEW: Mission Ledger Route
+@app.get("/suite/mission-ledger")
+async def mission_ledger_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
+    require_paid_access(ctx["user"])
+    return _template_or_fallback(request, templates, "mission_ledger.html", ctx)
+
 @app.get("/api/gravity/scan")
 async def api_gravity_scan(symbol: str = "BTC/USDT"):
     candles_1d = await battlebox_pipeline.fetch_live_daily(symbol, limit=30)
@@ -177,6 +188,26 @@ async def api_gravity_scan(symbol: str = "BTC/USDT"):
         "kde_data": kde_data, 
         "macro_fibs": macro_fibs
     })
+
+# NEW: Mission Ledger API Data
+@app.get("/api/campaign/logs")
+async def get_campaign_logs(db: Session = Depends(get_db)):
+    logs = db.query(CampaignLog).order_by(CampaignLog.created_at.desc()).all()
+    result = []
+    for l in logs:
+        result.append({
+            "id": l.id,
+            "symbol": l.symbol,
+            "date_key": l.date_key,
+            "session_id": l.session_id,
+            "bias": l.bias,
+            "grade": l.grade,
+            "entry_price": l.entry_price,
+            "status": l.status,
+            "realized_pnl": l.realized_pnl,
+            "created_at": l.created_at.isoformat()
+        })
+    return JSONResponse({"ok": True, "logs": result})
 
 @app.get("/indicators")
 async def indicators(request: Request, db: Session = Depends(get_db)):
@@ -331,7 +362,6 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/api/radar/scan")
 async def run_radar_scan(request: Request):
-    # DYNAMIC SESSION ROUTING
     try:
         payload = await request.json()
         session_id = payload.get("session_id", "us_ny_futures")
