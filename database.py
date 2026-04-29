@@ -80,7 +80,7 @@ class SessionLock(Base):
     packet_data = Column(String, nullable=False) 
 
 # ---------------------------------------------------------
-# NEW: MISSION LEDGER (AUTOMATED TRADE TRACKER)
+# UPGRADED: MISSION LEDGER (AUTOMATED TRADE TRACKER)
 # ---------------------------------------------------------
 class CampaignLog(Base):
     __tablename__ = "campaign_logs"
@@ -90,8 +90,8 @@ class CampaignLog(Base):
     date_key = Column(String, index=True, nullable=False)
     session_id = Column(String, nullable=False)
 
-    bias = Column(String, nullable=False)     # LONG / SHORT
-    grade = Column(String, nullable=False)    # GRADE A / GRADE B
+    bias = Column(String, nullable=False)     
+    grade = Column(String, nullable=False)    
 
     entry_price = Column(Float, nullable=False)
     stop_loss = Column(Float, nullable=False)
@@ -101,9 +101,12 @@ class CampaignLog(Base):
 
     total_contracts = Column(Float, nullable=False)
 
-    # State Machine Status: PENDING, ACTIVE, T1_HIT, T2_HIT, CLOSED_WIN, CLOSED_LOSS, CLOSED_SCRATCH
     status = Column(String, default="PENDING", nullable=False) 
     realized_pnl = Column(Float, default=0.0)
+
+    # NEW: Granular Time Tracking for Advanced Analytics
+    activated_at = Column(DateTime, nullable=True) 
+    closed_at = Column(DateTime, nullable=True)    
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
