@@ -9,6 +9,8 @@ import os
 import json
 import asyncio
 import datetime
+from datetime import timedelta
+import pytz
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -115,7 +117,59 @@ def _score_setup(vector: str, macro: str, micro: str, fuel: dict, audit: dict):
 
     return grade, pct, checks
 
-def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs):
+def _audit_predator_candle(plan: dict, raw_15m: list, session_id: str):
+    """Audits the 9:30 AM EST 15m candle against the locked Kabroda structural map."""
+    if session_id not in ["us_ny_futures", "us_ny_equity"]:
+        return {"active": False}
+
+    if not plan.get("valid"):
+        return {"active": False}
+
+    ny_tz = pytz.timezone("America/New_York")
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    now_ny = now_utc.astimezone(ny_tz)
+
+    target_ny = now_ny.replace(hour=9, minute=30, second=0, microsecond=0)
+    if now_ny.hour < 8:
+        target_ny -= timedelta(days=1)
+
+    target_end_ny = target_ny + timedelta(minutes=15)
+    
+    if now_ny < target_end_ny:
+        return {"active": True, "status": "AWAITING", "message": "AWAITING PREDATOR RESOLUTION (09:45 EST)"}
+
+    target_ts = int(target_ny.timestamp())
+    predator_candle = next((c for c in raw_15m if int(c["time"]) == target_ts), None)
+
+    if not predator_candle:
+        return {"active": True, "status": "AWAITING", "message": "AWAITING CANDLE DATA..."}
+
+    c_close = float(predator_candle["close"])
+    c_high = float(predator_candle["high"])
+    c_low = float(predator_candle["low"])
+    stop = float(plan["stop"])
+    t1 = float(plan["targets"][0])
+    bias = plan["bias"]
+
+    if bias == "SHORT":
+        if c_close > stop:
+            return {"active": True, "status": "ABORT", "message": "🔴 STRUCTURE COMPROMISED: Bulls claimed the Gravity Well."}
+        elif c_low <= t1:
+            return {"active": True, "status": "ABORT", "message": "🟡 MOVE EXHAUSTED: Volatility cleared Target 1 liquidity."}
+        else:
+            return {"active": True, "status": "EXECUTE", "message": "🟢 INTEGRITY CONFIRMED: Structure held. Set Trigger Order."}
+            
+    elif bias == "LONG":
+        if c_close < stop:
+            return {"active": True, "status": "ABORT", "message": "🔴 STRUCTURE COMPROMISED: Bears claimed the Gravity Well."}
+        elif c_high >= t1:
+            return {"active": True, "status": "ABORT", "message": "🟡 MOVE EXHAUSTED: Volatility cleared Target 1 liquidity."}
+        else:
+            return {"active": True, "status": "EXECUTE", "message": "🟢 INTEGRITY CONFIRMED: Structure held. Set Trigger Order."}
+
+    return {"active": False}
+
+def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs, raw_15m, session_id):
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
     
@@ -131,7 +185,7 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
         return {
             "favored": "NEUTRAL", "grade": "STAND DOWN", "score_pct": 0, "color_code": "GRAY",
             "briefing": "Market is in absolute neutral consolidation. Stand down.",
-            "checks": [], "plan": {"valid": False}
+            "checks": [], "plan": {"valid": False}, "predator_audit": {"active": False}
         }
         
     audit = _run_gravity_audit(entry, favored, kde_peaks, macro_fibs, levels)
@@ -158,11 +212,14 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
         "targets": [audit["t1"], audit["t2"], audit["t3"]]
     }
     
+    predator_audit = _audit_predator_candle(plan, raw_15m, session_id)
+    
     key = f"{plan['bias']}|{grade}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}|{macro_bias}|{micro_bias}" if plan["valid"] else ""
 
     return {
         "favored": favored, "grade": grade, "score_pct": score_pct, "color_code": color,
-        "briefing": briefing, "checks": checks, "plan": plan, "key": key
+        "briefing": briefing, "checks": checks, "plan": plan, "key": key,
+        "predator_audit": predator_audit
     }
 
 def log_to_google_sheet(radar_item):
@@ -237,16 +294,15 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
     price = float(data.get("price", 0))
     levels = data.get("battlebox", {}).get("levels", {})
     context = data.get("battlebox", {}).get("context", {})
+    raw_15m = data.get("battlebox", {}).get("raw_15m", [])
     
     macro_bias = context.get("macro_bias", "NEUTRAL")
     micro_bias = context.get("micro_bias", "NEUTRAL")
     fuel_gauge = context.get("fuel_gauge", {})
-    
-    # FIX: Pull locked peaks and fibs directly from the Pipeline context vault.
     kde_peaks = context.get("kde_peaks", [])
     macro_fibs = context.get("macro_fibs", {})
 
-    dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs)
+    dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs, raw_15m, session_id)
     
     return {
         "ok": True,
@@ -271,16 +327,16 @@ async def scan_sector(session_id="us_ny_futures"):
         price = float(res.get("price", 0))
         levels = res.get("battlebox", {}).get("levels", {})
         context = res.get("battlebox", {}).get("context", {})
+        raw_15m = res.get("battlebox", {}).get("raw_15m", [])
         
         macro_bias = context.get("macro_bias", "NEUTRAL")
         micro_bias = context.get("micro_bias", "NEUTRAL")
         fuel_gauge = context.get("fuel_gauge", {})
 
-        # FIX: Pull locked peaks and fibs directly from the Pipeline context vault.
         kde_peaks = context.get("kde_peaks", [])
         macro_fibs = context.get("macro_fibs", {})
 
-        dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs)
+        dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs, raw_15m, session_id)
         
         radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,

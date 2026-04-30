@@ -246,6 +246,7 @@ def _compute_sse_packet(
 
 async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id: Optional[str] = None, operator_flex: bool = False, tuning: Optional[Dict] = None) -> Dict[str, Any]:
     raw_5m = await fetch_live_5m(symbol)
+    raw_15m = await fetch_live_15m(symbol)
     raw_1h = await fetch_live_1h(symbol)
     raw_4h = await fetch_live_4h(symbol)
     raw_daily = await fetch_live_daily(symbol)
@@ -269,6 +270,7 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
         return {
             "status": "CALIBRATING", "timestamp": now_utc.strftime("%H:%M UTC"), "price": float(raw_5m[-1]["close"]), "energy": "CALIBRATING", 
             "battlebox": {
+                "raw_15m": raw_15m,
                 "war_map_context": wm, "session_battle": _safe_placeholder_state("Calibrating..."), "session": session, "levels": {}, "bias_model": {}, 
                 "context": {"macro_bias": macro_bias, "micro_bias": micro_bias, "fuel_gauge": fuel_gauge, "kde_peaks": kde_data.get("peaks", []), "macro_fibs": macro_fibs}
             }
@@ -281,7 +283,6 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
         if session_key not in _LOCKED_PACKETS:
             db = SessionLocal()
             try:
-                # 1. DATABASE SSOT: Check if this exact session was already locked today.
                 existing_lock = db.query(SessionLock).filter(
                     SessionLock.symbol == symbol,
                     SessionLock.session_id == session['id'],
@@ -289,17 +290,14 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                 ).first()
 
                 if existing_lock:
-                    # Serve directly from permanent memory
                     _LOCKED_PACKETS[session_key] = json.loads(existing_lock.packet_data)
                 else:
-                    # 2. Compute fresh meta-signal packet
                     pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, tuning=tuning, raw_daily=raw_daily)
                     if "error" in pkt: 
-                        return {"status": "ERROR", "message": pkt["error"], "battlebox": {"war_map_context": _war_map_from_1h(raw_1h), "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
+                        return {"status": "ERROR", "message": pkt["error"], "battlebox": {"raw_15m": raw_15m, "war_map_context": _war_map_from_1h(raw_1h), "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
                     
                     _LOCKED_PACKETS[session_key] = pkt
                     
-                    # 3. Commit permanent lock to the database vault
                     new_lock = SessionLock(
                         symbol=symbol,
                         session_id=session['id'],
@@ -314,7 +312,6 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
             except Exception as e:
                 print(f"DATABASE VAULT ERROR: {e}")
                 traceback.print_exc()
-                # Fallback to RAM if database connection gets interrupted
                 if session_key not in _LOCKED_PACKETS:
                     pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, tuning=tuning, raw_daily=raw_daily)
                     if "error" not in pkt:
@@ -335,6 +332,7 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     return {
         "status": "OK", "timestamp": now_utc.strftime("%H:%M UTC"), "price": float(raw_5m[-1]["close"]), "energy": session.get("energy", "ACTIVE"), 
         "battlebox": {
+            "raw_15m": raw_15m,
             "war_map_context": _war_map_from_1h(raw_1h), "session_battle": state, "levels": levels, "session": session, 
             "bias_model": pkt.get("bias_model", {}), "context": pkt.get("context", {}), "htf_shelves": pkt.get("htf_shelves", {}), "meta": pkt.get("meta", {})
         }, 
