@@ -100,9 +100,13 @@
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v11.3</span></h2>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v11.4</span></h2>
             </div>
             <div style="display: flex; align-items: center;">
+                <div class="session-toggle">
+                    <button id="btn-agg" class="session-btn active" onclick="switchExecutionMode('AGGRESSIVE')">AGGRESSIVE</button>
+                    <button id="btn-con" class="session-btn" onclick="switchExecutionMode('CONSERVATIVE')">CONSERVATIVE</button>
+                </div>
                 <div class="session-toggle">
                     <button id="btn-am" class="session-btn active" onclick="switchSession('us_ny_futures')">AM SESSION</button>
                     <button id="btn-pm" class="session-btn" onclick="switchSession('us_ny_pm')">PM SESSION</button>
@@ -260,6 +264,7 @@
         window.radarMemory = {};
         let activeData = null;
         let activeSession = 'us_ny_futures'; 
+        let executionMode = 'AGGRESSIVE';
         
         const balInput = document.getElementById('inpBal');
         const riskInput = document.getElementById('inpRisk');
@@ -356,12 +361,11 @@
                     const totalContracts = riskAmt / dist;
                     document.getElementById('pSiz').innerText = totalContracts.toFixed(4);
 
-                    // NEW: Dynamic Volume Split Calculation
-                    let scalePct = 0.30; // Default to Grade A (Sell 30%, Keep 70%)
+                    let scalePct = 0.30;
                     let runPct = 0.70;
                     
                     if (activeData.grade === "GRADE B") {
-                        scalePct = 0.70; // Grade B (Sell 70%, Keep 30%)
+                        scalePct = 0.70; 
                         runPct = 0.30;
                     }
                     
@@ -373,15 +377,22 @@
 
         function switchSession(sessionId) {
             activeSession = sessionId;
-            
             document.getElementById('btn-am').classList.remove('active');
             document.getElementById('btn-pm').classList.remove('active');
             
-            if(sessionId === 'us_ny_futures') {
-                document.getElementById('btn-am').classList.add('active');
-            } else {
-                document.getElementById('btn-pm').classList.add('active');
-            }
+            if(sessionId === 'us_ny_futures') document.getElementById('btn-am').classList.add('active');
+            else document.getElementById('btn-pm').classList.add('active');
+            
+            forceScan();
+        }
+
+        function switchExecutionMode(mode) {
+            executionMode = mode;
+            document.getElementById('btn-agg').classList.remove('active');
+            document.getElementById('btn-con').classList.remove('active');
+            
+            if(mode === 'AGGRESSIVE') document.getElementById('btn-agg').classList.add('active');
+            else document.getElementById('btn-con').classList.add('active');
             
             forceScan();
         }
@@ -425,10 +436,31 @@
                     }
 
                     let borderTheme = t.color_code;
+                    let displayGrade = t.grade;
+                    let displayFavored = t.favored;
+                    let displaySubtext = `${t.favored} FAVORED (${t.score_pct.toFixed(0)}%)`;
                     let actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px;" onclick="openModal('${t.symbol}')">LOCK TARGET →</button>`;
                     
                     if(t.grade === "STAND DOWN") {
                         actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px; color:#ef4444; border-color:#ef4444;" disabled>NO TRADE</button>`;
+                    } else if (executionMode === 'CONSERVATIVE' && t.predator_audit && t.predator_audit.active) {
+                        let p_audit = t.predator_audit;
+                        if (p_audit.status === "AWAITING") {
+                            borderTheme = "GRAY";
+                            displayGrade = "AWAITING PREDATOR";
+                            displaySubtext = "AWAITING 09:45 EST RESOLUTION";
+                            actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px; color:#94a3b8; border-color:#334155;" disabled>AWAITING</button>`;
+                        } else if (p_audit.status === "ABORT") {
+                            borderTheme = "RED";
+                            displayGrade = "STRUCTURE FAILED";
+                            displaySubtext = p_audit.message;
+                            actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px; color:#ef4444; border-color:#ef4444;" disabled>NO TRADE</button>`;
+                        } else if (p_audit.status === "EXECUTE") {
+                            borderTheme = "GREEN";
+                            displayGrade = "PREDATOR CLEARED";
+                            displaySubtext = p_audit.message;
+                            actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px;" onclick="openModal('${t.symbol}')">LOCK TARGET →</button>`;
+                        }
                     }
 
                     html += `
@@ -439,8 +471,8 @@
                         </div>
 
                         <div style="display:flex; flex-direction:column; justify-content:center; align-items:center;">
-                            <div style="font-family:'Rajdhani'; font-size:24px; font-weight:800; color:var(--${borderTheme.toLowerCase()});">${t.grade}</div>
-                            <div style="font-size:12px; color:#94a3b8; font-family:'JetBrains Mono'; margin-top:4px;">${t.favored} FAVORED (${t.score_pct.toFixed(0)}%)</div>
+                            <div style="font-family:'Rajdhani'; font-size:24px; font-weight:800; color:var(--${borderTheme.toLowerCase()});">${displayGrade}</div>
+                            <div style="font-size:10px; color:#94a3b8; font-family:'JetBrains Mono'; margin-top:4px; text-align:center; max-width:200px;">${displaySubtext}</div>
                         </div>
 
                         <div style="display:flex; flex-direction:column; gap:8px; justify-content:center; align-items:flex-end;">
