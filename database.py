@@ -23,14 +23,19 @@ def get_db():
 def init_db():
     Base.metadata.create_all(bind=engine)
     
-    # --- MIGRATION PATCH ---
-    # Forces the database to append the new time-tracking columns if they are missing.
+    # --- MIGRATION PATCH (POSTGRESQL SAFE) ---
+    # We must use TIMESTAMP for Postgres compatibility and isolate the executions.
     try:
         with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN activated_at DATETIME"))
-            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN closed_at DATETIME"))
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN activated_at TIMESTAMP"))
     except Exception:
-        pass # Columns already exist, move on silently.
+        pass 
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN closed_at TIMESTAMP"))
+    except Exception:
+        pass 
 
 # ---------------------------------------------------------
 # EXISTING USER MODEL
