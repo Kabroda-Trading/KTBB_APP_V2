@@ -1,7 +1,7 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v12.0 (THE DECISION ENGINE)
-# AUDIT CONTEXT: Multi-Timeframe Confluence Enforced. False 100% logic eradicated.
+# KABRODA MARKET RADAR v12.1 (THE DECISION ENGINE)
+# AUDIT CONTEXT: RSI Ledgers Restored. RSI Overbought/Oversold Exhaustion Penalty Enforced.
 # ==============================================================================
 import os
 import json
@@ -82,17 +82,22 @@ def _score_setup(vector: str, macro: str, micro: str, fuel: dict, audit: dict):
     max_score = 15
     checks = []
 
+    f_1h = fuel.get("1H", {})
+    f_4h = fuel.get("4H", {})
+    
+    rsi_1h = f_1h.get("rsi", 50)
+    rsi_4h = f_4h.get("rsi", 50)
+
+    # 1. Base Confluence Scoring
     if vector == "LONG" and macro == "BULLISH": score += 2; checks.append("Macro Aligned")
     elif vector == "SHORT" and macro == "BEARISH": score += 2; checks.append("Macro Aligned")
     
     if vector == "LONG" and micro == "BULLISH": score += 2; checks.append("Micro Aligned")
     elif vector == "SHORT" and micro == "BEARISH": score += 2; checks.append("Micro Aligned")
 
-    f_1h = fuel.get("1H", {})
     if vector == "LONG" and f_1h.get("trend") == "BULLISH": score += 3; checks.append("1H EMA Fuel Aligned")
     elif vector == "SHORT" and f_1h.get("trend") == "BEARISH": score += 3; checks.append("1H EMA Fuel Aligned")
 
-    f_4h = fuel.get("4H", {})
     if f_4h.get("momentum") == "POSITIVE" and vector == "LONG": score += 2; checks.append("4H MACD Momentum")
     elif f_4h.get("momentum") == "NEGATIVE" and vector == "SHORT": score += 2; checks.append("4H MACD Momentum")
 
@@ -101,11 +106,21 @@ def _score_setup(vector: str, macro: str, micro: str, fuel: dict, audit: dict):
     
     score += 1; checks.append("Primal Gap Confirmed")
 
-    pct = (score / max_score) * 100
+    # 2. AUDIT FIX: The Exhaustion Penalty (Prevents buying tops / shorting bottoms)
+    if vector == "LONG" and (rsi_1h > 75 or rsi_4h > 75):
+        score -= 5
+        checks.append("⚠️ Overbought Exhaustion (RSI > 75)")
+    elif vector == "SHORT" and (rsi_1h < 25 or rsi_4h < 25):
+        score -= 5
+        checks.append("⚠️ Oversold Exhaustion (RSI < 25)")
+
+    # 3. Final Grade Calculation
+    pct = max(0, (score / max_score) * 100) # Ensure it doesn't drop below 0%
     if pct >= 86: grade = "GRADE A"
     elif pct >= 73: grade = "GRADE B"
     else: grade = "STAND DOWN"
 
+    # 4. Diagnostic Ledger (RSI Restored)
     diagnostic_ledger = {
         "vector_direction": vector,
         "macro_bias": macro,
@@ -113,7 +128,10 @@ def _score_setup(vector: str, macro: str, micro: str, fuel: dict, audit: dict):
         "1h_trend": f_1h.get("trend", "UNKNOWN"),
         "1h_ema30": f_1h.get("ema30", 0),
         "1h_ema50": f_1h.get("ema50", 0),
+        "1h_rsi": round(rsi_1h, 2),
+        "4h_trend": f_4h.get("trend", "UNKNOWN"),
         "4h_momentum": f_4h.get("momentum", "UNKNOWN"),
+        "4h_rsi": round(rsi_4h, 2),
         "airspace_clear": audit["airspace_clear"],
         "has_shield": audit["has_shield"],
         "radar_score": pct
@@ -205,7 +223,7 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
     elif grade == "GRADE B":
         briefing = "🟡 STANDARD OPERATION. Executable, but strictly level-to-level. 30% Ride / 70% Scale."
     else:
-        briefing = "🔴 ABORT. Insufficient fuel or heavy structural blockades detected."
+        briefing = "🔴 ABORT. Insufficient fuel, heavy blockades, or market exhaustion detected."
 
     plan = {
         "valid": grade in ["GRADE A", "GRADE B"],
