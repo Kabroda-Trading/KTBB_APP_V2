@@ -35,7 +35,7 @@ def _evaluate_state(log: CampaignLog, high: float, low: float):
     if log.status in ["ACTIVE", "T1_HIT", "T2_HIT"]:
         current_stop = log.entry_price if log.status in ["T1_HIT", "T2_HIT"] else log.stop_loss
         
-        # 1. Stop Out (Fixed to catch aggressive moves through the line)
+        # 1. Stop Out
         if (is_long and low <= current_stop) or (not is_long and high >= current_stop):
             if log.status == "ACTIVE":
                 loss = (current_stop - log.entry_price) * log.total_contracts if is_long else (log.entry_price - current_stop) * log.total_contracts
@@ -82,29 +82,37 @@ async def sync_daily_campaigns():
             )
             
             plan = dossier.get("plan", {})
-            if plan.get("valid"):
-                exists = db.query(CampaignLog).filter(
-                    CampaignLog.symbol == lock.symbol,
-                    CampaignLog.session_id == lock.session_id,
-                    CampaignLog.date_key == date_key
-                ).first()
+            
+            exists = db.query(CampaignLog).filter(
+                CampaignLog.symbol == lock.symbol,
+                CampaignLog.session_id == lock.session_id,
+                CampaignLog.date_key == date_key
+            ).first()
+            
+            if not exists:
+                risk_amt = 1000.00 
+                dist = abs(plan.get("entry", 0.0) - plan.get("stop", 0.0))
+                total_contracts = (risk_amt / dist) if dist > 0 else 0.0
                 
-                if not exists:
-                    risk_amt = 1000.00 
-                    dist = abs(plan["entry"] - plan["stop"])
-                    total_contracts = (risk_amt / dist) if dist > 0 else 0
-                    
-                    # --- NEW: EXTRACT THE DIAGNOSTIC LEDGER FOR DB SERIALIZATION ---
-                    diagnostics_payload = dossier.get("diagnostic_ledger", {})
-                    
-                    new_log = CampaignLog(
-                        symbol=lock.symbol, date_key=date_key, session_id=lock.session_id,
-                        bias=plan["bias"], grade=dossier["grade"], entry_price=plan["entry"],
-                        stop_loss=plan["stop"], t1=plan["targets"][0], t2=plan["targets"][1], t3=plan["targets"][2],
-                        total_contracts=total_contracts,
-                        diagnostic_data=json.dumps(diagnostics_payload)
-                    )
-                    db.add(new_log)
+                diagnostics_payload = dossier.get("diagnostic_ledger", {})
+                
+                # AUDIT FIX: Determine if this is an active deployment or a Stand Down.
+                # We log EVERYTHING to eliminate survivorship bias in the data architecture.
+                initial_status = "PENDING" if plan.get("valid") else "STAND_DOWN"
+                targets = plan.get("targets", [0.0, 0.0, 0.0])
+                
+                new_log = CampaignLog(
+                    symbol=lock.symbol, date_key=date_key, session_id=lock.session_id,
+                    bias=plan.get("bias", "NEUTRAL"), grade=dossier["grade"], 
+                    entry_price=plan.get("entry", 0.0), stop_loss=plan.get("stop", 0.0), 
+                    t1=targets[0] if len(targets) > 0 else 0.0, 
+                    t2=targets[1] if len(targets) > 1 else 0.0, 
+                    t3=targets[2] if len(targets) > 2 else 0.0,
+                    total_contracts=total_contracts,
+                    status=initial_status,
+                    diagnostic_data=json.dumps(diagnostics_payload)
+                )
+                db.add(new_log)
         db.commit()
     except Exception as e:
         traceback.print_exc()
@@ -112,12 +120,13 @@ async def sync_daily_campaigns():
         db.close()
 
 async def run_campaign_tracker_loop():
-    print(">>> CAMPAIGN ENGINE: Mission Ledger Daemon Online...")
+    print(">>> CAMPAIGN ENGINE: Mission Ledger Daemon Online (100% Data Capture Active)...")
     while True:
         await sync_daily_campaigns()
         
         db = SessionLocal()
         try:
+            # The Daemon only evaluates price action for live trades. STAND_DOWN rows are ignored.
             active_logs = db.query(CampaignLog).filter(
                 CampaignLog.status.in_(["PENDING", "ACTIVE", "T1_HIT", "T2_HIT"])
             ).all()
@@ -147,7 +156,7 @@ async def run_campaign_tracker_loop():
                     unseen_candles = [c for c in candles_5m if int(c["time"]) >= last_check_ts - 300]
                     
                     for candle in unseen_candles:
-                        if log.status in ["CLOSED_WIN", "CLOSED_LOSS", "CLOSED_SCRATCH", "EXPIRED"]:
+                        if log.status in ["CLOSED_WIN", "CLOSED_LOSS", "CLOSED_SCRATCH", "EXPIRED", "STAND_DOWN"]:
                             break 
                         _evaluate_state(log, float(candle["high"]), float(candle["low"]))
                         
