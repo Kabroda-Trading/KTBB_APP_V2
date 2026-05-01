@@ -1,9 +1,6 @@
 # market_radar.py
 # ==============================================================================
 # KABRODA MARKET RADAR v11.4 (THE DECISION ENGINE)
-# UPDATE: 10-Point Weighted Scorecard Integrated.
-# FIX: Radar now strictly consumes locked KDE and Fib data from the Pipeline SSOT.
-#      Live math bypasses removed to permanently eliminate intraday drift.
 # ==============================================================================
 import os
 import json
@@ -24,7 +21,6 @@ def _make_indicator_string(levels):
     return f"{levels.get('breakout_trigger',0)},{levels.get('breakdown_trigger',0)},{levels.get('daily_resistance',0)},{levels.get('daily_support',0)},{levels.get('range30m_high',0)},{levels.get('range30m_low',0)}"
 
 def _run_gravity_audit(entry: float, vector: str, peaks: list, fibs: dict, levels: dict):
-    """Scans the KDE Gravity Map for Shields, Blockades, and Targets."""
     audit = {
         "shield_price": 0.0, "t1": 0.0, "t2": 0.0, "t3": 0.0,
         "has_shield": False, "airspace_clear": True
@@ -42,7 +38,6 @@ def _run_gravity_audit(entry: float, vector: str, peaks: list, fibs: dict, level
     
     if vector == "LONG":
         audit["t1"] = entry + (gap * 0.618)
-        
         heavy_und = [p for p in underneath if p["intensity"] in ["HEAVY", "MAXIMUM"]]
         if heavy_und:
             audit["shield_price"] = heavy_und[0]["price"] * 0.998
@@ -63,7 +58,6 @@ def _run_gravity_audit(entry: float, vector: str, peaks: list, fibs: dict, level
 
     elif vector == "SHORT":
         audit["t1"] = entry - (gap * 0.618)
-        
         heavy_ovr = [p for p in overhead if p["intensity"] in ["HEAVY", "MAXIMUM"]]
         if heavy_ovr:
             audit["shield_price"] = heavy_ovr[0]["price"] * 1.002
@@ -85,7 +79,6 @@ def _run_gravity_audit(entry: float, vector: str, peaks: list, fibs: dict, level
     return audit
 
 def _score_setup(vector: str, macro: str, micro: str, fuel: dict, audit: dict):
-    """The 10-Point Kabroda Matrix."""
     score = 0
     max_score = 15
     checks = []
@@ -110,39 +103,48 @@ def _score_setup(vector: str, macro: str, micro: str, fuel: dict, audit: dict):
     score += 1; checks.append("Primal Gap Confirmed")
 
     pct = (score / max_score) * 100
-    
     if pct >= 86: grade = "GRADE A"
     elif pct >= 73: grade = "GRADE B"
     else: grade = "STAND DOWN"
 
-    return grade, pct, checks
+    # --- NEW: RAW DIAGNOSTIC LEDGER ---
+    diagnostic_ledger = {
+        "vector_direction": vector,
+        "macro_bias": macro,
+        "micro_bias": micro,
+        "1h_trend": f_1h.get("trend", "UNKNOWN"),
+        "1h_ema30": f_1h.get("ema30", 0),
+        "1h_ema50": f_1h.get("ema50", 0),
+        "1h_rsi": f_1h.get("rsi", 0),
+        "4h_trend": f_4h.get("trend", "UNKNOWN"),
+        "4h_momentum": f_4h.get("momentum", "UNKNOWN"),
+        "4h_rsi": f_4h.get("rsi", 0),
+        "airspace_clear": audit["airspace_clear"],
+        "has_shield": audit["has_shield"],
+        "radar_score": pct
+    }
+
+    return grade, pct, checks, diagnostic_ledger
 
 def _audit_predator_candle(plan: dict, raw_15m: list, session_id: str):
-    """Audits the 9:30 AM EST 15m candle against the locked Kabroda structural map."""
-    if session_id not in ["us_ny_futures", "us_ny_equity"]:
-        return {"active": False}
-
-    if not plan.get("valid"):
-        return {"active": False}
+    if session_id not in ["us_ny_futures", "us_ny_equity"]: return {"active": False}
+    if not plan.get("valid"): return {"active": False}
 
     ny_tz = pytz.timezone("America/New_York")
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     now_ny = now_utc.astimezone(ny_tz)
 
     target_ny = now_ny.replace(hour=9, minute=30, second=0, microsecond=0)
-    if now_ny.hour < 8:
-        target_ny -= timedelta(days=1)
+    if now_ny.hour < 8: target_ny -= timedelta(days=1)
 
     target_end_ny = target_ny + timedelta(minutes=15)
-    
     if now_ny < target_end_ny:
         return {"active": True, "status": "AWAITING", "message": "AWAITING PREDATOR RESOLUTION (09:45 EST)"}
 
     target_ts = int(target_ny.timestamp())
     predator_candle = next((c for c in raw_15m if int(c["time"]) == target_ts), None)
 
-    if not predator_candle:
-        return {"active": True, "status": "AWAITING", "message": "AWAITING CANDLE DATA..."}
+    if not predator_candle: return {"active": True, "status": "AWAITING", "message": "AWAITING CANDLE DATA..."}
 
     c_close = float(predator_candle["close"])
     c_high = float(predator_candle["high"])
@@ -152,20 +154,14 @@ def _audit_predator_candle(plan: dict, raw_15m: list, session_id: str):
     bias = plan["bias"]
 
     if bias == "SHORT":
-        if c_close > stop:
-            return {"active": True, "status": "ABORT", "message": "🔴 STRUCTURE COMPROMISED: Bulls claimed the Gravity Well."}
-        elif c_low <= t1:
-            return {"active": True, "status": "ABORT", "message": "🟡 MOVE EXHAUSTED: Volatility cleared Target 1 liquidity."}
-        else:
-            return {"active": True, "status": "EXECUTE", "message": "🟢 INTEGRITY CONFIRMED: Structure held. Set Trigger Order."}
+        if c_close > stop: return {"active": True, "status": "ABORT", "message": "🔴 STRUCTURE COMPROMISED: Bulls claimed the Gravity Well."}
+        elif c_low <= t1: return {"active": True, "status": "ABORT", "message": "🟡 MOVE EXHAUSTED: Volatility cleared Target 1 liquidity."}
+        else: return {"active": True, "status": "EXECUTE", "message": "🟢 INTEGRITY CONFIRMED: Structure held. Set Trigger Order."}
             
     elif bias == "LONG":
-        if c_close < stop:
-            return {"active": True, "status": "ABORT", "message": "🔴 STRUCTURE COMPROMISED: Bears claimed the Gravity Well."}
-        elif c_high >= t1:
-            return {"active": True, "status": "ABORT", "message": "🟡 MOVE EXHAUSTED: Volatility cleared Target 1 liquidity."}
-        else:
-            return {"active": True, "status": "EXECUTE", "message": "🟢 INTEGRITY CONFIRMED: Structure held. Set Trigger Order."}
+        if c_close < stop: return {"active": True, "status": "ABORT", "message": "🔴 STRUCTURE COMPROMISED: Bears claimed the Gravity Well."}
+        elif c_high >= t1: return {"active": True, "status": "ABORT", "message": "🟡 MOVE EXHAUSTED: Volatility cleared Target 1 liquidity."}
+        else: return {"active": True, "status": "EXECUTE", "message": "🟢 INTEGRITY CONFIRMED: Structure held. Set Trigger Order."}
 
     return {"active": False}
 
@@ -185,11 +181,11 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
         return {
             "favored": "NEUTRAL", "grade": "STAND DOWN", "score_pct": 0, "color_code": "GRAY",
             "briefing": "Market is in absolute neutral consolidation. Stand down.",
-            "checks": [], "plan": {"valid": False}, "predator_audit": {"active": False}
+            "checks": [], "diagnostic_ledger": {}, "plan": {"valid": False}, "predator_audit": {"active": False}
         }
         
     audit = _run_gravity_audit(entry, favored, kde_peaks, macro_fibs, levels)
-    grade, score_pct, checks = _score_setup(favored, macro_bias, micro_bias, fuel_gauge, audit)
+    grade, score_pct, checks, diagnostic_ledger = _score_setup(favored, macro_bias, micro_bias, fuel_gauge, audit)
     
     color = "GRAY"
     if grade == "GRADE A": color = "GREEN"
@@ -197,39 +193,31 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
     elif grade == "STAND DOWN": color = "RED"
 
     briefing = ""
-    if grade == "GRADE A":
-        briefing = "🟢 ELITE ALIGNMENT. Fuel and structure are synchronized. 70% Ride / 30% Scale recommended. Maximum capture."
-    elif grade == "GRADE B":
-        briefing = "🟡 STANDARD OPERATION. Executable, but strictly level-to-level. 30% Ride / 70% Scale. Secure early profits at Target 1."
-    else:
-        briefing = "🔴 ABORT. Insufficient fuel or heavy structural blockades detected. Probability is too low for execution."
+    if grade == "GRADE A": briefing = "🟢 ELITE ALIGNMENT. Fuel and structure are synchronized. 70% Ride / 30% Scale recommended."
+    elif grade == "GRADE B": briefing = "🟡 STANDARD OPERATION. Executable, but strictly level-to-level. 30% Ride / 70% Scale."
+    else: briefing = "🔴 ABORT. Insufficient fuel or heavy structural blockades detected. Probability is too low."
 
     plan = {
         "valid": grade in ["GRADE A", "GRADE B"],
-        "bias": favored,
-        "entry": entry,
-        "stop": audit["shield_price"],
+        "bias": favored, "entry": entry, "stop": audit["shield_price"],
         "targets": [audit["t1"], audit["t2"], audit["t3"]]
     }
     
     predator_audit = _audit_predator_candle(plan, raw_15m, session_id)
-    
     key = f"{plan['bias']}|{grade}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}|{macro_bias}|{micro_bias}" if plan["valid"] else ""
 
     return {
         "favored": favored, "grade": grade, "score_pct": score_pct, "color_code": color,
-        "briefing": briefing, "checks": checks, "plan": plan, "key": key,
-        "predator_audit": predator_audit
+        "briefing": briefing, "checks": checks, "diagnostic_ledger": diagnostic_ledger, 
+        "plan": plan, "key": key, "predator_audit": predator_audit
     }
 
 def log_to_google_sheet(radar_item):
     if radar_item.get("symbol") not in ["BTCUSDT", "ETHUSDT", "SOLUSDT"]: return
-
     try:
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         google_creds_str = os.environ.get("GOOGLE_CREDENTIALS_JSON")
         if not google_creds_str: return
-
         creds_dict = json.loads(google_creds_str)
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         client = gspread.authorize(creds)
@@ -257,31 +245,16 @@ def log_to_google_sheet(radar_item):
 
         timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
         plan = radar_item.get("plan", {})
-        
-        try:
-            bo, bd, dr, ds, r30h, r30l = radar_item.get("indicator_string", "0,0,0,0,0,0").split(',')
-        except:
-            bo = bd = dr = ds = r30h = r30l = 0
+        try: bo, bd, dr, ds, r30h, r30l = radar_item.get("indicator_string", "0,0,0,0,0,0").split(',')
+        except: bo = bd = dr = ds = r30h = r30l = 0
 
         row_data = [
-            timestamp,                             
-            radar_item["symbol"],                  
-            radar_item.get("macro_bias", ""),              
-            radar_item.get("micro_bias", ""),              
-            radar_item.get("favored", ""),                               
-            radar_item.get("grade", ""),                                  
-            "Yes" if plan.get("valid") else "No",                            
-            plan.get("entry", 0),                  
-            plan.get("stop", 0),                   
-            plan.get("targets", [0,0,0])[0],       
-            plan.get("targets", [0,0,0])[1],       
-            plan.get("targets", [0,0,0])[2],       
-            radar_item.get("score_pct", 0),                       
-            "", "", "", "",                        
-            0, 0,                             
-            r30h, r30l, bo, bd, dr, ds                                     
+            timestamp, radar_item["symbol"], radar_item.get("macro_bias", ""), radar_item.get("micro_bias", ""),              
+            radar_item.get("favored", ""), radar_item.get("grade", ""), "Yes" if plan.get("valid") else "No",                            
+            plan.get("entry", 0), plan.get("stop", 0), plan.get("targets", [0,0,0])[0],       
+            plan.get("targets", [0,0,0])[1], plan.get("targets", [0,0,0])[2], radar_item.get("score_pct", 0),                       
+            "", "", "", "", 0, 0, r30h, r30l, bo, bd, dr, ds                                     
         ]
-
         sheet.append_row(row_data)
     except Exception as e:
         print(f"❌ Failed to log to Google Sheets: {e}")
@@ -332,7 +305,6 @@ async def scan_sector(session_id="us_ny_futures"):
         macro_bias = context.get("macro_bias", "NEUTRAL")
         micro_bias = context.get("micro_bias", "NEUTRAL")
         fuel_gauge = context.get("fuel_gauge", {})
-
         kde_peaks = context.get("kde_peaks", [])
         macro_fibs = context.get("macro_fibs", {})
 
