@@ -6,7 +6,7 @@
 import asyncio
 import json
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from database import SessionLocal, SessionLock, CampaignLog
 import battlebox_pipeline
@@ -22,20 +22,20 @@ def _evaluate_state(log: CampaignLog, high: float, low: float):
     t1_vol, runner_vol = _calculate_scale_split(log.grade, log.total_contracts)
     now_utc = datetime.now(timezone.utc)
 
-    # --- PENDING -> ACTIVE ---
+    # --- PENDING -> ACTIVE (FIXED GAP-SAFE LIMIT LOGIC) ---
     if log.status == "PENDING":
-        if is_long and low <= log.entry_price <= high:
+        if is_long and low <= log.entry_price:
             log.status = "ACTIVE"
-            log.activated_at = now_utc # NEW: Stamp Entry Time
-        elif not is_long and low <= log.entry_price <= high:
+            log.activated_at = now_utc 
+        elif not is_long and high >= log.entry_price:
             log.status = "ACTIVE"
-            log.activated_at = now_utc # NEW: Stamp Entry Time
+            log.activated_at = now_utc 
 
     # --- ACTIVE MANAGEMENT ---
     if log.status in ["ACTIVE", "T1_HIT", "T2_HIT"]:
         current_stop = log.entry_price if log.status in ["T1_HIT", "T2_HIT"] else log.stop_loss
         
-        # 1. Stop Out
+        # 1. Stop Out (Fixed to catch aggressive moves through the line)
         if (is_long and low <= current_stop) or (not is_long and high >= current_stop):
             if log.status == "ACTIVE":
                 loss = (current_stop - log.entry_price) * log.total_contracts if is_long else (log.entry_price - current_stop) * log.total_contracts
@@ -43,7 +43,7 @@ def _evaluate_state(log: CampaignLog, high: float, low: float):
                 log.status = "CLOSED_LOSS"
             else:
                 log.status = "CLOSED_SCRATCH" 
-            log.closed_at = now_utc # NEW: Stamp Termination Time
+            log.closed_at = now_utc 
             return
 
         # 2. Target Progression
@@ -62,7 +62,7 @@ def _evaluate_state(log: CampaignLog, high: float, low: float):
                 profit = (log.t3 - log.entry_price) * runner_vol if is_long else (log.entry_price - log.t3) * runner_vol
                 log.realized_pnl += profit
                 log.status = "CLOSED_WIN"
-                log.closed_at = now_utc # NEW: Stamp Termination Time
+                log.closed_at = now_utc 
 
 async def sync_daily_campaigns():
     db = SessionLocal()
@@ -121,18 +121,39 @@ async def run_campaign_tracker_loop():
             targets_to_fetch = set([log.symbol for log in active_logs])
             
             for symbol in targets_to_fetch:
-                candles_5m = await battlebox_pipeline.fetch_live_5m(symbol, limit=3)
+                # AUDIT FIX: Pull 288 candles (24 hours of 5m data) to prevent polling blindspots.
+                candles_5m = await battlebox_pipeline.fetch_live_5m(symbol, limit=288)
                 if not candles_5m: continue
-                
-                high_px = max([float(c["high"]) for c in candles_5m])
-                low_px  = min([float(c["low"]) for c in candles_5m])
                 
                 symbol_logs = [log for log in active_logs if log.symbol == symbol]
                 for log in symbol_logs:
                     old_status = log.status
-                    _evaluate_state(log, high_px, low_px)
+                    now_utc = datetime.now(timezone.utc)
+                    
+                    # Ensure timezone awareness for SQL Alchemy naive datetimes
+                    log_created_utc = log.created_at.replace(tzinfo=timezone.utc) if log.created_at.tzinfo is None else log.created_at
+                    
+                    # AUDIT FIX: Temporal Expiration (4-Hour Session TTL)
+                    if log.status == "PENDING" and (now_utc - log_created_utc).total_seconds() > 14400:
+                        log.status = "EXPIRED"
+                        log.closed_at = now_utc
+                        log.updated_at = now_utc
+                        print(f"[MISSION LEDGER] {symbol} | Status Update: PENDING -> EXPIRED (4-Hour Session TTL Reached)")
+                        continue
+
+                    # AUDIT FIX: Chronological State Evaluation
+                    # We evaluate only candles that occurred AFTER our last known update to prevent ghost-fills.
+                    last_check_ts = int(log.updated_at.timestamp()) if log.updated_at else int(log_created_utc.timestamp())
+                    unseen_candles = [c for c in candles_5m if int(c["time"]) >= last_check_ts - 300]
+                    
+                    for candle in unseen_candles:
+                        if log.status in ["CLOSED_WIN", "CLOSED_LOSS", "CLOSED_SCRATCH", "EXPIRED"]:
+                            break # Terminal state reached, stop evaluating.
+                            
+                        _evaluate_state(log, float(candle["high"]), float(candle["low"]))
+                        
                     if old_status != log.status:
-                        log.updated_at = datetime.now(timezone.utc)
+                        log.updated_at = now_utc
                         print(f"[MISSION LEDGER] {symbol} | Status Update: {old_status} -> {log.status} | PnL: ${log.realized_pnl:.2f}")
             db.commit()
         except Exception as e:
