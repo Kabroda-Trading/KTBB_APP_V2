@@ -23,8 +23,7 @@ def get_db():
 def init_db():
     Base.metadata.create_all(bind=engine)
     
-    # --- MIGRATION PATCH (POSTGRESQL SAFE) ---
-    # We must use TIMESTAMP for Postgres compatibility and isolate the executions.
+    # --- MIGRATION PATCHES (POSTGRESQL SAFE) ---
     try:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN activated_at TIMESTAMP"))
@@ -34,6 +33,12 @@ def init_db():
     try:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN closed_at TIMESTAMP"))
+    except Exception:
+        pass 
+        
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN diagnostic_data TEXT"))
     except Exception:
         pass 
 
@@ -123,3 +128,5 @@ class CampaignLog(Base):
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    
+    diagnostic_data = Column(String, nullable=True)

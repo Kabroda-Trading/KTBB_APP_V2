@@ -94,11 +94,15 @@ async def sync_daily_campaigns():
                     dist = abs(plan["entry"] - plan["stop"])
                     total_contracts = (risk_amt / dist) if dist > 0 else 0
                     
+                    # --- NEW: EXTRACT THE DIAGNOSTIC LEDGER FOR DB SERIALIZATION ---
+                    diagnostics_payload = dossier.get("diagnostic_ledger", {})
+                    
                     new_log = CampaignLog(
                         symbol=lock.symbol, date_key=date_key, session_id=lock.session_id,
                         bias=plan["bias"], grade=dossier["grade"], entry_price=plan["entry"],
                         stop_loss=plan["stop"], t1=plan["targets"][0], t2=plan["targets"][1], t3=plan["targets"][2],
-                        total_contracts=total_contracts
+                        total_contracts=total_contracts,
+                        diagnostic_data=json.dumps(diagnostics_payload)
                     )
                     db.add(new_log)
         db.commit()
@@ -121,7 +125,6 @@ async def run_campaign_tracker_loop():
             targets_to_fetch = set([log.symbol for log in active_logs])
             
             for symbol in targets_to_fetch:
-                # AUDIT FIX: Pull 288 candles (24 hours of 5m data) to prevent polling blindspots.
                 candles_5m = await battlebox_pipeline.fetch_live_5m(symbol, limit=288)
                 if not candles_5m: continue
                 
@@ -130,10 +133,9 @@ async def run_campaign_tracker_loop():
                     old_status = log.status
                     now_utc = datetime.now(timezone.utc)
                     
-                    # Ensure timezone awareness for SQL Alchemy naive datetimes
                     log_created_utc = log.created_at.replace(tzinfo=timezone.utc) if log.created_at.tzinfo is None else log.created_at
                     
-                    # AUDIT FIX: Temporal Expiration (4-Hour Session TTL)
+                    # 4-Hour Session TTL Expiration
                     if log.status == "PENDING" and (now_utc - log_created_utc).total_seconds() > 14400:
                         log.status = "EXPIRED"
                         log.closed_at = now_utc
@@ -141,15 +143,12 @@ async def run_campaign_tracker_loop():
                         print(f"[MISSION LEDGER] {symbol} | Status Update: PENDING -> EXPIRED (4-Hour Session TTL Reached)")
                         continue
 
-                    # AUDIT FIX: Chronological State Evaluation
-                    # We evaluate only candles that occurred AFTER our last known update to prevent ghost-fills.
                     last_check_ts = int(log.updated_at.timestamp()) if log.updated_at else int(log_created_utc.timestamp())
                     unseen_candles = [c for c in candles_5m if int(c["time"]) >= last_check_ts - 300]
                     
                     for candle in unseen_candles:
                         if log.status in ["CLOSED_WIN", "CLOSED_LOSS", "CLOSED_SCRATCH", "EXPIRED"]:
-                            break # Terminal state reached, stop evaluating.
-                            
+                            break 
                         _evaluate_state(log, float(candle["high"]), float(candle["low"]))
                         
                     if old_status != log.status:

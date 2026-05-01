@@ -3,6 +3,7 @@
 # KABRODA UNIFIED SERVER: BATTLEBOX v10.4 (CAMPAIGN DAEMON)
 # ---------------------------------------------------------
 import os
+import json # AUDIT FIX: Required for Diagnostic Ledger parsing
 import traceback
 from typing import Any, Dict, Optional
 import asyncio
@@ -24,7 +25,7 @@ import research_lab
 import market_simulator  
 import gravity_engine  
 import gravity_math
-import campaign_engine  # NEW: The Mission Ledger Daemon
+import campaign_engine  # The Mission Ledger Daemon
 
 from database import init_db, get_db, UserModel, CampaignLog
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
@@ -166,7 +167,6 @@ async def gravity_map_page(request: Request, db: Session = Depends(get_db)):
     require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "gravity_map.html", ctx)
 
-# NEW: Mission Ledger Route
 @app.get("/suite/mission-ledger")
 async def mission_ledger_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
@@ -189,7 +189,6 @@ async def api_gravity_scan(symbol: str = "BTC/USDT"):
         "macro_fibs": macro_fibs
     })
 
-# NEW: Mission Ledger API Data
 @app.get("/api/campaign/logs")
 async def get_campaign_logs(db: Session = Depends(get_db)):
     logs = db.query(CampaignLog).order_by(CampaignLog.created_at.desc()).all()
@@ -258,6 +257,7 @@ async def account_settings(request: Request, db: Session = Depends(get_db)):
         db.commit()
     return {"status": "ok"}
 
+# --- ADMIN ROUTES ---
 @app.get("/admin/simulator")
 async def admin_simulator_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
@@ -283,6 +283,34 @@ async def admin_roster_page(request: Request, db: Session = Depends(get_db)):
     users = db.query(UserModel).all()
     ctx["users"] = users
     return _template_or_fallback(request, templates, "admin.html", ctx)
+
+# NEW: STRUCTURED DIAGNOSTIC VAULT EXPORT
+@app.get("/admin/export-audit-ledger")
+async def export_audit_ledger(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"): 
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=403)
+        
+    logs = db.query(CampaignLog).order_by(CampaignLog.created_at.desc()).all()
+    audit_data = []
+    
+    for l in logs:
+        try:
+            diagnostics = json.loads(l.diagnostic_data) if l.diagnostic_data else {}
+        except Exception:
+            diagnostics = {}
+            
+        audit_data.append({
+            "trade_id": l.id,
+            "symbol": l.symbol,
+            "date": l.date_key,
+            "bias": l.bias,
+            "status": l.status,
+            "realized_pnl": l.realized_pnl,
+            "diagnostics": diagnostics
+        })
+        
+    return JSONResponse({"ok": True, "total_records": len(audit_data), "ledger": audit_data})
 
 @app.post("/admin/delete-user")
 async def admin_delete_user(request: Request, user_id: str = Form(...), db: Session = Depends(get_db)):
@@ -322,6 +350,7 @@ async def admin_reset_password(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"ok": True})
     return JSONResponse({"ok": False, "error": "User not found"})
 
+# --- API EXECUTION ROUTES ---
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     uid = request.session.get(auth.SESSION_KEY)
