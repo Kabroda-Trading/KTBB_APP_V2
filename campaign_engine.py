@@ -1,6 +1,7 @@
 # campaign_engine.py
 # ==============================================================================
 # KABRODA CAMPAIGN STATE MACHINE (THE MISSION LEDGER DAEMON)
+# AUDIT CONTEXT: Database Schema crash resolved. 100% SSOT Data Capture Enforced.
 # ==============================================================================
 
 import asyncio
@@ -22,7 +23,7 @@ def _evaluate_state(log: CampaignLog, high: float, low: float):
     t1_vol, runner_vol = _calculate_scale_split(log.grade, log.total_contracts)
     now_utc = datetime.now(timezone.utc)
 
-    # --- PENDING -> ACTIVE (FIXED GAP-SAFE LIMIT LOGIC) ---
+    # --- PENDING -> ACTIVE (GAP-SAFE LIMIT LOGIC) ---
     if log.status == "PENDING":
         if is_long and low <= log.entry_price:
             log.status = "ACTIVE"
@@ -91,19 +92,30 @@ async def sync_daily_campaigns():
             
             if not exists:
                 risk_amt = 1000.00 
-                dist = abs(plan.get("entry", 0.0) - plan.get("stop", 0.0))
+                
+                # AUDIT FIX: Prevents Database crash by securely extracting SSOT fallback price.
+                last_price = 0.0
+                if "meta" in pkt and "last_price" in pkt["meta"]:
+                    last_price = float(pkt["meta"]["last_price"])
+                elif "levels" in pkt and "range30m_high" in pkt["levels"]:
+                    last_price = float(pkt["levels"]["range30m_high"])
+                
+                entry_ref = plan.get("entry", 0.0) if plan.get("valid") else last_price
+                stop_ref = plan.get("stop", 0.0) if plan.get("valid") else (last_price * 0.99)
+                
+                dist = abs(entry_ref - stop_ref)
                 total_contracts = (risk_amt / dist) if dist > 0 else 0.0
                 
                 diagnostics_payload = dossier.get("diagnostic_ledger", {})
                 
-                # AUDIT FIX: Determine if this is an active deployment or a Stand Down.
-                # We log EVERYTHING to eliminate survivorship bias in the data architecture.
                 initial_status = "PENDING" if plan.get("valid") else "STAND_DOWN"
+                bias_ref = plan.get("bias", "NEUTRAL") if plan.get("valid") else dossier.get("favored", "NEUTRAL")
+                
                 targets = plan.get("targets", [0.0, 0.0, 0.0])
                 
                 new_log = CampaignLog(
                     symbol=lock.symbol, date_key=date_key, session_id=lock.session_id,
-                    bias=plan.get("bias", "NEUTRAL"), grade=dossier["grade"], 
+                    bias=bias_ref, grade=dossier["grade"], 
                     entry_price=plan.get("entry", 0.0), stop_loss=plan.get("stop", 0.0), 
                     t1=targets[0] if len(targets) > 0 else 0.0, 
                     t2=targets[1] if len(targets) > 1 else 0.0, 
@@ -126,7 +138,6 @@ async def run_campaign_tracker_loop():
         
         db = SessionLocal()
         try:
-            # The Daemon only evaluates price action for live trades. STAND_DOWN rows are ignored.
             active_logs = db.query(CampaignLog).filter(
                 CampaignLog.status.in_(["PENDING", "ACTIVE", "T1_HIT", "T2_HIT"])
             ).all()
