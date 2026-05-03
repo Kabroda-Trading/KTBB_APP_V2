@@ -1,9 +1,10 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v10.4 (CAMPAIGN DAEMON)
+# KABRODA UNIFIED SERVER: BATTLEBOX v10.5 (SSOT ENFORCED)
+# AUDIT FIX: Stripped legacy PM/Session routing. Single-track AM architecture.
 # ---------------------------------------------------------
 import os
-import json # AUDIT FIX: Required for Diagnostic Ledger parsing
+import json 
 import traceback
 from typing import Any, Dict, Optional
 import asyncio
@@ -25,7 +26,7 @@ import research_lab
 import market_simulator  
 import gravity_engine  
 import gravity_math
-import campaign_engine  # The Mission Ledger Daemon
+import campaign_engine  
 
 from database import init_db, get_db, UserModel, CampaignLog
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
@@ -37,13 +38,13 @@ async def lifespan(app: FastAPI):
     print(">>> BOOTING KABRODA SYSTEM: Initializing Database Schema...")
     init_db()
     gravity_task = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
-    campaign_task = asyncio.create_task(campaign_engine.run_campaign_tracker_loop()) # DAEMON ACTIVATED
+    campaign_task = asyncio.create_task(campaign_engine.run_campaign_tracker_loop()) 
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     gravity_task.cancel()
     campaign_task.cancel()
 
-app = FastAPI(title="Kabroda BattleBox", version="10.4", lifespan=lifespan)
+app = FastAPI(title="Kabroda BattleBox", version="10.5", lifespan=lifespan)
 
 SECRET_KEY = os.getenv("SESSION_SECRET", "kabroda_prod_key_999")
 
@@ -204,7 +205,8 @@ async def get_campaign_logs(db: Session = Depends(get_db)):
             "entry_price": l.entry_price,
             "status": l.status,
             "realized_pnl": l.realized_pnl,
-            "created_at": l.created_at.isoformat()
+            "created_at": l.created_at.isoformat(),
+            "diagnostic_data": l.diagnostic_data
         })
     return JSONResponse({"ok": True, "logs": result})
 
@@ -284,7 +286,6 @@ async def admin_roster_page(request: Request, db: Session = Depends(get_db)):
     ctx["users"] = users
     return _template_or_fallback(request, templates, "admin.html", ctx)
 
-# NEW: STRUCTURED DIAGNOSTIC VAULT EXPORT
 @app.get("/admin/export-audit-ledger")
 async def export_audit_ledger(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
@@ -360,14 +361,10 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    session_id = payload.get("session_id")
-    requested_tz = payload.get("session_tz") or (getattr(user, "session_tz", None) or "UTC")
     ensure_symbol_allowed(user, symbol)
     
-    if session_id:
-        out = await battlebox_pipeline.get_session_review(symbol=symbol, session_id=session_id)
-    else:
-        out = await battlebox_pipeline.get_session_review(symbol=symbol, session_tz=requested_tz)
+    # AUDIT FIX: Stripped session passing logic. 
+    out = await battlebox_pipeline.get_session_review(symbol=symbol, session_id="us_ny_futures")
     return JSONResponse(out)
 
 @app.post("/api/dmr/live")
@@ -381,23 +378,19 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     ensure_symbol_allowed(user, symbol)
     
+    # AUDIT FIX: Forced MANUAL us_ny_futures alignment.
     out = await battlebox_pipeline.get_live_battlebox(
         symbol=symbol,
-        session_mode=(payload.get("session_mode") or "AUTO").upper(),
-        manual_id=payload.get("manual_session_id") or payload.get("session_id"),
+        session_mode="MANUAL",
+        manual_id="us_ny_futures",
         operator_flex=getattr(user, "operator_flex", False)
     )
     return JSONResponse(out)
 
 @app.post("/api/radar/scan")
 async def run_radar_scan(request: Request):
-    try:
-        payload = await request.json()
-        session_id = payload.get("session_id", "us_ny_futures")
-    except Exception:
-        session_id = "us_ny_futures"
-        
-    results = await market_radar.scan_sector(session_id=session_id)
+    # AUDIT FIX: No payload parsing required. Hardcoded logic flows from engine.
+    results = await market_radar.scan_sector()
     return {"ok": True, "results": results}
 
 @app.post("/api/research/run")
@@ -419,9 +412,7 @@ async def research_run(request: Request, db: Session = Depends(get_db)):
 async def simulator_run(request: Request, db: Session = Depends(get_db)):
     uid = request.session.get(auth.SESSION_KEY)
     if not uid: raise HTTPException(status_code=401)
-    
     user = db.query(UserModel).filter(UserModel.id == uid).first()
-    
     if not getattr(user, "is_admin", False): 
         return JSONResponse({"ok": False, "error": "Admin access required."}, status_code=403)
     
@@ -437,9 +428,6 @@ async def simulator_run(request: Request, db: Session = Depends(get_db)):
 async def processing_route(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     return _template_or_fallback(request, templates, "processing.html", ctx)
-
-from fastapi.responses import HTMLResponse
-import traceback
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

@@ -1,7 +1,7 @@
 # market_radar.py
 # ==============================================================================
 # KABRODA MARKET RADAR v13.0 (THE DECISION ENGINE)
-# REWRITE: Complete UI/UX cleanup. Removed PM Session. Removed Predator Audit.
+# AUDIT FIX: Stripped legacy session arguments to match pure AM Architecture.
 # ADDED: Strict "Synthetic Jewel" 15m Chop Filter using ADX and RSI rules.
 # ==============================================================================
 import os
@@ -171,7 +171,6 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
     elif grade == "GRADE B":
         briefing = "🟡 STANDARD OPERATION. Executable, but strictly level-to-level. 30% Ride / 70% Scale."
     else:
-        # Provide specific failure reason
         briefing = "🔴 ABORT. " + (checks[0] if checks else "Insufficient structural alignment.")
 
     plan = {
@@ -182,7 +181,6 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
         "targets": [audit["t1"], audit["t2"], audit["t3"]]
     }
     
-    # Pack the diagnostics for the UI
     diagnostic_ledger = {
         "vector_direction": favored,
         "15m_adx_volatility": j_15m.get("adx", 0),
@@ -264,8 +262,8 @@ def log_to_google_sheet(radar_item):
     except Exception as e:
         print(f"❌ Failed to log to Google Sheets: {e}")
 
+# AUDIT FIX: Removed session_id argument entirely. Hardcoded to SSOT pipeline.
 async def analyze_target(symbol):
-    # HARDCODED AM SESSION
     data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id="us_ny_futures")
     if data.get("status") == "ERROR": return {"ok": False}
     if data.get("status") == "CALIBRATING": return {"ok": True, "result": {"status": "CALIBRATING"}}
@@ -291,8 +289,8 @@ async def analyze_target(symbol):
         }
     }
 
+# AUDIT FIX: Removed session_id argument entirely. Hardcoded to SSOT pipeline.
 async def scan_sector():
-    # HARDCODED AM SESSION
     radar_grid = []
     tasks = [battlebox_pipeline.get_live_battlebox(sym, "MANUAL", manual_id="us_ny_futures") for sym in TARGETS]
     results = await asyncio.gather(*tasks, return_exceptions=True)
