@@ -1,13 +1,7 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v9.2 (DATABASE SSOT INTEGRATION)
-# ==============================================================================
-# Purpose:
-# - Computes Multi-Timeframe Fuel (1H/4H EMAs, MACD, RSI).
-# - Locks session open + 30m anchor range.
-# - Permanently locks the Live Gravity KDE Map to prevent Radar Drift.
-# - NEW: Connects to Postgres/SQLite to permanently lock session data, surviving
-#   server reboots and eliminating AM session drift.
+# KABRODA BATTLEBOX PIPELINE — v10.0 (SYNTHETIC JEWEL INTEGRATION)
+# Purpose: Calculates 15m ADX Volatility & EMA Alignment to act as a strict chop filter.
 # ==============================================================================
 
 from __future__ import annotations
@@ -33,9 +27,6 @@ SESSION_CONFIGS = session_manager.SESSION_CONFIGS
 _LOCKED_PACKETS: Dict[str, Dict[str, Any]] = {}
 _CACHE_LOCK = asyncio.Lock()
 
-# ----------------------------------------------------------------------
-# Exchange (MEXC - No Proxy Required)
-# ----------------------------------------------------------------------
 _exchange_live = ccxt.mexc({"enableRateLimit": True})
 
 def _normalize_symbol(symbol: str) -> str:
@@ -45,15 +36,6 @@ def _normalize_symbol(symbol: str) -> str:
     if s.endswith("USDT") and "/" not in s: return s.replace("USDT", "/USDT")
     return s
 
-async def close_exchange() -> None:
-    global _exchange_live
-    try:
-        if _exchange_live is not None:
-            await _exchange_live.close()
-    except Exception:
-        pass
-
-# --- DATA FETCHERS ---
 async def fetch_live_5m(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
     s = _normalize_symbol(symbol)
     try:
@@ -89,7 +71,6 @@ async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]
         return [{"time": int(r[0] / 1000), "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "volume": float(r[5])} for r in rows]
     except Exception: return []
 
-# --- PURE PYTHON MATH ENGINES (NO EXTERNAL DEPENDENCIES) ---
 def _calc_ema_series(prices: List[float], period: int) -> List[float]:
     if not prices or len(prices) < period: return []
     ema = [sum(prices[:period]) / period]
@@ -123,16 +104,89 @@ def _calc_rsi(prices: List[float], period=14) -> float:
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
 
-def _build_fuel_gauge(raw_1h: List[Dict], raw_4h: List[Dict]) -> Dict:
+# --- NEW: SYNTHETIC JEWEL ENGINE (ADX MATH) ---
+def _calc_adx(candles: List[Dict], period: int = 14) -> float:
+    if len(candles) < period * 2: return 0.0
+    
+    tr_list, pDM_list, nDM_list = [], [], []
+    
+    for i in range(1, len(candles)):
+        h = float(candles[i]["high"])
+        l = float(candles[i]["low"])
+        prev_h = float(candles[i-1]["high"])
+        prev_l = float(candles[i-1]["low"])
+        prev_c = float(candles[i-1]["close"])
+        
+        tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+        tr_list.append(tr)
+        
+        up_move = h - prev_h
+        down_move = prev_l - l
+        
+        pDM = up_move if up_move > down_move and up_move > 0 else 0
+        nDM = down_move if down_move > up_move and down_move > 0 else 0
+        
+        pDM_list.append(pDM)
+        nDM_list.append(nDM)
+
+    atr = sum(tr_list[:period])
+    smoothed_pDM = sum(pDM_list[:period])
+    smoothed_nDM = sum(nDM_list[:period])
+    dx_list = []
+    
+    for i in range(period, len(tr_list)):
+        atr = atr - (atr / period) + tr_list[i]
+        smoothed_pDM = smoothed_pDM - (smoothed_pDM / period) + pDM_list[i]
+        smoothed_nDM = smoothed_nDM - (smoothed_nDM / period) + nDM_list[i]
+        
+        di_plus = (smoothed_pDM / atr) * 100 if atr > 0 else 0
+        di_minus = (smoothed_nDM / atr) * 100 if atr > 0 else 0
+        
+        dx = (abs(di_plus - di_minus) / (di_plus + di_minus)) * 100 if (di_plus + di_minus) > 0 else 0
+        dx_list.append(dx)
+
+    adx = sum(dx_list[:period]) / period if len(dx_list) >= period else 0
+    for i in range(period, len(dx_list)):
+        adx = ((adx * (period - 1)) + dx_list[i]) / period
+        
+    return adx
+
+def _build_synthetic_jewel(raw_15m: List[Dict]) -> Dict:
+    """Calculates 15m RSI, ADX Volatility, and 21/55 EMA Alignment."""
+    if not raw_15m or len(raw_15m) < 60:
+        return {"rsi": 50.0, "adx": 0.0, "ema_state": "TANGLED"}
+        
+    closes = [float(c["close"]) for c in raw_15m]
+    
+    rsi = _calc_rsi(closes, period=14)
+    adx = _calc_adx(raw_15m, period=14)
+    
+    ema21 = _calc_ema_series(closes, 21)[-1]
+    ema55 = _calc_ema_series(closes, 55)[-1]
+    
+    # Needs 0.1% separation to not be considered "Tangled"
+    separation = abs((ema21 - ema55) / ema55) * 100
+    if separation < 0.1:
+        ema_state = "TANGLED"
+    else:
+        ema_state = "BULLISH" if ema21 > ema55 else "BEARISH"
+        
+    return {
+        "rsi": round(rsi, 2),
+        "adx": round(adx, 2),
+        "ema_state": ema_state,
+        "ema21": round(ema21, 2),
+        "ema55": round(ema55, 2)
+    }
+
+def _build_fuel_gauge(raw_1h: List[Dict], raw_4h: List[Dict], raw_15m: List[Dict]) -> Dict:
     def analyze_tf(candles):
         if not candles or len(candles) < 50:
             return {"trend": "NEUTRAL", "momentum": "NEUTRAL", "rsi": 50.0}
         
         closes = [float(c["close"]) for c in candles]
-        
         ema_series_30 = _calc_ema_series(closes, 30)
         ema_series_50 = _calc_ema_series(closes, 50)
-        
         ema30 = ema_series_30[-1] if ema_series_30 else closes[-1]
         ema50 = ema_series_50[-1] if ema_series_50 else closes[-1]
         
@@ -143,7 +197,11 @@ def _build_fuel_gauge(raw_1h: List[Dict], raw_4h: List[Dict]) -> Dict:
         
         return {"trend": trend, "momentum": momentum, "rsi": round(rsi, 2), "ema30": round(ema30, 2), "ema50": round(ema50, 2)}
         
-    return {"1H": analyze_tf(raw_1h), "4H": analyze_tf(raw_4h)}
+    return {
+        "1H": analyze_tf(raw_1h), 
+        "4H": analyze_tf(raw_4h),
+        "15M_JEWEL": _build_synthetic_jewel(raw_15m) # Inject local 15m fuel state
+    }
 
 def _calculate_weekly_force(raw_daily: List[Dict[str, Any]], anchor_ts: int) -> str:
     if not raw_daily: return "NEUTRAL"
@@ -260,7 +318,9 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
 
     macro_bias = _calculate_weekly_force(raw_daily, anchor_ts)
     micro_bias = _calculate_168h_micro_bias(raw_1h)
-    fuel_gauge = _build_fuel_gauge(raw_1h, raw_4h)
+    
+    # PASS raw_15m TO FUEL GAUGE TO CAPTURE ADX AT THE LOCK
+    fuel_gauge = _build_fuel_gauge(raw_1h, raw_4h, raw_15m)
     
     kde_data = gravity_math.calculate_gravity_kde(symbol)
     macro_fibs = gravity_math.calculate_macro_fibs(raw_daily, [])
@@ -337,54 +397,4 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
             "bias_model": pkt.get("bias_model", {}), "context": pkt.get("context", {}), "htf_shelves": pkt.get("htf_shelves", {}), "meta": pkt.get("meta", {})
         }, 
         "candles": post_lock
-    }
-
-async def get_session_review(symbol: str, session_id: str = "us_ny_futures", tuning: Optional[Dict] = None) -> Dict[str, Any]:
-    raw_5m = await fetch_live_5m(symbol)
-    if not raw_5m: return {"ok": False, "error": "No Data"}
-    
-    raw_1h = await fetch_live_1h(symbol)
-    raw_4h = await fetch_live_4h(symbol)
-    raw_daily = await fetch_live_daily(symbol)
-    
-    cfg = session_manager.get_session_config(session_id)
-    now_utc = datetime.now(timezone.utc)
-    anchor_ts = session_manager.anchor_ts_for_utc_date(cfg, now_utc)
-    lock_end_ts = anchor_ts + 1800
-    
-    if anchor_ts > int(now_utc.timestamp()):
-        anchor_ts -= 86400
-        lock_end_ts -= 86400
-
-    macro_bias = _calculate_weekly_force(raw_daily, anchor_ts)
-    micro_bias = _calculate_168h_micro_bias(raw_1h)
-    fuel_gauge = _build_fuel_gauge(raw_1h, raw_4h)
-    
-    kde_data = gravity_math.calculate_gravity_kde(symbol)
-    macro_fibs = gravity_math.calculate_macro_fibs(raw_daily, [])
-
-    if int(now_utc.timestamp()) < lock_end_ts: return {"ok": True, "mode": "CALIBRATING", "symbol": symbol, "session": {"id": cfg["id"], "name": cfg["name"], "anchor_time": datetime.fromtimestamp(anchor_ts, tz=timezone.utc).isoformat()}, "message": "Calibrating..."}
-    
-    date_key = datetime.fromtimestamp(anchor_ts, timezone.utc).strftime("%Y-%m-%d")
-    
-    db = SessionLocal()
-    try:
-        existing_lock = db.query(SessionLock).filter(
-            SessionLock.symbol == symbol,
-            SessionLock.session_id == session_id,
-            SessionLock.date_key == date_key
-        ).first()
-        
-        if existing_lock:
-            pkt = json.loads(existing_lock.packet_data)
-        else:
-            pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, tuning=tuning, raw_daily=raw_daily)
-            if "error" in pkt: return {"ok": False, "error": pkt["error"]}
-    finally:
-        db.close()
-    
-    return {
-        "ok": True, "mode": "LOCKED", "symbol": symbol, "price": float(raw_5m[-1]["close"]), "session": {"id": cfg["id"], "name": cfg["name"], "anchor_time": datetime.fromtimestamp(anchor_ts, tz=timezone.utc).isoformat()}, 
-        "levels": pkt["levels"], "bias_model": pkt.get("bias_model", {}), "context": pkt.get("context", {}), "htf_shelves": pkt.get("htf_shelves", {}), 
-        "meta": pkt.get("meta", {}), "range_30m": {"high": float(pkt["levels"].get("range30m_high", 0.0)), "low": float(pkt["levels"].get("range30m_low", 0.0))}
     }

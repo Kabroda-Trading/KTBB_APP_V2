@@ -1,7 +1,8 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v12.1 (THE DECISION ENGINE)
-# AUDIT CONTEXT: RSI Ledgers Restored. RSI Overbought/Oversold Exhaustion Penalty Enforced.
+# KABRODA MARKET RADAR v13.0 (THE DECISION ENGINE)
+# REWRITE: Complete UI/UX cleanup. Removed PM Session. Removed Predator Audit.
+# ADDED: Strict "Synthetic Jewel" 15m Chop Filter using ADX and RSI rules.
 # ==============================================================================
 import os
 import json
@@ -78,119 +79,66 @@ def _run_gravity_audit(entry: float, vector: str, peaks: list, fibs: dict, level
     return audit
 
 def _score_setup(vector: str, macro: str, micro: str, fuel: dict, audit: dict):
-    score = 0
-    max_score = 15
     checks = []
-
+    
     f_1h = fuel.get("1H", {})
     f_4h = fuel.get("4H", {})
-    
+    j_15m = fuel.get("15M_JEWEL", {"rsi": 50, "adx": 0, "ema_state": "TANGLED"})
+
     rsi_1h = f_1h.get("rsi", 50)
     rsi_4h = f_4h.get("rsi", 50)
+    rsi_15m = j_15m.get("rsi", 50)
+    adx_15m = j_15m.get("adx", 0)
 
-    # 1. Base Confluence Scoring
-    if vector == "LONG" and macro == "BULLISH": score += 2; checks.append("Macro Aligned")
-    elif vector == "SHORT" and macro == "BEARISH": score += 2; checks.append("Macro Aligned")
+    # ---------------------------------------------------------
+    # RULE 1: THE SYNTHETIC JEWEL CHOP FILTER (ABSOLUTE GATE)
+    # ---------------------------------------------------------
+    if adx_15m < 20:
+        return "STAND DOWN", 0, ["🔴 HALT: ADX < 20. Dead Volatility. Extreme Chop Risk."], j_15m
     
-    if vector == "LONG" and micro == "BULLISH": score += 2; checks.append("Micro Aligned")
-    elif vector == "SHORT" and micro == "BEARISH": score += 2; checks.append("Micro Aligned")
-
-    if vector == "LONG" and f_1h.get("trend") == "BULLISH": score += 3; checks.append("1H EMA Fuel Aligned")
-    elif vector == "SHORT" and f_1h.get("trend") == "BEARISH": score += 3; checks.append("1H EMA Fuel Aligned")
-
-    if f_4h.get("momentum") == "POSITIVE" and vector == "LONG": score += 2; checks.append("4H MACD Momentum")
-    elif f_4h.get("momentum") == "NEGATIVE" and vector == "SHORT": score += 2; checks.append("4H MACD Momentum")
-
-    if audit["airspace_clear"]: score += 3; checks.append("Clear Structural Airspace")
-    if audit["has_shield"]: score += 2; checks.append("Gravity Shield Protected")
-    
-    score += 1; checks.append("Primal Gap Confirmed")
-
-    # 2. AUDIT FIX: The Exhaustion Penalty (Prevents buying tops / shorting bottoms)
+    # ---------------------------------------------------------
+    # RULE 2: THE MACRO EXHAUSTION GATE
+    # ---------------------------------------------------------
     if vector == "LONG" and (rsi_1h > 75 or rsi_4h > 75):
-        score -= 5
-        checks.append("⚠️ Overbought Exhaustion (RSI > 75)")
-    elif vector == "SHORT" and (rsi_1h < 25 or rsi_4h < 25):
-        score -= 5
-        checks.append("⚠️ Oversold Exhaustion (RSI < 25)")
+        return "STAND DOWN", 0, ["🔴 HALT: Macro Tide Exhausted. Brick wall resistance ahead."], j_15m
+    if vector == "SHORT" and (rsi_1h < 25 or rsi_4h < 25):
+        return "STAND DOWN", 0, ["🔴 HALT: Macro Tide Exhausted. Concrete floor support ahead."], j_15m
 
-    # 3. Final Grade Calculation
-    pct = max(0, (score / max_score) * 100) # Ensure it doesn't drop below 0%
+    # ---------------------------------------------------------
+    # RULE 3: THE LOCAL FUEL GATE
+    # ---------------------------------------------------------
+    if vector == "LONG" and rsi_15m > 65:
+        return "STAND DOWN", 0, ["🔴 HALT: 15m Local Fuel Exhausted. Wait for Fib pocket reset."], j_15m
+    if vector == "SHORT" and rsi_15m < 35:
+        return "STAND DOWN", 0, ["🔴 HALT: 15m Local Fuel Exhausted. Wait for Fib pocket reset."], j_15m
+
+    # --- If it passes the chop filters, score the structural alignment ---
+    score = 0
+    max_score = 15
+
+    if vector == "LONG" and macro == "BULLISH": score += 2; checks.append("✓ Macro Aligned")
+    elif vector == "SHORT" and macro == "BEARISH": score += 2; checks.append("✓ Macro Aligned")
+    
+    if vector == "LONG" and f_1h.get("trend") == "BULLISH": score += 3; checks.append("✓ 1H EMA Fuel Aligned")
+    elif vector == "SHORT" and f_1h.get("trend") == "BEARISH": score += 3; checks.append("✓ 1H EMA Fuel Aligned")
+
+    if f_4h.get("momentum") == "POSITIVE" and vector == "LONG": score += 2; checks.append("✓ 4H MACD Momentum")
+    elif f_4h.get("momentum") == "NEGATIVE" and vector == "SHORT": score += 2; checks.append("✓ 4H MACD Momentum")
+
+    if audit["airspace_clear"]: score += 3; checks.append("✓ Clear Structural Airspace")
+    if audit["has_shield"]: score += 2; checks.append("✓ Gravity Shield Protected")
+    
+    score += 1; checks.append("✓ Primal Gap Confirmed")
+    checks.append(f"✓ 15m Volatility Active (ADX: {adx_15m})")
+
+    pct = max(0, (score / max_score) * 100)
     if pct >= 86: grade = "GRADE A"
     elif pct >= 73: grade = "GRADE B"
     else: grade = "STAND DOWN"
 
-    # 4. Diagnostic Ledger (RSI Restored)
-    diagnostic_ledger = {
-        "vector_direction": vector,
-        "macro_bias": macro,
-        "micro_bias": micro,
-        "1h_trend": f_1h.get("trend", "UNKNOWN"),
-        "1h_ema30": f_1h.get("ema30", 0),
-        "1h_ema50": f_1h.get("ema50", 0),
-        "1h_rsi": round(rsi_1h, 2),
-        "4h_trend": f_4h.get("trend", "UNKNOWN"),
-        "4h_momentum": f_4h.get("momentum", "UNKNOWN"),
-        "4h_rsi": round(rsi_4h, 2),
-        "airspace_clear": audit["airspace_clear"],
-        "has_shield": audit["has_shield"],
-        "radar_score": pct
-    }
+    return grade, pct, checks, j_15m
 
-    return grade, pct, checks, diagnostic_ledger
-
-def _audit_predator_candle(plan: dict, raw_15m: list, session_id: str):
-    if session_id not in ["us_ny_futures", "us_ny_equity"]:
-        return {"active": False}
-
-    if not plan.get("valid"):
-        return {"active": False}
-
-    ny_tz = pytz.timezone("America/New_York")
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-    now_ny = now_utc.astimezone(ny_tz)
-
-    target_ny = now_ny.replace(hour=9, minute=30, second=0, microsecond=0)
-    if now_ny.hour < 8:
-        target_ny -= timedelta(days=1)
-
-    target_end_ny = target_ny + timedelta(minutes=15)
-    
-    if now_ny < target_end_ny:
-        return {"active": True, "status": "AWAITING", "message": "AWAITING PREDATOR RESOLUTION (09:45 EST)"}
-
-    target_ts = int(target_ny.timestamp())
-    predator_candle = next((c for c in raw_15m if int(c["time"]) == target_ts), None)
-
-    if not predator_candle:
-        return {"active": True, "status": "AWAITING", "message": "AWAITING CANDLE DATA..."}
-
-    c_close = float(predator_candle["close"])
-    c_high = float(predator_candle["high"])
-    c_low = float(predator_candle["low"])
-    stop = float(plan["stop"])
-    t1 = float(plan["targets"][0])
-    bias = plan["bias"]
-
-    if bias == "SHORT":
-        if c_close > stop:
-            return {"active": True, "status": "ABORT", "message": "🔴 STRUCTURE COMPROMISED: Bulls claimed the Gravity Well."}
-        elif c_low <= t1:
-            return {"active": True, "status": "ABORT", "message": "🟡 MOVE EXHAUSTED: Volatility cleared Target 1 liquidity."}
-        else:
-            return {"active": True, "status": "EXECUTE", "message": "🟢 INTEGRITY CONFIRMED: Structure held. Set Trigger Order."}
-            
-    elif bias == "LONG":
-        if c_close < stop:
-            return {"active": True, "status": "ABORT", "message": "🔴 STRUCTURE COMPROMISED: Bears claimed the Gravity Well."}
-        elif c_high >= t1:
-            return {"active": True, "status": "ABORT", "message": "🟡 MOVE EXHAUSTED: Volatility cleared Target 1 liquidity."}
-        else:
-            return {"active": True, "status": "EXECUTE", "message": "🟢 INTEGRITY CONFIRMED: Structure held. Set Trigger Order."}
-
-    return {"active": False}
-
-def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs, raw_15m, session_id):
+def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs):
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
     
@@ -206,11 +154,11 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
         return {
             "favored": "NEUTRAL", "grade": "STAND DOWN", "score_pct": 0, "color_code": "GRAY",
             "briefing": "Market is in absolute neutral consolidation. Stand down.",
-            "checks": [], "diagnostic_ledger": {}, "plan": {"valid": False}, "predator_audit": {"active": False}
+            "checks": [], "diagnostic_ledger": {}, "plan": {"valid": False}
         }
         
     audit = _run_gravity_audit(entry, favored, kde_peaks, macro_fibs, levels)
-    grade, score_pct, checks, diagnostic_ledger = _score_setup(favored, macro_bias, micro_bias, fuel_gauge, audit)
+    grade, score_pct, checks, j_15m = _score_setup(favored, macro_bias, micro_bias, fuel_gauge, audit)
     
     color = "GRAY"
     if grade == "GRADE A": color = "GREEN"
@@ -219,11 +167,12 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
 
     briefing = ""
     if grade == "GRADE A":
-        briefing = "🟢 ELITE ALIGNMENT. Fuel and structure are synchronized. 70% Ride / 30% Scale recommended."
+        briefing = "🟢 ELITE ALIGNMENT. Fuel, volatility, and structure are synchronized. 70% Ride / 30% Scale recommended."
     elif grade == "GRADE B":
         briefing = "🟡 STANDARD OPERATION. Executable, but strictly level-to-level. 30% Ride / 70% Scale."
     else:
-        briefing = "🔴 ABORT. Insufficient fuel, heavy blockades, or market exhaustion detected."
+        # Provide specific failure reason
+        briefing = "🔴 ABORT. " + (checks[0] if checks else "Insufficient structural alignment.")
 
     plan = {
         "valid": grade in ["GRADE A", "GRADE B"],
@@ -233,14 +182,22 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
         "targets": [audit["t1"], audit["t2"], audit["t3"]]
     }
     
-    predator_audit = _audit_predator_candle(plan, raw_15m, session_id)
+    # Pack the diagnostics for the UI
+    diagnostic_ledger = {
+        "vector_direction": favored,
+        "15m_adx_volatility": j_15m.get("adx", 0),
+        "15m_rsi_fuel": j_15m.get("rsi", 0),
+        "1h_rsi": fuel_gauge.get("1H", {}).get("rsi", 0),
+        "4h_rsi": fuel_gauge.get("4H", {}).get("rsi", 0),
+        "airspace_clear": audit["airspace_clear"]
+    }
     
     key = f"{plan['bias']}|{grade}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}|{macro_bias}|{micro_bias}" if plan["valid"] else ""
 
     return {
         "favored": favored, "grade": grade, "score_pct": score_pct, "color_code": color,
         "briefing": briefing, "checks": checks, "diagnostic_ledger": diagnostic_ledger,
-        "plan": plan, "key": key, "predator_audit": predator_audit
+        "plan": plan, "key": key
     }
 
 def log_to_google_sheet(radar_item):
@@ -307,15 +264,15 @@ def log_to_google_sheet(radar_item):
     except Exception as e:
         print(f"❌ Failed to log to Google Sheets: {e}")
 
-async def analyze_target(symbol, session_id="us_ny_futures"):
-    data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id=session_id)
+async def analyze_target(symbol):
+    # HARDCODED AM SESSION
+    data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id="us_ny_futures")
     if data.get("status") == "ERROR": return {"ok": False}
     if data.get("status") == "CALIBRATING": return {"ok": True, "result": {"status": "CALIBRATING"}}
 
     price = float(data.get("price", 0))
     levels = data.get("battlebox", {}).get("levels", {})
     context = data.get("battlebox", {}).get("context", {})
-    raw_15m = data.get("battlebox", {}).get("raw_15m", [])
     
     macro_bias = context.get("macro_bias", "NEUTRAL")
     micro_bias = context.get("micro_bias", "NEUTRAL")
@@ -323,7 +280,7 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
     kde_peaks = context.get("kde_peaks", [])
     macro_fibs = context.get("macro_fibs", {})
 
-    dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs, raw_15m, session_id)
+    dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs)
     
     return {
         "ok": True,
@@ -334,9 +291,10 @@ async def analyze_target(symbol, session_id="us_ny_futures"):
         }
     }
 
-async def scan_sector(session_id="us_ny_futures"):
+async def scan_sector():
+    # HARDCODED AM SESSION
     radar_grid = []
-    tasks = [battlebox_pipeline.get_live_battlebox(sym, "MANUAL", manual_id=session_id) for sym in TARGETS]
+    tasks = [battlebox_pipeline.get_live_battlebox(sym, "MANUAL", manual_id="us_ny_futures") for sym in TARGETS]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for sym, res in zip(TARGETS, results):
@@ -348,7 +306,6 @@ async def scan_sector(session_id="us_ny_futures"):
         price = float(res.get("price", 0))
         levels = res.get("battlebox", {}).get("levels", {})
         context = res.get("battlebox", {}).get("context", {})
-        raw_15m = res.get("battlebox", {}).get("raw_15m", [])
         
         macro_bias = context.get("macro_bias", "NEUTRAL")
         micro_bias = context.get("micro_bias", "NEUTRAL")
@@ -356,7 +313,7 @@ async def scan_sector(session_id="us_ny_futures"):
         kde_peaks = context.get("kde_peaks", [])
         macro_fibs = context.get("macro_fibs", {})
 
-        dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs, raw_15m, session_id)
+        dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs)
         
         radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,

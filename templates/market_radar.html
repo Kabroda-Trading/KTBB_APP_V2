@@ -18,12 +18,6 @@
         .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #334155; padding-bottom: 20px; margin-bottom: 30px; }
         .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
         
-        /* --- SESSION TOGGLE --- */
-        .session-toggle { display: inline-flex; background: #0f172a; border: 1px solid #334155; border-radius: 4px; overflow: hidden; margin-right: 20px; }
-        .session-btn { background: transparent; border: none; color: #94a3b8; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; padding: 10px 20px; cursor: pointer; transition: 0.2s; }
-        .session-btn:hover { color: #fff; }
-        .session-btn.active { background: #0ea5e9; color: #000; }
-
         .btn-scan { background: #0ea5e9; color: #000; font-weight: 800; font-family: 'JetBrains Mono'; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; text-transform: uppercase; transition: 0.2s; box-shadow: 0 0 15px rgba(14, 165, 233, 0.2); }
         .btn-scan:hover { background: #38bdf8; }
         
@@ -73,10 +67,10 @@
         
         .roe-box { background: rgba(0,0,0,0.3); border-left: 4px solid #94a3b8; padding: 20px; font-family: 'Inter'; font-size: 14px; line-height: 1.6; border-radius: 0 4px 4px 0; margin-top: 20px; text-align: left; }
         .check-item { background: #020617; padding: 8px 12px; border-radius: 4px; border: 1px solid #334155; font-size: 12px; font-family: 'JetBrains Mono'; margin-bottom: 5px; color: #22c55e; }
+        .check-item.fail { color: #ef4444; border-color: #ef4444; }
         .mini-copy { background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 14px; opacity: 0.5; padding: 0 0 0 5px; }
         .mini-copy:hover { opacity: 1; color: #f8fafc; }
 
-        /* --- ACADEMY DRAWER STYLES --- */
         .drawer-toggle { position: fixed; top: 50%; right: 0; transform: translateY(-50%); background: #0ea5e9; color: #000; padding: 15px 10px; writing-mode: vertical-rl; text-orientation: mixed; cursor: pointer; border-radius: 8px 0 0 8px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; z-index: 10001; border: none; letter-spacing: 2px; transition: 0.2s; box-shadow: -2px 0 10px rgba(14, 165, 233, 0.3); }
         .drawer-toggle:hover { padding-right: 15px; background: #38bdf8; }
         .academy-drawer { position: fixed; top: 0; right: -450px; width: 450px; height: 100vh; background: #0f172a; border-left: 1px solid #334155; z-index: 10000; transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: -10px 0 30px rgba(0,0,0,0.8); padding: 30px; overflow-y: auto; box-sizing: border-box; }
@@ -100,17 +94,9 @@
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v11.4</span></h2>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v13.0</span></h2>
             </div>
             <div style="display: flex; align-items: center;">
-                <div class="session-toggle">
-                    <button id="btn-agg" class="session-btn active" onclick="switchExecutionMode('AGGRESSIVE')">AGGRESSIVE</button>
-                    <button id="btn-con" class="session-btn" onclick="switchExecutionMode('CONSERVATIVE')">CONSERVATIVE</button>
-                </div>
-                <div class="session-toggle">
-                    <button id="btn-am" class="session-btn active" onclick="switchSession('us_ny_futures')">AM SESSION</button>
-                    <button id="btn-pm" class="session-btn" onclick="switchSession('us_ny_pm')">PM SESSION</button>
-                </div>
                 <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
             </div>
         </div>
@@ -241,8 +227,6 @@
 
         window.radarMemory = {};
         let activeData = null;
-        let activeSession = 'us_ny_futures'; 
-        let executionMode = 'AGGRESSIVE';
         
         const balInput = document.getElementById('inpBal');
         const riskInput = document.getElementById('inpRisk');
@@ -301,10 +285,10 @@
             const chkBox = document.getElementById('checksContainer');
             chkBox.innerHTML = "";
             d.checks.forEach(c => {
-                chkBox.innerHTML += `<div class="check-item">✓ ${c}</div>`;
+                let cssClass = c.includes('HALT') ? 'check-item fail' : 'check-item';
+                chkBox.innerHTML += `<div class="${cssClass}">${c}</div>`;
             });
 
-            // --- NEW: RENDER DIAGNOSTIC LEDGER ---
             if (d.diagnostic_ledger && Object.keys(d.diagnostic_ledger).length > 0) {
                 let diagHtml = `<div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono'; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">RAW STRUCTURAL DIAGNOSTICS:</div>`;
                 for (const [key, val] of Object.entries(d.diagnostic_ledger)) {
@@ -372,28 +356,6 @@
             }
         }
 
-        function switchSession(sessionId) {
-            activeSession = sessionId;
-            document.getElementById('btn-am').classList.remove('active');
-            document.getElementById('btn-pm').classList.remove('active');
-            
-            if(sessionId === 'us_ny_futures') document.getElementById('btn-am').classList.add('active');
-            else document.getElementById('btn-pm').classList.add('active');
-            
-            forceScan();
-        }
-
-        function switchExecutionMode(mode) {
-            executionMode = mode;
-            document.getElementById('btn-agg').classList.remove('active');
-            document.getElementById('btn-con').classList.remove('active');
-            
-            if(mode === 'AGGRESSIVE') document.getElementById('btn-agg').classList.add('active');
-            else document.getElementById('btn-con').classList.add('active');
-            
-            forceScan();
-        }
-
         async function forceScan() {
             const btn = document.getElementById('scanBtn'); 
             const grid = document.getElementById('radarTargetGrid'); 
@@ -402,11 +364,8 @@
             btn.disabled = true; grid.style.display = 'none'; loader.style.display = 'block';
 
             try {
-                const res = await fetch('/api/radar/scan', { 
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ session_id: activeSession })
-                });
+                // HARDCODED TO AM SESSION ONLY
+                const res = await fetch('/api/radar/scan', { method: 'POST' });
                 const data = await res.json();
                 let html = "";
                 window.radarMemory = {};
@@ -434,31 +393,13 @@
 
                     let borderTheme = t.color_code;
                     let displayGrade = t.grade;
-                    let displayFavored = t.favored;
-                    let displaySubtext = `${t.favored} FAVORED (${t.score_pct.toFixed(0)}%)`;
+                    let displaySubtext = t.briefing;
+                    
                     let actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px;" onclick="openModal('${t.symbol}')">LOCK TARGET →</button>`;
                     
                     if(t.grade === "STAND DOWN") {
                         actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px; color:#ef4444; border-color:#ef4444;" disabled>NO TRADE</button>`;
-                    } else if (executionMode === 'CONSERVATIVE' && t.predator_audit && t.predator_audit.active) {
-                        let p_audit = t.predator_audit;
-                        if (p_audit.status === "AWAITING") {
-                            borderTheme = "GRAY";
-                            displayGrade = "AWAITING PREDATOR";
-                            displaySubtext = "AWAITING 09:45 EST RESOLUTION";
-                            actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px; color:#94a3b8; border-color:#334155;" disabled>AWAITING</button>`;
-                        } else if (p_audit.status === "ABORT") {
-                            borderTheme = "RED";
-                            displayGrade = "STRUCTURE FAILED";
-                            displaySubtext = p_audit.message;
-                            actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px; color:#ef4444; border-color:#ef4444;" disabled>NO TRADE</button>`;
-                        } else if (p_audit.status === "EXECUTE") {
-                            borderTheme = "GREEN";
-                            displayGrade = "PREDATOR CLEARED";
-                            displaySubtext = p_audit.message;
-                            actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px;" onclick="openModal('${t.symbol}')">LOCK TARGET →</button>`;
-                        }
-                    }
+                    } 
 
                     html += `
                     <div class="radar-row border-${borderTheme}">
@@ -469,7 +410,7 @@
 
                         <div style="display:flex; flex-direction:column; justify-content:center; align-items:center;">
                             <div style="font-family:'Rajdhani'; font-size:24px; font-weight:800; color:var(--${borderTheme.toLowerCase()});">${displayGrade}</div>
-                            <div style="font-size:10px; color:#94a3b8; font-family:'JetBrains Mono'; margin-top:4px; text-align:center; max-width:200px;">${displaySubtext}</div>
+                            <div style="font-size:10px; color:#94a3b8; font-family:'JetBrains Mono'; margin-top:4px; text-align:center; max-width:280px;">${displaySubtext}</div>
                         </div>
 
                         <div style="display:flex; flex-direction:column; gap:8px; justify-content:center; align-items:flex-end;">
