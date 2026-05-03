@@ -1,7 +1,8 @@
 # campaign_engine.py
 # ==============================================================================
 # KABRODA CAMPAIGN STATE MACHINE (THE MISSION LEDGER DAEMON)
-# AUDIT CONTEXT: Database Schema crash resolved. 100% SSOT Data Capture Enforced.
+# AUDIT FIX: Inverted Breakout/Breakdown trigger logic corrected.
+# ADDED: Stand Down / Chop tracking to prove capital preservation.
 # ==============================================================================
 
 import asyncio
@@ -23,12 +24,12 @@ def _evaluate_state(log: CampaignLog, high: float, low: float):
     t1_vol, runner_vol = _calculate_scale_split(log.grade, log.total_contracts)
     now_utc = datetime.now(timezone.utc)
 
-    # --- PENDING -> ACTIVE (GAP-SAFE LIMIT LOGIC) ---
+    # --- PENDING -> ACTIVE (FIXED BREAKOUT LOGIC) ---
     if log.status == "PENDING":
-        if is_long and low <= log.entry_price:
+        if is_long and high >= log.entry_price:  # Breakout UP
             log.status = "ACTIVE"
             log.activated_at = now_utc 
-        elif not is_long and high >= log.entry_price:
+        elif not is_long and low <= log.entry_price: # Breakdown DOWN
             log.status = "ACTIVE"
             log.activated_at = now_utc 
 
@@ -93,7 +94,6 @@ async def sync_daily_campaigns():
             if not exists:
                 risk_amt = 1000.00 
                 
-                # AUDIT FIX: Prevents Database crash by securely extracting SSOT fallback price.
                 last_price = 0.0
                 if "meta" in pkt and "last_price" in pkt["meta"]:
                     last_price = float(pkt["meta"]["last_price"])
@@ -107,6 +107,7 @@ async def sync_daily_campaigns():
                 total_contracts = (risk_amt / dist) if dist > 0 else 0.0
                 
                 diagnostics_payload = dossier.get("diagnostic_ledger", {})
+                diagnostics_payload["rejection_reason"] = dossier.get("checks", ["No valid setup"])[0] if dossier.get("grade") == "STAND DOWN" else ""
                 
                 initial_status = "PENDING" if plan.get("valid") else "STAND_DOWN"
                 bias_ref = plan.get("bias", "NEUTRAL") if plan.get("valid") else dossier.get("favored", "NEUTRAL")
