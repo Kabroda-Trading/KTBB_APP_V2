@@ -1,8 +1,7 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v13.0 (THE DECISION ENGINE)
-# AUDIT FIX: Stripped legacy session arguments to match pure AM Architecture.
-# ADDED: Strict "Synthetic Jewel" 15m Chop Filter using ADX and RSI rules.
+# KABRODA MARKET RADAR v13.1 (THE DECISION ENGINE)
+# AUDIT FIX: Explicit failure tracking added to the scoring matrix.
 # ==============================================================================
 import os
 import json
@@ -80,6 +79,7 @@ def _run_gravity_audit(entry: float, vector: str, peaks: list, fibs: dict, level
 
 def _score_setup(vector: str, macro: str, micro: str, fuel: dict, audit: dict):
     checks = []
+    missing = []
     
     f_1h = fuel.get("1H", {})
     f_4h = fuel.get("4H", {})
@@ -90,53 +90,59 @@ def _score_setup(vector: str, macro: str, micro: str, fuel: dict, audit: dict):
     rsi_15m = j_15m.get("rsi", 50)
     adx_15m = j_15m.get("adx", 0)
 
-    # ---------------------------------------------------------
-    # RULE 1: THE SYNTHETIC JEWEL CHOP FILTER (ABSOLUTE GATE)
-    # ---------------------------------------------------------
+    # 1. THE ABSOLUTE GATES (INSTANT KILL)
     if adx_15m < 20:
-        return "STAND DOWN", 0, ["🔴 HALT: ADX < 20. Dead Volatility. Extreme Chop Risk."], j_15m
-    
-    # ---------------------------------------------------------
-    # RULE 2: THE MACRO EXHAUSTION GATE
-    # ---------------------------------------------------------
+        return "STAND DOWN", 0, [], "🔴 HALT: ADX < 20. Dead Volatility. Extreme Chop Risk.", j_15m
     if vector == "LONG" and (rsi_1h > 75 or rsi_4h > 75):
-        return "STAND DOWN", 0, ["🔴 HALT: Macro Tide Exhausted. Brick wall resistance ahead."], j_15m
+        return "STAND DOWN", 0, [], "🔴 HALT: Macro Tide Exhausted. Brick wall resistance ahead.", j_15m
     if vector == "SHORT" and (rsi_1h < 25 or rsi_4h < 25):
-        return "STAND DOWN", 0, ["🔴 HALT: Macro Tide Exhausted. Concrete floor support ahead."], j_15m
-
-    # ---------------------------------------------------------
-    # RULE 3: THE LOCAL FUEL GATE
-    # ---------------------------------------------------------
+        return "STAND DOWN", 0, [], "🔴 HALT: Macro Tide Exhausted. Concrete floor support ahead.", j_15m
     if vector == "LONG" and rsi_15m > 65:
-        return "STAND DOWN", 0, ["🔴 HALT: 15m Local Fuel Exhausted. Wait for Fib pocket reset."], j_15m
+        return "STAND DOWN", 0, [], "🔴 HALT: 15m Local Fuel Exhausted. Wait for Fib pocket reset.", j_15m
     if vector == "SHORT" and rsi_15m < 35:
-        return "STAND DOWN", 0, ["🔴 HALT: 15m Local Fuel Exhausted. Wait for Fib pocket reset."], j_15m
+        return "STAND DOWN", 0, [], "🔴 HALT: 15m Local Fuel Exhausted. Wait for Fib pocket reset.", j_15m
 
-    # --- If it passes the chop filters, score the structural alignment ---
+    # 2. THE WEIGHTED SCORING MATRIX (15 PTS MAX)
     score = 0
     max_score = 15
 
-    if vector == "LONG" and macro == "BULLISH": score += 2; checks.append("✓ Macro Aligned")
-    elif vector == "SHORT" and macro == "BEARISH": score += 2; checks.append("✓ Macro Aligned")
+    if (vector == "LONG" and macro == "BULLISH") or (vector == "SHORT" and macro == "BEARISH"):
+        score += 2; checks.append("✓ Macro Aligned")
+    else: missing.append("Macro Trend Conflict")
     
-    if vector == "LONG" and f_1h.get("trend") == "BULLISH": score += 3; checks.append("✓ 1H EMA Fuel Aligned")
-    elif vector == "SHORT" and f_1h.get("trend") == "BEARISH": score += 3; checks.append("✓ 1H EMA Fuel Aligned")
+    if (vector == "LONG" and f_1h.get("trend") == "BULLISH") or (vector == "SHORT" and f_1h.get("trend") == "BEARISH"):
+        score += 3; checks.append("✓ 1H EMA Fuel Aligned")
+    else: missing.append("1H EMA Misaligned")
 
-    if f_4h.get("momentum") == "POSITIVE" and vector == "LONG": score += 2; checks.append("✓ 4H MACD Momentum")
-    elif f_4h.get("momentum") == "NEGATIVE" and vector == "SHORT": score += 2; checks.append("✓ 4H MACD Momentum")
+    if (vector == "LONG" and f_4h.get("momentum") == "POSITIVE") or (vector == "SHORT" and f_4h.get("momentum") == "NEGATIVE"):
+        score += 2; checks.append("✓ 4H MACD Momentum")
+    else: missing.append("4H Momentum Weak")
 
-    if audit["airspace_clear"]: score += 3; checks.append("✓ Clear Structural Airspace")
-    if audit["has_shield"]: score += 2; checks.append("✓ Gravity Shield Protected")
+    if audit["airspace_clear"]:
+        score += 3; checks.append("✓ Clear Structural Airspace")
+    else: missing.append("Gravity Wall Blocking Airspace")
+
+    if audit["has_shield"]:
+        score += 2; checks.append("✓ Gravity Shield Protected")
+    else: missing.append("No Gravity Shield")
     
     score += 1; checks.append("✓ Primal Gap Confirmed")
     checks.append(f"✓ 15m Volatility Active (ADX: {adx_15m})")
 
     pct = max(0, (score / max_score) * 100)
-    if pct >= 86: grade = "GRADE A"
-    elif pct >= 73: grade = "GRADE B"
-    else: grade = "STAND DOWN"
+    
+    grade = "STAND DOWN"
+    rejection_reason = ""
+    
+    if pct >= 86: 
+        grade = "GRADE A"
+    elif pct >= 73: 
+        grade = "GRADE B"
+    else: 
+        grade = "STAND DOWN"
+        rejection_reason = f"🔴 ABORT: Score {pct:.0f}%. Missing structural support: " + ", ".join(missing)
 
-    return grade, pct, checks, j_15m
+    return grade, pct, checks, rejection_reason, j_15m
 
 def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs):
     bo = float(levels.get("breakout_trigger", 0))
@@ -158,20 +164,20 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
         }
         
     audit = _run_gravity_audit(entry, favored, kde_peaks, macro_fibs, levels)
-    grade, score_pct, checks, j_15m = _score_setup(favored, macro_bias, micro_bias, fuel_gauge, audit)
+    grade, score_pct, checks, rejection_reason, j_15m = _score_setup(favored, macro_bias, micro_bias, fuel_gauge, audit)
     
     color = "GRAY"
-    if grade == "GRADE A": color = "GREEN"
-    elif grade == "GRADE B": color = "YELLOW"
-    elif grade == "STAND DOWN": color = "RED"
-
     briefing = ""
-    if grade == "GRADE A":
+    
+    if grade == "GRADE A": 
+        color = "GREEN"
         briefing = "🟢 ELITE ALIGNMENT. Fuel, volatility, and structure are synchronized. 70% Ride / 30% Scale recommended."
-    elif grade == "GRADE B":
+    elif grade == "GRADE B": 
+        color = "YELLOW"
         briefing = "🟡 STANDARD OPERATION. Executable, but strictly level-to-level. 30% Ride / 70% Scale."
-    else:
-        briefing = "🔴 ABORT. " + (checks[0] if checks else "Insufficient structural alignment.")
+    elif grade == "STAND DOWN": 
+        color = "RED"
+        briefing = rejection_reason
 
     plan = {
         "valid": grade in ["GRADE A", "GRADE B"],
@@ -189,6 +195,8 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
         "4h_rsi": fuel_gauge.get("4H", {}).get("rsi", 0),
         "airspace_clear": audit["airspace_clear"]
     }
+    if not plan["valid"]:
+        diagnostic_ledger["rejection_reason"] = rejection_reason
     
     key = f"{plan['bias']}|{grade}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}|{macro_bias}|{micro_bias}" if plan["valid"] else ""
 
@@ -200,7 +208,6 @@ def _build_dossier(symbol, anchor, levels, macro_bias, micro_bias, fuel_gauge, k
 
 def log_to_google_sheet(radar_item):
     if radar_item.get("symbol") not in ["BTCUSDT", "ETHUSDT", "SOLUSDT"]: return
-
     try:
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         google_creds_str = os.environ.get("GOOGLE_CREDENTIALS_JSON")
@@ -262,7 +269,6 @@ def log_to_google_sheet(radar_item):
     except Exception as e:
         print(f"❌ Failed to log to Google Sheets: {e}")
 
-# AUDIT FIX: Removed session_id argument entirely. Hardcoded to SSOT pipeline.
 async def analyze_target(symbol):
     data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id="us_ny_futures")
     if data.get("status") == "ERROR": return {"ok": False}
@@ -289,7 +295,6 @@ async def analyze_target(symbol):
         }
     }
 
-# AUDIT FIX: Removed session_id argument entirely. Hardcoded to SSOT pipeline.
 async def scan_sector():
     radar_grid = []
     tasks = [battlebox_pipeline.get_live_battlebox(sym, "MANUAL", manual_id="us_ny_futures") for sym in TARGETS]

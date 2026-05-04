@@ -6,7 +6,6 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        /* --- RADAR BASE STYLES --- */
         :root { 
             --bg-deep: #020617; var(--panel): #0f172a; var(--border): #334155; 
             --green: #22c55e; var(--yellow): #eab308; var(--red): #ef4444; 
@@ -40,7 +39,6 @@
         .copy-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; margin-right: 8px; font-family: 'JetBrains Mono'; font-size: 14px; }
         .copy-btn:hover { background: #334155; color: #fff; border-color: #fff; }
 
-        /* --- TARGET LOCK MODAL --- */
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(2, 6, 23, 0.95); backdrop-filter: blur(8px); z-index: 9999; overflow-y: auto; padding: 40px 20px; }
         .modal-content { max-width: 1400px; margin: 0 auto; position: relative; animation: slideIn 0.3s ease-out; }
         @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
@@ -94,7 +92,7 @@
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v13.0</span></h2>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v13.1</span></h2>
             </div>
             <div style="display: flex; align-items: center;">
                 <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
@@ -292,6 +290,9 @@
             if (d.diagnostic_ledger && Object.keys(d.diagnostic_ledger).length > 0) {
                 let diagHtml = `<div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono'; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">RAW STRUCTURAL DIAGNOSTICS:</div>`;
                 for (const [key, val] of Object.entries(d.diagnostic_ledger)) {
+                    // Ignore the rejection reason in the loop since it is displayed in the Briefing box
+                    if(key === "rejection_reason") continue;
+                    
                     let color = (val === true || val === d.favored) ? "#22c55e" : (val === false ? "#ef4444" : "#cbd5e1");
                     let displayVal = typeof val === 'number' ? val.toFixed(2) : val.toString().toUpperCase();
                     
@@ -364,7 +365,6 @@
             btn.disabled = true; grid.style.display = 'none'; loader.style.display = 'block';
 
             try {
-                // HARDCODED TO AM SESSION ONLY
                 const res = await fetch('/api/radar/scan', { method: 'POST' });
                 const data = await res.json();
                 let html = "";
