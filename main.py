@@ -1,7 +1,7 @@
 # main.py
 # ---------------------------------------------------------
 # KABRODA UNIFIED SERVER: BATTLEBOX v10.5 (SSOT ENFORCED)
-# AUDIT FIX: Stripped legacy PM/Session routing. Single-track AM architecture.
+# AUDIT FIX: Added missing telemetry timestamps to the campaign API.
 # ---------------------------------------------------------
 import os
 import json 
@@ -190,6 +190,7 @@ async def api_gravity_scan(symbol: str = "BTC/USDT"):
         "macro_fibs": macro_fibs
     })
 
+# AUDIT FIX: Explicitly passing activated_at and closed_at to the UI
 @app.get("/api/campaign/logs")
 async def get_campaign_logs(db: Session = Depends(get_db)):
     logs = db.query(CampaignLog).order_by(CampaignLog.created_at.desc()).all()
@@ -206,7 +207,9 @@ async def get_campaign_logs(db: Session = Depends(get_db)):
             "status": l.status,
             "realized_pnl": l.realized_pnl,
             "created_at": l.created_at.isoformat(),
-            "diagnostic_data": l.diagnostic_data
+            "diagnostic_data": l.diagnostic_data,
+            "activated_at": l.activated_at.isoformat() if l.activated_at else None,
+            "closed_at": l.closed_at.isoformat() if l.closed_at else None
         })
     return JSONResponse({"ok": True, "logs": result})
 
@@ -363,7 +366,6 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     ensure_symbol_allowed(user, symbol)
     
-    # AUDIT FIX: Stripped session passing logic. 
     out = await battlebox_pipeline.get_session_review(symbol=symbol, session_id="us_ny_futures")
     return JSONResponse(out)
 
@@ -378,7 +380,6 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     ensure_symbol_allowed(user, symbol)
     
-    # AUDIT FIX: Forced MANUAL us_ny_futures alignment.
     out = await battlebox_pipeline.get_live_battlebox(
         symbol=symbol,
         session_mode="MANUAL",
@@ -389,7 +390,6 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/api/radar/scan")
 async def run_radar_scan(request: Request):
-    # AUDIT FIX: No payload parsing required. Hardcoded logic flows from engine.
     results = await market_radar.scan_sector()
     return {"ok": True, "results": results}
 
