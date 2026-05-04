@@ -132,8 +132,8 @@
                 <div id="chartBarDay" style="height: 250px;"></div>
             </div>
             <div class="chart-card">
-                <div class="chart-title">Average Time in Trade (Minutes)</div>
-                <div id="chartBarTime" style="height: 250px;"></div>
+                <div class="chart-title">Strategy Net Yield (PnL by Scale vs Runner)</div>
+                <div id="chartStrategyYield" style="height: 250px;"></div>
             </div>
         </div>
 
@@ -143,7 +143,7 @@
                     <tr>
                         <th>Date</th>
                         <th>Asset</th>
-                        <th>Grade</th>
+                        <th>Grade / Strategy</th>
                         <th>Status / Diagnostics</th>
                         <th>Duration</th>
                         <th>Net PnL</th>
@@ -200,11 +200,13 @@
             });
             apexCharts.day.render();
 
-            apexCharts.duration = new ApexCharts(document.getElementById("chartBarTime"), {
-                ...darkTheme, type: 'bar', series: [], xaxis: { categories: ['Grade A', 'Grade B'] },
-                colors: ['#eab308'], plotOptions: { bar: { borderRadius: 4, horizontal: true } }, dataLabels: { enabled: false }
+            // AUDIT FIX: Chart rendering for Strategy Yield
+            apexCharts.strategyYield = new ApexCharts(document.getElementById("chartStrategyYield"), {
+                ...darkTheme, type: 'bar', series: [], xaxis: { categories: ['Grade A (Runner Heavy)', 'Grade B (Scale Heavy)'] },
+                colors: ['#0ea5e9'], plotOptions: { bar: { borderRadius: 4, horizontal: true } }, 
+                dataLabels: { enabled: true, formatter: val => "$" + parseFloat(val).toFixed(0), style: { colors: ['#fff'] } }
             });
-            apexCharts.duration.render();
+            apexCharts.strategyYield.render();
         }
 
         function runAnalyticsEngine() {
@@ -239,27 +241,45 @@
             let html = "";
 
             data.slice().reverse().forEach(l => {
-                const isExecuted = !['STAND_DOWN', 'PENDING'].includes(l.status);
+                const isExecuted = !['STAND_DOWN', 'PENDING', 'EXPIRED'].includes(l.status);
+                
                 if (isExecuted) {
                     netPnl += l.realized_pnl;
                     executions++;
+                    
+                    // AUDIT FIX: Win Rate is now calculated strictly by PnL reality.
+                    if (l.realized_pnl > 0) {
+                        wins++;
+                    } else if (l.realized_pnl < 0) {
+                        losses++;
+                    }
                 }
 
-                if(l.status === 'T1_HIT' || l.status === 'CLOSED_WIN') wins++;
-                if(l.status === 'CLOSED_LOSS') losses++;
-
                 const dateStr = l.created_at.replace('T', ' ').substring(0, 16);
-                const pnlStr = l.realized_pnl >= 0 ? `+$${l.realized_pnl.toFixed(2)}` : `-$${Math.abs(l.realized_pnl).toFixed(2)}`;
+                const pnlStr = l.realized_pnl > 0 ? `+$${l.realized_pnl.toFixed(2)}` : (l.realized_pnl < 0 ? `-$${Math.abs(l.realized_pnl).toFixed(2)}` : `$0.00`);
                 const pnlColor = l.realized_pnl > 0 ? '#22c55e' : (l.realized_pnl < 0 ? '#ef4444' : '#94a3b8');
                 
+                // AUDIT FIX: Display specific strategy splits in the table
+                let gradeDisplay = `<span style="color:${l.grade === 'GRADE A' ? '#22c55e' : (l.grade === 'STAND DOWN' ? '#ef4444' : '#eab308')}">${l.grade}</span>`;
+                if (l.grade === 'GRADE A') {
+                    gradeDisplay += `<br><span style="font-size:10px; color:#94a3b8;">30% T1 / 70% RUNNER</span>`;
+                } else if (l.grade === 'GRADE B') {
+                    gradeDisplay += `<br><span style="font-size:10px; color:#94a3b8;">70% T1 / 30% RUNNER</span>`;
+                }
+
                 let durationStr = "—";
                 if(l.activated_at && l.closed_at) {
                     const diffMs = new Date(l.closed_at) - new Date(l.activated_at);
                     const diffMins = Math.round(diffMs / 60000);
-                    durationStr = diffMins + "m";
+                    durationStr = diffMins > 0 ? diffMins + "m" : "<1m";
                 }
 
-                let statusDisplay = `<span class="status-${l.status}">${l.status.replace('_', ' ')}</span>`;
+                let statusText = l.status.replace('_', ' ');
+                if (l.status === 'CLOSED_SCRATCH' && l.realized_pnl > 0) {
+                    statusText = "CLOSED SCRATCH <span style='color:#22c55e; font-size:10px;'><br/>(PROFIT SECURED)</span>";
+                }
+
+                let statusDisplay = `<span class="status-${l.status}">${statusText}</span>`;
                 if(l.status === 'STAND_DOWN' && l.diagnostic_data) {
                     try {
                         const diag = JSON.parse(l.diagnostic_data);
@@ -273,10 +293,10 @@
                 <tr>
                     <td>${dateStr}</td>
                     <td style="color:#fff; font-weight:800;">${l.symbol.replace('/','')}</td>
-                    <td style="color:${l.grade === 'GRADE A' ? '#22c55e' : (l.grade === 'STAND DOWN' ? '#ef4444' : '#eab308')}">${l.grade}</td>
+                    <td>${gradeDisplay}</td>
                     <td>${statusDisplay}</td>
                     <td>${durationStr}</td>
-                    <td style="color:${pnlColor}; font-weight:800;">${l.status === 'STAND_DOWN' ? '—' : pnlStr}</td>
+                    <td style="color:${pnlColor}; font-weight:800;">${['STAND_DOWN', 'EXPIRED'].includes(l.status) ? '—' : pnlStr}</td>
                 </tr>`;
             });
 
@@ -287,20 +307,20 @@
 
             document.getElementById('valTrades').innerText = executions;
             document.getElementById('valWinRate').innerText = winRate.toFixed(1) + '%';
-            document.getElementById('valPnL').innerText = (netPnl >= 0 ? '+$' : '-$') + Math.abs(netPnl).toFixed(2);
-            document.getElementById('valPnL').style.color = netPnl >= 0 ? '#22c55e' : '#ef4444';
+            document.getElementById('valPnL').innerText = (netPnl > 0 ? '+$' : (netPnl < 0 ? '-$' : '$')) + Math.abs(netPnl).toFixed(2);
+            document.getElementById('valPnL').style.color = netPnl > 0 ? '#22c55e' : (netPnl < 0 ? '#ef4444' : '#94a3b8');
 
             const userRisk = parseFloat(document.getElementById('simRisk').value) || 1000;
             const simMultiplier = userRisk / 1000.0;
             const projectedPnL = netPnl * simMultiplier;
             
-            document.getElementById('valSimPnL').innerText = (projectedPnL >= 0 ? '+$' : '-$') + Math.abs(projectedPnL).toFixed(2);
-            document.getElementById('valSimPnL').style.color = projectedPnL >= 0 ? '#22c55e' : '#ef4444';
+            document.getElementById('valSimPnL').innerText = (projectedPnL > 0 ? '+$' : (projectedPnL < 0 ? '-$' : '$')) + Math.abs(projectedPnL).toFixed(2);
+            document.getElementById('valSimPnL').style.color = projectedPnL > 0 ? '#22c55e' : (projectedPnL < 0 ? '#ef4444' : '#94a3b8');
         }
 
         function updateDataVisualizations(data) {
             let cumulative = 0;
-            const executedData = data.filter(l => !['STAND_DOWN', 'PENDING'].includes(l.status));
+            const executedData = data.filter(l => !['STAND_DOWN', 'PENDING', 'EXPIRED'].includes(l.status));
             
             const pnlSeries = executedData.map(l => {
                 cumulative += l.realized_pnl;
@@ -328,17 +348,14 @@
             });
             apexCharts.day.updateSeries([{ name: 'PnL', data: dayPnl }]);
 
-            let durA = { total:0, count:0 }; let durB = { total:0, count:0 };
+            // AUDIT FIX: Calculate exact PnL generated by each strategy type
+            let pnlA = 0; let pnlB = 0;
             executedData.forEach(l => {
-                if(l.activated_at && l.closed_at) {
-                    const diffMins = (new Date(l.closed_at) - new Date(l.activated_at)) / 60000;
-                    if(l.grade === 'GRADE A') { durA.total += diffMins; durA.count++; }
-                    if(l.grade === 'GRADE B') { durB.total += diffMins; durB.count++; }
-                }
+                if(l.grade === 'GRADE A') pnlA += l.realized_pnl;
+                if(l.grade === 'GRADE B') pnlB += l.realized_pnl;
             });
-            const avgA = durA.count > 0 ? durA.total/durA.count : 0;
-            const avgB = durB.count > 0 ? durB.total/durB.count : 0;
-            apexCharts.duration.updateSeries([{ name: 'Avg Minutes', data: [avgA.toFixed(0), avgB.toFixed(0)] }]);
+            
+            apexCharts.strategyYield.updateSeries([{ name: 'Net PnL', data: [pnlA.toFixed(2), pnlB.toFixed(2)] }]);
         }
 
         function exportCSV() {
