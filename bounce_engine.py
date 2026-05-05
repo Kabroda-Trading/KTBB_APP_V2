@@ -97,8 +97,8 @@ async def scan_sector():
             
             # 1. Distance & Overlap Checks
             dist_to_sma = abs(last_price - sma_200) / sma_200
-            if dist_to_sma > 0.005: # Must be within 0.5%
-                results.append({"symbol": symbol, "grade": "STAND DOWN", "briefing": "Price too extended from 200 SMA."})
+            if dist_to_sma > 0.005: 
+                results.append({"symbol": symbol, "grade": "STAND DOWN", "briefing": "Price too extended from 200 SMA.", "price": last_price})
                 continue
                 
             closest_wall = None
@@ -111,13 +111,13 @@ async def scan_sector():
                         wall_dist = d
                         
             if not closest_wall:
-                results.append({"symbol": symbol, "grade": "STAND DOWN", "briefing": "No Gravity Wall support at 200 SMA."})
+                results.append({"symbol": symbol, "grade": "STAND DOWN", "briefing": "No Gravity Wall support at 200 SMA.", "price": last_price})
                 continue
                 
             # 2. Fuel & Bias Checks
             if macro_bias == "BULLISH":
                 if rsi_1h > 55:
-                    results.append({"symbol": symbol, "grade": "STAND DOWN", "briefing": f"Bullish Trend, but 1H RSI ({rsi_1h}) is too high (Needs <=55)."})
+                    results.append({"symbol": symbol, "grade": "STAND DOWN", "briefing": f"Bullish Trend, but 1H RSI ({rsi_1h}) is too high (Needs <=55).", "price": last_price})
                     continue
                 entry = min(sma_200, closest_wall["price"])
                 stop = closest_wall["price"] * 0.995 # 0.5% below wall
@@ -126,14 +126,14 @@ async def scan_sector():
                 
             elif macro_bias == "BEARISH":
                 if rsi_1h < 45:
-                    results.append({"symbol": symbol, "grade": "STAND DOWN", "briefing": f"Bearish Trend, but 1H RSI ({rsi_1h}) is exhausted (Needs >=45)."})
+                    results.append({"symbol": symbol, "grade": "STAND DOWN", "briefing": f"Bearish Trend, but 1H RSI ({rsi_1h}) is exhausted (Needs >=45).", "price": last_price})
                     continue
                 entry = max(sma_200, closest_wall["price"])
                 stop = closest_wall["price"] * 1.005 # 0.5% above wall
                 t1 = kde_data["peaks"][-1]["price"] if kde_data["peaks"] and kde_data["peaks"][-1]["price"] < entry else macro_fibs.get("ext_dn_1272", entry*0.98)
                 t2 = macro_fibs.get("ext_dn_1618", entry*0.95)
             else:
-                results.append({"symbol": symbol, "grade": "STAND DOWN", "briefing": "Macro Trend is Neutral. No Bounce Trades allowed."})
+                results.append({"symbol": symbol, "grade": "STAND DOWN", "briefing": "Macro Trend is Neutral. No Bounce Trades allowed.", "price": last_price})
                 continue
                 
             # 3. Grading the Floor (Titanium vs Standard)
