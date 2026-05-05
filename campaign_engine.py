@@ -1,8 +1,7 @@
 # campaign_engine.py
 # ==============================================================================
 # KABRODA CAMPAIGN STATE MACHINE (THE MISSION LEDGER DAEMON)
-# AUDIT FIX: Inverted Breakout/Breakdown trigger logic corrected.
-# ADDED: Stand Down / Chop tracking to prove capital preservation.
+# AUDIT FIX: Removed manual SessionLock dependency. Fully autonomous daily logging.
 # ==============================================================================
 
 import asyncio
@@ -10,7 +9,7 @@ import json
 import traceback
 from datetime import datetime, timezone, timedelta
 
-from database import SessionLocal, SessionLock, CampaignLog
+from database import SessionLocal, CampaignLog
 import battlebox_pipeline
 
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
@@ -26,10 +25,10 @@ def _evaluate_state(log: CampaignLog, high: float, low: float):
 
     # --- PENDING -> ACTIVE (FIXED BREAKOUT LOGIC) ---
     if log.status == "PENDING":
-        if is_long and high >= log.entry_price:  # Breakout UP
+        if is_long and high >= log.entry_price:  
             log.status = "ACTIVE"
             log.activated_at = now_utc 
-        elif not is_long and low <= log.entry_price: # Breakdown DOWN
+        elif not is_long and low <= log.entry_price: 
             log.status = "ACTIVE"
             log.activated_at = now_utc 
 
@@ -72,34 +71,36 @@ async def sync_daily_campaigns():
         now_utc = datetime.now(timezone.utc)
         date_key = now_utc.strftime("%Y-%m-%d")
         
-        locks = db.query(SessionLock).filter(SessionLock.date_key == date_key).all()
-        
-        for lock in locks:
-            pkt = json.loads(lock.packet_data)
-            import market_radar 
-            dossier = market_radar._build_dossier(
-                lock.symbol, 0, pkt.get("levels",{}), pkt.get("context",{}).get("macro_bias","NEUTRAL"),
-                pkt.get("context",{}).get("micro_bias","NEUTRAL"), pkt.get("context",{}).get("fuel_gauge",{}),
-                pkt.get("context",{}).get("kde_peaks",[]), pkt.get("context",{}).get("macro_fibs",{})
-            )
-            
-            plan = dossier.get("plan", {})
-            
+        for symbol in TARGETS:
+            # Check if we already logged this asset today
             exists = db.query(CampaignLog).filter(
-                CampaignLog.symbol == lock.symbol,
-                CampaignLog.session_id == lock.session_id,
+                CampaignLog.symbol == symbol,
                 CampaignLog.date_key == date_key
             ).first()
             
             if not exists:
+                # Autonomously ping the pipeline to build today's math
+                data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id="us_ny_futures")
+                if data.get("status") in ["ERROR", "CALIBRATING"]:
+                    continue
+
+                levels = data.get("battlebox", {}).get("levels", {})
+                context = data.get("battlebox", {}).get("context", {})
+
+                import market_radar 
+                dossier = market_radar._build_dossier(
+                    symbol, 0, levels, 
+                    context.get("macro_bias","NEUTRAL"),
+                    context.get("micro_bias","NEUTRAL"), 
+                    context.get("fuel_gauge",{}),
+                    context.get("kde_peaks",[]), 
+                    context.get("macro_fibs",{})
+                )
+                
+                plan = dossier.get("plan", {})
                 risk_amt = 1000.00 
                 
-                last_price = 0.0
-                if "meta" in pkt and "last_price" in pkt["meta"]:
-                    last_price = float(pkt["meta"]["last_price"])
-                elif "levels" in pkt and "range30m_high" in pkt["levels"]:
-                    last_price = float(pkt["levels"]["range30m_high"])
-                
+                last_price = float(data.get("price", 0.0))
                 entry_ref = plan.get("entry", 0.0) if plan.get("valid") else last_price
                 stop_ref = plan.get("stop", 0.0) if plan.get("valid") else (last_price * 0.99)
                 
@@ -107,17 +108,17 @@ async def sync_daily_campaigns():
                 total_contracts = (risk_amt / dist) if dist > 0 else 0.0
                 
                 diagnostics_payload = dossier.get("diagnostic_ledger", {})
-                diagnostics_payload["rejection_reason"] = dossier.get("checks", ["No valid setup"])[0] if dossier.get("grade") == "STAND DOWN" else ""
+                if dossier.get("grade") == "STAND DOWN":
+                    diagnostics_payload["rejection_reason"] = dossier.get("checks", ["No valid setup"])[0] if dossier.get("checks") else "Insufficient structural alignment"
                 
                 initial_status = "PENDING" if plan.get("valid") else "STAND_DOWN"
                 bias_ref = plan.get("bias", "NEUTRAL") if plan.get("valid") else dossier.get("favored", "NEUTRAL")
-                
                 targets = plan.get("targets", [0.0, 0.0, 0.0])
                 
                 new_log = CampaignLog(
-                    symbol=lock.symbol, date_key=date_key, session_id=lock.session_id,
+                    symbol=symbol, date_key=date_key, session_id="us_ny_futures",
                     bias=bias_ref, grade=dossier["grade"], 
-                    entry_price=plan.get("entry", 0.0), stop_loss=plan.get("stop", 0.0), 
+                    entry_price=entry_ref, stop_loss=stop_ref, 
                     t1=targets[0] if len(targets) > 0 else 0.0, 
                     t2=targets[1] if len(targets) > 1 else 0.0, 
                     t3=targets[2] if len(targets) > 2 else 0.0,
@@ -126,6 +127,8 @@ async def sync_daily_campaigns():
                     diagnostic_data=json.dumps(diagnostics_payload)
                 )
                 db.add(new_log)
+                print(f"[MISSION LEDGER] Autonomously Logged {symbol} for {date_key}: {initial_status}")
+                
         db.commit()
     except Exception as e:
         traceback.print_exc()
@@ -133,7 +136,7 @@ async def sync_daily_campaigns():
         db.close()
 
 async def run_campaign_tracker_loop():
-    print(">>> CAMPAIGN ENGINE: Mission Ledger Daemon Online (100% Data Capture Active)...")
+    print(">>> CAMPAIGN ENGINE: Mission Ledger Daemon Online (Autonomous Tracking Active)...")
     while True:
         await sync_daily_campaigns()
         
