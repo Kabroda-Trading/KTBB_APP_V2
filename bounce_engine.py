@@ -1,12 +1,13 @@
 # bounce_engine.py
 # ==============================================================================
 # KABRODA BOUNCE ENGINE (MEAN-REVERSION CONTINUATION DAEMON)
-# Purpose: Identifies Titanium Floors/Ceilings & fires email alerts.
+# Purpose: Identifies Titanium Floors/Ceilings & fires dual-payload email alerts.
 # ==============================================================================
 import os
 import json
 import smtplib
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone
 import asyncio
 
@@ -16,9 +17,7 @@ import gravity_math
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 _ALERT_CACHE = {}  # Prevents email spam (tracks alerts per symbol per day)
 
-# --- EMAIL NOTIFICATION SYSTEM (HTML UPGRADE) ---
-from email.mime.multipart import MIMEMultipart
-
+# --- EMAIL NOTIFICATION SYSTEM (DUAL PAYLOAD) ---
 def send_bounce_alert(symbol: str, grade: str, bias: str, entry: float, stop: float, t1: float, t2: float):
     now_utc = datetime.now(timezone.utc)
     date_key = now_utc.strftime("%Y-%m-%d")
@@ -35,11 +34,26 @@ def send_bounce_alert(symbol: str, grade: str, bias: str, entry: float, stop: fl
         print(f"[BOUNCE ENGINE] Alert triggered for {symbol}, but SMTP credentials missing.")
         return
 
-    # Color code the grade
+    # Color code the grade for HTML
     grade_color = "#22c55e" if grade == "GRADE A" else "#eab308"
     vector_color = "#22c55e" if bias == "BULLISH" else "#ef4444"
 
-    # Build the HTML payload
+    # 1. Build the Plain Text Fallback
+    text_content = f"""
+KABRODA SYSTEM ALERT: {grade} BOUNCE DETECTED
+
+Asset: {symbol}
+Vector: {bias}
+
+RESTING LIMIT ENTRY: ${entry:.2f}
+STOP LOSS (ARMOR): ${stop:.2f}
+TARGET 1 (SCALE): ${t1:.2f}
+TARGET 2 (RUNNER): ${t2:.2f}
+
+Log into the Admin Suite to view structural alignment.
+"""
+
+    # 2. Build the HTML Premium Payload
     html_content = f"""
     <html>
     <body style="background-color: #020617; color: #f8fafc; font-family: 'Courier New', monospace; padding: 20px;">
@@ -80,12 +94,14 @@ def send_bounce_alert(symbol: str, grade: str, bias: str, entry: float, stop: fl
     </html>
     """
 
+    # 3. Package and Send (MIMEMultipart "alternative")
     msg = MIMEMultipart("alternative")
     msg['Subject'] = f"[{grade}] {symbol} Kabroda Limit Order"
     msg['From'] = smtp_user
     msg['To'] = smtp_dest
     
-    # Attach the HTML rendering
+    # CRITICAL: Attach plain text FIRST, then HTML. 
+    msg.attach(MIMEText(text_content, "plain"))
     msg.attach(MIMEText(html_content, "html"))
 
     try:
@@ -93,7 +109,7 @@ def send_bounce_alert(symbol: str, grade: str, bias: str, entry: float, stop: fl
             server.login(smtp_user, smtp_pass)
             server.send_message(msg)
         _ALERT_CACHE[cache_key] = True
-        print(f"[BOUNCE ENGINE] >>> HTML EMAIL ALERT SENT FOR {symbol} <<<")
+        print(f"[BOUNCE ENGINE] >>> DUAL-PAYLOAD EMAIL ALERT SENT FOR {symbol} <<<")
     except Exception as e:
         print(f"[BOUNCE ENGINE] Failed to send email: {e}")
 
