@@ -14,11 +14,8 @@
         .map-header { display: flex; justify-content: space-between; align-items: center; padding: 15px 30px; background: #0f172a; border-bottom: 1px solid #334155; z-index: 10; position: relative;}
         .h-title { font-family: 'JetBrains Mono'; font-size: 20px; font-weight: 800; margin: 0; color: #fff; text-transform: uppercase; letter-spacing: 2px;}
 
-        /* The Chart area requires relative positioning to hold the absolute overlay */
         #chart-wrapper { flex: 1; position: relative; background: #020617; display: flex; flex-direction: column; }
         #chart-container { flex: 1; position: relative; }
-        
-        /* The invisible Bookmap Canvas Overlay */
         #kde-overlay { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 5; }
 
         .sidebar { width: 420px; background: #0f172a; padding: 20px; overflow-y: auto; box-sizing: border-box; border-left: 1px solid #334155; z-index: 10; position: relative;}
@@ -34,6 +31,9 @@
         .fib-card { background: rgba(168, 85, 247, 0.1); border: 1px solid #a855f7; border-left: 4px solid #a855f7; padding: 15px; margin-bottom: 20px; border-radius: 6px; }
         .z-price { font-family: 'JetBrains Mono'; font-size: 16px; font-weight: 800; color: #fff; }
         .z-score { float: right; font-family: 'Rajdhani'; font-size: 14px; font-weight: 800; color: #94a3b8; }
+        
+        .tv-btn { background: #a855f7; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 800; cursor: pointer; margin-left: 15px; transition: 0.2s; box-shadow: 0 0 10px rgba(168, 85, 247, 0.3); }
+        .tv-btn:hover { background: #d8b4fe; color: #000; }
     </style>
 </head>
 <body>
@@ -44,11 +44,14 @@
             <div id="chart-wrapper">
                 <div class="map-header">
                     <h1 class="h-title">Gravity Map <span style="font-size:10px; color:#0ea5e9;">[KDE STRUCTURAL DENSITY]</span></h1>
-                    <select id="symSelect" style="padding: 6px 12px; background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 12px;" onchange="loadGrid()">
-                        <option value="BTC/USDT">BTC/USDT</option>
-                        <option value="ETH/USDT">ETH/USDT</option>
-                        <option value="SOL/USDT">SOL/USDT</option>
-                    </select>
+                    <div style="display: flex; align-items: center;">
+                        <select id="symSelect" style="padding: 6px 12px; background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 12px;" onchange="loadGrid()">
+                            <option value="BTC/USDT">BTC/USDT</option>
+                            <option value="ETH/USDT">ETH/USDT</option>
+                            <option value="SOL/USDT">SOL/USDT</option>
+                        </select>
+                        <button class="tv-btn" id="exportBtn" onclick="exportTradingViewData()">📋 COPY TV OVERLAY</button>
+                    </div>
                 </div>
                 <div id="chart-container">
                     <canvas id="kde-overlay"></canvas>
@@ -62,10 +65,13 @@
 
     <script>
         let chart, candlestickSeries;
-        let globalKDE = null; // Stores the curve data
-        let maxDensity = 0;   // Stores peak amplitude
+        let globalKDE = null; 
+        let maxDensity = 0;   
         
-        // Sync trackers for the Price Scale
+        // --- AUDIT FIX: Export Data Storage ---
+        let globalPeaks = [];
+        let globalFibs = null;
+
         let lastYCoord = null;
         let syncAnimation = null;
         
@@ -86,10 +92,8 @@
                 upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444'
             });
             
-            // Horizontal Pan/Zoom Sync
             chart.timeScale().subscribeVisibleLogicalRangeChange(renderKDEWave);
             
-            // Aggressive Vertical Scale Sync via Interaction Tracking
             container.addEventListener('mousedown', startPriceScaleSync);
             container.addEventListener('touchstart', startPriceScaleSync, {passive: true});
             window.addEventListener('mouseup', stopPriceScaleSync);
@@ -99,17 +103,14 @@
             resizeCanvas();
         }
 
-        // --- ALIGNMENT ENGINE ---
         function startPriceScaleSync() {
             if (syncAnimation) cancelAnimationFrame(syncAnimation);
             
             function checkYShift() {
                 if (globalKDE && globalKDE.length > 0) {
-                    // Monitor a stable anchor point in the middle of our density array
                     const anchorPrice = globalKDE[Math.floor(globalKDE.length / 2)].price;
                     const currentY = candlestickSeries.priceToCoordinate(anchorPrice);
                     
-                    // If the Y coordinate moved without the time scale changing, redraw immediately
                     if (currentY !== null && currentY !== lastYCoord) {
                         lastYCoord = currentY;
                         renderKDEWave();
@@ -125,7 +126,7 @@
                 cancelAnimationFrame(syncAnimation);
                 syncAnimation = null;
             }
-            renderKDEWave(); // Final snap to ensure perfect alignment
+            renderKDEWave(); 
         }
 
         function resizeCanvas() {
@@ -136,7 +137,6 @@
             if (globalKDE) renderKDEWave();
         }
 
-        // The Engine that draws the Bookmap Histogram
         function renderKDEWave() {
             if (!globalKDE || globalKDE.length === 0) return;
             
@@ -147,29 +147,23 @@
             
             ctx.clearRect(0, 0, width, height);
             
-            // Determine the width of the right price scale to start drawing precisely on its edge
             const priceAxisWidth = chart.priceScale('right').width();
             const startX = width - priceAxisWidth;
-            
-            // Max stretch of the wave into the screen (e.g., 35% of chart width)
             const maxWaveExtent = width * 0.35; 
 
             ctx.beginPath();
             ctx.moveTo(startX, height);
 
-            // Create a fluid gradient for the structural mass (Blue -> Purple -> Red)
             const gradient = ctx.createLinearGradient(startX, 0, startX - maxWaveExtent, 0);
-            gradient.addColorStop(0, 'rgba(59, 130, 246, 0.1)');  // Light pull
-            gradient.addColorStop(0.5, 'rgba(168, 85, 247, 0.4)'); // Heavy pull
-            gradient.addColorStop(1, 'rgba(239, 68, 68, 0.7)');    // Maximum pull
+            gradient.addColorStop(0, 'rgba(59, 130, 246, 0.1)');  
+            gradient.addColorStop(0.5, 'rgba(168, 85, 247, 0.4)'); 
+            gradient.addColorStop(1, 'rgba(239, 68, 68, 0.7)');    
 
-            // Map Price points to Pixels via TradingView API
             let started = false;
             for (let i = 0; i < globalKDE.length; i++) {
                 const point = globalKDE[i];
                 const yCoord = candlestickSeries.priceToCoordinate(point.price);
                 
-                // If the price is completely off screen, skip calculating to save CPU
                 if (yCoord === null) continue; 
                 
                 const waveIntensity = (point.density / maxDensity) * maxWaveExtent;
@@ -188,13 +182,40 @@
             ctx.fillStyle = gradient;
             ctx.fill();
             
-            // Draw a harsh structural edge line
             ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)';
             ctx.lineWidth = 1;
             ctx.stroke();
         }
 
-        // Add an 'isBackgroundUpdate' flag so we don't wipe the screen every 60 seconds
+        // --- THE DATA EXTRACTION FUNCTION ---
+        function exportTradingViewData() {
+            if (globalPeaks.length === 0 || !globalFibs) {
+                return alert("Data not ready. Please wait for the scan to finish.");
+            }
+
+            let maxArr = []; let heavyArr = []; let stdArr = [];
+            
+            globalPeaks.forEach(p => {
+                if(p.intensity === 'MAXIMUM') maxArr.push(p.price.toFixed(2));
+                else if(p.intensity === 'HEAVY') heavyArr.push(p.price.toFixed(2));
+                else stdArr.push(p.price.toFixed(2));
+            });
+
+            // Format: MAX|HEAVY|STD|FIB1,FIB2
+            let payload = `${maxArr.join(',')}|${heavyArr.join(',')}|${stdArr.join(',')}|${globalFibs.fib_0500},${globalFibs.fib_0618}`;
+
+            navigator.clipboard.writeText(payload).then(() => {
+                const btn = document.getElementById('exportBtn');
+                const orig = btn.innerText;
+                btn.innerText = "✓ SYNCED";
+                btn.style.background = "#22c55e";
+                setTimeout(() => {
+                    btn.innerText = orig;
+                    btn.style.background = "#a855f7";
+                }, 2000);
+            });
+        }
+
         async function loadGrid(isBackgroundUpdate = false) {
             const sym = document.getElementById('symSelect').value;
             const sidebar = document.getElementById('sidebar-zones');
@@ -210,22 +231,20 @@
                 
                 if (!isBackgroundUpdate) sidebar.innerHTML = '';
                 
-                // 1. Hydrate Base Chart (TradingView handles silent updates cleanly)
                 if (data.macro_fibs && data.macro_fibs.chart_data) {
                     candlestickSeries.setData(data.macro_fibs.chart_data);
-                    if (!isBackgroundUpdate) chart.timeScale().fitContent(); // Only fit content on initial load
+                    if (!isBackgroundUpdate) chart.timeScale().fitContent(); 
                 }
                 
-                // 2. Hydrate the KDE Engine Memory
                 if (data.kde_data && data.kde_data.curve) {
                     globalKDE = data.kde_data.curve;
                     maxDensity = data.kde_data.max_density;
-                    renderKDEWave(); // Redraw the wave
+                    globalPeaks = data.kde_data.peaks; // Save for TV Export
+                    globalFibs = data.macro_fibs;      // Save for TV Export
+                    renderKDEWave(); 
                 }
                 
-                // Only rebuild the sidebar HTML if it's the initial load to prevent flickering
                 if (!isBackgroundUpdate) {
-                    // 3. Project Macro Fibs
                     if (data.macro_fibs && data.macro_fibs.swing_high) {
                         const f = data.macro_fibs;
                         candlestickSeries.createPriceLine({ price: f.swing_high, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'HIGH' });
@@ -240,7 +259,6 @@
                         </div>`;
                     }
                     
-                    // 4. Project KDE Peaks
                     if (data.kde_data && data.kde_data.peaks.length > 0) {
                         sidebar.innerHTML += `<div style="color:#94a3b8; font-family:'JetBrains Mono'; font-size:11px; margin-bottom:15px; text-transform:uppercase;">Identified Centers of Gravity</div>`;
                         
@@ -268,20 +286,17 @@
             }
         }
 
-        // UNIFIED EVENT LISTENER - NO DUPLICATES
         document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => { 
                 initChart(); 
-                loadGrid(); // Initial Load
+                loadGrid(); 
             }, 150);
 
-            // LIVE RADAR LINK: Auto-refresh data silently every 60 seconds
             setInterval(() => {
                 loadGrid(true); 
             }, 60000);
         });
 
-        // UNIFIED RESIZE LISTENER
         window.addEventListener('resize', () => { 
             if (chart) {
                 const container = document.getElementById('chart-container');
