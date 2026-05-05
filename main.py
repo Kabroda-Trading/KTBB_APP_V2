@@ -1,7 +1,7 @@
 # main.py
 # ---------------------------------------------------------
 # KABRODA UNIFIED SERVER: BATTLEBOX v10.5 (SSOT ENFORCED)
-# AUDIT FIX: Added missing telemetry timestamps to the campaign API.
+# AUDIT FIX: Cleanly integrated Bounce Engine API and Admin routes.
 # ---------------------------------------------------------
 import os
 import json 
@@ -26,7 +26,8 @@ import research_lab
 import market_simulator  
 import gravity_engine  
 import gravity_math
-import campaign_engine  
+import campaign_engine
+import bounce_engine  
 
 from database import init_db, get_db, UserModel, CampaignLog
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
@@ -190,7 +191,6 @@ async def api_gravity_scan(symbol: str = "BTC/USDT"):
         "macro_fibs": macro_fibs
     })
 
-# AUDIT FIX: Explicitly passing activated_at and closed_at to the UI
 @app.get("/api/campaign/logs")
 async def get_campaign_logs(db: Session = Depends(get_db)):
     logs = db.query(CampaignLog).order_by(CampaignLog.created_at.desc()).all()
@@ -289,6 +289,12 @@ async def admin_roster_page(request: Request, db: Session = Depends(get_db)):
     ctx["users"] = users
     return _template_or_fallback(request, templates, "admin.html", ctx)
 
+@app.get("/admin/bounce")
+async def admin_bounce_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx["is_admin"]: return RedirectResponse("/suite")
+    return _template_or_fallback(request, templates, "bounce_radar.html", ctx)
+
 @app.get("/admin/export-audit-ledger")
 async def export_audit_ledger(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
@@ -355,6 +361,16 @@ async def admin_reset_password(request: Request, db: Session = Depends(get_db)):
     return JSONResponse({"ok": False, "error": "User not found"})
 
 # --- API EXECUTION ROUTES ---
+@app.post("/api/bounce/scan")
+async def run_bounce_scan(request: Request, db: Session = Depends(get_db)):
+    uid = request.session.get(auth.SESSION_KEY)
+    if not uid: raise HTTPException(status_code=401)
+    user = db.query(UserModel).filter(UserModel.id == uid).first()
+    if not getattr(user, "is_admin", False): return JSONResponse({"ok": False, "error": "Admin access required."})
+    
+    results = await bounce_engine.scan_sector()
+    return {"ok": True, "results": results}
+
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     uid = request.session.get(auth.SESSION_KEY)
