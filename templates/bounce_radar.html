@@ -2,23 +2,35 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Kabroda Admin | Bounce Engine</title>
+    <title>Kabroda | Bounce Engine</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        :root { --panel: #0f172a; --border: #334155; }
+        :root { --bg-deep: #020617; var(--panel): #0f172a; var(--border): #334155; --green: #22c55e; var(--yellow): #eab308; var(--red): #ef4444; --white: #f8fafc; var(--gray): #94a3b8; }
         body { background-color: #020617; color: #f8fafc; font-family: 'Inter', sans-serif; padding: 20px; margin: 0; }
         .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
-        .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 30px; }
-        .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
+        .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #334155; padding-bottom: 20px; margin-bottom: 30px; }
+        .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #a855f7; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
         .btn-scan { background: #a855f7; color: #fff; font-weight: 800; font-family: 'JetBrains Mono'; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; text-transform: uppercase; transition: 0.2s; box-shadow: 0 0 15px rgba(168, 85, 247, 0.2); }
-        .btn-scan:hover { background: #d8b4fe; color:#000; }
-        
+        .btn-scan:hover { background: #c084fc; }
         .radar-grid { display: grid; gap: 15px; }
-        .radar-row { display: grid; grid-template-columns: 1fr 2fr 1fr; background: var(--panel); border: 1px solid var(--border); padding: 20px 30px; border-radius: 6px; align-items: center; }
-        .border-GREEN { border-left: 4px solid #22c55e; } .border-YELLOW { border-left: 4px solid #eab308; } .border-GRAY { border-left: 4px solid #94a3b8; opacity:0.5; }
+        .radar-row { display: grid; grid-template-columns: 1fr 2fr 1fr; background: #0f172a; border: 1px solid #334155; padding: 20px 30px; border-radius: 6px; align-items: center; }
+        .border-GREEN { border-left: 4px solid #22c55e; }
+        .border-YELLOW { border-left: 4px solid #eab308; }
+        .border-RED { border-left: 4px solid #ef4444; opacity: 0.6; }
+        .sym-name { font-size: 24px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
+        .sym-price { font-size: 14px; color: #94a3b8; font-family: 'JetBrains Mono'; margin-top: 4px; }
         
-        .data-row { display: flex; justify-content: space-between; font-family: 'JetBrains Mono'; font-size: 13px; border-bottom: 1px solid var(--border); padding: 4px 0; }
+        .copy-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-size: 12px; width: 100%; font-weight: 700;}
+        .copy-btn:hover { background: #334155; color: #fff; border-color: #fff; }
+
+        /* Modal Styles */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(2, 6, 23, 0.95); backdrop-filter: blur(8px); z-index: 9999; overflow-y: auto; padding: 40px 20px; }
+        .modal-content { max-width: 600px; margin: 0 auto; background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 30px; position: relative; }
+        .close-btn { position: absolute; top: 20px; right: 20px; background: none; border: none; color: #ef4444; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 16px; cursor: pointer; }
+        .diag-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed #1e293b; font-family: 'JetBrains Mono'; font-size: 13px; }
+        .diag-label { color: #64748b; text-transform: uppercase; }
+        .diag-val { font-weight: bold; color: #f8fafc; }
     </style>
 </head>
 <body>
@@ -26,15 +38,54 @@
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title" style="color:#a855f7;">Bounce Engine <span style="font-size:14px; background:#1e293b; color:#cbd5e1; padding:4px; border-radius:4px;">LIMIT ORDERS</span></h2>
+                <h2 class="radar-title">BOUNCE ENGINE <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8; font-family: 'Inter';">LIMIT ORDERS</span></h2>
             </div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">SCAN FLOORS & CEILINGS</button>
         </div>
-        <div id="loading" style="display:none; text-align:center; padding:80px; color:#a855f7; font-family:'JetBrains Mono';">/// SCANNING ALGORITHMIC STRUCTURE...</div>
+        
+        <div id="loading" style="display:none; text-align:center; padding:80px; color:#a855f7; font-family:'JetBrains Mono';">
+            /// CALIBRATING GRAVITY WELLS...
+        </div>
         <div id="radarTargetGrid" class="radar-grid"></div>
     </div>
 
+    <div id="diagModal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-btn" onclick="closeModal()">✕</button>
+            <h2 style="font-family: 'Rajdhani'; color: #0ea5e9; margin-top: 0;" id="mSym">SYMBOL DIAGNOSTICS</h2>
+            <div id="mReason" style="color: #ef4444; font-family: 'JetBrains Mono'; font-size: 12px; margin-bottom: 20px; background: rgba(239,68,68,0.1); padding: 10px; border-left: 2px solid #ef4444;"></div>
+            <div id="diagContainer"></div>
+        </div>
+    </div>
+
     <script>
+        window.bounceMemory = {};
+
+        function openModal(symbol) {
+            const data = window.bounceMemory[symbol];
+            if (!data) return;
+            
+            document.getElementById('mSym').innerText = symbol + " RAW DATA";
+            
+            let diagHtml = "";
+            if (data.diagnostic_ledger) {
+                for (const [key, val] of Object.entries(data.diagnostic_ledger)) {
+                    let displayVal = typeof val === 'number' ? val.toFixed(2) : val;
+                    diagHtml += `<div class="diag-row"><span class="diag-label">${key.replace(/_/g, ' ')}</span><span class="diag-val">${displayVal}</span></div>`;
+                }
+            } else {
+                diagHtml = "<div style='color:#94a3b8; font-family:monospace;'>No internal diagnostics available for this rejection.</div>";
+            }
+            
+            document.getElementById('diagContainer').innerHTML = diagHtml;
+            document.getElementById('mReason').innerText = data.briefing || "N/A";
+            document.getElementById('diagModal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('diagModal').style.display = 'none';
+        }
+
         async function forceScan() {
             const btn = document.getElementById('scanBtn'); 
             const grid = document.getElementById('radarTargetGrid'); 
@@ -46,38 +97,32 @@
                 const res = await fetch('/api/bounce/scan', { method: 'POST' });
                 const data = await res.json();
                 let html = "";
+                window.bounceMemory = {};
 
                 data.results.forEach(t => {
-                    let borderTheme = t.color_code || "GRAY";
+                    window.bounceMemory[t.symbol] = t;
+                    let borderTheme = t.color_code || "RED";
+                    let displayGrade = t.grade;
+                    let displaySubtext = t.briefing;
                     
-                    if (t.grade === "STAND DOWN") {
-                        html += `
-                        <div class="radar-row border-GRAY">
-                            <div><div style="font-family:'JetBrains Mono'; font-size:24px; font-weight:800;">${t.symbol}</div><div style="color:#94a3b8; font-size:12px; margin-top:4px;">Price: $${t.price.toFixed(2)}</div></div>
-                            <div style="text-align:center;"><div style="font-family:'Rajdhani'; font-size:20px; color:#ef4444; font-weight:800;">STAND DOWN</div><div style="font-family:'JetBrains Mono'; font-size:11px; color:#94a3b8;">${t.briefing}</div></div>
-                            <div></div>
-                        </div>`;
-                    } else {
-                        html += `
-                        <div class="radar-row border-${borderTheme}">
-                            <div><div style="font-family:'JetBrains Mono'; font-size:24px; font-weight:800;">${t.symbol}</div><div style="color:#22c55e; font-size:12px; margin-top:4px; font-family:'JetBrains Mono';">VECTOR: ${t.macro_bias}</div></div>
-                            <div style="padding: 0 20px;">
-                                <div style="font-family:'Rajdhani'; font-size:24px; color:var(--${borderTheme.toLowerCase()}); font-weight:800; text-align:center;">${t.grade}</div>
-                                <div style="font-family:'JetBrains Mono'; font-size:11px; color:#94a3b8; text-align:center; margin-bottom:10px;">${t.briefing}</div>
-                                <div class="data-row"><span style="color:#94a3b8;">LIMIT ENTRY</span><span style="color:#fff; font-weight:bold;">$${t.plan.entry.toFixed(2)}</span></div>
-                                <div class="data-row"><span style="color:#94a3b8;">STOP LOSS</span><span style="color:#ef4444; font-weight:bold;">$${t.plan.stop.toFixed(2)}</span></div>
-                                <div class="data-row"><span style="color:#94a3b8;">TARGET 1 (SCALE)</span><span style="color:#eab308; font-weight:bold;">$${t.plan.targets[0].toFixed(2)}</span></div>
-                                <div class="data-row" style="border:none;"><span style="color:#94a3b8;">TARGET 2 (RUNNER)</span><span style="color:#0ea5e9; font-weight:bold;">$${t.plan.targets[1].toFixed(2)}</span></div>
-                            </div>
-                            <div style="text-align:right;">
-                                <div style="font-family:'JetBrains Mono'; font-size:10px; color:#64748b; margin-bottom:5px;">DIAGNOSTICS</div>
-                                <div style="font-family:'JetBrains Mono'; font-size:11px; color:#cbd5e1;">1H RSI: ${t.diagnostic_ledger['1h_rsi_fuel'].toFixed(2)}</div>
-                                <div style="font-family:'JetBrains Mono'; font-size:11px; color:#cbd5e1;">15M 200 SMA: $${t.diagnostic_ledger['15m_200_sma'].toFixed(2)}</div>
-                            </div>
-                        </div>`;
-                    }
+                    html += `
+                    <div class="radar-row border-${borderTheme}">
+                        <div>
+                            <div><span class="sym-name">${t.symbol}</span></div>
+                            <div class="sym-price" style="margin-top: 8px;">Price: $${t.price.toFixed(2)}</div>
+                        </div>
+
+                        <div style="display:flex; flex-direction:column; justify-content:center; align-items:center;">
+                            <div style="font-family:'Rajdhani'; font-size:20px; font-weight:800; color:var(--${borderTheme.toLowerCase()});">${displayGrade}</div>
+                            <div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono'; margin-top:4px; text-align:center;">${displaySubtext}</div>
+                        </div>
+
+                        <div style="display:flex; justify-content:flex-end; align-items:center;">
+                             <button class="copy-btn" onclick="openModal('${t.symbol}')">📋 RAW DATA</button>
+                        </div>
+                    </div>`;
                 });
-                grid.innerHTML = html || `<div style="text-align:center; padding:40px; color:#94a3b8;">No data returned.</div>`;
+                grid.innerHTML = html;
             } catch(e) { console.log(e); } 
             finally { loader.style.display = 'none'; grid.style.display = 'grid'; btn.disabled = false; }
         }
