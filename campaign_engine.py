@@ -1,7 +1,7 @@
 # campaign_engine.py
 # ==============================================================================
 # KABRODA CAMPAIGN STATE MACHINE (THE MISSION LEDGER DAEMON)
-# AUDIT FIX: Dual-tracking enabled for Radar Breakouts & Bounce Engine limits.
+# AUDIT FIX: Daemon now dynamically overwrites STAND_DOWN logs when valid setups emerge.
 # ==============================================================================
 
 import asyncio
@@ -69,39 +69,63 @@ async def sync_radar_campaigns():
         date_key = now_utc.strftime("%Y-%m-%d")
         
         for symbol in TARGETS:
-            exists = db.query(CampaignLog).filter(CampaignLog.symbol == symbol, CampaignLog.date_key == date_key, CampaignLog.session_id == "us_ny_futures").first()
-            if not exists:
-                data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id="us_ny_futures")
-                if data.get("status") in ["ERROR", "CALIBRATING"]: continue
+            log = db.query(CampaignLog).filter(
+                CampaignLog.symbol == symbol, 
+                CampaignLog.date_key == date_key, 
+                CampaignLog.session_id == "us_ny_futures"
+            ).first()
+            
+            # If a live trade is already running today, do not overwrite it.
+            if log and log.status not in ["STAND_DOWN", "EXPIRED"]:
+                continue 
+                
+            data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id="us_ny_futures")
+            if data.get("status") in ["ERROR", "CALIBRATING"]: continue
 
-                levels = data.get("battlebox", {}).get("levels", {})
-                context = data.get("battlebox", {}).get("context", {})
+            levels = data.get("battlebox", {}).get("levels", {})
+            context = data.get("battlebox", {}).get("context", {})
 
-                import market_radar 
-                dossier = market_radar._build_dossier(symbol, 0, levels, context.get("macro_bias","NEUTRAL"), context.get("micro_bias","NEUTRAL"), context.get("fuel_gauge",{}), context.get("kde_peaks",[]), context.get("macro_fibs",{}))
-                
-                plan = dossier.get("plan", {})
-                risk_amt = 1000.00 
-                last_price = float(data.get("price", 0.0))
-                entry_ref = plan.get("entry", 0.0) if plan.get("valid") else last_price
-                stop_ref = plan.get("stop", 0.0) if plan.get("valid") else (last_price * 0.99)
-                
-                dist = abs(entry_ref - stop_ref)
-                total_contracts = (risk_amt / dist) if dist > 0 else 0.0
-                
-                diagnostics_payload = dossier.get("diagnostic_ledger", {})
-                if dossier.get("grade") == "STAND DOWN":
-                    diagnostics_payload["rejection_reason"] = dossier.get("checks", ["No valid setup"])[0] if dossier.get("checks") else "Insufficient structural alignment"
-                
+            import market_radar 
+            dossier = market_radar._build_dossier(symbol, 0, levels, context.get("macro_bias","NEUTRAL"), context.get("micro_bias","NEUTRAL"), context.get("fuel_gauge",{}), context.get("kde_peaks",[]), context.get("macro_fibs",{}))
+            
+            plan = dossier.get("plan", {})
+            risk_amt = 1000.00 
+            last_price = float(data.get("price", 0.0))
+            entry_ref = plan.get("entry", 0.0) if plan.get("valid") else last_price
+            stop_ref = plan.get("stop", 0.0) if plan.get("valid") else (last_price * 0.99)
+            
+            dist = abs(entry_ref - stop_ref)
+            total_contracts = (risk_amt / dist) if dist > 0 else 0.0
+            
+            diagnostics_payload = dossier.get("diagnostic_ledger", {})
+            if dossier.get("grade") == "STAND DOWN":
+                diagnostics_payload["rejection_reason"] = dossier.get("checks", ["No valid setup"])[0] if dossier.get("checks") else "Insufficient structural alignment"
+            
+            # THE FIX: Dynamically upgrade a STAND DOWN log if a valid setup emerges.
+            if log and log.status in ["STAND_DOWN", "EXPIRED"]:
+                if plan.get("valid"):
+                    log.status = "PENDING"
+                    log.bias = plan.get("bias", "NEUTRAL")
+                    log.grade = dossier["grade"]
+                    log.entry_price = entry_ref
+                    log.stop_loss = stop_ref
+                    log.t1 = plan.get("targets", [0]*3)[0]
+                    log.t2 = plan.get("targets", [0]*3)[1]
+                    log.t3 = plan.get("targets", [0]*3)[2]
+                    log.total_contracts = total_contracts
+                    log.diagnostic_data = json.dumps(diagnostics_payload)
+                    db.commit()
+            else:
+                # Insert brand new record if none exists
                 initial_status = "PENDING" if plan.get("valid") else "STAND_DOWN"
-                
                 new_log = CampaignLog(
                     symbol=symbol, date_key=date_key, session_id="us_ny_futures", bias=plan.get("bias", "NEUTRAL") if plan.get("valid") else dossier.get("favored", "NEUTRAL"), grade=dossier["grade"], 
                     entry_price=entry_ref, stop_loss=stop_ref, t1=plan.get("targets", [0]*3)[0], t2=plan.get("targets", [0]*3)[1], t3=plan.get("targets", [0]*3)[2],
                     total_contracts=total_contracts, status=initial_status, diagnostic_data=json.dumps(diagnostics_payload)
                 )
                 db.add(new_log)
-        db.commit()
+                db.commit()
+                
     except Exception as e: traceback.print_exc()
     finally: db.close()
 
@@ -116,7 +140,7 @@ async def sync_bounce_campaigns():
             if r["grade"] == "STAND DOWN": continue
             
             exists = db.query(CampaignLog).filter(CampaignLog.symbol == r["symbol"], CampaignLog.date_key == date_key, CampaignLog.session_id == "BOUNCE_ENGINE", CampaignLog.status.in_(["PENDING", "ACTIVE", "T1_HIT", "T2_HIT"])).first()
-            if exists: continue # Already tracking a live bounce today
+            if exists: continue 
             
             plan = r["plan"]
             risk_amt = 1000.00
