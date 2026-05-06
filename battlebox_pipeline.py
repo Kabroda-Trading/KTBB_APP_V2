@@ -1,7 +1,7 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v10.0 (SYNTHETIC JEWEL INTEGRATION)
-# Purpose: Calculates 15m ADX Volatility & EMA Alignment to act as a strict chop filter.
+# KABRODA BATTLEBOX PIPELINE — v11.0 (SYNTHETIC JEWEL KINEMATICS UPGRADE)
+# Purpose: Calculates 15m ADX Volatility & Full EMA Alignment/Mean Deviation.
 # ==============================================================================
 
 from __future__ import annotations
@@ -104,6 +104,10 @@ def _calc_rsi(prices: List[float], period=14) -> float:
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
 
+def _calc_sma(prices: List[float], period: int) -> float:
+    if len(prices) < period: return 0.0
+    return sum(prices[-period:]) / period
+
 # --- NEW: SYNTHETIC JEWEL ENGINE (ADX MATH) ---
 def _calc_adx(candles: List[Dict], period: int = 14) -> float:
     if len(candles) < period * 2: return 0.0
@@ -152,31 +156,48 @@ def _calc_adx(candles: List[Dict], period: int = 14) -> float:
     return adx
 
 def _build_synthetic_jewel(raw_15m: List[Dict]) -> Dict:
-    """Calculates 15m RSI, ADX Volatility, and 21/55 EMA Alignment."""
-    if not raw_15m or len(raw_15m) < 60:
-        return {"rsi": 50.0, "adx": 0.0, "ema_state": "TANGLED"}
+    """Calculates 15m RSI, ADX Volatility, 9/21/35/55 EMA Alignment, and 200 SMA Deviation."""
+    if not raw_15m or len(raw_15m) < 200:
+        return {"rsi": 50.0, "adx": 0.0, "kinematic_grade": "TANGLED"}
         
     closes = [float(c["close"]) for c in raw_15m]
+    current_price = closes[-1]
     
     rsi = _calc_rsi(closes, period=14)
     adx = _calc_adx(raw_15m, period=14)
     
+    # 1. Calculate the Institutional Ribbon (EMAs)
+    ema9 = _calc_ema_series(closes, 9)[-1]
     ema21 = _calc_ema_series(closes, 21)[-1]
+    ema35 = _calc_ema_series(closes, 35)[-1]
     ema55 = _calc_ema_series(closes, 55)[-1]
     
-    # Needs 0.1% separation to not be considered "Tangled"
-    separation = abs((ema21 - ema55) / ema55) * 100
-    if separation < 0.1:
-        ema_state = "TANGLED"
+    # 2. Calculate the Concrete Floor (200 SMA)
+    sma200 = _calc_sma(closes, 200)
+    
+    # 3. Kinematic Physics Calculations
+    deviation_from_mean = abs(current_price - sma200) / sma200 * 100
+    ribbon_spread = abs(ema9 - ema55) / ema55 * 100
+    
+    # 4. The Grading Logic (Single Source of Truth)
+    if deviation_from_mean > 1.5:
+        kinematic_grade = "OVEREXTENDED"
+    elif ribbon_spread < 0.15:
+        kinematic_grade = "TANGLED"
     else:
-        ema_state = "BULLISH" if ema21 > ema55 else "BEARISH"
+        kinematic_grade = "PRIMED"
         
     return {
         "rsi": round(rsi, 2),
         "adx": round(adx, 2),
-        "ema_state": ema_state,
+        "kinematic_grade": kinematic_grade,
+        "deviation_from_mean_pct": round(deviation_from_mean, 2),
+        "ribbon_spread_pct": round(ribbon_spread, 2),
+        "ema9": round(ema9, 2),
         "ema21": round(ema21, 2),
-        "ema55": round(ema55, 2)
+        "ema35": round(ema35, 2),
+        "ema55": round(ema55, 2),
+        "sma200": round(sma200, 2)
     }
 
 def _build_fuel_gauge(raw_1h: List[Dict], raw_4h: List[Dict], raw_15m: List[Dict]) -> Dict:
@@ -319,7 +340,6 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     macro_bias = _calculate_weekly_force(raw_daily, anchor_ts)
     micro_bias = _calculate_168h_micro_bias(raw_1h)
     
-    # PASS raw_15m TO FUEL GAUGE TO CAPTURE ADX AT THE LOCK
     fuel_gauge = _build_fuel_gauge(raw_1h, raw_4h, raw_15m)
     
     kde_data = gravity_math.calculate_gravity_kde(symbol)
