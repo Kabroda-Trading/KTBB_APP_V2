@@ -92,7 +92,7 @@
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v13.1</span></h2>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v14.0</span></h2>
             </div>
             <div style="display: flex; align-items: center;">
                 <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
@@ -290,7 +290,6 @@
             if (d.diagnostic_ledger && Object.keys(d.diagnostic_ledger).length > 0) {
                 let diagHtml = `<div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono'; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">RAW STRUCTURAL DIAGNOSTICS:</div>`;
                 for (const [key, val] of Object.entries(d.diagnostic_ledger)) {
-                    // Ignore the rejection reason in the loop since it is displayed in the Briefing box
                     if(key === "rejection_reason") continue;
                     
                     let color = (val === true || val === d.favored) ? "#22c55e" : (val === false ? "#ef4444" : "#cbd5e1");
