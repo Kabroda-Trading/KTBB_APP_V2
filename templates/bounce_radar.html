@@ -6,7 +6,7 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        :root { --bg-deep: #020617; var(--panel): #0f172a; var(--border): #334155; --green: #22c55e; var(--yellow): #eab308; var(--red): #ef4444; --white: #f8fafc; var(--gray): #94a3b8; }
+        :root { --bg-deep: #020617; var(--panel): #0f172a; var(--border): #334155; --green: #22c55e; var(--yellow): #eab308; var(--red): #ef4444; var(--white): #f8fafc; var(--gray): #94a3b8; }
         body { background-color: #020617; color: #f8fafc; font-family: 'Inter', sans-serif; padding: 20px; margin: 0; }
         .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
         .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #334155; padding-bottom: 20px; margin-bottom: 30px; }
@@ -38,13 +38,13 @@
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title">BOUNCE ENGINE <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8; font-family: 'Inter';">LIMIT ORDERS</span></h2>
+                <h2 class="radar-title">BOUNCE ENGINE <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8; font-family: 'Inter';">v14.0 (Exposed Diagnostics)</span></h2>
             </div>
             <button id="scanBtn" class="btn-scan" onclick="forceScan()">SCAN FLOORS & CEILINGS</button>
         </div>
         
         <div id="loading" style="display:none; text-align:center; padding:80px; color:#a855f7; font-family:'JetBrains Mono';">
-            /// CALIBRATING GRAVITY WELLS...
+            /// AUDITING SECTOR PHYSICS...
         </div>
         <div id="radarTargetGrid" class="radar-grid"></div>
     </div>
@@ -53,7 +53,7 @@
         <div class="modal-content">
             <button class="close-btn" onclick="closeModal()">✕</button>
             <h2 style="font-family: 'Rajdhani'; color: #0ea5e9; margin-top: 0;" id="mSym">SYMBOL DIAGNOSTICS</h2>
-            <div id="mReason" style="color: #ef4444; font-family: 'JetBrains Mono'; font-size: 12px; margin-bottom: 20px; background: rgba(239,68,68,0.1); padding: 10px; border-left: 2px solid #ef4444;"></div>
+            <div id="mReason" style="color: #cbd5e1; font-family: 'JetBrains Mono'; font-size: 12px; margin-bottom: 20px; background: rgba(14,165,233,0.1); padding: 10px; border-left: 2px solid #0ea5e9;"></div>
             <div id="diagContainer"></div>
         </div>
     </div>
@@ -65,16 +65,44 @@
             const data = window.bounceMemory[symbol];
             if (!data) return;
             
-            document.getElementById('mSym').innerText = symbol + " RAW DATA";
+            document.getElementById('mSym').innerText = symbol + " RAW DIAGNOSTICS";
             
             let diagHtml = "";
-            if (data.diagnostic_ledger) {
+
+            // --- INJECT FLIGHT PATH IF TRADE IS VALID ---
+            if (data.plan && data.plan.valid) {
+                diagHtml += `
+                <div style="background: rgba(34, 197, 94, 0.1); border-left: 2px solid #22c55e; padding: 15px; margin-bottom: 20px; border-radius: 0 4px 4px 0;">
+                    <div style="font-size:11px; color:#22c55e; font-family:'JetBrains Mono'; margin-bottom:12px; text-transform:uppercase; letter-spacing:1px; font-weight:800;">>>> ACTIVE LIMIT ORDER <<<</div>
+                    
+                    <div class="diag-row" style="border-bottom: 1px solid rgba(34, 197, 94, 0.2);"><span class="diag-label">VECTOR</span><span class="diag-val" style="color:#22c55e;">${data.plan.bias}</span></div>
+                    <div class="diag-row" style="border-bottom: 1px solid rgba(34, 197, 94, 0.2);"><span class="diag-label">LIMIT ENTRY</span><span class="diag-val" style="color:#fff;">$${data.plan.entry.toFixed(2)}</span></div>
+                    <div class="diag-row" style="border-bottom: 1px solid rgba(34, 197, 94, 0.2);"><span class="diag-label">STOP LOSS</span><span class="diag-val" style="color:#ef4444;">$${data.plan.stop.toFixed(2)}</span></div>
+                    <div class="diag-row" style="border-bottom: 1px solid rgba(34, 197, 94, 0.2);"><span class="diag-label">TARGET 1</span><span class="diag-val" style="color:#eab308;">$${data.plan.targets[0].toFixed(2)}</span></div>
+                    <div class="diag-row" style="border-bottom: none;"><span class="diag-label">TARGET 2</span><span class="diag-val" style="color:#0ea5e9;">$${data.plan.targets[1].toFixed(2)}</span></div>
+                </div>`;
+            }
+
+            diagHtml += `<div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono'; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">RAW STRUCTURAL DIAGNOSTICS:</div>`;
+            
+            if (data.diagnostic_ledger && Object.keys(data.diagnostic_ledger).length > 0) {
                 for (const [key, val] of Object.entries(data.diagnostic_ledger)) {
-                    let displayVal = typeof val === 'number' ? val.toFixed(2) : val;
-                    diagHtml += `<div class="diag-row"><span class="diag-label">${key.replace(/_/g, ' ')}</span><span class="diag-val">${displayVal}</span></div>`;
+                    if(key === "rejection_reason") continue;
+                    
+                    let color = "#cbd5e1"; 
+                    if (val === true) color = "#22c55e"; 
+                    if (val === false) color = "#ef4444"; 
+                    
+                    let displayVal = typeof val === 'number' ? val.toFixed(2) : val.toString().toUpperCase();
+                    
+                    diagHtml += `
+                    <div class="diag-row">
+                        <span class="diag-label">${key.replace(/_/g, ' ')}</span>
+                        <span class="diag-val" style="color:${color};">${displayVal}</span>
+                    </div>`;
                 }
             } else {
-                diagHtml = "<div style='color:#94a3b8; font-family:monospace;'>No internal diagnostics available for this rejection.</div>";
+                diagHtml += "<div style='color:#94a3b8; font-family:monospace;'>No internal diagnostics found.</div>";
             }
             
             document.getElementById('diagContainer').innerHTML = diagHtml;
@@ -114,7 +142,7 @@
 
                         <div style="display:flex; flex-direction:column; justify-content:center; align-items:center;">
                             <div style="font-family:'Rajdhani'; font-size:20px; font-weight:800; color:var(--${borderTheme.toLowerCase()});">${displayGrade}</div>
-                            <div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono'; margin-top:4px; text-align:center;">${displaySubtext}</div>
+                            <div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono'; margin-top:4px; text-align:center; max-width:280px;">${displaySubtext}</div>
                         </div>
 
                         <div style="display:flex; justify-content:flex-end; align-items:center;">
