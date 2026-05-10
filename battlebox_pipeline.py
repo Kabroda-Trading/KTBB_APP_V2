@@ -1,8 +1,8 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v11.0 (SYNTHETIC JEWEL KINEMATICS UPGRADE)
-# Purpose: Calculates 15m ADX Volatility & Full EMA Alignment/Mean Deviation.
-# UPGRADE: Harmonic Alignment Matrix & 21-Day Macro Baseline (SSOT Enforced).
+# KABRODA BATTLEBOX PIPELINE — v11.1 (STERILIZED)
+# Purpose: Calculates Full EMA Alignment & Mean Deviation.
+# AUDIT FIX: Stripped out lagging ADX math. Enforced strict structural physics.
 # ==============================================================================
 
 from __future__ import annotations
@@ -109,63 +109,15 @@ def _calc_sma(prices: List[float], period: int) -> float:
     if len(prices) < period: return 0.0
     return sum(prices[-period:]) / period
 
-# --- NEW: SYNTHETIC JEWEL ENGINE (ADX MATH) ---
-def _calc_adx(candles: List[Dict], period: int = 14) -> float:
-    if len(candles) < period * 2: return 0.0
-    
-    tr_list, pDM_list, nDM_list = [], [], []
-    
-    for i in range(1, len(candles)):
-        h = float(candles[i]["high"])
-        l = float(candles[i]["low"])
-        prev_h = float(candles[i-1]["high"])
-        prev_l = float(candles[i-1]["low"])
-        prev_c = float(candles[i-1]["close"])
-        
-        tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
-        tr_list.append(tr)
-        
-        up_move = h - prev_h
-        down_move = prev_l - l
-        
-        pDM = up_move if up_move > down_move and up_move > 0 else 0
-        nDM = down_move if down_move > up_move and down_move > 0 else 0
-        
-        pDM_list.append(pDM)
-        nDM_list.append(nDM)
-
-    atr = sum(tr_list[:period])
-    smoothed_pDM = sum(pDM_list[:period])
-    smoothed_nDM = sum(nDM_list[:period])
-    dx_list = []
-    
-    for i in range(period, len(tr_list)):
-        atr = atr - (atr / period) + tr_list[i]
-        smoothed_pDM = smoothed_pDM - (smoothed_pDM / period) + pDM_list[i]
-        smoothed_nDM = smoothed_nDM - (smoothed_nDM / period) + nDM_list[i]
-        
-        di_plus = (smoothed_pDM / atr) * 100 if atr > 0 else 0
-        di_minus = (smoothed_nDM / atr) * 100 if atr > 0 else 0
-        
-        dx = (abs(di_plus - di_minus) / (di_plus + di_minus)) * 100 if (di_plus + di_minus) > 0 else 0
-        dx_list.append(dx)
-
-    adx = sum(dx_list[:period]) / period if len(dx_list) >= period else 0
-    for i in range(period, len(dx_list)):
-        adx = ((adx * (period - 1)) + dx_list[i]) / period
-        
-    return adx
-
 def _build_synthetic_jewel(raw_15m: List[Dict]) -> Dict:
-    """Calculates 15m RSI, ADX Volatility, 9/21/35/55 EMA Alignment, and 200 SMA Deviation."""
+    """Calculates 15m RSI, 9/21/35/55 EMA Alignment, and 200 SMA Deviation."""
     if not raw_15m or len(raw_15m) < 200:
-        return {"rsi": 50.0, "adx": 0.0, "kinematic_grade": "TANGLED"}
+        return {"rsi": 50.0, "kinematic_grade": "TANGLED"}
         
     closes = [float(c["close"]) for c in raw_15m]
     current_price = closes[-1]
     
     rsi = _calc_rsi(closes, period=14)
-    adx = _calc_adx(raw_15m, period=14)
     
     # 1. Calculate the Institutional Ribbon (EMAs)
     ema9 = _calc_ema_series(closes, 9)[-1]
@@ -190,7 +142,6 @@ def _build_synthetic_jewel(raw_15m: List[Dict]) -> Dict:
         
     return {
         "rsi": round(rsi, 2),
-        "adx": round(adx, 2),
         "kinematic_grade": kinematic_grade,
         "deviation_from_mean_pct": round(deviation_from_mean, 2),
         "ribbon_spread_pct": round(ribbon_spread, 2),
