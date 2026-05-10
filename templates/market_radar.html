@@ -36,7 +36,7 @@
         .lock-btn:hover:not(:disabled) { background: #eab308; color:#000; border-color: #eab308; }
         .lock-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         
-        .copy-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; margin-right: 8px; font-family: 'JetBrains Mono'; font-size: 14px; }
+        .copy-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; margin-right: 8px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700; text-transform: uppercase; }
         .copy-btn:hover { background: #334155; color: #fff; border-color: #fff; }
 
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(2, 6, 23, 0.95); backdrop-filter: blur(8px); z-index: 9999; overflow-y: auto; padding: 40px 20px; }
@@ -48,147 +48,168 @@
         .cockpit { display: grid; gap: 20px; grid-template-columns: 350px 1fr 450px; grid-template-areas: "header header header" "left center right"; }
         .header { grid-area: header; border-bottom: 2px solid #334155; padding-bottom: 15px; }
         .panel { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 25px; display: flex; flex-direction: column; }
-        .panel h3 { font-family: 'JetBrains Mono'; color: #0ea5e9; font-size: 14px; margin-top: 0; margin-bottom: 20px; letter-spacing: 1px; text-transform: uppercase; border-bottom: 1px dashed #334155; padding-bottom: 10px; }
+        .h-title { font-family: 'Rajdhani'; font-weight: 800; font-size: 36px; color: #fff; letter-spacing: 2px; margin: 0; }
+        .panel-head { font-family: 'Rajdhani'; font-weight: 800; font-size: 18px; color: #0ea5e9; border-bottom: 1px dashed #334155; padding-bottom: 10px; margin-bottom: 20px; letter-spacing: 1px; text-transform: uppercase; }
         
-        .c-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #1e293b; font-family: 'JetBrains Mono'; font-size: 14px; }
-        .c-row:last-child { border-bottom: none; }
-        .c-label { color: #94a3b8; }
-        .c-val { color: #fff; font-weight: bold; display: flex; align-items: center; gap: 8px; }
-        .c-val-accent { color: #eab308; cursor: pointer; transition: 0.2s; }
-        .c-val-accent:hover { color: #fff; }
+        .mode-display { font-family: 'Rajdhani'; font-size: 42px; font-weight: 900; line-height: 1; margin-bottom: 10px; text-transform: uppercase; }
+        .inp-risk { background: #020617; border: 1px solid #334155; color: #fff; padding: 12px; width: 100%; text-align: right; font-weight: 700; font-size: 18px; border-radius: 4px; box-sizing: border-box; }
         
-        .box-input { background: #020617; border: 1px solid #334155; color: #eab308; font-family: 'JetBrains Mono'; font-size: 16px; padding: 8px; width: 100px; text-align: right; border-radius: 4px; outline: none; }
-        .box-input:focus { border-color: #0ea5e9; }
+        .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px dashed #334155; padding-bottom: 6px; font-family: 'JetBrains Mono', monospace; }
+        .d-val { font-size: 16px; font-weight: 800; color: #fff; margin-right: 10px; }
         
-        .check-item { font-family: 'Inter'; font-size: 13px; color: #22c55e; background: rgba(34, 197, 94, 0.1); padding: 10px; border-radius: 4px; margin-bottom: 8px; border-left: 2px solid #22c55e; }
+        .c-GREEN { color: #22c55e; } .c-YELLOW { color: #eab308; } .c-RED { color: #ef4444; } .c-GRAY { color: #94a3b8; }
         
-        .raw-input-area { background: #020617; border: 1px dashed #475569; padding: 15px; border-radius: 4px; margin-top: 15px; position: relative; }
-        .raw-input { width: 100%; background: transparent; border: none; color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 12px; resize: none; height: 60px; outline: none; }
-        .btn-copy-raw { position: absolute; right: 10px; bottom: 10px; background: #334155; border: none; color: #fff; font-size: 10px; padding: 4px 8px; cursor: pointer; border-radius: 2px; font-family: 'JetBrains Mono'; }
-        .btn-copy-raw:hover { background: #475569; }
+        .btn-act { width: 100%; padding: 15px; border: none; border-radius: 4px; font-weight: 800; font-family: 'Rajdhani'; font-size: 16px; cursor: pointer; text-transform: uppercase; margin-bottom: 10px; transition: 0.2s; }
+        .btn-l { background: rgba(34, 197, 94, 0.2); color: #22c55e; border: 1px solid #22c55e; } .btn-l:hover { background: #22c55e; color: #000; }
+        .btn-s { background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; } .btn-s:hover { background: #ef4444; color: #fff; }
+        
+        .roe-box { background: rgba(0,0,0,0.3); border-left: 4px solid #94a3b8; padding: 20px; font-family: 'Inter'; font-size: 14px; line-height: 1.6; border-radius: 0 4px 4px 0; margin-top: 20px; text-align: left; }
+        .check-item { background: #020617; padding: 8px 12px; border-radius: 4px; border: 1px solid #334155; font-size: 12px; font-family: 'JetBrains Mono'; margin-bottom: 5px; color: #22c55e; }
+        .check-item.fail { color: #ef4444; border-color: #ef4444; }
+        .mini-copy { background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 14px; opacity: 0.5; padding: 0 0 0 5px; }
+        .mini-copy:hover { opacity: 1; color: #f8fafc; }
 
-        .drawer { position: fixed; top: 0; right: -400px; width: 400px; height: 100%; background: #0f172a; border-left: 1px solid #334155; transition: 0.3s ease; z-index: 10000; padding: 30px; box-sizing: border-box; overflow-y: auto; }
-        .drawer.open { right: 0; }
-        .drawer-close { position: absolute; top: 20px; right: 20px; background: none; border: none; color: #ef4444; font-size: 16px; font-weight: bold; cursor: pointer; font-family: 'JetBrains Mono'; }
-        .drawer-close:hover { color: #fff; }
-        .drawer h3 { color: #0ea5e9; font-family: 'JetBrains Mono'; font-size: 18px; margin-bottom: 20px; border-bottom: 1px dashed #334155; padding-bottom: 10px; }
-        .drawer-item { background: #020617; padding: 15px; border-radius: 4px; margin-bottom: 15px; border-left: 3px solid #334155; }
-        .drawer-item h4 { margin: 0 0 10px 0; color: #fff; font-family: 'JetBrains Mono'; font-size: 14px; }
-        .drawer-item p { margin: 0; font-size: 13px; color: #94a3b8; line-height: 1.5; }
-        
-        .btn-academy { background: #1e293b; color: #0ea5e9; border: 1px solid #334155; font-family: 'JetBrains Mono'; font-size: 12px; padding: 8px 15px; border-radius: 4px; cursor: pointer; transition: 0.2s; }
-        .btn-academy:hover { background: #334155; color: #fff; border-color: #0ea5e9; }
-        
-        .diag-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed #1e293b; font-family: 'JetBrains Mono'; font-size: 13px; }
-        .diag-label { color: #64748b; text-transform: uppercase; }
-        .diag-val { font-weight: bold; color: #f8fafc; }
+        .drawer-toggle { position: fixed; top: 50%; right: 0; transform: translateY(-50%); background: #0ea5e9; color: #000; padding: 15px 10px; writing-mode: vertical-rl; text-orientation: mixed; cursor: pointer; border-radius: 8px 0 0 8px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; z-index: 10001; border: none; letter-spacing: 2px; transition: 0.2s; box-shadow: -2px 0 10px rgba(14, 165, 233, 0.3); }
+        .drawer-toggle:hover { padding-right: 15px; background: #38bdf8; }
+        .academy-drawer { position: fixed; top: 0; right: -450px; width: 450px; height: 100vh; background: #0f172a; border-left: 1px solid #334155; z-index: 10000; transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: -10px 0 30px rgba(0,0,0,0.8); padding: 30px; overflow-y: auto; box-sizing: border-box; }
+        .academy-drawer.open { right: 0; }
+        .drawer-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 15px; margin-bottom: 25px; }
+        .drawer-title { font-family: 'JetBrains Mono'; font-size: 20px; color: #fff; margin: 0; text-transform: uppercase; }
+        .drawer-close { background: none; border: none; color: #94a3b8; font-size: 24px; cursor: pointer; transition: 0.2s; }
+        .drawer-close:hover { color: #ef4444; }
+        .video-box { margin-bottom: 30px; }
+        .video-header { font-family: 'Rajdhani'; font-weight: 800; font-size: 16px; color: #0ea5e9; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 1px; }
+        .video-wrapper { position: relative; width: 100%; padding-bottom: 56.25%; height: 0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; border: 1px solid #334155; background: #000; }
+        .video-wrapper iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
+        .video-desc { font-size: 13px; color: #94a3b8; line-height: 1.5; }
+        .pdf-btn { display: block; text-align: center; background: #1e293b; color: #fff; text-decoration: none; padding: 15px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; border: 1px solid #334155; transition: 0.2s; margin-bottom: 30px; }
+        .pdf-btn:hover { background: #22c55e; color: #000; border-color: #22c55e; }
     </style>
 </head>
 <body>
     {% include 'nav.html' %}
+    
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title">MARKET RADAR <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; color:#0ea5e9;">15m MEASURED MOVE</span></h2>
-                <p style="color: #94a3b8; margin-top: 8px; font-family: 'JetBrains Mono';">Scanning sector for session breakouts & breakdowns.</p>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v14.0</span></h2>
             </div>
-            <div style="display:flex; gap:15px; align-items:center;">
-                <button class="btn-academy" onclick="toggleDrawer()">? TACTICAL ACADEMY</button>
-                <button class="btn-scan" onclick="runRadarScan()" id="scanBtn">INITIATE RADAR SCAN</button>
+            <div style="display: flex; align-items: center;">
+                <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
             </div>
         </div>
         
-        <div id="loading" style="display:none; text-align:center; padding: 50px; color: #0ea5e9; font-family: 'JetBrains Mono'; font-weight: bold; letter-spacing: 2px;">
-            <div style="font-size: 24px; margin-bottom: 10px;">SCANNING FREQUENCIES...</div>
-            <div style="font-size: 14px; color: #64748b;">(This processes live kinetic data. Please wait.)</div>
+        <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">
+            /// AUDITING SECTOR PHYSICS...
         </div>
         
-        <div id="radarGrid" class="radar-grid">
-            </div>
+        <div id="radarTargetGrid" class="radar-grid"></div>
     </div>
 
-    <div id="academyDrawer" class="drawer">
-        <button class="drawer-close" onclick="toggleDrawer()">[X]</button>
-        <h3>TACTICAL ACADEMY</h3>
-        
-        <div class="drawer-item" style="border-left-color: #0ea5e9;">
-            <h4>THE MEASURED MOVE (15m)</h4>
-            <p>The system calculates the exact height of the 30-minute daily session box (High - Low). When a breakout occurs, it geometrically projects that box height upward (or downward) to determine mechanical profit targets.</p>
+    <button class="drawer-toggle" onclick="toggleDrawer()">📚 ACADEMY GUIDE</button>
+    <div id="academyDrawer" class="academy-drawer">
+        <div class="drawer-header">
+            <h3 class="drawer-title">Execution SOP</h3>
+            <button class="drawer-close" onclick="toggleDrawer()">✕</button>
         </div>
-        
-        <div class="drawer-item" style="border-left-color: #22c55e;">
-            <h4>SCALE OUT LOGIC</h4>
-            <p><strong>Target 1 (1.0x):</strong> The standard box extension. Sell 50% and move stop to Break-Even. You are now unkillable.<br><br>
-               <strong>Target 2 (1.618x):</strong> The Golden Ratio. Sell 30%.<br><br>
-               <strong>Target 3 (2.618x):</strong> The Macro Expansion. Let the final 20% "runner" ride.</p>
-        </div>
-        
-        <div class="drawer-item" style="border-left-color: #eab308;">
-            <h4>AIRSPACE & GRAVITY</h4>
-            <p>A "GRADE A" setup means there are ZERO Heavy or Maximum Gravity Walls blocking the path to Target 1. If a wall exists in the airspace, the trade is rejected or downgraded. Do not fight concrete.</p>
+
+        <a href="/static/Kabroda_SOP.pdf" target="_blank" class="pdf-btn">📄 DOWNLOAD MASTER SOP (PDF)</a>
+
+        <div class="video-box">
+            <div class="video-header">Module 1: The Radar Scan</div>
+            <div class="video-wrapper">
+                <iframe src="https://www.youtube.com/embed/HLM_S2lySdQ?si=T1GLT7Q_KWzZZ7g9" title="YouTube video player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+            </div>
+            <div class="video-desc">Learn how to read the Runway Gap % and identify Primal Zones vs. Death Zones.</div>
         </div>
     </div>
 
-    <div id="diagModal" class="modal-overlay">
-        <div class="modal-content cockpit">
-            <button class="close-btn" onclick="document.getElementById('diagModal').style.display='none'">[X] CLOSE COCKPIT</button>
+    <div id="targetModal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-btn" onclick="closeModal()">✕ CLOSE COCKPIT</button>
             
-            <div class="header">
-                <h2 id="mSym" style="font-family: 'JetBrains Mono'; color: #fff; margin: 0;"></h2>
-                <div style="font-family: 'JetBrains Mono'; color: #94a3b8; margin-top: 5px; font-size: 14px;">
-                    MISSION VECTOR: <span id="mBias" style="font-weight: bold;"></span>
+            <div class="cockpit">
+                <div class="header">
+                    <h1 class="h-title" id="tSym">TARGET LOCK</h1>
                 </div>
-            </div>
 
-            <div class="panel" style="grid-area: left;">
-                <h3>01. THE SETUP</h3>
-                <div class="c-row"><span class="c-label">TRIGGER ENTRY</span><span class="c-val" style="color:#fff;">$<span id="valEntry" class="c-val-accent" onclick="copyVal('valEntry')"></span></span></div>
-                <div class="c-row"><span class="c-label">STRUCTURAL STOP</span><span class="c-val" style="color:#ef4444;">$<span id="valStop" class="c-val-accent" onclick="copyVal('valStop')"></span></span></div>
-                
-                <h3 style="margin-top: 30px;">02. SCALE TARGETS</h3>
-                <div class="c-row"><span class="c-label">TARGET 1 (1.0x)</span><span class="c-val" style="color:#eab308;">$<span id="valT1" class="c-val-accent" onclick="copyVal('valT1')"></span></span></div>
-                <div class="c-row"><span class="c-label">TARGET 2 (1.618x)</span><span class="c-val" style="color:#0ea5e9;">$<span id="valT2" class="c-val-accent" onclick="copyVal('valT2')"></span></span></div>
-                <div class="c-row"><span class="c-label">TARGET 3 (2.618x)</span><span class="c-val" style="color:#a855f7;">$<span id="valT3" class="c-val-accent" onclick="copyVal('valT3')"></span></span></div>
-                
-                <div class="raw-input-area">
-                    <textarea id="rawKey" class="raw-input" readonly></textarea>
-                    <button class="btn-copy-raw" id="btnKey" onclick="copyKey()">COPY TO HUD</button>
-                </div>
-            </div>
-
-            <div class="panel" style="grid-area: center;">
-                <h3>03. KINEMATIC AUDIT</h3>
-                <div id="mChecks" style="margin-bottom: 20px;"></div>
-                <div id="mDiag"></div>
-            </div>
-
-            <div class="panel" style="grid-area: right;">
-                <h3>04. RISK LEDGER</h3>
-                <div class="c-row">
-                    <span class="c-label">COMPOUNDING BAL</span>
-                    <div style="display:flex; align-items:center;">
-                        <span style="color:#94a3b8; margin-right:5px;">$</span>
-                        <input type="number" id="inpBal" class="box-input" value="1000" oninput="calcRisk()">
+                <div class="panel" style="grid-area: left;">
+                    <div class="panel-head">01. RISK LEDGER</div>
+                    <div style="font-size:12px; color:#94a3b8; margin-bottom:5px;">COMPOUNDING BAL</div>
+                    <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="recalc()">
+                    <div style="font-size:12px; color:#94a3b8; margin-bottom:5px; margin-top:20px;">RISK TOLERANCE (%)</div>
+                    <input type="number" id="inpRisk" class="inp-risk" value="10.0" step="0.1" oninput="recalc()">
+                    <div style="margin-top:auto; padding-top:20px; border-top:1px solid #334155;">
+                        <div style="font-size:12px; color:#94a3b8;">CAPITAL RISKED</div>
+                        <div id="valLoss" class="c-RED" style="font-size:32px; font-weight:800;">$0.00</div>
                     </div>
                 </div>
-                <div class="c-row">
-                    <span class="c-label">RISK TOLERANCE</span>
-                    <div style="display:flex; align-items:center;">
-                        <input type="number" id="inpRisk" class="box-input" value="10" step="0.5" oninput="calcRisk()">
-                        <span style="color:#94a3b8; margin-left:5px;">%</span>
+
+                <div class="panel" style="grid-area: center; text-align:center; justify-content:center;">
+                    <div class="panel-head" style="border:none; margin-bottom:0;">02. KINEMATIC AUDIT</div>
+                    <div id="vMode" class="mode-display c-GRAY">LOADING</div>
+                    
+                    <div id="checksContainer" style="display:flex; flex-wrap:wrap; gap:5px; justify-content:center; margin-top:10px;"></div>
+
+                    <div id="diagnosticLedger" style="margin-top: 15px; border-top: 1px dashed #334155; padding-top: 15px; text-align: left; width: 100%;"></div>
+
+                    <div id="roeContainer" class="roe-box">
+                        <div id="vROE">Analyzing structural behavior...</div>
                     </div>
                 </div>
-                
-                <div style="background: rgba(14, 165, 233, 0.1); border: 1px solid rgba(14, 165, 233, 0.3); padding: 20px; border-radius: 4px; margin-top: 20px;">
-                    <div class="c-row" style="border-bottom: 1px dashed #334155;"><span class="c-label">CAPITAL RISKED</span><span class="c-val" style="color:#ef4444;">$<span id="calcLoss">0.00</span></span></div>
-                    <div class="c-row" style="border-bottom: 1px dashed #334155;"><span class="c-label">REQUIRED LEVERAGE</span><span class="c-val" style="color:#eab308;"><span id="calcLev">0.0</span>x</span></div>
-                    <div class="c-row" style="border-bottom: none;"><span class="c-label">POSITION SIZE (COINS)</span><span class="c-val" style="color:#fff;"><span id="calcSize">0.00</span></span></div>
+
+                <div class="panel" style="grid-area: right;">
+                    <div class="panel-head">03. THE SETUP</div>
+                    <div style="margin-top:10px;">
+                        
+                        <div class="data-row">
+                            <span style="color:#94a3b8; font-size:12px;">TRIGGER ENTRY</span>
+                            <div><span id="pEnt" class="d-val c-GREEN">--</span><button class="mini-copy" onclick="copyVal('pEnt')">📋</button></div>
+                        </div>
+                        <div class="data-row">
+                            <span style="color:#94a3b8; font-size:12px;">STRUCTURAL STOP</span>
+                            <div><span id="pStp" class="d-val c-RED">--</span><button class="mini-copy" onclick="copyVal('pStp')">📋</button></div>
+                        </div>
+                        
+                        <div class="data-row" style="margin-bottom: 6px;">
+                            <span style="color:#94a3b8; font-size:12px;">POSITION SIZE (COINS)</span>
+                            <div><span id="pSiz" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pSiz')">📋</button></div>
+                        </div>
+                        <div class="data-row" style="margin-top: -6px; margin-bottom: 12px; padding-left: 10px; border-left: 2px solid #334155; border-bottom: 2px solid #334155; padding-bottom: 12px;">
+                            <div style="display: flex; flex-direction: column; width: 100%; gap: 6px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="color:#eab308; font-size:11px; font-family:'JetBrains Mono';">↳ SELL AT TARGET 1</span>
+                                    <div><span id="pT1Vol" class="d-val" style="color:#eab308; font-size:14px;">--</span><button class="mini-copy" onclick="copyVal('pT1Vol')">📋</button></div>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="color:#0ea5e9; font-size:11px; font-family:'JetBrains Mono';">↳ RUNNER (KEEP)</span>
+                                    <div><span id="pRunVol" class="d-val" style="color:#0ea5e9; font-size:14px;">--</span><button class="mini-copy" onclick="copyVal('pRunVol')">📋</button></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="data-row" style="margin-top:12px;">
+                            <span style="color:#94a3b8; font-size:12px;">TARGET 1</span>
+                            <div><span id="pT1" class="d-val c-YELLOW">--</span><button class="mini-copy" onclick="copyVal('pT1')">📋</button></div>
+                        </div>
+                        <div class="data-row">
+                            <span style="color:#94a3b8; font-size:12px;">TARGET 2</span>
+                            <div><span id="pT2" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT2')">📋</button></div>
+                        </div>
+                        <div class="data-row">
+                            <span style="color:#94a3b8; font-size:12px;">TARGET 3</span>
+                            <div><span id="pT3" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT3')">📋</button></div>
+                        </div>
+
+                        <div style="background: #020617; border: 1px solid #334155; padding: 15px; border-radius: 4px; margin-top: 20px;">
+                            <div id="hudPayload" style="font-family: 'JetBrains Mono'; font-size: 11px; color: #94a3b8; margin-bottom: 15px; line-height: 1.4; word-break: break-all;">
+                                --
+                            </div>
+                            <input type="hidden" id="rawKey">
+                            <button class="lock-btn" style="width: 100%; text-align: center; background: #1e293b; color: #fff; border-color: #334155; font-size: 13px;" onclick="copyKey()" id="btnKey">COPY TO HUD</button>
+                        </div>
+
+                    </div>
                 </div>
-                
-                <p style="font-size: 11px; color: #64748b; margin-top: 15px; font-family: 'Inter'; text-align: justify;">
-                    <strong>LEVERAGE DISCLAIMER:</strong> The required leverage calculates the multiplier needed to align your hard stop-loss with your defined risk tolerance. 
-                    If Required Leverage exceeds exchange limits, the trade is mathematically invalid for your account size.
-                </p>
             </div>
         </div>
     </div>
@@ -239,152 +260,181 @@
             const btn = document.getElementById('btnKey');
             const orig = btn.innerText;
             btn.innerText = "COPIED TO HUD ✓";
-            setTimeout(() => btn.innerText = orig, 1000);
+            btn.style.backgroundColor = "#22c55e";
+            btn.style.color = "#000";
+            setTimeout(() => {
+                btn.innerText = orig;
+                btn.style.backgroundColor = "#1e293b";
+                btn.style.color = "#fff";
+            }, 1500);
         }
 
         function openModal(symbol) {
             const data = window.radarMemory[symbol];
-            if (!data) return;
-            activeData = data;
-            
-            document.getElementById('mSym').innerText = symbol + " MISSION COCKPIT";
-            document.getElementById('mBias').innerText = data.favored;
-            document.getElementById('mBias').style.color = (data.favored === 'LONG') ? '#22c55e' : '#ef4444';
-            document.getElementById('rawKey').value = data.key || "NO KEY GENERATED";
-            
-            document.getElementById('valEntry').innerText = fmt(data.plan.entry);
-            document.getElementById('valStop').innerText = fmt(data.plan.stop);
-            
-            if(data.plan && data.plan.valid) {
-                document.getElementById('valT1').innerText = fmt(data.plan.targets[0]);
-                document.getElementById('valT2').innerText = fmt(data.plan.targets[1]);
-                document.getElementById('valT3').innerText = fmt(data.plan.targets[2]);
-            } else {
-                document.getElementById('valT1').innerText = "--";
-                document.getElementById('valT2').innerText = "--";
-                document.getElementById('valT3').innerText = "--";
+            if (data && data.plan && data.plan.valid) {
+                activeData = data;
+                document.getElementById('tSym').innerText = activeData.symbol.replace('USDT', '') + " MISSION COCKPIT";
+                renderModal(activeData);
+                document.getElementById('targetModal').style.display = 'block';
+                document.body.style.overflow = 'hidden'; 
             }
-            
-            let chkHtml = "";
-            (data.checks || []).forEach(c => { chkHtml += `<div class="check-item">${c}</div>`; });
-            document.getElementById('mChecks').innerHTML = chkHtml;
-            
-            let diagHtml = "";
-            if (data.diagnostic_ledger) {
-                const d = data.diagnostic_ledger;
-                
-                // Pipeline SSOT Colors
-                const pipeColor = (d.pipeline_state && d.pipeline_state.includes("SWEET_ZONE")) ? "#22c55e" : (d.pipeline_state === "CHOP") ? "#ef4444" : "#eab308";
-                
-                diagHtml += `
-                <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
-                    <div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono'; margin-bottom:8px; text-transform:uppercase;">SSOT Pipeline Analysis</div>
-                    <div class="diag-row"><span class="diag-label">MICRO STATE (1H/4H)</span><span class="diag-val" style="color: ${pipeColor};">${d.pipeline_state || "N/A"}</span></div>
-                    <div class="diag-row"><span class="diag-label">VECTOR DIRECTION</span><span class="diag-val">${d.vector_direction || "N/A"}</span></div>
-                    <div class="diag-row"><span class="diag-label">AIRSPACE CLEAR</span><span class="diag-val">${d.airspace_clear ? "YES (Clear to T1)" : "NO (Blocked by Wall)"}</span></div>
-                    <div class="diag-row" style="border-bottom: none;"><span class="diag-label">SESSION BOX SIZE</span><span class="diag-val">${d.session_box_size ? parseFloat(d.session_box_size).toFixed(2) : "N/A"}</span></div>
-                </div>`;
+        }
 
-                if (d.rejection_reason) {
+        function closeModal() {
+            document.getElementById('targetModal').style.display = 'none';
+            document.body.style.overflow = 'auto'; 
+        }
+
+        function renderModal(d) {
+            document.getElementById('vROE').innerText = d.briefing;
+            document.getElementById('vMode').innerText = d.grade;
+            
+            let modeTheme = d.color_code;
+            document.getElementById('vMode').className = `mode-display c-${modeTheme}`;
+            document.getElementById('roeContainer').style.borderLeftColor = `var(--${modeTheme.toLowerCase()})`;
+
+            const chkBox = document.getElementById('checksContainer');
+            chkBox.innerHTML = "";
+            d.checks.forEach(c => {
+                let cssClass = c.includes('HALT') ? 'check-item fail' : 'check-item';
+                chkBox.innerHTML += `<div class="${cssClass}">${c}</div>`;
+            });
+
+            if (d.diagnostic_ledger && Object.keys(d.diagnostic_ledger).length > 0) {
+                let diagHtml = `<div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono'; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">SSOT PIPELINE ANALYSIS:</div>`;
+                for (const [key, val] of Object.entries(d.diagnostic_ledger)) {
+                    if(key === "rejection_reason") continue;
+                    
+                    let color = (val === true || val === d.favored) ? "#22c55e" : (val === false ? "#ef4444" : "#cbd5e1");
+                    let displayVal = typeof val === 'number' ? val.toFixed(2) : val.toString().toUpperCase();
+                    
                     diagHtml += `
-                    <div style="background: rgba(239, 68, 68, 0.1); border-left: 2px solid #ef4444; padding: 15px; margin-bottom: 20px;">
-                        <div style="color: #ef4444; font-size: 13px; font-weight: bold; font-family: 'JetBrains Mono';">${d.rejection_reason}</div>
+                    <div style="display:flex; justify-content:space-between; font-size:11px; font-family:'JetBrains Mono'; border-bottom:1px solid #1e293b; padding:4px 0;">
+                        <span style="color:#64748b; text-transform:uppercase;">${key.replace(/_/g, ' ')}</span>
+                        <span style="color:${color}; font-weight:bold;">${displayVal}</span>
                     </div>`;
                 }
+                document.getElementById('diagnosticLedger').innerHTML = diagHtml;
+                document.getElementById('diagnosticLedger').style.display = 'block';
+            } else {
+                document.getElementById('diagnosticLedger').style.display = 'none';
             }
-            document.getElementById('mDiag').innerHTML = diagHtml;
+
+            document.getElementById('rawKey').value = d.key;
             
-            calcRisk(); 
-            document.getElementById('diagModal').style.display = 'block';
+            // Format Key for HUD visual
+            let visualKey = d.key ? d.key.replace(/\|/g, " | ") : "-- DATA MISSING --";
+            document.getElementById('hudPayload').innerHTML = visualKey;
+
+            if(d.plan.valid) {
+                document.getElementById('pEnt').innerText = d.plan.entry.toFixed(2);
+                document.getElementById('pStp').innerText = d.plan.stop.toFixed(2);
+                document.getElementById('pT1').innerText = d.plan.targets[0].toFixed(2);
+                document.getElementById('pT2').innerText = d.plan.targets[1].toFixed(2);
+                document.getElementById('pT3').innerText = d.plan.targets[2].toFixed(2);
+            }
+            recalc();
         }
 
-        function calcRisk() {
-            if(!activeData || !activeData.plan || !activeData.plan.valid) return;
-            
-            const bal = parseFloat(balInput.value) || 0;
-            const riskPct = parseFloat(riskInput.value) || 0;
-            
+        function recalc() {
             localStorage.setItem('kabroda_locked_bal', balInput.value);
             localStorage.setItem('kabroda_locked_risk', riskInput.value);
+            if(!activeData) return;
+            
+            const bal = parseFloat(balInput.value);
+            const riskPct = parseFloat(riskInput.value);
+            const riskAmt = bal * (riskPct / 100);
+            document.getElementById('valLoss').innerText = "$" + riskAmt.toFixed(2);
+            
+            if(activeData.plan.valid) {
+                const dist = Math.abs(activeData.plan.entry - activeData.plan.stop);
+                if(dist > 0) {
+                    const totalContracts = riskAmt / dist;
+                    document.getElementById('pSiz').innerText = totalContracts.toFixed(4);
 
-            const dollarRisk = bal * (riskPct / 100);
-            document.getElementById('calcLoss').innerText = dollarRisk.toFixed(2);
-
-            const entry = activeData.plan.entry;
-            const stop = activeData.plan.stop;
-            if(entry === 0) return;
-
-            const movePct = Math.abs(entry - stop) / entry;
-            if(movePct === 0) return;
-
-            const requiredLev = (riskPct / 100) / movePct;
-            document.getElementById('calcLev').innerText = requiredLev.toFixed(1);
-
-            const posSizeCoins = dollarRisk / Math.abs(entry - stop);
-            document.getElementById('calcSize').innerText = posSizeCoins.toFixed(4);
+                    let scalePct = 0.30;
+                    let runPct = 0.70;
+                    
+                    if (activeData.grade === "GRADE B") {
+                        scalePct = 0.70; 
+                        runPct = 0.30;
+                    }
+                    
+                    document.getElementById('pT1Vol').innerText = (totalContracts * scalePct).toFixed(4);
+                    document.getElementById('pRunVol').innerText = (totalContracts * runPct).toFixed(4);
+                }
+            }
         }
 
-        async function runRadarScan() {
-            const btn = document.getElementById('scanBtn');
-            const grid = document.getElementById('radarGrid');
-            const loading = document.getElementById('loading');
+        async function forceScan() {
+            const btn = document.getElementById('scanBtn'); 
+            const grid = document.getElementById('radarTargetGrid'); 
+            const loader = document.getElementById('loading');
             
-            btn.disabled = true;
-            btn.innerText = "SCANNING...";
-            grid.innerHTML = "";
-            loading.style.display = "block";
-            window.radarMemory = {};
-            
+            btn.disabled = true; grid.style.display = 'none'; loader.style.display = 'block';
+
             try {
                 const res = await fetch('/api/radar/scan', { method: 'POST' });
                 const data = await res.json();
-                
-                loading.style.display = "none";
-                btn.disabled = false;
-                btn.innerText = "INITIATE RADAR SCAN";
-                
-                if(!data.ok) {
-                    grid.innerHTML = `<div style="color:#ef4444; font-family:'JetBrains Mono';">Scan Failed: ${data.error || "Unknown Error"}</div>`;
-                    return;
-                }
-                
                 let html = "";
-                data.results.forEach(item => {
-                    if (item.status === "CALIBRATING") return;
-                    window.radarMemory[item.symbol] = item;
+                window.radarMemory = {};
+
+                data.results.forEach(t => {
+                    window.radarMemory[t.symbol] = t;
                     
-                    const isStandDown = item.grade === "STAND DOWN";
+                    if(t.status === "CALIBRATING") {
+                        html += `
+                        <div class="radar-row border-GRAY" style="opacity: 0.6;">
+                            <div>
+                                <div><span class="sym-name">${t.symbol}</span></div>
+                                <div class="sym-price" style="margin-top: 8px; color: #0ea5e9;">[ ENGINE CALIBRATING ]</div>
+                            </div>
+                            <div style="display:flex; flex-direction:column; justify-content:center; align-items:center;">
+                                <div style="font-family:'Rajdhani'; font-size:24px; font-weight:800; color:#94a3b8;">GATHERING DATA</div>
+                                <div style="font-size:12px; color:#64748b; font-family:'JetBrains Mono'; margin-top:4px;">LOCKS AT 30M MARK</div>
+                            </div>
+                            <div style="display:flex; flex-direction:column; gap:8px; justify-content:center; align-items:flex-end;">
+                                <button class="lock-btn" style="width:100%; text-align:center; padding: 15px; background:transparent; border-color:#334155; color:#94a3b8;" disabled>STANDBY</button>
+                            </div>
+                        </div>`;
+                        return; 
+                    }
+
+                    let borderTheme = t.color_code;
+                    let displayGrade = t.grade;
+                    let displaySubtext = t.briefing;
                     
+                    let actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 10px; margin-bottom: 5px;" onclick="openModal('${t.symbol}')">VIEW DIAGNOSTICS</button>`;
+                    let copyBtn = `<button class="copy-btn" style="width:100%; text-align:center; margin:0; padding: 10px;" onclick="copyIntel('${t.symbol}')">COPY TRIGGERS</button>`;
+                    
+                    if(t.grade === "STAND DOWN") {
+                        actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 10px; margin-bottom: 5px; color:#ef4444; border-color:#ef4444;" disabled>NO TRADE</button>`;
+                        copyBtn = "";
+                    } 
+
                     html += `
-                    <div class="radar-row border-${item.color_code}">
+                    <div class="radar-row border-${borderTheme}">
                         <div>
-                            <div class="sym-name">${item.symbol}</div>
-                            <div class="sym-price">$${fmt(item.price)}</div>
+                            <div><span class="sym-name">${t.symbol}</span></div>
+                            <div class="sym-price" style="margin-top: 8px;">PRICE: $${fmt(t.price)}</div>
                         </div>
-                        <div>
-                            <div style="font-family:'JetBrains Mono'; font-weight:bold; font-size:16px; color:${item.color_code === 'GREEN' ? '#22c55e' : item.color_code === 'YELLOW' ? '#eab308' : '#ef4444'}; margin-bottom: 6px;">${item.grade}</div>
-                            <div style="font-family:'Inter'; font-size:13px; color:#94a3b8; line-height: 1.4;">${item.briefing}</div>
+
+                        <div style="display:flex; flex-direction:column; justify-content:center; align-items:center;">
+                            <div style="font-family:'Rajdhani'; font-size:24px; font-weight:800; color:var(--${borderTheme.toLowerCase()});">${displayGrade}</div>
+                            <div style="font-size:10px; color:#94a3b8; font-family:'JetBrains Mono'; margin-top:4px; text-align:center; max-width:280px;">${displaySubtext}</div>
                         </div>
-                        <div style="display:flex; flex-direction:column; gap:8px; align-items: flex-end;">
-                            <button class="lock-btn" onclick="openModal('${item.symbol}')">VIEW DIAGNOSTICS</button>
-                            ${!isStandDown ? `<button class="copy-btn" onclick="copyIntel('${item.symbol}')">COPY TRIGGERS</button>` : ''}
+
+                        <div style="display:flex; flex-direction:column; gap:2px; justify-content:center; align-items:flex-end; width:100%; max-width: 200px;">
+                            ${actionBtn}
+                            ${copyBtn}
                         </div>
-                    </div>
-                    `;
+                    </div>`;
                 });
-                
                 grid.innerHTML = html;
-                
-            } catch (err) {
-                loading.style.display = "none";
-                btn.disabled = false;
-                btn.innerText = "INITIATE RADAR SCAN";
-                grid.innerHTML = `<div style="color:#ef4444; font-family:'JetBrains Mono';">System Error: ${err}</div>`;
-            }
+            } catch(e) { console.log(e); } 
+            finally { loader.style.display = 'none'; grid.style.display = 'grid'; btn.disabled = false; }
         }
-        
-        // Run on load
-        runRadarScan();
+        document.addEventListener('DOMContentLoaded', forceScan);
     </script>
 </body>
 </html>
