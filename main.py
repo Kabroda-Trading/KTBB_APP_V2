@@ -1,7 +1,7 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX v10.5 (SSOT ENFORCED)
-# AUDIT FIX: Cleanly integrated Bounce Engine API and Admin routes.
+# KABRODA UNIFIED SERVER: BATTLEBOX (SSOT ENFORCED)
+# AUDIT FIX: Surgically removed Bounce Engine and Mission Ledger.
 # ---------------------------------------------------------
 import os
 import json 
@@ -26,8 +26,6 @@ import research_lab
 import market_simulator  
 import gravity_engine  
 import gravity_math
-import campaign_engine
-import bounce_engine  
 
 from database import init_db, get_db, UserModel, CampaignLog
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
@@ -39,13 +37,11 @@ async def lifespan(app: FastAPI):
     print(">>> BOOTING KABRODA SYSTEM: Initializing Database Schema...")
     init_db()
     gravity_task = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
-    campaign_task = asyncio.create_task(campaign_engine.run_campaign_tracker_loop()) 
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     gravity_task.cancel()
-    campaign_task.cancel()
 
-app = FastAPI(title="Kabroda BattleBox", version="10.5", lifespan=lifespan)
+app = FastAPI(title="Kabroda BattleBox", version="11.0", lifespan=lifespan)
 
 SECRET_KEY = os.getenv("SESSION_SECRET", "kabroda_prod_key_999")
 
@@ -169,13 +165,6 @@ async def gravity_map_page(request: Request, db: Session = Depends(get_db)):
     require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "gravity_map.html", ctx)
 
-@app.get("/suite/mission-ledger")
-async def mission_ledger_page(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    require_paid_access(ctx["user"])
-    return _template_or_fallback(request, templates, "mission_ledger.html", ctx)
-
 @app.get("/api/gravity/scan")
 async def api_gravity_scan(symbol: str = "BTC/USDT"):
     candles_1d = await battlebox_pipeline.fetch_live_daily(symbol, limit=30)
@@ -190,28 +179,6 @@ async def api_gravity_scan(symbol: str = "BTC/USDT"):
         "kde_data": kde_data, 
         "macro_fibs": macro_fibs
     })
-
-@app.get("/api/campaign/logs")
-async def get_campaign_logs(db: Session = Depends(get_db)):
-    logs = db.query(CampaignLog).order_by(CampaignLog.created_at.desc()).all()
-    result = []
-    for l in logs:
-        result.append({
-            "id": l.id,
-            "symbol": l.symbol,
-            "date_key": l.date_key,
-            "session_id": l.session_id,
-            "bias": l.bias,
-            "grade": l.grade,
-            "entry_price": l.entry_price,
-            "status": l.status,
-            "realized_pnl": l.realized_pnl,
-            "created_at": l.created_at.isoformat(),
-            "diagnostic_data": l.diagnostic_data,
-            "activated_at": l.activated_at.isoformat() if l.activated_at else None,
-            "closed_at": l.closed_at.isoformat() if l.closed_at else None
-        })
-    return JSONResponse({"ok": True, "logs": result})
 
 @app.get("/indicators")
 async def indicators(request: Request, db: Session = Depends(get_db)):
@@ -275,12 +242,6 @@ async def admin_research_page(request: Request, db: Session = Depends(get_db)):
     if not ctx["is_admin"]: return RedirectResponse("/suite")
     return _template_or_fallback(request, templates, "research_lab.html", ctx)
 
-@app.get("/admin/mission")
-async def mission_brief(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx["is_admin"]: return RedirectResponse("/suite")
-    return _template_or_fallback(request, templates, "mission_brief.html", ctx)
-
 @app.get("/admin")
 async def admin_roster_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
@@ -288,12 +249,6 @@ async def admin_roster_page(request: Request, db: Session = Depends(get_db)):
     users = db.query(UserModel).all()
     ctx["users"] = users
     return _template_or_fallback(request, templates, "admin.html", ctx)
-
-@app.get("/admin/bounce")
-async def admin_bounce_page(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx["is_admin"]: return RedirectResponse("/suite")
-    return _template_or_fallback(request, templates, "bounce_radar.html", ctx)
 
 @app.get("/admin/export-audit-ledger")
 async def export_audit_ledger(request: Request, db: Session = Depends(get_db)):
@@ -361,16 +316,6 @@ async def admin_reset_password(request: Request, db: Session = Depends(get_db)):
     return JSONResponse({"ok": False, "error": "User not found"})
 
 # --- API EXECUTION ROUTES ---
-@app.post("/api/bounce/scan")
-async def run_bounce_scan(request: Request, db: Session = Depends(get_db)):
-    uid = request.session.get(auth.SESSION_KEY)
-    if not uid: raise HTTPException(status_code=401)
-    user = db.query(UserModel).filter(UserModel.id == uid).first()
-    if not getattr(user, "is_admin", False): return JSONResponse({"ok": False, "error": "Admin access required."})
-    
-    results = await bounce_engine.scan_sector()
-    return {"ok": True, "results": results}
-
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     uid = request.session.get(auth.SESSION_KEY)
