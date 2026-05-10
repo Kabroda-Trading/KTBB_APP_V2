@@ -2,6 +2,7 @@
 # ==============================================================================
 # KABRODA BATTLEBOX PIPELINE — v11.0 (SYNTHETIC JEWEL KINEMATICS UPGRADE)
 # Purpose: Calculates 15m ADX Volatility & Full EMA Alignment/Mean Deviation.
+# UPGRADE: Harmonic Alignment Matrix & 21-Day Macro Baseline (SSOT Enforced).
 # ==============================================================================
 
 from __future__ import annotations
@@ -224,28 +225,82 @@ def _build_fuel_gauge(raw_1h: List[Dict], raw_4h: List[Dict], raw_15m: List[Dict
         "15M_JEWEL": _build_synthetic_jewel(raw_15m) # Inject local 15m fuel state
     }
 
-def _calculate_weekly_force(raw_daily: List[Dict[str, Any]], anchor_ts: int) -> str:
-    if not raw_daily: return "NEUTRAL"
-    anchor_dt = datetime.fromtimestamp(anchor_ts, tz=timezone.utc)
+# --- SSOT UPGRADE: 21-Day Macro Baseline ---
+def _calculate_weekly_force(daily_candles: list) -> str:
+    """
+    SSOT MACRO COMPASS: Determines Macro Bias using a 21-Day structural baseline.
+    Prevents localized 1H/4H pullbacks from falsely flipping the macro trend.
+    """
+    if not daily_candles or len(daily_candles) < 21:
+        return "NEUTRAL"
+
+    closes = [float(c["close"]) for c in daily_candles]
+    current_price = closes[-1]
+
+    # Establish the Macro Baseline (21 Days)
+    macro_baseline_21 = sum(closes[-21:]) / 21
     
-    days_since_sunday = (anchor_dt.weekday() + 1) % 7
-    if days_since_sunday == 0: days_since_sunday = 7
-        
-    last_sunday_dt = anchor_dt - timedelta(days=days_since_sunday)
-    last_sunday_dt = last_sunday_dt.replace(hour=23, minute=59, second=59, microsecond=0)
-    last_monday_dt = last_sunday_dt - timedelta(days=6)
-    last_monday_dt = last_monday_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Establish a Micro Momentum Check (7 Days)
+    micro_baseline_7 = sum(closes[-7:]) / 7
+
+    # Logic: Price must be structurally above the 3-week floor to be Bullish.
+    if current_price > macro_baseline_21 and micro_baseline_7 > macro_baseline_21:
+        return "BULLISH"
+    elif current_price < macro_baseline_21 and micro_baseline_7 < macro_baseline_21:
+        return "BEARISH"
     
-    start_ts = int(last_monday_dt.timestamp())
-    end_ts = int(last_sunday_dt.timestamp())
-    week_candles = [c for c in raw_daily if start_ts <= int(c["time"]) <= end_ts]
-    
-    if not week_candles: return "NEUTRAL"
-    op, cl = float(week_candles[0]["open"]), float(week_candles[-1]["close"])
-    
-    if cl > op: return "BULLISH"
-    if cl < op: return "BEARISH"
     return "NEUTRAL"
+
+# --- SSOT UPGRADE: Harmonic Alignment Matrix ---
+def _calculate_harmonic_matrix(candles_1h: list, candles_4h: list) -> dict:
+    """
+    SSOT ALIGNMENT MATRIX: Evaluates 1H and 4H momentum to dictate 15m engine state.
+    Accounts for the 'gray area' by measuring slope and relative positioning.
+    """
+    def get_ema(prices, period):
+        if len(prices) < period: return 0.0
+        multiplier = 2 / (period + 1)
+        ema = sum(prices[:period]) / period
+        for p in prices[period:]:
+            ema = (p - ema) * multiplier + ema
+        return ema
+
+    if len(candles_1h) < 50 or len(candles_4h) < 50:
+        return {"micro_state": "CHOP", "1h_fuel_status": "UNKNOWN"}
+
+    # 4H Tide Physics
+    closes_4h = [float(c["close"]) for c in candles_4h]
+    ema20_4h = get_ema(closes_4h, 20)
+    ema50_4h = get_ema(closes_4h, 50)
+    tide_bullish = ema20_4h > ema50_4h
+
+    # 1H Wave Physics
+    closes_1h = [float(c["close"]) for c in candles_1h]
+    ema20_1h = get_ema(closes_1h, 20)
+    ema50_1h = get_ema(closes_1h, 50)
+    wave_bullish = ema20_1h > ema50_1h
+
+    # 1H Fuel Exhaustion Proxy (Distance between EMAs indicates overextension)
+    spread_1h = abs(ema20_1h - ema50_1h) / ema50_1h
+    is_exhausted = spread_1h > 0.015  # If EMAs are stretched > 1.5% apart, fuel is burning out
+
+    # The Matrix Logic
+    if tide_bullish and wave_bullish:
+        if is_exhausted:
+            return {"micro_state": "EXHAUSTION", "1h_fuel_status": "OVEREXTENDED"}
+        return {"micro_state": "SWEET_ZONE", "1h_fuel_status": "STRONG"}
+    
+    elif tide_bullish and not wave_bullish:
+        return {"micro_state": "PULLBACK", "1h_fuel_status": "REFUELING"}
+        
+    elif not tide_bullish and wave_bullish:
+        return {"micro_state": "HOSTILE_CEILING", "1h_fuel_status": "CHOP_RISK"}
+        
+    else:
+        # Both Bearish
+        if is_exhausted:
+            return {"micro_state": "EXHAUSTION", "1h_fuel_status": "OVEREXTENDED"}
+        return {"micro_state": "SWEET_ZONE_BEAR", "1h_fuel_status": "STRONG"}
 
 def _calculate_168h_micro_bias(raw_1h: List[Dict[str, Any]]) -> str:
     if not raw_1h or len(raw_1h) < 168: return "NEUTRAL"
@@ -268,7 +323,7 @@ def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"status": "LIVE", "lean": lean, "phase": "TRANSITION", "note": f"Pressure is {lean}."}
 
 def _compute_sse_packet(
-    raw_5m: List[Dict], anchor_ts: int, macro_bias: str, micro_bias: str, fuel_gauge: Dict, kde_data: Dict, macro_fibs: Dict, tuning: Optional[Dict] = None, raw_daily: List[Dict] = None  
+    raw_5m: List[Dict], anchor_ts: int, macro_bias: str, micro_bias: str, fuel_gauge: Dict, kde_data: Dict, macro_fibs: Dict, harmonic_data: Dict, tuning: Optional[Dict] = None, raw_daily: List[Dict] = None  
 ) -> Dict[str, Any]:
     lock_end_ts = int(anchor_ts) + 1800
     calibration = [c for c in raw_5m if anchor_ts <= int(c["time"]) < lock_end_ts]
@@ -308,11 +363,16 @@ def _compute_sse_packet(
         computed["levels"]["daily_ema20"], computed["levels"]["daily_ema30"], computed["levels"]["daily_ema50"] = d_ema20, d_ema30, d_ema50
 
     if "context" not in computed: computed["context"] = {}
+    
     computed["context"]["macro_bias"] = macro_bias
     computed["context"]["micro_bias"] = micro_bias
     computed["context"]["fuel_gauge"] = fuel_gauge
     computed["context"]["kde_peaks"] = kde_data.get("peaks", [])
     computed["context"]["macro_fibs"] = macro_fibs
+    
+    # INJECT NEW SSOT KINEMATIC DATA
+    computed["context"]["micro_state"] = harmonic_data.get("micro_state", "CHOP")
+    computed["context"]["1h_fuel_status"] = harmonic_data.get("1h_fuel_status", "UNKNOWN")
 
     return {
         "levels": computed["levels"], 
@@ -337,10 +397,11 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     anchor_ts = int(session["anchor_time"])
     lock_end_ts = anchor_ts + 1800
 
-    macro_bias = _calculate_weekly_force(raw_daily, anchor_ts)
+    macro_bias = _calculate_weekly_force(raw_daily)
     micro_bias = _calculate_168h_micro_bias(raw_1h)
     
     fuel_gauge = _build_fuel_gauge(raw_1h, raw_4h, raw_15m)
+    harmonic_data = _calculate_harmonic_matrix(raw_1h, raw_4h)
     
     kde_data = gravity_math.calculate_gravity_kde(symbol)
     macro_fibs = gravity_math.calculate_macro_fibs(raw_daily, [])
@@ -352,7 +413,15 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
             "battlebox": {
                 "raw_15m": raw_15m,
                 "war_map_context": wm, "session_battle": _safe_placeholder_state("Calibrating..."), "session": session, "levels": {}, "bias_model": {}, 
-                "context": {"macro_bias": macro_bias, "micro_bias": micro_bias, "fuel_gauge": fuel_gauge, "kde_peaks": kde_data.get("peaks", []), "macro_fibs": macro_fibs}
+                "context": {
+                    "macro_bias": macro_bias, 
+                    "micro_bias": micro_bias, 
+                    "fuel_gauge": fuel_gauge, 
+                    "kde_peaks": kde_data.get("peaks", []), 
+                    "macro_fibs": macro_fibs,
+                    "micro_state": harmonic_data.get("micro_state"),
+                    "1h_fuel_status": harmonic_data.get("1h_fuel_status")
+                }
             }
         }
 
@@ -372,7 +441,7 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                 if existing_lock:
                     _LOCKED_PACKETS[session_key] = json.loads(existing_lock.packet_data)
                 else:
-                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, tuning=tuning, raw_daily=raw_daily)
+                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, tuning=tuning, raw_daily=raw_daily)
                     if "error" in pkt: 
                         return {"status": "ERROR", "message": pkt["error"], "battlebox": {"raw_15m": raw_15m, "war_map_context": _war_map_from_1h(raw_1h), "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
                     
@@ -393,7 +462,7 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                 print(f"DATABASE VAULT ERROR: {e}")
                 traceback.print_exc()
                 if session_key not in _LOCKED_PACKETS:
-                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, tuning=tuning, raw_daily=raw_daily)
+                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, tuning=tuning, raw_daily=raw_daily)
                     if "error" not in pkt:
                         _LOCKED_PACKETS[session_key] = pkt
             finally:

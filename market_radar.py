@@ -1,7 +1,7 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v14.0 (15-MINUTE MEASURED MOVE ARCHITECTURE)
-# AUDIT: Enforced Session Box Geometry and Kinematic Checklists.
+# KABRODA MARKET RADAR v14.1 (HARMONIC SSOT UPGRADE)
+# AUDIT: Replaced lagging ADX with Pipeline micro_state gating. Adjusted airspace.
 # ==============================================================================
 import os
 import json
@@ -20,33 +20,36 @@ def _make_indicator_string(levels):
     if not levels: return "0,0,0,0,0,0"
     return f"{levels.get('breakout_trigger',0)},{levels.get('breakdown_trigger',0)},{levels.get('daily_resistance',0)},{levels.get('daily_support',0)},{levels.get('range30m_high',0)},{levels.get('range30m_low',0)}"
 
-def _run_measured_move_audit(entry: float, vector: str, bo: float, bd: float, peaks: list):
+def _run_measured_move_audit(entry: float, vector: str, bo: float, bd: float, peaks: list, is_sweet_zone: bool):
     """
     Calculates targets based strictly on the 15m Session Box (BO - BD).
-    Checks for Gravity Walls blocking the airspace.
+    Airspace tolerance relaxes if pipeline declares SWEET_ZONE.
     """
     audit = {
         "stop": 0.0, "t1": 0.0, "t2": 0.0, "t3": 0.0,
         "airspace_clear": True, "blocking_wall": 0.0
     }
     
-    # 1. Define the Session Box (Core unit of risk)
+    # 1. Define the Session Box
     box_size = abs(bo - bd)
-    if box_size == 0: box_size = entry * 0.01 # Fallback
+    if box_size == 0: box_size = entry * 0.01 
     
     # 2. Extract Gravity Obstacles
     overhead = sorted([p for p in peaks if p["price"] > entry], key=lambda x: x["price"])
     underneath = sorted([p for p in peaks if p["price"] < entry], key=lambda x: x["price"], reverse=True)
     
+    # Define required clearance (100% normally, 70% if SWEET_ZONE)
+    clearance_multiplier = 0.7 if is_sweet_zone else 1.0
+
     if vector == "LONG":
         audit["stop"] = bd
         audit["t1"] = entry + box_size
         audit["t2"] = entry + (box_size * 1.618)
         audit["t3"] = entry + (box_size * 2.618)
         
-        # Check if airspace is clear to T1
+        required_clearance_price = entry + (box_size * clearance_multiplier)
         heavy_ovr = [p for p in overhead if p["intensity"] in ["HEAVY", "MAXIMUM"]]
-        if heavy_ovr and heavy_ovr[0]["price"] < audit["t1"]:
+        if heavy_ovr and heavy_ovr[0]["price"] < required_clearance_price:
             audit["airspace_clear"] = False
             audit["blocking_wall"] = heavy_ovr[0]["price"]
 
@@ -56,64 +59,59 @@ def _run_measured_move_audit(entry: float, vector: str, bo: float, bd: float, pe
         audit["t2"] = entry - (box_size * 1.618)
         audit["t3"] = entry - (box_size * 2.618)
         
-        # Check if airspace is clear to T1
+        required_clearance_price = entry - (box_size * clearance_multiplier)
         heavy_und = [p for p in underneath if p["intensity"] in ["HEAVY", "MAXIMUM"]]
-        if heavy_und and heavy_und[0]["price"] > audit["t1"]:
+        if heavy_und and heavy_und[0]["price"] > required_clearance_price:
             audit["airspace_clear"] = False
             audit["blocking_wall"] = heavy_und[0]["price"]
 
     return audit, box_size
 
-def _score_setup(vector: str, macro: str, micro: str, fuel: dict, audit: dict, entry: float, box_size: float):
+def _score_setup(vector: str, macro: str, micro: str, fuel: dict, context: dict, entry: float, bo: float, bd: float, peaks: list):
     checks = []
     missing = []
     
-    f_1h = fuel.get("1H", {})
-    f_4h = fuel.get("4H", {})
-    j_15m = fuel.get("15M_JEWEL", {"rsi": 50, "adx": 0, "kinematic_grade": "TANGLED"})
-
-    rsi_1h = f_1h.get("rsi", 50)
-    rsi_4h = f_4h.get("rsi", 50)
-    adx_15m = j_15m.get("adx", 0)
-    kinematic_grade = j_15m.get("kinematic_grade", "TANGLED")
-    trend_1h = f_1h.get("trend", "NEUTRAL")
+    # Extract SSOT Pipeline State
+    micro_state = context.get("micro_state", "CHOP")
+    is_sweet_zone = micro_state in ["SWEET_ZONE", "SWEET_ZONE_BEAR"]
+    
+    audit, box_size = _run_measured_move_audit(entry, vector, bo, bd, peaks, is_sweet_zone)
 
     # GATE 1: Session Box Risk
     box_pct = (box_size / entry) * 100
     if box_pct > 1.5:
-        return "STAND DOWN", 0, [], f"🔴 HALT: Session Box is too wide ({box_pct:.2f}%). Risk is mathematically untradeable for a 15m setup.", j_15m
+        return "STAND DOWN", 0, [], f"🔴 HALT: Session Box is too wide ({box_pct:.2f}%).", audit, box_size
 
-    # GATE 2: Kinematics & Volatility
-    if kinematic_grade == "OVEREXTENDED":
-        return "STAND DOWN", 0, [], "🔴 HALT: Price is overextended from 200 SMA. Extreme Mean Reversion Risk. STAND DOWN.", j_15m
-    if kinematic_grade == "TANGLED" or adx_15m < 20:
-         return "STAND DOWN", 0, [], "🔴 HALT: 15m EMAs are tangled or ADX < 20. Dead Volatility. Chop Zone.", j_15m
+    # GATE 2: Pipeline SSOT Enforcement
+    if micro_state == "HOSTILE_CEILING":
+        return "STAND DOWN", 0, [], "🔴 HALT: PIPELINE LOCKDOWN. 1H is bouncing into a 4H descending ceiling. Chop risk extreme.", audit, box_size
+    if micro_state == "CHOP":
+        return "STAND DOWN", 0, [], "🔴 HALT: PIPELINE LOCKDOWN. Timeframes are in harmonic conflict.", audit, box_size
+    if micro_state == "PULLBACK":
+        return "STAND DOWN", 0, [], "🟡 HALT: PIPELINE LOCKDOWN. 1H is refueling. Radar Breakouts are disabled until 1H aligns with 4H.", audit, box_size
 
-    # GATE 3: 1H Fuel Exhaustion
-    if vector == "LONG" and rsi_1h > 70:
-        return "STAND DOWN", 0, [], f"🔴 HALT: 1H RSI ({rsi_1h}) is exhausted. Rubber band stretched. Breakout unlikely.", j_15m
-    if vector == "SHORT" and rsi_1h < 30:
-        return "STAND DOWN", 0, [], f"🔴 HALT: 1H RSI ({rsi_1h}) is exhausted. Concrete floor support ahead.", j_15m
+    # GATE 3: Kinematics (Overextension)
+    j_15m = fuel.get("15M_JEWEL", {})
+    if j_15m.get("kinematic_grade") == "OVEREXTENDED":
+        return "STAND DOWN", 0, [], "🔴 HALT: Price is overextended from 15m 200 SMA. Mean Reversion Risk.", audit, box_size
 
-    # GATE 4: The Polarity Trap (1H Conflict)
-    if vector == "SHORT" and trend_1h == "BULLISH":
-        return "STAND DOWN", 0, [], "🟡 HALT: 15m Breaking Down, but 1H Trend is BULLISH. Do not short into macro support. Wait for Bounce Engine.", j_15m
-    if vector == "LONG" and trend_1h == "BEARISH":
-        return "STAND DOWN", 0, [], "🟡 HALT: 15m Breaking Out, but 1H Trend is BEARISH. Do not buy into macro resistance. Wait for ceiling rejection.", j_15m
+    # GATE 4: The Polarity Trap
+    if vector == "SHORT" and micro_state == "SWEET_ZONE":
+        return "STAND DOWN", 0, [], "🟡 HALT: Breaking Down, but Pipeline is in Bullish Sweet Zone. Do not short into macro support.", audit, box_size
+    if vector == "LONG" and micro_state == "SWEET_ZONE_BEAR":
+        return "STAND DOWN", 0, [], "🟡 HALT: Breaking Out, but Pipeline is in Bearish Sweet Zone. Do not buy into macro resistance.", audit, box_size
 
     # THE WEIGHTED SCORING MATRIX
     score = 0
     max_score = 10
 
-    if (vector == "LONG" and trend_1h == "BULLISH") or (vector == "SHORT" and trend_1h == "BEARISH"):
-        score += 4; checks.append("✓ 1H Macro Tide Aligned")
-    else: missing.append("1H Tide Misaligned")
+    if is_sweet_zone:
+        score += 6; checks.append("✓ Pipeline: Harmonic Sweet Zone Confirmed")
+    else: missing.append("Pipeline: Harmonic Alignment Missing")
 
     if audit["airspace_clear"]:
         score += 4; checks.append("✓ Clear Airspace to Target 1")
     else: missing.append(f"Airspace Blocked by Wall at {audit['blocking_wall']}")
-
-    score += 2; checks.append(f"✓ 15m Kinematics Active (ADX: {adx_15m})")
 
     pct = max(0, (score / max_score) * 100)
     
@@ -126,19 +124,17 @@ def _score_setup(vector: str, macro: str, micro: str, fuel: dict, audit: dict, e
         grade = "GRADE B"
     else: 
         grade = "STAND DOWN"
-        rejection_reason = f"🔴 ABORT: Score {pct:.0f}%. Missing alignment: " + ", ".join(missing)
+        rejection_reason = f"🔴 ABORT: Missing alignment: " + ", ".join(missing)
 
-    return grade, pct, checks, rejection_reason, j_15m
+    return grade, pct, checks, rejection_reason, audit, box_size
 
-def _build_dossier(symbol, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs):
+def _build_dossier(symbol, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs, context):
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
     
     favored = "NEUTRAL"
     if micro_bias == "BULLISH": favored = "LONG"
     elif micro_bias == "BEARISH": favored = "SHORT"
-    elif fuel_gauge.get("1H", {}).get("trend") == "BULLISH": favored = "LONG"
-    elif fuel_gauge.get("1H", {}).get("trend") == "BEARISH": favored = "SHORT"
     
     entry = bo if favored == "LONG" else bd
     
@@ -149,18 +145,17 @@ def _build_dossier(symbol, price, levels, macro_bias, micro_bias, fuel_gauge, kd
             "checks": [], "diagnostic_ledger": {}, "plan": {"valid": False}
         }
         
-    audit, box_size = _run_measured_move_audit(entry, favored, bo, bd, kde_peaks)
-    grade, score_pct, checks, rejection_reason, j_15m = _score_setup(favored, macro_bias, micro_bias, fuel_gauge, audit, entry, box_size)
+    grade, score_pct, checks, rejection_reason, audit, box_size = _score_setup(favored, macro_bias, micro_bias, fuel_gauge, context, entry, bo, bd, kde_peaks)
     
     color = "GRAY"
     briefing = ""
     
     if grade == "GRADE A": 
         color = "GREEN"
-        briefing = "🟢 ELITE ALIGNMENT. 1H Tide and 15m Kinematics synchronized. Airspace is clear for Measured Move."
+        briefing = "🟢 ELITE ALIGNMENT. Pipeline Harmonic Alignment confirmed. Airspace cleared."
     elif grade == "GRADE B": 
         color = "YELLOW"
-        briefing = "🟡 STANDARD OPERATION. Executable, but expect friction. Scale out aggressively at Target 1."
+        briefing = "🟡 STANDARD OPERATION. Executable, but expect friction. Scale out aggressively."
     elif grade == "STAND DOWN": 
         color = "RED"
         briefing = rejection_reason
@@ -176,9 +171,7 @@ def _build_dossier(symbol, price, levels, macro_bias, micro_bias, fuel_gauge, kd
     diagnostic_ledger = {
         "vector_direction": favored,
         "session_box_size": box_size,
-        "15m_adx_volatility": j_15m.get("adx", 0),
-        "1h_rsi": fuel_gauge.get("1H", {}).get("rsi", 0),
-        "1h_trend": fuel_gauge.get("1H", {}).get("trend", "NEUTRAL"),
+        "pipeline_state": context.get("micro_state", "UNKNOWN"),
         "airspace_clear": audit["airspace_clear"]
     }
     if not plan["valid"]:
@@ -233,7 +226,7 @@ def log_to_google_sheet(radar_item):
             bo = bd = dr = ds = r30h = r30l = 0
 
         row_data = [
-            timestamp,                             
+            timestamp,                  
             radar_item["symbol"],                  
             radar_item.get("macro_bias", ""),              
             radar_item.get("micro_bias", ""),              
@@ -270,7 +263,7 @@ async def analyze_target(symbol):
     kde_peaks = context.get("kde_peaks", [])
     macro_fibs = context.get("macro_fibs", {})
 
-    dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs)
+    dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs, context)
     
     return {
         "ok": True,
@@ -302,7 +295,7 @@ async def scan_sector():
         kde_peaks = context.get("kde_peaks", [])
         macro_fibs = context.get("macro_fibs", {})
 
-        dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs)
+        dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias, fuel_gauge, kde_peaks, macro_fibs, context)
         
         radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,
