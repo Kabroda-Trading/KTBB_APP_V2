@@ -404,13 +404,13 @@
                     let displayGrade = t.grade;
                     let displaySubtext = t.briefing;
                     
-                    let actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 10px; margin-bottom: 5px;" onclick="openModal('${t.symbol}')">VIEW DIAGNOSTICS</button>`;
-                    let copyBtn = `<button class="copy-btn" style="width:100%; text-align:center; margin:0; padding: 10px;" onclick="copyIntel('${t.symbol}')">COPY TRIGGERS</button>`;
+                    // Default active button for valid trades
+                    let actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px;" onclick="openModal('${t.symbol}')">LOCK TARGET →</button>`;
                     
+                    // If Stand Down, keep it clickable so you can read the diagnostics
                     if(t.grade === "STAND DOWN") {
-                        actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 10px; margin-bottom: 5px; color:#ef4444; border-color:#ef4444;" disabled>NO TRADE</button>`;
-                        copyBtn = "";
-                    } 
+                        actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px; color:#ef4444; border-color:#ef4444;" onclick="openModal('${t.symbol}')">VIEW DIAGNOSTICS</button>`;
+                    }
 
                     html += `
                     <div class="radar-row border-${borderTheme}">
@@ -424,9 +424,11 @@
                             <div style="font-size:10px; color:#94a3b8; font-family:'JetBrains Mono'; margin-top:4px; text-align:center; max-width:280px;">${displaySubtext}</div>
                         </div>
 
-                        <div style="display:flex; flex-direction:column; gap:2px; justify-content:center; align-items:flex-end; width:100%; max-width: 200px;">
+                        <div style="display:flex; flex-direction:column; gap:8px; justify-content:center; align-items:flex-end;">
                             ${actionBtn}
-                            ${copyBtn}
+                            <div style="display:flex; gap:5px; width:100%;">
+                                <button class="copy-btn" style="flex:1; margin:0;" onclick="copyIntel('${t.symbol}')" title="Copy 6 Chart Levels">📋 COPY TRIGGERS</button>
+                            </div>
                         </div>
                     </div>`;
                 });
