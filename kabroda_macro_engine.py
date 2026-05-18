@@ -1,8 +1,9 @@
 # kabroda_macro_engine.py
 # ==============================================================================
-# KABRODA MACRO ENGINE — v5.0 (THE ZIGZAG MATRIX)
+# KABRODA MACRO ENGINE — v6.0 (THE QUANT AXIOM ENGINE)
 # Purpose: Autonomous Macro Elliott Wave Scanner & State Latch
-# AUDIT FIX: Replaced Temporal Slicing with pure 20% ZigZag Pivot isolation.
+# AUDIT FIX: Phase 1 (ZigZag Matrix) integrated with Phase 2 (Axiom Validator).
+# Enforces strict Elliott Wave rules on structural pivots to map pure sequences.
 # ==============================================================================
 
 import asyncio
@@ -28,67 +29,51 @@ async def fetch_historical_daily_macro(symbol: str, target_days: int = 1500) -> 
     while len(all_candles) < target_days:
         try:
             rows = await _exchange.fetch_ohlcv(symbol, "1d", since=since_ts, limit=limit_per_call)
-            if not rows:
-                break 
+            if not rows: break 
                 
             formatted = [{"time": int(r[0] / 1000), "high": float(r[2]), "low": float(r[3]), "close": float(r[4])} for r in rows]
             all_candles.extend(formatted)
-            
             since_ts = int(rows[-1][0]) + 1
             await asyncio.sleep(0.5)
-            
         except Exception as e:
             print(f"Macro Pagination Error for {symbol}: {e}")
             break
             
     return all_candles[-target_days:]
 
-# --- KABRODA ARCHITECTURE UPGRADE: 20% ZigZag Engine ---
 def _calculate_zigzag_pivots(candles: List[Dict[str, Any]], deviation_pct: float = 0.20) -> List[Dict[str, Any]]:
-    """
-    Strips noise. Returns an array of pure structural pivots based on a minimum % move.
-    """
+    """Phase 1: Strips daily noise. Returns pure 20% structural pivots."""
     if not candles: return []
 
     pivots = []
-    # Initial state
-    current_trend = 1 # 1 for Up, -1 for Down
+    current_trend = 1 
     extreme_price = candles[0]["high"]
     extreme_idx = 0
-    extreme_candle = candles[0]
 
     for i, c in enumerate(candles):
         high = c["high"]
         low = c["low"]
 
-        if current_trend == 1: # Looking for a Top
+        if current_trend == 1: 
             if high > extreme_price:
                 extreme_price = high
                 extreme_idx = i
-                extreme_candle = c
             elif low < extreme_price * (1 - deviation_pct):
-                # 20% Drop confirmed -> Lock the Top Pivot
-                pivots.append({"type": "PEAK", "price": extreme_price, "abs_idx": extreme_idx, "time": extreme_candle["time"]})
+                pivots.append({"type": "PEAK", "price": extreme_price, "abs_idx": extreme_idx})
                 current_trend = -1
                 extreme_price = low
                 extreme_idx = i
-                extreme_candle = c
 
-        elif current_trend == -1: # Looking for a Bottom
+        elif current_trend == -1: 
             if low < extreme_price:
                 extreme_price = low
                 extreme_idx = i
-                extreme_candle = c
             elif high > extreme_price * (1 + deviation_pct):
-                # 20% Bounce confirmed -> Lock the Bottom Pivot
-                pivots.append({"type": "TROUGH", "price": extreme_price, "abs_idx": extreme_idx, "time": extreme_candle["time"]})
+                pivots.append({"type": "TROUGH", "price": extreme_price, "abs_idx": extreme_idx})
                 current_trend = 1
                 extreme_price = high
                 extreme_idx = i
-                extreme_candle = c
     
-    # Push the final unconfirmed extreme
-    pivots.append({"type": "PEAK" if current_trend == 1 else "TROUGH", "price": extreme_price, "abs_idx": extreme_idx, "time": extreme_candle["time"]})
     return pivots
 
 def _find_macro_anchors(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -97,21 +82,101 @@ def _find_macro_anchors(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for i, c in enumerate(candles):
         c["abs_idx"] = i
 
-    # Phase 1: Build the 20% ZigZag Matrix
+    # Phase 1: Raw Pivots
     raw_pivots = _calculate_zigzag_pivots(candles, deviation_pct=0.20)
     
-    # We will temporarily output the raw ZigZag pivots to verify the engine is isolating noise.
-    anchors = []
-    for i, p in enumerate(raw_pivots):
-        if p["type"] == "PEAK":
-            anchors.append({"type": f"ZIGZAG_PEAK_{i}", "price": p["price"]})
-        else:
-            anchors.append({"type": f"ZIGZAG_TROUGH_{i}", "price": p["price"]})
+    if len(raw_pivots) < 4: return [] # Need structure to map waves
+
+    # Absolute Extremes (Wave 0 and Wave 5)
+    highest_candle = max(candles, key=lambda c: c["high"])
+    cycle_top_price = highest_candle["high"]
+    top_idx = highest_candle["abs_idx"]
+    
+    pre_top_candles = candles[:top_idx+1]
+    lowest_candle = min(pre_top_candles, key=lambda c: c["low"])
+    cycle_origin_price = lowest_candle["low"]
+    origin_idx = lowest_candle["abs_idx"]
+
+    anchors = [
+        {"type": "CYCLE_ORIGIN", "price": cycle_origin_price},
+        {"type": "CYCLE_TOP", "price": cycle_top_price}
+    ]
+
+    # --- Phase 2: Elliott Wave Axiom Validator (Bull Run) ---
+    bull_pivots = [p for p in raw_pivots if origin_idx < p["abs_idx"] < top_idx]
+    peaks = [p for p in bull_pivots if p["type"] == "PEAK"]
+    troughs = [p for p in bull_pivots if p["type"] == "TROUGH"]
+
+    if len(peaks) >= 2 and len(troughs) >= 2:
+        # Axiom 1: Find W4 (Lowest structural trough in upper half of run)
+        mid_price = cycle_origin_price + ((cycle_top_price - cycle_origin_price) * 0.5)
+        upper_troughs = [t for t in troughs if t["price"] > mid_price]
+        
+        if upper_troughs:
+            w4 = min(upper_troughs, key=lambda t: t["price"])
             
+            # Axiom 2: Find W3 (Highest peak before W4)
+            valid_w3 = [p for p in peaks if p["abs_idx"] < w4["abs_idx"]]
+            if valid_w3:
+                w3 = max(valid_w3, key=lambda p: p["price"])
+                
+                # Axiom 3: Find W2 (Lowest trough before W3)
+                valid_w2 = [t for t in troughs if t["abs_idx"] < w3["abs_idx"]]
+                if valid_w2:
+                    w2 = min(valid_w2, key=lambda t: t["price"])
+                    
+                    # Axiom 4: Find W1 (Highest peak before W2)
+                    valid_w1 = [p for p in peaks if p["abs_idx"] < w2["abs_idx"]]
+                    if valid_w1:
+                        w1 = max(valid_w1, key=lambda p: p["price"])
+                        
+                        # INVIOLABLE ELLIOTT WAVE RULES CHECK:
+                        # 1. W4 cannot overlap W1 territory
+                        # 2. W2 cannot break Origin
+                        if w4["price"] > w1["price"] and w2["price"] > cycle_origin_price:
+                            anchors.extend([
+                                {"type": "BULL_WAVE_1", "price": w1["price"]},
+                                {"type": "BULL_WAVE_2", "price": w2["price"]},
+                                {"type": "BULL_WAVE_3", "price": w3["price"]},
+                                {"type": "BULL_WAVE_4", "price": w4["price"]}
+                            ])
+
+    # --- Phase 2: Elliott Wave Axiom Validator (Bear Run) ---
+    bear_pivots = [p for p in raw_pivots if p["abs_idx"] > top_idx]
+    bear_peaks = [p for p in bear_pivots if p["type"] == "PEAK"]
+    bear_troughs = [p for p in bear_pivots if p["type"] == "TROUGH"]
+
+    if bear_troughs:
+        # Bear W3 is absolute lowest point of bear market so far
+        bear_w3 = min(bear_troughs, key=lambda t: t["price"])
+        anchors.append({"type": "BEAR_WAVE_3_LOW", "price": bear_w3["price"]})
+
+        # Bear W4 is the highest bounce AFTER W3
+        valid_w4 = [p for p in bear_peaks if p["abs_idx"] > bear_w3["abs_idx"]]
+        if valid_w4:
+            bear_w4 = max(valid_w4, key=lambda p: p["price"])
+            anchors.append({"type": "BEAR_WAVE_4_BOUNCE", "price": bear_w4["price"]})
+
+        # Bear W1 & W2 (Before W3)
+        valid_w2 = [p for p in bear_peaks if p["abs_idx"] < bear_w3["abs_idx"]]
+        if valid_w2:
+            bear_w2 = max(valid_w2, key=lambda p: p["price"])
+            
+            valid_w1 = [t for t in bear_troughs if t["abs_idx"] < bear_w2["abs_idx"]]
+            if valid_w1:
+                bear_w1 = min(valid_w1, key=lambda t: t["price"])
+                
+                # Axiom Check: W2 must be lower than Top
+                if bear_w2["price"] < cycle_top_price:
+                    anchors.extend([
+                        {"type": "BEAR_WAVE_1_MSB", "price": bear_w1["price"]},
+                        {"type": "BEAR_WAVE_2", "price": bear_w2["price"]}
+                    ])
+
     return anchors
 
 async def run_macro_scan():
-    print(">>> MACRO ENGINE: Scanning multi-year SPOT structural anchors (ZIGZAG MATRIX)...")
+    print(">>> MACRO ENGINE: Scanning multi-year SPOT structural anchors (AXIOM VALIDATOR)...")
     db = SessionLocal()
     try:
         for symbol in TARGETS:
@@ -143,7 +208,7 @@ async def run_macro_scan():
                 db.add(mem)
             
             db.commit()
-            print(f"|| MACRO ANCHORS LOCKED (SPOT) || {db_sym} | Pivots Mapped: {len(anchors)}")
+            print(f"|| MACRO ANCHORS LOCKED (SPOT) || {db_sym} | Exact Waves Mapped: {len(anchors)}")
             
     except Exception as e:
         print(f"Macro Engine Error: {e}")
