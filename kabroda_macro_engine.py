@@ -1,9 +1,8 @@
 # kabroda_macro_engine.py
 # ==============================================================================
-# KABRODA MACRO ENGINE — v3.1
+# KABRODA MACRO ENGINE — v5.0 (THE ZIGZAG MATRIX)
 # Purpose: Autonomous Macro Elliott Wave Scanner & State Latch
-# AUDIT FIX: Full file integration of Absolute Global Indices and 
-# strict slice boundaries to perfectly isolate internal Bull/Bear waves.
+# AUDIT FIX: Replaced Temporal Slicing with pure 20% ZigZag Pivot isolation.
 # ==============================================================================
 
 import asyncio
@@ -20,10 +19,6 @@ _exchange = ccxt.mexc({
 })
 
 async def fetch_historical_daily_macro(symbol: str, target_days: int = 1500) -> List[Dict[str, Any]]:
-    """
-    Bypasses the MEXC 1000-candle hard limit using Time-Stitched Pagination.
-    Recursively fetches chunks until the full 1500-day history is built.
-    """
     limit_per_call = 1000  
     all_candles = []
     
@@ -48,91 +43,75 @@ async def fetch_historical_daily_macro(symbol: str, target_days: int = 1500) -> 
             
     return all_candles[-target_days:]
 
+# --- KABRODA ARCHITECTURE UPGRADE: 20% ZigZag Engine ---
+def _calculate_zigzag_pivots(candles: List[Dict[str, Any]], deviation_pct: float = 0.20) -> List[Dict[str, Any]]:
+    """
+    Strips noise. Returns an array of pure structural pivots based on a minimum % move.
+    """
+    if not candles: return []
+
+    pivots = []
+    # Initial state
+    current_trend = 1 # 1 for Up, -1 for Down
+    extreme_price = candles[0]["high"]
+    extreme_idx = 0
+    extreme_candle = candles[0]
+
+    for i, c in enumerate(candles):
+        high = c["high"]
+        low = c["low"]
+
+        if current_trend == 1: # Looking for a Top
+            if high > extreme_price:
+                extreme_price = high
+                extreme_idx = i
+                extreme_candle = c
+            elif low < extreme_price * (1 - deviation_pct):
+                # 20% Drop confirmed -> Lock the Top Pivot
+                pivots.append({"type": "PEAK", "price": extreme_price, "abs_idx": extreme_idx, "time": extreme_candle["time"]})
+                current_trend = -1
+                extreme_price = low
+                extreme_idx = i
+                extreme_candle = c
+
+        elif current_trend == -1: # Looking for a Bottom
+            if low < extreme_price:
+                extreme_price = low
+                extreme_idx = i
+                extreme_candle = c
+            elif high > extreme_price * (1 + deviation_pct):
+                # 20% Bounce confirmed -> Lock the Bottom Pivot
+                pivots.append({"type": "TROUGH", "price": extreme_price, "abs_idx": extreme_idx, "time": extreme_candle["time"]})
+                current_trend = 1
+                extreme_price = high
+                extreme_idx = i
+                extreme_candle = c
+    
+    # Push the final unconfirmed extreme
+    pivots.append({"type": "PEAK" if current_trend == 1 else "TROUGH", "price": extreme_price, "abs_idx": extreme_idx, "time": extreme_candle["time"]})
+    return pivots
+
 def _find_macro_anchors(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not candles: return []
     
-    # INJECT ABSOLUTE INDEX to prevent .index() collision
     for i, c in enumerate(candles):
         c["abs_idx"] = i
-    
-    # --- 1. CYCLE EXTREMES ---
-    highest_candle = max(candles, key=lambda c: c["high"])
-    cycle_top_price = highest_candle["high"]
-    top_idx = highest_candle["abs_idx"]
-    
-    pre_top_candles = candles[:top_idx+1]
-    lowest_candle = min(pre_top_candles, key=lambda c: c["low"])
-    cycle_origin_price = lowest_candle["low"]
-    origin_idx = lowest_candle["abs_idx"]
-    
-    anchors = [
-        {"type": "CYCLE_ORIGIN", "price": cycle_origin_price},
-        {"type": "CYCLE_TOP", "price": cycle_top_price}
-    ]
 
-    # --- 2. BULL RUN SUB-ROUTINE ---
-    bull_length = top_idx - origin_idx
-    if bull_length > 30: 
-        mid_idx = origin_idx + (bull_length // 2)
-        
-        # W4: Lowest point in the second half
-        w4_candle = min(candles[mid_idx:top_idx], key=lambda c: c["low"])
-        w4_idx = w4_candle["abs_idx"]
-        
-        if w4_idx > origin_idx + 1:
-            # W3: Highest between Origin and W4 (Strictly exclude Origin)
-            w3_candle = max(candles[origin_idx + 1:w4_idx], key=lambda c: c["high"])
-            w3_idx = w3_candle["abs_idx"]
+    # Phase 1: Build the 20% ZigZag Matrix
+    raw_pivots = _calculate_zigzag_pivots(candles, deviation_pct=0.20)
+    
+    # We will temporarily output the raw ZigZag pivots to verify the engine is isolating noise.
+    anchors = []
+    for i, p in enumerate(raw_pivots):
+        if p["type"] == "PEAK":
+            anchors.append({"type": f"ZIGZAG_PEAK_{i}", "price": p["price"]})
+        else:
+            anchors.append({"type": f"ZIGZAG_TROUGH_{i}", "price": p["price"]})
             
-            if w3_idx > origin_idx + 1:
-                # W2: Lowest between Origin and W3 (Strictly exclude Origin)
-                w2_candle = min(candles[origin_idx + 1:w3_idx], key=lambda c: c["low"])
-                w2_idx = w2_candle["abs_idx"]
-                
-                if w2_idx > origin_idx + 1:
-                    # W1: Highest between Origin and W2 (Strictly exclude Origin)
-                    w1_candle = max(candles[origin_idx + 1:w2_idx], key=lambda c: c["high"])
-                    
-                    anchors.extend([
-                        {"type": "BULL_WAVE_1", "price": w1_candle["high"]},
-                        {"type": "BULL_WAVE_2", "price": w2_candle["low"]},
-                        {"type": "BULL_WAVE_3", "price": w3_candle["high"]},
-                        {"type": "BULL_WAVE_4", "price": w4_candle["low"]}
-                    ])
-
-    # --- 3. BEAR RUN SUB-ROUTINE ---
-    post_top = candles[top_idx+1:]
-    if post_top:
-        bear_lowest_candle = min(post_top, key=lambda c: c["low"])
-        bear_lowest_idx = bear_lowest_candle["abs_idx"]
-        
-        anchors.append({"type": "BEAR_WAVE_3", "price": bear_lowest_candle["low"]})
-        
-        # BEAR WAVE 4: Bounce AFTER the lowest point
-        post_lowest = candles[bear_lowest_idx+1:]
-        if post_lowest:
-            bear_w4_candle = max(post_lowest, key=lambda c: c["high"])
-            anchors.append({"type": "BEAR_WAVE_4", "price": bear_w4_candle["high"]})
-            
-        # BEAR WAVES 1 & 2: Structure BEFORE the lowest point
-        pre_lowest = candles[top_idx+1:bear_lowest_idx]
-        if len(pre_lowest) > 2: 
-            bear_w2_candle = max(pre_lowest, key=lambda c: c["high"])
-            bear_w2_idx = bear_w2_candle["abs_idx"]
-            
-            # Strictly exclude the top from the w1 search
-            pre_w2 = candles[top_idx+1:bear_w2_idx]
-            if pre_w2:
-                bear_w1_candle = min(pre_w2, key=lambda c: c["low"])
-                anchors.extend([
-                    {"type": "BEAR_WAVE_1_MSB", "price": bear_w1_candle["low"]},
-                    {"type": "BEAR_WAVE_2", "price": bear_w2_candle["high"]}
-                ])
-                
     return anchors
 
 async def run_macro_scan():
-    print(">>> MACRO ENGINE: Scanning multi-year SPOT structural anchors...")
+    print(">>> MACRO ENGINE: Scanning multi-year SPOT structural anchors (ZIGZAG MATRIX)...")
     db = SessionLocal()
     try:
         for symbol in TARGETS:
@@ -164,7 +143,7 @@ async def run_macro_scan():
                 db.add(mem)
             
             db.commit()
-            print(f"|| MACRO ANCHORS LOCKED (SPOT) || {db_sym} | Anchors Mapped: {len(anchors)}")
+            print(f"|| MACRO ANCHORS LOCKED (SPOT) || {db_sym} | Pivots Mapped: {len(anchors)}")
             
     except Exception as e:
         print(f"Macro Engine Error: {e}")
