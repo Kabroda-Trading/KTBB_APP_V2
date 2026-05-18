@@ -1,7 +1,7 @@
 # main.py
 # ---------------------------------------------------------
 # KABRODA UNIFIED SERVER: BATTLEBOX (SSOT ENFORCED)
-# AUDIT FIX: Surgically removed Bounce Engine and Mission Ledger.
+# AUDIT FIX: Surgically Integrated Gravity Background Engine & Routes.
 # ---------------------------------------------------------
 import os
 import json 
@@ -36,12 +36,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 async def lifespan(app: FastAPI):
     print(">>> BOOTING KABRODA SYSTEM: Initializing Database Schema...")
     init_db()
-    gravity_task = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
+    # KABRODA ARCHITECTURE UPGRADE: Ignite Background Engines safely
+    app.state.gravity_task = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
-    gravity_task.cancel()
+    app.state.gravity_task.cancel()
 
-app = FastAPI(title="Kabroda BattleBox", version="11.0", lifespan=lifespan)
+app = FastAPI(title="Kabroda BattleBox", version="11.2", lifespan=lifespan)
 
 SECRET_KEY = os.getenv("SESSION_SECRET", "kabroda_prod_key_999")
 
@@ -165,6 +166,7 @@ async def gravity_map_page(request: Request, db: Session = Depends(get_db)):
     require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "gravity_map.html", ctx)
 
+# --- GRAVITY API ENDPOINT ---
 @app.get("/api/gravity/scan")
 async def api_gravity_scan(symbol: str = "BTC/USDT"):
     candles_1d = await battlebox_pipeline.fetch_live_daily(symbol, limit=30)
@@ -241,6 +243,12 @@ async def admin_research_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_admin"]: return RedirectResponse("/suite")
     return _template_or_fallback(request, templates, "research_lab.html", ctx)
+
+@app.get("/admin/mission")
+async def mission_brief(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx["is_admin"]: return RedirectResponse("/suite")
+    return _template_or_fallback(request, templates, "mission_brief.html", ctx)
 
 @app.get("/admin")
 async def admin_roster_page(request: Request, db: Session = Depends(get_db)):
@@ -325,9 +333,14 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
+    session_id = payload.get("session_id")
+    requested_tz = payload.get("session_tz") or (getattr(user, "session_tz", None) or "UTC")
     ensure_symbol_allowed(user, symbol)
     
-    out = await battlebox_pipeline.get_session_review(symbol=symbol, session_id="us_ny_futures")
+    if session_id:
+        out = await battlebox_pipeline.get_session_review(symbol=symbol, session_id=session_id)
+    else:
+        out = await battlebox_pipeline.get_session_review(symbol=symbol, session_tz=requested_tz)
     return JSONResponse(out)
 
 @app.post("/api/dmr/live")
@@ -343,8 +356,8 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
     
     out = await battlebox_pipeline.get_live_battlebox(
         symbol=symbol,
-        session_mode="MANUAL",
-        manual_id="us_ny_futures",
+        session_mode=(payload.get("session_mode") or "AUTO").upper(),
+        manual_id=payload.get("manual_session_id") or payload.get("session_id"),
         operator_flex=getattr(user, "operator_flex", False)
     )
     return JSONResponse(out)
@@ -373,9 +386,11 @@ async def research_run(request: Request, db: Session = Depends(get_db)):
 async def simulator_run(request: Request, db: Session = Depends(get_db)):
     uid = request.session.get(auth.SESSION_KEY)
     if not uid: raise HTTPException(status_code=401)
+    
     user = db.query(UserModel).filter(UserModel.id == uid).first()
+    
     if not getattr(user, "is_admin", False): 
-        return JSONResponse({"ok": False, "error": "Admin access required."}, status_code=403)
+        return JSONResponse({"ok": False, "error": "Admin access required for heavy backtesting computations."}, status_code=403)
     
     payload = await request.json()
     try:
@@ -390,15 +405,19 @@ async def processing_route(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     return _template_or_fallback(request, templates, "processing.html", ctx)
 
+# ---------------------------------------------------------
+# 🚨 SYSTEM DIAGNOSTIC AUTOPSY (CATCHES SILENT 500 ERRORS)
+# ---------------------------------------------------------
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     error_trace = traceback.format_exc()
-    print(f"CRITICAL CRASH:\n{error_trace}")
+    print(f"CRITICAL CRASH:\n{error_trace}") 
     return HTMLResponse(
         content=f"""
-        <div style="background-color: #0f172a; color: #ef4444; padding: 40px; font-family: monospace;">
-            <h1>🚨 FATAL SYSTEM CRASH 🚨</h1>
-            <pre>{error_trace}</pre>
+        <div style="background-color: #0f172a; color: #ef4444; padding: 40px; font-family: 'JetBrains Mono', monospace; min-height: 100vh; box-sizing: border-box;">
+            <h1 style="border-bottom: 2px solid #ef4444; padding-bottom: 10px; margin-top:0;">🚨 FATAL SYSTEM CRASH 🚨</h1>
+            <p style="color: #cbd5e1; font-size: 14px;">The execution sequence failed. Here is the exact internal autopsy of the code:</p>
+            <pre style="background: #020617; padding: 20px; border: 1px solid #334155; border-radius: 8px; overflow-x: auto; font-size: 12px; line-height: 1.5;">{error_trace}</pre>
         </div>
         """,
         status_code=500
