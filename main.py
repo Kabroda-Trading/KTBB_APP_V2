@@ -1,7 +1,7 @@
 # main.py
 # ---------------------------------------------------------
 # KABRODA UNIFIED SERVER: BATTLEBOX (SSOT ENFORCED)
-# AUDIT FIX: Surgically Integrated Gravity Background Engine & Routes.
+# AUDIT FIX: Surgically Integrated Macro War Room Route.
 # ---------------------------------------------------------
 import os
 import json 
@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     app.state.gravity_task.cancel()
 
-app = FastAPI(title="Kabroda BattleBox", version="11.2", lifespan=lifespan)
+app = FastAPI(title="Kabroda BattleBox", version="11.3", lifespan=lifespan)
 
 SECRET_KEY = os.getenv("SESSION_SECRET", "kabroda_prod_key_999")
 
@@ -165,6 +165,14 @@ async def gravity_map_page(request: Request, db: Session = Depends(get_db)):
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
     require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "gravity_map.html", ctx)
+
+# --- KABRODA ARCHITECTURE UPGRADE: MACRO WAR ROOM ROUTE ---
+@app.get("/suite/macro-war-room")
+async def macro_war_room_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
+    require_paid_access(ctx["user"])
+    return _template_or_fallback(request, templates, "macro_war_room.html", ctx)
 
 # --- GRAVITY API ENDPOINT ---
 @app.get("/api/gravity/scan")
@@ -405,9 +413,6 @@ async def processing_route(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     return _template_or_fallback(request, templates, "processing.html", ctx)
 
-# ---------------------------------------------------------
-# 🚨 SYSTEM DIAGNOSTIC AUTOPSY (CATCHES SILENT 500 ERRORS)
-# ---------------------------------------------------------
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     error_trace = traceback.format_exc()
