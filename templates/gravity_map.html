@@ -34,6 +34,12 @@
         
         .tv-btn { background: #a855f7; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 800; cursor: pointer; margin-left: 15px; transition: 0.2s; box-shadow: 0 0 10px rgba(168, 85, 247, 0.3); }
         .tv-btn:hover { background: #d8b4fe; color: #000; }
+
+        /* KABRODA ARCHITECTURE UPGRADE: Kinetic Friction UI */
+        .danger-zone { background: rgba(239, 68, 68, 0.15); border: 2px solid #ef4444; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: none; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+        .danger-title { color: #ef4444; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; margin-bottom: 5px;}
+        .danger-text { color: #f8fafc; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -58,7 +64,13 @@
                 </div>
             </div>
             <div class="sidebar" id="sidebar-zones">
-                <div style="text-align:center; padding: 40px; color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 12px;">SYNCHRONIZING WITH KABRODA CORE...</div>
+                <div id="kinetic-friction-alert" class="danger-zone">
+                    <div class="danger-title">⚠ KINETIC FRICTION DETECTED</div>
+                    <div class="danger-text">Price is colliding with a Class 0 Macro Anchor. High probability of chop or violent rejection. Recommended Action: NO TRADE.</div>
+                </div>
+                <div id="sidebar-content">
+                    <div style="text-align:center; padding: 40px; color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 12px;">SYNCHRONIZING WITH KABRODA CORE...</div>
+                </div>
             </div>
         </div>
     </div>
@@ -68,19 +80,18 @@
         let globalKDE = null; 
         let maxDensity = 0;   
         
-        // --- AUDIT FIX: Export Data Storage ---
         let globalPeaks = [];
         let globalFibs = null;
+        let globalMacroBeams = []; // KABRODA ARCHITECTURE UPGRADE
 
         let lastYCoord = null;
         let syncAnimation = null;
+        let currentLivePrice = 0;
         
         function initChart() {
             const container = document.getElementById('chart-container');
-            
             chart = LightweightCharts.createChart(container, {
-                width: container.clientWidth,
-                height: container.clientHeight,
+                width: container.clientWidth, height: container.clientHeight,
                 layout: { background: { type: 'solid', color: '#020617' }, textColor: '#cbd5e1' },
                 grid: { vertLines: { color: '#161e2e' }, horzLines: { color: '#161e2e' } },
                 crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
@@ -93,24 +104,20 @@
             });
             
             chart.timeScale().subscribeVisibleLogicalRangeChange(renderKDEWave);
-            
             container.addEventListener('mousedown', startPriceScaleSync);
             container.addEventListener('touchstart', startPriceScaleSync, {passive: true});
             window.addEventListener('mouseup', stopPriceScaleSync);
             window.addEventListener('touchend', stopPriceScaleSync);
             container.addEventListener('wheel', renderKDEWave, {passive: true});
-            
             resizeCanvas();
         }
 
         function startPriceScaleSync() {
             if (syncAnimation) cancelAnimationFrame(syncAnimation);
-            
             function checkYShift() {
                 if (globalKDE && globalKDE.length > 0) {
                     const anchorPrice = globalKDE[Math.floor(globalKDE.length / 2)].price;
                     const currentY = candlestickSeries.priceToCoordinate(anchorPrice);
-                    
                     if (currentY !== null && currentY !== lastYCoord) {
                         lastYCoord = currentY;
                         renderKDEWave();
@@ -122,10 +129,7 @@
         }
 
         function stopPriceScaleSync() {
-            if (syncAnimation) {
-                cancelAnimationFrame(syncAnimation);
-                syncAnimation = null;
-            }
+            if (syncAnimation) { cancelAnimationFrame(syncAnimation); syncAnimation = null; }
             renderKDEWave(); 
         }
 
@@ -139,7 +143,6 @@
 
         function renderKDEWave() {
             if (!globalKDE || globalKDE.length === 0) return;
-            
             const canvas = document.getElementById('kde-overlay');
             const ctx = canvas.getContext('2d');
             const width = canvas.width;
@@ -163,37 +166,40 @@
             for (let i = 0; i < globalKDE.length; i++) {
                 const point = globalKDE[i];
                 const yCoord = candlestickSeries.priceToCoordinate(point.price);
-                
                 if (yCoord === null) continue; 
-                
                 const waveIntensity = (point.density / maxDensity) * maxWaveExtent;
                 const xCoord = startX - waveIntensity;
-
-                if (!started) {
-                    ctx.moveTo(startX, yCoord);
-                    started = true;
-                }
+                if (!started) { ctx.moveTo(startX, yCoord); started = true; }
                 ctx.lineTo(xCoord, yCoord);
             }
             
             ctx.lineTo(startX, 0);
             ctx.closePath();
-            
             ctx.fillStyle = gradient;
             ctx.fill();
-            
             ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)';
             ctx.lineWidth = 1;
             ctx.stroke();
         }
 
-        // --- THE DATA EXTRACTION FUNCTION ---
-        function exportTradingViewData() {
-            if (globalPeaks.length === 0 || !globalFibs) {
-                return alert("Data not ready. Please wait for the scan to finish.");
+        function evaluateKineticFriction() {
+            const alertBox = document.getElementById('kinetic-friction-alert');
+            let frictionDetected = false;
+            if (globalMacroBeams.length > 0 && currentLivePrice > 0) {
+                globalMacroBeams.forEach(beam => {
+                    // If price is within 1.5% of a Macro Beam, trigger NO TRADE ZONE
+                    const distancePct = Math.abs(currentLivePrice - beam.price) / beam.price;
+                    if (distancePct < 0.015) frictionDetected = true;
+                });
             }
+            alertBox.style.display = frictionDetected ? 'block' : 'none';
+        }
 
+        // KABRODA ARCHITECTURE UPGRADE: TV Export
+        function exportTradingViewData() {
+            if (globalPeaks.length === 0 || !globalFibs) return alert("Data not ready.");
             let maxArr = []; let heavyArr = []; let stdArr = [];
+            let macroArr = globalMacroBeams.map(b => b.price.toFixed(2));
             
             globalPeaks.forEach(p => {
                 if(p.intensity === 'MAXIMUM') maxArr.push(p.price.toFixed(2));
@@ -201,28 +207,23 @@
                 else stdArr.push(p.price.toFixed(2));
             });
 
-            // Format: MAX|HEAVY|STD|FIB1,FIB2
-            let payload = `${maxArr.join(',')}|${heavyArr.join(',')}|${stdArr.join(',')}|${globalFibs.fib_0500},${globalFibs.fib_0618}`;
+            // Cleanly separated payload: MACRO_ARRAY | MAX_MICRO | HEAVY_MICRO | STD_MICRO
+            let payload = `[MACRO]${macroArr.join(',')}|[MAX]${maxArr.join(',')}|[HEAVY]${heavyArr.join(',')}|[STD]${stdArr.join(',')}`;
 
             navigator.clipboard.writeText(payload).then(() => {
                 const btn = document.getElementById('exportBtn');
                 const orig = btn.innerText;
                 btn.innerText = "✓ SYNCED";
                 btn.style.background = "#22c55e";
-                setTimeout(() => {
-                    btn.innerText = orig;
-                    btn.style.background = "#a855f7";
-                }, 2000);
+                setTimeout(() => { btn.innerText = orig; btn.style.background = "#a855f7"; }, 2000);
             });
         }
 
         async function loadGrid(isBackgroundUpdate = false) {
             const sym = document.getElementById('symSelect').value;
-            const sidebar = document.getElementById('sidebar-zones');
+            const sidebar = document.getElementById('sidebar-content');
             
-            if (!isBackgroundUpdate) {
-                sidebar.innerHTML = `<div style="text-align:center; padding: 40px; color: #0ea5e9; font-family: 'JetBrains Mono'; font-size: 12px;">/// SCANNING STRUCTURAL SCARS...</div>`;
-            }
+            if (!isBackgroundUpdate) sidebar.innerHTML = `<div style="text-align:center; padding: 40px; color: #0ea5e9; font-family: 'JetBrains Mono'; font-size: 12px;">/// SCANNING STRUCTURAL SCARS...</div>`;
             
             try {
                 const res = await fetch(`/api/gravity/scan?symbol=${encodeURIComponent(sym)}`);
@@ -233,42 +234,40 @@
                 
                 if (data.macro_fibs && data.macro_fibs.chart_data) {
                     candlestickSeries.setData(data.macro_fibs.chart_data);
+                    currentLivePrice = data.macro_fibs.chart_data[data.macro_fibs.chart_data.length - 1].close;
                     if (!isBackgroundUpdate) chart.timeScale().fitContent(); 
                 }
                 
                 if (data.kde_data && data.kde_data.curve) {
                     globalKDE = data.kde_data.curve;
                     maxDensity = data.kde_data.max_density;
-                    globalPeaks = data.kde_data.peaks; // Save for TV Export
-                    globalFibs = data.macro_fibs;      // Save for TV Export
+                    globalPeaks = data.kde_data.peaks; 
+                    globalFibs = data.macro_fibs;      
+                    globalMacroBeams = data.kde_data.macro_beams || [];
                     renderKDEWave(); 
                 }
                 
                 if (!isBackgroundUpdate) {
-                    if (data.macro_fibs && data.macro_fibs.swing_high) {
-                        const f = data.macro_fibs;
-                        candlestickSeries.createPriceLine({ price: f.swing_high, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'HIGH' });
-                        candlestickSeries.createPriceLine({ price: f.swing_low, color: '#f8fafc', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'LOW' });
-                        candlestickSeries.createPriceLine({ price: f.fib_0500, color: '#a855f7', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Solid, title: '0.500 POCKET' });
-                        candlestickSeries.createPriceLine({ price: f.fib_0618, color: '#eab308', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Solid, title: '0.618 GOLDEN' });
-                        
-                        sidebar.innerHTML += `
-                        <div class="fib-card">
-                            <div style="color:#a855f7; font-family:'JetBrains Mono'; font-weight:800; font-size:12px; margin-bottom:8px;">MACRO ANCHORS (30D)</div>
-                            <div style="font-family:'JetBrains Mono'; font-size:12px; color:#cbd5e1;">0.500: $${f.fib_0500} | 0.618: $${f.fib_0618}</div>
-                        </div>`;
+                    // KABRODA ARCHITECTURE UPGRADE: Render Macro Beams on UI
+                    if (globalMacroBeams.length > 0) {
+                        sidebar.innerHTML += `<div style="color:#ef4444; font-family:'JetBrains Mono'; font-size:11px; margin-bottom:15px; text-transform:uppercase;">CLASS 0 MACRO ANCHORS</div>`;
+                        globalMacroBeams.forEach(beam => {
+                            candlestickSeries.createPriceLine({ price: beam.price, color: '#ef4444', lineWidth: 3, lineStyle: LightweightCharts.LineStyle.Solid, title: `MACRO [${beam.type}]` });
+                            sidebar.innerHTML += `
+                            <div class="zone-card zone-MAXIMUM" style="background: rgba(239, 68, 68, 0.1);">
+                                <div><span class="z-price">$${beam.price.toFixed(2)}</span><span class="z-score">STRUCTURAL FLOOR</span></div>
+                                <div style="font-size:10px; color:#ef4444; margin-top:4px; text-transform:uppercase;">${beam.type}</div>
+                            </div>`;
+                        });
                     }
-                    
+
                     if (data.kde_data && data.kde_data.peaks.length > 0) {
-                        sidebar.innerHTML += `<div style="color:#94a3b8; font-family:'JetBrains Mono'; font-size:11px; margin-bottom:15px; text-transform:uppercase;">Identified Centers of Gravity</div>`;
-                        
+                        sidebar.innerHTML += `<div style="color:#94a3b8; font-family:'JetBrains Mono'; font-size:11px; margin-top:20px; margin-bottom:15px; text-transform:uppercase;">Identified Centers of Gravity (Micro)</div>`;
                         data.kde_data.peaks.forEach(peak => {
                             let lineColor = '#3b82f6';
                             if (peak.intensity === 'HEAVY') lineColor = '#eab308';
                             if (peak.intensity === 'MAXIMUM') lineColor = '#ef4444';
-
                             candlestickSeries.createPriceLine({ price: peak.price, color: lineColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: 'GRAVITY WELL' });
-
                             sidebar.innerHTML += `
                             <div class="zone-card zone-${peak.intensity}">
                                 <div><span class="z-price">$${peak.price.toFixed(2)}</span><span class="z-score">PULL: ${peak.heat_score}</span></div>
@@ -277,33 +276,15 @@
                         });
                     }
                 }
-                
+                evaluateKineticFriction();
             } catch(e) {
                 console.error("KDE Render Failure:", e);
-                if (!isBackgroundUpdate) {
-                    sidebar.innerHTML = `<div style="color:#ef4444; padding:20px; font-family:'JetBrains Mono'; font-size:12px;">SYSTEM ERROR: Failed to compute density wave.</div>`;
-                }
+                if (!isBackgroundUpdate) sidebar.innerHTML = `<div style="color:#ef4444; padding:20px; font-family:'JetBrains Mono'; font-size:12px;">SYSTEM ERROR: Failed to compute density wave.</div>`;
             }
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            setTimeout(() => { 
-                initChart(); 
-                loadGrid(); 
-            }, 150);
-
-            setInterval(() => {
-                loadGrid(true); 
-            }, 60000);
-        });
-
-        window.addEventListener('resize', () => { 
-            if (chart) {
-                const container = document.getElementById('chart-container');
-                chart.applyOptions({ width: container.clientWidth, height: container.clientHeight }); 
-                resizeCanvas();
-            }
-        });
+        document.addEventListener('DOMContentLoaded', () => { setTimeout(() => { initChart(); loadGrid(); }, 150); setInterval(() => { loadGrid(true); }, 60000); });
+        window.addEventListener('resize', () => { if (chart) { const container = document.getElementById('chart-container'); chart.applyOptions({ width: container.clientWidth, height: container.clientHeight }); resizeCanvas(); } });
     </script>
 </body>
 </html>

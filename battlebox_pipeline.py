@@ -1,6 +1,6 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v11.1 (STERILIZED)
+# KABRODA BATTLEBOX PIPELINE — v11.2 (MACRO STRUCTURE UPGRADE)
 # Purpose: Calculates Full EMA Alignment & Mean Deviation.
 # AUDIT FIX: Stripped out lagging ADX math. Enforced strict structural physics.
 # ==============================================================================
@@ -21,7 +21,7 @@ import sse_engine
 import structure_state_engine
 import gravity_engine
 import gravity_math
-from database import SessionLocal, SessionLock
+from database import SessionLocal, SessionLock, GravityMemory # INJECTED: GravityMemory
 
 SESSION_CONFIGS = session_manager.SESSION_CONFIGS
 
@@ -273,9 +273,25 @@ def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
     lean = "BULLISH" if closes[-1] > ema else "BEARISH"
     return {"status": "LIVE", "lean": lean, "phase": "TRANSITION", "note": f"Pressure is {lean}."}
 
+# --- KABRODA ARCHITECTURE UPGRADE: MACRO PAYLOAD INJECTION ---
+def _fetch_macro_structure(symbol: str) -> List[Dict[str, Any]]:
+    db = SessionLocal()
+    try:
+        db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
+        anchors = db.query(GravityMemory).filter(
+            GravityMemory.symbol == db_sym,
+            GravityMemory.source == "MACRO_ENGINE_CLASS_0"
+        ).all()
+        return [{"type": a.level_type, "price": a.price} for a in anchors]
+    except Exception as e:
+        print(f"Macro DB Fetch Error: {e}")
+        return []
+    finally:
+        db.close()
+
 def _compute_sse_packet(
-    raw_5m: List[Dict], anchor_ts: int, macro_bias: str, micro_bias: str, fuel_gauge: Dict, kde_data: Dict, macro_fibs: Dict, harmonic_data: Dict, tuning: Optional[Dict] = None, raw_daily: List[Dict] = None  
-) -> Dict[str, Any]:
+    raw_5m: List[Dict], anchor_ts: int, macro_bias: str, micro_bias: str, fuel_gauge: Dict, kde_data: Dict, macro_fibs: Dict, harmonic_data: Dict, macro_structure: List[Dict], tuning: Optional[Dict] = None, raw_daily: List[Dict] = None  
+) -> Dict[str, Any]: # INJECTED: macro_structure argument
     lock_end_ts = int(anchor_ts) + 1800
     calibration = [c for c in raw_5m if anchor_ts <= int(c["time"]) < lock_end_ts]
     
@@ -324,6 +340,7 @@ def _compute_sse_packet(
     # INJECT NEW SSOT KINEMATIC DATA
     computed["context"]["micro_state"] = harmonic_data.get("micro_state", "CHOP")
     computed["context"]["1h_fuel_status"] = harmonic_data.get("1h_fuel_status", "UNKNOWN")
+    computed["context"]["macro_structure"] = macro_structure # INJECTED SHELF
 
     return {
         "levels": computed["levels"], 
@@ -354,6 +371,8 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     fuel_gauge = _build_fuel_gauge(raw_1h, raw_4h, raw_15m)
     harmonic_data = _calculate_harmonic_matrix(raw_1h, raw_4h)
     
+    macro_structure = _fetch_macro_structure(symbol) # INJECTED: PULLING DB DATA
+
     kde_data = gravity_math.calculate_gravity_kde(symbol)
     macro_fibs = gravity_math.calculate_macro_fibs(raw_daily, [])
 
@@ -371,7 +390,8 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                     "kde_peaks": kde_data.get("peaks", []), 
                     "macro_fibs": macro_fibs,
                     "micro_state": harmonic_data.get("micro_state"),
-                    "1h_fuel_status": harmonic_data.get("1h_fuel_status")
+                    "1h_fuel_status": harmonic_data.get("1h_fuel_status"),
+                    "macro_structure": macro_structure # INJECTED SHELF
                 }
             }
         }
@@ -392,7 +412,7 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                 if existing_lock:
                     _LOCKED_PACKETS[session_key] = json.loads(existing_lock.packet_data)
                 else:
-                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, tuning=tuning, raw_daily=raw_daily)
+                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, macro_structure, tuning=tuning, raw_daily=raw_daily)
                     if "error" in pkt: 
                         return {"status": "ERROR", "message": pkt["error"], "battlebox": {"raw_15m": raw_15m, "war_map_context": _war_map_from_1h(raw_1h), "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
                     
@@ -413,7 +433,7 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                 print(f"DATABASE VAULT ERROR: {e}")
                 traceback.print_exc()
                 if session_key not in _LOCKED_PACKETS:
-                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, tuning=tuning, raw_daily=raw_daily)
+                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, macro_structure, tuning=tuning, raw_daily=raw_daily)
                     if "error" not in pkt:
                         _LOCKED_PACKETS[session_key] = pkt
             finally:
