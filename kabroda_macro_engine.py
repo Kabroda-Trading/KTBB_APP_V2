@@ -1,9 +1,8 @@
 # kabroda_macro_engine.py
 # ==============================================================================
-# KABRODA MACRO ENGINE — v1.2
+# KABRODA MACRO ENGINE — v1.3
 # Purpose: Autonomous Macro Elliott Wave Scanner & State Latch
-# AUDIT FIX: Reverted to SPOT market for absolute asset accuracy.
-# Utilizing 1D candles with an extended lookback to bypass 1W API limits.
+# AUDIT FIX: Engineered Time-Stitched Pagination to bypass 1000-candle API limit.
 # ==============================================================================
 
 import asyncio
@@ -19,17 +18,41 @@ _exchange = ccxt.mexc({
     "enableRateLimit": True
 })
 
-async def fetch_historical_daily_macro(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
+async def fetch_historical_daily_macro(symbol: str, target_days: int = 1500) -> List[Dict[str, Any]]:
     """
-    Fetches 1500 days (~4.1 years) of SPOT daily candles.
-    This guarantees we capture the Nov 2022 cycle bottom without using Futures data.
+    Bypasses the MEXC 1000-candle hard limit using Time-Stitched Pagination.
+    Recursively fetches chunks until the full 1500-day history is built.
     """
-    try:
-        rows = await _exchange.fetch_ohlcv(symbol, "1d", limit=limit)
-        return [{"time": int(r[0] / 1000), "high": float(r[2]), "low": float(r[3]), "close": float(r[4])} for r in rows]
-    except Exception as e:
-        print(f"Macro Fetch Error for {symbol}: {e}")
-        return []
+    limit_per_call = 1000  # MEXC Hard Limit
+    all_candles = []
+    
+    # Start the clock exactly 1500 days ago
+    now_ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+    since_ts = now_ts - (target_days * 86400 * 1000)
+    
+    while len(all_candles) < target_days:
+        try:
+            # Request up to 1000 candles starting from 'since_ts'
+            rows = await _exchange.fetch_ohlcv(symbol, "1d", since=since_ts, limit=limit_per_call)
+            
+            if not rows:
+                break  # Exit if no more data is returned
+                
+            formatted = [{"time": int(r[0] / 1000), "high": float(r[2]), "low": float(r[3]), "close": float(r[4])} for r in rows]
+            all_candles.extend(formatted)
+            
+            # Move the timestamp forward to the last received candle + 1 millisecond
+            since_ts = int(rows[-1][0]) + 1
+            
+            # Brief pause to respect API rate limits
+            await asyncio.sleep(0.5)
+            
+        except Exception as e:
+            print(f"Macro Pagination Error for {symbol}: {e}")
+            break
+            
+    # Ensure we strictly return the target amount
+    return all_candles[-target_days:]
 
 def _find_macro_anchors(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not candles: return []
@@ -67,11 +90,11 @@ async def run_macro_scan():
     try:
         for symbol in TARGETS:
             db_sym = symbol.replace("/", "")
-            # Requesting daily data instead of weekly
-            daily_data = await fetch_historical_daily_macro(symbol, limit=1500)
+            # Calling our new paginated fetcher
+            daily_data = await fetch_historical_daily_macro(symbol, target_days=1500)
             anchors = _find_macro_anchors(daily_data)
             
-            # Safety check: Skip database write if MEXC dropped the connection
+            # Safety check: Skip database write if we didn't get enough data
             if len(anchors) < 2:
                 print(f"|| MACRO ENGINE WARNING || {db_sym} | Insufficient data. Skipping.")
                 continue
@@ -97,7 +120,7 @@ async def run_macro_scan():
                 db.add(mem)
             
             db.commit()
-            print(f"|| MACRO ANCHORS LOCKED (SPOT) || {db_sym} | Top: {anchors[1]['price']}")
+            print(f"|| MACRO ANCHORS LOCKED (SPOT) || {db_sym} | History: {len(daily_data)} Days | Top: {anchors[1]['price']}")
             
     except Exception as e:
         print(f"Macro Engine Error: {e}")
