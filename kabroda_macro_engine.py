@@ -1,9 +1,9 @@
 # kabroda_macro_engine.py
 # ==============================================================================
-# KABRODA MACRO ENGINE — v3.0
+# KABRODA MACRO ENGINE — v3.1
 # Purpose: Autonomous Macro Elliott Wave Scanner & State Latch
-# AUDIT FIX: Replaced list.index() with Absolute Global Indices to prevent 
-# duplicate-price timestamp collisions over the 4-year dataset.
+# AUDIT FIX: Full file integration of Absolute Global Indices and 
+# strict slice boundaries to perfectly isolate internal Bull/Bear waves.
 # ==============================================================================
 
 import asyncio
@@ -20,6 +20,10 @@ _exchange = ccxt.mexc({
 })
 
 async def fetch_historical_daily_macro(symbol: str, target_days: int = 1500) -> List[Dict[str, Any]]:
+    """
+    Bypasses the MEXC 1000-candle hard limit using Time-Stitched Pagination.
+    Recursively fetches chunks until the full 1500-day history is built.
+    """
     limit_per_call = 1000  
     all_candles = []
     
@@ -71,19 +75,23 @@ def _find_macro_anchors(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if bull_length > 30: 
         mid_idx = origin_idx + (bull_length // 2)
         
+        # W4: Lowest point in the second half
         w4_candle = min(candles[mid_idx:top_idx], key=lambda c: c["low"])
         w4_idx = w4_candle["abs_idx"]
         
-        if w4_idx > origin_idx:
-            w3_candle = max(candles[origin_idx:w4_idx], key=lambda c: c["high"])
+        if w4_idx > origin_idx + 1:
+            # W3: Highest between Origin and W4 (Strictly exclude Origin)
+            w3_candle = max(candles[origin_idx + 1:w4_idx], key=lambda c: c["high"])
             w3_idx = w3_candle["abs_idx"]
             
-            if w3_idx > origin_idx:
-                w2_candle = min(candles[origin_idx:w3_idx], key=lambda c: c["low"])
+            if w3_idx > origin_idx + 1:
+                # W2: Lowest between Origin and W3 (Strictly exclude Origin)
+                w2_candle = min(candles[origin_idx + 1:w3_idx], key=lambda c: c["low"])
                 w2_idx = w2_candle["abs_idx"]
                 
-                if w2_idx > origin_idx:
-                    w1_candle = max(candles[origin_idx:w2_idx], key=lambda c: c["high"])
+                if w2_idx > origin_idx + 1:
+                    # W1: Highest between Origin and W2 (Strictly exclude Origin)
+                    w1_candle = max(candles[origin_idx + 1:w2_idx], key=lambda c: c["high"])
                     
                     anchors.extend([
                         {"type": "BULL_WAVE_1", "price": w1_candle["high"]},
@@ -100,16 +108,19 @@ def _find_macro_anchors(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         
         anchors.append({"type": "BEAR_WAVE_3", "price": bear_lowest_candle["low"]})
         
+        # BEAR WAVE 4: Bounce AFTER the lowest point
         post_lowest = candles[bear_lowest_idx+1:]
         if post_lowest:
             bear_w4_candle = max(post_lowest, key=lambda c: c["high"])
             anchors.append({"type": "BEAR_WAVE_4", "price": bear_w4_candle["high"]})
             
+        # BEAR WAVES 1 & 2: Structure BEFORE the lowest point
         pre_lowest = candles[top_idx+1:bear_lowest_idx]
         if len(pre_lowest) > 2: 
             bear_w2_candle = max(pre_lowest, key=lambda c: c["high"])
             bear_w2_idx = bear_w2_candle["abs_idx"]
             
+            # Strictly exclude the top from the w1 search
             pre_w2 = candles[top_idx+1:bear_w2_idx]
             if pre_w2:
                 bear_w1_candle = min(pre_w2, key=lambda c: c["low"])
