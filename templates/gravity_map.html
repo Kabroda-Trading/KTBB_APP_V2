@@ -217,7 +217,9 @@
         function exportTradingViewData() {
             if (globalPeaks.length === 0 || !globalFibs) return alert("Data not ready.");
             let maxArr = []; let heavyArr = []; let stdArr = [];
-            let macroArr = globalMacroBeams.map(b => b.price.toFixed(2));
+            
+            // ARCH-UPDATE: Bind the exact structural name to the price for TradingView
+            let macroArr = globalMacroBeams.map(b => `${b.type.replace(/_/g, ' ')}:${b.price.toFixed(2)}`);
             
             globalPeaks.forEach(p => {
                 if(p.intensity === 'MAXIMUM') maxArr.push(p.price.toFixed(2));
