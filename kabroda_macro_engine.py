@@ -1,7 +1,9 @@
 # kabroda_macro_engine.py
 # ==============================================================================
-# KABRODA MACRO ENGINE — v1.0
-# Purpose: Autonomous Weekly Elliott Wave Scanner & State Latch
+# KABRODA MACRO ENGINE — v1.2
+# Purpose: Autonomous Macro Elliott Wave Scanner & State Latch
+# AUDIT FIX: Reverted to SPOT market for absolute asset accuracy.
+# Utilizing 1D candles with an extended lookback to bypass 1W API limits.
 # ==============================================================================
 
 import asyncio
@@ -11,11 +13,19 @@ import ccxt.async_support as ccxt
 from database import SessionLocal, GravityMemory
 
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
-_exchange = ccxt.mexc({"enableRateLimit": True})
 
-async def fetch_historical_weekly(symbol: str, limit: int = 300) -> List[Dict[str, Any]]:
+# Single Source of Truth: SPOT Market
+_exchange = ccxt.mexc({
+    "enableRateLimit": True
+})
+
+async def fetch_historical_daily_macro(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
+    """
+    Fetches 1500 days (~4.1 years) of SPOT daily candles.
+    This guarantees we capture the Nov 2022 cycle bottom without using Futures data.
+    """
     try:
-        rows = await _exchange.fetch_ohlcv(symbol, "1w", limit=limit)
+        rows = await _exchange.fetch_ohlcv(symbol, "1d", limit=limit)
         return [{"time": int(r[0] / 1000), "high": float(r[2]), "low": float(r[3]), "close": float(r[4])} for r in rows]
     except Exception as e:
         print(f"Macro Fetch Error for {symbol}: {e}")
@@ -52,14 +62,20 @@ def _find_macro_anchors(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return anchors
 
 async def run_macro_scan():
-    print(">>> MACRO ENGINE: Scanning multi-year structural anchors...")
+    print(">>> MACRO ENGINE: Scanning multi-year SPOT structural anchors...")
     db = SessionLocal()
     try:
         for symbol in TARGETS:
             db_sym = symbol.replace("/", "")
-            weekly_data = await fetch_historical_weekly(symbol)
-            anchors = _find_macro_anchors(weekly_data)
+            # Requesting daily data instead of weekly
+            daily_data = await fetch_historical_daily_macro(symbol, limit=1500)
+            anchors = _find_macro_anchors(daily_data)
             
+            # Safety check: Skip database write if MEXC dropped the connection
+            if len(anchors) < 2:
+                print(f"|| MACRO ENGINE WARNING || {db_sym} | Insufficient data. Skipping.")
+                continue
+
             now_utc = datetime.now(timezone.utc)
             
             # Clear old macro anchors to prevent duplication
@@ -81,7 +97,7 @@ async def run_macro_scan():
                 db.add(mem)
             
             db.commit()
-            print(f"|| MACRO ANCHORS LOCKED || {db_sym} | Top: {anchors[1]['price']}")
+            print(f"|| MACRO ANCHORS LOCKED (SPOT) || {db_sym} | Top: {anchors[1]['price']}")
             
     except Exception as e:
         print(f"Macro Engine Error: {e}")
