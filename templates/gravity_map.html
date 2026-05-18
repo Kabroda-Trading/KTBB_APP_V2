@@ -39,12 +39,10 @@
         .danger-title { color: #ef4444; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; margin-bottom: 5px;}
         .danger-text { color: #f8fafc; font-size: 12px; }
 
-        /* KABRODA ARCHITECTURE UPGRADE: Accordion UI Elements */
         .acc-header { background: #1e293b; color: #cbd5e1; padding: 12px 15px; cursor: pointer; font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 700; border: 1px solid #334155; border-radius: 4px; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; }
         .acc-header:hover { background: #2a3a54; color: #fff; }
         .acc-content { display: none; padding: 10px 0 15px 0; }
         .acc-content.active { display: block; }
-        .macro-header { color: #ef4444; border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.05); }
     </style>
 </head>
 <body>
@@ -94,7 +92,6 @@
         let currentLivePrice = 0;
 
        function toggleAcc(el) {
-            // Find the closest sibling with the 'acc-content' class
             let content = el.nextElementSibling;
             while(content && !content.classList.contains('acc-content')) {
                 content = content.nextElementSibling;
@@ -239,12 +236,13 @@
             });
         }
 
-        // KABRODA ARCHITECTURE UPGRADE: Grouped UI Builder
-        function generateMacroCard(beam) {
+        // KABRODA ARCHITECTURE UPGRADE: Dynamic Styling Injection
+        function generateMacroCard(beam, color) {
+            const cleanTitle = beam.type.replace(/_/g, ' ');
             return `
-            <div class="zone-card zone-MAXIMUM" style="background: rgba(239, 68, 68, 0.1);">
-                <div><span class="z-price">$${beam.price.toFixed(2)}</span><span class="z-score">STRUCTURAL ANCHOR</span></div>
-                <div style="font-size:10px; color:#ef4444; margin-top:4px; text-transform:uppercase;">${beam.type}</div>
+            <div class="zone-card" style="background: rgba(15, 23, 42, 0.4); border-left: 4px solid ${color};">
+                <div><span class="z-price">$${beam.price.toFixed(2)}</span><span class="z-score" style="color:${color};">STRUCTURAL ANCHOR</span></div>
+                <div style="font-size:10px; color:#cbd5e1; margin-top:4px; text-transform:uppercase;">${cleanTitle}</div>
             </div>`;
         }
 
@@ -278,46 +276,57 @@
                 
                 if (!isBackgroundUpdate) {
                     if (globalMacroBeams.length > 0) {
-                        // Plot lines on the chart
-                        globalMacroBeams.forEach(beam => {
-                            candlestickSeries.createPriceLine({ price: beam.price, color: '#ef4444', lineWidth: 3, lineStyle: LightweightCharts.LineStyle.Solid, title: `MACRO` });
-                        });
-
-                        // Categorize for Accordions
+                        // Group Arrays
                         const cycleExtremes = globalMacroBeams.filter(b => b.type.includes("CYCLE"));
                         const bullStructure = globalMacroBeams.filter(b => b.type.includes("BULL"));
                         const bearStructure = globalMacroBeams.filter(b => b.type.includes("BEAR"));
 
-                        // Build Cycle Accordion (Open by Default)
-                        sidebar.innerHTML += `
-                        <div class="acc-header macro-header" onclick="toggleAcc(this)">
-                            <span>CYCLE BOUNDARIES [0/5]</span><span class="acc-icon">▲</span>
-                        </div>
-                        <div class="acc-content active">${cycleExtremes.map(generateMacroCard).join('')}</div>`;
+                        // KABRODA ARCHITECTURE UPGRADE: Label & Color Formatting
+                        globalMacroBeams.forEach(beam => {
+                            let beamColor = '#ef4444'; // Default Red for CYCLE
+                            if (beam.type.includes('BULL')) beamColor = '#22c55e'; // Green
+                            if (beam.type.includes('BEAR')) beamColor = '#f97316'; // Orange
 
-                        // Build Bull Accordion
+                            // Strip out generic prefixes so the label is clean (e.g. "WAVE 3" instead of "BULL_WAVE_3")
+                            let cleanLabel = beam.type.replace('BULL_', '').replace('BEAR_', '').replace('CYCLE_', '').replace(/_/g, ' ');
+
+                            candlestickSeries.createPriceLine({ 
+                                price: beam.price, 
+                                color: beamColor, 
+                                lineWidth: 2, // Thinned to reduce candle obstruction
+                                lineStyle: LightweightCharts.LineStyle.Solid, 
+                                title: cleanLabel // Dynamic Label Injection
+                            });
+                        });
+
+                        // Accordion Generation with Matching Colors
+                        sidebar.innerHTML += `
+                        <div class="acc-header macro-header" onclick="toggleAcc(this)" style="border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.05); color: #ef4444;">
+                            <span>CYCLE BOUNDARIES [${cycleExtremes.length}]</span><span class="acc-icon">▲</span>
+                        </div>
+                        <div class="acc-content active">${cycleExtremes.map(b => generateMacroCard(b, '#ef4444')).join('')}</div>`;
+
                         if(bullStructure.length > 0) {
                             sidebar.innerHTML += `
-                            <div class="acc-header" onclick="toggleAcc(this)">
-                                <span>BULL RUN STRUCTURE</span><span class="acc-icon">▼</span>
+                            <div class="acc-header" onclick="toggleAcc(this)" style="border-color: rgba(34, 197, 94, 0.3); background: rgba(34, 197, 94, 0.05); color: #22c55e;">
+                                <span>BULL RUN STRUCTURE [${bullStructure.length}]</span><span class="acc-icon">▼</span>
                             </div>
-                            <div class="acc-content">${bullStructure.map(generateMacroCard).join('')}</div>`;
+                            <div class="acc-content">${bullStructure.map(b => generateMacroCard(b, '#22c55e')).join('')}</div>`;
                         }
 
-                        // Build Bear Accordion (Open by Default)
                         if(bearStructure.length > 0) {
                             sidebar.innerHTML += `
-                            <div class="acc-header macro-header" onclick="toggleAcc(this)">
-                                <span>BEAR TREND STRUCTURE</span><span class="acc-icon">▲</span>
+                            <div class="acc-header macro-header" onclick="toggleAcc(this)" style="border-color: rgba(249, 115, 22, 0.3); background: rgba(249, 115, 22, 0.05); color: #f97316;">
+                                <span>BEAR TREND STRUCTURE [${bearStructure.length}]</span><span class="acc-icon">▲</span>
                             </div>
-                            <div class="acc-content active">${bearStructure.map(generateMacroCard).join('')}</div>`;
+                            <div class="acc-content active">${bearStructure.map(b => generateMacroCard(b, '#f97316')).join('')}</div>`;
                         }
                     }
 
                     if (data.kde_data && data.kde_data.peaks.length > 0) {
                         sidebar.innerHTML += `
-                        <div class="acc-header" onclick="toggleAcc(this)" style="margin-top:20px; border-color:#3b82f6;">
-                            <span style="color:#60a5fa;">MICRO GRAVITY DENSITY</span><span class="acc-icon">▲</span>
+                        <div class="acc-header" onclick="toggleAcc(this)" style="margin-top:20px; border-color: rgba(59, 130, 246, 0.5); color: #60a5fa;">
+                            <span>MICRO GRAVITY DENSITY</span><span class="acc-icon">▲</span>
                         </div>
                         <div class="acc-content active">`;
                         
@@ -326,7 +335,16 @@
                             let lineColor = '#3b82f6';
                             if (peak.intensity === 'HEAVY') lineColor = '#eab308';
                             if (peak.intensity === 'MAXIMUM') lineColor = '#ef4444';
-                            candlestickSeries.createPriceLine({ price: peak.price, color: lineColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: 'WELL' });
+                            
+                            // Inject specific density intensity into the chart label
+                            candlestickSeries.createPriceLine({ 
+                                price: peak.price, 
+                                color: lineColor, 
+                                lineWidth: 2, 
+                                lineStyle: LightweightCharts.LineStyle.Dotted, 
+                                title: `${peak.intensity} DENSITY` 
+                            });
+                            
                             peakHTML += `
                             <div class="zone-card zone-${peak.intensity}">
                                 <div><span class="z-price">$${peak.price.toFixed(2)}</span><span class="z-score">PULL: ${peak.heat_score}</span></div>
