@@ -93,14 +93,21 @@
         let syncAnimation = null;
         let currentLivePrice = 0;
 
-        function toggleAcc(el) {
-            const content = el.nextElementSibling;
-            if (content.classList.contains("active")) {
-                content.classList.remove("active");
-                el.querySelector('.acc-icon').innerText = '▼';
-            } else {
-                content.classList.add("active");
-                el.querySelector('.acc-icon').innerText = '▲';
+       function toggleAcc(el) {
+            // Find the closest sibling with the 'acc-content' class
+            let content = el.nextElementSibling;
+            while(content && !content.classList.contains('acc-content')) {
+                content = content.nextElementSibling;
+            }
+            
+            if (content) {
+                if (content.classList.contains("active")) {
+                    content.classList.remove("active");
+                    el.querySelector('.acc-icon').innerText = '▼';
+                } else {
+                    content.classList.add("active");
+                    el.querySelector('.acc-icon').innerText = '▲';
+                }
             }
         }
         
