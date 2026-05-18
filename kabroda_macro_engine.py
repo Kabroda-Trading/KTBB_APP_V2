@@ -1,9 +1,9 @@
 # kabroda_macro_engine.py
 # ==============================================================================
-# KABRODA MACRO ENGINE — v2.0
+# KABRODA MACRO ENGINE — v2.1
 # Purpose: Autonomous Macro Elliott Wave Scanner & State Latch
-# AUDIT FIX: Engineered Time-Stitched Pagination (Spot 1D).
-# AUDIT FIX: Complete internal sub-routines for BOTH Bull and Bear Runs.
+# AUDIT FIX: Re-engineered internal wave slicing using Global Indices to 
+# prevent the Origin/Top from overriding internal structural pivots.
 # ==============================================================================
 
 import asyncio
@@ -20,10 +20,6 @@ _exchange = ccxt.mexc({
 })
 
 async def fetch_historical_daily_macro(symbol: str, target_days: int = 1500) -> List[Dict[str, Any]]:
-    """
-    Bypasses the MEXC 1000-candle hard limit using Time-Stitched Pagination.
-    Recursively fetches chunks until the full 1500-day history is built.
-    """
     limit_per_call = 1000  
     all_candles = []
     
@@ -51,7 +47,7 @@ async def fetch_historical_daily_macro(symbol: str, target_days: int = 1500) -> 
 def _find_macro_anchors(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not candles: return []
     
-    # --- 1. CYCLE EXTREMES ---
+    # --- 1. CYCLE EXTREMES (Global Indices) ---
     highest_candle = max(candles, key=lambda c: c["high"])
     cycle_top_price = highest_candle["high"]
     top_idx = candles.index(highest_candle)
@@ -66,28 +62,28 @@ def _find_macro_anchors(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         {"type": "CYCLE_TOP", "price": cycle_top_price}
     ]
 
-    # --- 2. BULL RUN SUB-ROUTINE (W0 to W5) ---
-    bull_run = candles[origin_idx:top_idx+1]
-    if len(bull_run) > 30: 
-        midpoint_idx = len(bull_run) // 2
+    # --- 2. BULL RUN SUB-ROUTINE ---
+    bull_length = top_idx - origin_idx
+    if bull_length > 30: 
+        mid_idx = origin_idx + (bull_length // 2)
         
-        # WAVE 4: Deepest valley in the second half of the run
-        w4_candle = min(bull_run[midpoint_idx:], key=lambda c: c["low"])
-        w4_idx = bull_run.index(w4_candle)
+        # WAVE 4: Lowest point in the second half (excluding the Top)
+        w4_candle = min(candles[mid_idx:top_idx], key=lambda c: c["low"])
+        w4_idx = candles.index(w4_candle)
         
-        if w4_idx > 0:
-            # WAVE 3: Highest peak between Origin and Wave 4
-            w3_candle = max(bull_run[:w4_idx], key=lambda c: c["high"])
-            w3_idx = bull_run.index(w3_candle)
+        if w4_idx > origin_idx + 1:
+            # WAVE 3: Highest point between Origin and Wave 4
+            w3_candle = max(candles[origin_idx+1:w4_idx], key=lambda c: c["high"])
+            w3_idx = candles.index(w3_candle)
             
-            if w3_idx > 0:
-                # WAVE 2: Deepest valley between Origin and Wave 3
-                w2_candle = min(bull_run[:w3_idx], key=lambda c: c["low"])
-                w2_idx = bull_run.index(w2_candle)
+            if w3_idx > origin_idx + 1:
+                # WAVE 2: Lowest point between Origin and Wave 3
+                w2_candle = min(candles[origin_idx+1:w3_idx], key=lambda c: c["low"])
+                w2_idx = candles.index(w2_candle)
                 
-                if w2_idx > 0:
-                    # WAVE 1: Highest peak between Origin and Wave 2
-                    w1_candle = max(bull_run[:w2_idx], key=lambda c: c["high"])
+                if w2_idx > origin_idx + 1:
+                    # WAVE 1: Highest point between Origin and Wave 2
+                    w1_candle = max(candles[origin_idx+1:w2_idx], key=lambda c: c["high"])
                     
                     anchors.extend([
                         {"type": "BULL_WAVE_1", "price": w1_candle["high"]},
@@ -96,32 +92,28 @@ def _find_macro_anchors(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                         {"type": "BULL_WAVE_4", "price": w4_candle["low"]}
                     ])
 
-    # --- 3. BEAR RUN SUB-ROUTINE (Post-Top to Present) ---
+    # --- 3. BEAR RUN SUB-ROUTINE ---
     post_top = candles[top_idx+1:]
     if post_top:
-        # The absolute lowest point so far in the bear market
         bear_lowest_candle = min(post_top, key=lambda c: c["low"])
         bear_lowest_idx = candles.index(bear_lowest_candle)
         
-        # In an ongoing bear trend, the absolute lowest is Wave 3 Floor
         anchors.append({"type": "BEAR_WAVE_3", "price": bear_lowest_candle["low"]})
         
-        # BEAR WAVE 4: The bounce AFTER the lowest point
+        # BEAR WAVE 4: Bounce AFTER the lowest point
         post_lowest = candles[bear_lowest_idx+1:]
         if post_lowest:
             bear_w4_candle = max(post_lowest, key=lambda c: c["high"])
             anchors.append({"type": "BEAR_WAVE_4", "price": bear_w4_candle["high"]})
             
-        # BEAR WAVES 1 & 2: The structure BEFORE the lowest point
+        # BEAR WAVES 1 & 2: Structure BEFORE the lowest point
         pre_lowest = candles[top_idx+1:bear_lowest_idx]
-        if len(pre_lowest) > 10: 
-            # Wave 2 is the highest bounce before the Wave 3 floor
+        if len(pre_lowest) > 2: 
             bear_w2_candle = max(pre_lowest, key=lambda c: c["high"])
             bear_w2_idx = candles.index(bear_w2_candle)
             
             pre_w2 = candles[top_idx+1:bear_w2_idx]
             if pre_w2:
-                # Wave 1 is the initial structural breakdown
                 bear_w1_candle = min(pre_w2, key=lambda c: c["low"])
                 anchors.extend([
                     {"type": "BEAR_WAVE_1_MSB", "price": bear_w1_candle["low"]},
