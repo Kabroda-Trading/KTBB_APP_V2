@@ -2,6 +2,7 @@
 # ==============================================================================
 # KABRODA GRAVITY MATH ENGINE (TRUE KDE DENSITY MODEL)
 # UPDATE: Macro Swing Auditor injected for Deep-Space Extension Targeting.
+# AUDIT FIX: Implemented Kinetic Friction Multiplier for Class 0 Macro Beams.
 # ==============================================================================
 
 import math
@@ -28,7 +29,11 @@ def calculate_gravity_kde(symbol: str, bandwidth_bps: int = 15, resolution: int 
         ).all()
 
         if not levels:
-            return {"curve": [], "peaks": [], "max_density": 0.0}
+            return {"curve": [], "peaks": [], "max_density": 0.0, "macro_beams": []}
+
+        # --- KABRODA ARCHITECTURE UPGRADE: Separate Macro Beams from Micro Noise ---
+        macro_beams = [{"price": l.price, "type": l.level_type} for l in levels if l.permanence_class == 0]
+        # ---------------------------------------------------------------------------
 
         # 1. Determine the scan range (Min/Max price + 2% padding for wave tails)
         prices = [l.price for l in levels]
@@ -52,7 +57,12 @@ def calculate_gravity_kde(symbol: str, bandwidth_bps: int = 15, resolution: int 
             for lvl in levels:
                 # Compound weight based on Kabroda Bedrock strength
                 weight = lvl.heat_multiplier
-                if lvl.permanence_class == 1:
+                
+                # --- KABRODA ARCHITECTURE UPGRADE: Class 0 Weighting ---
+                if lvl.permanence_class == 0:
+                    weight += 15.0  # MASSIVE PULL: Kinetic Friction Multiplier
+                # -------------------------------------------------------
+                elif lvl.permanence_class == 1:
                     weight += 3.0  # Massive pull for 4H Guardrails
                 elif lvl.source == "7_DAY_KABRODA":
                     weight += 1.5  # Heavy pull for Session Ranges / Daily Triggers
@@ -95,12 +105,12 @@ def calculate_gravity_kde(symbol: str, bandwidth_bps: int = 15, resolution: int 
         return {
             "curve": kde_curve,
             "peaks": peaks,
-            "max_density": round(max_density, 4)
+            "max_density": round(max_density, 4),
+            "macro_beams": macro_beams # <- INJECTED: Pass data to HTML
         }
         
     finally:
         db.close()
-
 
 def calculate_macro_fibs(candles_1d: List[Dict[str, Any]], candles_15m: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
