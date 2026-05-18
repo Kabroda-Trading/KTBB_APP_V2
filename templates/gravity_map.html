@@ -28,18 +28,23 @@
         .zone-MAXIMUM { border-left-color: #ef4444; }
         .zone-HEAVY { border-left-color: #eab308; }
         
-        .fib-card { background: rgba(168, 85, 247, 0.1); border: 1px solid #a855f7; border-left: 4px solid #a855f7; padding: 15px; margin-bottom: 20px; border-radius: 6px; }
         .z-price { font-family: 'JetBrains Mono'; font-size: 16px; font-weight: 800; color: #fff; }
         .z-score { float: right; font-family: 'Rajdhani'; font-size: 14px; font-weight: 800; color: #94a3b8; }
         
         .tv-btn { background: #a855f7; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 800; cursor: pointer; margin-left: 15px; transition: 0.2s; box-shadow: 0 0 10px rgba(168, 85, 247, 0.3); }
         .tv-btn:hover { background: #d8b4fe; color: #000; }
 
-        /* KABRODA ARCHITECTURE UPGRADE: Kinetic Friction UI */
         .danger-zone { background: rgba(239, 68, 68, 0.15); border: 2px solid #ef4444; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: none; animation: pulse 2s infinite; }
         @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
         .danger-title { color: #ef4444; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; margin-bottom: 5px;}
         .danger-text { color: #f8fafc; font-size: 12px; }
+
+        /* KABRODA ARCHITECTURE UPGRADE: Accordion UI Elements */
+        .acc-header { background: #1e293b; color: #cbd5e1; padding: 12px 15px; cursor: pointer; font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 700; border: 1px solid #334155; border-radius: 4px; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; }
+        .acc-header:hover { background: #2a3a54; color: #fff; }
+        .acc-content { display: none; padding: 10px 0 15px 0; }
+        .acc-content.active { display: block; }
+        .macro-header { color: #ef4444; border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.05); }
     </style>
 </head>
 <body>
@@ -82,11 +87,22 @@
         
         let globalPeaks = [];
         let globalFibs = null;
-        let globalMacroBeams = []; // KABRODA ARCHITECTURE UPGRADE
+        let globalMacroBeams = []; 
 
         let lastYCoord = null;
         let syncAnimation = null;
         let currentLivePrice = 0;
+
+        function toggleAcc(el) {
+            const content = el.nextElementSibling;
+            if (content.classList.contains("active")) {
+                content.classList.remove("active");
+                el.querySelector('.acc-icon').innerText = '▼';
+            } else {
+                content.classList.add("active");
+                el.querySelector('.acc-icon').innerText = '▲';
+            }
+        }
         
         function initChart() {
             const container = document.getElementById('chart-container');
@@ -187,7 +203,6 @@
             let frictionDetected = false;
             if (globalMacroBeams.length > 0 && currentLivePrice > 0) {
                 globalMacroBeams.forEach(beam => {
-                    // If price is within 1.5% of a Macro Beam, trigger NO TRADE ZONE
                     const distancePct = Math.abs(currentLivePrice - beam.price) / beam.price;
                     if (distancePct < 0.015) frictionDetected = true;
                 });
@@ -195,7 +210,6 @@
             alertBox.style.display = frictionDetected ? 'block' : 'none';
         }
 
-        // KABRODA ARCHITECTURE UPGRADE: TV Export
         function exportTradingViewData() {
             if (globalPeaks.length === 0 || !globalFibs) return alert("Data not ready.");
             let maxArr = []; let heavyArr = []; let stdArr = [];
@@ -207,7 +221,6 @@
                 else stdArr.push(p.price.toFixed(2));
             });
 
-            // Cleanly separated payload: MACRO_ARRAY | MAX_MICRO | HEAVY_MICRO | STD_MICRO
             let payload = `[MACRO]${macroArr.join(',')}|[MAX]${maxArr.join(',')}|[HEAVY]${heavyArr.join(',')}|[STD]${stdArr.join(',')}`;
 
             navigator.clipboard.writeText(payload).then(() => {
@@ -217,6 +230,15 @@
                 btn.style.background = "#22c55e";
                 setTimeout(() => { btn.innerText = orig; btn.style.background = "#a855f7"; }, 2000);
             });
+        }
+
+        // KABRODA ARCHITECTURE UPGRADE: Grouped UI Builder
+        function generateMacroCard(beam) {
+            return `
+            <div class="zone-card zone-MAXIMUM" style="background: rgba(239, 68, 68, 0.1);">
+                <div><span class="z-price">$${beam.price.toFixed(2)}</span><span class="z-score">STRUCTURAL ANCHOR</span></div>
+                <div style="font-size:10px; color:#ef4444; margin-top:4px; text-transform:uppercase;">${beam.type}</div>
+            </div>`;
         }
 
         async function loadGrid(isBackgroundUpdate = false) {
@@ -248,32 +270,63 @@
                 }
                 
                 if (!isBackgroundUpdate) {
-                    // KABRODA ARCHITECTURE UPGRADE: Render Macro Beams on UI
                     if (globalMacroBeams.length > 0) {
-                        sidebar.innerHTML += `<div style="color:#ef4444; font-family:'JetBrains Mono'; font-size:11px; margin-bottom:15px; text-transform:uppercase;">CLASS 0 MACRO ANCHORS</div>`;
+                        // Plot lines on the chart
                         globalMacroBeams.forEach(beam => {
-                            candlestickSeries.createPriceLine({ price: beam.price, color: '#ef4444', lineWidth: 3, lineStyle: LightweightCharts.LineStyle.Solid, title: `MACRO [${beam.type}]` });
-                            sidebar.innerHTML += `
-                            <div class="zone-card zone-MAXIMUM" style="background: rgba(239, 68, 68, 0.1);">
-                                <div><span class="z-price">$${beam.price.toFixed(2)}</span><span class="z-score">STRUCTURAL FLOOR</span></div>
-                                <div style="font-size:10px; color:#ef4444; margin-top:4px; text-transform:uppercase;">${beam.type}</div>
-                            </div>`;
+                            candlestickSeries.createPriceLine({ price: beam.price, color: '#ef4444', lineWidth: 3, lineStyle: LightweightCharts.LineStyle.Solid, title: `MACRO` });
                         });
+
+                        // Categorize for Accordions
+                        const cycleExtremes = globalMacroBeams.filter(b => b.type.includes("CYCLE"));
+                        const bullStructure = globalMacroBeams.filter(b => b.type.includes("BULL"));
+                        const bearStructure = globalMacroBeams.filter(b => b.type.includes("BEAR"));
+
+                        // Build Cycle Accordion (Open by Default)
+                        sidebar.innerHTML += `
+                        <div class="acc-header macro-header" onclick="toggleAcc(this)">
+                            <span>CYCLE BOUNDARIES [0/5]</span><span class="acc-icon">▲</span>
+                        </div>
+                        <div class="acc-content active">${cycleExtremes.map(generateMacroCard).join('')}</div>`;
+
+                        // Build Bull Accordion
+                        if(bullStructure.length > 0) {
+                            sidebar.innerHTML += `
+                            <div class="acc-header" onclick="toggleAcc(this)">
+                                <span>BULL RUN STRUCTURE</span><span class="acc-icon">▼</span>
+                            </div>
+                            <div class="acc-content">${bullStructure.map(generateMacroCard).join('')}</div>`;
+                        }
+
+                        // Build Bear Accordion (Open by Default)
+                        if(bearStructure.length > 0) {
+                            sidebar.innerHTML += `
+                            <div class="acc-header macro-header" onclick="toggleAcc(this)">
+                                <span>BEAR TREND STRUCTURE</span><span class="acc-icon">▲</span>
+                            </div>
+                            <div class="acc-content active">${bearStructure.map(generateMacroCard).join('')}</div>`;
+                        }
                     }
 
                     if (data.kde_data && data.kde_data.peaks.length > 0) {
-                        sidebar.innerHTML += `<div style="color:#94a3b8; font-family:'JetBrains Mono'; font-size:11px; margin-top:20px; margin-bottom:15px; text-transform:uppercase;">Identified Centers of Gravity (Micro)</div>`;
+                        sidebar.innerHTML += `
+                        <div class="acc-header" onclick="toggleAcc(this)" style="margin-top:20px; border-color:#3b82f6;">
+                            <span style="color:#60a5fa;">MICRO GRAVITY DENSITY</span><span class="acc-icon">▲</span>
+                        </div>
+                        <div class="acc-content active">`;
+                        
+                        let peakHTML = '';
                         data.kde_data.peaks.forEach(peak => {
                             let lineColor = '#3b82f6';
                             if (peak.intensity === 'HEAVY') lineColor = '#eab308';
                             if (peak.intensity === 'MAXIMUM') lineColor = '#ef4444';
-                            candlestickSeries.createPriceLine({ price: peak.price, color: lineColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: 'GRAVITY WELL' });
-                            sidebar.innerHTML += `
+                            candlestickSeries.createPriceLine({ price: peak.price, color: lineColor, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, title: 'WELL' });
+                            peakHTML += `
                             <div class="zone-card zone-${peak.intensity}">
                                 <div><span class="z-price">$${peak.price.toFixed(2)}</span><span class="z-score">PULL: ${peak.heat_score}</span></div>
                                 <div style="font-size:10px; color:#94a3b8; margin-top:4px; text-transform:uppercase;">Structure: ${peak.intensity} DENSITY</div>
                             </div>`;
                         });
+                        sidebar.innerHTML += peakHTML + `</div>`;
                     }
                 }
                 evaluateKineticFriction();
