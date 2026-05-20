@@ -26,6 +26,7 @@ import research_lab
 import market_simulator  
 import gravity_engine  
 import gravity_math
+import kabroda_mas_flow  # <-- THE MISSING IMPORT HAS BEEN RESTORED
 
 from database import init_db, get_db, UserModel, CampaignLog
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
@@ -42,7 +43,7 @@ async def lifespan(app: FastAPI):
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     app.state.gravity_task.cancel()
 
-app = FastAPI(title="Kabroda BattleBox", version="11.4", lifespan=lifespan)
+app = FastAPI(title="Kabroda BattleBox", version="11.5", lifespan=lifespan)
 
 SECRET_KEY = os.getenv("SESSION_SECRET", "kabroda_prod_key_999")
 
@@ -179,7 +180,6 @@ async def macro_war_room_page(request: Request, symbol: str = "BTC/USDT", db: Se
     # SELF-HEALING: If no brief exists, trigger the MAS background task immediately
     if latest_log and not latest_log.mas_executive_brief and latest_log.mas_approval_status == 'PENDING':
         from battlebox_pipeline import _LOCKED_PACKETS, _normalize_symbol
-        # We try to find the locked packet for this symbol to feed to the MAS
         for key, pkt in _LOCKED_PACKETS.items():
             if _normalize_symbol(symbol) in key:
                 asyncio.create_task(
