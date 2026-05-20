@@ -1,7 +1,7 @@
 # main.py
 # ---------------------------------------------------------
 # KABRODA UNIFIED SERVER: BATTLEBOX (SSOT ENFORCED)
-# AUDIT FIX: Restored Missing Foreign Intel Regex Route
+# AUDIT FIX: Restored Missing Foreign Intel Regex Route & Agent Trigger
 # ---------------------------------------------------------
 import os
 import json 
@@ -214,7 +214,7 @@ async def api_gravity_scan(symbol: str = "BTC/USDT"):
         "macro_fibs": macro_fibs
     })
 
-# --- KABRODA ARCHITECTURE: FOREIGN INTEL PARSER ---
+# --- KABRODA ARCHITECTURE: FOREIGN INTEL PARSER & MAS ROUTING ---
 class ForeignIntelPayload(BaseModel):
     raw_text: str
 
@@ -247,11 +247,29 @@ async def audit_foreign_intel(payload: ForeignIntelPayload, request: Request, db
             "stop_loss": sl
         }
         
-        return JSONResponse({
-            "ok": True, 
-            "message": "Intel secured and parsed.", 
-            "data": parsed_packet
-        })
+        # Pull SSOT Context to audit against
+        from battlebox_pipeline import _LOCKED_PACKETS, _normalize_symbol
+        current_ssot = {}
+        for key, pkt in _LOCKED_PACKETS.items():
+            if _normalize_symbol(asset) in key:
+                current_ssot = pkt
+                break
+                
+        if not current_ssot:
+            return JSONResponse({"ok": False, "error": f"No active Kabroda session locked for {asset}. Cannot perform audit."})
+
+        # Run MAS Auditor Agent synchronously
+        audit_result = kabroda_mas_flow.audit_foreign_intel_pipeline(parsed_packet, current_ssot)
+        
+        if audit_result["status"] == "SUCCESS":
+            return JSONResponse({
+                "ok": True, 
+                "message": "Intel audited successfully.", 
+                "data": parsed_packet,
+                "audit": audit_result["report"]
+            })
+        else:
+            return JSONResponse({"ok": False, "error": "Agent failed to analyze intel. See server logs."})
 
     except Exception as e:
         return JSONResponse({

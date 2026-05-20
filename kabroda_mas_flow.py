@@ -24,6 +24,12 @@ class ExecutiveBrief(BaseModel):
     t2: float = Field(description="Target 2 (Distance * 1.618 added to entry).")
     t3: float = Field(description="Target 3 (Distance * 2.618 added to entry).")
 
+class IntelAuditReport(BaseModel):
+    """The strict output schema for the External Intel Auditor."""
+    verdict: str = Field(description="Must be 'CONFIRMED', 'REJECTED', or 'HIGH_RISK'")
+    kabroda_variance: str = Field(description="A 1-2 sentence explanation comparing their targets against Kabroda's gravity walls/triggers.")
+    recalculated_target_1: float = Field(description="The target recalculated using strictly Kabroda Measured Move math (distance between our triggers).")
+
 # --- 2. RAG MEMORY INJECTION (POSTGRESQL) ---
 def _fetch_cro_memory(symbol: str) -> str:
     """Queries PostgreSQL to build short-term tactical memory for the CRO."""
@@ -119,12 +125,29 @@ def _build_agents() -> Dict[str, Agent]:
         allow_delegation=False,
         llm=llm
     )
+    
+    intel_auditor = Agent(
+        role="External Intel Auditor",
+        goal="Ruthlessly cross-examine third-party trading signals against Kabroda's internal Gravity Map physics and Measured Move logic.",
+        backstory=(
+            "You are a counter-intelligence analyst. You do not trust external signals. "
+            "When handed a foreign intel packet (like MetaSignals), you immediately compare their Entry and Targets "
+            "against Kabroda's internal Breakout/Breakdown triggers and KDE Gravity Peaks. "
+            "If their target attempts to push through a massive Class 0 Gravity Wall, you flag it as 'HIGH_RISK'. "
+            "You also discard their arbitrary RR targets and recalculate Target 1 using strictly Kabroda math: "
+            "Target 1 = Entry +/- (Breakout Trigger - Breakdown Trigger)."
+        ),
+        verbose=True,
+        allow_delegation=False,
+        llm=llm
+    )
 
     return {
         "macro": macro_architect,
         "micro": liquidity_scavenger,
         "quant": momentum_quant,
-        "cro": chief_risk_officer
+        "cro": chief_risk_officer,
+        "auditor": intel_auditor
     }
 
 # --- 4. EXECUTION PIPELINE ---
@@ -169,7 +192,6 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
     )
 
     task_quant = Task(
-        # AUDIT FIX: Eradicated "bleshooting" typo. Replaced with json.dumps.
         description=f"Analyze this Kinematic data: {json.dumps(quant_data)}. Confirm if momentum supports a breakout or if the market is exhausted.",
         expected_output="A summary of kinetic velocity and EMA alignment.",
         agent=agents["quant"]
@@ -206,7 +228,50 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
         print(f"MAS EXECUTION ERROR: {e}")
         return {"status": "ERROR", "message": str(e)}
 
-# --- 5. DATABASE INJECTION ---
+# --- 5. EXTERNAL INTEL AUDIT PIPELINE ---
+def audit_foreign_intel_pipeline(intel_packet: Dict[str, Any], battlebox_payload: Dict[str, Any]):
+    print(f">>> MAS INITIATED: Auditing Foreign Intel for {intel_packet.get('symbol')}")
+    
+    levels = battlebox_payload.get("levels", {})
+    context = battlebox_payload.get("context", {})
+    
+    kabroda_data = {
+        "kabroda_breakout_trigger": levels.get("breakout_trigger"),
+        "kabroda_breakdown_trigger": levels.get("breakdown_trigger"),
+        "gravity_kde_peaks": context.get("kde_peaks")
+    }
+
+    agents = _build_agents()
+
+    task_audit = Task(
+        description=(
+            f"Audit this Foreign Intel Packet: {json.dumps(intel_packet)}\n\n"
+            f"Against this Internal Kabroda SSOT: {json.dumps(kabroda_data)}\n\n"
+            "1. Compare their Entry/Targets against our Gravity Peaks. Are they trading into a wall?\n"
+            "2. Determine the Verdict.\n"
+            "3. Recalculate Target 1 using Kabroda Measured Move math."
+        ),
+        expected_output="A strictly typed JSON object matching the IntelAuditReport schema.",
+        agent=agents["auditor"],
+        output_pydantic=IntelAuditReport
+    )
+
+    audit_crew = Crew(
+        agents=[agents["auditor"]],
+        tasks=[task_audit],
+        process=Process.sequential,
+        verbose=False
+    )
+
+    try:
+        result = audit_crew.kickoff()
+        audit_output: IntelAuditReport = task_audit.output.pydantic
+        return {"status": "SUCCESS", "report": audit_output.dict()}
+    except Exception as e:
+        print(f"INTEL AUDIT ERROR: {e}")
+        return {"status": "ERROR", "message": str(e)}
+
+# --- 6. DATABASE INJECTION ---
 def _inject_brief_to_database(symbol: str, session_id: str, date_key: str, brief: ExecutiveBrief):
     db = SessionLocal()
     try:
