@@ -1,8 +1,9 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v11.2 (MACRO STRUCTURE UPGRADE)
+# KABRODA BATTLEBOX PIPELINE — v11.3 (MAS ORCHESTRATION UPGRADE)
 # Purpose: Calculates Full EMA Alignment & Mean Deviation.
-# AUDIT FIX: Stripped out lagging ADX math. Enforced strict structural physics.
+# AUDIT FIX: Injected threaded MAS Orchestrator payload trigger to prevent 
+# async loop blocking upon session lock.
 # ==============================================================================
 
 from __future__ import annotations
@@ -21,7 +22,8 @@ import sse_engine
 import structure_state_engine
 import gravity_engine
 import gravity_math
-from database import SessionLocal, SessionLock, GravityMemory # INJECTED: GravityMemory
+import kabroda_mas_flow  # INJECTED: MAS Orchestrator
+from database import SessionLocal, SessionLock, GravityMemory 
 
 SESSION_CONFIGS = session_manager.SESSION_CONFIGS
 
@@ -110,7 +112,6 @@ def _calc_sma(prices: List[float], period: int) -> float:
     return sum(prices[-period:]) / period
 
 def _build_synthetic_jewel(raw_15m: List[Dict]) -> Dict:
-    """Calculates 15m RSI, 9/21/35/55 EMA Alignment, and 200 SMA Deviation."""
     if not raw_15m or len(raw_15m) < 200:
         return {"rsi": 50.0, "kinematic_grade": "TANGLED"}
         
@@ -119,20 +120,16 @@ def _build_synthetic_jewel(raw_15m: List[Dict]) -> Dict:
     
     rsi = _calc_rsi(closes, period=14)
     
-    # 1. Calculate the Institutional Ribbon (EMAs)
     ema9 = _calc_ema_series(closes, 9)[-1]
     ema21 = _calc_ema_series(closes, 21)[-1]
     ema35 = _calc_ema_series(closes, 35)[-1]
     ema55 = _calc_ema_series(closes, 55)[-1]
     
-    # 2. Calculate the Concrete Floor (200 SMA)
     sma200 = _calc_sma(closes, 200)
     
-    # 3. Kinematic Physics Calculations
     deviation_from_mean = abs(current_price - sma200) / sma200 * 100
     ribbon_spread = abs(ema9 - ema55) / ema55 * 100
     
-    # 4. The Grading Logic (Single Source of Truth)
     if deviation_from_mean > 1.5:
         kinematic_grade = "OVEREXTENDED"
     elif ribbon_spread < 0.15:
@@ -173,28 +170,19 @@ def _build_fuel_gauge(raw_1h: List[Dict], raw_4h: List[Dict], raw_15m: List[Dict
     return {
         "1H": analyze_tf(raw_1h), 
         "4H": analyze_tf(raw_4h),
-        "15M_JEWEL": _build_synthetic_jewel(raw_15m) # Inject local 15m fuel state
+        "15M_JEWEL": _build_synthetic_jewel(raw_15m)
     }
 
-# --- SSOT UPGRADE: 21-Day Macro Baseline ---
 def _calculate_weekly_force(daily_candles: list) -> str:
-    """
-    SSOT MACRO COMPASS: Determines Macro Bias using a 21-Day structural baseline.
-    Prevents localized 1H/4H pullbacks from falsely flipping the macro trend.
-    """
     if not daily_candles or len(daily_candles) < 21:
         return "NEUTRAL"
 
     closes = [float(c["close"]) for c in daily_candles]
     current_price = closes[-1]
 
-    # Establish the Macro Baseline (21 Days)
     macro_baseline_21 = sum(closes[-21:]) / 21
-    
-    # Establish a Micro Momentum Check (7 Days)
     micro_baseline_7 = sum(closes[-7:]) / 7
 
-    # Logic: Price must be structurally above the 3-week floor to be Bullish.
     if current_price > macro_baseline_21 and micro_baseline_7 > macro_baseline_21:
         return "BULLISH"
     elif current_price < macro_baseline_21 and micro_baseline_7 < macro_baseline_21:
@@ -202,12 +190,7 @@ def _calculate_weekly_force(daily_candles: list) -> str:
     
     return "NEUTRAL"
 
-# --- SSOT UPGRADE: Harmonic Alignment Matrix ---
 def _calculate_harmonic_matrix(candles_1h: list, candles_4h: list) -> dict:
-    """
-    SSOT ALIGNMENT MATRIX: Evaluates 1H and 4H momentum to dictate 15m engine state.
-    Accounts for the 'gray area' by measuring slope and relative positioning.
-    """
     def get_ema(prices, period):
         if len(prices) < period: return 0.0
         multiplier = 2 / (period + 1)
@@ -219,38 +202,28 @@ def _calculate_harmonic_matrix(candles_1h: list, candles_4h: list) -> dict:
     if len(candles_1h) < 50 or len(candles_4h) < 50:
         return {"micro_state": "CHOP", "1h_fuel_status": "UNKNOWN"}
 
-    # 4H Tide Physics
     closes_4h = [float(c["close"]) for c in candles_4h]
     ema20_4h = get_ema(closes_4h, 20)
     ema50_4h = get_ema(closes_4h, 50)
     tide_bullish = ema20_4h > ema50_4h
 
-    # 1H Wave Physics
     closes_1h = [float(c["close"]) for c in candles_1h]
     ema20_1h = get_ema(closes_1h, 20)
     ema50_1h = get_ema(closes_1h, 50)
     wave_bullish = ema20_1h > ema50_1h
 
-    # 1H Fuel Exhaustion Proxy (Distance between EMAs indicates overextension)
     spread_1h = abs(ema20_1h - ema50_1h) / ema50_1h
-    is_exhausted = spread_1h > 0.015  # If EMAs are stretched > 1.5% apart, fuel is burning out
+    is_exhausted = spread_1h > 0.015  
 
-    # The Matrix Logic
     if tide_bullish and wave_bullish:
-        if is_exhausted:
-            return {"micro_state": "EXHAUSTION", "1h_fuel_status": "OVEREXTENDED"}
+        if is_exhausted: return {"micro_state": "EXHAUSTION", "1h_fuel_status": "OVEREXTENDED"}
         return {"micro_state": "SWEET_ZONE", "1h_fuel_status": "STRONG"}
-    
     elif tide_bullish and not wave_bullish:
         return {"micro_state": "PULLBACK", "1h_fuel_status": "REFUELING"}
-        
     elif not tide_bullish and wave_bullish:
         return {"micro_state": "HOSTILE_CEILING", "1h_fuel_status": "CHOP_RISK"}
-        
     else:
-        # Both Bearish
-        if is_exhausted:
-            return {"micro_state": "EXHAUSTION", "1h_fuel_status": "OVEREXTENDED"}
+        if is_exhausted: return {"micro_state": "EXHAUSTION", "1h_fuel_status": "OVEREXTENDED"}
         return {"micro_state": "SWEET_ZONE_BEAR", "1h_fuel_status": "STRONG"}
 
 def _calculate_168h_micro_bias(raw_1h: List[Dict[str, Any]]) -> str:
@@ -273,7 +246,6 @@ def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
     lean = "BULLISH" if closes[-1] > ema else "BEARISH"
     return {"status": "LIVE", "lean": lean, "phase": "TRANSITION", "note": f"Pressure is {lean}."}
 
-# --- KABRODA ARCHITECTURE UPGRADE: MACRO PAYLOAD INJECTION ---
 def _fetch_macro_structure(symbol: str) -> List[Dict[str, Any]]:
     db = SessionLocal()
     try:
@@ -291,7 +263,7 @@ def _fetch_macro_structure(symbol: str) -> List[Dict[str, Any]]:
 
 def _compute_sse_packet(
     raw_5m: List[Dict], anchor_ts: int, macro_bias: str, micro_bias: str, fuel_gauge: Dict, kde_data: Dict, macro_fibs: Dict, harmonic_data: Dict, macro_structure: List[Dict], tuning: Optional[Dict] = None, raw_daily: List[Dict] = None  
-) -> Dict[str, Any]: # INJECTED: macro_structure argument
+) -> Dict[str, Any]: 
     lock_end_ts = int(anchor_ts) + 1800
     calibration = [c for c in raw_5m if anchor_ts <= int(c["time"]) < lock_end_ts]
     
@@ -336,11 +308,9 @@ def _compute_sse_packet(
     computed["context"]["fuel_gauge"] = fuel_gauge
     computed["context"]["kde_peaks"] = kde_data.get("peaks", [])
     computed["context"]["macro_fibs"] = macro_fibs
-    
-    # INJECT NEW SSOT KINEMATIC DATA
     computed["context"]["micro_state"] = harmonic_data.get("micro_state", "CHOP")
     computed["context"]["1h_fuel_status"] = harmonic_data.get("1h_fuel_status", "UNKNOWN")
-    computed["context"]["macro_structure"] = macro_structure # INJECTED SHELF
+    computed["context"]["macro_structure"] = macro_structure 
 
     return {
         "levels": computed["levels"], 
@@ -370,8 +340,7 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     
     fuel_gauge = _build_fuel_gauge(raw_1h, raw_4h, raw_15m)
     harmonic_data = _calculate_harmonic_matrix(raw_1h, raw_4h)
-    
-    macro_structure = _fetch_macro_structure(symbol) # INJECTED: PULLING DB DATA
+    macro_structure = _fetch_macro_structure(symbol) 
 
     kde_data = gravity_math.calculate_gravity_kde(symbol)
     macro_fibs = gravity_math.calculate_macro_fibs(raw_daily, [])
@@ -391,7 +360,7 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                     "macro_fibs": macro_fibs,
                     "micro_state": harmonic_data.get("micro_state"),
                     "1h_fuel_status": harmonic_data.get("1h_fuel_status"),
-                    "macro_structure": macro_structure # INJECTED SHELF
+                    "macro_structure": macro_structure
                 }
             }
         }
@@ -429,6 +398,21 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                     db.commit()
                     
                     gravity_engine.log_kabroda_bedrock(symbol, pkt["levels"], pkt["lock_time"])
+
+                    # --- KABRODA ARCHITECTURE UPGRADE: IGNITE MAS ORCHESTRATOR ---
+                    # Execute CrewAI in a background thread to prevent blocking the FastAPI loop.
+                    # This ensures the UI loads instantly while the CRO builds the executive brief.
+                    asyncio.create_task(
+                        asyncio.to_thread(
+                            kabroda_mas_flow.run_mas_analysis,
+                            symbol=symbol,
+                            session_id=session['id'],
+                            date_key=date_key,
+                            battlebox_payload=pkt
+                        )
+                    )
+                    # -------------------------------------------------------------
+
             except Exception as e:
                 print(f"DATABASE VAULT ERROR: {e}")
                 traceback.print_exc()
