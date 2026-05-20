@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Kabroda | Macro War Room</title>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
         body { background-color: #050505; color: #f8fafc; font-family: 'Inter', sans-serif; margin: 0; display: flex; flex-direction: column; min-height: 100vh; }
@@ -12,10 +12,30 @@
         .header-panel { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
         .wr-title { font-family: 'JetBrains Mono'; font-size: 24px; font-weight: 800; color: #fff; margin: 0; letter-spacing: 2px; }
         
-        .asset-selector { background: #111; color: #0ea5e9; border: 1px solid #333; padding: 8px 16px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; border-radius: 4px; outline: none; }
+        .asset-selector { background: #111; color: #0ea5e9; border: 1px solid #333; padding: 8px 16px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; border-radius: 4px; outline: none; cursor: pointer; }
 
-        .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
+        /* --- GHOST LEAD TERMINAL (MAS OVERLAY) --- */
+        .ghost-lead-terminal { background: rgba(10, 10, 10, 0.8); border: 1px solid #222; border-left: 4px solid #0ea5e9; border-radius: 8px; padding: 24px; font-family: 'JetBrains Mono', monospace; position: relative; overflow: hidden; margin-bottom: 30px; box-shadow: 0 0 20px rgba(14, 165, 233, 0.05); }
+        .ghost-lead-terminal::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(180deg, rgba(14, 165, 233, 0.03) 0%, transparent 100%); pointer-events: none; }
         
+        .gl-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #222; padding-bottom: 12px; margin-bottom: 16px; }
+        .gl-title { color: #0ea5e9; font-weight: 800; font-size: 16px; text-transform: uppercase; letter-spacing: 2px; }
+        
+        .gl-status-badge { background: rgba(14, 165, 233, 0.1); color: #0ea5e9; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; border: 1px solid rgba(14, 165, 233, 0.3); letter-spacing: 1px; text-transform: uppercase;}
+        .gl-status-badge.rejected { color: #ef4444; border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.1); }
+        .gl-status-badge.waiting { color: #facc15; border-color: rgba(250, 204, 21, 0.3); background: rgba(250, 204, 21, 0.1); }
+
+        .gl-brief { font-size: 14px; line-height: 1.6; margin-bottom: 24px; color: #94a3b8; background: #050505; padding: 16px; border-radius: 6px; border: 1px dashed #333; }
+        
+        .gl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+        .gl-data-point { background: #050505; border: 1px solid #222; padding: 12px; border-radius: 6px; }
+        .gl-label { display: block; font-size: 10px; color: #64748b; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 1px; }
+        .gl-value { font-size: 18px; color: #f8fafc; font-weight: 700; font-family: 'Rajdhani'; }
+        .gl-value.cyan { color: #0ea5e9; text-shadow: 0 0 8px rgba(14, 165, 233, 0.3); }
+        .gl-value.red { color: #ef4444; }
+
+        /* --- EXISTING KPI GRID --- */
+        .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
         .kpi-card { background: #0a0a0a; border: 1px solid #222; border-radius: 8px; padding: 20px; display: flex; flex-direction: column; position: relative; overflow: hidden; }
         .kpi-card::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: #333; }
         .kpi-card.state-neutral::before { background: #64748b; }
@@ -46,16 +66,62 @@
 <body>
     {% include 'nav.html' %}
     
-    <div id="loader" class="loading-overlay">/// AGGREGATING MACRO LOGIC...</div>
+    <div id="loader" class="loading-overlay">/// AGGREGATING TACTICAL DATA...</div>
 
     <div class="war-room-wrapper">
         <div class="header-panel">
             <h1 class="wr-title">MACRO WAR ROOM <span style="font-size: 12px; color: #666; font-family: 'Inter'; font-weight: 400;">// EXECUTIVE DASHBOARD</span></h1>
-            <select id="symSelect" class="asset-selector" onchange="fetchWarRoomData()">
-                <option value="BTC/USDT">BTC/USDT</option>
-                <option value="ETH/USDT">ETH/USDT</option>
-                <option value="SOL/USDT">SOL/USDT</option>
+            <select id="symSelect" class="asset-selector" onchange="changeAssetRoute()">
+                <option value="BTC/USDT" {% if request.query_params.symbol == 'BTC/USDT' or not request.query_params.symbol %}selected{% endif %}>BTC/USDT</option>
+                <option value="ETH/USDT" {% if request.query_params.symbol == 'ETH/USDT' %}selected{% endif %}>ETH/USDT</option>
+                <option value="SOL/USDT" {% if request.query_params.symbol == 'SOL/USDT' %}selected{% endif %}>SOL/USDT</option>
             </select>
+        </div>
+
+        <div class="ghost-lead-terminal">
+            <div class="gl-header">
+                <span class="gl-title">Ghost Lead // Tactical Brief</span>
+                <span class="gl-status-badge {% if mas_log and mas_log.mas_approval_status == 'REJECTED' %}rejected{% elif mas_log and mas_log.mas_approval_status == 'WAITING_FOR_15M' %}waiting{% endif %}">
+                    [{{ mas_log.mas_approval_status if mas_log and mas_log.mas_approval_status else 'AWAITING UPLINK' }}]
+                </span>
+            </div>
+
+            <div class="gl-brief">
+                {% if mas_log and mas_log.mas_executive_brief %}
+                    > {{ mas_log.mas_executive_brief }}
+                {% else %}
+                    > Establishing uplink... CRO analyzing structural alignment and kinematic friction for current session...
+                {% endif %}
+            </div>
+
+            {% if mas_log and mas_log.mas_approval_status == 'APPROVED' %}
+            <div class="gl-grid">
+                <div class="gl-data-point">
+                    <span class="gl-label">Vector</span>
+                    <span class="gl-value cyan">{{ mas_log.bias }}</span>
+                </div>
+                <div class="gl-data-point">
+                    <span class="gl-label">Execution Trigger</span>
+                    <span class="gl-value">${{ mas_log.entry_price }}</span>
+                </div>
+                <div class="gl-data-point">
+                    <span class="gl-label">Hard Stop Loss</span>
+                    <span class="gl-value red">${{ mas_log.stop_loss }}</span>
+                </div>
+                <div class="gl-data-point">
+                    <span class="gl-label">Target 1 (1.0)</span>
+                    <span class="gl-value">${{ mas_log.t1 }}</span>
+                </div>
+                <div class="gl-data-point">
+                    <span class="gl-label">Target 2 (1.618)</span>
+                    <span class="gl-value">${{ mas_log.t2 }}</span>
+                </div>
+                <div class="gl-data-point">
+                    <span class="gl-label">Target 3 (2.618)</span>
+                    <span class="gl-value">${{ mas_log.t3 }}</span>
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <div class="kpi-grid">
@@ -81,8 +147,7 @@
         <div class="details-grid">
             <div class="data-panel">
                 <div class="panel-header">STRUCTURAL BOUNDARIES (CLASS 0 TRUTH)</div>
-                <div id="boundary-list">
-                    </div>
+                <div id="boundary-list"></div>
             </div>
 
             <div class="data-panel">
@@ -96,6 +161,12 @@
     </div>
 
     <script>
+        // Force server navigation so FastAPI provides the correct Jinja MAS payload
+        function changeAssetRoute() {
+            const sym = document.getElementById('symSelect').value;
+            window.location.href = `/suite/macro-war-room?symbol=${encodeURIComponent(sym)}`;
+        }
+
         async function fetchWarRoomData() {
             document.getElementById('loader').style.display = 'flex';
             const sym = document.getElementById('symSelect').value;
@@ -105,7 +176,7 @@
                 const res = await fetch(`/api/gravity/scan?symbol=${encodeURIComponent(sym)}`);
                 const data = await res.json();
                 
-                if(data.ok && data.macro_fibs.chart_data.length > 0) {
+                if(data.ok && data.macro_fibs && data.macro_fibs.chart_data && data.macro_fibs.chart_data.length > 0) {
                     const livePrice = data.macro_fibs.chart_data[data.macro_fibs.chart_data.length - 1].close;
                     const beams = data.kde_data.macro_beams || [];
                     processExecutiveLogic(livePrice, beams);
