@@ -42,6 +42,19 @@ def init_db():
     except Exception:
         pass 
 
+    # --- MAS UPGRADE MIGRATIONS ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN mas_executive_brief TEXT"))
+    except Exception:
+        pass 
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN mas_approval_status VARCHAR DEFAULT 'PENDING'"))
+    except Exception:
+        pass 
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -99,7 +112,7 @@ class SessionLock(Base):
     packet_data = Column(String, nullable=False) 
 
 # ---------------------------------------------------------
-# MISSION LEDGER (AUTOMATED TRADE TRACKER)
+# MISSION LEDGER (AUTOMATED TRADE TRACKER + MAS ORCHESTRATION)
 # ---------------------------------------------------------
 class CampaignLog(Base):
     __tablename__ = "campaign_logs"
@@ -130,3 +143,7 @@ class CampaignLog(Base):
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     
     diagnostic_data = Column(String, nullable=True)
+
+    # --- MAS UPGRADE COLUMNS ---
+    mas_executive_brief = Column(String, nullable=True)
+    mas_approval_status = Column(String, default="PENDING", nullable=False)
