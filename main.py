@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     app.state.gravity_task.cancel()
 
-app = FastAPI(title="Kabroda BattleBox", version="11.3", lifespan=lifespan)
+app = FastAPI(title="Kabroda BattleBox", version="11.4", lifespan=lifespan)
 
 SECRET_KEY = os.getenv("SESSION_SECRET", "kabroda_prod_key_999")
 
@@ -166,12 +166,34 @@ async def gravity_map_page(request: Request, db: Session = Depends(get_db)):
     require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "gravity_map.html", ctx)
 
-# --- KABRODA ARCHITECTURE UPGRADE: MACRO WAR ROOM ROUTE ---
+# --- KABRODA ARCHITECTURE UPGRADE: MACRO WAR ROOM ROUTE (SELF-HEALING) ---
 @app.get("/suite/macro-war-room")
-async def macro_war_room_page(request: Request, db: Session = Depends(get_db)):
+async def macro_war_room_page(request: Request, symbol: str = "BTC/USDT", db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
     require_paid_access(ctx["user"])
+    
+    db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
+    latest_log = db.query(CampaignLog).filter(CampaignLog.symbol == db_sym).order_by(CampaignLog.id.desc()).first()
+    
+    # SELF-HEALING: If no brief exists, trigger the MAS background task immediately
+    if latest_log and not latest_log.mas_executive_brief and latest_log.mas_approval_status == 'PENDING':
+        from battlebox_pipeline import _LOCKED_PACKETS, _normalize_symbol
+        # We try to find the locked packet for this symbol to feed to the MAS
+        for key, pkt in _LOCKED_PACKETS.items():
+            if _normalize_symbol(symbol) in key:
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        kabroda_mas_flow.run_mas_analysis,
+                        symbol=db_sym,
+                        session_id=latest_log.session_id,
+                        date_key=latest_log.date_key,
+                        battlebox_payload=pkt
+                    )
+                )
+                break
+    
+    ctx["mas_log"] = latest_log
     return _template_or_fallback(request, templates, "macro_war_room.html", ctx)
 
 # --- GRAVITY API ENDPOINT ---
