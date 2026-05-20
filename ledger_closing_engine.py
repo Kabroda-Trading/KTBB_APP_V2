@@ -31,9 +31,10 @@ async def run_ledger_audit_loop():
         db = SessionLocal()
         try:
             # Fetch all trades that the MAS approved but haven't been closed yet
+            # AUDIT FIX: Used .is_(None) to comply with SQLAlchemy syntax
             open_campaigns = db.query(CampaignLog).filter(
                 CampaignLog.mas_approval_status == 'APPROVED',
-                CampaignLog.closed_at.is(None)
+                CampaignLog.closed_at.is_(None)
             ).all()
 
             if not open_campaigns:
