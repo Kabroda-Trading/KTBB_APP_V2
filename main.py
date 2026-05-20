@@ -27,6 +27,7 @@ import market_simulator
 import gravity_engine  
 import gravity_math
 import kabroda_mas_flow  # <-- THE MISSING IMPORT HAS BEEN RESTORED
+import ledger_closing_engine
 
 from database import init_db, get_db, UserModel, CampaignLog
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
@@ -39,9 +40,14 @@ async def lifespan(app: FastAPI):
     init_db()
     # KABRODA ARCHITECTURE UPGRADE: Ignite Background Engines safely
     app.state.gravity_task = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
+    
+    # IGNITE THE LEDGER CLOSING ENGINE
+    app.state.ledger_task = asyncio.create_task(ledger_closing_engine.run_ledger_audit_loop())
+    
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     app.state.gravity_task.cancel()
+    app.state.ledger_task.cancel() # Safely shut it down
 
 app = FastAPI(title="Kabroda BattleBox", version="11.5", lifespan=lifespan)
 
