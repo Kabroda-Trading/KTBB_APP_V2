@@ -29,11 +29,10 @@ def _fetch_cro_memory(symbol: str) -> str:
     """Queries PostgreSQL to build short-term tactical memory for the CRO."""
     db = SessionLocal()
     try:
-        # Fetch the last 5 CLOSED trades to establish a win/loss context
         logs = db.query(CampaignLog).filter(
             CampaignLog.symbol == symbol,
             CampaignLog.mas_approval_status == 'APPROVED',
-            CampaignLog.closed_at.isnot(None) # Only look at trades that have finished
+            CampaignLog.closed_at.isnot(None) 
         ).order_by(CampaignLog.closed_at.desc()).limit(5).all()
 
         if not logs:
@@ -50,7 +49,6 @@ def _fetch_cro_memory(symbol: str) -> str:
 
         memory_str = f"MEMORY BANK (Last {len(logs)} closed {symbol} trades): {wins} Wins, {losses} Losses. Net PnL: {pnl_sum:.2f}. "
         
-        # Self-Correcting Directives
         if losses > wins:
             memory_str += "CRITICAL WARNING: Recent performance is negative. You are bleeding capital in this market regime. You MUST tighten risk parameters, demand higher structural confluence, and be highly skeptical of breakouts."
         elif wins > losses:
@@ -67,7 +65,6 @@ def _fetch_cro_memory(symbol: str) -> str:
 
 # --- 3. AGENT DEFINITIONS ---
 def _build_agents() -> Dict[str, Agent]:
-    # Temperature 0.0 eliminates hallucination.
     llm = ChatOpenAI(temperature=0.0, model="gpt-4o")
 
     macro_architect = Agent(
@@ -132,13 +129,8 @@ def _build_agents() -> Dict[str, Agent]:
 
 # --- 4. EXECUTION PIPELINE ---
 def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payload: Dict[str, Any]):
-    """
-    Ingests the locked SSOT payload, builds RAG memory, runs CrewAI MAS,
-    and injects the final Executive Brief into PostgreSQL.
-    """
     print(f">>> MAS INITIATED: Orchestrating Tactical Analysis for {symbol} | {session_id}")
     
-    # Extract isolated SSOT segments
     levels = battlebox_payload.get("levels", {})
     context = battlebox_payload.get("context", {})
     
@@ -161,9 +153,7 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
         "micro_state": context.get("micro_state")
     }
 
-    # Fetch PostgreSQL Memory
     cro_memory_context = _fetch_cro_memory(symbol)
-
     agents = _build_agents()
 
     task_macro = Task(
@@ -179,7 +169,8 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
     )
 
     task_quant = Task(
-        description=f"Analyze this Kinematic data: {json.bleshooting(quant_data)}. Confirm if momentum supports a breakout or if the market is exhausted.",
+        # AUDIT FIX: Eradicated "bleshooting" typo. Replaced with json.dumps.
+        description=f"Analyze this Kinematic data: {json.dumps(quant_data)}. Confirm if momentum supports a breakout or if the market is exhausted.",
         expected_output="A summary of kinetic velocity and EMA alignment.",
         agent=agents["quant"]
     )
@@ -197,7 +188,6 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
         output_pydantic=ExecutiveBrief
     )
 
-    # Initialize Crew
     trading_crew = Crew(
         agents=[agents["macro"], agents["micro"], agents["quant"], agents["cro"]],
         tasks=[task_macro, task_micro, task_quant, task_cro],
@@ -205,7 +195,6 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
         verbose=False
     )
 
-    # Fire the MAS Pipeline
     try:
         result = trading_crew.kickoff()
         brief_output: ExecutiveBrief = task_cro.output.pydantic
