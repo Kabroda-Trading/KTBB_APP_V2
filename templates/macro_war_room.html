@@ -124,6 +124,25 @@
             {% endif %}
         </div>
 
+        <div class="ghost-lead-terminal" style="margin-top: 0px; border-left-color: #facc15;">
+            <div class="gl-header" style="border-bottom-color: rgba(250, 204, 21, 0.3);">
+                <span class="gl-title" style="color: #facc15;">External Intel Injection // Manual Uplink</span>
+            </div>
+            
+            <div style="display: flex; gap: 16px; align-items: flex-start;">
+                <textarea id="foreignIntelInput" placeholder="Paste MetaSignals raw text here...&#10;Example:&#10;BTC | USDT @ $76,821.20 - 1H - 1.1 G1&#10;Target 1: 77,870.68..." 
+                    style="flex: 1; background: #050505; border: 1px solid #333; color: #94a3b8; font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 12px; border-radius: 6px; min-height: 120px; resize: vertical; outline: none;"></textarea>
+                
+                <button onclick="submitForeignIntel()" style="background: rgba(250, 204, 21, 0.1); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.5); padding: 12px 24px; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-weight: 800; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s;">
+                    Audit Intel
+                </button>
+            </div>
+            
+            <div id="intelResponseConsole" style="margin-top: 16px; font-size: 12px; color: #22c55e; display: none;">
+                > Awaiting execution...
+            </div>
+        </div>
+
         <div class="kpi-grid">
             <div id="kpi-cycle" class="kpi-card state-neutral">
                 <div class="kpi-label"><span>⚙️</span> CYCLE STATE</div>
@@ -285,6 +304,45 @@
                 let rowColor = b.price > livePrice ? 'val-red' : 'val-green';
                 listDiv.innerHTML += `<div class="data-row"><span class="data-key">${cleanType}</span><span class="data-val ${rowColor}">$${b.price.toFixed(2)}</span></div>`;
             });
+        }
+
+        // --- FOREIGN INTEL JS HANDLER ---
+        async function submitForeignIntel() {
+            const rawText = document.getElementById('foreignIntelInput').value;
+            const consoleDiv = document.getElementById('intelResponseConsole');
+            
+            if (!rawText.trim()) {
+                consoleDiv.style.display = 'block';
+                consoleDiv.style.color = '#ef4444';
+                consoleDiv.innerText = "> ERROR: No intel provided.";
+                return;
+            }
+
+            consoleDiv.style.display = 'block';
+            consoleDiv.style.color = '#facc15';
+            consoleDiv.innerText = "> Transmitting intel to backend parser...";
+
+            try {
+                const res = await fetch('/api/research/audit-intel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ raw_text: rawText })
+                });
+                
+                const data = await res.json();
+                
+                if (data.ok) {
+                    consoleDiv.style.color = '#22c55e';
+                    consoleDiv.innerText = `> SUCCESS: Intel secured.\n> Asset: ${data.data.symbol} | Bias: ${data.data.bias} | Entry: $${data.data.entry_price}\n> Routing to MAS Auditor Agent...`;
+                    document.getElementById('foreignIntelInput').value = ''; 
+                } else {
+                    consoleDiv.style.color = '#ef4444';
+                    consoleDiv.innerText = `> ERROR: ${data.error}`;
+                }
+            } catch (e) {
+                consoleDiv.style.color = '#ef4444';
+                consoleDiv.innerText = "> CRITICAL ERROR: Uplink failed.";
+            }
         }
 
         // Boot Sequence
