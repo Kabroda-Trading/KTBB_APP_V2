@@ -18,3 +18,5 @@ google-auth
 aiohttp
 pytz
 asyncpg==0.29.0
+crewai
+langchain-openai
