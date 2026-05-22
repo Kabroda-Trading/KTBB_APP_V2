@@ -15,7 +15,7 @@ from database import SessionLocal, CampaignLog
 
 # --- 1. PYDANTIC SCHEMAS (THE SSOT ENFORCERS) ---
 class ExecutiveBrief(BaseModel):
-    """The strict output schema for the Chief Risk Officer."""
+    """The strict output schema for the Chief Risk Officer and Chief Content Officer."""
     approval_status: str = Field(description="Must be 'APPROVED', 'REJECTED', or 'WAITING_FOR_15M'")
     tactical_brief: str = Field(description="The 'Ghost Lead' plain-English execution directive. Must reference historical memory if provided.")
     bias: str = Field(description="'LONG', 'SHORT', or 'NEUTRAL'")
@@ -24,6 +24,7 @@ class ExecutiveBrief(BaseModel):
     t1: float = Field(description="Target 1 (Distance between triggers added to entry).")
     t2: float = Field(description="Target 2 (Distance * 1.618 added to entry).")
     t3: float = Field(description="Target 3 (Distance * 2.618 added to entry).")
+    formatted_newsletter_md: str = Field(description="The final Markdown formatted newsletter article.")
 
 class IntelAuditReport(BaseModel):
     """The strict output schema for the External Intel Auditor."""
@@ -75,10 +76,10 @@ def _build_agents() -> Dict[str, Agent]:
 
     macro_architect = Agent(
         role="Macro Structural Architect",
-        goal="Analyze the 1D Elliott Wave structure and daily levels to determine the overarching directional bias.",
+        goal="Analyze the 1D Elliott Wave structure, daily levels, and Global Macro Environment to determine directional bias.",
         backstory=(
-            "You are a veteran macro analyst. You ignore intraday noise and operate strictly on daily structures. "
-            "You read the provided Macro Structure arrays and Daily Support/Resistance levels to determine if the "
+            "You are a veteran macro analyst. You ignore intraday noise and operate strictly on daily structures and traditional finance risk posture (SPX, DXY, VIX). "
+            "You read the provided Macro Structure arrays, Daily Support/Resistance levels, and the Macro Oracle data to determine if the "
             "market is in an impulsive trend or a corrective chop."
         ),
         verbose=True,
@@ -113,10 +114,10 @@ def _build_agents() -> Dict[str, Agent]:
 
     chief_risk_officer = Agent(
         role="Chief Risk Officer (Ghost Lead)",
-        goal="Synthesize agent reports, consult historical performance memory, enforce Kabroda risk parameters, and issue the final Executive Brief.",
+        goal="Synthesize agent reports, consult historical performance memory, enforce Kabroda risk parameters, and issue the final technical execution plan.",
         backstory=(
             "You are the Ghost Lead and final gatekeeper of capital. You audit the Macro Architect, "
-            "Liquidity Scavenger, and Momentum Quant. If their intel conflicts, you reject the setup. "
+            "Liquidity Scavenger, and Momentum Quant. If their intel conflicts, or if the Macro Risk Posture is hostile, you reject the setup. "
             "You enforce the strict Kabroda Measured Move rule: Targets are derived exclusively from the distance "
             "between the breakout and breakdown triggers. You NEVER guess a 1:1 exit. "
             "You MUST factor in the provided 'MEMORY BANK' data. If recent performance is poor, you must reject marginal setups."
@@ -126,6 +127,18 @@ def _build_agents() -> Dict[str, Agent]:
         llm=llm
     )
     
+    chief_content_officer = Agent(
+        role="Chief Content Officer",
+        goal="Convert the CRO's technical decision into an institutional-grade, Markdown-formatted newsletter brief.",
+        backstory=(
+            "You write for professional traders. No fluff. No generic financial advice. You take the strict math and rulings from the Chief Risk Officer "
+            "and format them into an aggressive, readable 'Tactical Perimeter Brief' using terms like 'Kinetic Friction', 'Ghost Lead Verdict', and 'Tactical Perimeter'."
+        ),
+        verbose=True,
+        allow_delegation=False,
+        llm=llm
+    )
+
     intel_auditor = Agent(
         role="External Intel Auditor",
         goal="Ruthlessly cross-examine third-party trading signals against Kabroda's internal Gravity Map physics and Measured Move logic.",
@@ -147,6 +160,7 @@ def _build_agents() -> Dict[str, Agent]:
         "micro": liquidity_scavenger,
         "quant": momentum_quant,
         "cro": chief_risk_officer,
+        "cco": chief_content_officer,
         "auditor": intel_auditor
     }
 
@@ -158,6 +172,7 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
     context = battlebox_payload.get("context", {})
     
     macro_data = {
+        "macro_environment": context.get("macro_environment"), # The DXY/SPX/VIX Oracle data
         "macro_bias": context.get("macro_bias"),
         "daily_resistance": levels.get("daily_resistance"),
         "daily_support": levels.get("daily_support"),
@@ -180,8 +195,8 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
     agents = _build_agents()
 
     task_macro = Task(
-        description=f"Analyze this Macro data: {json.dumps(macro_data)}. Identify the directional bias and structural strength.",
-        expected_output="A summary of the daily trend and macro structural alignment.",
+        description=f"Analyze this Macro data: {json.dumps(macro_data)}. Specifically note the Global Macro Environment risk posture. Identify the directional bias and structural strength.",
+        expected_output="A summary of the daily trend, macro structural alignment, and traditional finance risk posture.",
         agent=agents["macro"]
     )
 
@@ -203,25 +218,38 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
             f"Review the reports from the Macro, Micro, and Quant agents. "
             f"The breakout trigger is {levels.get('breakout_trigger')} and the breakdown trigger is {levels.get('breakdown_trigger')}. "
             "Determine the final tactical execution. Enforce the Measured Move math for targets based on the distance between the two triggers. "
-            "Output the final directive conforming strictly to the ExecutiveBrief JSON schema."
+            "Output a highly technical summary of the exact execution plan, including approval status, entry, stop, and exact mathematical targets. Do not output JSON."
+        ),
+        expected_output="A detailed technical summary of the execution plan.",
+        agent=agents["cro"]
+    )
+
+    task_cco = Task(
+        description=(
+            "Take the Chief Risk Officer's technical summary and format it into a clean, aggressive Markdown article for professional subscribers. "
+            "Use our terms: 'Kinetic Friction', 'Ghost Lead Verdict', and 'Tactical Perimeter'. "
+            "Then, output the final directive conforming strictly to the ExecutiveBrief JSON schema, placing your Markdown article into the 'formatted_newsletter_md' field."
         ),
         expected_output="A strictly typed JSON object matching the ExecutiveBrief schema.",
-        agent=agents["cro"],
+        agent=agents["cco"],
         output_pydantic=ExecutiveBrief
     )
 
     trading_crew = Crew(
-        agents=[agents["macro"], agents["micro"], agents["quant"], agents["cro"]],
-        tasks=[task_macro, task_micro, task_quant, task_cro],
+        agents=[agents["macro"], agents["micro"], agents["quant"], agents["cro"], agents["cco"]],
+        tasks=[task_macro, task_micro, task_quant, task_cro, task_cco],
         process=Process.sequential,
         verbose=False
     )
 
     try:
         result = trading_crew.kickoff()
-        brief_output: ExecutiveBrief = task_cro.output.pydantic
+        # CrewAI automatically returns the Pydantic output of the final task (task_cco)
+        brief_output: ExecutiveBrief = task_cco.output.pydantic
         
         _inject_brief_to_database(symbol, session_id, date_key, brief_output)
+        
+        # We return the dictionary containing the brief, the math, AND the markdown newsletter
         return {"status": "SUCCESS", "brief": brief_output.dict()}
 
     except Exception as e:
