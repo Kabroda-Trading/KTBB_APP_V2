@@ -1,7 +1,7 @@
 # main.py
 # ---------------------------------------------------------
 # KABRODA UNIFIED SERVER: BATTLEBOX (SSOT ENFORCED)
-# AUDIT FIX: Deployed Operator Commlink Chat API
+# AUDIT FIX: Wired Self-Healing Route to Persistent DB Locks
 # ---------------------------------------------------------
 import os
 import json 
@@ -31,7 +31,8 @@ import gravity_math
 import kabroda_mas_flow  
 import ledger_closing_engine
 
-from database import init_db, get_db, UserModel, CampaignLog
+# AUDIT FIX: Added SessionLock to imports
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -181,19 +182,24 @@ async def macro_war_room_page(request: Request, symbol: str = "BTC/USDT", db: Se
     latest_log = db.query(CampaignLog).filter(CampaignLog.symbol == db_sym).order_by(CampaignLog.id.desc()).first()
     
     if latest_log and not latest_log.mas_executive_brief and latest_log.mas_approval_status == 'PENDING':
-        from battlebox_pipeline import _LOCKED_PACKETS, _normalize_symbol
-        for key, pkt in _LOCKED_PACKETS.items():
-            if _normalize_symbol(symbol) in key:
-                asyncio.create_task(
-                    asyncio.to_thread(
-                        kabroda_mas_flow.run_mas_analysis,
-                        symbol=db_sym,
-                        session_id=latest_log.session_id,
-                        date_key=latest_log.date_key,
-                        battlebox_payload=pkt
-                    )
+        # ARCHITECTURE FIX: Pull payload from persistent DB instead of volatile RAM
+        lock_record = db.query(SessionLock).filter(
+            SessionLock.symbol == db_sym,
+            SessionLock.session_id == latest_log.session_id,
+            SessionLock.date_key == latest_log.date_key
+        ).first()
+
+        if lock_record:
+            pkt = json.loads(lock_record.packet_data)
+            asyncio.create_task(
+                asyncio.to_thread(
+                    kabroda_mas_flow.run_mas_analysis,
+                    symbol=db_sym,
+                    session_id=latest_log.session_id,
+                    date_key=latest_log.date_key,
+                    battlebox_payload=pkt
                 )
-                break
+            )
     
     ctx["mas_log"] = latest_log
     return _template_or_fallback(request, templates, "macro_war_room.html", ctx)
