@@ -1,9 +1,8 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v11.3 (MAS ORCHESTRATION UPGRADE)
+# KABRODA BATTLEBOX PIPELINE — v11.4 (MACRO ORACLE UPGRADE)
 # Purpose: Calculates Full EMA Alignment & Mean Deviation.
-# AUDIT FIX: Injected threaded MAS Orchestrator payload trigger to prevent 
-# async loop blocking upon session lock.
+# UPGRADE: Injected market_context_oracle into the SSOT payload.
 # ==============================================================================
 
 from __future__ import annotations
@@ -22,7 +21,8 @@ import sse_engine
 import structure_state_engine
 import gravity_engine
 import gravity_math
-import kabroda_mas_flow  # INJECTED: MAS Orchestrator
+import kabroda_mas_flow
+import market_context_oracle  # <-- NEW: Import the Macro Oracle
 from database import SessionLocal, SessionLock, GravityMemory 
 
 SESSION_CONFIGS = session_manager.SESSION_CONFIGS
@@ -262,7 +262,7 @@ def _fetch_macro_structure(symbol: str) -> List[Dict[str, Any]]:
         db.close()
 
 def _compute_sse_packet(
-    raw_5m: List[Dict], anchor_ts: int, macro_bias: str, micro_bias: str, fuel_gauge: Dict, kde_data: Dict, macro_fibs: Dict, harmonic_data: Dict, macro_structure: List[Dict], tuning: Optional[Dict] = None, raw_daily: List[Dict] = None  
+    raw_5m: List[Dict], anchor_ts: int, macro_bias: str, micro_bias: str, fuel_gauge: Dict, kde_data: Dict, macro_fibs: Dict, harmonic_data: Dict, macro_structure: List[Dict], macro_context: Dict, tuning: Optional[Dict] = None, raw_daily: List[Dict] = None  
 ) -> Dict[str, Any]: 
     lock_end_ts = int(anchor_ts) + 1800
     calibration = [c for c in raw_5m if anchor_ts <= int(c["time"]) < lock_end_ts]
@@ -311,6 +311,7 @@ def _compute_sse_packet(
     computed["context"]["micro_state"] = harmonic_data.get("micro_state", "CHOP")
     computed["context"]["1h_fuel_status"] = harmonic_data.get("1h_fuel_status", "UNKNOWN")
     computed["context"]["macro_structure"] = macro_structure 
+    computed["context"]["macro_environment"] = macro_context # <-- NEW: External Context
 
     return {
         "levels": computed["levels"], 
@@ -322,11 +323,24 @@ def _compute_sse_packet(
     }
 
 async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id: Optional[str] = None, operator_flex: bool = False, tuning: Optional[Dict] = None) -> Dict[str, Any]:
-    raw_5m = await fetch_live_5m(symbol)
-    raw_15m = await fetch_live_15m(symbol)
-    raw_1h = await fetch_live_1h(symbol)
-    raw_4h = await fetch_live_4h(symbol)
-    raw_daily = await fetch_live_daily(symbol)
+    # Concurrent fetching of required data arrays to prevent blocking
+    fetch_tasks = [
+        fetch_live_5m(symbol),
+        fetch_live_15m(symbol),
+        fetch_live_1h(symbol),
+        fetch_live_4h(symbol),
+        fetch_live_daily(symbol),
+        market_context_oracle.get_global_macro_context() # <-- NEW: Fetch the Oracle data
+    ]
+    
+    results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+    
+    raw_5m = results[0] if not isinstance(results[0], Exception) else []
+    raw_15m = results[1] if not isinstance(results[1], Exception) else []
+    raw_1h = results[2] if not isinstance(results[2], Exception) else []
+    raw_4h = results[3] if not isinstance(results[3], Exception) else []
+    raw_daily = results[4] if not isinstance(results[4], Exception) else []
+    macro_context = results[5] if not isinstance(results[5], Exception) else {}
 
     if not raw_5m: return {"status": "ERROR", "message": "No Data"}
 
@@ -360,7 +374,8 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                     "macro_fibs": macro_fibs,
                     "micro_state": harmonic_data.get("micro_state"),
                     "1h_fuel_status": harmonic_data.get("1h_fuel_status"),
-                    "macro_structure": macro_structure
+                    "macro_structure": macro_structure,
+                    "macro_environment": macro_context
                 }
             }
         }
@@ -381,7 +396,7 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                 if existing_lock:
                     _LOCKED_PACKETS[session_key] = json.loads(existing_lock.packet_data)
                 else:
-                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, macro_structure, tuning=tuning, raw_daily=raw_daily)
+                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, macro_structure, macro_context, tuning=tuning, raw_daily=raw_daily)
                     if "error" in pkt: 
                         return {"status": "ERROR", "message": pkt["error"], "battlebox": {"raw_15m": raw_15m, "war_map_context": _war_map_from_1h(raw_1h), "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
                     
@@ -399,9 +414,6 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                     
                     gravity_engine.log_kabroda_bedrock(symbol, pkt["levels"], pkt["lock_time"])
 
-                    # --- KABRODA ARCHITECTURE UPGRADE: IGNITE MAS ORCHESTRATOR ---
-                    # Execute CrewAI in a background thread to prevent blocking the FastAPI loop.
-                    # This ensures the UI loads instantly while the CRO builds the executive brief.
                     asyncio.create_task(
                         asyncio.to_thread(
                             kabroda_mas_flow.run_mas_analysis,
@@ -411,13 +423,12 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                             battlebox_payload=pkt
                         )
                     )
-                    # -------------------------------------------------------------
 
             except Exception as e:
                 print(f"DATABASE VAULT ERROR: {e}")
                 traceback.print_exc()
                 if session_key not in _LOCKED_PACKETS:
-                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, macro_structure, tuning=tuning, raw_daily=raw_daily)
+                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, macro_structure, macro_context, tuning=tuning, raw_daily=raw_daily)
                     if "error" not in pkt:
                         _LOCKED_PACKETS[session_key] = pkt
             finally:
