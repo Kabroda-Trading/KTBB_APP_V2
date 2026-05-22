@@ -1,7 +1,7 @@
 # main.py
 # ---------------------------------------------------------
 # KABRODA UNIFIED SERVER: BATTLEBOX (SSOT ENFORCED)
-# AUDIT FIX: Restored Missing Foreign Intel Regex Route & Agent Trigger
+# AUDIT FIX: Deployed Operator Commlink Chat API
 # ---------------------------------------------------------
 import os
 import json 
@@ -218,6 +218,22 @@ async def api_gravity_scan(symbol: str = "BTC/USDT"):
 class ForeignIntelPayload(BaseModel):
     raw_text: str
 
+class MASChatPayload(BaseModel):
+    symbol: str
+    message: str
+
+@app.post("/api/research/chat-mas")
+async def chat_with_mas(payload: MASChatPayload, request: Request, db: Session = Depends(get_db)):
+    """Operator Commlink: Direct interrogation of the Chief Risk Officer."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"): 
+        return JSONResponse({"ok": False, "error": "Unauthorized"})
+    
+    db_sym = payload.symbol.replace("USDT", "/USDT") if "/" not in payload.symbol else payload.symbol
+    response_text = await asyncio.to_thread(kabroda_mas_flow.interrogate_cro, db_sym, payload.message)
+    
+    return JSONResponse({"ok": True, "reply": response_text})
+
 @app.post("/api/research/audit-intel")
 async def audit_foreign_intel(payload: ForeignIntelPayload, request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
@@ -247,7 +263,6 @@ async def audit_foreign_intel(payload: ForeignIntelPayload, request: Request, db
             "stop_loss": sl
         }
         
-        # Pull SSOT Context to audit against
         from battlebox_pipeline import _LOCKED_PACKETS, _normalize_symbol
         current_ssot = {}
         for key, pkt in _LOCKED_PACKETS.items():
@@ -258,7 +273,6 @@ async def audit_foreign_intel(payload: ForeignIntelPayload, request: Request, db
         if not current_ssot:
             return JSONResponse({"ok": False, "error": f"No active Kabroda session locked for {asset}. Cannot perform audit."})
 
-        # Run MAS Auditor Agent synchronously
         audit_result = kabroda_mas_flow.audit_foreign_intel_pipeline(parsed_packet, current_ssot)
         
         if audit_result["status"] == "SUCCESS":

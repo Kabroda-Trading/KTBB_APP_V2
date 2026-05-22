@@ -10,6 +10,7 @@ from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 from crewai import Agent, Task, Crew, Process
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
 from database import SessionLocal, CampaignLog
 
 # --- 1. PYDANTIC SCHEMAS (THE SSOT ENFORCERS) ---
@@ -32,7 +33,6 @@ class IntelAuditReport(BaseModel):
 
 # --- 2. RAG MEMORY INJECTION (POSTGRESQL) ---
 def _fetch_cro_memory(symbol: str) -> str:
-    """Queries PostgreSQL to build short-term tactical memory for the CRO."""
     db = SessionLocal()
     try:
         logs = db.query(CampaignLog).filter(
@@ -271,7 +271,48 @@ def audit_foreign_intel_pipeline(intel_packet: Dict[str, Any], battlebox_payload
         print(f"INTEL AUDIT ERROR: {e}")
         return {"status": "ERROR", "message": str(e)}
 
-# --- 6. DATABASE INJECTION ---
+# --- 6. OPERATOR COMMLINK (DIRECT INTERROGATION) ---
+def interrogate_cro(symbol: str, user_message: str) -> str:
+    """Directly interrogates the Chief Risk Officer regarding current session context."""
+    db = SessionLocal()
+    try:
+        # Fetch the most recent CampaignLog to establish working memory
+        log = db.query(CampaignLog).filter(CampaignLog.symbol == symbol).order_by(CampaignLog.id.desc()).first()
+        
+        context_str = "No active campaign data found. You are analyzing raw market conditions."
+        if log:
+            context_str = (
+                f"LATEST SESSION DATA:\n"
+                f"Approval Status: {log.mas_approval_status}\n"
+                f"Bias: {log.bias}\n"
+                f"Entry Price: {log.entry_price}\n"
+                f"Stop Loss: {log.stop_loss}\n"
+                f"Target 1: {log.t1}\n"
+                f"Executive Brief Authored by you: {log.mas_executive_brief}\n"
+            )
+
+        llm = ChatOpenAI(temperature=0.2, model="gpt-4o") # Slight temp increase for conversational flow
+        sys_prompt = SystemMessage(content=(
+            "You are the Kabroda Chief Risk Officer (Ghost Lead). "
+            "You are communicating directly with the human Operator in the Macro War Room. "
+            "Answer the Operator's query directly, professionally, and concisely. "
+            "You enforce the Single Source of Truth (SSOT). Rely ONLY on Kabroda Measured Move math, "
+            "Gravity physics, and the context provided. Do not invent external data. "
+            f"CURRENT CONTEXT FOR {symbol}: {context_str}"
+        ))
+        
+        human_prompt = HumanMessage(content=user_message)
+
+        response = llm.invoke([sys_prompt, human_prompt])
+        return response.content
+
+    except Exception as e:
+        print(f"COMMLINK ERROR: {e}")
+        return f"COMMLINK FAILURE: {str(e)}"
+    finally:
+        db.close()
+
+# --- 7. DATABASE INJECTION ---
 def _inject_brief_to_database(symbol: str, session_id: str, date_key: str, brief: ExecutiveBrief):
     db = SessionLocal()
     try:
