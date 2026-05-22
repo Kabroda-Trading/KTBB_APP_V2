@@ -1,7 +1,6 @@
 # main.py
 # ---------------------------------------------------------
-# KABRODA UNIFIED SERVER: BATTLEBOX (SSOT ENFORCED)
-# AUDIT FIX: Wired Foreign Intel Parser to Persistent DB Locks
+# KABRODA UNIFIED SERVER: PRIVATE TEAM TERMINAL
 # ---------------------------------------------------------
 import os
 import json 
@@ -21,7 +20,6 @@ from pydantic import BaseModel
 
 # --- CORE IMPORTS ---
 import auth
-import billing
 import battlebox_pipeline
 import market_radar
 import research_lab
@@ -32,7 +30,6 @@ import kabroda_mas_flow
 import ledger_closing_engine
 
 from database import init_db, get_db, UserModel, CampaignLog, SessionLock
-from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -47,7 +44,7 @@ async def lifespan(app: FastAPI):
     app.state.gravity_task.cancel()
     app.state.ledger_task.cancel()
 
-app = FastAPI(title="Kabroda BattleBox", version="11.5", lifespan=lifespan)
+app = FastAPI(title="Kabroda BattleBox", version="12.0", lifespan=lifespan)
 
 SECRET_KEY = os.getenv("SESSION_SECRET", "kabroda_prod_key_999")
 
@@ -72,7 +69,6 @@ app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), na
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 app.include_router(auth.router)
-app.include_router(billing.router, prefix="/billing")
 
 def _template_or_fallback(request: Request, templates: Jinja2Templates, name: str, context: Dict[str, Any]):
     try: 
@@ -94,88 +90,53 @@ def get_user_context(request: Request, db: Session):
         "is_admin": getattr(user, "is_admin", False) if user else False,
         "username": getattr(user, "username", "Operative") if user else "Operative",
         "email": getattr(user, "email", "") if user else "",
-        "sub_status": getattr(user, "subscription_status", "inactive") if user else "inactive",
         "user": user
     })
-    
-    if user:
-        ms = get_membership_state(user)
-        base_context.update({"plan_label": ms.label})
-        
     return base_context
 
-# --- PUBLIC ROUTES ---
+# --- PUBLIC ROUTES (LOCKED DOWN) ---
 @app.get("/")
 async def home(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
-    return _template_or_fallback(request, templates, "home.html", ctx)
-
-@app.get("/analysis")
-async def analysis(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    return _template_or_fallback(request, templates, "analysis.html", ctx)
-
-@app.get("/how-it-works")
-async def how_it_works(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    return _template_or_fallback(request, templates, "how_it_works.html", ctx)
-
-@app.get("/pricing")
-async def pricing(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    return _template_or_fallback(request, templates, "pricing.html", ctx)
-
-@app.get("/about")
-async def about(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    return _template_or_fallback(request, templates, "about.html", ctx)
-
-@app.get("/privacy")
-async def privacy_page(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    return _template_or_fallback(request, templates, "privacy.html", ctx)
+    if ctx["is_logged_in"]:
+        return RedirectResponse(url="/suite", status_code=303)
+    return RedirectResponse(url="/login", status_code=303)
 
 # --- SUITE ROUTES ---
 @app.get("/suite")
 async def suite(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "session_control.html", ctx)
 
 @app.get("/suite/battle-control")
 async def battle_control_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "suite_home.html", ctx)
 
 @app.get("/suite/research-lab")
 async def suite_research_lab_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "research_lab.html", ctx)
 
 @app.get("/suite/radar")
 async def radar_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "market_radar.html", ctx)
 
 @app.get("/suite/gravity-map")
 async def gravity_map_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "gravity_map.html", ctx)
 
 @app.get("/suite/macro-war-room")
 async def macro_war_room_page(request: Request, symbol: str = "BTC/USDT", db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    require_paid_access(ctx["user"])
     
     db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
     latest_log = db.query(CampaignLog).filter(CampaignLog.symbol == db_sym).order_by(CampaignLog.id.desc()).first()
@@ -228,7 +189,6 @@ class MASChatPayload(BaseModel):
 
 @app.post("/api/research/chat-mas")
 async def chat_with_mas(payload: MASChatPayload, request: Request, db: Session = Depends(get_db)):
-    """Operator Commlink: Direct interrogation of the Chief Risk Officer."""
     ctx = get_user_context(request, db)
     if not ctx.get("is_logged_in"): 
         return JSONResponse({"ok": False, "error": "Unauthorized"})
@@ -245,7 +205,6 @@ async def audit_foreign_intel(payload: ForeignIntelPayload, request: Request, db
         return JSONResponse({"ok": False, "error": "Unauthorized"})
 
     text = payload.raw_text
-    
     try:
         header_match = re.search(r'([A-Z]+)\s*\|\s*([A-Z]+)\s*@\s*\$([\d,.]+)', text)
         asset = f"{header_match.group(1)}/{header_match.group(2)}"
@@ -269,7 +228,6 @@ async def audit_foreign_intel(payload: ForeignIntelPayload, request: Request, db
         
         db_sym = asset.replace("USDT", "/USDT") if "/" not in asset else asset
         
-        # ARCHITECTURE FIX: Pull SSOT Context from DB Vault, NOT Volatile RAM
         lock_record = db.query(SessionLock).filter(
             SessionLock.symbol == db_sym
         ).order_by(SessionLock.id.desc()).first()
@@ -301,14 +259,12 @@ async def audit_foreign_intel(payload: ForeignIntelPayload, request: Request, db
 async def indicators(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    require_paid_access(ctx["user"])
     return _template_or_fallback(request, templates, "indicators.html", ctx)
 
 @app.get("/account")
 async def account(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    ctx["tier_label"] = ctx.get("plan_label", "")
     return _template_or_fallback(request, templates, "account.html", ctx)
 
 @app.post("/account/profile")
@@ -443,19 +399,15 @@ async def admin_reset_password(request: Request, db: Session = Depends(get_db)):
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
     uid = request.session.get(auth.SESSION_KEY)
     if not uid: raise HTTPException(status_code=401)
-    user = db.query(UserModel).filter(UserModel.id == uid).first()
-    require_paid_access(user)
     
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
     session_id = payload.get("session_id")
-    requested_tz = payload.get("session_tz") or (getattr(user, "session_tz", None) or "UTC")
-    ensure_symbol_allowed(user, symbol)
     
     if session_id:
         out = await battlebox_pipeline.get_session_review(symbol=symbol, session_id=session_id)
     else:
-        out = await battlebox_pipeline.get_session_review(symbol=symbol, session_tz=requested_tz)
+        out = await battlebox_pipeline.get_session_review(symbol=symbol)
     return JSONResponse(out)
 
 @app.post("/api/dmr/live")
@@ -463,11 +415,9 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
     uid = request.session.get(auth.SESSION_KEY)
     if not uid: raise HTTPException(status_code=401)
     user = db.query(UserModel).filter(UserModel.id == uid).first()
-    require_paid_access(user)
     
     payload = await request.json()
     symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    ensure_symbol_allowed(user, symbol)
     
     out = await battlebox_pipeline.get_live_battlebox(
         symbol=symbol,
@@ -486,8 +436,6 @@ async def run_radar_scan(request: Request):
 async def research_run(request: Request, db: Session = Depends(get_db)):
     uid = request.session.get(auth.SESSION_KEY)
     if not uid: raise HTTPException(status_code=401)
-    user = db.query(UserModel).filter(UserModel.id == uid).first()
-    require_paid_access(user)
     
     payload = await request.json()
     try:
@@ -514,11 +462,6 @@ async def simulator_run(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         traceback.print_exc()
         return JSONResponse({"ok": False, "error": str(e)})
-    
-@app.get("/processing")
-async def processing_route(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    return _template_or_fallback(request, templates, "processing.html", ctx)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
