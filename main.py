@@ -1,7 +1,7 @@
 # main.py
 # ---------------------------------------------------------
 # KABRODA UNIFIED SERVER: BATTLEBOX (SSOT ENFORCED)
-# AUDIT FIX: Wired Self-Healing Route to Persistent DB Locks
+# AUDIT FIX: Wired Foreign Intel Parser to Persistent DB Locks
 # ---------------------------------------------------------
 import os
 import json 
@@ -31,7 +31,6 @@ import gravity_math
 import kabroda_mas_flow  
 import ledger_closing_engine
 
-# AUDIT FIX: Added SessionLock to imports
 from database import init_db, get_db, UserModel, CampaignLog, SessionLock
 from membership import get_membership_state, require_paid_access, ensure_symbol_allowed
 
@@ -182,7 +181,6 @@ async def macro_war_room_page(request: Request, symbol: str = "BTC/USDT", db: Se
     latest_log = db.query(CampaignLog).filter(CampaignLog.symbol == db_sym).order_by(CampaignLog.id.desc()).first()
     
     if latest_log and not latest_log.mas_executive_brief and latest_log.mas_approval_status == 'PENDING':
-        # ARCHITECTURE FIX: Pull payload from persistent DB instead of volatile RAM
         lock_record = db.query(SessionLock).filter(
             SessionLock.symbol == db_sym,
             SessionLock.session_id == latest_log.session_id,
@@ -269,15 +267,17 @@ async def audit_foreign_intel(payload: ForeignIntelPayload, request: Request, db
             "stop_loss": sl
         }
         
-        from battlebox_pipeline import _LOCKED_PACKETS, _normalize_symbol
-        current_ssot = {}
-        for key, pkt in _LOCKED_PACKETS.items():
-            if _normalize_symbol(asset) in key:
-                current_ssot = pkt
-                break
+        db_sym = asset.replace("USDT", "/USDT") if "/" not in asset else asset
+        
+        # ARCHITECTURE FIX: Pull SSOT Context from DB Vault, NOT Volatile RAM
+        lock_record = db.query(SessionLock).filter(
+            SessionLock.symbol == db_sym
+        ).order_by(SessionLock.id.desc()).first()
                 
-        if not current_ssot:
-            return JSONResponse({"ok": False, "error": f"No active Kabroda session locked for {asset}. Cannot perform audit."})
+        if not lock_record:
+            return JSONResponse({"ok": False, "error": f"No active Kabroda session locked for {asset} in DB. Cannot perform audit."})
+
+        current_ssot = json.loads(lock_record.packet_data)
 
         audit_result = kabroda_mas_flow.audit_foreign_intel_pipeline(parsed_packet, current_ssot)
         
