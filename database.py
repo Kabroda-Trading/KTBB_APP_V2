@@ -55,6 +55,12 @@ def init_db():
     except Exception:
         pass 
 
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN formatted_newsletter TEXT"))
+    except Exception:
+        pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -147,3 +153,4 @@ class CampaignLog(Base):
     # --- MAS UPGRADE COLUMNS ---
     mas_executive_brief = Column(String, nullable=True)
     mas_approval_status = Column(String, default="PENDING", nullable=False)
+    formatted_newsletter = Column(String, nullable=True)
