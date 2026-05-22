@@ -172,7 +172,7 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
     context = battlebox_payload.get("context", {})
     
     macro_data = {
-        "macro_environment": context.get("macro_environment"), # The DXY/SPX/VIX Oracle data
+        "macro_environment": context.get("macro_environment"),
         "macro_bias": context.get("macro_bias"),
         "daily_resistance": levels.get("daily_resistance"),
         "daily_support": levels.get("daily_support"),
@@ -244,12 +244,10 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
 
     try:
         result = trading_crew.kickoff()
-        # CrewAI automatically returns the Pydantic output of the final task (task_cco)
         brief_output: ExecutiveBrief = task_cco.output.pydantic
         
         _inject_brief_to_database(symbol, session_id, date_key, brief_output)
         
-        # We return the dictionary containing the brief, the math, AND the markdown newsletter
         return {"status": "SUCCESS", "brief": brief_output.dict()}
 
     except Exception as e:
@@ -304,7 +302,6 @@ def interrogate_cro(symbol: str, user_message: str) -> str:
     """Directly interrogates the Chief Risk Officer regarding current session context."""
     db = SessionLocal()
     try:
-        # Fetch the most recent CampaignLog to establish working memory
         log = db.query(CampaignLog).filter(CampaignLog.symbol == symbol).order_by(CampaignLog.id.desc()).first()
         
         context_str = "No active campaign data found. You are analyzing raw market conditions."
@@ -319,7 +316,7 @@ def interrogate_cro(symbol: str, user_message: str) -> str:
                 f"Executive Brief Authored by you: {log.mas_executive_brief}\n"
             )
 
-        llm = ChatOpenAI(temperature=0.2, model="gpt-4o") # Slight temp increase for conversational flow
+        llm = ChatOpenAI(temperature=0.2, model="gpt-4o")
         sys_prompt = SystemMessage(content=(
             "You are the Kabroda Chief Risk Officer (Ghost Lead). "
             "You are communicating directly with the human Operator in the Macro War Room. "
@@ -360,9 +357,10 @@ def _inject_brief_to_database(symbol: str, session_id: str, date_key: str, brief
             log.t2 = brief.t2
             log.t3 = brief.t3
             log.status = brief.approval_status
+            log.formatted_newsletter = brief.formatted_newsletter_md
             
             db.commit()
-            print(f"|| MAS OVERLAY SECURED || Executive Brief injected for {symbol}.")
+            print(f"|| MAS OVERLAY SECURED || Executive Brief & Newsletter injected for {symbol}.")
         else:
             print(f"|| MAS WARNING || No CampaignLog found for {symbol} | {session_id} to inject brief.")
     except Exception as e:

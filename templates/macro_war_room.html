@@ -5,6 +5,7 @@
     <title>Kabroda | Macro War Room</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         body { background-color: #050505; color: #f8fafc; font-family: 'Inter', sans-serif; margin: 0; display: flex; flex-direction: column; min-height: 100vh; }
         
@@ -14,8 +15,11 @@
         
         .asset-selector { background: #111; color: #0ea5e9; border: 1px solid #333; padding: 8px 16px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; border-radius: 4px; outline: none; cursor: pointer; }
 
+        /* --- THE SKYSCRAPER DESK LAYOUT --- */
+        .desk-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 30px; margin-bottom: 30px; }
+
         /* --- GHOST LEAD TERMINAL (MAS OVERLAY) --- */
-        .ghost-lead-terminal { background: rgba(10, 10, 10, 0.8); border: 1px solid #222; border-left: 4px solid #0ea5e9; border-radius: 8px; padding: 24px; font-family: 'JetBrains Mono', monospace; position: relative; overflow: hidden; margin-bottom: 30px; box-shadow: 0 0 20px rgba(14, 165, 233, 0.05); }
+        .ghost-lead-terminal { background: rgba(10, 10, 10, 0.8); border: 1px solid #222; border-left: 4px solid #0ea5e9; border-radius: 8px; padding: 24px; font-family: 'JetBrains Mono', monospace; position: relative; overflow: hidden; box-shadow: 0 0 20px rgba(14, 165, 233, 0.05); }
         .ghost-lead-terminal::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(180deg, rgba(14, 165, 233, 0.03) 0%, transparent 100%); pointer-events: none; }
         
         .gl-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #222; padding-bottom: 12px; margin-bottom: 16px; }
@@ -27,12 +31,37 @@
 
         .gl-brief { font-size: 14px; line-height: 1.6; margin-bottom: 24px; color: #94a3b8; background: #050505; padding: 16px; border-radius: 6px; border: 1px dashed #333; }
         
-        .gl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+        /* NEW: Newsletter formatting */
+        .newsletter-content { font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.6; margin-bottom: 24px; color: #cbd5e1; background: #050505; padding: 20px; border-radius: 6px; border: 1px dashed #333; max-height: 400px; overflow-y: auto; position: relative; z-index: 2; }
+        .newsletter-content h1, .newsletter-content h2, .newsletter-content h3 { color: #fff; margin-top: 0; font-family: 'Rajdhani'; letter-spacing: 1px; text-transform: uppercase; }
+        .newsletter-content strong { color: #0ea5e9; }
+        .newsletter-content ul { padding-left: 20px; }
+        .newsletter-content li { margin-bottom: 5px; }
+
+        .gl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; position: relative; z-index: 2;}
         .gl-data-point { background: #050505; border: 1px solid #222; padding: 12px; border-radius: 6px; }
         .gl-label { display: block; font-size: 10px; color: #64748b; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 1px; }
         .gl-value { font-size: 18px; color: #f8fafc; font-weight: 700; font-family: 'Rajdhani'; }
         .gl-value.cyan { color: #0ea5e9; text-shadow: 0 0 8px rgba(14, 165, 233, 0.3); }
         .gl-value.red { color: #ef4444; }
+
+        /* --- OPERATOR COMMLINK --- */
+        .commlink-terminal { background: rgba(10, 10, 10, 0.8); border: 1px solid #222; border-left: 4px solid #a855f7; border-radius: 8px; padding: 24px; display: flex; flex-direction: column; position: relative; z-index: 2;}
+        .cl-title { color: #a855f7; font-weight: 800; font-size: 16px; text-transform: uppercase; letter-spacing: 2px; font-family: 'JetBrains Mono'; border-bottom: 1px solid #222; padding-bottom: 12px; margin-bottom: 16px; }
+        .chat-window { flex: 1; background: #050505; border: 1px solid #333; border-radius: 6px; padding: 15px; margin-bottom: 15px; min-height: 300px; max-height: 450px; overflow-y: auto; font-family: 'JetBrains Mono'; font-size: 12px; display: flex; flex-direction: column; gap: 10px; }
+        
+        .chat-bubble { padding: 10px 15px; border-radius: 6px; max-width: 85%; line-height: 1.5; font-family: 'Inter', sans-serif;}
+        .chat-user { background: #1e293b; color: #fff; align-self: flex-end; border-bottom-right-radius: 0; }
+        .chat-cro { background: rgba(168, 85, 247, 0.1); color: #d8b4fe; align-self: flex-start; border-bottom-left-radius: 0; border: 1px solid rgba(168, 85, 247, 0.3); }
+        
+        .chat-input-container { display: flex; gap: 10px; }
+        .chat-input { flex: 1; background: #050505; border: 1px solid #333; color: #fff; padding: 12px; border-radius: 4px; font-family: 'Inter'; font-size: 14px; outline: none; }
+        .chat-input:focus { border-color: #a855f7; }
+        .chat-btn { background: #a855f7; color: #000; border: none; padding: 0 20px; font-weight: 800; font-family: 'JetBrains Mono'; border-radius: 4px; cursor: pointer; transition: 0.2s; }
+        .chat-btn:hover { background: #d8b4fe; }
+
+        .copy-btn { background: transparent; border: 1px solid #333; color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 11px; padding: 4px 8px; cursor: pointer; border-radius: 4px; transition: 0.2s; }
+        .copy-btn:hover { background: #1e293b; color: #fff; }
 
         /* --- EXISTING KPI GRID --- */
         .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
@@ -78,50 +107,70 @@
             </select>
         </div>
 
-        <div class="ghost-lead-terminal">
-            <div class="gl-header">
-                <span class="gl-title">Ghost Lead // Tactical Brief</span>
-                <span class="gl-status-badge {% if mas_log and mas_log.mas_approval_status == 'REJECTED' %}rejected{% elif mas_log and mas_log.mas_approval_status == 'WAITING_FOR_15M' %}waiting{% endif %}">
-                    [{{ mas_log.mas_approval_status if mas_log and mas_log.mas_approval_status else 'AWAITING UPLINK' }}]
-                </span>
-            </div>
+        <div class="desk-grid">
+            <div class="ghost-lead-terminal" style="margin-bottom: 0;">
+                <div class="gl-header">
+                    <span class="gl-title">CCO Desk // Tactical Perimeter Brief</span>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <button class="copy-btn" onclick="copyNewsletter()">📋 COPY MARKDOWN</button>
+                        <span class="gl-status-badge {% if mas_log and mas_log.mas_approval_status == 'REJECTED' %}rejected{% elif mas_log and mas_log.mas_approval_status == 'WAITING_FOR_15M' %}waiting{% endif %}">
+                            [{{ mas_log.mas_approval_status if mas_log and mas_log.mas_approval_status else 'AWAITING UPLINK' }}]
+                        </span>
+                    </div>
+                </div>
 
-            <div class="gl-brief">
-                {% if mas_log and mas_log.mas_executive_brief %}
-                    > {{ mas_log.mas_executive_brief }}
-                {% else %}
-                    > Establishing uplink... CRO analyzing structural alignment and kinematic friction for current session...
+                <div class="newsletter-content" id="newsletterOutput">
+                    {% if mas_log and mas_log.formatted_newsletter %}
+                        <div id="rawMarkdown" style="display:none;">{{ mas_log.formatted_newsletter }}</div>
+                    {% else %}
+                        <div style="font-family: 'JetBrains Mono'; color: #64748b;">> Establishing uplink... CCO currently drafting the session brief.</div>
+                    {% endif %}
+                </div>
+
+                {% if mas_log and mas_log.mas_approval_status == 'APPROVED' %}
+                <div class="gl-grid">
+                    <div class="gl-data-point">
+                        <span class="gl-label">Vector</span>
+                        <span class="gl-value cyan">{{ mas_log.bias }}</span>
+                    </div>
+                    <div class="gl-data-point">
+                        <span class="gl-label">Execution Trigger</span>
+                        <span class="gl-value">${{ mas_log.entry_price }}</span>
+                    </div>
+                    <div class="gl-data-point">
+                        <span class="gl-label">Hard Stop Loss</span>
+                        <span class="gl-value red">${{ mas_log.stop_loss }}</span>
+                    </div>
+                    <div class="gl-data-point">
+                        <span class="gl-label">Target 1 (1.0)</span>
+                        <span class="gl-value">${{ mas_log.t1 }}</span>
+                    </div>
+                    <div class="gl-data-point">
+                        <span class="gl-label">Target 2 (1.618)</span>
+                        <span class="gl-value">${{ mas_log.t2 }}</span>
+                    </div>
+                    <div class="gl-data-point">
+                        <span class="gl-label">Target 3 (2.618)</span>
+                        <span class="gl-value">${{ mas_log.t3 }}</span>
+                    </div>
+                </div>
                 {% endif %}
             </div>
 
-            {% if mas_log and mas_log.mas_approval_status == 'APPROVED' %}
-            <div class="gl-grid">
-                <div class="gl-data-point">
-                    <span class="gl-label">Vector</span>
-                    <span class="gl-value cyan">{{ mas_log.bias }}</span>
+            <div class="commlink-terminal">
+                <div class="cl-title">OPERATOR COMMLINK // DIRECT INTERROGATION</div>
+                
+                <div class="chat-window" id="chatWindow">
+                    <div class="chat-bubble chat-cro">
+                        <strong>GHOST LEAD [CRO]:</strong> Uplink secure. I have locked the SSOT variables for {{ request.query_params.symbol | default('BTC/USDT') }}. How can I assist with your execution logic?
+                    </div>
                 </div>
-                <div class="gl-data-point">
-                    <span class="gl-label">Execution Trigger</span>
-                    <span class="gl-value">${{ mas_log.entry_price }}</span>
-                </div>
-                <div class="gl-data-point">
-                    <span class="gl-label">Hard Stop Loss</span>
-                    <span class="gl-value red">${{ mas_log.stop_loss }}</span>
-                </div>
-                <div class="gl-data-point">
-                    <span class="gl-label">Target 1 (1.0)</span>
-                    <span class="gl-value">${{ mas_log.t1 }}</span>
-                </div>
-                <div class="gl-data-point">
-                    <span class="gl-label">Target 2 (1.618)</span>
-                    <span class="gl-value">${{ mas_log.t2 }}</span>
-                </div>
-                <div class="gl-data-point">
-                    <span class="gl-label">Target 3 (2.618)</span>
-                    <span class="gl-value">${{ mas_log.t3 }}</span>
+
+                <div class="chat-input-container">
+                    <input type="text" id="chatInput" class="chat-input" placeholder="Query the Chief Risk Officer..." onkeypress="handleEnter(event)">
+                    <button class="chat-btn" onclick="sendMessage()" id="chatSendBtn">SEND</button>
                 </div>
             </div>
-            {% endif %}
         </div>
 
         <div class="ghost-lead-terminal" style="margin-top: 0px; border-left-color: #facc15;">
@@ -129,7 +178,7 @@
                 <span class="gl-title" style="color: #facc15;">External Intel Injection // Manual Uplink</span>
             </div>
             
-            <div style="display: flex; gap: 16px; align-items: flex-start;">
+            <div style="display: flex; gap: 16px; align-items: flex-start; position: relative; z-index: 2;">
                 <textarea id="foreignIntelInput" placeholder="Paste MetaSignals raw text here...&#10;Example:&#10;BTC | USDT @ $76,821.20 - 1H - 1.1 G1&#10;Target 1: 77,870.68..." 
                     style="flex: 1; background: #050505; border: 1px solid #333; color: #94a3b8; font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 12px; border-radius: 6px; min-height: 120px; resize: vertical; outline: none;"></textarea>
                 
@@ -138,7 +187,7 @@
                 </button>
             </div>
             
-            <div id="intelResponseConsole" style="margin-top: 16px; font-size: 12px; color: #22c55e; display: none;">
+            <div id="intelResponseConsole" style="margin-top: 16px; font-size: 12px; color: #22c55e; display: none; position: relative; z-index: 2;">
                 > Awaiting execution...
             </div>
         </div>
@@ -186,12 +235,90 @@
             window.location.href = `/suite/macro-war-room?symbol=${encodeURIComponent(sym)}`;
         }
 
+        // --- NEW: Render Markdown on Load ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const rawEl = document.getElementById('rawMarkdown');
+            if (rawEl) {
+                const rawText = rawEl.innerText;
+                document.getElementById('newsletterOutput').innerHTML = marked.parse(rawText);
+            }
+            fetchWarRoomData();
+        });
+
+        // --- NEW: Copy Markdown ---
+        function copyNewsletter() {
+            const rawEl = document.getElementById('rawMarkdown');
+            if (!rawEl) return;
+            navigator.clipboard.writeText(rawEl.innerText).then(() => {
+                alert("Markdown copied to clipboard. Ready for Substack/Beehiiv.");
+            });
+        }
+
+        // --- NEW: Chat Interface Logic ---
+        function handleEnter(e) {
+            if (e.key === 'Enter') sendMessage();
+        }
+
+        async function sendMessage() {
+            const inputEl = document.getElementById('chatInput');
+            const msg = inputEl.value.trim();
+            if (!msg) return;
+
+            const chatWindow = document.getElementById('chatWindow');
+            const sym = document.getElementById('symSelect').value;
+            const btn = document.getElementById('chatSendBtn');
+
+            const userBubble = document.createElement('div');
+            userBubble.className = 'chat-bubble chat-user';
+            userBubble.innerText = msg;
+            chatWindow.appendChild(userBubble);
+            
+            inputEl.value = '';
+            btn.disabled = true;
+            btn.innerText = '...';
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+
+            try {
+                const res = await fetch('/api/research/chat-mas', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol: sym, message: msg })
+                });
+                
+                const data = await res.json();
+                
+                const croBubble = document.createElement('div');
+                croBubble.className = 'chat-bubble chat-cro';
+                
+                if (data.ok) {
+                    croBubble.innerHTML = `<strong>GHOST LEAD:</strong> ${data.reply}`;
+                } else {
+                    croBubble.innerHTML = `<strong>SYSTEM ERROR:</strong> Interrogation failed. Recon lost.`;
+                    croBubble.style.color = '#ef4444';
+                    croBubble.style.borderColor = '#ef4444';
+                }
+                chatWindow.appendChild(croBubble);
+
+            } catch (e) {
+                const errorBubble = document.createElement('div');
+                errorBubble.className = 'chat-bubble chat-cro';
+                errorBubble.innerHTML = `<strong>SYSTEM ERROR:</strong> Uplink severed.`;
+                errorBubble.style.color = '#ef4444';
+                errorBubble.style.borderColor = '#ef4444';
+                chatWindow.appendChild(errorBubble);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'SEND';
+                chatWindow.scrollTop = chatWindow.scrollHeight;
+            }
+        }
+
+        // --- RESTORED JS FUNCTIONS ---
         async function fetchWarRoomData() {
-            document.getElementById('loader').style.display = 'flex';
+            // document.getElementById('loader').style.display = 'flex'; // Optional: comment out if too jarring
             const sym = document.getElementById('symSelect').value;
             
             try {
-                // Fetch the exact same SSOT data used by the Gravity Map
                 const res = await fetch(`/api/gravity/scan?symbol=${encodeURIComponent(sym)}`);
                 const data = await res.json();
                 
@@ -208,10 +335,8 @@
         }
 
         function processExecutiveLogic(livePrice, beams) {
-            // 1. Update Telemetry
             document.getElementById('tel-price').innerText = `$${livePrice.toFixed(2)}`;
 
-            // Sort beams to find ceiling and floor relative to live price
             const ceilings = beams.filter(b => b.price >= livePrice).sort((a,b) => a.price - b.price);
             const floors = beams.filter(b => b.price < livePrice).sort((a,b) => b.price - a.price);
 
@@ -221,7 +346,6 @@
             document.getElementById('tel-ceil').innerText = ceilPrice ? `$${ceilPrice.toFixed(2)}` : 'BLUE SKY';
             document.getElementById('tel-floor').innerText = floorPrice ? `$${floorPrice.toFixed(2)}` : 'PRICE DISCOVERY';
 
-            // 2. Kinetic Proximity KPI
             let minDistancePct = Infinity;
             let proxState = 'state-neutral';
             
@@ -235,7 +359,7 @@
             }
 
             const kpiProx = document.getElementById('kpi-proximity');
-            kpiProx.className = 'kpi-card'; // reset
+            kpiProx.className = 'kpi-card'; 
             
             if (minDistancePct !== Infinity) {
                 document.getElementById('val-prox').innerText = `${minDistancePct.toFixed(2)}%`;
@@ -250,9 +374,8 @@
                 }
             }
 
-            // 3. Gravitational Bias (Midpoint Logic)
             const kpiGrav = document.getElementById('kpi-gravity');
-            kpiGrav.className = 'kpi-card'; // reset
+            kpiGrav.className = 'kpi-card'; 
 
             if (ceilPrice && floorPrice) {
                 const midPoint = (ceilPrice + floorPrice) / 2;
@@ -269,9 +392,8 @@
                 }
             }
 
-            // 4. Cycle State KPI
             const kpiCycle = document.getElementById('kpi-cycle');
-            kpiCycle.className = 'kpi-card'; // reset
+            kpiCycle.className = 'kpi-card'; 
 
             let cycleState = "UNCLEAR STRUCTURE";
             let isBull = false;
@@ -294,7 +416,6 @@
             else if (isBear) kpiCycle.classList.add('state-bear');
             else kpiCycle.classList.add('state-neutral');
 
-            // 5. Populate Boundary Ledger
             const listDiv = document.getElementById('boundary-list');
             listDiv.innerHTML = '';
             
@@ -306,7 +427,6 @@
             });
         }
 
-        // --- FOREIGN INTEL JS HANDLER ---
         async function submitForeignIntel() {
             const rawText = document.getElementById('foreignIntelInput').value;
             const consoleDiv = document.getElementById('intelResponseConsole');
@@ -336,9 +456,9 @@
                     consoleDiv.style.display = 'block';
                     consoleDiv.style.color = '#22c55e';
                     
-                    let verdictColor = '#22c55e'; // Green for CONFIRMED
+                    let verdictColor = '#22c55e'; 
                     if (audit.verdict === 'HIGH_RISK' || audit.verdict === 'REJECTED') {
-                        verdictColor = '#ef4444'; // Red for High Risk/Rejected
+                        verdictColor = '#ef4444'; 
                     }
 
                     consoleDiv.innerHTML = `
@@ -365,8 +485,6 @@
             }
         }
 
-        // Boot Sequence
-        document.addEventListener('DOMContentLoaded', fetchWarRoomData);
         // Refresh every 60 seconds
         setInterval(fetchWarRoomData, 60000);
     </script>
