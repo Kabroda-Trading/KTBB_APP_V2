@@ -332,8 +332,28 @@
                 const data = await res.json();
                 
                 if (data.ok) {
+                    const audit = data.audit;
+                    consoleDiv.style.display = 'block';
                     consoleDiv.style.color = '#22c55e';
-                    consoleDiv.innerText = `> SUCCESS: Intel secured.\n> Asset: ${data.data.symbol} | Bias: ${data.data.bias} | Entry: $${data.data.entry_price}\n> Routing to MAS Auditor Agent...`;
+                    
+                    let verdictColor = '#22c55e'; // Green for CONFIRMED
+                    if (audit.verdict === 'HIGH_RISK' || audit.verdict === 'REJECTED') {
+                        verdictColor = '#ef4444'; // Red for High Risk/Rejected
+                    }
+
+                    consoleDiv.innerHTML = `
+                        <div style="margin-top: 10px; border: 1px solid ${verdictColor}; padding: 16px; border-radius: 6px; background: rgba(0, 0, 0, 0.4);">
+                            <div style="font-weight: 800; color: #fff; margin-bottom: 8px; font-size: 14px; letter-spacing: 1px;">
+                                AUDIT VERDICT: <span style="color: ${verdictColor};">${audit.verdict}</span>
+                            </div>
+                            <div style="margin-bottom: 12px; color: #94a3b8; line-height: 1.5; border-bottom: 1px dashed #333; padding-bottom: 12px;">
+                                > ${audit.kabroda_variance}
+                            </div>
+                            <div style="color: #0ea5e9; font-weight: 700; font-size: 13px;">
+                                RECALCULATED T1 (MEASURED MOVE): $${audit.recalculated_target_1.toFixed(2)}
+                            </div>
+                        </div>
+                    `;
                     document.getElementById('foreignIntelInput').value = ''; 
                 } else {
                     consoleDiv.style.color = '#ef4444';
