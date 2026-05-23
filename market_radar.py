@@ -16,6 +16,7 @@ from google.oauth2.service_account import Credentials
 import battlebox_pipeline
 import gravity_math
 import mtf_confluence_scanner
+from database import SessionLocal, MtfReading
 
 TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
@@ -291,6 +292,28 @@ async def get_mtf_brief(symbol: str) -> dict:
         "summary": scan.get("summary", ""),
     }
 
+def _build_action_sentence(direction: str, energy: str, bo: float, bd: float) -> str:
+    bo_str = f"${bo:,.2f}" if bo > 0 else "trigger"
+    bd_str = f"${bd:,.2f}" if bd > 0 else "trigger"
+
+    if direction == "BULLISH":
+        if energy == "EXHAUSTED":
+            return f"Momentum exhausted. Longs overextended — do not chase. Pullback toward {bd_str} possible."
+        elif energy == "BURNING":
+            return f"Trend running hot above {bo_str}. Long bias active. Scale out aggressively near resistance."
+        else:
+            return f"Momentum building. Long setup active above {bo_str}. Higher timeframes aligned."
+    elif direction == "BEARISH":
+        if energy == "EXHAUSTED":
+            return f"Energy burned out. Watch for breakdown below {bd_str}. Do not chase longs."
+        elif energy == "BURNING":
+            return f"Bear trend running hot below {bd_str}. Short bias active. Cover aggressively near support."
+        else:
+            return f"Bearish pressure building. Short setup active below {bd_str}. Higher timeframes aligned."
+    else:
+        return "No clear direction. Stay flat until confluence improves."
+
+
 async def analyze_target(symbol):
     data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id="us_ny_futures")
     if data.get("status") == "ERROR": return {"ok": False}
@@ -343,6 +366,24 @@ async def scan_sector():
 
         mtf_brief = mtf if isinstance(mtf, dict) and "error" not in mtf else {}
 
+        bo_val = float(levels.get("breakout_trigger", 0) or 0)
+        bd_val = float(levels.get("breakdown_trigger", 0) or 0)
+        if mtf_brief:
+            direction = mtf_brief.get("confluence_direction", "NEUTRAL")
+            energy    = mtf_brief.get("energy_status", "BUILDING")
+            mtf_brief["action_sentence"] = _build_action_sentence(direction, energy, bo_val, bd_val)
+            dist = abs(bo_val - bd_val)
+            if direction == "BULLISH" and bo_val > 0 and dist > 0:
+                mtf_brief["t1"] = round(bo_val + dist, 2)
+                mtf_brief["t2"] = round(bo_val + dist * 1.618, 2)
+                mtf_brief["t3"] = round(bo_val + dist * 2.618, 2)
+            elif direction == "BEARISH" and bd_val > 0 and dist > 0:
+                mtf_brief["t1"] = round(bd_val - dist, 2)
+                mtf_brief["t2"] = round(bd_val - dist * 1.618, 2)
+                mtf_brief["t3"] = round(bd_val - dist * 2.618, 2)
+            else:
+                mtf_brief["t1"] = mtf_brief["t2"] = mtf_brief["t3"] = 0.0
+
         radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,
             "indicator_string": _make_indicator_string(levels), "full_intel": json.dumps(res, default=str),
@@ -354,6 +395,25 @@ async def scan_sector():
         radar_item["sort_weight"] = dossier["score_pct"]
         radar_grid.append(radar_item)
         log_to_google_sheet(radar_item)
+
+        try:
+            with SessionLocal() as db:
+                reading = MtfReading(
+                    symbol=sym.replace("USDT", "/USDT"),
+                    timestamp=datetime.datetime.utcnow(),
+                    confluence_score=mtf_brief.get("confluence_score", 0) if mtf_brief else 0,
+                    confluence_direction=mtf_brief.get("confluence_direction", "NEUTRAL") if mtf_brief else "NEUTRAL",
+                    energy_status=mtf_brief.get("energy_status", "BUILDING") if mtf_brief else "BUILDING",
+                    timeframe_data=json.dumps(mtf_brief, default=str),
+                    bo_price=bo_val,
+                    bd_price=bd_val,
+                    asset_price=price,
+                    session_date=datetime.datetime.utcnow().strftime("%Y-%m-%d")
+                )
+                db.add(reading)
+                db.commit()
+        except Exception as e:
+            print(f"[MTF DB SAVE ERROR] {sym}: {e}")
 
     radar_grid.sort(key=lambda x: x['sort_weight'], reverse=True)
     return radar_grid

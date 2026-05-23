@@ -313,7 +313,7 @@
             <span class="rsb-label">Risk Calculator</span>
             <label style="display:flex; align-items:center; gap:8px;">
                 <span>Account ($)</span>
-                <input id="mbAcctSize" type="number" class="mb-input" placeholder="10000" min="0" step="100">
+                <input id="mbAcctSize" type="number" class="mb-input" placeholder="10000" value="10000" min="0" step="100">
             </label>
             <label style="display:flex; align-items:center; gap:8px;">
                 <span>Risk %</span>
@@ -606,6 +606,9 @@
             if (key === 'bd')   val = (data.levels || {}).breakdown_trigger;
             if (key === 'res')  val = (data.mtf_brief || {}).nearest_resistance;
             if (key === 'sup')  val = (data.mtf_brief || {}).nearest_support;
+            if (key === 't1')   val = (data.mtf_brief || {}).t1;
+            if (key === 't2')   val = (data.mtf_brief || {}).t2;
+            if (key === 't3')   val = (data.mtf_brief || {}).t3;
             if (key === 'full') val = buildFullSetupStr(data);
             if (val == null || val === 0) return;
             navigator.clipboard.writeText(String(val)).then(() => {
@@ -617,13 +620,13 @@
         }
 
         function buildFullSetupStr(data) {
-            const base = (data.symbol || '').replace('USDT', '');
-            const bo = ((data.levels || {}).breakout_trigger || 0).toFixed(2);
-            const bd = ((data.levels || {}).breakdown_trigger || 0).toFixed(2);
-            const targets = (data.plan || {}).targets || [0, 0, 0];
-            const t1 = (targets[0] || 0).toFixed(2);
-            const t2 = (targets[1] || 0).toFixed(2);
-            const t3 = (targets[2] || 0).toFixed(2);
+            const base  = (data.symbol || '').replace('USDT', '');
+            const bo    = ((data.levels || {}).breakout_trigger  || 0).toFixed(2);
+            const bd    = ((data.levels || {}).breakdown_trigger || 0).toFixed(2);
+            const brief = data.mtf_brief || {};
+            const t1    = (brief.t1 || 0).toFixed(2);
+            const t2    = (brief.t2 || 0).toFixed(2);
+            const t3    = (brief.t3 || 0).toFixed(2);
             return `${base} | Entry: $${bo} | Stop: $${bd} | T1: $${t1} | T2: $${t2} | T3: $${t3}`;
         }
 
@@ -643,12 +646,9 @@
                 if (!sym) return;
                 const el = document.getElementById('mb-size-' + sym);
                 if (!el) return;
-                const base = sym.replace('USDT', '');
-                const plan = data.plan || {};
+                const base   = sym.replace('USDT', '');
                 const levels = data.levels || {};
-                const entry = plan.valid ? (plan.entry || 0) : (levels.breakout_trigger || 0);
-                const stop  = plan.valid ? (plan.stop  || 0) : (levels.breakdown_trigger || 0);
-                const dist  = Math.abs(entry - stop);
+                const dist   = Math.abs((levels.breakout_trigger || 0) - (levels.breakdown_trigger || 0));
                 const posSize = (acct > 0 && dist > 0) ? (dollarRisk / dist).toFixed(4) : '—';
                 el.textContent = 'Size: ' + posSize + ' ' + base + '  |  Risk: $' + dollarRisk.toFixed(2);
             });
@@ -678,6 +678,9 @@
             const action = brief.action_sentence      || '—';
             const res    = brief.nearest_resistance;
             const sup    = brief.nearest_support;
+            const t1     = brief.t1 || 0;
+            const t2     = brief.t2 || 0;
+            const t3     = brief.t3 || 0;
 
             const bo = levels.breakout_trigger  || 0;
             const bd = levels.breakdown_trigger || 0;
@@ -689,9 +692,7 @@
             const acct = parseFloat(document.getElementById('mbAcctSize')?.value) || 0;
             const risk = parseFloat(document.getElementById('mbRiskPct')?.value)  || 2;
             const dollarRisk = acct * (risk / 100);
-            const entry = plan.valid ? (plan.entry || bo) : bo;
-            const stop  = plan.valid ? (plan.stop  || bd) : bd;
-            const dist  = Math.abs(entry - stop);
+            const dist  = Math.abs(bo - bd);
             const posSize = (acct > 0 && dist > 0) ? (dollarRisk / dist).toFixed(4) : '—';
 
             const fmtLevel = v => (v && v > 0) ? '$' + fmt(v) : '—';
@@ -728,6 +729,23 @@
                         <button class="mb-copy-btn" ${sup ? '' : 'disabled'} onclick="mbCopyLevel('${sym}','sup',this)">COPY</button>
                     </div>
                 </div>
+                ${(t1 > 0) ? `<div style="display:flex;flex-direction:column;gap:4px;">
+                    <div class="mb-level-row">
+                        <span class="mb-level-label" style="color:#eab308;">T1</span>
+                        <span class="mb-level-val">${fmtLevel(t1)}</span>
+                        <button class="mb-copy-btn" onclick="mbCopyLevel('${sym}','t1',this)">COPY</button>
+                    </div>
+                    <div class="mb-level-row">
+                        <span class="mb-level-label" style="color:#0ea5e9;">T2</span>
+                        <span class="mb-level-val">${fmtLevel(t2)}</span>
+                        <button class="mb-copy-btn" onclick="mbCopyLevel('${sym}','t2',this)">COPY</button>
+                    </div>
+                    <div class="mb-level-row">
+                        <span class="mb-level-label" style="color:#a855f7;">T3</span>
+                        <span class="mb-level-val">${fmtLevel(t3)}</span>
+                        <button class="mb-copy-btn" onclick="mbCopyLevel('${sym}','t3',this)">COPY</button>
+                    </div>
+                </div>` : ''}
                 <div class="mb-size-row" id="mb-size-${sym}">Size: ${posSize} ${base}&nbsp;&nbsp;|&nbsp;&nbsp;Risk: $${dollarRisk.toFixed(2)}</div>
                 <button class="mb-full-copy-btn" onclick="mbCopyLevel('${sym}','full',this)">COPY FULL SETUP</button>
             </div>`;

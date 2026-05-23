@@ -154,3 +154,21 @@ class CampaignLog(Base):
     mas_executive_brief = Column(String, nullable=True)
     mas_approval_status = Column(String, default="PENDING", nullable=False)
     formatted_newsletter = Column(String, nullable=True)
+
+# ---------------------------------------------------------
+# MTF CONFLUENCE READINGS (MORNING BRIEF HISTORY)
+# ---------------------------------------------------------
+class MtfReading(Base):
+    __tablename__ = "mtf_readings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True, nullable=False)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    confluence_score = Column(Integer, nullable=False, default=0)
+    confluence_direction = Column(String, nullable=False, default="NEUTRAL")
+    energy_status = Column(String, nullable=False, default="BUILDING")
+    timeframe_data = Column(String, nullable=True)
+    bo_price = Column(Float, nullable=True)
+    bd_price = Column(Float, nullable=True)
+    asset_price = Column(Float, nullable=True)
+    session_date = Column(String, nullable=True)
