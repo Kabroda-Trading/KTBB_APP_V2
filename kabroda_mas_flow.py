@@ -9,7 +9,7 @@ import json
 from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 from crewai import Agent, Task, Crew, Process
-from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
 from database import SessionLocal, CampaignLog
 
@@ -72,7 +72,7 @@ def _fetch_cro_memory(symbol: str) -> str:
 
 # --- 3. AGENT DEFINITIONS ---
 def _build_agents() -> Dict[str, Agent]:
-    llm = ChatOpenAI(temperature=0.0, model="gpt-4o")
+    llm = ChatAnthropic(temperature=0.0, model="claude-sonnet-4-20250514")
 
     macro_architect = Agent(
         role="Macro Structural Architect",
@@ -319,7 +319,7 @@ def interrogate_cro(symbol: str, user_message: str) -> str:
                 f"Executive Brief Authored by you: {log.mas_executive_brief}\n"
             )
 
-        llm = ChatOpenAI(temperature=0.2, model="gpt-4o")
+        llm = ChatAnthropic(temperature=0.2, model="claude-sonnet-4-20250514")
         sys_prompt = SystemMessage(content=(
             "You are the Kabroda Chief Risk Officer (Ghost Lead). "
             "You are communicating directly with the human Operator in the Macro War Room. "
