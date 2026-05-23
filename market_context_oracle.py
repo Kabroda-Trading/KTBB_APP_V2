@@ -11,7 +11,7 @@ from typing import Dict, Any
 def _fetch_macro_sync() -> Dict[str, Any]:
     try:
         # We fetch explicitly. If a ticker is invalid, it won't crash the whole batch.
-        tickers_list = ["^GSPC", "DX-Y.NYB", "^VIX", "BTC-DOM"]
+        tickers_list = ["^GSPC", "DX-Y.NYB", "^VIX"]
         data = yf.download(tickers_list, period="5d", group_by='ticker', progress=False)
         
         results = {}

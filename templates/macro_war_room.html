@@ -235,21 +235,21 @@
             window.location.href = `/suite/macro-war-room?symbol=${encodeURIComponent(sym)}`;
         }
 
-        // --- NEW: Render Markdown on Load ---
+        // Preserve raw markdown text before it gets replaced by marked.parse
+        let _rawMarkdownText = '';
+
         document.addEventListener('DOMContentLoaded', () => {
             const rawEl = document.getElementById('rawMarkdown');
             if (rawEl) {
-                const rawText = rawEl.innerText;
-                document.getElementById('newsletterOutput').innerHTML = marked.parse(rawText);
+                _rawMarkdownText = rawEl.innerText;
+                document.getElementById('newsletterOutput').innerHTML = marked.parse(_rawMarkdownText);
             }
             fetchWarRoomData();
         });
 
-        // --- NEW: Copy Markdown ---
         function copyNewsletter() {
-            const rawEl = document.getElementById('rawMarkdown');
-            if (!rawEl) return;
-            navigator.clipboard.writeText(rawEl.innerText).then(() => {
+            if (!_rawMarkdownText) { alert("No brief available yet."); return; }
+            navigator.clipboard.writeText(_rawMarkdownText).then(() => {
                 alert("Markdown copied to clipboard. Ready for Substack/Beehiiv.");
             });
         }
@@ -291,9 +291,12 @@
                 croBubble.className = 'chat-bubble chat-cro';
                 
                 if (data.ok) {
-                    croBubble.innerHTML = `<strong>GHOST LEAD:</strong> ${data.reply}`;
+                    const label = document.createElement('strong');
+                    label.textContent = 'GHOST LEAD: ';
+                    croBubble.appendChild(label);
+                    croBubble.appendChild(document.createTextNode(data.reply));
                 } else {
-                    croBubble.innerHTML = `<strong>SYSTEM ERROR:</strong> Interrogation failed. Recon lost.`;
+                    croBubble.textContent = 'SYSTEM ERROR: Interrogation failed. Recon lost.';
                     croBubble.style.color = '#ef4444';
                     croBubble.style.borderColor = '#ef4444';
                 }
@@ -485,8 +488,28 @@
             }
         }
 
-        // Refresh every 60 seconds
+        // Refresh gravity data every 60 seconds
         setInterval(fetchWarRoomData, 60000);
+
+        // Poll for CCO brief if currently pending
+        const currentStatus = "{{ mas_log.mas_approval_status if mas_log and mas_log.mas_approval_status else 'NONE' }}";
+        if (currentStatus === 'PENDING' || currentStatus === 'NONE') {
+            const briefPoller = setInterval(() => {
+                fetch(window.location.href, { headers: { 'X-Poll': '1' } })
+                    .then(r => r.text())
+                    .then(html => {
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(html, 'text/html');
+                        const newBadge = doc.querySelector('.gl-status-badge');
+                        const newStatus = newBadge ? newBadge.innerText.trim() : '';
+                        if (newStatus && !newStatus.includes('PENDING') && !newStatus.includes('NONE') && !newStatus.includes('AWAITING')) {
+                            clearInterval(briefPoller);
+                            window.location.reload();
+                        }
+                    })
+                    .catch(() => {});
+            }, 15000);
+        }
     </script>
 </body>
 </html>

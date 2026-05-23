@@ -243,15 +243,18 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
     )
 
     try:
-        result = trading_crew.kickoff()
+        trading_crew.kickoff()
         brief_output: ExecutiveBrief = task_cco.output.pydantic
-        
+
+        if brief_output is None:
+            raise ValueError("CCO task produced no Pydantic output — LLM may not have returned valid JSON.")
+
         _inject_brief_to_database(symbol, session_id, date_key, brief_output)
-        
         return {"status": "SUCCESS", "brief": brief_output.dict()}
 
     except Exception as e:
         print(f"MAS EXECUTION ERROR: {e}")
+        _mark_mas_error(symbol, session_id, date_key, str(e))
         return {"status": "ERROR", "message": str(e)}
 
 # --- 5. EXTERNAL INTEL AUDIT PIPELINE ---
@@ -337,7 +340,25 @@ def interrogate_cro(symbol: str, user_message: str) -> str:
     finally:
         db.close()
 
-# --- 7. DATABASE INJECTION ---
+# --- 7. ERROR MARKER ---
+def _mark_mas_error(symbol: str, session_id: str, date_key: str, error_msg: str):
+    db = SessionLocal()
+    try:
+        log = db.query(CampaignLog).filter(
+            CampaignLog.symbol == symbol,
+            CampaignLog.session_id == session_id,
+            CampaignLog.date_key == date_key
+        ).first()
+        if log:
+            log.mas_approval_status = "MAS_ERROR"
+            log.mas_executive_brief = f"[SYSTEM ERROR] {error_msg[:500]}"
+            db.commit()
+    except Exception as e:
+        print(f"MAS ERROR MARKER FAILED: {e}")
+    finally:
+        db.close()
+
+# --- 8. DATABASE INJECTION ---
 def _inject_brief_to_database(symbol: str, session_id: str, date_key: str, brief: ExecutiveBrief):
     db = SessionLocal()
     try:
@@ -347,22 +368,37 @@ def _inject_brief_to_database(symbol: str, session_id: str, date_key: str, brief
             CampaignLog.date_key == date_key
         ).first()
 
-        if log:
-            log.mas_executive_brief = brief.tactical_brief
-            log.mas_approval_status = brief.approval_status
-            log.bias = brief.bias
-            log.entry_price = brief.entry_price
-            log.stop_loss = brief.stop_loss
-            log.t1 = brief.t1
-            log.t2 = brief.t2
-            log.t3 = brief.t3
-            log.status = brief.approval_status
-            log.formatted_newsletter = brief.formatted_newsletter_md
-            
-            db.commit()
-            print(f"|| MAS OVERLAY SECURED || Executive Brief & Newsletter injected for {symbol}.")
-        else:
-            print(f"|| MAS WARNING || No CampaignLog found for {symbol} | {session_id} to inject brief.")
+        if not log:
+            log = CampaignLog(
+                symbol=symbol,
+                session_id=session_id,
+                date_key=date_key,
+                bias=brief.bias,
+                grade="MAS_AUTO",
+                entry_price=brief.entry_price,
+                stop_loss=brief.stop_loss,
+                t1=brief.t1,
+                t2=brief.t2,
+                t3=brief.t3,
+                total_contracts=0.0,
+                status=brief.approval_status,
+            )
+            db.add(log)
+            print(f"|| MAS OVERLAY SECURED || New CampaignLog created for {symbol} | {session_id}.")
+
+        log.mas_executive_brief = brief.tactical_brief
+        log.mas_approval_status = brief.approval_status
+        log.bias = brief.bias
+        log.entry_price = brief.entry_price
+        log.stop_loss = brief.stop_loss
+        log.t1 = brief.t1
+        log.t2 = brief.t2
+        log.t3 = brief.t3
+        log.status = brief.approval_status
+        log.formatted_newsletter = brief.formatted_newsletter_md
+
+        db.commit()
+        print(f"|| MAS OVERLAY SECURED || Executive Brief & Newsletter injected for {symbol}.")
     except Exception as e:
         print(f"MAS DATABASE INJECTION ERROR: {e}")
     finally:

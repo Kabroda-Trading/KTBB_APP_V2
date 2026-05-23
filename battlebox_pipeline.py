@@ -381,14 +381,15 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
         }
 
     date_key = session["date_key"]
-    session_key = f"{_normalize_symbol(symbol)}::{session['id']}::{date_key}"
+    norm_sym = _normalize_symbol(symbol)
+    session_key = f"{norm_sym}::{session['id']}::{date_key}"
 
     async with _CACHE_LOCK:
         if session_key not in _LOCKED_PACKETS:
             db = SessionLocal()
             try:
                 existing_lock = db.query(SessionLock).filter(
-                    SessionLock.symbol == symbol,
+                    SessionLock.symbol == norm_sym,
                     SessionLock.session_id == session['id'],
                     SessionLock.date_key == date_key
                 ).first()
@@ -397,13 +398,13 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                     _LOCKED_PACKETS[session_key] = json.loads(existing_lock.packet_data)
                 else:
                     pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, macro_structure, macro_context, tuning=tuning, raw_daily=raw_daily)
-                    if "error" in pkt: 
+                    if "error" in pkt:
                         return {"status": "ERROR", "message": pkt["error"], "battlebox": {"raw_15m": raw_15m, "war_map_context": _war_map_from_1h(raw_1h), "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
-                    
+
                     _LOCKED_PACKETS[session_key] = pkt
-                    
+
                     new_lock = SessionLock(
-                        symbol=symbol,
+                        symbol=norm_sym,
                         session_id=session['id'],
                         date_key=date_key,
                         lock_time=int(pkt["lock_time"]),
@@ -411,13 +412,13 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                     )
                     db.add(new_lock)
                     db.commit()
-                    
-                    gravity_engine.log_kabroda_bedrock(symbol, pkt["levels"], pkt["lock_time"])
+
+                    gravity_engine.log_kabroda_bedrock(norm_sym, pkt["levels"], pkt["lock_time"])
 
                     asyncio.create_task(
                         asyncio.to_thread(
                             kabroda_mas_flow.run_mas_analysis,
-                            symbol=symbol,
+                            symbol=norm_sym,
                             session_id=session['id'],
                             date_key=date_key,
                             battlebox_payload=pkt
