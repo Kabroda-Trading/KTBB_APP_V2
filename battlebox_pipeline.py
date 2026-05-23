@@ -111,6 +111,112 @@ def _calc_sma(prices: List[float], period: int) -> float:
     if len(prices) < period: return 0.0
     return sum(prices[-period:]) / period
 
+def _calc_adx(candles: List[Dict], period: int = 14) -> Dict:
+    """Wilder's Average Directional Index (+DI, -DI, ADX, rising flag)."""
+    if len(candles) < period * 2 + 1:
+        return {"adx": 0.0, "plus_di": 0.0, "minus_di": 0.0, "rising": False}
+    plus_dm_vals, minus_dm_vals, tr_vals = [], [], []
+    for i in range(1, len(candles)):
+        h  = float(candles[i]["high"]);   l  = float(candles[i]["low"])
+        ph = float(candles[i-1]["high"]); pl = float(candles[i-1]["low"]); pc = float(candles[i-1]["close"])
+        up = h - ph;  dn = pl - l
+        plus_dm_vals.append(up if (up > dn and up > 0) else 0.0)
+        minus_dm_vals.append(dn if (dn > up and dn > 0) else 0.0)
+        tr_vals.append(max(h - l, abs(h - pc), abs(l - pc)))
+    def _wilder(vals: List[float]) -> List[float]:
+        if len(vals) < period: return []
+        s = [sum(vals[:period])]
+        for v in vals[period:]: s.append(s[-1] - s[-1] / period + v)
+        return s
+    sm_pdm = _wilder(plus_dm_vals); sm_mdm = _wilder(minus_dm_vals); sm_tr = _wilder(tr_vals)
+    if not sm_tr: return {"adx": 0.0, "plus_di": 0.0, "minus_di": 0.0, "rising": False}
+    dx_vals, pdi_vals, mdi_vals = [], [], []
+    for i in range(len(sm_tr)):
+        tr = sm_tr[i]
+        if tr == 0: dx_vals.append(0.0); pdi_vals.append(0.0); mdi_vals.append(0.0); continue
+        pdi = 100 * sm_pdm[i] / tr; mdi = 100 * sm_mdm[i] / tr
+        pdi_vals.append(pdi); mdi_vals.append(mdi)
+        dsum = pdi + mdi
+        dx_vals.append(100 * abs(pdi - mdi) / dsum if dsum > 0 else 0.0)
+    adx_vals = _wilder(dx_vals)
+    if not adx_vals: return {"adx": 0.0, "plus_di": 0.0, "minus_di": 0.0, "rising": False}
+    return {
+        "adx": round(adx_vals[-1], 2),
+        "plus_di": round(pdi_vals[-1] if pdi_vals else 0.0, 2),
+        "minus_di": round(mdi_vals[-1] if mdi_vals else 0.0, 2),
+        "rising": len(adx_vals) >= 2 and adx_vals[-1] > adx_vals[-2],
+    }
+
+def _calc_stochastic(candles: List[Dict], k_period: int = 14, d_period: int = 3) -> Dict:
+    """Stochastic Oscillator %K and %D."""
+    if len(candles) < k_period: return {"k": 50.0, "d": 50.0}
+    k_vals = []
+    for i in range(k_period - 1, len(candles)):
+        window = candles[i - k_period + 1 : i + 1]
+        hh = max(float(c["high"]) for c in window)
+        ll = min(float(c["low"])  for c in window)
+        cl = float(candles[i]["close"])
+        k_vals.append(100 * (cl - ll) / (hh - ll) if hh != ll else 50.0)
+    d = sum(k_vals[-d_period:]) / min(d_period, len(k_vals))
+    return {"k": round(k_vals[-1], 2), "d": round(d, 2)}
+
+def _build_jewel_reading(candles: List[Dict]) -> Dict:
+    """
+    JEWEL indicator: EMA21/55 crossover state, ADX trend strength,
+    Stochastic + RSI zone classification.
+    Value zone = 38.2–61.8. Extended = <20 or >80.
+    Signal is BOUNCE_PRIMED when price hugs slow EMA inside value zone with ADX rising.
+    """
+    if not candles or len(candles) < 56:
+        return {"signal": "INSUFFICIENT_DATA"}
+    closes = [float(c["close"]) for c in candles]
+    ema21 = _calc_ema_series(closes, 21)[-1]
+    ema55 = _calc_ema_series(closes, 55)[-1]
+    ema21_prev = _calc_ema_series(closes[:-1], 21)[-1] if len(closes) > 56 else ema21
+    ema55_prev = _calc_ema_series(closes[:-1], 55)[-1] if len(closes) > 56 else ema55
+    gap_now  = ema21 - ema55
+    gap_prev = ema21_prev - ema55_prev
+    spread_pct = round(abs(gap_now) / ema55 * 100, 3) if ema55 != 0 else 0.0
+    if spread_pct < 0.10:
+        ema_state = "AT_SLOW_EMA"
+    elif gap_now > 0:
+        ema_state = "BULLISH_EXPANDING" if gap_now >= gap_prev else "BULLISH_COMPRESSING"
+    else:
+        ema_state = "BEARISH_EXPANDING" if gap_now <= gap_prev else "BEARISH_COMPRESSING"
+    rsi = _calc_rsi(closes)
+    if rsi < 20:         rsi_zone = "OVERSOLD_EXTREME"
+    elif rsi < 38.2:     rsi_zone = "OVERSOLD_VALUE"
+    elif rsi <= 61.8:    rsi_zone = "VALUE_ZONE"
+    elif rsi <= 80:      rsi_zone = "OVERBOUGHT_VALUE"
+    else:                rsi_zone = "OVERBOUGHT_EXTREME"
+    stoch = _calc_stochastic(candles)
+    if stoch["k"] < 20:     stoch_zone = "OVERSOLD"
+    elif stoch["k"] <= 80:  stoch_zone = "NEUTRAL"
+    else:                   stoch_zone = "OVERBOUGHT"
+    adx_data = _calc_adx(candles)
+    in_value = rsi_zone == "VALUE_ZONE" and stoch_zone == "NEUTRAL"
+    bounce   = ema_state == "AT_SLOW_EMA" and in_value and adx_data["rising"]
+    trending = ema_state in ("BULLISH_EXPANDING", "BEARISH_EXPANDING") and adx_data["adx"] > 25 and adx_data["rising"]
+    if bounce:       signal = "BOUNCE_PRIMED"
+    elif trending:   signal = "TRENDING_STRONG"
+    elif in_value:   signal = "VALUE_ZONE_NEUTRAL"
+    else:            signal = "EXTENDED"
+    return {
+        "ema21":          round(ema21, 2),
+        "ema55":          round(ema55, 2),
+        "ema_state":      ema_state,
+        "ema_spread_pct": spread_pct,
+        "rsi":            round(rsi, 2),
+        "rsi_zone":       rsi_zone,
+        "stoch_k":        stoch["k"],
+        "stoch_d":        stoch["d"],
+        "stoch_zone":     stoch_zone,
+        "adx":            adx_data["adx"],
+        "adx_rising":     adx_data["rising"],
+        "adx_trending":   adx_data["adx"] > 25,
+        "signal":         signal,
+    }
+
 def _build_synthetic_jewel(raw_15m: List[Dict]) -> Dict:
     if not raw_15m or len(raw_15m) < 200:
         return {"rsi": 50.0, "kinematic_grade": "TANGLED"}
@@ -146,26 +252,27 @@ def _build_synthetic_jewel(raw_15m: List[Dict]) -> Dict:
         "ema21": round(ema21, 2),
         "ema35": round(ema35, 2),
         "ema55": round(ema55, 2),
-        "sma200": round(sma200, 2)
+        "sma200": round(sma200, 2),
+        "jewel": _build_jewel_reading(raw_15m),
     }
 
 def _build_fuel_gauge(raw_1h: List[Dict], raw_4h: List[Dict], raw_15m: List[Dict]) -> Dict:
     def analyze_tf(candles):
         if not candles or len(candles) < 50:
-            return {"trend": "NEUTRAL", "momentum": "NEUTRAL", "rsi": 50.0}
-        
+            return {"trend": "NEUTRAL", "momentum": "NEUTRAL", "rsi": 50.0, "jewel": {"signal": "INSUFFICIENT_DATA"}}
+
         closes = [float(c["close"]) for c in candles]
         ema_series_30 = _calc_ema_series(closes, 30)
         ema_series_50 = _calc_ema_series(closes, 50)
         ema30 = ema_series_30[-1] if ema_series_30 else closes[-1]
         ema50 = ema_series_50[-1] if ema_series_50 else closes[-1]
-        
+
         trend = "BULLISH" if ema30 > ema50 else "BEARISH"
         macd_data = _calc_macd(closes)
         momentum = "POSITIVE" if macd_data["hist"] > 0 else "NEGATIVE"
         rsi = _calc_rsi(closes)
-        
-        return {"trend": trend, "momentum": momentum, "rsi": round(rsi, 2), "ema30": round(ema30, 2), "ema50": round(ema50, 2)}
+
+        return {"trend": trend, "momentum": momentum, "rsi": round(rsi, 2), "ema30": round(ema30, 2), "ema50": round(ema50, 2), "jewel": _build_jewel_reading(candles)}
         
     return {
         "1H": analyze_tf(raw_1h), 
