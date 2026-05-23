@@ -1,8 +1,9 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v14.3 (STERILIZED SSOT)
-# AUDIT: Removed conflicting Harmonic/Kinematic gating. Strictly evaluates 
+# KABRODA MARKET RADAR v14.4 (MORNING BRIEF UPGRADE)
+# AUDIT: Removed conflicting Harmonic/Kinematic gating. Strictly evaluates
 # structural breakouts against the 6 primary triggers (bo, bd, res, sup, r30).
+# v14.4 ADD: MTF Confluence brief injected per symbol. No existing logic changed.
 # ==============================================================================
 import os
 import json
@@ -14,6 +15,7 @@ from google.oauth2.service_account import Credentials
 
 import battlebox_pipeline
 import gravity_math
+import mtf_confluence_scanner
 
 TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
@@ -23,28 +25,28 @@ def _make_indicator_string(levels):
 
 def _run_measured_move_audit(entry: float, vector: str, bo: float, bd: float, peaks: list):
     """
-    Calculates targets based strictly on the Session Box (BO - BD) 
+    Calculates targets based strictly on the Session Box (BO - BD)
     and checks for Gravity Wall blockages in the airspace.
     """
     audit = {
         "stop": 0.0, "t1": 0.0, "t2": 0.0, "t3": 0.0,
         "airspace_clear": True, "blocking_wall": 0.0
     }
-    
+
     # 1. Define the Session Box Risk
     box_size = abs(bo - bd)
-    if box_size == 0: box_size = entry * 0.01 
-    
+    if box_size == 0: box_size = entry * 0.01
+
     # 2. Extract Gravity Obstacles
     overhead = sorted([p for p in peaks if p["price"] > entry], key=lambda x: x["price"])
     underneath = sorted([p for p in peaks if p["price"] < entry], key=lambda x: x["price"], reverse=True)
-    
+
     if vector == "LONG":
         audit["stop"] = bd
         audit["t1"] = entry + box_size
         audit["t2"] = entry + (box_size * 1.618)
         audit["t3"] = entry + (box_size * 2.618)
-        
+
         heavy_ovr = [p for p in overhead if p["intensity"] in ["HEAVY", "MAXIMUM"]]
         if heavy_ovr and heavy_ovr[0]["price"] < audit["t1"]:
             audit["airspace_clear"] = False
@@ -55,7 +57,7 @@ def _run_measured_move_audit(entry: float, vector: str, bo: float, bd: float, pe
         audit["t1"] = entry - box_size
         audit["t2"] = entry - (box_size * 1.618)
         audit["t3"] = entry - (box_size * 2.618)
-        
+
         heavy_und = [p for p in underneath if p["intensity"] in ["HEAVY", "MAXIMUM"]]
         if heavy_und and heavy_und[0]["price"] > audit["t1"]:
             audit["airspace_clear"] = False
@@ -66,7 +68,7 @@ def _run_measured_move_audit(entry: float, vector: str, bo: float, bd: float, pe
 def _score_setup(vector: str, macro_bias: str, micro_bias: str, entry: float, bo: float, bd: float, peaks: list):
     checks = []
     missing = []
-    
+
     audit, box_size = _run_measured_move_audit(entry, vector, bo, bd, peaks)
 
     # GATE 1: Session Box Risk
@@ -93,15 +95,15 @@ def _score_setup(vector: str, macro_bias: str, micro_bias: str, entry: float, bo
     score += 4; checks.append("✓ Clear Airspace to Target 1")
 
     pct = max(0, (score / max_score) * 100)
-    
+
     grade = "STAND DOWN"
     rejection_reason = ""
-    
-    if pct == 100: 
+
+    if pct == 100:
         grade = "GRADE A"
-    elif pct >= 60: 
+    elif pct >= 60:
         grade = "GRADE B"
-    else: 
+    else:
         grade = "STAND DOWN"
         rejection_reason = f"🔴 ABORT: Missing alignment: " + ", ".join(missing)
 
@@ -110,32 +112,32 @@ def _score_setup(vector: str, macro_bias: str, micro_bias: str, entry: float, bo
 def _build_dossier(symbol, price, levels, macro_bias, micro_bias, kde_peaks):
     bo = float(levels.get("breakout_trigger", 0))
     bd = float(levels.get("breakdown_trigger", 0))
-    
+
     favored = "NEUTRAL"
     if micro_bias == "BULLISH": favored = "LONG"
     elif micro_bias == "BEARISH": favored = "SHORT"
-    
+
     entry = bo if favored == "LONG" else bd
-    
+
     if favored == "NEUTRAL" or bo == 0 or bd == 0:
         return {
             "favored": "NEUTRAL", "grade": "STAND DOWN", "score_pct": 0, "color_code": "GRAY",
             "briefing": "Market is in absolute neutral consolidation or missing triggers.",
             "checks": [], "diagnostic_ledger": {}, "plan": {"valid": False}
         }
-        
+
     grade, score_pct, checks, rejection_reason, audit, box_size = _score_setup(favored, macro_bias, micro_bias, entry, bo, bd, kde_peaks)
-    
+
     color = "GRAY"
     briefing = ""
-    
-    if grade == "GRADE A": 
+
+    if grade == "GRADE A":
         color = "GREEN"
         briefing = "🟢 ELITE ALIGNMENT. Structural Breakout Verified against Macro Trend."
-    elif grade == "GRADE B": 
+    elif grade == "GRADE B":
         color = "YELLOW"
         briefing = "🟡 STANDARD OPERATION. Executable, but expect friction. Scale out aggressively."
-    elif grade == "STAND DOWN": 
+    elif grade == "STAND DOWN":
         color = "RED"
         briefing = rejection_reason
 
@@ -146,7 +148,7 @@ def _build_dossier(symbol, price, levels, macro_bias, micro_bias, kde_peaks):
         "stop": audit["stop"],
         "targets": [audit["t1"], audit["t2"], audit["t3"]]
     }
-    
+
     diagnostic_ledger = {
         "vector_direction": favored,
         "session_box_size": box_size,
@@ -154,7 +156,7 @@ def _build_dossier(symbol, price, levels, macro_bias, micro_bias, kde_peaks):
     }
     if not plan["valid"]:
         diagnostic_ledger["rejection_reason"] = rejection_reason
-    
+
     key = f"{plan['bias']}|{grade}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}|{macro_bias}|{micro_bias}" if plan["valid"] else ""
 
     return {
@@ -177,54 +179,117 @@ def log_to_google_sheet(radar_item):
 
         now = datetime.datetime.now()
         day_str = str(now.day)
-        today_iso = now.strftime("%Y-%m-%d")                       
-        today_slash = now.strftime("%m/%d/%Y")                     
-        today_text = now.strftime("%b ") + day_str + now.strftime(", %Y")  
-        today_text_padded = now.strftime("%b %d, %Y")              
-        
+        today_iso = now.strftime("%Y-%m-%d")
+        today_slash = now.strftime("%m/%d/%Y")
+        today_text = now.strftime("%b ") + day_str + now.strftime(", %Y")
+        today_text_padded = now.strftime("%b %d, %Y")
+
         existing_dates = sheet.col_values(1)
         existing_symbols = sheet.col_values(2)
         already_logged = False
-        
+
         for i in range(min(len(existing_dates), len(existing_symbols))):
             date_cell = str(existing_dates[i])
             if (today_iso in date_cell or today_slash in date_cell or today_text in date_cell or today_text_padded in date_cell):
                 if existing_symbols[i] == radar_item["symbol"]:
                     already_logged = True
                     break
-                
+
         if already_logged: return
 
         timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
         plan = radar_item.get("plan", {})
-        
+
         try:
             bo, bd, dr, ds, r30h, r30l = radar_item.get("indicator_string", "0,0,0,0,0,0").split(',')
         except:
             bo = bd = dr = ds = r30h = r30l = 0
 
         row_data = [
-            timestamp,                  
-            radar_item["symbol"],                  
-            radar_item.get("macro_bias", ""),              
-            radar_item.get("micro_bias", ""),              
-            radar_item.get("favored", ""),                               
-            radar_item.get("grade", ""),                                  
-            "Yes" if plan.get("valid") else "No",                            
-            plan.get("entry", 0),                  
-            plan.get("stop", 0),                   
-            plan.get("targets", [0,0,0])[0],       
-            plan.get("targets", [0,0,0])[1],       
-            plan.get("targets", [0,0,0])[2],       
-            radar_item.get("score_pct", 0),                        
-            "", "", "", "",                        
-            0, 0,                              
-            r30h, r30l, bo, bd, dr, ds                                     
+            timestamp,
+            radar_item["symbol"],
+            radar_item.get("macro_bias", ""),
+            radar_item.get("micro_bias", ""),
+            radar_item.get("favored", ""),
+            radar_item.get("grade", ""),
+            "Yes" if plan.get("valid") else "No",
+            plan.get("entry", 0),
+            plan.get("stop", 0),
+            plan.get("targets", [0,0,0])[0],
+            plan.get("targets", [0,0,0])[1],
+            plan.get("targets", [0,0,0])[2],
+            radar_item.get("score_pct", 0),
+            "", "", "", "",
+            0, 0,
+            r30h, r30l, bo, bd, dr, ds
         ]
 
         sheet.append_row(row_data)
     except Exception as e:
         print(f"❌ Failed to log to Google Sheets: {e}")
+
+async def get_mtf_brief(symbol: str) -> dict:
+    """
+    Returns Morning Brief data for a symbol using the MTF confluence scanner.
+    Energy status is derived from 15M StochRSI zone and curl direction.
+    btc_master_switch is only populated when symbol is BTC.
+    """
+    try:
+        scan = await mtf_confluence_scanner.run_mtf_confluence_scan(symbol)
+    except Exception as e:
+        print(f"[MTF BRIEF ERROR] {symbol}: {e}")
+        return {"error": str(e)}
+
+    direction = scan.get("dominant_direction", "NEUTRAL")
+    score = scan.get("confluence_score", 0)
+    conviction = scan.get("conviction", "LOW")
+    timeframes = scan.get("timeframes", {})
+    tf_15m = timeframes.get("15M", {})
+    stoch = tf_15m.get("stoch_rsi", {})
+    zone_15m = stoch.get("zone", "NEUTRAL")
+    curl_15m = stoch.get("curl", "FLAT")
+
+    # Energy status: derived from 15M StochRSI relative to directional bias
+    if direction == "BULLISH":
+        if zone_15m == "OVERBOUGHT":
+            energy = "EXHAUSTED"
+        elif zone_15m == "VALUE_HIGH":
+            energy = "BURNING"
+        else:
+            energy = "BUILDING"
+    elif direction == "BEARISH":
+        if zone_15m == "OVERSOLD":
+            energy = "EXHAUSTED"
+        elif zone_15m == "VALUE_LOW":
+            energy = "BURNING"
+        else:
+            energy = "BUILDING"
+    else:
+        energy = "BUILDING"
+
+    # Plain-English action sentence
+    base = symbol.replace("USDT", "").replace("/", "")
+    if direction == "BULLISH":
+        action = f"{base} bullish on {score}/5 TFs ({conviction} conviction). Energy: {energy}. Watch breakout trigger."
+    elif direction == "BEARISH":
+        action = f"{base} bearish on {score}/5 TFs ({conviction} conviction). Energy: {energy}. Watch breakdown trigger."
+    else:
+        action = f"{base} split — no directional confluence ({score}/5). Await trigger break for clarity."
+
+    is_btc = "BTC" in symbol.upper()
+    btc_master_switch = (direction == "BULLISH" and score >= 3) if is_btc else None
+
+    return {
+        "confluence_score": score,
+        "confluence_direction": direction,
+        "energy_status": energy,
+        "action_sentence": action,
+        "btc_master_switch": btc_master_switch,
+        "conviction": conviction,
+        "nearest_resistance": scan.get("nearest_resistance"),
+        "nearest_support": scan.get("nearest_support"),
+        "summary": scan.get("summary", ""),
+    }
 
 async def analyze_target(symbol):
     data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id="us_ny_futures")
@@ -234,13 +299,13 @@ async def analyze_target(symbol):
     price = float(data.get("price", 0))
     levels = data.get("battlebox", {}).get("levels", {})
     context = data.get("battlebox", {}).get("context", {})
-    
+
     macro_bias = context.get("macro_bias", "NEUTRAL")
     micro_bias = context.get("micro_bias", "NEUTRAL")
     kde_peaks = context.get("kde_peaks", [])
 
     dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias, kde_peaks)
-    
+
     return {
         "ok": True,
         "result": {
@@ -252,10 +317,15 @@ async def analyze_target(symbol):
 
 async def scan_sector():
     radar_grid = []
-    tasks = [battlebox_pipeline.get_live_battlebox(sym, "MANUAL", manual_id="us_ny_futures") for sym in TARGETS]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    for sym, res in zip(TARGETS, results):
+    # Run battlebox scans and MTF briefs in parallel for all targets
+    bb_tasks = [battlebox_pipeline.get_live_battlebox(sym, "MANUAL", manual_id="us_ny_futures") for sym in TARGETS]
+    mtf_tasks = [get_mtf_brief(sym) for sym in TARGETS]
+    all_results = await asyncio.gather(*bb_tasks, *mtf_tasks, return_exceptions=True)
+    bb_results = all_results[:len(TARGETS)]
+    mtf_results = all_results[len(TARGETS):]
+
+    for sym, res, mtf in zip(TARGETS, bb_results, mtf_results):
         if isinstance(res, Exception) or res.get("status") == "ERROR": continue
         if res.get("status") == "CALIBRATING":
             radar_grid.append({"symbol": sym, "status": "CALIBRATING", "sort_weight": 0})
@@ -264,22 +334,26 @@ async def scan_sector():
         price = float(res.get("price", 0))
         levels = res.get("battlebox", {}).get("levels", {})
         context = res.get("battlebox", {}).get("context", {})
-        
+
         macro_bias = context.get("macro_bias", "NEUTRAL")
         micro_bias = context.get("micro_bias", "NEUTRAL")
         kde_peaks = context.get("kde_peaks", [])
 
         dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias, kde_peaks)
-        
+
+        mtf_brief = mtf if isinstance(mtf, dict) and "error" not in mtf else {}
+
         radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,
             "indicator_string": _make_indicator_string(levels), "full_intel": json.dumps(res, default=str),
+            "levels": levels,
+            "mtf_brief": mtf_brief,
             **dossier
         }
-        
+
         radar_item["sort_weight"] = dossier["score_pct"]
         radar_grid.append(radar_item)
         log_to_google_sheet(radar_item)
-        
+
     radar_grid.sort(key=lambda x: x['sort_weight'], reverse=True)
     return radar_grid

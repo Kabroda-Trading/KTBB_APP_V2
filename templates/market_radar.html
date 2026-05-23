@@ -6,20 +6,20 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <style>
-        :root { 
-            --bg-deep: #020617; var(--panel): #0f172a; var(--border): #334155; 
-            --green: #22c55e; var(--yellow): #eab308; var(--red): #ef4444; 
-            --white: #f8fafc; var(--gray): #94a3b8; 
+        :root {
+            --bg-deep: #020617; var(--panel): #0f172a; var(--border): #334155;
+            --green: #22c55e; var(--yellow): #eab308; var(--red): #ef4444;
+            --white: #f8fafc; var(--gray): #94a3b8;
         }
         body { background-color: #020617; color: #f8fafc; font-family: 'Inter', sans-serif; padding: 20px; margin: 0; overflow-x: hidden; }
-        
+
         .radar-container { max-width: 1400px; margin: 0 auto; margin-top: 40px; }
         .radar-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #334155; padding-bottom: 20px; margin-bottom: 30px; }
         .radar-title { font-family: 'JetBrains Mono'; font-size: 32px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
-        
+
         .btn-scan { background: #0ea5e9; color: #000; font-weight: 800; font-family: 'JetBrains Mono'; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; text-transform: uppercase; transition: 0.2s; box-shadow: 0 0 15px rgba(14, 165, 233, 0.2); }
         .btn-scan:hover { background: #38bdf8; }
-        
+
         .radar-grid { display: grid; gap: 15px; }
         .radar-row { display: grid; grid-template-columns: 1fr 2fr 1fr; background: #0f172a; border: 1px solid #334155; padding: 20px 30px; border-radius: 6px; align-items: center; transition: 0.2s; }
         .radar-row:hover { border-color: #475569; transform: translateY(-2px); }
@@ -31,11 +31,11 @@
 
         .sym-name { font-size: 24px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
         .sym-price { font-size: 14px; color: #94a3b8; font-family: 'JetBrains Mono'; margin-top: 4px; }
-        
+
         .lock-btn { font-size: 11px; padding: 12px 20px; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
         .lock-btn:hover:not(:disabled) { background: #eab308; color:#000; border-color: #eab308; }
         .lock-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        
+
         .copy-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; margin-right: 8px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700; text-transform: uppercase; }
         .copy-btn:hover { background: #334155; color: #fff; border-color: #fff; }
 
@@ -50,19 +50,19 @@
         .panel { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 25px; display: flex; flex-direction: column; }
         .h-title { font-family: 'Rajdhani'; font-weight: 800; font-size: 36px; color: #fff; letter-spacing: 2px; margin: 0; }
         .panel-head { font-family: 'Rajdhani'; font-weight: 800; font-size: 18px; color: #0ea5e9; border-bottom: 1px dashed #334155; padding-bottom: 10px; margin-bottom: 20px; letter-spacing: 1px; text-transform: uppercase; }
-        
+
         .mode-display { font-family: 'Rajdhani'; font-size: 42px; font-weight: 900; line-height: 1; margin-bottom: 10px; text-transform: uppercase; }
         .inp-risk { background: #020617; border: 1px solid #334155; color: #fff; padding: 12px; width: 100%; text-align: right; font-weight: 700; font-size: 18px; border-radius: 4px; box-sizing: border-box; }
-        
+
         .data-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px dashed #334155; padding-bottom: 6px; font-family: 'JetBrains Mono', monospace; }
         .d-val { font-size: 16px; font-weight: 800; color: #fff; margin-right: 10px; }
-        
+
         .c-GREEN { color: #22c55e; } .c-YELLOW { color: #eab308; } .c-RED { color: #ef4444; } .c-GRAY { color: #94a3b8; }
-        
+
         .btn-act { width: 100%; padding: 15px; border: none; border-radius: 4px; font-weight: 800; font-family: 'Rajdhani'; font-size: 16px; cursor: pointer; text-transform: uppercase; margin-bottom: 10px; transition: 0.2s; }
         .btn-l { background: rgba(34, 197, 94, 0.2); color: #22c55e; border: 1px solid #22c55e; } .btn-l:hover { background: #22c55e; color: #000; }
         .btn-s { background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; } .btn-s:hover { background: #ef4444; color: #fff; }
-        
+
         .roe-box { background: rgba(0,0,0,0.3); border-left: 4px solid #94a3b8; padding: 20px; font-family: 'Inter'; font-size: 14px; line-height: 1.6; border-radius: 0 4px 4px 0; margin-top: 20px; text-align: left; }
         .check-item { background: #020617; padding: 8px 12px; border-radius: 4px; border: 1px solid #334155; font-size: 12px; font-family: 'JetBrains Mono'; margin-bottom: 5px; color: #22c55e; }
         .check-item.fail { color: #ef4444; border-color: #ef4444; }
@@ -84,25 +84,251 @@
         .video-desc { font-size: 13px; color: #94a3b8; line-height: 1.5; }
         .pdf-btn { display: block; text-align: center; background: #1e293b; color: #fff; text-decoration: none; padding: 15px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; border: 1px solid #334155; transition: 0.2s; margin-bottom: 30px; }
         .pdf-btn:hover { background: #22c55e; color: #000; border-color: #22c55e; }
+
+        /* ================================================================
+           MORNING BRIEF STYLES — added v14.4, no existing styles modified
+           ================================================================ */
+        .master-switch-banner {
+            border-left: 4px solid #eab308;
+            background: rgba(234,179,8,0.08);
+            padding: 14px 24px;
+            border-radius: 6px;
+            margin-bottom: 14px;
+            font-family: 'JetBrains Mono';
+            font-size: 14px;
+            font-weight: 700;
+            color: #eab308;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            display: none;
+        }
+        .risk-settings-bar {
+            display: none;
+            align-items: center;
+            gap: 20px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            padding: 12px 20px;
+            margin-bottom: 14px;
+            font-family: 'JetBrains Mono';
+            font-size: 12px;
+            color: #94a3b8;
+            flex-wrap: wrap;
+        }
+        .risk-settings-bar .rsb-label {
+            color: #f8fafc;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-right: 4px;
+        }
+        .mb-input {
+            background: #020617;
+            border: 1px solid #334155;
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono';
+            font-size: 13px;
+            font-weight: 700;
+            width: 110px;
+            text-align: right;
+        }
+        .mb-input:focus { outline: none; border-color: #0ea5e9; }
+        .mb-section { display: none; margin-bottom: 10px; }
+        .mb-section-title {
+            font-family: 'Rajdhani';
+            font-size: 20px;
+            font-weight: 800;
+            color: #0ea5e9;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 12px;
+        }
+        .mb-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        .mb-card {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .mb-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .mb-sym {
+            font-family: 'JetBrains Mono';
+            font-size: 20px;
+            font-weight: 800;
+            color: #fff;
+        }
+        .mb-price-tag {
+            font-family: 'JetBrains Mono';
+            font-size: 11px;
+            color: #94a3b8;
+            margin-top: 3px;
+        }
+        .mb-dir-badge {
+            font-family: 'JetBrains Mono';
+            font-size: 13px;
+            font-weight: 700;
+            text-align: right;
+        }
+        .mb-energy {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            border: 1px solid;
+            font-family: 'JetBrains Mono';
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            align-self: flex-start;
+        }
+        .mb-action {
+            font-size: 11px;
+            color: #94a3b8;
+            line-height: 1.6;
+            font-family: 'JetBrains Mono';
+        }
+        .mb-levels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px;
+        }
+        .mb-level-row {
+            display: flex;
+            align-items: center;
+            background: #020617;
+            border: 1px solid #1e293b;
+            border-radius: 4px;
+            padding: 5px 8px;
+            gap: 5px;
+        }
+        .mb-level-label {
+            font-family: 'JetBrains Mono';
+            font-size: 9px;
+            color: #64748b;
+            font-weight: 700;
+            min-width: 22px;
+            text-transform: uppercase;
+        }
+        .mb-level-val {
+            font-family: 'JetBrains Mono';
+            font-size: 11px;
+            color: #fff;
+            font-weight: 700;
+            flex: 1;
+            text-align: right;
+            white-space: nowrap;
+        }
+        .mb-copy-btn {
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #64748b;
+            padding: 2px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: 'JetBrains Mono';
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            transition: 0.15s;
+            white-space: nowrap;
+        }
+        .mb-copy-btn:hover:not(:disabled) { background: #334155; color: #fff; }
+        .mb-copy-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+        .mb-size-row {
+            font-family: 'JetBrains Mono';
+            font-size: 11px;
+            color: #0ea5e9;
+            background: #020617;
+            border: 1px solid #1e293b;
+            border-radius: 4px;
+            padding: 7px 10px;
+        }
+        .mb-full-copy-btn {
+            background: #1e293b;
+            border: 1px solid #0ea5e9;
+            color: #0ea5e9;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: 'JetBrains Mono';
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            transition: 0.15s;
+            width: 100%;
+        }
+        .mb-full-copy-btn:hover { background: #0ea5e9; color: #000; }
+        .sector-divider {
+            font-family: 'Rajdhani';
+            font-size: 16px;
+            font-weight: 800;
+            color: #475569;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            border-bottom: 1px solid #1e293b;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+            margin-top: 4px;
+        }
+        @media (max-width: 1000px) { .mb-grid { grid-template-columns: 1fr 1fr; } }
+        @media (max-width: 640px) { .mb-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
     {% include 'nav.html' %}
-    
+
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v14.0</span></h2>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v14.4</span></h2>
             </div>
             <div style="display: flex; align-items: center;">
                 <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
             </div>
         </div>
-        
+
         <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">
             /// AUDITING SECTOR PHYSICS...
         </div>
-        
+
+        <!-- ========= MORNING BRIEF SECTION ========= -->
+        <div id="btcMasterSwitch" class="master-switch-banner"></div>
+
+        <div id="riskSettingsBar" class="risk-settings-bar">
+            <span class="rsb-label">Risk Calculator</span>
+            <label style="display:flex; align-items:center; gap:8px;">
+                <span>Account ($)</span>
+                <input id="mbAcctSize" type="number" class="mb-input" placeholder="10000" min="0" step="100">
+            </label>
+            <label style="display:flex; align-items:center; gap:8px;">
+                <span>Risk %</span>
+                <input id="mbRiskPct" type="number" class="mb-input" placeholder="2" value="2" min="0.1" max="100" step="0.1">
+            </label>
+            <span style="color:#475569; font-size:10px;">Saved automatically</span>
+        </div>
+
+        <div id="morningBriefSection" class="mb-section">
+            <div class="mb-section-title">Morning Brief</div>
+            <div id="morningBriefGrid" class="mb-grid"></div>
+            <div class="sector-divider">Sector Radar</div>
+        </div>
+        <!-- ========= END MORNING BRIEF ========= -->
+
         <div id="radarTargetGrid" class="radar-grid"></div>
     </div>
 
@@ -127,7 +353,7 @@
     <div id="targetModal" class="modal-overlay">
         <div class="modal-content">
             <button class="close-btn" onclick="closeModal()">✕ CLOSE COCKPIT</button>
-            
+
             <div class="cockpit">
                 <div class="header">
                     <h1 class="h-title" id="tSym">TARGET LOCK</h1>
@@ -148,7 +374,7 @@
                 <div class="panel" style="grid-area: center; text-align:center; justify-content:center;">
                     <div class="panel-head" style="border:none; margin-bottom:0;">02. KINEMATIC AUDIT</div>
                     <div id="vMode" class="mode-display c-GRAY">LOADING</div>
-                    
+
                     <div id="checksContainer" style="display:flex; flex-wrap:wrap; gap:5px; justify-content:center; margin-top:10px;"></div>
 
                     <div id="diagnosticLedger" style="margin-top: 15px; border-top: 1px dashed #334155; padding-top: 15px; text-align: left; width: 100%;"></div>
@@ -161,7 +387,7 @@
                 <div class="panel" style="grid-area: right;">
                     <div class="panel-head">03. THE SETUP</div>
                     <div style="margin-top:10px;">
-                        
+
                         <div class="data-row">
                             <span style="color:#94a3b8; font-size:12px;">TRIGGER ENTRY</span>
                             <div><span id="pEnt" class="d-val c-GREEN">--</span><button class="mini-copy" onclick="copyVal('pEnt')">📋</button></div>
@@ -170,7 +396,7 @@
                             <span style="color:#94a3b8; font-size:12px;">STRUCTURAL STOP</span>
                             <div><span id="pStp" class="d-val c-RED">--</span><button class="mini-copy" onclick="copyVal('pStp')">📋</button></div>
                         </div>
-                        
+
                         <div class="data-row" style="margin-bottom: 6px;">
                             <span style="color:#94a3b8; font-size:12px;">POSITION SIZE (COINS)</span>
                             <div><span id="pSiz" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pSiz')">📋</button></div>
@@ -215,6 +441,9 @@
     </div>
 
     <script>
+        // ================================================================
+        // EXISTING UTILITIES — unchanged
+        // ================================================================
         function copyVal(id) {
             const el = document.getElementById(id);
             if (!el) return;
@@ -232,7 +461,7 @@
 
         window.radarMemory = {};
         let activeData = null;
-        
+
         const balInput = document.getElementById('inpBal');
         const riskInput = document.getElementById('inpRisk');
 
@@ -255,8 +484,8 @@
             });
         }
 
-        function copyKey() { 
-            navigator.clipboard.writeText(document.getElementById('rawKey').value); 
+        function copyKey() {
+            navigator.clipboard.writeText(document.getElementById('rawKey').value);
             const btn = document.getElementById('btnKey');
             const orig = btn.innerText;
             btn.innerText = "COPIED TO HUD ✓";
@@ -276,19 +505,19 @@
                 document.getElementById('tSym').innerText = activeData.symbol.replace('USDT', '') + " MISSION COCKPIT";
                 renderModal(activeData);
                 document.getElementById('targetModal').style.display = 'block';
-                document.body.style.overflow = 'hidden'; 
+                document.body.style.overflow = 'hidden';
             }
         }
 
         function closeModal() {
             document.getElementById('targetModal').style.display = 'none';
-            document.body.style.overflow = 'auto'; 
+            document.body.style.overflow = 'auto';
         }
 
         function renderModal(d) {
             document.getElementById('vROE').innerText = d.briefing;
             document.getElementById('vMode').innerText = d.grade;
-            
+
             let modeTheme = d.color_code;
             document.getElementById('vMode').className = `mode-display c-${modeTheme}`;
             document.getElementById('roeContainer').style.borderLeftColor = `var(--${modeTheme.toLowerCase()})`;
@@ -304,10 +533,10 @@
                 let diagHtml = `<div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono'; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">SSOT PIPELINE ANALYSIS:</div>`;
                 for (const [key, val] of Object.entries(d.diagnostic_ledger)) {
                     if(key === "rejection_reason") continue;
-                    
+
                     let color = (val === true || val === d.favored) ? "#22c55e" : (val === false ? "#ef4444" : "#cbd5e1");
                     let displayVal = typeof val === 'number' ? val.toFixed(2) : val.toString().toUpperCase();
-                    
+
                     diagHtml += `
                     <div style="display:flex; justify-content:space-between; font-size:11px; font-family:'JetBrains Mono'; border-bottom:1px solid #1e293b; padding:4px 0;">
                         <span style="color:#64748b; text-transform:uppercase;">${key.replace(/_/g, ' ')}</span>
@@ -321,8 +550,7 @@
             }
 
             document.getElementById('rawKey').value = d.key;
-            
-            // Format Key for HUD visual
+
             let visualKey = d.key ? d.key.replace(/\|/g, " | ") : "-- DATA MISSING --";
             document.getElementById('hudPayload').innerHTML = visualKey;
 
@@ -340,12 +568,12 @@
             localStorage.setItem('kabroda_locked_bal', balInput.value);
             localStorage.setItem('kabroda_locked_risk', riskInput.value);
             if(!activeData) return;
-            
+
             const bal = parseFloat(balInput.value);
             const riskPct = parseFloat(riskInput.value);
             const riskAmt = bal * (riskPct / 100);
             document.getElementById('valLoss').innerText = "$" + riskAmt.toFixed(2);
-            
+
             if(activeData.plan.valid) {
                 const dist = Math.abs(activeData.plan.entry - activeData.plan.stop);
                 if(dist > 0) {
@@ -354,34 +582,212 @@
 
                     let scalePct = 0.30;
                     let runPct = 0.70;
-                    
+
                     if (activeData.grade === "GRADE B") {
-                        scalePct = 0.70; 
+                        scalePct = 0.70;
                         runPct = 0.30;
                     }
-                    
+
                     document.getElementById('pT1Vol').innerText = (totalContracts * scalePct).toFixed(4);
                     document.getElementById('pRunVol').innerText = (totalContracts * runPct).toFixed(4);
                 }
             }
         }
 
+        // ================================================================
+        // MORNING BRIEF — v14.4 additions
+        // ================================================================
+
+        function mbCopyLevel(sym, key, btn) {
+            const data = window.radarMemory[sym];
+            if (!data) return;
+            let val;
+            if (key === 'bo')   val = (data.levels || {}).breakout_trigger;
+            if (key === 'bd')   val = (data.levels || {}).breakdown_trigger;
+            if (key === 'res')  val = (data.mtf_brief || {}).nearest_resistance;
+            if (key === 'sup')  val = (data.mtf_brief || {}).nearest_support;
+            if (key === 'full') val = buildFullSetupStr(data);
+            if (val == null || val === 0) return;
+            navigator.clipboard.writeText(String(val)).then(() => {
+                if (!btn) return;
+                const orig = btn.innerText;
+                btn.innerText = '✓';
+                setTimeout(() => btn.innerText = orig, 1000);
+            });
+        }
+
+        function buildFullSetupStr(data) {
+            const base = (data.symbol || '').replace('USDT', '');
+            const bo = ((data.levels || {}).breakout_trigger || 0).toFixed(2);
+            const bd = ((data.levels || {}).breakdown_trigger || 0).toFixed(2);
+            const targets = (data.plan || {}).targets || [0, 0, 0];
+            const t1 = (targets[0] || 0).toFixed(2);
+            const t2 = (targets[1] || 0).toFixed(2);
+            const t3 = (targets[2] || 0).toFixed(2);
+            return `${base} | Entry: $${bo} | Stop: $${bd} | T1: $${t1} | T2: $${t2} | T3: $${t3}`;
+        }
+
+        function mbRecalc() {
+            const acctEl = document.getElementById('mbAcctSize');
+            const riskEl = document.getElementById('mbRiskPct');
+            if (!acctEl || !riskEl) return;
+            localStorage.setItem('kabroda_mb_acct', acctEl.value);
+            localStorage.setItem('kabroda_mb_risk', riskEl.value);
+
+            const acct = parseFloat(acctEl.value) || 0;
+            const risk = parseFloat(riskEl.value) || 2;
+            const dollarRisk = acct * (risk / 100);
+
+            Object.values(window.radarMemory).forEach(data => {
+                const sym = data.symbol;
+                if (!sym) return;
+                const el = document.getElementById('mb-size-' + sym);
+                if (!el) return;
+                const base = sym.replace('USDT', '');
+                const plan = data.plan || {};
+                const levels = data.levels || {};
+                const entry = plan.valid ? (plan.entry || 0) : (levels.breakout_trigger || 0);
+                const stop  = plan.valid ? (plan.stop  || 0) : (levels.breakdown_trigger || 0);
+                const dist  = Math.abs(entry - stop);
+                const posSize = (acct > 0 && dist > 0) ? (dollarRisk / dist).toFixed(4) : '—';
+                el.textContent = 'Size: ' + posSize + ' ' + base + '  |  Risk: $' + dollarRisk.toFixed(2);
+            });
+        }
+
+        function buildBriefCard(t) {
+            const sym = t.symbol || '';
+            const base = sym.replace('USDT', '');
+
+            if (t.status === 'CALIBRATING') {
+                return `<div class="mb-card" style="border-left:3px solid #334155; opacity:0.55;">
+                    <div class="mb-card-header">
+                        <div><span class="mb-sym">${base}</span></div>
+                        <span style="font-family:'JetBrains Mono';font-size:11px;color:#64748b;">CALIBRATING</span>
+                    </div>
+                    <div class="mb-action">Session lock in progress. Check back after the 30M mark.</div>
+                </div>`;
+            }
+
+            const brief  = t.mtf_brief  || {};
+            const levels = t.levels      || {};
+            const plan   = t.plan        || {};
+
+            const dir    = brief.confluence_direction || 'NEUTRAL';
+            const score  = brief.confluence_score     || 0;
+            const energy = brief.energy_status        || 'BUILDING';
+            const action = brief.action_sentence      || '—';
+            const res    = brief.nearest_resistance;
+            const sup    = brief.nearest_support;
+
+            const bo = levels.breakout_trigger  || 0;
+            const bd = levels.breakdown_trigger || 0;
+
+            const dirArrow = dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '●';
+            const dirColor = dir === 'BULLISH' ? '#22c55e' : dir === 'BEARISH' ? '#ef4444' : '#eab308';
+            const energyColor = energy === 'BUILDING' ? '#22c55e' : energy === 'BURNING' ? '#eab308' : '#ef4444';
+
+            const acct = parseFloat(document.getElementById('mbAcctSize')?.value) || 0;
+            const risk = parseFloat(document.getElementById('mbRiskPct')?.value)  || 2;
+            const dollarRisk = acct * (risk / 100);
+            const entry = plan.valid ? (plan.entry || bo) : bo;
+            const stop  = plan.valid ? (plan.stop  || bd) : bd;
+            const dist  = Math.abs(entry - stop);
+            const posSize = (acct > 0 && dist > 0) ? (dollarRisk / dist).toFixed(4) : '—';
+
+            const fmtLevel = v => (v && v > 0) ? '$' + fmt(v) : '—';
+
+            return `<div class="mb-card">
+                <div class="mb-card-header">
+                    <div>
+                        <span class="mb-sym">${base}</span>
+                        <div class="mb-price-tag">$${fmt(t.price)}</div>
+                    </div>
+                    <div class="mb-dir-badge" style="color:${dirColor};">${dirArrow} ${dir} ${score}/5</div>
+                </div>
+                <div class="mb-energy" style="background:${energyColor}18; border-color:${energyColor}; color:${energyColor};">${energy}</div>
+                <div class="mb-action">${action}</div>
+                <div class="mb-levels">
+                    <div class="mb-level-row">
+                        <span class="mb-level-label">BO</span>
+                        <span class="mb-level-val">${fmtLevel(bo)}</span>
+                        <button class="mb-copy-btn" ${bo > 0 ? '' : 'disabled'} onclick="mbCopyLevel('${sym}','bo',this)">COPY</button>
+                    </div>
+                    <div class="mb-level-row">
+                        <span class="mb-level-label">BD</span>
+                        <span class="mb-level-val">${fmtLevel(bd)}</span>
+                        <button class="mb-copy-btn" ${bd > 0 ? '' : 'disabled'} onclick="mbCopyLevel('${sym}','bd',this)">COPY</button>
+                    </div>
+                    <div class="mb-level-row">
+                        <span class="mb-level-label">RES</span>
+                        <span class="mb-level-val">${fmtLevel(res)}</span>
+                        <button class="mb-copy-btn" ${res ? '' : 'disabled'} onclick="mbCopyLevel('${sym}','res',this)">COPY</button>
+                    </div>
+                    <div class="mb-level-row">
+                        <span class="mb-level-label">SUP</span>
+                        <span class="mb-level-val">${fmtLevel(sup)}</span>
+                        <button class="mb-copy-btn" ${sup ? '' : 'disabled'} onclick="mbCopyLevel('${sym}','sup',this)">COPY</button>
+                    </div>
+                </div>
+                <div class="mb-size-row" id="mb-size-${sym}">Size: ${posSize} ${base}&nbsp;&nbsp;|&nbsp;&nbsp;Risk: $${dollarRisk.toFixed(2)}</div>
+                <button class="mb-full-copy-btn" onclick="mbCopyLevel('${sym}','full',this)">COPY FULL SETUP</button>
+            </div>`;
+        }
+
+        function renderMorningBrief(results) {
+            const btcItem  = results.find(r => r.symbol === 'BTCUSDT') || {};
+            const btcBrief = btcItem.mtf_brief || {};
+            const btcScore = btcBrief.confluence_score     || 0;
+            const btcDir   = btcBrief.confluence_direction || 'NEUTRAL';
+
+            const switchEl = document.getElementById('btcMasterSwitch');
+            let switchBg, switchBorder, switchText;
+            if (btcScore >= 3 && btcDir === 'BULLISH') {
+                switchBg = 'rgba(34,197,94,0.08)'; switchBorder = '#22c55e';
+                switchText = 'BTC MASTER SWITCH: BULLISH ' + btcScore + '/5 — Risk-on bias active';
+            } else if (btcScore >= 3 && btcDir === 'BEARISH') {
+                switchBg = 'rgba(239,68,68,0.08)'; switchBorder = '#ef4444';
+                switchText = 'BTC MASTER SWITCH: BEARISH ' + btcScore + '/5 — Risk-off bias dominant';
+            } else {
+                switchBg = 'rgba(234,179,8,0.08)'; switchBorder = '#eab308';
+                switchText = 'BTC MASTER SWITCH: NEUTRAL ' + btcScore + '/5 — Mixed signals, no directional edge';
+            }
+            switchEl.style.background        = switchBg;
+            switchEl.style.borderLeftColor   = switchBorder;
+            switchEl.style.color             = switchBorder;
+            switchEl.textContent             = switchText;
+            switchEl.style.display           = 'block';
+
+            document.getElementById('riskSettingsBar').style.display    = 'flex';
+            document.getElementById('morningBriefSection').style.display = 'block';
+
+            document.getElementById('morningBriefGrid').innerHTML = results.map(t => buildBriefCard(t)).join('');
+        }
+
+        // ================================================================
+        // MAIN SCAN — existing forceScan() with Morning Brief wired in
+        // ================================================================
         async function forceScan() {
-            const btn = document.getElementById('scanBtn'); 
-            const grid = document.getElementById('radarTargetGrid'); 
+            const btn    = document.getElementById('scanBtn');
+            const grid   = document.getElementById('radarTargetGrid');
             const loader = document.getElementById('loading');
-            
+
             btn.disabled = true; grid.style.display = 'none'; loader.style.display = 'block';
 
             try {
-                const res = await fetch('/api/radar/scan', { method: 'POST' });
+                const res  = await fetch('/api/radar/scan', { method: 'POST' });
                 const data = await res.json();
                 let html = "";
                 window.radarMemory = {};
 
                 data.results.forEach(t => {
                     window.radarMemory[t.symbol] = t;
-                    
+                });
+
+                // Render Morning Brief first
+                renderMorningBrief(data.results);
+
+                // Render existing radar rows (unchanged)
+                data.results.forEach(t => {
                     if(t.status === "CALIBRATING") {
                         html += `
                         <div class="radar-row border-GRAY" style="opacity: 0.6;">
@@ -397,17 +803,15 @@
                                 <button class="lock-btn" style="width:100%; text-align:center; padding: 15px; background:transparent; border-color:#334155; color:#94a3b8;" disabled>STANDBY</button>
                             </div>
                         </div>`;
-                        return; 
+                        return;
                     }
 
-                    let borderTheme = t.color_code;
-                    let displayGrade = t.grade;
+                    let borderTheme   = t.color_code;
+                    let displayGrade  = t.grade;
                     let displaySubtext = t.briefing;
-                    
-                    // Default active button for valid trades
+
                     let actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px;" onclick="openModal('${t.symbol}')">LOCK TARGET →</button>`;
-                    
-                    // If Stand Down, keep it clickable so you can read the diagnostics
+
                     if(t.grade === "STAND DOWN") {
                         actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px; color:#ef4444; border-color:#ef4444;" onclick="openModal('${t.symbol}')">VIEW DIAGNOSTICS</button>`;
                     }
@@ -433,10 +837,21 @@
                     </div>`;
                 });
                 grid.innerHTML = html;
-            } catch(e) { console.log(e); } 
+            } catch(e) { console.log(e); }
             finally { loader.style.display = 'none'; grid.style.display = 'grid'; btn.disabled = false; }
         }
-        document.addEventListener('DOMContentLoaded', forceScan);
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Load saved Morning Brief risk settings
+            const acctEl = document.getElementById('mbAcctSize');
+            const riskEl = document.getElementById('mbRiskPct');
+            if (localStorage.getItem('kabroda_mb_acct')) acctEl.value = localStorage.getItem('kabroda_mb_acct');
+            if (localStorage.getItem('kabroda_mb_risk')) riskEl.value = localStorage.getItem('kabroda_mb_risk');
+            acctEl.addEventListener('input', mbRecalc);
+            riskEl.addEventListener('input', mbRecalc);
+
+            forceScan();
+        });
     </script>
 </body>
 </html>
