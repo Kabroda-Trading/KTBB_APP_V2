@@ -20,24 +20,69 @@
         .btn-scan { background: #0ea5e9; color: #000; font-weight: 800; font-family: 'JetBrains Mono'; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; text-transform: uppercase; transition: 0.2s; box-shadow: 0 0 15px rgba(14, 165, 233, 0.2); }
         .btn-scan:hover { background: #38bdf8; }
 
-        .radar-grid { display: grid; gap: 15px; }
-        .radar-row { display: grid; grid-template-columns: 1fr 2fr 1fr; background: #0f172a; border: 1px solid #334155; padding: 20px 30px; border-radius: 6px; align-items: center; transition: 0.2s; }
-        .radar-row:hover { border-color: #475569; transform: translateY(-2px); }
+        .radar-grid { display: grid; gap: 12px; }
 
-        .border-GREEN { border-left: 4px solid #22c55e; }
-        .border-YELLOW { border-left: 4px solid #eab308; }
-        .border-RED { border-left: 4px solid #ef4444; opacity: 0.7; }
-        .border-GRAY { border-left: 4px solid #94a3b8; }
+        /* ================================================================
+           COMPACT SECTOR RADAR ROWS — single-line layout
+           ================================================================ */
+        .radar-row-c {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-left-width: 4px;
+            padding: 14px 20px;
+            border-radius: 6px;
+            transition: 0.2s;
+            flex-wrap: wrap;
+        }
+        .radar-row-c:hover { border-color: #475569; transform: translateY(-1px); }
+        .rrc-active { border-left-color: #22c55e; opacity: 1; }
+        .rrc-down   { border-left-color: #ef4444; opacity: 0.7; }
+        .rrc-calib  { border-left-color: #94a3b8; opacity: 0.6; }
 
-        .sym-name { font-size: 24px; font-weight: 800; color: #fff; font-family: 'JetBrains Mono'; }
-        .sym-price { font-size: 14px; color: #94a3b8; font-family: 'JetBrains Mono'; margin-top: 4px; }
+        .rrc-sym { min-width: 110px; }
+        .rrc-sym-name { font-family: 'JetBrains Mono'; font-size: 22px; font-weight: 800; color: #fff; line-height: 1; }
+        .rrc-sym-price { font-family: 'JetBrains Mono'; font-size: 12px; color: #94a3b8; margin-top: 5px; }
+
+        .rrc-badge {
+            font-family: 'JetBrains Mono'; font-size: 13px; font-weight: 700;
+            padding: 7px 12px; border-radius: 6px; border: 1px solid;
+            white-space: nowrap;
+        }
+        .rrc-energy {
+            font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700;
+            padding: 6px 14px; border-radius: 20px; border: 1px solid;
+            text-transform: uppercase; letter-spacing: 1px; white-space: nowrap;
+        }
+        .rrc-level {
+            background: #020617; border: 1px solid #1e293b; border-radius: 4px;
+            padding: 8px 12px; font-family: 'JetBrains Mono'; font-size: 12px;
+            color: #94a3b8; white-space: nowrap;
+        }
+        .rrc-level b { color: #fff; font-weight: 700; }
+        .rrc-actions { margin-left: auto; display: flex; gap: 8px; }
+        .rrc-copy {
+            background: #1e293b; border: 1px solid #334155; color: #94a3b8;
+            padding: 11px 16px; border-radius: 4px; cursor: pointer;
+            font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700;
+            text-transform: uppercase; transition: 0.2s; white-space: nowrap;
+        }
+        .rrc-copy:hover { background: #334155; color: #fff; border-color: #fff; }
+        .rrc-cockpit {
+            padding: 11px 16px; border-radius: 4px; cursor: pointer;
+            font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700;
+            text-transform: uppercase; transition: 0.2s; white-space: nowrap;
+            background: #1e293b;
+        }
+        .rrc-cockpit-active { background: rgba(34, 197, 94, 0.12); border: 1px solid #22c55e; color: #22c55e; }
+        .rrc-cockpit-active:hover { background: #22c55e; color: #000; }
+        .rrc-cockpit-muted { background: #1e293b; border: 1px solid #334155; color: #64748b; }
 
         .lock-btn { font-size: 11px; padding: 12px 20px; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
         .lock-btn:hover:not(:disabled) { background: #eab308; color:#000; border-color: #eab308; }
         .lock-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        .copy-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; margin-right: 8px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-        .copy-btn:hover { background: #334155; color: #fff; border-color: #fff; }
 
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(2, 6, 23, 0.95); backdrop-filter: blur(8px); z-index: 9999; overflow-y: auto; padding: 40px 20px; }
         .modal-content { max-width: 1400px; margin: 0 auto; position: relative; animation: slideIn 0.3s ease-out; }
@@ -45,7 +90,7 @@
         .close-btn { position: absolute; top: 0; right: 0; background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; color: #ef4444; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; padding: 8px 16px; border-radius: 4px; cursor: pointer; z-index: 10; }
         .close-btn:hover { background: #ef4444; color: #fff; }
 
-        .cockpit { display: grid; gap: 20px; grid-template-columns: 350px 1fr 450px; grid-template-areas: "header header header" "left center right"; }
+        .cockpit { display: grid; gap: 20px; grid-template-columns: 350px 1fr 450px; grid-template-areas: "header header header" "brief brief brief" "left center right"; }
         .header { grid-area: header; border-bottom: 2px solid #334155; padding-bottom: 15px; }
         .panel { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 25px; display: flex; flex-direction: column; }
         .h-title { font-family: 'Rajdhani'; font-weight: 800; font-size: 36px; color: #fff; letter-spacing: 2px; margin: 0; }
@@ -69,6 +114,18 @@
         .mini-copy { background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 14px; opacity: 0.5; padding: 0 0 0 5px; }
         .mini-copy:hover { opacity: 1; color: #f8fafc; }
 
+        /* ================================================================
+           PANEL 00 — ANALYST BRIEF
+           ================================================================ */
+        .analyst-brief { grid-area: brief; }
+        .ab-line { font-family: 'Inter'; font-size: 14px; line-height: 1.6; padding: 12px 16px; border-radius: 4px; margin-bottom: 8px; border-left: 3px solid #334155; background: rgba(0,0,0,0.25); }
+        .ab-line:last-child { margin-bottom: 0; }
+        .ab-label { font-family: 'JetBrains Mono'; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; display: block; margin-bottom: 4px; }
+        .ab-l1 { border-left-color: #0ea5e9; color: #e2e8f0; }
+        .ab-l2 { border-left-color: #22c55e; color: #f1f5f9; font-weight: 600; }
+        .ab-l3 { border-left-color: #eab308; color: #e2e8f0; }
+        .ab-l4 { border-left-color: #ef4444; color: #fca5a5; }
+
         .drawer-toggle { position: fixed; top: 50%; right: 0; transform: translateY(-50%); background: #0ea5e9; color: #000; padding: 15px 10px; writing-mode: vertical-rl; text-orientation: mixed; cursor: pointer; border-radius: 8px 0 0 8px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; z-index: 10001; border: none; letter-spacing: 2px; transition: 0.2s; box-shadow: -2px 0 10px rgba(14, 165, 233, 0.3); }
         .drawer-toggle:hover { padding-right: 15px; background: #38bdf8; }
         .academy-drawer { position: fixed; top: 0; right: -450px; width: 450px; height: 100vh; background: #0f172a; border-left: 1px solid #334155; z-index: 10000; transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: -10px 0 30px rgba(0,0,0,0.8); padding: 30px; overflow-y: auto; box-sizing: border-box; }
@@ -85,9 +142,7 @@
         .pdf-btn { display: block; text-align: center; background: #1e293b; color: #fff; text-decoration: none; padding: 15px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; border: 1px solid #334155; transition: 0.2s; margin-bottom: 30px; }
         .pdf-btn:hover { background: #22c55e; color: #000; border-color: #22c55e; }
 
-        /* ================================================================
-           MORNING BRIEF STYLES — added v14.4, no existing styles modified
-           ================================================================ */
+        /* BTC MASTER SWITCH BANNER — kept as-is */
         .master-switch-banner {
             border-left: 4px solid #eab308;
             background: rgba(234,179,8,0.08);
@@ -102,191 +157,10 @@
             text-transform: uppercase;
             display: none;
         }
-        .risk-settings-bar {
-            display: none;
-            align-items: center;
-            gap: 20px;
-            background: #0f172a;
-            border: 1px solid #334155;
-            border-radius: 6px;
-            padding: 12px 20px;
-            margin-bottom: 14px;
-            font-family: 'JetBrains Mono';
-            font-size: 12px;
-            color: #94a3b8;
-            flex-wrap: wrap;
+
+        @media (max-width: 1100px) {
+            .cockpit { grid-template-columns: 1fr; grid-template-areas: "header" "brief" "left" "center" "right"; }
         }
-        .risk-settings-bar .rsb-label {
-            color: #f8fafc;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-right: 4px;
-        }
-        .mb-input {
-            background: #020617;
-            border: 1px solid #334155;
-            color: #fff;
-            padding: 6px 10px;
-            border-radius: 4px;
-            font-family: 'JetBrains Mono';
-            font-size: 13px;
-            font-weight: 700;
-            width: 110px;
-            text-align: right;
-        }
-        .mb-input:focus { outline: none; border-color: #0ea5e9; }
-        .mb-section { display: none; margin-bottom: 10px; }
-        .mb-section-title {
-            font-family: 'Rajdhani';
-            font-size: 20px;
-            font-weight: 800;
-            color: #0ea5e9;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            margin-bottom: 12px;
-        }
-        .mb-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 12px;
-            margin-bottom: 24px;
-        }
-        .mb-card {
-            background: #0f172a;
-            border: 1px solid #334155;
-            border-radius: 8px;
-            padding: 18px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        .mb-card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-        }
-        .mb-sym {
-            font-family: 'JetBrains Mono';
-            font-size: 20px;
-            font-weight: 800;
-            color: #fff;
-        }
-        .mb-price-tag {
-            font-family: 'JetBrains Mono';
-            font-size: 11px;
-            color: #94a3b8;
-            margin-top: 3px;
-        }
-        .mb-dir-badge {
-            font-family: 'JetBrains Mono';
-            font-size: 13px;
-            font-weight: 700;
-            text-align: right;
-        }
-        .mb-energy {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            border: 1px solid;
-            font-family: 'JetBrains Mono';
-            font-size: 10px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            align-self: flex-start;
-        }
-        .mb-action {
-            font-size: 11px;
-            color: #94a3b8;
-            line-height: 1.6;
-            font-family: 'JetBrains Mono';
-        }
-        .mb-levels {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 5px;
-        }
-        .mb-level-row {
-            display: flex;
-            align-items: center;
-            background: #020617;
-            border: 1px solid #1e293b;
-            border-radius: 4px;
-            padding: 5px 8px;
-            gap: 5px;
-        }
-        .mb-level-label {
-            font-family: 'JetBrains Mono';
-            font-size: 9px;
-            color: #64748b;
-            font-weight: 700;
-            min-width: 22px;
-            text-transform: uppercase;
-        }
-        .mb-level-val {
-            font-family: 'JetBrains Mono';
-            font-size: 11px;
-            color: #fff;
-            font-weight: 700;
-            flex: 1;
-            text-align: right;
-            white-space: nowrap;
-        }
-        .mb-copy-btn {
-            background: #1e293b;
-            border: 1px solid #334155;
-            color: #64748b;
-            padding: 2px 6px;
-            border-radius: 3px;
-            cursor: pointer;
-            font-family: 'JetBrains Mono';
-            font-size: 9px;
-            font-weight: 700;
-            text-transform: uppercase;
-            transition: 0.15s;
-            white-space: nowrap;
-        }
-        .mb-copy-btn:hover:not(:disabled) { background: #334155; color: #fff; }
-        .mb-copy-btn:disabled { opacity: 0.25; cursor: not-allowed; }
-        .mb-size-row {
-            font-family: 'JetBrains Mono';
-            font-size: 11px;
-            color: #0ea5e9;
-            background: #020617;
-            border: 1px solid #1e293b;
-            border-radius: 4px;
-            padding: 7px 10px;
-        }
-        .mb-full-copy-btn {
-            background: #1e293b;
-            border: 1px solid #0ea5e9;
-            color: #0ea5e9;
-            padding: 8px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-family: 'JetBrains Mono';
-            font-size: 10px;
-            font-weight: 700;
-            text-transform: uppercase;
-            transition: 0.15s;
-            width: 100%;
-        }
-        .mb-full-copy-btn:hover { background: #0ea5e9; color: #000; }
-        .sector-divider {
-            font-family: 'Rajdhani';
-            font-size: 16px;
-            font-weight: 800;
-            color: #475569;
-            text-transform: uppercase;
-            letter-spacing: 3px;
-            border-bottom: 1px solid #1e293b;
-            padding-bottom: 10px;
-            margin-bottom: 15px;
-            margin-top: 4px;
-        }
-        @media (max-width: 1000px) { .mb-grid { grid-template-columns: 1fr 1fr; } }
-        @media (max-width: 640px) { .mb-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
@@ -295,7 +169,7 @@
     <div class="radar-container">
         <div class="radar-header">
             <div>
-                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v14.4</span></h2>
+                <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v15</span></h2>
             </div>
             <div style="display: flex; align-items: center;">
                 <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
@@ -306,28 +180,8 @@
             /// AUDITING SECTOR PHYSICS...
         </div>
 
-        <!-- ========= MORNING BRIEF SECTION ========= -->
+        <!-- BTC MASTER SWITCH BANNER -->
         <div id="btcMasterSwitch" class="master-switch-banner"></div>
-
-        <div id="riskSettingsBar" class="risk-settings-bar">
-            <span class="rsb-label">Risk Calculator</span>
-            <label style="display:flex; align-items:center; gap:8px;">
-                <span>Account ($)</span>
-                <input id="mbAcctSize" type="number" class="mb-input" placeholder="10000" value="10000" min="0" step="100">
-            </label>
-            <label style="display:flex; align-items:center; gap:8px;">
-                <span>Risk %</span>
-                <input id="mbRiskPct" type="number" class="mb-input" placeholder="2" value="2" min="0.1" max="100" step="0.1">
-            </label>
-            <span style="color:#475569; font-size:10px;">Saved automatically</span>
-        </div>
-
-        <div id="morningBriefSection" class="mb-section">
-            <div class="mb-section-title">Morning Brief</div>
-            <div id="morningBriefGrid" class="mb-grid"></div>
-            <div class="sector-divider">Sector Radar</div>
-        </div>
-        <!-- ========= END MORNING BRIEF ========= -->
 
         <div id="radarTargetGrid" class="radar-grid"></div>
     </div>
@@ -359,12 +213,23 @@
                     <h1 class="h-title" id="tSym">TARGET LOCK</h1>
                 </div>
 
+                <div class="panel analyst-brief" style="grid-area: brief;">
+                    <div class="panel-head">00. ANALYST BRIEF</div>
+                    <div id="analystBriefBody">
+                        <div class="ab-line ab-l1">Loading structural read...</div>
+                    </div>
+                </div>
+
                 <div class="panel" style="grid-area: left;">
                     <div class="panel-head">01. RISK LEDGER</div>
-                    <div style="font-size:12px; color:#94a3b8; margin-bottom:5px;">COMPOUNDING BAL</div>
+                    <div style="font-size:12px; color:#94a3b8; margin-bottom:5px;">ACCOUNT SIZE ($)</div>
                     <input type="number" id="inpBal" class="inp-risk" value="4000" oninput="recalc()">
                     <div style="font-size:12px; color:#94a3b8; margin-bottom:5px; margin-top:20px;">RISK TOLERANCE (%)</div>
                     <input type="number" id="inpRisk" class="inp-risk" value="10.0" step="0.1" oninput="recalc()">
+                    <div style="margin-top:20px; padding-top:20px; border-top:1px solid #334155;">
+                        <div style="font-size:12px; color:#94a3b8;">POSITION SIZE (COINS)</div>
+                        <div id="valPosSize" style="font-size:24px; font-weight:800; color:#0ea5e9;">--</div>
+                    </div>
                     <div style="margin-top:auto; padding-top:20px; border-top:1px solid #334155;">
                         <div style="font-size:12px; color:#94a3b8;">CAPITAL RISKED</div>
                         <div id="valLoss" class="c-RED" style="font-size:32px; font-weight:800;">$0.00</div>
@@ -514,7 +379,109 @@
             document.body.style.overflow = 'auto';
         }
 
+        // ================================================================
+        // PANEL 00 — ANALYST BRIEF (built from existing radarMemory data)
+        // ================================================================
+        function _kdePeaks(d) {
+            try {
+                const intel = JSON.parse(d.full_intel || '{}');
+                return (((intel.battlebox || {}).context || {}).kde_peaks) || [];
+            } catch (e) { return []; }
+        }
+
+        function _findBlockingWall(peaks, favored, entry, t1) {
+            const heavy = peaks.filter(p => ['HEAVY', 'MAXIMUM'].includes(p.intensity));
+            if (favored === 'LONG') {
+                const inPath = heavy.filter(p => p.price > entry && p.price < t1).sort((a, b) => a.price - b.price);
+                return inPath.length ? inPath[0].price : 0;
+            }
+            if (favored === 'SHORT') {
+                const inPath = heavy.filter(p => p.price < entry && p.price > t1).sort((a, b) => b.price - a.price);
+                return inPath.length ? inPath[0].price : 0;
+            }
+            return 0;
+        }
+
+        function buildAnalystBrief(d) {
+            const price  = d.price || 0;
+            const levels = d.levels || {};
+            const bo     = levels.breakout_trigger  || 0;
+            const bd     = levels.breakdown_trigger || 0;
+            const brief  = d.mtf_brief || {};
+            const dir    = brief.confluence_direction || 'NEUTRAL';
+            const score  = brief.confluence_score     || 0;
+            const energy = brief.energy_status        || 'BUILDING';
+            const macro  = (d.macro_bias || 'NEUTRAL').toUpperCase();
+            const plan   = d.plan || {};
+            const favored = plan.bias || d.favored || 'NEUTRAL';
+            const targets = plan.targets || [0, 0, 0];
+            const diag   = d.diagnostic_ledger || {};
+
+            // Range from nearest gravity walls above/below current price (fallback to triggers).
+            const peaks = _kdePeaks(d);
+            const above = peaks.filter(p => p.price > price).sort((a, b) => a.price - b.price);
+            const below = peaks.filter(p => p.price < price).sort((a, b) => b.price - a.price);
+            const ceiling = above.length ? above[0].price : bo;
+            const floor   = below.length ? below[0].price : bd;
+
+            // LINE 1 — Structure (framing adapts to macro_bias)
+            let l1;
+            if (macro === 'BULLISH') {
+                l1 = `Bullish structure active. Range: $${fmt(floor)} — $${fmt(ceiling)}. Bulls hold structural advantage.`;
+            } else if (macro === 'BEARISH') {
+                l1 = `Bearish structure active. Range: $${fmt(floor)} — $${fmt(ceiling)}. Bears hold structural advantage.`;
+            } else {
+                l1 = `Range-bound structure. Range: $${fmt(floor)} — $${fmt(ceiling)}. No side holds a structural edge.`;
+            }
+
+            // LINE 2 — Energy Read
+            let l2;
+            if (energy === 'EXHAUSTED') {
+                const opp = dir === 'BULLISH' ? 'SHORT' : dir === 'BEARISH' ? 'LONG' : 'REVERSAL';
+                const moveDir = dir === 'BULLISH' ? 'long' : dir === 'BEARISH' ? 'short' : 'directional';
+                l2 = `★ HIGHER PROBABILITY: ${opp} — Energy burned out after recent ${moveDir} push. Watch for reversal.`;
+            } else if (dir === 'BEARISH' && energy === 'BUILDING') {
+                l2 = `★ HIGHER PROBABILITY: SHORT — ${score}/5 timeframes aligned bearish. Energy building. Short setup active below $${fmt(bd)}.`;
+            } else if (dir === 'BULLISH' && energy === 'BUILDING') {
+                l2 = `★ HIGHER PROBABILITY: LONG — ${score}/5 timeframes aligned bullish. Energy building. Long setup active above $${fmt(bo)}.`;
+            } else {
+                l2 = `NO CLEAR EDGE — Timeframes split. Wait for trigger confirmation.`;
+            }
+
+            // LINE 3 — Setup
+            let l3;
+            if (favored === 'LONG' || favored === 'SHORT') {
+                const entry = plan.entry || 0;
+                const stop  = plan.stop  || 0;
+                const t1    = targets[0] || 0;
+                const t2    = targets[1] || 0;
+                l3 = `IF ${favored} trigger breaks: Entry $${fmt(entry)} | Stop $${fmt(stop)} | T1 $${fmt(t1)} | T2 $${fmt(t2)}. `;
+                const clear = diag.airspace_clear !== false;
+                if (clear) {
+                    l3 += `T1 has CLEAR airspace.`;
+                } else {
+                    const wall = _findBlockingWall(peaks, favored, entry, t1);
+                    l3 += `T1 has BLOCKED airspace.` + (wall ? ` Heavy wall at $${fmt(wall)} — take profits at T1, do not hold.` : ` Take profits at T1, do not hold.`);
+                }
+            } else {
+                l3 = `No active trigger setup — awaiting a directional break of the $${fmt(bd)} — $${fmt(bo)} range.`;
+            }
+
+            // LINE 4 — Stand Down Conditions
+            const l4 = `STAND DOWN IF: Price stays between $${fmt(bd)} and $${fmt(bo)} without breakout. Energy contradicts trigger break direction.`;
+
+            return `
+                <div class="ab-line ab-l1"><span class="ab-label">Structure</span>${l1}</div>
+                <div class="ab-line ab-l2"><span class="ab-label">Energy Read</span>${l2}</div>
+                <div class="ab-line ab-l3"><span class="ab-label">Setup</span>${l3}</div>
+                <div class="ab-line ab-l4"><span class="ab-label">Stand Down</span>${l4}</div>
+            `;
+        }
+
         function renderModal(d) {
+            // PANEL 00 — Analyst Brief
+            document.getElementById('analystBriefBody').innerHTML = buildAnalystBrief(d);
+
             document.getElementById('vROE').innerText = d.briefing;
             document.getElementById('vMode').innerText = d.grade;
 
@@ -580,6 +547,9 @@
                     const totalContracts = riskAmt / dist;
                     document.getElementById('pSiz').innerText = totalContracts.toFixed(4);
 
+                    const psEl = document.getElementById('valPosSize');
+                    if (psEl) psEl.innerText = totalContracts.toFixed(4);
+
                     let scalePct = 0.30;
                     let runPct = 0.70;
 
@@ -595,163 +565,9 @@
         }
 
         // ================================================================
-        // MORNING BRIEF — v14.4 additions
+        // BTC MASTER SWITCH BANNER — kept as-is
         // ================================================================
-
-        function mbCopyLevel(sym, key, btn) {
-            const data = window.radarMemory[sym];
-            if (!data) return;
-            let val;
-            if (key === 'bo')   val = (data.levels || {}).breakout_trigger;
-            if (key === 'bd')   val = (data.levels || {}).breakdown_trigger;
-            if (key === 'res')  val = (data.mtf_brief || {}).nearest_resistance;
-            if (key === 'sup')  val = (data.mtf_brief || {}).nearest_support;
-            if (key === 't1')   val = (data.mtf_brief || {}).t1;
-            if (key === 't2')   val = (data.mtf_brief || {}).t2;
-            if (key === 't3')   val = (data.mtf_brief || {}).t3;
-            if (key === 'full') val = buildFullSetupStr(data);
-            if (val == null || val === 0) return;
-            navigator.clipboard.writeText(String(val)).then(() => {
-                if (!btn) return;
-                const orig = btn.innerText;
-                btn.innerText = '✓';
-                setTimeout(() => btn.innerText = orig, 1000);
-            });
-        }
-
-        function buildFullSetupStr(data) {
-            const base  = (data.symbol || '').replace('USDT', '');
-            const bo    = ((data.levels || {}).breakout_trigger  || 0).toFixed(2);
-            const bd    = ((data.levels || {}).breakdown_trigger || 0).toFixed(2);
-            const brief = data.mtf_brief || {};
-            const t1    = (brief.t1 || 0).toFixed(2);
-            const t2    = (brief.t2 || 0).toFixed(2);
-            const t3    = (brief.t3 || 0).toFixed(2);
-            return `${base} | Entry: $${bo} | Stop: $${bd} | T1: $${t1} | T2: $${t2} | T3: $${t3}`;
-        }
-
-        function mbRecalc() {
-            const acctEl = document.getElementById('mbAcctSize');
-            const riskEl = document.getElementById('mbRiskPct');
-            if (!acctEl || !riskEl) return;
-            localStorage.setItem('kabroda_mb_acct', acctEl.value);
-            localStorage.setItem('kabroda_mb_risk', riskEl.value);
-
-            const acct = parseFloat(acctEl.value) || 0;
-            const risk = parseFloat(riskEl.value) || 2;
-            const dollarRisk = acct * (risk / 100);
-
-            Object.values(window.radarMemory).forEach(data => {
-                const sym = data.symbol;
-                if (!sym) return;
-                const el = document.getElementById('mb-size-' + sym);
-                if (!el) return;
-                const base   = sym.replace('USDT', '');
-                const levels = data.levels || {};
-                const dist   = Math.abs((levels.breakout_trigger || 0) - (levels.breakdown_trigger || 0));
-                const posSize = (acct > 0 && dist > 0) ? (dollarRisk / dist).toFixed(4) : '—';
-                el.textContent = 'Size: ' + posSize + ' ' + base + '  |  Risk: $' + dollarRisk.toFixed(2);
-            });
-        }
-
-        function buildBriefCard(t) {
-            const sym = t.symbol || '';
-            const base = sym.replace('USDT', '');
-
-            if (t.status === 'CALIBRATING') {
-                return `<div class="mb-card" style="border-left:3px solid #334155; opacity:0.55;">
-                    <div class="mb-card-header">
-                        <div><span class="mb-sym">${base}</span></div>
-                        <span style="font-family:'JetBrains Mono';font-size:11px;color:#64748b;">CALIBRATING</span>
-                    </div>
-                    <div class="mb-action">Session lock in progress. Check back after the 30M mark.</div>
-                </div>`;
-            }
-
-            const brief  = t.mtf_brief  || {};
-            const levels = t.levels      || {};
-            const plan   = t.plan        || {};
-
-            const dir    = brief.confluence_direction || 'NEUTRAL';
-            const score  = brief.confluence_score     || 0;
-            const energy = brief.energy_status        || 'BUILDING';
-            const action = brief.action_sentence      || '—';
-            const res    = brief.nearest_resistance;
-            const sup    = brief.nearest_support;
-            const t1     = brief.t1 || 0;
-            const t2     = brief.t2 || 0;
-            const t3     = brief.t3 || 0;
-
-            const bo = levels.breakout_trigger  || 0;
-            const bd = levels.breakdown_trigger || 0;
-
-            const dirArrow = dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '●';
-            const dirColor = dir === 'BULLISH' ? '#22c55e' : dir === 'BEARISH' ? '#ef4444' : '#eab308';
-            const energyColor = energy === 'BUILDING' ? '#22c55e' : energy === 'BURNING' ? '#eab308' : '#ef4444';
-
-            const acct = parseFloat(document.getElementById('mbAcctSize')?.value) || 0;
-            const risk = parseFloat(document.getElementById('mbRiskPct')?.value)  || 2;
-            const dollarRisk = acct * (risk / 100);
-            const dist  = Math.abs(bo - bd);
-            const posSize = (acct > 0 && dist > 0) ? (dollarRisk / dist).toFixed(4) : '—';
-
-            const fmtLevel = v => (v && v > 0) ? '$' + fmt(v) : '—';
-
-            return `<div class="mb-card">
-                <div class="mb-card-header">
-                    <div>
-                        <span class="mb-sym">${base}</span>
-                        <div class="mb-price-tag">$${fmt(t.price)}</div>
-                    </div>
-                    <div class="mb-dir-badge" style="color:${dirColor};">${dirArrow} ${dir} ${score}/5</div>
-                </div>
-                <div class="mb-energy" style="background:${energyColor}18; border-color:${energyColor}; color:${energyColor};">${energy}</div>
-                <div class="mb-action">${action}</div>
-                <div class="mb-levels">
-                    <div class="mb-level-row">
-                        <span class="mb-level-label">BO</span>
-                        <span class="mb-level-val">${fmtLevel(bo)}</span>
-                        <button class="mb-copy-btn" ${bo > 0 ? '' : 'disabled'} onclick="mbCopyLevel('${sym}','bo',this)">COPY</button>
-                    </div>
-                    <div class="mb-level-row">
-                        <span class="mb-level-label">BD</span>
-                        <span class="mb-level-val">${fmtLevel(bd)}</span>
-                        <button class="mb-copy-btn" ${bd > 0 ? '' : 'disabled'} onclick="mbCopyLevel('${sym}','bd',this)">COPY</button>
-                    </div>
-                    <div class="mb-level-row">
-                        <span class="mb-level-label">RES</span>
-                        <span class="mb-level-val">${fmtLevel(res)}</span>
-                        <button class="mb-copy-btn" ${res ? '' : 'disabled'} onclick="mbCopyLevel('${sym}','res',this)">COPY</button>
-                    </div>
-                    <div class="mb-level-row">
-                        <span class="mb-level-label">SUP</span>
-                        <span class="mb-level-val">${fmtLevel(sup)}</span>
-                        <button class="mb-copy-btn" ${sup ? '' : 'disabled'} onclick="mbCopyLevel('${sym}','sup',this)">COPY</button>
-                    </div>
-                </div>
-                ${(t1 > 0) ? `<div style="display:flex;flex-direction:column;gap:4px;">
-                    <div class="mb-level-row">
-                        <span class="mb-level-label" style="color:#eab308;">T1</span>
-                        <span class="mb-level-val">${fmtLevel(t1)}</span>
-                        <button class="mb-copy-btn" onclick="mbCopyLevel('${sym}','t1',this)">COPY</button>
-                    </div>
-                    <div class="mb-level-row">
-                        <span class="mb-level-label" style="color:#0ea5e9;">T2</span>
-                        <span class="mb-level-val">${fmtLevel(t2)}</span>
-                        <button class="mb-copy-btn" onclick="mbCopyLevel('${sym}','t2',this)">COPY</button>
-                    </div>
-                    <div class="mb-level-row">
-                        <span class="mb-level-label" style="color:#a855f7;">T3</span>
-                        <span class="mb-level-val">${fmtLevel(t3)}</span>
-                        <button class="mb-copy-btn" onclick="mbCopyLevel('${sym}','t3',this)">COPY</button>
-                    </div>
-                </div>` : ''}
-                <div class="mb-size-row" id="mb-size-${sym}">Size: ${posSize} ${base}&nbsp;&nbsp;|&nbsp;&nbsp;Risk: $${dollarRisk.toFixed(2)}</div>
-                <button class="mb-full-copy-btn" onclick="mbCopyLevel('${sym}','full',this)">COPY FULL SETUP</button>
-            </div>`;
-        }
-
-        function renderMorningBrief(results) {
+        function renderMasterSwitch(results) {
             const btcItem  = results.find(r => r.symbol === 'BTCUSDT') || {};
             const btcBrief = btcItem.mtf_brief || {};
             const btcScore = btcBrief.confluence_score     || 0;
@@ -774,15 +590,10 @@
             switchEl.style.color             = switchBorder;
             switchEl.textContent             = switchText;
             switchEl.style.display           = 'block';
-
-            document.getElementById('riskSettingsBar').style.display    = 'flex';
-            document.getElementById('morningBriefSection').style.display = 'block';
-
-            document.getElementById('morningBriefGrid').innerHTML = results.map(t => buildBriefCard(t)).join('');
         }
 
         // ================================================================
-        // MAIN SCAN — existing forceScan() with Morning Brief wired in
+        // MAIN SCAN
         // ================================================================
         async function forceScan() {
             const btn    = document.getElementById('scanBtn');
@@ -801,56 +612,57 @@
                     window.radarMemory[t.symbol] = t;
                 });
 
-                // Render Morning Brief first
-                renderMorningBrief(data.results);
+                // BTC Master Switch banner
+                renderMasterSwitch(data.results);
 
-                // Render existing radar rows (unchanged)
+                // Compact single-line sector radar rows
                 data.results.forEach(t => {
                     if(t.status === "CALIBRATING") {
                         html += `
-                        <div class="radar-row border-GRAY" style="opacity: 0.6;">
-                            <div>
-                                <div><span class="sym-name">${t.symbol}</span></div>
-                                <div class="sym-price" style="margin-top: 8px; color: #0ea5e9;">[ ENGINE CALIBRATING ]</div>
+                        <div class="radar-row-c rrc-calib">
+                            <div class="rrc-sym">
+                                <div class="rrc-sym-name">${(t.symbol || '').replace('USDT', '')}</div>
+                                <div class="rrc-sym-price" style="color:#0ea5e9;">CALIBRATING</div>
                             </div>
-                            <div style="display:flex; flex-direction:column; justify-content:center; align-items:center;">
-                                <div style="font-family:'Rajdhani'; font-size:24px; font-weight:800; color:#94a3b8;">GATHERING DATA</div>
-                                <div style="font-size:12px; color:#64748b; font-family:'JetBrains Mono'; margin-top:4px;">LOCKS AT 30M MARK</div>
-                            </div>
-                            <div style="display:flex; flex-direction:column; gap:8px; justify-content:center; align-items:flex-end;">
-                                <button class="lock-btn" style="width:100%; text-align:center; padding: 15px; background:transparent; border-color:#334155; color:#94a3b8;" disabled>STANDBY</button>
+                            <div class="rrc-badge" style="border-color:#334155; color:#64748b;">ENGINE CALIBRATING</div>
+                            <div class="rrc-energy" style="border-color:#334155; color:#64748b;">LOCKS AT 30M</div>
+                            <div class="rrc-actions">
+                                <button class="rrc-cockpit rrc-cockpit-muted" disabled>STANDBY</button>
                             </div>
                         </div>`;
                         return;
                     }
 
-                    let borderTheme   = t.color_code;
-                    let displayGrade  = t.grade;
-                    let displaySubtext = t.briefing;
+                    const base   = (t.symbol || '').replace('USDT', '');
+                    const brief  = t.mtf_brief || {};
+                    const dir    = brief.confluence_direction || 'NEUTRAL';
+                    const score  = brief.confluence_score     || 0;
+                    const energy = brief.energy_status        || 'BUILDING';
+                    const levels = t.levels || {};
+                    const bo     = levels.breakout_trigger  || 0;
+                    const bd     = levels.breakdown_trigger || 0;
 
-                    let actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px;" onclick="openModal('${t.symbol}')">LOCK TARGET →</button>`;
+                    const dirArrow   = dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '●';
+                    const dirColor   = dir === 'BULLISH' ? '#22c55e' : dir === 'BEARISH' ? '#ef4444' : '#eab308';
+                    const energyColor = energy === 'BUILDING' ? '#22c55e' : energy === 'BURNING' ? '#eab308' : '#ef4444';
 
-                    if(t.grade === "STAND DOWN") {
-                        actionBtn = `<button class="lock-btn" style="width:100%; text-align:center; padding: 15px; color:#ef4444; border-color:#ef4444;" onclick="openModal('${t.symbol}')">VIEW DIAGNOSTICS</button>`;
-                    }
+                    const actionable   = (t.grade === 'GRADE A' || t.grade === 'GRADE B');
+                    const rowClass     = actionable ? 'rrc-active' : 'rrc-down';
+                    const cockpitClass = actionable ? 'rrc-cockpit-active' : 'rrc-cockpit-muted';
 
                     html += `
-                    <div class="radar-row border-${borderTheme}">
-                        <div>
-                            <div><span class="sym-name">${t.symbol}</span></div>
-                            <div class="sym-price" style="margin-top: 8px;">PRICE: $${fmt(t.price)}</div>
+                    <div class="radar-row-c ${rowClass}">
+                        <div class="rrc-sym">
+                            <div class="rrc-sym-name">${base}</div>
+                            <div class="rrc-sym-price">$${fmt(t.price)}</div>
                         </div>
-
-                        <div style="display:flex; flex-direction:column; justify-content:center; align-items:center;">
-                            <div style="font-family:'Rajdhani'; font-size:24px; font-weight:800; color:var(--${borderTheme.toLowerCase()});">${displayGrade}</div>
-                            <div style="font-size:10px; color:#94a3b8; font-family:'JetBrains Mono'; margin-top:4px; text-align:center; max-width:280px;">${displaySubtext}</div>
-                        </div>
-
-                        <div style="display:flex; flex-direction:column; gap:8px; justify-content:center; align-items:flex-end;">
-                            ${actionBtn}
-                            <div style="display:flex; gap:5px; width:100%;">
-                                <button class="copy-btn" style="flex:1; margin:0;" onclick="copyIntel('${t.symbol}')" title="Copy 6 Chart Levels">📋 COPY TRIGGERS</button>
-                            </div>
+                        <div class="rrc-badge" style="border-color:${dirColor}; color:${dirColor};">${dirArrow} ${dir} ${score}/5</div>
+                        <div class="rrc-energy" style="background:${energyColor}18; border-color:${energyColor}; color:${energyColor};">${energy}</div>
+                        <div class="rrc-level">BO <b>$${fmt(bo)}</b></div>
+                        <div class="rrc-level">BD <b>$${fmt(bd)}</b></div>
+                        <div class="rrc-actions">
+                            <button class="rrc-copy" onclick="copyIntel('${t.symbol}')" title="Copy 6 Chart Levels">📋 COPY TRIGGERS</button>
+                            <button class="rrc-cockpit ${cockpitClass}" onclick="openModal('${t.symbol}')">OPEN COCKPIT →</button>
                         </div>
                     </div>`;
                 });
@@ -860,14 +672,6 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            // Load saved Morning Brief risk settings
-            const acctEl = document.getElementById('mbAcctSize');
-            const riskEl = document.getElementById('mbRiskPct');
-            if (localStorage.getItem('kabroda_mb_acct')) acctEl.value = localStorage.getItem('kabroda_mb_acct');
-            if (localStorage.getItem('kabroda_mb_risk')) riskEl.value = localStorage.getItem('kabroda_mb_risk');
-            acctEl.addEventListener('input', mbRecalc);
-            riskEl.addEventListener('input', mbRecalc);
-
             forceScan();
         });
     </script>
