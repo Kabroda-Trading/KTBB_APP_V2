@@ -16,7 +16,7 @@ from google.oauth2.service_account import Credentials
 import battlebox_pipeline
 import gravity_math
 import mtf_confluence_scanner
-from database import SessionLocal, MtfReading
+from database import SessionLocal, MtfReading, DecisionJournal
 
 TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
@@ -414,6 +414,35 @@ async def scan_sector():
                 db.commit()
         except Exception as e:
             print(f"[MTF DB SAVE ERROR] {sym}: {e}")
+
+        # --- DECISION JOURNAL (Performance Auditor foundation — data collection only) ---
+        try:
+            grade = dossier.get("grade", "STAND DOWN")
+            decision_type = {
+                "GRADE A": "GRADE_A",
+                "GRADE B": "GRADE_B",
+                "STAND DOWN": "STAND_DOWN",
+            }.get(grade, "STAND_DOWN")
+
+            with SessionLocal() as db:
+                journal = DecisionJournal(
+                    symbol=sym.replace("USDT", "/USDT"),
+                    timestamp=datetime.datetime.utcnow(),
+                    decision_type=decision_type,
+                    confluence_score=mtf_brief.get("confluence_score", 0) if mtf_brief else 0,
+                    confluence_direction=mtf_brief.get("confluence_direction", "NEUTRAL") if mtf_brief else "NEUTRAL",
+                    energy_status=mtf_brief.get("energy_status", "BUILDING") if mtf_brief else "BUILDING",
+                    bo_price=bo_val,
+                    bd_price=bd_val,
+                    asset_price=price,
+                    session_date=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
+                    decision_reason=dossier.get("briefing", ""),
+                    full_context_json=json.dumps(radar_item, default=str),
+                )
+                db.add(journal)
+                db.commit()
+        except Exception as e:
+            print(f"[DECISION JOURNAL SAVE ERROR] {sym}: {e}")
 
     radar_grid.sort(key=lambda x: x['sort_weight'], reverse=True)
     return radar_grid

@@ -61,6 +61,25 @@ def init_db():
     except Exception:
         pass
 
+    # --- DECISION JOURNAL OUTCOME MIGRATIONS (filled later by the 4H auditor task) ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE decision_journal ADD COLUMN outcome_price_4h FLOAT"))
+    except Exception:
+        pass
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE decision_journal ADD COLUMN outcome_pct_move_4h FLOAT"))
+    except Exception:
+        pass
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE decision_journal ADD COLUMN outcome_direction_correct BOOLEAN"))
+    except Exception:
+        pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -172,3 +191,34 @@ class MtfReading(Base):
     bd_price = Column(Float, nullable=True)
     asset_price = Column(Float, nullable=True)
     session_date = Column(String, nullable=True)
+
+# ---------------------------------------------------------
+# DECISION JOURNAL (PERFORMANCE AUDITOR FOUNDATION — DATA COLLECTION ONLY)
+# ---------------------------------------------------------
+class DecisionJournal(Base):
+    __tablename__ = "decision_journal"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True, nullable=False)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    # STAND_DOWN / GRADE_A / GRADE_B / MAS_APPROVED / MAS_REJECTED / INTEL_AUDIT
+    decision_type = Column(String, nullable=False)
+
+    confluence_score = Column(Integer, nullable=True, default=0)
+    confluence_direction = Column(String, nullable=True, default="NEUTRAL")
+    energy_status = Column(String, nullable=True, default="BUILDING")
+
+    bo_price = Column(Float, nullable=True)
+    bd_price = Column(Float, nullable=True)
+    asset_price = Column(Float, nullable=True)
+
+    session_date = Column(String, nullable=True)
+    decision_reason = Column(String, nullable=True)
+
+    # Outcome fields — null at creation, filled by the 4H gravity-engine task.
+    outcome_price_4h = Column(Float, nullable=True)
+    outcome_pct_move_4h = Column(Float, nullable=True)
+    outcome_direction_correct = Column(Boolean, nullable=True)
+
+    full_context_json = Column(String, nullable=True)

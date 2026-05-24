@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any
 import subprocess
 
-from database import SessionLocal, GravityMemory
+from database import SessionLocal, GravityMemory, DecisionJournal
 import battlebox_pipeline  # <-- SINGLE SOURCE OF TRUTH ENFORCED
 
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
@@ -97,6 +97,60 @@ def _scan_for_pivots(symbol: str, candles: List[Dict[str, Any]], timeframe: str,
             if is_demand: pivots_found.append({"ts": ts, "price": cl, "type": "DEMAND", "class": p_class, "heat": multiplier})
     return pivots_found
 
+async def fill_decision_outcomes():
+    """Backfill 4H outcomes for DecisionJournal records older than 4 hours with null outcomes.
+
+    Foundation for the Performance Auditor — pure data collection, no judgement agent.
+    """
+    cutoff = datetime.utcnow() - timedelta(hours=4)
+    db = SessionLocal()
+    try:
+        pending = db.query(DecisionJournal).filter(
+            DecisionJournal.outcome_price_4h.is_(None),
+            DecisionJournal.timestamp <= cutoff,
+        ).all()
+
+        if not pending:
+            return
+
+        # Fetch each symbol's current price once and reuse.
+        price_cache: Dict[str, float] = {}
+        for rec in pending:
+            sym = rec.symbol
+            if sym not in price_cache:
+                try:
+                    candles = await battlebox_pipeline.fetch_live_15m(sym, limit=5)
+                    price_cache[sym] = float(candles[-1]["close"]) if candles else 0.0
+                except Exception as e:
+                    print(f"[OUTCOME FILL PRICE ERROR] {sym}: {e}")
+                    price_cache[sym] = 0.0
+
+            current_price = price_cache.get(sym, 0.0)
+            if current_price <= 0 or not rec.asset_price or rec.asset_price <= 0:
+                continue
+
+            pct_move = ((current_price - rec.asset_price) / rec.asset_price) * 100.0
+
+            direction = (rec.confluence_direction or "").upper()
+            if direction in ("BULLISH", "LONG"):
+                correct = pct_move > 0
+            elif direction in ("BEARISH", "SHORT"):
+                correct = pct_move < 0
+            else:
+                correct = None
+
+            rec.outcome_price_4h = round(current_price, 4)
+            rec.outcome_pct_move_4h = round(pct_move, 4)
+            rec.outcome_direction_correct = correct
+
+        db.commit()
+        print(f"|| DECISION JOURNAL OUTCOMES FILLED || {len(pending)} records updated.")
+    except Exception as e:
+        print(f"Decision Outcome Fill Error: {e}")
+    finally:
+        db.close()
+
+
 async def run_gravity_ingestion_loop():
     print(">>> GRAVITY ENGINE: Initializing background loop (STRICT SSOT MODE)...")
     
@@ -107,6 +161,7 @@ async def run_gravity_ingestion_loop():
         print(f"Failed to launch Macro Engine: {e}")
 
     loop_count = 0
+    outcome_count = 0
     while True:
         db = SessionLocal()
         try:
@@ -141,5 +196,14 @@ async def run_gravity_ingestion_loop():
                 subprocess.Popen(["python", "kabroda_macro_engine.py"])
             except Exception: pass
             loop_count = 0
+
+        outcome_count += 1
+        # Fill DecisionJournal 4H outcomes every ~4 hours (900s sleep = 15 mins -> 16 loops)
+        if outcome_count >= 16:
+            try:
+                await fill_decision_outcomes()
+            except Exception as e:
+                print(f"Decision Outcome Task Error: {e}")
+            outcome_count = 0
 
         await asyncio.sleep(900)

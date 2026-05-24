@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from crewai import Agent, Task, Crew, Process
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
-from database import SessionLocal, CampaignLog
+from database import SessionLocal, CampaignLog, DecisionJournal
 
 # --- 1. PYDANTIC SCHEMAS (THE SSOT ENFORCERS) ---
 class ExecutiveBrief(BaseModel):
@@ -254,6 +254,7 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
             raise ValueError("CCO task produced no Pydantic output — LLM may not have returned valid JSON.")
 
         _inject_brief_to_database(symbol, session_id, date_key, brief_output)
+        _inject_decision_journal(symbol, date_key, brief_output, battlebox_payload)
         return {"status": "SUCCESS", "brief": brief_output.dict()}
 
     except Exception as e:
@@ -434,5 +435,34 @@ def _inject_brief_to_database(symbol: str, session_id: str, date_key: str, brief
         print(f"|| MAS OVERLAY SECURED || Executive Brief & Newsletter injected for {symbol}.")
     except Exception as e:
         print(f"MAS DATABASE INJECTION ERROR: {e}")
+    finally:
+        db.close()
+
+# --- 9. DECISION JOURNAL (PERFORMANCE AUDITOR FOUNDATION — DATA COLLECTION ONLY) ---
+def _inject_decision_journal(symbol: str, date_key: str, brief: ExecutiveBrief, battlebox_payload: Dict[str, Any]):
+    db = SessionLocal()
+    try:
+        levels = battlebox_payload.get("levels", {})
+
+        decision_type = "MAS_APPROVED" if brief.approval_status == "APPROVED" else "MAS_REJECTED"
+
+        journal = DecisionJournal(
+            symbol=symbol,
+            decision_type=decision_type,
+            confluence_score=0,
+            confluence_direction=brief.bias,
+            energy_status="UNKNOWN",
+            bo_price=float(levels.get("breakout_trigger", 0) or 0),
+            bd_price=float(levels.get("breakdown_trigger", 0) or 0),
+            asset_price=brief.entry_price,
+            session_date=date_key,
+            decision_reason=brief.tactical_brief,
+            full_context_json=json.dumps({"brief": brief.dict(), "battlebox": battlebox_payload}, default=str),
+        )
+        db.add(journal)
+        db.commit()
+        print(f"|| DECISION JOURNAL LOGGED || {symbol} | {decision_type}")
+    except Exception as e:
+        print(f"DECISION JOURNAL INJECTION ERROR: {e}")
     finally:
         db.close()
