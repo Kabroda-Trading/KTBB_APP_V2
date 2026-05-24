@@ -27,10 +27,12 @@ class ExecutiveBrief(BaseModel):
     formatted_newsletter_md: str = Field(description="The final Markdown formatted newsletter article.")
 
 class IntelAuditReport(BaseModel):
-    """The strict output schema for the External Intel Auditor."""
-    verdict: str = Field(description="Must be 'CONFIRMED', 'REJECTED', or 'HIGH_RISK'")
-    kabroda_variance: str = Field(description="A 1-2 sentence explanation comparing their targets against Kabroda's gravity walls/triggers.")
-    recalculated_target_1: float = Field(description="The target recalculated using strictly Kabroda Measured Move math (distance between our triggers).")
+    """The strict output schema for the External Intel Auditor (three-source audit)."""
+    gravity_verdict: str = Field(description="Gravity audit result. Must be 'CLEAR', 'BLOCKED', or 'HIGH_RISK'.")
+    momentum_verdict: str = Field(description="Momentum audit result from the signal's timeframe JEWEL state. Must be 'BUILDING', 'EXHAUSTED', or 'MIXED'.")
+    measured_move_t1: float = Field(description="Target 1 recalculated from the signal's own box (entry/stop). Long: entry + abs(entry-stop). Short: entry - abs(entry-stop).")
+    overall_verdict: str = Field(description="The final synthesized verdict. Must be 'CONFIRMED', 'CAUTION', or 'REJECTED'.")
+    reasoning: str = Field(description="A plain-English summary tying together the gravity, momentum, and measured-move findings.")
 
 # --- 2. RAG MEMORY INJECTION (POSTGRESQL) ---
 def _fetch_cro_memory(symbol: str) -> str:
@@ -141,14 +143,16 @@ def _build_agents() -> Dict[str, Agent]:
 
     intel_auditor = Agent(
         role="External Intel Auditor",
-        goal="Ruthlessly cross-examine third-party trading signals against Kabroda's internal Gravity Map physics and Measured Move logic.",
+        goal="Ruthlessly cross-examine third-party trading signals across three Kabroda data sources: Gravity Map physics, Multi-Timeframe momentum, and Measured Move math.",
         backstory=(
             "You are a counter-intelligence analyst. You do not trust external signals. "
-            "When handed a foreign intel packet (like MetaSignals), you immediately compare their Entry and Targets "
-            "against Kabroda's internal Breakout/Breakdown triggers and KDE Gravity Peaks. "
-            "If their target attempts to push through a massive Class 0 Gravity Wall, you flag it as 'HIGH_RISK'. "
-            "You also discard their arbitrary RR targets and recalculate Target 1 using strictly Kabroda math: "
-            "Target 1 = Entry +/- (Breakout Trigger - Breakdown Trigger)."
+            "When handed a foreign intel packet (like MetaSignals), you run a three-source audit. "
+            "First, you compare their Entry and Targets against Kabroda's KDE Gravity Peaks — if a target must push "
+            "through a HEAVY or MAXIMUM (Class 0) Gravity Wall, the path is BLOCKED or HIGH_RISK. "
+            "Second, you read the live Multi-Timeframe Confluence scan for the signal's own timeframe to judge whether "
+            "momentum is BUILDING behind the trade or EXHAUSTED against it. "
+            "Third, you discard their arbitrary RR targets and recalculate Target 1 from the signal's own box "
+            "(the distance between its entry and stop), measured one box in the trade's direction."
         ),
         verbose=True,
         allow_delegation=False,
@@ -258,27 +262,56 @@ def run_mas_analysis(symbol: str, session_id: str, date_key: str, battlebox_payl
         return {"status": "ERROR", "message": str(e)}
 
 # --- 5. EXTERNAL INTEL AUDIT PIPELINE ---
-def audit_foreign_intel_pipeline(intel_packet: Dict[str, Any], battlebox_payload: Dict[str, Any]):
+def audit_foreign_intel_pipeline(intel_packet: Dict[str, Any], battlebox_payload: Dict[str, Any], mtf_context: Dict[str, Any] = None):
     print(f">>> MAS INITIATED: Auditing Foreign Intel for {intel_packet.get('symbol')}")
-    
+
     levels = battlebox_payload.get("levels", {})
     context = battlebox_payload.get("context", {})
-    
+
     kabroda_data = {
         "kabroda_breakout_trigger": levels.get("breakout_trigger"),
         "kabroda_breakdown_trigger": levels.get("breakdown_trigger"),
         "gravity_kde_peaks": context.get("kde_peaks")
     }
 
+    if mtf_context is None:
+        mtf_context = {}
+
     agents = _build_agents()
 
     task_audit = Task(
         description=(
             f"Audit this Foreign Intel Packet: {json.dumps(intel_packet)}\n\n"
-            f"Against this Internal Kabroda SSOT: {json.dumps(kabroda_data)}\n\n"
-            "1. Compare their Entry/Targets against our Gravity Peaks. Are they trading into a wall?\n"
-            "2. Determine the Verdict.\n"
-            "3. Recalculate Target 1 using Kabroda Measured Move math."
+            f"Against this Internal Kabroda SSOT (gravity): {json.dumps(kabroda_data)}\n\n"
+            f"And this live Multi-Timeframe Confluence scan (momentum): {json.dumps(mtf_context)}\n\n"
+            "The signal carries a 'timeframe' field (e.g. '4H', '1H') and a 'bias' field (LONG or SHORT). "
+            "Run a THREE-SECTION audit and report each section explicitly in your reasoning.\n\n"
+            "=== SECTION 1 — GRAVITY AUDIT ===\n"
+            "Check each of the signal's targets against the KDE gravity peaks. "
+            "Flag any HEAVY or MAXIMUM gravity wall (especially Class 0 beams) sitting in the path between entry and a target. "
+            "If a target must trade THROUGH such a wall, the path is BLOCKED (or HIGH_RISK if it is a MAXIMUM/Class 0 wall). "
+            "If the airspace toward the targets is clear, it is CLEAR. Set 'gravity_verdict' to CLEAR, BLOCKED, or HIGH_RISK.\n\n"
+            "=== SECTION 2 — MOMENTUM AUDIT ===\n"
+            "Read the Multi-Timeframe scan's 'timeframes' map for the SIGNAL'S OWN timeframe "
+            "(if the signal is 4H, read timeframes['4H']; if 1H, read timeframes['1H'], etc.). "
+            "From that timeframe report: (a) is momentum BUILDING, BURNING, or EXHAUSTED — "
+            "derive this from its stoch_rsi zone and curl (a zone of OVERBOUGHT against a LONG or OVERSOLD against a SHORT = EXHAUSTED; "
+            "an aligned VALUE_HIGH/VALUE_LOW with the trade = BURNING; otherwise BUILDING); "
+            "(b) is the fast EMA (ema21) above or below the slow EMA (ema55); "
+            "(c) does that momentum SUPPORT the signal's trade direction? "
+            "Set 'momentum_verdict' to BUILDING if momentum supports the direction, EXHAUSTED if momentum is spent or against it, "
+            "or MIXED if the timeframe data is unavailable or the signals conflict.\n\n"
+            "=== SECTION 3 — MEASURED MOVE AUDIT ===\n"
+            "Discard the signal's arbitrary targets. Recalculate Target 1 from the signal's OWN box, using the timeframe of the signal "
+            "(a 4H signal's box is its own 4H entry/stop range — NOT the 15M box). "
+            "Let box = abs(entry_price - stop_loss). "
+            "For a LONG signal: measured_move_t1 = entry_price + box. "
+            "For a SHORT signal: measured_move_t1 = entry_price - box. "
+            "Put this value in 'measured_move_t1'.\n\n"
+            "=== FINAL ===\n"
+            "Synthesize the three sections into 'overall_verdict': CONFIRMED (gravity clear AND momentum building), "
+            "REJECTED (gravity HIGH_RISK or momentum EXHAUSTED against the trade), or CAUTION (anything mixed/borderline). "
+            "Write a plain-English 'reasoning' summary covering all three sections."
         ),
         expected_output="A strictly typed JSON object matching the IntelAuditReport schema.",
         agent=agents["auditor"],

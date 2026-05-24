@@ -458,26 +458,45 @@
                     const audit = data.audit;
                     consoleDiv.style.display = 'block';
                     consoleDiv.style.color = '#22c55e';
-                    
-                    let verdictColor = '#22c55e'; 
-                    if (audit.verdict === 'HIGH_RISK' || audit.verdict === 'REJECTED') {
-                        verdictColor = '#ef4444'; 
+
+                    const overall = audit.overall_verdict || 'UNKNOWN';
+                    let verdictColor = '#22c55e';
+                    if (overall === 'REJECTED') {
+                        verdictColor = '#ef4444';
+                    } else if (overall === 'CAUTION') {
+                        verdictColor = '#facc15';
                     }
+
+                    const gravityColor = (audit.gravity_verdict === 'CLEAR') ? '#22c55e' : '#ef4444';
+                    const momentumColor = (audit.momentum_verdict === 'BUILDING') ? '#22c55e'
+                        : (audit.momentum_verdict === 'EXHAUSTED') ? '#ef4444' : '#facc15';
+                    const t1 = (typeof audit.measured_move_t1 === 'number')
+                        ? '$' + audit.measured_move_t1.toFixed(2) : 'N/A';
 
                     consoleDiv.innerHTML = `
                         <div style="margin-top: 10px; border: 1px solid ${verdictColor}; padding: 16px; border-radius: 6px; background: rgba(0, 0, 0, 0.4);">
-                            <div style="font-weight: 800; color: #fff; margin-bottom: 8px; font-size: 14px; letter-spacing: 1px;">
-                                AUDIT VERDICT: <span style="color: ${verdictColor};">${audit.verdict}</span>
+                            <div style="font-weight: 800; color: #fff; margin-bottom: 12px; font-size: 14px; letter-spacing: 1px;">
+                                OVERALL VERDICT: <span style="color: ${verdictColor};">${overall}</span>
                             </div>
-                            <div style="margin-bottom: 12px; color: #94a3b8; line-height: 1.5; border-bottom: 1px dashed #333; padding-bottom: 12px;">
-                                > ${audit.kabroda_variance}
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+                                <div style="border: 1px solid #333; border-radius: 6px; padding: 10px;">
+                                    <div style="color: #64748b; font-size: 10px; letter-spacing: 1px; text-transform: uppercase;">Gravity Audit</div>
+                                    <div style="color: ${gravityColor}; font-weight: 800; font-size: 14px; margin-top: 4px;">${audit.gravity_verdict || 'N/A'}</div>
+                                </div>
+                                <div style="border: 1px solid #333; border-radius: 6px; padding: 10px;">
+                                    <div style="color: #64748b; font-size: 10px; letter-spacing: 1px; text-transform: uppercase;">Momentum Audit</div>
+                                    <div style="color: ${momentumColor}; font-weight: 800; font-size: 14px; margin-top: 4px;">${audit.momentum_verdict || 'N/A'}</div>
+                                </div>
                             </div>
-                            <div style="color: #0ea5e9; font-weight: 700; font-size: 13px;">
-                                RECALCULATED T1 (MEASURED MOVE): $${audit.recalculated_target_1.toFixed(2)}
+                            <div style="color: #0ea5e9; font-weight: 700; font-size: 13px; margin-bottom: 12px;">
+                                MEASURED MOVE T1 (SIGNAL BOX): ${t1}
+                            </div>
+                            <div style="color: #94a3b8; line-height: 1.5; border-top: 1px dashed #333; padding-top: 12px;">
+                                > ${audit.reasoning || ''}
                             </div>
                         </div>
                     `;
-                    document.getElementById('foreignIntelInput').value = ''; 
+                    document.getElementById('foreignIntelInput').value = '';
                 } else {
                     consoleDiv.style.color = '#ef4444';
                     consoleDiv.innerText = `> ERROR: ${data.error}`;

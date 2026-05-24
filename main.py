@@ -26,8 +26,9 @@ import research_lab
 import market_simulator  
 import gravity_engine  
 import gravity_math
-import kabroda_mas_flow  
+import kabroda_mas_flow
 import ledger_closing_engine
+import mtf_confluence_scanner
 
 from database import init_db, get_db, UserModel, CampaignLog, SessionLock
 
@@ -214,18 +215,23 @@ async def audit_foreign_intel(payload: ForeignIntelPayload, request: Request, db
         t2 = float(re.search(r'Target 2:\s*([\d,.]+)', text).group(1).replace(',', ''))
         t3 = float(re.search(r'Target 3:\s*([\d,.]+)', text).group(1).replace(',', ''))
         sl = float(re.search(r'SL Close Below:\s*([\d,.]+)', text).group(1).replace(',', ''))
-        
+
         bias = "LONG" if t1 > entry_price else "SHORT"
-        
+
+        # Timeframe lives in the MetaSignals header, e.g. "BTC | USDT @ $76,821.20 - 1H - 1.1 G1"
+        tf_match = re.search(r'@\s*\$[\d,.]+\s*-\s*(\d+\s*[HMDWhmdw])', text)
+        timeframe = tf_match.group(1).replace(' ', '').upper() if tf_match else "UNKNOWN"
+
         parsed_packet = {
             "source": "MetaSignals",
             "symbol": asset,
             "bias": bias,
+            "timeframe": timeframe,
             "entry_price": entry_price,
             "targets": [t1, t2, t3],
             "stop_loss": sl
         }
-        
+
         db_sym = asset.replace("USDT", "/USDT") if "/" not in asset else asset
         
         lock_record = db.query(SessionLock).filter(
@@ -237,7 +243,17 @@ async def audit_foreign_intel(payload: ForeignIntelPayload, request: Request, db
 
         current_ssot = json.loads(lock_record.packet_data)
 
-        audit_result = kabroda_mas_flow.audit_foreign_intel_pipeline(parsed_packet, current_ssot)
+        # Third data source: live multi-timeframe confluence for the momentum audit.
+        try:
+            mtf_context = await mtf_confluence_scanner.run_mtf_confluence_scan(db_sym)
+        except Exception as mtf_err:
+            print(f"[AUDIT MTF ERROR] {db_sym}: {mtf_err}")
+            mtf_context = {"error": str(mtf_err)}
+
+        audit_result = await asyncio.to_thread(
+            kabroda_mas_flow.audit_foreign_intel_pipeline,
+            parsed_packet, current_ssot, mtf_context
+        )
         
         if audit_result["status"] == "SUCCESS":
             return JSONResponse({
