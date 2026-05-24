@@ -118,13 +118,16 @@
            PANEL 00 — ANALYST BRIEF
            ================================================================ */
         .analyst-brief { grid-area: brief; }
-        .ab-line { font-family: 'Inter'; font-size: 14px; line-height: 1.6; padding: 12px 16px; border-radius: 4px; margin-bottom: 8px; border-left: 3px solid #334155; background: rgba(0,0,0,0.25); }
+        .ab-line { font-family: 'Inter'; font-size: 14px; line-height: 1.6; padding: 12px 16px; border-radius: 4px; margin-bottom: 8px; border-left: 3px solid #334155; background: rgba(0,0,0,0.25); overflow: hidden; max-height: 300px; transition: max-height 0.3s ease, opacity 0.25s ease, padding 0.3s ease, margin 0.3s ease, border-left-width 0.3s ease; }
         .ab-line:last-child { margin-bottom: 0; }
         .ab-label { font-family: 'JetBrains Mono'; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; display: block; margin-bottom: 4px; }
         .ab-l1 { border-left-color: #0ea5e9; color: #e2e8f0; }
         .ab-l2 { border-left-color: #22c55e; color: #f1f5f9; font-weight: 600; }
         .ab-l3 { border-left-color: #eab308; color: #e2e8f0; }
         .ab-l4 { border-left-color: #ef4444; color: #fca5a5; }
+        .ab-toggle { background: none; border: none; color: #0ea5e9; font-size: 14px; cursor: pointer; padding: 0 4px; line-height: 1; }
+        .ab-toggle:hover { color: #38bdf8; }
+        #analystBriefBody.collapsed .ab-collapsible { max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-left-width: 0; }
 
         .drawer-toggle { position: fixed; top: 50%; right: 0; transform: translateY(-50%); background: #0ea5e9; color: #000; padding: 15px 10px; writing-mode: vertical-rl; text-orientation: mixed; cursor: pointer; border-radius: 8px 0 0 8px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; z-index: 10001; border: none; letter-spacing: 2px; transition: 0.2s; box-shadow: -2px 0 10px rgba(14, 165, 233, 0.3); }
         .drawer-toggle:hover { padding-right: 15px; background: #38bdf8; }
@@ -214,9 +217,12 @@
                 </div>
 
                 <div class="panel analyst-brief" style="grid-area: brief;">
-                    <div class="panel-head">00. ANALYST BRIEF</div>
+                    <div class="panel-head" style="display:flex; justify-content:space-between; align-items:center;">
+                        <span>00. ANALYST BRIEF</span>
+                        <button id="abToggle" class="ab-toggle" onclick="toggleAnalystBrief()" title="Collapse / expand">▼</button>
+                    </div>
                     <div id="analystBriefBody">
-                        <div class="ab-line ab-l1">Loading structural read...</div>
+                        <div class="ab-line ab-l2 ab-starred">Loading structural read...</div>
                     </div>
                 </div>
 
@@ -365,13 +371,12 @@
 
         function openModal(symbol) {
             const data = window.radarMemory[symbol];
-            if (data && data.plan && data.plan.valid) {
-                activeData = data;
-                document.getElementById('tSym').innerText = activeData.symbol.replace('USDT', '') + " MISSION COCKPIT";
-                renderModal(activeData);
-                document.getElementById('targetModal').style.display = 'block';
-                document.body.style.overflow = 'hidden';
-            }
+            if (!data || data.status === 'CALIBRATING') return;
+            activeData = data;
+            document.getElementById('tSym').innerText = activeData.symbol.replace('USDT', '') + " MISSION COCKPIT";
+            renderModal(activeData);
+            document.getElementById('targetModal').style.display = 'block';
+            document.body.style.overflow = 'hidden';
         }
 
         function closeModal() {
@@ -380,107 +385,60 @@
         }
 
         // ================================================================
-        // PANEL 00 — ANALYST BRIEF (built from existing radarMemory data)
+        // PANEL 00 — ANALYST BRIEF (live Ghost Lead / MAS analysis)
         // ================================================================
-        function _kdePeaks(d) {
+        function escapeHtml(s) {
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
+        function renderBriefText(text) {
+            const lines = String(text).split(/\n+/).map(s => s.trim()).filter(Boolean);
+            if (!lines.length) {
+                return `<div class="ab-line ab-l2 ab-starred">${escapeHtml(text)}</div>`;
+            }
+            // The starred "higher probability" line stays visible when collapsed.
+            let starIdx = lines.findIndex(l => l.includes('★') || /HIGHER PROBABILITY/i.test(l));
+            if (starIdx < 0) starIdx = 0;
+            return lines.map((l, i) => {
+                const cls = (i === starIdx) ? 'ab-line ab-l2 ab-starred' : 'ab-line ab-l1 ab-collapsible';
+                return `<div class="${cls}">${escapeHtml(l)}</div>`;
+            }).join('');
+        }
+
+        async function loadAnalystBrief(symbol) {
+            const body = document.getElementById('analystBriefBody');
+            body.innerHTML = `<div class="ab-line ab-l2 ab-starred">Ghost Lead analyzing...</div>`;
+
+            const dbSym = (symbol || '').includes('/') ? symbol : (symbol || '').replace('USDT', '/USDT');
+            const message = `Give me the Analyst Brief for ${dbSym}. State where we are in the wave structure with specific prices. Give the starred higher probability direction with exact trigger levels. Give the exact setup if the trigger breaks. Give the stand down condition. Maximum 6 sentences. No generic macro commentary. Specific Kabroda prices and levels only.`;
+
             try {
-                const intel = JSON.parse(d.full_intel || '{}');
-                return (((intel.battlebox || {}).context || {}).kde_peaks) || [];
-            } catch (e) { return []; }
+                const res = await fetch('/api/research/chat-mas', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol: dbSym, message: message })
+                });
+                const data = await res.json();
+                if (!data || !data.ok || !data.reply) throw new Error('bad response');
+                body.innerHTML = renderBriefText(data.reply);
+            } catch (e) {
+                body.innerHTML = `<div class="ab-line ab-l4 ab-starred">Ghost Lead unavailable. Check connection.</div>`;
+            }
         }
 
-        function _findBlockingWall(peaks, favored, entry, t1) {
-            const heavy = peaks.filter(p => ['HEAVY', 'MAXIMUM'].includes(p.intensity));
-            if (favored === 'LONG') {
-                const inPath = heavy.filter(p => p.price > entry && p.price < t1).sort((a, b) => a.price - b.price);
-                return inPath.length ? inPath[0].price : 0;
-            }
-            if (favored === 'SHORT') {
-                const inPath = heavy.filter(p => p.price < entry && p.price > t1).sort((a, b) => b.price - a.price);
-                return inPath.length ? inPath[0].price : 0;
-            }
-            return 0;
-        }
-
-        function buildAnalystBrief(d) {
-            const price  = d.price || 0;
-            const levels = d.levels || {};
-            const bo     = levels.breakout_trigger  || 0;
-            const bd     = levels.breakdown_trigger || 0;
-            const brief  = d.mtf_brief || {};
-            const dir    = brief.confluence_direction || 'NEUTRAL';
-            const score  = brief.confluence_score     || 0;
-            const energy = brief.energy_status        || 'BUILDING';
-            const macro  = (d.macro_bias || 'NEUTRAL').toUpperCase();
-            const plan   = d.plan || {};
-            const favored = plan.bias || d.favored || 'NEUTRAL';
-            const targets = plan.targets || [0, 0, 0];
-            const diag   = d.diagnostic_ledger || {};
-
-            // Range from nearest gravity walls above/below current price (fallback to triggers).
-            const peaks = _kdePeaks(d);
-            const above = peaks.filter(p => p.price > price).sort((a, b) => a.price - b.price);
-            const below = peaks.filter(p => p.price < price).sort((a, b) => b.price - a.price);
-            const ceiling = above.length ? above[0].price : bo;
-            const floor   = below.length ? below[0].price : bd;
-
-            // LINE 1 — Structure (framing adapts to macro_bias)
-            let l1;
-            if (macro === 'BULLISH') {
-                l1 = `Bullish structure active. Range: $${fmt(floor)} — $${fmt(ceiling)}. Bulls hold structural advantage.`;
-            } else if (macro === 'BEARISH') {
-                l1 = `Bearish structure active. Range: $${fmt(floor)} — $${fmt(ceiling)}. Bears hold structural advantage.`;
-            } else {
-                l1 = `Range-bound structure. Range: $${fmt(floor)} — $${fmt(ceiling)}. No side holds a structural edge.`;
-            }
-
-            // LINE 2 — Energy Read
-            let l2;
-            if (energy === 'EXHAUSTED') {
-                const opp = dir === 'BULLISH' ? 'SHORT' : dir === 'BEARISH' ? 'LONG' : 'REVERSAL';
-                const moveDir = dir === 'BULLISH' ? 'long' : dir === 'BEARISH' ? 'short' : 'directional';
-                l2 = `★ HIGHER PROBABILITY: ${opp} — Energy burned out after recent ${moveDir} push. Watch for reversal.`;
-            } else if (dir === 'BEARISH' && energy === 'BUILDING') {
-                l2 = `★ HIGHER PROBABILITY: SHORT — ${score}/5 timeframes aligned bearish. Energy building. Short setup active below $${fmt(bd)}.`;
-            } else if (dir === 'BULLISH' && energy === 'BUILDING') {
-                l2 = `★ HIGHER PROBABILITY: LONG — ${score}/5 timeframes aligned bullish. Energy building. Long setup active above $${fmt(bo)}.`;
-            } else {
-                l2 = `NO CLEAR EDGE — Timeframes split. Wait for trigger confirmation.`;
-            }
-
-            // LINE 3 — Setup
-            let l3;
-            if (favored === 'LONG' || favored === 'SHORT') {
-                const entry = plan.entry || 0;
-                const stop  = plan.stop  || 0;
-                const t1    = targets[0] || 0;
-                const t2    = targets[1] || 0;
-                l3 = `IF ${favored} trigger breaks: Entry $${fmt(entry)} | Stop $${fmt(stop)} | T1 $${fmt(t1)} | T2 $${fmt(t2)}. `;
-                const clear = diag.airspace_clear !== false;
-                if (clear) {
-                    l3 += `T1 has CLEAR airspace.`;
-                } else {
-                    const wall = _findBlockingWall(peaks, favored, entry, t1);
-                    l3 += `T1 has BLOCKED airspace.` + (wall ? ` Heavy wall at $${fmt(wall)} — take profits at T1, do not hold.` : ` Take profits at T1, do not hold.`);
-                }
-            } else {
-                l3 = `No active trigger setup — awaiting a directional break of the $${fmt(bd)} — $${fmt(bo)} range.`;
-            }
-
-            // LINE 4 — Stand Down Conditions
-            const l4 = `STAND DOWN IF: Price stays between $${fmt(bd)} and $${fmt(bo)} without breakout. Energy contradicts trigger break direction.`;
-
-            return `
-                <div class="ab-line ab-l1"><span class="ab-label">Structure</span>${l1}</div>
-                <div class="ab-line ab-l2"><span class="ab-label">Energy Read</span>${l2}</div>
-                <div class="ab-line ab-l3"><span class="ab-label">Setup</span>${l3}</div>
-                <div class="ab-line ab-l4"><span class="ab-label">Stand Down</span>${l4}</div>
-            `;
+        function toggleAnalystBrief() {
+            const body = document.getElementById('analystBriefBody');
+            const btn  = document.getElementById('abToggle');
+            const collapsed = body.classList.toggle('collapsed');
+            btn.innerText = collapsed ? '▶' : '▼';
         }
 
         function renderModal(d) {
-            // PANEL 00 — Analyst Brief
-            document.getElementById('analystBriefBody').innerHTML = buildAnalystBrief(d);
+            // PANEL 00 — Analyst Brief (live Ghost Lead call)
+            loadAnalystBrief(d.symbol);
 
             document.getElementById('vROE').innerText = d.briefing;
             document.getElementById('vMode').innerText = d.grade;
@@ -527,6 +485,8 @@
                 document.getElementById('pT1').innerText = d.plan.targets[0].toFixed(2);
                 document.getElementById('pT2').innerText = d.plan.targets[1].toFixed(2);
                 document.getElementById('pT3').innerText = d.plan.targets[2].toFixed(2);
+            } else {
+                ['pEnt','pStp','pT1','pT2','pT3'].forEach(id => document.getElementById(id).innerText = '--');
             }
             recalc();
         }
@@ -561,6 +521,12 @@
                     document.getElementById('pT1Vol').innerText = (totalContracts * scalePct).toFixed(4);
                     document.getElementById('pRunVol').innerText = (totalContracts * runPct).toFixed(4);
                 }
+            } else {
+                document.getElementById('pSiz').innerText = '--';
+                const psEl = document.getElementById('valPosSize');
+                if (psEl) psEl.innerText = '--';
+                document.getElementById('pT1Vol').innerText = '--';
+                document.getElementById('pRunVol').innerText = '--';
             }
         }
 
@@ -648,7 +614,7 @@
 
                     const actionable   = (t.grade === 'GRADE A' || t.grade === 'GRADE B');
                     const rowClass     = actionable ? 'rrc-active' : 'rrc-down';
-                    const cockpitClass = actionable ? 'rrc-cockpit-active' : 'rrc-cockpit-muted';
+                    const cockpitClass = 'rrc-cockpit-active';
 
                     html += `
                     <div class="radar-row-c ${rowClass}">
