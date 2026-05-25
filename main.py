@@ -29,8 +29,9 @@ import gravity_math
 import kabroda_mas_flow
 import ledger_closing_engine
 import mtf_confluence_scanner
+import agent_core
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -270,6 +271,61 @@ async def audit_foreign_intel(payload: ForeignIntelPayload, request: Request, db
             "ok": False, 
             "error": "Failed to parse intel. Ensure the text perfectly matches the MetaSignals format."
         })
+
+# --- AGENT COST INFRASTRUCTURE (PHASE 1) ---
+
+@app.get("/api/agents/cost")
+async def api_agents_cost(request: Request, db: Session = Depends(get_db)):
+    """Returns 24h and 7-day agent spend summary. Admin only."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    summary = await asyncio.to_thread(agent_core.get_cost_summary)
+    return JSONResponse(summary)
+
+
+@app.post("/api/agents/test-call")
+async def api_agents_test_call(request: Request, db: Session = Depends(get_db)):
+    """
+    Phase 1 success test. Fires one minimal _call_agent() invocation,
+    writes a row to agent_run_log, and returns the response + cost.
+    Admin only.
+    """
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+
+    system_prompt = (
+        "You are a cost-tracking verification agent for the Kabroda trading "
+        "intelligence system. Your only function is to confirm that the Phase 1 "
+        "cost infrastructure is operational."
+    )
+    context_text = (
+        "Confirm system status. "
+        "Respond with exactly one line: PHASE_1_COST_INFRASTRUCTURE_ONLINE"
+    )
+
+    try:
+        result = await asyncio.to_thread(
+            agent_core._call_agent,
+            "infrastructure_test",
+            system_prompt,
+            context_text,
+            "admin_test",
+        )
+        summary = await asyncio.to_thread(agent_core.get_cost_summary)
+        last_call = summary.get("last_10_calls", [{}])[0]
+        return JSONResponse({
+            "ok": True,
+            "agent_response": result,
+            "logged_row": last_call,
+            "next_step": "Visit /api/agents/cost to see full summary.",
+        })
+    except RuntimeError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=402)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 
 @app.get("/indicators")
 async def indicators(request: Request, db: Session = Depends(get_db)):

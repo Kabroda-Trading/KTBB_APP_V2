@@ -222,3 +222,30 @@ class DecisionJournal(Base):
     outcome_direction_correct = Column(Boolean, nullable=True)
 
     full_context_json = Column(String, nullable=True)
+
+
+# ---------------------------------------------------------
+# AGENT RUN LOG (PHASE 1 — COST INFRASTRUCTURE)
+# Tracks every agent invocation: tokens, cost, status.
+# Budget gate reads this table before any agent fires.
+# ---------------------------------------------------------
+class AgentRunLog(Base):
+    __tablename__ = "agent_run_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_name = Column(String, nullable=False, index=True)
+    model = Column(String, nullable=False, default="claude-sonnet-4-6")
+    triggered_by = Column(String, nullable=False)
+
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    cache_read_tokens = Column(Integer, default=0)
+    cache_write_tokens = Column(Integer, default=0)
+
+    estimated_cost_usd = Column(Float, default=0.0)
+
+    # SUCCESS | ERROR | BUDGET_BLOCKED
+    status = Column(String, nullable=False)
+    error_message = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

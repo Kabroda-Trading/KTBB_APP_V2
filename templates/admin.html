@@ -51,6 +51,29 @@
         .inp-pass { width: 100%; padding: 12px; background: #020617; border: 1px solid #475569; color: #fff; border-radius: 4px; margin: 15px 0; font-family: 'JetBrains Mono'; box-sizing: border-box; }
         .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
         .btn-save { background: #facc15; color: #000; border: none; padding: 10px 20px; font-weight: 700; border-radius: 4px; cursor: pointer; }
+
+        /* COST CARD */
+        .cost-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 16px 20px; }
+        .cost-stat { background: #020617; border: 1px solid #1e293b; border-radius: 6px; padding: 14px 16px; }
+        .cost-label { font-family: 'JetBrains Mono'; font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+        .cost-value { font-family: 'JetBrains Mono'; font-size: 22px; font-weight: 800; color: #f1f5f9; }
+        .cost-sub { font-size: 11px; color: #64748b; margin-top: 4px; }
+        .budget-bar-wrap { padding: 0 20px 16px; }
+        .budget-bar-bg { background: #1e293b; border-radius: 4px; height: 6px; overflow: hidden; }
+        .budget-bar-fill { height: 100%; border-radius: 4px; background: #10b981; transition: width 0.4s; }
+        .budget-bar-fill.warn { background: #f59e0b; }
+        .budget-bar-fill.danger { background: #ef4444; }
+        .cost-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .cost-table th { background: #020617; color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 8px 12px; border-bottom: 1px solid #334155; text-align: left; }
+        .cost-table td { padding: 8px 12px; border-bottom: 1px solid #1e293b; color: #cbd5e1; font-family: 'JetBrains Mono'; font-size: 11px; }
+        .cost-table tr:last-child td { border-bottom: none; }
+        .status-ok { color: #10b981; }
+        .status-err { color: #ef4444; }
+        .status-blocked { color: #f59e0b; }
+        .btn-test { background: rgba(16,185,129,0.1); border: 1px solid #10b981; color: #10b981; padding: 7px 14px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; transition: 0.2s; }
+        .btn-test:hover { background: rgba(16,185,129,0.25); }
+        .btn-test:disabled { opacity: 0.4; cursor: not-allowed; }
+        #testResult { font-family: 'JetBrains Mono'; font-size: 11px; color: #94a3b8; margin-top: 10px; padding: 10px 12px; background: #020617; border: 1px solid #1e293b; border-radius: 4px; display: none; white-space: pre-wrap; }
     </style>
 </head>
 <body>
@@ -113,6 +136,64 @@
                 {% endfor %}
             </tbody>
         </table>
+    </div>
+
+    <!-- PHASE 1: AGENT COST INFRASTRUCTURE CARD -->
+    <div class="roster-card" style="margin-top: 24px;">
+        <div class="card-header">
+            <span class="card-title">Agent Cost Monitor</span>
+            <div style="display:flex; gap:10px; align-items:center;">
+                <span id="budgetPctLabel" class="card-title" style="color:#64748b;">Loading...</span>
+                <button class="btn-test" id="testBtn" onclick="runTestCall()">RUN TEST CALL</button>
+            </div>
+        </div>
+
+        <!-- 24H STATS GRID -->
+        <div class="cost-grid">
+            <div class="cost-stat">
+                <div class="cost-label">24H Spend</div>
+                <div class="cost-value" id="todaySpend">—</div>
+                <div class="cost-sub" id="todayBudget">of $— daily cap</div>
+            </div>
+            <div class="cost-stat">
+                <div class="cost-label">7-Day Spend</div>
+                <div class="cost-value" id="weekSpend">—</div>
+                <div class="cost-sub" id="weekCalls">— total calls</div>
+            </div>
+        </div>
+
+        <!-- BUDGET BAR -->
+        <div class="budget-bar-wrap">
+            <div class="budget-bar-bg">
+                <div class="budget-bar-fill" id="budgetBar" style="width:0%"></div>
+            </div>
+        </div>
+
+        <!-- LAST 10 CALLS TABLE -->
+        <div style="padding: 0 0 4px;">
+            <table class="cost-table">
+                <thead>
+                    <tr>
+                        <th>Agent</th>
+                        <th>Trigger</th>
+                        <th>Status</th>
+                        <th>In</th>
+                        <th>Out</th>
+                        <th>CR</th>
+                        <th>Cost</th>
+                        <th>Time</th>
+                    </tr>
+                </thead>
+                <tbody id="costTableBody">
+                    <tr><td colspan="8" style="color:#64748b; text-align:center; padding:20px;">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- TEST CALL OUTPUT -->
+        <div style="padding: 0 20px 16px;">
+            <div id="testResult"></div>
+        </div>
     </div>
 
     <div id="resetModal" class="modal-overlay">
@@ -194,6 +275,90 @@
             }
         }
     </script>
+    <script>
+        // --- AGENT COST CARD ---
+        async function loadCostData() {
+            try {
+                const res = await fetch('/api/agents/cost');
+                const data = await res.json();
+                if (!data.ok) return;
+
+                const t = data.today;
+                const w = data.seven_day;
+                const pct = t.budget_pct || 0;
+
+                document.getElementById('todaySpend').textContent = '$' + t.total_usd.toFixed(4);
+                document.getElementById('todayBudget').textContent = 'of $' + t.budget_usd.toFixed(2) + ' daily cap';
+                document.getElementById('weekSpend').textContent = '$' + w.total_usd.toFixed(4);
+
+                const weekCalls = Object.values(w.by_agent || {}).reduce((s, a) => s + a.calls, 0);
+                document.getElementById('weekCalls').textContent = weekCalls + ' total calls';
+
+                document.getElementById('budgetPctLabel').textContent = pct.toFixed(1) + '% of daily budget';
+
+                const bar = document.getElementById('budgetBar');
+                bar.style.width = Math.min(pct, 100) + '%';
+                bar.className = 'budget-bar-fill' + (pct >= 90 ? ' danger' : pct >= 70 ? ' warn' : '');
+
+                const tbody = document.getElementById('costTableBody');
+                const calls = data.last_10_calls || [];
+                if (calls.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="color:#64748b; text-align:center; padding:20px;">No calls logged yet. Run a test call.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = calls.map(r => {
+                    const sc = r.status === 'SUCCESS' ? 'status-ok' : r.status === 'BUDGET_BLOCKED' ? 'status-blocked' : 'status-err';
+                    const cr = r.cache_read_tokens > 0 ? '<span style="color:#10b981">' + r.cache_read_tokens + '</span>' : '0';
+                    return `<tr>
+                        <td>${r.agent_name}</td>
+                        <td style="color:#64748b">${r.triggered_by}</td>
+                        <td class="${sc}">${r.status}</td>
+                        <td>${r.input_tokens}</td>
+                        <td>${r.output_tokens}</td>
+                        <td>${cr}</td>
+                        <td style="color:#facc15">$${r.estimated_cost_usd.toFixed(6)}</td>
+                        <td style="color:#64748b; font-size:10px">${(r.created_at || '').replace(' UTC','')}</td>
+                    </tr>`;
+                }).join('');
+
+            } catch(e) {
+                console.error('Cost load failed:', e);
+            }
+        }
+
+        async function runTestCall() {
+            const btn = document.getElementById('testBtn');
+            const out = document.getElementById('testResult');
+            btn.disabled = true;
+            btn.textContent = 'FIRING...';
+            out.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/agents/test-call', { method: 'POST' });
+                const data = await res.json();
+                out.style.display = 'block';
+                if (data.ok) {
+                    out.style.color = '#10b981';
+                    out.textContent = '✓ RESPONSE: ' + data.agent_response + '\n\nLOGGED ROW:\n' + JSON.stringify(data.logged_row, null, 2);
+                    await loadCostData();
+                } else {
+                    out.style.color = '#ef4444';
+                    out.textContent = '✗ ERROR: ' + data.error;
+                }
+            } catch(e) {
+                out.style.display = 'block';
+                out.style.color = '#ef4444';
+                out.textContent = '✗ Connection failed: ' + e;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'RUN TEST CALL';
+            }
+        }
+
+        loadCostData();
+        setInterval(loadCostData, 30000);
+    </script>
+
     {% include 'footer.html' %}
 </body>
 </html>

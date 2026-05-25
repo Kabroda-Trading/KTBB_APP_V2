@@ -20,4 +20,5 @@ pytz
 asyncpg==0.29.0
 crewai
 langchain-anthropic
+anthropic>=0.40.0
 yfinance
