@@ -249,3 +249,76 @@ class AgentRunLog(Base):
     error_message = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
+# MACRO NARRATIVE LOG (PHASE 2 — CROSS-DAY NARRATIVE MEMORY)
+# Stores the Elliott Wave structural context and the Senior
+# Analyst's daily brief text. Tomorrow's Senior Analyst reads
+# yesterday's row before writing, creating genuine continuity.
+#
+# Writers:
+#   elliott_wave_specialist — updates wave parameters Sunday
+#   senior_analyst          — writes narrative_text + tactical_text daily
+#   performance_auditor     — writes performance_note Sunday
+# ---------------------------------------------------------
+class MacroNarrativeLog(Base):
+    __tablename__ = "macro_narrative_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, nullable=False, index=True, default="BTC/USDT")
+    date_key = Column(String, nullable=False, index=True)
+
+    # "elliott_wave_specialist" | "senior_analyst"
+    authored_by = Column(String, nullable=False)
+
+    # Elliott Wave parameters — written by Elliott Wave Specialist
+    wave_label = Column(String, nullable=True)           # e.g. "BEAR_WAVE_4_BOUNCE"
+    wave_origin_date = Column(String, nullable=True)     # e.g. "2026-02-05"
+    wave_origin_price = Column(Float, nullable=True)     # e.g. 60055.00
+    wave_target_price = Column(Float, nullable=True)     # e.g. 80632.00
+    wave_day_count = Column(Integer, nullable=True)      # days since wave_origin_date
+    completion_pct = Column(Float, nullable=True)        # % to wave_target_price
+    invalidation_price = Column(Float, nullable=True)    # where this wave count dies
+
+    # Brief text — written by Senior Analyst
+    narrative_text = Column(String, nullable=True)       # Part 1: the paragraph
+    tactical_text = Column(String, nullable=True)        # Part 2: structured setup
+
+    # Corrections — written by Performance Auditor
+    performance_note = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
+# JEWEL SNAPSHOT LOG (PHASE 2 — 6 DAILY TIMEFRAME SNAPSHOTS)
+# Captures JEWEL state across all 5 timeframes at 6 fixed
+# session transitions per day. Senior Analyst reads the last
+# 6 entries (24 hours) before writing the morning brief.
+#
+# session_label values:
+#   NY_OPEN, NY_MIDDAY, NY_CLOSE,
+#   ASIA_OPEN, ASIA_MIDDAY, LONDON_OPEN
+#
+# tf_*_state fields: JSON strings with keys:
+#   direction, zone, momentum, adx_strength
+# ---------------------------------------------------------
+class JewelSnapshotLog(Base):
+    __tablename__ = "jewel_snapshot_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, nullable=False, index=True, default="BTC/USDT")
+    timestamp = Column(DateTime, nullable=False, index=True)
+
+    session_label = Column(String, nullable=False)   # NY_OPEN | NY_MIDDAY | ...
+
+    asset_price = Column(Float, nullable=False)
+
+    tf_15m_state = Column(String, nullable=True)     # JSON: direction/zone/momentum/adx
+    tf_1h_state = Column(String, nullable=True)
+    tf_4h_state = Column(String, nullable=True)
+    tf_daily_state = Column(String, nullable=True)
+    tf_weekly_state = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
