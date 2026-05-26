@@ -325,45 +325,64 @@ def _fetch_cro_memory(symbol: str) -> str:
 
 def _read_narrative_context(symbol: str) -> str:
     """
-    Returns yesterday's narrative text for cross-day continuity.
-    Handles empty table gracefully on Day 1.
+    Builds the cross-day context block for the Senior Analyst.
+    Queries analyst and specialist rows separately — the Specialist row
+    has narrative_text=None by design, so a single .first() query always
+    hit the Day 1 path and dropped the wave data.
     """
     db = SessionLocal()
     try:
-        latest = (
+        analyst_row = (
             db.query(MacroNarrativeLog)
-            .filter(MacroNarrativeLog.symbol == symbol)
+            .filter(
+                MacroNarrativeLog.symbol == symbol,
+                MacroNarrativeLog.authored_by == "senior_analyst",
+            )
             .order_by(MacroNarrativeLog.id.desc())
             .first()
         )
-        if not latest or not latest.narrative_text:
-            return (
-                "NARRATIVE CONTEXT: Day 1 of tracking — no prior brief available. "
-                "Write the narrative from current structural data. "
-                "Acknowledge: 'Note: Elliott Wave parameters pending weekly verification. "
-                "Wave context approximate.'"
+        wave_row = (
+            db.query(MacroNarrativeLog)
+            .filter(
+                MacroNarrativeLog.symbol == symbol,
+                MacroNarrativeLog.authored_by == "elliott_wave_specialist",
             )
+            .order_by(MacroNarrativeLog.id.desc())
+            .first()
+        )
 
-        lines = [f"NARRATIVE CONTEXT (Yesterday — {latest.date_key}):"]
-        lines.append(f'"{latest.narrative_text}"')
+        lines = []
 
-        if latest.wave_label:
+        if analyst_row and analyst_row.narrative_text:
+            lines.append(f"NARRATIVE CONTEXT (Yesterday — {analyst_row.date_key}):")
+            lines.append(f'"{analyst_row.narrative_text}"')
+        else:
             lines.append(
-                f"\nCURRENT WAVE STATE: {latest.wave_label} | "
-                f"Day {latest.wave_day_count} | "
-                f"{latest.completion_pct}% complete | "
-                f"Origin: ${latest.wave_origin_price:,.2f} | "
-                f"Target: ${latest.wave_target_price:,.2f} | "
-                f"Invalidation: ${latest.invalidation_price:,.2f}"
+                "NARRATIVE CONTEXT: Day 1 of tracking — no prior brief available. "
+                "Write the narrative from current structural data."
             )
+
+        if wave_row and wave_row.wave_label:
+            lines.append(
+                f"\nCURRENT WAVE STATE ({wave_row.date_key}): "
+                f"{wave_row.wave_label} | {wave_row.wave_status} | "
+                f"{wave_row.completion_pct}% of structural range complete | "
+                f"Origin: ${wave_row.wave_origin_price:,.2f} | "
+                f"Target: ${wave_row.wave_target_price:,.2f} | "
+                f"Invalidation: ${wave_row.invalidation_price:,.2f}"
+            )
+            if wave_row.wave_reasoning:
+                lines.append(f"\nSPECIALIST WAVE REASONING:\n{wave_row.wave_reasoning}")
+            if wave_row.confirmation_condition:
+                lines.append(f"\nCONFIRMATION CONDITION:\n{wave_row.confirmation_condition}")
         else:
             lines.append(
                 "\nWAVE STATE: Elliott Wave parameters pending weekly verification. "
                 "Wave context approximate."
             )
 
-        if latest.performance_note:
-            lines.append(f"\nPERFORMANCE AUDITOR NOTE: {latest.performance_note}")
+        if analyst_row and analyst_row.performance_note:
+            lines.append(f"\nPERFORMANCE AUDITOR NOTE: {analyst_row.performance_note}")
 
         return "\n".join(lines)
 
