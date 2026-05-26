@@ -396,6 +396,8 @@ def _read_narrative_context(symbol: str) -> str:
 def _read_jewel_context(symbol: str) -> str:
     """
     Returns the last 6 JEWEL snapshots (24h of session transitions).
+    Most recent snapshot: full detail (all 5 TFs, all JEWEL fields).
+    Prior 5 snapshots: one-liner summary (gate, direction, conviction).
     Handles empty table gracefully on Day 1.
     """
     db = SessionLocal()
@@ -414,24 +416,65 @@ def _read_jewel_context(symbol: str) -> str:
             )
 
         lines = ["OVERNIGHT JEWEL SNAPSHOTS (Last 6 session transitions):"]
-        for snap in reversed(snapshots):
-            ts_str = snap.timestamp.strftime("%Y-%m-%d %H:%M UTC") if snap.timestamp else "?"
-            line = f"  [{snap.session_label} @ {ts_str}] Price: ${snap.asset_price:,.2f}"
-            for tf_name, tf_field in [
-                ("15M", snap.tf_15m_state),
-                ("1H", snap.tf_1h_state),
-                ("4H", snap.tf_4h_state),
-            ]:
-                if tf_field:
-                    try:
-                        state = json.loads(tf_field)
-                        line += (
-                            f" | {tf_name}: {state.get('direction','?')} "
-                            f"{state.get('zone','?')} {state.get('momentum','?')}"
-                        )
-                    except Exception:
-                        pass
-            lines.append(line)
+
+        def _tf_line(tf_name: str, tf_field) -> str:
+            if not tf_field:
+                return f"  {tf_name:>4}: No data"
+            try:
+                s = json.loads(tf_field)
+                bbwp_flag = " [COMPRESSED]" if s.get("bbwp_compressed") else ""
+                pmarp_flag = " [OVEREXT]" if s.get("pmarp_overextended") else ""
+                div = s.get("divergence", "NONE")
+                div_str = f" | Div: {div}" if div != "NONE" else ""
+                return (
+                    f"  {tf_name:>4}: {s.get('direction','?'):>8} | zone={s.get('zone','?'):<12} "
+                    f"mom={s.get('momentum','?'):<12} adx={s.get('adx_strength','?'):<8} "
+                    f"BBWP={s.get('bbwp_value', 0.0):>5.1f}%{bbwp_flag} "
+                    f"PMARP={s.get('pmarp_value', 0.0):>5.1f}%{pmarp_flag} "
+                    f"pmdir={s.get('pmarp_direction','?'):<8}{div_str}"
+                )
+            except Exception:
+                return f"  {tf_name:>4}: Parse error"
+
+        # Most recent snapshot — full detail
+        snap = snapshots[0]
+        ts_str = snap.timestamp.strftime("%Y-%m-%d %H:%M UTC") if snap.timestamp else "?"
+        gate_str = "OPEN" if snap.jewel_gate_open else "CLOSED"
+        lines.append(
+            f"\n[LATEST — {snap.session_label} @ {ts_str}] "
+            f"Price: ${snap.asset_price:,.2f} | Gate: {gate_str} | "
+            f"Conviction: {snap.jewel_conviction or '?'} | Direction: {snap.dominant_direction or '?'}"
+        )
+        if snap.jewel_exit_warning:
+            lines.append("  !! EXIT WARNING: PMARP overextended — position exhaustion risk")
+        if snap.jewel_divergence_warning:
+            lines.append("  !! DIVERGENCE WARNING: RSI divergence detected — momentum weakening")
+        if snap.jewel_signal_summary:
+            lines.append(f"  Signal: {snap.jewel_signal_summary}")
+
+        lines.append("  Timeframe breakdown:")
+        for tf_name, tf_field in [
+            ("15M",  snap.tf_15m_state),
+            ("1H",   snap.tf_1h_state),
+            ("4H",   snap.tf_4h_state),
+            ("1D",   snap.tf_daily_state),
+            ("1W",   snap.tf_weekly_state),
+        ]:
+            lines.append(_tf_line(tf_name, tf_field))
+
+        # Prior snapshots — one-liner each
+        if len(snapshots) > 1:
+            lines.append("\nPRIOR SESSIONS (oldest to newest):")
+            for snap in reversed(snapshots[1:]):
+                ts_str = snap.timestamp.strftime("%Y-%m-%d %H:%M UTC") if snap.timestamp else "?"
+                gate_str = "OPEN" if snap.jewel_gate_open else "CLOSED"
+                exit_flag = " EXIT!" if snap.jewel_exit_warning else ""
+                div_flag = " DIV!" if snap.jewel_divergence_warning else ""
+                lines.append(
+                    f"  [{snap.session_label} @ {ts_str}] ${snap.asset_price:,.2f} | "
+                    f"Gate:{gate_str} | {snap.dominant_direction or '?'} | "
+                    f"{snap.jewel_conviction or '?'}{exit_flag}{div_flag}"
+                )
 
         return "\n".join(lines)
 
