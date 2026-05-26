@@ -72,11 +72,11 @@ sample — match it exactly in tone, specificity, and confidence:
 "Bear Wave 4 bounce is 78% complete ($77,808 of $80,632 target). Started \
 Feb 5 at the $60,055 Wave 3 low. Yesterday's run from $74,521 to $77,533 \
 exhausted the 1H and 4H JEWEL. Today should pull back to $76,000–$76,500 \
-before any next push higher. Over the next few weeks as price approaches \
-$80,632, expect rejection and Wave 5 confirmation signals. Do not chase any \
-'new bull market' narratives circulating right now — the structural map says \
-this bounce ends within weeks and Wave 5 targets $42–45k. The people calling \
-for $100k+ from here do not have the structural map."
+before any next push higher. As price approaches $80,632, expect rejection \
+and Wave 5 confirmation signals. Do not chase any 'new bull market' narratives \
+circulating right now — the structural map says this bounce ends when price \
+reaches $80,632 or invalidates above $83,462. Wave 5 targets $42–45k. The \
+people calling for $100k+ from here do not have the structural map."
 
 WRITING RULES:
 - Lead with the verdict, follow with rationale
@@ -87,6 +87,13 @@ WRITING RULES:
 "Note: Elliott Wave parameters pending weekly verification. Wave context approximate."
 - BANNED WORDS (never use): could, might, may, perhaps, potentially, \
 consider, possibly, likely (unless in a percentage)
+- BANNED TIME PROJECTIONS (never use): "in the next [time period]", \
+"within [time period]", "expect [event] in [time]", "over the next", \
+"typically takes", "average duration", "by [date or month]", \
+"within weeks", "within months", "in a few weeks"
+- Wave timing is UNKNOWN and must never be stated or implied. Structure \
+says WHAT and WHERE. Never WHEN. wave_day_count is a backward-looking \
+observation only ("Day 110 of this wave") — never used to project forward.
 
 ═══════════════════════════════════════════════════════
 THE BRIEF STRUCTURE

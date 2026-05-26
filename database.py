@@ -80,6 +80,25 @@ def init_db():
     except Exception:
         pass
 
+    # --- PHASE 3B SPECIALIST AUDIT TRAIL ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE macro_narrative_log ADD COLUMN wave_status TEXT"))
+    except Exception:
+        pass
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE macro_narrative_log ADD COLUMN wave_reasoning TEXT"))
+    except Exception:
+        pass
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE macro_narrative_log ADD COLUMN confirmation_condition TEXT"))
+    except Exception:
+        pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -280,6 +299,11 @@ class MacroNarrativeLog(Base):
     wave_day_count = Column(Integer, nullable=True)      # days since wave_origin_date
     completion_pct = Column(Float, nullable=True)        # % to wave_target_price
     invalidation_price = Column(Float, nullable=True)    # where this wave count dies
+
+    # Specialist reasoning — written by Elliott Wave Specialist
+    wave_status = Column(String, nullable=True)          # IN_PROGRESS | CONFIRMED | PENDING | QUESTIONABLE
+    wave_reasoning = Column(String, nullable=True)       # Full EWT structural analysis with rule citations
+    confirmation_condition = Column(String, nullable=True)  # Price events that confirm wave completion
 
     # Brief text — written by Senior Analyst
     narrative_text = Column(String, nullable=True)       # Part 1: the paragraph
