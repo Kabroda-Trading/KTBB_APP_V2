@@ -103,6 +103,26 @@ def init_db():
     except Exception:
         pass
 
+    # --- PHASE 3C JEWEL SPECIALIST — top-level scanner context columns ---
+    for col_def in [
+        "confluence_score INTEGER",
+        "dominant_direction TEXT",
+        "conviction TEXT",
+        "any_tf_compressed BOOLEAN",
+        "any_tf_overextended BOOLEAN",
+        "any_tf_divergence BOOLEAN",
+        "jewel_gate_open BOOLEAN",
+        "jewel_conviction TEXT",
+        "jewel_exit_warning BOOLEAN",
+        "jewel_divergence_warning BOOLEAN",
+        "jewel_signal_summary TEXT",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE jewel_snapshot_log ADD COLUMN {col_def}"))
+        except Exception:
+            pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -348,5 +368,18 @@ class JewelSnapshotLog(Base):
     tf_4h_state = Column(String, nullable=True)
     tf_daily_state = Column(String, nullable=True)
     tf_weekly_state = Column(String, nullable=True)
+
+    # --- PHASE 3C: scanner top-level context ---
+    confluence_score      = Column(Integer, nullable=True)
+    dominant_direction    = Column(String, nullable=True)
+    conviction            = Column(String, nullable=True)
+    any_tf_compressed     = Column(Boolean, nullable=True)
+    any_tf_overextended   = Column(Boolean, nullable=True)
+    any_tf_divergence     = Column(Boolean, nullable=True)
+    jewel_gate_open       = Column(Boolean, nullable=True)
+    jewel_conviction      = Column(String, nullable=True)
+    jewel_exit_warning    = Column(Boolean, nullable=True)
+    jewel_divergence_warning = Column(Boolean, nullable=True)
+    jewel_signal_summary  = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

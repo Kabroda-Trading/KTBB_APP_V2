@@ -1,15 +1,16 @@
 # mtf_confluence_scanner.py
 # ==============================================================================
-# KABRODA MULTI-TIMEFRAME CONFLUENCE SCANNER v1.0
+# KABRODA MULTI-TIMEFRAME CONFLUENCE SCANNER v2.0
 # Purpose: Live 5-timeframe direction vote (15M/1H/4H/Daily/Weekly) with
-# StochRSI, EMA21/55 bias, ADX strength, and KDE key level detection.
+# StochRSI, EMA21/55 bias, ADX strength, BBWP compression gate, PMARP exit
+# protocol, RSI divergence detection, and unified jewel_signal synthesis.
 # Runs every 15 minutes via gravity engine loop. Standalone — read-only.
 # DO NOT modify battlebox_pipeline.py or any existing file.
 # ==============================================================================
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from battlebox_pipeline import (
     fetch_live_15m,
@@ -60,7 +61,7 @@ def _resample_weekly(daily_candles: List[Dict]) -> List[Dict]:
 
 
 # ------------------------------------------------------------------------------
-# RSI SERIES (O(n) — needed for StochRSI)
+# RSI SERIES (O(n) — needed for StochRSI and divergence detection)
 # ------------------------------------------------------------------------------
 
 def _calc_rsi_series(closes: List[float], period: int = 14) -> List[float]:
@@ -78,11 +79,9 @@ def _calc_rsi_series(closes: List[float], period: int = 14) -> List[float]:
     avg_loss = sum(losses[:period]) / period
 
     rsi_series: List[float] = []
-    # Pad with None for alignment — first RSI value corresponds to index `period`
+    ag, al = avg_gain, avg_loss
     for i in range(period, len(closes)):
-        if i == period:
-            ag, al = avg_gain, avg_loss
-        else:
+        if i > period:
             ag = (ag * (period - 1) + gains[i - 1]) / period
             al = (al * (period - 1) + losses[i - 1]) / period
 
@@ -159,11 +158,264 @@ def _calc_stoch_rsi(
 
 
 # ------------------------------------------------------------------------------
+# BBWP — Bollinger Band Width Percentile
+# Gate condition: bbwp_compressed=True means volatility is compressed and an
+# expansion move is imminent. The JEWEL system only signals direction when
+# at least one timeframe is compressed.
+# ------------------------------------------------------------------------------
+
+def _calc_bbwp(candles: List[Dict], period: int = 20, lookback: int = 252) -> Dict[str, Any]:
+    """
+    Percentile rank of current Bollinger Band width vs the last `lookback` values.
+    bbwp_value < 25 = compression — gate open for JEWEL direction signal.
+    Falls back to raw band width (not percentile) when fewer than 50 bars available.
+    """
+    fallback = {"bbwp_value": 50.0, "bbwp_compressed": False}
+    closes = [c["close"] for c in candles]
+    if len(closes) < period + 1:
+        return fallback
+
+    bw_series: List[float] = []
+    for i in range(period - 1, len(closes)):
+        window = closes[i - period + 1 : i + 1]
+        sma = sum(window) / period
+        if sma == 0.0:
+            bw_series.append(0.0)
+            continue
+        variance = sum((x - sma) ** 2 for x in window) / period
+        std = variance ** 0.5
+        # (upper_bb - lower_bb) / sma * 100 = (4 * std) / sma * 100
+        bw_series.append((4.0 * std) / sma * 100.0)
+
+    if not bw_series:
+        return fallback
+
+    current_bw = bw_series[-1]
+
+    if len(bw_series) < 50:
+        # Not enough history — return raw band width, flag < 25 as compressed
+        return {"bbwp_value": round(current_bw, 4), "bbwp_compressed": current_bw < 25.0}
+
+    # Percentile rank of current_bw vs up to `lookback` historical values
+    history = bw_series[-(min(lookback, len(bw_series)) + 1) : -1]
+    if not history:
+        return {"bbwp_value": round(current_bw, 4), "bbwp_compressed": current_bw < 25.0}
+
+    rank = sum(1 for v in history if v <= current_bw) / len(history) * 100.0
+    return {"bbwp_value": round(rank, 2), "bbwp_compressed": rank < 25.0}
+
+
+# ------------------------------------------------------------------------------
+# PMARP — Price Moving Average Ratio Percentile
+# Exit protocol: pmarp_overextended=True means price has stretched too far
+# from its mean and a mean-reversion pull-back is likely.
+# ------------------------------------------------------------------------------
+
+def _calc_pmarp(
+    closes: List[float], ema21_series: List[float], lookback: int = 252
+) -> Dict[str, Any]:
+    """
+    Percentile rank of how far current price has deviated from EMA21.
+    pmarp_value > 75 = overextended — exit signal.
+    ema21_series must be the output of _calc_ema_series(closes, 21):
+    length = len(closes) - 20, where ema21_series[i] aligns to closes[i + 20].
+    """
+    fallback = {"pmarp_value": 50.0, "pmarp_overextended": False, "pmarp_direction": "NEUTRAL"}
+    if not closes or not ema21_series:
+        return fallback
+
+    # Align: ema21_series[i] corresponds to closes[offset + i]
+    offset = len(closes) - len(ema21_series)
+    aligned_closes = closes[offset:]
+
+    ratio_series: List[float] = []
+    for c, e in zip(aligned_closes, ema21_series):
+        ratio_series.append((c - e) / e * 100.0 if e != 0.0 else 0.0)
+
+    if not ratio_series:
+        return fallback
+
+    current_ratio = ratio_series[-1]
+    direction = "ABOVE" if current_ratio >= 0.0 else "BELOW"
+
+    if len(ratio_series) < 50:
+        return {
+            "pmarp_value": round(abs(current_ratio), 4),
+            "pmarp_overextended": False,
+            "pmarp_direction": direction,
+        }
+
+    history = ratio_series[-(min(lookback, len(ratio_series)) + 1) : -1]
+    if not history:
+        return {
+            "pmarp_value": round(abs(current_ratio), 4),
+            "pmarp_overextended": False,
+            "pmarp_direction": direction,
+        }
+
+    rank = sum(1 for v in history if v <= current_ratio) / len(history) * 100.0
+    return {
+        "pmarp_value": round(rank, 2),
+        "pmarp_overextended": rank > 75.0,
+        "pmarp_direction": direction,
+    }
+
+
+# ------------------------------------------------------------------------------
+# RSI DIVERGENCE
+# Detects when price and RSI disagree at swing pivots — early exhaustion signal.
+# Classic: price makes extreme in one direction, RSI does not confirm.
+# Hidden: RSI makes extreme, price does not confirm (trend continuation).
+# ------------------------------------------------------------------------------
+
+def _find_pivot_highs(series: List[float], n: int = 3) -> List[Tuple[int, float]]:
+    """Indices and values of bars higher than the n bars before AND after."""
+    pivots: List[Tuple[int, float]] = []
+    for i in range(n, len(series) - n):
+        val = series[i]
+        if all(val > series[i - j] for j in range(1, n + 1)) and \
+           all(val > series[i + j] for j in range(1, n + 1)):
+            pivots.append((i, val))
+    return pivots
+
+
+def _find_pivot_lows(series: List[float], n: int = 3) -> List[Tuple[int, float]]:
+    """Indices and values of bars lower than the n bars before AND after."""
+    pivots: List[Tuple[int, float]] = []
+    for i in range(n, len(series) - n):
+        val = series[i]
+        if all(val < series[i - j] for j in range(1, n + 1)) and \
+           all(val < series[i + j] for j in range(1, n + 1)):
+            pivots.append((i, val))
+    return pivots
+
+
+def _find_divergence(
+    closes: List[float],
+    rsi_series: List[float],
+    rsi_period: int = 14,
+    n: int = 3,
+) -> Dict[str, str]:
+    """
+    Compare last 2 price pivot highs/lows against RSI at those same bars.
+    rsi_series[j] aligns to closes[j + rsi_period].
+    Strength: STRONG when RSI spread > 5 points, WEAK when 1–5 points.
+    """
+    fallback = {"divergence": "NONE", "divergence_strength": "NONE"}
+    if len(rsi_series) < 20 or len(closes) < rsi_period + n * 2 + 2:
+        return fallback
+
+    rsi_offset = len(closes) - len(rsi_series)  # = rsi_period for period=14
+
+    def get_rsi_at(closes_idx: int) -> Optional[float]:
+        rsi_idx = closes_idx - rsi_offset
+        return rsi_series[rsi_idx] if 0 <= rsi_idx < len(rsi_series) else None
+
+    def _strength(r1: float, r2: float) -> str:
+        diff = abs(r2 - r1)
+        if diff > 5.0:
+            return "STRONG"
+        if diff > 1.0:
+            return "WEAK"
+        return "NONE"
+
+    highs = _find_pivot_highs(closes, n)
+    lows = _find_pivot_lows(closes, n)
+
+    if len(highs) >= 2:
+        i1, p1 = highs[-2]
+        i2, p2 = highs[-1]
+        r1, r2 = get_rsi_at(i1), get_rsi_at(i2)
+        if r1 is not None and r2 is not None:
+            strength = _strength(r1, r2)
+            if strength != "NONE":
+                if p2 > p1 and r2 < r1:
+                    return {"divergence": "BEARISH", "divergence_strength": strength}
+                if p2 < p1 and r2 > r1:
+                    return {"divergence": "HIDDEN_BEARISH", "divergence_strength": strength}
+
+    if len(lows) >= 2:
+        i1, p1 = lows[-2]
+        i2, p2 = lows[-1]
+        r1, r2 = get_rsi_at(i1), get_rsi_at(i2)
+        if r1 is not None and r2 is not None:
+            strength = _strength(r1, r2)
+            if strength != "NONE":
+                if p2 < p1 and r2 > r1:
+                    return {"divergence": "BULLISH", "divergence_strength": strength}
+                if p2 > p1 and r2 < r1:
+                    return {"divergence": "HIDDEN_BULLISH", "divergence_strength": strength}
+
+    return fallback
+
+
+# ------------------------------------------------------------------------------
+# JEWEL SIGNAL — Sequential synthesis of all components
+# This is the primary output the Senior Analyst reads. It answers:
+# "Is the market ready to move, in which direction, and how confidently?"
+# ------------------------------------------------------------------------------
+
+def _build_jewel_signal(
+    tf_data: Dict[str, Dict],
+    dominant_direction: str,
+) -> Dict[str, Any]:
+    """
+    Sequential Krown logic:
+    1. BBWP gate — any timeframe compressed?
+    2. Direction from existing confluence vote
+    3. Conviction from EMA alignment + StochRSI momentum support
+    4. PMARP exit warning
+    5. Divergence warning
+    """
+    gate_open = any(v.get("bbwp_compressed", False) for v in tf_data.values())
+    exit_warning = any(v.get("pmarp_overextended", False) for v in tf_data.values())
+    divergence_warning = any(
+        v.get("divergence", "NONE") in {"BEARISH", "BULLISH"}
+        for v in tf_data.values()
+    )
+
+    if not gate_open:
+        conviction = "LOW"
+    else:
+        momentum_target = "UP" if dominant_direction == "BULLISH" else "DOWN"
+        direction_aligned = sum(
+            1 for v in tf_data.values()
+            if v.get("direction_vote") == dominant_direction
+        )
+        momentum_supporting = sum(
+            1 for v in tf_data.values()
+            if v.get("stoch_rsi", {}).get("curl") == momentum_target
+        )
+        conviction = "STRONG" if direction_aligned >= 3 and momentum_supporting >= 2 else "MODERATE"
+
+    if not gate_open:
+        summary = "Gate closed — no compression detected, stand down."
+    else:
+        parts = [f"Gate open. {dominant_direction.capitalize()} bias, {conviction.lower()} conviction."]
+        if exit_warning:
+            parts.append("Exit warning active — overextended on at least one timeframe.")
+        if divergence_warning:
+            parts.append("Divergence detected — potential reversal signal.")
+        if not exit_warning and not divergence_warning:
+            parts.append("No exit warnings. Setup clean.")
+        summary = " ".join(parts)
+
+    return {
+        "gate_open": gate_open,
+        "direction": dominant_direction,
+        "conviction": conviction,
+        "exit_warning": exit_warning,
+        "divergence_warning": divergence_warning,
+        "signal_summary": summary,
+    }
+
+
+# ------------------------------------------------------------------------------
 # PER-TIMEFRAME ANALYSIS
 # ------------------------------------------------------------------------------
 
 def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
-    """Compute EMA bias, StochRSI, and ADX for a single timeframe."""
+    """Compute full JEWEL component set for a single timeframe."""
     error_result = {
         "label": label,
         "ema_bias": "UNKNOWN",
@@ -172,6 +424,13 @@ def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
         "adx_strength": "WEAK",
         "adx_rising": False,
         "direction_vote": "NEUTRAL",
+        "bbwp_value": 50.0,
+        "bbwp_compressed": False,
+        "pmarp_value": 50.0,
+        "pmarp_overextended": False,
+        "pmarp_direction": "NEUTRAL",
+        "divergence": "NONE",
+        "divergence_strength": "NONE",
         "error": "insufficient_data",
     }
 
@@ -196,6 +455,12 @@ def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
     adx_strength = "STRONG" if adx_val > 25 else "WEAK"
     adx_rising = adx_data.get("rising", False)
 
+    bbwp = _calc_bbwp(candles)
+    pmarp = _calc_pmarp(closes, ema21)
+
+    rsi_series = _calc_rsi_series(closes)
+    divergence = _find_divergence(closes, rsi_series)
+
     return {
         "label": label,
         "ema_bias": ema_bias,
@@ -206,6 +471,13 @@ def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
         "adx_strength": adx_strength,
         "adx_rising": adx_rising,
         "direction_vote": ema_bias,
+        "bbwp_value": bbwp["bbwp_value"],
+        "bbwp_compressed": bbwp["bbwp_compressed"],
+        "pmarp_value": pmarp["pmarp_value"],
+        "pmarp_overextended": pmarp["pmarp_overextended"],
+        "pmarp_direction": pmarp["pmarp_direction"],
+        "divergence": divergence["divergence"],
+        "divergence_strength": divergence["divergence_strength"],
     }
 
 
@@ -231,7 +503,6 @@ def _find_key_levels(
     except Exception:
         pass
 
-    # Fallback to 4H candle extremes if KDE returned nothing
     if resistance is None or support is None:
         highs = sorted([c["high"] for c in candles_4h if c["high"] > current_price])
         lows = sorted([c["low"] for c in candles_4h if c["low"] < current_price], reverse=True)
@@ -265,6 +536,9 @@ def _build_summary(
     overbought = [v["label"] for v in tf_data.values() if v.get("stoch_rsi", {}).get("zone") == "OVERBOUGHT"]
     oversold = [v["label"] for v in tf_data.values() if v.get("stoch_rsi", {}).get("zone") == "OVERSOLD"]
     strong_adx = [v["label"] for v in tf_data.values() if v.get("adx_strength") == "STRONG"]
+    compressed = [v["label"] for v in tf_data.values() if v.get("bbwp_compressed")]
+    overextended = [v["label"] for v in tf_data.values() if v.get("pmarp_overextended")]
+    diverging = [v["label"] for v in tf_data.values() if v.get("divergence", "NONE") != "NONE"]
 
     res = levels.get("nearest_resistance")
     sup = levels.get("nearest_support")
@@ -284,6 +558,12 @@ def _build_summary(
         parts.append(f"Aligned TFs: {', '.join(aligned)}.")
     if opposing:
         parts.append(f"Opposing: {', '.join(opposing)}.")
+    if compressed:
+        parts.append(f"BBWP compressed (gate open) on: {', '.join(compressed)}.")
+    if overextended:
+        parts.append(f"PMARP overextended (exit warning) on: {', '.join(overextended)}.")
+    if diverging:
+        parts.append(f"RSI divergence on: {', '.join(diverging)}.")
     if curl_up:
         parts.append(f"StochRSI curling UP on: {', '.join(curl_up)}.")
     if curl_down:
@@ -307,14 +587,15 @@ def _build_summary(
 # ------------------------------------------------------------------------------
 
 async def run_mtf_confluence_scan(symbol: str) -> Dict[str, Any]:
-    """Run full 5-TF confluence scan for a single symbol. Live data only."""
+    """Run full 5-TF JEWEL scan for a single symbol. Live data only."""
     norm_sym = _normalize_symbol(symbol)
 
+    # 4H bumped to 280 so percentile rank covers full 252-period lookback
     raw_15m, raw_1h, raw_4h, raw_daily = await asyncio.gather(
         fetch_live_15m(norm_sym, limit=300),
         fetch_live_1h(norm_sym, limit=300),
-        fetch_live_4h(norm_sym, limit=200),
-        fetch_live_daily(norm_sym, limit=500),  # 500 days → ~71 weeks for EMA55 weekly
+        fetch_live_4h(norm_sym, limit=280),
+        fetch_live_daily(norm_sym, limit=500),
     )
 
     raw_weekly = _resample_weekly(raw_daily)
@@ -349,6 +630,12 @@ async def run_mtf_confluence_scan(symbol: str) -> Dict[str, Any]:
     else:
         conviction = "LOW"
 
+    any_tf_compressed = any(v.get("bbwp_compressed", False) for v in tf_data.values())
+    any_tf_overextended = any(v.get("pmarp_overextended", False) for v in tf_data.values())
+    any_tf_divergence = any(v.get("divergence", "NONE") != "NONE" for v in tf_data.values())
+
+    jewel_signal = _build_jewel_signal(tf_data, dominant_direction)
+
     levels = _find_key_levels(norm_sym, raw_4h, current_price)
 
     summary = _build_summary(tf_data, score, conviction, dominant_direction, current_price, levels)
@@ -362,6 +649,10 @@ async def run_mtf_confluence_scan(symbol: str) -> Dict[str, Any]:
         "conviction": conviction,
         "nearest_resistance": levels["nearest_resistance"],
         "nearest_support": levels["nearest_support"],
+        "any_tf_compressed": any_tf_compressed,
+        "any_tf_overextended": any_tf_overextended,
+        "any_tf_divergence": any_tf_divergence,
+        "jewel_signal": jewel_signal,
         "summary": summary,
         "scanned_at": datetime.now(tz=timezone.utc).isoformat(),
     }
