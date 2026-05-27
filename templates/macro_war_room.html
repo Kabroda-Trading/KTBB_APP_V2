@@ -2,533 +2,743 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Kabroda | Macro War Room</title>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <title>Kabroda | Morning Brief</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Rajdhani:wght@600;700;800&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
-        body { background-color: #050505; color: #f8fafc; font-family: 'Inter', sans-serif; margin: 0; display: flex; flex-direction: column; min-height: 100vh; }
-        
-        .war-room-wrapper { flex: 1; padding: 40px; display: flex; flex-direction: column; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box; }
-        .header-panel { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
-        .wr-title { font-family: 'JetBrains Mono'; font-size: 24px; font-weight: 800; color: #fff; margin: 0; letter-spacing: 2px; }
-        
-        .asset-selector { background: #111; color: #0ea5e9; border: 1px solid #333; padding: 8px 16px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; border-radius: 4px; outline: none; cursor: pointer; }
+        :root {
+            --bg:       #050505;
+            --surface:  #0a0a0a;
+            --border:   #1e1e1e;
+            --border2:  #2a2a2a;
+            --green:    #22c55e;
+            --red:      #ef4444;
+            --amber:    #f59e0b;
+            --blue:     #0ea5e9;
+            --purple:   #a855f7;
+            --text:     #f1f5f9;
+            --muted:    #94a3b8;
+            --dim:      #475569;
+        }
 
-        /* --- THE SKYSCRAPER DESK LAYOUT --- */
-        .desk-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 30px; margin-bottom: 30px; }
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
 
-        /* --- GHOST LEAD TERMINAL (MAS OVERLAY) --- */
-        .ghost-lead-terminal { background: rgba(10, 10, 10, 0.8); border: 1px solid #222; border-left: 4px solid #0ea5e9; border-radius: 8px; padding: 24px; font-family: 'JetBrains Mono', monospace; position: relative; overflow: hidden; box-shadow: 0 0 20px rgba(14, 165, 233, 0.05); }
-        .ghost-lead-terminal::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(180deg, rgba(14, 165, 233, 0.03) 0%, transparent 100%); pointer-events: none; }
-        
-        .gl-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #222; padding-bottom: 12px; margin-bottom: 16px; }
-        .gl-title { color: #0ea5e9; font-weight: 800; font-size: 16px; text-transform: uppercase; letter-spacing: 2px; }
-        
-        .gl-status-badge { background: rgba(14, 165, 233, 0.1); color: #0ea5e9; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; border: 1px solid rgba(14, 165, 233, 0.3); letter-spacing: 1px; text-transform: uppercase;}
-        .gl-status-badge.rejected { color: #ef4444; border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.1); }
-        .gl-status-badge.waiting { color: #facc15; border-color: rgba(250, 204, 21, 0.3); background: rgba(250, 204, 21, 0.1); }
+        .page-wrap {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 48px 32px 80px;
+            width: 100%;
+            box-sizing: border-box;
+        }
 
-        .gl-brief { font-size: 14px; line-height: 1.6; margin-bottom: 24px; color: #94a3b8; background: #050505; padding: 16px; border-radius: 6px; border: 1px dashed #333; }
-        
-        /* NEW: Newsletter formatting */
-        .newsletter-content { font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.6; margin-bottom: 24px; color: #cbd5e1; background: #050505; padding: 20px; border-radius: 6px; border: 1px dashed #333; max-height: 400px; overflow-y: auto; position: relative; z-index: 2; }
-        .newsletter-content h1, .newsletter-content h2, .newsletter-content h3 { color: #fff; margin-top: 0; font-family: 'Rajdhani'; letter-spacing: 1px; text-transform: uppercase; }
-        .newsletter-content strong { color: #0ea5e9; }
-        .newsletter-content ul { padding-left: 20px; }
-        .newsletter-content li { margin-bottom: 5px; }
+        /* ── PAGE HEADER ─────────────────────────────────── */
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            border-bottom: 1px solid var(--border2);
+            padding-bottom: 20px;
+            margin-bottom: 48px;
+        }
+        .page-title {
+            font-family: 'JetBrains Mono';
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+        .page-date {
+            font-family: 'JetBrains Mono';
+            font-size: 12px;
+            color: var(--dim);
+        }
 
-        .gl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; position: relative; z-index: 2;}
-        .gl-data-point { background: #050505; border: 1px solid #222; padding: 12px; border-radius: 6px; }
-        .gl-label { display: block; font-size: 10px; color: #64748b; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 1px; }
-        .gl-value { font-size: 18px; color: #f8fafc; font-weight: 700; font-family: 'Rajdhani'; }
-        .gl-value.cyan { color: #0ea5e9; text-shadow: 0 0 8px rgba(14, 165, 233, 0.3); }
-        .gl-value.red { color: #ef4444; }
+        /* ── SECTION 1: THE NARRATIVE ────────────────────── */
+        .narrative-block {
+            margin-bottom: 48px;
+        }
+        .narrative-text {
+            font-size: 18px;
+            font-weight: 300;
+            line-height: 1.75;
+            color: #e2e8f0;
+            letter-spacing: 0.01em;
+        }
+        .narrative-stale {
+            display: inline-block;
+            font-family: 'JetBrains Mono';
+            font-size: 10px;
+            color: var(--amber);
+            background: rgba(245,158,11,0.1);
+            border: 1px solid rgba(245,158,11,0.25);
+            padding: 2px 8px;
+            border-radius: 3px;
+            margin-bottom: 16px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        .narrative-placeholder {
+            font-size: 16px;
+            font-weight: 300;
+            line-height: 1.75;
+            color: var(--dim);
+            font-style: italic;
+        }
 
-        /* --- OPERATOR COMMLINK --- */
-        .commlink-terminal { background: rgba(10, 10, 10, 0.8); border: 1px solid #222; border-left: 4px solid #a855f7; border-radius: 8px; padding: 24px; display: flex; flex-direction: column; position: relative; z-index: 2;}
-        .cl-title { color: #a855f7; font-weight: 800; font-size: 16px; text-transform: uppercase; letter-spacing: 2px; font-family: 'JetBrains Mono'; border-bottom: 1px solid #222; padding-bottom: 12px; margin-bottom: 16px; }
-        .chat-window { flex: 1; background: #050505; border: 1px solid #333; border-radius: 6px; padding: 15px; margin-bottom: 15px; min-height: 300px; max-height: 450px; overflow-y: auto; font-family: 'JetBrains Mono'; font-size: 12px; display: flex; flex-direction: column; gap: 10px; }
-        
-        .chat-bubble { padding: 10px 15px; border-radius: 6px; max-width: 85%; line-height: 1.5; font-family: 'Inter', sans-serif;}
+        /* ── SECTION 2: WAVE STATE BAR ───────────────────── */
+        .wave-bar {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            background: var(--surface);
+            border: 1px solid var(--border2);
+            border-left: 3px solid var(--amber);
+            border-radius: 8px;
+            padding: 18px 24px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .wave-label-pill {
+            font-family: 'JetBrains Mono';
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: var(--amber);
+            background: rgba(245,158,11,0.08);
+            border: 1px solid rgba(245,158,11,0.25);
+            padding: 4px 10px;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
+        .wave-status-pill {
+            font-family: 'JetBrains Mono';
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--green);
+            background: rgba(34,197,94,0.08);
+            border: 1px solid rgba(34,197,94,0.2);
+            padding: 3px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
+        .wave-completion {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+            min-width: 160px;
+        }
+        .completion-bar-wrap {
+            flex: 1;
+            background: var(--border2);
+            border-radius: 3px;
+            height: 6px;
+            overflow: hidden;
+        }
+        .completion-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--amber), #f97316);
+            border-radius: 3px;
+            transition: width 0.6s ease;
+        }
+        .completion-pct {
+            font-family: 'JetBrains Mono';
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--amber);
+            white-space: nowrap;
+        }
+        .wave-levels {
+            font-family: 'JetBrains Mono';
+            font-size: 12px;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+        .wave-levels .origin { color: var(--green); }
+        .wave-levels .arrow  { color: var(--dim); margin: 0 4px; }
+        .wave-levels .target { color: var(--text); }
+        .wave-invalidation {
+            font-family: 'JetBrains Mono';
+            font-size: 11px;
+            color: var(--red);
+            white-space: nowrap;
+        }
+
+        /* ── SECTION 3: JEWEL STATUS ─────────────────────── */
+        .jewel-bar {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            background: var(--surface);
+            border: 1px solid var(--border2);
+            border-radius: 8px;
+            padding: 18px 24px;
+            margin-bottom: 48px;
+            flex-wrap: wrap;
+        }
+        .jewel-gate-open {
+            font-family: 'JetBrains Mono';
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: var(--green);
+            background: rgba(34,197,94,0.08);
+            border: 1px solid rgba(34,197,94,0.3);
+            padding: 6px 14px;
+            border-radius: 5px;
+            text-transform: uppercase;
+        }
+        .jewel-gate-closed {
+            font-family: 'JetBrains Mono';
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: var(--dim);
+            background: rgba(71,85,105,0.12);
+            border: 1px solid var(--border2);
+            padding: 6px 14px;
+            border-radius: 5px;
+            text-transform: uppercase;
+        }
+        .jewel-meta {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .jewel-chip {
+            font-family: 'JetBrains Mono';
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 9px;
+            border-radius: 4px;
+            border: 1px solid;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .chip-dir-bull  { color: var(--green); border-color: rgba(34,197,94,0.3);  background: rgba(34,197,94,0.07);  }
+        .chip-dir-bear  { color: var(--red);   border-color: rgba(239,68,68,0.3);  background: rgba(239,68,68,0.07);  }
+        .chip-dir-neut  { color: var(--muted); border-color: var(--border2);       background: transparent; }
+        .chip-conv-str  { color: var(--blue);  border-color: rgba(14,165,233,0.3); background: rgba(14,165,233,0.07); }
+        .chip-conv-mod  { color: var(--amber); border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.07); }
+        .chip-conv-low  { color: var(--dim);   border-color: var(--border2);       background: transparent; }
+        .chip-warn-exit { color: #fff;         border-color: var(--red);           background: rgba(239,68,68,0.15);  }
+        .chip-warn-div  { color: #fff;         border-color: var(--amber);         background: rgba(245,158,11,0.15); }
+        .jewel-summary {
+            flex: 1;
+            font-size: 13px;
+            color: var(--muted);
+            font-style: italic;
+            min-width: 200px;
+        }
+
+        /* ── SECTION 4: THE TACTICAL SETUP ──────────────── */
+        .section-label {
+            font-family: 'JetBrains Mono';
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 2.5px;
+            text-transform: uppercase;
+            color: var(--dim);
+            margin-bottom: 16px;
+        }
+        .tactical-block {
+            background: var(--surface);
+            border: 1px solid var(--border2);
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 48px;
+        }
+        .tactical-content {
+            font-size: 14px;
+            line-height: 1.7;
+            color: #cbd5e1;
+            white-space: pre-wrap;
+            font-family: 'Inter', sans-serif;
+        }
+        .tactical-content .starred-line {
+            color: var(--green);
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        /* ── SECTION 5: OPERATOR COMMLINK ────────────────── */
+        .commlink-wrap {
+            margin-bottom: 48px;
+        }
+        .commlink-terminal {
+            background: var(--surface);
+            border: 1px solid var(--border2);
+            border-left: 3px solid var(--purple);
+            border-radius: 8px;
+            padding: 24px;
+        }
+        .chat-window {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 14px;
+            min-height: 200px;
+            max-height: 380px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .chat-bubble {
+            padding: 10px 14px;
+            border-radius: 6px;
+            max-width: 88%;
+            line-height: 1.55;
+            font-size: 14px;
+        }
         .chat-user { background: #1e293b; color: #fff; align-self: flex-end; border-bottom-right-radius: 0; }
-        .chat-cro { background: rgba(168, 85, 247, 0.1); color: #d8b4fe; align-self: flex-start; border-bottom-left-radius: 0; border: 1px solid rgba(168, 85, 247, 0.3); }
-        
-        .chat-input-container { display: flex; gap: 10px; }
-        .chat-input { flex: 1; background: #050505; border: 1px solid #333; color: #fff; padding: 12px; border-radius: 4px; font-family: 'Inter'; font-size: 14px; outline: none; }
-        .chat-input:focus { border-color: #a855f7; }
-        .chat-btn { background: #a855f7; color: #000; border: none; padding: 0 20px; font-weight: 800; font-family: 'JetBrains Mono'; border-radius: 4px; cursor: pointer; transition: 0.2s; }
-        .chat-btn:hover { background: #d8b4fe; }
+        .chat-analyst { background: rgba(168,85,247,0.08); color: #d8b4fe; align-self: flex-start; border-bottom-left-radius: 0; border: 1px solid rgba(168,85,247,0.2); }
+        .chat-input-row { display: flex; gap: 10px; }
+        .chat-input {
+            flex: 1; background: var(--bg); border: 1px solid var(--border2);
+            color: #fff; padding: 11px 14px; border-radius: 5px;
+            font-family: 'Inter'; font-size: 14px; outline: none;
+        }
+        .chat-input:focus { border-color: var(--purple); }
+        .chat-send {
+            background: var(--purple); color: #000; border: none;
+            padding: 0 22px; font-weight: 800; font-family: 'JetBrains Mono';
+            border-radius: 5px; cursor: pointer; font-size: 12px;
+            letter-spacing: 1px; transition: 0.2s;
+        }
+        .chat-send:hover { background: #d8b4fe; }
 
-        .copy-btn { background: transparent; border: 1px solid #333; color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 11px; padding: 4px 8px; cursor: pointer; border-radius: 4px; transition: 0.2s; }
-        .copy-btn:hover { background: #1e293b; color: #fff; }
+        /* ── SECTION 6: PERFORMANCE NOTE ─────────────────── */
+        .perf-note-wrap { margin-bottom: 48px; }
+        .collapsible-toggle {
+            width: 100%;
+            background: var(--surface);
+            border: 1px solid var(--border2);
+            border-radius: 8px;
+            padding: 14px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            font-family: 'JetBrains Mono';
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: var(--muted);
+            transition: 0.15s;
+        }
+        .collapsible-toggle:hover { border-color: var(--border2); color: var(--text); }
+        .collapsible-body {
+            background: var(--surface);
+            border: 1px solid var(--border2);
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            padding: 20px 24px;
+            display: none;
+        }
+        .collapsible-body.open { display: block; }
+        .perf-note-content { font-size: 14px; line-height: 1.7; color: #cbd5e1; }
+        .perf-note-content h1, .perf-note-content h2, .perf-note-content h3 {
+            font-family: 'Rajdhani'; font-size: 15px; text-transform: uppercase;
+            color: var(--text); margin: 16px 0 8px; letter-spacing: 1px;
+        }
+        .perf-note-content strong { color: var(--blue); }
+        .perf-note-content hr { border: none; border-top: 1px solid var(--border2); margin: 16px 0; }
 
-        /* --- EXISTING KPI GRID --- */
-        .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
-        .kpi-card { background: #0a0a0a; border: 1px solid #222; border-radius: 8px; padding: 20px; display: flex; flex-direction: column; position: relative; overflow: hidden; }
-        .kpi-card::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: #333; }
-        .kpi-card.state-neutral::before { background: #64748b; }
-        .kpi-card.state-bull::before { background: #22c55e; }
-        .kpi-card.state-bear::before { background: #ef4444; }
-        .kpi-card.state-alert::before { background: #facc15; animation: pulse-border 1.5s infinite; }
+        /* ── SECTION 7: INTEL INJECTION ──────────────────── */
+        .intel-wrap { margin-bottom: 48px; }
+        .intel-terminal {
+            background: var(--surface);
+            border: 1px solid var(--border2);
+            border-left: 3px solid var(--amber);
+            border-radius: 8px;
+            padding: 24px;
+        }
+        .intel-terminal textarea {
+            width: 100%; box-sizing: border-box;
+            background: var(--bg); border: 1px solid var(--border2);
+            color: var(--muted); font-family: 'JetBrains Mono'; font-size: 12px;
+            padding: 12px; border-radius: 5px; min-height: 110px;
+            resize: vertical; outline: none;
+        }
+        .intel-terminal textarea:focus { border-color: var(--amber); }
+        .intel-submit {
+            margin-top: 12px;
+            background: rgba(245,158,11,0.08);
+            color: var(--amber);
+            border: 1px solid rgba(245,158,11,0.3);
+            padding: 10px 24px;
+            border-radius: 5px;
+            font-family: 'JetBrains Mono';
+            font-weight: 800;
+            font-size: 11px;
+            letter-spacing: 1px;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: 0.2s;
+        }
+        .intel-submit:hover { background: rgba(245,158,11,0.18); }
+        .intel-console {
+            margin-top: 14px;
+            font-family: 'JetBrains Mono';
+            font-size: 12px;
+            color: var(--green);
+            display: none;
+        }
 
-        @keyframes pulse-border { 0% { box-shadow: 0 0 5px #facc15; } 50% { box-shadow: 0 0 20px #facc15; } 100% { box-shadow: 0 0 5px #facc15; } }
+        /* ── LOADING OVERLAY ─────────────────────────────── */
+        .loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(5,5,5,0.92); z-index: 50;
+            display: flex; justify-content: center; align-items: center;
+            font-family: 'JetBrains Mono'; color: var(--blue);
+            font-size: 13px; letter-spacing: 2px;
+        }
 
-        .kpi-label { font-family: 'JetBrains Mono'; font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }
-        .kpi-value { font-family: 'Rajdhani'; font-size: 32px; font-weight: 800; color: #fff; margin-bottom: 5px; line-height: 1.1; }
-        .kpi-subtext { font-family: 'Inter'; font-size: 13px; color: #666; }
-
-        .details-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
-        .data-panel { background: #0a0a0a; border: 1px solid #222; border-radius: 8px; padding: 20px; }
-        .panel-header { font-family: 'JetBrains Mono'; font-size: 12px; color: #0ea5e9; border-bottom: 1px solid #222; padding-bottom: 10px; margin-bottom: 15px; text-transform: uppercase; }
-
-        .data-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px dashed #222; font-family: 'JetBrains Mono'; font-size: 13px; }
-        .data-row:last-child { border-bottom: none; }
-        .data-key { color: #888; }
-        .data-val { color: #fff; font-weight: 700; }
-        .val-red { color: #ef4444; }
-        .val-green { color: #22c55e; }
-
-        .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 50; display: flex; justify-content: center; align-items: center; font-family: 'JetBrains Mono'; color: #0ea5e9; font-size: 14px; letter-spacing: 2px; }
+        @media (max-width: 640px) {
+            .page-wrap { padding: 32px 20px 60px; }
+            .narrative-text { font-size: 16px; }
+            .wave-bar, .jewel-bar { gap: 12px; }
+        }
     </style>
 </head>
 <body>
     {% include 'nav.html' %}
-    
-    <div id="loader" class="loading-overlay">/// AGGREGATING TACTICAL DATA...</div>
 
-    <div class="war-room-wrapper">
-        <div class="header-panel">
-            <h1 class="wr-title">MACRO WAR ROOM <span style="font-size: 12px; color: #666; font-family: 'Inter'; font-weight: 400;">// EXECUTIVE DASHBOARD</span></h1>
-            <select id="symSelect" class="asset-selector" onchange="changeAssetRoute()">
-                <option value="BTC/USDT" {% if request.query_params.symbol == 'BTC/USDT' or not request.query_params.symbol %}selected{% endif %}>BTC/USDT</option>
-                <option value="ETH/USDT" {% if request.query_params.symbol == 'ETH/USDT' %}selected{% endif %}>ETH/USDT</option>
-                <option value="SOL/USDT" {% if request.query_params.symbol == 'SOL/USDT' %}selected{% endif %}>SOL/USDT</option>
-            </select>
+    <div id="loader" class="loading-overlay">/// LOADING BRIEF...</div>
+
+    <div class="page-wrap">
+
+        <!-- PAGE HEADER -->
+        <div class="page-header">
+            <span class="page-title">Morning Brief // BTC/USDT</span>
+            <span class="page-date" id="briefDate">—</span>
         </div>
 
-        <div class="desk-grid">
-            <div class="ghost-lead-terminal" style="margin-bottom: 0;">
-                <div class="gl-header">
-                    <span class="gl-title">CCO Desk // Tactical Perimeter Brief</span>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <button class="copy-btn" onclick="copyNewsletter()">📋 COPY MARKDOWN</button>
-                        <span class="gl-status-badge {% if mas_log and mas_log.mas_approval_status == 'REJECTED' %}rejected{% elif mas_log and mas_log.mas_approval_status == 'WAITING_FOR_15M' %}waiting{% endif %}">
-                            [{{ mas_log.mas_approval_status if mas_log and mas_log.mas_approval_status else 'AWAITING UPLINK' }}]
-                        </span>
-                    </div>
-                </div>
+        <!-- SECTION 1: THE NARRATIVE -->
+        <div class="narrative-block" id="narrativeBlock">
+            <p class="narrative-placeholder">Loading today's brief...</p>
+        </div>
 
-                <div class="newsletter-content" id="newsletterOutput">
-                    {% if mas_log and mas_log.formatted_newsletter %}
-                        <div id="rawMarkdown" style="display:none;">{{ mas_log.formatted_newsletter }}</div>
-                    {% else %}
-                        <div style="font-family: 'JetBrains Mono'; color: #64748b;">> Establishing uplink... CCO currently drafting the session brief.</div>
-                    {% endif %}
+        <!-- SECTION 2: WAVE STATE BAR -->
+        <div id="waveBar" style="display:none; margin-bottom:16px;">
+            <div class="wave-bar">
+                <div class="wave-label-pill" id="waveLabel">—</div>
+                <div class="wave-status-pill" id="waveStatus">ACTIVE</div>
+                <div class="wave-completion">
+                    <div class="completion-bar-wrap">
+                        <div class="completion-bar-fill" id="completionFill" style="width:0%"></div>
+                    </div>
+                    <span class="completion-pct" id="completionPct">—%</span>
                 </div>
-
-                {% if mas_log and mas_log.mas_approval_status == 'APPROVED' %}
-                <div class="gl-grid">
-                    <div class="gl-data-point">
-                        <span class="gl-label">Vector</span>
-                        <span class="gl-value cyan">{{ mas_log.bias }}</span>
-                    </div>
-                    <div class="gl-data-point">
-                        <span class="gl-label">Execution Trigger</span>
-                        <span class="gl-value">${{ mas_log.entry_price }}</span>
-                    </div>
-                    <div class="gl-data-point">
-                        <span class="gl-label">Hard Stop Loss</span>
-                        <span class="gl-value red">${{ mas_log.stop_loss }}</span>
-                    </div>
-                    <div class="gl-data-point">
-                        <span class="gl-label">Target 1 (1.0)</span>
-                        <span class="gl-value">${{ mas_log.t1 }}</span>
-                    </div>
-                    <div class="gl-data-point">
-                        <span class="gl-label">Target 2 (1.618)</span>
-                        <span class="gl-value">${{ mas_log.t2 }}</span>
-                    </div>
-                    <div class="gl-data-point">
-                        <span class="gl-label">Target 3 (2.618)</span>
-                        <span class="gl-value">${{ mas_log.t3 }}</span>
-                    </div>
+                <div class="wave-levels">
+                    <span class="origin" id="waveOrigin">—</span>
+                    <span class="arrow">→</span>
+                    <span class="target" id="waveTarget">—</span>
                 </div>
-                {% endif %}
+                <div class="wave-invalidation">INVALIDATES &nbsp;<span id="waveInvalidation">—</span></div>
             </div>
+        </div>
 
+        <!-- SECTION 3: JEWEL STATUS -->
+        <div id="jewelBar" style="display:none; margin-bottom:48px;">
+            <div class="jewel-bar">
+                <div id="jewelGateBadge" class="jewel-gate-closed">GATE —</div>
+                <div class="jewel-meta" id="jewelMeta"></div>
+                <div class="jewel-summary" id="jewelSummary"></div>
+            </div>
+        </div>
+
+        <!-- SECTION 4: THE TACTICAL SETUP -->
+        <div id="tacticalBlock" style="display:none; margin-bottom:48px;">
+            <div class="section-label">Tactical Setup</div>
+            <div class="tactical-block">
+                <div class="tactical-content" id="tacticalContent"></div>
+            </div>
+        </div>
+
+        <!-- SECTION 5: OPERATOR COMMLINK -->
+        <div class="commlink-wrap">
+            <div class="section-label">Ask the Senior Analyst</div>
             <div class="commlink-terminal">
-                <div class="cl-title">OPERATOR COMMLINK // DIRECT INTERROGATION</div>
-                
                 <div class="chat-window" id="chatWindow">
-                    <div class="chat-bubble chat-cro">
-                        <strong>GHOST LEAD [CRO]:</strong> Uplink secure. I have locked the SSOT variables for {{ request.query_params.symbol | default('BTC/USDT') }}. How can I assist with your execution logic?
+                    <div class="chat-bubble chat-analyst">
+                        <strong>SENIOR ANALYST:</strong> Brief is ready. How can I help?
                     </div>
                 </div>
-
-                <div class="chat-input-container">
-                    <input type="text" id="chatInput" class="chat-input" placeholder="Query the Chief Risk Officer..." onkeypress="handleEnter(event)">
-                    <button class="chat-btn" onclick="sendMessage()" id="chatSendBtn">SEND</button>
+                <div class="chat-input-row">
+                    <input type="text" id="chatInput" class="chat-input"
+                        placeholder="Ask about the setup, wave structure, or any level..."
+                        onkeypress="if(event.key==='Enter') sendMessage()">
+                    <button class="chat-send" onclick="sendMessage()" id="chatSendBtn">SEND</button>
                 </div>
             </div>
         </div>
 
-        <div class="ghost-lead-terminal" style="margin-top: 0px; border-left-color: #facc15;">
-            <div class="gl-header" style="border-bottom-color: rgba(250, 204, 21, 0.3);">
-                <span class="gl-title" style="color: #facc15;">External Intel Injection // Manual Uplink</span>
+        <!-- SECTION 6: PERFORMANCE NOTE (collapsible) -->
+        <div class="perf-note-wrap" id="perfNoteWrap" style="display:none;">
+            <button class="collapsible-toggle" onclick="togglePerfNote(this)">
+                <span>Last Week's Correction</span>
+                <span id="perfIcon">▼</span>
+            </button>
+            <div class="collapsible-body" id="perfNoteBody"></div>
+        </div>
+
+        <!-- SECTION 7: EXTERNAL INTEL INJECTION -->
+        <div class="intel-wrap">
+            <div class="collapsible-toggle" onclick="toggleIntel(this)" style="border-radius:8px; margin-bottom:0;">
+                <span>External Intel Injection</span>
+                <span id="intelIcon">▼</span>
             </div>
-            
-            <div style="display: flex; gap: 16px; align-items: flex-start; position: relative; z-index: 2;">
-                <textarea id="foreignIntelInput" placeholder="Paste MetaSignals raw text here...&#10;Example:&#10;BTC | USDT @ $76,821.20 - 1H - 1.1 G1&#10;Target 1: 77,870.68..." 
-                    style="flex: 1; background: #050505; border: 1px solid #333; color: #94a3b8; font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 12px; border-radius: 6px; min-height: 120px; resize: vertical; outline: none;"></textarea>
-                
-                <button onclick="submitForeignIntel()" style="background: rgba(250, 204, 21, 0.1); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.5); padding: 12px 24px; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-weight: 800; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s;">
-                    Audit Intel
-                </button>
-            </div>
-            
-            <div id="intelResponseConsole" style="margin-top: 16px; font-size: 12px; color: #22c55e; display: none; position: relative; z-index: 2;">
-                > Awaiting execution...
+            <div class="collapsible-body" id="intelBody">
+                <div class="intel-terminal" style="border:none; padding:0; background:transparent;">
+                    <textarea id="foreignIntelInput"
+                        placeholder="Paste MetaSignals raw text here...&#10;Example: BTC | USDT @ $76,821.20 - 1H - 1.1 G1&#10;Target 1: 77,870.68..."></textarea>
+                    <button class="intel-submit" onclick="submitForeignIntel()">Audit Intel</button>
+                    <div class="intel-console" id="intelResponseConsole"></div>
+                </div>
             </div>
         </div>
 
-        <div class="kpi-grid">
-            <div id="kpi-cycle" class="kpi-card state-neutral">
-                <div class="kpi-label"><span>⚙️</span> CYCLE STATE</div>
-                <div id="val-cycle" class="kpi-value">SCANNING...</div>
-                <div id="sub-cycle" class="kpi-subtext">Awaiting Elliott Wave Validation</div>
-            </div>
-            
-            <div id="kpi-proximity" class="kpi-card state-neutral">
-                <div class="kpi-label"><span>🎯</span> KINETIC PROXIMITY</div>
-                <div id="val-prox" class="kpi-value">--.--%</div>
-                <div id="sub-prox" class="kpi-subtext">Distance to nearest Titanium boundary</div>
-            </div>
-
-            <div id="kpi-gravity" class="kpi-card state-neutral">
-                <div class="kpi-label"><span>⚖️</span> GRAVITATIONAL BIAS</div>
-                <div id="val-grav" class="kpi-value">NEUTRAL</div>
-                <div id="sub-grav" class="kpi-subtext">Midpoint structure analysis</div>
-            </div>
-        </div>
-
-        <div class="details-grid">
-            <div class="data-panel">
-                <div class="panel-header">STRUCTURAL BOUNDARIES (CLASS 0 TRUTH)</div>
-                <div id="boundary-list"></div>
-            </div>
-
-            <div class="data-panel">
-                <div class="panel-header">LIVE TELEMETRY</div>
-                <div class="data-row"><span class="data-key">ASSET PRICE</span><span id="tel-price" class="data-val">--</span></div>
-                <div class="data-row"><span class="data-key">MACRO CEILING</span><span id="tel-ceil" class="data-val val-red">--</span></div>
-                <div class="data-row"><span class="data-key">MACRO FLOOR</span><span id="tel-floor" class="data-val val-green">--</span></div>
-                <div class="data-row"><span class="data-key">MIDPOINT</span><span id="tel-mid" class="data-val" style="color:#0ea5e9;">--</span></div>
-            </div>
-        </div>
-    </div>
+    </div><!-- end .page-wrap -->
 
     <script>
-        // Force server navigation so FastAPI provides the correct Jinja MAS payload
-        function changeAssetRoute() {
-            const sym = document.getElementById('symSelect').value;
-            window.location.href = `/suite/macro-war-room?symbol=${encodeURIComponent(sym)}`;
+        const SYMBOL = "BTC/USDT";
+
+        // ── COLLAPSIBLES ─────────────────────────────────────────────────
+        function togglePerfNote(btn) {
+            const body = document.getElementById('perfNoteBody');
+            const icon = document.getElementById('perfIcon');
+            const open = body.classList.toggle('open');
+            icon.textContent = open ? '▲' : '▼';
         }
 
-        // Preserve raw markdown text before it gets replaced by marked.parse
-        let _rawMarkdownText = '';
-
-        document.addEventListener('DOMContentLoaded', () => {
-            const rawEl = document.getElementById('rawMarkdown');
-            if (rawEl) {
-                _rawMarkdownText = rawEl.innerText;
-                document.getElementById('newsletterOutput').innerHTML = marked.parse(_rawMarkdownText);
-            }
-            fetchWarRoomData();
-        });
-
-        function copyNewsletter() {
-            if (!_rawMarkdownText) { alert("No brief available yet."); return; }
-            navigator.clipboard.writeText(_rawMarkdownText).then(() => {
-                alert("Markdown copied to clipboard. Ready for Substack/Beehiiv.");
-            });
+        function toggleIntel(btn) {
+            const body = document.getElementById('intelBody');
+            const icon = document.getElementById('intelIcon');
+            const open = body.classList.toggle('open');
+            icon.textContent = open ? '▲' : '▼';
         }
 
-        // --- NEW: Chat Interface Logic ---
-        function handleEnter(e) {
-            if (e.key === 'Enter') sendMessage();
+        // ── FORMAT HELPERS ───────────────────────────────────────────────
+        function fmt(n) {
+            if (n == null) return '—';
+            return parseFloat(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
 
-        async function sendMessage() {
-            const inputEl = document.getElementById('chatInput');
-            const msg = inputEl.value.trim();
-            if (!msg) return;
-
-            const chatWindow = document.getElementById('chatWindow');
-            const sym = document.getElementById('symSelect').value;
-            const btn = document.getElementById('chatSendBtn');
-
-            const userBubble = document.createElement('div');
-            userBubble.className = 'chat-bubble chat-user';
-            userBubble.innerText = msg;
-            chatWindow.appendChild(userBubble);
-            
-            inputEl.value = '';
-            btn.disabled = true;
-            btn.innerText = '...';
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-
-            try {
-                const res = await fetch('/api/research/chat-mas', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ symbol: sym, message: msg })
-                });
-                
-                const data = await res.json();
-                
-                const croBubble = document.createElement('div');
-                croBubble.className = 'chat-bubble chat-cro';
-                
-                if (data.ok) {
-                    const label = document.createElement('strong');
-                    label.textContent = 'GHOST LEAD: ';
-                    croBubble.appendChild(label);
-                    croBubble.appendChild(document.createTextNode(data.reply));
-                } else {
-                    croBubble.textContent = 'SYSTEM ERROR: Interrogation failed. Recon lost.';
-                    croBubble.style.color = '#ef4444';
-                    croBubble.style.borderColor = '#ef4444';
+        function renderTactical(text) {
+            if (!text) return '';
+            return text.split('\n').map(line => {
+                const esc = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                if (line.includes('★') || /HIGHER PROBABILITY/i.test(line)) {
+                    return `<div class="starred-line">${esc}</div>`;
                 }
-                chatWindow.appendChild(croBubble);
+                return `<div>${esc}</div>`;
+            }).join('');
+        }
+
+        // ── LOAD NARRATIVE DATA ──────────────────────────────────────────
+        async function loadBrief() {
+            try {
+                const res  = await fetch(`/api/narrative/latest?symbol=${encodeURIComponent(SYMBOL)}`);
+                const data = await res.json();
+
+                if (!data.ok) throw new Error(data.error || 'API error');
+
+                // Date header
+                const dateStr = data.date_key || '—';
+                document.getElementById('briefDate').textContent = dateStr;
+
+                // SECTION 1 — Narrative
+                const narBlock = document.getElementById('narrativeBlock');
+                const narText  = data.narrative && data.narrative.narrative_text;
+                const narDate  = data.narrative && data.narrative.date_key;
+                const today    = new Date().toISOString().slice(0, 10);
+
+                if (narText) {
+                    const staleNote = (narDate && narDate !== today)
+                        ? `<div class="narrative-stale">Yesterday's brief — ${narDate}</div>`
+                        : '';
+                    narBlock.innerHTML = staleNote + `<p class="narrative-text">${narText.replace(/\n/g, '<br>')}</p>`;
+                } else {
+                    narBlock.innerHTML = `<p class="narrative-placeholder">Today's brief is being prepared. Check back after 9:00 AM ET.</p>`;
+                }
+
+                // SECTION 2 — Wave State Bar
+                if (data.wave && data.wave.wave_label) {
+                    const w = data.wave;
+                    document.getElementById('waveLabel').textContent  = (w.wave_label || '—').replace(/_/g, ' ');
+                    document.getElementById('waveStatus').textContent = w.wave_status || 'ACTIVE';
+                    const pct = w.completion_pct != null ? parseFloat(w.completion_pct) : null;
+                    document.getElementById('completionPct').textContent  = pct != null ? pct.toFixed(1) + '%' : '—%';
+                    document.getElementById('completionFill').style.width = pct != null ? Math.min(pct, 100) + '%' : '0%';
+                    document.getElementById('waveOrigin').textContent      = w.wave_origin_price  ? '$' + fmt(w.wave_origin_price)  : '—';
+                    document.getElementById('waveTarget').textContent      = w.wave_target_price  ? '$' + fmt(w.wave_target_price)  : '—';
+                    document.getElementById('waveInvalidation').textContent = w.invalidation_price ? '$' + fmt(w.invalidation_price) : '—';
+                    document.getElementById('waveBar').style.display = 'block';
+                }
+
+                // SECTION 3 — JEWEL Status Bar
+                if (data.jewel) {
+                    const j = data.jewel;
+                    const gateEl = document.getElementById('jewelGateBadge');
+                    if (j.jewel_gate_open) {
+                        gateEl.textContent  = 'GATE OPEN';
+                        gateEl.className    = 'jewel-gate-open';
+                    } else {
+                        gateEl.textContent  = 'GATE CLOSED';
+                        gateEl.className    = 'jewel-gate-closed';
+                    }
+
+                    const dirClass = (j.dominant_direction === 'BULLISH') ? 'chip-dir-bull'
+                                   : (j.dominant_direction === 'BEARISH') ? 'chip-dir-bear' : 'chip-dir-neut';
+                    const convClass = (j.jewel_conviction === 'STRONG')   ? 'chip-conv-str'
+                                    : (j.jewel_conviction === 'MODERATE') ? 'chip-conv-mod' : 'chip-conv-low';
+
+                    let metaHtml = `<span class="jewel-chip ${dirClass}">${j.dominant_direction || '—'}</span>`;
+                    metaHtml    += `<span class="jewel-chip ${convClass}">${j.jewel_conviction || '—'}</span>`;
+                    if (j.jewel_exit_warning)      metaHtml += `<span class="jewel-chip chip-warn-exit">Exit Warning</span>`;
+                    if (j.jewel_divergence_warning) metaHtml += `<span class="jewel-chip chip-warn-div">Divergence</span>`;
+
+                    document.getElementById('jewelMeta').innerHTML    = metaHtml;
+                    document.getElementById('jewelSummary').textContent = j.jewel_signal_summary || '';
+                    document.getElementById('jewelBar').style.display   = 'block';
+                }
+
+                // SECTION 4 — Tactical Setup
+                const tacText = data.narrative && data.narrative.tactical_text;
+                if (tacText) {
+                    document.getElementById('tacticalContent').innerHTML = renderTactical(tacText);
+                    document.getElementById('tacticalBlock').style.display = 'block';
+                }
+
+                // SECTION 6 — Performance Note
+                const perfNote = data.narrative && data.narrative.performance_note;
+                if (perfNote) {
+                    document.getElementById('perfNoteBody').innerHTML = `<div class="perf-note-content">${marked.parse(perfNote)}</div>`;
+                    document.getElementById('perfNoteWrap').style.display = 'block';
+                }
 
             } catch (e) {
-                const errorBubble = document.createElement('div');
-                errorBubble.className = 'chat-bubble chat-cro';
-                errorBubble.innerHTML = `<strong>SYSTEM ERROR:</strong> Uplink severed.`;
-                errorBubble.style.color = '#ef4444';
-                errorBubble.style.borderColor = '#ef4444';
-                chatWindow.appendChild(errorBubble);
-            } finally {
-                btn.disabled = false;
-                btn.innerText = 'SEND';
-                chatWindow.scrollTop = chatWindow.scrollHeight;
-            }
-        }
-
-        // --- RESTORED JS FUNCTIONS ---
-        async function fetchWarRoomData() {
-            // document.getElementById('loader').style.display = 'flex'; // Optional: comment out if too jarring
-            const sym = document.getElementById('symSelect').value;
-            
-            try {
-                const res = await fetch(`/api/gravity/scan?symbol=${encodeURIComponent(sym)}`);
-                const data = await res.json();
-                
-                if(data.ok && data.macro_fibs && data.macro_fibs.chart_data && data.macro_fibs.chart_data.length > 0) {
-                    const livePrice = data.macro_fibs.chart_data[data.macro_fibs.chart_data.length - 1].close;
-                    const beams = data.kde_data.macro_beams || [];
-                    processExecutiveLogic(livePrice, beams);
-                }
-            } catch(e) {
-                console.error("Dashboard Aggregation Failed", e);
+                console.error('loadBrief error:', e);
+                document.getElementById('narrativeBlock').innerHTML =
+                    `<p class="narrative-placeholder">Brief unavailable. Check server logs.</p>`;
             } finally {
                 document.getElementById('loader').style.display = 'none';
             }
         }
 
-        function processExecutiveLogic(livePrice, beams) {
-            document.getElementById('tel-price').innerText = `$${livePrice.toFixed(2)}`;
+        // ── CHAT ─────────────────────────────────────────────────────────
+        async function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const msg   = input.value.trim();
+            if (!msg) return;
 
-            const ceilings = beams.filter(b => b.price >= livePrice).sort((a,b) => a.price - b.price);
-            const floors = beams.filter(b => b.price < livePrice).sort((a,b) => b.price - a.price);
+            const win = document.getElementById('chatWindow');
+            const btn = document.getElementById('chatSendBtn');
 
-            let ceilPrice = ceilings.length > 0 ? ceilings[0].price : null;
-            let floorPrice = floors.length > 0 ? floors[0].price : null;
+            const userBubble = document.createElement('div');
+            userBubble.className = 'chat-bubble chat-user';
+            userBubble.textContent = msg;
+            win.appendChild(userBubble);
 
-            document.getElementById('tel-ceil').innerText = ceilPrice ? `$${ceilPrice.toFixed(2)}` : 'BLUE SKY';
-            document.getElementById('tel-floor').innerText = floorPrice ? `$${floorPrice.toFixed(2)}` : 'PRICE DISCOVERY';
-
-            let minDistancePct = Infinity;
-            let proxState = 'state-neutral';
-            
-            if (ceilPrice) {
-                const distCeil = (ceilPrice - livePrice) / livePrice * 100;
-                if(distCeil < minDistancePct) minDistancePct = distCeil;
-            }
-            if (floorPrice) {
-                const distFloor = (livePrice - floorPrice) / livePrice * 100;
-                if(distFloor < minDistancePct) minDistancePct = distFloor;
-            }
-
-            const kpiProx = document.getElementById('kpi-proximity');
-            kpiProx.className = 'kpi-card'; 
-            
-            if (minDistancePct !== Infinity) {
-                document.getElementById('val-prox').innerText = `${minDistancePct.toFixed(2)}%`;
-                if (minDistancePct <= 3.0) {
-                    kpiProx.classList.add('state-alert');
-                    document.getElementById('sub-prox').innerText = "⚠ KINETIC FRICTION WARNING";
-                    document.getElementById('sub-prox').style.color = "#facc15";
-                } else {
-                    kpiProx.classList.add('state-neutral');
-                    document.getElementById('sub-prox').innerText = "Safe Operating Distance";
-                    document.getElementById('sub-prox').style.color = "#666";
-                }
-            }
-
-            const kpiGrav = document.getElementById('kpi-gravity');
-            kpiGrav.className = 'kpi-card'; 
-
-            if (ceilPrice && floorPrice) {
-                const midPoint = (ceilPrice + floorPrice) / 2;
-                document.getElementById('tel-mid').innerText = `$${midPoint.toFixed(2)}`;
-                
-                if (livePrice > midPoint) {
-                    kpiGrav.classList.add('state-bull');
-                    document.getElementById('val-grav').innerText = "BULLISH PULL";
-                    document.getElementById('sub-grav').innerText = "Price supported above midpoint";
-                } else {
-                    kpiGrav.classList.add('state-bear');
-                    document.getElementById('val-grav').innerText = "BEARISH DRAG";
-                    document.getElementById('sub-grav').innerText = "Price suppressed below midpoint";
-                }
-            }
-
-            const kpiCycle = document.getElementById('kpi-cycle');
-            kpiCycle.className = 'kpi-card'; 
-
-            let cycleState = "UNCLEAR STRUCTURE";
-            let isBull = false;
-            let isBear = false;
-
-            const hasBull = beams.some(b => b.type.includes("BULL"));
-            const hasBear = beams.some(b => b.type.includes("BEAR"));
-
-            if (hasBear) {
-                cycleState = "MACRO BEAR PHASE";
-                isBear = true;
-            } else if (hasBull) {
-                cycleState = "MACRO BULL PHASE";
-                isBull = true;
-            }
-
-            document.getElementById('val-cycle').innerText = cycleState;
-            
-            if (isBull) kpiCycle.classList.add('state-bull');
-            else if (isBear) kpiCycle.classList.add('state-bear');
-            else kpiCycle.classList.add('state-neutral');
-
-            const listDiv = document.getElementById('boundary-list');
-            listDiv.innerHTML = '';
-            
-            const sortedBeams = [...beams].sort((a,b) => b.price - a.price);
-            sortedBeams.forEach(b => {
-                const cleanType = b.type.replace(/_/g, ' ');
-                let rowColor = b.price > livePrice ? 'val-red' : 'val-green';
-                listDiv.innerHTML += `<div class="data-row"><span class="data-key">${cleanType}</span><span class="data-val ${rowColor}">$${b.price.toFixed(2)}</span></div>`;
-            });
-        }
-
-        async function submitForeignIntel() {
-            const rawText = document.getElementById('foreignIntelInput').value;
-            const consoleDiv = document.getElementById('intelResponseConsole');
-            
-            if (!rawText.trim()) {
-                consoleDiv.style.display = 'block';
-                consoleDiv.style.color = '#ef4444';
-                consoleDiv.innerText = "> ERROR: No intel provided.";
-                return;
-            }
-
-            consoleDiv.style.display = 'block';
-            consoleDiv.style.color = '#facc15';
-            consoleDiv.innerText = "> Transmitting intel to backend parser...";
+            input.value   = '';
+            btn.disabled  = true;
+            btn.textContent = '...';
+            win.scrollTop = win.scrollHeight;
 
             try {
-                const res = await fetch('/api/research/audit-intel', {
+                const res  = await fetch('/api/research/chat-mas', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ raw_text: rawText })
+                    body: JSON.stringify({ symbol: SYMBOL, message: msg }),
                 });
-                
                 const data = await res.json();
-                
+
+                const reply = document.createElement('div');
+                reply.className = 'chat-bubble chat-analyst';
                 if (data.ok) {
-                    const audit = data.audit;
-                    consoleDiv.style.display = 'block';
-                    consoleDiv.style.color = '#22c55e';
-
-                    const overall = audit.overall_verdict || 'UNKNOWN';
-                    let verdictColor = '#22c55e';
-                    if (overall === 'REJECTED') {
-                        verdictColor = '#ef4444';
-                    } else if (overall === 'CAUTION') {
-                        verdictColor = '#facc15';
-                    }
-
-                    const gravityColor = (audit.gravity_verdict === 'CLEAR') ? '#22c55e' : '#ef4444';
-                    const momentumColor = (audit.momentum_verdict === 'BUILDING') ? '#22c55e'
-                        : (audit.momentum_verdict === 'EXHAUSTED') ? '#ef4444' : '#facc15';
-                    const t1 = (typeof audit.measured_move_t1 === 'number')
-                        ? '$' + audit.measured_move_t1.toFixed(2) : 'N/A';
-
-                    consoleDiv.innerHTML = `
-                        <div style="margin-top: 10px; border: 1px solid ${verdictColor}; padding: 16px; border-radius: 6px; background: rgba(0, 0, 0, 0.4);">
-                            <div style="font-weight: 800; color: #fff; margin-bottom: 12px; font-size: 14px; letter-spacing: 1px;">
-                                OVERALL VERDICT: <span style="color: ${verdictColor};">${overall}</span>
-                            </div>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
-                                <div style="border: 1px solid #333; border-radius: 6px; padding: 10px;">
-                                    <div style="color: #64748b; font-size: 10px; letter-spacing: 1px; text-transform: uppercase;">Gravity Audit</div>
-                                    <div style="color: ${gravityColor}; font-weight: 800; font-size: 14px; margin-top: 4px;">${audit.gravity_verdict || 'N/A'}</div>
-                                </div>
-                                <div style="border: 1px solid #333; border-radius: 6px; padding: 10px;">
-                                    <div style="color: #64748b; font-size: 10px; letter-spacing: 1px; text-transform: uppercase;">Momentum Audit</div>
-                                    <div style="color: ${momentumColor}; font-weight: 800; font-size: 14px; margin-top: 4px;">${audit.momentum_verdict || 'N/A'}</div>
-                                </div>
-                            </div>
-                            <div style="color: #0ea5e9; font-weight: 700; font-size: 13px; margin-bottom: 12px;">
-                                MEASURED MOVE T1 (SIGNAL BOX): ${t1}
-                            </div>
-                            <div style="color: #94a3b8; line-height: 1.5; border-top: 1px dashed #333; padding-top: 12px;">
-                                > ${audit.reasoning || ''}
-                            </div>
-                        </div>
-                    `;
-                    document.getElementById('foreignIntelInput').value = '';
+                    reply.innerHTML = `<strong>SENIOR ANALYST:</strong> ${data.reply.replace(/\n/g,'<br>')}`;
                 } else {
-                    consoleDiv.style.color = '#ef4444';
-                    consoleDiv.innerText = `> ERROR: ${data.error}`;
+                    reply.style.color = 'var(--red)';
+                    reply.textContent = 'Uplink failed. Try again.';
                 }
+                win.appendChild(reply);
             } catch (e) {
-                consoleDiv.style.color = '#ef4444';
-                consoleDiv.innerText = "> CRITICAL ERROR: Uplink failed.";
+                const err = document.createElement('div');
+                err.className = 'chat-bubble chat-analyst';
+                err.style.color = 'var(--red)';
+                err.textContent = 'Connection lost.';
+                win.appendChild(err);
+            } finally {
+                btn.disabled    = false;
+                btn.textContent = 'SEND';
+                win.scrollTop   = win.scrollHeight;
             }
         }
 
-        // Refresh gravity data every 60 seconds
-        setInterval(fetchWarRoomData, 60000);
+        // ── INTEL INJECTION ──────────────────────────────────────────────
+        async function submitForeignIntel() {
+            const rawText   = document.getElementById('foreignIntelInput').value;
+            const consoleEl = document.getElementById('intelResponseConsole');
+            if (!rawText.trim()) {
+                consoleEl.style.display = 'block';
+                consoleEl.style.color   = 'var(--red)';
+                consoleEl.textContent   = '> ERROR: No intel provided.';
+                return;
+            }
+            consoleEl.style.display = 'block';
+            consoleEl.style.color   = 'var(--amber)';
+            consoleEl.textContent   = '> Transmitting to backend parser...';
 
-        // Poll for CCO brief if currently pending
-        const currentStatus = "{{ mas_log.mas_approval_status if mas_log and mas_log.mas_approval_status else 'NONE' }}";
-        if (currentStatus === 'PENDING' || currentStatus === 'NONE') {
-            const briefPoller = setInterval(() => {
-                fetch(window.location.href, { headers: { 'X-Poll': '1' } })
-                    .then(r => r.text())
-                    .then(html => {
-                        const parser = new DOMParser();
-                        const doc = parser.parseFromString(html, 'text/html');
-                        const newBadge = doc.querySelector('.gl-status-badge');
-                        const newStatus = newBadge ? newBadge.innerText.trim() : '';
-                        if (newStatus && !newStatus.includes('PENDING') && !newStatus.includes('NONE') && !newStatus.includes('AWAITING')) {
-                            clearInterval(briefPoller);
-                            window.location.reload();
-                        }
-                    })
-                    .catch(() => {});
-            }, 15000);
+            try {
+                const res  = await fetch('/api/research/audit-intel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ raw_text: rawText }),
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    const a = data.audit;
+                    const verdictColor = a.overall_verdict === 'REJECTED' ? 'var(--red)'
+                                       : a.overall_verdict === 'CAUTION'  ? 'var(--amber)' : 'var(--green)';
+                    const t1 = typeof a.measured_move_t1 === 'number' ? '$' + a.measured_move_t1.toFixed(2) : 'N/A';
+                    consoleEl.innerHTML = `
+                        <div style="border:1px solid ${verdictColor}; padding:14px; border-radius:6px; background:rgba(0,0,0,0.3);">
+                            <div style="font-weight:800; color:#fff; margin-bottom:10px;">
+                                VERDICT: <span style="color:${verdictColor};">${a.overall_verdict || '—'}</span>
+                            </div>
+                            <div style="color:var(--blue); margin-bottom:8px;">MEASURED MOVE T1: ${t1}</div>
+                            <div style="color:var(--muted); line-height:1.5; border-top:1px dashed var(--border2); padding-top:10px;">> ${a.reasoning || ''}</div>
+                        </div>`;
+                    document.getElementById('foreignIntelInput').value = '';
+                } else {
+                    consoleEl.style.color = 'var(--red)';
+                    consoleEl.textContent = `> ERROR: ${data.error}`;
+                }
+            } catch (e) {
+                consoleEl.style.color = 'var(--red)';
+                consoleEl.textContent = '> CRITICAL ERROR: Uplink failed.';
+            }
         }
+
+        document.addEventListener('DOMContentLoaded', loadBrief);
     </script>
 </body>
 </html>

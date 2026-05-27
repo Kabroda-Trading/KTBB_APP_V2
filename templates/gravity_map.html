@@ -56,8 +56,6 @@
                     <div style="display: flex; align-items: center;">
                         <select id="symSelect" style="padding: 6px 12px; background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 12px;" onchange="loadGrid()">
                             <option value="BTC/USDT">BTC/USDT</option>
-                            <option value="ETH/USDT">ETH/USDT</option>
-                            <option value="SOL/USDT">SOL/USDT</option>
                         </select>
                         <button class="tv-btn" id="exportBtn" onclick="exportTradingViewData()">📋 COPY TV OVERLAY</button>
                     </div>
@@ -71,6 +69,7 @@
                     <div class="danger-title">⚠ KINETIC FRICTION DETECTED</div>
                     <div class="danger-text">Price is colliding with a Class 0 Macro Anchor. High probability of chop or violent rejection. Recommended Action: NO TRADE.</div>
                 </div>
+                <div id="wave-context-section"></div>
                 <div id="sidebar-content">
                     <div style="text-align:center; padding: 40px; color: #94a3b8; font-family: 'JetBrains Mono'; font-size: 12px;">SYNCHRONIZING WITH KABRODA CORE...</div>
                 </div>
@@ -363,7 +362,66 @@
             }
         }
 
-        document.addEventListener('DOMContentLoaded', () => { setTimeout(() => { initChart(); loadGrid(); }, 150); setInterval(() => { loadGrid(true); }, 60000); });
+        async function loadWaveContext() {
+            const section = document.getElementById('wave-context-section');
+            try {
+                const res = await fetch('/api/narrative/latest?symbol=BTC/USDT');
+                const data = await res.json();
+                if (!data.ok || !data.wave) { section.innerHTML = ''; return; }
+                const w = data.wave;
+                const label = w.wave_label ? w.wave_label.replace(/_/g, ' ') : 'UNKNOWN';
+                const status = w.wave_status || 'ACTIVE';
+                const pct = w.completion_pct != null ? w.completion_pct : null;
+                const fmt = v => v != null ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '—';
+                const origin = fmt(w.wave_origin_price);
+                const target = fmt(w.wave_target_price);
+                const invalidation = fmt(w.invalidation_price);
+                const confirm = w.confirmation_condition || '—';
+
+                const progressBar = pct != null ? `
+                    <div style="margin-top:8px;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
+                            <span style="font-family:'JetBrains Mono'; font-size:9px; color:#94a3b8;">COMPLETION</span>
+                            <span style="font-family:'JetBrains Mono'; font-size:9px; color:#60a5fa;">${pct.toFixed(1)}%</span>
+                        </div>
+                        <div style="height:4px; background:#0f172a; border-radius:2px; overflow:hidden;">
+                            <div style="height:100%; width:${Math.min(pct, 100)}%; background:linear-gradient(90deg,#3b82f6,#a855f7); border-radius:2px;"></div>
+                        </div>
+                    </div>` : '';
+
+                section.innerHTML = `
+                <div class="acc-header" onclick="toggleAcc(this)" style="margin-bottom:5px; border-color:rgba(168,85,247,0.4); background:rgba(168,85,247,0.05); color:#a855f7;">
+                    <span>WAVE CONTEXT</span><span class="acc-icon">▼</span>
+                </div>
+                <div class="acc-content">
+                    <div style="background:#1e293b; border:1px solid #334155; border-left:4px solid #a855f7; border-radius:6px; padding:12px; margin-bottom:12px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span style="font-family:'JetBrains Mono'; font-size:11px; font-weight:800; color:#e2e8f0;">${label}</span>
+                            <span style="font-family:'JetBrains Mono'; font-size:9px; font-weight:700; background:rgba(168,85,247,0.2); color:#a855f7; padding:2px 6px; border-radius:3px;">${status}</span>
+                        </div>
+                        ${progressBar}
+                        <div style="display:flex; justify-content:space-between; margin-top:8px;">
+                            <div>
+                                <div style="font-size:9px; color:#64748b; font-family:'JetBrains Mono';">ORIGIN → TARGET</div>
+                                <div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono';">${origin} → ${target}</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-size:9px; color:#64748b; font-family:'JetBrains Mono';">INVALIDATION</div>
+                                <div style="font-size:11px; color:#ef4444; font-family:'JetBrains Mono'; font-weight:800;">${invalidation}</div>
+                            </div>
+                        </div>
+                        <div style="margin-top:8px; padding-top:8px; border-top:1px solid #334155;">
+                            <div style="font-size:9px; color:#64748b; font-family:'JetBrains Mono'; margin-bottom:2px;">CONFIRMATION</div>
+                            <div style="font-size:10px; color:#94a3b8; line-height:1.4;">${confirm}</div>
+                        </div>
+                    </div>
+                </div>`;
+            } catch(e) {
+                section.innerHTML = '';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => { setTimeout(() => { initChart(); loadGrid(); loadWaveContext(); }, 150); setInterval(() => { loadGrid(true); }, 60000); });
         window.addEventListener('resize', () => { if (chart) { const container = document.getElementById('chart-container'); chart.applyOptions({ width: container.clientWidth, height: container.clientHeight }); resizeCanvas(); } });
     </script>
 </body>
