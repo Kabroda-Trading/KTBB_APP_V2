@@ -31,20 +31,312 @@ import ledger_closing_engine
 import mtf_confluence_scanner
 import agent_core
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog
+from datetime import datetime, timezone, timedelta
+from jewel_specialist import run_jewel_snapshot
+from elliott_wave_specialist import run_elliott_wave_analysis
+from performance_auditor import run_performance_audit
+
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ==============================================================================
+# PHASE 4 — ASYNCIO SCHEDULERS
+# No extra dependencies. Each loop calculates sleep duration to next fire time,
+# catches all exceptions internally so a crashing agent never kills the server.
+# ==============================================================================
+
+# JEWEL session transitions sorted by UTC hour (ET label → UTC time)
+_JEWEL_SCHEDULE = [
+    ( 1, 0, "ASIA_OPEN"),    # 8:00 PM ET  → 01:00 UTC
+    ( 5, 0, "ASIA_MIDDAY"),  # 12:00 AM ET → 05:00 UTC
+    ( 9, 0, "LONDON_OPEN"),  # 4:00 AM ET  → 09:00 UTC
+    (14, 0, "NY_OPEN"),      # 9:00 AM ET  → 14:00 UTC
+    (18, 0, "NY_MIDDAY"),    # 1:00 PM ET  → 18:00 UTC
+    (21, 0, "NY_CLOSE"),     # 4:00 PM ET  → 21:00 UTC
+]
+
+
+def _seconds_until_utc(hour: int, minute: int = 0) -> float:
+    """Seconds from now until the next occurrence of hour:minute UTC."""
+    now = datetime.now(timezone.utc)
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+def _seconds_until_sunday_2300() -> float:
+    """Seconds from now until next Sunday at 23:00 UTC."""
+    now = datetime.now(timezone.utc)
+    days_ahead = (6 - now.weekday()) % 7   # Monday=0, Sunday=6
+    target = now.replace(hour=23, minute=0, second=0, microsecond=0) + timedelta(days=days_ahead)
+    if target <= now:
+        target += timedelta(weeks=1)
+    return (target - now).total_seconds()
+
+
+def _next_jewel_slot():
+    """Returns (seconds_to_wait, session_label) for the next JEWEL snapshot."""
+    now = datetime.now(timezone.utc)
+    today = now.date()
+    candidates = []
+    for hour, minute, label in _JEWEL_SCHEDULE:
+        t = datetime(today.year, today.month, today.day, hour, minute, 0, tzinfo=timezone.utc)
+        if t <= now:
+            t += timedelta(days=1)
+        candidates.append((t, label))
+    candidates.sort(key=lambda x: x[0])
+    next_time, next_label = candidates[0]
+    return (next_time - now).total_seconds(), next_label
+
+
+async def _fetch_btc_price() -> float:
+    """Fetch current BTC price from the last 15M candle close."""
+    try:
+        candles = await battlebox_pipeline.fetch_live_15m("BTCUSDT", limit=2)
+        return float(candles[-1]["close"]) if candles else 0.0
+    except Exception as e:
+        print(f"[SCHEDULER] BTC price fetch failed: {e}")
+        return 0.0
+
+
+async def _fire_senior_analyst(date_key: str) -> None:
+    """
+    Fires the Senior Analyst for the given date_key if not already run.
+
+    Two scenarios handled:
+    - New lock: get_live_battlebox() creates the lock and fires run_mas_analysis()
+      internally via asyncio.create_task(). We detect this via lock_existed_before
+      and do NOT fire a second time.
+    - Restart recovery: lock already exists but analyst was never triggered.
+      We read the locked packet directly and call run_mas_analysis() ourselves.
+    """
+    db = SessionLocal()
+    try:
+        existing_brief = db.query(MacroNarrativeLog).filter(
+            MacroNarrativeLog.symbol == "BTC/USDT",
+            MacroNarrativeLog.authored_by == "senior_analyst",
+            MacroNarrativeLog.date_key == date_key,
+        ).first()
+        if existing_brief:
+            print(f"[SCHEDULER] Senior Analyst already ran for {date_key} — skipping")
+            return
+
+        lock_before = db.query(SessionLock).filter(
+            SessionLock.symbol == "BTC/USDT",
+            SessionLock.date_key == date_key,
+        ).first()
+        lock_existed_before = lock_before is not None
+    finally:
+        db.close()
+
+    print(f"[SCHEDULER] Fetching battlebox for Senior Analyst ({date_key})...")
+    try:
+        out = await battlebox_pipeline.get_live_battlebox("BTCUSDT", session_mode="AUTO")
+    except Exception as e:
+        print(f"[SCHEDULER] Battlebox fetch failed: {e}")
+        return
+
+    if out.get("status") == "CALIBRATING":
+        print("[SCHEDULER] Session CALIBRATING — waiting 2 min and retrying (9:00 AM ET / 14:00 UTC)...")
+        await asyncio.sleep(120)
+        try:
+            out = await battlebox_pipeline.get_live_battlebox("BTCUSDT", session_mode="AUTO")
+        except Exception as e:
+            print(f"[SCHEDULER] Battlebox retry failed: {e}")
+            return
+
+    if out.get("status") == "ERROR":
+        print(f"[SCHEDULER] Battlebox error: {out.get('message')}")
+        return
+
+    if not lock_existed_before:
+        # New lock was created — get_live_battlebox() already fired run_mas_analysis()
+        # internally via asyncio.create_task(). No double-fire.
+        print(f"[SCHEDULER] New session lock created — Senior Analyst fired via battlebox")
+        return
+
+    # Restart recovery: existing lock, analyst not triggered — fire directly
+    session_info = out.get("battlebox", {}).get("session", {})
+    session_id = session_info.get("id")
+    if not session_id:
+        print("[SCHEDULER] Could not extract session_id from battlebox response — aborting")
+        return
+
+    db = SessionLocal()
+    try:
+        lock_record = db.query(SessionLock).filter(
+            SessionLock.symbol == "BTC/USDT",
+            SessionLock.session_id == session_id,
+            SessionLock.date_key == date_key,
+        ).first()
+        if not lock_record:
+            print(f"[SCHEDULER] No session lock found for {date_key} — aborting")
+            return
+        pkt = json.loads(lock_record.packet_data)
+    finally:
+        db.close()
+
+    print(f"[SCHEDULER] Firing Senior Analyst directly (restart recovery) for {date_key} 14:00 UTC / 9:00 AM ET...")
+    try:
+        await asyncio.to_thread(
+            kabroda_mas_flow.run_mas_analysis,
+            symbol="BTC/USDT",
+            session_id=session_id,
+            date_key=date_key,
+            battlebox_payload=pkt,
+        )
+    except Exception as e:
+        print(f"[SCHEDULER] Senior Analyst direct fire failed: {e}")
+
+
+async def run_senior_analyst_scheduler() -> None:
+    """
+    Daily at 14:00 UTC (9:00 AM ET). Calls _fire_senior_analyst() which handles
+    both the normal-operation and restart-recovery paths without double-firing.
+
+    Boot-time logic:
+    - If it is past 14:00 UTC and no brief exists for today: fire immediately.
+    - If it is before 14:00 UTC: wait for the scheduled time.
+    """
+    print("[SCHEDULER] Senior Analyst scheduler starting...")
+
+    now = datetime.now(timezone.utc)
+    if now.hour >= 14:
+        date_key = now.strftime("%Y-%m-%d")
+        print(f"[SCHEDULER] Boot check: looking for today's Senior Analyst brief ({date_key})...")
+        db = SessionLocal()
+        try:
+            existing = db.query(MacroNarrativeLog).filter(
+                MacroNarrativeLog.symbol == "BTC/USDT",
+                MacroNarrativeLog.authored_by == "senior_analyst",
+                MacroNarrativeLog.date_key == date_key,
+            ).first()
+        finally:
+            db.close()
+
+        if existing:
+            print(f"[SCHEDULER] Boot: Senior Analyst already ran today ({date_key}) — skipping")
+        else:
+            print(f"[SCHEDULER] Boot: no brief for today and past 9:00 AM ET — firing now...")
+            try:
+                await _fire_senior_analyst(date_key)
+            except Exception as e:
+                print(f"[SCHEDULER] Boot-time Senior Analyst failed: {e}")
+
+    while True:
+        try:
+            seconds = _seconds_until_utc(14, 0)
+            print(f"[SCHEDULER] Senior Analyst: next fire in {seconds / 3600:.1f}h (14:00 UTC / 9:00 AM ET)")
+            await asyncio.sleep(seconds)
+            date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            print(f"[SCHEDULER] Senior Analyst scheduled fire — {date_key} 14:00 UTC")
+            await _fire_senior_analyst(date_key)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[SCHEDULER] Senior Analyst scheduler error: {e}")
+            await asyncio.sleep(300)
+
+
+async def run_jewel_scheduler() -> None:
+    """6x daily JEWEL snapshots at each session transition."""
+    print("[SCHEDULER] JEWEL Specialist scheduler starting...")
+    while True:
+        try:
+            seconds, session_label = _next_jewel_slot()
+            print(f"[SCHEDULER] JEWEL: next snapshot is {session_label} in {seconds / 3600:.1f}h")
+            await asyncio.sleep(seconds)
+
+            current_price = await _fetch_btc_price()
+            date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            print(f"[SCHEDULER] JEWEL snapshot: {session_label} | ${current_price:,.2f}")
+
+            try:
+                result = await run_jewel_snapshot(
+                    symbol="BTC/USDT",
+                    session_label=session_label,
+                    current_price=current_price,
+                    date_key=date_key,
+                )
+                print(f"[SCHEDULER] JEWEL {session_label}: {result.get('status')}")
+            except Exception as e:
+                print(f"[SCHEDULER] JEWEL {session_label} failed: {e}")
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[SCHEDULER] JEWEL outer error: {e}")
+            await asyncio.sleep(60)
+
+
+async def run_weekly_scheduler() -> None:
+    """
+    Sunday 23:00 UTC: Elliott Wave Specialist runs first, then Performance Auditor.
+    Sleeps 1h after firing to avoid re-triggering within the same Sunday window.
+    """
+    print("[SCHEDULER] Weekly scheduler starting (Elliott Wave + Performance Auditor)...")
+    while True:
+        try:
+            seconds = _seconds_until_sunday_2300()
+            print(f"[SCHEDULER] Weekly: next run in {seconds / 3600:.1f}h (Sunday 23:00 UTC)")
+            await asyncio.sleep(seconds)
+
+            date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            current_price = await _fetch_btc_price()
+
+            # Elliott Wave Specialist fires first
+            print(f"[SCHEDULER] Elliott Wave Specialist firing for {date_key} (Sunday 23:00 UTC)...")
+            try:
+                result = await asyncio.to_thread(
+                    run_elliott_wave_analysis,
+                    symbol="BTC/USDT",
+                    current_price=current_price,
+                    date_key=date_key,
+                )
+                print(f"[SCHEDULER] Elliott Wave: {result.get('status')}")
+            except Exception as e:
+                print(f"[SCHEDULER] Elliott Wave failed: {e}")
+
+            # Performance Auditor runs after
+            print(f"[SCHEDULER] Performance Auditor firing for {date_key} (Sunday 23:00 UTC)...")
+            try:
+                result = await asyncio.to_thread(
+                    run_performance_audit,
+                    symbol="BTC/USDT",
+                    date_key=date_key,
+                )
+                print(f"[SCHEDULER] Performance Auditor: {result.get('status')}")
+            except Exception as e:
+                print(f"[SCHEDULER] Performance Auditor failed: {e}")
+
+            # Sleep 1h to clear the Sunday 23:00 UTC window before recalculating next fire
+            await asyncio.sleep(3600)
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[SCHEDULER] Weekly outer error: {e}")
+            await asyncio.sleep(300)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(">>> BOOTING KABRODA SYSTEM: Initializing Database Schema...")
     init_db()
-    app.state.gravity_task = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
-    app.state.ledger_task = asyncio.create_task(ledger_closing_engine.run_ledger_audit_loop())
+    app.state.gravity_task        = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
+    app.state.ledger_task         = asyncio.create_task(ledger_closing_engine.run_ledger_audit_loop())
+    app.state.senior_analyst_task = asyncio.create_task(run_senior_analyst_scheduler())
+    app.state.jewel_task          = asyncio.create_task(run_jewel_scheduler())
+    app.state.weekly_task         = asyncio.create_task(run_weekly_scheduler())
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     app.state.gravity_task.cancel()
     app.state.ledger_task.cancel()
+    app.state.senior_analyst_task.cancel()
+    app.state.jewel_task.cancel()
+    app.state.weekly_task.cancel()
 
 app = FastAPI(title="Kabroda BattleBox", version="12.0", lifespan=lifespan)
 
