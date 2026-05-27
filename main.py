@@ -36,7 +36,7 @@ from jewel_specialist import run_jewel_snapshot
 from elliott_wave_specialist import run_elliott_wave_analysis
 from performance_auditor import run_performance_audit
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -456,6 +456,84 @@ async def macro_war_room_page(request: Request, symbol: str = "BTC/USDT", db: Se
     
     ctx["mas_log"] = latest_log
     return _template_or_fallback(request, templates, "macro_war_room.html", ctx)
+
+# --- NARRATIVE / JEWEL DATA ENDPOINT ---
+@app.get("/api/narrative/latest")
+async def api_narrative_latest(symbol: str = "BTC/USDT"):
+    """
+    Single endpoint serving War Room, Market Radar Panel 00, and Gravity Map sidebar.
+    Returns latest Senior Analyst narrative, Elliott Wave state, and JEWEL snapshot.
+    No authentication required — data is not sensitive.
+    """
+    db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
+
+    db = SessionLocal()
+    try:
+        analyst_row = (
+            db.query(MacroNarrativeLog)
+            .filter(
+                MacroNarrativeLog.symbol == db_sym,
+                MacroNarrativeLog.authored_by == "senior_analyst",
+            )
+            .order_by(MacroNarrativeLog.id.desc())
+            .first()
+        )
+
+        wave_row = (
+            db.query(MacroNarrativeLog)
+            .filter(
+                MacroNarrativeLog.symbol == db_sym,
+                MacroNarrativeLog.authored_by == "elliott_wave_specialist",
+            )
+            .order_by(MacroNarrativeLog.id.desc())
+            .first()
+        )
+
+        jewel_row = (
+            db.query(JewelSnapshotLog)
+            .filter(JewelSnapshotLog.symbol == db_sym)
+            .order_by(JewelSnapshotLog.id.desc())
+            .first()
+        )
+
+        return JSONResponse({
+            "ok": True,
+            "symbol": db_sym,
+            "date_key": analyst_row.date_key if analyst_row else None,
+            "narrative": {
+                "narrative_text":   analyst_row.narrative_text   if analyst_row else None,
+                "tactical_text":    analyst_row.tactical_text    if analyst_row else None,
+                "performance_note": analyst_row.performance_note if analyst_row else None,
+                "date_key":         analyst_row.date_key         if analyst_row else None,
+            },
+            "wave": {
+                "wave_label":            wave_row.wave_label            if wave_row else None,
+                "wave_status":           wave_row.wave_status           if wave_row else None,
+                "completion_pct":        wave_row.completion_pct        if wave_row else None,
+                "wave_origin_price":     wave_row.wave_origin_price     if wave_row else None,
+                "wave_target_price":     wave_row.wave_target_price     if wave_row else None,
+                "invalidation_price":    wave_row.invalidation_price    if wave_row else None,
+                "confirmation_condition":wave_row.confirmation_condition if wave_row else None,
+                "wave_reasoning":        wave_row.wave_reasoning        if wave_row else None,
+                "date_key":              wave_row.date_key              if wave_row else None,
+            } if wave_row else None,
+            "jewel": {
+                "jewel_gate_open":         jewel_row.jewel_gate_open         if jewel_row else None,
+                "jewel_conviction":        jewel_row.jewel_conviction        if jewel_row else None,
+                "jewel_exit_warning":      jewel_row.jewel_exit_warning      if jewel_row else None,
+                "jewel_divergence_warning":jewel_row.jewel_divergence_warning if jewel_row else None,
+                "jewel_signal_summary":    jewel_row.jewel_signal_summary    if jewel_row else None,
+                "dominant_direction":      jewel_row.dominant_direction      if jewel_row else None,
+                "session_label":           jewel_row.session_label           if jewel_row else None,
+                "timestamp":               jewel_row.timestamp.isoformat()   if jewel_row and jewel_row.timestamp else None,
+            } if jewel_row else None,
+        })
+    except Exception as e:
+        print(f"[NARRATIVE API] Error: {e}")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    finally:
+        db.close()
+
 
 # --- GRAVITY API ENDPOINT ---
 @app.get("/api/gravity/scan")
