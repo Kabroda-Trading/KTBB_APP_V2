@@ -33,14 +33,14 @@ from database import (
 class ExecutiveBrief(BaseModel):
     """Strict output schema for the Senior Analyst."""
     approval_status: str = Field(description="Must be 'APPROVED', 'REJECTED', or 'WAITING_FOR_15M'")
-    tactical_brief: str = Field(description="Part 2 — the structured execution directive (entry/stop/targets/stand-down).")
+    tactical_brief: str = Field(description="The brief from ## TODAY'S ENERGY through ## THE OTHER SIDE — all sections after THE BIGGER PICTURE.")
     bias: str = Field(description="'LONG', 'SHORT', or 'NEUTRAL'")
     entry_price: float = Field(description="The exact trigger entry price.")
     stop_loss: float = Field(description="The exact stop loss (the opposing trigger).")
     t1: float = Field(description="Target 1 — pre-computed, copy exactly.")
     t2: float = Field(description="Target 2 — pre-computed, copy exactly.")
     t3: float = Field(description="Target 3 — pre-computed, copy exactly.")
-    formatted_newsletter_md: str = Field(description="Part 1 narrative + Part 2 tactical combined in Markdown.")
+    formatted_newsletter_md: str = Field(description="Complete brief in Markdown: all ## sections from THE BIGGER PICTURE through THE OTHER SIDE.")
 
 
 class IntelAuditReport(BaseModel):
@@ -99,44 +99,54 @@ observation only ("Day 110 of this wave") — never used to project forward.
 THE BRIEF STRUCTURE
 ═══════════════════════════════════════════════════════
 
-PART 1 — THE NARRATIVE
-One synthesized paragraph in the voice sample above. Weaves:
-- Large Pocket (Elliott Wave structural position — weekly/daily)
-- Middle Pocket (1H/4H energy state — where exhaustion lives)
-Into a story that has memory of yesterday's chapter and projects forward.
+Write the brief using these exact section headers in this exact order. \
+Every section is required.
 
-PART 2 — THE TACTICAL
-Structured trade setup for today's 15-minute chart. Use this exact format:
+## THE BIGGER PICTURE
+One to three sentences. Where are we in the wave structure. What does it mean. \
+Plain English anyone can understand. No indicator jargon. Name at least one \
+specific dollar price level. Project at least one forward event.
 
-TODAY'S ENERGY READ
+## TODAY'S ENERGY
+One to two sentences on what the momentum signals are saying. Is fuel building \
+or exhausted. What does 1H and 4H look like today.
+
+Gate: [OPEN or CLOSED — one sentence why]
+Direction: [BEARISH or BULLISH]
+Conviction: [STRONG, MODERATE, or LOW]
+[If divergence or exit warning is active — one plain English sentence on what \
+it means and why it matters today. Omit this line entirely if no warning.]
+
+## TODAY'S TRADE SETUP
 ★ HIGHER PROBABILITY: [LONG or SHORT]
-- 1H energy state: [specific reading]
-- 4H energy state: [specific reading]
-- Weekly bias: [BULLISH/BEARISH/NEUTRAL]
-- Synthesis: [one declarative sentence]
+Two to three sentences explaining WHY this is the higher probability direction. \
+What energy state supports it. What structural level confirms it. What makes \
+it valid today.
 
 LOWER PROBABILITY: [opposite direction]
-- [Specific price condition that would validate this trade]
+One to two sentences on exactly when and why this becomes valid. What has to \
+happen first before considering it.
 
-THE SETUP
+## THE LEVELS
 Breakout Trigger: $[exact value from context]
 Breakdown Trigger: $[exact value from context]
 
-★ THE [PRIMARY DIRECTION] TRADE
+★ THE [LONG or SHORT] TRADE
 Entry: $[from pre-computed targets]
 Stop: $[from pre-computed targets — the opposing trigger]
-T1: $[from pre-computed targets] — take 40% here
-T2: $[from pre-computed targets] — take 40% here
-T3: $[from pre-computed targets] — trail 20% to this
-DO NOT: [one specific instruction for today's setup]
+Target 1: $[from pre-computed targets] — take 40% here
+Target 2: $[from pre-computed targets] — take 40% here
+Target 3: $[from pre-computed targets] — trail 20% to this
 
-THE [SECONDARY DIRECTION] TRADE
-[When this becomes valid — a specific price event]
-[Whether to consider it at all today]
+DO NOT: [one specific instruction about what not to do on this exact setup today]
 
-STAND DOWN CONDITIONS
-- [Specific price event — not a generic statement]
-- [Specific price event — not a generic statement]
+## STAND DOWN IF
+- [Specific price condition — exact price or candle condition, not vague language]
+- [Second condition if applicable]
+
+## THE OTHER SIDE
+If the lower probability direction triggers, write the full setup here. Entry \
+condition, stop, targets. One paragraph.
 
 ═══════════════════════════════════════════════════════
 MATHEMATICAL RULES (CRITICAL)
@@ -159,10 +169,10 @@ SELF-CHECK BEFORE OUTPUT
 ═══════════════════════════════════════════════════════
 
 Before generating your final output, verify:
-1. Part 1 names at least one specific dollar price level
-2. Part 1 projects at least one forward event (price target, date, or signal)
-3. Part 2 contains exactly one starred primary trade
-4. Stand Down Conditions are specific price events, not generic statements
+1. THE BIGGER PICTURE names at least one specific dollar price level
+2. THE BIGGER PICTURE projects at least one forward event (price target or signal)
+3. TODAY'S TRADE SETUP contains exactly one starred primary trade (★ HIGHER PROBABILITY)
+4. STAND DOWN IF conditions are specific price events, not generic statements
 5. No banned words appear anywhere in the output
 6. entry_price, stop_loss, t1, t2, t3 match the pre-computed values exactly
 
@@ -175,20 +185,21 @@ OUTPUT FORMAT (MANDATORY)
 Return ONLY a valid JSON object. No markdown fences. No preamble. \
 No explanation before or after. Every field is required.
 
-Include one extra field "narrative_text" containing ONLY Part 1 \
-(the narrative paragraph, no headers). This is used for cross-day memory.
+Include one extra field "narrative_text" containing ONLY the plain text \
+content of THE BIGGER PICTURE section — no ## header, just the 1–3 sentence \
+paragraph. This is used for cross-day memory.
 
 {
   "approval_status": "APPROVED" or "REJECTED" or "WAITING_FOR_15M",
-  "tactical_brief": "<Part 2 only — the structured execution directive as plain text>",
+  "tactical_brief": "<Everything from ## TODAY'S ENERGY through ## THE OTHER SIDE — all sections after THE BIGGER PICTURE, as plain text>",
   "bias": "LONG" or "SHORT" or "NEUTRAL",
   "entry_price": <float>,
   "stop_loss": <float>,
   "t1": <float>,
   "t2": <float>,
   "t3": <float>,
-  "formatted_newsletter_md": "<Part 1 narrative paragraph PLUS Part 2 tactical setup combined in Markdown>",
-  "narrative_text": "<Part 1 narrative paragraph only — verbatim from formatted_newsletter_md opening>"
+  "formatted_newsletter_md": "<Complete brief in Markdown: all ## sections from THE BIGGER PICTURE through THE OTHER SIDE>",
+  "narrative_text": "<Plain text content of THE BIGGER PICTURE only — no ## header, just the 1–3 sentence paragraph>"
 }
 """
 

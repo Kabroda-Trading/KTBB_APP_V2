@@ -70,9 +70,10 @@
         .narrative-text {
             font-size: 18px;
             font-weight: 300;
-            line-height: 1.75;
-            color: #e2e8f0;
+            line-height: 1.85;
+            color: #cbd5e1;
             letter-spacing: 0.01em;
+            max-width: 680px;
         }
         .narrative-stale {
             display: inline-block;
@@ -266,13 +267,118 @@
             font-size: 14px;
             line-height: 1.7;
             color: #cbd5e1;
-            white-space: pre-wrap;
             font-family: 'Inter', sans-serif;
         }
-        .tactical-content .starred-line {
-            color: var(--green);
-            font-weight: 600;
-            font-size: 15px;
+
+        /* ── TACTICAL SECTION RENDERING ─────────────────── */
+        .tac-section-label {
+            font-family: 'JetBrains Mono';
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 2.5px;
+            text-transform: uppercase;
+            color: var(--dim);
+            margin-top: 28px;
+            margin-bottom: 10px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+        }
+        .tactical-content .tac-section-label:first-child {
+            margin-top: 0;
+            padding-top: 0;
+            border-top: none;
+        }
+        .tac-starred {
+            font-size: 16px;
+            font-weight: 500;
+            margin: 10px 0 6px;
+            line-height: 1.4;
+        }
+        .tac-price-row {
+            display: flex;
+            align-items: baseline;
+            font-family: 'JetBrains Mono';
+            font-size: 13px;
+            padding: 5px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .tac-price-label {
+            color: var(--muted);
+            min-width: 130px;
+            flex-shrink: 0;
+        }
+        .tac-price-dots {
+            flex: 1;
+            border-bottom: 1px dotted var(--border2);
+            margin: 0 8px 4px;
+            min-width: 12px;
+        }
+        .tac-price-value {
+            color: var(--text);
+            font-weight: 700;
+        }
+        .tac-price-note {
+            font-family: 'Inter';
+            font-size: 12px;
+            color: var(--muted);
+            margin-left: 12px;
+        }
+        .tac-do-not {
+            color: #ef4444;
+            margin: 14px 0 8px 16px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .tac-badge-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin: 12px 0 4px;
+        }
+        .tac-gate-sm {
+            font-size: 11px !important;
+            padding: 3px 10px !important;
+            letter-spacing: 1px !important;
+        }
+        .tac-gate-reason {
+            font-size: 12px;
+            color: var(--muted);
+            margin: 2px 0 6px;
+            font-style: italic;
+            line-height: 1.5;
+        }
+        .tac-div-warning {
+            font-size: 13px;
+            color: var(--amber);
+            margin: 4px 0 10px;
+            line-height: 1.5;
+        }
+        .tac-standown-box {
+            background: rgba(234,179,8,0.08);
+            border-left: 2px solid #854d0e;
+            border-radius: 6px;
+            padding: 14px;
+            margin: 8px 0 16px;
+        }
+        .tac-standown-list {
+            margin: 0;
+            padding-left: 20px;
+            color: #fef08a;
+            font-size: 13px;
+            line-height: 1.75;
+        }
+        .tac-lower-prob {
+            font-weight: 500;
+            color: var(--muted);
+            margin: 14px 0 4px;
+            font-size: 14px;
+        }
+        .tac-spacer { height: 8px; }
+        .tac-line {
+            font-size: 14px;
+            color: #94a3b8;
+            line-height: 1.65;
         }
 
         /* ── SECTION 5: OPERATOR COMMLINK ────────────────── */
@@ -544,13 +650,159 @@
 
         function renderTactical(text) {
             if (!text) return '';
-            return text.split('\n').map(line => {
-                const esc = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-                if (line.includes('★') || /HIGHER PROBABILITY/i.test(line)) {
-                    return `<div class="starred-line">${esc}</div>`;
+
+            function esc(s) {
+                return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+
+            const lines = text.split('\n');
+            let html = '';
+            let inStandDown = false;
+            let standDownItems = [];
+            let pendingBadges = [];
+
+            function flushBadges() {
+                if (!pendingBadges.length) return;
+                let row = '<div class="tac-badge-row">';
+                let gateReason = '';
+                let warningLine = '';
+                pendingBadges.forEach(b => {
+                    if (b.type === 'gate') {
+                        const cls = b.val === 'OPEN' ? 'jewel-gate-open' : 'jewel-gate-closed';
+                        row += `<span class="${cls} tac-gate-sm">GATE ${b.val}</span>`;
+                        gateReason = b.reason || '';
+                    } else if (b.type === 'dir') {
+                        const cls = b.val === 'BULLISH' ? 'chip-dir-bull' : b.val === 'BEARISH' ? 'chip-dir-bear' : 'chip-dir-neut';
+                        row += `<span class="jewel-chip ${cls}">${b.val}</span>`;
+                    } else if (b.type === 'conv') {
+                        const cls = b.val === 'STRONG' ? 'chip-conv-str' : b.val === 'MODERATE' ? 'chip-conv-mod' : 'chip-conv-low';
+                        row += `<span class="jewel-chip ${cls}">${b.val}</span>`;
+                    } else if (b.type === 'warning') {
+                        warningLine = b.val;
+                    }
+                });
+                row += '</div>';
+                if (gateReason) row += `<div class="tac-gate-reason">${esc(gateReason)}</div>`;
+                if (warningLine) row += `<div class="tac-div-warning">${esc(warningLine)}</div>`;
+                html += row;
+                pendingBadges = [];
+            }
+
+            function flushStandDown() {
+                if (standDownItems.length) {
+                    const items = standDownItems.map(item => `<li>${esc(item)}</li>`).join('');
+                    html += `<div class="tac-standown-box"><ul class="tac-standown-list">${items}</ul></div>`;
                 }
-                return `<div>${esc}</div>`;
-            }).join('');
+                standDownItems = [];
+                inStandDown = false;
+            }
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const trimmed = line.trim();
+
+                if (inStandDown) {
+                    if (trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
+                        standDownItems.push(trimmed.replace(/^[-•]\s*/, ''));
+                        continue;
+                    }
+                    if (trimmed === '') continue;
+                    flushStandDown();
+                    // fall through to process line normally
+                }
+
+                const isGate = /^Gate:\s*/i.test(line);
+                const isDir  = /^Direction:\s*/i.test(line);
+                const isConv = /^Conviction:\s*/i.test(line);
+
+                if (isGate) {
+                    flushBadges();
+                    const rest = line.replace(/^Gate:\s*/i, '').trim();
+                    const dashIdx = rest.search(/\s[—–-]\s/);
+                    const val = (dashIdx > -1 ? rest.slice(0, dashIdx) : rest).trim().toUpperCase();
+                    const reason = dashIdx > -1 ? rest.slice(dashIdx).replace(/^\s*[—–-]\s*/, '').trim() : '';
+                    pendingBadges.push({ type: 'gate', val, reason });
+                    continue;
+                }
+                if (isDir) {
+                    const val = line.replace(/^Direction:\s*/i, '').trim().toUpperCase();
+                    pendingBadges.push({ type: 'dir', val });
+                    continue;
+                }
+                if (isConv) {
+                    const val = line.replace(/^Conviction:\s*/i, '').trim().toUpperCase();
+                    pendingBadges.push({ type: 'conv', val });
+                    continue;
+                }
+
+                if (pendingBadges.length > 0) {
+                    if (trimmed !== '') {
+                        const isSpecial = trimmed.startsWith('## ') || line.includes('★') ||
+                            /^(Entry|Stop|Target\s+[123]|T[123]|Breakout Trigger|Breakdown Trigger|LOWER PROBABILITY|DO NOT):/i.test(trimmed);
+                        if (!isSpecial) {
+                            pendingBadges.push({ type: 'warning', val: trimmed });
+                            flushBadges();
+                            continue;
+                        }
+                    }
+                    flushBadges();
+                }
+
+                if (line.startsWith('## ')) {
+                    const label = line.slice(3).trim();
+                    if (label === 'STAND DOWN IF') {
+                        inStandDown = true;
+                        html += `<div class="tac-section-label">Stand Down If</div>`;
+                        continue;
+                    }
+                    html += `<div class="tac-section-label">${esc(label)}</div>`;
+                    continue;
+                }
+
+                if (line.includes('★')) {
+                    const isShort = /SHORT/i.test(line);
+                    const color = isShort ? '#ef4444' : '#22c55e';
+                    html += `<div class="tac-starred" style="color:${color}">${esc(line)}</div>`;
+                    continue;
+                }
+
+                const priceMatch = line.match(/^(Entry|Stop|Target\s+[123]|T[123]|Breakout Trigger|Breakdown Trigger):\s*(.+)/i);
+                if (priceMatch) {
+                    const label = priceMatch[1];
+                    const rest  = priceMatch[2].trim();
+                    const dashIdx = rest.search(/\s[—–]\s/);
+                    const price = dashIdx > -1 ? rest.slice(0, dashIdx).trim() : rest;
+                    const note  = dashIdx > -1 ? rest.slice(dashIdx).replace(/^\s*[—–]\s*/, '').trim() : '';
+                    html += `<div class="tac-price-row">` +
+                        `<span class="tac-price-label">${esc(label)}</span>` +
+                        `<span class="tac-price-dots"></span>` +
+                        `<span class="tac-price-value">${esc(price)}</span>` +
+                        (note ? `<span class="tac-price-note"> — ${esc(note)}</span>` : '') +
+                        `</div>`;
+                    continue;
+                }
+
+                if (/^DO NOT:/i.test(line)) {
+                    html += `<div class="tac-do-not">${esc(line)}</div>`;
+                    continue;
+                }
+
+                if (/^LOWER PROBABILITY:/i.test(line)) {
+                    html += `<div class="tac-lower-prob">${esc(line)}</div>`;
+                    continue;
+                }
+
+                if (trimmed === '') {
+                    html += '<div class="tac-spacer"></div>';
+                    continue;
+                }
+
+                html += `<div class="tac-line">${esc(line)}</div>`;
+            }
+
+            flushBadges();
+            if (inStandDown) flushStandDown();
+            return html;
         }
 
         // ── LOAD NARRATIVE DATA ──────────────────────────────────────────
