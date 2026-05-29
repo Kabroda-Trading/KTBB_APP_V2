@@ -164,6 +164,182 @@
         @media (max-width: 1100px) {
             .cockpit { grid-template-columns: 1fr; grid-template-areas: "header" "brief" "left" "center" "right"; }
         }
+
+        /* ── TACTICAL RENDERER — copied from macro_war_room.html ── */
+        :root {
+            --surface:  #0a0a0a;
+            --border:   #1e1e1e;
+            --border2:  #2a2a2a;
+            --amber:    #f59e0b;
+            --blue:     #0ea5e9;
+            --text:     #f1f5f9;
+            --muted:    #94a3b8;
+            --dim:      #475569;
+        }
+        .narrative-text {
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            line-height: 1.75;
+            color: #cbd5e1;
+            margin: 0 0 16px;
+        }
+        .tactical-content {
+            font-size: 14px;
+            line-height: 1.7;
+            color: #cbd5e1;
+            font-family: 'Inter', sans-serif;
+        }
+        .jewel-gate-open {
+            font-family: 'JetBrains Mono';
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: var(--green);
+            background: rgba(34,197,94,0.08);
+            border: 1px solid rgba(34,197,94,0.3);
+            padding: 6px 14px;
+            border-radius: 5px;
+            text-transform: uppercase;
+        }
+        .jewel-gate-closed {
+            font-family: 'JetBrains Mono';
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: var(--dim);
+            background: rgba(71,85,105,0.12);
+            border: 1px solid var(--border2);
+            padding: 6px 14px;
+            border-radius: 5px;
+            text-transform: uppercase;
+        }
+        .jewel-chip {
+            font-family: 'JetBrains Mono';
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 9px;
+            border-radius: 4px;
+            border: 1px solid;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .chip-dir-bull  { color: var(--green); border-color: rgba(34,197,94,0.3);  background: rgba(34,197,94,0.07);  }
+        .chip-dir-bear  { color: var(--red);   border-color: rgba(239,68,68,0.3);  background: rgba(239,68,68,0.07);  }
+        .chip-dir-neut  { color: var(--muted); border-color: var(--border2);       background: transparent; }
+        .chip-conv-str  { color: var(--blue);  border-color: rgba(14,165,233,0.3); background: rgba(14,165,233,0.07); }
+        .chip-conv-mod  { color: var(--amber); border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.07); }
+        .chip-conv-low  { color: var(--dim);   border-color: var(--border2);       background: transparent; }
+        .chip-warn-exit { color: #fff;         border-color: var(--red);           background: rgba(239,68,68,0.15);  }
+        .chip-warn-div  { color: #fff;         border-color: var(--amber);         background: rgba(245,158,11,0.15); }
+        .tac-section-label {
+            font-family: 'JetBrains Mono';
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 2.5px;
+            text-transform: uppercase;
+            color: var(--dim);
+            margin-top: 28px;
+            margin-bottom: 10px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+        }
+        .tactical-content .tac-section-label:first-child {
+            margin-top: 0;
+            padding-top: 0;
+            border-top: none;
+        }
+        .tac-starred {
+            font-size: 16px;
+            font-weight: 500;
+            margin: 10px 0 6px;
+            line-height: 1.4;
+        }
+        .tac-price-row {
+            display: flex;
+            align-items: baseline;
+            font-family: 'JetBrains Mono';
+            font-size: 13px;
+            padding: 5px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .tac-price-label {
+            color: var(--muted);
+            min-width: 130px;
+            flex-shrink: 0;
+        }
+        .tac-price-dots {
+            flex: 1;
+            border-bottom: 1px dotted var(--border2);
+            margin: 0 8px 4px;
+            min-width: 12px;
+        }
+        .tac-price-value {
+            color: var(--text);
+            font-weight: 700;
+        }
+        .tac-price-note {
+            font-family: 'Inter';
+            font-size: 12px;
+            color: var(--muted);
+            margin-left: 12px;
+        }
+        .tac-do-not {
+            color: #ef4444;
+            margin: 14px 0 8px 16px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .tac-badge-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin: 12px 0 4px;
+        }
+        .tac-gate-sm {
+            font-size: 11px !important;
+            padding: 3px 10px !important;
+            letter-spacing: 1px !important;
+        }
+        .tac-gate-reason {
+            font-size: 12px;
+            color: var(--muted);
+            margin: 2px 0 6px;
+            font-style: italic;
+            line-height: 1.5;
+        }
+        .tac-div-warning {
+            font-size: 13px;
+            color: var(--amber);
+            margin: 4px 0 10px;
+            line-height: 1.5;
+        }
+        .tac-standown-box {
+            background: rgba(234,179,8,0.08);
+            border-left: 2px solid #854d0e;
+            border-radius: 6px;
+            padding: 14px;
+            margin: 8px 0 16px;
+        }
+        .tac-standown-list {
+            margin: 0;
+            padding-left: 20px;
+            color: #fef08a;
+            font-size: 13px;
+            line-height: 1.75;
+        }
+        .tac-lower-prob {
+            font-weight: 500;
+            color: var(--muted);
+            margin: 14px 0 4px;
+            font-size: 14px;
+        }
+        .tac-spacer { height: 8px; }
+        .tac-line {
+            font-size: 14px;
+            color: #94a3b8;
+            line-height: 1.65;
+        }
     </style>
 </head>
 <body>
@@ -407,6 +583,163 @@
             }).join('');
         }
 
+        function renderTactical(text) {
+            if (!text) return '';
+
+            function esc(s) {
+                return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+
+            const lines = text.split('\n');
+            let html = '';
+            let inStandDown = false;
+            let standDownItems = [];
+            let pendingBadges = [];
+
+            function flushBadges() {
+                if (!pendingBadges.length) return;
+                let row = '<div class="tac-badge-row">';
+                let gateReason = '';
+                let warningLine = '';
+                pendingBadges.forEach(b => {
+                    if (b.type === 'gate') {
+                        const cls = b.val === 'OPEN' ? 'jewel-gate-open' : 'jewel-gate-closed';
+                        row += `<span class="${cls} tac-gate-sm">GATE ${b.val}</span>`;
+                        gateReason = b.reason || '';
+                    } else if (b.type === 'dir') {
+                        const cls = b.val === 'BULLISH' ? 'chip-dir-bull' : b.val === 'BEARISH' ? 'chip-dir-bear' : 'chip-dir-neut';
+                        row += `<span class="jewel-chip ${cls}">${b.val}</span>`;
+                    } else if (b.type === 'conv') {
+                        const cls = b.val === 'STRONG' ? 'chip-conv-str' : b.val === 'MODERATE' ? 'chip-conv-mod' : 'chip-conv-low';
+                        row += `<span class="jewel-chip ${cls}">${b.val}</span>`;
+                    } else if (b.type === 'warning') {
+                        warningLine = b.val;
+                    }
+                });
+                row += '</div>';
+                if (gateReason) row += `<div class="tac-gate-reason">${esc(gateReason)}</div>`;
+                if (warningLine) row += `<div class="tac-div-warning">${esc(warningLine)}</div>`;
+                html += row;
+                pendingBadges = [];
+            }
+
+            function flushStandDown() {
+                if (standDownItems.length) {
+                    const items = standDownItems.map(item => `<li>${esc(item)}</li>`).join('');
+                    html += `<div class="tac-standown-box"><ul class="tac-standown-list">${items}</ul></div>`;
+                }
+                standDownItems = [];
+                inStandDown = false;
+            }
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const trimmed = line.trim();
+
+                if (inStandDown) {
+                    if (trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
+                        standDownItems.push(trimmed.replace(/^[-•]\s*/, ''));
+                        continue;
+                    }
+                    if (trimmed === '') continue;
+                    flushStandDown();
+                    // fall through to process line normally
+                }
+
+                const isGate = /^Gate:\s*/i.test(line);
+                const isDir  = /^Direction:\s*/i.test(line);
+                const isConv = /^Conviction:\s*/i.test(line);
+
+                if (isGate) {
+                    flushBadges();
+                    const rest = line.replace(/^Gate:\s*/i, '').trim();
+                    const dashIdx = rest.search(/\s[—–-]\s/);
+                    const val = (dashIdx > -1 ? rest.slice(0, dashIdx) : rest).trim().toUpperCase();
+                    const reason = dashIdx > -1 ? rest.slice(dashIdx).replace(/^\s*[—–-]\s*/, '').trim() : '';
+                    pendingBadges.push({ type: 'gate', val, reason });
+                    continue;
+                }
+                if (isDir) {
+                    const val = line.replace(/^Direction:\s*/i, '').trim().toUpperCase();
+                    pendingBadges.push({ type: 'dir', val });
+                    continue;
+                }
+                if (isConv) {
+                    const val = line.replace(/^Conviction:\s*/i, '').trim().toUpperCase();
+                    pendingBadges.push({ type: 'conv', val });
+                    continue;
+                }
+
+                if (pendingBadges.length > 0) {
+                    if (trimmed !== '') {
+                        const isSpecial = trimmed.startsWith('## ') || line.includes('★') ||
+                            /^(Entry|Stop|Target\s+[123]|T[123]|Breakout Trigger|Breakdown Trigger|LOWER PROBABILITY|DO NOT):/i.test(trimmed);
+                        if (!isSpecial) {
+                            pendingBadges.push({ type: 'warning', val: trimmed });
+                            flushBadges();
+                            continue;
+                        }
+                    }
+                    flushBadges();
+                }
+
+                if (line.startsWith('## ')) {
+                    const label = line.slice(3).trim();
+                    if (label === 'STAND DOWN IF') {
+                        inStandDown = true;
+                        html += `<div class="tac-section-label">Stand Down If</div>`;
+                        continue;
+                    }
+                    html += `<div class="tac-section-label">${esc(label)}</div>`;
+                    continue;
+                }
+
+                if (line.includes('★')) {
+                    const isShort = /SHORT/i.test(line);
+                    const color = isShort ? '#ef4444' : '#22c55e';
+                    html += `<div class="tac-starred" style="color:${color}">${esc(line)}</div>`;
+                    continue;
+                }
+
+                const priceMatch = line.match(/^(Entry|Stop|Target\s+[123]|T[123]|Breakout Trigger|Breakdown Trigger):\s*(.+)/i);
+                if (priceMatch) {
+                    const label = priceMatch[1];
+                    const rest  = priceMatch[2].trim();
+                    const dashIdx = rest.search(/\s[—–]\s/);
+                    const price = dashIdx > -1 ? rest.slice(0, dashIdx).trim() : rest;
+                    const note  = dashIdx > -1 ? rest.slice(dashIdx).replace(/^\s*[—–]\s*/, '').trim() : '';
+                    html += `<div class="tac-price-row">` +
+                        `<span class="tac-price-label">${esc(label)}</span>` +
+                        `<span class="tac-price-dots"></span>` +
+                        `<span class="tac-price-value">${esc(price)}</span>` +
+                        (note ? `<span class="tac-price-note"> — ${esc(note)}</span>` : '') +
+                        `</div>`;
+                    continue;
+                }
+
+                if (/^DO NOT:/i.test(line)) {
+                    html += `<div class="tac-do-not">${esc(line)}</div>`;
+                    continue;
+                }
+
+                if (/^LOWER PROBABILITY:/i.test(line)) {
+                    html += `<div class="tac-lower-prob">${esc(line)}</div>`;
+                    continue;
+                }
+
+                if (trimmed === '') {
+                    html += '<div class="tac-spacer"></div>';
+                    continue;
+                }
+
+                html += `<div class="tac-line">${esc(line)}</div>`;
+            }
+
+            flushBadges();
+            if (inStandDown) flushStandDown();
+            return html;
+        }
+
         async function loadAnalystBrief(symbol) {
             const body  = document.getElementById('analystBriefBody');
             body.innerHTML = `<div class="ab-line ab-l2 ab-starred">Loading brief...</div>`;
@@ -422,8 +755,14 @@
                 const tacText = data.narrative && data.narrative.tactical_text;
 
                 if (narText || tacText) {
-                    const combined = [narText, tacText].filter(Boolean).join('\n\n');
-                    body.innerHTML = renderBriefText(combined);
+                    let html = '';
+                    if (narText) {
+                        html += `<p class="narrative-text">${narText.replace(/\n/g, '<br>')}</p>`;
+                    }
+                    if (tacText) {
+                        html += `<div class="tactical-content">${renderTactical(tacText)}</div>`;
+                    }
+                    body.innerHTML = html;
                 } else {
                     body.innerHTML = `<div class="ab-line ab-l1 ab-starred">Today's brief is being prepared. Check back after 9:00 AM ET.</div>`;
                 }
