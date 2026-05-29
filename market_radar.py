@@ -18,7 +18,7 @@ import gravity_math
 import mtf_confluence_scanner
 from database import SessionLocal, MtfReading, DecisionJournal
 
-TARGETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+TARGETS = ["BTCUSDT"]
 
 def _make_indicator_string(levels):
     if not levels: return "0,0,0,0,0,0"

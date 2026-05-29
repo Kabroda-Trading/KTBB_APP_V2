@@ -103,6 +103,20 @@ def init_db():
     except Exception:
         pass
 
+    # --- FIX 1 — Outcome tracker backfill ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN target_hit VARCHAR"))
+    except Exception:
+        pass
+
+    # --- FIX 2 — kinematic_grade on decision_journal ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE decision_journal ADD COLUMN kinematic_grade VARCHAR"))
+    except Exception:
+        pass
+
     # --- PHASE 3C JEWEL SPECIALIST — top-level scanner context columns ---
     for col_def in [
         "confluence_score INTEGER",
@@ -216,6 +230,7 @@ class CampaignLog(Base):
     mas_executive_brief = Column(String, nullable=True)
     mas_approval_status = Column(String, default="PENDING", nullable=False)
     formatted_newsletter = Column(String, nullable=True)
+    target_hit = Column(String, nullable=True)   # T1 | T2 | T3 | STOP — written by outcome tracker
 
 # ---------------------------------------------------------
 # MTF CONFLUENCE READINGS (MORNING BRIEF HISTORY)
@@ -251,6 +266,7 @@ class DecisionJournal(Base):
     confluence_score = Column(Integer, nullable=True, default=0)
     confluence_direction = Column(String, nullable=True, default="NEUTRAL")
     energy_status = Column(String, nullable=True, default="BUILDING")
+    kinematic_grade = Column(String, nullable=True)   # PRIMED | OVEREXTENDED | TANGLED | UNKNOWN
 
     bo_price = Column(Float, nullable=True)
     bd_price = Column(Float, nullable=True)

@@ -36,7 +36,7 @@ from jewel_specialist import run_jewel_snapshot
 from elliott_wave_specialist import run_elliott_wave_analysis
 from performance_auditor import run_performance_audit
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -321,15 +321,86 @@ async def run_weekly_scheduler() -> None:
             await asyncio.sleep(300)
 
 
+# ==============================================================================
+# OUTCOME TRACKER — runs every 4 hours
+# Fills DecisionJournal outcome fields for rows older than 4h.
+# Fills CampaignLog.target_hit for all closed rows.
+# ==============================================================================
+
+def _do_outcome_tick(current_price: float) -> None:
+    """Core outcome-tracker logic. Extracted for testability."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=4)
+    db = SessionLocal()
+    try:
+        pending = db.query(DecisionJournal).filter(
+            DecisionJournal.outcome_direction_correct.is_(None),
+            DecisionJournal.timestamp < cutoff,
+        ).all()
+
+        filled = 0
+        for row in pending:
+            if not row.asset_price or row.asset_price == 0:
+                continue
+            pct_move = (current_price - row.asset_price) / row.asset_price * 100
+            bias = row.confluence_direction
+            if bias == "LONG":
+                correct = pct_move > 0
+            elif bias == "SHORT":
+                correct = pct_move < 0
+            else:
+                correct = False
+            row.outcome_price_4h = current_price
+            row.outcome_pct_move_4h = round(pct_move, 4)
+            row.outcome_direction_correct = correct
+            filled += 1
+
+        # target_hit: current ledger always closes at T1 or SL — record what happened
+        closed_logs = db.query(CampaignLog).filter(
+            CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS"]),
+            CampaignLog.target_hit.is_(None),
+        ).all()
+        for log in closed_logs:
+            log.target_hit = "T1" if log.status == "CLOSED_WIN" else "STOP"
+
+        db.commit()
+        print(f"[OUTCOME TRACKER] Filled {filled} DJ rows | {len(closed_logs)} campaign target_hit rows")
+    except Exception as e:
+        print(f"[OUTCOME TRACKER] DB error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def run_outcome_tracker() -> None:
+    """Every 4 hours: fills 4H outcome fields on DecisionJournal and target_hit on CampaignLog.
+    Runs immediately on boot to backfill any existing unprocessed rows."""
+    print("[SCHEDULER] Outcome Tracker starting...")
+    while True:
+        try:
+            current_price = await _fetch_btc_price()
+            if current_price > 0:
+                _do_outcome_tick(current_price)
+            else:
+                print("[OUTCOME TRACKER] Could not fetch BTC price — skipping tick")
+            await asyncio.sleep(14400)  # 4 hours
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[OUTCOME TRACKER] Outer error: {e}")
+            await asyncio.sleep(300)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(">>> BOOTING KABRODA SYSTEM: Initializing Database Schema...")
     init_db()
-    app.state.gravity_task        = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
-    app.state.ledger_task         = asyncio.create_task(ledger_closing_engine.run_ledger_audit_loop())
-    app.state.senior_analyst_task = asyncio.create_task(run_senior_analyst_scheduler())
-    app.state.jewel_task          = asyncio.create_task(run_jewel_scheduler())
-    app.state.weekly_task         = asyncio.create_task(run_weekly_scheduler())
+    app.state.gravity_task          = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
+    app.state.ledger_task           = asyncio.create_task(ledger_closing_engine.run_ledger_audit_loop())
+    app.state.senior_analyst_task   = asyncio.create_task(run_senior_analyst_scheduler())
+    app.state.jewel_task            = asyncio.create_task(run_jewel_scheduler())
+    app.state.weekly_task           = asyncio.create_task(run_weekly_scheduler())
+    app.state.outcome_tracker_task  = asyncio.create_task(run_outcome_tracker())
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     app.state.gravity_task.cancel()
@@ -337,6 +408,7 @@ async def lifespan(app: FastAPI):
     app.state.senior_analyst_task.cancel()
     app.state.jewel_task.cancel()
     app.state.weekly_task.cancel()
+    app.state.outcome_tracker_task.cancel()
 
 app = FastAPI(title="Kabroda BattleBox", version="12.0", lifespan=lifespan)
 

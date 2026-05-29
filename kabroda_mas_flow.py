@@ -597,6 +597,18 @@ def _build_senior_analyst_context(
     micro_bias = context.get("micro_bias", "NEUTRAL")
     micro_state = context.get("micro_state", "UNKNOWN")
     fuel_1h = context.get("1h_fuel_status", "UNKNOWN")
+    jewel_1h = tf_1h.get("jewel", {})
+    jewel_4h = tf_4h.get("jewel", {})
+    f24_poc = levels.get("f24_poc", 0)
+    f24_vah = levels.get("f24_vah", 0)
+    f24_val = levels.get("f24_val", 0)
+    _radar_map = {
+        "STRONG": "BURNING",
+        "OVEREXTENDED": "EXHAUSTED",
+        "REFUELING": "BUILDING",
+        "CHOP_RISK": "BUILDING",
+    }
+    radar_energy = _radar_map.get(fuel_1h, fuel_1h)
     kde_peaks = context.get("kde_peaks", [])
     macro_structure = context.get("macro_structure", [])
     macro_env = context.get("macro_environment", {})
@@ -612,6 +624,9 @@ def _build_senior_analyst_context(
         f"Daily Support:      ${sup:,.2f}",
         f"30M Range High:     ${r30h:,.2f}",
         f"30M Range Low:      ${r30l:,.2f}",
+        f"24H VRVP VAH:       ${f24_vah:,.2f}  (WHY breakout trigger: bo = max(R30H, VAH))",
+        f"24H VRVP VAL:       ${f24_val:,.2f}  (WHY breakdown trigger: bd = min(R30L, VAL))",
+        f"24H VRVP POC:       ${f24_poc:,.2f}",
     ]
 
     if targets:
@@ -642,13 +657,15 @@ def _build_senior_analyst_context(
         "=== MULTI-TIMEFRAME ENERGY ===",
         f"Macro Bias (21-day weekly force): {macro_bias}",
         f"Micro Bias (168h):                {micro_bias}",
-        f"4H Trend: {tf_4h.get('trend','?')} | Momentum: {tf_4h.get('momentum','?')} | RSI: {tf_4h.get('rsi','?')}",
-        f"1H Trend: {tf_1h.get('trend','?')} | Momentum: {tf_1h.get('momentum','?')} | RSI: {tf_1h.get('rsi','?')}",
+        f"4H Trend: {tf_4h.get('trend','?')} | Momentum: {tf_4h.get('momentum','?')} | RSI: {tf_4h.get('rsi','?')} | Zone: {jewel_4h.get('rsi_zone','?')} | Signal: {jewel_4h.get('signal','?')}",
+        f"    ADX: {jewel_4h.get('adx','?')} ({'rising' if jewel_4h.get('adx_rising') else 'flat'}) | StochZone: {jewel_4h.get('stoch_zone','?')}",
+        f"1H Trend: {tf_1h.get('trend','?')} | Momentum: {tf_1h.get('momentum','?')} | RSI: {tf_1h.get('rsi','?')} | Zone: {jewel_1h.get('rsi_zone','?')} | Signal: {jewel_1h.get('signal','?')}",
+        f"    ADX: {jewel_1h.get('adx','?')} ({'rising' if jewel_1h.get('adx_rising') else 'flat'}) | StochZone: {jewel_1h.get('stoch_zone','?')}",
         f"15M JEWEL: {tf_15m.get('kinematic_grade','?')} | "
         f"RSI: {tf_15m.get('rsi','?')} | "
         f"Ribbon: {tf_15m.get('ribbon_spread_pct','?')}% | "
         f"Deviation: {tf_15m.get('deviation_from_mean_pct','?')}%",
-        f"Harmonic State: {micro_state} | 1H Fuel: {fuel_1h}",
+        f"Harmonic State: {micro_state} | Kinematic Fuel: {fuel_1h} [Market Radar: {radar_energy}]",
     ]
 
     if kde_peaks:
@@ -1024,15 +1041,46 @@ def _inject_decision_journal(
     db = SessionLocal()
     try:
         levels = battlebox_payload.get("levels", {})
+        context = battlebox_payload.get("context", {})
+        fuel_gauge = context.get("fuel_gauge", {})
+
+        # Real energy_status from battlebox harmonic matrix
+        energy_status = context.get("1h_fuel_status", "UNKNOWN")
+
+        # Real kinematic_grade from 15M JEWEL
+        kinematic_grade = fuel_gauge.get("15M_JEWEL", {}).get("kinematic_grade", "UNKNOWN")
+
+        # Confluence score: 0-3 count of TFs aligned with brief.bias
+        bias = brief.bias
+        tf_1h = fuel_gauge.get("1H", {})
+        tf_4h = fuel_gauge.get("4H", {})
+        tf_15m = fuel_gauge.get("15M_JEWEL", {})
+        score = 0
+        if bias == "LONG":
+            if tf_1h.get("trend") == "BULLISH":
+                score += 1
+            if tf_4h.get("trend") == "BULLISH":
+                score += 1
+            if tf_15m.get("kinematic_grade") == "PRIMED":
+                score += 1
+        elif bias == "SHORT":
+            if tf_1h.get("trend") == "BEARISH":
+                score += 1
+            if tf_4h.get("trend") == "BEARISH":
+                score += 1
+            if tf_15m.get("kinematic_grade") == "PRIMED":
+                score += 1
+
         decision_type = (
             "MAS_APPROVED" if brief.approval_status == "APPROVED" else "MAS_REJECTED"
         )
         journal = DecisionJournal(
             symbol=symbol,
             decision_type=decision_type,
-            confluence_score=0,
+            confluence_score=score,
             confluence_direction=brief.bias,
-            energy_status="UNKNOWN",
+            energy_status=energy_status,
+            kinematic_grade=kinematic_grade,
             bo_price=float(levels.get("breakout_trigger", 0) or 0),
             bd_price=float(levels.get("breakdown_trigger", 0) or 0),
             asset_price=brief.entry_price,
