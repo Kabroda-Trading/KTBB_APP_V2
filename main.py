@@ -508,23 +508,32 @@ async def macro_war_room_page(request: Request, symbol: str = "BTC/USDT", db: Se
     latest_log = db.query(CampaignLog).filter(CampaignLog.symbol == db_sym).order_by(CampaignLog.id.desc()).first()
     
     if latest_log and not latest_log.mas_executive_brief and latest_log.mas_approval_status == 'PENDING':
-        lock_record = db.query(SessionLock).filter(
-            SessionLock.symbol == db_sym,
-            SessionLock.session_id == latest_log.session_id,
-            SessionLock.date_key == latest_log.date_key
+        # Dedup: if MacroNarrativeLog already has a senior_analyst row for this date,
+        # the brief is written or in-flight — do not fire a second run_mas_analysis().
+        existing_narrative = db.query(MacroNarrativeLog).filter(
+            MacroNarrativeLog.symbol == db_sym,
+            MacroNarrativeLog.authored_by == "senior_analyst",
+            MacroNarrativeLog.date_key == latest_log.date_key,
         ).first()
 
-        if lock_record:
-            pkt = json.loads(lock_record.packet_data)
-            asyncio.create_task(
-                asyncio.to_thread(
-                    kabroda_mas_flow.run_mas_analysis,
-                    symbol=db_sym,
-                    session_id=latest_log.session_id,
-                    date_key=latest_log.date_key,
-                    battlebox_payload=pkt
+        if not existing_narrative:
+            lock_record = db.query(SessionLock).filter(
+                SessionLock.symbol == db_sym,
+                SessionLock.session_id == latest_log.session_id,
+                SessionLock.date_key == latest_log.date_key
+            ).first()
+
+            if lock_record:
+                pkt = json.loads(lock_record.packet_data)
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        kabroda_mas_flow.run_mas_analysis,
+                        symbol=db_sym,
+                        session_id=latest_log.session_id,
+                        date_key=latest_log.date_key,
+                        battlebox_payload=pkt
+                    )
                 )
-            )
     
     ctx["mas_log"] = latest_log
     return _template_or_fallback(request, templates, "macro_war_room.html", ctx)

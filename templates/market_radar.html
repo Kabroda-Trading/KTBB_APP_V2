@@ -418,17 +418,14 @@
                     </div>
                 </div>
 
-                <div class="panel" style="grid-area: center; text-align:center; justify-content:center;">
-                    <div class="panel-head" style="border:none; margin-bottom:0;">02. KINEMATIC AUDIT</div>
-                    <div id="vMode" class="mode-display c-GRAY">LOADING</div>
-
-                    <div id="checksContainer" style="display:flex; flex-wrap:wrap; gap:5px; justify-content:center; margin-top:10px;"></div>
-
+                <div class="panel" style="grid-area: center;">
+                    <div class="panel-head" style="border:none; margin-bottom:12px;">02. INTEL SUMMARY</div>
+                    <div id="p02TopLine" style="font-family:'JetBrains Mono'; font-size:15px; font-weight:800; letter-spacing:1px; margin-bottom:16px; color:#64748b;">LOADING...</div>
+                    <div id="p02Badges" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;"></div>
+                    <div id="p02Signal" style="font-size:13px; color:#94a3b8; line-height:1.6; margin-bottom:10px;"></div>
+                    <div id="p02ExitWarning" style="display:none; font-family:'JetBrains Mono'; font-size:12px; color:#f59e0b; font-weight:700; letter-spacing:0.5px; margin-bottom:6px;">⚠ EXIT WARNING ACTIVE</div>
+                    <div id="p02DivWarning" style="display:none; font-family:'JetBrains Mono'; font-size:12px; color:#f59e0b; font-weight:700; letter-spacing:0.5px; margin-bottom:10px;">⚠ DIVERGENCE WARNING</div>
                     <div id="diagnosticLedger" style="margin-top: 15px; border-top: 1px dashed #334155; padding-top: 15px; text-align: left; width: 100%;"></div>
-
-                    <div id="roeContainer" class="roe-box">
-                        <div id="vROE">Analyzing structural behavior...</div>
-                    </div>
                 </div>
 
                 <div class="panel" style="grid-area: right;">
@@ -778,23 +775,66 @@
             btn.innerText = collapsed ? '▶' : '▼';
         }
 
+        async function loadPanel02Intel(symbol) {
+            const dbSym = (symbol || '').includes('/') ? symbol : (symbol || '').replace('USDT', '/USDT');
+            try {
+                const res  = await fetch(`/api/narrative/latest?symbol=${encodeURIComponent(dbSym)}`);
+                const data = await res.json();
+                if (!data || !data.ok || !data.jewel) {
+                    document.getElementById('p02TopLine').textContent = 'NO JEWEL DATA';
+                    document.getElementById('p02TopLine').style.color = '#64748b';
+                    return;
+                }
+                const j = data.jewel;
+
+                // Top line conviction state
+                const topEl = document.getElementById('p02TopLine');
+                if (j.jewel_gate_open && j.jewel_conviction === 'STRONG') {
+                    topEl.textContent = 'HIGH CONVICTION SETUP';
+                    topEl.style.color = '#22c55e';
+                } else if (j.jewel_gate_open && j.jewel_conviction === 'MODERATE') {
+                    topEl.textContent = 'MODERATE SETUP';
+                    topEl.style.color = '#f59e0b';
+                } else {
+                    topEl.textContent = 'GATE CLOSED — STAND DOWN';
+                    topEl.style.color = '#64748b';
+                }
+
+                // Status badges
+                const gateClass = j.jewel_gate_open ? 'jewel-gate-open tac-gate-sm' : 'jewel-gate-closed tac-gate-sm';
+                const gateText  = j.jewel_gate_open ? 'GATE OPEN' : 'GATE CLOSED';
+                const dirVal    = (j.dominant_direction || 'NEUTRAL').toUpperCase();
+                const dirClass  = dirVal === 'BULLISH' ? 'jewel-chip chip-dir-bull'
+                                : dirVal === 'BEARISH' ? 'jewel-chip chip-dir-bear'
+                                : 'jewel-chip chip-dir-neut';
+                const convVal   = (j.jewel_conviction || 'LOW').toUpperCase();
+                const convClass = convVal === 'STRONG'   ? 'jewel-chip chip-conv-str'
+                                : convVal === 'MODERATE' ? 'jewel-chip chip-conv-mod'
+                                : 'jewel-chip chip-conv-low';
+
+                document.getElementById('p02Badges').innerHTML =
+                    `<span class="${gateClass}">${gateText}</span>` +
+                    `<span class="${dirClass}">${dirVal}</span>` +
+                    `<span class="${convClass}">${convVal}</span>`;
+
+                // Signal summary sentence
+                document.getElementById('p02Signal').textContent = j.jewel_signal_summary || '';
+
+                // Conditional warnings
+                document.getElementById('p02ExitWarning').style.display = j.jewel_exit_warning       ? 'block' : 'none';
+                document.getElementById('p02DivWarning').style.display  = j.jewel_divergence_warning ? 'block' : 'none';
+
+            } catch(e) {
+                document.getElementById('p02TopLine').textContent = 'INTEL UNAVAILABLE';
+                document.getElementById('p02TopLine').style.color = '#64748b';
+            }
+        }
+
         function renderModal(d) {
-            // PANEL 00 — Analyst Brief (live Ghost Lead call)
+            // PANEL 00 — Analyst Brief
             loadAnalystBrief(d.symbol);
-
-            document.getElementById('vROE').innerText = d.briefing;
-            document.getElementById('vMode').innerText = d.grade;
-
-            let modeTheme = d.color_code;
-            document.getElementById('vMode').className = `mode-display c-${modeTheme}`;
-            document.getElementById('roeContainer').style.borderLeftColor = `var(--${modeTheme.toLowerCase()})`;
-
-            const chkBox = document.getElementById('checksContainer');
-            chkBox.innerHTML = "";
-            d.checks.forEach(c => {
-                let cssClass = c.includes('HALT') ? 'check-item fail' : 'check-item';
-                chkBox.innerHTML += `<div class="${cssClass}">${c}</div>`;
-            });
+            // PANEL 02 — JEWEL Intel Summary
+            loadPanel02Intel(d.symbol);
 
             if (d.diagnostic_ledger && Object.keys(d.diagnostic_ledger).length > 0) {
                 let diagHtml = `<div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono'; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">SSOT PIPELINE ANALYSIS:</div>`;
@@ -852,13 +892,8 @@
                     const psEl = document.getElementById('valPosSize');
                     if (psEl) psEl.innerText = totalContracts.toFixed(4);
 
-                    let scalePct = 0.30;
-                    let runPct = 0.70;
-
-                    if (activeData.grade === "GRADE B") {
-                        scalePct = 0.70;
-                        runPct = 0.30;
-                    }
+                    const scalePct = 0.40;  // sell 40% at T1 — matches Senior Analyst brief
+                    const runPct   = 0.60;  // runner 60% to T2/T3
 
                     document.getElementById('pT1Vol').innerText = (totalContracts * scalePct).toFixed(4);
                     document.getElementById('pRunVol').innerText = (totalContracts * runPct).toFixed(4);
