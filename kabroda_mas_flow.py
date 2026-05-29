@@ -185,6 +185,12 @@ OUTPUT FORMAT (MANDATORY)
 Return ONLY a valid JSON object. No markdown fences. No preamble. \
 No explanation before or after. Every field is required.
 
+CRITICAL: The `{` character must be the absolute first character of your \
+response. Do not write ```json, do not write any sentence before `{`. \
+Every line break inside the formatted_newsletter_md string value must be \
+written as \\n (backslash + n) — never embed a literal newline inside a \
+JSON string value or the parser will crash.
+
 Include one extra field "narrative_text" containing ONLY the plain text \
 content of THE BIGGER PICTURE section — no ## header, just the 1–3 sentence \
 paragraph. This is used for cross-day memory.
@@ -546,8 +552,10 @@ def _parse_brief(text: str, model_class):
 
     # Strip markdown code fences if present
     if "```" in cleaned:
-        cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned, flags=re.MULTILINE)
-        cleaned = re.sub(r"\n?```\s*$", "", cleaned, flags=re.MULTILINE)
+        # No re.MULTILINE — only strip fences at the absolute start/end of the
+        # string, never from lines inside JSON string values (e.g. newsletter_md).
+        cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
+        cleaned = re.sub(r"\n?```\s*$", "", cleaned)
         cleaned = cleaned.strip()
 
     # Locate the outermost JSON object if there is surrounding text

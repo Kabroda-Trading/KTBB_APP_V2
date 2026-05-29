@@ -510,15 +510,22 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
 
                     _LOCKED_PACKETS[session_key] = pkt
 
-                    new_lock = SessionLock(
-                        symbol=norm_sym,
-                        session_id=session['id'],
-                        date_key=date_key,
-                        lock_time=int(pkt["lock_time"]),
-                        packet_data=json.dumps(pkt)
-                    )
-                    db.add(new_lock)
-                    db.commit()
+                    # Persist lock to DB in its own try/except so a write failure
+                    # never silently blocks gravity logging or the Senior Analyst fire.
+                    try:
+                        new_lock = SessionLock(
+                            symbol=norm_sym,
+                            session_id=session['id'],
+                            date_key=date_key,
+                            lock_time=int(pkt["lock_time"]),
+                            packet_data=json.dumps(pkt, default=str)
+                        )
+                        db.add(new_lock)
+                        db.commit()
+                        print(f"[BATTLEBOX] Session lock persisted to DB: {session_key}")
+                    except Exception as lock_err:
+                        print(f"[BATTLEBOX] Lock DB write failed (in-memory only): {lock_err}")
+                        db.rollback()
 
                     gravity_engine.log_kabroda_bedrock(norm_sym, pkt["levels"], pkt["lock_time"])
 

@@ -286,30 +286,59 @@ async def run_weekly_scheduler() -> None:
             date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             current_price = await _fetch_btc_price()
 
-            # Elliott Wave Specialist fires first
-            print(f"[SCHEDULER] Elliott Wave Specialist firing for {date_key} (Sunday 23:00 UTC)...")
-            try:
-                result = await asyncio.to_thread(
-                    run_elliott_wave_analysis,
-                    symbol="BTC/USDT",
-                    current_price=current_price,
-                    date_key=date_key,
-                )
-                print(f"[SCHEDULER] Elliott Wave: {result.get('status')}")
-            except Exception as e:
-                print(f"[SCHEDULER] Elliott Wave failed: {e}")
+            since_week = datetime.utcnow() - timedelta(days=7)
 
-            # Performance Auditor runs after
-            print(f"[SCHEDULER] Performance Auditor firing for {date_key} (Sunday 23:00 UTC)...")
+            # Elliott Wave Specialist — dedup: skip if already ran this week
+            _ew_db = SessionLocal()
             try:
-                result = await asyncio.to_thread(
-                    run_performance_audit,
-                    symbol="BTC/USDT",
-                    date_key=date_key,
-                )
-                print(f"[SCHEDULER] Performance Auditor: {result.get('status')}")
-            except Exception as e:
-                print(f"[SCHEDULER] Performance Auditor failed: {e}")
+                _ew_ran = _ew_db.query(MacroNarrativeLog).filter(
+                    MacroNarrativeLog.symbol == "BTC/USDT",
+                    MacroNarrativeLog.authored_by == "elliott_wave_specialist",
+                    MacroNarrativeLog.created_at >= since_week,
+                ).first()
+            finally:
+                _ew_db.close()
+
+            if _ew_ran:
+                print(f"[SCHEDULER] Elliott Wave Specialist already ran this week ({_ew_ran.date_key}) — skipping")
+            else:
+                print(f"[SCHEDULER] Elliott Wave Specialist firing for {date_key} (Sunday 23:00 UTC)...")
+                try:
+                    result = await asyncio.to_thread(
+                        run_elliott_wave_analysis,
+                        symbol="BTC/USDT",
+                        current_price=current_price,
+                        date_key=date_key,
+                    )
+                    print(f"[SCHEDULER] Elliott Wave: {result.get('status')}")
+                except Exception as e:
+                    print(f"[SCHEDULER] Elliott Wave failed: {e}")
+
+            # Performance Auditor — dedup: skip if performance_note already written this week
+            _pa_db = SessionLocal()
+            try:
+                _pa_ran = _pa_db.query(MacroNarrativeLog).filter(
+                    MacroNarrativeLog.symbol == "BTC/USDT",
+                    MacroNarrativeLog.authored_by == "senior_analyst",
+                    MacroNarrativeLog.performance_note.isnot(None),
+                    MacroNarrativeLog.created_at >= since_week,
+                ).first()
+            finally:
+                _pa_db.close()
+
+            if _pa_ran:
+                print(f"[SCHEDULER] Performance Auditor: performance_note already written this week — skipping")
+            else:
+                print(f"[SCHEDULER] Performance Auditor firing for {date_key} (Sunday 23:00 UTC)...")
+                try:
+                    result = await asyncio.to_thread(
+                        run_performance_audit,
+                        symbol="BTC/USDT",
+                        date_key=date_key,
+                    )
+                    print(f"[SCHEDULER] Performance Auditor: {result.get('status')}")
+                except Exception as e:
+                    print(f"[SCHEDULER] Performance Auditor failed: {e}")
 
             # Sleep 1h to clear the Sunday 23:00 UTC window before recalculating next fire
             await asyncio.sleep(3600)
