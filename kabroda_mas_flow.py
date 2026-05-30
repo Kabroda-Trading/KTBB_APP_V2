@@ -134,6 +134,20 @@ Breakdown Trigger: $[exact value from context]
 ★ THE [LONG or SHORT] TRADE
 Entry: $[from pre-computed targets]
 Stop: $[from pre-computed targets — the opposing trigger]
+ALLOCATION RULE — read the fuel state before setting allocation:
+
+IF any of these conditions are true:
+- 4H momentum is NEGATIVE
+- 1H fuel_status is OVEREXTENDED or CHOP_RISK
+- jewel_exit_warning is active
+- 15M kinematic_grade is OVEREXTENDED
+- 1H or 4H RSI zone is OVERBOUGHT_EXTREME
+
+THEN write:
+Target 1: $[from pre-computed targets] — exit full position here
+(No T2 or T3. Fuel is exhausted. One target only.)
+
+IF none of those conditions are true (fuel is clean across all timeframes):
 Target 1: $[from pre-computed targets] — take 40% here
 Target 2: $[from pre-computed targets] — take 40% here
 Target 3: $[from pre-computed targets] — trail 20% to this
@@ -175,6 +189,7 @@ Before generating your final output, verify:
 4. STAND DOWN IF conditions are specific price events, not generic statements
 5. No banned words appear anywhere in the output
 6. entry_price, stop_loss, t1, t2, t3 match the pre-computed values exactly
+7. Allocation matches fuel state — if exit warning active, only T1 should appear
 
 If any check fails, rewrite that section before outputting.
 
