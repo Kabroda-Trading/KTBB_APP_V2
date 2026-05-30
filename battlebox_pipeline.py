@@ -219,7 +219,7 @@ def _build_jewel_reading(candles: List[Dict]) -> Dict:
 
 def _build_synthetic_jewel(raw_15m: List[Dict]) -> Dict:
     if not raw_15m or len(raw_15m) < 200:
-        return {"rsi": 50.0, "kinematic_grade": "TANGLED"}
+        return {"rsi": 50.0, "kinematic_grade": "TANGLED", "exit_warning": False}
         
     closes = [float(c["close"]) for c in raw_15m]
     current_price = closes[-1]
@@ -242,12 +242,18 @@ def _build_synthetic_jewel(raw_15m: List[Dict]) -> Dict:
         kinematic_grade = "TANGLED"
     else:
         kinematic_grade = "PRIMED"
-        
+
+    exit_warning = (
+        (deviation_from_mean > 1.5 and kinematic_grade == "OVEREXTENDED") or
+        (ribbon_spread < 0.10 and kinematic_grade == "TANGLED")
+    )
+
     return {
         "rsi": round(rsi, 2),
         "kinematic_grade": kinematic_grade,
         "deviation_from_mean_pct": round(deviation_from_mean, 2),
         "ribbon_spread_pct": round(ribbon_spread, 2),
+        "exit_warning": exit_warning,
         "ema9": round(ema9, 2),
         "ema21": round(ema21, 2),
         "ema35": round(ema35, 2),

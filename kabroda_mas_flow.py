@@ -687,18 +687,107 @@ def _build_senior_analyst_context(
         f"15M JEWEL: {tf_15m.get('kinematic_grade','?')} | "
         f"RSI: {tf_15m.get('rsi','?')} | "
         f"Ribbon: {tf_15m.get('ribbon_spread_pct','?')}% | "
-        f"Deviation: {tf_15m.get('deviation_from_mean_pct','?')}%",
+        f"Deviation: {tf_15m.get('deviation_from_mean_pct','?')}% | "
+        f"Exit Warning: {'YES' if tf_15m.get('exit_warning', False) else 'NO'}",
         f"Harmonic State: {micro_state} | Kinematic Fuel: {fuel_1h} [Market Radar: {radar_energy}]",
     ]
 
-    if kde_peaks:
-        lines.append("")
-        lines.append("=== GRAVITY / KDE PEAKS (nearest walls) ===")
-        for p in kde_peaks[:8]:
-            lines.append(
-                f"  ${p.get('price',0):,.2f} | Heat: {p.get('heat_score',0):.1f} | "
-                f"Intensity: {p.get('intensity','?')}"
-            )
+    # Pre-process gravity walls: orient and label peaks relative to trade targets.
+    # Both LONG and SHORT sections are always rendered — the Senior Analyst applies
+    # whichever matches the direction it chooses after evaluating fuel state.
+    _macro_prices = [m.get("price", 0) for m in macro_structure if m.get("price", 0) > 0]
+
+    def _macro_confluence(peak_price: float) -> bool:
+        return any(abs(peak_price - mp) <= 200 for mp in _macro_prices)
+
+    def _wall_zone_long(peak_price: float, t1: float, t2: float, t3: float) -> str:
+        if peak_price <= t1:
+            return "Between entry and T1"
+        elif peak_price <= t2:
+            return "Between T1 and T2"
+        elif peak_price <= t3:
+            return "Between T2 and T3"
+        return "Beyond T3"
+
+    def _wall_zone_short(peak_price: float, t1: float, t2: float, t3: float) -> str:
+        if peak_price >= t1:
+            return "Between entry and T1"
+        elif peak_price >= t2:
+            return "Between T1 and T2"
+        elif peak_price >= t3:
+            return "Between T2 and T3"
+        return "Beyond T3"
+
+    def _fmt_wall(p: dict, zone: str) -> str:
+        price = p.get("price", 0)
+        heat = p.get("heat_score", 0)
+        intensity = p.get("intensity", "?")
+        confluence = " | MACRO CONFLUENCE" if _macro_confluence(price) else ""
+        return f"  ${price:,.2f} | Heat: {heat:.1f} | {intensity} | {zone}{confluence}"
+
+    _lt = targets.get("long", {}) if targets else {}
+    _st = targets.get("short", {}) if targets else {}
+    _lt_t1, _lt_t2, _lt_t3 = _lt.get("t1", 0), _lt.get("t2", 0), _lt.get("t3", 0)
+    _st_t1, _st_t2, _st_t3 = _st.get("t1", 0), _st.get("t2", 0), _st.get("t3", 0)
+
+    # UPSIDE — peaks above breakout trigger (relevant for LONG setups)
+    upside_peaks = sorted(
+        [p for p in kde_peaks if p.get("price", 0) > bo],
+        key=lambda x: x.get("price", 0)
+    )
+    lines.append("")
+    lines.append("=== GRAVITY WALLS — UPSIDE (LONG) ===")
+    if upside_peaks and _lt_t3:
+        trade_walls = [p for p in upside_peaks if p.get("price", 0) <= _lt_t3]
+        structural_walls = [p for p in upside_peaks if p.get("price", 0) > _lt_t3]
+        if trade_walls:
+            lines.append("(Between entry and T3 — obstacles in the measured move)")
+            for p in trade_walls:
+                lines.append(_fmt_wall(p, _wall_zone_long(p.get("price", 0), _lt_t1, _lt_t2, _lt_t3)))
+        else:
+            lines.append("  Clear airspace to T3 — no walls in the measured move")
+        if structural_walls:
+            lines.append("(Beyond T3 — structural reference)")
+            for p in structural_walls[:3]:
+                lines.append(_fmt_wall(p, "Beyond T3"))
+    elif upside_peaks:
+        lines.append("  (Targets unavailable — raw upside walls)")
+        for p in upside_peaks[:5]:
+            price = p.get("price", 0)
+            confluence = " | MACRO CONFLUENCE" if _macro_confluence(price) else ""
+            lines.append(f"  ${price:,.2f} | Heat: {p.get('heat_score',0):.1f} | {p.get('intensity','?')}{confluence}")
+    else:
+        lines.append("  No KDE peaks detected above breakout trigger")
+
+    # DOWNSIDE — peaks below breakdown trigger (relevant for SHORT setups)
+    downside_peaks = sorted(
+        [p for p in kde_peaks if p.get("price", 0) < bd],
+        key=lambda x: x.get("price", 0),
+        reverse=True
+    )
+    lines.append("")
+    lines.append("=== GRAVITY WALLS — DOWNSIDE (SHORT) ===")
+    if downside_peaks and _st_t3:
+        trade_walls = [p for p in downside_peaks if p.get("price", 0) >= _st_t3]
+        structural_walls = [p for p in downside_peaks if p.get("price", 0) < _st_t3]
+        if trade_walls:
+            lines.append("(Between entry and T3 — obstacles in the measured move)")
+            for p in trade_walls:
+                lines.append(_fmt_wall(p, _wall_zone_short(p.get("price", 0), _st_t1, _st_t2, _st_t3)))
+        else:
+            lines.append("  Clear airspace to T3 — no walls in the measured move")
+        if structural_walls:
+            lines.append("(Beyond T3 — structural reference)")
+            for p in structural_walls[:3]:
+                lines.append(_fmt_wall(p, "Beyond T3"))
+    elif downside_peaks:
+        lines.append("  (Targets unavailable — raw downside walls)")
+        for p in downside_peaks[:5]:
+            price = p.get("price", 0)
+            confluence = " | MACRO CONFLUENCE" if _macro_confluence(price) else ""
+            lines.append(f"  ${price:,.2f} | Heat: {p.get('heat_score',0):.1f} | {p.get('intensity','?')}{confluence}")
+    else:
+        lines.append("  No KDE peaks detected below breakdown trigger")
 
     if macro_structure:
         lines.append("")
