@@ -110,6 +110,13 @@ def init_db():
     except Exception:
         pass
 
+    # --- TRADE STRUCTURE ANALYST audit trail ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN structure_reasoning TEXT"))
+    except Exception:
+        pass
+
     # --- FIX 2 — kinematic_grade on decision_journal ---
     try:
         with engine.begin() as conn:
@@ -231,6 +238,7 @@ class CampaignLog(Base):
     mas_approval_status = Column(String, default="PENDING", nullable=False)
     formatted_newsletter = Column(String, nullable=True)
     target_hit = Column(String, nullable=True)   # T1 | T2 | T3 | STOP — written by outcome tracker
+    structure_reasoning = Column(String, nullable=True)  # JSON: Trade Structure Analyst audit trail
 
 # ---------------------------------------------------------
 # MTF CONFLUENCE READINGS (MORNING BRIEF HISTORY)

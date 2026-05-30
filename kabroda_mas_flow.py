@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, Tuple
 from pydantic import BaseModel, Field
 
 import agent_core
+import trade_structure_analyst
 from database import (
     SessionLocal,
     CampaignLog,
@@ -166,9 +167,11 @@ condition, stop, targets. One paragraph.
 MATHEMATICAL RULES (CRITICAL)
 ═══════════════════════════════════════════════════════
 
-T1, T2, and T3 are pre-computed in Python and provided in your context. \
-Copy them exactly. Do not recalculate, do not round differently, do not \
-adjust. The stop loss is always the opposing trigger — do not override it.
+T1, T2, and T3 are pre-computed by the Trade Structure Analyst and injected \
+into your context. Stops and targets may be structurally adjusted to account \
+for ATR-based placement and gravity wall snapping — see the \
+STRUCTURAL ADJUSTMENTS section for the full reasoning. Copy all values \
+exactly. Do not recalculate, do not round differently, do not adjust.
 
 ═══════════════════════════════════════════════════════
 PERFORMANCE MEMORY RULE
@@ -604,6 +607,7 @@ def _build_senior_analyst_context(
     cro_memory: str,
     narrative_ctx: str,
     jewel_ctx: str,
+    structure_notes: str = "",
 ) -> str:
     bo = levels.get("breakout_trigger", 0)
     bd = levels.get("breakdown_trigger", 0)
@@ -673,6 +677,13 @@ def _build_senior_analyst_context(
             "",
             "=== TARGETS: UNAVAILABLE (triggers not locked) ===",
             "Approval status must be WAITING_FOR_15M or REJECTED.",
+        ]
+
+    if structure_notes:
+        lines += [
+            "",
+            "=== STRUCTURAL ADJUSTMENTS (TRADE STRUCTURE ANALYST) ===",
+            structure_notes,
         ]
 
     lines += [
@@ -877,7 +888,13 @@ def run_mas_analysis(
     bd = float(levels.get("breakdown_trigger") or 0)
 
     # 1. Python math — LLM never computes targets
-    targets = _compute_targets(bo, bd)
+    raw_targets = _compute_targets(bo, bd)
+
+    # 1b. Trade Structure Analyst — structural stops + gravity-snapped targets
+    _tsa_result = trade_structure_analyst.apply_trade_structure(levels, context, raw_targets)
+    targets = _tsa_result
+    structure_notes = _tsa_result.get("structure_notes", "")
+    structure_reasoning = _tsa_result.get("reasoning", {})
 
     # 2. Gather all context
     cro_memory = _fetch_cro_memory(symbol)
@@ -895,6 +912,7 @@ def run_mas_analysis(
         cro_memory=cro_memory,
         narrative_ctx=narrative_ctx,
         jewel_ctx=jewel_ctx,
+        structure_notes=structure_notes,
     )
 
     # 4. Call Senior Analyst through agent_core (budget gate runs automatically)
@@ -942,7 +960,7 @@ def run_mas_analysis(
             return {"status": "ERROR", "message": err}
 
     # 6. Write to all three database locations
-    _inject_brief_to_database(symbol, session_id, date_key, brief)
+    _inject_brief_to_database(symbol, session_id, date_key, brief, structure_reasoning)
     _inject_decision_journal(symbol, date_key, brief, battlebox_payload)
     _write_narrative_log(symbol, date_key, brief, narrative_text_for_log)
 
@@ -1093,7 +1111,8 @@ def _mark_mas_error(
 
 
 def _inject_brief_to_database(
-    symbol: str, session_id: str, date_key: str, brief: ExecutiveBrief
+    symbol: str, session_id: str, date_key: str, brief: ExecutiveBrief,
+    structure_reasoning: Optional[dict] = None,
 ) -> None:
     db = SessionLocal()
     try:
@@ -1135,6 +1154,8 @@ def _inject_brief_to_database(
         log.t3 = brief.t3
         log.status = brief.approval_status
         log.formatted_newsletter = brief.formatted_newsletter_md
+        if structure_reasoning:
+            log.structure_reasoning = json.dumps(structure_reasoning, default=str)
 
         db.commit()
         print(f"|| MAS OVERLAY || Brief injected for {symbol}.")
