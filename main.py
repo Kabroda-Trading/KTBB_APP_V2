@@ -654,12 +654,16 @@ async def api_narrative_latest(symbol: str = "BTC/USDT"):
 # --- GRAVITY API ENDPOINT ---
 @app.get("/api/gravity/scan")
 async def api_gravity_scan(symbol: str = "BTC/USDT"):
+    print(f"[GRAVITY] scan called for {symbol}")
+    print("[GRAVITY] calling fetch_live_daily")
     candles_1d = await battlebox_pipeline.fetch_live_daily(symbol, limit=30)
+    print(f"[GRAVITY] got {len(candles_1d)} daily candles")
+    print("[GRAVITY] calling fetch_live_15m")
     candles_15m = await battlebox_pipeline.fetch_live_15m(symbol, limit=300)
-    
+    print(f"[GRAVITY] got {len(candles_15m)} 15m candles")
     kde_data = gravity_math.calculate_gravity_kde(symbol)
     macro_fibs = gravity_math.calculate_macro_fibs(candles_1d, candles_15m)
-    
+    print(f"[GRAVITY] chart_data length: {len(macro_fibs.get('chart_data', []))}")
     return JSONResponse({
         "ok": True,
         "symbol": symbol,
@@ -1001,7 +1005,9 @@ async def dmr_live(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/api/radar/scan")
 async def run_radar_scan(request: Request):
+    print("[RADAR] scan endpoint called")
     results = await market_radar.scan_sector()
+    print(f"[RADAR] returning {len(results)} results")
     return {"ok": True, "results": results}
 
 @app.post("/api/research/run")
