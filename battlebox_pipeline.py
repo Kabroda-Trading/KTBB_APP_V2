@@ -30,7 +30,7 @@ SESSION_CONFIGS = session_manager.SESSION_CONFIGS
 _LOCKED_PACKETS: Dict[str, Dict[str, Any]] = {}
 _CACHE_LOCK = asyncio.Lock()
 
-_exchange_live = ccxt.mexc({"enableRateLimit": True, "timeout": 10000})
+_exchange_live = ccxt.kraken({"enableRateLimit": True, "timeout": 10000})
 
 def _normalize_symbol(symbol: str) -> str:
     s = (symbol or "").upper().strip()
