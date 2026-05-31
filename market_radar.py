@@ -56,10 +56,14 @@ async def _try_locked_shortcut(symbol: str):
 
 async def _get_bb_data(symbol: str):
     """Shortcut-first battlebox fetch — avoids full MEXC pull when lock exists."""
-    shortcut = await _try_locked_shortcut(symbol)
-    if shortcut:
-        return shortcut
-    return await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id="us_ny_futures")
+    try:
+        shortcut = await _try_locked_shortcut(symbol)
+        if shortcut:
+            return shortcut
+        return await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id="us_ny_futures")
+    except IndexError:
+        print(f"[RADAR] Empty candle list for {symbol} — MEXC may be rate-limiting")
+        return {"status": "ERROR", "message": "empty_candle_list"}
 
 def _make_indicator_string(levels):
     if not levels: return "0,0,0,0,0,0"
@@ -330,7 +334,9 @@ async def scan_sector():
     mtf_results = all_results[len(TARGETS):]
 
     for sym, res, mtf in zip(TARGETS, bb_results, mtf_results):
-        if isinstance(res, Exception) or res.get("status") == "ERROR": continue
+        if isinstance(res, Exception) or res.get("status") == "ERROR":
+            print(f"[RADAR SCAN] {sym} failed: {res}")
+            continue
         if res.get("status") == "CALIBRATING":
             radar_grid.append({"symbol": sym, "status": "CALIBRATING", "sort_weight": 0})
             continue

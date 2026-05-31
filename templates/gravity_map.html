@@ -266,6 +266,9 @@
                     lastDailyBar = Object.assign({}, data.macro_fibs.chart_data[data.macro_fibs.chart_data.length - 1]);
                     currentLivePrice = lastDailyBar.close;
                     if (!isBackgroundUpdate) chart.timeScale().fitContent();
+                } else if (!isBackgroundUpdate) {
+                    // chart_data empty on first load (MEXC rate limit) — retry once after 10s
+                    setTimeout(() => loadGrid(true), 10000);
                 }
                 
                 if (data.kde_data && data.kde_data.curve) {
@@ -435,7 +438,11 @@
             } catch(e) { /* non-fatal */ }
         }
 
-        document.addEventListener('DOMContentLoaded', () => { setTimeout(() => { initChart(); loadGrid(); loadWaveContext(); }, 150); setInterval(tickLivePrice, 60000); });
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => { initChart(); loadGrid(); loadWaveContext(); }, 150);
+            setInterval(tickLivePrice, 60000);           // lightweight price tick
+            setInterval(() => { loadGrid(true); }, 300000); // full data refresh every 5 min
+        });
         window.addEventListener('resize', () => { if (chart) { const container = document.getElementById('chart-container'); chart.applyOptions({ width: container.clientWidth, height: container.clientHeight }); resizeCanvas(); } });
     </script>
 </body>
