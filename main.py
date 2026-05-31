@@ -36,7 +36,7 @@ from jewel_specialist import run_jewel_snapshot
 from elliott_wave_specialist import run_elliott_wave_analysis
 from performance_auditor import run_performance_audit
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -672,6 +672,93 @@ async def api_gravity_scan(symbol: str = "BTC/USDT"):
     })
 
 
+@app.get("/api/radar/snapshot")
+async def api_radar_snapshot(db: Session = Depends(get_db)):
+    """
+    Phase 1 of the two-phase radar render. Pure DB reads — zero exchange I/O.
+    Returns: locked session levels + most recent MtfReading + JEWEL gate + MAS status.
+    Target response time: < 100ms. Called before POST /api/radar/scan so the UI
+    can render structural truth instantly while live MTF data loads in the background.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    symbol_norm = "BTC/USDT"
+    symbol_raw  = "BTCUSDT"
+
+    # 1. Today's session lock — locked levels are the SSOT
+    lock = db.query(SessionLock).filter(
+        SessionLock.symbol == symbol_norm,
+        SessionLock.session_id == "us_ny_futures",
+        SessionLock.date_key == today,
+    ).first()
+
+    levels = {}
+    price = 0.0
+    if lock:
+        try:
+            pkt = json.loads(lock.packet_data)
+            levels = pkt.get("levels", {})
+            price = float(levels.get("anchor_price") or 0)
+        except Exception:
+            pass
+
+    # 2. Latest MtfReading — written on every scan_sector() call and every gravity loop tick
+    mtf_row = db.query(MtfReading).filter(
+        MtfReading.symbol == symbol_norm
+    ).order_by(MtfReading.id.desc()).first()
+
+    mtf_cached: dict = {}
+    if mtf_row:
+        mtf_cached = {
+            "confluence_direction": mtf_row.confluence_direction,
+            "confluence_score":     mtf_row.confluence_score,
+            "energy_status":        mtf_row.energy_status,
+            "bo_price":             mtf_row.bo_price,
+            "bd_price":             mtf_row.bd_price,
+            "asset_price":          mtf_row.asset_price,
+            "scanned_at":           mtf_row.timestamp.isoformat() if mtf_row.timestamp else None,
+        }
+        # Prefer MtfReading asset_price — more recent than the locked anchor
+        if mtf_row.asset_price and mtf_row.asset_price > 0:
+            price = mtf_row.asset_price
+
+    # 3. Latest JEWEL snapshot — for the gate dot
+    jewel_row = db.query(JewelSnapshotLog).filter(
+        JewelSnapshotLog.symbol == symbol_norm
+    ).order_by(JewelSnapshotLog.id.desc()).first()
+
+    jewel_gate_open = jewel_row.jewel_gate_open if jewel_row else None
+
+    # 4. Today's MAS verdict — for the status badge and cockpit pre-population
+    campaign = db.query(CampaignLog).filter(
+        CampaignLog.symbol == symbol_norm,
+        CampaignLog.date_key == today,
+    ).order_by(CampaignLog.id.desc()).first()
+
+    mas_status = campaign.mas_approval_status if campaign else None
+    plan = None
+    if campaign and campaign.entry_price:
+        plan = {
+            "bias":        campaign.bias,
+            "entry_price": campaign.entry_price,
+            "stop_loss":   campaign.stop_loss,
+            "t1":          campaign.t1,
+            "t2":          campaign.t2,
+            "t3":          campaign.t3,
+        }
+
+    return JSONResponse({
+        "ok":              True,
+        "locked":          lock is not None,
+        "symbol":          symbol_raw,
+        "price":           price,
+        "levels":          levels,
+        "mtf_cached":      mtf_cached,
+        "jewel_gate_open": jewel_gate_open,
+        "mas_status":      mas_status,
+        "plan":            plan,
+    })
+
+
 @app.get("/api/live-price")
 async def api_live_price():
     """Lightweight BTC price tick — single candle fetch, no macro math."""
@@ -1220,8 +1307,9 @@ async def api_dashboard_newsletters(request: Request, db: Session = Depends(get_
         return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
     try:
         rows = db.query(NewsletterLog).order_by(NewsletterLog.id.desc()).limit(30).all()
-        data = [{"date_key": r.date_key, "headline": r.headline,
-                 "approval_status": r.approval_status, "publish_status": r.publish_status} for r in rows]
+        data = [{"id": r.id, "date_key": r.date_key, "headline": r.headline,
+                 "approval_status": r.approval_status, "publish_status": r.publish_status,
+                 "newsletter_md": r.newsletter_md or ""} for r in rows]
         return JSONResponse({"ok": True, "newsletters": data})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)

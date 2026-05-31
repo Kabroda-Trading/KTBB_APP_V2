@@ -34,8 +34,8 @@ from database import (
 
 class ExecutiveBrief(BaseModel):
     """Strict output schema for the Senior Analyst."""
-    approval_status: str = Field(description="Must be 'APPROVED', 'REJECTED', or 'WAITING_FOR_15M'")
-    tactical_brief: str = Field(description="The brief from ## TODAY'S ENERGY through ## THE OTHER SIDE — all sections after THE BIGGER PICTURE.")
+    approval_status: str = Field(description="Must be 'APPROVED', 'REJECTED', 'WAITING_FOR_15M', or 'STAND_DOWN'")
+    tactical_brief: str = Field(description="The brief from ## TODAY'S ENERGY through ## THE OTHER SIDE. For STAND_DOWN, replaces ## TODAY'S TRADE SETUP and ## THE LEVELS with ## WHY THE SYSTEM STANDS DOWN, ## THE STRUCTURAL LANDSCAPE, and ## WHAT WOULD CHANGE THIS.")
     bias: str = Field(description="'LONG', 'SHORT', or 'NEUTRAL'")
     entry_price: float = Field(description="The exact trigger entry price.")
     stop_loss: float = Field(description="The exact stop loss (the opposing trigger).")
@@ -96,6 +96,62 @@ consider, possibly, likely (unless in a percentage)
 - Wave timing is UNKNOWN and must never be stated or implied. Structure \
 says WHAT and WHERE. Never WHEN. wave_day_count is a backward-looking \
 observation only ("Day 110 of this wave") — never used to project forward.
+
+═══════════════════════════════════════════════════════
+STAND_DOWN PROTOCOL — EVALUATE BEFORE WRITING ANY BRIEF
+═══════════════════════════════════════════════════════
+
+approval_status = "STAND_DOWN" is the correct output when the market \
+environment makes a valid measured-move trade structurally impossible. \
+This is not a dismissal. It is an institutional veto with a full explanation \
+of the failure mode and what the operator would need to see to re-engage. \
+The operator learns more from a precise STAND_DOWN than from a forced \
+APPROVED with a trivial target.
+
+Output STAND_DOWN when ANY of the following conditions are true:
+
+CONDITION 1 — CHOP ENVIRONMENT
+Harmonic State is CHOP or HOSTILE_CEILING AND Kinematic Fuel is CHOP_RISK. \
+The 4H trend and 1H trend are in direct conflict. There is no coherent \
+directional energy. A measured move requires aligned timeframes — they are not.
+
+CONDITION 2 — MULTI-TIMEFRAME EXHAUSTION
+At least two of these are simultaneously true: \
+(a) 4H Momentum is NEGATIVE, \
+(b) Kinematic Fuel is OVEREXTENDED or CHOP_RISK, \
+(c) 15M Kinematic Grade is OVEREXTENDED. \
+The system has run out of fuel across the primary driving timeframes.
+
+CONDITION 3 — CHOKED TARGET
+The adjusted T1 from the STRUCTURAL ADJUSTMENTS section is less than 0.35% \
+from the entry price. A gravity wall has intercepted the measured move and \
+snapped T1 so close to entry that the setup cannot cover spread and provide \
+meaningful R. This is a scalp dressed as a trade — not a measured move.
+
+WHEN approval_status IS "STAND_DOWN":
+Replace ## TODAY'S TRADE SETUP and ## THE LEVELS with the following three \
+sections. Keep ## THE BIGGER PICTURE, ## TODAY'S ENERGY, ## STAND DOWN IF, \
+and ## THE OTHER SIDE exactly as normal.
+
+## WHY THE SYSTEM STANDS DOWN
+State the specific condition(s) above that triggered the veto. Name the exact \
+data values — for example: "Harmonic State is HOSTILE_CEILING with 4H Momentum \
+NEGATIVE and Kinematic Fuel CHOP_RISK." Two to three declarative sentences. \
+No hedging. No vague language.
+
+## THE STRUCTURAL LANDSCAPE
+Breakout Trigger: $[exact value]
+Breakdown Trigger: $[exact value]
+One sentence on where price is sitting relative to the session box. The \
+operator still needs these levels on a no-trade day.
+
+## WHAT WOULD CHANGE THIS
+This is the most important section in a STAND_DOWN brief. It is the mentor \
+speaking. State the SPECIFIC conditions that would flip this session to \
+APPROVED. Name the exact timeframe states that must change. Example: \
+"This session becomes tradeable when the 1H trend turns BULLISH and the \
+15M Kinematic Grade reads PRIMED — currently the 1H is BEARISH with \
+NEGATIVE momentum and the 15M is OVEREXTENDED." One to three sentences.
 
 ═══════════════════════════════════════════════════════
 THE BRIEF STRUCTURE
@@ -189,11 +245,16 @@ SELF-CHECK BEFORE OUTPUT
 Before generating your final output, verify:
 1. THE BIGGER PICTURE names at least one specific dollar price level
 2. THE BIGGER PICTURE projects at least one forward event (price target or signal)
-3. TODAY'S TRADE SETUP contains exactly one starred primary trade (★ HIGHER PROBABILITY)
+3. IF approval_status is APPROVED or REJECTED: TODAY'S TRADE SETUP contains \
+   exactly one starred primary trade (★ HIGHER PROBABILITY). \
+   IF approval_status is STAND_DOWN: brief contains ## WHY THE SYSTEM STANDS DOWN, \
+   ## THE STRUCTURAL LANDSCAPE, and ## WHAT WOULD CHANGE THIS — NO starred trade.
 4. STAND DOWN IF conditions are specific price events, not generic statements
 5. No banned words appear anywhere in the output
-6. entry_price, stop_loss, t1, t2, t3 match the pre-computed values exactly
-7. Allocation matches fuel state — if exit warning active, only T1 should appear
+6. entry_price, stop_loss, t1, t2, t3 match the pre-computed values exactly \
+   (for STAND_DOWN these are reference levels, not active trade signals — copy them anyway)
+7. Allocation matches fuel state — if exit warning active, only T1 should appear \
+   (for STAND_DOWN: omit allocation entirely — no trade is being issued)
 
 If any check fails, rewrite that section before outputting.
 
@@ -215,7 +276,7 @@ content of THE BIGGER PICTURE section — no ## header, just the 1–3 sentence 
 paragraph. This is used for cross-day memory.
 
 {
-  "approval_status": "APPROVED" or "REJECTED" or "WAITING_FOR_15M",
+  "approval_status": "APPROVED" or "REJECTED" or "WAITING_FOR_15M" or "STAND_DOWN",
   "tactical_brief": "<Everything from ## TODAY'S ENERGY through ## THE OTHER SIDE — all sections after THE BIGGER PICTURE, as plain text>",
   "bias": "LONG" or "SHORT" or "NEUTRAL",
   "entry_price": <float>,

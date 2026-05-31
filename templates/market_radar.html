@@ -135,6 +135,9 @@
             .cockpit { grid-template-columns: 1fr; grid-template-areas: "header" "brief" "left" "center" "right"; }
         }
 
+        @keyframes pulse-opacity { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+        .syncing-badge { animation: pulse-opacity 1.6s ease-in-out infinite; }
+
         /* ── TACTICAL RENDERER — copied from macro_war_room.html ── */
         :root {
             --surface:  #0a0a0a;
@@ -852,97 +855,297 @@
         }
 
         // ================================================================
-        // MAIN SCAN
+        // ROW BUILDER — shared by Phase 1 snapshot and Phase 2 full render
+        // ================================================================
+        function _buildRow(sym, price, dir, score, energy, bo, bd, jewelGateOpen, rowClass, cockpitEnabled, masStatus) {
+            const base        = (sym || '').replace('USDT', '');
+            const dirArrow    = dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '●';
+            const dirColor    = dir === 'BULLISH' ? '#22c55e' : dir === 'BEARISH' ? '#ef4444' : '#eab308';
+            const energyColor = energy === 'BUILDING' ? '#22c55e' : energy === 'BURNING' ? '#eab308' : '#ef4444';
+
+            let jewelDot = '';
+            if (sym === 'BTCUSDT' && jewelGateOpen !== null) {
+                const dotColor = jewelGateOpen ? '#22c55e' : '#475569';
+                const dotLabel = jewelGateOpen ? 'JEWEL ●' : 'JEWEL ○';
+                const dotTitle = jewelGateOpen ? 'JEWEL Gate OPEN — BBWP compressed' : 'JEWEL Gate CLOSED';
+                jewelDot = `<div class="rrc-energy" style="background:${dotColor}18; border-color:${dotColor}; color:${dotColor}; font-size:10px;" title="${dotTitle}">${dotLabel}</div>`;
+            }
+
+            const masColor  = masStatus === 'APPROVED'    ? '#22c55e'
+                            : masStatus === 'STAND_DOWN'   ? '#94a3b8'
+                            : masStatus === 'REJECTED'     ? '#ef4444'
+                            : '#64748b';
+            const masBadge  = masStatus
+                ? `<div class="rrc-badge" style="border-color:${masColor}; color:${masColor}; font-size:10px;">MAS: ${masStatus}</div>`
+                : '';
+            const cockpitClass = cockpitEnabled ? 'rrc-cockpit-active' : 'rrc-cockpit-muted';
+
+            return `
+            <div class="radar-row-c ${rowClass}" data-symbol="${sym}">
+                <div class="rrc-sym">
+                    <div class="rrc-sym-name">${base}</div>
+                    <div class="rrc-sym-price">$${fmt(price)}</div>
+                </div>
+                <div class="rrc-badge" data-mtf-dir style="border-color:${dirColor}; color:${dirColor};">${dirArrow} ${dir} ${score}/5</div>
+                <div class="rrc-energy" data-mtf-energy style="background:${energyColor}18; border-color:${energyColor}; color:${energyColor};">${energy}</div>
+                ${jewelDot}
+                ${masBadge}
+                <div class="rrc-level">BO <b>$${fmt(bo)}</b></div>
+                <div class="rrc-level">BD <b>$${fmt(bd)}</b></div>
+                <div class="rrc-actions">
+                    <button class="rrc-copy" onclick="copyIntel('${sym}')" title="Copy 6 Chart Levels">📋 COPY TRIGGERS</button>
+                    <button class="rrc-cockpit ${cockpitClass}" onclick="openModal('${sym}')" ${cockpitEnabled ? '' : 'disabled'}>OPEN COCKPIT →</button>
+                </div>
+            </div>`;
+        }
+
+        // ================================================================
+        // PHASE 1 — render locked DB levels instantly (no exchange calls)
+        // ================================================================
+        function renderSnapshotGrid(snap) {
+            const grid = document.getElementById('radarTargetGrid');
+            window.radarMemory = {};
+
+            if (!snap.locked) { grid.innerHTML = ''; return; }
+
+            const levels  = snap.levels || {};
+            const bo      = levels.breakout_trigger  || 0;
+            const bd      = levels.breakdown_trigger || 0;
+            const mtf     = snap.mtf_cached || {};
+            const dir     = mtf.confluence_direction || 'NEUTRAL';
+            const score   = mtf.confluence_score     || 0;
+            const energy  = mtf.energy_status        || 'BUILDING';
+            const price   = snap.price || 0;
+
+            // Seed radarMemory so the cockpit can open with CampaignLog data
+            if (snap.plan) {
+                const lvl = snap.levels || {};
+                window.radarMemory[snap.symbol] = {
+                    symbol:             snap.symbol,
+                    price:              price,
+                    levels:             lvl,
+                    indicator_string:   `${bo},${bd},${lvl.daily_resistance||0},${lvl.daily_support||0},${lvl.range30m_high||0},${lvl.range30m_low||0}`,
+                    grade:              snap.mas_status || 'PENDING',
+                    key:                '',
+                    diagnostic_ledger:  {},
+                    plan: {
+                        valid:   true,
+                        bias:    snap.plan.bias,
+                        entry:   snap.plan.entry_price,
+                        stop:    snap.plan.stop_loss,
+                        targets: [snap.plan.t1 || 0, snap.plan.t2 || 0, snap.plan.t3 || 0],
+                    },
+                };
+            }
+
+            // Staleness label for cached MTF direction badge
+            let ageLabel = '';
+            if (mtf.scanned_at) {
+                const ageMin = Math.round((Date.now() - new Date(mtf.scanned_at).getTime()) / 60000);
+                ageLabel = ` <span style="font-size:9px;color:#475569;">(${ageMin}m ago)</span>`;
+            }
+
+            const cockpitEnabled = !!(snap.plan && snap.plan.entry_price);
+            const rowClass       = 'rrc-active';
+
+            // Build the row then inject a SYNCING overlay badge
+            let rowHtml = _buildRow(
+                snap.symbol, price, dir, score, energy, bo, bd,
+                snap.jewel_gate_open, rowClass, cockpitEnabled, snap.mas_status
+            );
+
+            // Inject age hint into the direction badge and SYNCING pill before closing actions div
+            rowHtml = rowHtml.replace(
+                `>${dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '●'} ${dir} ${score}/5</div>`,
+                `>${dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '●'} ${dir} ${score}/5${ageLabel}</div>`
+            );
+            rowHtml = rowHtml.replace(
+                `<div class="rrc-actions">`,
+                `<div class="rrc-badge syncing-badge" style="border-color:#334155;color:#475569;font-size:10px;">SYNCING LIVE…</div><div class="rrc-actions">`
+            );
+
+            grid.innerHTML = rowHtml;
+        }
+
+        // ================================================================
+        // PHASE 2 — overlay live MTF data onto Phase 1 rows in-place
+        // ================================================================
+        function updateMtfOverlay(liveData, jewelGateOpen) {
+            if (!liveData || !liveData.ok) return;
+
+            liveData.results.forEach(t => {
+                window.radarMemory[t.symbol] = t;
+
+                const row = document.querySelector(`.radar-row-c[data-symbol="${t.symbol}"]`);
+                if (!row) return;
+                if (t.status === 'CALIBRATING') return;
+
+                const brief  = t.mtf_brief || {};
+                const dir    = brief.confluence_direction || 'NEUTRAL';
+                const score  = brief.confluence_score     || 0;
+                const energy = brief.energy_status        || 'BUILDING';
+
+                const dirArrow    = dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '●';
+                const dirColor    = dir === 'BULLISH' ? '#22c55e' : dir === 'BEARISH' ? '#ef4444' : '#eab308';
+                const energyColor = energy === 'BUILDING' ? '#22c55e' : energy === 'BURNING' ? '#eab308' : '#ef4444';
+
+                // Update direction badge (data-mtf-dir)
+                const dirBadge = row.querySelector('[data-mtf-dir]');
+                if (dirBadge) {
+                    dirBadge.style.borderColor = dirColor;
+                    dirBadge.style.color       = dirColor;
+                    dirBadge.innerHTML         = `${dirArrow} ${dir} ${score}/5`;
+                }
+
+                // Update energy badge (data-mtf-energy)
+                const energyBadge = row.querySelector('[data-mtf-energy]');
+                if (energyBadge) {
+                    energyBadge.style.background  = `${energyColor}18`;
+                    energyBadge.style.borderColor = energyColor;
+                    energyBadge.style.color       = energyColor;
+                    energyBadge.textContent       = energy;
+                }
+
+                // Remove SYNCING badge
+                const syncBadge = row.querySelector('.syncing-badge');
+                if (syncBadge) syncBadge.remove();
+
+                // Update price
+                const priceEl = row.querySelector('.rrc-sym-price');
+                if (priceEl && t.price) priceEl.textContent = `$${fmt(t.price)}`;
+
+                // Enable cockpit button with full live data
+                const cockpitBtn = row.querySelector('.rrc-cockpit');
+                if (cockpitBtn) {
+                    cockpitBtn.disabled  = false;
+                    cockpitBtn.className = 'rrc-cockpit rrc-cockpit-active';
+                }
+
+                // Update row border color by grade
+                const actionable = (t.grade === 'GRADE A' || t.grade === 'GRADE B');
+                row.className = `radar-row-c ${actionable ? 'rrc-active' : 'rrc-down'}`;
+                row.setAttribute('data-symbol', t.symbol);
+
+                // Update JEWEL dot if present
+                if (t.symbol === 'BTCUSDT' && jewelGateOpen !== null) {
+                    const dotColor = jewelGateOpen ? '#22c55e' : '#475569';
+                    const dotLabel = jewelGateOpen ? 'JEWEL ●' : 'JEWEL ○';
+                    const existingDot = row.querySelector('[title*="JEWEL"]');
+                    if (existingDot) {
+                        existingDot.style.background  = `${dotColor}18`;
+                        existingDot.style.borderColor = dotColor;
+                        existingDot.style.color       = dotColor;
+                        existingDot.textContent       = dotLabel;
+                    }
+                }
+            });
+        }
+
+        // ================================================================
+        // FULL GRID RENDER — used when Phase 1 has no locked data
+        // ================================================================
+        function renderFullGrid(results, jewelGateOpen) {
+            const grid = document.getElementById('radarTargetGrid');
+            let html   = '';
+
+            results.forEach(t => {
+                if (t.status === 'CALIBRATING') {
+                    html += `
+                    <div class="radar-row-c rrc-calib" data-symbol="${t.symbol}">
+                        <div class="rrc-sym">
+                            <div class="rrc-sym-name">${(t.symbol || '').replace('USDT', '')}</div>
+                            <div class="rrc-sym-price" style="color:#0ea5e9;">CALIBRATING</div>
+                        </div>
+                        <div class="rrc-badge" style="border-color:#334155; color:#64748b;">ENGINE CALIBRATING</div>
+                        <div class="rrc-energy" style="border-color:#334155; color:#64748b;">LOCKS AT 30M</div>
+                        <div class="rrc-actions">
+                            <button class="rrc-cockpit rrc-cockpit-muted" disabled>STANDBY</button>
+                        </div>
+                    </div>`;
+                    return;
+                }
+
+                const brief  = t.mtf_brief || {};
+                const dir    = brief.confluence_direction || 'NEUTRAL';
+                const score  = brief.confluence_score     || 0;
+                const energy = brief.energy_status        || 'BUILDING';
+                const lvl    = t.levels || {};
+                const bo     = lvl.breakout_trigger  || 0;
+                const bd     = lvl.breakdown_trigger || 0;
+                const actionable = (t.grade === 'GRADE A' || t.grade === 'GRADE B');
+
+                html += _buildRow(
+                    t.symbol, t.price, dir, score, energy, bo, bd,
+                    t.symbol === 'BTCUSDT' ? jewelGateOpen : null,
+                    actionable ? 'rrc-active' : 'rrc-down',
+                    true, null
+                );
+            });
+
+            grid.innerHTML = html;
+        }
+
+        // ================================================================
+        // MAIN SCAN — two-phase render
+        // Phase 1 (~50ms):  GET /api/radar/snapshot  — DB only, renders instantly
+        // Phase 2 (~3-5s):  POST /api/radar/scan     — live Kraken MTF, updates badges
         // ================================================================
         async function forceScan() {
             const btn    = document.getElementById('scanBtn');
             const grid   = document.getElementById('radarTargetGrid');
             const loader = document.getElementById('loading');
 
-            btn.disabled = true; grid.style.display = 'none'; loader.style.display = 'block';
+            btn.disabled = true;
+            grid.style.display = 'none';
+            loader.style.display = 'block';
 
+            let snapRendered = false;
+
+            // === PHASE 1: Instant DB snapshot ===
             try {
-                const res  = await fetch('/api/radar/scan', { method: 'POST' });
-                const data = await res.json();
-                let html = "";
-                window.radarMemory = {};
+                const snap = await fetch('/api/radar/snapshot').then(r => r.json());
+                if (snap.ok && snap.locked) {
+                    renderSnapshotGrid(snap);
+                    loader.style.display = 'none';
+                    grid.style.display   = 'grid';
+                    btn.disabled         = false;  // unlock — user can read locked levels now
+                    snapRendered         = true;
+                }
+            } catch (e) {
+                console.warn('[RADAR] Snapshot failed:', e);
+            }
 
-                data.results.forEach(t => {
-                    window.radarMemory[t.symbol] = t;
-                });
+            // === PHASE 2: Live MTF scan (runs regardless — updates snapshot or does full render) ===
+            try {
+                const [scanRes, jRes] = await Promise.all([
+                    fetch('/api/radar/scan', { method: 'POST' }),
+                    fetch('/api/narrative/latest?symbol=BTC/USDT'),
+                ]);
+                const scanData     = await scanRes.json();
+                const jData        = await jRes.json();
+                const jewelGateOpen = (jData.ok && jData.jewel) ? jData.jewel.jewel_gate_open : null;
 
-                // Fetch JEWEL gate status for BTC before rendering rows
-                let jewelGateOpen = null;
-                try {
-                    const jRes  = await fetch('/api/narrative/latest?symbol=BTC/USDT');
-                    const jData = await jRes.json();
-                    if (jData.ok && jData.jewel) jewelGateOpen = jData.jewel.jewel_gate_open;
-                } catch(e) { /* non-fatal */ }
-
-                // Compact single-line sector radar rows
-                data.results.forEach(t => {
-                    if(t.status === "CALIBRATING") {
-                        html += `
-                        <div class="radar-row-c rrc-calib">
-                            <div class="rrc-sym">
-                                <div class="rrc-sym-name">${(t.symbol || '').replace('USDT', '')}</div>
-                                <div class="rrc-sym-price" style="color:#0ea5e9;">CALIBRATING</div>
-                            </div>
-                            <div class="rrc-badge" style="border-color:#334155; color:#64748b;">ENGINE CALIBRATING</div>
-                            <div class="rrc-energy" style="border-color:#334155; color:#64748b;">LOCKS AT 30M</div>
-                            <div class="rrc-actions">
-                                <button class="rrc-cockpit rrc-cockpit-muted" disabled>STANDBY</button>
-                            </div>
-                        </div>`;
-                        return;
-                    }
-
-                    const base   = (t.symbol || '').replace('USDT', '');
-                    const brief  = t.mtf_brief || {};
-                    const dir    = brief.confluence_direction || 'NEUTRAL';
-                    const score  = brief.confluence_score     || 0;
-                    const energy = brief.energy_status        || 'BUILDING';
-                    const levels = t.levels || {};
-                    const bo     = levels.breakout_trigger  || 0;
-                    const bd     = levels.breakdown_trigger || 0;
-
-                    const dirArrow    = dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '●';
-                    const dirColor    = dir === 'BULLISH' ? '#22c55e' : dir === 'BEARISH' ? '#ef4444' : '#eab308';
-                    const energyColor = energy === 'BUILDING' ? '#22c55e' : energy === 'BURNING' ? '#eab308' : '#ef4444';
-
-                    const actionable   = (t.grade === 'GRADE A' || t.grade === 'GRADE B');
-                    const rowClass     = actionable ? 'rrc-active' : 'rrc-down';
-                    const cockpitClass = 'rrc-cockpit-active';
-
-                    // JEWEL gate dot — only for BTC
-                    let jewelDot = '';
-                    if (t.symbol === 'BTCUSDT' && jewelGateOpen !== null) {
-                        const dotColor   = jewelGateOpen ? '#22c55e' : '#475569';
-                        const dotTitle   = jewelGateOpen ? 'JEWEL Gate OPEN — BBWP compressed' : 'JEWEL Gate CLOSED';
-                        const dotLabel   = jewelGateOpen ? 'JEWEL ●' : 'JEWEL ○';
-                        jewelDot = `<div class="rrc-energy" style="background:${dotColor}18; border-color:${dotColor}; color:${dotColor}; font-size:10px;" title="${dotTitle}">${dotLabel}</div>`;
-                    }
-
-                    html += `
-                    <div class="radar-row-c ${rowClass}">
-                        <div class="rrc-sym">
-                            <div class="rrc-sym-name">${base}</div>
-                            <div class="rrc-sym-price">$${fmt(t.price)}</div>
-                        </div>
-                        <div class="rrc-badge" style="border-color:${dirColor}; color:${dirColor};">${dirArrow} ${dir} ${score}/5</div>
-                        <div class="rrc-energy" style="background:${energyColor}18; border-color:${energyColor}; color:${energyColor};">${energy}</div>
-                        ${jewelDot}
-                        <div class="rrc-level">BO <b>$${fmt(bo)}</b></div>
-                        <div class="rrc-level">BD <b>$${fmt(bd)}</b></div>
-                        <div class="rrc-actions">
-                            <button class="rrc-copy" onclick="copyIntel('${t.symbol}')" title="Copy 6 Chart Levels">📋 COPY TRIGGERS</button>
-                            <button class="rrc-cockpit ${cockpitClass}" onclick="openModal('${t.symbol}')">OPEN COCKPIT →</button>
-                        </div>
-                    </div>`;
-                });
-                grid.innerHTML = html;
-            } catch(e) { console.log(e); }
-            finally { loader.style.display = 'none'; grid.style.display = 'grid'; btn.disabled = false; }
+                if (snapRendered) {
+                    updateMtfOverlay(scanData, jewelGateOpen);
+                } else {
+                    // No Phase 1 data — first load of the day or pre-market
+                    window.radarMemory = {};
+                    if (scanData.ok) scanData.results.forEach(t => { window.radarMemory[t.symbol] = t; });
+                    renderFullGrid(scanData.results || [], jewelGateOpen);
+                    loader.style.display = 'none';
+                    grid.style.display   = 'grid';
+                }
+            } catch (e) {
+                console.warn('[RADAR] Live scan failed:', e);
+                if (!snapRendered) {
+                    loader.style.display = 'none';
+                    grid.style.display   = 'grid';
+                    grid.innerHTML = `<div style="color:#ef4444;padding:20px;font-family:'JetBrains Mono';font-size:12px;">LIVE SCAN FAILED. Check server logs.</div>`;
+                }
+                // If Phase 1 rendered, user already has locked data — silent failure is acceptable
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         document.addEventListener('DOMContentLoaded', () => {

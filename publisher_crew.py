@@ -113,6 +113,7 @@ APPROVAL STATUS:
   APPROVED          → "Session structure confirmed"
   REJECTED          → "Session structure rejected — setup does not meet confluence criteria"
   WAITING_FOR_15M   → "Session structure pending — awaiting short-term momentum confirmation"
+  STAND_DOWN        → "Session vetoed — structural energy insufficient for a valid trade"
 
 LEVELS AND STRUCTURE:
   Breakout Trigger      → "Upper Structural Boundary"
@@ -219,6 +220,15 @@ IF the brief shows 40/40/20 split:
 [If REJECTED:]
 Write a clear, one-paragraph explanation of what structural criteria were \
 not met. No targets needed.
+
+[If STAND_DOWN:]
+Write two focused paragraphs using the ## WHY THE SYSTEM STANDS DOWN and \
+## WHAT WOULD CHANGE THIS content from the brief as your source material. \
+Paragraph 1: Translate the specific veto condition into institutional language — \
+what the structural map shows and why a trade cannot be issued today. \
+Paragraph 2 — the educational component: what specific conditions would need to \
+change for the next valid setup to emerge. This is the most valuable content \
+in a no-trade newsletter. No target table needed.
 
 ## Performance Ledger
 
