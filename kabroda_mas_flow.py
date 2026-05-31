@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, Tuple
 from pydantic import BaseModel, Field
 
 import agent_core
+import publisher_crew
 import trade_structure_analyst
 from database import (
     SessionLocal,
@@ -963,6 +964,12 @@ def run_mas_analysis(
     _inject_brief_to_database(symbol, session_id, date_key, brief, structure_reasoning)
     _inject_decision_journal(symbol, date_key, brief, battlebox_payload)
     _write_narrative_log(symbol, date_key, brief, narrative_text_for_log)
+
+    # 7. Content Publishing Engine — non-fatal, same thread, isolated try/except
+    try:
+        publisher_crew.run_publisher(symbol, session_id, date_key, brief)
+    except Exception as pub_err:
+        print(f"[PUBLISHER] Non-critical failure — MAS unaffected: {pub_err}")
 
     return {"status": "SUCCESS", "brief": brief.dict()}
 

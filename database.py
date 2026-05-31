@@ -407,3 +407,30 @@ class JewelSnapshotLog(Base):
     jewel_signal_summary  = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
+# NEWSLETTER LOG (PHASE 6 — CONTENT PUBLISHING ENGINE)
+# Stores the Publisher agent's daily newsletter output.
+# publish_status lifecycle: DRAFT → PUBLISHED | FAILED
+# ghost_post_id populated after Ghost API publish step.
+# New table — created by Base.metadata.create_all(), no ALTER needed.
+# ---------------------------------------------------------
+class NewsletterLog(Base):
+    __tablename__ = "newsletter_log"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    symbol        = Column(String, index=True, nullable=False)
+    date_key      = Column(String, index=True, nullable=False)
+    session_id    = Column(String, nullable=False)
+
+    approval_status = Column(String, nullable=True)    # APPROVED / REJECTED / WAITING_FOR_15M
+    headline        = Column(String, nullable=True)
+    newsletter_md   = Column(String, nullable=True)    # Full Markdown article
+    newsletter_html = Column(String, nullable=True)    # Reserved for Ghost publish step
+
+    publish_status = Column(String, default="DRAFT", nullable=False)  # DRAFT / PUBLISHED / FAILED
+    published_at   = Column(DateTime, nullable=True)
+    ghost_post_id  = Column(String, nullable=True)     # Populated after Ghost API publish
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

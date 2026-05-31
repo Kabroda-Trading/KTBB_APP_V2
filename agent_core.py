@@ -97,7 +97,7 @@ def _check_budget_before_run(agent_name: str) -> bool:
     Fails open (returns True) if the DB is unavailable — agents are
     more important than the accounting when infra is down.
     """
-    daily_cap = float(os.getenv("AGENT_DAILY_BUDGET_USD", "5.00"))
+    daily_cap = float(os.getenv("AGENT_DAILY_BUDGET_USD", "10.00"))
     db = SessionLocal()
     try:
         since = datetime.now(timezone.utc) - timedelta(hours=24)
@@ -238,7 +238,7 @@ def get_cost_summary() -> dict:
     Returns today's (24h) and 7-day cost summary by agent.
     Used by GET /api/agents/cost.
     """
-    daily_cap = float(os.getenv("AGENT_DAILY_BUDGET_USD", "5.00"))
+    daily_cap = float(os.getenv("AGENT_DAILY_BUDGET_USD", "10.00"))
     now = datetime.now(timezone.utc)
     today_cutoff = now - timedelta(hours=24)
     week_cutoff = now - timedelta(days=7)
