@@ -1032,15 +1032,13 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
         return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
     try:
         from sqlalchemy import func
-        total      = db.query(func.count(CampaignLog.id)).scalar() or 0
-        approved   = db.query(func.count(CampaignLog.id)).filter(CampaignLog.mas_approval_status == "APPROVED").scalar() or 0
+        total      = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT").scalar() or 0
+        approved   = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.mas_approval_status == "APPROVED").scalar() or 0
         approved_rate = round(approved / total * 100, 1) if total > 0 else 0.0
-        wins   = db.query(func.count(CampaignLog.id)).filter(CampaignLog.status == "CLOSED_WIN").scalar() or 0
-        losses = db.query(func.count(CampaignLog.id)).filter(CampaignLog.status == "CLOSED_LOSS").scalar() or 0
+        wins   = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.status == "CLOSED_WIN").scalar() or 0
+        losses = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.status == "CLOSED_LOSS").scalar() or 0
         win_rate = round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0.0
-        net_r_raw = db.query(func.sum(CampaignLog.realized_pnl)).filter(
-            CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS"])).scalar()
-        net_r = round(net_r_raw or 0.0, 2)
+        net_r = round(float(wins - losses), 2)
         since_7d = datetime.now(timezone.utc) - timedelta(days=7)
         spend_raw = db.query(func.sum(AgentRunLog.estimated_cost_usd)).filter(
             AgentRunLog.created_at >= since_7d).scalar()
@@ -1083,11 +1081,13 @@ async def api_dashboard_accuracy(request: Request, db: Session = Depends(get_db)
             return result
         grade_rows = db.query(DecisionJournal.kinematic_grade,
             DecisionJournal.outcome_direction_correct, func.count(DecisionJournal.id)).filter(
+            DecisionJournal.symbol == "BTC/USDT",
             DecisionJournal.outcome_direction_correct.isnot(None),
             DecisionJournal.kinematic_grade.isnot(None)
         ).group_by(DecisionJournal.kinematic_grade, DecisionJournal.outcome_direction_correct).all()
         conf_rows = db.query(DecisionJournal.confluence_score,
             DecisionJournal.outcome_direction_correct, func.count(DecisionJournal.id)).filter(
+            DecisionJournal.symbol == "BTC/USDT",
             DecisionJournal.outcome_direction_correct.isnot(None),
             DecisionJournal.confluence_score.isnot(None)
         ).group_by(DecisionJournal.confluence_score, DecisionJournal.outcome_direction_correct).all()
@@ -1129,16 +1129,19 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
     try:
         from sqlalchemy import func
         approval_rows = db.query(CampaignLog.mas_approval_status,
-            func.count(CampaignLog.id)).group_by(CampaignLog.mas_approval_status).all()
+            func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT").group_by(CampaignLog.mas_approval_status).all()
         approval_counts = {row[0]: row[1] for row in approval_rows}
-        pnl_rows = db.query(CampaignLog.closed_at, CampaignLog.realized_pnl,
-            CampaignLog.date_key).filter(CampaignLog.closed_at.isnot(None)).order_by(CampaignLog.closed_at).all()
+        pnl_rows = db.query(CampaignLog.closed_at, CampaignLog.date_key,
+            CampaignLog.status).filter(
+            CampaignLog.symbol == "BTC/USDT",
+            CampaignLog.closed_at.isnot(None)
+        ).order_by(CampaignLog.closed_at).all()
         cumulative = 0.0
         pnl_series = []
         for row in pnl_rows:
-            cumulative += (row.realized_pnl or 0)
+            cumulative += 1.0 if row.status == "CLOSED_WIN" else -1.0
             pnl_series.append({"date": row.date_key, "cumulative": round(cumulative, 2)})
-        trades = db.query(CampaignLog).order_by(CampaignLog.id.desc()).limit(50).all()
+        trades = db.query(CampaignLog).filter(CampaignLog.symbol == "BTC/USDT").order_by(CampaignLog.id.desc()).limit(50).all()
         trades_data = [{"date_key": t.date_key, "bias": t.bias, "mas_approval_status": t.mas_approval_status,
             "status": t.status, "entry_price": t.entry_price, "stop_loss": t.stop_loss,
             "t1": t.t1, "realized_pnl": t.realized_pnl} for t in trades]
@@ -1161,7 +1164,9 @@ async def api_dashboard_jewel(request: Request, db: Session = Depends(get_db)):
             if not snap.timestamp:
                 continue
             date_key = snap.timestamp.strftime("%Y-%m-%d")
-            trade = db.query(CampaignLog).filter(CampaignLog.date_key == date_key,
+            trade = db.query(CampaignLog).filter(
+                CampaignLog.symbol == "BTC/USDT",
+                CampaignLog.date_key == date_key,
                 CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS"])).first()
             if not trade:
                 continue

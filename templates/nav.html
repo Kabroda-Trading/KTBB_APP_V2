@@ -1,14 +1,12 @@
 <nav class="navbar">
     <div class="nav-container">
         <a href="/" class="logo">
-            <div style="width: 12px; height: 12px; background: #0dcaf0; border-radius: 2px;"></div>
+            <div style="width: 10px; height: 10px; background: #c8813a; border-radius: 2px;"></div>
             KABRODA
         </a>
 
         <ul class="nav-links">
             {% if is_logged_in %}
-                <li><a href="/suite" style="color: #fff; font-weight: 800;">OPERATOR SUITE</a></li>
-                
                 <li><a href="/suite/radar" style="color: #06b6d4; font-weight: 800;">MARKET RADAR</a></li>
                 <li><a href="/suite/gravity-map" style="color: #eab308; font-weight: 800;">GRAVITY MAP</a></li>
                 <li><a href="/suite/macro-war-room" style="color: #ef4444; font-weight: 800;">MACRO WAR ROOM</a></li>

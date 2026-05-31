@@ -111,11 +111,11 @@
             const container = document.getElementById('chart-container');
             chart = LightweightCharts.createChart(container, {
                 width: container.clientWidth, height: container.clientHeight,
-                layout: { background: { type: 'solid', color: '#020617' }, textColor: '#cbd5e1' },
-                grid: { vertLines: { color: '#161e2e' }, horzLines: { color: '#161e2e' } },
+                layout: { background: { type: 'solid', color: '#140d09' }, textColor: '#c9a880' },
+                grid: { vertLines: { color: '#3a2820' }, horzLines: { color: '#3a2820' } },
                 crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-                rightPriceScale: { borderColor: '#334155', autoScale: true },
-                timeScale: { borderColor: '#334155', timeVisible: true }
+                rightPriceScale: { borderColor: '#4d3526', autoScale: true },
+                timeScale: { borderColor: '#4d3526', timeVisible: true }
             });
 
             candlestickSeries = chart.addCandlestickSeries({
@@ -260,7 +260,7 @@
                 
                 if (!isBackgroundUpdate) sidebar.innerHTML = '';
                 
-                if (data.macro_fibs && data.macro_fibs.chart_data) {
+                if (data.macro_fibs && data.macro_fibs.chart_data && data.macro_fibs.chart_data.length > 0) {
                     candlestickSeries.setData(data.macro_fibs.chart_data);
                     currentLivePrice = data.macro_fibs.chart_data[data.macro_fibs.chart_data.length - 1].close;
                     if (!isBackgroundUpdate) chart.timeScale().fitContent(); 

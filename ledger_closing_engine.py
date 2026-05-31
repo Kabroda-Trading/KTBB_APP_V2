@@ -57,33 +57,28 @@ async def run_ledger_audit_loop():
                 # --- LONG LOGIC ---
                 if campaign.bias == 'LONG':
                     if live_price <= campaign.stop_loss:
-                        # Hard Stop Hit (-1R)
                         campaign.status = 'CLOSED_LOSS'
-                        pnl = -box_size
+                        pnl = -1.0
                         closed = True
                         print(f"|| LEDGER UPDATE || {campaign.symbol} LONG Stopped Out at {live_price}.")
-                    
+
                     elif live_price >= campaign.t1:
-                        # Target 1 Hit (+1R) 
-                        # (For Phase 1, we close the ledger at T1 to build the win rate memory)
                         campaign.status = 'CLOSED_WIN'
-                        pnl = box_size
+                        pnl = 1.0
                         closed = True
                         print(f"|| LEDGER UPDATE || {campaign.symbol} LONG Target 1 Hit at {live_price}.")
 
                 # --- SHORT LOGIC ---
                 elif campaign.bias == 'SHORT':
                     if live_price >= campaign.stop_loss:
-                        # Hard Stop Hit (-1R)
                         campaign.status = 'CLOSED_LOSS'
-                        pnl = -box_size
+                        pnl = -1.0
                         closed = True
                         print(f"|| LEDGER UPDATE || {campaign.symbol} SHORT Stopped Out at {live_price}.")
-                    
+
                     elif live_price <= campaign.t1:
-                        # Target 1 Hit (+1R)
                         campaign.status = 'CLOSED_WIN'
-                        pnl = box_size
+                        pnl = 1.0
                         closed = True
                         print(f"|| LEDGER UPDATE || {campaign.symbol} SHORT Target 1 Hit at {live_price}.")
 

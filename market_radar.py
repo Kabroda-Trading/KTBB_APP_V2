@@ -10,9 +10,6 @@ import json
 import asyncio
 import datetime
 from datetime import timedelta
-import gspread
-from google.oauth2.service_account import Credentials
-
 import battlebox_pipeline
 import gravity_math
 import mtf_confluence_scanner
@@ -166,68 +163,6 @@ def _build_dossier(symbol, price, levels, macro_bias, micro_bias, kde_peaks):
         "plan": plan, "key": key
     }
 
-def log_to_google_sheet(radar_item):
-    if radar_item.get("symbol") not in ["BTCUSDT", "ETHUSDT", "SOLUSDT"]: return
-    try:
-        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        google_creds_str = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-        if not google_creds_str: return
-
-        creds_dict = json.loads(google_creds_str)
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-        client = gspread.authorize(creds)
-        sheet = client.open("Market Radar Tracking").sheet1
-
-        now = datetime.datetime.now()
-        day_str = str(now.day)
-        today_iso = now.strftime("%Y-%m-%d")
-        today_slash = now.strftime("%m/%d/%Y")
-        today_text = now.strftime("%b ") + day_str + now.strftime(", %Y")
-        today_text_padded = now.strftime("%b %d, %Y")
-
-        existing_dates = sheet.col_values(1)
-        existing_symbols = sheet.col_values(2)
-        already_logged = False
-
-        for i in range(min(len(existing_dates), len(existing_symbols))):
-            date_cell = str(existing_dates[i])
-            if (today_iso in date_cell or today_slash in date_cell or today_text in date_cell or today_text_padded in date_cell):
-                if existing_symbols[i] == radar_item["symbol"]:
-                    already_logged = True
-                    break
-
-        if already_logged: return
-
-        timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
-        plan = radar_item.get("plan", {})
-
-        try:
-            bo, bd, dr, ds, r30h, r30l = radar_item.get("indicator_string", "0,0,0,0,0,0").split(',')
-        except:
-            bo = bd = dr = ds = r30h = r30l = 0
-
-        row_data = [
-            timestamp,
-            radar_item["symbol"],
-            radar_item.get("macro_bias", ""),
-            radar_item.get("micro_bias", ""),
-            radar_item.get("favored", ""),
-            radar_item.get("grade", ""),
-            "Yes" if plan.get("valid") else "No",
-            plan.get("entry", 0),
-            plan.get("stop", 0),
-            plan.get("targets", [0,0,0])[0],
-            plan.get("targets", [0,0,0])[1],
-            plan.get("targets", [0,0,0])[2],
-            radar_item.get("score_pct", 0),
-            "", "", "", "",
-            0, 0,
-            r30h, r30l, bo, bd, dr, ds
-        ]
-
-        sheet.append_row(row_data)
-    except Exception as e:
-        print(f"❌ Failed to log to Google Sheets: {e}")
 
 async def get_mtf_brief(symbol: str) -> dict:
     """
@@ -394,7 +329,6 @@ async def scan_sector():
 
         radar_item["sort_weight"] = dossier["score_pct"]
         radar_grid.append(radar_item)
-        log_to_google_sheet(radar_item)
 
         try:
             with SessionLocal() as db:
