@@ -20,7 +20,7 @@ TARGETS = ["BTCUSDT"]
 async def _try_locked_shortcut(symbol: str):
     """
     If a SessionLock already exists for today's us_ny_futures session, read it
-    directly from the DB and fetch only a single candle for the live price.
+    directly from the DB. No MEXC call — price is read from the locked packet.
     Returns a battlebox-compatible response dict, or None if no lock exists.
     Bypasses the 1500-candle MEXC fetch when the session is already established.
     """
@@ -39,17 +39,14 @@ async def _try_locked_shortcut(symbol: str):
     except Exception:
         return None
 
-    try:
-        candles = await battlebox_pipeline.fetch_live_5m(symbol, limit=1)
-        price = float(candles[-1]["close"]) if candles else 0.0
-    except Exception:
-        price = 0.0
+    levels = pkt.get("levels", {})
+    price = float(levels.get("anchor_price") or 0.0)
 
     return {
         "status": "OK",
         "price": price,
         "battlebox": {
-            "levels": pkt.get("levels", {}),
+            "levels": levels,
             "context": pkt.get("context", {})
         }
     }
