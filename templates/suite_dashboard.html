@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kabroda | Executive Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <style>
+        .dash-wrap { max-width: 1400px; margin: 0 auto; padding: 40px 24px 80px; }
+
+        /* PAGE HEADER */
+        .dash-header { margin-bottom: 40px; border-bottom: 1px solid #4d3526; padding-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; }
+        .dash-title { font-family: 'Playfair Display', serif; font-size: 34px; font-weight: 700; color: #f2e3cf; margin: 0; letter-spacing: -0.01em; }
+        .dash-subtitle { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8a6f57; text-transform: uppercase; letter-spacing: 2px; margin-top: 6px; }
+        .dash-ts { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #6b5345; }
+
+        /* KPI GRID */
+        .kpi-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 28px; }
+        .kpi-card { background: #251a14; border: 1px solid #4d3526; border-radius: 8px; padding: 20px 16px; position: relative; overflow: hidden; }
+        .kpi-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+        .kpi-cognac::before { background: #c8813a; }
+        .kpi-green::before  { background: #5e8c66; }
+        .kpi-red::before    { background: #8c4a3a; }
+        .kpi-gold::before   { background: #c9a24a; }
+        .kpi-muted::before  { background: #6b5345; }
+        .kpi-val { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 800; color: #f2e3cf; line-height: 1; transition: color 0.3s; }
+        .kpi-lbl { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #8a6f57; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 8px; }
+
+        /* CHART LAYOUT */
+        .chart-row { display: grid; gap: 18px; margin-bottom: 18px; }
+        .row-2-1 { grid-template-columns: 2fr 1fr; }
+        .row-1-1 { grid-template-columns: 1fr 1fr; }
+        .chart-card { background: #251a14; border: 1px solid #4d3526; border-radius: 8px; padding: 22px 24px; }
+        .chart-title { font-family: 'Playfair Display', serif; font-size: 13px; font-weight: 600; color: #c9a880; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 3px; }
+        .chart-sub { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #6b5345; margin-bottom: 18px; }
+        .admin-badge { background: rgba(201,162,74,0.12); border: 1px solid #c9a24a; color: #c9a24a; font-family: 'JetBrains Mono', monospace; font-size: 9px; padding: 2px 5px; border-radius: 3px; margin-left: 6px; text-transform: uppercase; vertical-align: middle; }
+
+        /* TABLES */
+        .table-section { margin-bottom: 30px; }
+        .table-header { font-family: 'Playfair Display', serif; font-size: 18px; font-weight: 600; color: #f2e3cf; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #4d3526; }
+        .table-wrap { background: #251a14; border: 1px solid #4d3526; border-radius: 8px; overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #301f17; color: #8a6f57; font-family: 'JetBrains Mono', monospace; font-size: 9px; padding: 12px 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; border-bottom: 1px solid #4d3526; text-align: left; }
+        td { padding: 11px 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; border-bottom: 1px solid #3a2820; color: #c9a880; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #2d1e15; }
+
+        /* STATUS CLASSES */
+        .s-approved,.s-approved  { color: #c8813a; font-weight: 800; }
+        .s-rejected              { color: #8c4a3a; font-weight: 800; }
+        .s-waiting,.s-waiting_for_15m,.s-waiting-for-15m { color: #a67c3a; font-weight: 800; }
+        .s-closed_win            { color: #5e8c66; font-weight: 800; }
+        .s-closed_loss           { color: #8c4a3a; font-weight: 800; }
+        .s-win                   { color: #5e8c66; font-weight: 800; }
+        .s-loss                  { color: #8c4a3a; font-weight: 800; }
+        .s-published             { color: #5e8c66; font-weight: 800; }
+        .s-draft                 { color: #6b5345; }
+        .s-failed                { color: #8c4a3a; }
+        .s-pending               { color: #6b5345; }
+
+        .empty-state { text-align: center; padding: 44px 20px; color: #5a3d2c; font-family: 'Playfair Display', serif; font-style: italic; font-size: 14px; }
+
+        @media (max-width: 1100px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 900px)  { .row-2-1, .row-1-1 { grid-template-columns: 1fr; } }
+        @media (max-width: 600px)  { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+    </style>
+</head>
+<body>
+    {% include 'nav.html' %}
+
+    <div class="dash-wrap">
+
+        <div class="dash-header">
+            <div>
+                <h1 class="dash-title">Executive Dashboard</h1>
+                <div class="dash-subtitle">Kabroda Intelligence System — Performance &amp; Operations</div>
+            </div>
+            <div class="dash-ts" id="tsLabel">—</div>
+        </div>
+
+        <!-- ── KPI ROW ───────────────────────────────────── -->
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-muted">
+                <div class="kpi-val" id="k-sessions">—</div>
+                <div class="kpi-lbl">Total Sessions</div>
+            </div>
+            <div class="kpi-card kpi-cognac">
+                <div class="kpi-val" id="k-approved">—</div>
+                <div class="kpi-lbl">Approved Rate</div>
+            </div>
+            <div class="kpi-card kpi-green">
+                <div class="kpi-val" id="k-winrate">—</div>
+                <div class="kpi-lbl">Win Rate</div>
+            </div>
+            <div class="kpi-card kpi-gold">
+                <div class="kpi-val" id="k-netr">—</div>
+                <div class="kpi-lbl">Net R Lifetime</div>
+            </div>
+            <div class="kpi-card kpi-red">
+                <div class="kpi-val" id="k-spend">—</div>
+                <div class="kpi-lbl">7-Day Agent Spend</div>
+            </div>
+            <div class="kpi-card kpi-muted">
+                <div class="kpi-val" id="k-cache">—</div>
+                <div class="kpi-lbl">Cache Hit Rate</div>
+            </div>
+        </div>
+
+        <!-- ── ROW 2: PnL + Approval ─────────────────────── -->
+        <div class="chart-row row-2-1">
+            <div class="chart-card">
+                <div class="chart-title">Cumulative Performance</div>
+                <div class="chart-sub">Net realized R — closed approved trades only, chronological</div>
+                <canvas id="chartPnL" height="90"></canvas>
+            </div>
+            <div class="chart-card">
+                <div class="chart-title">MAS Approval Distribution</div>
+                <div class="chart-sub">All sessions since system deployment</div>
+                <canvas id="chartApproval"></canvas>
+            </div>
+        </div>
+
+        <!-- ── ROW 3: Grade + Confluence ─────────────────── -->
+        <div class="chart-row row-1-1">
+            <div class="chart-card">
+                <div class="chart-title">Directional Accuracy by Kinematic Grade</div>
+                <div class="chart-sub">4H outcome vs. session bias — PRIMED / OVEREXTENDED / TANGLED</div>
+                <canvas id="chartGrade" height="160"></canvas>
+            </div>
+            <div class="chart-card">
+                <div class="chart-title">Accuracy by Confluence Score</div>
+                <div class="chart-sub">Score 0–3 (aligned timeframes at entry) vs. outcome</div>
+                <canvas id="chartConfluence" height="160"></canvas>
+            </div>
+        </div>
+
+        <!-- ── ROW 4: Costs + JEWEL ───────────────────────── -->
+        <div class="chart-row row-1-1">
+            <div class="chart-card" id="costCard">
+                <div class="chart-title">
+                    Agent Cost — 7-Day Stack
+                    <span class="admin-badge">Admin</span>
+                </div>
+                <div class="chart-sub">Daily spend by agent — $10.00 daily budget ceiling</div>
+                <canvas id="chartCost" height="160"></canvas>
+            </div>
+            <div class="chart-card">
+                <div class="chart-title">JEWEL Gate vs. Trade Outcome</div>
+                <div class="chart-sub">NY Open gate state paired with same-session closed trade result</div>
+                <canvas id="chartJewel" height="160"></canvas>
+            </div>
+        </div>
+
+        <!-- ── NEWSLETTER TABLE ──────────────────────────── -->
+        <div class="table-section">
+            <div class="table-header">Newsletter Archive</div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr>
+                        <th>Date</th>
+                        <th>Headline</th>
+                        <th>Session Status</th>
+                        <th>Publish Status</th>
+                    </tr></thead>
+                    <tbody id="newsletterBody">
+                        <tr><td colspan="4" class="empty-state">Loading newsletter log…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ── TRADE HISTORY TABLE ───────────────────────── -->
+        <div class="table-section">
+            <div class="table-header">Trade History (Last 50)</div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr>
+                        <th>Date</th>
+                        <th>Bias</th>
+                        <th>MAS Status</th>
+                        <th>Trade Outcome</th>
+                        <th>Entry</th>
+                        <th>Stop</th>
+                        <th>T1</th>
+                        <th>Net PnL</th>
+                    </tr></thead>
+                    <tbody id="tradeBody">
+                        <tr><td colspan="8" class="empty-state">Loading trade history…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+    // ── ESPRESSO EXECUTIVE CHART PALETTE ──────────────────
+    const C = {
+        cognac:  '#c8813a',
+        green:   '#5e8c66',
+        red:     '#8c4a3a',
+        amber:   '#a67c3a',
+        gold:    '#c9a24a',
+        muted:   '#6b5345',
+        cream:   '#f2e3cf',
+        latte:   '#c9a880',
+        leather: '#8a6f57',
+        border:  '#3a2820',
+        panel:   '#251a14',
+    };
+
+    Chart.defaults.color        = C.leather;
+    Chart.defaults.borderColor  = C.border;
+    Chart.defaults.font.family  = "'JetBrains Mono', monospace";
+    Chart.defaults.font.size    = 11;
+
+    const tooltipDefaults = {
+        backgroundColor: C.panel,
+        titleColor:      C.cream,
+        bodyColor:       C.latte,
+        borderColor:     C.border,
+        borderWidth:     1,
+        padding:         10,
+    };
+
+    const scalesXY = {
+        x: { ticks: { color: C.leather }, grid: { color: C.border } },
+        y: { ticks: { color: C.leather }, grid: { color: C.border } },
+    };
+
+    // ── KPI OVERVIEW ──────────────────────────────────────
+    async function loadOverview() {
+        const r = await fetch('/api/dashboard/overview');
+        const d = await r.json();
+        if (!d.ok) return;
+
+        document.getElementById('k-sessions').textContent = d.total_sessions;
+        document.getElementById('k-approved').textContent = d.approved_rate + '%';
+        document.getElementById('k-winrate').textContent  = d.win_rate + '%';
+
+        const netrEl = document.getElementById('k-netr');
+        netrEl.textContent = (d.net_r >= 0 ? '+' : '') + d.net_r + 'R';
+        netrEl.style.color = d.net_r > 0 ? C.green : (d.net_r < 0 ? C.red : C.cream);
+
+        document.getElementById('k-spend').textContent = '$' + d.spend_7d;
+        document.getElementById('k-cache').textContent = d.cache_hit_rate + '%';
+
+        const now = new Date();
+        document.getElementById('tsLabel').textContent =
+            'Updated ' + now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // ── MAS HISTORY: PnL LINE + APPROVAL DONUT + TRADE TABLE ──
+    async function loadMasHistory() {
+        const r = await fetch('/api/dashboard/mas-history');
+        const d = await r.json();
+        if (!d.ok) return;
+
+        // Cumulative PnL line
+        new Chart(document.getElementById('chartPnL'), {
+            type: 'line',
+            data: {
+                labels: d.pnl_series.map(p => p.date),
+                datasets: [{
+                    label: 'Cumulative R',
+                    data:  d.pnl_series.map(p => p.cumulative),
+                    borderColor:     C.cognac,
+                    backgroundColor: 'rgba(200,129,58,0.07)',
+                    fill:            true,
+                    tension:         0.35,
+                    pointRadius:     d.pnl_series.length < 30 ? 4 : 2,
+                    pointBackgroundColor: C.cognac,
+                    borderWidth:     2,
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: true,
+                plugins: { legend: { display: false }, tooltip: tooltipDefaults },
+                scales: scalesXY,
+            }
+        });
+
+        // Approval donut
+        const ap = d.approval_counts;
+        new Chart(document.getElementById('chartApproval'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Approved', 'Rejected', 'Waiting', 'Error/Other'],
+                datasets: [{
+                    data: [ap.APPROVED||0, ap.REJECTED||0, ap.WAITING_FOR_15M||0, (ap.MAS_ERROR||0)+(ap.PENDING||0)],
+                    backgroundColor: [C.cognac, C.red, C.amber, C.muted],
+                    borderColor:     C.panel,
+                    borderWidth:     3,
+                }]
+            },
+            options: {
+                responsive: true, cutout: '72%',
+                plugins: {
+                    legend:  { position: 'bottom', labels: { color: C.leather, padding: 14 } },
+                    tooltip: tooltipDefaults,
+                }
+            }
+        });
+
+        // Trade history table
+        const tbody = document.getElementById('tradeBody');
+        if (!d.trades.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No trade history yet. Sessions will appear here after the first session lock.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = d.trades.map(t => {
+            const pnl = t.realized_pnl || 0;
+            const pnlStr = pnl ? (pnl > 0 ? '+' + pnl.toFixed(2) : pnl.toFixed(2)) + 'R' : '—';
+            const pnlCls = pnl > 0 ? 's-win' : (pnl < 0 ? 's-loss' : '');
+            const st  = (t.status || '').toLowerCase();
+            const mas = (t.mas_approval_status || '').toLowerCase();
+            const fmt = v => v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
+            return `<tr>
+                <td>${t.date_key || '—'}</td>
+                <td style="color:#f2e3cf;font-weight:800;">${t.bias || '—'}</td>
+                <td><span class="s-${mas}">${t.mas_approval_status || '—'}</span></td>
+                <td><span class="s-${st}">${t.status || '—'}</span></td>
+                <td>${fmt(t.entry_price)}</td>
+                <td>${fmt(t.stop_loss)}</td>
+                <td>${fmt(t.t1)}</td>
+                <td class="${pnlCls}">${pnlStr}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    // ── ACCURACY CHARTS ───────────────────────────────────
+    async function loadAccuracy() {
+        const r = await fetch('/api/dashboard/accuracy');
+        const d = await r.json();
+        if (!d.ok) return;
+
+        // Grade accuracy
+        const ga = d.grade_accuracy;
+        const grades = Object.keys(ga);
+        new Chart(document.getElementById('chartGrade'), {
+            type: 'bar',
+            data: {
+                labels: grades,
+                datasets: [
+                    { label: 'Correct %',   data: grades.map(g => ga[g].correct_pct),   backgroundColor: C.cognac, borderRadius: 4 },
+                    { label: 'Incorrect %', data: grades.map(g => ga[g].incorrect_pct), backgroundColor: C.muted,  borderRadius: 4 },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: true,
+                plugins: { legend: { labels: { color: C.leather } }, tooltip: tooltipDefaults },
+                scales: {
+                    x: { ...scalesXY.x },
+                    y: { ...scalesXY.y, max: 100, ticks: { color: C.leather, callback: v => v + '%' } },
+                }
+            }
+        });
+
+        // Confluence accuracy
+        const ca = d.confluence_accuracy;
+        const scores = Object.keys(ca).sort((a,b) => Number(a)-Number(b));
+        new Chart(document.getElementById('chartConfluence'), {
+            type: 'bar',
+            data: {
+                labels: scores.map(s => 'Score ' + s),
+                datasets: [
+                    { label: 'Correct %',   data: scores.map(s => ca[s].correct_pct),   backgroundColor: C.green,  borderRadius: 4 },
+                    { label: 'Incorrect %', data: scores.map(s => ca[s].incorrect_pct), backgroundColor: C.muted,   borderRadius: 4 },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: true,
+                plugins: { legend: { labels: { color: C.leather } }, tooltip: tooltipDefaults },
+                scales: {
+                    x: { ...scalesXY.x },
+                    y: { ...scalesXY.y, max: 100, ticks: { color: C.leather, callback: v => v + '%' } },
+                }
+            }
+        });
+    }
+
+    // ── AGENT COSTS (ADMIN ONLY) ──────────────────────────
+    const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+
+    async function loadCosts() {
+        if (!IS_ADMIN) {
+            document.getElementById('costCard').style.opacity = '0.35';
+            document.getElementById('costCard').querySelector('.chart-sub').textContent = 'Admin access required to view cost data.';
+            return;
+        }
+        const r = await fetch('/api/dashboard/costs');
+        const d = await r.json();
+        if (!d.ok) return;
+
+        const palette = [C.cognac, C.green, C.gold, C.amber, C.muted, C.red];
+        new Chart(document.getElementById('chartCost'), {
+            type: 'bar',
+            data: {
+                labels: d.days,
+                datasets: d.agents.map((ag, i) => ({
+                    label: ag.name,
+                    data:  ag.values,
+                    backgroundColor: palette[i % palette.length],
+                    borderRadius: 2,
+                }))
+            },
+            options: {
+                responsive: true, maintainAspectRatio: true,
+                plugins: { legend: { labels: { color: C.leather } }, tooltip: tooltipDefaults },
+                scales: {
+                    x: { stacked: true, ...scalesXY.x },
+                    y: { stacked: true, ...scalesXY.y, ticks: { color: C.leather, callback: v => '$' + v.toFixed(3) } },
+                }
+            }
+        });
+    }
+
+    // ── JEWEL GATE DONUT ──────────────────────────────────
+    async function loadJewel() {
+        const r = await fetch('/api/dashboard/jewel');
+        const d = await r.json();
+        if (!d.ok) return;
+        new Chart(document.getElementById('chartJewel'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Gate Open + Win', 'Gate Open + Loss', 'Gate Closed + Win', 'Gate Closed + Loss'],
+                datasets: [{
+                    data: [d.open_win, d.open_loss, d.closed_win, d.closed_loss],
+                    backgroundColor: [C.green, C.red, C.amber, C.muted],
+                    borderColor:     C.panel,
+                    borderWidth:     3,
+                }]
+            },
+            options: {
+                responsive: true, cutout: '68%',
+                plugins: {
+                    legend:  { position: 'bottom', labels: { color: C.leather, padding: 10, font: { size: 10 } } },
+                    tooltip: tooltipDefaults,
+                }
+            }
+        });
+    }
+
+    // ── NEWSLETTERS TABLE ─────────────────────────────────
+    async function loadNewsletters() {
+        const r = await fetch('/api/dashboard/newsletters');
+        const d = await r.json();
+        if (!d.ok) return;
+        const tbody = document.getElementById('newsletterBody');
+        if (!d.newsletters.length) {
+            tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No newsletters generated yet. The first will appear here after the next session lock.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = d.newsletters.map(n => {
+            const apSt = (n.approval_status || '').toLowerCase();
+            const puSt = (n.publish_status  || '').toLowerCase();
+            return `<tr>
+                <td>${n.date_key || '—'}</td>
+                <td style="color:#f2e3cf; max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${n.headline || '—'}</td>
+                <td><span class="s-${apSt}">${n.approval_status || '—'}</span></td>
+                <td><span class="s-${puSt}">${n.publish_status || '—'}</span></td>
+            </tr>`;
+        }).join('');
+    }
+
+    // ── INIT ──────────────────────────────────────────────
+    async function initDashboard() {
+        await Promise.all([
+            loadOverview(),
+            loadMasHistory(),
+            loadAccuracy(),
+            loadCosts(),
+            loadJewel(),
+            loadNewsletters(),
+        ]);
+    }
+
+    document.addEventListener('DOMContentLoaded', initDashboard);
+    </script>
+</body>
+</html>

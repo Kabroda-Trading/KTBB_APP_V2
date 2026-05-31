@@ -36,7 +36,7 @@ from jewel_specialist import run_jewel_snapshot
 from elliott_wave_specialist import run_elliott_wave_analysis
 from performance_auditor import run_performance_audit
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -528,6 +528,12 @@ async def gravity_map_page(request: Request, db: Session = Depends(get_db)):
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
     return _template_or_fallback(request, templates, "gravity_map.html", ctx)
 
+@app.get("/suite/dashboard")
+async def suite_dashboard_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
+    return _template_or_fallback(request, templates, "suite_dashboard.html", ctx)
+
 @app.get("/suite/macro-war-room")
 async def macro_war_room_page(request: Request, symbol: str = "BTC/USDT", db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
@@ -1014,6 +1020,177 @@ async def simulator_run(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         traceback.print_exc()
         return JSONResponse({"ok": False, "error": str(e)})
+
+# ==============================================================================
+# EXECUTIVE DASHBOARD API ROUTES (Phase 6 — read-only DB queries)
+# ==============================================================================
+
+@app.get("/api/dashboard/overview")
+async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    try:
+        from sqlalchemy import func
+        total      = db.query(func.count(CampaignLog.id)).scalar() or 0
+        approved   = db.query(func.count(CampaignLog.id)).filter(CampaignLog.mas_approval_status == "APPROVED").scalar() or 0
+        approved_rate = round(approved / total * 100, 1) if total > 0 else 0.0
+        wins   = db.query(func.count(CampaignLog.id)).filter(CampaignLog.status == "CLOSED_WIN").scalar() or 0
+        losses = db.query(func.count(CampaignLog.id)).filter(CampaignLog.status == "CLOSED_LOSS").scalar() or 0
+        win_rate = round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0.0
+        net_r_raw = db.query(func.sum(CampaignLog.realized_pnl)).filter(
+            CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS"])).scalar()
+        net_r = round(net_r_raw or 0.0, 2)
+        since_7d = datetime.now(timezone.utc) - timedelta(days=7)
+        spend_raw = db.query(func.sum(AgentRunLog.estimated_cost_usd)).filter(
+            AgentRunLog.created_at >= since_7d).scalar()
+        spend_7d = round(spend_raw or 0.0, 4)
+        tok = db.query(func.sum(AgentRunLog.input_tokens), func.sum(AgentRunLog.cache_read_tokens)).filter(
+            AgentRunLog.created_at >= since_7d).first()
+        total_tok = (tok[0] or 0) + (tok[1] or 0)
+        cache_hit_rate = round((tok[1] or 0) / total_tok * 100, 1) if total_tok > 0 else 0.0
+        newsletter_count = db.query(func.count(NewsletterLog.id)).scalar() or 0
+        return JSONResponse({"ok": True, "total_sessions": total, "approved_rate": approved_rate,
+            "win_rate": win_rate, "net_r": net_r, "spend_7d": spend_7d,
+            "cache_hit_rate": cache_hit_rate, "newsletter_count": newsletter_count})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/dashboard/accuracy")
+async def api_dashboard_accuracy(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    try:
+        from sqlalchemy import func
+        def _build_accuracy(rows):
+            acc = {}
+            for key, correct, count in rows:
+                k = str(key)
+                if k not in acc:
+                    acc[k] = {"correct": 0, "incorrect": 0}
+                if correct:
+                    acc[k]["correct"] += count
+                else:
+                    acc[k]["incorrect"] += count
+            result = {}
+            for k, c in acc.items():
+                total = c["correct"] + c["incorrect"]
+                result[k] = {"correct_pct": round(c["correct"]/total*100,1) if total else 0,
+                             "incorrect_pct": round(c["incorrect"]/total*100,1) if total else 0,
+                             "total": total}
+            return result
+        grade_rows = db.query(DecisionJournal.kinematic_grade,
+            DecisionJournal.outcome_direction_correct, func.count(DecisionJournal.id)).filter(
+            DecisionJournal.outcome_direction_correct.isnot(None),
+            DecisionJournal.kinematic_grade.isnot(None)
+        ).group_by(DecisionJournal.kinematic_grade, DecisionJournal.outcome_direction_correct).all()
+        conf_rows = db.query(DecisionJournal.confluence_score,
+            DecisionJournal.outcome_direction_correct, func.count(DecisionJournal.id)).filter(
+            DecisionJournal.outcome_direction_correct.isnot(None),
+            DecisionJournal.confluence_score.isnot(None)
+        ).group_by(DecisionJournal.confluence_score, DecisionJournal.outcome_direction_correct).all()
+        return JSONResponse({"ok": True, "grade_accuracy": _build_accuracy(grade_rows),
+                             "confluence_accuracy": _build_accuracy(conf_rows)})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/dashboard/costs")
+async def api_dashboard_costs(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    try:
+        from collections import defaultdict
+        since_7d = datetime.now(timezone.utc) - timedelta(days=7)
+        rows = db.query(AgentRunLog).filter(
+            AgentRunLog.created_at >= since_7d, AgentRunLog.status == "SUCCESS").all()
+        daily = defaultdict(lambda: defaultdict(float))
+        all_agents = set()
+        for row in rows:
+            day = row.created_at.strftime("%m/%d")
+            daily[day][row.agent_name] += row.estimated_cost_usd
+            all_agents.add(row.agent_name)
+        days_list = [(datetime.now(timezone.utc) - timedelta(days=i)).strftime("%m/%d") for i in range(6, -1, -1)]
+        agents_sorted = sorted(all_agents)
+        return JSONResponse({"ok": True, "days": days_list,
+            "agents": [{"name": ag, "values": [round(daily[d][ag], 5) for d in days_list]} for ag in agents_sorted]})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/dashboard/mas-history")
+async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    try:
+        from sqlalchemy import func
+        approval_rows = db.query(CampaignLog.mas_approval_status,
+            func.count(CampaignLog.id)).group_by(CampaignLog.mas_approval_status).all()
+        approval_counts = {row[0]: row[1] for row in approval_rows}
+        pnl_rows = db.query(CampaignLog.closed_at, CampaignLog.realized_pnl,
+            CampaignLog.date_key).filter(CampaignLog.closed_at.isnot(None)).order_by(CampaignLog.closed_at).all()
+        cumulative = 0.0
+        pnl_series = []
+        for row in pnl_rows:
+            cumulative += (row.realized_pnl or 0)
+            pnl_series.append({"date": row.date_key, "cumulative": round(cumulative, 2)})
+        trades = db.query(CampaignLog).order_by(CampaignLog.id.desc()).limit(50).all()
+        trades_data = [{"date_key": t.date_key, "bias": t.bias, "mas_approval_status": t.mas_approval_status,
+            "status": t.status, "entry_price": t.entry_price, "stop_loss": t.stop_loss,
+            "t1": t.t1, "realized_pnl": t.realized_pnl} for t in trades]
+        return JSONResponse({"ok": True, "approval_counts": approval_counts,
+                             "pnl_series": pnl_series, "trades": trades_data})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/dashboard/jewel")
+async def api_dashboard_jewel(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    try:
+        snapshots = db.query(JewelSnapshotLog).filter(
+            JewelSnapshotLog.session_label == "NY_OPEN").all()
+        open_win = open_loss = closed_win = closed_loss = 0
+        for snap in snapshots:
+            if not snap.timestamp:
+                continue
+            date_key = snap.timestamp.strftime("%Y-%m-%d")
+            trade = db.query(CampaignLog).filter(CampaignLog.date_key == date_key,
+                CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS"])).first()
+            if not trade:
+                continue
+            is_win = trade.status == "CLOSED_WIN"
+            if snap.jewel_gate_open:
+                open_win  += (1 if is_win else 0)
+                open_loss += (0 if is_win else 1)
+            else:
+                closed_win  += (1 if is_win else 0)
+                closed_loss += (0 if is_win else 1)
+        return JSONResponse({"ok": True, "open_win": open_win, "open_loss": open_loss,
+                             "closed_win": closed_win, "closed_loss": closed_loss})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/dashboard/newsletters")
+async def api_dashboard_newsletters(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    try:
+        rows = db.query(NewsletterLog).order_by(NewsletterLog.id.desc()).limit(30).all()
+        data = [{"date_key": r.date_key, "headline": r.headline,
+                 "approval_status": r.approval_status, "publish_status": r.publish_status} for r in rows]
+        return JSONResponse({"ok": True, "newsletters": data})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

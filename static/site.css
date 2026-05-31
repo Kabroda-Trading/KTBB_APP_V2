@@ -1,77 +1,128 @@
-/* KABRODA ELECTRIC THEME (Master Sheet) */
+/* KABRODA — ESPRESSO EXECUTIVE THEME */
+/* Aesthetic: Premium Executive Coffee Lounge                               */
+/* Warm mahogany, cognac leather, espresso tones — composed & authoritative */
 
 :root {
-  --bg-deep: #020617;
-  --primary: #0ea5e9;
-  --primary-bright: #38bdf8;
-  --primary-glow: rgba(14, 165, 233, 0.5);
-  --glass: rgba(15, 23, 42, 0.7);
-  --glass-border: rgba(56, 189, 248, 0.2);
-  --text-main: #ffffff;
-  --text-muted: #94a3b8;
-  --success: #10b981;
-  --danger: #ef4444; 
-  --purple: #a855f7;
-  --warning: #f59e0b;
-  --accent-cyan: #06b6d4; /* Added for compatibility */
+  /* ── FOUNDATION ─────────────────────────────────────────── */
+  --bg-deep:      #140d09;   /* Darkest espresso — the room                  */
+  --bg-surface:   #1c1410;   /* Dark walnut — lifted surface                 */
+  --bg-card:      #251a14;   /* Mahogany — main card/panel surface           */
+  --bg-elevated:  #301f17;   /* Hover/active state — lighter walnut          */
+  --bg-input:     #1a110c;   /* Input field background                       */
+
+  /* ── BORDERS ────────────────────────────────────────────── */
+  --border-faint:  #3a2820;  /* Barely-there warm edge                       */
+  --border-mid:    #4d3526;  /* Standard card border                         */
+  --border-strong: #6b4a30;  /* Active/highlighted border                    */
+
+  /* ── TEXT ───────────────────────────────────────────────── */
+  --text-primary:   #f2e3cf; /* Warm parchment cream — primary reading       */
+  --text-secondary: #c9a880; /* Latte — secondary labels                     */
+  --text-muted:     #8a6f57; /* Aged leather taupe — metadata                */
+  --text-faint:     #5a3d2c; /* Whisper — disabled / placeholder             */
+
+  /* ── ACCENT: COGNAC (replaces all cyan/blue) ────────────── */
+  --accent:         #c8813a; /* Cognac / aged bourbon — primary accent       */
+  --accent-bright:  #e09840; /* Highlighted cognac — hover state             */
+  --accent-glow:    rgba(200, 129, 58, 0.15);
+
+  /* ── GOLD (premium highlights) ──────────────────────────── */
+  --gold:           #c9a24a; /* Refined aged gold — admin / premium badges   */
+  --gold-subtle:    rgba(201, 162, 74, 0.12);
+
+  /* ── STATUS: MUTED, ELEGANT ─────────────────────────────── */
+  --win:            #5e8c66; /* Muted forest green — billiard felt           */
+  --win-bg:         rgba(94, 140, 102, 0.12);
+  --loss:           #8c4a3a; /* Brick red / terracotta — composed            */
+  --loss-bg:        rgba(140, 74, 58, 0.12);
+  --warn:           #a67c3a; /* Warm honey amber — advisory                  */
+  --warn-bg:        rgba(166, 124, 58, 0.12);
+  --neutral:        #6b5345; /* Warm taupe — pending / no-signal             */
+  --neutral-bg:     rgba(107, 83, 69, 0.12);
+
+  /* ── GLASS / OVERLAY ────────────────────────────────────── */
+  --glass:          rgba(37, 26, 20, 0.80);
+  --glass-border:   rgba(200, 129, 58, 0.15);
+
+  /* ── LEGACY COMPAT — old variable names resolve to warm equivalents ── */
+  --bg-dark:        var(--bg-card);
+  --primary:        var(--accent);
+  --primary-bright: var(--accent-bright);
+  --primary-glow:   var(--accent-glow);
+  --text-main:      var(--text-primary);
+  --accent-cyan:    var(--accent);
+  --success:        var(--win);
+  --danger:         var(--loss);
+  --warning:        var(--warn);
+  --purple:         #8a6b9c;   /* muted plum — replaces neon purple          */
+
+  /* ── FONTS ──────────────────────────────────────────────── */
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-body:    'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Courier New', monospace;
 }
 
 body {
   background-color: var(--bg-deep);
-  background-image: 
-    radial-gradient(circle at 50% 0%, rgba(14, 165, 233, 0.15), transparent 50%),
-    radial-gradient(circle at 80% 40%, rgba(56, 189, 248, 0.05), transparent 40%);
-  color: var(--text-main);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-image:
+    radial-gradient(circle at 50% 0%, rgba(200, 129, 58, 0.06), transparent 60%),
+    radial-gradient(circle at 85% 50%, rgba(201, 162, 74, 0.03), transparent 40%);
+  color: var(--text-primary);
+  font-family: var(--font-body);
   margin: 0;
   padding: 0;
 }
 
-/* --- MASTER NAVIGATION (Standardized) --- */
+/* --- MASTER NAVIGATION --- */
 .navbar {
     display: flex; justify-content: space-between; align-items: center; padding: 20px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(5, 11, 20, 0.95);
-    position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border-faint);
+    background: rgba(20, 13, 9, 0.96);
+    position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(12px);
 }
 .nav-container {
     width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 20px;
     display: flex; justify-content: space-between; align-items: center;
 }
 .logo {
-    font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.2rem;
-    color: #fff; display: flex; align-items: center; gap: 10px; text-decoration: none;
+    font-family: var(--font-display); font-weight: 700; font-size: 1.15rem;
+    color: var(--text-primary); display: flex; align-items: center; gap: 10px;
+    text-decoration: none; letter-spacing: 0.04em;
 }
 .nav-links { display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0; align-items: center; }
 .nav-links a {
-    font-size: 0.95rem; color: var(--text-muted); font-weight: 500;
-    text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none;
+    font-size: 0.9rem; color: var(--text-muted); font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.06em; text-decoration: none;
     transition: color 0.2s;
 }
-.nav-links a:hover { color: #fff; }
+.nav-links a:hover { color: var(--text-primary); }
 
-/* --- BOSS CONTROL DROPDOWN --- */
+/* --- ADMIN DROPDOWN --- */
 .dropdown { position: relative; display: inline-block; }
-.dropbtn { cursor: pointer; display: flex; align-items: center; gap: 5px; color: #facc15 !important; font-weight: 800 !important; }
+.dropbtn { cursor: pointer; display: flex; align-items: center; gap: 5px; color: var(--gold) !important; font-weight: 700 !important; }
 .dropdown-content {
-    display: none; position: absolute; top: 100%; right: 0; /* Align right */
-    background-color: #0f172a; min-width: 200px;
-    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.5);
-    border: 1px solid #334155; border-radius: 4px; z-index: 2000;
+    display: none; position: absolute; top: 100%; right: 0;
+    background-color: var(--bg-card); min-width: 210px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    border: 1px solid var(--border-mid); border-radius: 6px; z-index: 2000;
 }
 .dropdown-content a {
-    color: #cbd5e1; padding: 12px 16px; text-decoration: none;
-    display: block; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #1e293b;
+    color: var(--text-secondary); padding: 12px 16px; text-decoration: none;
+    display: block; font-size: 12px; text-transform: uppercase;
+    letter-spacing: 0.05em; border-bottom: 1px solid var(--border-faint);
+    transition: background 0.15s, color 0.15s;
 }
 .dropdown-content a:last-child { border-bottom: none; }
-.dropdown-content a:hover { background-color: #1e293b; color: #fff; }
+.dropdown-content a:hover { background-color: var(--bg-elevated); color: var(--text-primary); }
 .dropdown:hover .dropdown-content { display: block; }
 
 /* --- GLOBAL BUTTONS --- */
 .btn-primary {
-    background: var(--accent-cyan); color: #050b14; padding: 10px 20px;
+    background: var(--accent); color: var(--bg-deep); padding: 10px 20px;
     border-radius: 4px; font-weight: 600; text-decoration: none; display: inline-block;
+    transition: background 0.2s;
 }
-.btn-primary:hover { background: #fff; }
+.btn-primary:hover { background: var(--accent-bright); }
 
 /* --- MOBILE NAV --- */
 @media (max-width: 768px) {
@@ -81,4 +132,4 @@ body {
 }
 
 /* --- FOOTER --- */
-.footer { border-top: 1px solid var(--glass-border); padding: 40px 0; margin-top: 80px; text-align: center; color: var(--text-muted); font-size: 13px; }
+.footer { border-top: 1px solid var(--border-faint); padding: 40px 0; margin-top: 80px; text-align: center; color: var(--text-muted); font-size: 13px; }
