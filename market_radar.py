@@ -13,9 +13,53 @@ from datetime import timedelta
 import battlebox_pipeline
 import gravity_math
 import mtf_confluence_scanner
-from database import SessionLocal, MtfReading, DecisionJournal
+from database import SessionLocal, SessionLock, MtfReading, DecisionJournal
 
 TARGETS = ["BTCUSDT"]
+
+async def _try_locked_shortcut(symbol: str):
+    """
+    If a SessionLock already exists for today's us_ny_futures session, read it
+    directly from the DB and fetch only a single candle for the live price.
+    Returns a battlebox-compatible response dict, or None if no lock exists.
+    Bypasses the 1500-candle MEXC fetch when the session is already established.
+    """
+    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    norm = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
+    try:
+        with SessionLocal() as db:
+            lock = db.query(SessionLock).filter(
+                SessionLock.symbol == norm,
+                SessionLock.session_id == "us_ny_futures",
+                SessionLock.date_key == today
+            ).first()
+        if not lock:
+            return None
+        pkt = json.loads(lock.packet_data)
+    except Exception:
+        return None
+
+    try:
+        candles = await battlebox_pipeline.fetch_live_5m(symbol, limit=1)
+        price = float(candles[-1]["close"]) if candles else 0.0
+    except Exception:
+        price = 0.0
+
+    return {
+        "status": "OK",
+        "price": price,
+        "battlebox": {
+            "levels": pkt.get("levels", {}),
+            "context": pkt.get("context", {})
+        }
+    }
+
+async def _get_bb_data(symbol: str):
+    """Shortcut-first battlebox fetch — avoids full MEXC pull when lock exists."""
+    shortcut = await _try_locked_shortcut(symbol)
+    if shortcut:
+        return shortcut
+    return await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id="us_ny_futures")
 
 def _make_indicator_string(levels):
     if not levels: return "0,0,0,0,0,0"
@@ -250,7 +294,7 @@ def _build_action_sentence(direction: str, energy: str, bo: float, bd: float) ->
 
 
 async def analyze_target(symbol):
-    data = await battlebox_pipeline.get_live_battlebox(symbol, "MANUAL", manual_id="us_ny_futures")
+    data = await _get_bb_data(symbol)
     if data.get("status") == "ERROR": return {"ok": False}
     if data.get("status") == "CALIBRATING": return {"ok": True, "result": {"status": "CALIBRATING"}}
 
@@ -276,8 +320,10 @@ async def analyze_target(symbol):
 async def scan_sector():
     radar_grid = []
 
-    # Run battlebox scans and MTF briefs in parallel for all targets
-    bb_tasks = [battlebox_pipeline.get_live_battlebox(sym, "MANUAL", manual_id="us_ny_futures") for sym in TARGETS]
+    # Run battlebox scans and MTF briefs in parallel for all targets.
+    # _get_bb_data uses the session-lock shortcut when available, skipping the
+    # 1500-candle MEXC fetch for sessions that are already established.
+    bb_tasks = [_get_bb_data(sym) for sym in TARGETS]
     mtf_tasks = [get_mtf_brief(sym) for sym in TARGETS]
     all_results = await asyncio.gather(*bb_tasks, *mtf_tasks, return_exceptions=True)
     bb_results = all_results[:len(TARGETS)]

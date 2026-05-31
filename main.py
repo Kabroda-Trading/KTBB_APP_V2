@@ -494,7 +494,7 @@ def get_user_context(request: Request, db: Session):
 async def home(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if ctx["is_logged_in"]:
-        return RedirectResponse(url="/suite", status_code=303)
+        return RedirectResponse(url="/suite/radar", status_code=303)
     return RedirectResponse(url="/login", status_code=303)
 
 # --- SUITE ROUTES ---
@@ -661,11 +661,25 @@ async def api_gravity_scan(symbol: str = "BTC/USDT"):
     macro_fibs = gravity_math.calculate_macro_fibs(candles_1d, candles_15m)
     
     return JSONResponse({
-        "ok": True, 
-        "symbol": symbol, 
-        "kde_data": kde_data, 
+        "ok": True,
+        "symbol": symbol,
+        "kde_data": kde_data,
         "macro_fibs": macro_fibs
     })
+
+
+@app.get("/api/live-price")
+async def api_live_price():
+    """Lightweight BTC price tick — single candle fetch, no macro math."""
+    try:
+        candles = await battlebox_pipeline.fetch_live_5m("BTCUSDT", limit=1)
+        if not candles:
+            return JSONResponse({"ok": False, "price": 0})
+        last = candles[-1]
+        return JSONResponse({"ok": True, "price": float(last["close"]), "time": int(last["time"])})
+    except Exception as e:
+        return JSONResponse({"ok": False, "price": 0, "error": str(e)})
+
 
 # --- KABRODA ARCHITECTURE: FOREIGN INTEL PARSER & MAS ROUTING ---
 class ForeignIntelPayload(BaseModel):
@@ -1142,9 +1156,19 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
             cumulative += 1.0 if row.status == "CLOSED_WIN" else -1.0
             pnl_series.append({"date": row.date_key, "cumulative": round(cumulative, 2)})
         trades = db.query(CampaignLog).filter(CampaignLog.symbol == "BTC/USDT").order_by(CampaignLog.id.desc()).limit(50).all()
-        trades_data = [{"date_key": t.date_key, "bias": t.bias, "mas_approval_status": t.mas_approval_status,
-            "status": t.status, "entry_price": t.entry_price, "stop_loss": t.stop_loss,
-            "t1": t.t1, "realized_pnl": t.realized_pnl} for t in trades]
+        trades_data = []
+        for t in trades:
+            if t.status == "CLOSED_WIN":
+                r_pnl = "+1.0R"
+            elif t.status == "CLOSED_LOSS":
+                r_pnl = "-1.0R"
+            else:
+                r_pnl = None
+            trades_data.append({
+                "date_key": t.date_key, "bias": t.bias, "mas_approval_status": t.mas_approval_status,
+                "status": t.status, "entry_price": t.entry_price, "stop_loss": t.stop_loss,
+                "t1": t.t1, "realized_pnl": r_pnl
+            })
         return JSONResponse({"ok": True, "approval_counts": approval_counts,
                              "pnl_series": pnl_series, "trades": trades_data})
     except Exception as e:

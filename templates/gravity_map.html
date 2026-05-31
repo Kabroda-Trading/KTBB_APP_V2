@@ -79,12 +79,13 @@
 
     <script>
         let chart, candlestickSeries;
-        let globalKDE = null; 
-        let maxDensity = 0;   
-        
+        let globalKDE = null;
+        let maxDensity = 0;
+
         let globalPeaks = [];
         let globalFibs = null;
-        let globalMacroBeams = []; 
+        let globalMacroBeams = [];
+        let lastDailyBar = null;
 
         let lastYCoord = null;
         let syncAnimation = null;
@@ -262,8 +263,9 @@
                 
                 if (data.macro_fibs && data.macro_fibs.chart_data && data.macro_fibs.chart_data.length > 0) {
                     candlestickSeries.setData(data.macro_fibs.chart_data);
-                    currentLivePrice = data.macro_fibs.chart_data[data.macro_fibs.chart_data.length - 1].close;
-                    if (!isBackgroundUpdate) chart.timeScale().fitContent(); 
+                    lastDailyBar = Object.assign({}, data.macro_fibs.chart_data[data.macro_fibs.chart_data.length - 1]);
+                    currentLivePrice = lastDailyBar.close;
+                    if (!isBackgroundUpdate) chart.timeScale().fitContent();
                 }
                 
                 if (data.kde_data && data.kde_data.curve) {
@@ -325,34 +327,31 @@
                     }
 
                     if (data.kde_data && data.kde_data.peaks.length > 0) {
-                        sidebar.innerHTML += `
-                        <div class="acc-header" onclick="toggleAcc(this)" style="margin-top:20px; border-color: rgba(59, 130, 246, 0.5); color: #60a5fa;">
-                            <span>MICRO GRAVITY DENSITY</span><span class="acc-icon">▲</span>
-                        </div>
-                        <div class="acc-content active">`;
-                        
                         let peakHTML = '';
                         data.kde_data.peaks.forEach(peak => {
                             let lineColor = '#3b82f6';
                             if (peak.intensity === 'HEAVY') lineColor = '#eab308';
                             if (peak.intensity === 'MAXIMUM') lineColor = '#ef4444';
-                            
-                            // Inject specific density intensity into the chart label
-                            candlestickSeries.createPriceLine({ 
-                                price: peak.price, 
-                                color: lineColor, 
-                                lineWidth: 2, 
-                                lineStyle: LightweightCharts.LineStyle.Dotted, 
-                                title: `${peak.intensity} DENSITY` 
+
+                            candlestickSeries.createPriceLine({
+                                price: peak.price,
+                                color: lineColor,
+                                lineWidth: 2,
+                                lineStyle: LightweightCharts.LineStyle.Dotted,
+                                title: `${peak.intensity} DENSITY`
                             });
-                            
+
                             peakHTML += `
                             <div class="zone-card zone-${peak.intensity}">
                                 <div><span class="z-price">$${peak.price.toFixed(2)}</span><span class="z-score">PULL: ${peak.heat_score}</span></div>
                                 <div style="font-size:10px; color:#94a3b8; margin-top:4px; text-transform:uppercase;">Structure: ${peak.intensity} DENSITY</div>
                             </div>`;
                         });
-                        sidebar.innerHTML += peakHTML + `</div>`;
+                        sidebar.innerHTML += `
+                        <div class="acc-header" onclick="toggleAcc(this)" style="margin-top:20px; border-color: rgba(59, 130, 246, 0.5); color: #60a5fa;">
+                            <span>MICRO GRAVITY DENSITY</span><span class="acc-icon">▲</span>
+                        </div>
+                        <div class="acc-content active">${peakHTML}</div>`;
                     }
                 }
                 evaluateKineticFriction();
@@ -421,7 +420,22 @@
             }
         }
 
-        document.addEventListener('DOMContentLoaded', () => { setTimeout(() => { initChart(); loadGrid(); loadWaveContext(); }, 150); setInterval(() => { loadGrid(true); }, 60000); });
+        async function tickLivePrice() {
+            if (!candlestickSeries || !lastDailyBar) return;
+            try {
+                const res = await fetch('/api/live-price');
+                const data = await res.json();
+                if (!data.ok || !data.price) return;
+                currentLivePrice = data.price;
+                lastDailyBar.high  = Math.max(lastDailyBar.high,  data.price);
+                lastDailyBar.low   = Math.min(lastDailyBar.low,   data.price);
+                lastDailyBar.close = data.price;
+                candlestickSeries.update(lastDailyBar);
+                evaluateKineticFriction();
+            } catch(e) { /* non-fatal */ }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => { setTimeout(() => { initChart(); loadGrid(); loadWaveContext(); }, 150); setInterval(tickLivePrice, 60000); });
         window.addEventListener('resize', () => { if (chart) { const container = document.getElementById('chart-container'); chart.applyOptions({ width: container.clientWidth, height: container.clientHeight }); resizeCanvas(); } });
     </script>
 </body>

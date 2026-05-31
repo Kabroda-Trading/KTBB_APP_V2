@@ -129,37 +129,7 @@
         .ab-toggle:hover { color: #38bdf8; }
         #analystBriefBody.collapsed .ab-collapsible { max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-left-width: 0; }
 
-        .drawer-toggle { position: fixed; top: 50%; right: 0; transform: translateY(-50%); background: #0ea5e9; color: #000; padding: 15px 10px; writing-mode: vertical-rl; text-orientation: mixed; cursor: pointer; border-radius: 8px 0 0 8px; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 14px; z-index: 10001; border: none; letter-spacing: 2px; transition: 0.2s; box-shadow: -2px 0 10px rgba(14, 165, 233, 0.3); }
-        .drawer-toggle:hover { padding-right: 15px; background: #38bdf8; }
-        .academy-drawer { position: fixed; top: 0; right: -450px; width: 450px; height: 100vh; background: #0f172a; border-left: 1px solid #334155; z-index: 10000; transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: -10px 0 30px rgba(0,0,0,0.8); padding: 30px; overflow-y: auto; box-sizing: border-box; }
-        .academy-drawer.open { right: 0; }
-        .drawer-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 15px; margin-bottom: 25px; }
-        .drawer-title { font-family: 'JetBrains Mono'; font-size: 20px; color: #fff; margin: 0; text-transform: uppercase; }
-        .drawer-close { background: none; border: none; color: #94a3b8; font-size: 24px; cursor: pointer; transition: 0.2s; }
-        .drawer-close:hover { color: #ef4444; }
-        .video-box { margin-bottom: 30px; }
-        .video-header { font-family: 'Rajdhani'; font-weight: 800; font-size: 16px; color: #0ea5e9; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 1px; }
-        .video-wrapper { position: relative; width: 100%; padding-bottom: 56.25%; height: 0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; border: 1px solid #334155; background: #000; }
-        .video-wrapper iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
-        .video-desc { font-size: 13px; color: #94a3b8; line-height: 1.5; }
-        .pdf-btn { display: block; text-align: center; background: #1e293b; color: #fff; text-decoration: none; padding: 15px; border-radius: 4px; font-family: 'JetBrains Mono'; font-weight: 800; border: 1px solid #334155; transition: 0.2s; margin-bottom: 30px; }
-        .pdf-btn:hover { background: #22c55e; color: #000; border-color: #22c55e; }
 
-        /* BTC MASTER SWITCH BANNER — kept as-is */
-        .master-switch-banner {
-            border-left: 4px solid #eab308;
-            background: rgba(234,179,8,0.08);
-            padding: 14px 24px;
-            border-radius: 6px;
-            margin-bottom: 14px;
-            font-family: 'JetBrains Mono';
-            font-size: 14px;
-            font-weight: 700;
-            color: #eab308;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            display: none;
-        }
 
         @media (max-width: 1100px) {
             .cockpit { grid-template-columns: 1fr; grid-template-areas: "header" "brief" "left" "center" "right"; }
@@ -359,28 +329,7 @@
             /// AUDITING SECTOR PHYSICS...
         </div>
 
-        <!-- BTC MASTER SWITCH BANNER -->
-        <div id="btcMasterSwitch" class="master-switch-banner"></div>
-
         <div id="radarTargetGrid" class="radar-grid"></div>
-    </div>
-
-    <button class="drawer-toggle" onclick="toggleDrawer()">📚 ACADEMY GUIDE</button>
-    <div id="academyDrawer" class="academy-drawer">
-        <div class="drawer-header">
-            <h3 class="drawer-title">Execution SOP</h3>
-            <button class="drawer-close" onclick="toggleDrawer()">✕</button>
-        </div>
-
-        <a href="/static/Kabroda_SOP.pdf" target="_blank" class="pdf-btn">📄 DOWNLOAD MASTER SOP (PDF)</a>
-
-        <div class="video-box">
-            <div class="video-header">Module 1: The Radar Scan</div>
-            <div class="video-wrapper">
-                <iframe src="https://www.youtube.com/embed/HLM_S2lySdQ?si=T1GLT7Q_KWzZZ7g9" title="YouTube video player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
-            </div>
-            <div class="video-desc">Learn how to read the Runway Gap % and identify Primal Zones vs. Death Zones.</div>
-        </div>
     </div>
 
     <div id="targetModal" class="modal-overlay">
@@ -511,11 +460,6 @@
 
         if(localStorage.getItem('kabroda_locked_bal')) balInput.value = localStorage.getItem('kabroda_locked_bal');
         if(localStorage.getItem('kabroda_locked_risk')) riskInput.value = localStorage.getItem('kabroda_locked_risk');
-
-        function toggleDrawer() {
-            const drawer = document.getElementById('academyDrawer');
-            drawer.classList.toggle('open');
-        }
 
         function copyIntel(symbol) {
             const data = window.radarMemory[symbol];
@@ -908,34 +852,6 @@
         }
 
         // ================================================================
-        // BTC MASTER SWITCH BANNER — kept as-is
-        // ================================================================
-        function renderMasterSwitch(results) {
-            const btcItem  = results.find(r => r.symbol === 'BTCUSDT') || {};
-            const btcBrief = btcItem.mtf_brief || {};
-            const btcScore = btcBrief.confluence_score     || 0;
-            const btcDir   = btcBrief.confluence_direction || 'NEUTRAL';
-
-            const switchEl = document.getElementById('btcMasterSwitch');
-            let switchBg, switchBorder, switchText;
-            if (btcScore >= 3 && btcDir === 'BULLISH') {
-                switchBg = 'rgba(34,197,94,0.08)'; switchBorder = '#22c55e';
-                switchText = 'BTC MASTER SWITCH: BULLISH ' + btcScore + '/5 — Risk-on bias active';
-            } else if (btcScore >= 3 && btcDir === 'BEARISH') {
-                switchBg = 'rgba(239,68,68,0.08)'; switchBorder = '#ef4444';
-                switchText = 'BTC MASTER SWITCH: BEARISH ' + btcScore + '/5 — Risk-off bias dominant';
-            } else {
-                switchBg = 'rgba(234,179,8,0.08)'; switchBorder = '#eab308';
-                switchText = 'BTC MASTER SWITCH: NEUTRAL ' + btcScore + '/5 — Mixed signals, no directional edge';
-            }
-            switchEl.style.background        = switchBg;
-            switchEl.style.borderLeftColor   = switchBorder;
-            switchEl.style.color             = switchBorder;
-            switchEl.textContent             = switchText;
-            switchEl.style.display           = 'block';
-        }
-
-        // ================================================================
         // MAIN SCAN
         // ================================================================
         async function forceScan() {
@@ -954,9 +870,6 @@
                 data.results.forEach(t => {
                     window.radarMemory[t.symbol] = t;
                 });
-
-                // BTC Master Switch banner
-                renderMasterSwitch(data.results);
 
                 // Fetch JEWEL gate status for BTC before rendering rows
                 let jewelGateOpen = null;
