@@ -23,6 +23,36 @@ match reality — that hides the bug. Fix the system, then update ACTUAL.
 
 ---
 
+## MISSION / CORE THESIS
+
+KABRODA's mission: each trading day, assess whether a tradeable 15-minute edge
+exists. If it does, characterize how strong the edge is and how to manage it
+accordingly — entry, stop placement, target selection, and profit-taking — matched
+to that day's conditions.
+
+The goal is selective, high-quality participation: neither over-trading (taking
+noise / low-edge setups) nor paralysis (waiting for a "perfect" setup that never
+comes). The default posture is **"no trade UNLESS there is a defensible edge"**
+— but when an edge exists, even a modest one, it should be traded at the size and
+aggression the edge justifies:
+
+- **Weaker-but-real setup** → take 100% at T1; do not run a runner.
+- **Strong, fully-aligned setup** → scale out, let a runner go to a further target.
+- **Choppy day / no sane stop placement** → stand down explicitly, because entering
+  carries negative expected value AND an opportunity cost — capital locked out of a
+  better setup forming later.
+
+Every "no-trade" and every trade must be articulated with its reasoning in the
+daily brief — **the system teaches, not just signals.** The system audits its own
+prior calls to refine what "an edge" looks like over time (indicator thresholds,
+timeframe-alignment rules, etc.).
+
+**This is NOT a hard-coded checkbox gate.** It is a graduated, probabilistic
+judgment. Smart / interpreter agents exist to make and articulate this judgment on
+pre-digested domain data — not to produce a binary pass/fail signal.
+
+---
+
 ## OPEN DESIGN QUESTIONS (the things we are actually trying to resolve)
 
 - **Q1 — Hunt vs. Gate.** Does the system *gate* (willing to say "higher
@@ -443,7 +473,8 @@ code would need to split the Senior Analyst into two sequential calls with disti
 prompts and context packages.
 
 ## SF-5 — Proposed MTF Interpreter Layer (Node 1C → 2A interface) `[ ? ]`
-*Added 2026-06-01. Design direction confirmed by owner. Not yet built.*
+*Added 2026-06-01. Output spec anchored to Mission / Core Thesis 2026-06-01.*
+*Design direction confirmed by owner. Not yet built.*
 
 **The gap:** The Senior Analyst currently receives multi-timeframe indicator data
 as raw JSON-formatted text lines (`4H Trend: BULLISH | Momentum: POSITIVE | RSI:
@@ -453,9 +484,27 @@ writing the brief. That is three cognitive jobs in one LLM call.
 
 **The proposed fix:** Insert a dedicated **MTF Interpreter** agent between the
 Python math layer and the Senior Analyst. The interpreter reads the raw fuel gauge
-data for its specific domain and hands the SA a clean synthesized statement:
-*"4H/1H aligned BULLISH, 15M PRIMED, SWEET_ZONE harmonic, no exit warnings,
-4/5 TF direction vote. Setup supports a long breakout with velocity."*
+data for its specific domain and produces a graduated, probabilistic read that the
+SA uses as pre-digested intelligence.
+
+**What the interpreter must output (anchored to Mission / Core Thesis):**
+The interpreter does NOT produce a binary "aligned / not aligned" flag. Its job
+is to report *how strong* the multi-timeframe alignment is, *where it conflicts*,
+and *what that implies* — concretely — for stop placement, target reachability,
+and conviction today. The SA uses this to calibrate aggression, not just direction.
+
+Examples of the required output quality:
+- *"4H/1H fully aligned BULLISH, 15M PRIMED, SWEET_ZONE harmonic. 4/5 TF
+  direction vote. No exit warnings. Airspace to T2 is structurally supported by
+  momentum — this is a full-scale setup. Stop below 30M low is defensible."*
+- *"4H BULLISH but 1H has flipped BEARISH with NEGATIVE momentum — tide/wave
+  disagreement. 15M kinematic_grade is OVEREXTENDED with ribbon spread 1.8%.
+  This is a weaker-edge day: if BO triggers, T1 only, no runner. Stop placement
+  is tighter than ideal — be aware of stop-hunt risk at 30M low."*
+- *"4H and 1H in direct conflict, 15M TANGLED, HOSTILE_CEILING harmonic.
+  No coherent directional energy across any timeframe. Stop cannot be placed at
+  a level that gives the trade room without excessive R. Negative expected value —
+  STAND_DOWN is the correct call."*
 
 **Architecture (when built):**
 ```
@@ -464,7 +513,8 @@ battlebox_pipeline.py  →  fuel_gauge + harmonic_data (Python math, unchanged)
                     mtf_interpreter.py  (NEW — 1 LLM call)
                     Reads: fuel_gauge, micro_state, 1h_fuel_status,
                            last 6 JEWEL snapshots
-                    Outputs: synthesized MTF read (plain English string)
+                    Outputs: graduated alignment read — strength, conflicts,
+                             implications for stop / target / conviction
                                 ↓
                     _build_senior_analyst_context()  (MODIFIED)
                     Inserts interpreted read in place of raw energy block
@@ -473,6 +523,7 @@ battlebox_pipeline.py  →  fuel_gauge + harmonic_data (Python math, unchanged)
 ```
 
 **Implementation rules (non-negotiable):**
+- Output is graduated, not binary — strength + conflict + stop/target implication
 - Fail-open: interpreter error → `mtf_read = None` → raw format used as
   fallback → SA context is never degraded below today's baseline
 - No schema changes, no new DB tables
@@ -481,7 +532,8 @@ battlebox_pipeline.py  →  fuel_gauge + harmonic_data (Python math, unchanged)
   (see `elliott_wave_specialist.py` as the template)
 
 **Node 1C status change when built:** `[ ~ ]` → `[ OK ]` (TF data will be
-genuinely interpreted before the SA sees it, not just narrated)
+genuinely interpreted — with strength, conflict, and implication — before the SA
+sees it, not just narrated as raw numbers)
 
 ---
 
@@ -491,3 +543,5 @@ genuinely interpreted before the SA sees it, not just narrated)
 | Date | Node(s) | What changed | Who | Why | Result |
 |------|---------|--------------|-----|-----|--------|
 | 2026-06-01 | 1C, SF-5 | Feasibility study: MTF Interpreter layer. Confirmed CrewAI removed; all agents use agent_core pattern. Identified insertion point in run_mas_analysis(). Added SF-5 to SYSTEM_FLOW. Updated W-1 in WORK_LOG. | owner + Claude Code | W-1 design direction confirmed | No code changed — docs only. Ready to build on approval. |
+| 2026-06-01 | MISSION | Added MISSION / CORE THESIS section (top of doc). Defines graduated-edge posture: weaker edge → T1 only; strong edge → scale/runner; no-sane-stop → stand down. Establishes probabilistic judgment mandate. | owner + Claude Code | Anchor the system's purpose before design questions | Docs only. |
+| 2026-06-01 | SF-5 | Updated MTF Interpreter output spec: graduated alignment read (strength + conflict + stop/target/conviction implication) — NOT a binary flag. Anchored to Mission / Core Thesis. | owner + Claude Code | Prevent interpreter from producing a checkbox instead of a read | Docs only. |
