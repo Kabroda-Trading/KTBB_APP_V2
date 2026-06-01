@@ -156,6 +156,15 @@
             </div>
         </div>
 
+        <!-- ── INTERNAL SYSTEM AUDITS ───────────────────────── -->
+        <div class="table-section" id="auditSection">
+            <div class="table-header" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" onclick="toggleAuditList()">
+                <span>Internal System Audits</span>
+                <span id="auditChevron" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#8a6f57; letter-spacing:1px;">▼ LOADING</span>
+            </div>
+            <div id="auditList"></div>
+        </div>
+
         <!-- ── NEWSLETTER TABLE ──────────────────────────── -->
         <div class="table-section">
             <div class="table-header">Newsletter Archive</div>
@@ -476,6 +485,91 @@
         });
     }
 
+    // ── INTERNAL SYSTEM AUDITS ────────────────────────────
+    window.auditArchive = {};
+    let auditListVisible = true;
+
+    function toggleAuditList() {
+        const list     = document.getElementById('auditList');
+        const chevron  = document.getElementById('auditChevron');
+        auditListVisible = !auditListVisible;
+        list.style.display   = auditListVisible ? 'block' : 'none';
+        const count = Object.keys(window.auditArchive).length;
+        chevron.textContent  = auditListVisible
+            ? `▼ ${count} REPORT${count !== 1 ? 'S' : ''}`
+            : `▶ ${count} REPORT${count !== 1 ? 'S' : ''} (COLLAPSED)`;
+    }
+
+    async function loadAudits() {
+        const list    = document.getElementById('auditList');
+        const chevron = document.getElementById('auditChevron');
+
+        try {
+            const r = await fetch('/api/dashboard/audits');
+            const d = await r.json();
+
+            if (!d.ok || !d.audits.length) {
+                list.innerHTML = `<div style="padding:20px 0; color:#5a3d2c; font-family:'Playfair Display',serif; font-style:italic; font-size:14px; text-align:center;">No system audits yet. The first will appear after the next Sunday 23:00 UTC scheduler run.</div>`;
+                chevron.textContent = '▼ 0 REPORTS';
+                return;
+            }
+
+            window.auditArchive = {};
+            d.audits.forEach(a => { window.auditArchive[a.id] = a; });
+
+            const count = d.audits.length;
+            chevron.textContent = `▼ ${count} REPORT${count !== 1 ? 'S' : ''}`;
+
+            list.innerHTML = d.audits.map((a, idx) => {
+                // First non-empty line as preview title
+                const firstLine = (a.audit_md || '')
+                    .split('\n')
+                    .map(l => l.trim())
+                    .find(l => l.length > 0) || 'System Audit';
+                const preview = firstLine.replace(/^[0-9]+\.\s*/, '').slice(0, 90);
+                const isLast  = idx === count - 1;
+
+                return `
+                <div onclick="openAuditModal(${a.id})"
+                     style="display:flex; align-items:center; gap:16px; padding:14px 20px;
+                            background:#251a14; border:1px solid #4d3526;
+                            border-top:${idx === 0 ? '1px solid #4d3526' : 'none'};
+                            border-radius:${idx === 0 ? '0 0 0 0' : '0'};
+                            ${isLast ? 'border-radius:0 0 8px 8px;' : ''}
+                            cursor:pointer; transition:background 0.15s;"
+                     onmouseover="this.style.background='#2d1e15'"
+                     onmouseout="this.style.background='#251a14'">
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:10px;
+                                color:#6b5345; min-width:90px; letter-spacing:1px;">
+                        ${a.date_key}
+                    </div>
+                    <div style="flex:1; font-family:'Inter',sans-serif; font-size:13px;
+                                color:#c9a880; overflow:hidden; text-overflow:ellipsis;
+                                white-space:nowrap;">
+                        ${preview}
+                    </div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:11px;
+                                color:#6b5345;">›</div>
+                </div>`;
+            }).join('');
+
+        } catch(e) {
+            list.innerHTML = `<div style="padding:20px; color:#8c4a3a; font-family:'JetBrains Mono',monospace; font-size:12px;">Failed to load audits.</div>`;
+            chevron.textContent = '▼ ERROR';
+        }
+    }
+
+    function openAuditModal(id) {
+        const a = window.auditArchive[id];
+        if (!a) return;
+        document.getElementById('nlModalMeta').textContent =
+            'SYSTEM AUDIT  ·  ' + (a.date_key || '—') + '  ·  ' + (a.created_at ? a.created_at.slice(0, 16).replace('T', ' ') + ' UTC' : '');
+        document.getElementById('nlModalHeadline').textContent = 'Systemic Adviser Report — ' + (a.date_key || '');
+        document.getElementById('nlModalBody').textContent     = a.audit_md || '(No content)';
+        document.getElementById('nlModal').style.display       = 'block';
+        document.body.style.overflow = 'hidden';
+    }
+
     // ── NEWSLETTERS TABLE ─────────────────────────────────
     window.nlArchive = {};
 
@@ -530,6 +624,7 @@
             loadAccuracy(),
             loadCosts(),
             loadJewel(),
+            loadAudits(),
             loadNewsletters(),
         ]);
     }

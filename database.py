@@ -434,3 +434,20 @@ class NewsletterLog(Base):
     ghost_post_id  = Column(String, nullable=True)     # Populated after Ghost API publish
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
+# SYSTEM AUDIT LOG (PERFORMANCE AUDITOR VAULT)
+# Permanent home for weekly Performance Auditor output.
+# Decoupled from MacroNarrativeLog — no dependency on a
+# senior_analyst row existing. New table; created by
+# Base.metadata.create_all(), no ALTER TABLE needed.
+# ---------------------------------------------------------
+class SystemAuditLog(Base):
+    __tablename__ = "system_audit_log"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    symbol     = Column(String,  index=True, nullable=False)
+    date_key   = Column(String,  index=True, nullable=False)
+    audit_md   = Column(String,  nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

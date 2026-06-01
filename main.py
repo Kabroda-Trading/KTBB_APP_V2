@@ -36,7 +36,7 @@ from jewel_specialist import run_jewel_snapshot
 from elliott_wave_specialist import run_elliott_wave_analysis
 from performance_auditor import run_performance_audit
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -314,20 +314,21 @@ async def run_weekly_scheduler() -> None:
                 except Exception as e:
                     print(f"[SCHEDULER] Elliott Wave failed: {e}")
 
-            # Performance Auditor — dedup: skip if performance_note already written this week
+            # Performance Auditor — dedup: skip if a SystemAuditLog row already
+            # exists for this date_key. Checks the vault directly — immune to
+            # the race condition that previously caused double-fires when two
+            # instances both found performance_note IS NULL before either committed.
             _pa_db = SessionLocal()
             try:
-                _pa_ran = _pa_db.query(MacroNarrativeLog).filter(
-                    MacroNarrativeLog.symbol == "BTC/USDT",
-                    MacroNarrativeLog.authored_by == "senior_analyst",
-                    MacroNarrativeLog.performance_note.isnot(None),
-                    MacroNarrativeLog.created_at >= since_week,
+                _pa_ran = _pa_db.query(SystemAuditLog).filter(
+                    SystemAuditLog.symbol == "BTC/USDT",
+                    SystemAuditLog.date_key == date_key,
                 ).first()
             finally:
                 _pa_db.close()
 
             if _pa_ran:
-                print(f"[SCHEDULER] Performance Auditor: performance_note already written this week — skipping")
+                print(f"[SCHEDULER] Performance Auditor: audit already in SystemAuditLog for {date_key} — skipping")
             else:
                 print(f"[SCHEDULER] Performance Auditor firing for {date_key} (Sunday 23:00 UTC)...")
                 try:
@@ -1311,6 +1312,28 @@ async def api_dashboard_newsletters(request: Request, db: Session = Depends(get_
                  "approval_status": r.approval_status, "publish_status": r.publish_status,
                  "newsletter_md": r.newsletter_md or ""} for r in rows]
         return JSONResponse({"ok": True, "newsletters": data})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/dashboard/audits")
+async def api_dashboard_audits(request: Request, db: Session = Depends(get_db)):
+    """Returns the last 5 SystemAuditLog rows for the Dashboard audit viewer."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    try:
+        rows = db.query(SystemAuditLog).order_by(SystemAuditLog.id.desc()).limit(5).all()
+        data = [
+            {
+                "id":         r.id,
+                "date_key":   r.date_key,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "audit_md":   r.audit_md or "",
+            }
+            for r in rows
+        ]
+        return JSONResponse({"ok": True, "audits": data})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
