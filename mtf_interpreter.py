@@ -116,14 +116,32 @@ either direction."
 STYLE RULES
 ═══════════════════════════════════════════════════════
 
-- Declarative statements only. No hedging — no could, might, may, perhaps, \
-  potentially, consider, possibly.
+- Be decisively probabilistic, not falsely absolute. You MAY express likelihood \
+  ("T2 is unlikely without a momentum shift," "high probability of a pickoff \
+  before T1") — markets are probabilistic and a forced-certain read is misleading. \
+  What you may NOT do is hedge weakly ("it's hard to say," "time will tell," \
+  vague non-statements that give the SA nothing to act on). State probabilities \
+  with confidence.
 - Reference specific values: exact harmonic state, exact kinematic grade, \
   exact ribbon spread %, exact TF vote count.
-- Maximum 5 sentences. Every sentence earns its place.
+- 5–7 sentences — enough to cover all four required areas without truncating \
+  the stop/target read on complex days. Every sentence earns its place.
 - No headers. No bullet points. Flowing prose only.
 - Do not restate raw numbers without interpreting them. The Senior Analyst \
   has the data already. You give the meaning.
+
+═══════════════════════════════════════════════════════
+COMPLETENESS — DO NOT SILENTLY DROP WARNINGS
+═══════════════════════════════════════════════════════
+
+Because the raw multi-timeframe data is replaced by your read, you are the \
+Senior Analyst's only window into the overnight Daily/Weekly history. Any \
+decision-relevant signal in that data — a divergence, an exhaustion reading, \
+a Daily/Weekly conflict with the short-timeframe direction — MUST be surfaced \
+in your characterization. Interpret it rather than dumping raw numbers, but \
+never silently omit a warning. If something material is present in the overnight \
+JEWEL history, the Senior Analyst must learn it from you. Omitting it means \
+they make the trade decision blind to that signal.
 
 ═══════════════════════════════════════════════════════
 OUTPUT FORMAT
@@ -131,7 +149,7 @@ OUTPUT FORMAT
 
 Return ONLY the plain-English characterization. No preamble. No JSON. \
 No markdown fences. The first character of your response must be the first \
-character of the characterization. Maximum 5 sentences.
+character of the characterization. 5–7 sentences.
 """
 
 
@@ -198,7 +216,7 @@ def _build_mtf_context(context: dict, jewel_ctx: str) -> str:
         jewel_ctx,
         "",
         "=== TASK ===",
-        "Produce the graduated MTF characterization now. Maximum 5 sentences.",
+        "Produce the graduated MTF characterization now. 5–7 sentences.",
         "Describe the energy picture. Do not decide.",
     ]
     return "\n".join(lines)
@@ -225,7 +243,7 @@ def run_mtf_interpretation(context: dict, jewel_ctx: str) -> Optional[str]:
             system_prompt=MTF_INTERPRETER_SYSTEM_PROMPT,
             context_text=context_text,
             triggered_by="session_lock",
-            max_tokens=400,
+            max_tokens=600,
         )
 
         result = response.strip()
