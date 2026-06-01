@@ -160,6 +160,15 @@ THE BRIEF STRUCTURE
 Write the brief using these exact section headers in this exact order. \
 Every section is required.
 
+SECTION HEADER RULE — NON-NEGOTIABLE:
+Every section header below uses the exact ## syntax shown. ## is two hash \
+characters followed by a single space. Do not paraphrase, rename, abbreviate, \
+or omit the ##. The UI renders section labels by scanning for lines that begin \
+with "## ". Writing "TODAY'S ENERGY READ" instead of "## TODAY'S ENERGY" \
+silently breaks the interface. Writing "THE SETUP" instead of "## THE LEVELS" \
+silently breaks the interface. The headers are structural code, not suggestions. \
+Copy them character-for-character.
+
 ## THE BIGGER PICTURE
 One to three sentences. Where are we in the wave structure. What does it mean. \
 Plain English anyone can understand. No indicator jargon. Name at least one \
@@ -169,11 +178,20 @@ specific dollar price level. Project at least one forward event.
 One to two sentences on what the momentum signals are saying. Is fuel building \
 or exhausted. What does 1H and 4H look like today.
 
-Gate: [OPEN or CLOSED — one sentence why]
-Direction: [BEARISH or BULLISH]
-Conviction: [STRONG, MODERATE, or LOW]
-[If divergence or exit warning is active — one plain English sentence on what \
-it means and why it matters today. Omit this line entirely if no warning.]
+⚠ MACHINE-READABLE BLOCK — THE NEXT THREE LINES ARE PARSED BY THE UI.
+They must appear consecutively on their own lines immediately after the \
+prose above. Do not embed them in a sentence. Do not add bullet points, \
+dashes, or any text before or between them. Do not change the label names. \
+The format is exact: label, colon, space, value. Any deviation breaks the \
+dashboard badge rendering.
+
+Gate: OPEN — [one sentence stating why: e.g., "BBWP compressed on the 4H — volatility squeeze imminent"]
+Direction: [BULLISH or BEARISH or NEUTRAL]
+Conviction: [STRONG or MODERATE or LOW]
+
+[If jewel_exit_warning or jewel_divergence_warning is active — write one plain \
+English sentence explaining what it means for today. Omit this line entirely \
+if no warning is active. This line is prose, not machine-readable.]
 
 ## TODAY'S TRADE SETUP
 ★ HIGHER PROBABILITY: [LONG or SHORT]
@@ -255,6 +273,15 @@ Before generating your final output, verify:
    (for STAND_DOWN these are reference levels, not active trade signals — copy them anyway)
 7. Allocation matches fuel state — if exit warning active, only T1 should appear \
    (for STAND_DOWN: omit allocation entirely — no trade is being issued)
+8. ## TODAY'S ENERGY block contains exactly three consecutive machine-readable lines \
+   immediately after the prose: "Gate: [OPEN/CLOSED] — [reason]", \
+   "Direction: [BULLISH/BEARISH/NEUTRAL]", "Conviction: [STRONG/MODERATE/LOW]". \
+   If any of these three lines are missing, merged into prose, or separated by \
+   other text, rewrite the ## TODAY'S ENERGY section before outputting.
+9. Every section header in the brief uses the exact ## prefix and exact name \
+   from the template (## THE BIGGER PICTURE, ## TODAY'S ENERGY, \
+   ## TODAY'S TRADE SETUP, ## THE LEVELS, ## STAND DOWN IF, ## THE OTHER SIDE). \
+   Any header without ## or with a different name must be rewritten.
 
 If any check fails, rewrite that section before outputting.
 
