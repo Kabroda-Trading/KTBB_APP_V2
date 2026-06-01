@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, Tuple
 from pydantic import BaseModel, Field
 
 import agent_core
+import mtf_interpreter
 import publisher_crew
 import trade_structure_analyst
 from database import (
@@ -706,6 +707,7 @@ def _build_senior_analyst_context(
     narrative_ctx: str,
     jewel_ctx: str,
     structure_notes: str = "",
+    mtf_read: Optional[str] = None,
 ) -> str:
     bo = levels.get("breakout_trigger", 0)
     bd = levels.get("breakdown_trigger", 0)
@@ -784,22 +786,29 @@ def _build_senior_analyst_context(
             structure_notes,
         ]
 
-    lines += [
-        "",
-        "=== MULTI-TIMEFRAME ENERGY ===",
-        f"Macro Bias (21-day weekly force): {macro_bias}",
-        f"Micro Bias (168h):                {micro_bias}",
-        f"4H Trend: {tf_4h.get('trend','?')} | Momentum: {tf_4h.get('momentum','?')} | RSI: {tf_4h.get('rsi','?')} | Zone: {jewel_4h.get('rsi_zone','?')} | Signal: {jewel_4h.get('signal','?')}",
-        f"    ADX: {jewel_4h.get('adx','?')} ({'rising' if jewel_4h.get('adx_rising') else 'flat'}) | StochZone: {jewel_4h.get('stoch_zone','?')}",
-        f"1H Trend: {tf_1h.get('trend','?')} | Momentum: {tf_1h.get('momentum','?')} | RSI: {tf_1h.get('rsi','?')} | Zone: {jewel_1h.get('rsi_zone','?')} | Signal: {jewel_1h.get('signal','?')}",
-        f"    ADX: {jewel_1h.get('adx','?')} ({'rising' if jewel_1h.get('adx_rising') else 'flat'}) | StochZone: {jewel_1h.get('stoch_zone','?')}",
-        f"15M JEWEL: {tf_15m.get('kinematic_grade','?')} | "
-        f"RSI: {tf_15m.get('rsi','?')} | "
-        f"Ribbon: {tf_15m.get('ribbon_spread_pct','?')}% | "
-        f"Deviation: {tf_15m.get('deviation_from_mean_pct','?')}% | "
-        f"Exit Warning: {'YES' if tf_15m.get('exit_warning', False) else 'NO'}",
-        f"Harmonic State: {micro_state} | Kinematic Fuel: {fuel_1h} [Market Radar: {radar_energy}]",
-    ]
+    if mtf_read:
+        lines += [
+            "",
+            "=== MULTI-TIMEFRAME ENERGY (INTERPRETED) ===",
+            mtf_read,
+        ]
+    else:
+        lines += [
+            "",
+            "=== MULTI-TIMEFRAME ENERGY ===",
+            f"Macro Bias (21-day weekly force): {macro_bias}",
+            f"Micro Bias (168h):                {micro_bias}",
+            f"4H Trend: {tf_4h.get('trend','?')} | Momentum: {tf_4h.get('momentum','?')} | RSI: {tf_4h.get('rsi','?')} | Zone: {jewel_4h.get('rsi_zone','?')} | Signal: {jewel_4h.get('signal','?')}",
+            f"    ADX: {jewel_4h.get('adx','?')} ({'rising' if jewel_4h.get('adx_rising') else 'flat'}) | StochZone: {jewel_4h.get('stoch_zone','?')}",
+            f"1H Trend: {tf_1h.get('trend','?')} | Momentum: {tf_1h.get('momentum','?')} | RSI: {tf_1h.get('rsi','?')} | Zone: {jewel_1h.get('rsi_zone','?')} | Signal: {jewel_1h.get('signal','?')}",
+            f"    ADX: {jewel_1h.get('adx','?')} ({'rising' if jewel_1h.get('adx_rising') else 'flat'}) | StochZone: {jewel_1h.get('stoch_zone','?')}",
+            f"15M JEWEL: {tf_15m.get('kinematic_grade','?')} | "
+            f"RSI: {tf_15m.get('rsi','?')} | "
+            f"Ribbon: {tf_15m.get('ribbon_spread_pct','?')}% | "
+            f"Deviation: {tf_15m.get('deviation_from_mean_pct','?')}% | "
+            f"Exit Warning: {'YES' if tf_15m.get('exit_warning', False) else 'NO'}",
+            f"Harmonic State: {micro_state} | Kinematic Fuel: {fuel_1h} [Market Radar: {radar_energy}]",
+        ]
 
     # Pre-process gravity walls: orient and label peaks relative to trade targets.
     # Both LONG and SHORT sections are always rendered — the Senior Analyst applies
@@ -917,7 +926,7 @@ def _build_senior_analyst_context(
         "",
         narrative_ctx,
         "",
-        jewel_ctx,
+        jewel_ctx if not mtf_read else "(JEWEL snapshot history synthesized into MTF Interpretation above.)",
         "",
         "=== INSTRUCTIONS ===",
         "Analyze all context above. Determine whether the session setup earns APPROVED, "
@@ -999,6 +1008,14 @@ def run_mas_analysis(
     narrative_ctx = _read_narrative_context(symbol)
     jewel_ctx = _read_jewel_context(symbol)
 
+    # 2b. MTF Interpreter — Bucket B pre-digests the energy picture for the SA.
+    # Fail-open: any exception → mtf_read = None → raw energy block used instead.
+    mtf_read: Optional[str] = None
+    try:
+        mtf_read = mtf_interpreter.run_mtf_interpretation(context, jewel_ctx)
+    except Exception as _mtf_err:
+        print(f"[MTF INTERPRETER] Skipped — raw energy block in use: {_mtf_err}")
+
     # 3. Build the full context string
     context_text = _build_senior_analyst_context(
         symbol=symbol,
@@ -1011,6 +1028,7 @@ def run_mas_analysis(
         narrative_ctx=narrative_ctx,
         jewel_ctx=jewel_ctx,
         structure_notes=structure_notes,
+        mtf_read=mtf_read,
     )
 
     # 4. Call Senior Analyst through agent_core (budget gate runs automatically)
