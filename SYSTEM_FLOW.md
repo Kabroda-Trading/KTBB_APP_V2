@@ -442,6 +442,47 @@ the primary brief writer. If the goal is to separate "decide" from "write," the
 code would need to split the Senior Analyst into two sequential calls with distinct
 prompts and context packages.
 
+## SF-5 — Proposed MTF Interpreter Layer (Node 1C → 2A interface) `[ ? ]`
+*Added 2026-06-01. Design direction confirmed by owner. Not yet built.*
+
+**The gap:** The Senior Analyst currently receives multi-timeframe indicator data
+as raw JSON-formatted text lines (`4H Trend: BULLISH | Momentum: POSITIVE | RSI:
+62.3 ...`). It must interpret those numbers, identify conflicts, assess alignment,
+and apply STAND_DOWN conditions — all while also making the trade decision and
+writing the brief. That is three cognitive jobs in one LLM call.
+
+**The proposed fix:** Insert a dedicated **MTF Interpreter** agent between the
+Python math layer and the Senior Analyst. The interpreter reads the raw fuel gauge
+data for its specific domain and hands the SA a clean synthesized statement:
+*"4H/1H aligned BULLISH, 15M PRIMED, SWEET_ZONE harmonic, no exit warnings,
+4/5 TF direction vote. Setup supports a long breakout with velocity."*
+
+**Architecture (when built):**
+```
+battlebox_pipeline.py  →  fuel_gauge + harmonic_data (Python math, unchanged)
+                                ↓
+                    mtf_interpreter.py  (NEW — 1 LLM call)
+                    Reads: fuel_gauge, micro_state, 1h_fuel_status,
+                           last 6 JEWEL snapshots
+                    Outputs: synthesized MTF read (plain English string)
+                                ↓
+                    _build_senior_analyst_context()  (MODIFIED)
+                    Inserts interpreted read in place of raw energy block
+                                ↓
+                    Senior Analyst (unchanged prompt — receives cleaner input)
+```
+
+**Implementation rules (non-negotiable):**
+- Fail-open: interpreter error → `mtf_read = None` → raw format used as
+  fallback → SA context is never degraded below today's baseline
+- No schema changes, no new DB tables
+- No change to any node currently marked `[ OK ]`
+- Follows the established `agent_core._call_agent()` pattern exactly
+  (see `elliott_wave_specialist.py` as the template)
+
+**Node 1C status change when built:** `[ ~ ]` → `[ OK ]` (TF data will be
+genuinely interpreted before the SA sees it, not just narrated)
+
 ---
 
 # CHANGE LOG
@@ -449,3 +490,4 @@ prompts and context packages.
 
 | Date | Node(s) | What changed | Who | Why | Result |
 |------|---------|--------------|-----|-----|--------|
+| 2026-06-01 | 1C, SF-5 | Feasibility study: MTF Interpreter layer. Confirmed CrewAI removed; all agents use agent_core pattern. Identified insertion point in run_mas_analysis(). Added SF-5 to SYSTEM_FLOW. Updated W-1 in WORK_LOG. | owner + Claude Code | W-1 design direction confirmed | No code changed — docs only. Ready to build on approval. |
