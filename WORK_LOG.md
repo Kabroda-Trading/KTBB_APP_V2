@@ -97,9 +97,10 @@ Status: ☐ not started · ◐ in progress · ☑ done
 - MTF Interpreter will be a new Bucket B sitting between `mtf_confluence_scanner`
   (A) and Senior Analyst (B).
 
-**Current status:** MTF Interpreter built and prompt refined (commits e3230dc,
-a596909). Prompt review round 1 complete. AWAITING DEPLOY APPROVAL — no live
-run until owner confirms.
+**Current status:** DEPLOYED live on commit ae45a71. Interpreter fires on next
+session lock (9:00 AM ET 2026-06-02). NEXT ACTION: read the first live brief,
+confirm the MTF interpretation appears and reads sharper — bring the actual
+output for review before closing W-1.
 
 ### W-2 ◐ Architecture question largely answered by bucket work
 - **What:** Whether 1B–1F should become real agents or stay Python functions.
@@ -154,6 +155,7 @@ done, we review this list and decide what graduates to OPEN WORK ITEMS.*
 | 2026-06-01 | Re-evaluate whether the 30-minute opening-range model is the right foundation (node 1A / Q4) | discussing "late to party" | TBD — strategy question |
 | 2026-06-01 | `live_telemetry.py` (Coinalyze OI fuel) and `liquidity_oracle.py` (Binance L2 depth) are orphaned but may contain real signal — decide whether open-interest and order-book depth belong in the trade read at all before reconnecting or deleting | connection audit | TBD — only reconnect if data earns a place; Bucket A feed to a future Bucket B interpreter |
 | 2026-06-01 | The "self-audit / learning loop" we discussed wanting IS already partially real — `performance_auditor.py` already runs weekly, reads closed-trade outcomes, and synthesises calibration recommendations. It was just disconnected from the SA. Once W-5 is merged, the loop exists. The open question is whether to make it more granular (post-session feedback, not just weekly). | connection audit | PARTIALLY REAL — do not build from scratch; extend what exists after W-5 |
+| 2026-06-01 | `crewai` and `langchain-anthropic` still install via `requirements.txt` even though the code no longer uses them (confirmed by audit — all agent calls go through `agent_core._call_agent()`). Dead dependencies — clean out of `requirements.txt` eventually to avoid confusion and unnecessary build weight. Not urgent. | audit confirmed CrewAI fully removed | TBD — low priority housekeeping |
 
 ---
 
