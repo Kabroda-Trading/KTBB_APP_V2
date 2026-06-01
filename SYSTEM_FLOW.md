@@ -537,6 +537,57 @@ sees it, not just narrated as raw numbers)
 
 ---
 
+# AGENT BUCKETS (clerk vs interpreter)
+*Added 2026-06-01. Conservative classification — Bucket B only where the same
+raw input genuinely means different things in context and requires a judgment
+before the SA sees it. The goal is to keep the LLM/cost footprint small.*
+
+**Bucket A — CLERK:** produces a locked-in fact (a level, a raw number, a
+structured dict) by applying deterministic math or a fixed rule. Fetching and
+packaging only — no LLM required, no interpretation.
+
+**Bucket B — INTERPRETER:** the same raw input means different things in
+context; requires digestion into a judgment before the SA sees it. LLM required.
+
+| Module | Bucket | One-line reason |
+|--------|--------|-----------------|
+| `battlebox_pipeline.py` | A | Fetches candles + runs all indicator math (EMA, MACD, RSI, harmonic matrix, fuel gauge) — deterministic formulas |
+| `sse_engine.py` | A | Computes bo/bd/daily levels from VRVP math and 30M range — pure arithmetic |
+| `structure_state_engine.py` | A | Counts consecutive 5M closes beyond the trigger — a counter, not a read |
+| `gravity_engine.py` | A | Background pivot ingestion (4H/1H/1D supply/demand extremes) — fixed scanning algorithm |
+| `gravity_math.py` | A | KDE Gaussian density + macro Fib arithmetic — pure math |
+| `kabroda_macro_engine.py` | A | ZigZag + deterministic Elliott Wave rule validation — labeled outputs, fixed overlap rules |
+| `trade_structure_analyst.py` | A | ATR stop placement + gravity wall snapping — deterministic rules applied to numbers |
+| `market_context_oracle.py` | A | Fetches SPX/DXY/VIX + derives risk_posture via fixed if/else thresholds — no contextual reading |
+| `mtf_confluence_scanner.py` | A | Computes 5-TF JEWEL indicators (EMA vote, StochRSI, ADX, BBWP, PMARP, divergence) — fixed formulas, structured output |
+| `jewel_specialist.py` | A | Extracts JEWEL fields from mtf_confluence_scanner and writes to DB — pure packaging |
+| `market_radar.py` | A | Fixed scoring matrix (bias alignment 6pts + airspace 4pts) → GRADE label — threshold scoring, not judgment |
+| `external_intel_reporter.py` | A | HTTP fetches for F&G index + CoinGecko data — pure data retrieval |
+| `ledger_closing_engine.py` | A | Compares live price vs T1/SL every 60s — pure comparison |
+| `session_manager.py` | A | Session config + anchor-time math — deterministic calendar logic |
+| `research_lab.py` | A | Reconstructs historical session data by replaying pipeline math — no interpretation |
+| `market_simulator.py` | A | Applies radar scoring to historical date ranges — pure computation |
+| `live_telemetry.py` | A | Fetches Coinalyze OI delta + 3-tier multiplier threshold — simple fetch *(orphaned)* |
+| `liquidity_oracle.py` | A | Fetches Binance L2 order book depth — raw data retrieval *(orphaned)* |
+| `agent_core.py` | A | Infrastructure: budget gate + LLM call wrapper — no domain function |
+| `elliott_wave_specialist.py` | **B** | Reads labeled Class 0 levels + current price and judges which wave is active, its structural status (IN_PROGRESS vs QUESTIONABLE), and what the invalidation conditions mean today — same levels read differently depending on price behavior |
+| `performance_auditor.py` | **B** | Reads 7-day stats across four tables and synthesizes a *specific calibration recommendation* — identical numbers produce different recommendations depending on pattern |
+| `publisher_crew.py` | **B** | Translates SA brief into institutional voice with editorial framing, sentiment contextualization, and tone calibration — same levels/status produce different reads depending on narrative |
+| `kabroda_mas_flow.py` — Senior Analyst | **B** | Receives all pre-digested facts and makes the probabilistic trade decision + writes the brief — the core judgment role |
+| `kabroda_mas_flow.py` — Intel Auditor | **B** | Audits a foreign signal against Kabroda SSOT across three domains — contextual cross-checking |
+| `kabroda_mas_flow.py` — Commlink | **B** | Answers operator questions about the current structural picture in real time — contextual response |
+
+**Summary:** 19 Clerks, 5 Interpreter roles (across 4 files). Every data-collection
+and math step is pure Python. The LLM footprint is appropriately narrow: four
+files, six call sites, all budget-gated through `agent_core`.
+
+**Where the proposed MTF Interpreter (SF-5) fits:** It is a new Bucket B role
+sitting between `mtf_confluence_scanner.py` (A) and the Senior Analyst (B). It
+takes structured Clerk output and produces a graduated judgment before the SA
+sees it — exactly what an Interpreter is for.
+
+---
+
 # CONNECTION MAP (2026-06-01)
 *Read-only audit of every agent/specialist/analyst/reporter module. Purpose: find
 orphans, dead-end writes, and wiring severed when CrewAI was removed.*
@@ -663,3 +714,4 @@ Three employees are not contributing to the work:
 | 2026-06-01 | MISSION | Added MISSION / CORE THESIS section (top of doc). Defines graduated-edge posture: weaker edge → T1 only; strong edge → scale/runner; no-sane-stop → stand down. Establishes probabilistic judgment mandate. | owner + Claude Code | Anchor the system's purpose before design questions | Docs only. |
 | 2026-06-01 | SF-5 | Updated MTF Interpreter output spec: graduated alignment read (strength + conflict + stop/target/conviction implication) — NOT a binary flag. Anchored to Mission / Core Thesis. | owner + Claude Code | Prevent interpreter from producing a checkbox instead of a read | Docs only. |
 | 2026-06-01 | CONNECTION MAP | Full wiring audit. Found 2 full orphans (live_telemetry, liquidity_oracle — CrewAI era, no callers). Found 1 broken connection (performance_auditor writes SystemAuditLog.audit_md; SA reads MacroNarrativeLog.performance_note — never written; SA never receives the note). Confirmed JEWEL path intact. | owner + Claude Code | Read-only discovery — no code changed | Docs only. |
+| 2026-06-01 | AGENT BUCKETS | Classified all 25 modules into Clerk (A) vs Interpreter (B). 19 Clerks, 5 Interpreter roles. Notes where MTF Interpreter (SF-5) fits in the taxonomy. | owner + Claude Code | Establish vocabulary for W-1 build planning | Docs only. |
