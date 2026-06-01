@@ -25,6 +25,7 @@ from database import (
     DecisionJournal,
     MacroNarrativeLog,
     JewelSnapshotLog,
+    SystemAuditLog,
 )
 
 
@@ -505,8 +506,16 @@ def _read_narrative_context(symbol: str) -> str:
                 "Wave context approximate."
             )
 
-        if analyst_row and analyst_row.performance_note:
-            lines.append(f"\nPERFORMANCE AUDITOR NOTE: {analyst_row.performance_note}")
+        # Performance Auditor v2 writes to SystemAuditLog.audit_md, not
+        # MacroNarrativeLog.performance_note — read from the correct table.
+        audit_row = (
+            db.query(SystemAuditLog)
+            .filter(SystemAuditLog.symbol == symbol)
+            .order_by(SystemAuditLog.id.desc())
+            .first()
+        )
+        if audit_row and audit_row.audit_md:
+            lines.append(f"\nPERFORMANCE AUDITOR NOTE: {audit_row.audit_md}")
 
         return "\n".join(lines)
 

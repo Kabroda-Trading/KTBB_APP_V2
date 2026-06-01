@@ -125,17 +125,7 @@ merged: build `mtf_interpreter.py` per spec in SF-5 (SYSTEM_FLOW.md).
 - **Why:** This is the money. But it can't be trusted until Phase 1 is reined in.
 - **Status:** deferred by design. Keep DRAFTS generating to learn the voice.
 
-### W-5 ◐ Fix auditor-wire break (one-change code fix, approved)
-- **What:** `performance_auditor` writes its note to `SystemAuditLog.audit_md`.
-  `_read_narrative_context()` reads `MacroNarrativeLog.performance_note` — never
-  written. SA never receives the weekly calibration note.
-- **Fix (approved):** Update the reader in `kabroda_mas_flow._read_narrative_context()`
-  to query `SystemAuditLog` instead. Writer stays untouched (vault architecture
-  intentional; dashboard also reads from `SystemAuditLog`).
-- **Scope:** ~4 lines in `kabroda_mas_flow.py`. No schema changes.
-- **Status:** awaiting execution — fix shown to owner, recommendation made.
-- **Do NOT revert the writer** — the `SystemAuditLog` write was deliberate (v2
-  upgrade fixed a real race-condition dedup problem).
+### W-5 ☑ Fix auditor-wire break — DONE
 
 ---
 
@@ -150,6 +140,7 @@ merged: build `mtf_interpreter.py` per spec in SF-5 (SYSTEM_FLOW.md).
 - ☑ 2026-06-01 — W-1 feasibility study: CrewAI audit, insertion point identified, SF-5 architecture written. commit dedf145
 - ☑ 2026-06-01 — Connection map audit: 2 orphans + broken auditor wire found; JEWEL confirmed. commit 756abd6
 - ☑ 2026-06-01 — Agent bucket classification: 19 Clerks, 5 Interpreters. commit 303f838
+- ☑ 2026-06-01 — W-5: Fixed broken auditor wire. SA now receives Performance Auditor note via SystemAuditLog query. commit (this batch)
 
 ---
 
