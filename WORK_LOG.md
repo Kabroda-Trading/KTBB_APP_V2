@@ -97,9 +97,9 @@ Status: ☐ not started · ◐ in progress · ☑ done
 - MTF Interpreter will be a new Bucket B sitting between `mtf_confluence_scanner`
   (A) and Senior Analyst (B).
 
-**Current status:** MTF Interpreter built (commit e3230dc). Code committed and
-pushed. AWAITING PROMPT REVIEW — owner must review MTF_INTERPRETER_SYSTEM_PROMPT
-before live run. No live execution until approved.
+**Current status:** MTF Interpreter built and prompt refined (commits e3230dc,
+a596909). Prompt review round 1 complete. AWAITING DEPLOY APPROVAL — no live
+run until owner confirms.
 
 ### W-2 ◐ Architecture question largely answered by bucket work
 - **What:** Whether 1B–1F should become real agents or stay Python functions.
