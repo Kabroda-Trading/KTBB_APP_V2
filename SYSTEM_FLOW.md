@@ -537,6 +537,123 @@ sees it, not just narrated as raw numbers)
 
 ---
 
+# CONNECTION MAP (2026-06-01)
+*Read-only audit of every agent/specialist/analyst/reporter module. Purpose: find
+orphans, dead-end writes, and wiring severed when CrewAI was removed.*
+
+**Key:** Decision = reaches `run_mas_analysis()` → SA context → trade brief.
+Newsletter = reaches `run_publisher()` → NewsletterLog. Neither = DB-only or
+UI-only, never influences either LLM decision chain.
+
+## Full Module Table
+
+| Module | Produces | Called by | Output goes to | Wired into | Orphaned? |
+|--------|----------|-----------|----------------|------------|-----------|
+| `market_radar.py` | GRADE A/B/STAND DOWN + MTF action sentence | `GET /api/dmr/radar`, `GET /api/radar/scan` (main.py) | `MtfReading` table + `DecisionJournal` table | **Neither** — dashboard display only; never read by `run_mas_analysis()` | N — serves UI, but disconnected from trade decision |
+| `mtf_confluence_scanner.py` | 5-TF JEWEL (EMA vote, StochRSI, ADX, BBWP, PMARP, divergence) | `market_radar.get_mtf_brief()` AND `jewel_specialist.run_jewel_snapshot()` | Via jewel_specialist → `JewelSnapshotLog` → SA context (Decision); via market_radar → `MtfReading` (display only) | **Decision** (via JEWEL path) | N |
+| `trade_structure_analyst.py` | ATR-adjusted stops + gravity-snapped Fib targets + structure_notes | `kabroda_mas_flow.run_mas_analysis()` line 983 | SA context block; `CampaignLog.structure_reasoning` | **Decision** | N |
+| `market_context_oracle.py` | SPX / DXY / VIX prices + risk_posture string | `battlebox_pipeline.get_live_battlebox()` line 446 | `context["macro_environment"]` → SA context | **Decision** | N |
+| `jewel_specialist.py` | 5-TF JEWEL snapshot: gate, direction, conviction, exit_warning | `run_jewel_scheduler()` in main.py (6× daily) | `JewelSnapshotLog` → `_read_jewel_context()` → SA context | **Decision** ✓ confirmed wired | N |
+| `elliott_wave_specialist.py` | WaveAnalysis: label, status, origin, target, invalidation | `run_weekly_scheduler()` in main.py (Sunday 23:00 UTC) | `MacroNarrativeLog` (authored_by="elliott_wave_specialist") → `_read_narrative_context()` → SA context | **Decision** ✓ confirmed wired | N |
+| `kabroda_mas_flow.py` — Senior Analyst | `ExecutiveBrief` JSON: approval_status, levels, full brief | `battlebox_pipeline.get_live_battlebox()` (new lock) + `run_senior_analyst_scheduler()` (main.py) | `CampaignLog`, `DecisionJournal`, `MacroNarrativeLog`; then passed to publisher | **Decision + Newsletter** | N |
+| `kabroda_mas_flow.py` — Commlink | Plain-text operator response | `POST /api/research/chat-mas` | Client JSON response | **Neither** (on-demand UI chat) | N |
+| `kabroda_mas_flow.py` — Intel Auditor | `IntelAuditReport`: gravity + momentum + measured-move audit | `POST /api/research/audit-intel` | Client JSON response | **Neither** (on-demand UI tool) | N |
+| `publisher_crew.py` | `NewsletterBrief`: headline + newsletter_md | `kabroda_mas_flow.run_mas_analysis()` line 1058 | `NewsletterLog` (publish_status=DRAFT) | **Newsletter only** | N |
+| `external_intel_reporter.py` | Fear & Greed index + CoinGecko market cap / volume | `publisher_crew.run_publisher()` | Publisher context → `NewsletterLog` | **Newsletter only** | N |
+| `performance_auditor.py` | ~300-word weekly audit note (LLM) | `run_weekly_scheduler()` in main.py (Sunday 23:00 UTC) | `SystemAuditLog.audit_md` + `GET /api/dashboard/audits` (dashboard UI only) | **Neither** — see broken-connection note below | **PARTIAL ORPHAN** |
+| `research_lab.py` | Historical session reconstruction with computed levels | `POST /api/admin/run-lab` (main.py) | Client JSON response — no DB write | **Neither** (admin backtesting tool) | N |
+| `market_simulator.py` | Historical radar simulation (GRADE + targets across date range) | `POST /api/admin/simulate` (main.py) | Client JSON response — no DB write | **Neither** (admin backtesting tool) | N |
+| `live_telemetry.py` | Coinalyze OI delta % + fuel_multiplier | **Nothing** — not imported by any other file | Nowhere | **Neither** | **YES — full orphan** |
+| `liquidity_oracle.py` | Binance L2 order book depth (1000 bids + asks) | **Nothing** — not imported by any other file | Nowhere | **Neither** | **YES — full orphan** |
+
+---
+
+## Flags
+
+### FLAG 1 — Full Orphans (two modules, likely CrewAI casualties)
+
+**`live_telemetry.py`** — Fetches Coinalyze open-interest delta and produces a
+`fuel_multiplier`. Not imported by any file. Under CrewAI, this was almost
+certainly a tool input passed to a liquidity/momentum agent. When CrewAI was
+removed, the caller disappeared and the file was left standing.
+
+**`liquidity_oracle.py`** — Fetches Binance futures order-book depth (1000 levels)
+via a proxy tunnel. Not imported by any file. Same pattern: a CrewAI-era tool
+(named "Liquidation Magnets") whose consuming agent no longer exists. The proxy
+infra (`BINANCE_PROXY_URL` env var) is still referenced; nothing reads the result.
+
+### FLAG 2 — Broken Connection: Performance Auditor → Senior Analyst
+
+This is the most consequential finding. The connection was **designed** to work
+as follows:
+
+```
+performance_auditor.py  →  writes performance_note  →  MacroNarrativeLog
+_read_narrative_context()  →  reads analyst_row.performance_note  →  SA context
+```
+
+**What actually happens:**
+
+`performance_auditor.py` (v2) was upgraded to write to `SystemAuditLog.audit_md`
+instead of `MacroNarrativeLog.performance_note`. The comment in the file says
+explicitly: *"Output written to SystemAuditLog (permanent vault) instead of being
+stapled to macro_narrative_log."*
+
+The read side was never updated. `_read_narrative_context()` in
+`kabroda_mas_flow.py:508` still reads:
+```python
+if analyst_row and analyst_row.performance_note:
+    lines.append(f"\nPERFORMANCE AUDITOR NOTE: {analyst_row.performance_note}")
+```
+`analyst_row` is a `MacroNarrativeLog` row. `MacroNarrativeLog.performance_note`
+is never written by any currently active code. The condition is always False.
+**The Senior Analyst never receives the Performance Auditor's note.** The note
+is visible on the dashboard UI (`GET /api/dashboard/audits` reads `SystemAuditLog`)
+but it never enters the trade decision context.
+
+### FLAG 3 — Market Radar disconnected from trade decision (known, not new)
+
+`market_radar.py` computes GRADE A/B/STAND DOWN, runs the MTF confluence scan,
+and writes to `MtfReading` and `DecisionJournal`. None of this is consumed by
+`run_mas_analysis()`. Confirmed in audit commit 6627dfe (Node 1B). The radar
+serves the UI dashboard correctly; the disconnect is intentional but worth keeping
+flagged here for completeness.
+
+### FLAG 4 — JEWEL snapshots confirmed wired (requested verification)
+
+`jewel_specialist.py` → writes to `JewelSnapshotLog` 6× daily at session
+transitions. `_read_jewel_context()` in `kabroda_mas_flow.py:520` queries
+`JewelSnapshotLog`, formats the last 6 snapshots, and passes the block into the
+Senior Analyst context via the `jewel_ctx` parameter at `kabroda_mas_flow.py:989`.
+**This connection is intact and active.** The snapshot history reaches the SA on
+every morning run.
+
+---
+
+## Plain-English Summary: Who Is Standing in the Hallway
+
+Three employees are not contributing to the work:
+
+1. **`live_telemetry.py`** — standing in the hallway holding an OI report nobody
+   asked for. Its manager (a CrewAI agent) no longer exists. The report is never
+   delivered. *Action when ready: reconnect as input to the MTF interpreter, or
+   delete if OI data isn't wanted.*
+
+2. **`liquidity_oracle.py`** — standing in the hallway holding a 1000-level order
+   book. Same story as `live_telemetry` — the CrewAI consumer is gone. The proxy
+   tunnel it depends on may also be defunct if `BINANCE_PROXY_URL` isn't set in
+   prod. *Action when ready: reconnect or delete.*
+
+3. **`performance_auditor.py`** (partial) — this one *is* doing its job (running
+   every Sunday, writing its note), but it's handing the note to the wrong desk.
+   The Senior Analyst has a mailslot labelled `PERFORMANCE AUDITOR NOTE` that is
+   always empty. The note gets filed in a different vault (`SystemAuditLog`) that
+   the dashboard reads, but the SA never sees it. *Action when ready: one-line fix
+   — either write to `MacroNarrativeLog.performance_note` again, or update
+   `_read_narrative_context()` to read from `SystemAuditLog` instead.*
+
+---
+
 # CHANGE LOG
 *Record every change to the system here so we can trace when a working flow broke.*
 
@@ -545,3 +662,4 @@ sees it, not just narrated as raw numbers)
 | 2026-06-01 | 1C, SF-5 | Feasibility study: MTF Interpreter layer. Confirmed CrewAI removed; all agents use agent_core pattern. Identified insertion point in run_mas_analysis(). Added SF-5 to SYSTEM_FLOW. Updated W-1 in WORK_LOG. | owner + Claude Code | W-1 design direction confirmed | No code changed — docs only. Ready to build on approval. |
 | 2026-06-01 | MISSION | Added MISSION / CORE THESIS section (top of doc). Defines graduated-edge posture: weaker edge → T1 only; strong edge → scale/runner; no-sane-stop → stand down. Establishes probabilistic judgment mandate. | owner + Claude Code | Anchor the system's purpose before design questions | Docs only. |
 | 2026-06-01 | SF-5 | Updated MTF Interpreter output spec: graduated alignment read (strength + conflict + stop/target/conviction implication) — NOT a binary flag. Anchored to Mission / Core Thesis. | owner + Claude Code | Prevent interpreter from producing a checkbox instead of a read | Docs only. |
+| 2026-06-01 | CONNECTION MAP | Full wiring audit. Found 2 full orphans (live_telemetry, liquidity_oracle — CrewAI era, no callers). Found 1 broken connection (performance_auditor writes SystemAuditLog.audit_md; SA reads MacroNarrativeLog.performance_note — never written; SA never receives the note). Confirmed JEWEL path intact. | owner + Claude Code | Read-only discovery — no code changed | Docs only. |
