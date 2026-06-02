@@ -1034,7 +1034,7 @@ TIER 4 — UI / PAGES
 
 ---
 
-### GAP-4 (ARCHITECTURE): Build the Gravity/Liquidity Interpreter and reconnect the orphans
+### GAP-4 Phase 1 `[ BUILT — awaiting prompt review 2026-06-02 ]` / Phase 2 `[ Open ]`: Gravity/Liquidity Interpreter + reconnect orphans
 
 **What it is:** `live_telemetry.py` (OI delta) and `liquidity_oracle.py` (L2 order book) produce real signal but are full orphans — no caller, no consumer. In the target architecture, they feed a Gravity/Liquidity Interpreter that produces a sweep-risk read and airspace verdict for the Junior Analyst.
 
@@ -1066,7 +1066,8 @@ TIER 4 — UI / PAGES
 | GAP-1 | Close cockpit UI bypasses (STAND_DOWN trade card + JEWEL label) | — | **CLOSED 2026-06-02** |
 | GAP-2 | Resolve parallel grading systems (radar grade vs SA verdict) | — | **CLOSED 2026-06-02** |
 | GAP-3 | Build Junior Analyst layer | W-1 live + GAP-4 exists | Open |
-| GAP-4 | Gravity/Liquidity Interpreter + reconnect orphans | Junior Analyst design decided | Open |
+| GAP-4 Phase 1 | Gravity Interpreter (kde_peaks + macro_structure) | None | Built — awaiting prompt review |
+| GAP-4 Phase 2 | Reconnect orphans (OI + L2 depth) | Phase 1 live + orphan verification | Open |
 | GAP-5 | Retire MtfReading from snapshot endpoint | GAP-3 built | Open |
 
 ---
@@ -1084,4 +1085,5 @@ TIER 4 — UI / PAGES
 | 2026-06-01 | 1F, W-5 | Fixed broken auditor wire: `_read_narrative_context()` now queries `SystemAuditLog` (scoped to symbol, most recent by id desc) instead of reading `MacroNarrativeLog.performance_note` (never written). Added `SystemAuditLog` import. Performance Auditor vault write unchanged. SA will now receive weekly calibration note. | owner + Claude Code | W-5 — broken connection found in audit | kabroda_mas_flow.py: 2 lines changed. |
 | 2026-06-01 | 1C, SF-5, W-1 | MTF Interpreter built (mtf_interpreter.py). Bucket B layer between Python math and SA. Graduated characterization: alignment strength, conflicts, stop/target/conviction implications. Bans APPROVED/REJECTED/STAND_DOWN — describes, never decides. Fail-open. AWAITING PROMPT REVIEW before live run. | owner + Claude Code | W-1 — first interpreter agent | mtf_interpreter.py new; kabroda_mas_flow.py: 4 edits. commit e3230dc |
 | 2026-06-01 | 1C, SF-5, W-1 | MTF Interpreter prompt refinements: (1) hedging rule → decisively probabilistic (may express likelihood, may not hedge weakly); (2) sentence cap 5 → 5-7; (3) COMPLETENESS guard added (D/W signals must not be silently dropped); (4) max_tokens 400 → 600. | owner + Claude Code | Pre-deploy prompt review | commit a596909 |
+| 2026-06-02 | GAP-4 Phase 1 | Gravity Interpreter built (gravity_interpreter.py). Bucket B layer reading kde_peaks + macro_structure + levels + post-TSA targets. Characterizes: nearest HEAVY/MAXIMUM obstacle to T1 (price, intensity, %, macro confluence by name), CLEAR/OBSTRUCTED/BLOCKED airspace verdict, T2/T3 viability, one-sentence opposing-direction note, overall structural picture. Completeness guard (same as MTF — must not silently drop decision-relevant walls). Fail-open pattern identical to mtf_interpreter. Wired into run_mas_analysis() as step 2c; gravity_read= param added to _build_senior_analyst_context(); replaces raw GRAVITY WALLS sections when present. AWAITING PROMPT REVIEW before live run. Phase 2 (OI + L2) deferred pending orphan verification. | owner + Claude Code | GAP-4 Phase 1 build | gravity_interpreter.py new; kabroda_mas_flow.py: 4 edits. commit TBD |
 | 2026-06-02 | GAP-1, GAP-2 | Cockpit UI authority fix (W-6). GAP-2 Option C: Phase 2 scan now MERGES over Phase 1 snapshot instead of overwriting (preserves SA verdict + SA plan from CampaignLog); row border color driven by mas_approval_status (green=APPROVED, gray=STAND_DOWN) with fallback to radar grade when no SA verdict exists; HUD payload display renames "GRADE A/B" to "PRE-CHECK: A/B" (rawKey unchanged for TradingView). GAP-1: Panel 02 top-line label forced to "STAND DOWN — SYSTEM INACTIVE" when SA says STAND_DOWN, regardless of JEWEL gate/conviction (JEWEL badges/signal still render as context); trade card and position-size calc suppressed (renders "--") when mas_status === 'STAND_DOWN'. rrc-down CSS border changed from red to gray to match SA-muted semantics. | owner + Claude Code | Root cause: diagnosed 2026-06-02 — STAND_DOWN session showed HIGH CONVICTION SETUP + live trade card | market_radar.html: 7 edits. No Python changes. commit TBD |

@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, Tuple
 from pydantic import BaseModel, Field
 
 import agent_core
+import gravity_interpreter
 import mtf_interpreter
 import publisher_crew
 import trade_structure_analyst
@@ -708,6 +709,7 @@ def _build_senior_analyst_context(
     jewel_ctx: str,
     structure_notes: str = "",
     mtf_read: Optional[str] = None,
+    gravity_read: Optional[str] = None,
 ) -> str:
     bo = levels.get("breakout_trigger", 0)
     bd = levels.get("breakdown_trigger", 0)
@@ -848,64 +850,69 @@ def _build_senior_analyst_context(
     _lt_t1, _lt_t2, _lt_t3 = _lt.get("t1", 0), _lt.get("t2", 0), _lt.get("t3", 0)
     _st_t1, _st_t2, _st_t3 = _st.get("t1", 0), _st.get("t2", 0), _st.get("t3", 0)
 
-    # UPSIDE — peaks above breakout trigger (relevant for LONG setups)
-    upside_peaks = sorted(
-        [p for p in kde_peaks if p.get("price", 0) > bo],
-        key=lambda x: x.get("price", 0)
-    )
-    lines.append("")
-    lines.append("=== GRAVITY WALLS — UPSIDE (LONG) ===")
-    if upside_peaks and _lt_t3:
-        trade_walls = [p for p in upside_peaks if p.get("price", 0) <= _lt_t3]
-        structural_walls = [p for p in upside_peaks if p.get("price", 0) > _lt_t3]
-        if trade_walls:
-            lines.append("(Between entry and T3 — obstacles in the measured move)")
-            for p in trade_walls:
-                lines.append(_fmt_wall(p, _wall_zone_long(p.get("price", 0), _lt_t1, _lt_t2, _lt_t3)))
-        else:
-            lines.append("  Clear airspace to T3 — no walls in the measured move")
-        if structural_walls:
-            lines.append("(Beyond T3 — structural reference)")
-            for p in structural_walls[:3]:
-                lines.append(_fmt_wall(p, "Beyond T3"))
-    elif upside_peaks:
-        lines.append("  (Targets unavailable — raw upside walls)")
-        for p in upside_peaks[:5]:
-            price = p.get("price", 0)
-            confluence = " | MACRO CONFLUENCE" if _macro_confluence(price) else ""
-            lines.append(f"  ${price:,.2f} | Heat: {p.get('heat_score',0):.1f} | {p.get('intensity','?')}{confluence}")
+    if gravity_read:
+        # Gravity Interpreter pre-digest replaces the raw wall listings.
+        # Fail-open: gravity_read=None → raw sections below are used instead.
+        lines += ["", "=== GRAVITY LANDSCAPE (INTERPRETED) ===", gravity_read]
     else:
-        lines.append("  No KDE peaks detected above breakout trigger")
+        # UPSIDE — peaks above breakout trigger (relevant for LONG setups)
+        upside_peaks = sorted(
+            [p for p in kde_peaks if p.get("price", 0) > bo],
+            key=lambda x: x.get("price", 0)
+        )
+        lines.append("")
+        lines.append("=== GRAVITY WALLS — UPSIDE (LONG) ===")
+        if upside_peaks and _lt_t3:
+            trade_walls = [p for p in upside_peaks if p.get("price", 0) <= _lt_t3]
+            structural_walls = [p for p in upside_peaks if p.get("price", 0) > _lt_t3]
+            if trade_walls:
+                lines.append("(Between entry and T3 — obstacles in the measured move)")
+                for p in trade_walls:
+                    lines.append(_fmt_wall(p, _wall_zone_long(p.get("price", 0), _lt_t1, _lt_t2, _lt_t3)))
+            else:
+                lines.append("  Clear airspace to T3 — no walls in the measured move")
+            if structural_walls:
+                lines.append("(Beyond T3 — structural reference)")
+                for p in structural_walls[:3]:
+                    lines.append(_fmt_wall(p, "Beyond T3"))
+        elif upside_peaks:
+            lines.append("  (Targets unavailable — raw upside walls)")
+            for p in upside_peaks[:5]:
+                price = p.get("price", 0)
+                confluence = " | MACRO CONFLUENCE" if _macro_confluence(price) else ""
+                lines.append(f"  ${price:,.2f} | Heat: {p.get('heat_score',0):.1f} | {p.get('intensity','?')}{confluence}")
+        else:
+            lines.append("  No KDE peaks detected above breakout trigger")
 
-    # DOWNSIDE — peaks below breakdown trigger (relevant for SHORT setups)
-    downside_peaks = sorted(
-        [p for p in kde_peaks if p.get("price", 0) < bd],
-        key=lambda x: x.get("price", 0),
-        reverse=True
-    )
-    lines.append("")
-    lines.append("=== GRAVITY WALLS — DOWNSIDE (SHORT) ===")
-    if downside_peaks and _st_t3:
-        trade_walls = [p for p in downside_peaks if p.get("price", 0) >= _st_t3]
-        structural_walls = [p for p in downside_peaks if p.get("price", 0) < _st_t3]
-        if trade_walls:
-            lines.append("(Between entry and T3 — obstacles in the measured move)")
-            for p in trade_walls:
-                lines.append(_fmt_wall(p, _wall_zone_short(p.get("price", 0), _st_t1, _st_t2, _st_t3)))
+        # DOWNSIDE — peaks below breakdown trigger (relevant for SHORT setups)
+        downside_peaks = sorted(
+            [p for p in kde_peaks if p.get("price", 0) < bd],
+            key=lambda x: x.get("price", 0),
+            reverse=True
+        )
+        lines.append("")
+        lines.append("=== GRAVITY WALLS — DOWNSIDE (SHORT) ===")
+        if downside_peaks and _st_t3:
+            trade_walls = [p for p in downside_peaks if p.get("price", 0) >= _st_t3]
+            structural_walls = [p for p in downside_peaks if p.get("price", 0) < _st_t3]
+            if trade_walls:
+                lines.append("(Between entry and T3 — obstacles in the measured move)")
+                for p in trade_walls:
+                    lines.append(_fmt_wall(p, _wall_zone_short(p.get("price", 0), _st_t1, _st_t2, _st_t3)))
+            else:
+                lines.append("  Clear airspace to T3 — no walls in the measured move")
+            if structural_walls:
+                lines.append("(Beyond T3 — structural reference)")
+                for p in structural_walls[:3]:
+                    lines.append(_fmt_wall(p, "Beyond T3"))
+        elif downside_peaks:
+            lines.append("  (Targets unavailable — raw downside walls)")
+            for p in downside_peaks[:5]:
+                price = p.get("price", 0)
+                confluence = " | MACRO CONFLUENCE" if _macro_confluence(price) else ""
+                lines.append(f"  ${price:,.2f} | Heat: {p.get('heat_score',0):.1f} | {p.get('intensity','?')}{confluence}")
         else:
-            lines.append("  Clear airspace to T3 — no walls in the measured move")
-        if structural_walls:
-            lines.append("(Beyond T3 — structural reference)")
-            for p in structural_walls[:3]:
-                lines.append(_fmt_wall(p, "Beyond T3"))
-    elif downside_peaks:
-        lines.append("  (Targets unavailable — raw downside walls)")
-        for p in downside_peaks[:5]:
-            price = p.get("price", 0)
-            confluence = " | MACRO CONFLUENCE" if _macro_confluence(price) else ""
-            lines.append(f"  ${price:,.2f} | Heat: {p.get('heat_score',0):.1f} | {p.get('intensity','?')}{confluence}")
-    else:
-        lines.append("  No KDE peaks detected below breakdown trigger")
+            lines.append("  No KDE peaks detected below breakdown trigger")
 
     if macro_structure:
         lines.append("")
@@ -1016,6 +1023,14 @@ def run_mas_analysis(
     except Exception as _mtf_err:
         print(f"[MTF INTERPRETER] Skipped — raw energy block in use: {_mtf_err}")
 
+    # 2c. Gravity Interpreter — Bucket B pre-digests the wall/airspace picture for the SA.
+    # Fail-open: any exception → gravity_read = None → raw GRAVITY WALLS sections used instead.
+    gravity_read: Optional[str] = None
+    try:
+        gravity_read = gravity_interpreter.run_gravity_interpretation(levels, context, targets)
+    except Exception as _grav_err:
+        print(f"[GRAVITY INTERPRETER] Skipped — raw wall sections in use: {_grav_err}")
+
     # 3. Build the full context string
     context_text = _build_senior_analyst_context(
         symbol=symbol,
@@ -1029,6 +1044,7 @@ def run_mas_analysis(
         jewel_ctx=jewel_ctx,
         structure_notes=structure_notes,
         mtf_read=mtf_read,
+        gravity_read=gravity_read,
     )
 
     # 4. Call Senior Analyst through agent_core (budget gate runs automatically)
