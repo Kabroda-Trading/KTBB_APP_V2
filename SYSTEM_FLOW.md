@@ -705,6 +705,372 @@ Three employees are not contributing to the work:
 
 ---
 
+---
+
+# DATA FLOW — CURRENT vs TARGET
+*Added 2026-06-02. Blueprint for W-6 and the junior-analyst architecture.*
+
+---
+
+## MAP 1 — CURRENT (the real, messy truth)
+
+This is the actual wiring as of 2026-06-02. Traced from code — not from design intent.
+
+### Layer 0 — Raw Inputs (external, no DB)
+
+| Source | Fetched by | What it provides |
+|--------|-----------|-----------------|
+| MEXC exchange (OHLCV) | `battlebox_pipeline.py` (5M/15M/1H/4H/1D) | Candle history for all math |
+| MEXC exchange (OHLCV) | `gravity_engine.py` (4H/1H/1D) | Pivot ingestion loop |
+| MEXC exchange (1500D daily) | `kabroda_macro_engine.py` subprocess | Elliott Wave ZigZag source |
+| Yahoo Finance | `market_context_oracle.py` → `battlebox_pipeline.py` | SPX / DXY / VIX |
+| Alternative.me F&G | `external_intel_reporter.py` → `publisher_crew.py` | Fear & Greed index |
+| CoinGecko global | `external_intel_reporter.py` → `publisher_crew.py` | Total market cap / volume / BTC dominance |
+| Coinalyze OI | `live_telemetry.py` | OI delta + fuel multiplier — **ORPHANED, never read** |
+| Binance L2 depth | `liquidity_oracle.py` | 1000-level order book — **ORPHANED, never read** |
+
+---
+
+### Layer 1 — Data House (`battlebox_pipeline.py` + `sse_engine.py`)
+
+The only layer that talks to exchanges. Everything else reads from DB or is passed in-memory.
+
+**`battlebox_pipeline.get_live_battlebox()`** — called by:
+- `market_radar.scan_sector()` (live MTF scan path)
+- `POST /api/dmr/live` and `POST /api/dmr/run-raw` (operator tools)
+- `main.py run_senior_analyst_scheduler._fire_senior_analyst()` (restart-recovery path)
+
+**What it produces (battlebox_payload):**
+```
+levels dict:
+  breakout_trigger, breakdown_trigger       ← SSOT (frozen at lock, computed by sse_engine)
+  range30m_high, range30m_low, anchor_price
+  daily_resistance, daily_support, f24_poc
+  atr (14-period from 15M candles)
+
+context dict:
+  macro_bias (21-day weekly force)
+  micro_bias (168H rolling EMA)
+  fuel_gauge (1H/4H EMA trend, MACD; 15M_JEWEL kinematic metrics)
+  harmonic_data → micro_state (SWEET_ZONE/PULLBACK/HOSTILE_CEILING/EXHAUSTION/CHOP)
+  kde_peaks (from gravity_math.calculate_gravity_kde — reads GravityMemory)
+  macro_structure (Class 0 EW levels — reads GravityMemory directly)
+  macro_environment (SPX/DXY/VIX from market_context_oracle)
+  macro_fibs (30D swing Fib retracements/extensions)
+```
+
+**At lock moment (first call after 9:00 AM ET):**
+1. Writes `SessionLock` to DB
+2. Calls `gravity_engine.log_kabroda_bedrock()` → writes 7_DAY_KABRODA rows to `GravityMemory`
+3. Fires `kabroda_mas_flow.run_mas_analysis()` as background task
+
+**`sse_engine.py`** — called inside `_compute_sse_packet()` in `battlebox_pipeline.py`. Pure math. Computes bo/bd from 30M range extremes + VRVP VAH/VAL. Produces the `levels` dict. Never writes to DB directly.
+
+**`structure_state_engine.py`** — called by `battlebox_pipeline.get_live_battlebox()` on every call after lock. Counts consecutive 5M closes beyond trigger. Produces `session_battle` state (HOLD FIRE / WAIT / GO). UI display only — not fed into MAS.
+
+---
+
+### Layer 2 — Background Writers (async loops, no user trigger)
+
+| Module | Cadence | Reads | Writes to |
+|--------|---------|-------|-----------|
+| `gravity_engine.py` | Every 15 min | MEXC 4H/1H/1D via battlebox_pipeline | `GravityMemory` (4H/1H pivots, 1W/168H anchors) |
+| `kabroda_macro_engine.py` | Boot + every 24h (subprocess) | MEXC 1500D daily | `GravityMemory` (permanence_class=0, MACRO_ENGINE_CLASS_0) |
+| `ledger_closing_engine.py` | Every 60 sec | `CampaignLog` (APPROVED, unclosed) + MEXC live price | `CampaignLog` (CLOSED_WIN/CLOSED_LOSS, realized_pnl) |
+| `gravity_engine.fill_decision_outcomes()` | Every 4h (inside gravity loop) | `DecisionJournal` rows >4h old + MEXC live price | `DecisionJournal` (outcome_price_4h, outcome_pct_move_4h, outcome_direction_correct) |
+
+---
+
+### Layer 3 — Scheduled Specialists (LLM agents with DB output)
+
+| Module | Cadence | Reads | Writes to | Consumed by |
+|--------|---------|-------|-----------|-------------|
+| `jewel_specialist.py` | 6× daily at session transitions | MEXC candles via mtf_confluence_scanner | `JewelSnapshotLog` | SA context via `_read_jewel_context()`; Panel 02 cockpit display via `/api/narrative/latest` |
+| `elliott_wave_specialist.py` | Sunday 23:00 UTC | `GravityMemory` (Class 0) + live BTC price | `MacroNarrativeLog` (authored_by="elliott_wave_specialist") | SA context via `_read_narrative_context()`; Macro War Room sidebar |
+| `performance_auditor.py` | Sunday 23:00 UTC | `CampaignLog`, `DecisionJournal`, `JewelSnapshotLog`, `MacroNarrativeLog` | `SystemAuditLog` | SA context via `_read_narrative_context()` (wired W-5); Dashboard audits panel |
+
+---
+
+### Layer 4 — MAS Pipeline (`kabroda_mas_flow.run_mas_analysis()`)
+
+Called once per session lock (fired by `battlebox_pipeline` at lock moment, or by scheduler restart-recovery).
+
+**Reads (assembled before any LLM call):**
+```
+battlebox_payload (passed in — levels + context from Layer 1)
+GravityMemory (via trade_structure_analyst → gravity_math — HEAVY/MAX peaks for stop/target snapping)
+CampaignLog (last 5 closed APPROVED trades → RAG memory string for SA)
+MacroNarrativeLog (prior SA narrative_text + Elliott Wave specialist wave data)
+SystemAuditLog (most recent Performance Auditor note — post W-5 fix)
+JewelSnapshotLog (last 6 session snapshots → jewel_ctx string)
+```
+
+**Sequential pipeline steps:**
+```
+1. _compute_targets()            Pure Python — measured move math (LLM never calculates)
+2. trade_structure_analyst       Pure Python — ATR stops + gravity-snapped FIB targets
+3. _fetch_cro_memory()           DB read — RAG memory string
+4. _read_narrative_context()     DB read — prior narrative + EW wave + auditor note
+5. _read_jewel_context()         DB read — 6x JEWEL snapshots
+6. mtf_interpreter (LLM call)    Bucket B — graduated MTF characterization (fail-open)
+7. _build_senior_analyst_context() String assembly
+8. Senior Analyst (LLM call)     Bucket B — decision + full brief (APPROVED/REJECTED/WAITING/STAND_DOWN)
+```
+
+**Writes:**
+```
+CampaignLog          approval_status, bias, entry, stop, t1/t2/t3,
+                     mas_executive_brief, formatted_newsletter, structure_reasoning
+DecisionJournal      decision_type, confluence params, full_context_json
+MacroNarrativeLog    authored_by="senior_analyst": narrative_text, tactical_text
+→ publisher_crew:
+  external_intel_reporter (HTTP: F&G + CoinGecko)
+  Publisher Agent (LLM call)
+  NewsletterLog        headline, newsletter_md, publish_status="DRAFT"
+AgentRunLog          token counts + cost (every LLM call via agent_core)
+```
+
+---
+
+### Layer 5 — On-Demand / UI Scan (`market_radar.scan_sector()`)
+
+Called by `POST /api/radar/scan` (user-triggered Market Radar scan). Runs **independently** — no connection to MAS.
+
+**Reads:** battlebox_pipeline (via locked shortcut or live) + mtf_confluence_scanner (live 5-TF JEWEL)
+
+**Computes:** GRADE A/B/STAND DOWN via `_build_dossier()` — 2-criterion scoring (macro bias 6pts + airspace 4pts). Plan (entry/stop/t1/t2/t3) from measured move math.
+
+**Writes:** `MtfReading` row + `DecisionJournal` row
+
+**Outputs to UI:** grade, plan, mtf_brief, levels — stored in `window.radarMemory[symbol]`
+
+**NOTE:** This grade and plan are NEVER read by `run_mas_analysis()`. They are UI-only.
+
+---
+
+### Layer 6 — UI Pages (what each page actually reads)
+
+#### Market Radar (`/suite/radar`)
+| UI element | Endpoint called | Table(s) read | Bypasses SA? |
+|------------|----------------|---------------|-------------|
+| Row MAS badge ("MAS: STAND_DOWN") | `/api/radar/snapshot` | `CampaignLog.mas_approval_status` | No — correct |
+| Row JEWEL dot (gate open/closed) | `/api/radar/snapshot` | `JewelSnapshotLog.jewel_gate_open` | N/A — display only |
+| Cockpit Panel 00 (SA brief text) | `/api/narrative/latest` | `MacroNarrativeLog` (narrative_text, tactical_text) | No — reads SA output |
+| **Cockpit Panel 02 "HIGH CONVICTION SETUP" label** | `/api/narrative/latest` | **`JewelSnapshotLog.jewel_gate_open + jewel_conviction`** | **YES — reads JEWEL table directly, no reference to mas_approval_status** |
+| **Cockpit trade card (entry/stop/T1/T2/T3)** | `/api/radar/snapshot` → `d.plan` | **`CampaignLog.entry_price/stop_loss/t1/t2/t3`** | **YES — renders whenever `entry_price != null`, no gate on approval_status** |
+| Cockpit GRADE badge ("GRADE A") | `/api/radar/scan` → market_radar dossier | **market_radar._build_dossier() (in-memory, not from CampaignLog)** | **YES — independent scoring system** |
+
+#### Macro War Room (`/suite/macro-war-room`)
+| UI element | Endpoint | Table(s) read |
+|------------|----------|---------------|
+| Brief display | `/api/narrative/latest` | `MacroNarrativeLog` (SA narrative/tactical) |
+| JEWEL sidebar | `/api/narrative/latest` | `JewelSnapshotLog` |
+| Wave sidebar | `/api/narrative/latest` | `MacroNarrativeLog` (EW specialist) |
+| Commlink chat | `/api/research/chat-mas` | `CampaignLog` (latest execution context) + LLM call |
+| Intel Auditor | `/api/research/audit-intel` | `SessionLock` (SSOT levels) + LLM call |
+
+#### Gravity Map (`/suite/gravity-map`)
+| UI element | Endpoint | Table(s) read |
+|------------|----------|---------------|
+| KDE density curve | `/api/gravity/scan` | `GravityMemory` (all classes) |
+| Macro Fibs | `/api/gravity/scan` | Computed from MEXC daily candles |
+| Sidebar (wave state) | `/api/narrative/latest` | `MacroNarrativeLog` (EW wave) + `JewelSnapshotLog` |
+
+#### Executive Dashboard (`/suite/dashboard`)
+Reads exclusively from `CampaignLog`, `DecisionJournal`, `JewelSnapshotLog`, `AgentRunLog`, `NewsletterLog`, `SystemAuditLog`. All read-only historical views — no bypasses, no decisions.
+
+---
+
+### MAP 1 — Three Structural Problems Exposed
+
+**Problem A — Two parallel, unconnected grading systems**
+
+`market_radar._build_dossier()` grades GRADE A/B/STAND DOWN using its own 2-criterion scoring (macro bias + airspace). `kabroda_mas_flow.run_mas_analysis()` grades APPROVED/REJECTED/WAITING/STAND_DOWN using the full SA context. These two systems never speak to each other. The Market Radar cockpit displays BOTH grades side by side. A user sees "GRADE A" from the radar and "MAS: STAND_DOWN" from the brief — two different verdicts from two different algorithms with no defined precedence.
+
+**Problem B — Panel 02 and the trade card bypass the SA verdict entirely**
+
+The cockpit "HIGH CONVICTION SETUP" label reads `JewelSnapshotLog.jewel_gate_open + jewel_conviction` — an independent technical snapshot written 6× daily by `jewel_specialist`. It has no knowledge of `CampaignLog.mas_approval_status`. The trade card renders entry/stop/T1/T2/T3 whenever `entry_price` is not null — the only condition is a non-null price field, not the SA's verdict. Both panels can (and today did) display a full trade setup while the SA brief says STAND_DOWN.
+
+**Problem C — No defined "who reports to whom" between the interpreters and the SA**
+
+The MTF interpreter, JewelSnapshotLog, Market Radar, and the SA are all independent consumers of overlapping data. There is no layer that collects all interpreter outputs, resolves conflicts between them, and hands a single clean package to the SA. The SA receives raw data from multiple sources directly. An MTF interpreter contradicting the JEWEL specialist's gate state arrives at the SA without any resolution.
+
+---
+
+## MAP 2 — TARGET (owner's designed org chart)
+
+```
+═══════════════════════════════════════════════════════════════════════
+TIER 0 — DATA HOUSE (battlebox_pipeline + sse_engine)
+═══════════════════════════════════════════════════════════════════════
+  Raw data source. Everything asks it. It asks nobody.
+  Outputs: locked levels (bo/bd/r30/daily/ATR) + raw context dict
+    (fuel_gauge, kde_peaks, macro_bias, micro_bias, harmonic_state,
+     macro_structure, macro_environment)
+
+  Feeds: ALL agents pull their slice from here and from DB tables
+         written by background Clerks (GravityMemory, JewelSnapshotLog,
+         MacroNarrativeLog, SystemAuditLog)
+
+═══════════════════════════════════════════════════════════════════════
+TIER 1 — INTERPRETER AGENTS (domain specialists, Bucket B)
+═══════════════════════════════════════════════════════════════════════
+  Each interpreter reads one slice of the data house, digests it
+  into a plain-English domain read, and hands that read UP.
+  No interpreter makes a trade decision. No interpreter reads another
+  interpreter's output.
+
+  MTF Interpreter (exists — mtf_interpreter.py):
+    Reads: fuel_gauge, harmonic_state, JewelSnapshotLog (last 6)
+    Outputs: graduated alignment characterization
+             (strength, conflicts, stop/target/conviction implications)
+
+  Gravity/Liquidity Interpreter (TO BUILD — W-?):
+    Reads: kde_peaks (from GravityMemory via gravity_math)
+           + live_telemetry OI delta (from live_telemetry.py — reconnect orphan)
+           + liquidity_oracle order book depth (from liquidity_oracle.py — reconnect orphan)
+    Outputs: sweep-risk read, airspace verdict, OI-backed momentum read
+
+  Macro/Structure Interpreter (exists as Elliott Wave Specialist):
+    Reads: GravityMemory Class 0 + live price
+    Outputs: active wave label, structural conditions, invalidation levels
+    Note: fires weekly — output cached in MacroNarrativeLog. Junior Analyst
+    reads the cached output, not a live call.
+
+  Performance/Calibration Adviser (exists as Performance Auditor):
+    Reads: CampaignLog, DecisionJournal, JewelSnapshotLog, MacroNarrativeLog
+    Outputs: weekly calibration note in SystemAuditLog
+    Note: fires weekly — output cached. Junior Analyst (or SA directly) reads
+    the cached note.
+
+═══════════════════════════════════════════════════════════════════════
+TIER 2 — JUNIOR ANALYST (single aggregation + conflict-resolution layer)
+═══════════════════════════════════════════════════════════════════════
+  Collects all interpreter outputs. Resolves conflicts between domains
+  (e.g. MTF says FULL ALIGNMENT but Gravity says airspace blocked).
+  Hands ONE clean package to the Senior Analyst.
+  Does NOT make the trade decision — only prepares the package.
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ OPEN QUESTION (flag — do not decide yet):                   │
+  │ Is the Junior Analyst a NEW dedicated module/prompt, OR is  │
+  │ it the MTF Interpreter pattern generalized to N domains with │
+  │ a combiner step at the end? Both architectures are valid.   │
+  │ The question is whether a single LLM aggregation call is     │
+  │ better than having each interpreter independently supply     │
+  │ its read. Decide after MTF interpreter is proven live and    │
+  │ the Gravity interpreter exists — can compare in practice.   │
+  └─────────────────────────────────────────────────────────────┘
+
+  Inputs: all interpreter reads (string outputs)
+  Outputs: one structured briefing package (domain reads + conflict flags)
+
+═══════════════════════════════════════════════════════════════════════
+TIER 3 — SENIOR ANALYST (decision + articulation)
+═══════════════════════════════════════════════════════════════════════
+  Receives the Junior Analyst's package.
+  Applies gate conditions. Decides APPROVED/REJECTED/WAITING/STAND_DOWN.
+  Articulates the brief.
+  Does NOT receive raw tables directly. Does NOT do interpretation.
+
+═══════════════════════════════════════════════════════════════════════
+TIER 4 — UI / PAGES
+═══════════════════════════════════════════════════════════════════════
+  Pull ONLY from Tier 3 outputs (CampaignLog.mas_approval_status,
+  CampaignLog.entry/stop/targets, MacroNarrativeLog narrative/tactical).
+
+  RULE: No UI page reaches past the Senior Analyst into raw tables
+        (GravityMemory, JewelSnapshotLog, MtfReading) to render a
+        verdict or trade card. Those tables are data-house-internal.
+
+  The only exception: read-only historical views (Dashboard, Gravity Map
+  visualization) — these display raw data for analysis, not for trade
+  decision rendering.
+```
+
+---
+
+## THE GAP LIST — current reality vs. target, ordered by what must come first
+
+### GAP-1 (BLOCKING — do first): Close the two cockpit UI bypasses
+
+**What it is:** Panel 02 ("HIGH CONVICTION SETUP") and the trade card render independently of `CampaignLog.mas_approval_status`. The JEWEL conviction label and trade levels show on a STAND_DOWN session.
+
+**What correct looks like:**
+- When `mas_approval_status == 'STAND_DOWN'`, Panel 02 top-line label overrides to "STAND DOWN — SYSTEM INACTIVE" regardless of JEWEL state.
+- When `mas_approval_status == 'STAND_DOWN'`, `d.plan.valid` is forced to `false` so the trade card renders `--` for all price fields.
+- The JEWEL gate/conviction still displays (it's valid data) but cannot be labeled "HIGH CONVICTION SETUP" when the SA has vetoed the session.
+
+**Files:** `market_radar.html` (`loadPanel02Intel()`, `renderSnapshotGrid()`, `renderModal()`)
+
+**Why first:** This is the most visible contradiction in the system today (diagnosed 2026-06-02). A STAND_DOWN session should not present a trade card to the operator.
+
+---
+
+### GAP-2 (BLOCKING): Resolve the two parallel grading systems
+
+**What it is:** Market Radar's GRADE A/B/STAND DOWN (2-criterion Python score from `market_radar._build_dossier()`) and the SA's APPROVED/REJECTED/STAND_DOWN (full LLM decision) are two independent verdicts with no defined precedence. Both appear in the cockpit simultaneously.
+
+**What correct looks like:**
+- Option A (simpler): The Market Radar grade becomes display-only metadata — a structural readiness indicator, not a verdict. The SA's `mas_approval_status` is the single authoritative verdict. Cockpit redesign labels the radar grade as "structural readiness" not "grade."
+- Option B (fuller): The Market Radar dossier becomes an input to the Junior Analyst layer. It stops being a verdict and becomes a domain read.
+
+**Why second:** Until this is resolved, any Junior Analyst layer design will be confused about whether the radar grade is an input or an output.
+
+---
+
+### GAP-3 (ARCHITECTURE): Build the Junior Analyst layer
+
+**What it is:** No module currently collects all interpreter outputs, resolves cross-domain conflicts, and hands a unified package to the SA. The SA receives data from multiple independent streams with no coordination.
+
+**What correct looks like:**
+- A Junior Analyst module (new or generalized from MTF interpreter pattern) that receives: MTF interpreter read + Gravity/Liquidity interpreter read + cached EW wave state + cached audit note, and outputs a single structured briefing package.
+- The SA's `_build_senior_analyst_context()` is rewritten to consume the Junior Analyst's package instead of assembling raw data independently.
+
+**Preconditions before this can be built:**
+1. MTF interpreter is proven live (confirm W-1 is working correctly in production)
+2. Gravity/Liquidity interpreter is built (GAP-4 below)
+3. Junior Analyst open question is answered (see MAP 2 open question box)
+
+---
+
+### GAP-4 (ARCHITECTURE): Build the Gravity/Liquidity Interpreter and reconnect the orphans
+
+**What it is:** `live_telemetry.py` (OI delta) and `liquidity_oracle.py` (L2 order book) produce real signal but are full orphans — no caller, no consumer. In the target architecture, they feed a Gravity/Liquidity Interpreter that produces a sweep-risk read and airspace verdict for the Junior Analyst.
+
+**What correct looks like:**
+- New `gravity_interpreter.py` (Bucket B): reads kde_peaks + live OI delta + L2 depth → outputs sweep-risk read, airspace verdict, OI momentum confirmation.
+- Called from the Junior Analyst layer (once it exists).
+- `live_telemetry.py` and `liquidity_oracle.py` get a caller for the first time since CrewAI was removed.
+
+**Preconditions:** Junior Analyst design must be decided first (GAP-3).
+
+---
+
+### GAP-5 (HYGIENE): Remove the MtfReading table dependency from the snapshot endpoint
+
+**What it is:** `GET /api/radar/snapshot` reads `MtfReading` (written by `market_radar.scan_sector()`) to display the cached MTF direction badge in Phase 1. In the target, this cached read should come from the Junior Analyst's package, not from a table written by an independent radar scan.
+
+**What correct looks like:**
+- In the target, Phase 1 snapshot reads from a "Junior Analyst output" cache, not from `MtfReading`.
+- `MtfReading` can be retired or repurposed for historical analysis only.
+
+**Preconditions:** Junior Analyst layer must exist (GAP-3). This gap is low-priority until then.
+
+---
+
+### Summary table
+
+| Gap | Description | Preconditions | Priority |
+|-----|-------------|---------------|----------|
+| GAP-1 | Close cockpit UI bypasses (STAND_DOWN trade card + JEWEL label) | None | **Do first — W-6** |
+| GAP-2 | Resolve parallel grading systems (radar grade vs SA verdict) | None | Do second |
+| GAP-3 | Build Junior Analyst layer | W-1 live + GAP-4 exists | After interpreters proven |
+| GAP-4 | Gravity/Liquidity Interpreter + reconnect orphans | Junior Analyst design decided | After GAP-3 design |
+| GAP-5 | Retire MtfReading from snapshot endpoint | GAP-3 built | Last |
+
+---
+
 # CHANGE LOG
 *Record every change to the system here so we can trace when a working flow broke.*
 
