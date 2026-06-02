@@ -39,7 +39,7 @@
         }
         .radar-row-c:hover { border-color: #475569; transform: translateY(-1px); }
         .rrc-active { border-left-color: #22c55e; opacity: 1; }
-        .rrc-down   { border-left-color: #ef4444; opacity: 0.7; }
+        .rrc-down   { border-left-color: #64748b; opacity: 0.7; }
         .rrc-calib  { border-left-color: #94a3b8; opacity: 0.6; }
 
         .rrc-sym { min-width: 110px; }
@@ -722,21 +722,29 @@
             btn.innerText = collapsed ? '▶' : '▼';
         }
 
-        async function loadPanel02Intel(symbol) {
+        async function loadPanel02Intel(symbol, masStatus) {
             const dbSym = (symbol || '').includes('/') ? symbol : (symbol || '').replace('USDT', '/USDT');
             try {
                 const res  = await fetch(`/api/narrative/latest?symbol=${encodeURIComponent(dbSym)}`);
                 const data = await res.json();
                 if (!data || !data.ok || !data.jewel) {
-                    document.getElementById('p02TopLine').textContent = 'NO JEWEL DATA';
+                    // GAP-1: SA STAND_DOWN overrides even the no-JEWEL-data fallback label
+                    document.getElementById('p02TopLine').textContent =
+                        masStatus === 'STAND_DOWN' ? 'STAND DOWN — SYSTEM INACTIVE' : 'NO JEWEL DATA';
                     document.getElementById('p02TopLine').style.color = '#64748b';
                     return;
                 }
                 const j = data.jewel;
 
                 // Top line conviction state
+                // GAP-1: SA STAND_DOWN verdict overrides JEWEL gate/conviction — cannot
+                // display "HIGH CONVICTION SETUP" when the Senior Analyst has vetoed the session.
+                // JEWEL badges and signal below still render as context data.
                 const topEl = document.getElementById('p02TopLine');
-                if (j.jewel_gate_open && j.jewel_conviction === 'STRONG') {
+                if (masStatus === 'STAND_DOWN') {
+                    topEl.textContent = 'STAND DOWN — SYSTEM INACTIVE';
+                    topEl.style.color = '#64748b';
+                } else if (j.jewel_gate_open && j.jewel_conviction === 'STRONG') {
                     topEl.textContent = 'HIGH CONVICTION SETUP';
                     topEl.style.color = '#22c55e';
                 } else if (j.jewel_gate_open && j.jewel_conviction === 'MODERATE') {
@@ -780,8 +788,8 @@
         function renderModal(d) {
             // PANEL 00 — Analyst Brief
             loadAnalystBrief(d.symbol);
-            // PANEL 02 — JEWEL Intel Summary
-            loadPanel02Intel(d.symbol);
+            // PANEL 02 — JEWEL Intel Summary (pass SA verdict so it can gate the top-line label)
+            loadPanel02Intel(d.symbol, d.mas_status);
 
             if (d.diagnostic_ledger && Object.keys(d.diagnostic_ledger).length > 0) {
                 let diagHtml = `<div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono'; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">SSOT PIPELINE ANALYSIS:</div>`;
@@ -805,10 +813,19 @@
 
             document.getElementById('rawKey').value = d.key;
 
-            let visualKey = d.key ? d.key.replace(/\|/g, " | ") : "-- DATA MISSING --";
+            // GAP-2: rename radar grade labels in the display string only — rawKey stays
+            // unchanged so the TradingView "COPY TO HUD" payload keeps its original format.
+            let visualKey = d.key
+                ? d.key.replace(/\|/g, " | ")
+                        .replace(/GRADE A/g, 'PRE-CHECK: A')
+                        .replace(/GRADE B/g, 'PRE-CHECK: B')
+                : "-- DATA MISSING --";
             document.getElementById('hudPayload').innerHTML = visualKey;
 
-            if(d.plan.valid) {
+            // GAP-1: trade card suppressed when SA verdict is STAND_DOWN, regardless of
+            // whether the radar pre-check or JEWEL gate shows a valid setup.
+            const planActive = d.plan.valid && d.mas_status !== 'STAND_DOWN';
+            if(planActive) {
                 document.getElementById('pEnt').innerText = d.plan.entry.toFixed(2);
                 document.getElementById('pStp').innerText = d.plan.stop.toFixed(2);
                 document.getElementById('pT1').innerText = d.plan.targets[0].toFixed(2);
@@ -830,7 +847,8 @@
             const riskAmt = bal * (riskPct / 100);
             document.getElementById('valLoss').innerText = "$" + riskAmt.toFixed(2);
 
-            if(activeData.plan.valid) {
+            const _planActive = activeData.plan.valid && activeData.mas_status !== 'STAND_DOWN';
+            if(_planActive) {
                 const dist = Math.abs(activeData.plan.entry - activeData.plan.stop);
                 if(dist > 0) {
                     const totalContracts = riskAmt / dist;
@@ -926,6 +944,7 @@
                     levels:             lvl,
                     indicator_string:   `${bo},${bd},${lvl.daily_resistance||0},${lvl.daily_support||0},${lvl.range30m_high||0},${lvl.range30m_low||0}`,
                     grade:              snap.mas_status || 'PENDING',
+                    mas_status:         snap.mas_status || null,
                     key:                '',
                     diagnostic_ledger:  {},
                     plan: {
@@ -974,7 +993,13 @@
             if (!liveData || !liveData.ok) return;
 
             liveData.results.forEach(t => {
-                window.radarMemory[t.symbol] = t;
+                // GAP-2: merge Phase 2 scan over Phase 1 snapshot — preserve SA verdict
+                // and SA plan (CampaignLog) so they are not overwritten by radar data.
+                const _prev = window.radarMemory[t.symbol] || {};
+                window.radarMemory[t.symbol] = Object.assign({}, _prev, t, {
+                    mas_status: _prev.mas_status !== undefined ? _prev.mas_status : (t.mas_status || null),
+                    plan:       _prev.plan || t.plan,
+                });
 
                 const row = document.querySelector(`.radar-row-c[data-symbol="${t.symbol}"]`);
                 if (!row) return;
@@ -1021,8 +1046,12 @@
                     cockpitBtn.className = 'rrc-cockpit rrc-cockpit-active';
                 }
 
-                // Update row border color by grade
-                const actionable = (t.grade === 'GRADE A' || t.grade === 'GRADE B');
+                // GAP-2: row border driven by SA verdict (mas_status) when available;
+                // falls back to radar grade when no SA verdict exists yet (pre-session).
+                const _masStatus = window.radarMemory[t.symbol].mas_status;
+                const actionable = _masStatus
+                    ? (_masStatus === 'APPROVED' || _masStatus === 'WAITING_FOR_15M')
+                    : (t.grade === 'GRADE A' || t.grade === 'GRADE B');
                 row.className = `radar-row-c ${actionable ? 'rrc-active' : 'rrc-down'}`;
                 row.setAttribute('data-symbol', t.symbol);
 
@@ -1072,6 +1101,7 @@
                 const lvl    = t.levels || {};
                 const bo     = lvl.breakout_trigger  || 0;
                 const bd     = lvl.breakdown_trigger || 0;
+                // GAP-2: no mas_status in full-grid path (no Phase 1 lock) — fall back to grade
                 const actionable = (t.grade === 'GRADE A' || t.grade === 'GRADE B');
 
                 html += _buildRow(
