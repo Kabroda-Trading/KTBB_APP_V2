@@ -28,6 +28,7 @@ from database import (
     MacroNarrativeLog,
     JewelSnapshotLog,
     SystemAuditLog,
+    InterpreterLog,
 )
 
 
@@ -982,6 +983,34 @@ def _write_narrative_log(
 # SECTION 9 — MAIN PIPELINES (REWRITTEN — Phase 3A)
 # ==============================================================================
 
+def _log_interpreter(
+    symbol: str,
+    session_date: str,
+    session_id: str,
+    name: str,
+    output_text: Optional[str],
+) -> None:
+    """
+    Persists a Bucket B interpreter's full output to InterpreterLog.
+    Called immediately after each interpreter returns in run_mas_analysis().
+    Writes a row even on fail-open (output_text=None, ran_successfully=False)
+    so absences are auditable. Fail-safe: caller wraps in try/except.
+    """
+    db = SessionLocal()
+    try:
+        db.add(InterpreterLog(
+            symbol=symbol,
+            session_date=session_date,
+            session_id=session_id,
+            interpreter_name=name,
+            output_text=output_text,
+            ran_successfully=output_text is not None,
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+
 def run_mas_analysis(
     symbol: str,
     session_id: str,
@@ -1022,6 +1051,10 @@ def run_mas_analysis(
         mtf_read = mtf_interpreter.run_mtf_interpretation(context, jewel_ctx)
     except Exception as _mtf_err:
         print(f"[MTF INTERPRETER] Skipped — raw energy block in use: {_mtf_err}")
+    try:
+        _log_interpreter(symbol, date_key, session_id, "mtf_interpreter", mtf_read)
+    except Exception:
+        pass
 
     # 2c. Gravity Interpreter — Bucket B pre-digests the wall/airspace picture for the SA.
     # Fail-open: any exception → gravity_read = None → raw GRAVITY WALLS sections used instead.
@@ -1030,6 +1063,10 @@ def run_mas_analysis(
         gravity_read = gravity_interpreter.run_gravity_interpretation(levels, context, targets)
     except Exception as _grav_err:
         print(f"[GRAVITY INTERPRETER] Skipped — raw wall sections in use: {_grav_err}")
+    try:
+        _log_interpreter(symbol, date_key, session_id, "gravity_interpreter", gravity_read)
+    except Exception:
+        pass
 
     # 3. Build the full context string
     context_text = _build_senior_analyst_context(

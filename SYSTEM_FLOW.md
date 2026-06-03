@@ -588,6 +588,45 @@ sees it — exactly what an Interpreter is for.
 
 ---
 
+# AUDITABILITY COVENANT
+*Established 2026-06-03. Governing principle — applies to every current and
+future Bucket B module.*
+
+**Every Bucket B (Interpreter) module must persist its full output text to
+`InterpreterLog` at build time. This is not optional and is not a follow-up task.**
+
+A component that produces judgment without a DB record is invisible to the
+Performance Auditor and unrecoverable after the session ends. The root cause
+was confirmed on 2026-06-03: the gravity interpreter ran successfully (485 tokens,
+$0.018) but its output was irrecoverable from the DB — the only record was a
+token count in `AgentRunLog`. No calibration, no look-back, no cross-session
+query was possible.
+
+**The rule:** every Interpreter's write path is part of its initial implementation
+spec, not an afterthought. If a Bucket B module produces output without an
+`InterpreterLog` row, it is not complete.
+
+**The table:** `InterpreterLog` — keyed by `(symbol, session_date, session_id,
+interpreter_name)`. Joinable to `CampaignLog` and `DecisionJournal` on the same
+triple. A row is written even on fail-open (`ran_successfully=False`,
+`output_text=None`) so absences are auditable.
+
+**Future interpreters this applies to:**
+- Junior Analyst (GAP-3 — when built)
+- Any reconnected OI / L2 depth interpreter (GAP-4 Phase 2)
+- Any macro context interpreter
+- Any domain interpreter added at any future build
+
+**What this enables for the Performance Auditor:**
+Once several weeks of `InterpreterLog` data exist, the weekly audit can add a
+Block D: per-interpreter domain accuracy. Example: "gravity_interpreter said
+BLOCKED on 3 sessions — 2 were CLOSED_LOSS, 1 was CLOSED_WIN. MTF said EXHAUSTED
+on 2 sessions — both were STAND_DOWN. These are calibration signals." This
+analysis requires the text data; without `InterpreterLog` it is permanently
+impossible to construct.
+
+---
+
 # CONNECTION MAP (2026-06-01)
 *Read-only audit of every agent/specialist/analyst/reporter module. Purpose: find
 orphans, dead-end writes, and wiring severed when CrewAI was removed.*
@@ -813,12 +852,16 @@ JewelSnapshotLog (last 6 session snapshots → jewel_ctx string)
 4. _read_narrative_context()     DB read — prior narrative + EW wave + auditor note
 5. _read_jewel_context()         DB read — 6x JEWEL snapshots
 6. mtf_interpreter (LLM call)    Bucket B — graduated MTF characterization (fail-open)
-7. _build_senior_analyst_context() String assembly
-8. Senior Analyst (LLM call)     Bucket B — decision + full brief (APPROVED/REJECTED/WAITING/STAND_DOWN)
+   → _log_interpreter()          InterpreterLog write (fail-safe, row written even on fail-open)
+7. gravity_interpreter (LLM call) Bucket B — wall/airspace characterization (fail-open)
+   → _log_interpreter()          InterpreterLog write (fail-safe, row written even on fail-open)
+8. _build_senior_analyst_context() String assembly
+9. Senior Analyst (LLM call)     Bucket B — decision + full brief (APPROVED/REJECTED/WAITING/STAND_DOWN)
 ```
 
 **Writes:**
 ```
+InterpreterLog       interpreter_name, output_text, ran_successfully (steps 6+7, fail-safe)
 CampaignLog          approval_status, bias, entry, stop, t1/t2/t3,
                      mas_executive_brief, formatted_newsletter, structure_reasoning
 DecisionJournal      decision_type, confluence params, full_context_json
@@ -1087,3 +1130,4 @@ TIER 4 — UI / PAGES
 | 2026-06-01 | 1C, SF-5, W-1 | MTF Interpreter prompt refinements: (1) hedging rule → decisively probabilistic (may express likelihood, may not hedge weakly); (2) sentence cap 5 → 5-7; (3) COMPLETENESS guard added (D/W signals must not be silently dropped); (4) max_tokens 400 → 600. | owner + Claude Code | Pre-deploy prompt review | commit a596909 |
 | 2026-06-02 | GAP-4 Phase 1 | Gravity Interpreter built (gravity_interpreter.py). Bucket B layer reading kde_peaks + macro_structure + levels + post-TSA targets. Characterizes: nearest HEAVY/MAXIMUM obstacle to T1 (price, intensity, %, macro confluence by name), CLEAR/OBSTRUCTED/BLOCKED airspace verdict, T2/T3 viability, one-sentence opposing-direction note, overall structural picture. Completeness guard (same as MTF — must not silently drop decision-relevant walls). Fail-open pattern identical to mtf_interpreter. Wired into run_mas_analysis() as step 2c; gravity_read= param added to _build_senior_analyst_context(); replaces raw GRAVITY WALLS sections when present. AWAITING PROMPT REVIEW before live run. Phase 2 (OI + L2) deferred pending orphan verification. | owner + Claude Code | GAP-4 Phase 1 build | gravity_interpreter.py new; kabroda_mas_flow.py: 4 edits. commit TBD |
 | 2026-06-02 | GAP-1, GAP-2 | Cockpit UI authority fix (W-6). GAP-2 Option C: Phase 2 scan now MERGES over Phase 1 snapshot instead of overwriting (preserves SA verdict + SA plan from CampaignLog); row border color driven by mas_approval_status (green=APPROVED, gray=STAND_DOWN) with fallback to radar grade when no SA verdict exists; HUD payload display renames "GRADE A/B" to "PRE-CHECK: A/B" (rawKey unchanged for TradingView). GAP-1: Panel 02 top-line label forced to "STAND DOWN — SYSTEM INACTIVE" when SA says STAND_DOWN, regardless of JEWEL gate/conviction (JEWEL badges/signal still render as context); trade card and position-size calc suppressed (renders "--") when mas_status === 'STAND_DOWN'. rrc-down CSS border changed from red to gray to match SA-muted semantics. | owner + Claude Code | Root cause: diagnosed 2026-06-02 — STAND_DOWN session showed HIGH CONVICTION SETUP + live trade card | market_radar.html: 7 edits. No Python changes. commit TBD |
+| 2026-06-03 | 3B, AUDITABILITY COVENANT | InterpreterLog persistence (AUDITABILITY COVENANT). New `InterpreterLog` table in `database.py` — keyed by `(symbol, session_date, session_id, interpreter_name)`, stores full `output_text`, `ran_successfully` bool. Picked up by `Base.metadata.create_all()` on deploy — no ALTER TABLE. `_log_interpreter()` helper added to `kabroda_mas_flow.py`; two call sites inserted in `run_mas_analysis()` immediately after `mtf_interpreter` (step 6) and `gravity_interpreter` (step 7) returns, each in its own `try/except` so a write failure never breaks the session. A row is written even on fail-open so absences are auditable. AUDITABILITY COVENANT section added to SYSTEM_FLOW.md as a governing principle for all future Bucket B builds. Layer 4 pipeline diagram updated. | owner + Claude Code | Root cause: gravity_interpreter ran successfully 2026-06-03 but output was irrecoverable (token count only, no text). One session of data permanently unrecoverable without this. | database.py: 1 class added. kabroda_mas_flow.py: 1 import, 1 helper, 2 call sites. SYSTEM_FLOW.md: 1 section + CHANGE LOG row. |

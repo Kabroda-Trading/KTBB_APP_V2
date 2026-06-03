@@ -451,3 +451,30 @@ class SystemAuditLog(Base):
     date_key   = Column(String,  index=True, nullable=False)
     audit_md   = Column(String,  nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
+# INTERPRETER LOG (AUDITABILITY COVENANT)
+# Persists every Bucket B interpreter's full output text,
+# keyed to the session so it can be joined to CampaignLog
+# and DecisionJournal for per-domain calibration queries.
+#
+# Writer: kabroda_mas_flow._log_interpreter() — called
+#   immediately after each interpreter returns, fail-safe.
+#   A row is written even on fail-open (output_text=None,
+#   ran_successfully=False) so absences are visible.
+#
+# New table — picked up by Base.metadata.create_all() on
+# deploy. No ALTER TABLE migration needed.
+# ---------------------------------------------------------
+class InterpreterLog(Base):
+    __tablename__ = "interpreter_log"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    symbol           = Column(String,  index=True, nullable=False)
+    session_date     = Column(String,  index=True, nullable=False)  # date_key "YYYY-MM-DD"
+    session_id       = Column(String,  index=True, nullable=False)  # e.g. "us_ny_futures"
+    interpreter_name = Column(String,  index=True, nullable=False)  # "mtf_interpreter" | "gravity_interpreter"
+    output_text      = Column(String,  nullable=True)               # Full prose — null if fail-opened
+    ran_successfully = Column(Boolean, nullable=False, default=False)
+    created_at       = Column(DateTime, default=datetime.datetime.utcnow)
