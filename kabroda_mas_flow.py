@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 import agent_core
 import gravity_interpreter
+import junior_analyst
 import mtf_interpreter
 import publisher_crew
 import trade_structure_analyst
@@ -711,6 +712,7 @@ def _build_senior_analyst_context(
     structure_notes: str = "",
     mtf_read: Optional[str] = None,
     gravity_read: Optional[str] = None,
+    junior_read: Optional[str] = None,
 ) -> str:
     bo = levels.get("breakout_trigger", 0)
     bd = levels.get("breakdown_trigger", 0)
@@ -787,6 +789,17 @@ def _build_senior_analyst_context(
             "",
             "=== STRUCTURAL ADJUSTMENTS (TRADE STRUCTURE ANALYST) ===",
             structure_notes,
+        ]
+
+    # v1: JA synthesis prepended; both full interpreter reads follow below as source
+    # material so the JA's completeness can be verified against them.
+    # v2: once InterpreterLog confirms JA reliability over several sessions, remove
+    # the raw interpreter reads from SA context (MAP 2 / Principle 3 — SA-load-reduction).
+    if junior_read:
+        lines += [
+            "",
+            "=== INTELLIGENCE PACKAGE (JUNIOR ANALYST) ===",
+            junior_read,
         ]
 
     if mtf_read:
@@ -1068,6 +1081,24 @@ def run_mas_analysis(
     except Exception:
         pass
 
+    # 2d. Junior Analyst — reconciles MTF + gravity reads into one intelligence package.
+    # Fail-open (three-layer guarantee):
+    #   L1: run_junior_analysis() catches all exceptions internally → returns None
+    #   L2: outer try/except here → junior_read stays None
+    #   L3: _build_senior_analyst_context() fall-through → SA reads mtf_read + gravity_read
+    #       directly, byte-for-byte identical to today's baseline. No regression.
+    # v1: full interpreter reads still appear in SA context below the package (source material).
+    # v2: consolidate to JA-only once InterpreterLog confirms reliability (MAP 2 / Principle 3).
+    junior_read: Optional[str] = None
+    try:
+        junior_read = junior_analyst.run_junior_analysis(mtf_read, gravity_read, levels, targets)
+    except Exception as _ja_err:
+        print(f"[JUNIOR ANALYST] Skipped — interpreters feeding SA directly: {_ja_err}")
+    try:
+        _log_interpreter(symbol, date_key, session_id, "junior_analyst", junior_read)
+    except Exception:
+        pass
+
     # 3. Build the full context string
     context_text = _build_senior_analyst_context(
         symbol=symbol,
@@ -1082,6 +1113,7 @@ def run_mas_analysis(
         structure_notes=structure_notes,
         mtf_read=mtf_read,
         gravity_read=gravity_read,
+        junior_read=junior_read,
     )
 
     # 4. Call Senior Analyst through agent_core (budget gate runs automatically)
