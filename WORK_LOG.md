@@ -185,6 +185,30 @@ output for review before closing W-1.
 
 ### W-5 ☑ Fix auditor-wire break — DONE
 
+### W-6 ☐ DASHBOARD ACCURACY AUDIT
+- **What:** Read-only audit of the performance dashboard — trace every displayed
+  number to its source query, verify correctness, then fix. The dashboard must be
+  an auditably correct scorecard before it can be trusted as the system's primary
+  feedback loop.
+- **Why (observed 2026-06-03):** Five specific issues found:
+  1. **Contradiction:** stat box shows "Net R lifetime +1R" but the cumulative chart
+     ends at approximately −6R. One is mislabeled. Both cannot be correct.
+  2. **Missing time windows:** "22 total sessions / 31.8% approved / 57.1% win rate"
+     with no stated date range. Every metric needs its period labeled.
+  3. **Bug:** "Loading trade history…" table never populates.
+  4. **"Error/Other" slice:** largest category in the MAS approval distribution. Need
+     to know what records count as Error/Other and whether they are real errors or
+     non-approved sessions miscategorized. This could be masking the real approval rate.
+  5. **No tooltips/labels:** no hover text explaining what each metric measures or
+     which table/column it reads from.
+- **This is the analytics equivalent of the cockpit contradiction** — a scorecard that
+  contradicts itself cannot be used to evaluate the system or validate the SUCCESS METRIC
+  framing (see above). It must be correct before the weather-reading audit (W-3) is meaningful.
+- **Protocol:** read-only audit FIRST (trace each number to its query and flag every
+  discrepancy). Fix pass SECOND. Do NOT bundle into another build — this is a focused,
+  standalone session.
+- **Status:** not started — own focused session when ready.
+
 ---
 
 ## DONE
