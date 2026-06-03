@@ -57,6 +57,46 @@ numbers rather than a judgment, it must go through an Interpreter (Bucket B) fir
 
 ---
 
+## SUCCESS METRIC (owner framing, 2026-06-03)
+
+The win rate that matters is **NOT** raw % of all possible trades — it's the system's
+**WEATHER-READING accuracy**, measured two ways:
+
+**(1) SELECTIVITY — when KABRODA STANDS DOWN, would trading have lost?**
+Stand-downs that avoided bad days are "wins" (capital protected), not missed trades.
+The Performance Auditor already tracks this: `STAND_DOWN accuracy (saved / resolved)`
+in the weekly audit. A STAND_DOWN that fires on a day price moved against the indicated
+direction = veto worked. A STAND_DOWN where price moved in the indicated direction = veto
+may have been overcautious. Over time, this ratio is the weather-reading score.
+
+**(2) ACCURACY WHEN IT ACTS — win rate AND expectancy on greenlight days.**
+A high win rate with bigger losses still loses money. The real measure is:
+`avg_win × win_rate − avg_loss × loss_rate > 0` (positive expectancy).
+CampaignLog has `realized_pnl` on closed trades. The Performance Auditor's Net R
+already approximates this. Goal is positive expectancy — a win-rate number alone
+is not meaningful without the loss-size context.
+
+**Owner's framing (two-trader model):** the edge is in knowing when NOT to trade
+(sit out the storms). Win rate naturally rises when you only act on clear-weather
+days. The system's weather-reading is validated by:
+- STAND_DOWN accuracy rate (avoided bad days vs. overcautious vetoes)
+- Win rate + expectancy on APPROVED sessions only (not all sessions)
+
+**FUTURE — tiered position sizing (post-validation):**
+Once the junior analyst is proven reliable in InterpreterLog, use agreement strength
+to drive position size: strong agree = clear weather = full size; partial agree = murky
+= reduced size; conflict = storm = stand down or minimal exposure. This is why the
+junior analyst earns its seat: it can eventually quantify HOW clear the day is, not
+just whether to act.
+
+**VALIDATION PATH (W-3):**
+Join `interpreter_log` stand-down/greenlight sessions to `campaign_logs` + subsequent
+price action: "does the system read the weather correctly?" Requires several weeks of
+logged InterpreterLog data (including `interpreter_name = 'junior_analyst'` rows).
+This is the W-3 backtest target — not a generic backtester, but a weather-reading audit.
+
+---
+
 ## ► NEXT SESSION START
 *End-of-session marker: 2026-06-03*
 
