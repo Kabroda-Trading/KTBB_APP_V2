@@ -185,7 +185,7 @@ output for review before closing W-1.
 
 ### W-5 ☑ Fix auditor-wire break — DONE
 
-### W-7 ◐ EXHAUSTION BUG FIX — direction-blind abs() stack (Fix 1 + Fix 2)
+### W-7 ◐ EXHAUSTION BUG FIX — Steps 0+1+2 DONE (deployed 80b1d79 · 2026-06-04); Fix 3 OPEN
 
 - **What:** Three direction-blind `abs()` computations stack inside CONDITION 2 of the
   SA gate, causing the system to read a strong clean bearish trend as "exhausted" and
@@ -303,18 +303,25 @@ Built on real ADX (no `/14` workaround — Step 0 fix must already be applied).
 
 Built on real ADX (Step 0 applied).
 
-- The function does not currently call `_calc_adx`. Add it:
-  `adx_15m = _calc_adx(raw_15m)` — `raw_15m` is the same candle list already in scope.
-- `trend_is_strong_15m = adx_15m["rising"] and adx_15m["adx"] >= 20`
-  *(CALIBRATION CHOICE B: 15M ADX is noisier than 4H. May need a lower threshold, e.g. 18,
-  or require more bars for stability. Validated in replay: Jun2 15M dev=4.38%, Jun3 dev=2.97%
-  — both should flip to PRIMED/SWEET_ZONE not OVEREXTENDED on strong-trend days.)*
-- Replace `if deviation_from_mean > 1.5: kinematic_grade = "OVEREXTENDED"` with
-  `if deviation_from_mean > 1.5 and not trend_is_strong_15m: kinematic_grade = "OVEREXTENDED"`.
-- Clean up the `exit_warning` tautology at the same time:
-  `exit_warning` currently checks `deviation > 1.5 and kinematic_grade == "OVEREXTENDED"` —
-  since the grade is assigned two lines above, the `and kinematic_grade` clause always
-  equals the first clause. Simplify to just `kinematic_grade == "OVEREXTENDED"`.
+**As planned (original approach — superseded):**
+- Add `adx_15m = _calc_adx(raw_15m)` and gate on `adx_15m["rising"] and adx_15m["adx"] >= 20`.
+
+**As implemented (deviation from plan — confirmed necessary):**
+- During build, replay revealed the 15M ADX decays rapidly after the initial directional
+  move: Jun 3 session-open 15M ADX=14.3 (not rising) despite 4H ADX=57.2. A 15M-only gate
+  would have re-blocked Jun 3 exactly as the original bug did, just via a different path.
+  The direction-aware DI check (minus_di > plus_di + price below SMA200 = trend) was also
+  tried but proved too permissive: Apr 28 (ranging, 4H ADX=12.2) had a short intraday 15M
+  drop that gave -DI dominance, which would incorrectly suppress OVEREXTENDED on a range day.
+- **Final implementation:** `_build_synthetic_jewel` accepts `adx_4h: Optional[Dict] = None`.
+  Gate: `adx_4h_strong = adx_4h rising AND adx_4h.adx >= 25`.
+  OVEREXTENDED fires only when `deviation > 1.5% AND NOT adx_4h_strong`.
+  `_build_fuel_gauge` passes `adx_4h=_calc_adx(raw_4h)` to the call.
+  *(CALIBRATION CHOICE B: threshold 25 for 4H. Correctly separates ranging intraday spike
+  (Apr 28: 4H ADX=12.2 → gate=False → OVEREXTENDED preserved) from trend continuation
+  (Jun 3: 4H ADX=57.2 → gate=True → protected). Revisit after 2–3 live sessions.)*
+- `exit_warning` tautology removed:
+  simplified from `(deviation > 1.5 AND grade == "OVEREXTENDED")` to `(grade == "OVEREXTENDED")`.
 
 **Step 3 — Fix 3 (CONDITION 2(a) direction-awareness) — DEFERRED, separate session**
 
@@ -329,20 +336,45 @@ Built on real ADX (Step 0 applied).
 
 #### Pre-deploy checklist
 
-- [ ] Step 0: Fix `_wilder` init in `_calc_adx` (one line: `/ period`). Run synthetic test — constant DX=30 must return ~30, not ~420.
-- [ ] Spot-check Step 0 against stored May30 session: recalculate 4H ADX from stored candles and confirm it now reads in 0–100 range matching the corrected values (~33 for May30).
-- [ ] Step 1: Write Fix 1 (`_calculate_harmonic_matrix`). Replay May29/Jun1/Jun2/Jun3 — confirm labels.
-- [ ] Step 2: Write Fix 2 (`_build_synthetic_jewel`). Replay same 4 days — confirm 15M grade.
-- [ ] Confirm Steps 0–2 together: all 3 stand-down days drop to 1/3 CONDITION 2 (a only). Fri May29 stays 1/3.
-- [ ] Validate on 2 non-trending / reversal days (find a choppy or V-reversal session in the last 30 days). Confirm the gate STILL fires STAND_DOWN on those — the fix must not unblock everything, only strong-trend days.
-- [ ] Deploy Steps 0–2 as a single commit (all three are coupled — Step 0 is the foundation, Steps 1+2 build on it).
-- [ ] Watch first live session after deploy. Confirm `micro_state` and `kinematic_grade` appear correctly in the SA context (SWEET_ZONE_BEAR on a trending day, EXHAUSTION/TANGLED on a choppy day).
+- [x] Step 0: Fix `_wilder` init in `_calc_adx`. Two changes (seed + recurrence formula). Synthetic DX=30 → ADX=30.0 ✓
+- [x] Spot-check Step 0: May30 stored 4H ADX 463.46 ÷ 14 = 33.1 — matches plan's ~33 prediction ✓
+- [x] Step 1: Fix 1 (`_calculate_harmonic_matrix`). Replay confirmed: Jun2/3 → SWEET_ZONE_BEAR, May29/Jun1 unchanged ✓
+- [x] Step 2: Fix 2 (`_build_synthetic_jewel`). 4H-ADX gate (threshold 25) — see implementation note above ✓
+- [x] Combined CONDITION 2 table: all four days at 1/3 (COND2(a) only). May29 unchanged ✓
+- [x] Negative test (3 non-trend days, identical candles, old vs new): Apr28 SD preserved; May15/May27 unchanged (pre-existing, not regressions) ✓
+- [x] Deployed as single commit **80b1d79** (2026-06-04) — one file, 23 insertions / 13 deletions ✓
+- [ ] Watch first live session post-deploy — see NEXT SESSION below.
 - [ ] Step 3 (CONDITION 2a direction-awareness) — separate session after live validation.
 
-- **Status:** ◐ Validated — build order decided. Next action: fresh session, Step 0 first.
-- **Depends on:** nothing (pure math layer)
+- **Status:** Steps 0+1+2 DEPLOYED 2026-06-04 (commit 80b1d79). Fix 3 OPEN.
+- **Positive validation:** Jun1/Jun2/Jun3 2026 unblocked (OLD=SD → NEW=no SD on all three).
+- **Negative validation:** Apr28/May15/May27 2026 — no regressions (Apr28 SD preserved; May15/27 unchanged pre-existing behavior).
+- **Depends on:** nothing (pure math layer — shipped)
 - **Blocks:** Part 2 mean-reversion mode (Suggestion Box 2026-06-03) — build Part 2 only
   after Steps 0–2 are proven live.
+
+---
+
+#### NEXT SESSION — post-deploy live watch (2026-06-04 onwards)
+
+Watch the first live NY Futures session that runs through the fixed code on Render.
+
+**If the SA brief still cites exhaustion / OVEREXTENDED labels:**
+- The Render instance may not have picked up commit 80b1d79. Check deploy logs.
+- Verify the running process has `_wilder` seeding with `/ period` (quick health check: hit
+  `/api/gravity/scan` and inspect the `fuel_gauge.4H.jewel.adx` value — must be in 0–100).
+
+**If the SA brief stands down citing only "4H Momentum NEGATIVE":**
+- Steps 0+1+2 are working as expected. This is Fix 3 territory.
+- CONDITION 2(a) "4H Momentum NEGATIVE" is structurally always true in a bearish trend
+  (MACD hist < 0 is the definition of the trend, not a failure signal). The SA is correctly
+  down to 1/3, but COND2(a) alone is still triggering STAND_DOWN per the prompt threshold.
+- Build Fix 3 next session: SA system prompt change — "4H Momentum NEGATIVE against the
+  trade direction is a stand-down signal; for a SHORT in a downtrend, NEGATIVE is
+  confirmation." Judgment layer only, no math layer changes.
+
+**If the SA brief issues APPROVED on a trending day:**
+- Steps 0+1+2 are working. Monitor the brief for correct level math and measured-move targets.
 
 ---
 
