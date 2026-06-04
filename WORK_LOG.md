@@ -378,22 +378,75 @@ Watch the first live NY Futures session that runs through the fixed code on Rend
 
 ---
 
-### W-8 ☐ FRONT-OF-RIVER SIGNAL AUDIT — findings logged 2026-06-04, all DEFERRED pending live ADX validation
+### W-8 ◐ "FEED THE SENIOR ANALYST" — front-of-river audit → reconnection phase (2026-06-04)
 
 **What:** Read-only stress-test of the signal computation and flow-through layer —
-the indicators computed at session lock that feed the SA brief. Replay harness run
-against all 7 known sessions (May29/Jun1/Jun2/Jun3 trending + Apr28/May15/May27 choppy),
-identical MEXC candles, code-review of five source files.
+indicators computed at session lock that feed the SA brief. Replay harness run against
+all 7 known sessions (May29/Jun1/Jun2/Jun3 trending + Apr28/May15/May27 choppy),
+identical MEXC candles, code-review of five source files. Owner framing decided
+2026-06-04: the audit finding reframes what the next phase of work IS.
 
 **Headline finding:** NO second ADX-class bug. Front-of-river math (RSI, MACD
 calculation, BO/BD triggers, EMA formulas, VRVP) computes correctly. The dominant
-theme is **dropped information** — correct values computed, then discarded before
-reaching the SA — not wrong values.
+theme is **dropped information** — correct values computed, then discarded or
+flattened before reaching the SA — not wrong values.
 
-**Fix order after live ADX validation (80b1d79):** MACD/Fix 3 first → PMARP →
-bias_model reconnect → remainder by weight. Each: careful, validated, front-to-back.
-Do NOT start any of these before the first live session confirms Steps 0+1+2 are
-working on Render.
+---
+
+#### Strategic framing — owner decision 2026-06-04
+
+The SA is currently reasoning on a **starved picture.** Signals that are correctly
+computed never arrive: MACD magnitude is flattened to a sign, the sse_engine's
+direction/confidence signal is wired to nothing, BBWP vanishes when the MTF
+interpreter fails. Despite this, the SA made **defensible trading calls** on Mon/Tue
+(trade-to-T1 on confirmed downtrend sessions). That is evidence the SA's reasoning
+layer is strong. The bottleneck is feeding it, not its judgment.
+
+**Therefore: the next phase of work is FEED THE SENIOR ANALYST, not
+gravity-map expansion or agent-tuning.** There is no point enriching downstream
+interpretation while upstream signals are silently missing. Front-of-river fully
+connected first. Gravity map expansion and agent-level tuning come after.
+
+**Hard gate: live ADX validation first.** Do not start any reconnection work before
+the first live session on Render confirms 80b1d79 is running (Steps 0+1+2 working,
+exhaustion labels gone). Clean baseline before new wires.
+
+**Guardrail: more info ≠ better.** Feed DECISION-RELEVANT signals cleanly. Route
+through the Junior Analyst / interpreters where the signal needs digestion before
+the SA sees it. The Junior Analyst's job is to pre-process, not to firehose the SA.
+This is the same principle behind the MTF interpreter — a good interpreter reduces
+SA load, it does not add raw rows to an already long context.
+
+---
+
+#### Work plan (after live ADX validation clears)
+
+**Tier A — RECONNECTIONS** (low-risk, high-value)
+These are wires never connected or signals silently dropped. Connecting a correctly
+working signal to a blind decision layer cannot break a working signal. Low blast radius.
+
+- **A1. Wire sse_engine bias_model into `_build_senior_analyst_context`** — the
+  `daily_lean` dict (direction, score, confidence from slope + VRVP location +
+  trigger asymmetry) is stored in the packet but never passed to the SA context
+  builder. One parameter addition + one section in the SA brief. See finding #3.
+- **A2. Add BBWP to SA fallback section** — when `mtf_read=None`, BBWP is currently
+  absent. Add `bbwp_value` and `bbwp_compressed` from `fuel_gauge["4H"]` to the
+  fallback lines 814–826 in `kabroda_mas_flow`. Low-risk one-liner. See finding #5.
+- **A3. Pass MACD magnitude through / Fix 3** — `analyze_tf` flattens hist to
+  "POSITIVE"/"NEGATIVE". Fix 3 may need to be a DATA change (pass the normalised
+  hist value through to SA context) AND a PROMPT change (teach the SA to read
+  direction-qualified momentum), not just a prompt change. This is the highest-weight
+  reconnection because it also closes CONDITION 2(a)'s structural always-true-in-downtrend
+  issue. See finding #1. Plan both layers before building.
+
+**Tier B — ONE REAL FIX** (requires careful validation, same protocol as W-7)
+- **B1. PMARP direction-blind threshold** — `rank > 75` fires for upside overextension
+  only. Downside extremes (Jun 2: rank=0.0, most extreme below EMA21 in 252-bar history)
+  read as "not overextended." Fix: flag BOTH `rank > 75` (upside) AND `rank < 25`
+  (downside) as overextended in their respective directions. Same ADX-class structural
+  pattern as W-7's abs() bugs. Validate with the same positive/negative test protocol:
+  downtrend days must now show downside-overextended; ranging days must still not
+  misfire. See finding #2.
 
 ---
 
@@ -442,9 +495,10 @@ working on Render.
 
 ---
 
-- **Status:** Audit complete. All findings DEFERRED — no code changes. Validate 80b1d79 live first.
-- **Next action after live validation:** MACD/Fix 3 — determine whether fix is prompt-only or requires hist magnitude to be wired through to SA context.
-- **Blocks nothing** (audit only). Informs Fix 3 scope.
+- **Status:** ◐ Audit complete; work plan decided 2026-06-04. Waiting on live ADX validation (80b1d79) before any code changes.
+- **Next action:** Watch first live Render session. If 80b1d79 confirmed working → start Tier A reconnections in order A1 → A2 → A3/Fix3. Then Tier B (PMARP) with W-7-protocol validation.
+- **Sequencing:** Tier A first (reconnections, low blast radius). Tier B only after Tier A is live and validated. Gravity map expansion after front-of-river is fully connected.
+- **Blocks:** W-3 backtest validity (pointless to replay a starved SA). Gravity expansion (downstream — feed front-of-river first).
 
 ---
 
