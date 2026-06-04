@@ -125,8 +125,8 @@ def _calc_adx(candles: List[Dict], period: int = 14) -> Dict:
         tr_vals.append(max(h - l, abs(h - pc), abs(l - pc)))
     def _wilder(vals: List[float]) -> List[float]:
         if len(vals) < period: return []
-        s = [sum(vals[:period])]
-        for v in vals[period:]: s.append(s[-1] - s[-1] / period + v)
+        s = [sum(vals[:period]) / period]
+        for v in vals[period:]: s.append(s[-1] - s[-1] / period + v / period)
         return s
     sm_pdm = _wilder(plus_dm_vals); sm_mdm = _wilder(minus_dm_vals); sm_tr = _wilder(tr_vals)
     if not sm_tr: return {"adx": 0.0, "plus_di": 0.0, "minus_di": 0.0, "rising": False}
@@ -217,7 +217,7 @@ def _build_jewel_reading(candles: List[Dict]) -> Dict:
         "signal":         signal,
     }
 
-def _build_synthetic_jewel(raw_15m: List[Dict]) -> Dict:
+def _build_synthetic_jewel(raw_15m: List[Dict], adx_4h: Optional[Dict] = None) -> Dict:
     if not raw_15m or len(raw_15m) < 200:
         return {"rsi": 50.0, "kinematic_grade": "TANGLED", "exit_warning": False}
         
@@ -236,17 +236,24 @@ def _build_synthetic_jewel(raw_15m: List[Dict]) -> Dict:
     deviation_from_mean = abs(current_price - sma200) / sma200 * 100
     ribbon_spread = abs(ema9 - ema55) / ema55 * 100
     
-    if deviation_from_mean > 1.5:
+    # CALIBRATION CHOICE B: gate OVEREXTENDED on 4H trend strength, not 15M ADX.
+    # Reason: after a sharp directional move the 15M ADX decays quickly (confirmed Jun 3:
+    # 15M ADX=14.3 despite 4H ADX=57.2) while the 4H trend is still fully intact.
+    # A 15M-only gate would re-block the fix for any session where the prior day was the
+    # big move. The 4H gate correctly distinguishes a ranging intraday spike (low 4H ADX)
+    # from a continuation session after a real multi-day trend (high 4H ADX).
+    adx_4h_strong = (adx_4h is not None and
+                     adx_4h.get("rising", False) and
+                     adx_4h.get("adx", 0.0) >= 25)
+
+    if deviation_from_mean > 1.5 and not adx_4h_strong:
         kinematic_grade = "OVEREXTENDED"
     elif ribbon_spread < 0.15:
         kinematic_grade = "TANGLED"
     else:
         kinematic_grade = "PRIMED"
 
-    exit_warning = (
-        (deviation_from_mean > 1.5 and kinematic_grade == "OVEREXTENDED") or
-        (ribbon_spread < 0.10 and kinematic_grade == "TANGLED")
-    )
+    exit_warning = kinematic_grade == "OVEREXTENDED" or (ribbon_spread < 0.10 and kinematic_grade == "TANGLED")
 
     return {
         "rsi": round(rsi, 2),
@@ -281,9 +288,9 @@ def _build_fuel_gauge(raw_1h: List[Dict], raw_4h: List[Dict], raw_15m: List[Dict
         return {"trend": trend, "momentum": momentum, "rsi": round(rsi, 2), "ema30": round(ema30, 2), "ema50": round(ema50, 2), "jewel": _build_jewel_reading(candles)}
         
     return {
-        "1H": analyze_tf(raw_1h), 
+        "1H": analyze_tf(raw_1h),
         "4H": analyze_tf(raw_4h),
-        "15M_JEWEL": _build_synthetic_jewel(raw_15m)
+        "15M_JEWEL": _build_synthetic_jewel(raw_15m, adx_4h=_calc_adx(raw_4h)),
     }
 
 def _calculate_weekly_force(daily_candles: list) -> str:
@@ -326,17 +333,20 @@ def _calculate_harmonic_matrix(candles_1h: list, candles_4h: list) -> dict:
     wave_bullish = ema20_1h > ema50_1h
 
     spread_1h = abs(ema20_1h - ema50_1h) / ema50_1h
-    is_exhausted = spread_1h > 0.015  
+    spread_wide = spread_1h > 0.015
+    adx_4h = _calc_adx(candles_4h)
+    # CALIBRATION CHOICE A: threshold 20 (vs 25 — both pass all 4 replay days; 20 catches weaker trends)
+    trend_is_strong = adx_4h["rising"] and adx_4h["adx"] >= 20
 
     if tide_bullish and wave_bullish:
-        if is_exhausted: return {"micro_state": "EXHAUSTION", "1h_fuel_status": "OVEREXTENDED"}
+        if spread_wide and not trend_is_strong: return {"micro_state": "EXHAUSTION", "1h_fuel_status": "OVEREXTENDED"}
         return {"micro_state": "SWEET_ZONE", "1h_fuel_status": "STRONG"}
     elif tide_bullish and not wave_bullish:
         return {"micro_state": "PULLBACK", "1h_fuel_status": "REFUELING"}
     elif not tide_bullish and wave_bullish:
         return {"micro_state": "HOSTILE_CEILING", "1h_fuel_status": "CHOP_RISK"}
     else:
-        if is_exhausted: return {"micro_state": "EXHAUSTION", "1h_fuel_status": "OVEREXTENDED"}
+        if spread_wide and not trend_is_strong: return {"micro_state": "EXHAUSTION", "1h_fuel_status": "OVEREXTENDED"}
         return {"micro_state": "SWEET_ZONE_BEAR", "1h_fuel_status": "STRONG"}
 
 def _calculate_168h_micro_bias(raw_1h: List[Dict[str, Any]]) -> str:
