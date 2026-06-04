@@ -185,6 +185,167 @@ output for review before closing W-1.
 
 ### W-5 ☑ Fix auditor-wire break — DONE
 
+### W-7 ◐ EXHAUSTION BUG FIX — direction-blind abs() stack (Fix 1 + Fix 2)
+
+- **What:** Three direction-blind `abs()` computations stack inside CONDITION 2 of the
+  SA gate, causing the system to read a strong clean bearish trend as "exhausted" and
+  issuing STAND_DOWN through confirmed downtrending sessions. Fix 1 and Fix 2 are pure
+  math-layer changes (no LLM, no prompt). Fix 3 is a separate SA-prompt change deferred
+  until after Fix 1+2 are proven live.
+
+- **Why:** 4-day live replay (May 29 / Jun 1 / Jun 2 / Jun 3) confirmed the owner's
+  read. On the three stand-down days the 4H ADX (corrected) was 29–57 with -DI dominant
+  (11.5/28.1 → 5.8/36.2 → 4.8/35.6) — an unambiguous, accelerating bearish trend that
+  should have been tradeable on the short side.
+
+#### Validated findings (2026-06-03 replay)
+
+**Three stacked bugs, not one:**
+
+1. **`battlebox_pipeline._calculate_harmonic_matrix` — CONDITION 2(b) source**
+   `spread_1h = abs(ema20_1h - ema50_1h) / ema50_1h` is direction-blind. A bear trend
+   with a wide 1H EMA spread gets labeled `EXHAUSTION / OVEREXTENDED` identically to a
+   bullish overextension. The `SWEET_ZONE_BEAR` path is unreachable whenever the trend
+   has extended the EMAs (which any multi-day directional move will do).
+
+2. **`battlebox_pipeline._build_synthetic_jewel` — CONDITION 2(c) source**
+   `deviation_from_mean = abs(current_price - sma200) / sma200 * 100` is direction-blind.
+   Price 4.38% below SMA200 on Jun 2 (strong bear run) labeled `OVEREXTENDED` identically
+   to price 4.38% above SMA200 (exhausted long). This fed CONDITION 2(c) on all three
+   stand-down days.
+
+3. **CONDITION 2(a) — "4H Momentum NEGATIVE" is structurally always true in a downtrend**
+   Driven by `MACD hist < 0`. In a bearish trend the MACD histogram IS negative — that is
+   the definition of the trend, not a failure signal. On Jun 2 the histogram was −327; on
+   Jun 3 it was −410. These indicate an accelerating downtrend, not an exhausted one. The
+   gate checks for sign only, not magnitude or direction context. This is Fix 3 (prompt change).
+
+**What Fix 1 alone produces (harmonic matrix only):**
+
+| Session | Current COND2 | After Fix 1 only | Outcome |
+|---------|--------------|-----------------|---------|
+| Fri May 29 | 1/3 → no SD | 1/3 → no SD | Unchanged (spread was only 0.64%, fix irrelevant) |
+| Mon Jun 1 | 2/3 (a+c) → SD | 2/3 (a+c) → **still SD** | Fix 1 has no effect — Jun 1 harmonic was already SWEET_ZONE_BEAR |
+| Tue Jun 2 | 3/3 (a+b+c) → SD | 2/3 (a+c) → **still SD** | Removes b; a+c remain |
+| Wed Jun 3 | 3/3 (a+b+c) → SD | 2/3 (a+c) → **still SD** | Same |
+
+**Fix 1 alone changes nothing for any stand-down session. Must pair with Fix 2.**
+
+**What Fix 1 + Fix 2 produces (both abs() bugs corrected, ADX-gated):**
+
+| Session | After Fix 1+2 | COND2 met | Outcome |
+|---------|--------------|-----------|---------|
+| Fri May 29 | SWEET_ZONE_BEAR (unchanged) | 1/3 (a only) | No SD — correct |
+| Mon Jun 1 | SWEET_ZONE_BEAR (unchanged) | 1/3 (a only) | No SD — correct |
+| Tue Jun 2 | SWEET_ZONE_BEAR (fixed) | 1/3 (a only) | No SD — correct, was SD |
+| Wed Jun 3 | SWEET_ZONE_BEAR (fixed) | 1/3 (a only) | No SD — correct, was SD |
+
+All three stand-down sessions unblocked. Remaining CONDITION 2(a) (4H Momentum NEGATIVE)
+is structurally always met in a downtrend — addressed in Fix 3 (deferred).
+
+#### Build order (owner decision 2026-06-03 — foundation-first, no workarounds)
+
+**Rationale:** the original plan used `adx / 14.0` to work around the `_calc_adx` Wilder init
+bug while building Fix 1+2. Owner rejected this: Fix 1+2 are decision-logic that the whole
+trade gate will run on — they must be built on rock, not on a known-broken function with a
+fudge factor on top. Correct the foundation first, then build on it.
+
+---
+
+**Step 0 — Fix `_calc_adx` (Wilder init bug) — DO FIRST**
+
+The bug: `_wilder()` at `battlebox_pipeline.py:126–130` initialises with
+`s = [sum(vals[:period])]` instead of `s = [sum(vals[:period]) / period]`.
+This makes the steady-state output `period × correct_ADX` (~14× true value).
+Confirmed: synthetic test (constant DX=30 → output 420, not 30); stored session data
+(4H ADX logged as 463, 1H as 159 — both impossible for a 0–100 indicator).
+
+Fix: one character change — add `/ period` to the initial line. After this fix,
+`_calc_adx` returns true 0–100 ADX values and `rising` behaviour is unchanged.
+
+**Before deploying the `_calc_adx` fix — audit every consumer:**
+
+All callers currently compare the raw (~14×) value against thresholds calibrated to the
+inflated scale. Once the fix lands, every `adx > X` threshold in every caller becomes
+wrong (comparing a true 0–100 value against an inflated threshold). Known consumers:
+
+| File | Function | Uses ADX how | Threshold to recalibrate |
+|------|----------|-------------|--------------------------|
+| `battlebox_pipeline.py` | `_build_jewel_reading` | `adx > 25` → `adx_trending`; `adx_rising` | `> 25` → stays `> 25` (now correct) |
+| `mtf_confluence_scanner.py` | `_analyze_timeframe` | `adx_val > 25` → `adx_strength = "STRONG"` | `> 25` → stays `> 25` (now correct) |
+| Fix 1 (Step 1 below) | `_calculate_harmonic_matrix` | new — `adx >= threshold` | calibrate from replay (target ~20–25) |
+| Fix 2 (Step 2 below) | `_build_synthetic_jewel` | new — `adx >= threshold` | calibrate from replay (target ~20–25) |
+
+The existing `> 25` thresholds in `_build_jewel_reading` and `_analyze_timeframe` are
+currently comparing against ~14× values. Once fixed, `> 25` is the correct Wilder
+"trending" threshold — no change needed to those lines after the fix. Verify by spot-check
+on a known trending session (Jun 2/3 should read ADX ~44/57 corrected, confirming strong trend).
+
+**Step 0 output:** `_calc_adx` returns true 0–100. All existing `> 25` thresholds correct.
+Stage but do not deploy until Steps 1+2 are written and validated together.
+
+---
+
+**Step 1 — Fix `battlebox_pipeline._calculate_harmonic_matrix` (lines 306–340)**
+
+Built on real ADX (no `/14` workaround — Step 0 fix must already be applied).
+
+- Compute `adx_4h = _calc_adx(candles_4h)` (same file, same candles — no new dependency).
+- `trend_is_strong = adx_4h["rising"] and adx_4h["adx"] >= 20`
+  *(CALIBRATION CHOICE A: threshold 20 vs 25 — validated from replay: Jun2 true ADX ~44,
+  Jun3 ~57, both clear; May29 ~29, Jun1 ~32 — any threshold 20–30 passes all four days.
+  Pick 20 for now; mark as calibration to revisit after 2–3 live sessions.)*
+- In both aligned branches (bull+bull, bear+bear): replace bare `if is_exhausted` with
+  `if spread_wide and not trend_is_strong`.
+- `SWEET_ZONE_BEAR` is now reachable even with wide EMA spread, provided ADX confirms trend.
+
+**Step 2 — Fix `battlebox_pipeline._build_synthetic_jewel` (lines 220–260)**
+
+Built on real ADX (Step 0 applied).
+
+- The function does not currently call `_calc_adx`. Add it:
+  `adx_15m = _calc_adx(raw_15m)` — `raw_15m` is the same candle list already in scope.
+- `trend_is_strong_15m = adx_15m["rising"] and adx_15m["adx"] >= 20`
+  *(CALIBRATION CHOICE B: 15M ADX is noisier than 4H. May need a lower threshold, e.g. 18,
+  or require more bars for stability. Validated in replay: Jun2 15M dev=4.38%, Jun3 dev=2.97%
+  — both should flip to PRIMED/SWEET_ZONE not OVEREXTENDED on strong-trend days.)*
+- Replace `if deviation_from_mean > 1.5: kinematic_grade = "OVEREXTENDED"` with
+  `if deviation_from_mean > 1.5 and not trend_is_strong_15m: kinematic_grade = "OVEREXTENDED"`.
+- Clean up the `exit_warning` tautology at the same time:
+  `exit_warning` currently checks `deviation > 1.5 and kinematic_grade == "OVEREXTENDED"` —
+  since the grade is assigned two lines above, the `and kinematic_grade` clause always
+  equals the first clause. Simplify to just `kinematic_grade == "OVEREXTENDED"`.
+
+**Step 3 — Fix 3 (CONDITION 2(a) direction-awareness) — DEFERRED, separate session**
+
+- CONDITION 2(a) "4H Momentum is NEGATIVE" is auto-true in any downtrend (MACD hist < 0 is
+  the definition of a bearish trend). It should read: NEGATIVE *against the trade direction*
+  being evaluated. For a SHORT in a downtrend, NEGATIVE is confirmation, not failure.
+- This is a prompt change to the SA system prompt — judgment layer, not math layer.
+- **Do not bundle with Steps 0–2.** Validate Steps 0–2 live first. Fix 3 in its own session
+  with SA output comparison before and after.
+
+---
+
+#### Pre-deploy checklist
+
+- [ ] Step 0: Fix `_wilder` init in `_calc_adx` (one line: `/ period`). Run synthetic test — constant DX=30 must return ~30, not ~420.
+- [ ] Spot-check Step 0 against stored May30 session: recalculate 4H ADX from stored candles and confirm it now reads in 0–100 range matching the corrected values (~33 for May30).
+- [ ] Step 1: Write Fix 1 (`_calculate_harmonic_matrix`). Replay May29/Jun1/Jun2/Jun3 — confirm labels.
+- [ ] Step 2: Write Fix 2 (`_build_synthetic_jewel`). Replay same 4 days — confirm 15M grade.
+- [ ] Confirm Steps 0–2 together: all 3 stand-down days drop to 1/3 CONDITION 2 (a only). Fri May29 stays 1/3.
+- [ ] Validate on 2 non-trending / reversal days (find a choppy or V-reversal session in the last 30 days). Confirm the gate STILL fires STAND_DOWN on those — the fix must not unblock everything, only strong-trend days.
+- [ ] Deploy Steps 0–2 as a single commit (all three are coupled — Step 0 is the foundation, Steps 1+2 build on it).
+- [ ] Watch first live session after deploy. Confirm `micro_state` and `kinematic_grade` appear correctly in the SA context (SWEET_ZONE_BEAR on a trending day, EXHAUSTION/TANGLED on a choppy day).
+- [ ] Step 3 (CONDITION 2a direction-awareness) — separate session after live validation.
+
+- **Status:** ◐ Validated — build order decided. Next action: fresh session, Step 0 first.
+- **Depends on:** nothing (pure math layer)
+- **Blocks:** Part 2 mean-reversion mode (Suggestion Box 2026-06-03) — build Part 2 only
+  after Steps 0–2 are proven live.
+
+---
+
 ### W-6 ☐ DASHBOARD ACCURACY AUDIT
 - **What:** Read-only audit of the performance dashboard — trace every displayed
   number to its source query, verify correctness, then fix. The dashboard must be
@@ -248,6 +409,8 @@ done, we review this list and decide what graduates to OPEN WORK ITEMS.*
 | 2026-06-03 | **`/api/dmr/run-raw` endpoint is broken** — calls `battlebox_pipeline.get_session_review()` which does not exist anywhere in the codebase. Throws `AttributeError` on every call. Dead operator endpoint — no user-visible feature depends on it. Low priority: fix (wire to a real function) or remove when convenient. Found during GAP-4 gravity-interpreter diagnosis 2026-06-03. | GAP-4 diagnosis | Low priority — fix or remove |
 | 2026-06-03 | **PRODUCT NAMING** — "newsletter" is a placeholder the owner dislikes; consumers ignore newsletters. The product is closer to a market weather/conditions report (ties to the weather analogy: "is today clear or stormy for trading?"). Rework naming + the publication's framing when Phase 2 (publication delivery) is activated. The stand-down communication especially should use the weather framing — "storm coming, stay off the water" — so that stand-downs read as protection, not missed trades. Not now — Phase 2 branding work. | owner, 2026-06-03 | TBD — Phase 2 |
 | 2026-06-03 | **Mean-reversion trader benchmark** — once we have enough closed CampaignLog records, run Kabroda's win-rate/R-multiple against a naive mean-reversion baseline (e.g., fade every breakout, take profit at the opposing trigger). If Kabroda doesn't beat the fade, the breakout thesis needs scrutiny. Belongs in W-3 backtest scope. | owner discussion, end-of-session 2026-06-03 | TBD — after W-3 backtest setup |
+| 2026-06-03 | **BUG: `_calc_adx` returns ADX ~14× true value** — `_wilder()` initialises with `sum(vals[:period])` instead of `sum(vals[:period]) / period`. Confirmed: synthetic test (constant DX=30 → 420, not 30); stored session data (4H ADX 463, 1H 159 — impossible for 0–100 indicator). `rising` flag and `+DI`/`−DI` correct. **Promoted to W-7 Step 0** (owner decision 2026-06-03): fix this FIRST, before building the ADX-gated exhaustion fix — build on rock, not a workaround. See W-7 build order for full consumer audit and recalibration plan. | `_calc_adx` audit during exhaustion-fix scoping 2026-06-03 | PROMOTED TO W-7 STEP 0 |
+| 2026-06-03 | **EXHAUSTION FIX — PART 2 (conservative mean-reversion mode):** The ADX fix (Part 1) distinguishes strong-trend (continuation, full targets) from no-trend. Owner's framework for the no-trend case: when ADX is low/flat but RSI shows stretched (oversold/overbought), there IS a small mean-reversion move available — trade it CONSERVATIVELY, T1 only, no runner, because it is a small move on low-timeframe momentum, not a trend push. This matches the BTC chop pattern seen across the last 2–3 weeks. Three-state model: (1) strong trend + ADX high/rising = ride it, T1/T2/T3 full targets; (2) no-trend + ADX low/flat + RSI stretched = quick conservative T1 only, no extension; (3) genuinely unclear (no trend, RSI neutral) = STAND DOWN. Part 2 implementation = wire the ADX-low + RSI-stretched condition to a conservative-target posture in the fuel/allocation path. Build only after Part 1 is validated in live sessions. | owner framework, exhaustion-fix diagnostic session 2026-06-03 | TBD — build after Part 1 (ADX-gated harmonic matrix) validated live |
 
 ---
 
