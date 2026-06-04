@@ -378,6 +378,76 @@ Watch the first live NY Futures session that runs through the fixed code on Rend
 
 ---
 
+### W-8 ☐ FRONT-OF-RIVER SIGNAL AUDIT — findings logged 2026-06-04, all DEFERRED pending live ADX validation
+
+**What:** Read-only stress-test of the signal computation and flow-through layer —
+the indicators computed at session lock that feed the SA brief. Replay harness run
+against all 7 known sessions (May29/Jun1/Jun2/Jun3 trending + Apr28/May15/May27 choppy),
+identical MEXC candles, code-review of five source files.
+
+**Headline finding:** NO second ADX-class bug. Front-of-river math (RSI, MACD
+calculation, BO/BD triggers, EMA formulas, VRVP) computes correctly. The dominant
+theme is **dropped information** — correct values computed, then discarded before
+reaching the SA — not wrong values.
+
+**Fix order after live ADX validation (80b1d79):** MACD/Fix 3 first → PMARP →
+bias_model reconnect → remainder by weight. Each: careful, validated, front-to-back.
+Do NOT start any of these before the first live session confirms Steps 0+1+2 are
+working on Render.
+
+---
+
+#### Findings, ranked by decision weight
+
+**1. MACD MAGNITUDE DROP** — `battlebox_pipeline._build_fuel_gauge` / `analyze_tf`
+- **Bug:** MACD histogram is correctly computed but `momentum = "POSITIVE" if hist > 0 else "NEGATIVE"` discards the value before the SA sees it. Replay: Jun 3 hist=−410 (hard accelerating downtrend) and Jun 1 hist=−24 (barely negative) are indistinguishable to the SA — both arrive as "NEGATIVE".
+- **Why it matters:** This is the ROOT of CONDITION 2(a) / Fix 3. The sign-only compression is what makes "4H Momentum NEGATIVE" always true in a downtrend — and also always equally "negative" whether momentum is building or collapsing. Fix 3 may not be a pure prompt change. It may require passing the raw hist (or a normalised magnitude) through to the SA context so the prompt can distinguish "confirming downtrend" (large negative hist) from "barely negative, momentum absent" (hist near zero).
+- **Severity:** Decision-logic. Highest weight — sits directly in CONDITION 2(a).
+- **Same class as ADX?** No. ADX gave numerically impossible values (14× reality). MACD gives the correct sign; the bug is magnitude suppression before the decision layer.
+
+**2. PMARP DIRECTION-BLIND threshold** — `mtf_confluence_scanner._calc_pmarp`
+- **Bug:** `pmarp_overextended = rank > 75` fires only for upside extremes (price historically high vs EMA21). Replay: Jun 2 PMARP rank=0.0 (most extreme downside reading in the 252-bar history) → `pmarp_overextended=False`. Jun 3 rank=2.81 → same. A price that has NEVER been this far below EMA21 is labeled "not overextended."
+- Secondary: short-history path (<50 bars) returns `abs(current_ratio)` as pmarp_value (a raw percentage magnitude); full path returns a percentile rank 0–100. Different scales from the same field — any threshold on pmarp_value changes meaning depending on data depth.
+- **Severity:** Decision-logic. Same structural class as W-7's direction-blind abs() bugs — but in the MTF interpretation layer, not the CONDITION 2 gate directly. Fix after MACD/Fix 3.
+- **Same class as ADX?** Yes — direction-blind threshold is the same pattern.
+
+**3. SSE bias_model SILENTLY DROPPED** — `sse_engine` / `kabroda_mas_flow._build_senior_analyst_context`
+- **Bug:** `sse_engine.compute_sse_levels` produces a `bias_model.daily_lean` dict containing direction (long/short/neutral), score, and confidence — derived from slope (daily SMA20/SMA50), VRVP opening location (above/below/in value area), and trigger asymmetry (distance to BO vs BD). This is stored in `packet["bias_model"]` and is visible in the battlebox JSON. But `_build_senior_analyst_context` never receives `bias_model` as a parameter — the function signature takes `levels` and `context` only. The SSE's quantitative direction signal is **computed and discarded**. It is a wire that was never connected.
+- **Severity:** Flow-through gap. Moderate weight — the signal incorporates real structural information (VRVP positioning, trigger asymmetry) that the SA currently cannot access.
+- **Same class as ADX?** No — this is a routing gap, not a wrong-value bug.
+
+**4. VRVP zero-volume silent degradation** — `sse_engine._calculate_vrvp`
+- **Bug:** If `total_volume=0` across all VRVP input candles, `target = 0 * 0.70 = 0`. The value-area expansion loop exits immediately (`curr < target` = `0.0 < 0.0` = False). Result: `POC = VAH = VAL = min_price`. The trigger logic degrades gracefully — BO falls back to R30H, BD to R30L — but no warning is logged, no error raised. Failure is entirely silent.
+- **Fix:** Log a warning when total_volume=0 after VRVP computation so the issue is visible in Render logs.
+- **Severity:** Medium. Unlikely on MEXC (always has volume), but a silent correctness gap.
+- **Same class as ADX?** No.
+
+**5. BBWP silent absence in fallback** — `mtf_confluence_scanner._calc_bbwp`
+- **Issue:** BBWP flows to the SA via the MTF interpretation string (`mtf_read`). When `mtf_read=None` (interpreter disabled or failed), BBWP is completely absent from the SA context — the fallback section (lines 814–826 in `kabroda_mas_flow`) covers RSI/MACD label/ADX/kinematic_grade but not BBWP. Replay confirmed BBWP was a correct and useful signal: Jun 1 BBWP=4.47 (compression before the breakout), Jun 2 BBWP=99.44 (maximum width during the selloff).
+- **Severity:** Medium. Good compression-timing signal with a silent drop path.
+
+**6. EMA dual-period inconsistency** — `battlebox_pipeline`
+- `analyze_tf` uses ema30/ema50 for the `trend` label ("BULLISH"/"BEARISH"). `_build_jewel_reading` uses ema21/ema55 for `ema_state` ("BULLISH_EXPANDING" etc.). Both reach the SA brief. Near a crossover they can disagree — no documented rationale for which to trust. Raw EMA price levels do not appear in the SA brief at all; SA gets labels but cannot reference "price is $1,600 below ema50" as a structural anchor.
+- **Severity:** Cosmetic / precision. All 7 replay sessions showed directional agreement between the two pairs.
+
+**7. Daily S/R: 1H pivot always silenced** — `sse_engine._select_daily_levels`
+- Hardcoded strength scores: 4H pivot = 0.8, 1H pivot = 0.6. `_select_daily_levels` always picks the highest-strength shelf → 4H always wins. The 1H pivot is computed, stored in `htf_shelves`, but never used in `ds`/`dr` (the values that feed BO/BD and the SA brief) whenever a 4H pivot exists.
+- **Severity:** Cosmetic. The 4H level is still meaningful structural reference.
+
+**8. JEWEL "EXTENDED" catch-all label direction-blind** — `battlebox_pipeline._build_jewel_reading`
+- `signal="EXTENDED"` fires as the catch-all for any state not matching BOUNCE_PRIMED, TRENDING_STRONG, or VALUE_ZONE_NEUTRAL — covering both RSI<20 (extreme oversold) and RSI>80 (extreme overbought) with the same label.
+- **Severity:** Cosmetic. The `rsi_zone` label (OVERSOLD_EXTREME / OVERBOUGHT_EXTREME) appears alongside the signal in the SA brief; the SA has the direction context it needs.
+
+**9. RSI** — Clean. Wilder formula correct: `(avg × (period-1) + new) / period`. Output 0–100 confirmed across all 7 sessions. Raw values and zone labels reach SA brief directly.
+
+---
+
+- **Status:** Audit complete. All findings DEFERRED — no code changes. Validate 80b1d79 live first.
+- **Next action after live validation:** MACD/Fix 3 — determine whether fix is prompt-only or requires hist magnitude to be wired through to SA context.
+- **Blocks nothing** (audit only). Informs Fix 3 scope.
+
+---
+
 ### W-6 ☐ DASHBOARD ACCURACY AUDIT
 - **What:** Read-only audit of the performance dashboard — trace every displayed
   number to its source query, verify correctness, then fix. The dashboard must be
