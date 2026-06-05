@@ -36,7 +36,7 @@ from jewel_specialist import run_jewel_snapshot
 from elliott_wave_specialist import run_elliott_wave_analysis
 from performance_auditor import run_performance_audit
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -1057,6 +1057,129 @@ async def admin_reset_password(request: Request, db: Session = Depends(get_db)):
         db.commit()
         return JSONResponse({"ok": True})
     return JSONResponse({"ok": False, "error": "User not found"})
+
+@app.get("/admin/interpreter-log")
+async def admin_interpreter_log(request: Request, db: Session = Depends(get_db)):
+    """Read-only view of the last 10 sessions of interpreter_log rows (admin only).
+    Groups by session_date, shows MTF → gravity → junior_analyst in order.
+    Used for weekly JA quality audits and bias_model wiring review."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return RedirectResponse("/suite")
+
+    rows = (
+        db.query(InterpreterLog)
+        .filter(InterpreterLog.symbol == "BTC/USDT")
+        .order_by(InterpreterLog.session_date.desc(), InterpreterLog.created_at.asc())
+        .limit(30)
+        .all()
+    )
+
+    # Group by session_date, preserve date order (most-recent first)
+    from collections import OrderedDict
+    sessions: OrderedDict = OrderedDict()
+    for r in rows:
+        if r.session_date not in sessions:
+            sessions[r.session_date] = []
+        sessions[r.session_date].append(r)
+
+    _INTERP_ORDER = ["mtf_interpreter", "gravity_interpreter", "junior_analyst"]
+    _INTERP_LABEL = {
+        "mtf_interpreter":   "MTF ENERGY",
+        "gravity_interpreter": "GRAVITY STRUCTURE",
+        "junior_analyst":    "JUNIOR ANALYST (RECONCILIATION)",
+    }
+    _INTERP_COLOR = {
+        "mtf_interpreter":   "#38bdf8",
+        "gravity_interpreter": "#a78bfa",
+        "junior_analyst":    "#34d399",
+    }
+
+    def _render_session(date_key: str, interp_rows: list) -> str:
+        by_name = {r.interpreter_name: r for r in interp_rows}
+        blocks = []
+        for name in _INTERP_ORDER:
+            r = by_name.get(name)
+            label = _INTERP_LABEL.get(name, name)
+            color = _INTERP_COLOR.get(name, "#94a3b8")
+            if r is None:
+                blocks.append(f"""
+                <div style="margin-bottom:18px;">
+                  <div style="color:{color};font-weight:bold;font-size:11px;letter-spacing:1px;margin-bottom:4px;">{label}</div>
+                  <div style="color:#64748b;font-style:italic;">— not logged this session —</div>
+                </div>""")
+                continue
+            ok_badge = (
+                '<span style="background:#166534;color:#86efac;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:bold;">OK</span>'
+                if r.ran_successfully else
+                '<span style="background:#7f1d1d;color:#fca5a5;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:bold;">FAIL-OPEN</span>'
+            )
+            ts = r.created_at.strftime("%H:%M:%S UTC") if r.created_at else "?"
+            text = r.output_text or "<em style='color:#64748b;'>None — fail-opened, no output</em>"
+            safe_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") if r.output_text else text
+            blocks.append(f"""
+            <div style="margin-bottom:22px;">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                <span style="color:{color};font-weight:bold;font-size:11px;letter-spacing:1px;">{label}</span>
+                {ok_badge}
+                <span style="color:#475569;font-size:10px;">{ts}</span>
+              </div>
+              <pre style="background:#020617;border:1px solid #1e293b;border-radius:6px;padding:14px;
+                          font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.6;
+                          color:#cbd5e1;white-space:pre-wrap;word-break:break-word;margin:0;">{safe_text}</pre>
+            </div>""")
+        return "".join(blocks)
+
+    session_blocks = []
+    for date_key, interp_rows in sessions.items():
+        session_id = interp_rows[0].session_id if interp_rows else "?"
+        inner = _render_session(date_key, interp_rows)
+        session_blocks.append(f"""
+        <div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;
+                    padding:24px;margin-bottom:28px;">
+          <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:18px;
+                      border-bottom:1px solid #1e293b;padding-bottom:12px;">
+            <span style="color:#f1f5f9;font-weight:bold;font-size:16px;">{date_key}</span>
+            <span style="color:#475569;font-size:11px;">{session_id}</span>
+          </div>
+          {inner}
+        </div>""")
+
+    body = "\n".join(session_blocks) if session_blocks else (
+        "<p style='color:#64748b;'>No interpreter_log rows found for BTC/USDT. "
+        "Table exists but may be empty — check that the JA has run at least one session.</p>"
+    )
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Interpreter Log — Kabroda Admin</title>
+  <style>
+    body {{ background:#020617; color:#cbd5e1; font-family:'JetBrains Mono',monospace;
+            margin:0; padding:32px; box-sizing:border-box; }}
+    a {{ color:#38bdf8; text-decoration:none; }}
+    a:hover {{ text-decoration:underline; }}
+  </style>
+</head>
+<body>
+  <div style="max-width:900px;margin:0 auto;">
+    <div style="margin-bottom:28px;">
+      <div style="color:#94a3b8;font-size:11px;letter-spacing:2px;margin-bottom:6px;">KABRODA ADMIN</div>
+      <h1 style="color:#f1f5f9;font-size:22px;margin:0 0 6px;">INTERPRETER LOG</h1>
+      <div style="color:#475569;font-size:12px;">
+        BTC/USDT &nbsp;·&nbsp; last {len(sessions)} sessions &nbsp;·&nbsp;
+        MTF → Gravity → Junior Analyst &nbsp;·&nbsp;
+        <a href="/admin">← admin</a>
+      </div>
+    </div>
+    {body}
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
 
 # --- API EXECUTION ROUTES ---
 @app.post("/api/dmr/run-raw")
