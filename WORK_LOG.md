@@ -98,19 +98,15 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ---
 
 ## ► NEXT SESSION START
-*End-of-session marker: 2026-06-03*
+*End-of-session marker: 2026-06-06*
 
-**WATCH FIRST:** Read the next post-9:00 AM ET brief and verify BOTH interpreter reads.
+**A3 VALIDATED — ready to commit/deploy.** STEP 3 validation complete (2026-06-06). Owner approved. Jun2 unblocked (the regression target — PASS). Old direction-blind "4H momentum NEGATIVE" bullet confirmed REMOVED everywhere. Files ready: `battlebox_pipeline.py` (data layer) + `kabroda_mas_flow.py` (prompt layer). Commit both as A3, deploy, watch first live session.
 
-**(a) MTF interpreter** — second+ live brief. Confirm still sharp.
+**A2 status:** Deployed (b5b928d), NOT exercised — MTF interpreter hasn't failed yet, so the fallback render path hasn't fired. Confirm A2 rendering on first degraded session.
 
-**(b) Gravity interpreter** — FIRST live brief. Confirm `=== GRAVITY LANDSCAPE (INTERPRETED) ===` section appears, reads as a characterization not a list, covers both directions, and that the SA visibly reasons about momentum (MTF) AND structure (gravity) together.
+**Jun6 session:** STAND_DOWN. Correctly driven by Choked Target ($60,025.76 MAXIMUM wall). A3 validated same day.
 
-Bring both reads here for review before acting on them.
-
-**THEN:** GAP-3 (junior analyst) becomes buildable — its precondition (two live interpreters) is now met, but its design should be informed by how MTF and gravity agree/conflict in live briefs, so gather a few sessions of evidence first.
-
-**Open design question still pending (GAP-3):** junior analyst as new module vs. MTF-pattern generalized.
+**NEXT ACTIONS:** (1) A3 commit + deploy. (2) Watch first live session: STRONG+with-trend → expect T1/T2/T3; WEAK/DEPLETED → expect T1 only. (3) After A3 proven live, Tier B (PMARP direction-blind threshold, W-8 B1). (4) Monitor exit_warning across sessions (see Suggestion Box 2026-06-06 exit_warning pin).
 
 ---
 
@@ -425,18 +421,29 @@ SA load, it does not add raw rows to an already long context.
 These are wires never connected or signals silently dropped. Connecting a correctly
 working signal to a blind decision layer cannot break a working signal. Low blast radius.
 
-- **A1. Wire sse_engine bias_model into `_build_senior_analyst_context`** — the
-  `daily_lean` dict (direction, score, confidence from slope + VRVP location +
-  trigger asymmetry) is stored in the packet but never passed to the SA context
-  builder. One parameter addition + one section in the SA brief. See finding #3.
+- **A1. Wire sse_engine bias_model into `_build_senior_analyst_context`** — **CONFIRMED LIVE 2026-06-06.** Bias_model wired as third JA input. Cost log all SUCCESS; JA reconciled energy-vs-structure correctly; no false-certainty in output; SSE lean correctly stayed silent (mild/agreeing) per Version-a design. Done (c4222dd).
 - **A2. Add EMA state/spread to SA fallback section** ✓ DONE (2026-06-05) — `ema_state`
   and `ema_spread_pct` were computed by `_build_jewel_reading` and in the jewel dicts
   but never rendered in the fallback block (lines 817–820). Added two lines —
   `EMA: <state> | Spread: <pct>%` — under the ADX line for both 4H and 1H. Purely
   additive. Originally scoped as "add BBWP to fallback" (finding #5) — investigation
   showed that was a false assumption; see updated finding #5 below.
-- **A3. MACD magnitude — scoped, NOT built (2026-06-06)** — Verified real against
+  **NOT exercised Jun6** — MTF interpreter ran clean, so the fallback render path did not fire. Confirm A2 rendering when first degraded session occurs.
+- **A3. MACD magnitude — VALIDATED, ready to commit/deploy (owner approved 2026-06-06)** — Verified real against
   actual code. Two-layer fix required.
+
+  **STEP 3 VALIDATION RESULTS (2026-06-06):**
+
+  | Session | MACD | Allocation outcome | Verdict |
+  |---------|------|--------------------|---------|
+  | Apr 28 (chop) | STRONG NEG | T1/T2/T3 (WITH-TREND) | WARN — NEEDS LIVE VALIDATION (1H/15M outside data window; old 'NEGATIVE' bullet confirmed gone) |
+  | May 27 (chop) | WEAK NEG | T1 only [MACD:WEAK] | PASS — chop correctly restricted |
+  | May 29 (trend bear) | WEAK NEG | T1 only [MACD:WEAK] | PASS — MACD genuinely weak, T1 correct |
+  | Jun 1 (trend bear) | DEPLETED NEG | T1 only [MACD:DEPLETED] | PASS — MACD depleted, T1 correct |
+  | Jun 2 (trend bear) | STRONG NEG | T1/T2/T3 (WITH-TREND) | **PASS** — unblocked (regression cleared) |
+  | Jun 3 (trend bear) | STRONG NEG | T1 only [ExitWarn] | PASS — exit_warning fired (not MACD); owner reviewed live chart: Jun3 ran to T2/T3 but T1 was still the correct CALL — 15M was TANGLED at a structural floor (light weekly-structure level), high-conflict zone, conservative exit right; owner independently called same caution live that day |
+
+  **Key confirmations:** Jun2 unblocked (the target regression — PASS). Old direction-blind "4H momentum NEGATIVE" bullet confirmed REMOVED from both CONDITION 2(a) and ALLOCATION RULE — deleted everywhere. Jun3 cap is via exit_warning (expected, correct); MACD correctly reads STRONG on Jun3. A3 ships as scoped — "no point correcting one day."
 
   **DISCOVERY (audit understated):** Two direction-blind impact points, not one:
   - **(1) CONDITION 2(a)** (known): "4H Momentum NEGATIVE" fires as sign-only →
@@ -559,10 +566,8 @@ working signal to a blind decision layer cannot break a working signal. Low blas
 
 ---
 
-- **Status:** ◐ A1 done (c4222dd). A2 done (b5b928d). A3 scoped+verified (2026-06-06, NOT built). Tier B remains.
-- **Next action (A3 build session):** (1) Calibrate bps thresholds via replay (all 7 sessions).
-  (2) Finalize prompt text for CONDITION 2(a) and allocation rule. (3) Validate positive/negative/
-  regression test matrix. (4) Deploy. Gate: live A1+A2 confirmation first.
+- **Status:** ◐ A1 done + **CONFIRMED LIVE 2026-06-06** (c4222dd). A2 done (b5b928d), not yet exercised — fallback path untriggered. **A3 VALIDATED — ready to commit/deploy (owner approved 2026-06-06).** Tier B remains.
+- **Next action (A3 deploy):** Commit `battlebox_pipeline.py` + `kabroda_mas_flow.py` as A3, deploy to Render, watch first live session for correct allocation behavior (Jun2-class session: expect T1/T2/T3; chop/WEAK day: expect T1 only). Then Tier B (PMARP).
 - **Sequencing:** A3 next (fixes both STAND_DOWN gate and T1-cap). Tier B (PMARP) after A3 live +
   validated. Gravity expansion after front-of-river fully connected.
 - **Blocks:** W-3 backtest validity (pointless to replay a starved SA). Gravity expansion (downstream).
@@ -642,6 +647,8 @@ done, we review this list and decide what graduates to OPEN WORK ITEMS.*
 | 2026-06-06 | **FEED LIVE INTERPRETER OUTPUT BACK TO CC WHEN TUNING AGENTS (owner, 2026-06-06).** CC tunes agent prompts from the code (intent), but hasn't seen what the agents actually PRODUCE live. When working on any agent's prompt, paste its real output from `/admin/interpreter-log` so CC tunes against reality, not just intended behavior. Closes a blind spot: prompt intent ≠ prompt output — the two can diverge silently over sessions. Concrete step: before any prompt edit, pull the last 2–3 live outputs for that agent from the interpreter log and include them in the session context. | owner, A3 scope session 2026-06-06 | TBD — adopt as standing practice from next agent-prompt session |
 | 2026-06-06 | **AUDIT TOOLING AS PERMANENT SITE FEATURE (owner, 2026-06-06).** The verify-before-build loop keeps finding things the static audit missed (allocation rule, BBWP data-path). Make audit / stress-test capability on-demand in the app — e.g. replay-harness-on-demand view, interpreter-output history with per-agent diff. So checking flow-through is a button, not a rebuild. Extends the existing `/admin/interpreter-log` page + cost monitor (already built). **GATED:** build after A3 + B1 are done — this is tooling, downstream of fixing the actual signal flow. | owner, A3 scope session 2026-06-06 | TBD — after A3 + B1 live; extend /admin/interpreter-log |
 | 2026-06-06 | **AUDIT IS A LOOP, NOT A SNAPSHOT (owner, 2026-06-06).** Lesson confirmed across W-8: a one-time audit gives leads; verifying each finding while building surfaces the next layer (the allocation rule was invisible until A3 scoping; BBWP absence was a false assumption). This is healthy, not a failure — the audit list is a STARTING POINT, not a complete inventory. Keep the verify-first protocol on every remaining finding. Don't trust the audit list as exhaustive before building. | owner, end of A3 scope session 2026-06-06 | Standing protocol — not a build item |
+| 2026-06-06 | **STAND-DOWN BRIEF — INTERNAL vs PUBLIC are different products (owner, 2026-06-06).** Internal brief on a no-trade day CAN be terse — the trader needs "no action, here's why" and no narrative is required. But the PUBLIC publication on a stand-down day must NOT be cut down: it should explain what is happening in the market (e.g. price at a major support floor, stop-hunt/chop dynamics, why both sides are positioning), AND must ALWAYS include a forward-looking / higher-timeframe section ("what to watch next"). A no-trade day is when a reader most wants the "what's going on?" read. Publisher-agent needs a STAND-DOWN TEMPLATE distinct from the internal one — different prompt path, different output structure. This is the differentiator between a real publication and a signal feed. Publisher prompt tuning, publication phase — NOT now. | owner, Jun6 STAND_DOWN session 2026-06-06 | TBD — publication phase |
+| 2026-06-06 | **EXIT_WARNING — LIVE MONITORING ITEM (NOT a fix now) (owner, 2026-06-06).** The `exit_warning` condition in the ALLOCATION RULE is a blunt T1-cap — it fired on Jun3 (15M grade=TANGLED at session open) and held a move that ran to T2/T3. Owner reviewed the live chart and confirmed T1 was still the correct call (15M tangled at a structural floor / light weekly-level — high-conflict zone, conservative exit right). But the pattern is the same class as the MACD veto A3 just removed: a single condition capping allocation without regard to trend strength or fuel quality. **Question for live monitoring over coming weeks:** is exit_warning ever capping clean strong-trend moves it shouldn't? Do NOT fix reactively to one day — observe across many sessions. Only scope a fix (e.g. a STRONG-with-trend override: exit_warning vetoed when 4H MACD=STRONG AND trade direction matches 4H trend) IF a real pattern emerges in data. This is the audit loop working: A3 removed the MACD veto, revealing exit_warning as the next layer — expected and healthy, not a regression. | owner, A3 validation session 2026-06-06 | TBD — observe live; scope fix only if pattern confirmed |
 
 ---
 
@@ -656,5 +663,5 @@ done, we review this list and decide what graduates to OPEN WORK ITEMS.*
 | 2026-06-01 | Do we need CrewAI back to build smart/interpreter agents? | NO. Smart-agent behavior is a role and wiring upgrade on the existing `agent_core` pattern — not a framework problem. CrewAI was removed deliberately; do not reintroduce it. |
 | 2026-06-01 | Won't reconnecting more agents overload the Senior Analyst? | Only if they dump raw data at it. GOVERNING RULE (Principle 3): the SA reads ONLY digested/interpreted reads, never raw feeds. Every new or reconnected agent must reduce the SA's cognitive load by digesting its domain first. A connection that would send raw numbers is not ready — it needs a Bucket B interpreter in front of it first. |
 | 2026-06-04 | GROWTH PLAYBOOK — entity, Wikidata & AI-citation strategy (Kabroda_Entity_Citation_Playbook.docx) | 4-layer strategy for building Kabroda as a citable entity AI systems reference by default. Layer 1: public-facing hub on kabroda.com — canonical identity (name/logo/description consistent everywhere), proof of work, publication + YouTube offer, cross-links to all owned profiles. Layer 2: entity chain via schema.org structured data — Organization schema (Kabroda), Person schema (SpiritMaker/@Grossmonkey as founder/analyst), Article schema per published piece, sameAs links to every profile. Layer 3: Wikidata reconciliation — establish notability footprint first (third-party mentions, body of public work), then create/claim Wikidata item, wire QID into schema sameAs. This closes the trust loop for Google Knowledge Graph and AI citation. Medium-term goal, not week-one. Layer 4: cited-everywhere flywheel — TradingView track record (timestamped, public), genuine presence in trader communities (Reddit/Discord/X), repurpose into content system (publication → YouTube → TradingView → social all reinforce same entity). Sequence: hub → schema → cross-profile consistency → publishing cadence → communities → Wikidata. Hard gates: (1) notability must precede Wikidata attempt; (2) attorney compliance review before publishing any public performance stats (see EDUCATIONAL FRAMING pin). |
-| 2026-06-05 | INTEL REPORTER CoinGecko 429 — reliability / graceful fallback (2026-06-05) | Render log 2026-06-05 showed `[INTEL REPORTER] CoinGecko global fetch failed: HTTP 429 Too Many Requests`. Brief still received F&G=12 (cached or fallback path fired), so no impact today. Confirm intel reporter has a graceful fallback when CoinGecko rate-limits so sentiment data doesn't silently vanish on a future session. Low priority, reliability — the kind of "little thing sliding through" the audit exists to catch. |
+| 2026-06-05 | INTEL REPORTER CoinGecko 429 — **recurring reliability item (Jun5 + Jun6, PRIORITY BUMPED)** | Fired both Jun5 and Jun6 — confirmed recurring, no longer a one-off. Brief survived both days (fallback/cache fired each time). Fix needed before publication phase: ensure intel reporter has a graceful fallback AND a logged warning when CoinGecko rate-limits so sentiment data doesn't silently vanish. **Priority: publication blocker** — must be resolved before any public launch. Pin for publication phase. |
 | 2026-06-04 | EDUCATIONAL FRAMING — design principle for all public/paid output (owner, 2026-06-04) | Everything published or sold is framed as EDUCATIONAL / opinion / "this is what we see" — never as financial advice, never with claims about profit or returns. Users make their own decisions and interpretations. Standard disclaimer language (not financial advice, educational purposes, our opinion, trade at your own discretion) on all public-facing material. CRITICAL CAVEAT: the disclaimer is necessary but NOT sufficient — regulators judge substance, not just the label. Publishing specific entry/stop/target levels + performance stats + charging can read as a signal service regardless of disclaimer. The framing AND the format must be designed together. HARD GATE (already pinned): a qualified securities/financial-services attorney must review the actual framing, format, disclaimers, and performance presentation for the owner's jurisdiction (US/TX) and subscriber base BEFORE any public launch or paid subscription. "Other sites do it this way" is not a compliance basis. Claude is not a lawyer and cannot adjudicate this. |

@@ -122,7 +122,9 @@ directional energy. A measured move requires aligned timeframes — they are not
 
 CONDITION 2 — MULTI-TIMEFRAME EXHAUSTION
 At least two of these are simultaneously true: \
-(a) 4H Momentum is NEGATIVE, \
+(a) 4H Momentum strength is WEAK or DEPLETED — histogram near-zero or fading. \
+A STRONG NEGATIVE reading is healthy trend energy in a downtrend, not exhaustion, \
+and does not fire this condition. \
 (b) Kinematic Fuel is OVEREXTENDED or CHOP_RISK, \
 (c) 15M Kinematic Grade is OVEREXTENDED. \
 The system has run out of fuel across the primary driving timeframes.
@@ -215,10 +217,16 @@ Breakdown Trigger: $[exact value from context]
 ★ THE [LONG or SHORT] TRADE
 Entry: $[from pre-computed targets]
 Stop: $[from pre-computed targets — the opposing trigger]
-ALLOCATION RULE — read the fuel state before setting allocation:
+ALLOCATION RULE — read the fuel state before setting allocation.
+
+macd_strength is a FUEL signal only. It measures the magnitude of momentum energy \
+behind the current move. It does NOT determine trade direction — direction is set by \
+harmonic state and trigger position. STRONG NEGATIVE means strong bearish fuel. \
+STRONG POSITIVE means strong bullish fuel. Do not use macd_strength to infer which \
+direction to trade.
 
 IF any of these conditions are true:
-- 4H momentum is NEGATIVE
+- 4H momentum strength is WEAK or DEPLETED (histogram near-zero or fading)
 - 1H fuel_status is OVEREXTENDED or CHOP_RISK
 - jewel_exit_warning is active
 - 15M kinematic_grade is OVEREXTENDED
@@ -226,9 +234,18 @@ IF any of these conditions are true:
 
 THEN write:
 Target 1: $[from pre-computed targets] — exit full position here
-(No T2 or T3. Fuel is exhausted. One target only.)
+(No T2 or T3. Fuel is insufficient. One target only.)
 
-IF none of those conditions are true (fuel is clean across all timeframes):
+IF none of those conditions are true, evaluate trade direction:
+
+COUNTER-TREND TRADE — trade direction opposes the 4H trend (a LONG bounce inside \
+a BEARISH 4H structure, or a SHORT fade inside a BULLISH 4H structure):
+Target 1: $[from pre-computed targets] — exit full position here
+(Counter-trend bounces are conservative by nature. Even STRONG momentum does not \
+warrant extended targets when the move runs against the dominant structure. One target only.)
+
+WITH-TREND TRADE — trade direction matches the 4H trend (STRONG momentum confirming \
+the dominant direction):
 Target 1: $[from pre-computed targets] — take 40% here
 Target 2: $[from pre-computed targets] — take 40% here
 Target 3: $[from pre-computed targets] — trail 20% to this
@@ -276,8 +293,11 @@ Before generating your final output, verify:
 5. No banned words appear anywhere in the output
 6. entry_price, stop_loss, t1, t2, t3 match the pre-computed values exactly \
    (for STAND_DOWN these are reference levels, not active trade signals — copy them anyway)
-7. Allocation matches fuel state — if exit warning active, only T1 should appear \
-   (for STAND_DOWN: omit allocation entirely — no trade is being issued)
+7. Allocation matches fuel state — three branches: (a) any fuel condition true \
+   (WEAK/DEPLETED momentum, OVEREXTENDED, exit warning, etc.) → T1 only; \
+   (b) fuel clean but trade is COUNTER-TREND (opposes 4H trend) → T1 only; \
+   (c) fuel clean AND trade is WITH-TREND → T1/T2/T3. \
+   For STAND_DOWN: omit allocation entirely — no trade is being issued.
 8. ## TODAY'S ENERGY block contains exactly three consecutive machine-readable lines \
    immediately after the prose: "Gate: [OPEN/CLOSED] — [reason]", \
    "Direction: [BULLISH/BEARISH/NEUTRAL]", "Conviction: [STRONG/MODERATE/LOW]". \
@@ -817,9 +837,11 @@ def _build_senior_analyst_context(
             f"4H Trend: {tf_4h.get('trend','?')} | Momentum: {tf_4h.get('momentum','?')} | RSI: {tf_4h.get('rsi','?')} | Zone: {jewel_4h.get('rsi_zone','?')} | Signal: {jewel_4h.get('signal','?')}",
             f"    ADX: {jewel_4h.get('adx','?')} ({'rising' if jewel_4h.get('adx_rising') else 'flat'}) | StochZone: {jewel_4h.get('stoch_zone','?')}",
             f"    EMA: {jewel_4h.get('ema_state','?')} | Spread: {jewel_4h.get('ema_spread_pct','?')}%",
+            f"    MACD: {tf_4h.get('momentum','?')} [{tf_4h.get('macd_strength','?')}] | Hist: {tf_4h.get('macd_hist','?')}",
             f"1H Trend: {tf_1h.get('trend','?')} | Momentum: {tf_1h.get('momentum','?')} | RSI: {tf_1h.get('rsi','?')} | Zone: {jewel_1h.get('rsi_zone','?')} | Signal: {jewel_1h.get('signal','?')}",
             f"    ADX: {jewel_1h.get('adx','?')} ({'rising' if jewel_1h.get('adx_rising') else 'flat'}) | StochZone: {jewel_1h.get('stoch_zone','?')}",
             f"    EMA: {jewel_1h.get('ema_state','?')} | Spread: {jewel_1h.get('ema_spread_pct','?')}%",
+            f"    MACD: {tf_1h.get('momentum','?')} [{tf_1h.get('macd_strength','?')}] | Hist: {tf_1h.get('macd_hist','?')}",
             f"15M JEWEL: {tf_15m.get('kinematic_grade','?')} | "
             f"RSI: {tf_15m.get('rsi','?')} | "
             f"Ribbon: {tf_15m.get('ribbon_spread_pct','?')}% | "

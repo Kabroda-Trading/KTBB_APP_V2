@@ -272,7 +272,9 @@ def _build_synthetic_jewel(raw_15m: List[Dict], adx_4h: Optional[Dict] = None) -
 def _build_fuel_gauge(raw_1h: List[Dict], raw_4h: List[Dict], raw_15m: List[Dict]) -> Dict:
     def analyze_tf(candles):
         if not candles or len(candles) < 50:
-            return {"trend": "NEUTRAL", "momentum": "NEUTRAL", "rsi": 50.0, "jewel": {"signal": "INSUFFICIENT_DATA"}}
+            return {"trend": "NEUTRAL", "momentum": "NEUTRAL", "rsi": 50.0,
+                    "macd_hist": 0.0, "macd_strength": "DEPLETED",
+                    "jewel": {"signal": "INSUFFICIENT_DATA"}}
 
         closes = [float(c["close"]) for c in candles]
         ema_series_30 = _calc_ema_series(closes, 30)
@@ -283,9 +285,15 @@ def _build_fuel_gauge(raw_1h: List[Dict], raw_4h: List[Dict], raw_15m: List[Dict
         trend = "BULLISH" if ema30 > ema50 else "BEARISH"
         macd_data = _calc_macd(closes)
         momentum = "POSITIVE" if macd_data["hist"] > 0 else "NEGATIVE"
+        macd_hist = round(macd_data["hist"], 2)
+        _abs_bps = abs(macd_data["hist"] / ema50 * 10000) if ema50 != 0 else 0.0
+        macd_strength = "DEPLETED" if _abs_bps < 5.0 else "WEAK" if _abs_bps < 20.0 else "STRONG"
         rsi = _calc_rsi(closes)
 
-        return {"trend": trend, "momentum": momentum, "rsi": round(rsi, 2), "ema30": round(ema30, 2), "ema50": round(ema50, 2), "jewel": _build_jewel_reading(candles)}
+        return {"trend": trend, "momentum": momentum, "rsi": round(rsi, 2),
+                "macd_hist": macd_hist, "macd_strength": macd_strength,
+                "ema30": round(ema30, 2), "ema50": round(ema50, 2),
+                "jewel": _build_jewel_reading(candles)}
         
     return {
         "1H": analyze_tf(raw_1h),
