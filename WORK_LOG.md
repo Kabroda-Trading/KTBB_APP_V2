@@ -494,14 +494,14 @@ working signal to a blind decision layer cannot break a working signal. Low blas
      (regress) Jun2 SHORT still gets multi-target; Jun3 LONG still restricted
   4. Deploy → watch live session for correct allocation behavior
 
-**Tier B — ONE REAL FIX** (requires careful validation, same protocol as W-7)
-- **B1. PMARP direction-blind threshold** — `rank > 75` fires for upside overextension
-  only. Downside extremes (Jun 2: rank=0.0, most extreme below EMA21 in 252-bar history)
-  read as "not overextended." Fix: flag BOTH `rank > 75` (upside) AND `rank < 25`
-  (downside) as overextended in their respective directions. Same ADX-class structural
-  pattern as W-7's abs() bugs. Validate with the same positive/negative test protocol:
-  downtrend days must now show downside-overextended; ranging days must still not
-  misfire. See finding #2.
+**Tier B — PARKED (see finding #2 for full re-scope)**
+- **B1. PMARP direction-blind threshold** — VERIFIED + RE-SCOPED + PARKED (2026-06-06).
+  Finding confirmed real but audit's proposed fix is a trap. See finding #2 for full
+  detail. Do NOT build until: (a) market has ranged/rallied so the 252-bar PMARP history
+  covers both sides, AND (b) the deferred exit_warning STRONG+with-trend override is
+  scoped (B1 likely shares that override layer). Monitoring item only — observe whether
+  PMARP ever correctly fires on an upside extreme or whether the current one-sided
+  downtrend market means the signal is simply dormant. No build date set.
 
 ---
 
@@ -527,11 +527,29 @@ working signal to a blind decision layer cannot break a working signal. Low blas
 - **Same class as ADX?** No. ADX gave numerically impossible values (14× reality). MACD gives the correct
   sign; the bug is magnitude suppression before two separate gate-and-allocation checks.
 
-**2. PMARP DIRECTION-BLIND threshold** — `mtf_confluence_scanner._calc_pmarp`
-- **Bug:** `pmarp_overextended = rank > 75` fires only for upside extremes (price historically high vs EMA21). Replay: Jun 2 PMARP rank=0.0 (most extreme downside reading in the 252-bar history) → `pmarp_overextended=False`. Jun 3 rank=2.81 → same. A price that has NEVER been this far below EMA21 is labeled "not overextended."
-- Secondary: short-history path (<50 bars) returns `abs(current_ratio)` as pmarp_value (a raw percentage magnitude); full path returns a percentile rank 0–100. Different scales from the same field — any threshold on pmarp_value changes meaning depending on data depth.
-- **Severity:** Decision-logic. Same structural class as W-7's direction-blind abs() bugs — but in the MTF interpretation layer, not the CONDITION 2 gate directly. Fix after MACD/Fix 3.
-- **Same class as ADX?** Yes — direction-blind threshold is the same pattern.
+**2. PMARP DIRECTION-BLIND threshold** — `mtf_confluence_scanner._calc_pmarp` — VERIFIED + RE-SCOPED + PARKED (2026-06-06)
+- **Bug confirmed:** `pmarp_overextended = rank > 75` fires only for upside extremes. `rank = sum(history_values <= current_ratio) / len(history) * 100`. When price is far BELOW EMA21, `current_ratio` is very negative → rank → 0 → `rank > 75.0 = False` always in a downtrend. Jun 2 verified live: rank=0.00, pmarp_overextended=False — 0 of 252 history bars were as low as Jun2's ratio. A historically extreme downside extension is completely invisible.
+- **Short-history scale inconsistency confirmed:** short path (<50 bars) returns `abs(current_ratio)` (raw %, e.g. 4.03); full path returns percentile rank 0–100 (e.g. 0.00). Same field, incompatible scales. Low practical impact at 280 4H candles, but a real inconsistency.
+- **Blast radius confirmed (5 layers, 3 agents):** `_calc_pmarp` → per-TF `pmarp_overextended` → `_build_jewel_signal` OR → `JewelSnapshotLog.jewel_exit_warning` → `_build_jewel_ctx` renders "!! EXIT WARNING: PMARP overextended" → MTF interpreter (overnight JEWEL history) + SA context (JEWEL block + per-TF PMARP table) + SA ALLOCATION RULE ("jewel_exit_warning is active → T1 only"). Not a one-file change.
+- **CRITICAL — the proposed fix (rank < 25) is a trap:** Verified across 8 sessions — EVERY session Apr28 through Jun6 reads rank < 25 on the 4H. The 252-bar 4H lookback (~42 days) is entirely inside the current downtrend; the 2025 bull-run prices rolled off the window. Naive rank < 25 → `pmarp_overextended=True` every session → `jewel_exit_warning=True` every session → T1 cap on every approved trade — an always-on direction-blind veto, exactly the class A3 just removed from MACD. Even rank < 5 still fires on Jun2/Jun3 (the A3-unblocked sessions), so any threshold requires a STRONG+with-trend override to not re-cap them. That override is the same one pinned-but-deferred for exit_warning.
+- **Session-by-session PMARP rank table (4H, all 8 sessions):**
+
+  | Session | Close | EMA21 | Ratio | Rank | OE_up (>75) | OE_dn (<25) |
+  |---------|-------|-------|-------|------|------------|------------|
+  | Apr 28 (chop) | 76,230 | 77,414 | -1.53% | 15.0 | False | True |
+  | May 27 (chop) | 75,759 | 76,514 | -0.99% | 19.4 | False | True |
+  | May 29 (trend) | 73,473 | 74,554 | -1.45% | 14.3 | False | True |
+  | Jun 1 (trend) | 72,474 | 73,706 | -1.67% | 8.7 | False | True |
+  | Jun 2 (trend) | 69,466 | 72,382 | -4.03% | 0.0 | False | True |
+  | Jun 3 (trend) | 67,060 | 69,994 | -4.19% | 2.0 | False | True |
+  | Jun 5 (approved) | 61,990 | 65,568 | -5.46% | 3.2 | False | True |
+  | Jun 6 (SD) | 60,990 | 63,728 | -4.30% | 7.9 | False | True |
+
+- **Full fix scope (A3-class, not a one-liner):** Requires (1) threshold decision (rank < 25 too wide, even rank < 5 fires on Jun2/Jun3), (2) direction-aware allocation override — "downside extreme on a SHORT is mean-reversion risk, same as STRONG+with-trend override for exit_warning; downside extreme on a LONG is a different signal entirely", (3) MTF interpreter prompt change to distinguish "PMARP BELOW extreme on a short" from "PMARP BELOW extreme on a long" — `pmarp_direction` (ABOVE/BELOW) is already in the rendered context but the interpreter has no instruction to interpret it directionally.
+- **Data currently unfit for threshold calibration:** PMARP history is one-sided (all-below-mean). No threshold can be honestly calibrated until the market ranges/rallies and the 252-bar window covers both sides of EMA21.
+- **Severity:** Real gap, but effect is dormant in the current one-sided downtrend (upside extreme never fires either — `rank > 75` also hasn't fired because prices have been falling). The signal is structurally silent in both directions in this market regime.
+- **Same class as ADX?** Reclassified: NOT the same. ADX was numerically impossible (14× reality), one-character fix, no design decision. PMARP requires a threshold decision, a direction-aware override layer, and a prompt change — and the data is currently unfit for calibration. Different scope class entirely.
+- **Status: PARKED as monitoring + design item.** Build gate: (a) market ranges/rallies → balanced PMARP history, AND (b) exit_warning STRONG+with-trend override is scoped (B1 shares that layer). Verify-first protocol confirmed its value a 3rd time: the audit's "simple symmetric fix" would have re-broken A3.
 
 **3. SSE bias_model SILENTLY DROPPED** — `sse_engine` / `kabroda_mas_flow._build_senior_analyst_context`
 - **Bug:** `sse_engine.compute_sse_levels` produces a `bias_model.daily_lean` dict containing direction (long/short/neutral), score, and confidence — derived from slope (daily SMA20/SMA50), VRVP opening location (above/below/in value area), and trigger asymmetry (distance to BO vs BD). This is stored in `packet["bias_model"]` and is visible in the battlebox JSON. But `_build_senior_analyst_context` never receives `bias_model` as a parameter — the function signature takes `levels` and `context` only. The SSE's quantitative direction signal is **computed and discarded**. It is a wire that was never connected.
@@ -566,14 +584,11 @@ working signal to a blind decision layer cannot break a working signal. Low blas
 
 ---
 
-- **Status:** ◐ A1 done + **CONFIRMED LIVE 2026-06-06** (c4222dd). A2 done (b5b928d), not yet exercised — fallback path untriggered. **A3 VALIDATED — ready to commit/deploy (owner approved 2026-06-06).** Tier B remains.
-- **Next action (A3 deploy):** Commit `battlebox_pipeline.py` + `kabroda_mas_flow.py` as A3, deploy to Render, watch first live session for correct allocation behavior (Jun2-class session: expect T1/T2/T3; chop/WEAK day: expect T1 only). Then Tier B (PMARP).
-- **Sequencing:** A3 next (fixes both STAND_DOWN gate and T1-cap). Tier B (PMARP) after A3 live +
-  validated. Gravity expansion after front-of-river fully connected.
+- **Status:** ◐ A1 done + **CONFIRMED LIVE 2026-06-06** (c4222dd). A2 done (b5b928d), not yet exercised. **A3 COMMITTED ff60c5a (2026-06-06) — deployed, watching live.** Tier B re-scoped: B1 PARKED (see finding #2).
+- **Next action:** Watch first live session post-A3 deploy. STRONG+with-trend → expect T1/T2/T3. WEAK/DEPLETED or chop → expect T1 only. B1 is monitoring-only; no build until market ranges and PMARP history is balanced. W-6 dashboard audit is the next discrete build session.
+- **Sequencing:** A3 deployed. B1 parked (data unfit, design question open). W-6 (dashboard audit) next build session when ready. Gravity expansion after front-of-river fully connected.
 - **Blocks:** W-3 backtest validity (pointless to replay a starved SA). Gravity expansion (downstream).
-- **Audit note:** Verify data-path assumptions against actual code before treating an absence as a
-  confirmed gap (finding #5 lesson). A3 scope session found the allocation rule impact was missed by
-  the original audit — confirms the verify-first protocol is earning its weight.
+- **Audit note:** Verify-first protocol confirmed its value three times: (1) finding #5 BBWP was a false assumption; (2) A3 scope found the allocation rule impact that the audit missed; (3) B1 re-scope found that the audit's proposed fix would have re-broken A3. Audit findings are leads, not confirmed fixes. Always verify against actual code and live data before building.
 
 ---
 
@@ -648,6 +663,7 @@ done, we review this list and decide what graduates to OPEN WORK ITEMS.*
 | 2026-06-06 | **AUDIT TOOLING AS PERMANENT SITE FEATURE (owner, 2026-06-06).** The verify-before-build loop keeps finding things the static audit missed (allocation rule, BBWP data-path). Make audit / stress-test capability on-demand in the app — e.g. replay-harness-on-demand view, interpreter-output history with per-agent diff. So checking flow-through is a button, not a rebuild. Extends the existing `/admin/interpreter-log` page + cost monitor (already built). **GATED:** build after A3 + B1 are done — this is tooling, downstream of fixing the actual signal flow. | owner, A3 scope session 2026-06-06 | TBD — after A3 + B1 live; extend /admin/interpreter-log |
 | 2026-06-06 | **AUDIT IS A LOOP, NOT A SNAPSHOT (owner, 2026-06-06).** Lesson confirmed across W-8: a one-time audit gives leads; verifying each finding while building surfaces the next layer (the allocation rule was invisible until A3 scoping; BBWP absence was a false assumption). This is healthy, not a failure — the audit list is a STARTING POINT, not a complete inventory. Keep the verify-first protocol on every remaining finding. Don't trust the audit list as exhaustive before building. | owner, end of A3 scope session 2026-06-06 | Standing protocol — not a build item |
 | 2026-06-06 | **STAND-DOWN BRIEF — INTERNAL vs PUBLIC are different products (owner, 2026-06-06).** Internal brief on a no-trade day CAN be terse — the trader needs "no action, here's why" and no narrative is required. But the PUBLIC publication on a stand-down day must NOT be cut down: it should explain what is happening in the market (e.g. price at a major support floor, stop-hunt/chop dynamics, why both sides are positioning), AND must ALWAYS include a forward-looking / higher-timeframe section ("what to watch next"). A no-trade day is when a reader most wants the "what's going on?" read. Publisher-agent needs a STAND-DOWN TEMPLATE distinct from the internal one — different prompt path, different output structure. This is the differentiator between a real publication and a signal feed. Publisher prompt tuning, publication phase — NOT now. | owner, Jun6 STAND_DOWN session 2026-06-06 | TBD — publication phase |
+| 2026-06-06 | **B1 PMARP — MONITORING + DESIGN ITEM, NOT a build now (owner, 2026-06-06).** Bug confirmed: `pmarp_overextended = rank > 75` is blind to downside extremes (Jun2 rank=0.00, pmarp_overextended=False). BUT: naive `rank < 25` fix fires on ALL 8 sessions in current dataset — the 252-bar 4H history is entirely inside the downtrend, so every session reads rank < 25. This fix would re-create an always-on T1 cap (exactly what A3 removed from MACD). Even rank < 5 fires on Jun2/Jun3 (A3-unblocked sessions). Full fix is A3-class: (1) threshold decision, (2) STRONG+with-trend override (same override deferred for exit_warning), (3) MTF interpreter prompt to distinguish downside extreme on SHORT vs LONG. Data is currently unfit for threshold calibration (one-sided history). Build gate: market ranges/rallies → balanced PMARP history AND exit_warning override is scoped (B1 shares that layer). Verify-first protocol prevented a fix that would have re-broken A3. | owner, B1 verification session 2026-06-06 | DO NOT build — monitoring only; build gate: balanced market + exit_warning override scoped |
 | 2026-06-06 | **EXIT_WARNING — LIVE MONITORING ITEM (NOT a fix now) (owner, 2026-06-06).** The `exit_warning` condition in the ALLOCATION RULE is a blunt T1-cap — it fired on Jun3 (15M grade=TANGLED at session open) and held a move that ran to T2/T3. Owner reviewed the live chart and confirmed T1 was still the correct call (15M tangled at a structural floor / light weekly-level — high-conflict zone, conservative exit right). But the pattern is the same class as the MACD veto A3 just removed: a single condition capping allocation without regard to trend strength or fuel quality. **Question for live monitoring over coming weeks:** is exit_warning ever capping clean strong-trend moves it shouldn't? Do NOT fix reactively to one day — observe across many sessions. Only scope a fix (e.g. a STRONG-with-trend override: exit_warning vetoed when 4H MACD=STRONG AND trade direction matches 4H trend) IF a real pattern emerges in data. This is the audit loop working: A3 removed the MACD veto, revealing exit_warning as the next layer — expected and healthy, not a regression. | owner, A3 validation session 2026-06-06 | TBD — observe live; scope fix only if pattern confirmed |
 
 ---
