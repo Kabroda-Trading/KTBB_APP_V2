@@ -435,12 +435,57 @@ working signal to a blind decision layer cannot break a working signal. Low blas
   `EMA: <state> | Spread: <pct>%` — under the ADX line for both 4H and 1H. Purely
   additive. Originally scoped as "add BBWP to fallback" (finding #5) — investigation
   showed that was a false assumption; see updated finding #5 below.
-- **A3. Pass MACD magnitude through / Fix 3** — `analyze_tf` flattens hist to
-  "POSITIVE"/"NEGATIVE". Fix 3 may need to be a DATA change (pass the normalised
-  hist value through to SA context) AND a PROMPT change (teach the SA to read
-  direction-qualified momentum), not just a prompt change. This is the highest-weight
-  reconnection because it also closes CONDITION 2(a)'s structural always-true-in-downtrend
-  issue. See finding #1. Plan both layers before building.
+- **A3. MACD magnitude — scoped, NOT built (2026-06-06)** — Verified real against
+  actual code. Two-layer fix required.
+
+  **DISCOVERY (audit understated):** Two direction-blind impact points, not one:
+  - **(1) CONDITION 2(a)** (known): "4H Momentum NEGATIVE" fires as sign-only →
+    structurally always true in a downtrend, requiring only one of (b)/(c) to trigger
+    STAND_DOWN. STRONG NEGATIVE (healthy trend) and DEPLETED NEGATIVE (exhausted) are
+    indistinguishable.
+  - **(2) ALLOCATION RULE** (`kabroda_mas_flow.py` ~L220–229, NEW): fires on "4H
+    momentum NEGATIVE" as a **single sufficient condition** — no two-of-three gate.
+    Every bearish day, even healthy trending SHORT sessions that reach APPROVED, is
+    silently capped at T1-only. T2/T3 targets are computed but unreachable. Jun 5
+    brief's T1-cap may have been mechanical from this rule, not purely the SA's
+    divergence reasoning.
+
+  **DATA LAYER** (`battlebox_pipeline.py` — `analyze_tf`):
+  - Add `macd_hist` (rounded raw value) to return dict — for fallback render visibility.
+  - Add `macd_strength` label: `STRONG` / `WEAK` / `DEPLETED`. Normalized as bps off
+    ema50 (`hist / ema50 * 10000`): price-level-independent at any BTC price.
+    Proposed thresholds: |bps| < 5 → DEPLETED; 5–20 → WEAK; >20 → STRONG.
+    **OPEN: thresholds derived from only Jun3 (−39 bps, STRONG) and Jun1 (−2.2 bps,
+    DEPLETED) — MUST validate all 7 replay sessions before finalizing. Wrong thresholds
+    make it worse than the bug.**
+  - Keep `momentum` sign string ("POSITIVE"/"NEGATIVE") unchanged — backward-compat
+    with interpreter and jewel snapshots. Additive only.
+  - Update fallback render: add `[{macd_strength}]` bracket after momentum label for
+    both 4H and 1H lines.
+  - Short-data path (line 275) needs `macd_hist: 0.0, macd_strength: "DEPLETED"` defaults.
+
+  **PROMPT LAYER** (`kabroda_mas_flow.py`):
+  - CONDITION 2(a): replace "4H Momentum is NEGATIVE" with "4H Momentum strength is
+    WEAK or DEPLETED — histogram near-zero or fading. STRONG NEGATIVE is healthy trend
+    energy, not exhaustion."
+  - ALLOCATION RULE: "4H momentum NEGATIVE" → "4H momentum strength is WEAK or
+    DEPLETED AND trade direction is LONG" (STRONG NEGATIVE + SHORT = confirming; STRONG
+    NEGATIVE + LONG = still restricts; WEAK/DEPLETED = restricts both directions).
+  - Add explicit note: "MACD strength is a FUEL/allocation signal only. Trade direction
+    is determined by harmonic state and trigger position — not by MACD sign."
+
+  **RISKS:**
+  - Label collision: harmonic matrix already uses `micro_state = "EXHAUSTION"`. Use
+    `DEPLETED` (not `EXHAUSTED`) to keep the two signals visually distinct in the brief.
+  - Circular coupling: revised allocation rule references trade direction — SA must not
+    choose direction based on MACD sign. Prompt note above guards this.
+
+  **BUILD GATE:** Live A1+A2 confirmation first. Then:
+  1. Calibrate thresholds — replay all 7 sessions, verify macd_strength labels are correct
+  2. Finalize prompt text
+  3. Validate: (+) Jun3 SHORT allows T2/T3; (−) Apr28/May27 chop still restricts;
+     (regress) Jun2 SHORT still gets multi-target; Jun3 LONG still restricted
+  4. Deploy → watch live session for correct allocation behavior
 
 **Tier B — ONE REAL FIX** (requires careful validation, same protocol as W-7)
 - **B1. PMARP direction-blind threshold** — `rank > 75` fires for upside overextension
@@ -455,11 +500,25 @@ working signal to a blind decision layer cannot break a working signal. Low blas
 
 #### Findings, ranked by decision weight
 
-**1. MACD MAGNITUDE DROP** — `battlebox_pipeline._build_fuel_gauge` / `analyze_tf`
-- **Bug:** MACD histogram is correctly computed but `momentum = "POSITIVE" if hist > 0 else "NEGATIVE"` discards the value before the SA sees it. Replay: Jun 3 hist=−410 (hard accelerating downtrend) and Jun 1 hist=−24 (barely negative) are indistinguishable to the SA — both arrive as "NEGATIVE".
-- **Why it matters:** This is the ROOT of CONDITION 2(a) / Fix 3. The sign-only compression is what makes "4H Momentum NEGATIVE" always true in a downtrend — and also always equally "negative" whether momentum is building or collapsing. Fix 3 may not be a pure prompt change. It may require passing the raw hist (or a normalised magnitude) through to the SA context so the prompt can distinguish "confirming downtrend" (large negative hist) from "barely negative, momentum absent" (hist near zero).
-- **Severity:** Decision-logic. Highest weight — sits directly in CONDITION 2(a).
-- **Same class as ADX?** No. ADX gave numerically impossible values (14× reality). MACD gives the correct sign; the bug is magnitude suppression before the decision layer.
+**1. MACD MAGNITUDE DROP** — `battlebox_pipeline._build_fuel_gauge` / `analyze_tf` — VERIFIED 2026-06-06
+- **Bug (confirmed):** `_calc_macd()` returns the full `{"macd", "signal", "hist"}` dict correctly.
+  In `analyze_tf` (line 284–285): `macd_data = _calc_macd(closes)` then `momentum = "POSITIVE" if
+  macd_data["hist"] > 0 else "NEGATIVE"`. `macd_data` is local — goes out of scope here. Return dict
+  (line 288) contains only the string `momentum`. No secondary path: jewel_ctx snapshots also use a
+  label-string `momentum` field (from MTF interpreter), not the raw hist.
+- **TWO impact points (audit originally identified only one):**
+  - **(1) CONDITION 2(a)** (`kabroda_mas_flow.py` lines 123–128): "4H Momentum is NEGATIVE" → sign-only
+    → structurally always true in any bearish session. Jun 3 hist=−410 and Jun 1 hist=−24 both arrive as
+    "NEGATIVE". Any single co-condition — (b) or (c) — is enough to force STAND_DOWN.
+  - **(2) ALLOCATION RULE** (`kabroda_mas_flow.py` lines 220–229, discovered in A3 scope session):
+    `"4H momentum is NEGATIVE"` is the FIRST condition in the allocation IF block — **no two-of-three
+    gate, fires alone**. Every bearish day — including healthy trending SHORT sessions that earn APPROVED
+    — is silently capped at T1-only. T2/T3 are computed and correct but unreachable by the operator.
+    Jun 5 brief's single-target allocation may have been this mechanical cap, not purely the SA's
+    divergence read.
+- **Severity:** Decision-logic. Highest weight. Two separate downstream impact points. Fix scoped in A3.
+- **Same class as ADX?** No. ADX gave numerically impossible values (14× reality). MACD gives the correct
+  sign; the bug is magnitude suppression before two separate gate-and-allocation checks.
 
 **2. PMARP DIRECTION-BLIND threshold** — `mtf_confluence_scanner._calc_pmarp`
 - **Bug:** `pmarp_overextended = rank > 75` fires only for upside extremes (price historically high vs EMA21). Replay: Jun 2 PMARP rank=0.0 (most extreme downside reading in the 252-bar history) → `pmarp_overextended=False`. Jun 3 rank=2.81 → same. A price that has NEVER been this far below EMA21 is labeled "not overextended."
@@ -500,11 +559,16 @@ working signal to a blind decision layer cannot break a working signal. Low blas
 
 ---
 
-- **Status:** ◐ A1 done (c4222dd). A2 done (2026-06-05). A3/Fix3 + Tier B remain.
-- **Next action:** A3/Fix3 — pass MACD magnitude through `analyze_tf` to SA context + prompt update. Plan both layers before building (data change + prompt change together).
-- **Sequencing:** A3/Fix3 next (highest decision-weight reconnection). Then Tier B (PMARP direction-blind threshold) with W-7-protocol validation. Gravity expansion after front-of-river fully connected.
+- **Status:** ◐ A1 done (c4222dd). A2 done (b5b928d). A3 scoped+verified (2026-06-06, NOT built). Tier B remains.
+- **Next action (A3 build session):** (1) Calibrate bps thresholds via replay (all 7 sessions).
+  (2) Finalize prompt text for CONDITION 2(a) and allocation rule. (3) Validate positive/negative/
+  regression test matrix. (4) Deploy. Gate: live A1+A2 confirmation first.
+- **Sequencing:** A3 next (fixes both STAND_DOWN gate and T1-cap). Tier B (PMARP) after A3 live +
+  validated. Gravity expansion after front-of-river fully connected.
 - **Blocks:** W-3 backtest validity (pointless to replay a starved SA). Gravity expansion (downstream).
-- **Audit note:** Treat remaining findings as leads to verify against actual code — finding #5 was wrong on its data-path assumption. Verify before building.
+- **Audit note:** Verify data-path assumptions against actual code before treating an absence as a
+  confirmed gap (finding #5 lesson). A3 scope session found the allocation rule impact was missed by
+  the original audit — confirms the verify-first protocol is earning its weight.
 
 ---
 
