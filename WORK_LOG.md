@@ -429,9 +429,12 @@ working signal to a blind decision layer cannot break a working signal. Low blas
   `daily_lean` dict (direction, score, confidence from slope + VRVP location +
   trigger asymmetry) is stored in the packet but never passed to the SA context
   builder. One parameter addition + one section in the SA brief. See finding #3.
-- **A2. Add BBWP to SA fallback section** — when `mtf_read=None`, BBWP is currently
-  absent. Add `bbwp_value` and `bbwp_compressed` from `fuel_gauge["4H"]` to the
-  fallback lines 814–826 in `kabroda_mas_flow`. Low-risk one-liner. See finding #5.
+- **A2. Add EMA state/spread to SA fallback section** ✓ DONE (2026-06-05) — `ema_state`
+  and `ema_spread_pct` were computed by `_build_jewel_reading` and in the jewel dicts
+  but never rendered in the fallback block (lines 817–820). Added two lines —
+  `EMA: <state> | Spread: <pct>%` — under the ADX line for both 4H and 1H. Purely
+  additive. Originally scoped as "add BBWP to fallback" (finding #5) — investigation
+  showed that was a false assumption; see updated finding #5 below.
 - **A3. Pass MACD magnitude through / Fix 3** — `analyze_tf` flattens hist to
   "POSITIVE"/"NEGATIVE". Fix 3 may need to be a DATA change (pass the normalised
   hist value through to SA context) AND a PROMPT change (teach the SA to read
@@ -475,9 +478,11 @@ working signal to a blind decision layer cannot break a working signal. Low blas
 - **Severity:** Medium. Unlikely on MEXC (always has volume), but a silent correctness gap.
 - **Same class as ADX?** No.
 
-**5. BBWP silent absence in fallback** — `mtf_confluence_scanner._calc_bbwp`
-- **Issue:** BBWP flows to the SA via the MTF interpretation string (`mtf_read`). When `mtf_read=None` (interpreter disabled or failed), BBWP is completely absent from the SA context — the fallback section (lines 814–826 in `kabroda_mas_flow`) covers RSI/MACD label/ADX/kinematic_grade but not BBWP. Replay confirmed BBWP was a correct and useful signal: Jun 1 BBWP=4.47 (compression before the breakout), Jun 2 BBWP=99.44 (maximum width during the selloff).
-- **Severity:** Medium. Good compression-timing signal with a silent drop path.
+**5. BBWP silent absence in fallback** — INVESTIGATED + LARGELY FALSE (2026-06-05)
+- **Original claim:** BBWP absent from fallback when `mtf_read=None`; fallback only covers RSI/MACD/ADX/kinematic_grade.
+- **Investigation result:** The audit's assumed data path (`fuel_gauge["4H"]["bbwp_value"]`) was wrong. BBWP reaches the SA via the `jewel_ctx` history block, which is present in both the interpreted and fallback paths. It is NOT absent in the fallback — it arrives via a different route than assumed.
+- **Real gap found instead:** `ema_state` and `ema_spread_pct` ARE in the jewel dicts (output of `_build_jewel_reading`) but were never rendered in the fallback block. Fixed in A2 (2026-06-05): two new lines added under the 4H and 1H ADX lines.
+- **Lesson:** Verify data-path assumptions against actual code before treating an absence as a confirmed gap. The audit was wrong once here.
 
 **6. EMA dual-period inconsistency** — `battlebox_pipeline`
 - `analyze_tf` uses ema30/ema50 for the `trend` label ("BULLISH"/"BEARISH"). `_build_jewel_reading` uses ema21/ema55 for `ema_state` ("BULLISH_EXPANDING" etc.). Both reach the SA brief. Near a crossover they can disagree — no documented rationale for which to trust. Raw EMA price levels do not appear in the SA brief at all; SA gets labels but cannot reference "price is $1,600 below ema50" as a structural anchor.
@@ -495,10 +500,11 @@ working signal to a blind decision layer cannot break a working signal. Low blas
 
 ---
 
-- **Status:** ◐ Audit complete; work plan decided 2026-06-04. Waiting on live ADX validation (80b1d79) before any code changes.
-- **Next action:** Watch first live Render session. If 80b1d79 confirmed working → start Tier A reconnections in order A1 → A2 → A3/Fix3. Then Tier B (PMARP) with W-7-protocol validation.
-- **Sequencing:** Tier A first (reconnections, low blast radius). Tier B only after Tier A is live and validated. Gravity map expansion after front-of-river is fully connected.
-- **Blocks:** W-3 backtest validity (pointless to replay a starved SA). Gravity expansion (downstream — feed front-of-river first).
+- **Status:** ◐ A1 done (c4222dd). A2 done (2026-06-05). A3/Fix3 + Tier B remain.
+- **Next action:** A3/Fix3 — pass MACD magnitude through `analyze_tf` to SA context + prompt update. Plan both layers before building (data change + prompt change together).
+- **Sequencing:** A3/Fix3 next (highest decision-weight reconnection). Then Tier B (PMARP direction-blind threshold) with W-7-protocol validation. Gravity expansion after front-of-river fully connected.
+- **Blocks:** W-3 backtest validity (pointless to replay a starved SA). Gravity expansion (downstream).
+- **Audit note:** Treat remaining findings as leads to verify against actual code — finding #5 was wrong on its data-path assumption. Verify before building.
 
 ---
 

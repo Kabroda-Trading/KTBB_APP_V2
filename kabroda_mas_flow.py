@@ -816,8 +816,10 @@ def _build_senior_analyst_context(
             f"Micro Bias (168h):                {micro_bias}",
             f"4H Trend: {tf_4h.get('trend','?')} | Momentum: {tf_4h.get('momentum','?')} | RSI: {tf_4h.get('rsi','?')} | Zone: {jewel_4h.get('rsi_zone','?')} | Signal: {jewel_4h.get('signal','?')}",
             f"    ADX: {jewel_4h.get('adx','?')} ({'rising' if jewel_4h.get('adx_rising') else 'flat'}) | StochZone: {jewel_4h.get('stoch_zone','?')}",
+            f"    EMA: {jewel_4h.get('ema_state','?')} | Spread: {jewel_4h.get('ema_spread_pct','?')}%",
             f"1H Trend: {tf_1h.get('trend','?')} | Momentum: {tf_1h.get('momentum','?')} | RSI: {tf_1h.get('rsi','?')} | Zone: {jewel_1h.get('rsi_zone','?')} | Signal: {jewel_1h.get('signal','?')}",
             f"    ADX: {jewel_1h.get('adx','?')} ({'rising' if jewel_1h.get('adx_rising') else 'flat'}) | StochZone: {jewel_1h.get('stoch_zone','?')}",
+            f"    EMA: {jewel_1h.get('ema_state','?')} | Spread: {jewel_1h.get('ema_spread_pct','?')}%",
             f"15M JEWEL: {tf_15m.get('kinematic_grade','?')} | "
             f"RSI: {tf_15m.get('rsi','?')} | "
             f"Ribbon: {tf_15m.get('ribbon_spread_pct','?')}% | "
