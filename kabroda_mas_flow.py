@@ -1039,6 +1039,7 @@ def run_mas_analysis(
 
     levels = battlebox_payload.get("levels", {})
     context = battlebox_payload.get("context", {})
+    bias_model = battlebox_payload.get("bias_model", {})
 
     bo = float(levels.get("breakout_trigger") or 0)
     bd = float(levels.get("breakdown_trigger") or 0)
@@ -1091,7 +1092,7 @@ def run_mas_analysis(
     # v2: consolidate to JA-only once InterpreterLog confirms reliability (MAP 2 / Principle 3).
     junior_read: Optional[str] = None
     try:
-        junior_read = junior_analyst.run_junior_analysis(mtf_read, gravity_read, levels, targets)
+        junior_read = junior_analyst.run_junior_analysis(mtf_read, gravity_read, levels, targets, bias_model=bias_model)
     except Exception as _ja_err:
         print(f"[JUNIOR ANALYST] Skipped — interpreters feeding SA directly: {_ja_err}")
     try:
