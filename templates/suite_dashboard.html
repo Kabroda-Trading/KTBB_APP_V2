@@ -353,9 +353,8 @@
             return;
         }
         tbody.innerHTML = d.trades.map(t => {
-            const pnl = t.realized_pnl || 0;
-            const pnlStr = pnl ? (pnl > 0 ? '+' + pnl.toFixed(2) : pnl.toFixed(2)) + 'R' : '—';
-            const pnlCls = pnl > 0 ? 's-win' : (pnl < 0 ? 's-loss' : '');
+            const pnlStr = t.realized_pnl || '—';
+            const pnlCls = t.realized_pnl === '+1.0R' ? 's-win' : (t.realized_pnl === '-1.0R' ? 's-loss' : '');
             const st  = (t.status || '').toLowerCase();
             const mas = (t.mas_approval_status || '').toLowerCase();
             const fmt = v => v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';

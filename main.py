@@ -1370,6 +1370,8 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
         cumulative = 0.0
         pnl_series = []
         for row in pnl_rows:
+            if row.status not in ("CLOSED_WIN", "CLOSED_LOSS"):
+                continue
             cumulative += 1.0 if row.status == "CLOSED_WIN" else -1.0
             pnl_series.append({"date": row.date_key, "cumulative": round(cumulative, 2)})
         trades = db.query(CampaignLog).filter(CampaignLog.symbol == "BTC/USDT").order_by(CampaignLog.id.desc()).limit(50).all()
