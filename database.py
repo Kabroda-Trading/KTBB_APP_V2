@@ -124,6 +124,37 @@ def init_db():
     except Exception:
         pass
 
+    # --- W-9 TRADE-LIFECYCLE MONITOR SCHEMA ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN entry_filled_at TIMESTAMP"))
+    except Exception:
+        pass
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN session_expires_at TIMESTAMP"))
+    except Exception:
+        pass
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN max_target_reached VARCHAR"))
+    except Exception:
+        pass
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN t2_reached BOOLEAN DEFAULT FALSE"))
+    except Exception:
+        pass
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN t3_reached BOOLEAN DEFAULT FALSE"))
+    except Exception:
+        pass
+
     # --- PHASE 3C JEWEL SPECIALIST — top-level scanner context columns ---
     for col_def in [
         "confluence_score INTEGER",
@@ -237,8 +268,30 @@ class CampaignLog(Base):
     mas_executive_brief = Column(String, nullable=True)
     mas_approval_status = Column(String, default="PENDING", nullable=False)
     formatted_newsletter = Column(String, nullable=True)
-    target_hit = Column(String, nullable=True)   # T1 | T2 | T3 | STOP — written by outcome tracker
+    target_hit = Column(String, nullable=True)   # T1 | T2 | T3 | STOP — the target the trade CLOSED AT
     structure_reasoning = Column(String, nullable=True)  # JSON: Trade Structure Analyst audit trail
+
+    # --- W-9 TRADE-LIFECYCLE MONITOR COLUMNS ---
+    # entry_filled_at: timestamp when price crossed entry_price during the session window.
+    #   NULL = price never reached entry — this setup is a candidate for EXPIRED status.
+    #   (activated_at exists as an orphaned column from an earlier design; never used — left alone)
+    entry_filled_at = Column(DateTime, nullable=True)
+
+    # session_expires_at: end of the valid NY Futures session window (8:30 AM – ~3:00 PM ET).
+    #   A setup not filled by this time → status = EXPIRED, realized_pnl = null.
+    session_expires_at = Column(DateTime, nullable=True)
+
+    # max_target_reached: the FURTHEST price target ever touched, even after the trade was exited.
+    #   Distinct from target_hit (which is the exit target). Used for target-optimization data:
+    #   "system exited at T1 but price reached T3 on 80% of those sessions."
+    #   Values: NONE | T1 | T2 | T3. NULL on open/expired trades.
+    max_target_reached = Column(String, nullable=True)
+
+    # t2_reached / t3_reached: persistent observation flags for target-optimization analysis.
+    #   Set TRUE when price reaches T2 or T3 even if the trade was already closed at T1.
+    #   Allows the auditor to ask: "how often does price continue past the exit target?"
+    t2_reached = Column(Boolean, default=False, nullable=False, server_default="0")
+    t3_reached = Column(Boolean, default=False, nullable=False, server_default="0")
 
 # ---------------------------------------------------------
 # MTF CONFLUENCE READINGS (MORNING BRIEF HISTORY)

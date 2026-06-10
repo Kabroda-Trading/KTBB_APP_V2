@@ -17,6 +17,7 @@
 
 import os
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Optional
 
 import anthropic
@@ -24,6 +25,7 @@ import anthropic
 from database import SessionLocal, AgentRunLog
 
 _MODEL = "claude-sonnet-4-6"
+_SPEC_DIR = Path(__file__).parent / "agents"
 
 _RATES = {
     "input":       3.00 / 1_000_000,
@@ -231,6 +233,70 @@ def _call_agent(
         )
         print(f"[AGENT_CORE] {agent_name} ERROR: {e}")
         raise
+
+
+class AgentSpec:
+    __slots__ = ("name", "model", "max_tokens", "body")
+
+    def __init__(self, name: str, model: str, max_tokens: int, body: str) -> None:
+        self.name = name
+        self.model = model
+        self.max_tokens = max_tokens
+        self.body = body
+
+
+def load_agent_spec(agent_name: str) -> AgentSpec:
+    """
+    Reads agents/{agent_name}.md, parses YAML frontmatter for model/max_tokens,
+    and returns the body as the system prompt text.
+
+    Raises FileNotFoundError if the spec file is missing — never silently falls
+    back to an empty prompt.
+    """
+    path = _SPEC_DIR / f"{agent_name}.md"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"[AGENT_CORE] Spec file not found: {path}. "
+            f"Cannot call agent '{agent_name}' without its spec."
+        )
+    text = path.read_text(encoding="utf-8")
+    meta: dict = {}
+    body = text
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) == 3:
+            for line in parts[1].strip().splitlines():
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    meta[k.strip()] = v.strip()
+            body = parts[2].lstrip('\n')
+    return AgentSpec(
+        name=agent_name,
+        model=meta.get("model", _MODEL),
+        max_tokens=int(meta.get("max_tokens", 2048)),
+        body=body,
+    )
+
+
+def _call_from_spec(
+    agent_name: str,
+    context_text: str,
+    triggered_by: str = "manual",
+) -> str:
+    """
+    Loads the agent's MD spec from agents/{agent_name}.md and calls _call_agent().
+    model and max_tokens are read from the spec frontmatter — no hardcoding at
+    call sites. To change a model: edit the frontmatter, no Python change needed.
+    """
+    spec = load_agent_spec(agent_name)
+    return _call_agent(
+        agent_name=spec.name,
+        system_prompt=spec.body,
+        context_text=context_text,
+        triggered_by=triggered_by,
+        model=spec.model,
+        max_tokens=spec.max_tokens,
+    )
 
 
 def get_cost_summary() -> dict:

@@ -55,6 +55,23 @@ load by digesting its domain first. The SA must never receive a raw data dump
 from a reconnected or new agent. If a connection would cause the SA to read raw
 numbers rather than a judgment, it must go through an Interpreter (Bucket B) first.
 
+### Principle 4 — The River Flow: fix upstream, downstream shrinks (owner, 2026-06-06)
+The system is a flow: signals/levels (source) → interpreters → Junior Analyst → Senior Analyst → brief → dashboard → publication. Fixing upstream auto-fixes downstream for free. Proven this week: the ADX fix revived dead downstream threshold checks; the MACD magnitude fix corrected the allocation logic. **Rule:** when tempted to fix something downstream (dashboard, publication), first ask "is this a downstream SYMPTOM of an upstream cause?" Fixing upstream is cheaper and shrinks the downstream work. Corollary: the publication (furthest downstream) will be relatively easy to build BECAUSE the internal foundation is solid and audited. **Don't push downstream production work before the upstream flow is clean** — but DO move steadily down the river, monitoring each stage as data volume grows.
+
+### Principle 5 — INSTRUMENT EVERYTHING NOW; THE COST OF NOT-TRACKING IS ASYMMETRIC (owner, 2026-06-06, strengthened 2026-06-07)
+
+**The asymmetry is absolute.** The cost of tracking something you don't need = trivial (storage). The cost of NOT tracking something you later need = WEEKS — because the data must accumulate from the start, and history cannot be created retroactively. There is no fix for a gap in the past. You can always reduce tracking detail later once core signals are known; you can never recover un-captured history.
+
+**Therefore: "should this be tracked?" is a CONSTANT, ACTIVE question for BOTH owner and Claude, and the default answer is YES.** Log every decision point, every condition fired, every non-obvious outcome NOW — before we know what we'll do with it — because the dataset is the foundation all downstream capabilities (auditing, validation, simulator, publication track record) depend on.
+
+**CAPTURE and FEATURE are separate things.** Capture comes FIRST and IMMEDIATELY — it is cheap and time-lagged. The feature that reads the capture can come later. Do not wait for a feature to be scoped before turning on its data collection. The auditor, the coach vision, the publication track record, and the account simulator are all blocked — not by code complexity — by the absence of historical data that should have been accumulating from the moment each gap was spotted.
+
+**Proven pain (2026-06-07):** the performance auditor and the publication track record are both blocked behind "get the basics first." Both blocks exist because data-capture was not turned on the moment the gap was spotted — only when the feature got built. That delay is unrecoverable.
+
+**No dark crevice left un-instrumented.** If a decision point fires, log it. If a condition is evaluated, log the outcome. If a setup is approved but never filled, log the NO_FILL, log the reason, log the session context. If an agent produces a read, log the read — not just whether it succeeded.
+
+**Concrete trigger (2026-06-07):** approved-but-never-filled trades are currently vanishing from the record (see W-9 — phantom CLOSED_LOSS on an untriggered Jun7 setup). The RIGHT response is not just fixing the mislabel — it is logging NO_FILL / EXPIRED with the reason and session context FROM NOW, so "how often does this happen, and what predicts it?" is answerable in two weeks instead of "we never tracked it, start now." The fix and the capture are both required; the capture is the more important of the two.
+
 ---
 
 ## SUCCESS METRIC (owner framing, 2026-06-03)
@@ -98,21 +115,195 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ---
 
 ## ► NEXT SESSION START
-*End-of-session marker: 2026-06-06*
+*End-of-session marker: 2026-06-07*
 
-**A3 VALIDATED — ready to commit/deploy.** STEP 3 validation complete (2026-06-06). Owner approved. Jun2 unblocked (the regression target — PASS). Old direction-blind "4H momentum NEGATIVE" bullet confirmed REMOVED everywhere. Files ready: `battlebox_pipeline.py` (data layer) + `kabroda_mas_flow.py` (prompt layer). Commit both as A3, deploy, watch first live session.
+**A3 + A1 CONFIRMED LIVE 2026-06-07.** Session APPROVED a SHORT despite 4H/1H POSITIVE momentum on a BEARISH trend. System correctly classified the 24–48h bounce as a counter-trend pullback "decelerating into bearish continuation, not a reversal" — matches owner's own structural read. This is the exact ambiguity (positive momentum + bear trend) that would have tangled the old gate; A3's strength-aware logic handled it correctly. JA reconciled THREE inputs (energy + structure + bias_model/macro divergence cap) cleanly, no false-certainty, concluded "single-target at most." T1-only capped correctly for STRUCTURAL reason: all 3 short targets collapsed to the $60,025.76 MAXIMUM wall — nowhere to go but the wall. All 5 agents SUCCESS on new code. NOTABLE: Kabroda's read (short the pullback, bearish continuation) aligns with owner's structural view AND opposes Mafioso's long call — independent confirmation Kabroda's logic reflects intended framework.
 
 **A2 status:** Deployed (b5b928d), NOT exercised — MTF interpreter hasn't failed yet, so the fallback render path hasn't fired. Confirm A2 rendering on first degraded session.
 
-**Jun6 session:** STAND_DOWN. Correctly driven by Choked Target ($60,025.76 MAXIMUM wall). A3 validated same day.
+**W-6 T1 DONE (d644366, 2026-06-07):** chart renders + matches KPI; trade table renders. T2 legibility polish BLOCKED — see W-9.
 
-**NEXT ACTIONS:** (1) A3 commit + deploy. (2) Watch first live session: STRONG+with-trend → expect T1/T2/T3; WEAK/DEPLETED → expect T1 only. (3) After A3 proven live, Tier B (PMARP direction-blind threshold, W-8 B1). (4) Monitor exit_warning across sessions (see Suggestion Box 2026-06-06 exit_warning pin).
+**WEEKLY SCHEDULER — FIRST SCHEDULED RUN FIRED 2026-06-07 23:00 UTC. AUDITOR PASSED + FOUND 2 REAL BUGS.** Both agents ran SUCCESS. Performance Auditor: $0.0137. Elliott Wave Specialist: $0.0183. Elliott Wave: BEAR_WAVE_4_BOUNCE / IN_PROGRESS / 13.7% complete, invalidation $60,055 (not yet ZigZag-locked — needs 20% reversal for confirmation). 3rd independent confirmation of bearish structure. Auditor output IS visible on production dashboard (Internal System Audits collapsible). **Auditor findings (treat as strong leads — computed on outcome data with known integrity issues per W-9, so accuracy %s are provisional):** (1) MAJOR — kinematic pipeline failing: 86 of 93 resolved calls (92%) return UNKNOWN kinematic_grade, performing at 17.4%. Classification pipeline not assigning grades on the vast majority of sessions — systemic data-quality bug invisible to daily observation. (2) Stand-down gate over-firing: 38 fires, 70.3% accurate, 29.7% overcautious. Corroborates exit_warning-too-blunt concern with real data. (3) BUG — auditor output TRUNCATED mid-sentence at 600-token limit. Raise max_tokens or tighten prompt. Elliott Wave reasoning still has no readable view (gravity-map Wave Context panel only shows the label). See W-10 and W-11.
+
+**NEXT ACTIONS:** (1) **W-11 KINEMATIC GRADE UNKNOWN — near top, read-only verify first.** Is the pipeline really failing 92% of sessions, or a counting artifact from outcome data integrity issues? Verify before any fix. (2) **W-9 OUTCOME-TRACKING INTEGRITY — TOP PRIORITY.** Read-only verification pass: how are outcomes assigned, how many rows mislabeled? (3) **W-10** — auditor output now visible; remaining: wave reasoning view + navigation + auditor token-limit fix. (4) W-6 T2 legibility polish — BLOCKED until W-9 resolved. (5) CoinGecko 429 fallback before publication.
 
 ---
 
 ## OPEN WORK ITEMS
 
 Status: ☐ not started · ◐ in progress · ☑ done
+
+### W-9 ◐ OUTCOME-TRACKING DATA INTEGRITY — TOP PRIORITY (owner caught live 2026-06-07)
+
+**Blocks:** W-6 T2 legibility polish, W-3 backtest, publication track record, auditor coach vision, agent model-optimization A/B testing. No dashboard number is trustworthy until this is resolved.
+
+#### What was caught
+
+W-6 T1 deployed and the now-visible trade table immediately exposed two data integrity bugs more serious than the display bugs that preceded them:
+
+**Bug A — PHANTOM LOSSES (untriggered trades logged as CLOSED_LOSS)**
+2026-06-07 session: logged SHORT / APPROVED / CLOSED_LOSS / −1.0R. The trade **never triggered** — price went sideways all session and never hit the $60,508 entry. An un-triggered setup cannot be a loss. It should be `NO_FILL` / `EXPIRED` / `NO_TRIGGER` with `realized_pnl = null`. The ledger closing engine apparently closed it as a loss despite no fill.
+
+**Bug B — BINARY ±1R ONLY (true R not recorded)**
+Every outcome in the table is exactly +1.0R or −1.0R — win (hit T1) or loss (hit stop). A trade that ran to T2 (+1.618R) or T3 (+2.618R) is logged as +1.0R. The true R achieved is never captured. Winners are systematically understated.
+
+#### Consequence
+
+The entire track record — KPI net R, win rate, cumulative chart, accuracy bars, CRO RAG memory bank — is built on these labels and is therefore **untrustworthy** until verified. Phantom losses penalize sessions where the system was correct but price never engaged. Binary R understates the value of multi-target winners. This is the single-source-of-truth-for-PnL problem made concrete.
+
+**W-6 T1 headline finding must be revised:** "Data is TRUSTWORTHY" (the original W-6 audit conclusion) is now in question. The display was wrong; the underlying data may also be wrong. Treat as unverified until the read-only pass confirms scope.
+
+#### ROOT CAUSE — VERIFIED 2026-06-10
+
+Read-only pass complete. Root cause is confirmed and fully scoped.
+
+**`ledger_closing_engine.py` has no entry-fill check.** The engine queries every `APPROVED / closed_at IS NULL` `CampaignLog` row and immediately begins monitoring live price against `stop_loss` and `t1`. It never asks whether price reached `entry_price`. Every APPROVED record is treated as an open live position from the moment of creation.
+
+**Exact mechanism for Jun7 phantom loss:** MAS approved SHORT at $60,508 (breakdown trigger) / stop $62,120 (breakout trigger). Price on Jun7 went sideways — never broke below $60,508, so the short was never entered. The ledger engine kept the record open and watched live price. Days later, when price rallied through $62,120, the engine's `live_price >= campaign.stop_loss` condition fired → `CLOSED_LOSS / −1.0R`. A stop-out was scored on a trade that was never entered.
+
+**Binary-R confirmed:** `pnl` is hardcoded `1.0` or `-1.0` at the moment of close ([ledger_closing_engine.py:61-83](ledger_closing_engine.py#L61-L83)). The engine reads `campaign.t1` but never reads `campaign.t2` or `campaign.t3`. No branch for `+1.618R` or `+2.618R` exists.
+
+**W-9 and W-11 confirmed independent:** Different tables, different write paths. W-9 = `CampaignLog` / ledger closing engine. W-11 = `DecisionJournal` / radar contamination. Fix separately.
+
+#### Design questions — ANSWERED 2026-06-10
+
+**(a) Trade expiry — when does an untriggered setup expire?**
+Owner's answer (2026-06-07): end of the NY Futures session (8:30 AM – ~3:00 PM ET), NOT rolling into London/Asia. A trigger that hasn't fired by session close is `EXPIRED`, not a loss and not carried forward.
+
+**(b) True R measurement — how to record actual R achieved?**
+Correct model: +1.0R (T1 hit), +1.618R (T2 hit), +2.618R (T3 hit), −1.0R (stop hit), 0.0R (expired/no fill).
+
+**(c) Entry-fill detection — RESOLVED: real-time observation, not OHLC lookback.**
+The existing engine polls live price every 60 seconds. The lifecycle monitor uses that same poll: if it observes `live_price >= entry_price` (LONG) or `live_price <= entry_price` (SHORT) during the session window, it marks the setup as entered and starts the stop/target phase. No OHLC history call needed — the monitor watches the crossing happen live. Caveat: if the server is down during the session window, fills can be missed; this is acceptable for current scale.
+
+#### ARCHITECTURE — TRADE-LIFECYCLE MONITOR (owner framing 2026-06-10)
+
+**This is not a patch. It is a real build.**
+
+The engine must model a trade the way a trader does. A setup has three phases; the monitor tracks all three:
+
+**Phase 1 — Pre-entry: watching for trigger**
+A trade does not exist until the entry trigger actually fires. Price CAN wander in both directions first — the canonical example: price between triggers, breaks UP through breakout (no LONG entered — short side was the approved direction), rejects, then breaks DOWN through breakdown. The short only activates on the breakdown cross, which may happen hours after setup creation or not at all. If the NY session closes and entry was never crossed → `EXPIRED`, `realized_pnl = null`, `closed_at = session_end`.
+
+**Phase 2 — In-trade: watching stop + all three targets**
+Once entry is confirmed (price crossed `entry_price` during the session window), begin tracking `stop_loss`, `t1`, `t2`, `t3`. Record each target reached as it happens. Track the high-water mark — the furthest target price touched.
+
+**Phase 3 — Post-close data capture (the target-optimization foundation)**
+Even when the trade is exited at T1 (safe target), the monitor **keeps watching and logs** whether price subsequently reached T2 and T3. This is not just a label fix — it is the data foundation for future target-optimization: "system called T1, but price reached T3 on 80% of those sessions → conservative exit policy is leaving significant R on the table." Without this persistent observation, that pattern is invisible. Do not skip this phase.
+
+**What "monitoring in the background" means architecturally:**
+- A background asyncio loop (like the existing ledger engine) — NOT page-load-triggered, NOT a recompute on every dashboard refresh
+- Session-window awareness: knows the NY session closes at ~3:00 PM ET; uses that boundary to expire untriggered setups (pull from `session_manager.py` session definitions)
+- Per-`CampaignLog` row state machine: `PENDING_ENTRY` → `ACTIVE` → `CLOSED_WIN/LOSS` or `EXPIRED`
+- New columns needed: `entry_filled_at` (timestamp when entry cross was observed), `max_target_reached` (highest R target touched, even post-exit), `t2_reached` / `t3_reached` (bool, for target-optimization query)
+
+#### Protocol (DO NOT skip steps)
+
+1. ~~Read-only verification pass.~~ **DONE 2026-06-10.** Root cause confirmed above.
+2. ~~Resolve design questions (a)/(b)/(c).~~ **DONE 2026-06-10.** See above.
+3. **Schema additions** — add new `CampaignLog` columns (`entry_filled_at`, `max_target_reached`, `t2_reached`, `t3_reached`, `session_expires_at`) via `ALTER TABLE` in `database.py`. Migrate safely with the existing try/except pattern.
+4. **Build the lifecycle monitor** — replace `ledger_closing_engine.py` with the three-phase state machine. Validate: (a) Jun7 flips to `EXPIRED` / `realized_pnl = null`; (b) Jun2/Jun3 winners record correct R; (c) post-T1 observation logs T2/T3 reaches correctly.
+5. **Validate full dataset** — confirm all existing `CLOSED_WIN`/`CLOSED_LOSS` rows are re-evaluated; update any rows that were phantom-closed under the old engine.
+
+- **Status:** ◐ Architecture decided. Schema additions + lifecycle monitor build is the next session.
+- **Blocks:** W-6 T2 (legibility polish is pointless on wrong numbers), W-3 backtest, publication track record, auditor RAG memory bank reliability, **agent model-optimization A/B testing** (Suggestion Box 2026-06-10 — cannot measure model quality until outcome data is trustworthy).
+- **Does NOT block:** daily session monitoring, A3 live watch, exit_warning observation.
+
+#### Agent → Model inventory (pinned here — Suggestion Box 2026-06-10)
+
+Read-only pass also completed the model-assignment inventory requested by the Suggestion Box pin. All nine LLM agents use `claude-sonnet-4-6` via the single `_MODEL` constant in `agent_core.py:26` — no overrides anywhere.
+
+| Agent | max_tokens | Optimization candidate |
+|---|---|---|
+| `senior_analyst` | 4096 | UP → Opus 4.8 / Fable 5 — the trade decision; highest stakes |
+| `junior_analyst` | 500 | UP secondary — synthesizes interpreters for SA |
+| `mtf_interpreter` | 600 | DOWN → Haiku — mechanical digest, tight budget |
+| `gravity_interpreter` | 600 | DOWN → Haiku — mechanical digest, tight budget |
+| `intel_auditor` | 1024 | DOWN → Haiku — structured audit, no judgment |
+| `publisher_agent` | 6000 | Monitor — narrative, quality-sensitive |
+| `performance_auditor` | 600 | Monitor — weekly, not latency-critical |
+| `elliott_wave_specialist` | 1024 | Monitor — weekly, not latency-critical |
+| `senior_analyst_commlink` | 512 | Monitor — reactive Q&A |
+| `jewel_specialist` | — | **No LLM** (pure Python extraction) |
+
+**Gate:** re-assignment and A/B testing require clean outcome data to measure against. W-9 thus unblocks both the track record AND the model-optimization question simultaneously.
+
+---
+
+### W-10 ☐ AUDIT OUTPUT SURFACING + NAVIGATION — BLOCKING (2026-06-07)
+
+**What:** The weekly scheduler fired successfully on 2026-06-07 23:00 UTC (first scheduled run). Both Performance Auditor ($0.0137) and Elliott Wave Specialist ($0.0183) completed with status SUCCESS. The Elliott Wave output is known (BEAR_WAVE_4_BOUNCE / IN_PROGRESS / 13.7%) because it's visible in the cost log. The Performance Auditor produced ~600 tokens of findings and calibration recommendations. **Neither output is reachable by the owner.** The interpreter-log admin page shows only MTF Interpreter, Gravity Interpreter, and Junior Analyst — it does not surface the auditor or wave specialist outputs. A successful-but-invisible audit is functionally the same as one that never ran.
+
+**Two gaps:**
+
+**(1) Output persistence + display.** Verify where the auditor output was written. The code writes to `SystemAuditLog` — confirm the row exists on Render (the local SQLite doesn't have this table). Then surface it: the dashboard "Internal System Audits" collapsible section (`/api/dashboard/audits`) is supposed to display `SystemAuditLog` — confirm whether it now shows "1 report" or still "0 reports." Same for the Elliott Wave output (`MacroNarrativeLog` where `authored_by='elliott_wave_specialist'`). If the rows exist but the dashboard section is broken or unreachable, that's the fix. If the rows don't exist (write failed silently), that's a different bug.
+
+**(2) Navigation.** The interpreter-log page (`/admin/interpreter-log`), audit page, and wave specialist output are currently bookmark-only — not linked from any menu. Owner cannot reach them during or after a live audit without knowing the direct URL. This was "polish" before tonight; it is **blocking** now that the system produced output the owner needs to read. A feature that ran and cannot be found is not a working feature.
+
+**Scope of fix:**
+- Step 1: Read-only — confirm what `SystemAuditLog` + `MacroNarrativeLog` contain on Render for tonight's run. Check `/api/dashboard/audits` response.
+- Step 2: If data exists but isn't displayed — fix the dashboard audits section render.
+- Step 3: If data is missing — trace the write path in `performance_auditor.py` and `elliott_wave_specialist.py`.
+- Step 4: Navigation — add links to `/admin/interpreter-log`, audit view, and wave specialist output to the admin menu or dashboard so they're reachable in one click.
+
+**Connects to:** W-9 (outcome integrity) — both are "the system must be legible and its data trustworthy before building forward." Also connects to the Suggestion Box "audit tooling as permanent site feature" pin (2026-06-06).
+
+**Status update (2026-06-07):** Gap 1 (output display) PARTIALLY RESOLVED — auditor output IS visible in the production dashboard's "Internal System Audits" collapsible. Elliott Wave reasoning still has no dedicated view; only the gravity-map Wave Context panel surfaces the label. Additional bug found: auditor output TRUNCATED mid-sentence (hit 600-token `max_tokens` ceiling — last word was "This isol—"). Quick fix: raise `max_tokens` in `performance_auditor.py` `_call_agent()` call (600 → 900 is sufficient; prompt targets ~300 words = ~400 tokens, leaving headroom). Navigation gap remains open.
+
+**Remaining scope:**
+- Raise auditor `max_tokens` 600 → 900 (one-line fix, high priority — next audit is 7 days away)
+- Surface Elliott Wave `wave_reasoning` text in a readable view (gravity-map panel or dedicated admin page)
+- Navigation: add menu links to interpreter-log, audit view, wave reasoning
+
+- **Status:** ◐ Partially resolved. Auditor output visible. Three items remain (token limit, wave reasoning view, navigation).
+- **Blocks:** complete weekly audit review; future audits will keep truncating until token limit is raised.
+- **Priority:** Token limit fix is a quick win before next Sunday.
+
+---
+
+### W-11 ☐ AUDITOR DATASET CONTAMINATION + DecisionJournal DATA-MODEL FLAW (reclassified 2026-06-07)
+
+**Original finding:** "92% UNKNOWN kinematic_grade — pipeline bug." **RESOLVED via verify-first (2026-06-07): NOT a pipeline bug. Kinematic pipeline works correctly on real sessions.** This is the 4th time verify-first caught a false lead before a wasted fix (BBWP data-path, allocation rule, PMARP fix-as-trap, now this).
+
+#### What verification found
+
+Two separate writers feed `DecisionJournal` with no clean distinguisher:
+
+| Writer | Trigger | `decision_type` | `kinematic_grade` |
+|--------|---------|-----------------|-------------------|
+| `kabroda_mas_flow._inject_brief_to_database()` | Once per session after MAS completes | `MAS_APPROVED` / `MAS_REJECTED` | **Always set** — from `fuel_gauge["15M_JEWEL"]["kinematic_grade"]` |
+| `market_radar.scan_sector()` | Every `POST /api/radar/scan` — fires on each Market Radar page open/refresh | `STAND_DOWN` / `GRADE_A` / `GRADE_B` | **Never set** — absent from the constructor call by design |
+
+The auditor queries ALL rows unfiltered. ~86 radar page-view events + ~7 real MAS sessions = 93 "calls." The 86 radar rows have `kinematic_grade = NULL`, which `d.kinematic_grade or "UNKNOWN"` converts to `"UNKNOWN"` at `performance_auditor.py:165`. The 7 MAS rows have real grades. Pipeline is fine; the denominator is wrong.
+
+#### The real bug: auditor analyzes a contaminated dataset
+
+**Every number the auditor produced tonight is mostly measuring radar page-views, not trade decisions:**
+- "93 resolved directional calls" → ~86 radar scans + ~7 real sessions
+- "92% UNKNOWN kinematic_grade" → 86 grade-less radar rows / 93 total
+- "38 STAND_DOWN fires, 70.3% accurate" → radar's per-scan STAND_DOWN grades, not the MAS gate
+- "17.4% accuracy on UNKNOWN" → accuracy of radar scan events, not meaningful as calibration
+
+The accuracy stats are not yet valid. The auditor cannot calibrate Kabroda's decision quality until it looks at the right rows.
+
+#### The root design flaw: DecisionJournal has no source field
+
+`market_radar` and `kabroda_mas_flow` both write to the same table with no column distinguishing monitoring-page events from real trade decisions. The only difference is `decision_type` values (`MAS_APPROVED`/`MAS_REJECTED` vs. `STAND_DOWN`/`GRADE_A`/`GRADE_B`) — but the radar also writes `STAND_DOWN`, so filtering on `decision_type` is not sufficient to separate them cleanly.
+
+#### Fix scope
+
+**Part 1 — Auditor query (low blast radius, high impact):** Filter `DecisionJournal` to MAS-flow rows only. Cleanest option: add a `source` column (`"mas_flow"` vs. `"market_radar"`) to `DecisionJournal`, set it in both writers, filter the auditor query on `source = "mas_flow"`. Alternative (no schema change): filter `decision_type.in_(["MAS_APPROVED", "MAS_REJECTED"])` — this misses MAS stand-downs but is a safe starting point. The radar stand-downs are a separate metric and should be analyzed separately if at all.
+
+**Part 2 — Stand-down analysis:** Once the auditor only sees MAS rows, the stand-down analysis should count rows where the system would have issued a stand-down verdict (e.g. `MAS_REJECTED` rows, or rows from the pre-MAS gate path). Currently the stand-down signal comes from the radar's `STAND_DOWN` labels, which is a different system entirely.
+
+**Sequencing:** Part 1 can be built standalone (one query filter change + optionally a schema column). Do not build Part 2 until the auditor's base query is clean and a week of real data has accumulated.
+
+- **Status:** ☐ Not started. Original "pipeline bug" conclusion fully retracted. Real work item is the auditor query filter + DecisionJournal source field.
+- **Priority:** High — next Sunday's audit will produce the same contaminated numbers if not fixed first.
+- **Blocks:** all auditor accuracy analysis, stand-down calibration, kinematic-grade calibration. Auditor output is directionally useless until query is fixed.
+- **Does NOT block:** daily sessions, A3 live watch, W-9 outcome integrity work.
+
+---
 
 ### W-1 ◐ Separate "organize/deal" from "decide" — interpreter layer build
 - **What:** The Senior Analyst currently organizes data AND decides AND writes,
@@ -584,37 +775,101 @@ working signal to a blind decision layer cannot break a working signal. Low blas
 
 ---
 
-- **Status:** ◐ A1 done + **CONFIRMED LIVE 2026-06-06** (c4222dd). A2 done (b5b928d), not yet exercised. **A3 COMMITTED ff60c5a (2026-06-06) — deployed, watching live.** Tier B re-scoped: B1 PARKED (see finding #2).
-- **Next action:** Watch first live session post-A3 deploy. STRONG+with-trend → expect T1/T2/T3. WEAK/DEPLETED or chop → expect T1 only. B1 is monitoring-only; no build until market ranges and PMARP history is balanced. W-6 dashboard audit is the next discrete build session.
+- **Status:** ◐ A1 done + **CONFIRMED LIVE 2026-06-06** (c4222dd). A2 done (b5b928d), not yet exercised. **A3 COMMITTED ff60c5a (2026-06-06) — CONFIRMED LIVE 2026-06-07.** Jun7 session: APPROVED SHORT, positive momentum + bearish trend, T1-only for structural reason ($60,025.76 wall), all 5 agents SUCCESS. Tier B re-scoped: B1 PARKED (see finding #2).
+- **Next action:** W-6 T1+T2 fix pass (A3 confirmed, proceed). B1 monitoring-only; no build until market ranges and PMARP history is balanced.
 - **Sequencing:** A3 deployed. B1 parked (data unfit, design question open). W-6 (dashboard audit) next build session when ready. Gravity expansion after front-of-river fully connected.
 - **Blocks:** W-3 backtest validity (pointless to replay a starved SA). Gravity expansion (downstream).
 - **Audit note:** Verify-first protocol confirmed its value three times: (1) finding #5 BBWP was a false assumption; (2) A3 scope found the allocation rule impact that the audit missed; (3) B1 re-scope found that the audit's proposed fix would have re-broken A3. Audit findings are leads, not confirmed fixes. Always verify against actual code and live data before building.
 
 ---
 
-### W-6 ☐ DASHBOARD ACCURACY AUDIT
-- **What:** Read-only audit of the performance dashboard — trace every displayed
-  number to its source query, verify correctness, then fix. The dashboard must be
-  an auditably correct scorecard before it can be trusted as the system's primary
-  feedback loop.
-- **Why (observed 2026-06-03):** Five specific issues found:
-  1. **Contradiction:** stat box shows "Net R lifetime +1R" but the cumulative chart
-     ends at approximately −6R. One is mislabeled. Both cannot be correct.
-  2. **Missing time windows:** "22 total sessions / 31.8% approved / 57.1% win rate"
-     with no stated date range. Every metric needs its period labeled.
-  3. **Bug:** "Loading trade history…" table never populates.
-  4. **"Error/Other" slice:** largest category in the MAS approval distribution. Need
-     to know what records count as Error/Other and whether they are real errors or
-     non-approved sessions miscategorized. This could be masking the real approval rate.
-  5. **No tooltips/labels:** no hover text explaining what each metric measures or
-     which table/column it reads from.
-- **This is the analytics equivalent of the cockpit contradiction** — a scorecard that
-  contradicts itself cannot be used to evaluate the system or validate the SUCCESS METRIC
-  framing (see above). It must be correct before the weather-reading audit (W-3) is meaningful.
-- **Protocol:** read-only audit FIRST (trace each number to its query and flag every
-  discrepancy). Fix pass SECOND. Do NOT bundle into another build — this is a focused,
-  standalone session.
-- **Status:** not started — own focused session when ready.
+### W-6 ◐ DASHBOARD AUDIT — READ-ONLY COMPLETE (2026-06-06); fix pass next
+
+#### Headline finding
+
+**~~Data is TRUSTWORTHY~~ — REVISED 2026-06-07 (see W-9).** Original finding: display bugs only, underlying data correct. Revised: T1 display fixes deployed and the now-visible trade table exposed data integrity bugs in the outcome-tracking layer (phantom losses on untriggered trades; binary ±1R instead of true R). "Trustworthy data" must be treated as unverified until W-9 read-only pass confirms scope. **W-6 T2 legibility polish is BLOCKED on W-9.**
+
+The alarming numbers (−6R chart, "Error/Other" largest slice, "80% incorrect" accuracy bar, trade table stuck) are NOT evidence of a broken system. Three of four "problems" are display artifacts or data gaps. Owner was confused and alarmed even knowing the system — if it confuses the builder, it misrepresents the system to anyone. LEGIBILITY is the real problem, not just the 2 bugs.
+
+---
+
+#### Panel inventory & data-source map
+
+| # | Panel | Source | Endpoint |
+|---|-------|--------|----------|
+| 1–6 | KPI cards (Total Sessions, Approved Rate, Win Rate, Net R, 7-Day Spend, Cache Hit Rate) | CampaignLog (1–4) + AgentRunLog (5–6) | `/api/dashboard/overview` |
+| 7 | Cumulative Performance line chart | CampaignLog WHERE `closed_at IS NOT NULL`, sorted chronologically, cumulative +1/−1 | `/api/dashboard/mas-history` |
+| 8 | MAS Approval Distribution donut | CampaignLog grouped by `mas_approval_status`; "Error/Other" = MAS_ERROR + PENDING | `/api/dashboard/mas-history` |
+| 9–10 | Directional Accuracy by Kinematic Grade + by Confluence Score bars | DecisionJournal WHERE `outcome_direction_correct IS NOT NULL AND kinematic_grade / confluence_score IS NOT NULL` | `/api/dashboard/accuracy` |
+| 11 | Agent Cost 7-Day Stack *(admin-gated)* | AgentRunLog last 7d by agent name | `/api/dashboard/costs` |
+| 12 | JEWEL Gate vs Trade Outcome donut | JewelSnapshotLog (NY_OPEN) joined to CampaignLog by `date_key` | `/api/dashboard/jewel` |
+| 13 | Internal System Audits *(collapsible)* | SystemAuditLog last 5 | `/api/dashboard/audits` |
+| 14 | Newsletter Archive | NewsletterLog last 30 | `/api/dashboard/newsletters` |
+| 15 | Trade History (Last 50) | CampaignLog last 50, all statuses | `/api/dashboard/mas-history` |
+
+---
+
+#### Verified bug classifications
+
+**Bug 1 — "Loading trade history…" never populates — DISPLAY BUG (1-line fix)**
+The API returns `realized_pnl` as a pre-formatted string (`"+1.0R"` for CLOSED_WIN, `"-1.0R"` for CLOSED_LOSS). The JS renderer calls `pnl.toFixed(2)` on it — strings have no `.toFixed()` → TypeError crashes the entire `d.trades.map()` call → `tbody.innerHTML` never writes → table stuck at the initial placeholder. Data is written, queried, and returned correctly — the crash is purely in the renderer. Fix: return `realized_pnl` as a float from the API and let JS format it, OR just use `t.realized_pnl` directly as the display string (it's already formatted).
+
+**Bug 2 — "+1R KPI vs −6R chart" — DATA BUG in the CHART only (1-clause fix)**
+KPI formula: `COUNT(CLOSED_WIN) − COUNT(CLOSED_LOSS)`. **KPI is correct; real track record ≈ the KPI.** Chart formula: for all rows with `closed_at IS NOT NULL`, applies `+1.0 if status='CLOSED_WIN' else -1.0`. The `else -1.0` fires on CLOSED_LOSS rows (correct) AND any row where `closed_at` was set but `status` wasn't updated atomically (error state, partial close) — each counting as −1 in the chart but 0 in the KPI. Enough of those rows produces the −6R artifact. Fix: add `if row.status in ('CLOSED_WIN', 'CLOSED_LOSS')` guard; skip rows with unexpected statuses.
+
+Both bugs are in the same file (`main.py`) — one small commit.
+
+**Not-bugs (verified):**
+- **Accuracy bars (Grade + Confluence) — DATA GAP, self-populates.** `DecisionJournal.outcome_direction_correct` filled by outcome tracker 4H after each session. `confluence_score` confirmed written (`kabroda_mas_flow.py:1445`). Charts will populate as sessions accumulate. No fix needed.
+- **JEWEL Gate donut — DATA GAP locally.** Requires NY_OPEN JewelSnapshotLog joined to same-date closed CampaignLog. Zero closed rows locally. Should work on production with enough aligned data.
+- **SystemAuditLog / NewsletterLog missing locally — LOCAL SCHEMA ONLY.** Both exist on production Render. Local SQLite not re-migrated. Not a code bug.
+- **"Error/Other = 11 vs Approved = 8" — REAL DATA, mostly historical pre-fix CCO parse failures.** Not a categorization bug. But: lumps PENDING (never-completed runs) with MAS_ERROR (explicit parse failures) — two different problems, indistinguishable on the dashboard. And the all-time view with no time axis means the historical scar looks identical to current reliability.
+
+---
+
+#### Legibility failures (beyond the 2 bugs)
+
+Owner — who built and best understands the system — was confused and alarmed by the dashboard. An illegible/alarming dashboard is **worse than none** for validation purposes.
+
+1. **Accuracy bars draw alarming shapes from tiny samples.** 5-session data with 2 misses produces "80% incorrect" for one confluence bucket. This is statistically empty — not a verdict. Needs sample-size guards and "insufficient data" labels so a 2-miss bar doesn't read as a calibrated signal.
+
+2. **"Error/Other = 11" is real data (pre-fix CCO failures) but looks like current unreliability.** All-time view, no time axis. Can't distinguish current reliability from historical scar. Needs: PENDING-vs-ERROR split + time axis = "MAS reliability % trending."
+
+3. **No hover tooltips explaining each metric** (owner's idea). "What is Net R Lifetime?" "What counts as a session?" Every metric needs a one-sentence tooltip. Owner can read the code; general readers cannot.
+
+---
+
+#### Design observations (owner decision required)
+
+**Denominator problem — headline stats are flattering:**
+"Total Sessions / Approved Rate / Win Rate" have three different denominators. A reader naturally multiplies them ("22 sessions × 36% approved × 57% win rate") but gets a wrong answer — Win Rate is computed only over `CLOSED_WIN + CLOSED_LOSS`, a much smaller pool. Add `(of N completed)` qualifier to the Win Rate card at minimum.
+
+**No single source of truth for PnL — matters for W-3 and publication:**
+`realized_pnl` Float column is written to the DB but never read by any dashboard query. KPI computes `wins − losses` (count). Chart cumulates `+1/−1` (count). Trade table returns `"+1.0R"` (Python-formatted string). Three representations, none derivable from the others. When a reader asks "what is the system's actual PnL?", there is no single authoritative answer in the DB. This must be resolved before W-3 backtest and before any publication track record is published.
+
+---
+
+#### Missing capabilities (new features — scope as T3)
+
+1. **Stand-down accuracy panel** — "when system stood down, did price move against the vetoed bias?" — THE core health metric for a discipline-based system. Matches the SUCCESS METRIC framing above. Currently entirely absent from the dashboard. Owner has asked this verbally all week.
+2. **MAS reliability % over time** — how often does the 6-agent chain complete without CCO parse failure? Currently proxied by the illegible "Error/Other" donut. Needs a dedicated trending metric.
+3. **Date filters** — all metrics are lifetime, no time-window selector. Can't answer "how has performance trended since A3 deployed?"
+4. **Session drill-down** — clicking a trade history row should open the full SA brief, trigger levels, CRO verdict, and conditions that fired. Currently no drill-down.
+5. **Interpreter-log visibility panel** — JA + MTF + gravity interpreters are running but there's no panel showing firing frequency, cost trend, or output quality. Will matter more as that layer matures.
+
+---
+
+#### Build tiers
+
+| Tier | What | Effort |
+|------|------|--------|
+| T1 | Bug 1 (JS `.toFixed` crash) + Bug 2 (chart clause) — one commit | ~30 min |
+| T2 | Honest-numbers polish: denominator qualifiers, sample-size guards on accuracy bars, PENDING-vs-ERROR split, time axis on reliability, tooltips | Small, same template |
+| T3 | Missing capabilities: stand-down accuracy panel, MAS reliability trending, date filters, session drill-down, interpreter visibility | Own scoped project |
+
+**T1 before judging A3 live** — the trade history table being broken means we can't read historical outcomes. T2 in the same session while the template is open. T3 is its own project.
+
+- **Status:** ◐ Read-only audit COMPLETE (2026-06-06). T1 + T2 fix pass next.
 
 ---
 
@@ -664,8 +919,17 @@ done, we review this list and decide what graduates to OPEN WORK ITEMS.*
 | 2026-06-06 | **AUDIT IS A LOOP, NOT A SNAPSHOT (owner, 2026-06-06).** Lesson confirmed across W-8: a one-time audit gives leads; verifying each finding while building surfaces the next layer (the allocation rule was invisible until A3 scoping; BBWP absence was a false assumption). This is healthy, not a failure — the audit list is a STARTING POINT, not a complete inventory. Keep the verify-first protocol on every remaining finding. Don't trust the audit list as exhaustive before building. | owner, end of A3 scope session 2026-06-06 | Standing protocol — not a build item |
 | 2026-06-06 | **STAND-DOWN BRIEF — INTERNAL vs PUBLIC are different products (owner, 2026-06-06).** Internal brief on a no-trade day CAN be terse — the trader needs "no action, here's why" and no narrative is required. But the PUBLIC publication on a stand-down day must NOT be cut down: it should explain what is happening in the market (e.g. price at a major support floor, stop-hunt/chop dynamics, why both sides are positioning), AND must ALWAYS include a forward-looking / higher-timeframe section ("what to watch next"). A no-trade day is when a reader most wants the "what's going on?" read. Publisher-agent needs a STAND-DOWN TEMPLATE distinct from the internal one — different prompt path, different output structure. This is the differentiator between a real publication and a signal feed. Publisher prompt tuning, publication phase — NOT now. | owner, Jun6 STAND_DOWN session 2026-06-06 | TBD — publication phase |
 | 2026-06-06 | **B1 PMARP — MONITORING + DESIGN ITEM, NOT a build now (owner, 2026-06-06).** Bug confirmed: `pmarp_overextended = rank > 75` is blind to downside extremes (Jun2 rank=0.00, pmarp_overextended=False). BUT: naive `rank < 25` fix fires on ALL 8 sessions in current dataset — the 252-bar 4H history is entirely inside the downtrend, so every session reads rank < 25. This fix would re-create an always-on T1 cap (exactly what A3 removed from MACD). Even rank < 5 fires on Jun2/Jun3 (A3-unblocked sessions). Full fix is A3-class: (1) threshold decision, (2) STRONG+with-trend override (same override deferred for exit_warning), (3) MTF interpreter prompt to distinguish downside extreme on SHORT vs LONG. Data is currently unfit for threshold calibration (one-sided history). Build gate: market ranges/rallies → balanced PMARP history AND exit_warning override is scoped (B1 shares that layer). Verify-first protocol prevented a fix that would have re-broken A3. | owner, B1 verification session 2026-06-06 | DO NOT build — monitoring only; build gate: balanced market + exit_warning override scoped |
-| 2026-06-06 | **HIGHER-TIMEFRAME STRUCTURAL ANTICIPATION — major capability project, GATED (owner, 2026-06-06).** The system reads intraday structure well but does NOT anticipate the bigger board. It reacts to major structural levels (e.g. the $60K MAXIMUM wall) as price ARRIVES, not days ahead. Owner's vision: the system should call out major higher-timeframe support/resistance levels 3–4 days BEFORE price reaches them, so price stalling/chopping/bouncing at those levels is EXPECTED rather than surprising — and so a trade that fires AT a pre-flagged level (e.g. a short rejecting a zone already called) is recognized as higher-probability because the interaction was anticipated, not just reactively matched. Reference model: Mafioso 8H signal calls forward pullback targets (T1/T2/T3 on the way UP) and likely rejection zones ahead of time. Kabroda's gravity map already knows WHERE the walls are but does not narrate the JOURNEY toward them or anticipate interaction. Two open design questions before scoping: (1) Should the gravity map be enriched with liquidity/order-book data to strengthen the structural read, or kept as the higher-timeframe structural map it is and connected to a new anticipation layer above it? (2) How does anticipated-level-interaction feed the trade decision — does a setup firing AT a pre-flagged level earn a higher allocation tier, a stronger SA conviction label, or a different target structure? Likely connects to the parked B1 (PMARP extreme = "we're AT the wall now") and the SA higher-timeframe narrative gap. **BUILD GATE:** front-of-river solid (done) AND A3 confirmed live across varied sessions. Own scoped project when gates clear. | owner, 2026-06-06 | GATED — expansion tier; own scoped project after A3 confirmed live |
+| 2026-06-06 | **HIGHER-TIMEFRAME STRUCTURAL ANTICIPATION — major capability project, GATED (owner, 2026-06-06).** The system reads intraday structure well but does NOT anticipate the bigger board. It reacts to major structural levels (e.g. the $60K MAXIMUM wall) as price ARRIVES, not days ahead. Owner's vision: the system should call out major higher-timeframe support/resistance levels 3–4 days BEFORE price reaches them, so price stalling/chopping/bouncing at those levels is EXPECTED rather than surprising — and so a trade that fires AT a pre-flagged level (e.g. a short rejecting a zone already called) is recognized as higher-probability because the interaction was anticipated, not just reactively matched. Reference model: Mafioso 8H signal calls forward pullback targets (T1/T2/T3 on the way UP) and likely rejection zones ahead of time. Kabroda's gravity map already knows WHERE the walls are but does not narrate the JOURNEY toward them or anticipate interaction. Two open design questions before scoping: (1) Should the gravity map be enriched with liquidity/order-book data to strengthen the structural read, or kept as the higher-timeframe structural map it is and connected to a new anticipation layer above it? (2) How does anticipated-level-interaction feed the trade decision — does a setup firing AT a pre-flagged level earn a higher allocation tier, a stronger SA conviction label, or a different target structure? Likely connects to the parked B1 (PMARP extreme = "we're AT the wall now") and the SA higher-timeframe narrative gap. **BUILD GATE:** front-of-river solid (done) AND A3 confirmed live across varied sessions. Own scoped project when gates clear. **CONCRETE REFERENCE EXAMPLE — Mafioso 4H call at the $60K floor (2026-06-06):** At the identical juncture where Kabroda stood down (15M tangled, choked target at $60,025.76 MAXIMUM wall), Mafioso issued a LONG bounce call with forward targets 63,850 / 66,504 / 66,701 and a stop on 4H-close-below 59,617. Both systems recognized the $60K floor as the pivotal decision point; they resolved it differently — Kabroda: stand down, bearish bias intact; Mafioso: long bounce. What Mafioso did that Kabroda cannot: mapped the full BOUNCE PATH forward — specific levels where price would likely stall, reject, and potentially set up a high-probability re-entry short. This is the anticipation-narration gap in concrete form. "Kabroda knows where the walls are but doesn't say: if we bounce, here's where we'd stall and reject, and that rejection is a high-prob short setup." CAVEATS (owner's framework — do not blur): (1) Mafioso's long is COUNTER-TREND within the bearish structure owner has mapped — a bounce-then-reject read, not a trend turn; owner's structural view (short the pullback) is intact. (2) Mafioso's "4H close below" stop methodology is the wide candle-close approach owner has already flagged as dangerous — price can spike far through the level intrabar before the close is confirmed; note the methodology difference, do not adopt it. (3) Mafioso is a reference/mirror only — NOT a direction source, NOT a tiebreaker against Kabroda's own logic. Use his forward-target structure as the design template for what HTF anticipation output should look like, not as a signal to follow. **SECOND CONCRETE EXAMPLE — weekly-close timing blindness (2026-06-07):** Owner's read on Sunday Jun 8: price is coiling into the weekly candle close (~00:00 UTC tonight) at a major decision level ($60,055 Wave-5 trigger). Expect chop and intraday drawdown today; real directional resolution waits on the weekly close. If the level holds → likely bounce/pullback up next week; if it fails → breakdown continuation later. Kabroda has ZERO awareness of this context. It evaluated today's intraday setup in isolation and approved a SHORT — blind to "this is a wait-for-the-close day where the intraday snapshot is noise relative to the bigger event resolving tonight." The approved short is technically valid by intraday logic but poor R:R in context — the system traded the detail while missing the frame. **What the HTF-anticipation layer needs to do here:** reason about UPCOMING higher-timeframe events (weekly/daily closes at key levels) and contextualize the session accordingly. Example output: "Price approaching weekly close at $60,055 Wave-5 decision level — expect indecision and potential intrabar whipsaw today; consider standing aside until the close resolves." This is a TIME-awareness gap, not just a level-awareness gap. The gravity map knows WHERE the walls are; it does not know WHEN a higher-timeframe close is imminent or that "close at a key level = low-quality intraday action." **Connects to the R:R gate pin** — both represent the system missing bigger-context that says "don't trade today regardless of what the intraday snapshot shows." The HTF-anticipation layer and an R:R gate are two expressions of the same missing capability: session-level context that overrides or qualifies intraday trigger logic. | owner, 2026-06-06 / 2026-06-07 | GATED — expansion tier; own scoped project after A3 confirmed live |
+| 2026-06-06 | **ACCOUNT SIMULATOR / R-TO-DOLLARS TRANSLATION (owner, 2026-06-06).** The system measures in R — correct, account-agnostic. But R is the "GB" most people don't intuit; the validating view is "start $X, risk $Y/trade, 30 days → where's the account." Pure arithmetic on the existing closed-trade R record (1R = chosen risk amount), replayed forward into an equity curve. **TWO distinct uses, only one gated:** (1) INTERNAL (behind the password wall, for the owner's own comprehension — "5R = $500 at $100/trade") — NOT gated, build freely, it's a private validation tool. The password wall is the line: inside = free. (2) EXTERNAL (any public/marketing/newsletter/paid-facing page showing $ performance to attract subscribers) — GATED behind the securities/financial-services attorney review (performance representation + hypothetical-results disclaimers). The whole Kabroda system is currently fully password-protected, zero forward-facing — so everything built now is internal by definition. When any page leaves the wall, the external gate applies. | owner, 2026-06-06 | Internal: build anytime. External: attorney review first |
 | 2026-06-06 | **EXIT_WARNING — LIVE MONITORING ITEM (NOT a fix now) (owner, 2026-06-06).** The `exit_warning` condition in the ALLOCATION RULE is a blunt T1-cap — it fired on Jun3 (15M grade=TANGLED at session open) and held a move that ran to T2/T3. Owner reviewed the live chart and confirmed T1 was still the correct call (15M tangled at a structural floor / light weekly-level — high-conflict zone, conservative exit right). But the pattern is the same class as the MACD veto A3 just removed: a single condition capping allocation without regard to trend strength or fuel quality. **Question for live monitoring over coming weeks:** is exit_warning ever capping clean strong-trend moves it shouldn't? Do NOT fix reactively to one day — observe across many sessions. Only scope a fix (e.g. a STRONG-with-trend override: exit_warning vetoed when 4H MACD=STRONG AND trade direction matches 4H trend) IF a real pattern emerges in data. This is the audit loop working: A3 removed the MACD veto, revealing exit_warning as the next layer — expected and healthy, not a regression. | owner, A3 validation session 2026-06-06 | TBD — observe live; scope fix only if pattern confirmed |
+| 2026-06-07 | **R:R / TRADE-QUALITY GATE (owner insight, 2026-06-07).** The system approves on DIRECTION + STRUCTURE but does NOT evaluate whether the resulting trade is a good risk:reward proposition. A "structurally valid trade" and a "good trade" are different things; Kabroda currently only checks the former. **Concrete example (2026-06-07):** approved SHORT — entry $60,508, stop $62,120 (~$1,612 risk), T1 $60,025 (~$483 reward) = **~0.3:1 R:R**. Directionally valid by every intraday gate, but a trade no disciplined trader takes: risking 3+ to make 1, because T1 sits against the $60K MAXIMUM wall only $480 away while the stop is $1,600 away. The wall proximity that caused the T1-only cap (choked target) also makes the R:R structurally unfavorable — both are symptoms of the same geometry, the system just doesn't say so. **Future layer:** after computing triggers, targets, and stop, assess R:R and flag/downgrade setups where reward is poor relative to risk. Example output: "Valid SHORT structure but T1 is only 0.3R from a 1R stop — wall too close, R:R unfavorable, consider standing aside." Threshold to determine (e.g. minimum 0.8:1 or 1:1 before APPROVED; below that → STAND_DOWN or CAUTION flag). **NOT TODAY** — do not bolt onto a working system mid-validation. **Connects to:** (1) VET-A-TRADE / timing pin — both are cases where the direction is right but the geometry makes the entry suboptimal; (2) HTF-anticipation pin — weekly-close timing blindness is the same failure class (bigger context says "don't trade today"); (3) allocation logic — R:R gate likely lives near or inside the allocation rule layer, alongside the MACD-strength and exit_warning caps. **Gates:** same as HTF-anticipation and VET-A-TRADE — front-of-river solid (done), A3 confirmed across varied sessions, design the three connected features together before building any of them. | owner, 2026-06-07 | GATED — do not build in isolation; design with VET-A-TRADE + HTF-anticipation as a connected evaluation layer |
+| 2026-06-07 | **VET-A-TRADE — ENTRY TIMING + DRAWDOWN AVOIDANCE TOOL (owner insight, 2026-06-07).** Core value is NOT "is this a good trade direction?" — it's "given an external signal's direction and targets, WHERE and WHEN is the lower-drawdown entry, and where's the real invalidation." **Concrete reference (2026-06-07):** Mafioso 4H LONG — entry $61,671, stop "4H close below 59,617" — concedes ~$2,054 of downside room before invalidation. Taking the entry at $61,671 means sitting in drawdown while price potentially tests $60K first. Kabroda's same-day read: the bounce is a decelerating counter-trend pullback likely to revisit the $60,025.76 MAXIMUM wall before any sustained move. **Synthesis the tool should produce:** "The long direction may be valid but Kabroda's near-term path says price likely tests $60K first — don't enter at $61,671 now. Wait for the pullback to the wall, confirm it holds, THEN enter with far less drawdown and a tighter stop." This solves **right-direction-wrong-timing**, the most painful trader failure mode: you have the thesis right, you lose money on the entry. **The two-system model:** external signal = direction + destination; Kabroda = immediate structural path + optimal timing. They are complementary, not competing. The external signal does NOT override Kabroda's direction read — Kabroda uses it only to identify destination targets and map the lower-drawdown entry point along the path it already sees. **Output structure the feature needs to produce:** (1) direction alignment check (does external signal direction match or oppose Kabroda's bias?); (2) near-term path read (what does Kabroda expect price to do in the next session before reaching the external signal's destination?); (3) recommended entry timing ("wait for X level, confirm Y condition, then enter"); (4) drawdown comparison (entering now vs. waiting = estimated max drawdown difference); (5) real invalidation level (Kabroda's trigger/structural level, not the external signal's wide candle-close stop). **CAVEATS:** (a) Mafioso's "4H close below" stop methodology is the wide candle-close approach owner has flagged as dangerous — always substitute Kabroda's structural level as the real invalidation; (b) external signal is reference only — direction and target levels are inputs, not overrides. **GATES (same as HTF Anticipation):** front-of-river solid (done) AND A3 confirmed across varied sessions; Version-A structural-read framing only (internal tool); any external/paid-facing use = attorney gate first. | owner, 2026-06-07 | GATED — build after A3 confirmed live across varied sessions; see HTF Anticipation pin for shared design questions |
+| 2026-06-07 | **MULTI-TIMEFRAME SSE ENGINES — MAJOR architectural project, GATED (owner, 2026-06-07).** The current SSE/battlebox engine analyzes ~24h of data to produce levels + bias for the 15M intraday trade. Idea: replicate the engine for 1H, 4H, daily, and weekly — each with its own VRVP / value-area / trigger levels / bias — so Kabroda becomes a multi-timeframe system ("I want to trade the 4H setup — what do I do?") rather than 15M-only. Matches what external reference systems (Mafioso) do with 1H/4H/8H signals. **Why this is high-leverage:** it reuses the existing core engine; point it at different candle sets rather than inventing new math. **Why this is likely the MECHANISM for HTF-anticipation:** a native 4H/weekly SSE engine would give Kabroda the higher-timeframe structural awareness it currently lacks natively — the "see the bigger board" capability the HTF-anticipation pin describes is probably not a separate feature but the natural output of a 4H/weekly engine running alongside the 15M one. Scope this jointly with the HTF-anticipation pin; they may resolve into one "multi-timeframe architecture" design project, not two. **SCOPE CAUTIONS — do not underestimate:** (1) NOT a copy-paste — each timeframe needs its own lookback calibration, threshold tuning, and live validation (a weekly wall ≠ a 15M wall in geometry, noise characteristics, or how close price can trade to it without triggering); (2) the HANDSHAKE between engines — does weekly bias override 15M? how do they reconcile on disagreement? what does a "STAND_DOWN on 4H but APPROVED on 15M" mean operationally? — this is its own real design problem and is where most of the complexity lives; (3) this is a PROJECT, likely the largest on the board, not a feature weave-in. **HARD GATES before even scoping:** (a) the 15M core must be proven SOLID across MANY live sessions — A3 is only 2 sessions old; B1/PMARP direction-blindness is still parked; replicating an unproven engine 4× is "build on sand" at maximum scale, copying any undiscovered bug into 4 more engines simultaneously; (b) dashboard must be legible so each engine's output is verifiable as sessions accumulate; (c) scope jointly with HTF-anticipation — do not design either in isolation. **The sequence:** 15M proven → dashboard legible → HTF-anticipation + multi-TF scoped together → then build. This is the highest-value future expansion on the board, and exactly why it must wait for a provably solid foundation. | owner, 2026-06-07 | HARD GATED — biggest project on the board; scope jointly with HTF-anticipation after 15M core proven across many sessions |
+| 2026-06-07 | **PERFORMANCE AUDITOR — FROM REPORT TO COACH (owner vision, 2026-06-07).** Tonight's first scheduled run is a thin, caveat-heavy SNAPSHOT — 5–7 sessions, sparse outcomes. It confirms the scheduler fires and produces honest output. That is all tonight is. The VISION is a separate, future capability: **(1) MEMORY** — the auditor accumulates and reasons over its OWN past audit notes, so it can say "I've watched three weeks, here's a recurring issue" that a daily eye forgets. A one-shot audit cannot see a pattern; a coach that reads its own history can. Requires audit-history storage (the `SystemAuditLog` rows are the raw material — they exist now per Principle 5) plus a cross-audit pattern-detection pass in the prompt ("given the last N audit notes, what is the persistent theme?"). **The capture already starts tonight — the pattern-finding becomes possible weeks from now.** **(2) DECISION-LEVEL REVIEW** — not just "win rate was X%" but "it called T1 on this configuration, MACD read STRONG, RSI was 61 — did that characterization hold up over the following 4H?" Requires joining `DecisionJournal` signal snapshots to realized outcomes and reviewing the specific reasoning, not just the count. **(3) RESEARCH-TRIGGERING** — auditor flags a recurring gap (e.g. "CoinGecko 429 has fired 3 consecutive weeks") and initiates a prior-art pass: how do comparable systems handle rate-limited sentiment feeds? Returns "here is our current approach, here is theirs, here is a proposed tweak." Connects to the prior-art research passes already noted in the suggestion box. **Sequencing:** tonight = does it fire + produce sane output. Week 3–4 = is the output honest with thin data. Month 2+ = cross-audit memory becomes meaningful. Decision-level review and research-triggering are Phase 3+ builds, gated behind sufficient `DecisionJournal` + `SystemAuditLog` history. Do not scope them until the plain weekly audit has accumulated 4+ runs. | owner, 2026-06-07 | GATED — tonight = fire check only; memory + decision-review + research-triggering are month-2+ builds after audit history accumulates |
+| 2026-06-10 | **MD-REFACTOR BUILD RULES — VERBATIM EXTRACTION IS NON-NEGOTIABLE (owner, 2026-06-10).** The MD refactor moves WHERE each prompt lives (Python → Markdown), never WHAT it says. **RULE 1 — VERBATIM ONLY:** per-agent procedure: (1) copy the EXACT current Python prompt string into the MD body — zero rewording, zero reorganization, zero "improvements"; section-header nav labels may be added ONLY as navigation aids that sit above the existing rule blocks without moving or altering any rule text; (2) DIFF the MD body against the original Python string (accounting for `\` line-continuation stripping) — prove character-identical content before proceeding; (3) wire the agent to load from MD; (4) run a live session and confirm output is unchanged; (5) ONLY THEN delete the Python constant. One agent at a time. Any reorganization of rule text (e.g. the CC-proposed SA template that moved banned-words into a separate section) is a SEPARATE, later, validated change — NOT part of this refactor. The refactor must not introduce the drift it exists to cure. **RULE 2 — SAFEST AGENT FIRST:** do NOT start with the senior_analyst (most critical, most complex, most stakes). Start with a simple lower-stakes agent (`mtf_interpreter` or `performance_auditor`) to prove the loader mechanism and the verbatim-diff-validate process end-to-end. Migrate the SA only AFTER the process is proven on something low-risk. **NOTE ON CC'S SA TEMPLATE (2026-06-10):** the worked example in the prior design session was a REORGANIZATION, not a verbatim copy — it promoted banned words/time projections out of WRITING RULES into a standalone section and added Role/Inputs sections that don't exist in the original. That reorganization is a future validated change, not part of the initial migration pass. The initial migration pass is purely verbatim. | owner, 2026-06-10 | STANDING BUILD RULE — applies to every agent migration in the MD-refactor; enforce per-agent, no exceptions. **CRITICAL LESSON FROM FIRST MIGRATION (2026-06-10):** manual transcription introduced 36 chars of drift that the diff caught — the `\` line-continuation artifacts (extra spaces at join points) were the culprit. **MANDATORY METHOD:** generate the MD body directly from the Python constant: `python -c "from X import PROMPT; write frontmatter + PROMPT"`. Never transcribe by hand. The verify script (`verify_prompt_mtf.py`) catches both exact mismatches and whitespace-normalization differences — formatting-artifact whitespace differences (multi-space joins) are the only acceptable diff. Any non-whitespace mismatch is a hard stop. |
+| 2026-06-10 | **AGENT MD-FILE SPECS — per-agent Markdown job descriptions (owner + friend's suggestion, 2026-06-10).** Idea: extract each agent's job description / responsibilities / rules / banned-behaviors / anti-drift instructions out of its `.py` file into a dedicated Markdown file per agent (e.g. `agents/senior_analyst.md`). **Why it fits Kabroda — three reasons:** (1) directly fights the #1 recurring pain — **agent drift** (false-certainty regression, brief-too-technical) — by making each agent's rules a clean single-source-of-truth doc that is easy to audit and correct without parsing Python; (2) **auditing an agent becomes trivial** — read the MD, compare against live output, edit one file; (3) **de-commingles logic (Python) from job-description (MD)**, matching the existing SYSTEM_FLOW.md / WORK_LOG.md source-of-truth-docs philosophy — the same reason those docs exist. **Key design decision to resolve before building:** does the agent LOAD its MD as its runtime system prompt (powerful — the doc literally IS the behavior; one source of truth that cannot drift from what the agent does) OR is the MD documentation that mirrors the hardcoded Python prompt (safer short-term, but guaranteed to drift over time)? The former is better if done carefully: `agent_core._call_agent()` reads the MD file at call time as the `system_prompt` argument — any edit to the MD takes effect on the next call with no code change. **Pairs with the model-assignment work:** the MD could also declare which model each agent uses (e.g. a `model:` frontmatter field), making model overrides a doc edit rather than a code change. **Scope:** a refactor touching all 9 LLM agents — `senior_analyst`, `junior_analyst`, `mtf_interpreter`, `gravity_interpreter`, `intel_auditor`, `publisher_agent`, `performance_auditor`, `elliott_wave_specialist`, `senior_analyst_commlink`. **Gate:** not urgent enough to jump W-9, but HIGH VALUE and worth doing before the big gated builds (HTF-anticipation, multi-TF) because it serves the core anti-drift/legibility/auditability values those builds will depend on. Do this in the near-term window between W-9 and the expansion tier. **PROGRESS (2026-06-10) — LOADER BUILT, FIRST AGENT WIRED:** `agent_core` gained `load_agent_spec()` + `_call_from_spec()` (reads frontmatter for model/max_tokens; `FileNotFoundError` on missing spec — never silent). `agents/mtf_interpreter.md` generated from Python constant (not transcribed — manual transcription introduced 36-char drift, caught by diff; generate-from-constant is now mandatory). `verify_prompt_mtf.py` confirms character-identical (6592 chars). `mtf_interpreter.py` call site wired to `_call_from_spec()`; Python constant retained pending live confirmation. **SA template noted as REORGANIZATION** — parked as a separate later validated change. **Known wrinkles to handle in rollout:** (1) `kabroda_mas_flow.py` hosts 3 prompts (`senior_analyst`, `senior_analyst_commlink`, `intel_auditor`) — each becomes its own MD, three deletions from one file; (2) retry paths in `senior_analyst` and `publisher_agent` pass a modified context to the same prompt — need a `_call_from_spec_with_prompt()` variant that accepts a pre-loaded spec + modified context so the file is only read once. **Rollout order** (safest first): mtf_interpreter ✓ → gravity_interpreter → junior_analyst → performance_auditor → elliott_wave_specialist → intel_auditor → senior_analyst_commlink → publisher_agent → senior_analyst (last — most critical). | owner + friend, 2026-06-10 | ◐ LOADER PROVEN — `mtf_interpreter` wired + diff-verified; next gate = live session validation, then continue rollout in safest-first order; full rollout gated on W-9 for SA (needs clean outcomes to verify no regression) |
+| 2026-06-10 | **AGENT MODEL-ASSIGNMENT AUDIT (owner, 2026-06-10).** Fable 5 launched 2026-06-09 — frontier model above Opus 4.8, strongest on long-horizon + analytical/finance reasoning ($10/$50 per M tokens; free on plans only through June 22, then metered). Owner's question: is each agent on the optimal model for its job? **CORRECT FRAMING — not "upgrade all to Fable":** match each agent to the CHEAPEST model that does its job well, per Principle 1 (clerk vs. judgment). Clerk/mechanical agents (jewel_specialist, structured packaging) → likely Haiku (cheaper, fine). Judgment agents (senior_analyst, junior_analyst, interpreters) → MIGHT benefit from Opus 4.8 or Fable 5, but only if measurable. **HARD DEPENDENCY:** cannot measure whether a stronger model improves the SA's decisions until outcome data is trustworthy (W-9) — otherwise there's no clean signal to A/B against. Also note cost: full pipeline is ~$0.18/day now; Fable would multiply it. **SEQUENCING:** inventory current model-per-agent now (read-only, free — just "what model is each agent using?"). The actual re-assignment/A-B testing is GATED behind W-9 (clean outcome data to measure against). Do the inventory now; defer the changes. | owner, 2026-06-10 | GATED — inventory now (free); re-assignment deferred until W-9 resolved and clean outcome data available |
+| 2026-06-07 | **STAND-DOWN GATE OVER-FIRING — FIRST DATA CORROBORATION (auditor finding, 2026-06-07).** The performance auditor's first scheduled run produced a concrete data point for the exit_warning monitoring item: 38 stand-down fires in the trailing window, 70.3% accuracy (correctly avoided bad days), 29.7% overcautious (valid setups missed). This is the first time the "may be overcautious" concern has numbers behind it rather than just a one-day observation. Treat as a STRONG LEAD with two caveats: (1) computed on outcome data with known integrity issues (W-9 — phantom losses + binary R), so the 70.3%/29.7% split is provisional; (2) auditor output was TRUNCATED mid-sentence (600-token limit hit — see W-10), so the full recommendation on this finding was cut off. **Action when W-9 resolved:** re-run the accuracy analysis on clean outcome data and check whether the split changes materially. If the ~30% overcautious rate persists on clean data, this corroborates scoping the exit_warning STRONG+with-trend override (already described in the exit_warning pin). Connects to: exit_warning Suggestion Box pin (2026-06-06) + B1/PMARP parked item. | auditor finding, 2026-06-07 | MONITORING — re-evaluate on clean outcome data after W-9 resolved |
 
 ---
 
@@ -680,5 +944,5 @@ done, we review this list and decide what graduates to OPEN WORK ITEMS.*
 | 2026-06-01 | Do we need CrewAI back to build smart/interpreter agents? | NO. Smart-agent behavior is a role and wiring upgrade on the existing `agent_core` pattern — not a framework problem. CrewAI was removed deliberately; do not reintroduce it. |
 | 2026-06-01 | Won't reconnecting more agents overload the Senior Analyst? | Only if they dump raw data at it. GOVERNING RULE (Principle 3): the SA reads ONLY digested/interpreted reads, never raw feeds. Every new or reconnected agent must reduce the SA's cognitive load by digesting its domain first. A connection that would send raw numbers is not ready — it needs a Bucket B interpreter in front of it first. |
 | 2026-06-04 | GROWTH PLAYBOOK — entity, Wikidata & AI-citation strategy (Kabroda_Entity_Citation_Playbook.docx) | 4-layer strategy for building Kabroda as a citable entity AI systems reference by default. Layer 1: public-facing hub on kabroda.com — canonical identity (name/logo/description consistent everywhere), proof of work, publication + YouTube offer, cross-links to all owned profiles. Layer 2: entity chain via schema.org structured data — Organization schema (Kabroda), Person schema (SpiritMaker/@Grossmonkey as founder/analyst), Article schema per published piece, sameAs links to every profile. Layer 3: Wikidata reconciliation — establish notability footprint first (third-party mentions, body of public work), then create/claim Wikidata item, wire QID into schema sameAs. This closes the trust loop for Google Knowledge Graph and AI citation. Medium-term goal, not week-one. Layer 4: cited-everywhere flywheel — TradingView track record (timestamped, public), genuine presence in trader communities (Reddit/Discord/X), repurpose into content system (publication → YouTube → TradingView → social all reinforce same entity). Sequence: hub → schema → cross-profile consistency → publishing cadence → communities → Wikidata. Hard gates: (1) notability must precede Wikidata attempt; (2) attorney compliance review before publishing any public performance stats (see EDUCATIONAL FRAMING pin). |
-| 2026-06-05 | INTEL REPORTER CoinGecko 429 — **recurring reliability item (Jun5 + Jun6, PRIORITY BUMPED)** | Fired both Jun5 and Jun6 — confirmed recurring, no longer a one-off. Brief survived both days (fallback/cache fired each time). Fix needed before publication phase: ensure intel reporter has a graceful fallback AND a logged warning when CoinGecko rate-limits so sentiment data doesn't silently vanish. **Priority: publication blocker** — must be resolved before any public launch. Pin for publication phase. |
+| 2026-06-05 | INTEL REPORTER CoinGecko 429 — **recurring reliability item (Jun5/6/7 — 3 consecutive days, CONFIRMED PERSISTENT)** | Fired Jun5, Jun6, AND Jun7 — three consecutive days confirms this is a persistent rate-limit, not a transient spike. Brief survived all three days (fallback/cache fired each time). Fix needed before publication phase: ensure intel reporter has a graceful fallback AND a logged warning when CoinGecko rate-limits so sentiment data doesn't silently vanish. **Priority: publication blocker** — must be resolved before any public launch. Pin for publication phase. |
 | 2026-06-04 | EDUCATIONAL FRAMING — design principle for all public/paid output (owner, 2026-06-04) | Everything published or sold is framed as EDUCATIONAL / opinion / "this is what we see" — never as financial advice, never with claims about profit or returns. Users make their own decisions and interpretations. Standard disclaimer language (not financial advice, educational purposes, our opinion, trade at your own discretion) on all public-facing material. CRITICAL CAVEAT: the disclaimer is necessary but NOT sufficient — regulators judge substance, not just the label. Publishing specific entry/stop/target levels + performance stats + charging can read as a signal service regardless of disclaimer. The framing AND the format must be designed together. HARD GATE (already pinned): a qualified securities/financial-services attorney must review the actual framing, format, disclaimers, and performance presentation for the owner's jurisdiction (US/TX) and subscriber base BEFORE any public launch or paid subscription. "Other sites do it this way" is not a compliance basis. Claude is not a lawyer and cannot adjudicate this. |

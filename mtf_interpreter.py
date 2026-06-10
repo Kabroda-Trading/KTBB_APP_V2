@@ -20,7 +20,11 @@ import agent_core
 
 
 # ==============================================================================
-# SECTION 1 — SYSTEM PROMPT (CACHEABLE CONSTANT)
+# SECTION 1 — SYSTEM PROMPT
+# MIGRATED TO: agents/mtf_interpreter.md  (loaded at runtime via agent_core.load_agent_spec)
+# PENDING DELETION: keep this constant until a live session confirms MD-loaded output
+# is identical to Python-constant output. Run verify_prompt_mtf.py before deleting.
+# DO NOT modify this constant — it is the diff reference for the verbatim check.
 # ==============================================================================
 
 MTF_INTERPRETER_SYSTEM_PROMPT = """\
@@ -238,12 +242,10 @@ def run_mtf_interpretation(context: dict, jewel_ctx: str) -> Optional[str]:
     try:
         context_text = _build_mtf_context(context, jewel_ctx)
 
-        response = agent_core._call_agent(
+        response = agent_core._call_from_spec(
             agent_name="mtf_interpreter",
-            system_prompt=MTF_INTERPRETER_SYSTEM_PROMPT,
             context_text=context_text,
             triggered_by="session_lock",
-            max_tokens=600,
         )
 
         result = response.strip()
