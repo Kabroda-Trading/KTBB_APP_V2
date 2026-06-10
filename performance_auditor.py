@@ -143,6 +143,7 @@ def _collect_stats(symbol: str, cutoff: datetime) -> Dict[str, Any]:
             .filter(
                 DecisionJournal.symbol == symbol,
                 DecisionJournal.timestamp >= cutoff,
+                DecisionJournal.decision_type.in_(["MAS_APPROVED", "MAS_REJECTED"]),
             )
             .all()
         )
@@ -511,7 +512,7 @@ def run_performance_audit(
             system_prompt=_SYSTEM_PROMPT,
             context_text=context_block,
             triggered_by=date_key,
-            max_tokens=600,
+            max_tokens=900,
         )
     except RuntimeError as e:
         return {"status": "BUDGET_BLOCKED", "error": str(e)}
