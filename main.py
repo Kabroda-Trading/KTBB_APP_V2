@@ -1393,6 +1393,111 @@ async def admin_backfill_preview(request: Request, db: Session = Depends(get_db)
     })
 
 
+
+# TEMPORARY — CampaignLog full-table audit. DELETE after data cleanup decision.
+@app.get("/admin/table-audit")
+async def admin_table_audit(request: Request, db: Session = Depends(get_db)):
+    """
+    READ-ONLY — zero writes. Full CampaignLog audit: symbol/bias/status breakdown,
+    PnL bucket distribution, and complete row list. Used to distinguish old test
+    data from real sessions before any correction or deletion.
+    DELETE after data cleanup is decided and applied.
+    """
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=403)
+
+    from sqlalchemy import text
+
+    # 1. Symbol + approval status + bias cross-tab with date range
+    cross_tab = db.execute(text("""
+        SELECT symbol, mas_approval_status, bias,
+               COUNT(*) AS row_count,
+               MIN(date_key) AS earliest,
+               MAX(date_key) AS latest
+        FROM campaign_logs
+        GROUP BY symbol, mas_approval_status, bias
+        ORDER BY symbol, mas_approval_status, bias
+    """)).fetchall()
+
+    # 2. Status distribution
+    status_dist = db.execute(text("""
+        SELECT status, mas_approval_status, COUNT(*) AS row_count
+        FROM campaign_logs
+        GROUP BY status, mas_approval_status
+        ORDER BY row_count DESC
+    """)).fetchall()
+
+    # 3. PnL bucket classification
+    pnl_buckets = db.execute(text("""
+        SELECT
+            CASE
+                WHEN realized_pnl IS NULL              THEN 'NULL'
+                WHEN realized_pnl = 0.0               THEN 'ZERO_DEFAULT'
+                WHEN ABS(realized_pnl) > 100          THEN 'DOLLAR_LARGE (>100)'
+                WHEN ABS(realized_pnl) > 10           THEN 'DOLLAR_MID (10-100)'
+                WHEN ABS(realized_pnl) > 3            THEN 'DOLLAR_SMALL (3-10)'
+                WHEN ABS(realized_pnl) <= 3 AND realized_pnl != 0 THEN 'REAL_R (0-3)'
+                ELSE 'OTHER'
+            END AS pnl_bucket,
+            COUNT(*) AS row_count,
+            MIN(realized_pnl) AS min_val,
+            MAX(realized_pnl) AS max_val
+        FROM campaign_logs
+        GROUP BY pnl_bucket
+        ORDER BY row_count DESC
+    """)).fetchall()
+
+    # 4. All distinct bias values
+    bias_values = db.execute(text("""
+        SELECT bias, COUNT(*) AS row_count
+        FROM campaign_logs
+        GROUP BY bias
+        ORDER BY row_count DESC
+    """)).fetchall()
+
+    # 5. Full row list (compact — every row for manual review)
+    all_rows = db.execute(text("""
+        SELECT id, date_key, symbol, bias, status, mas_approval_status,
+               realized_pnl, entry_price, stop_loss, t1,
+               closed_at, entry_filled_at, session_expires_at
+        FROM campaign_logs
+        ORDER BY date_key, id
+    """)).fetchall()
+
+    def _rows(result) -> list:
+        return [dict(zip(r._fields, r)) for r in result]
+
+    return JSONResponse({
+        "ok": True,
+        "writes": 0,
+        "total_rows": len(all_rows),
+        "note": "READ-ONLY — zero writes. Review all five sections before deciding on any correction.",
+        "cross_tab_by_symbol_approval_bias": _rows(cross_tab),
+        "status_distribution": _rows(status_dist),
+        "pnl_bucket_distribution": _rows(pnl_buckets),
+        "distinct_bias_values": _rows(bias_values),
+        "all_rows": [
+            {
+                "id": r.id,
+                "date_key": r.date_key,
+                "symbol": r.symbol,
+                "bias": r.bias,
+                "status": r.status,
+                "mas_approval_status": r.mas_approval_status,
+                "realized_pnl": r.realized_pnl,
+                "entry_price": r.entry_price,
+                "stop_loss": r.stop_loss,
+                "t1": r.t1,
+                "closed_at": str(r.closed_at) if r.closed_at else None,
+                "entry_filled_at": str(r.entry_filled_at) if r.entry_filled_at else None,
+                "session_expires_at": str(r.session_expires_at) if r.session_expires_at else None,
+            }
+            for r in all_rows
+        ],
+    })
+
+
 # ==============================================================================
 # EXECUTIVE DASHBOARD API ROUTES (Phase 6 — read-only DB queries)
 # ==============================================================================
