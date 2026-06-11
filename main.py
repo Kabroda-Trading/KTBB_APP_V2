@@ -1264,7 +1264,7 @@ async def admin_schema_check(request: Request, db: Session = Depends(get_db)):
         "FROM information_schema.columns "
         "WHERE table_name='campaign_logs' "
         "AND column_name IN ('entry_filled_at','session_expires_at',"
-        "'max_target_reached','t2_reached','t3_reached') "
+        "'max_target_reached','t2_reached','t3_reached','is_canonical') "
         "ORDER BY column_name"
     )).fetchall()
     columns = [{"column_name": r[0], "data_type": r[1], "is_nullable": r[2]} for r in rows]

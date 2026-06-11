@@ -155,6 +155,13 @@ def init_db():
     except Exception:
         pass
 
+    # --- CANONICAL RECORD SEPARATION ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN is_canonical BOOLEAN DEFAULT FALSE"))
+    except Exception:
+        pass
+
     # --- PHASE 3C JEWEL SPECIALIST — top-level scanner context columns ---
     for col_def in [
         "confluence_score INTEGER",
@@ -292,6 +299,12 @@ class CampaignLog(Base):
     #   Allows the auditor to ask: "how often does price continue past the exit target?"
     t2_reached = Column(Boolean, default=False, nullable=False, server_default="0")
     t3_reached = Column(Boolean, default=False, nullable=False, server_default="0")
+
+    # is_canonical: TRUE = production-quality BTC/USDT record from 2026-05-27 onward.
+    #   All dashboard / auditor / performance / lifecycle queries filter to is_canonical=TRUE.
+    #   FALSE = legacy data (multi-symbol era, placeholder PnL, pre-track-record rows).
+    #   Auto-set TRUE at creation for any BTC/USDT record. Historical set: IDs 74–90 (13 rows).
+    is_canonical = Column(Boolean, default=False, nullable=False, server_default="0")
 
 # ---------------------------------------------------------
 # MTF CONFLUENCE READINGS (MORNING BRIEF HISTORY)
