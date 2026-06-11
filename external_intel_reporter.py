@@ -15,6 +15,7 @@
 # ==============================================================================
 
 import json
+import os
 import urllib.request
 from typing import Any, Dict
 
@@ -22,6 +23,7 @@ _FNG_URL    = "https://api.alternative.me/fng/"
 _GECKO_URL  = "https://api.coingecko.com/api/v3/global"
 _TIMEOUT    = 5
 _UA         = "KabrodaPublisher/1.0"
+_GECKO_KEY  = os.getenv("COINGECKO_API_KEY", "")
 
 
 def _fetch_fear_and_greed() -> Dict[str, Any]:
@@ -64,7 +66,10 @@ def _fetch_fear_and_greed() -> Dict[str, Any]:
 
 def _fetch_crypto_global() -> Dict[str, Any]:
     try:
-        req = urllib.request.Request(_GECKO_URL, headers={"User-Agent": _UA})
+        headers = {"User-Agent": _UA}
+        if _GECKO_KEY:
+            headers["x-cg-demo-api-key"] = _GECKO_KEY
+        req = urllib.request.Request(_GECKO_URL, headers=headers)
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             data = json.loads(resp.read().decode())
 

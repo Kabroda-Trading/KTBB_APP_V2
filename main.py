@@ -1252,6 +1252,31 @@ async def simulator_run(request: Request, db: Session = Depends(get_db)):
         traceback.print_exc()
         return JSONResponse({"ok": False, "error": str(e)})
 
+# TEMPORARY — W-9 schema gate check. DELETE after production confirms 5 columns.
+@app.get("/admin/schema-check")
+async def admin_schema_check(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=403)
+    from sqlalchemy import text
+    rows = db.execute(text(
+        "SELECT column_name, data_type, is_nullable "
+        "FROM information_schema.columns "
+        "WHERE table_name='campaign_logs' "
+        "AND column_name IN ('entry_filled_at','session_expires_at',"
+        "'max_target_reached','t2_reached','t3_reached') "
+        "ORDER BY column_name"
+    )).fetchall()
+    columns = [{"column_name": r[0], "data_type": r[1], "is_nullable": r[2]} for r in rows]
+    return JSONResponse({
+        "ok": True,
+        "found": len(columns),
+        "expected": 5,
+        "gate_clear": len(columns) == 5,
+        "columns": columns,
+    })
+
+
 # ==============================================================================
 # EXECUTIVE DASHBOARD API ROUTES (Phase 6 — read-only DB queries)
 # ==============================================================================

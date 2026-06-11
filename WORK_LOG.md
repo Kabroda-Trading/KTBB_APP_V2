@@ -201,13 +201,39 @@ Even when the trade is exited at T1 (safe target), the monitor **keeps watching 
 
 1. ~~Read-only verification pass.~~ **DONE 2026-06-10.** Root cause confirmed above.
 2. ~~Resolve design questions (a)/(b)/(c).~~ **DONE 2026-06-10.** See above.
-3. **Schema additions** — add new `CampaignLog` columns (`entry_filled_at`, `max_target_reached`, `t2_reached`, `t3_reached`, `session_expires_at`) via `ALTER TABLE` in `database.py`. Migrate safely with the existing try/except pattern.
-4. **Build the lifecycle monitor** — replace `ledger_closing_engine.py` with the three-phase state machine. Validate: (a) Jun7 flips to `EXPIRED` / `realized_pnl = null`; (b) Jun2/Jun3 winners record correct R; (c) post-T1 observation logs T2/T3 reaches correctly.
+3. ~~**Schema additions**~~ — **COMMITTED 2026-06-10 (commit `9ec43b1`).** Five columns added to `CampaignLog` + five `ALTER TABLE` blocks in `init_db()`: `entry_filled_at` (TIMESTAMP nullable), `session_expires_at` (TIMESTAMP nullable), `max_target_reached` (VARCHAR nullable), `t2_reached` (BOOLEAN DEFAULT FALSE), `t3_reached` (BOOLEAN DEFAULT FALSE). Also noted: `activated_at` exists as a dead orphaned column (never read/written anywhere) — left untouched. `status` is plain VARCHAR with no DB constraint — `EXPIRED` is a valid value without any schema change. Pushed to Render. **⚠ OPEN GATE — NOT YET CONFIRMED LIVE.** Before Step 4: run the column-existence check via Render Shell: `SELECT column_name FROM information_schema.columns WHERE table_name='campaign_logs' AND column_name IN ('entry_filled_at','session_expires_at','max_target_reached','t2_reached','t3_reached')` — expect 5 rows back. Also confirm app booted clean (dashboard renders, no exit before uvicorn line in boot log). Do NOT build Step 4 until this gate is cleared.
+4. **Build the lifecycle monitor** — replace `ledger_closing_engine.py` with the three-phase state machine. Validate: (a) Jun7 flips to `EXPIRED` / `realized_pnl = null`; (b) Jun2/Jun3 winners record correct R; (c) post-T1 observation logs T2/T3 reaches correctly. **GATED on step 3 schema confirmation.**
 5. **Validate full dataset** — confirm all existing `CLOSED_WIN`/`CLOSED_LOSS` rows are re-evaluated; update any rows that were phantom-closed under the old engine.
 
-- **Status:** ◐ Architecture decided. Schema additions + lifecycle monitor build is the next session.
+- **Status:** ◐ Schema committed + pushed (`9ec43b1`), pending live confirmation. Step 4 (monitor logic) is GATED until schema confirmed on production.
 - **Blocks:** W-6 T2 (legibility polish is pointless on wrong numbers), W-3 backtest, publication track record, auditor RAG memory bank reliability, **agent model-optimization A/B testing** (Suggestion Box 2026-06-10 — cannot measure model quality until outcome data is trustworthy).
 - **Does NOT block:** daily session monitoring, A3 live watch, exit_warning observation.
+- **MD-refactor gate (same session):** `mtf_interpreter` is wired to load from `agents/mtf_interpreter.md` and diff-verified character-identical. Python constant `MTF_INTERPRETER_SYSTEM_PROMPT` must NOT be deleted until a live NY session confirms identical output in `/admin/interpreter-log`. Both gates (schema + mtf_interpreter validation) clear independently — neither blocks the other.
+
+#### Monitor Validation Fixture — LIVE TEST CASE (pinned 2026-06-10)
+
+Concrete real-world case for validating Step 4 (the lifecycle monitor) once built. This is the live twin of the Jun-7 phantom loss.
+
+**Setup:** SHORT APPROVED, 2026-06-10 NY Futures session.
+- Entry / breakdown trigger: **$61,039.90**
+- Stop (breakout trigger): **$61,922.70**
+- T1: $60,157.10 | T2: $59,611.50 | T3: $58,728.60
+- At 2:22 PM CST snapshot: live price ~$61,710 — between entry and stop, drifted **up** toward the stop; entry NEVER triggered (price never reached $61,039).
+- Brief's own stand-down line: "reclaims $61,500 on 15M close." Price was above $61,500 at snapshot → setup was already compromised by the brief's own terms.
+
+**Correct monitor outcomes to confirm at session close:**
+
+**(a) Price never hit $61,039 by NY session expiry:** → `EXPIRED` / `realized_pnl = null`. NOT a loss.
+
+**(b) CANONICAL PHANTOM-LOSS TRAP — price hit the stop $61,922 WITHOUT first hitting entry $61,039:** → still `EXPIRED` / `realized_pnl = null`. NOT `CLOSED_LOSS −1R`. The current engine gets this exactly wrong: it sees `live_price >= stop_loss` and fires `CLOSED_LOSS` regardless of whether entry was ever crossed. The lifecycle monitor must check `entry_filled_at IS NOT NULL` before entering the stop/target evaluation phase. If `entry_filled_at` is null and price hits the stop → `EXPIRED`, close the record, `pnl = null`.
+
+**(c) Price dropped through $61,039 first:** → trade went live (`entry_filled_at` populated), real outcome follows normal stop/target logic.
+
+**ACTION:** Confirm the actual session-close price path and record the outcome below. This locked answer becomes the regression test for Step 4 — "did the monitor correctly score 2026-06-10?"
+
+> **Session-close outcome — CONFIRMED 2026-06-11:** Price never reached entry $61,039.88. The current engine logged the setup as **CLOSED_LOSS / −1.0R** — a confirmed phantom loss (second after Jun-7). Scenario (b) is the actual case: price drifted up toward the stop region without ever triggering the short. Correct lifecycle-monitor outcome: **EXPIRED / realized_pnl = null**. This is the locked before/after regression test for W-9 Step 4. Additional impact: today's published newsletter Performance Ledger reported "−1.00R most recent, 2 losses" — the bug is already corrupting the published track record visible to readers.
+
+---
 
 #### Agent → Model inventory (pinned here — Suggestion Box 2026-06-10)
 
@@ -297,6 +323,18 @@ The accuracy stats are not yet valid. The auditor cannot calibrate Kabroda's dec
 **Part 2 — Stand-down analysis:** Once the auditor only sees MAS rows, the stand-down analysis should count rows where the system would have issued a stand-down verdict (e.g. `MAS_REJECTED` rows, or rows from the pre-MAS gate path). Currently the stand-down signal comes from the radar's `STAND_DOWN` labels, which is a different system entirely.
 
 **Sequencing:** Part 1 can be built standalone (one query filter change + optionally a schema column). Do not build Part 2 until the auditor's base query is clean and a week of real data has accumulated.
+
+#### 4-value decision_type tagging — PRIORITY BLOCKER for stand-down accuracy (2026-06-10)
+
+**Verified during W-11 filter design:** `_inject_decision_journal` collapses all non-APPROVED MAS outcomes into `"MAS_REJECTED"` via a binary ternary. `REJECTED`, `STAND_DOWN`, and `WAITING_FOR_15M` are all written identically.
+
+**W-11 filter applied 2026-06-10** (`IN ('MAS_APPROVED', 'MAS_REJECTED')`) correctly excludes all radar contamination — auditor now analyzes real MAS decisions only. **Side effect:** the auditor's stand-down-validation block (Block C) now reports 0. It counted rows where `decision_type == "STAND_DOWN"` — that was the radar's value, now filtered out. Real MAS stand-downs are tagged `MAS_REJECTED` and indistinguishable from real rejections. The 0 is honest (correct behavior — honest 0 beats the contaminated 70.3% it replaced), but it means stand-down accuracy cannot be computed at all.
+
+**Stand-down accuracy is the owner's most-wanted metric** — "was the no-trade call right?" This metric is now the direct blocker between the current state and that answer.
+
+**Fix:** change `_inject_decision_journal` in `kabroda_mas_flow.py` to write the actual `approval_status` value (4 values: `MAS_APPROVED` / `MAS_REJECTED` / `MAS_STAND_DOWN` / `MAS_WAITING`) instead of the binary. `decision_type` is a plain VARCHAR with no constraint — no migration needed. Old rows keep their binary labels; new rows get the 4-value label. Update the auditor query to `IN ('MAS_APPROVED', 'MAS_REJECTED', 'MAS_STAND_DOWN', 'MAS_WAITING')` at the same time. Update Block C filter from `d.decision_type == "STAND_DOWN"` to `d.decision_type == "MAS_STAND_DOWN"`.
+
+**Sequencing:** do after W-9 (need clean outcome data first), before the big gated builds. Small change — one write site, one query filter, one Block C line.
 
 - **Status:** ☐ Not started. Original "pipeline bug" conclusion fully retracted. Real work item is the auditor query filter + DecisionJournal source field.
 - **Priority:** High — next Sunday's audit will produce the same contaminated numbers if not fixed first.

@@ -24,6 +24,9 @@ import agent_core
 
 # ==============================================================================
 # SECTION 1 — SYSTEM PROMPT (CACHEABLE CONSTANT)
+# MIGRATED TO: agents/gravity_interpreter.md  (loaded at runtime via agent_core.load_agent_spec)
+# PENDING DELETION: keep until a live session confirms MD-loaded output is identical.
+# DO NOT modify this constant — it is the diff reference for verify_prompt_mtf.py pattern.
 # ==============================================================================
 
 GRAVITY_INTERPRETER_SYSTEM_PROMPT = """\
@@ -333,12 +336,10 @@ def run_gravity_interpretation(
     try:
         context_text = _build_gravity_context(levels, context, targets)
 
-        response = agent_core._call_agent(
+        response = agent_core._call_from_spec(
             agent_name="gravity_interpreter",
-            system_prompt=GRAVITY_INTERPRETER_SYSTEM_PROMPT,
             context_text=context_text,
             triggered_by="session_lock",
-            max_tokens=600,
         )
 
         result = response.strip()
