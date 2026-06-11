@@ -12,7 +12,10 @@
 
 import json
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
+
+import pytz
 
 from pydantic import BaseModel, Field
 
@@ -1342,6 +1345,35 @@ def _mark_mas_error(
         db.close()
 
 
+_NY_TZ = pytz.timezone("America/New_York")
+
+# Session close times in ET. Source: owner specification — the NY Futures session
+# boundary for BTC monitoring is the US equity cash close (3:00 PM ET). This is
+# NOT derived from any exchange API or session_manager.py (which only defines
+# open times). If the session boundary changes, update this dict and redeploy.
+_SESSION_CLOSE_ET: Dict[str, tuple] = {
+    "us_ny_futures": (15, 0),   # 3:00 PM ET — US equity cash close
+    "us_ny_equity":  (16, 0),   # 4:00 PM ET
+    "us_ny_pm":      (16, 15),  # 4:15 PM ET
+}
+
+
+def _compute_session_expires_at(session_id: str, date_key: str) -> datetime:
+    """
+    Returns timezone-aware UTC datetime for the session close boundary.
+
+    NY Futures = 3:00 PM ET (US equity cash close). Not from any API — hardcoded
+    per owner specification. pytz.localize() handles DST automatically so the
+    UTC offset is correct year-round (EDT = UTC-4, EST = UTC-5).
+    """
+    close_h, close_m = _SESSION_CLOSE_ET.get(session_id, (15, 0))
+    date = datetime.strptime(date_key, "%Y-%m-%d")
+    local_close = _NY_TZ.localize(
+        date.replace(hour=close_h, minute=close_m, second=0, microsecond=0)
+    )
+    return local_close.astimezone(timezone.utc)
+
+
 def _inject_brief_to_database(
     symbol: str, session_id: str, date_key: str, brief: ExecutiveBrief,
     structure_reasoning: Optional[dict] = None,
@@ -1388,6 +1420,11 @@ def _inject_brief_to_database(
         log.formatted_newsletter = brief.formatted_newsletter_md
         if structure_reasoning:
             log.structure_reasoning = json.dumps(structure_reasoning, default=str)
+
+        # Set session expiry on APPROVED records so the lifecycle monitor knows
+        # when to expire unfilled setups. Only set once — don't overwrite.
+        if brief.approval_status == "APPROVED" and log.session_expires_at is None:
+            log.session_expires_at = _compute_session_expires_at(session_id, date_key)
 
         db.commit()
         print(f"|| MAS OVERLAY || Brief injected for {symbol}.")
