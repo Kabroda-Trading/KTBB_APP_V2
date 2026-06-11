@@ -1277,6 +1277,122 @@ async def admin_schema_check(request: Request, db: Session = Depends(get_db)):
     })
 
 
+# TEMPORARY — W-9 backfill diagnostic. DELETE after backfill confirmed + applied.
+@app.get("/admin/backfill-preview")
+async def admin_backfill_preview(request: Request, db: Session = Depends(get_db)):
+    """
+    READ-ONLY — zero writes. Shows all CLOSED_LOSS rows with entry_filled_at IS NULL
+    (phantom-loss candidates). For each: current field values as backup snapshot,
+    MEXC daily OHLC for the session date, and a phantom_verdict.
+
+    phantom_verdict logic:
+      DEFINITE PHANTOM — daily candle never reached entry_price level (SHORT: low > entry;
+        LONG: high < entry). Price cannot have crossed entry. Safe to reclassify.
+      OWNER_CONFIRM — daily candle reached or crossed entry_price. May be real loss or
+        phantom depending on intraday timing. Requires manual confirmation before write.
+
+    Admin-guarded. DELETE this route once Step 5 backfill is complete.
+    """
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=403)
+
+    import urllib.request as _req
+    from datetime import timedelta as _td
+
+    def _fetch_candle(symbol: str, date_key: str) -> dict:
+        try:
+            mx_sym = symbol.replace("/", "")
+            day_start = datetime.strptime(date_key, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            start_ms = int(day_start.timestamp() * 1000)
+            end_ms   = int((day_start + _td(days=1)).timestamp() * 1000)
+            url = (
+                f"https://api.mexc.com/api/v3/klines"
+                f"?symbol={mx_sym}&interval=1d"
+                f"&startTime={start_ms}&endTime={end_ms}&limit=1"
+            )
+            r = _req.Request(url, headers={"User-Agent": "KabrodaAdmin/1.0"})
+            with _req.urlopen(r, timeout=8) as resp:
+                data = json.loads(resp.read().decode())
+            if not data:
+                return {"ok": False, "error": "empty response", "high": None, "low": None}
+            c = data[0]
+            # MEXC klines: [openTime, open, high, low, close, volume, ...]
+            return {"ok": True, "open": float(c[1]), "high": float(c[2]),
+                    "low": float(c[3]), "close": float(c[4]), "error": None}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:200], "high": None, "low": None}
+
+    def _verdict(bias: str, entry: float, ohlc: dict) -> str:
+        if not ohlc["ok"] or ohlc["high"] is None:
+            return f"OWNER_CONFIRM — OHLC fetch failed: {ohlc.get('error', '?')}"
+        h, lo = ohlc["high"], ohlc["low"]
+        if bias == "SHORT":
+            if lo > entry:
+                return f"DEFINITE PHANTOM — daily low {lo:.2f} never reached SHORT entry {entry:.2f}"
+            return f"OWNER_CONFIRM — daily low {lo:.2f} reached/crossed SHORT entry {entry:.2f}"
+        if bias == "LONG":
+            if h < entry:
+                return f"DEFINITE PHANTOM — daily high {h:.2f} never reached LONG entry {entry:.2f}"
+            return f"OWNER_CONFIRM — daily high {h:.2f} reached/crossed LONG entry {entry:.2f}"
+        return f"OWNER_CONFIRM — unrecognised bias '{bias}'"
+
+    candidates = (
+        db.query(CampaignLog)
+        .filter(
+            CampaignLog.status == "CLOSED_LOSS",
+            CampaignLog.entry_filled_at.is_(None),
+        )
+        .order_by(CampaignLog.date_key)
+        .all()
+    )
+
+    rows = []
+    for c in candidates:
+        ohlc = _fetch_candle(c.symbol or "", c.date_key or "")
+        rows.append({
+            "id": c.id,
+            "date_key": c.date_key,
+            "phantom_verdict": _verdict(c.bias or "", c.entry_price or 0.0, ohlc),
+            "ohlc": ohlc,
+            "backup_snapshot": {
+                "id": c.id,
+                "date_key": c.date_key,
+                "symbol": c.symbol,
+                "bias": c.bias,
+                "entry_price": c.entry_price,
+                "stop_loss": c.stop_loss,
+                "t1": c.t1,
+                "t2": c.t2,
+                "t3": c.t3,
+                "status": c.status,
+                "mas_approval_status": c.mas_approval_status,
+                "realized_pnl": c.realized_pnl,
+                "target_hit": c.target_hit,
+                "closed_at": str(c.closed_at) if c.closed_at else None,
+                "entry_filled_at": None,
+                "session_expires_at": str(c.session_expires_at) if c.session_expires_at else None,
+            },
+            "correction_if_confirmed": {
+                "status": "EXPIRED",
+                "realized_pnl": None,
+                "target_hit": None,
+            },
+        })
+
+    return JSONResponse({
+        "ok": True,
+        "writes": 0,
+        "candidate_count": len(rows),
+        "note": (
+            "READ-ONLY — zero writes performed. "
+            "Review phantom_verdict for each candidate. "
+            "Provide the IDs you confirm as phantoms; correction runs as a separate step."
+        ),
+        "candidates": rows,
+    })
+
+
 # ==============================================================================
 # EXECUTIVE DASHBOARD API ROUTES (Phase 6 — read-only DB queries)
 # ==============================================================================
