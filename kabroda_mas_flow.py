@@ -1191,7 +1191,7 @@ def run_mas_analysis(
 
     # 6. Write to all three database locations
     _inject_brief_to_database(symbol, session_id, date_key, brief, structure_reasoning)
-    _inject_decision_journal(symbol, date_key, brief, battlebox_payload)
+    _inject_decision_journal(symbol, session_id, date_key, brief, battlebox_payload)
     _write_narrative_log(symbol, date_key, brief, narrative_text_for_log)
 
     # 7. Content Publishing Engine — non-fatal, same thread, isolated try/except
@@ -1445,6 +1445,7 @@ def _inject_brief_to_database(
 
 def _inject_decision_journal(
     symbol: str,
+    session_id: str,
     date_key: str,
     brief: ExecutiveBrief,
     battlebox_payload: Dict[str, Any],
@@ -1496,6 +1497,7 @@ def _inject_decision_journal(
             bd_price=float(levels.get("breakdown_trigger", 0) or 0),
             asset_price=brief.entry_price,
             session_date=date_key,
+            session_id=session_id,
             decision_reason=brief.tactical_brief,
             full_context_json=json.dumps(
                 {"brief": brief.dict(), "battlebox": battlebox_payload}, default=str

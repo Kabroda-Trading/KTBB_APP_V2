@@ -162,6 +162,13 @@ def init_db():
     except Exception:
         pass
 
+    # --- JOB 2 / PHASE A — DecisionJournal ↔ InterpreterLog join key ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE decision_journal ADD COLUMN session_id VARCHAR"))
+    except Exception:
+        pass
+
     # --- PHASE 3C JEWEL SPECIALIST — top-level scanner context columns ---
     for col_def in [
         "confluence_score INTEGER",
@@ -347,6 +354,7 @@ class DecisionJournal(Base):
     asset_price = Column(Float, nullable=True)
 
     session_date = Column(String, nullable=True)
+    session_id   = Column(String, nullable=True)   # e.g. "us_ny_futures" — session TYPE label, not unique run id
     decision_reason = Column(String, nullable=True)
 
     # Outcome fields — null at creation, filled by the 4H gravity-engine task.
