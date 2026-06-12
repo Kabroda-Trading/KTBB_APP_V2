@@ -425,8 +425,7 @@ def _fetch_cro_memory(symbol: str) -> str:
     try:
         logs = db.query(CampaignLog).filter(
             CampaignLog.symbol == symbol,
-            CampaignLog.mas_approval_status == "APPROVED",
-            CampaignLog.closed_at.isnot(None),
+            CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS"]),
             CampaignLog.is_canonical == True,
         ).order_by(CampaignLog.closed_at.desc()).limit(5).all()
 
@@ -439,11 +438,12 @@ def _fetch_cro_memory(symbol: str) -> str:
         wins = losses = 0
         pnl_sum = 0.0
         for log in logs:
-            if log.realized_pnl > 0:
+            if log.realized_pnl is not None and log.realized_pnl > 0:
                 wins += 1
             else:
                 losses += 1
-            pnl_sum += log.realized_pnl
+            if log.realized_pnl is not None:
+                pnl_sum += log.realized_pnl
 
         memory_str = (
             f"MEMORY BANK (Last {len(logs)} closed {symbol} trades): "
