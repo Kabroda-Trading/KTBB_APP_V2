@@ -815,7 +815,7 @@ context dict:
 |--------|---------|-------|-----------|
 | `gravity_engine.py` | Every 15 min | MEXC 4H/1H/1D via battlebox_pipeline | `GravityMemory` (4H/1H pivots, 1W/168H anchors) |
 | `kabroda_macro_engine.py` | Boot + every 24h (subprocess) | MEXC 1500D daily | `GravityMemory` (permanence_class=0, MACRO_ENGINE_CLASS_0) |
-| `ledger_closing_engine.py` | Every 60 sec | `CampaignLog` (APPROVED, unclosed) + MEXC live price | `CampaignLog` (CLOSED_WIN/CLOSED_LOSS, realized_pnl) |
+| `ledger_closing_engine.py` | Every 60 sec | `CampaignLog` (APPROVED, is_canonical=True, unclosed) + MEXC live price | `CampaignLog` (status, realized_pnl, entry_filled_at, t2_reached, t3_reached, max_target_reached). **W-9 three-phase engine** (2026-06-11): Phase 1 watches for entry fill (entry_filled_at IS NULL → EXPIRED on session close, never CLOSED_LOSS); Phase 2 monitors stop + T1 after confirmed fill; Phase 3 observes T2/T3 after T1 close. Only processes `is_canonical == True` records. |
 | `gravity_engine.fill_decision_outcomes()` | Every 4h (inside gravity loop) | `DecisionJournal` rows >4h old + MEXC live price | `DecisionJournal` (outcome_price_4h, outcome_pct_move_4h, outcome_direction_correct) |
 
 ---
@@ -1131,3 +1131,56 @@ TIER 4 — UI / PAGES
 | 2026-06-02 | GAP-4 Phase 1 | Gravity Interpreter built (gravity_interpreter.py). Bucket B layer reading kde_peaks + macro_structure + levels + post-TSA targets. Characterizes: nearest HEAVY/MAXIMUM obstacle to T1 (price, intensity, %, macro confluence by name), CLEAR/OBSTRUCTED/BLOCKED airspace verdict, T2/T3 viability, one-sentence opposing-direction note, overall structural picture. Completeness guard (same as MTF — must not silently drop decision-relevant walls). Fail-open pattern identical to mtf_interpreter. Wired into run_mas_analysis() as step 2c; gravity_read= param added to _build_senior_analyst_context(); replaces raw GRAVITY WALLS sections when present. AWAITING PROMPT REVIEW before live run. Phase 2 (OI + L2) deferred pending orphan verification. | owner + Claude Code | GAP-4 Phase 1 build | gravity_interpreter.py new; kabroda_mas_flow.py: 4 edits. commit TBD |
 | 2026-06-02 | GAP-1, GAP-2 | Cockpit UI authority fix (W-6). GAP-2 Option C: Phase 2 scan now MERGES over Phase 1 snapshot instead of overwriting (preserves SA verdict + SA plan from CampaignLog); row border color driven by mas_approval_status (green=APPROVED, gray=STAND_DOWN) with fallback to radar grade when no SA verdict exists; HUD payload display renames "GRADE A/B" to "PRE-CHECK: A/B" (rawKey unchanged for TradingView). GAP-1: Panel 02 top-line label forced to "STAND DOWN — SYSTEM INACTIVE" when SA says STAND_DOWN, regardless of JEWEL gate/conviction (JEWEL badges/signal still render as context); trade card and position-size calc suppressed (renders "--") when mas_status === 'STAND_DOWN'. rrc-down CSS border changed from red to gray to match SA-muted semantics. | owner + Claude Code | Root cause: diagnosed 2026-06-02 — STAND_DOWN session showed HIGH CONVICTION SETUP + live trade card | market_radar.html: 7 edits. No Python changes. commit TBD |
 | 2026-06-03 | 3B, AUDITABILITY COVENANT | InterpreterLog persistence (AUDITABILITY COVENANT). New `InterpreterLog` table in `database.py` — keyed by `(symbol, session_date, session_id, interpreter_name)`, stores full `output_text`, `ran_successfully` bool. Picked up by `Base.metadata.create_all()` on deploy — no ALTER TABLE. `_log_interpreter()` helper added to `kabroda_mas_flow.py`; two call sites inserted in `run_mas_analysis()` immediately after `mtf_interpreter` (step 6) and `gravity_interpreter` (step 7) returns, each in its own `try/except` so a write failure never breaks the session. A row is written even on fail-open so absences are auditable. AUDITABILITY COVENANT section added to SYSTEM_FLOW.md as a governing principle for all future Bucket B builds. Layer 4 pipeline diagram updated. | owner + Claude Code | Root cause: gravity_interpreter ran successfully 2026-06-03 but output was irrecoverable (token count only, no text). One session of data permanently unrecoverable without this. | database.py: 1 class added. kabroda_mas_flow.py: 1 import, 1 helper, 2 call sites. SYSTEM_FLOW.md: 1 section + CHANGE LOG row. |
+| 2026-06-11 | 3B, SF-6 | **W-9 Lifecycle Monitor** — replaced `ledger_closing_engine.py` with a three-phase state machine. Phase 1: pre-entry watch (APPROVED records, `entry_filled_at IS NULL`); session close without fill → `EXPIRED / realized_pnl=NULL` — never `CLOSED_LOSS`. Phase 2: in-trade watch after confirmed entry fill; stop → `CLOSED_LOSS / -1.0R`; T1 → `CLOSED_WIN / +1.0R`. Phase 3: post-T1 observation (T2/T3 high-water mark). Five new columns: `entry_filled_at`, `session_expires_at`, `max_target_reached`, `t2_reached`, `t3_reached`. All three phases gate on `is_canonical == True`. | owner + Claude Code | Root cause (W-9): old engine had no entry-fill check — stamped `CLOSED_LOSS` on setups where price never crossed entry. Confirmed phantom losses on 2026-06-07 and 2026-06-10. | `ledger_closing_engine.py` rewritten; `database.py` +5 columns; commits `9ec43b1`, `cc49904`. |
+| 2026-06-11 | 3B, SF-6, dashboard/all consumers | **Canonical Record Separation** — added `is_canonical` boolean to `CampaignLog`. Auto-set `True` at creation for BTC/USDT records (unconditional — covers APPROVED, STAND_DOWN, REJECTED, WAITING). Historical set: IDs 74–90 (13 rows, 2026-05-28 onward) marked via one-time `/admin/set-canonical`. Applied 16 `is_canonical == True` filters across all production consumers: dashboard overview/history/jewel, War Room latest_log/today campaign, Radar snapshot today-campaign, CRO RAG memory, Commlink latest context, ledger all 3 phases, publisher last_closed/weekly, performance auditor. `/admin/export-audit-ledger` intentionally unfiltered. Step 5 data correction: IDs 86 and 89 reclassified `CLOSED_LOSS → EXPIRED` (`realized_pnl = NULL`, `target_hit = NULL`); ID 86 received `diagnostic_data.close_note` documenting late-PM fill context. Verified track record: 4 WIN / 0 LOSS / 2 EXPIRED / 7 STAND_DOWN. | owner + Claude Code | Pre-74 rows (ETH/SOL/multi-symbol era, dollar-PnL format) were polluting all dashboard KPIs, CRO RAG memory, and publisher performance summary. | `database.py`, `main.py` (16 sites), `kabroda_mas_flow.py`, `ledger_closing_engine.py`, `performance_auditor.py`, `publisher_crew.py`. Commits `ac71e82`, `752677b`, `8abc215`, `cc49904`, `48f6fe7`. |
+
+---
+
+## SF-6 — CampaignLog Data-Model Invariants (added 2026-06-11)
+
+Two permanent rules for anyone reading or writing `CampaignLog`. These are not implementation details — they are load-bearing constraints the lifecycle monitor, dashboard, and CRO RAG memory all depend on.
+
+---
+
+### Rule 1 — `is_canonical` gates all production reads
+
+`CampaignLog.is_canonical` (BOOLEAN, default FALSE) distinguishes the production track record from legacy data (multi-symbol era, dollar-PnL format, pre-W-9 setup rows).
+
+**Where it is set TRUE:**
+- At creation in `_inject_brief_to_database()` for any `symbol == "BTC/USDT"` record — unconditional, covers every `approval_status` value (APPROVED, STAND_DOWN, REJECTED, WAITING_FOR_15M).
+- Historically: IDs 74–90 were backfilled via `/admin/set-canonical` on 2026-06-11.
+
+**Where it is filtered TRUE (16 sites):**
+- All three lifecycle monitor phases (`ledger_closing_engine.py`)
+- CRO RAG memory (`_fetch_cro_memory()`) and Commlink latest context
+- Every dashboard consumer: `overview` (4 count queries), `mas-history` (approval_rows, pnl_rows, trades list), `jewel` trade lookup
+- War Room `latest_log` and today's campaign query
+- Radar snapshot today-campaign query
+- Performance Auditor campaigns query
+- Publisher `last_closed` and `weekly` archivist queries
+
+**The one intentional exception:** `GET /admin/export-audit-ledger` sees ALL rows — it is an admin audit tool, not a production consumer.
+
+**Why this matters:** any future query against `CampaignLog` must decide whether it is a production consumer (add `is_canonical == True`) or an admin/audit tool (see all). A new route that omits the filter silently inherits legacy garbage.
+
+---
+
+### Rule 2 — `entry_filled_at IS NULL` → `EXPIRED`, never `CLOSED_LOSS`
+
+**The invariant:** A `CampaignLog` record cannot be `CLOSED_LOSS` if `entry_filled_at IS NULL`. A loss requires an entry. `entry_filled_at IS NULL` means the lifecycle monitor never observed price crossing the entry trigger — the trade was never opened.
+
+**What the lifecycle monitor enforces (Phase 1):**
+```
+If session_expires_at IS NOT NULL AND now >= session_expires_at AND entry_filled_at IS NULL:
+    status = "EXPIRED"
+    realized_pnl = NULL
+    closed_at = now
+```
+
+This fires whether or not price touched the stop. The stop can hit before entry is confirmed (price crossed entry trigger → reversed through stop trigger without first crossing entry) — this is the canonical phantom-loss trap. The monitor checks `entry_filled_at IS NOT NULL` before entering Phase 2 (stop/target evaluation).
+
+**The historical phantom losses (corrected 2026-06-11):**
+- ID 89 (2026-06-10): stop hit while `entry_filled_at IS NULL`. Reclassified `EXPIRED / realized_pnl=NULL`.
+- ID 86 (2026-06-07): late PM trigger (~2:30 ET) outside AM session intent. Also `entry_filled_at IS NULL`. Reclassified `EXPIRED / realized_pnl=NULL`; `diagnostic_data.close_note` documents context.
+
+**Job 2 (not yet built):** The lifecycle monitor enforces this rule going forward for new sessions. But it does not retroactively audit existing `CLOSED_LOSS` rows added before W-9 — those were corrected by hand for the 13 canonical rows. A future hardening pass could add a consistency check: `SELECT * FROM campaign_logs WHERE status='CLOSED_LOSS' AND entry_filled_at IS NULL` — any result is a data integrity violation.

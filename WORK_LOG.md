@@ -115,6 +115,29 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ---
 
 ## ► NEXT SESSION START
+*End-of-session marker: 2026-06-11*
+
+**2026-06-11 — Canonical Record Separation complete (Steps 2–5)**
+
+Added `is_canonical` column to `CampaignLog`; flagged 13 canonical rows (IDs 74–90, 2026-05-28 → 2026-06-11) via `/admin/set-canonical`. Verified: 6 APPROVED (4 WIN / 2 phantom-loss), 7 STAND_DOWN.
+
+Applied 16 `is_canonical == True` query filters across dashboard, War Room, agent memory (CRO/Commlink), ledger engine (all 3 phases), publisher, auditor. Pre-74 ETH/SOL/dollar-PnL junk now hidden from all consumers. `/admin/export-audit-ledger` intentionally left unfiltered (admin audit view sees all rows).
+
+Step 5 row correction: IDs 86 & 89 reclassified `CLOSED_LOSS` → `EXPIRED`. Both had `entry_filled_at IS NULL` — confirmed phantom losses (stop triggered on positions that were never entered). `realized_pnl` and `target_hit` nulled on both.
+
+- ID 89 (2026-06-10): clean no-fill. Price never crossed entry trigger.
+- ID 86 (2026-06-07): late PM trigger (~2:30 ET, ~6h after session open) outside AM session intent. `diagnostic_data` note written. Treated as EXPIRED, not a loss.
+
+Canonical track record now reads: **4 wins / 0 losses / 2 expired / 7 stand-downs.**
+
+**Two open threads for tomorrow:**
+
+1. **Temp admin routes still live in production** (`/admin/set-canonical`, `/admin/correct-phantoms`, `/admin/schema-check`, `/admin/backfill-preview`, `/admin/table-audit`) — these are throwaway write-capable routes that shouldn't become permanent fixtures. Delete in the next cleanup pass.
+
+2. **Root-cause fix status:** Tonight corrected the *data* (two mislabeled rows). The W-9 lifecycle monitor rewrite was the structural fix — it added the `entry_filled_at IS NULL → EXPIRED` logic that prevents future phantom losses. Confirm tomorrow that the live monitor is correctly handling sessions (no new phantom losses appearing). If the monitor is solid, the root cause IS fixed; tonight was a historical data correction, not a workaround.
+
+---
+
 *End-of-session marker: 2026-06-07*
 
 **A3 + A1 CONFIRMED LIVE 2026-06-07.** Session APPROVED a SHORT despite 4H/1H POSITIVE momentum on a BEARISH trend. System correctly classified the 24–48h bounce as a counter-trend pullback "decelerating into bearish continuation, not a reversal" — matches owner's own structural read. This is the exact ambiguity (positive momentum + bear trend) that would have tangled the old gate; A3's strength-aware logic handled it correctly. JA reconciled THREE inputs (energy + structure + bias_model/macro divergence cap) cleanly, no false-certainty, concluded "single-target at most." T1-only capped correctly for STRUCTURAL reason: all 3 short targets collapsed to the $60,025.76 MAXIMUM wall — nowhere to go but the wall. All 5 agents SUCCESS on new code. NOTABLE: Kabroda's read (short the pullback, bearish continuation) aligns with owner's structural view AND opposes Mafioso's long call — independent confirmation Kabroda's logic reflects intended framework.
