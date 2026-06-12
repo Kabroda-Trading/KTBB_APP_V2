@@ -115,26 +115,27 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ---
 
 ## ► NEXT SESSION START
-*End-of-session marker: 2026-06-11*
+*End-of-session marker: 2026-06-12*
 
-**2026-06-11 — Canonical Record Separation complete (Steps 2–5)**
+**2026-06-11 → 06-12 — Phantom-loss cleanup + canonical filtering (Steps 2–5)**
 
-Added `is_canonical` column to `CampaignLog`; flagged 13 canonical rows (IDs 74–90, 2026-05-28 → 2026-06-11) via `/admin/set-canonical`. Verified: 6 APPROVED (4 WIN / 2 phantom-loss), 7 STAND_DOWN.
+Performance record was untrustworthy — approved-but-never-filled trades were logged as `CLOSED_LOSS / −1R` (phantom losses), and pre-launch test data (ETH/SOL/dollar-denominated) was polluting all dashboard views.
 
-Applied 16 `is_canonical == True` query filters across dashboard, War Room, agent memory (CRO/Commlink), ledger engine (all 3 phases), publisher, auditor. Pre-74 ETH/SOL/dollar-PnL junk now hidden from all consumers. `/admin/export-audit-ledger` intentionally left unfiltered (admin audit view sees all rows).
+**Done:**
+- Added `is_canonical` (boolean) column to `CampaignLog`.
+- `/admin/set-canonical` flagged 13 canonical rows (IDs 74–90, 2026-05-28 → 06-11). Endpoint hard-aborts unless exactly 13 IDs found; idempotent. Returned `rows_updated: 13`. Verified.
+- Applied 16 `is_canonical == True` filters across all trade-history consumers: dashboard (`overview ×4`, `mas-history ×3`, `jewel`), war room (×2), agent memory (CRO `_fetch_cro_memory`, Operator Commlink), ledger engine (phases 1/2/3), outcome tick, performance auditor, publisher (×2). `/admin/export-audit-ledger` **intentionally left unfiltered** (audit escape hatch — must see all rows by design).
+- `/admin/correct-phantoms` reclassified 2 rows `CLOSED_LOSS` → `EXPIRED`: ID 89 (06-10, clean no-fill) and ID 86 (06-07, late PM trigger ~2:30 ET outside AM intent). Both had `entry_filled_at: null` while `status: CLOSED_LOSS` — direct evidence of the phantom-loss bug. `realized_pnl` / `target_hit` nulled on both; ID 86 received `diagnostic_data` note.
+- **Archivist crash fixed (06-12):** `_fetch_archivist_data()` in `publisher_crew.py` used direct `realized_pnl > 0` comparisons on all `closed_at IS NOT NULL` rows. After nulling EXPIRED rows' PnL, those rows appeared in `weekly` and `last_closed` with `realized_pnl = None` → `TypeError`. Fix: both queries now filter `status.in_(["CLOSED_WIN", "CLOSED_LOSS"])`; arithmetic guarded with `is not None`. EXPIRED rows are "no trade" — they must never count in wins/losses/net_pnl or appear as "last trade result" in the newsletter.
 
-Step 5 row correction: IDs 86 & 89 reclassified `CLOSED_LOSS` → `EXPIRED`. Both had `entry_filled_at IS NULL` — confirmed phantom losses (stop triggered on positions that were never entered). `realized_pnl` and `target_hit` nulled on both.
+**Verified record: 4 wins / 0 losses / 2 expired / 7 stand-downs.** Dashboard reads 100% win rate, +4R lifetime, 14 sessions, 42.9% approved.
 
-- ID 89 (2026-06-10): clean no-fill. Price never crossed entry trigger.
-- ID 86 (2026-06-07): late PM trigger (~2:30 ET, ~6h after session open) outside AM session intent. `diagnostic_data` note written. Treated as EXPIRED, not a loss.
-
-Canonical track record now reads: **4 wins / 0 losses / 2 expired / 7 stand-downs.**
-
-**Two open threads for tomorrow:**
-
-1. **Temp admin routes still live in production** (`/admin/set-canonical`, `/admin/correct-phantoms`, `/admin/schema-check`, `/admin/backfill-preview`, `/admin/table-audit`) — these are throwaway write-capable routes that shouldn't become permanent fixtures. Delete in the next cleanup pass.
-
-2. **Root-cause fix status:** Tonight corrected the *data* (two mislabeled rows). The W-9 lifecycle monitor rewrite was the structural fix — it added the `entry_filled_at IS NULL → EXPIRED` logic that prevents future phantom losses. Confirm tomorrow that the live monitor is correctly handling sessions (no new phantom losses appearing). If the monitor is solid, the root cause IS fixed; tonight was a historical data correction, not a workaround.
+**Open / next:**
+1. **[CLEANUP]** Temp admin routes still live in production: `/admin/set-canonical`, `/admin/correct-phantoms`, `/admin/schema-check`, `/admin/backfill-preview`, `/admin/table-audit`. Delete in next pass.
+2. **[VERIFY]** Confirm lifecycle monitor issues EXPIRED (not CLOSED_LOSS) on no-fill sessions going forward — root-cause fix is in the W-9 monitor code, the above was a historical data correction.
+3. **[BUG]** Intel Reporter: CoinGecko 429 rate-limit. Confirm if persistent (3rd consecutive day = publication blocker).
+4. **[COSMETIC]** Cumulative performance chart x-axis dates out of chronological order (values correct, sort wrong).
+5. **[DESIGN]** Job 2: full daily-state capture for replay/backtest. Store INPUTS not just outputs: ADX, MACD, MAs, JEWEL, TF votes, kinematic grade, harmonic state, price-action-followed, fill session AM/PM.
 
 ---
 

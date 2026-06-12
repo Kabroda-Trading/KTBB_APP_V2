@@ -289,11 +289,13 @@ def _fetch_archivist_data(symbol: str) -> Dict[str, Any]:
     """
     db = SessionLocal()
     try:
+        # Filter to actual completed trades only — EXPIRED rows have realized_pnl=NULL
+        # and must not appear in wins/losses/net_pnl or as "last trade result".
         last_closed = (
             db.query(CampaignLog)
             .filter(
                 CampaignLog.symbol == symbol,
-                CampaignLog.closed_at.isnot(None),
+                CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS"]),
                 CampaignLog.is_canonical == True,
             )
             .order_by(CampaignLog.closed_at.desc())
@@ -305,23 +307,25 @@ def _fetch_archivist_data(symbol: str) -> Dict[str, Any]:
             db.query(CampaignLog)
             .filter(
                 CampaignLog.symbol == symbol,
-                CampaignLog.closed_at.isnot(None),
+                CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS"]),
                 CampaignLog.closed_at >= since,
                 CampaignLog.is_canonical == True,
             )
             .all()
         )
 
-        wins    = sum(1 for t in weekly if t.realized_pnl > 0)
-        losses  = sum(1 for t in weekly if t.realized_pnl <= 0)
-        net_pnl = sum(t.realized_pnl for t in weekly)
+        wins    = sum(1 for t in weekly if t.realized_pnl is not None and t.realized_pnl > 0)
+        losses  = sum(1 for t in weekly if t.realized_pnl is not None and t.realized_pnl < 0)
+        net_pnl = sum(t.realized_pnl for t in weekly if t.realized_pnl is not None)
 
         if last_closed:
-            outcome = last_closed.target_hit or ("WIN" if last_closed.realized_pnl > 0 else "LOSS")
+            pnl = last_closed.realized_pnl
+            outcome = last_closed.target_hit or ("WIN" if pnl is not None and pnl > 0 else "LOSS")
+            pnl_str = f"{pnl:+.2f}R" if pnl is not None else "N/A"
             last_trade_str = (
                 f"{last_closed.date_key} | {last_closed.bias} | "
                 f"Entry ${last_closed.entry_price:,.2f} | "
-                f"Outcome: {outcome} | PnL: {last_closed.realized_pnl:+.2f}R"
+                f"Outcome: {outcome} | PnL: {pnl_str}"
             )
         else:
             last_trade_str = "No closed trades on record — system in early deployment."
