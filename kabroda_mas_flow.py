@@ -1421,6 +1421,11 @@ def _inject_brief_to_database(
         if structure_reasoning:
             log.structure_reasoning = json.dumps(structure_reasoning, default=str)
 
+        # Auto-mark canonical: all BTC/USDT records are track-record quality.
+        # Unconditional — covers APPROVED, STAND_DOWN, REJECTED, WAITING_FOR_15M.
+        if symbol == "BTC/USDT" and not log.is_canonical:
+            log.is_canonical = True
+
         # Set session expiry on APPROVED records so the lifecycle monitor knows
         # when to expire unfilled setups. Only set once — don't overwrite.
         if brief.approval_status == "APPROVED" and log.session_expires_at is None:

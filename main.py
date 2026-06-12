@@ -1277,6 +1277,58 @@ async def admin_schema_check(request: Request, db: Session = Depends(get_db)):
     })
 
 
+# TEMPORARY — canonical record separation. DELETE after Step 5 phantom correction confirmed.
+@app.post("/admin/set-canonical")
+async def admin_set_canonical(request: Request, db: Session = Depends(get_db)):
+    """
+    ONE-TIME idempotent write. Marks the 13 known-good BTC/USDT records as canonical.
+    Safe to re-run — only updates rows where is_canonical is currently False.
+    Returns rows_updated — must be exactly 13 on first run, 0 on re-run.
+    Admin-guarded. DELETE this route after Step 5 phantom correction is confirmed.
+    """
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=403)
+
+    _CANONICAL_IDS = [74, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90]
+
+    before = db.query(CampaignLog).filter(
+        CampaignLog.id.in_(_CANONICAL_IDS)
+    ).all()
+
+    if len(before) != 13:
+        return JSONResponse({
+            "ok": False,
+            "error": f"Expected 13 rows by ID — found {len(before)}. Aborting. Check IDs.",
+            "found_ids": sorted([r.id for r in before]),
+        }, status_code=400)
+
+    updated = 0
+    snapshot = []
+    for row in before:
+        snapshot.append({
+            "id": row.id,
+            "symbol": row.symbol,
+            "date_key": row.date_key,
+            "bias": row.bias,
+            "mas_approval_status": row.mas_approval_status,
+            "status": row.status,
+            "was_canonical": row.is_canonical,
+        })
+        if not row.is_canonical:
+            row.is_canonical = True
+            updated += 1
+
+    db.commit()
+    return JSONResponse({
+        "ok": True,
+        "rows_updated": updated,
+        "total_canonical_ids": len(_CANONICAL_IDS),
+        "note": "Idempotent — re-run returns rows_updated: 0 if already applied.",
+        "snapshot": snapshot,
+    })
+
+
 # TEMPORARY — W-9 backfill diagnostic. DELETE after backfill confirmed + applied.
 @app.get("/admin/backfill-preview")
 async def admin_backfill_preview(request: Request, db: Session = Depends(get_db)):
