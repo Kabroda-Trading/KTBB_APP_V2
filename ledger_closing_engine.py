@@ -122,6 +122,7 @@ async def run_ledger_audit_loop():
                 CampaignLog.closed_at.is_(None),
                 CampaignLog.entry_filled_at.is_(None),
                 CampaignLog.session_expires_at.isnot(None),
+                CampaignLog.is_canonical == True,
             ).all()
 
             for c in pending:
@@ -159,6 +160,7 @@ async def run_ledger_audit_loop():
                 CampaignLog.mas_approval_status == "APPROVED",
                 CampaignLog.closed_at.is_(None),
                 CampaignLog.entry_filled_at.isnot(None),
+                CampaignLog.is_canonical == True,
             ).all()
 
             for c in active:
@@ -230,6 +232,7 @@ async def run_ledger_audit_loop():
                 CampaignLog.closed_at.isnot(None),
                 CampaignLog.target_hit == "T1",
                 CampaignLog.session_expires_at.isnot(None),
+                CampaignLog.is_canonical == True,
             ).all()
 
             for c in post_exit:

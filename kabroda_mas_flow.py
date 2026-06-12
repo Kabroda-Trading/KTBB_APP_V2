@@ -427,6 +427,7 @@ def _fetch_cro_memory(symbol: str) -> str:
             CampaignLog.symbol == symbol,
             CampaignLog.mas_approval_status == "APPROVED",
             CampaignLog.closed_at.isnot(None),
+            CampaignLog.is_canonical == True,
         ).order_by(CampaignLog.closed_at.desc()).limit(5).all()
 
         if not logs:
@@ -1213,7 +1214,10 @@ def interrogate_cro(symbol: str, user_message: str) -> str:
         # Latest execution context from CampaignLog
         log = (
             db.query(CampaignLog)
-            .filter(CampaignLog.symbol == symbol)
+            .filter(
+                CampaignLog.symbol == symbol,
+                CampaignLog.is_canonical == True,
+            )
             .order_by(CampaignLog.id.desc())
             .first()
         )

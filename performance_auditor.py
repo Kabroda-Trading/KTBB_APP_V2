@@ -120,6 +120,7 @@ def _collect_stats(symbol: str, cutoff: datetime) -> Dict[str, Any]:
             .filter(
                 CampaignLog.symbol == symbol,
                 CampaignLog.created_at >= cutoff,
+                CampaignLog.is_canonical == True,
             )
             .all()
         )

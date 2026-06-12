@@ -389,6 +389,7 @@ def _do_outcome_tick(current_price: float) -> None:
         closed_logs = db.query(CampaignLog).filter(
             CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS"]),
             CampaignLog.target_hit.is_(None),
+            CampaignLog.is_canonical == True,
         ).all()
         for log in closed_logs:
             log.target_hit = "T1" if log.status == "CLOSED_WIN" else "STOP"
@@ -541,7 +542,7 @@ async def macro_war_room_page(request: Request, symbol: str = "BTC/USDT", db: Se
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
     
     db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
-    latest_log = db.query(CampaignLog).filter(CampaignLog.symbol == db_sym).order_by(CampaignLog.id.desc()).first()
+    latest_log = db.query(CampaignLog).filter(CampaignLog.symbol == db_sym, CampaignLog.is_canonical == True).order_by(CampaignLog.id.desc()).first()
     
     if latest_log and not latest_log.mas_executive_brief and latest_log.mas_approval_status == 'PENDING':
         # Dedup: if MacroNarrativeLog already has a senior_analyst row for this date,
@@ -733,6 +734,7 @@ async def api_radar_snapshot(db: Session = Depends(get_db)):
     campaign = db.query(CampaignLog).filter(
         CampaignLog.symbol == symbol_norm,
         CampaignLog.date_key == today,
+        CampaignLog.is_canonical == True,
     ).order_by(CampaignLog.id.desc()).first()
 
     mas_status = campaign.mas_approval_status if campaign else None
@@ -1561,11 +1563,11 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
         return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
     try:
         from sqlalchemy import func
-        total      = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT").scalar() or 0
-        approved   = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.mas_approval_status == "APPROVED").scalar() or 0
+        total      = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.is_canonical == True).scalar() or 0
+        approved   = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.mas_approval_status == "APPROVED", CampaignLog.is_canonical == True).scalar() or 0
         approved_rate = round(approved / total * 100, 1) if total > 0 else 0.0
-        wins   = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.status == "CLOSED_WIN").scalar() or 0
-        losses = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.status == "CLOSED_LOSS").scalar() or 0
+        wins   = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.status == "CLOSED_WIN", CampaignLog.is_canonical == True).scalar() or 0
+        losses = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.status == "CLOSED_LOSS", CampaignLog.is_canonical == True).scalar() or 0
         win_rate = round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0.0
         net_r = round(float(wins - losses), 2)
         since_7d = datetime.now(timezone.utc) - timedelta(days=7)
@@ -1658,12 +1660,13 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
     try:
         from sqlalchemy import func
         approval_rows = db.query(CampaignLog.mas_approval_status,
-            func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT").group_by(CampaignLog.mas_approval_status).all()
+            func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.is_canonical == True).group_by(CampaignLog.mas_approval_status).all()
         approval_counts = {row[0]: row[1] for row in approval_rows}
         pnl_rows = db.query(CampaignLog.closed_at, CampaignLog.date_key,
             CampaignLog.status).filter(
             CampaignLog.symbol == "BTC/USDT",
-            CampaignLog.closed_at.isnot(None)
+            CampaignLog.closed_at.isnot(None),
+            CampaignLog.is_canonical == True,
         ).order_by(CampaignLog.closed_at).all()
         cumulative = 0.0
         pnl_series = []
@@ -1672,7 +1675,7 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
                 continue
             cumulative += 1.0 if row.status == "CLOSED_WIN" else -1.0
             pnl_series.append({"date": row.date_key, "cumulative": round(cumulative, 2)})
-        trades = db.query(CampaignLog).filter(CampaignLog.symbol == "BTC/USDT").order_by(CampaignLog.id.desc()).limit(50).all()
+        trades = db.query(CampaignLog).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.is_canonical == True).order_by(CampaignLog.id.desc()).limit(50).all()
         trades_data = []
         for t in trades:
             if t.status == "CLOSED_WIN":
@@ -1708,7 +1711,8 @@ async def api_dashboard_jewel(request: Request, db: Session = Depends(get_db)):
             trade = db.query(CampaignLog).filter(
                 CampaignLog.symbol == "BTC/USDT",
                 CampaignLog.date_key == date_key,
-                CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS"])).first()
+                CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS"]),
+                CampaignLog.is_canonical == True).first()
             if not trade:
                 continue
             is_win = trade.status == "CLOSED_WIN"

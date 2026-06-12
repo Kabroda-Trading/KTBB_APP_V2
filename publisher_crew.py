@@ -294,6 +294,7 @@ def _fetch_archivist_data(symbol: str) -> Dict[str, Any]:
             .filter(
                 CampaignLog.symbol == symbol,
                 CampaignLog.closed_at.isnot(None),
+                CampaignLog.is_canonical == True,
             )
             .order_by(CampaignLog.closed_at.desc())
             .first()
@@ -306,6 +307,7 @@ def _fetch_archivist_data(symbol: str) -> Dict[str, Any]:
                 CampaignLog.symbol == symbol,
                 CampaignLog.closed_at.isnot(None),
                 CampaignLog.closed_at >= since,
+                CampaignLog.is_canonical == True,
             )
             .all()
         )
