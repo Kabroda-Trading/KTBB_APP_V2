@@ -117,25 +117,24 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ## ► NEXT SESSION START
 *End-of-session marker: 2026-06-12*
 
-**2026-06-11 → 06-12 — Phantom-loss cleanup + canonical filtering (Steps 2–5)**
+**2026-06-12 — Null-PnL crash fixes + temp route cleanup + Job 2 Phase A join key**
 
-Performance record was untrustworthy — approved-but-never-filled trades were logged as `CLOSED_LOSS / −1R` (phantom losses), and pre-launch test data (ETH/SOL/dollar-denominated) was polluting all dashboard views.
+**Done (this session):**
+- **CRO RAG memory crash fixed** (`_fetch_cro_memory()` in `kabroda_mas_flow.py`, commit `ba34e8f`): query filtered on `mas_approval_status == "APPROVED"` without a `status` filter; EXPIRED rows (IDs 86 and 89, `realized_pnl = NULL`) appeared in the last-5 RAG context → `TypeError` on every SA run. Fix: `status.in_(["CLOSED_WIN", "CLOSED_LOSS"])`; arithmetic guarded with `is not None`. *Same root cause as the Archivist crash (commit `32fc241`): `mas_approval_status` is never updated by the lifecycle monitor — EXPIRED rows keep their pre-trade APPROVED verdict. Both crashes trace to the SF-6 Rule 1 trap. Queries for "actual completed trades" must filter on `status`, not `mas_approval_status`.*
+- **Temp admin routes deleted** (commit `fa79584`): `/admin/set-canonical`, `/admin/correct-phantoms`, `/admin/schema-check`, `/admin/backfill-preview`, `/admin/table-audit` — all five TEMPORARY-tagged routes removed from `main.py`. Retained: `/admin/export-audit-ledger` (SF-6 Rule 1 exception), `/admin/interpreter-log` (Auditability Covenant, permanent).
+- **Job 2 Phase A item 1 — join key** (commit `4e82934`): `DecisionJournal` had no `session_id` column; could only join to `InterpreterLog` on `(symbol, session_date)`. Added `session_id VARCHAR` column + ALTER TABLE migration in `database.py`. Forwarded `session_id` into `_inject_decision_journal()` signature and its call site in `run_mas_analysis()`. Join triple `(symbol, session_date, session_id)` now threads all three tables: `campaign_logs`, `interpreter_log`, `decision_journal`. Serves W-3 weather-reading backtest. See SF-6 Rule 3 for the session_id trap note.
 
-**Done:**
-- Added `is_canonical` (boolean) column to `CampaignLog`.
-- `/admin/set-canonical` flagged 13 canonical rows (IDs 74–90, 2026-05-28 → 06-11). Endpoint hard-aborts unless exactly 13 IDs found; idempotent. Returned `rows_updated: 13`. Verified.
-- Applied 16 `is_canonical == True` filters across all trade-history consumers: dashboard (`overview ×4`, `mas-history ×3`, `jewel`), war room (×2), agent memory (CRO `_fetch_cro_memory`, Operator Commlink), ledger engine (phases 1/2/3), outcome tick, performance auditor, publisher (×2). `/admin/export-audit-ledger` **intentionally left unfiltered** (audit escape hatch — must see all rows by design).
-- `/admin/correct-phantoms` reclassified 2 rows `CLOSED_LOSS` → `EXPIRED`: ID 89 (06-10, clean no-fill) and ID 86 (06-07, late PM trigger ~2:30 ET outside AM intent). Both had `entry_filled_at: null` while `status: CLOSED_LOSS` — direct evidence of the phantom-loss bug. `realized_pnl` / `target_hit` nulled on both; ID 86 received `diagnostic_data` note.
-- **Archivist crash fixed (06-12):** `_fetch_archivist_data()` in `publisher_crew.py` used direct `realized_pnl > 0` comparisons on all `closed_at IS NOT NULL` rows. After nulling EXPIRED rows' PnL, those rows appeared in `weekly` and `last_closed` with `realized_pnl = None` → `TypeError`. Fix: both queries now filter `status.in_(["CLOSED_WIN", "CLOSED_LOSS"])`; arithmetic guarded with `is not None`. EXPIRED rows are "no trade" — they must never count in wins/losses/net_pnl or appear as "last trade result" in the newsletter.
+**Open gate — production confirmation pending:**
+`4e82934` deployed but not yet confirmed live. Next 9 AM ET MAS run must write `session_id="us_ny_futures"` into a new `decision_journal` row.
+Verify with: `SELECT id, symbol, session_date, session_id FROM decision_journal ORDER BY id DESC LIMIT 1;`
 
-**Verified record: 4 wins / 0 losses / 2 expired / 7 stand-downs.** Dashboard reads 100% win rate, +4R lifetime, 14 sessions, 42.9% approved.
+**W-11 = Phase A item 2 (source column + decision_type tagging):**
+Touches the same `_inject_decision_journal()` function modified in `4e82934`. **Do NOT edit that function again until `4e82934` is production-confirmed.** After confirmation: add `source` column (`"mas_flow"` vs. `"market_radar"`) and 4-value `decision_type` tagging in a separate commit.
 
-**Open / next:**
-1. **[CLEANUP]** Temp admin routes still live in production: `/admin/set-canonical`, `/admin/correct-phantoms`, `/admin/schema-check`, `/admin/backfill-preview`, `/admin/table-audit`. Delete in next pass.
-2. **[VERIFY]** Confirm lifecycle monitor issues EXPIRED (not CLOSED_LOSS) on no-fill sessions going forward — root-cause fix is in the W-9 monitor code, the above was a historical data correction.
-3. **[BUG]** Intel Reporter: CoinGecko 429 rate-limit. Confirm if persistent (3rd consecutive day = publication blocker).
+**Carry forward:**
+2. **[VERIFY]** Confirm lifecycle monitor issues EXPIRED (not CLOSED_LOSS) on no-fill sessions going forward — root-cause fix is in the W-9 monitor code, the historical phantom-loss correction is done.
+3. **[BUG]** Intel Reporter: CoinGecko 429 rate-limit. Confirm if persistent (multi-day = publication blocker).
 4. **[COSMETIC]** Cumulative performance chart x-axis dates out of chronological order (values correct, sort wrong).
-5. **[DESIGN]** Job 2: full daily-state capture for replay/backtest. Store INPUTS not just outputs: ADX, MACD, MAs, JEWEL, TF votes, kinematic grade, harmonic state, price-action-followed, fill session AM/PM.
 
 ---
 
