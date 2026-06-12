@@ -1278,7 +1278,7 @@ async def admin_schema_check(request: Request, db: Session = Depends(get_db)):
 
 
 # TEMPORARY — canonical record separation. DELETE after Step 5 phantom correction confirmed.
-@app.post("/admin/set-canonical")
+@app.get("/admin/set-canonical")
 async def admin_set_canonical(request: Request, db: Session = Depends(get_db)):
     """
     ONE-TIME idempotent write. Marks the 13 known-good BTC/USDT records as canonical.
