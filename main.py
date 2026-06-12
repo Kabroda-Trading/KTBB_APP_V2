@@ -1331,6 +1331,80 @@ async def admin_set_canonical(request: Request, db: Session = Depends(get_db)):
     })
 
 
+# TEMPORARY — Step 5 phantom correction. DELETE after dashboard shows 4W/0L/2EXPIRED.
+@app.get("/admin/correct-phantoms")
+async def admin_correct_phantoms(request: Request, db: Session = Depends(get_db)):
+    """
+    ONE-TIME correction of IDs 86 and 89 — mislabeled CLOSED_LOSS rows where
+    entry was never filled. Both → EXPIRED / realized_pnl NULL / target_hit NULL.
+    ID 86 also receives a diagnostic_data close_note documenting the late-fill context.
+    Idempotent — re-run is safe (rows_corrected: 0 if already applied).
+    DELETE after Step 5 dashboard confirmation (4 wins / 0 losses / 2 expired).
+    """
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=403)
+
+    rows = db.query(CampaignLog).filter(CampaignLog.id.in_([86, 89])).all()
+    if len(rows) != 2:
+        return JSONResponse({
+            "ok": False,
+            "error": f"Expected 2 rows (IDs 86, 89) — found {len(rows)}. Aborting.",
+            "found_ids": sorted([r.id for r in rows]),
+        }, status_code=400)
+
+    row_map = {r.id: r for r in rows}
+    r86 = row_map[86]
+    r89 = row_map[89]
+
+    def _snap(r: CampaignLog) -> dict:
+        return {
+            "id": r.id,
+            "date_key": r.date_key,
+            "status": r.status,
+            "mas_approval_status": r.mas_approval_status,
+            "realized_pnl": r.realized_pnl,
+            "target_hit": r.target_hit,
+            "entry_filled_at": str(r.entry_filled_at) if r.entry_filled_at else None,
+            "diagnostic_data": r.diagnostic_data,
+        }
+
+    snapshot_before = {str(rid): _snap(row_map[rid]) for rid in [86, 89]}
+    rows_corrected = 0
+
+    for row in [r86, r89]:
+        if row.status != "EXPIRED":
+            row.status = "EXPIRED"
+            row.realized_pnl = None
+            row.target_hit = None
+            rows_corrected += 1
+
+    # ID 86: merge close_note into diagnostic_data (idempotent)
+    try:
+        diag86 = json.loads(r86.diagnostic_data) if r86.diagnostic_data else {}
+    except (json.JSONDecodeError, TypeError):
+        diag86 = {}
+    diag86["close_note"] = (
+        "Late afternoon fill (~2:30 PM ET) outside AM session intent "
+        "— reclassified EXPIRED rather than CLOSED_LOSS"
+    )
+    r86.diagnostic_data = json.dumps(diag86)
+
+    db.commit()
+    db.refresh(r86)
+    db.refresh(r89)
+
+    snapshot_after = {str(rid): _snap(row_map[rid]) for rid in [86, 89]}
+
+    return JSONResponse({
+        "ok": True,
+        "rows_corrected": rows_corrected,
+        "note": "Idempotent — re-run returns rows_corrected: 0 if already applied. ID 86 diagnostic_data is always refreshed.",
+        "before": snapshot_before,
+        "after": snapshot_after,
+    })
+
+
 # TEMPORARY — W-9 backfill diagnostic. DELETE after backfill confirmed + applied.
 @app.get("/admin/backfill-preview")
 async def admin_backfill_preview(request: Request, db: Session = Depends(get_db)):
