@@ -1191,11 +1191,11 @@ async def decision_type_audit(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx.get("is_admin"):
         return RedirectResponse("/suite")
-    from sqlalchemy import func as sa_func
+    from sqlalchemy import func
     rows = (
-        db.query(DecisionJournal.decision_type, sa_func.count(DecisionJournal.id))
+        db.query(DecisionJournal.decision_type, func.count(DecisionJournal.id))
         .group_by(DecisionJournal.decision_type)
-        .order_by(sa_func.count(DecisionJournal.id).desc())
+        .order_by(func.count(DecisionJournal.id).desc())
         .all()
     )
     also_null = db.query(func.count(DecisionJournal.id)).filter(DecisionJournal.decision_type == None).scalar() or 0
