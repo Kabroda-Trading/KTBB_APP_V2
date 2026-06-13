@@ -1183,6 +1183,31 @@ async def admin_interpreter_log(request: Request, db: Session = Depends(get_db))
     return HTMLResponse(content=html)
 
 
+# TEMPORARY — READ-ONLY — DELETE AFTER W-11 BACKFILL CONFIRMED
+# Returns distinct decision_type counts from production decision_journal.
+# Used to verify backfill coverage before the W-11 source column migration.
+@app.get("/admin/decision-type-audit")
+async def decision_type_audit(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return RedirectResponse("/suite")
+    from sqlalchemy import func as sa_func
+    rows = (
+        db.query(DecisionJournal.decision_type, sa_func.count(DecisionJournal.id))
+        .group_by(DecisionJournal.decision_type)
+        .order_by(sa_func.count(DecisionJournal.id).desc())
+        .all()
+    )
+    also_null = db.query(func.count(DecisionJournal.id)).filter(DecisionJournal.decision_type == None).scalar() or 0
+    total = db.query(func.count(DecisionJournal.id)).scalar() or 0
+    return JSONResponse({
+        "ok": True,
+        "total_rows": total,
+        "null_decision_type": also_null,
+        "counts": [{"decision_type": r[0], "count": r[1]} for r in rows],
+    })
+
+
 # --- API EXECUTION ROUTES ---
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
