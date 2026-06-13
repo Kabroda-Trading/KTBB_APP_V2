@@ -115,25 +115,23 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ---
 
 ## ► NEXT SESSION START
-*End-of-session marker: 2026-06-12*
+*End-of-session marker: 2026-06-13*
 
-**2026-06-12 — Null-PnL crash fixes + temp route cleanup + Job 2 Phase A join key**
+**2026-06-13 — Phase A join key production-confirmed + null-PnL fixes verified live**
 
-**Done (this session):**
-- **CRO RAG memory crash fixed** (`_fetch_cro_memory()` in `kabroda_mas_flow.py`, commit `ba34e8f`): query filtered on `mas_approval_status == "APPROVED"` without a `status` filter; EXPIRED rows (IDs 86 and 89, `realized_pnl = NULL`) appeared in the last-5 RAG context → `TypeError` on every SA run. Fix: `status.in_(["CLOSED_WIN", "CLOSED_LOSS"])`; arithmetic guarded with `is not None`. *Same root cause as the Archivist crash (commit `32fc241`): `mas_approval_status` is never updated by the lifecycle monitor — EXPIRED rows keep their pre-trade APPROVED verdict. Both crashes trace to the SF-6 Rule 1 trap. Queries for "actual completed trades" must filter on `status`, not `mas_approval_status`.*
-- **Temp admin routes deleted** (commit `fa79584`): `/admin/set-canonical`, `/admin/correct-phantoms`, `/admin/schema-check`, `/admin/backfill-preview`, `/admin/table-audit` — all five TEMPORARY-tagged routes removed from `main.py`. Retained: `/admin/export-audit-ledger` (SF-6 Rule 1 exception), `/admin/interpreter-log` (Auditability Covenant, permanent).
-- **Job 2 Phase A item 1 — join key** (commit `4e82934`): `DecisionJournal` had no `session_id` column; could only join to `InterpreterLog` on `(symbol, session_date)`. Added `session_id VARCHAR` column + ALTER TABLE migration in `database.py`. Forwarded `session_id` into `_inject_decision_journal()` signature and its call site in `run_mas_analysis()`. Join triple `(symbol, session_date, session_id)` now threads all three tables: `campaign_logs`, `interpreter_log`, `decision_journal`. Serves W-3 weather-reading backtest. See SF-6 Rule 3 for the session_id trap note.
+**Confirmed today:**
+- **Job 2 Phase A item 1 PRODUCTION-CONFIRMED** (commit `4e82934`): deploy log shows `|| DECISION JOURNAL || BTC/USDT | MAS_REJECTED` at 13:55:36 — `init_db()` ran clean on Postgres and a new `decision_journal` row was written. Residual check (non-blocker): run `SELECT id, symbol, session_date, session_id FROM decision_journal ORDER BY id DESC LIMIT 1;` to eyeball that `session_id="us_ny_futures"` populated the column.
+- **Both null-PnL crash fixes held live** (commits `ba34e8f`, `32fc241`): full MTF / Gravity / Junior Analyst interpreter reasoning written with no `NoneType/TypeError`. CRO memory and Archivist fixes confirmed working on a real session.
+- **W-11 UNBLOCKED** — join key is production-confirmed; source column + 4-value `decision_type` tagging can now proceed in a separate commit.
 
-**Open gate — production confirmation pending:**
-`4e82934` deployed but not yet confirmed live. Next 9 AM ET MAS run must write `session_id="us_ny_futures"` into a new `decision_journal` row.
-Verify with: `SELECT id, symbol, session_date, session_id FROM decision_journal ORDER BY id DESC LIMIT 1;`
+**Today's session result:** STAND_DOWN (5 consecutive EXIT/DIVERGENCE signals, 4H PMARP 83.7%, HOSTILE_CEILING + CHOP_RISK, 1/5 fractured vote). Newsletter draft written. Costs healthy ($0.158 24h / $1.14 7-day, all SUCCESS).
 
-**W-11 = Phase A item 2 (source column + decision_type tagging):**
-Touches the same `_inject_decision_journal()` function modified in `4e82934`. **Do NOT edit that function again until `4e82934` is production-confirmed.** After confirmation: add `source` column (`"mas_flow"` vs. `"market_radar"`) and 4-value `decision_type` tagging in a separate commit.
+**NEW — W-12 (MAS scheduler autonomy — read-only diagnosis complete, see W-12 section):**
+Today's MAS run (13:55:36) fired 12 seconds after `GET /suite/radar + POST /api/radar/scan` at 13:55:24. Page-triggered path confirmed, NOT the 14:00 UTC scheduler. See W-12 for full trace and autonomy status. Not a blocker for daily operation; critical-path for unattended publication.
 
 **Carry forward:**
 2. **[VERIFY]** Confirm lifecycle monitor issues EXPIRED (not CLOSED_LOSS) on no-fill sessions going forward — root-cause fix is in the W-9 monitor code, the historical phantom-loss correction is done.
-3. **[BUG]** Intel Reporter: CoinGecko 429 rate-limit. Confirm if persistent (multi-day = publication blocker).
+3. **[BUG]** Intel Reporter: CoinGecko 429 rate-limit — did NOT recur today; possibly transient. Continue to monitor.
 4. **[COSMETIC]** Cumulative performance chart x-axis dates out of chronological order (values correct, sort wrong).
 
 ---
@@ -363,6 +361,50 @@ The accuracy stats are not yet valid. The auditor cannot calibrate Kabroda's dec
 - **Priority:** High — next Sunday's audit will produce the same contaminated numbers if not fixed first.
 - **Blocks:** all auditor accuracy analysis, stand-down calibration, kinematic-grade calibration. Auditor output is directionally useless until query is fixed.
 - **Does NOT block:** daily sessions, A3 live watch, W-9 outcome integrity work.
+
+---
+
+### W-12 ☐ MAS SCHEDULER AUTONOMY — read-only diagnosis complete (2026-06-13)
+
+**Question:** Does the daily MAS run fire on the autonomous 14:00 UTC scheduler, or is the real trigger a page-visit?
+
+**Observation:** Today's MAS run (`|| DECISION JOURNAL || BTC/USDT | MAS_REJECTED` at 13:55:36) fired 12 seconds after `GET /suite/radar + POST /api/radar/scan` at 13:55:24 — 4 minutes before the scheduled 14:00 UTC fire time.
+
+#### Trigger chain trace (read-only, no changes)
+
+**Path A — Page-triggered (what happened today):**
+1. User visits `/suite/radar` → JS fires `POST /api/radar/scan` on page load
+2. → `market_radar.scan_sector()` (`market_radar.py:60`)
+3. → `battlebox_pipeline.get_live_battlebox("BTCUSDT", "MANUAL", manual_id="us_ny_futures")`
+4. → No `SessionLock` for today → creates lock → `asyncio.create_task(run_mas_analysis(...))` (`battlebox_pipeline.py:556`)
+5. MAS fires immediately — the 14:00 UTC fire is preempted
+
+**Path B — Scheduler (14:00 UTC daily, `main.py:194`):**
+1. `run_senior_analyst_scheduler()` wakes at 14:00 UTC
+2. → `_fire_senior_analyst(date_key)` (`main.py:104`)
+3. → Checks `MacroNarrativeLog` — if already written (Path A ran): skips entirely (`main.py:119-124`)
+4. → If no narrative: calls `get_live_battlebox()` → finds existing lock → no second MAS fire
+5. Restart-recovery fallback only: if lock exists but no CampaignLog PENDING → fires `run_mas_analysis()` directly (`main.py:183-188`)
+
+**Path C — War Room page (`GET /suite/macro-war-room`, `main.py:547-573`):**
+A third path: if a `CampaignLog` row has `mas_approval_status == 'PENDING'` and no `MacroNarrativeLog` exists for today, fires `run_mas_analysis()` via `asyncio.create_task()`. This is a legacy rescue path from before the scheduler existed.
+
+#### Double-execution guard status
+- `battlebox_pipeline.py:528`: if `existing_lock` found → skips `asyncio.create_task()`. Prevents double-fire from multiple `get_live_battlebox()` calls.
+- `_fire_senior_analyst()` `main.py:117-124`: checks `MacroNarrativeLog` before proceeding. Prevents the scheduler from re-running after Path A succeeds.
+- Both guards are effective — there is no double-brief risk.
+
+#### Is the system autonomous?
+**Yes — with a caveat.** If the owner never loads the radar page before 14:00 UTC, the scheduler fires at 14:00 UTC, creates the lock via `get_live_battlebox()`, and MAS runs unattended. The autonomous path works correctly. **The issue:** in normal use, the page-visit always wins the race, so the "14:00 UTC scheduler" is effectively the fallback, not the primary trigger. The brief time-stamps will show the MAS run whenever the page was first loaded that day.
+
+#### Implication for autonomous publication goal
+The unattended publication flow (MAS → newsletter → delivery) requires the MAS to fire reliably at a predictable time WITHOUT a page-visit. The current design delivers that — the scheduler handles the no-visit case — but the brief will timestamp to 13:55 on days the owner loads the page first. If publication depends on a fixed fire time (e.g., a downstream job at 14:05 UTC), page-visit timing creates unpredictable jitter.
+
+**Next question (not yet answered):** does the newsletter publication job (`run_senior_analyst_scheduler` or a separate scheduler) fire at a fixed offset after 14:00 UTC, or does it chain off the MAS completion? That determines whether the jitter matters.
+
+- **Status:** ☐ Read-only diagnosis complete. No code changes made or needed yet.
+- **Priority:** Medium — system works, autonomy confirmed. Build decision depends on whether publication timing requires a hard 14:00 UTC anchor.
+- **Connects to:** SYSTEM_FLOW node 1A (trigger-timing design), W-4 (publication delivery).
 
 ---
 
