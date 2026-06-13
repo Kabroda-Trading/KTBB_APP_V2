@@ -364,7 +364,7 @@ The accuracy stats are not yet valid. The auditor cannot calibrate Kabroda's dec
 
 ---
 
-### W-12 ☐ MAS SCHEDULER AUTONOMY — read-only diagnosis complete (2026-06-13)
+### W-12 ☑ MAS SCHEDULER AUTONOMY — CLOSED, no action needed until W-4 (2026-06-13)
 
 **Question:** Does the daily MAS run fire on the autonomous 14:00 UTC scheduler, or is the real trigger a page-visit?
 
@@ -395,15 +395,13 @@ A third path: if a `CampaignLog` row has `mas_approval_status == 'PENDING'` and 
 - Both guards are effective — there is no double-brief risk.
 
 #### Is the system autonomous?
-**Yes — with a caveat.** If the owner never loads the radar page before 14:00 UTC, the scheduler fires at 14:00 UTC, creates the lock via `get_live_battlebox()`, and MAS runs unattended. The autonomous path works correctly. **The issue:** in normal use, the page-visit always wins the race, so the "14:00 UTC scheduler" is effectively the fallback, not the primary trigger. The brief time-stamps will show the MAS run whenever the page was first loaded that day.
+**Yes — with a caveat.** If the owner never loads the radar page before 14:00 UTC, the scheduler fires at 14:00 UTC, creates the lock via `get_live_battlebox()`, and MAS runs unattended. The autonomous path works correctly. **The issue:** in normal use, the page-visit always wins the race, so the "14:00 UTC scheduler" is effectively the fallback, not the primary trigger. The brief timestamps will show the MAS run whenever the page was first loaded that day.
 
-#### Implication for autonomous publication goal
-The unattended publication flow (MAS → newsletter → delivery) requires the MAS to fire reliably at a predictable time WITHOUT a page-visit. The current design delivers that — the scheduler handles the no-visit case — but the brief will timestamp to 13:55 on days the owner loads the page first. If publication depends on a fixed fire time (e.g., a downstream job at 14:05 UTC), page-visit timing creates unpredictable jitter.
+#### Publisher chain and jitter verdict (2026-06-13)
+`publisher_crew.run_publisher()` is called synchronously at `kabroda_mas_flow.py:1199` — same call stack as MAS, no separate scheduler. Newsletter inherits MAS jitter. `NewsletterLog.date_key` is always correct regardless of wall-clock time. **DRAFT is the terminal state** — `publish_status` is written once as `"DRAFT"` and never promoted. No Ghost API, no email delivery, no downstream job exists. MAS-timing jitter is **irrelevant today** because nothing downstream expects a newsletter at a fixed time.
 
-**Next question (not yet answered):** does the newsletter publication job (`run_senior_analyst_scheduler` or a separate scheduler) fire at a fixed offset after 14:00 UTC, or does it chain off the MAS completion? That determines whether the jitter matters.
-
-- **Status:** ☐ Read-only diagnosis complete. No code changes made or needed yet.
-- **Priority:** Medium — system works, autonomy confirmed. Build decision depends on whether publication timing requires a hard 14:00 UTC anchor.
+- **Status:** ☑ CLOSED — autonomous, no fix needed. Reopen when W-4 (Ghost/delivery) is built.
+- **Constraint for W-4:** publish step must chain off DRAFT creation (`NewsletterLog.created_at` or MAS completion), NOT a fixed UTC offset — MAS fire time is variable by design.
 - **Connects to:** SYSTEM_FLOW node 1A (trigger-timing design), W-4 (publication delivery).
 
 ---
@@ -472,6 +470,7 @@ output for review before closing W-1.
   context, website + X links, engagement — NOT a copy of the internal brief.
 - **Why:** This is the money. But it can't be trusted until Phase 1 is reined in.
 - **Status:** deferred by design. Keep DRAFTS generating to learn the voice.
+- **Constraint (W-12):** publish step must chain off DRAFT creation (`NewsletterLog.created_at` or MAS completion callback), NOT a fixed UTC offset — MAS fire time is variable (page-visit preempts the 14:00 UTC scheduler in normal use).
 
 ### W-5 ☑ Fix auditor-wire break — DONE
 
