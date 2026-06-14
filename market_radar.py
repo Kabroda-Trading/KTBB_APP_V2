@@ -419,6 +419,7 @@ async def scan_sector():
                     bd_price=bd_val,
                     asset_price=price,
                     session_date=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
+                    source="market_radar",
                     decision_reason=dossier.get("briefing", ""),
                     full_context_json=json.dumps(radar_item, default=str),
                 )

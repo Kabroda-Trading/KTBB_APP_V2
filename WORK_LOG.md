@@ -126,8 +126,11 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 
 **Today's session result:** STAND_DOWN (5 consecutive EXIT/DIVERGENCE signals, 4H PMARP 83.7%, HOSTILE_CEILING + CHOP_RISK, 1/5 fractured vote). Newsletter draft written. Costs healthy ($0.158 24h / $1.14 7-day, all SUCCESS).
 
-**NEW — W-12 (MAS scheduler autonomy — read-only diagnosis complete, see W-12 section):**
-Today's MAS run (13:55:36) fired 12 seconds after `GET /suite/radar + POST /api/radar/scan` at 13:55:24. Page-triggered path confirmed, NOT the 14:00 UTC scheduler. See W-12 for full trace and autonomy status. Not a blocker for daily operation; critical-path for unattended publication.
+**NEW — W-12 (MAS scheduler autonomy — CLOSED, see W-12 section):**
+Today's MAS run (13:55:36) fired 12 seconds after `GET /suite/radar + POST /api/radar/scan` at 13:55:24. Page-triggered path confirmed, NOT the 14:00 UTC scheduler. System IS autonomous (scheduler fires if page never loaded). No action needed until W-4 (Ghost delivery).
+
+**Done (2026-06-13 evening) — W-11 complete:**
+Source column + 4-value decision_type + backfill shipped. Auditor contamination eliminated. Stand-down accuracy now computable. W-13 logged (radar session_id gap — needs-decision, not a bug).
 
 **Carry forward:**
 2. **[VERIFY]** Confirm lifecycle monitor issues EXPIRED (not CLOSED_LOSS) on no-fill sessions going forward — root-cause fix is in the W-9 monitor code, the historical phantom-loss correction is done.
@@ -357,10 +360,23 @@ The accuracy stats are not yet valid. The auditor cannot calibrate Kabroda's dec
 
 **Sequencing:** do after W-9 (need clean outcome data first), before the big gated builds. Small change — one write site, one query filter, one Block C line.
 
-- **Status:** ☐ Not started. Original "pipeline bug" conclusion fully retracted. Real work item is the auditor query filter + DecisionJournal source field.
-- **Priority:** High — next Sunday's audit will produce the same contaminated numbers if not fixed first.
-- **Blocks:** all auditor accuracy analysis, stand-down calibration, kinematic-grade calibration. Auditor output is directionally useless until query is fixed.
+- **Status:** ☑ DONE (2026-06-13). All six steps shipped. Auditor now sees only MAS rows via `source == "mas_flow"`; stand-down accuracy computable via `MAS_STAND_DOWN`; radar contamination eliminated. Pre-W-11 historical rows preserved via backfill.
+- **Priority:** ~~High~~ — resolved.
+- **Blocks:** ~~all auditor accuracy analysis, stand-down calibration, kinematic-grade calibration~~.
 - **Does NOT block:** daily sessions, A3 live watch, W-9 outcome integrity work.
+
+---
+
+### W-13 ☐ RADAR DecisionJournal WRITE — session_id gap (needs-decision, not a bug) (2026-06-13)
+
+`market_radar.scan_sector()` writes to `DecisionJournal` without `session_id` — the join key added in commit `4e82934` (Job 2 Phase A item 1). The MAS write (`_inject_decision_journal`) carries `session_id`; the radar write does not.
+
+**Open question:** should radar rows carry the join key at all? Radar rows are per-page-load monitoring events, not session decisions. The join triple `(symbol, session_date, session_id)` was designed to link MAS decisions to their `InterpreterLog` and `CampaignLog` rows — radar rows have no corresponding `InterpreterLog` or `CampaignLog` entry. Adding `session_id` to radar rows would populate the column with whatever session is active at scan time, which is a different semantic than the MAS join key.
+
+**Not bundled into W-11** — this is a deliberate design question, not an oversight. Decide separately.
+
+- **Status:** ☐ Needs decision before any code change. Raised during W-11 pre-work (2026-06-13).
+- **Priority:** Low — no existing feature reads `session_id` from radar rows. Relevant only if a future backtest or audit joins radar rows to session context.
 
 ---
 

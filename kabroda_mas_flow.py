@@ -1483,9 +1483,12 @@ def _inject_decision_journal(
             if tf_15m.get("kinematic_grade") == "PRIMED":
                 score += 1
 
-        decision_type = (
-            "MAS_APPROVED" if brief.approval_status == "APPROVED" else "MAS_REJECTED"
-        )
+        decision_type = {
+            "APPROVED":        "MAS_APPROVED",
+            "REJECTED":        "MAS_REJECTED",
+            "STAND_DOWN":      "MAS_STAND_DOWN",
+            "WAITING_FOR_15M": "MAS_WAITING",
+        }.get(brief.approval_status, "MAS_REJECTED")
         journal = DecisionJournal(
             symbol=symbol,
             decision_type=decision_type,
@@ -1498,6 +1501,7 @@ def _inject_decision_journal(
             asset_price=brief.entry_price,
             session_date=date_key,
             session_id=session_id,
+            source="mas_flow",
             decision_reason=brief.tactical_brief,
             full_context_json=json.dumps(
                 {"brief": brief.dict(), "battlebox": battlebox_payload}, default=str

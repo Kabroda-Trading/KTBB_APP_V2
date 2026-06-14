@@ -169,6 +169,33 @@ def init_db():
     except Exception:
         pass
 
+    # --- W-11 — DecisionJournal source column + historical backfill ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE decision_journal ADD COLUMN source VARCHAR"))
+    except Exception:
+        pass
+
+    # Backfill source for pre-W-11 rows (idempotent — WHERE source IS NULL).
+    # Production snapshot 2026-06-13: 30 MAS rows (MAS_APPROVED / MAS_REJECTED),
+    # 393 radar rows (STAND_DOWN / GRADE_A / GRADE_B), 0 NULLs in decision_type.
+    # Without this backfill, switching the auditor filter to source == "mas_flow"
+    # would orphan all 423 historical rows (NULL source after ALTER TABLE).
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "UPDATE decision_journal SET source = 'mas_flow' "
+                "WHERE source IS NULL "
+                "AND decision_type IN ('MAS_APPROVED', 'MAS_REJECTED')"
+            ))
+            conn.execute(text(
+                "UPDATE decision_journal SET source = 'market_radar' "
+                "WHERE source IS NULL "
+                "AND decision_type IN ('GRADE_A', 'GRADE_B', 'STAND_DOWN')"
+            ))
+    except Exception:
+        pass
+
     # --- PHASE 3C JEWEL SPECIALIST — top-level scanner context columns ---
     for col_def in [
         "confluence_score INTEGER",
@@ -341,7 +368,8 @@ class DecisionJournal(Base):
     symbol = Column(String, index=True, nullable=False)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
-    # STAND_DOWN / GRADE_A / GRADE_B / MAS_APPROVED / MAS_REJECTED / INTEL_AUDIT
+    # MAS flow:      MAS_APPROVED / MAS_REJECTED / MAS_STAND_DOWN / MAS_WAITING
+    # Market Radar:  GRADE_A / GRADE_B / STAND_DOWN
     decision_type = Column(String, nullable=False)
 
     confluence_score = Column(Integer, nullable=True, default=0)
@@ -355,6 +383,7 @@ class DecisionJournal(Base):
 
     session_date = Column(String, nullable=True)
     session_id   = Column(String, nullable=True)   # e.g. "us_ny_futures" — session TYPE label, not unique run id
+    source       = Column(String, nullable=True)   # "mas_flow" | "market_radar"
     decision_reason = Column(String, nullable=True)
 
     # Outcome fields — null at creation, filled by the 4H gravity-engine task.

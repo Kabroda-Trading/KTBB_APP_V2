@@ -144,7 +144,7 @@ def _collect_stats(symbol: str, cutoff: datetime) -> Dict[str, Any]:
             .filter(
                 DecisionJournal.symbol == symbol,
                 DecisionJournal.timestamp >= cutoff,
-                DecisionJournal.decision_type.in_(["MAS_APPROVED", "MAS_REJECTED"]),
+                DecisionJournal.source == "mas_flow",
             )
             .all()
         )
@@ -153,7 +153,7 @@ def _collect_stats(symbol: str, cutoff: datetime) -> Dict[str, Any]:
         dir_null      = sum(1 for d in decisions if d.outcome_direction_correct is None)
         total_dir     = dir_correct + dir_wrong
         dir_accuracy  = round(dir_correct / total_dir * 100.0, 1) if total_dir > 0 else None
-        stand_down    = sum(1 for d in decisions if d.decision_type == "STAND_DOWN")
+        stand_down    = sum(1 for d in decisions if d.decision_type == "MAS_STAND_DOWN")
 
         # ── Block A: Harmonic Breakdown ──────────────────────────────────────
         # Cross-references energy_status and kinematic_grade with 4h outcomes.
@@ -230,7 +230,7 @@ def _collect_stats(symbol: str, cutoff: datetime) -> Dict[str, Any]:
         #   outcome_direction_correct = True  → direction was right → veto may have been overcautious
         # Note: even if direction was right, the structural veto (narrow box, chop) may
         # still have been valid — but this is flagged for human review.
-        sd_decisions       = [d for d in decisions if d.decision_type == "STAND_DOWN"]
+        sd_decisions       = [d for d in decisions if d.decision_type == "MAS_STAND_DOWN"]
         sd_saved           = sum(1 for d in sd_decisions if d.outcome_direction_correct is False)
         sd_overcautious    = sum(1 for d in sd_decisions if d.outcome_direction_correct is True)
         sd_unresolved      = sum(1 for d in sd_decisions if d.outcome_direction_correct is None)
