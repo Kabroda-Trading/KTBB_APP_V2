@@ -19,6 +19,23 @@ answer to "What were we doing? What's next? What did we agree to leave alone?"
 
 ---
 
+## ✅ END-OF-TASK CHECKLIST — run after EVERY commit before declaring done
+*(Added 2026-06-14. The previous standing instruction wasn't firing reliably — the 06-13 NEXT SESSION START stayed stale until the owner caught it. This checklist is the fix.)*
+
+**After any commit, before closing the task, verify all four:**
+
+1. **NEXT SESSION START marker** — does it show today's date and today's actual accomplishments? If a session's work just landed in a commit, update the marker to reflect it. Never leave it showing a prior day. This is the orientation block a fresh context reads first; if it's stale, tomorrow starts disoriented.
+
+2. **W-item status** — every W-item touched this task: is its checkbox (`☐` / `◐` / `☑`) and status line current? Check off what's done, note the commit hash. If a W-item moved from blocked to unblocked as a side effect of this task, note that too.
+
+3. **SYSTEM_FLOW CHANGE LOG** — does every code change have a corresponding CHANGE LOG row? One row per meaningful change, keyed to the commit hash. If the task was docs-only or a config change with no behavioral effect, note "docs-only — no CHANGE LOG row needed."
+
+4. **Surface, don't silently decide** — if reconciling reveals an ambiguity or a judgment call (a status that's unclear, something that might be done but isn't confirmed), **flag it to the owner and ask** rather than guessing. Updating a clear fact = just do it. Resolving an ambiguity = ask first.
+
+**Mutual accountability loop:** Claude Code reconciles the docs after commits. The conversation-side Claude cross-checks that reconciliation happened. The owner sits above both. Neither AI is the sole guardian — they check each other. If Claude Code skips the checklist, the conversation-side Claude catches it (as it did today). If both miss it, the owner is the final backstop and should call it out.
+
+---
+
 ## CORE PRINCIPLES (decided 2026-06-01)
 
 ### Principle 1 — Two layers, opposite treatment
