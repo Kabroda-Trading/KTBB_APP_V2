@@ -115,27 +115,28 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ---
 
 ## ► NEXT SESSION START
+*End-of-session marker: 2026-06-14*
+
+**2026-06-14 — W-9 top-priority blocker cleared + strengthening-phase vision pinned**
+
+**Confirmed today:**
+- **W-9 ☑ CLOSED** (commits `9ec43b1` + `cc49904`, verified 2026-06-14) — lifecycle monitor built, schema gate cleared on production (5/5 columns live), Step 5 confirmed complete-by-prior-cleanup. Four production queries: Q1=6 pre-monitor APPROVED rows with null expiry, Q2=0 open+unfilled, Q3=0 open, Q4=0 phantom CLOSED_LOSS — dataset already in the state Step 5 was meant to produce. IDs 86/89 were already reclassified EXPIRED by prior cleanup. W-9 was the declared top-priority blocker for the backtest, track record, and model-optimization work.
+- **W-11 verified live** — today's MAS run wrote `MAS_STAND_DOWN` to `decision_journal.decision_type`, confirming the 4-value map works in production. Stand-down accuracy is now computable on next Sunday's auditor run.
+- **Production DB terminal established** (Render `psql` session) — direct Postgres access confirmed operational. Eliminates the throwaway-diagnostic-route pattern; used today for W-9 schema gate check and all four Step 5 queries.
+- **W-14 pinned** — strengthening-phase vision (multi-timeframe + signal-conviction cluster) logged as a thin connective node referencing MULTI-TIMEFRAME SSE ENGINES, HTF STRUCTURAL ANTICIPATION, and VET-A-TRADE Suggestion Box pins. Gate: 15M core solid across many live sessions.
+
+**Carry forward:**
+2. **[W-9 PASSIVE]** Forward verification only: next real no-fill APPROVED session must run through Phase 1 → EXPIRED/pnl=null correctly. Cannot be forced.
+3. **[BUG]** Intel Reporter: CoinGecko 429 — not recurred on 06-13; continue to monitor.
+4. **[COSMETIC]** Cumulative performance chart x-axis out of chronological order (values correct, sort wrong).
+5. **[BOARD REVIEW — see below]** 15M core status: W-6, W-7 Fix 3, B1, W-10, W-1 — true current state reported in Part 2 read-only pass (2026-06-14). This is the menu for what to work on next.
+
+---
+
 *End-of-session marker: 2026-06-13*
 
 **2026-06-13 — Phase A join key production-confirmed + null-PnL fixes verified live**
-
-**Confirmed today:**
-- **Job 2 Phase A item 1 PRODUCTION-CONFIRMED** (commit `4e82934`): deploy log shows `|| DECISION JOURNAL || BTC/USDT | MAS_REJECTED` at 13:55:36 — `init_db()` ran clean on Postgres and a new `decision_journal` row was written. Residual check (non-blocker): run `SELECT id, symbol, session_date, session_id FROM decision_journal ORDER BY id DESC LIMIT 1;` to eyeball that `session_id="us_ny_futures"` populated the column.
-- **Both null-PnL crash fixes held live** (commits `ba34e8f`, `32fc241`): full MTF / Gravity / Junior Analyst interpreter reasoning written with no `NoneType/TypeError`. CRO memory and Archivist fixes confirmed working on a real session.
-- **W-11 UNBLOCKED** — join key is production-confirmed; source column + 4-value `decision_type` tagging can now proceed in a separate commit.
-
-**Today's session result:** STAND_DOWN (5 consecutive EXIT/DIVERGENCE signals, 4H PMARP 83.7%, HOSTILE_CEILING + CHOP_RISK, 1/5 fractured vote). Newsletter draft written. Costs healthy ($0.158 24h / $1.14 7-day, all SUCCESS).
-
-**NEW — W-12 (MAS scheduler autonomy — CLOSED, see W-12 section):**
-Today's MAS run (13:55:36) fired 12 seconds after `GET /suite/radar + POST /api/radar/scan` at 13:55:24. Page-triggered path confirmed, NOT the 14:00 UTC scheduler. System IS autonomous (scheduler fires if page never loaded). No action needed until W-4 (Ghost delivery).
-
-**Done (2026-06-13 evening) — W-11 complete:**
-Source column + 4-value decision_type + backfill shipped. Auditor contamination eliminated. Stand-down accuracy now computable. W-13 logged (radar session_id gap — needs-decision, not a bug).
-
-**Carry forward:**
-2. **[W-9 PASSIVE]** W-9 Steps 1–5 all done (verified 2026-06-14). Forward verification only: next real no-fill APPROVED session must be observed running through Phase 1 → EXPIRED correctly. Cannot be forced — confirms itself when it happens.
-3. **[BUG]** Intel Reporter: CoinGecko 429 rate-limit — did NOT recur today; possibly transient. Continue to monitor.
-4. **[COSMETIC]** Cumulative performance chart x-axis dates out of chronological order (values correct, sort wrong).
+Job 2 Phase A item 1 confirmed live (commit `4e82934`): `session_id` join key on `DecisionJournal` writing correctly. Both null-PnL crash fixes confirmed live (`ba34e8f`, `32fc241`). W-11 shipped (`63d0c24`): source column + 4-value `decision_type` + historical backfill. W-12 closed: MAS scheduler confirmed autonomous (page-visit path fires first, 14:00 UTC scheduler is fallback). Session result: STAND_DOWN.
 
 ---
 
