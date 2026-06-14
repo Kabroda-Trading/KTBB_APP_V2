@@ -997,6 +997,45 @@ Owner — who built and best understands the system — was confused and alarmed
 
 ---
 
+### W-14 ☐ STRENGTHENING PHASE — multi-timeframe + signal-conviction cluster (GATED, 2026-06-14)
+
+A connective node for three Suggestion Box items that belong together and share the same primary gate. They were already cross-linked in the Suggestion Box ("scope jointly — they may resolve into one multi-timeframe architecture design project, not two"). This entry names the cluster and preserves that linkage.
+
+**The three components — reference the Suggestion Box pins, do not re-state:**
+
+- **14b — Per-TF independent engines:** see **MULTI-TIMEFRAME SSE ENGINES pin (2026-06-07)**. Hard gate reasoning, scope cautions, and handshake-protocol design problem all live there.
+- **14c — Cross-week anticipation narrative:** see **HTF STRUCTURAL ANTICIPATION pin (2026-06-06)**. Elliott Wave Specialist partially covers this; the gap is time-axis path narration ahead of price arrival.
+- **14a — Signal-tracking / timing-conviction tool:** extends the already-deployed Intel Auditor (`POST /api/research/audit-intel`) — see also **VET-A-TRADE pin (2026-06-07)**. See "What's genuinely new" below.
+
+**What's genuinely new — not in any existing pin:**
+
+*The "good-till-close trap":* a signal that is directionally correct but mistimed leaves the trader underwater — not because the setup was wrong but because the entry was premature. Signal services solve "is a setup valid?"; they do not solve "is NOW the right moment?" Kabroda's edge in this cluster is judging WHEN to act, not just WHETHER a setup exists.
+
+*Stateful Intel Auditor extension:* the deployed Intel Auditor makes a one-shot CONFIRMED/REJECTED/HIGH_RISK call on a foreign signal. 14a adds a time dimension: carry a signal in memory across polls, monitor for TF alignment to arrive, green-light when conditions are met. That tracking loop does not exist yet. The one-shot call is real; the persistent monitoring is new.
+
+**Gate — what this cluster actually depends on:**
+
+Primary gate: **the 15M core proven solid across many live sessions.** A3 is 2 sessions old. W-7 Fix 3 (CONDITION 2(a) direction-awareness, SA prompt change) is still OPEN. B1/PMARP direction-blind is parked. Any bug in the 15M foundation is inherited by every per-TF engine that replicates it.
+
+Job 2 / replay harness: **validation aid for 14b** (stress-test per-TF trigger math against history before live deployment), NOT a construction dependency for 14a or 14c.
+
+**Per-TF trigger math — why 14b is not an interpreter extension:**
+
+W-1's MTF Interpreter adds an interpretive layer within the existing 15M pipeline. 14b is different: it needs independent triggers per timeframe. The 30M Range (`r30_high` / `r30_low`, 8:30–9:00 AM ET calibration window) is 15M-session-specific — there is no equivalent calibration window for a 4H engine. The VRVP / VAH / VAL derivation and the trigger-distance minimums all need fresh design per TF. That is why the Suggestion Box pin calls 14b the largest project on the board, not a feature weave-in.
+
+**Phase 3 record correction:**
+
+W-9 Phase 3 (`ledger_closing_engine.py`) captures per-target booleans (`t2_reached`, `t3_reached`, `max_target_reached`) — raw data only. The per-target WR% stat ("T2 reached on X% of T1-exit sessions") is a future Performance Auditor query over accumulated booleans. The monitor does not generate the stat. Phase 3 has not yet fired in production (no T1 WIN observed post-cc49904); data accumulation has not started.
+
+**Prior art / research notes** *(to be filled when this cluster graduates from GATED)*
+*(placeholder — Mafioso 4H/8H signal methodology, multi-TF SSE prior art, timing-conviction model approaches)*
+
+- **Status:** ☐ GATED. 14b: scope jointly with HTF-anticipation pin when 15M-core gate clears (Suggestion Box's own instruction). 14a: most buildable near-term sub-item (extends existing Intel Auditor infrastructure, no per-TF engine required).
+- **Does NOT block anything currently.** Expansion-tier work.
+- **References:** MULTI-TIMEFRAME SSE ENGINES pin (2026-06-07) · HTF STRUCTURAL ANTICIPATION pin (2026-06-06) · VET-A-TRADE pin (2026-06-07) · Intel Auditor (`POST /api/research/audit-intel`, CLAUDE.md) · SYSTEM_FLOW nodes 1C, Q3, Q4
+
+---
+
 ## DONE
 *(move items here with date + commit hash when complete)*
 

@@ -1212,3 +1212,9 @@ decision_journal.session_id   = interpreter_log.session_id
 ```
 
 **The trap:** Any query filtering on `session_id = "us_ny_futures"` alone (without `date_key`) will return every row ever written — not a single session. A query joining on `session_id` alone will fan out into a Cartesian mess across dates. Always include `date_key` in the predicate when using `session_id`. Same class of column-misread as the `mas_approval_status` trap in Rule 1 — correct column, wrong assumption about its cardinality.
+
+---
+
+## EXPANSION TIER — after 15M core solid
+
+**W-14 (GATED):** the multi-timeframe + signal-conviction strengthening phase (per-TF engines, cross-week anticipation, signal-timing tool) follows the "15M core proven solid across many live sessions" gate. This system's nodes (1A–5D) describe the 15M pipeline only; W-14's per-TF engines would add parallel paths that do not yet exist in this map. See WORK_LOG W-14 for the component map, gate conditions, and Suggestion Box pin references.
