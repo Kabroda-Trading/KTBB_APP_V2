@@ -133,7 +133,7 @@ Today's MAS run (13:55:36) fired 12 seconds after `GET /suite/radar + POST /api/
 Source column + 4-value decision_type + backfill shipped. Auditor contamination eliminated. Stand-down accuracy now computable. W-13 logged (radar session_id gap — needs-decision, not a bug).
 
 **Carry forward:**
-2. **[W-9 Step 5]** Lifecycle monitor built (cc49904) + schema confirmed live (2026-06-14). Legacy APPROVED rows have `session_expires_at IS NULL` → invisible to Phase 1. Step 5 = backfill `session_expires_at` on those rows, then confirm Phase 1 correctly issues EXPIRED/pnl=null on the next no-fill session. Backfill scope under analysis (2026-06-14 session).
+2. **[W-9 PASSIVE]** W-9 Steps 1–5 all done (verified 2026-06-14). Forward verification only: next real no-fill APPROVED session must be observed running through Phase 1 → EXPIRED correctly. Cannot be forced — confirms itself when it happens.
 3. **[BUG]** Intel Reporter: CoinGecko 429 rate-limit — did NOT recur today; possibly transient. Continue to monitor.
 4. **[COSMETIC]** Cumulative performance chart x-axis dates out of chronological order (values correct, sort wrong).
 
@@ -157,7 +157,7 @@ Source column + 4-value decision_type + backfill shipped. Auditor contamination 
 
 Status: ☐ not started · ◐ in progress · ☑ done
 
-### W-9 ◐ OUTCOME-TRACKING DATA INTEGRITY — TOP PRIORITY (owner caught live 2026-06-07)
+### W-9 ☑ OUTCOME-TRACKING DATA INTEGRITY — FUNCTIONALLY CLOSED (2026-06-14)
 
 **Blocks:** W-6 T2 legibility polish, W-3 backtest, publication track record, auditor coach vision, agent model-optimization A/B testing. No dashboard number is trustworthy until this is resolved.
 
@@ -227,9 +227,15 @@ Even when the trade is exited at T1 (safe target), the monitor **keeps watching 
 2. ~~Resolve design questions (a)/(b)/(c).~~ **DONE 2026-06-10.** See above.
 3. ~~**Schema additions**~~ — **COMMITTED 2026-06-10 (commit `9ec43b1`).** Five columns added to `CampaignLog` + five `ALTER TABLE` blocks in `init_db()`: `entry_filled_at` (TIMESTAMP nullable), `session_expires_at` (TIMESTAMP nullable), `max_target_reached` (VARCHAR nullable), `t2_reached` (BOOLEAN DEFAULT FALSE), `t3_reached` (BOOLEAN DEFAULT FALSE). Also noted: `activated_at` exists as a dead orphaned column (never read/written anywhere) — left untouched. `status` is plain VARCHAR with no DB constraint — `EXPIRED` is a valid value without any schema change. Pushed to Render. **✓ GATE CLEARED 2026-06-14** — all 5 columns confirmed live on production Postgres (`SELECT column_name FROM information_schema.columns WHERE table_name='campaign_logs'` returned 5/5 rows). App booted clean.
 4. ~~**Build the lifecycle monitor**~~ — **DONE 2026-06-11 (commit `cc49904`).** `ledger_closing_engine.py` replaced with three-phase state machine. Phase 1 entry-fill check is airtight: `entry_filled_at IS NULL` + `session_expires_at IS NOT NULL` guard ensures no APPROVED record reaches stop/target evaluation without a confirmed fill. Legacy rows (all null `session_expires_at`) are untouched until Step 5 backfill.
-5. **Validate full dataset** — populate `session_expires_at` on legacy APPROVED rows (currently NULL → invisible to Phase 1); confirm Phase 1 correctly issues `EXPIRED / realized_pnl=null` on no-fill sessions going forward. Includes verifying phantom-closed historical rows (CLOSED_LOSS records from the old engine that should be EXPIRED).
+5. ~~**Validate full dataset**~~ — **COMPLETE-BY-PRIOR-CLEANUP (verified 2026-06-14).** No action required. Four production queries run against Postgres confirmed the dataset is already in the state Step 5 was meant to produce:
 
-- **Status:** ◐ Steps 1–4 done. Only open items: Step 5 historical backfill (legacy rows have `session_expires_at IS NULL` and are skipped by the monitor) + forward-going live EXPIRED verification (carry-forward item 2 — a new no-fill session must be observed running through Phase 1 correctly).
+   **5a — `session_expires_at` backfill:** Q1 found 6 canonical APPROVED rows with `session_expires_at IS NULL` (the 6 real approved trades written pre-monitor: IDs 74, 79, 80, 84, 86, 89). Q2 found **0** of those are still open + un-filled → the 5a backfill has nothing to act on. All 6 are already resolved (WIN / LOSS / EXPIRED) by the earlier canonical separation + phantom correction work. Q3 (open rows confirmed) = **0**.
+
+   **5b — phantom-CLOSED_LOSS correction:** Q4 hunted for canonical APPROVED rows still stamped `CLOSED_LOSS` with no confirmed fill (`entry_filled_at IS NULL`). Result = **0**. IDs 86 and 89 were the phantom losses; both were already reclassified to `EXPIRED` in the prior `/admin/correct-phantoms` cleanup. No stragglers remain.
+
+   *Why it needed no action:* the phantom correction and canonical separation done before the monitor was built happened to resolve every row that Step 5 would have touched. The queries are the evidence that closes the item.
+
+- **Status:** ☑ Steps 1–5 DONE. W-9 is functionally closed. Only remaining item is passive forward verification: the next real no-fill APPROVED session must be observed running through Phase 1 and correctly stamping `EXPIRED / realized_pnl=null`. Cannot be forced — confirms itself on the next untriggered setup.
 - **Blocks:** W-6 T2 (legibility polish is pointless on wrong numbers), W-3 backtest, publication track record, auditor RAG memory bank reliability, **agent model-optimization A/B testing** (Suggestion Box 2026-06-10 — cannot measure model quality until outcome data is trustworthy).
 - **Does NOT block:** daily session monitoring, A3 live watch, exit_warning observation.
 - **MD-refactor gate (same session):** `mtf_interpreter` is wired to load from `agents/mtf_interpreter.md` and diff-verified character-identical. Python constant `MTF_INTERPRETER_SYSTEM_PROMPT` must NOT be deleted until a live NY session confirms identical output in `/admin/interpreter-log`. Both gates (schema + mtf_interpreter validation) clear independently — neither blocks the other.
