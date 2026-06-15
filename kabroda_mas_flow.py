@@ -146,7 +146,7 @@ and ## THE OTHER SIDE exactly as normal.
 ## WHY THE SYSTEM STANDS DOWN
 State the specific condition(s) above that triggered the veto. Name the exact \
 data values — for example: "Harmonic State is HOSTILE_CEILING with 4H Momentum \
-NEGATIVE and Kinematic Fuel CHOP_RISK." Two to three declarative sentences. \
+WEAK [DEPLETED] and Kinematic Fuel CHOP_RISK." Two to three declarative sentences. \
 No hedging. No vague language.
 
 ## THE STRUCTURAL LANDSCAPE

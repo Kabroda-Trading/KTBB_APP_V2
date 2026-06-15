@@ -134,17 +134,18 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ## ► NEXT SESSION START
 *End-of-session marker: 2026-06-15*
 
-**2026-06-15 — Read-only investigations + behavioral fix: architecture honest-picture, time-coherence gap found + shipped**
+**2026-06-15 — Time-coherence gap fix + W-7 Fix 3 stale example residue shipped; architecture honest-picture**
 
 **Confirmed today:**
 - **MAS architecture is a fixed sequential pipeline, not an orchestrator** (read-only, no code touched) — `run_mas_analysis()` fires each module in a hardcoded Python call order: TSA → DB reads → MTF interpreter → gravity interpreter → junior analyst → context assembly → SA → DB writes → publisher. No LLM decides routing. No feedback loops. The SA is the terminal stage; it receives a pre-assembled frozen string and produces JSON. The one "retry" is a JSON FORMAT correction (append "[CORRECTION: return valid JSON]" + re-call), not a semantic re-evaluation. The Senior Analyst is not a conductor; Python is. Full report delivered to owner.
 - **ENERGY/LEVEL TIME-COHERENCE GAP — found, scoped, and shipped (commit `d9a4a92`)** — Option 2 chosen: `main.py` scheduler now fires at `lock_end_ts` instead of a hardcoded 14:00 UTC. DST-aware `_seconds_until_lock_end()` helper uses `session_manager` pytz logic (EDT: 13:00 UTC, EST: 14:00 UTC). Boot-time check uses `now.timestamp() >= _boot_lock_end_ts` (not `now.hour >= 14`). `date_key` comes from `session["date_key"]` in both paths. Page-visit double-fire guard is unchanged — `_CACHE_LOCK` + existing lock in DB prevents re-fire. **Verification checkpoint: tomorrow 9:00 AM ET — brief should be sitting there on arrival, not triggered by page-visit.** Suggestion Box 2026-06-15 pin marked SHIPPED; W-12 status updated (scheduler now PRIMARY trigger).
+- **W-7 ☑ FULLY CLOSED — Fix 3 stale SA prompt example fixed ([new commit])** — CONDITION 2(a) was updated in `ff60c5a` (2026-06-06) to magnitude logic (STRONG NEGATIVE excluded; WEAK/DEPLETED fires). The adjacent WHY THE SYSTEM STANDS DOWN example still cited "4H Momentum NEGATIVE" — updated to "4H Momentum WEAK [DEPLETED]" to match. SA reads examples as format templates; stale example could teach it to cite old sign-only wording. W-7 header, checklist, and status line all closed. Unblocks: Part 2 mean-reversion mode (Suggestion Box 2026-06-03).
 
 **Carry forward:**
 2. **[W-9 PASSIVE]** Forward verification only: next real no-fill APPROVED session must run through Phase 1 → EXPIRED/pnl=null correctly. Cannot be forced.
 3. **[BUG]** Intel Reporter: CoinGecko 429 — not recurred on 06-13; continue to monitor.
 4. **[COSMETIC]** Cumulative performance chart x-axis out of chronological order (values correct, sort wrong).
-5. **[BOARD REVIEW]** 15M core status: W-6, W-7 Fix 3, B1, W-10, W-1 — true current state reported in Part 2 read-only pass (2026-06-14). This is the menu for what to work on next.
+5. **[BOARD REVIEW]** 15M core status: W-6, B1, W-10, W-1 — true current state reported in Part 2 read-only pass (2026-06-14). W-7 ☑ closed this session. This is the menu for what to work on next.
 6. **[AUDITOR BUG — NEAR-TERM]** Thin-data legibility fix in `performance_auditor.py`: zero resolved outcomes → "INSUFFICIENT DATA", not "0%". One session, no dependencies. Before next Sunday's run.
 
 ---
@@ -533,7 +534,7 @@ output for review before closing W-1.
 
 ### W-5 ☑ Fix auditor-wire break — DONE
 
-### W-7 ◐ EXHAUSTION BUG FIX — Steps 0+1+2 DONE (deployed 80b1d79 · 2026-06-04); Fix 3 OPEN
+### W-7 ☑ EXHAUSTION BUG FIX — ALL STEPS DONE (80b1d79 · 2026-06-04; ff60c5a · 2026-06-06; example residue fixed [new commit] · 2026-06-15)
 
 - **What:** Three direction-blind `abs()` computations stack inside CONDITION 2 of the
   SA gate, causing the system to read a strong clean bearish trend as "exhausted" and
@@ -691,10 +692,10 @@ Built on real ADX (Step 0 applied).
 - [x] Combined CONDITION 2 table: all four days at 1/3 (COND2(a) only). May29 unchanged ✓
 - [x] Negative test (3 non-trend days, identical candles, old vs new): Apr28 SD preserved; May15/May27 unchanged (pre-existing, not regressions) ✓
 - [x] Deployed as single commit **80b1d79** (2026-06-04) — one file, 23 insertions / 13 deletions ✓
-- [ ] Watch first live session post-deploy — see NEXT SESSION below.
-- [ ] Step 3 (CONDITION 2a direction-awareness) — separate session after live validation.
+- [x] Watch first live session post-deploy — Jun7 confirmed (A3 / ff60c5a bundled Fix 3; magnitude approach). ✓
+- [x] Step 3 (CONDITION 2a direction-awareness) — SHIPPED ff60c5a (2026-06-06): magnitude approach (WEAK/DEPLETED fires; STRONG NEGATIVE excluded). Functionally equivalent to direction-relative design for problem sessions. Stale WHY THE SYSTEM STANDS DOWN example fixed [new commit] (2026-06-15). ✓
 
-- **Status:** Steps 0+1+2 DEPLOYED 2026-06-04 (commit 80b1d79). Fix 3 OPEN.
+- **Status:** ☑ ALL STEPS CLOSED. 80b1d79 (2026-06-04) + ff60c5a (2026-06-06) + [new commit] (2026-06-15). Magnitude approach supersedes direction-relative design note; functionally equivalent for problem sessions. Unblocks: Part 2 mean-reversion mode (Suggestion Box 2026-06-03).
 - **Positive validation:** Jun1/Jun2/Jun3 2026 unblocked (OLD=SD → NEW=no SD on all three).
 - **Negative validation:** Apr28/May15/May27 2026 — no regressions (Apr28 SD preserved; May15/27 unchanged pre-existing behavior).
 - **Depends on:** nothing (pure math layer — shipped)
