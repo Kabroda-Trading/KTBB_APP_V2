@@ -139,7 +139,7 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 **Confirmed today:**
 - **MAS architecture is a fixed sequential pipeline, not an orchestrator** (read-only, no code touched) — `run_mas_analysis()` fires each module in a hardcoded Python call order: TSA → DB reads → MTF interpreter → gravity interpreter → junior analyst → context assembly → SA → DB writes → publisher. No LLM decides routing. No feedback loops. The SA is the terminal stage; it receives a pre-assembled frozen string and produces JSON. The one "retry" is a JSON FORMAT correction (append "[CORRECTION: return valid JSON]" + re-call), not a semantic re-evaluation. The Senior Analyst is not a conductor; Python is. Full report delivered to owner.
 - **ENERGY/LEVEL TIME-COHERENCE GAP — found, scoped, and shipped (commit `d9a4a92`)** — Option 2 chosen: `main.py` scheduler now fires at `lock_end_ts` instead of a hardcoded 14:00 UTC. DST-aware `_seconds_until_lock_end()` helper uses `session_manager` pytz logic (EDT: 13:00 UTC, EST: 14:00 UTC). Boot-time check uses `now.timestamp() >= _boot_lock_end_ts` (not `now.hour >= 14`). `date_key` comes from `session["date_key"]` in both paths. Page-visit double-fire guard is unchanged — `_CACHE_LOCK` + existing lock in DB prevents re-fire. **Verification checkpoint: tomorrow 9:00 AM ET — brief should be sitting there on arrival, not triggered by page-visit.** Suggestion Box 2026-06-15 pin marked SHIPPED; W-12 status updated (scheduler now PRIMARY trigger).
-- **W-7 ☑ FULLY CLOSED — Fix 3 stale SA prompt example fixed ([new commit])** — CONDITION 2(a) was updated in `ff60c5a` (2026-06-06) to magnitude logic (STRONG NEGATIVE excluded; WEAK/DEPLETED fires). The adjacent WHY THE SYSTEM STANDS DOWN example still cited "4H Momentum NEGATIVE" — updated to "4H Momentum WEAK [DEPLETED]" to match. SA reads examples as format templates; stale example could teach it to cite old sign-only wording. W-7 header, checklist, and status line all closed. Unblocks: Part 2 mean-reversion mode (Suggestion Box 2026-06-03).
+- **W-7 ☑ FULLY CLOSED — Fix 3 stale SA prompt example fixed (0805bd4)** — CONDITION 2(a) was updated in `ff60c5a` (2026-06-06) to magnitude logic (STRONG NEGATIVE excluded; WEAK/DEPLETED fires). The adjacent WHY THE SYSTEM STANDS DOWN example still cited "4H Momentum NEGATIVE" — updated to "4H Momentum WEAK [DEPLETED]" to match. SA reads examples as format templates; stale example could teach it to cite old sign-only wording. W-7 header, checklist, and status line all closed. Unblocks: Part 2 mean-reversion mode (Suggestion Box 2026-06-03).
 
 **Carry forward:**
 2. **[W-9 PASSIVE]** Forward verification only: next real no-fill APPROVED session must run through Phase 1 → EXPIRED/pnl=null correctly. Cannot be forced.
@@ -534,7 +534,7 @@ output for review before closing W-1.
 
 ### W-5 ☑ Fix auditor-wire break — DONE
 
-### W-7 ☑ EXHAUSTION BUG FIX — ALL STEPS DONE (80b1d79 · 2026-06-04; ff60c5a · 2026-06-06; example residue fixed [new commit] · 2026-06-15)
+### W-7 ☑ EXHAUSTION BUG FIX — ALL STEPS DONE (80b1d79 · 2026-06-04; ff60c5a · 2026-06-06; example residue fixed 0805bd4 · 2026-06-15)
 
 - **What:** Three direction-blind `abs()` computations stack inside CONDITION 2 of the
   SA gate, causing the system to read a strong clean bearish trend as "exhausted" and
@@ -693,9 +693,9 @@ Built on real ADX (Step 0 applied).
 - [x] Negative test (3 non-trend days, identical candles, old vs new): Apr28 SD preserved; May15/May27 unchanged (pre-existing, not regressions) ✓
 - [x] Deployed as single commit **80b1d79** (2026-06-04) — one file, 23 insertions / 13 deletions ✓
 - [x] Watch first live session post-deploy — Jun7 confirmed (A3 / ff60c5a bundled Fix 3; magnitude approach). ✓
-- [x] Step 3 (CONDITION 2a direction-awareness) — SHIPPED ff60c5a (2026-06-06): magnitude approach (WEAK/DEPLETED fires; STRONG NEGATIVE excluded). Functionally equivalent to direction-relative design for problem sessions. Stale WHY THE SYSTEM STANDS DOWN example fixed [new commit] (2026-06-15). ✓
+- [x] Step 3 (CONDITION 2a direction-awareness) — SHIPPED ff60c5a (2026-06-06): magnitude approach (WEAK/DEPLETED fires; STRONG NEGATIVE excluded). Functionally equivalent to direction-relative design for problem sessions. Stale WHY THE SYSTEM STANDS DOWN example fixed 0805bd4 (2026-06-15). ✓
 
-- **Status:** ☑ ALL STEPS CLOSED. 80b1d79 (2026-06-04) + ff60c5a (2026-06-06) + [new commit] (2026-06-15). Magnitude approach supersedes direction-relative design note; functionally equivalent for problem sessions. Unblocks: Part 2 mean-reversion mode (Suggestion Box 2026-06-03).
+- **Status:** ☑ ALL STEPS CLOSED. 80b1d79 (2026-06-04) + ff60c5a (2026-06-06) + 0805bd4 (2026-06-15). Magnitude approach supersedes direction-relative design note; functionally equivalent for problem sessions. Unblocks: Part 2 mean-reversion mode (Suggestion Box 2026-06-03).
 - **Positive validation:** Jun1/Jun2/Jun3 2026 unblocked (OLD=SD → NEW=no SD on all three).
 - **Negative validation:** Apr28/May15/May27 2026 — no regressions (Apr28 SD preserved; May15/27 unchanged pre-existing behavior).
 - **Depends on:** nothing (pure math layer — shipped)
