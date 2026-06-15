@@ -23,13 +23,14 @@ import auth
 import battlebox_pipeline
 import market_radar
 import research_lab
-import market_simulator  
-import gravity_engine  
+import market_simulator
+import gravity_engine
 import gravity_math
 import kabroda_mas_flow
 import ledger_closing_engine
 import mtf_confluence_scanner
 import agent_core
+import session_manager
 
 from datetime import datetime, timezone, timedelta
 from jewel_specialist import run_jewel_snapshot
@@ -74,6 +75,22 @@ def _seconds_until_sunday_2300() -> float:
     if target <= now:
         target += timedelta(weeks=1)
     return (target - now).total_seconds()
+
+
+def _seconds_until_lock_end() -> float:
+    """Seconds until the next NY Futures session lock_end (8:30 AM ET + 30min = 9:00 AM ET).
+
+    Uses session_manager's own DST-aware logic so the target shifts correctly between
+    EST (lock_end = 14:00 UTC) and EDT (lock_end = 13:00 UTC) without any hardcoded
+    UTC hours. If today's lock_end has already passed, targets tomorrow's lock_end.
+    """
+    now = datetime.now(timezone.utc)
+    session = session_manager.resolve_current_session(now, mode="AUTO")
+    lock_end_ts = int(session["anchor_time"]) + 1800
+    lock_end_utc = datetime.fromtimestamp(lock_end_ts, tz=timezone.utc)
+    if lock_end_utc <= now:
+        lock_end_utc += timedelta(days=1)
+    return (lock_end_utc - now).total_seconds()
 
 
 def _next_jewel_slot():
@@ -139,7 +156,7 @@ async def _fire_senior_analyst(date_key: str) -> None:
         return
 
     if out.get("status") == "CALIBRATING":
-        print("[SCHEDULER] Session CALIBRATING — waiting 2 min and retrying (9:00 AM ET / 14:00 UTC)...")
+        print("[SCHEDULER] Session CALIBRATING — waiting 2 min and retrying (lock_end / 9:00 AM ET)...")
         await asyncio.sleep(120)
         try:
             out = await battlebox_pipeline.get_live_battlebox("BTCUSDT", session_mode="AUTO")
@@ -178,7 +195,7 @@ async def _fire_senior_analyst(date_key: str) -> None:
     finally:
         db.close()
 
-    print(f"[SCHEDULER] Firing Senior Analyst directly (restart recovery) for {date_key} 14:00 UTC / 9:00 AM ET...")
+    print(f"[SCHEDULER] Firing Senior Analyst directly (restart recovery) for {date_key} lock_end (9:00 AM ET)...")
     try:
         await asyncio.to_thread(
             kabroda_mas_flow.run_mas_analysis,
@@ -203,8 +220,10 @@ async def run_senior_analyst_scheduler() -> None:
     print("[SCHEDULER] Senior Analyst scheduler starting...")
 
     now = datetime.now(timezone.utc)
-    if now.hour >= 14:
-        date_key = now.strftime("%Y-%m-%d")
+    _boot_session = session_manager.resolve_current_session(now, mode="AUTO")
+    _boot_lock_end_ts = int(_boot_session["anchor_time"]) + 1800
+    if now.timestamp() >= _boot_lock_end_ts:
+        date_key = _boot_session["date_key"]
         print(f"[SCHEDULER] Boot check: looking for today's Senior Analyst brief ({date_key})...")
         db = SessionLocal()
         try:
@@ -219,7 +238,7 @@ async def run_senior_analyst_scheduler() -> None:
         if existing:
             print(f"[SCHEDULER] Boot: Senior Analyst already ran today ({date_key}) — skipping")
         else:
-            print(f"[SCHEDULER] Boot: no brief for today and past 9:00 AM ET — firing now...")
+            print(f"[SCHEDULER] Boot: no brief for today and past lock_end (9:00 AM ET) — firing now...")
             try:
                 await _fire_senior_analyst(date_key)
             except Exception as e:
@@ -227,11 +246,13 @@ async def run_senior_analyst_scheduler() -> None:
 
     while True:
         try:
-            seconds = _seconds_until_utc(14, 0)
-            print(f"[SCHEDULER] Senior Analyst: next fire in {seconds / 3600:.1f}h (14:00 UTC / 9:00 AM ET)")
+            seconds = _seconds_until_lock_end()
+            print(f"[SCHEDULER] Senior Analyst: next fire in {seconds / 3600:.1f}h (lock_end / 9:00 AM ET)")
             await asyncio.sleep(seconds)
-            date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            print(f"[SCHEDULER] Senior Analyst scheduled fire — {date_key} 14:00 UTC")
+            _fire_now = datetime.now(timezone.utc)
+            _fire_session = session_manager.resolve_current_session(_fire_now, mode="AUTO")
+            date_key = _fire_session["date_key"]
+            print(f"[SCHEDULER] Senior Analyst scheduled fire — {date_key} lock_end (9:00 AM ET)")
             await _fire_senior_analyst(date_key)
         except asyncio.CancelledError:
             raise
