@@ -144,7 +144,7 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 - **W-9 Phase 2 fix (3385a7b) live, forward verification pending** — first real day on production. Next gate: a FILLED trade that hits stop or T1 after 3 PM ET must record `CLOSED_WIN` or `CLOSED_LOSS` with `closed_at` at the actual candle timestamp, not `EXPIRED`. Cannot be forced — confirms on the next filled session that resolves outside the 9 AM–3 PM window.
 - **RE-ARM ALERTER logged (b9f0e4b)** — strengthening-phase Suggestion Box pin. Gated behind 15M-solid + W-4 notification infra.
 - **CONTINUOUS SESSION-EVALUATION DISCIPLINE locked in (docs)** — new OPERATING DISCIPLINE section in WORK_LOG; SF-7 operating rhythm section in SYSTEM_FLOW. Defines the bear-market-pullback evaluation mode: daily lightweight log, three honest outcome categories, longitudinal pattern-detection as Claude's standing job, trigger = pattern clarity not calendar.
-- **W-15 ☑ AUDITOR THIN-DATA LEGIBILITY FIX (commit TBD)** — `_format_stats_block` now guards all three breakdown sections (Harmonic Energy, Kinematic Grade, Box Size) with `insufficient_data = (resolved_dir == 0)`. When true, each section emits one "INSUFFICIENT DATA — 0 resolved directional outcomes" line instead of per-row zero-count tables. Calibration task for the evaluation discipline: weekly auditor now reads honestly on thin-data weeks, making stand-down validation trustworthy as the automated half of the cross-check.
+- **W-15 ☑ AUDITOR THIN-DATA LEGIBILITY FIX (commit `cdd2425`)** — `_format_stats_block` now guards all three breakdown sections (Harmonic Energy, Kinematic Grade, Box Size) with `insufficient_data = (resolved_dir == 0)`. When true, each section emits one "INSUFFICIENT DATA — 0 resolved directional outcomes" line instead of per-row zero-count tables. Calibration task for the evaluation discipline: weekly auditor now reads honestly on thin-data weeks, making stand-down validation trustworthy as the automated half of the cross-check.
 
 **Carry forward:**
 2. **[BUG]** Intel Reporter: CoinGecko 429 — not recurred on 06-13; continue to monitor.
@@ -1150,7 +1150,7 @@ The weekly auditor's stand-down validation is the automated half; the daily manu
 **Fix (scoped read-only, confirmed before build):** add `resolved_dir = direction_correct + direction_wrong` and `insufficient_data = (resolved_dir == 0)` after the stats extraction in `_format_stats_block`. Gate each of the three breakdown sections: when `insufficient_data`, replace the per-row table with a single `INSUFFICIENT DATA — N resolved directional outcomes this week. Metric not computable.` line. STAND_DOWN VALIDATION already handles the empty case correctly (`if sd["total"] > 0:` guard). No schema changes. No new tables. ~6 lines net across 1 file.
 
 - **File:** `performance_auditor.py` — `_format_stats_block()` only
-- **Status:** ☑ Closed 2026-06-16 (commit TBD). 8 lines added across 3 guards.
+- **Status:** ☑ Closed 2026-06-16 (commit `cdd2425`). 8 lines added across 3 guards.
 - **Calibration note:** makes the weekly auditor's stand-down validation trustworthy during the bear-market-pullback watch phase — the automated half of the dual-accountability evaluation rhythm can now be trusted on thin-data weeks.
 
 ---
