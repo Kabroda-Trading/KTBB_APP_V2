@@ -143,12 +143,14 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 - **id=94 corrected live** — owner ran the UPDATE in production terminal. Trade History now shows `CLOSED_LOSS / -1.0R / STOP`, rendering correctly.
 - **W-9 Phase 2 fix (3385a7b) live, forward verification pending** — first real day on production. Next gate: a FILLED trade that hits stop or T1 after 3 PM ET must record `CLOSED_WIN` or `CLOSED_LOSS` with `closed_at` at the actual candle timestamp, not `EXPIRED`. Cannot be forced — confirms on the next filled session that resolves outside the 9 AM–3 PM window.
 - **RE-ARM ALERTER logged (b9f0e4b)** — strengthening-phase Suggestion Box pin. Gated behind 15M-solid + W-4 notification infra.
+- **CONTINUOUS SESSION-EVALUATION DISCIPLINE locked in (docs)** — new OPERATING DISCIPLINE section in WORK_LOG; SF-7 operating rhythm section in SYSTEM_FLOW. Defines the bear-market-pullback evaluation mode: daily lightweight log, three honest outcome categories, longitudinal pattern-detection as Claude's standing job, trigger = pattern clarity not calendar.
+- **W-15 ☑ AUDITOR THIN-DATA LEGIBILITY FIX (commit TBD)** — `_format_stats_block` now guards all three breakdown sections (Harmonic Energy, Kinematic Grade, Box Size) with `insufficient_data = (resolved_dir == 0)`. When true, each section emits one "INSUFFICIENT DATA — 0 resolved directional outcomes" line instead of per-row zero-count tables. Calibration task for the evaluation discipline: weekly auditor now reads honestly on thin-data weeks, making stand-down validation trustworthy as the automated half of the cross-check.
 
 **Carry forward:**
 2. **[BUG]** Intel Reporter: CoinGecko 429 — not recurred on 06-13; continue to monitor.
 3. **[COSMETIC]** Cumulative performance chart x-axis out of chronological order (values correct, sort wrong).
 4. **[BOARD REVIEW]** 15M core status: W-6, B1, W-10, W-1 — true current state reported in Part 2 read-only pass (2026-06-14). W-7 ☑ closed 06-15. This is the menu for what to work on next.
-5. **[AUDITOR BUG — NEAR-TERM]** Thin-data legibility fix in `performance_auditor.py`: zero resolved outcomes → "INSUFFICIENT DATA", not "0%". One session, no dependencies. Before next Sunday's run.
+5. **[AUDITOR BUG — ☑ CLOSED 2026-06-16]** W-15 shipped. See bullet above + CHANGE LOG.
 6. **[R1 — KNOWN MINOR]** Trades that hit stop/T1 between midnight UTC and next-session-open will have `closed_at` on the following calendar date. Grouping by `date_key` (session label) is correct. Grouping by `closed_at::date` will misplace those outcomes into the next day's audit bucket. No code fix needed now — flag for future auditor improvement.
 
 ---
@@ -1092,6 +1094,64 @@ W-9 Phase 3 (`ledger_closing_engine.py`) captures per-target booleans (`t2_reach
 - **Status:** ☐ GATED. 14b: scope jointly with HTF-anticipation pin when 15M-core gate clears (Suggestion Box's own instruction). 14a: most buildable near-term sub-item (extends existing Intel Auditor infrastructure, no per-TF engine required).
 - **Does NOT block anything currently.** Expansion-tier work.
 - **References:** MULTI-TIMEFRAME SSE ENGINES pin (2026-06-07) · HTF STRUCTURAL ANTICIPATION pin (2026-06-06) · VET-A-TRADE pin (2026-06-07) · Intel Auditor (`POST /api/research/audit-intel`, CLAUDE.md) · SYSTEM_FLOW nodes 1C, Q3, Q4
+
+---
+
+## OPERATING DISCIPLINE — CONTINUOUS SESSION-EVALUATION (☑ active, 2026-06-16)
+
+*The operating mode for the current phase. Replaces any "timed watch phase" framing.*
+
+### Context
+
+Core build phase is largely complete. System is fundamentally sound (W-9 integrity fixed, coherence fix live, A3 core confirmed). Current market = bear-market pullback: daily/weekly bearish, 1H/4H bullish on indicators/momentum only (not trend structure), pushing into HTF ceilings → chop in low timeframes, micro-bull moves that don't reach target (id=94, 2026-06-15 was exactly this). High stand-down rate is **correct behavior** for this regime — not a bug. When HTFs roll over and realign down to 15M, approvals + clean movement return ("trend is your friend until the end"). This is a "keep earnings in the bank" regime.
+
+### The daily discipline (lightweight)
+
+1. **Log the call:** APPROVED / STAND_DOWN + the brief's key reasoning in one line (including any conditional "tradeable IF X").
+2. **Watch it resolve** against actual price within the **8–11 AM CST tradeable window** (NOT PM / overnight / weekends — outside owner's trading frame; see entry window definition in SYSTEM_FLOW node 1A).
+3. **Evaluate honestly.** Three outcomes:
+   - **(a) Correct stand-down** — no clean opportunity existed. Terse note ("stand-down, correct, chop").
+   - **(b) Questionable stand-down** — a clean pullback setup the system vetoed. **PRIORITY SIGNAL — over-conservatism is the current top risk.** Flag day with detail.
+   - **(c) Approval-quality** — did it resolve as the read suggested?
+
+**Where notes live:** a dated evaluation log keyed by `date_key`. Lightweight markdown for now. DB-attachment to the session record is DEFERRED — `date_key` is the join key that makes later migration trivial if volume justifies it. **Do NOT build a notes-capture feature now — we are in a don't-tinker phase.**
+
+### Hard-line principle
+
+Evaluation is evidence-based, not feeling-based. "I feel / I hope / it should" = emotion = distrust. The system's value IS its black-and-white parameter discipline; the evaluation audits that discipline against reality with a trader's eye as a CHECK, never an override. Any core change must earn its way through accumulated logged evidence — never a reaction to one chop day.
+
+### Longitudinal pattern-detection (Claude's standing job)
+
+As the owner shares daily logs/files, conversation-Claude reads them for recurring cross-session threads and flags emerging patterns. The daily eye forgets; cross-day memory holds the signal. When a pattern is clear (e.g. "3 questionable stand-downs in 2 weeks, all clean pullback longs → ADX/MACD gate may be too tight in pullback regimes"), investigate together, THEN bring Claude Code in for a targeted, evidence-backed parameter look. **Trigger to act = pattern clarity, not trade count or calendar.** Could be weeks or months.
+
+### Owner's personal trading frame (current operating ASSUMPTIONS — tested by the evaluation, not hard-coded)
+
+- Morning session only; out ~2h before session close (~7 PM CST); no overnight holds; no weekends
+- AM over PM (prior AM/PM audit found little PM value)
+- Trades 15M with 5M execution
+
+### Dual accountability
+
+The weekly auditor's stand-down validation is the automated half; the daily manual eval is the human half. Both must read honestly — which is why the auditor thin-data legibility fix (W-15) is the one near-term code task paired with this discipline.
+
+- **Status:** ☑ Operating mode for this phase. Defined plan — NOT a vague "wait and see."
+- **Regime gate:** more approvals expected when daily/weekly structure realigns bearishly and HTF ceilings stop blocking upside. No arbitrary timeline.
+
+---
+
+### W-15 ◐ AUDITOR THIN-DATA LEGIBILITY FIX (near-term, before next Sunday's run)
+
+**What breaks:** `performance_auditor.py` renders harmonic / kinematic-grade / box-size breakdown tables even when all directional outcomes are unresolved (`direction_correct = 0, direction_wrong = 0`). Each row shows `correct:0  wrong:0  unresolved:N  accuracy:unresolved`. The LLM sees zero-correct rows and synthesizes "0% accuracy / every configuration failed" — treating "no data" as "total failure." This makes every thin-data week's audit a false-alarm cry.
+
+**Distinct from the "provisional numbers due to W-9 integrity" caveat** — that caveat is about data quality on resolved outcomes. This is about generating a false failure signal from an *empty* denominator.
+
+**Root cause:** the three breakdown sections in `_format_stats_block` have no guard for `resolved_dir == 0`. The `win_rate` and `dir_accuracy` lines already handle `None` correctly ("Insufficient closed trades" / "No resolved calls yet"). The breakdown tables do not.
+
+**Fix (scoped read-only, confirmed before build):** add `resolved_dir = direction_correct + direction_wrong` and `insufficient_data = (resolved_dir == 0)` after the stats extraction in `_format_stats_block`. Gate each of the three breakdown sections: when `insufficient_data`, replace the per-row table with a single `INSUFFICIENT DATA — N resolved directional outcomes this week. Metric not computable.` line. STAND_DOWN VALIDATION already handles the empty case correctly (`if sd["total"] > 0:` guard). No schema changes. No new tables. ~6 lines net across 1 file.
+
+- **File:** `performance_auditor.py` — `_format_stats_block()` only
+- **Status:** ☑ Closed 2026-06-16 (commit TBD). 8 lines added across 3 guards.
+- **Calibration note:** makes the weekly auditor's stand-down validation trustworthy during the bear-market-pullback watch phase — the automated half of the dual-accountability evaluation rhythm can now be trusted on thin-data weeks.
 
 ---
 

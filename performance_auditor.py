@@ -362,6 +362,10 @@ def _format_stats_block(symbol: str, date_key: str, stats: Dict[str, Any]) -> st
     j  = stats["jewel"]
     w  = stats["wave"]
 
+    resolved_dir      = d["direction_correct"] + d["direction_wrong"]
+    insufficient_data = resolved_dir == 0
+    INSUFFICIENT_MSG  = f"  INSUFFICIENT DATA — {resolved_dir} resolved directional outcomes this week. Accuracy metric not computable."
+
     lines = [
         f"PERFORMANCE AUDIT — {symbol} — Week ending {date_key}",
         "=" * 60,
@@ -397,7 +401,9 @@ def _format_stats_block(symbol: str, date_key: str, stats: Dict[str, Any]) -> st
     # ── Block A: Harmonic Breakdown ─────────────────────────────────────────
     lines += ["", "HARMONIC BREAKDOWN — Energy Status vs 4h Outcome:"]
     energy = h.get("energy_breakdown", {})
-    if energy:
+    if insufficient_data:
+        lines.append(INSUFFICIENT_MSG)
+    elif energy:
         for state, v in sorted(energy.items()):
             acc = f"{v['accuracy_pct']}%" if v["accuracy_pct"] is not None else "unresolved"
             lines.append(
@@ -409,7 +415,9 @@ def _format_stats_block(symbol: str, date_key: str, stats: Dict[str, Any]) -> st
 
     lines += ["", "HARMONIC BREAKDOWN — Kinematic Grade vs 4h Outcome:"]
     grade = h.get("grade_breakdown", {})
-    if grade:
+    if insufficient_data:
+        lines.append(INSUFFICIENT_MSG)
+    elif grade:
         for g, v in sorted(grade.items()):
             acc = f"{v['accuracy_pct']}%" if v["accuracy_pct"] is not None else "unresolved"
             lines.append(
@@ -421,7 +429,9 @@ def _format_stats_block(symbol: str, date_key: str, stats: Dict[str, Any]) -> st
 
     # ── Block B: Box Size Breakdown ─────────────────────────────────────────
     lines += ["", "BOX SIZE BREAKDOWN — Session Box Width vs 4h Outcome:"]
-    if b:
+    if insufficient_data:
+        lines.append(INSUFFICIENT_MSG)
+    elif b:
         for bucket in ["NARROW (<0.5%)", "MEDIUM (0.5-1.0%)", "WIDE (>1.0%)"]:
             if bucket in b:
                 v   = b[bucket]
