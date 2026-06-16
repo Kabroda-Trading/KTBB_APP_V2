@@ -132,6 +132,23 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ---
 
 ## ► NEXT SESSION START
+*End-of-session marker: 2026-06-16*
+
+**2026-06-16 — W-9 Phase 2 fully resolved: OHLC detection + next-session-open window**
+
+**Confirmed today:**
+- **W-9 Phase 2 root cause found and fixed (OHLC upgrade, commit TBD)** — Root cause: Phase 2 checked `now_utc >= session_expires_at` BEFORE any price evaluation and `continue`d past all stop/T1 checks — a filled trade reaching 3 PM ET was stamped `EXPIRED/null` unconditionally, identical to an unfilled trade. Confirmed by id=94 (2026-06-15 LONG, entry filled 13:06 UTC, stop eventually hit 22:26 UTC, stamped EXPIRED at 19:00 UTC with `realized_pnl=NULL`). Secondary: `ticker["last"]` (MEXC snapshot every 60s) missed intrabar stop/T1 touches between polls. Fix: replaced snapshot detection with 1m Kraken OHLCV candle scan (`_fetch_1m_since`). Filled trades now run until candle `low ≤ stop` (LONG) or `high ≥ T1`, bounded by next-session-open (next day 8:30 AM ET via `_next_session_open_utc`), not 3 PM ET. Same-candle stop-first rule (conservative). Genuinely-unresolved case: `CLOSED_AT_EXPIRY / fractional R / target_hit="EXPIRY"`. Phase 1 (unfilled → EXPIRED at 3 PM) unchanged. Phase 3 (post-T1 observation) unchanged. SF-6 Rule 4 added.
+- **id=94 data correction (separate step, owner-run)** — MEXC 1m scan confirmed stop ($66,131.62) first touched at **22:26 UTC June 15** (6:26 PM ET), 3h26m after session close, well within next-session-open window. Kraken in-session scan (13:06–19:00 UTC) confirmed stop was NOT hit during session — in-session low was $66,716.50. Under the corrected rule, id=94 is `CLOSED_LOSS / -1.0R / target_hit="STOP" / closed_at=2026-06-15 22:26 UTC`. UPDATE shown as separate step — owner to run in production terminal.
+
+**Carry forward:**
+2. **[BUG]** Intel Reporter: CoinGecko 429 — not recurred on 06-13; continue to monitor.
+3. **[COSMETIC]** Cumulative performance chart x-axis out of chronological order (values correct, sort wrong).
+4. **[BOARD REVIEW]** 15M core status: W-6, B1, W-10, W-1 — true current state reported in Part 2 read-only pass (2026-06-14). W-7 ☑ closed 06-15. This is the menu for what to work on next.
+5. **[AUDITOR BUG — NEAR-TERM]** Thin-data legibility fix in `performance_auditor.py`: zero resolved outcomes → "INSUFFICIENT DATA", not "0%". One session, no dependencies. Before next Sunday's run.
+6. **[R1 — KNOWN MINOR]** Trades that hit stop/T1 between midnight UTC and next-session-open will have `closed_at` on the following calendar date. Grouping by `date_key` (session label) is correct. Grouping by `closed_at::date` will misplace those outcomes into the next day's audit bucket. No code fix needed now — flag for future auditor improvement.
+
+---
+
 *End-of-session marker: 2026-06-15*
 
 **2026-06-15 — Time-coherence gap fix + W-7 Fix 3 stale example residue shipped; architecture honest-picture**
@@ -141,8 +158,8 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 - **ENERGY/LEVEL TIME-COHERENCE GAP — found, scoped, and shipped (commit `d9a4a92`)** — Option 2 chosen: `main.py` scheduler now fires at `lock_end_ts` instead of a hardcoded 14:00 UTC. DST-aware `_seconds_until_lock_end()` helper uses `session_manager` pytz logic (EDT: 13:00 UTC, EST: 14:00 UTC). Boot-time check uses `now.timestamp() >= _boot_lock_end_ts` (not `now.hour >= 14`). `date_key` comes from `session["date_key"]` in both paths. Page-visit double-fire guard is unchanged — `_CACHE_LOCK` + existing lock in DB prevents re-fire. **Verification checkpoint: tomorrow 9:00 AM ET — brief should be sitting there on arrival, not triggered by page-visit.** Suggestion Box 2026-06-15 pin marked SHIPPED; W-12 status updated (scheduler now PRIMARY trigger).
 - **W-7 ☑ FULLY CLOSED — Fix 3 stale SA prompt example fixed (0805bd4)** — CONDITION 2(a) was updated in `ff60c5a` (2026-06-06) to magnitude logic (STRONG NEGATIVE excluded; WEAK/DEPLETED fires). The adjacent WHY THE SYSTEM STANDS DOWN example still cited "4H Momentum NEGATIVE" — updated to "4H Momentum WEAK [DEPLETED]" to match. SA reads examples as format templates; stale example could teach it to cite old sign-only wording. W-7 header, checklist, and status line all closed. Unblocks: Part 2 mean-reversion mode (Suggestion Box 2026-06-03).
 
-**Carry forward:**
-2. **[W-9 PASSIVE]** Forward verification only: next real no-fill APPROVED session must run through Phase 1 → EXPIRED/pnl=null correctly. Cannot be forced.
+**Carry forward (archived — see 2026-06-16 carry forward above for current state):**
+2. **[W-9 PASSIVE]** Forward verification only — superseded by Phase 2 fix 2026-06-16.
 3. **[BUG]** Intel Reporter: CoinGecko 429 — not recurred on 06-13; continue to monitor.
 4. **[COSMETIC]** Cumulative performance chart x-axis out of chronological order (values correct, sort wrong).
 5. **[BOARD REVIEW]** 15M core status: W-6, B1, W-10, W-1 — true current state reported in Part 2 read-only pass (2026-06-14). W-7 ☑ closed this session. This is the menu for what to work on next.
@@ -195,7 +212,7 @@ Job 2 Phase A item 1 confirmed live (commit `4e82934`): `session_id` join key on
 
 Status: ☐ not started · ◐ in progress · ☑ done
 
-### W-9 ☑ OUTCOME-TRACKING DATA INTEGRITY — FUNCTIONALLY CLOSED (2026-06-14)
+### W-9 ☑ OUTCOME-TRACKING DATA INTEGRITY — FULLY CLOSED (Phase 2 OHLC fix 2026-06-16)
 
 **Blocks:** W-6 T2 legibility polish, W-3 backtest, publication track record, auditor coach vision, agent model-optimization A/B testing. No dashboard number is trustworthy until this is resolved.
 
@@ -273,7 +290,7 @@ Even when the trade is exited at T1 (safe target), the monitor **keeps watching 
 
    *Why it needed no action:* the phantom correction and canonical separation done before the monitor was built happened to resolve every row that Step 5 would have touched. The queries are the evidence that closes the item.
 
-- **Status:** ☑ Steps 1–5 DONE. W-9 is functionally closed. Only remaining item is passive forward verification: the next real no-fill APPROVED session must be observed running through Phase 1 and correctly stamping `EXPIRED / realized_pnl=null`. Cannot be forced — confirms itself on the next untriggered setup.
+- **Status:** ☑ Steps 1–5 DONE + Phase 2 OHLC fix shipped 2026-06-16. W-9 is fully closed. Phase 1 (unfilled → EXPIRED at 3 PM) confirmed correct and unchanged. Phase 2 (filled trade expiry-override bug) resolved: filled trades now run until stop/T1 on 1m Kraken OHLCV or next-session-open, never clock-EXPIRED at 3 PM. id=94 confirmed CLOSED_LOSS at 22:26 UTC via MEXC 1m scan; manual correction staged. SF-6 Rule 4 documents the invariant. Passive Phase 1 forward verification (no-fill APPROVED → EXPIRED) still valid but no longer the only remaining item — the Phase 2 fix is the structural close.
 - **Blocks:** W-6 T2 (legibility polish is pointless on wrong numbers), W-3 backtest, publication track record, auditor RAG memory bank reliability, **agent model-optimization A/B testing** (Suggestion Box 2026-06-10 — cannot measure model quality until outcome data is trustworthy).
 - **Does NOT block:** daily session monitoring, A3 live watch, exit_warning observation.
 - **MD-refactor gate (same session):** `mtf_interpreter` is wired to load from `agents/mtf_interpreter.md` and diff-verified character-identical. Python constant `MTF_INTERPRETER_SYSTEM_PROMPT` must NOT be deleted until a live NY session confirms identical output in `/admin/interpreter-log`. Both gates (schema + mtf_interpreter validation) clear independently — neither blocks the other.

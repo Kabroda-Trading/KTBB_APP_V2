@@ -1,10 +1,9 @@
 # ledger_closing_engine.py
 # ==============================================================================
 # KABRODA TRADE-LIFECYCLE MONITOR  (W-9 replacement — 2026-06-11)
+# OHLC detection upgrade — 2026-06-16
 #
-# Three-phase state machine. Replaces the original ledger engine that had no
-# entry-fill check and hardcoded ±1R PnL — causing phantom losses on untriggered
-# setups (confirmed Jun-7 and Jun-10).
+# Three-phase state machine.
 #
 # PHASE 1 — Pre-entry
 #   Watches APPROVED records where entry_filled_at IS NULL.
@@ -12,46 +11,54 @@
 #   CRITICAL: stop hit while entry_filled_at IS NULL is NOT a loss — it is still
 #   EXPIRED. The phantom-loss trap required price to cross entry FIRST.
 #
-# PHASE 2 — In-trade
-#   Runs only after entry_filled_at is set. Watches stop + T1 (exit), T2/T3
-#   (observation only — V1 exits at T1). True R recorded (1.0 / -1.0), not
-#   hardcoded ±1 on a record that may never have been entered.
+# PHASE 2 — In-trade (OHLC-based, bounded by next session open)
+#   Runs only after entry_filled_at is set. Watches stop + T1 via 1m Kraken
+#   OHLCV candles — NOT ticker snapshots. Filled trades are NOT clock-expired
+#   at session_expires_at (3 PM ET). They run until stop or T1 is hit, or until
+#   the NEXT session open (next day 8:30 AM ET) without resolution. The 3 PM
+#   session_expires_at is the Phase 1 entry-window boundary only.
 #
-#   KNOWN LIMITATION — intra-interval ordering: if stop and T1 are both touched
-#   within a single 60s poll, stop is assumed (conservative). True ordering
-#   requires OHLC candle inspection. Acceptable for V1; flag for future fix.
+#   Stop-first rule on same-candle ambiguity (conservative). At 1m granularity
+#   this requires a ~$1,690 intrabar range for BTC at current levels — rare.
+#
+#   Genuinely-unresolved case (neither stop nor T1 hit by next session open):
+#   CLOSED_AT_EXPIRY / fractional R / target_hit="EXPIRY".
+#
+#   KNOWN LIMITATION R1 (minor, accounting): a trade that hits stop between
+#   midnight UTC and next session open has closed_at on the following calendar
+#   date. Grouping by campaign date_key (session label) is accurate; grouping
+#   by closed_at::date will shift that outcome to the next day's audit bucket.
 #
 # PHASE 3 — Post-exit observation
 #   After a T1 close, keeps observing until session_expires_at. Logs whether
 #   price subsequently reached T2/T3 via max_target_reached / t2_reached /
 #   t3_reached. Does NOT reopen the record or change status/pnl.
-#   Data foundation for future target-optimisation ("called T1, hit T3 on 80%").
-#
-# KNOWN LIMITATION — poll-based entry detection: a fast wick through the entry
-# trigger between two 60s polls is not observed, and the setup expires as if
-# unfilled. Acceptable for V1. Future fix: supplement with OHLC lookback on each
-# poll to catch wicks the live-price snapshot missed.
+#   Uses MEXC live-price snapshot (acceptable for non-closing observation).
 #
 # Legacy-row safety: all existing rows have session_expires_at = NULL. Every
 # phase query filters session_expires_at IS NOT NULL (Phase 1) or entry_filled_at
-# IS NOT NULL (Phase 2), so no pre-monitor row is touched until Step 5 backfill.
+# IS NOT NULL (Phase 2). Phase 2 skips rows with session_expires_at=NULL (guard
+# at top of loop) to avoid indefinite OHLC scanning of legacy data.
 # ==============================================================================
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import traceback
 from typing import Optional
 
 import ccxt.async_support as ccxt
 
 from database import CampaignLog, SessionLocal
+from session_manager import anchor_ts_for_utc_date, get_session_config
 
 _ticker_exchange = ccxt.mexc({"enableRateLimit": True})
+_ohlc_exchange   = ccxt.kraken({"enableRateLimit": True})
 
 _TARGET_RANK = {"T1": 1, "T2": 2, "T3": 3}
 
 
 async def _get_live_price(symbol: str) -> float:
+    """MEXC snapshot — Phase 1 entry detection and Phase 3 T2/T3 observation only."""
     try:
         fmt = symbol if "/" in symbol else symbol.replace("USDT", "/USDT")
         ticker = await _ticker_exchange.fetch_ticker(fmt)
@@ -59,6 +66,39 @@ async def _get_live_price(symbol: str) -> float:
     except Exception as e:
         print(f"|| LIFECYCLE || Price fetch error {symbol}: {e}")
         return 0.0
+
+
+async def _fetch_1m_since(symbol: str, since_ms: int, limit: int = 720) -> list:
+    """
+    Fetch 1m Kraken OHLCV candles from since_ms forward.
+    720 candles = 12 hours; covers a full session plus overnight gap to next open.
+    Returns list of dicts: ts (epoch ms), o, h, l, c.
+    """
+    try:
+        fmt = symbol if "/" in symbol else symbol.replace("USDT", "/USDT")
+        rows = await _ohlc_exchange.fetch_ohlcv(fmt, "1m", since=since_ms, limit=limit)
+        return [
+            {"ts": int(r[0]), "o": float(r[1]), "h": float(r[2]),
+             "l": float(r[3]), "c": float(r[4])}
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"|| LIFECYCLE || OHLC fetch error {symbol}: {e}")
+        return []
+
+
+def _next_session_open_utc(session_expires_at_utc: datetime) -> datetime:
+    """
+    Compute the next session open (8:30 AM ET) after session_expires_at.
+    Adds 18h to session_expires_at (3 PM ET → 9 AM next day ET), then lets
+    anchor_ts_for_utc_date snap to that day's 8:30 AM ET anchor.
+    Example: 19:00 UTC (3 PM ET) + 18h = 13:00 UTC next day (9 AM ET).
+    9 AM > 8:30 AM open → anchor returns that day's 8:30 AM ET. Correct.
+    """
+    config = get_session_config("us_ny_futures")
+    probe = session_expires_at_utc + timedelta(hours=18)
+    ts = anchor_ts_for_utc_date(config, probe)
+    return datetime.fromtimestamp(ts, tz=timezone.utc)
 
 
 def _as_utc(dt: datetime) -> datetime:
@@ -104,11 +144,11 @@ def _observe_targets(c: CampaignLog, live: float) -> bool:
 
 
 async def run_ledger_audit_loop():
-    print(">>> TRADE-LIFECYCLE MONITOR: Initializing (W-9 three-phase engine)...")
+    print(">>> TRADE-LIFECYCLE MONITOR: Initializing (W-9 engine, OHLC detection)...")
 
     while True:
         now_utc = datetime.now(timezone.utc)
-        # Per-cycle price cache — avoids redundant API calls for same symbol
+        # Per-cycle price cache — avoids redundant API calls for same symbol (Phase 1/3)
         price_cache: dict = {}
         db = SessionLocal()
 
@@ -154,8 +194,11 @@ async def run_ledger_audit_loop():
                     db.commit()
                     print(f"|| LIFECYCLE P1 || {c.symbol} ENTRY FILL observed at {live:.2f}. Entering Phase 2.")
 
-            # ── PHASE 2: In-trade ─────────────────────────────────────────────
-            # Only records where entry has been confirmed.
+            # ── PHASE 2: In-trade (OHLC-based detection) ─────────────────────
+            # Filled trades run until stop/T1 is hit via 1m Kraken candle scan,
+            # or until the next session open without resolution. The 3 PM ET
+            # session_expires_at does NOT close filled trades — it is the Phase 1
+            # entry-window boundary only. No more EXPIRED/null for filled rows.
             active = db.query(CampaignLog).filter(
                 CampaignLog.mas_approval_status == "APPROVED",
                 CampaignLog.closed_at.is_(None),
@@ -164,64 +207,87 @@ async def run_ledger_audit_loop():
             ).all()
 
             for c in active:
-                # Session expiry while in-trade (entered but no outcome before close)
-                if c.session_expires_at is not None:
-                    if now_utc >= _as_utc(c.session_expires_at):
-                        c.status = "EXPIRED"
-                        c.closed_at = now_utc
-                        c.realized_pnl = None
-                        db.commit()
-                        print(f"|| LIFECYCLE P2 || {c.symbol} EXPIRED — session closed while in-trade.")
-                        continue
-
-                if c.symbol not in price_cache:
-                    price_cache[c.symbol] = await _get_live_price(c.symbol)
-                live = price_cache[c.symbol]
-                if live == 0.0:
+                # Legacy-row guard: rows without session_expires_at have no
+                # next-session-open anchor; skip to prevent indefinite scanning.
+                if c.session_expires_at is None:
                     continue
 
-                # Observe T2/T3 high-water mark (non-closing)
-                obs_changed = _observe_targets(c, live)
+                fill_ts_ms = max(
+                    int(_as_utc(c.entry_filled_at).timestamp() * 1000),
+                    int((now_utc - timedelta(minutes=710)).timestamp() * 1000),
+                )
+                candles = await _fetch_1m_since(c.symbol, since_ms=fill_ts_ms)
+
+                if not candles:
+                    continue
+
                 closed = False
 
-                # Stop check runs before T1 check (conservative).
-                # If both stop and T1 are touched in the same 60s interval,
-                # stop wins. True ordering requires OHLC — V1 known limitation.
+                # Scan chronologically. Stop-first on same-candle (conservative).
+                for candle in candles:
+                    if c.bias == "LONG":
+                        hit_stop = candle["l"] <= c.stop_loss
+                        hit_t1   = c.t1 is not None and candle["h"] >= c.t1
+                    else:
+                        hit_stop = candle["h"] >= c.stop_loss
+                        hit_t1   = c.t1 is not None and candle["l"] <= c.t1
+
+                    candle_ts = datetime.fromtimestamp(candle["ts"] / 1000, tz=timezone.utc)
+
+                    if hit_stop:
+                        c.status       = "CLOSED_LOSS"
+                        c.realized_pnl = -1.0
+                        c.target_hit   = "STOP"
+                        c.closed_at    = candle_ts
+                        closed = True
+                        tag = " (same-candle, stop wins)" if hit_t1 else ""
+                        print(f"|| LIFECYCLE P2 || {c.symbol} {c.bias} STOP{tag} {candle_ts}. -1R.")
+                        break
+
+                    if hit_t1:
+                        c.status       = "CLOSED_WIN"
+                        c.realized_pnl = 1.0
+                        c.target_hit   = "T1"
+                        c.max_target_reached = _advance_target(c.max_target_reached, "T1")
+                        c.closed_at    = candle_ts
+                        closed = True
+                        print(f"|| LIFECYCLE P2 || {c.symbol} {c.bias} T1 {candle_ts}. +1R.")
+                        break
+
+                if closed:
+                    db.commit()
+                    continue
+
+                # No stop/T1 hit yet — update T2/T3 high-water marks from
+                # period extremes of all scanned candles.
+                obs_changed = False
                 if c.bias == "LONG":
-                    if live <= c.stop_loss:
-                        c.status = "CLOSED_LOSS"
-                        c.realized_pnl = -1.0
-                        c.target_hit = "STOP"
-                        c.closed_at = now_utc
-                        closed = True
-                        print(f"|| LIFECYCLE P2 || {c.symbol} LONG STOP at {live:.2f}. −1R.")
-                    elif c.t1 is not None and live >= c.t1:
-                        c.status = "CLOSED_WIN"
-                        c.realized_pnl = 1.0
-                        c.target_hit = "T1"
-                        c.max_target_reached = _advance_target(c.max_target_reached, "T1")
-                        c.closed_at = now_utc
-                        closed = True
-                        print(f"|| LIFECYCLE P2 || {c.symbol} LONG T1 at {live:.2f}. +1R.")
-
+                    obs_changed = _observe_targets(c, max(can["h"] for can in candles))
                 elif c.bias == "SHORT":
-                    if live >= c.stop_loss:
-                        c.status = "CLOSED_LOSS"
-                        c.realized_pnl = -1.0
-                        c.target_hit = "STOP"
-                        c.closed_at = now_utc
-                        closed = True
-                        print(f"|| LIFECYCLE P2 || {c.symbol} SHORT STOP at {live:.2f}. −1R.")
-                    elif c.t1 is not None and live <= c.t1:
-                        c.status = "CLOSED_WIN"
-                        c.realized_pnl = 1.0
-                        c.target_hit = "T1"
-                        c.max_target_reached = _advance_target(c.max_target_reached, "T1")
-                        c.closed_at = now_utc
-                        closed = True
-                        print(f"|| LIFECYCLE P2 || {c.symbol} SHORT T1 at {live:.2f}. +1R.")
+                    obs_changed = _observe_targets(c, min(can["l"] for can in candles))
 
-                if closed or obs_changed:
+                # Genuinely-unresolved boundary: next session open reached with
+                # no stop or T1 hit. Record fractional R from final candle close.
+                next_open = _next_session_open_utc(_as_utc(c.session_expires_at))
+                if now_utc >= next_open:
+                    final_close = candles[-1]["c"]
+                    if c.bias == "LONG":
+                        frac_r = round(
+                            (final_close - c.entry_price) / (c.entry_price - c.stop_loss), 4
+                        )
+                    else:
+                        frac_r = round(
+                            (c.entry_price - final_close) / (c.stop_loss - c.entry_price), 4
+                        )
+                    c.status       = "CLOSED_AT_EXPIRY"
+                    c.realized_pnl = frac_r
+                    c.target_hit   = "EXPIRY"
+                    c.closed_at    = now_utc
+                    db.commit()
+                    print(f"|| LIFECYCLE P2 || {c.symbol} CLOSED_AT_EXPIRY (next session open). R={frac_r:+.4f}.")
+                    continue
+
+                if obs_changed:
                     db.commit()
 
             # ── PHASE 3: Post-exit observation ────────────────────────────────
