@@ -98,6 +98,15 @@ is just producing its piece and pushing it "up" to the Senior Analyst.*
   arrival. **Prior state (pre-2026-06-15):** hardcoded 14:00 UTC (incorrect in EDT);
   page-visits raced the scheduler; energy reads sampled at page-visit time, not lock
   time — a time-coherence gap. Resolved by commit `d9a4a92`.
+  **Entry window (confirmed 2026-06-16):** Fresh entry is only valid during
+  **8:30–11:00 AM CST (9:00 AM–12:00 PM ET)**. After ~noon ET the calibration
+  context is several hours stale and a new entry is considered stale regardless of
+  intraday price movement. The RE-ARM ALERTER (Suggestion Box 2026-06-16) respects
+  this boundary and goes quiet at noon ET. **Phase 1 note:** the current lifecycle
+  monitor expires unfilled trades at `session_expires_at` (3:00 PM ET) — the noon
+  entry cutoff is a policy parameter not yet enforced as the Phase 1 expiry. Future
+  refinement: tighten Phase 1 to noon ET. Filled trades (Phase 2) are unaffected —
+  once entered, they run to stop/target/next-session-open per the W-9 Phase 2 fix.
 - **Feeds into:** 1B, 1C, 1D...
 
 ### 1B — Market Radar (V15) `[ ~ ]`
