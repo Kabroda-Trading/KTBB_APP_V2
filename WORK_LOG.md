@@ -132,6 +132,26 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ---
 
 ## ► NEXT SESSION START
+*End-of-session marker: 2026-06-17*
+
+**2026-06-17 — Evaluation discipline inaugurated; 2-day rollover thread documented**
+
+**Confirmed today:**
+- **SESSION EVALUATION LOG inaugurated** — first entry written for 2026-06-17 in the OPERATING DISCIPLINE section. STAND_DOWN / CORRECT (high confidence). Two independent reasons: 1H fully flipped BEARISH (rising ADX 23.73), 4H bullish on fumes (NEGATIVE momentum + JEWEL EXTENDED), 15M OVEREXTENDED / exit warning active (TF coherence 1/5); AND short-side disqualified (all three targets collapse onto HEAVY wall at $64,283.47, 0.39% below breakdown trigger, no valid measured-move R). Same collapsed-target-into-wall logic as 06-07 short — system consistent.
+- **2-day rollover thread logged** — 06-16 and 06-17 treated as one continuous event: 06-16 chop was the beginning of the 1H rollover confirmed on 06-17. 06-16 stand-down is in hindsight MORE correct (the tempting long was the wrong direction). Cross-session forward watch-item captured: first with-trend (short) approval = regime turning signal.
+- **Brief fired at 13:05 UTC** — coherence fix holding day 2.
+- **W-9 Phase 2 forward-verification still pending** — no fill today. First live filled trade after 3 PM ET remains the gate.
+- **Auditor watch-item for Sunday** — confirm CHOP_RISK / zero-correct-calls stat is computed on real resolved data under W-15 legibility code, not a thin-data artifact.
+
+**Carry forward:**
+2. **[BUG]** Intel Reporter: CoinGecko 429 — not recurred on 06-13; continue to monitor.
+3. **[COSMETIC]** Cumulative performance chart x-axis out of chronological order (values correct, sort wrong).
+4. **[BOARD REVIEW]** 15M core status: W-6, B1, W-10, W-1 — true current state reported in Part 2 read-only pass (2026-06-14). W-7 ☑ closed 06-15. This is the menu for what to work on next.
+5. **[AUDITOR BUG — ☑ CLOSED 2026-06-16]** W-15 shipped (cdd2425).
+6. **[R1 — KNOWN MINOR]** Trades that hit stop/T1 between midnight UTC and next-session-open will have `closed_at` on the following calendar date. Grouping by `date_key` (session label) is correct. Grouping by `closed_at::date` will misplace those outcomes into the next day's audit bucket. No code fix needed now — flag for future auditor improvement.
+
+---
+
 *End-of-session marker: 2026-06-16*
 
 **2026-06-16 — W-9 Phase 2 fully resolved: OHLC detection + next-session-open window**
@@ -146,7 +166,7 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 - **CONTINUOUS SESSION-EVALUATION DISCIPLINE locked in (docs)** — new OPERATING DISCIPLINE section in WORK_LOG; SF-7 operating rhythm section in SYSTEM_FLOW. Defines the bear-market-pullback evaluation mode: daily lightweight log, three honest outcome categories, longitudinal pattern-detection as Claude's standing job, trigger = pattern clarity not calendar.
 - **W-15 ☑ AUDITOR THIN-DATA LEGIBILITY FIX (commit `cdd2425`)** — `_format_stats_block` now guards all three breakdown sections (Harmonic Energy, Kinematic Grade, Box Size) with `insufficient_data = (resolved_dir == 0)`. When true, each section emits one "INSUFFICIENT DATA — 0 resolved directional outcomes" line instead of per-row zero-count tables. Calibration task for the evaluation discipline: weekly auditor now reads honestly on thin-data weeks, making stand-down validation trustworthy as the automated half of the cross-check.
 
-**Carry forward:**
+**Carry forward (archived — see 2026-06-17 carry forward above for current state):**
 2. **[BUG]** Intel Reporter: CoinGecko 429 — not recurred on 06-13; continue to monitor.
 3. **[COSMETIC]** Cumulative performance chart x-axis out of chronological order (values correct, sort wrong).
 4. **[BOARD REVIEW]** 15M core status: W-6, B1, W-10, W-1 — true current state reported in Part 2 read-only pass (2026-06-14). W-7 ☑ closed 06-15. This is the menu for what to work on next.
@@ -1136,6 +1156,33 @@ The weekly auditor's stand-down validation is the automated half; the daily manu
 
 - **Status:** ☑ Operating mode for this phase. Defined plan — NOT a vague "wait and see."
 - **Regime gate:** more approvals expected when daily/weekly structure realigns bearishly and HTF ceilings stop blocking upside. No arbitrary timeline.
+
+---
+
+### SESSION EVALUATION LOG
+*(Reverse-chronological. Add new entries at the top. One-line terse for clean days; flag days get full detail. Keyed by `date_key` = session anchor date.)*
+
+---
+
+**2026-06-17 | STAND_DOWN | Outcome: CORRECT (high confidence) | Part of 2-day rollover thread**
+
+*Call:* STAND_DOWN.
+
+*Evaluation:* Clean, high-confidence correct stand-down for two independent reasons:
+1. **Multi-timeframe exhaustion** — 1H fully flipped BEARISH with rising ADX (23.73). 4H bullish on NEGATIVE momentum + JEWEL EXTENDED (running on fumes). 15M OVEREXTENDED with active exit warning. TF coherence 1/5.
+2. **Short side structurally disqualified** — all three short targets collapse onto a single HEAVY wall at $64,283.47, 0.39% below the breakdown trigger. No valid measured-move R. Same collapsed-target-into-wall logic that correctly capped the 06-07 short — system is consistent.
+
+No clean setup was missed. Not a questionable stand-down.
+
+*2-day rollover thread (06-16 → 06-17):*
+- **06-16:** stood down on two-sided chop; brief flagged a conditional long. Owner watched the upside potential. Price instead failed and broke down — upper-$65k → $64k-something on 06-17. The watched-for long never triggered; standing down was correct. In hindsight 06-16's stand-down is MORE correct, not less — the one tempting directional lean (long) was the wrong way.
+- **06-17:** 1H now fully bearish with rising ADX confirms the rollover that 06-16's chop was beginning. These two sessions are one continuous event, not two isolated stand-downs.
+
+*Owner TA observation (trader's-eye layer):* Daily dropped hard (~$10k), needed a rest; the pullback traveled back toward the ~$66–68k area, tagged ~$66.9k, showed exhaustion near that level, and is now rotating back down. If correct: the recent chop was NOT missed opportunity — it was the pullback completing at level, and the trend is now resuming downside. The payoff trades (short, with-trend) should appear once the 4H rolls from "bullish on fumes" to bearish and aligns down through 1H to 15M.
+
+*Forward watch-item (Claude holds cross-session):* When does the 4H flip from bullish-on-fumes to bearish-aligned? That realignment is what should restore approvals. Watch for the **first with-trend (short) approval** — that's the regime turning. If the system catches a clean with-trend short that runs → validates this entire stand-down stretch as correct patience. If the trend resumes and the system KEEPS standing down through clean with-trend setups → that becomes the over-conservative flag. Either outcome lands in this log with the setup already captured.
+
+*Status notes:* Brief fired clean at lock time again (13:05 UTC) — coherence fix holding day 2. No fill today — W-9 Phase 2 forward-verification still pending first live filled trade. Watch for Sunday's auditor run: confirm the CHOP_RISK / zero-correct-calls stat is computed on real resolved data under the W-15 legibility code, not a thin-data artifact.
 
 ---
 
