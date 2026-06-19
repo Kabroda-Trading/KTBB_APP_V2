@@ -750,6 +750,9 @@
                 } else if (j.jewel_gate_open && j.jewel_conviction === 'MODERATE') {
                     topEl.textContent = 'MODERATE SETUP';
                     topEl.style.color = '#f59e0b';
+                } else if (masStatus === 'APPROVED' || masStatus === 'WAITING_FOR_15M') {
+                    topEl.textContent = 'JEWEL GATE CLOSED';
+                    topEl.style.color = '#f59e0b';
                 } else {
                     topEl.textContent = 'GATE CLOSED — STAND DOWN';
                     topEl.style.color = '#64748b';
@@ -945,7 +948,9 @@
                     indicator_string:   `${bo},${bd},${lvl.daily_resistance||0},${lvl.daily_support||0},${lvl.range30m_high||0},${lvl.range30m_low||0}`,
                     grade:              snap.mas_status || 'PENDING',
                     mas_status:         snap.mas_status || null,
-                    key:                '',
+                    key:                snap.mas_status === 'APPROVED'
+                        ? `${snap.plan.bias}|SA_APPROVED|${(snap.plan.entry_price||0).toFixed(2)}|${(snap.plan.stop_loss||0).toFixed(2)}|${(snap.plan.t1||0).toFixed(2)}|${(snap.plan.t2||0).toFixed(2)}|${(snap.plan.t3||0).toFixed(2)}`
+                        : '',
                     diagnostic_ledger:  {},
                     plan: {
                         valid:   true,
@@ -999,6 +1004,7 @@
                 window.radarMemory[t.symbol] = Object.assign({}, _prev, t, {
                     mas_status: _prev.mas_status !== undefined ? _prev.mas_status : (t.mas_status || null),
                     plan:       _prev.plan || t.plan,
+                    key:        (_prev.mas_status === 'APPROVED' && _prev.key) ? _prev.key : t.key,
                 });
 
                 const row = document.querySelector(`.radar-row-c[data-symbol="${t.symbol}"]`);
