@@ -1180,6 +1180,7 @@ def run_mas_analysis(
     # 5. Parse JSON response — one retry on failure
     brief: Optional[ExecutiveBrief] = None
     narrative_text_for_log: Optional[str] = None
+    _final_response_text = response_text  # tracks which response text actually parsed successfully
 
     try:
         brief, narrative_text_for_log = _parse_brief(response_text, ExecutiveBrief)
@@ -1199,6 +1200,7 @@ def run_mas_analysis(
                 max_tokens=4096,
             )
             brief, narrative_text_for_log = _parse_brief(response_text2, ExecutiveBrief)
+            _final_response_text = response_text2  # retry succeeded; capture the successful text
         except Exception as e2:
             err = f"JSON parse failed after retry: {e2}"
             _mark_mas_error(symbol, session_id, date_key, err)
@@ -1209,7 +1211,37 @@ def run_mas_analysis(
     _inject_decision_journal(symbol, session_id, date_key, brief, battlebox_payload)
     _write_narrative_log(symbol, date_key, brief, narrative_text_for_log)
 
-    # 7. Content Publishing Engine — non-fatal, same thread, isolated try/except
+    # 7. Forward-audit record — frozen at decision time (Adj. 3: non-blocking).
+    # cro_memory is the REUSED reference from step 2 — not a re-fetch (Adj. 1).
+    # A re-fetch here could produce a different result if a trade closed between
+    # the two calls, defeating the capture-at-decision-time principle.
+    try:
+        from harness.audit_writer import write_decision_record as _write_audit
+        _fuel = context.get("fuel_gauge", {})
+        _write_audit(
+            symbol=symbol,
+            date_key=date_key,
+            session_id=session_id,
+            approval_status=brief.approval_status,
+            bias=brief.bias,
+            entry_price=brief.entry_price,
+            stop_loss=brief.stop_loss,
+            t1=brief.t1,
+            t2=brief.t2,
+            t3=brief.t3,
+            bo_trigger=bo if bo else None,
+            bd_trigger=bd if bd else None,
+            energy_status=context.get("1h_fuel_status"),
+            kinematic_grade=_fuel.get("15M_JEWEL", {}).get("kinematic_grade"),
+            kde_peaks=context.get("kde_peaks"),
+            rag_memory_snapshot=cro_memory,
+            agent_chain={"senior_analyst": _final_response_text},
+            model_version=agent_core._MODEL,
+        )
+    except Exception as _audit_err:
+        print(f"[AUDIT WRITER] Non-critical failure — MAS unaffected: {_audit_err}")
+
+    # 8. Content Publishing Engine — non-fatal, same thread, isolated try/except
     try:
         publisher_crew.run_publisher(symbol, session_id, date_key, brief)
     except Exception as pub_err:
