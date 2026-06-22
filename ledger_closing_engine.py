@@ -176,6 +176,19 @@ async def run_ledger_audit_loop():
                     c.closed_at = now_utc
                     c.realized_pnl = None
                     db.commit()
+                    # Forward-audit back-fill (Adj. 3: non-blocking)
+                    try:
+                        from harness.audit_writer import backfill_outcome as _backfill
+                        _backfill(
+                            symbol=c.symbol,
+                            date_key=c.date_key,
+                            session_id=c.session_id,
+                            outcome_type="NO_TRIGGER",
+                            realized_pnl_r=None,
+                            resolution_notes="Session expired; entry price never triggered.",
+                        )
+                    except Exception as _ae:
+                        print(f"[AUDIT BACKFILL] Non-critical failure: {_ae}")
                     print(f"|| LIFECYCLE P1 || {c.symbol} EXPIRED — session closed, entry never triggered.")
                     continue
 
@@ -256,6 +269,18 @@ async def run_ledger_audit_loop():
 
                 if closed:
                     db.commit()
+                    # Forward-audit back-fill (Adj. 3: non-blocking — close path continues on any error)
+                    try:
+                        from harness.audit_writer import backfill_outcome as _backfill
+                        _backfill(
+                            symbol=c.symbol,
+                            date_key=c.date_key,
+                            session_id=c.session_id,
+                            outcome_type=c.status,          # CLOSED_WIN or CLOSED_LOSS
+                            realized_pnl_r=c.realized_pnl,
+                        )
+                    except Exception as _ae:
+                        print(f"[AUDIT BACKFILL] Non-critical failure: {_ae}")
                     continue
 
                 # No stop/T1 hit yet — update T2/T3 high-water marks from
@@ -284,6 +309,19 @@ async def run_ledger_audit_loop():
                     c.target_hit   = "EXPIRY"
                     c.closed_at    = now_utc
                     db.commit()
+                    # Forward-audit back-fill (Adj. 3: non-blocking)
+                    try:
+                        from harness.audit_writer import backfill_outcome as _backfill
+                        _backfill(
+                            symbol=c.symbol,
+                            date_key=c.date_key,
+                            session_id=c.session_id,
+                            outcome_type="CLOSED_AT_EXPIRY",
+                            realized_pnl_r=frac_r,
+                            resolution_notes="Reached next session open without hitting stop or T1.",
+                        )
+                    except Exception as _ae:
+                        print(f"[AUDIT BACKFILL] Non-critical failure: {_ae}")
                     print(f"|| LIFECYCLE P2 || {c.symbol} CLOSED_AT_EXPIRY (next session open). R={frac_r:+.4f}.")
                     continue
 
