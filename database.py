@@ -581,3 +581,115 @@ class InterpreterLog(Base):
     output_text      = Column(String,  nullable=True)               # Full prose — null if fail-opened
     ran_successfully = Column(Boolean, nullable=False, default=False)
     created_at       = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
+# SESSION AUDIT LOG (FORWARD-AUDIT LOOP — CANONICAL AUDIT RECORD)
+# One row per MAS session decision. Write-once discipline:
+#   - Frozen-at-decision columns set once when decision is made; never overwritten.
+#   - Outcome columns (outcome_*) set once when trade resolves; never overwritten.
+#   - outcome_set_at timestamps the back-fill.
+#
+# No hash chain (Adj. 2): single-operator system with no external auditor requiring
+# cryptographic tamper evidence. The write-once column discipline is sufficient.
+#
+# Write paths:
+#   - harness/audit_writer.write_decision_record()  — called from kabroda_mas_flow.py
+#   - harness/audit_writer.backfill_outcome()       — called from ledger_closing_engine.py
+#
+# Both wrap their DB calls in try/except — a failed audit write never blocks the
+# decision or close path. See Adjustment 3.
+# ---------------------------------------------------------
+class SessionAuditLog(Base):
+    __tablename__ = "session_audit_log"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    symbol     = Column(String, index=True, nullable=False)       # "BTC/USDT"
+    date_key   = Column(String, index=True, nullable=False)       # "YYYY-MM-DD"
+    session_id = Column(String, nullable=False)                   # "us_ny_futures"
+
+    # Links to existing tables (soft FK — no ORM relationship declared)
+    campaign_log_id      = Column(Integer, nullable=True)         # campaign_logs.id
+    decision_journal_id  = Column(Integer, nullable=True)         # decision_journal.id
+    jewel_snapshot_id    = Column(Integer, nullable=True)         # jewel_snapshot_log.id
+
+    # ── FROZEN AT DECISION TIME (write-once; never overwritten after creation) ──
+    decision_timestamp_utc = Column(DateTime, nullable=True)      # exact UTC moment MAS verdict produced
+    approval_status        = Column(String,   nullable=True)      # APPROVED / STAND_DOWN / REJECTED / WAITING_FOR_15M
+    bias                   = Column(String,   nullable=True)      # LONG / SHORT / NEUTRAL
+    bo_trigger             = Column(Float,    nullable=True)      # breakout trigger at lock time
+    bd_trigger             = Column(Float,    nullable=True)      # breakdown trigger at lock time
+    box_size_pct           = Column(Float,    nullable=True)      # (bo - bd) / bo * 100, computed at decision time
+    energy_status          = Column(String,   nullable=True)      # 1h_fuel_status at decision time
+    kinematic_grade        = Column(String,   nullable=True)      # 15M JEWEL kinematic_grade
+    jewel_gate_open        = Column(Boolean,  nullable=True)      # NY_OPEN JEWEL gate state
+    jewel_conviction       = Column(String,   nullable=True)      # STRONG / MODERATE / WEAK
+    kde_peaks_json         = Column(String,   nullable=True)      # kde_peaks list as presented to MAS (JSON)
+    rag_memory_snapshot    = Column(String,   nullable=True)      # exact _fetch_cro_memory() return value — reused
+                                                                  # reference, NOT a re-fetch. See audit_writer.py.
+    agent_chain_json       = Column(String,   nullable=True)      # {"msa":..,"mls":..,"kmq":..,"cro":..,"cco":..}
+    model_version          = Column(String,   nullable=True)      # model ID string at decision time
+    entry_price            = Column(Float,    nullable=True)
+    stop_loss              = Column(Float,    nullable=True)
+    t1                     = Column(Float,    nullable=True)
+    t2                     = Column(Float,    nullable=True)
+    t3                     = Column(Float,    nullable=True)
+
+    # ── BACK-FILLED AT RESOLUTION (write-once at resolution time; NULL until then) ──
+    outcome_resolved_at_utc  = Column(DateTime, nullable=True)
+    outcome_type             = Column(String,   nullable=True)    # CLOSED_WIN / CLOSED_LOSS / NO_TRIGGER /
+                                                                  # EXPIRED / STAND_DOWN_SAVED /
+                                                                  # STAND_DOWN_OVERCAUTIOUS / STAND_DOWN_UNRESOLVED
+    outcome_direction_correct = Column(Boolean, nullable=True)    # True = price moved in declared direction
+    realized_pnl_r           = Column(Float,   nullable=True)    # PnL in R units; NULL for stand-downs
+    resolution_notes         = Column(String,  nullable=True)    # anomalies: manual close, slippage, etc.
+    outcome_set_at           = Column(DateTime, nullable=True)   # when back-fill was written
+
+    # ── AUDIT METADATA ──
+    label_tier = Column(String, nullable=True)  # four-tier label at record time; updated at N milestones
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
+# TRIALS LOG (FORWARD-AUDIT LOOP — COMPARISONS-EVALUATED COUNTER)
+# One row per replay, backtest, or binomial checkpoint run.
+# This is the "trials spent" ledger. SELECT COUNT(*) WHERE
+# against_n <= current_n gives the comparisons denominator
+# for any multiple-comparisons correction.
+#
+# The hypothesis column is required for evidentiary integrity.
+# An empty or NULL hypothesis auto-labels the row DATA_MINED —
+# recording THAT a hypothesis was stated before testing, not
+# that it was genuinely written before results were seen.
+# Honesty is a human discipline this field cannot enforce. (Adj. 4)
+#
+# Write path: harness/binomial_checkpoint.py and any harness
+# module that replays parameters against historical data.
+# ---------------------------------------------------------
+class TrialsLog(Base):
+    __tablename__ = "trials_log"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    logged_at_utc = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    # REPLAY / PARAMETER_SWEEP / BINOMIAL_CHECKPOINT / ABLATION / MANUAL
+    test_type  = Column(String, nullable=False)
+
+    # Written before looking at results. NULL/empty → candidate_status auto-set DATA_MINED.
+    # This records existence of a stated hypothesis, not that it preceded result inspection.
+    hypothesis = Column(String, nullable=True)
+
+    config_json        = Column(String,  nullable=True)   # complete parameter set tested (JSON)
+    against_n          = Column(Integer, nullable=True)   # resolved observations in dataset at test time
+    against_date_range = Column(String,  nullable=True)   # "YYYY-MM-DD → YYYY-MM-DD"
+
+    result_summary      = Column(String,  nullable=True)  # findings with N on every percentage
+    result_accuracy_pct = Column(Float,   nullable=True)  # extracted numeric for querying
+    result_n            = Column(Integer, nullable=True)
+
+    # UNDER_REVIEW / ACTIVE_CANDIDATE / FORWARD_WATCH / PROMOTED / REJECTED / SUPERSEDED / DATA_MINED
+    candidate_status = Column(String, nullable=True, default="UNDER_REVIEW")
+
+    notes                  = Column(String,  nullable=True)
+    promoted_at_utc        = Column(DateTime, nullable=True)
+    promotion_forward_n    = Column(Integer,  nullable=True)  # forward sessions confirmed before promotion
