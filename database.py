@@ -627,7 +627,7 @@ class SessionAuditLog(Base):
     kde_peaks_json         = Column(String,   nullable=True)      # kde_peaks list as presented to MAS (JSON)
     rag_memory_snapshot    = Column(String,   nullable=True)      # exact _fetch_cro_memory() return value — reused
                                                                   # reference, NOT a re-fetch. See audit_writer.py.
-    agent_chain_json       = Column(String,   nullable=True)      # {"msa":..,"mls":..,"kmq":..,"cro":..,"cco":..}
+    agent_chain_json       = Column(String,   nullable=True)      # {"senior_analyst": <response text that passed JSON parse>}
     model_version          = Column(String,   nullable=True)      # model ID string at decision time
     entry_price            = Column(Float,    nullable=True)
     stop_loss              = Column(Float,    nullable=True)
