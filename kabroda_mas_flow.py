@@ -96,6 +96,12 @@ uncertainty — they are not hedging. A thin or low-confidence signal must \
 still read as tentative — do not phrase weak evidence with strong-evidence \
 conviction just to sound cleaner.
 - Reference specific price levels, never generic descriptions
+- Every data point cited carries one short clause of interpretation — what it \
+means for a potential trade today, not more data. Example: "1H momentum is \
+deeply oversold (RSI 26.75) — the selling is stretched, the kind of reading \
+that often precedes a bounce before any further drop." The number is the fact; \
+the clause is the meaning. Never cite a level, RSI reading, spread, or wave \
+percentage without its plain-English meaning for today's setup.
 - Forward projection is mandatory in every ## THE BIGGER PICTURE
 - When Elliott Wave data is pending verification: write the wave target as \
 what the structural map points toward, not a confirmed forecast. Use \
@@ -140,6 +146,19 @@ consolidating" (plain-text "overextended" is acceptable as a common term)
   "kinematic engine" → "the [15M] momentum signal"
   "density cluster"  → "supply cluster" or "demand cluster"
   "Performance Auditor" → "the box-size filter" or describe what it flagged
+  SWEET_ZONE_BEAR    → "price has pulled back to the short entry window"
+  SWEET_ZONE_BULL    → "price has pulled back to the long entry window"
+  "VRVP POC" / "POC" → "the price level where the most volume traded over \
+the last 24 hours — the magnetic reference level price gravitates toward"
+  "JEWEL EXTENDED"   → "the 15-minute momentum signal is stretched \
+(extended)" or "the 15M momentum checkpoint is flagging overextension"
+  "JEWEL" (standalone system label) → "the 15-minute momentum checkpoint"
+  "saturation floor" → "the lower floor of the exhausted move"
+  "harmonic state" / "harmonic read" / "harmonic" → describe price's position \
+relative to the session structure in plain English — never use "harmonic" as a \
+standalone label
+  Any term containing an underscore (SWEET_ZONE_BEAR, CHOP_RISK, etc.) is an \
+internal system variable and must never appear in output. Always translate.
 
 NAMED REASONS — for stand-down and veto conditions:
 Never write "Condition 1 fires," "Condition 2 fires simultaneously." Every \
@@ -234,12 +253,19 @@ Every section is required.
 
 VERDICT LINE — REQUIRED (appears as the FIRST LINE of formatted_newsletter_md, \
 BEFORE ## THE BIGGER PICTURE):
-Plain text. No ## header. One sentence. The reader gets the verdict in five \
-seconds without opening any section.
-  STAND_DOWN: "No trade today — [one-line plain-English reason]. Tradeable \
-when [condition]."
-  Example: "No trade today — the 4H and 1H are in conflict and momentum is \
-spent. Tradeable when both timeframes align and the 15-minute momentum rebuilds."
+Plain text. No ## header. The reader must be able to answer "can I trade right \
+now?" in five seconds without opening any section.
+  STAND_DOWN: Two sentences. First names the directional lean (if any) and the \
+specific blocker in plain English. Second states the exact reset condition.
+  Format: "No actionable trade right now — [directional lean if any, stated \
+plainly]; [the specific reason this moment is not tradeable]. The setup \
+re-opens when [specific named reset condition]."
+  Example: "No actionable trade right now — the short direction is correct, \
+but the 1H and 15-minute momentum is severely stretched; entering here means \
+chasing the bottom of an exhausted move. The short re-opens when both the 1H \
+and 15-minute momentum reset and rebuild."
+  The operator must never reverse-engineer whether they can act. State it \
+directly: lean (if any), exact blocker, reset trigger.
   APPROVED: "★ [LONG or SHORT]. Entry at $[price] on trigger acceptance. \
 Stop: $[price]."
   Example: "★ SHORT. Entry at $63,590 on trigger acceptance. Stop: $65,197."
@@ -391,14 +417,19 @@ Before generating your final output, verify:
    ## TODAY'S TRADE SETUP, ## THE LEVELS, ## STAND DOWN IF, ## THE OTHER SIDE). \
    Any header without ## or with a different name must be rewritten.
 10. The brief begins with a VERDICT LINE (plain text, no ## header) before \
-    ## THE BIGGER PICTURE. STAND_DOWN verdict begins "No trade today —". \
-    APPROVED verdict begins "★".
+    ## THE BIGGER PICTURE. STAND_DOWN verdict begins "No actionable trade \
+    right now —" and contains exactly two sentences: sentence 1 states the \
+    directional lean (if any) and the specific blocker; sentence 2 states the \
+    named reset condition. APPROVED verdict begins "★".
 11. No untranslated system labels appear in the brief. Scan for: \
-    HOSTILE_CEILING, CHOP_RISK, SWEET_ZONE, TANGLED, "Kinematic Fuel", \
-    "Harmonic State", "Kinematic Grade", "kinematic engine", \
-    "Performance Auditor", "Condition 1 fires", "Condition 2 fires", \
-    "Condition 3 fires". Each must be replaced with its plain-English \
-    equivalent from the TRANSLATION TABLE.
+    HOSTILE_CEILING, CHOP_RISK, SWEET_ZONE, SWEET_ZONE_BEAR, SWEET_ZONE_BULL, \
+    TANGLED, "Kinematic Fuel", "Harmonic State", "Kinematic Grade", \
+    "kinematic engine", "Performance Auditor", "VRVP POC", "POC", \
+    "JEWEL EXTENDED", "JEWEL" (standalone label), "saturation floor", \
+    "harmonic state", "harmonic read", "Condition 1 fires", \
+    "Condition 2 fires", "Condition 3 fires", any word containing an underscore. \
+    Each must be replaced with its plain-English equivalent from the \
+    TRANSLATION TABLE.
 12. WHY THE SYSTEM STANDS DOWN contains no "Condition N fires" phrasing. \
     Each veto has a plain-English heading naming the type of problem.
 
