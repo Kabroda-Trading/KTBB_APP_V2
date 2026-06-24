@@ -175,6 +175,35 @@ def _find_macro_anchors(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     return anchors
 
+
+def _compute_weekly_200sma(daily_candles: List[Dict[str, Any]]) -> float:
+    """
+    Resample daily candles to weekly (anchor: UTC Monday open), then return
+    the simple moving average of the last 200 completed weekly closes.
+    Requires at least 1400 daily candles (≈200 weeks of 5 trading days each).
+    Returns 0.0 if insufficient data.
+    """
+    if len(daily_candles) < 1400:
+        return 0.0
+
+    # Group by ISO week (year, week_number) — last candle in each group is the weekly close
+    weeks: dict = {}
+    for c in daily_candles:
+        dt = datetime.fromtimestamp(c["time"], tz=timezone.utc)
+        year, week, _ = dt.isocalendar()
+        key = (year, week)
+        if key not in weeks:
+            weeks[key] = c["close"]
+        else:
+            weeks[key] = c["close"]  # overwrite — last daily candle in week wins
+
+    sorted_closes = [weeks[k] for k in sorted(weeks.keys())]
+    if len(sorted_closes) < 200:
+        return 0.0
+
+    return sum(sorted_closes[-200:]) / 200.0
+
+
 async def run_macro_scan():
     print(">>> MACRO ENGINE: Scanning multi-year SPOT structural anchors (AXIOM VALIDATOR)...")
     db = SessionLocal()
@@ -209,7 +238,31 @@ async def run_macro_scan():
             
             db.commit()
             print(f"|| MACRO ANCHORS LOCKED (SPOT) || {db_sym} | Exact Waves Mapped: {len(anchors)}")
-            
+
+            # ── WEEKLY 200 SMA (stored as active=False so KDE ignores it) ──
+            # Queried by _fetch_weekly_200sma() in battlebox_pipeline at lock time.
+            try:
+                sma_200w = _compute_weekly_200sma(daily_data)
+                if sma_200w > 0:
+                    db.query(GravityMemory).filter(
+                        GravityMemory.symbol == db_sym,
+                        GravityMemory.source == "WEEKLY_200_SMA",
+                    ).delete()
+                    db.add(GravityMemory(
+                        symbol=db_sym,
+                        timestamp=now_utc,
+                        source="WEEKLY_200_SMA",
+                        level_type="WEEKLY_200_SMA_REFERENCE",
+                        price=sma_200w,
+                        permanence_class=2,
+                        heat_multiplier=0.0,
+                        active=False,  # invisible to KDE — reference value only
+                    ))
+                    db.commit()
+                    print(f"|| WEEKLY 200 SMA || {db_sym} | {sma_200w:.2f}")
+            except Exception as sma_err:
+                print(f"|| WEEKLY 200 SMA ERROR || {db_sym}: {sma_err}")
+
     except Exception as e:
         print(f"Macro Engine Error: {e}")
     finally:
