@@ -29,6 +29,7 @@ import gravity_math
 import kabroda_mas_flow
 import ledger_closing_engine
 import mtf_confluence_scanner
+import session_monitor
 import agent_core
 import session_manager
 
@@ -453,6 +454,7 @@ async def lifespan(app: FastAPI):
     app.state.jewel_task            = asyncio.create_task(run_jewel_scheduler())
     app.state.weekly_task           = asyncio.create_task(run_weekly_scheduler())
     app.state.outcome_tracker_task  = asyncio.create_task(run_outcome_tracker())
+    app.state.monitor_task          = asyncio.create_task(session_monitor.run_session_monitor_loop())
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     app.state.gravity_task.cancel()
@@ -461,6 +463,7 @@ async def lifespan(app: FastAPI):
     app.state.jewel_task.cancel()
     app.state.weekly_task.cancel()
     app.state.outcome_tracker_task.cancel()
+    app.state.monitor_task.cancel()
 
 app = FastAPI(title="Kabroda BattleBox", version="12.0", lifespan=lifespan)
 

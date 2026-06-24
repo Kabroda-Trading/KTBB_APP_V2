@@ -73,7 +73,7 @@ is reached; no re-approval needed.
 
 ---
 
-## Audit write exception (the one narrow exception to read-only)
+## Write exception #1 — Forward-audit loop
 
 `audit_writer.py` writes to two tables:
 - `session_audit_log` — one row per MAS decision; frozen inputs captured at decision time
@@ -83,6 +83,28 @@ Neither table has any connection to live trading config. They describe system be
 they do not influence it. `audit_writer.py` is called from production code
 (`kabroda_mas_flow.py`, `ledger_closing_engine.py`) with try/except wrapping — a
 failed audit write never blocks or alters a trade decision or close.
+
+---
+
+## Write exception #2 — Intraday session monitor
+
+`session_monitor.py` (not a harness file — lives in project root) writes to:
+- `monitor_event_log` — one row per 15-minute poll during the active session window
+- `monitor_config` — configuration and notification gate state (read-only from here)
+
+Hard wall remains intact: `session_monitor.py` has no FK to `session_locks` or
+`campaign_logs`. It does not update any live column. Every write is wrapped in
+try/except — a failed poll row never stops the monitor loop or affects any trade path.
+
+The monitor is observe-and-log only in v1. Notifications are built but disabled.
+Three gates must simultaneously clear before notifications can fire:
+- **Gate A**: 30+ resolved-session transition events (evidence threshold)
+- **Gate B**: human harness review confirms signal plausibility
+- **Gate C**: explicit `monitor_config.notification_enabled` flip by a human
+
+The monitor cannot enable itself. `session_audit_log.micro_state_lock` (added in
+Phase C) allows condition re-derivation to use the exact micro_state that was active
+at lock time, rather than the energy_status proxy used in v1 for older rows.
 
 ---
 
