@@ -132,6 +132,80 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ---
 
 ## ► NEXT SESSION START
+*End-of-session marker: 2026-06-24*
+
+**2026-06-24 — Phase C intraday session monitor, micro_state_lock, brief voice, War Room UI, and Phase 1 MTF structural capture all committed**
+
+### ✅ COMPLETED AND COMMITTED THIS SESSION (2026-06-22 → 2026-06-24)
+
+**1. Phase C — Intraday Session Monitor (4 commits, prior to context compaction)**
+
+Full observe-and-log infrastructure for intraday state transition tracking:
+- `database.py`: `MonitorEventLog` ORM (one row per 15-minute poll) + `MonitorConfig` ORM (three-gate notification config). Both have ALTER TABLE migrations in `init_db()`.
+- `session_monitor.py` (new file, ~370 lines): background async loop running during session window (8:30 AM–3:00 PM ET). Polls every 15 minutes. Tracks five discrete state variables (`kinematic_grade`, `micro_state`, `1h_fuel_status`, `4h_adx_strength`, `1h_adx_strength`). Detects transitions. Re-derives three STAND_DOWN conditions against the locked audit record. Checks three notification gates simultaneously (Gate A: 30+ resolved-session events; Gate B: human harness review; Gate C: explicit `notification_enabled` flip). Monitor cannot enable itself.
+- `main.py`: `asyncio.create_task(session_monitor.run_session_monitor_loop())` in lifespan; graceful cancel on shutdown.
+- `harness/README.md`: Write exception #2 documented (monitor write path, hard wall rules, three gate descriptions).
+
+**2. micro_state_lock column (committed 2026-06-22)**
+- `database.py`: `micro_state_lock = Column(String, nullable=True)` added to `SessionAuditLog` + ALTER TABLE migration.
+- `harness/audit_writer.py`: `micro_state: Optional[str] = None` param + `micro_state_lock=micro_state` in row constructor.
+- `kabroda_mas_flow.py`: `micro_state=context.get("micro_state")` passed to `_write_audit()`.
+
+**3. Brief voice tuning (commit `6d24d43`)**
+- `kabroda_mas_flow.py` `SENIOR_ANALYST_SYSTEM_PROMPT`: 7 edits — jargon leak table (HOSTILE_CEILING → "the market is stacked against clean entry"), interpretation clause ban, actionable verdict line before "## THE BIGGER PICTURE", TODAY'S ENERGY section, SELF-CHECK items 10-12. Voice changed; measured-move math, trigger levels, and STAND_DOWN conditions unchanged.
+
+**4. Macro War Room UI redesign (committed standalone)**
+- `templates/macro_war_room.html`: dark military-terminal aesthetic (black, cyan, purple), JetBrains Mono + Rajdhani fonts, multi-panel desk grid up to 1400px. Backend data bindings unchanged.
+
+**5. Phase 1 MTF Structural Capture (3 commits: 076b34a → 3911b26 → 5c8ba4f)**
+
+Build objective: capture structural timeframe state at session lock time. Zero change to decision path. Writes only to new session_audit_log columns and gravity_memory.
+
+- **`database.py` (076b34a)**: 10 new nullable columns on `SessionAuditLog` + ALTER TABLE migrations in `init_db()`:
+  - `daily_21ema_direction` (SLOPING_UP / FLAT / SLOPING_DOWN)
+  - `daily_21ema_position` (ABOVE / AT / BELOW)
+  - `daily_21ema_distance_pct` (float)
+  - `tf4h_200sma_position` (ABOVE / AT / BELOW)
+  - `tf4h_200sma_distance_pct` (float)
+  - `tf1h_200sma_position` (ABOVE / AT / BELOW)
+  - `tf1h_200sma_distance_pct` (float)
+  - `weekly_200sma_position` (ABOVE / AT / BELOW)
+  - `weekly_200sma_distance_pct` (float)
+  - `weekly_200sma_test_count` (int — consecutive completed daily closes within 1% of weekly 200 SMA)
+
+- **`kabroda_macro_engine.py` (3911b26)**: `_compute_weekly_200sma()` resamples 1500 daily candles to weekly via ISO week grouping; returns SMA of last 200 completed weekly closes. `run_macro_scan()` now writes one `WEEKLY_200_SMA` entry per symbol to `gravity_memory` (`active=False` so the KDE ignores it). Entry is deleted and re-written on every 24h scan cycle.
+
+- **`battlebox_pipeline.py`, `harness/audit_writer.py`, `kabroda_mas_flow.py` (5c8ba4f)**:
+  - `_fetch_weekly_200sma()`: reads `WEEKLY_200_SMA` row from gravity_memory at lock time (no new API call).
+  - `_compute_mtf_structural_snapshot()`: computes all 10 fields from candle data already in memory. Daily 21 EMA uses `raw_daily[:-1]` (completed closes only; last candle is today's partial). 4H/1H 200 SMAs from last 200 bars. Weekly 200 SMA from gravity_memory. Test count from last 20 completed daily closes. Per-field try/except — any failure leaves that field None; never blocks the lock.
+  - `get_live_battlebox()`: calls both functions immediately after `_compute_sse_packet()`, stores result in `pkt["context"]["mtf_structural_snapshot"]` before the packet is persisted to DB.
+  - `write_decision_record()`: 10 new Optional keyword params, all forwarded to the ORM row.
+  - `run_mas_analysis()`: extracts `_mtf = context.get("mtf_structural_snapshot", {})` and passes all 10 fields to `write_decision_record()`.
+
+### ⚠ PENDING LIVE VERIFICATION (4 items — not yet confirmed against a live session)
+
+1. **Monitor first rows** — `monitor_event_log` writes with sane values on the next live session (poll sequence incrementing, state snapshot populating, transition detection firing when states change).
+2. **Brief voice clean render** — first live session post-deploy shows no leaked enums (no HOSTILE_CEILING, CHOP_RISK, "Condition N fires" in generated output); verdict line appears before "## THE BIGGER PICTURE."
+3. **CHECK 1 (carry-forward)** — Production `session_audit_log` schema has all new columns (including `micro_state_lock` + 10 MTF columns). SQL query in Render Shell: `SELECT column_name FROM information_schema.columns WHERE table_name='session_audit_log' ORDER BY column_name;`
+4. **MTF structural columns populate sanely** — After next session lock, new columns in `session_audit_log` row are non-null with plausible values: `daily_21ema_direction` matches chart, `weekly_200sma_distance_pct` is a plausible % from the weekly 200 SMA, `weekly_200sma_test_count` is a small integer.
+
+**Weekly 200 SMA specifically**: populated on the next macro engine run (boot or 24h cycle). If the WEEKLY_200_SMA row is absent from gravity_memory, `_fetch_weekly_200sma()` returns None, all weekly fields stay NULL — no crash. Verify with: `SELECT symbol, level_type, price, active FROM gravity_memory WHERE source='WEEKLY_200_SMA';`
+
+### NEXT (planned, not yet started)
+
+**Phase 2 MTF Structure Memory** — deferred until 10+ sessions populate Phase 1 columns cleanly:
+- Lookback function: query last N sessions from `session_audit_log`; compute directional frequency per field.
+- Categorical `structural_alignment` state (NO numeric score — the design conversation rejected score-of-10 as unvalidatable at N<50). State = one of: `FULL_TAILWIND`, `PARTIAL_TAILWIND`, `MIXED`, `PARTIAL_HEADWIND`, `FULL_HEADWIND`.
+- Senior Analyst injection: structural alignment block inserted into `_build_senior_analyst_context()` — same pattern as `mtf_read` (fail-open: if None, SA reads raw fields only).
+- Gate: 10+ sessions minimum before Phase 2 build starts. Trigger = pattern clarity, not calendar.
+
+**Carry forward (open, no urgency change):**
+- Panel 02 HIGH CONVICTION vs MODERATE mismatch (GAP-1 class — JEWEL vs SA source; logged, not urgent)
+- CoinGecko 429 recurring fix (publication blocker — coded dormant)
+- CHECK 2 (carry-forward) — live MAS session writes a sane audit row with non-null RAG snapshot and agent chain `{"senior_analyst": ...}`. Pending next live session.
+
+---
+
 *End-of-session marker: 2026-06-22*
 
 **2026-06-22 — Forward-audit loop subsystem deployed; analyst brief voice rewritten and wired into generation; data count corrected (~12 evaluable, not 17); three items PENDING LIVE VERIFICATION**

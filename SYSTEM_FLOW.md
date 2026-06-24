@@ -814,7 +814,8 @@ context dict:
 **At lock moment (first call after 9:00 AM ET):**
 1. Writes `SessionLock` to DB
 2. Calls `gravity_engine.log_kabroda_bedrock()` → writes 7_DAY_KABRODA rows to `GravityMemory`
-3. Fires `kabroda_mas_flow.run_mas_analysis()` as background task
+3. Computes MTF structural snapshot: `_fetch_weekly_200sma()` reads `WEEKLY_200_SMA` from `GravityMemory`; `_compute_mtf_structural_snapshot()` computes 10 structural fields (daily 21 EMA direction/position/distance, 4H 200 SMA position/distance, 1H 200 SMA position/distance, weekly 200 SMA position/distance/test_count) from already-fetched candles. Stored in `pkt["context"]["mtf_structural_snapshot"]`. Non-blocking: any failure leaves fields None; lock proceeds regardless.
+4. Fires `kabroda_mas_flow.run_mas_analysis()` as background task
 
 **`sse_engine.py`** — called inside `_compute_sse_packet()` in `battlebox_pipeline.py`. Pure math. Computes bo/bd from 30M range extremes + VRVP VAH/VAL. Produces the `levels` dict. Never writes to DB directly.
 
@@ -827,7 +828,8 @@ context dict:
 | Module | Cadence | Reads | Writes to |
 |--------|---------|-------|-----------|
 | `gravity_engine.py` | Every 15 min | MEXC 4H/1H/1D via battlebox_pipeline | `GravityMemory` (4H/1H pivots, 1W/168H anchors) |
-| `kabroda_macro_engine.py` | Boot + every 24h (subprocess) | MEXC 1500D daily | `GravityMemory` (permanence_class=0, MACRO_ENGINE_CLASS_0) |
+| `kabroda_macro_engine.py` | Boot + every 24h (subprocess) | MEXC 1500D daily | `GravityMemory` (permanence_class=0, MACRO_ENGINE_CLASS_0); also one `WEEKLY_200_SMA` row per symbol (active=False, permanence_class=2 — invisible to KDE, read by battlebox at lock time) |
+| `session_monitor.py` | Every 15 min during session window (8:30–15:00 ET) | `SessionAuditLog` (current session record), MEXC 15M/1H/4H candles | `MonitorEventLog` (one row per poll: state snapshot, transitions detected, conditions active, consecutive clears, notification gate status) |
 | `ledger_closing_engine.py` | Every 60 sec | `CampaignLog` (APPROVED, is_canonical=True, unclosed) + MEXC live price + Kraken 1m OHLCV (Phase 2) | `CampaignLog` (status, realized_pnl, entry_filled_at, t2_reached, t3_reached, max_target_reached); `session_audit_log` (`backfill_outcome` after each close — non-blocking try/except). **W-9 three-phase engine** (2026-06-11): Phase 1 watches for entry fill (entry_filled_at IS NULL → EXPIRED on session close, never CLOSED_LOSS); Phase 2 monitors stop + T1 after confirmed fill via Kraken 1m candle scan; Phase 3 observes T2/T3 after T1 close. Only processes `is_canonical == True` records. |
 | `gravity_engine.fill_decision_outcomes()` | Every 4h (inside gravity loop) | `DecisionJournal` rows >4h old + MEXC live price | `DecisionJournal` (outcome_price_4h, outcome_pct_move_4h, outcome_direction_correct) |
 
@@ -881,7 +883,14 @@ CampaignLog          approval_status, bias, entry, stop, t1/t2/t3,
                      mas_executive_brief, formatted_newsletter, structure_reasoning
 DecisionJournal      decision_type, confluence params, full_context_json
 MacroNarrativeLog    authored_by="senior_analyst": narrative_text, tactical_text
-session_audit_log    frozen-at-decision inputs (step 10, non-blocking try/except — Adj. 3)
+session_audit_log    frozen-at-decision inputs (step 10, non-blocking try/except — Adj. 3):
+                     approval_status, bias, bo/bd triggers, energy_status, kinematic_grade,
+                     micro_state_lock, kde_peaks_json, rag_memory_snapshot, agent_chain_json,
+                     entry/stop/t1/t2/t3, box_size_pct, label_tier;
+                     MTF structural snapshot (Phase 1): daily_21ema_direction/_position/_distance_pct,
+                     tf4h_200sma_position/_distance_pct, tf1h_200sma_position/_distance_pct,
+                     weekly_200sma_position/_distance_pct/test_count (all nullable; None if
+                     macro engine has not yet run or candle data was insufficient)
 → publisher_crew:
   external_intel_reporter (HTTP: F&G + CoinGecko)
   Publisher Agent (LLM call)
