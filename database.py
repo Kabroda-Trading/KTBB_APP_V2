@@ -203,6 +203,25 @@ def init_db():
     except Exception:
         pass
 
+    # --- MTF STRUCTURAL SNAPSHOT PHASE 1 — new capture columns ---
+    for _col in [
+        "daily_21ema_direction VARCHAR",
+        "daily_21ema_position VARCHAR",
+        "daily_21ema_distance_pct FLOAT",
+        "tf4h_200sma_position VARCHAR",
+        "tf4h_200sma_distance_pct FLOAT",
+        "tf1h_200sma_position VARCHAR",
+        "tf1h_200sma_distance_pct FLOAT",
+        "weekly_200sma_position VARCHAR",
+        "weekly_200sma_distance_pct FLOAT",
+        "weekly_200sma_test_count INTEGER",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE session_audit_log ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- PHASE 3C JEWEL SPECIALIST — top-level scanner context columns ---
     for col_def in [
         "confluence_score INTEGER",
@@ -654,6 +673,18 @@ class SessionAuditLog(Base):
 
     # ── INTRADAY MONITOR EXTENSION ──
     micro_state_lock = Column(String, nullable=True)  # micro_state (SWEET_ZONE/HOSTILE_CEILING/etc.) at decision time
+
+    # ── MULTI-TF STRUCTURAL SNAPSHOT (Phase 1 — frozen at lock time; capture only) ──
+    daily_21ema_direction      = Column(String,  nullable=True)  # SLOPING_UP / FLAT / SLOPING_DOWN
+    daily_21ema_position       = Column(String,  nullable=True)  # ABOVE / AT / BELOW
+    daily_21ema_distance_pct   = Column(Float,   nullable=True)  # (price - ema21) / ema21 * 100
+    tf4h_200sma_position       = Column(String,  nullable=True)  # ABOVE / AT / BELOW (4H 200 SMA)
+    tf4h_200sma_distance_pct   = Column(Float,   nullable=True)
+    tf1h_200sma_position       = Column(String,  nullable=True)  # ABOVE / AT / BELOW (1H 200 SMA)
+    tf1h_200sma_distance_pct   = Column(Float,   nullable=True)
+    weekly_200sma_position     = Column(String,  nullable=True)  # ABOVE / AT / BELOW (weekly 200 SMA)
+    weekly_200sma_distance_pct = Column(Float,   nullable=True)
+    weekly_200sma_test_count   = Column(Integer, nullable=True)  # consecutive completed daily closes within 1% of weekly 200 SMA
 
     # ── AUDIT METADATA ──
     label_tier = Column(String, nullable=True)  # four-tier label at record time; updated at N milestones
