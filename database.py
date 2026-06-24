@@ -196,6 +196,13 @@ def init_db():
     except Exception:
         pass
 
+    # --- INTRADAY MONITOR — micro_state at lock time (backfills condition re-derivation) ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE session_audit_log ADD COLUMN micro_state_lock VARCHAR"))
+    except Exception:
+        pass
+
     # --- PHASE 3C JEWEL SPECIALIST — top-level scanner context columns ---
     for col_def in [
         "confluence_score INTEGER",
@@ -645,6 +652,9 @@ class SessionAuditLog(Base):
     resolution_notes         = Column(String,  nullable=True)    # anomalies: manual close, slippage, etc.
     outcome_set_at           = Column(DateTime, nullable=True)   # when back-fill was written
 
+    # ── INTRADAY MONITOR EXTENSION ──
+    micro_state_lock = Column(String, nullable=True)  # micro_state (SWEET_ZONE/HOSTILE_CEILING/etc.) at decision time
+
     # ── AUDIT METADATA ──
     label_tier = Column(String, nullable=True)  # four-tier label at record time; updated at N milestones
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
@@ -693,3 +703,87 @@ class TrialsLog(Base):
     notes                  = Column(String,  nullable=True)
     promoted_at_utc        = Column(DateTime, nullable=True)
     promotion_forward_n    = Column(Integer,  nullable=True)  # forward sessions confirmed before promotion
+
+
+# ---------------------------------------------------------
+# MONITOR EVENT LOG (INTRADAY SESSION MONITOR — v1)
+# One row per 15-minute poll during the active session window
+# (lock_time → 4:00 PM ET). Observe-and-log only.
+#
+# Hard wall: no FK to session_locks or campaign_logs.
+# No write to any live column. Every write is wrapped in
+# try/except — a failed row never stops the monitor loop.
+#
+# New table — picked up by Base.metadata.create_all() on
+# deploy. No ALTER TABLE migration needed.
+# ---------------------------------------------------------
+class MonitorEventLog(Base):
+    __tablename__ = "monitor_event_log"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    symbol        = Column(String,  index=True, nullable=False)  # "BTC/USDT"
+    session_date  = Column(String,  index=True, nullable=False)  # "YYYY-MM-DD"
+    session_id    = Column(String,  nullable=False)              # "us_ny_futures"
+    poll_sequence = Column(Integer, nullable=False)              # monotonic 1 → ~28
+
+    poll_timestamp = Column(DateTime, nullable=False)
+    btc_price      = Column(Float,   nullable=True)
+    pct_from_bo    = Column(Float,   nullable=True)   # ((price - bo) / bo) * 100
+    pct_from_bd    = Column(Float,   nullable=True)   # ((price - bd) / bd) * 100
+    mas_verdict    = Column(String,  nullable=True)   # STAND_DOWN / APPROVED / PENDING / UNKNOWN
+
+    # Full computed state snapshot at this poll (JSON)
+    state_snapshot_json = Column(String, nullable=True)
+
+    # Transition events vs previous poll: [{variable, prior_state, new_state}, ...]
+    transitions_json = Column(String,  nullable=True)
+    any_transition   = Column(Boolean, default=False, nullable=False)
+    transition_count = Column(Integer, default=0,     nullable=False)
+
+    # Blocking condition state — re-derived at session start from session_audit_log
+    conditions_active_json     = Column(String,  nullable=True)   # {cond_1, cond_2, cond_3, any_active}
+    stand_down_conds_all_clear = Column(Boolean, default=False, nullable=False)
+    consecutive_clears         = Column(Integer, default=0,     nullable=False)
+    notification_sent          = Column(Boolean, default=False, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
+# MONITOR CONFIG (NOTIFICATION GATE — v1)
+# One row per monitored instrument (currently BTC only).
+# Three gates must ALL clear before notifications can fire:
+#   Gate A: 30+ resolved transition events (evidence threshold)
+#   Gate B: human harness review confirms signal plausibility
+#   Gate C: explicit human notification_enabled flag flip
+# The monitor cannot enable itself. All three require human action.
+#
+# New table — picked up by Base.metadata.create_all() on
+# deploy. No ALTER TABLE migration needed.
+# ---------------------------------------------------------
+class MonitorConfig(Base):
+    __tablename__ = "monitor_config"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    config_key = Column(String, unique=True, nullable=False)   # "btc_session_monitor"
+
+    # Gate A: minimum resolved-session transition events before notifications unlock
+    gate_a_min_events = Column(Integer, default=30, nullable=False)
+
+    # Gate B: human harness review confirming signal quality
+    gate_b_harness_reviewed = Column(Boolean, default=False, nullable=False)
+    gate_b_reviewed_at      = Column(DateTime, nullable=True)
+    gate_b_reviewed_by      = Column(String,   nullable=True)
+
+    # Gate C: explicit human enable
+    notification_enabled = Column(Boolean, default=False, nullable=False)
+    enabled_at           = Column(DateTime, nullable=True)
+    enabled_by           = Column(String,   nullable=True)
+
+    # Notification behaviour
+    confirmation_polls        = Column(Integer,  default=2,  nullable=False)  # 2 consecutive clean polls required
+    cooldown_hours            = Column(Integer,  default=4,  nullable=False)  # max 1 notification per N hours
+    last_notification_sent_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

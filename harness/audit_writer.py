@@ -95,6 +95,7 @@ def write_decision_record(
     jewel_snapshot_id: Optional[int] = None,
     jewel_gate_open: Optional[bool] = None,
     jewel_conviction: Optional[str] = None,
+    micro_state: Optional[str] = None,
 ) -> None:
     """
     Write a frozen-at-decision audit record to session_audit_log.
@@ -159,6 +160,7 @@ def write_decision_record(
             t1=t1,
             t2=t2,
             t3=t3,
+            micro_state_lock=micro_state,
             # label tier at write time
             label_tier=_tier_label_for_n(n_current),
         )

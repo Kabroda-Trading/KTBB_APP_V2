@@ -1355,6 +1355,7 @@ def run_mas_analysis(
             bd_trigger=bd if bd else None,
             energy_status=context.get("1h_fuel_status"),
             kinematic_grade=_fuel.get("15M_JEWEL", {}).get("kinematic_grade"),
+            micro_state=context.get("micro_state"),
             kde_peaks=context.get("kde_peaks"),
             rag_memory_snapshot=cro_memory,
             agent_chain={"senior_analyst": _final_response_text},
