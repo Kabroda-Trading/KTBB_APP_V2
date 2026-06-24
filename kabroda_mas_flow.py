@@ -1340,6 +1340,7 @@ def run_mas_analysis(
     try:
         from harness.audit_writer import write_decision_record as _write_audit
         _fuel = context.get("fuel_gauge", {})
+        _mtf = context.get("mtf_structural_snapshot", {}) or {}
         _write_audit(
             symbol=symbol,
             date_key=date_key,
@@ -1360,6 +1361,16 @@ def run_mas_analysis(
             rag_memory_snapshot=cro_memory,
             agent_chain={"senior_analyst": _final_response_text},
             model_version=agent_core._MODEL,
+            daily_21ema_direction=_mtf.get("daily_21ema_direction"),
+            daily_21ema_position=_mtf.get("daily_21ema_position"),
+            daily_21ema_distance_pct=_mtf.get("daily_21ema_distance_pct"),
+            tf4h_200sma_position=_mtf.get("tf4h_200sma_position"),
+            tf4h_200sma_distance_pct=_mtf.get("tf4h_200sma_distance_pct"),
+            tf1h_200sma_position=_mtf.get("tf1h_200sma_position"),
+            tf1h_200sma_distance_pct=_mtf.get("tf1h_200sma_distance_pct"),
+            weekly_200sma_position=_mtf.get("weekly_200sma_position"),
+            weekly_200sma_distance_pct=_mtf.get("weekly_200sma_distance_pct"),
+            weekly_200sma_test_count=_mtf.get("weekly_200sma_test_count"),
         )
     except Exception as _audit_err:
         print(f"[AUDIT WRITER] Non-critical failure — MAS unaffected: {_audit_err}")

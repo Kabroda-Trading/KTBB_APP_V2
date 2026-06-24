@@ -82,6 +82,120 @@ def _calc_ema_series(prices: List[float], period: int) -> List[float]:
         ema.append((price - ema[-1]) * multiplier + ema[-1])
     return ema
 
+
+def _fetch_weekly_200sma(symbol: str) -> Optional[float]:
+    """Read the WEEKLY_200_SMA reference level from gravity_memory (active=False row written by macro engine)."""
+    db = SessionLocal()
+    try:
+        db_sym = symbol.replace("/", "")
+        row = db.query(GravityMemory).filter(
+            GravityMemory.symbol == db_sym,
+            GravityMemory.source == "WEEKLY_200_SMA",
+        ).first()
+        return float(row.price) if row else None
+    except Exception:
+        return None
+    finally:
+        db.close()
+
+
+def _compute_mtf_structural_snapshot(
+    raw_1h: List[Dict[str, Any]],
+    raw_4h: List[Dict[str, Any]],
+    raw_daily: List[Dict[str, Any]],
+    current_price: float,
+    weekly_200sma: Optional[float],
+) -> Dict[str, Any]:
+    """
+    Compute multi-TF structural state from candle data at session lock time.
+
+    Rules:
+    - Daily EMA uses raw_daily[:-1] (completed closes only; last candle is today's partial).
+    - 4H/1H SMAs include all delivered candles (exchange ensures they are closed bars).
+    - Weekly 200 SMA is read from gravity_memory (macro engine write) — no new fetch.
+    - All fields are deterministic from candle math; None on any failure (non-blocking).
+    """
+    snap: Dict[str, Any] = {
+        "daily_21ema_direction":    None,
+        "daily_21ema_position":     None,
+        "daily_21ema_distance_pct": None,
+        "tf4h_200sma_position":     None,
+        "tf4h_200sma_distance_pct": None,
+        "tf1h_200sma_position":     None,
+        "tf1h_200sma_distance_pct": None,
+        "weekly_200sma_position":     None,
+        "weekly_200sma_distance_pct": None,
+        "weekly_200sma_test_count":   None,
+    }
+
+    try:
+        # ── Daily 21 EMA — completed closes only (exclude today's partial) ─────
+        completed_daily = raw_daily[:-1] if len(raw_daily) > 1 else []
+        if len(completed_daily) >= 22:
+            daily_closes = [float(c["close"]) for c in completed_daily]
+            ema21 = _calc_ema_series(daily_closes, 21)
+            if len(ema21) >= 6:
+                now_val = ema21[-1]
+                past_val = ema21[-6]
+                chg = (now_val - past_val) / past_val * 100.0
+                snap["daily_21ema_direction"] = (
+                    "SLOPING_UP" if chg > 0.1 else "SLOPING_DOWN" if chg < -0.1 else "FLAT"
+                )
+                dist = (current_price - now_val) / now_val * 100.0
+                snap["daily_21ema_distance_pct"] = round(dist, 4)
+                snap["daily_21ema_position"] = (
+                    "ABOVE" if dist > 0.2 else "BELOW" if dist < -0.2 else "AT"
+                )
+    except Exception:
+        pass
+
+    try:
+        # ── 4H 200 SMA ────────────────────────────────────────────────────────
+        if len(raw_4h) >= 200:
+            sma = sum(float(c["close"]) for c in raw_4h[-200:]) / 200.0
+            dist = (current_price - sma) / sma * 100.0
+            snap["tf4h_200sma_distance_pct"] = round(dist, 4)
+            snap["tf4h_200sma_position"] = (
+                "ABOVE" if dist > 0.2 else "BELOW" if dist < -0.2 else "AT"
+            )
+    except Exception:
+        pass
+
+    try:
+        # ── 1H 200 SMA ────────────────────────────────────────────────────────
+        if len(raw_1h) >= 200:
+            sma = sum(float(c["close"]) for c in raw_1h[-200:]) / 200.0
+            dist = (current_price - sma) / sma * 100.0
+            snap["tf1h_200sma_distance_pct"] = round(dist, 4)
+            snap["tf1h_200sma_position"] = (
+                "ABOVE" if dist > 0.2 else "BELOW" if dist < -0.2 else "AT"
+            )
+    except Exception:
+        pass
+
+    try:
+        # ── Weekly 200 SMA ────────────────────────────────────────────────────
+        if weekly_200sma and weekly_200sma > 0 and current_price > 0:
+            dist = (current_price - weekly_200sma) / weekly_200sma * 100.0
+            snap["weekly_200sma_distance_pct"] = round(dist, 4)
+            snap["weekly_200sma_position"] = (
+                "ABOVE" if dist > 0.5 else "BELOW" if dist < -0.5 else "AT"
+            )
+            # Test count: consecutive completed daily closes within 1% of weekly 200 SMA
+            completed_daily = raw_daily[:-1] if len(raw_daily) > 1 else []
+            count = 0
+            for c in reversed(completed_daily[-20:]):
+                if abs(float(c["close"]) - weekly_200sma) / weekly_200sma * 100.0 <= 1.0:
+                    count += 1
+                else:
+                    break
+            snap["weekly_200sma_test_count"] = count
+    except Exception:
+        pass
+
+    return snap
+
+
 def _calc_macd(prices: List[float], fast=12, slow=26, signal=9) -> dict:
     if len(prices) < slow + signal: return {"macd": 0.0, "signal": 0.0, "hist": 0.0}
     fast_ema = _calc_ema_series(prices, fast)
@@ -531,6 +645,18 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                     pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, macro_structure, macro_context, tuning=tuning, raw_daily=raw_daily)
                     if "error" in pkt:
                         return {"status": "ERROR", "message": pkt["error"], "battlebox": {"raw_15m": raw_15m, "war_map_context": _war_map_from_1h(raw_1h), "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
+
+                    # ── MTF STRUCTURAL SNAPSHOT (Phase 1 capture — frozen with the lock) ──
+                    try:
+                        _w200sma = _fetch_weekly_200sma(symbol)
+                        _mtf_snap = _compute_mtf_structural_snapshot(
+                            raw_1h, raw_4h, raw_daily,
+                            float(raw_5m[-1]["close"]),
+                            _w200sma,
+                        )
+                        pkt.setdefault("context", {})["mtf_structural_snapshot"] = _mtf_snap
+                    except Exception as _mtf_err:
+                        print(f"[MTF SNAPSHOT] Capture failed (non-blocking): {_mtf_err}")
 
                     _LOCKED_PACKETS[session_key] = pkt
 

@@ -96,6 +96,17 @@ def write_decision_record(
     jewel_gate_open: Optional[bool] = None,
     jewel_conviction: Optional[str] = None,
     micro_state: Optional[str] = None,
+    # MTF structural snapshot (Phase 1 — capture only; None until populated)
+    daily_21ema_direction: Optional[str] = None,
+    daily_21ema_position: Optional[str] = None,
+    daily_21ema_distance_pct: Optional[float] = None,
+    tf4h_200sma_position: Optional[str] = None,
+    tf4h_200sma_distance_pct: Optional[float] = None,
+    tf1h_200sma_position: Optional[str] = None,
+    tf1h_200sma_distance_pct: Optional[float] = None,
+    weekly_200sma_position: Optional[str] = None,
+    weekly_200sma_distance_pct: Optional[float] = None,
+    weekly_200sma_test_count: Optional[int] = None,
 ) -> None:
     """
     Write a frozen-at-decision audit record to session_audit_log.
@@ -161,6 +172,17 @@ def write_decision_record(
             t2=t2,
             t3=t3,
             micro_state_lock=micro_state,
+            # MTF structural snapshot
+            daily_21ema_direction=daily_21ema_direction,
+            daily_21ema_position=daily_21ema_position,
+            daily_21ema_distance_pct=daily_21ema_distance_pct,
+            tf4h_200sma_position=tf4h_200sma_position,
+            tf4h_200sma_distance_pct=tf4h_200sma_distance_pct,
+            tf1h_200sma_position=tf1h_200sma_position,
+            tf1h_200sma_distance_pct=tf1h_200sma_distance_pct,
+            weekly_200sma_position=weekly_200sma_position,
+            weekly_200sma_distance_pct=weekly_200sma_distance_pct,
+            weekly_200sma_test_count=weekly_200sma_test_count,
             # label tier at write time
             label_tier=_tier_label_for_n(n_current),
         )
