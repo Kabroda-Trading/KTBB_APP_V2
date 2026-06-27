@@ -196,6 +196,88 @@
         </div>
     </div>
 
+    <!-- AUDIT SYSTEM HEARTBEAT CARD -->
+    <div class="roster-card" style="margin-top: 24px;">
+        <div class="card-header">
+            <span class="card-title">Audit System Heartbeat</span>
+            <span id="hbRefreshLabel" class="card-title" style="color:#64748b; font-size:10px;">auto-refresh 60s</span>
+        </div>
+        <div style="padding: 16px 20px; display: flex; gap: 32px; flex-wrap: wrap;">
+            <div>
+                <div style="font-family:'JetBrains Mono'; font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">session_audit_log</div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="hbAuditDot" style="width:10px; height:10px; border-radius:50%; background:#334155; display:inline-block;"></span>
+                    <span id="hbAuditStatus" style="font-family:'JetBrains Mono'; font-size:13px; font-weight:800; color:#64748b;">—</span>
+                </div>
+                <div id="hbAuditDetail" style="font-family:'JetBrains Mono'; font-size:10px; color:#64748b; margin-top:4px;">loading…</div>
+            </div>
+            <div>
+                <div style="font-family:'JetBrains Mono'; font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">monitor_event_log</div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="hbMonDot" style="width:10px; height:10px; border-radius:50%; background:#334155; display:inline-block;"></span>
+                    <span id="hbMonStatus" style="font-family:'JetBrains Mono'; font-size:13px; font-weight:800; color:#64748b;">—</span>
+                </div>
+                <div id="hbMonDetail" style="font-family:'JetBrains Mono'; font-size:10px; color:#64748b; margin-top:4px;">loading…</div>
+            </div>
+        </div>
+    </div>
+    <script>
+        async function loadAuditHeartbeat() {
+            try {
+                const res = await fetch('/api/health/audit-heartbeat');
+                const d = await res.json();
+                if (!d.ok) return;
+
+                const sal = d.session_audit_log || {};
+                const mel = d.monitor_event_log || {};
+
+                const auditDot = document.getElementById('hbAuditDot');
+                const auditSt  = document.getElementById('hbAuditStatus');
+                const auditDt  = document.getElementById('hbAuditDetail');
+                if (sal.status === 'WRITING') {
+                    auditDot.style.background = '#10b981';
+                    auditSt.style.color = '#10b981';
+                    auditSt.textContent = 'WRITING';
+                    auditDt.textContent = `last: ${sal.last_date_key || '—'} (${sal.last_status || '—'})  |  recent: ${sal.recent_count ?? '—'} rows`;
+                } else if (sal.status === 'TABLE_MISSING') {
+                    auditDot.style.background = '#ef4444';
+                    auditSt.style.color = '#ef4444';
+                    auditSt.textContent = 'TABLE MISSING';
+                    auditDt.textContent = sal.error || '';
+                } else {
+                    auditDot.style.background = '#f59e0b';
+                    auditSt.style.color = '#f59e0b';
+                    auditSt.textContent = 'DARK';
+                    auditDt.textContent = 'Table exists — no rows yet';
+                }
+
+                const monDot = document.getElementById('hbMonDot');
+                const monSt  = document.getElementById('hbMonStatus');
+                const monDt  = document.getElementById('hbMonDetail');
+                if (mel.status === 'WRITING') {
+                    monDot.style.background = '#10b981';
+                    monSt.style.color = '#10b981';
+                    monSt.textContent = 'WRITING';
+                    monDt.textContent = `last session: ${mel.last_session_date || '—'}  poll seq: ${mel.last_poll_seq ?? '—'}  |  recent: ${mel.recent_count ?? '—'} rows`;
+                } else if (mel.status === 'TABLE_MISSING') {
+                    monDot.style.background = '#ef4444';
+                    monSt.style.color = '#ef4444';
+                    monSt.textContent = 'TABLE MISSING';
+                    monDt.textContent = mel.error || '';
+                } else {
+                    monDot.style.background = '#f59e0b';
+                    monSt.style.color = '#f59e0b';
+                    monSt.textContent = 'DARK';
+                    monDt.textContent = 'Table exists — no rows yet';
+                }
+            } catch (e) {
+                console.warn('Heartbeat fetch failed:', e);
+            }
+        }
+        loadAuditHeartbeat();
+        setInterval(loadAuditHeartbeat, 60000);
+    </script>
+
     <div id="resetModal" class="modal-overlay">
         <div class="modal">
             <h3>Override Access Key</h3>

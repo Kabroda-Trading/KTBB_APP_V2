@@ -1491,6 +1491,49 @@ async def api_dashboard_audits(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+@app.get("/api/health/audit-heartbeat")
+async def api_audit_heartbeat(request: Request, db: Session = Depends(get_db)):
+    """
+    Admin-only. Returns WRITING/DARK for session_audit_log and monitor_event_log.
+    Polled by the admin page every 60 seconds. Silent failures surface here.
+    """
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in") or not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+
+    import datetime as _dt
+    yesterday = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=2)).strftime("%Y-%m-%d")
+    result: dict = {"ok": True, "session_audit_log": {}, "monitor_event_log": {}}
+
+    try:
+        from database import SessionAuditLog as _SAL
+        _latest = db.query(_SAL).filter(_SAL.symbol == "BTC/USDT").order_by(_SAL.id.desc()).first()
+        _cnt = db.query(_SAL).filter(_SAL.symbol == "BTC/USDT", _SAL.date_key >= yesterday).count()
+        result["session_audit_log"] = {
+            "status": "WRITING" if _latest else "DARK",
+            "recent_count": _cnt,
+            "last_date_key": _latest.date_key if _latest else None,
+            "last_status": _latest.approval_status if _latest else None,
+        }
+    except Exception as _e:
+        result["session_audit_log"] = {"status": "TABLE_MISSING", "error": str(_e)}
+
+    try:
+        from database import MonitorEventLog as _MEL
+        _latest_m = db.query(_MEL).filter(_MEL.symbol == "BTC/USDT").order_by(_MEL.id.desc()).first()
+        _cnt_m = db.query(_MEL).filter(_MEL.symbol == "BTC/USDT", _MEL.session_date >= yesterday).count()
+        result["monitor_event_log"] = {
+            "status": "WRITING" if _latest_m else "DARK",
+            "recent_count": _cnt_m,
+            "last_session_date": _latest_m.session_date if _latest_m else None,
+            "last_poll_seq": _latest_m.poll_sequence if _latest_m else None,
+        }
+    except Exception as _e:
+        result["monitor_event_log"] = {"status": "TABLE_MISSING", "error": str(_e)}
+
+    return JSONResponse(result)
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     error_trace = traceback.format_exc()

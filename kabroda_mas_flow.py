@@ -1372,8 +1372,24 @@ def run_mas_analysis(
             weekly_200sma_distance_pct=_mtf.get("weekly_200sma_distance_pct"),
             weekly_200sma_test_count=_mtf.get("weekly_200sma_test_count"),
         )
+        # Read-back heartbeat — proves the row actually landed, visible in Render logs
+        try:
+            from database import SessionLocal as _HB_SL, SessionAuditLog as _HB_SAL
+            _hb_db = _HB_SL()
+            try:
+                _wrote = _hb_db.query(_HB_SAL).filter(
+                    _HB_SAL.symbol == symbol,
+                    _HB_SAL.date_key == date_key,
+                    _HB_SAL.session_id == session_id,
+                ).first() is not None
+            finally:
+                _hb_db.close()
+            print(f"[HEARTBEAT] session_audit_log: {'YES' if _wrote else 'NO — row missing after write'} ({date_key})")
+        except Exception as _hb_ex:
+            print(f"[HEARTBEAT] session_audit_log check FAILED: {_hb_ex}")
     except Exception as _audit_err:
         print(f"[AUDIT WRITER] Non-critical failure — MAS unaffected: {_audit_err}")
+        print(f"[HEARTBEAT] session_audit_log: NO — write path threw ({type(_audit_err).__name__}: {_audit_err})")
 
     # 8. Content Publishing Engine — non-fatal, same thread, isolated try/except
     try:

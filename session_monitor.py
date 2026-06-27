@@ -355,9 +355,11 @@ def _write_monitor_event(
             )
             db.add(row)
             db.commit()
+            print(f"[MONITOR HEARTBEAT] monitor_event_log write: YES (seq={poll_sequence}, session={session_date})")
         except Exception as e:
             db.rollback()
             print(f"[MONITOR] DB write error: {e}")
+            print(f"[MONITOR HEARTBEAT] monitor_event_log write: NO (seq={poll_sequence}) — {type(e).__name__}: {e}")
         finally:
             db.close()
     except Exception as e:
