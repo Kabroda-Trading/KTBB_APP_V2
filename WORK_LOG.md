@@ -132,9 +132,51 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ---
 
 ## ► NEXT SESSION START
-*End-of-session marker: 2026-06-24*
+*End-of-session marker: 2026-06-27*
 
-**2026-06-24 — Phase C intraday session monitor, micro_state_lock, brief voice, War Room UI, and Phase 1 MTF structural capture all committed**
+**2026-06-27 — Root cause of silent failure found + code pushed to production. Gates 2-4 require owner verification.**
+
+### GATE LOG — Phase 1 Production Deploy (2026-06-27)
+
+**Root cause confirmed:** 16 commits (from `3fc2593` "Add session_audit_log and trials_log tables" through `711d58c` "health_check.py") were LOCAL ONLY — never pushed to remote. Render was running the pre-audit codebase. `session_audit_log`, `monitor_event_log`, `monitor_config`, and `trials_log` did not exist on production. Every audit write since the subsystem was built failed with `ImportError: cannot import name 'SessionAuditLog' from 'database'`, caught silently by the try/except in `run_mas_analysis()`. Zero audit rows have ever been written to production. This is now fixed by the push.
+
+**GATE 1 — PASSED (2026-06-27 ~18:00 UTC)**
+Pushed all 16 commits + Gate 5 heartbeat commit (`00b8840`) to `origin/main`.
+Evidence: `git log origin/main..HEAD` returned empty — remote is fully caught up.
+Push target: `https://github.com/Kabroda-Trading/KTBB_APP_V2.git` (b9d60dd → 711d58c → 00b8840).
+
+**GATE 2 — PENDING (owner: paste Render deploy log)**
+Render should auto-deploy on push. Required evidence: deploy log showing build completed + boot line `>>> BOOTING KABRODA SYSTEM: Initializing Database Schema...`
+
+**GATE 3 — PENDING (owner: run in psql after Gate 2)**
+```sql
+SELECT table_name FROM information_schema.tables
+WHERE table_schema = 'public'
+AND table_name IN ('session_audit_log','monitor_event_log','monitor_config','trials_log')
+ORDER BY table_name;
+```
+All four names must appear. Fewer than four = `create_all()` failed, diagnose before proceeding.
+
+**GATE 4 — PENDING (owner: run after next live session)**
+```sql
+SELECT date_key, approval_status, kinematic_grade, bo_trigger, bd_trigger,
+       daily_21ema_direction, weekly_200sma_position, weekly_200sma_test_count
+FROM session_audit_log ORDER BY created_at DESC LIMIT 3;
+-- AND:
+SELECT session_date, COUNT(*) AS polls, MAX(poll_sequence), SUM(transition_count)
+FROM monitor_event_log GROUP BY session_date ORDER BY session_date DESC LIMIT 3;
+```
+A real row from a real session proves the write path works. Structural columns should be non-null (they will be NULL if macro engine hasn't run yet to write WEEKLY_200_SMA — that's expected; daily_21ema_direction should populate regardless).
+
+**GATE 5 — COMMITTED (`00b8840`), deployed with Gate 1 push**
+- `kabroda_mas_flow.py`: read-back heartbeat after every `write_decision_record()` call. Emits `[HEARTBEAT] session_audit_log: YES/NO (date_key)` to Render logs.
+- `session_monitor.py`: `[MONITOR HEARTBEAT] monitor_event_log write: YES/NO` after every `db.commit()` in `_write_monitor_event()`.
+- `main.py`: `GET /api/health/audit-heartbeat` (admin-only) — returns WRITING/DARK/TABLE_MISSING for both tables.
+- `templates/admin.html`: "Audit System Heartbeat" card on admin page, polled every 60 seconds, green/amber/red dot per table.
+
+**Status as of this session: DEPLOYED, UNVERIFIED.** Gates 2-4 require owner to paste evidence. Do not write "done" here until Gate 4 shows real rows.
+
+---
 
 ### ✅ COMPLETED AND COMMITTED THIS SESSION (2026-06-22 → 2026-06-24)
 
