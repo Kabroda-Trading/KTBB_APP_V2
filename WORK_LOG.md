@@ -161,16 +161,21 @@ All four tables confirmed present on production PostgreSQL:
 ```
 Evidence pasted directly from psql session on ktbb_postgres.
 
-**GATE 4 — PENDING (owner: run after next live session)**
+**GATE 4 — PARTIAL PASS (2026-06-28) — monitor_event_log still pending**
+
+`session_audit_log` write confirmed with real session data:
+```
+ date_key  | approval_status | kinematic_grade | bo_trigger | bd_trigger | daily_21ema_direction | weekly_200sma_position | weekly_200sma_test_count
+ 2026-06-28 | STAND_DOWN     | TANGLED         | 60791.175  | 60193.2722 | SLOPING_DOWN          | BELOW                  | 0
+(1 row)
+```
+All Phase 1 MTF columns populated on first post-deploy session. weekly_200sma_test_count=0 means no consecutive daily closes within 1% of weekly 200 SMA in last 20 sessions — expected and correct given SLOPING_DOWN / BELOW position.
+
+`monitor_event_log` — pending owner query:
 ```sql
-SELECT date_key, approval_status, kinematic_grade, bo_trigger, bd_trigger,
-       daily_21ema_direction, weekly_200sma_position, weekly_200sma_test_count
-FROM session_audit_log ORDER BY created_at DESC LIMIT 3;
--- AND:
 SELECT session_date, COUNT(*) AS polls, MAX(poll_sequence), SUM(transition_count)
 FROM monitor_event_log GROUP BY session_date ORDER BY session_date DESC LIMIT 3;
 ```
-A real row from a real session proves the write path works. Structural columns should be non-null (they will be NULL if macro engine hasn't run yet to write WEEKLY_200_SMA — that's expected; daily_21ema_direction should populate regardless).
 
 **GATE 5 — COMMITTED (`00b8840`), deployed with Gate 1 push**
 - `kabroda_mas_flow.py`: read-back heartbeat after every `write_decision_record()` call. Emits `[HEARTBEAT] session_audit_log: YES/NO (date_key)` to Render logs.
