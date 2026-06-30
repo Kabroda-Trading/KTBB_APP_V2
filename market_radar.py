@@ -13,9 +13,64 @@ from datetime import timedelta
 import battlebox_pipeline
 import gravity_math
 import mtf_confluence_scanner
-from database import SessionLocal, SessionLock, MtfReading, DecisionJournal
+from database import SessionLocal, SessionLock, MtfReading, DecisionJournal, CampaignLog
 
 TARGETS = ["BTCUSDT"]
+
+
+def _get_tf_system_verdicts(symbol_norm: str) -> dict:
+    """Query campaign_logs for today's 4H and 1H BOS candidates. DB-only."""
+    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    result = {
+        "4H": {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None},
+        "1H": {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None},
+    }
+    try:
+        with SessionLocal() as db:
+            c4h = db.query(CampaignLog).filter(
+                CampaignLog.symbol == symbol_norm,
+                CampaignLog.session_id == "4h_system",
+                CampaignLog.date_key == today,
+            ).first()
+            if c4h:
+                result["4H"] = {
+                    "status": "BOS_ACTIVE",
+                    "bias": c4h.bias,
+                    "entry": c4h.entry_price,
+                    "stop": c4h.stop_loss,
+                    "t1": c4h.t1,
+                }
+            c1h = db.query(CampaignLog).filter(
+                CampaignLog.symbol == symbol_norm,
+                CampaignLog.session_id == "1h_system",
+                CampaignLog.date_key == today,
+            ).first()
+            if c1h:
+                result["1H"] = {
+                    "status": "BOS_ACTIVE",
+                    "bias": c1h.bias,
+                    "entry": c1h.entry_price,
+                    "stop": c1h.stop_loss,
+                    "t1": c1h.t1,
+                }
+    except Exception as e:
+        print(f"[TF VERDICTS] {symbol_norm}: {e}")
+    return result
+
+
+def _compute_daily_regime(mtf_snap: dict) -> str:
+    """Derive plain-English daily regime label from MTF snapshot fields."""
+    direction = (mtf_snap.get("daily_21ema_direction") or "FLAT").upper()
+    pos200 = (mtf_snap.get("daily_200sma_position") or "").upper()
+    if direction == "SLOPING_UP" and pos200 in ("ABOVE", "AT", ""):
+        return "DAILY_BULL"
+    if direction == "SLOPING_UP" and pos200 == "BELOW":
+        return "DAILY_RECOVERY"
+    if direction == "SLOPING_DOWN" and pos200 == "BELOW":
+        return "DAILY_BEAR"
+    if direction == "SLOPING_DOWN" and pos200 in ("ABOVE", "AT"):
+        return "DAILY_DISTRIBUTION"
+    return "DAILY_NEUTRAL"
 
 async def _try_locked_shortcut(symbol: str):
     """
@@ -348,6 +403,13 @@ async def scan_sector():
 
         dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias, kde_peaks)
 
+        # TF system verdicts (4H + 1H candidates) and daily regime
+        sym_norm = sym.replace("USDT", "/USDT") if "/" not in sym else sym
+        mtf_snap = context.get("mtf_structural_snapshot", {}) or {}
+        tf_verdicts = _get_tf_system_verdicts(sym_norm)
+        daily_regime = _compute_daily_regime(mtf_snap)
+        weekly_pos = mtf_snap.get("weekly_200sma_position") or ""
+
         mtf_brief = mtf if isinstance(mtf, dict) and "error" not in mtf else {}
 
         bo_val = float(levels.get("breakout_trigger", 0) or 0)
@@ -373,6 +435,9 @@ async def scan_sector():
             "indicator_string": _make_indicator_string(levels), "full_intel": json.dumps(res, default=str),
             "levels": levels,
             "mtf_brief": mtf_brief,
+            "tf_verdicts": tf_verdicts,
+            "daily_regime": daily_regime,
+            "weekly_200sma_position": weekly_pos,
             **dossier
         }
 

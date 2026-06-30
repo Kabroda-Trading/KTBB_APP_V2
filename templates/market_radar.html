@@ -80,6 +80,59 @@
         .rrc-cockpit-active:hover { background: #22c55e; color: #000; }
         .rrc-cockpit-muted { background: #1e293b; border: 1px solid #334155; color: #64748b; }
 
+        /* ================================================================
+           TF STACK — attached panel below each radar row
+           ================================================================ */
+        .radar-entry { display: flex; flex-direction: column; }
+        .radar-row-c-capped { border-radius: 6px 6px 0 0 !important; }
+        .tf-stack {
+            background: #080f1d;
+            border: 1px solid #1e293b;
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            padding: 7px 20px 9px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .tf-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: 'JetBrains Mono';
+            font-size: 11px;
+            min-height: 22px;
+        }
+        .tf-label {
+            min-width: 30px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid;
+            text-align: center;
+            font-weight: 800;
+            font-size: 10px;
+            letter-spacing: 1px;
+        }
+        .tf-trade-this {
+            background: rgba(234,179,8,0.12);
+            border: 1px solid #eab308;
+            color: #eab308;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            white-space: nowrap;
+        }
+        .tf-regime-bar {
+            font-family: 'JetBrains Mono';
+            font-size: 10px;
+            color: #334155;
+            border-top: 1px dashed #1e293b;
+            margin-top: 3px;
+            padding-top: 5px;
+        }
+
         .lock-btn { font-size: 11px; padding: 12px 20px; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
         .lock-btn:hover:not(:disabled) { background: #eab308; color:#000; border-color: #eab308; }
         .lock-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -921,6 +974,53 @@
         }
 
         // ================================================================
+        // TF STACK BUILDER — 4H / 1H / regime strip below each radar row
+        // ================================================================
+        function _buildTfStack(sym, tfVerdicts, dailyRegime, weeklyPos) {
+            const tv4h = (tfVerdicts && tfVerdicts['4H']) || {};
+            const tv1h = (tfVerdicts && tfVerdicts['1H']) || {};
+
+            // Determine highest-priority active TF for TRADE THIS badge
+            const tradeTf = tv4h.status === 'BOS_ACTIVE' ? '4H'
+                          : tv1h.status === 'BOS_ACTIVE' ? '1H'
+                          : null;
+
+            function tfRow(tf, data) {
+                const active = data.status === 'BOS_ACTIVE';
+                const color  = active ? (data.bias === 'LONG' ? '#22c55e' : '#ef4444') : '#1e293b';
+                const text   = active ? (data.bias === 'LONG' ? '#22c55e' : '#ef4444') : '#334155';
+                const badge  = `<span class="tf-label" style="border-color:${color}; color:${text};">${tf}</span>`;
+                const tradeThis = (tradeTf === tf)
+                    ? `<span class="tf-trade-this">TRADE THIS ★</span>` : '';
+                let detail = '';
+                if (active) {
+                    const bias  = `<span style="color:${text}; font-weight:700;">${data.bias || ''}</span>`;
+                    const entry = data.entry ? `<span style="color:#475569;"> · Entry <b style="color:#94a3b8;">$${fmt(data.entry)}</b></span>` : '';
+                    const stop  = data.stop  ? `<span style="color:#475569;"> · Stop <b style="color:#ef4444;">$${fmt(data.stop)}</b></span>`   : '';
+                    const t1    = data.t1    ? `<span style="color:#475569;"> · T1 <b style="color:#eab308;">$${fmt(data.t1)}</b></span>`       : '';
+                    detail = `${bias}${entry}${stop}${t1}`;
+                } else {
+                    detail = `<span style="color:#1e3a52;">MONITORING — no signal today</span>`;
+                }
+                return `<div class="tf-row">${badge}${detail}${tradeThis}</div>`;
+            }
+
+            const regimeColor = dailyRegime === 'DAILY_BULL'          ? '#22c55e'
+                              : dailyRegime === 'DAILY_RECOVERY'      ? '#4ade80'
+                              : dailyRegime === 'DAILY_DISTRIBUTION'  ? '#f97316'
+                              : dailyRegime === 'DAILY_BEAR'          ? '#ef4444'
+                              : '#475569';
+            const regimePart = (dailyRegime && dailyRegime !== '—')
+                ? `Regime: <b style="color:${regimeColor};">${dailyRegime}</b>` : '';
+            const weeklyPart = (weeklyPos && weeklyPos !== '—')
+                ? ` | Weekly 200 SMA: <b style="color:#475569;">${weeklyPos}</b>` : '';
+            const regimeBar  = (regimePart || weeklyPart)
+                ? `<div class="tf-regime-bar">${regimePart}${weeklyPart}</div>` : '';
+
+            return `<div class="tf-stack" data-tf-symbol="${sym}">${tfRow('4H', tv4h)}${tfRow('1H', tv1h)}${regimeBar}</div>`;
+        }
+
+        // ================================================================
         // PHASE 1 — render locked DB levels instantly (no exchange calls)
         // ================================================================
         function renderSnapshotGrid(snap) {
@@ -988,7 +1088,15 @@
                 `<div class="rrc-badge syncing-badge" style="border-color:#334155;color:#475569;font-size:10px;">SYNCING LIVE…</div><div class="rrc-actions">`
             );
 
-            grid.innerHTML = rowHtml;
+            const tfHtml = _buildTfStack(
+                snap.symbol,
+                snap.tf_verdicts || null,
+                snap.daily_regime || '—',
+                snap.weekly_200sma_position || '—'
+            );
+            // Flatten bottom corners on radar-row-c when TF stack follows it
+            const rowCapped = rowHtml.replace('class="radar-row-c ', 'class="radar-row-c radar-row-c-capped ');
+            grid.innerHTML = `<div class="radar-entry">${rowCapped}${tfHtml}</div>`;
         }
 
         // ================================================================
@@ -1073,6 +1181,23 @@
                         existingDot.textContent       = dotLabel;
                     }
                 }
+
+                // Update or inject TF stack with live Phase 2 data
+                if (t.tf_verdicts) {
+                    const tfEl = document.querySelector(`.tf-stack[data-tf-symbol="${t.symbol}"]`);
+                    const newTfHtml = _buildTfStack(
+                        t.symbol, t.tf_verdicts,
+                        t.daily_regime || '—',
+                        t.weekly_200sma_position || '—'
+                    );
+                    if (tfEl) {
+                        tfEl.outerHTML = newTfHtml;
+                    } else {
+                        // No TF stack yet (no Phase 1 lock) — inject after the radar row
+                        row.insertAdjacentHTML('afterend', newTfHtml);
+                        row.classList.add('radar-row-c-capped');
+                    }
+                }
             });
         }
 
@@ -1110,12 +1235,19 @@
                 // GAP-2: no mas_status in full-grid path (no Phase 1 lock) — fall back to grade
                 const actionable = (t.grade === 'GRADE A' || t.grade === 'GRADE B');
 
-                html += _buildRow(
+                const rowHtml = _buildRow(
                     t.symbol, t.price, dir, score, energy, bo, bd,
                     t.symbol === 'BTCUSDT' ? jewelGateOpen : null,
                     actionable ? 'rrc-active' : 'rrc-down',
                     true, null
+                ).replace('class="radar-row-c ', 'class="radar-row-c radar-row-c-capped ');
+                const tfHtml = _buildTfStack(
+                    t.symbol,
+                    t.tf_verdicts || null,
+                    t.daily_regime || '—',
+                    t.weekly_200sma_position || '—'
                 );
+                html += `<div class="radar-entry">${rowHtml}${tfHtml}</div>`;
             });
 
             grid.innerHTML = html;

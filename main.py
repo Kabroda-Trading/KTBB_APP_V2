@@ -773,16 +773,36 @@ async def api_radar_snapshot(db: Session = Depends(get_db)):
             "t3":          campaign.t3,
         }
 
+    # 5. TF system verdicts — 4H + 1H BOS candidates from campaign_logs (DB-only, <5ms)
+    tf_verdicts = market_radar._get_tf_system_verdicts(symbol_norm)
+
+    # 6. Daily regime + weekly 200 SMA position from most recent audit row
+    daily_regime = "—"
+    weekly_200sma_position = "—"
+    from database import SessionAuditLog as _SAL
+    audit_row = db.query(_SAL).filter(
+        _SAL.symbol == symbol_norm,
+    ).order_by(_SAL.id.desc()).first()
+    if audit_row:
+        daily_regime = market_radar._compute_daily_regime({
+            "daily_21ema_direction": audit_row.daily_21ema_direction,
+            "daily_200sma_position": getattr(audit_row, "daily_200sma_position", None),
+        })
+        weekly_200sma_position = getattr(audit_row, "weekly_200sma_position", None) or "—"
+
     return JSONResponse({
-        "ok":              True,
-        "locked":          lock is not None,
-        "symbol":          symbol_raw,
-        "price":           price,
-        "levels":          levels,
-        "mtf_cached":      mtf_cached,
-        "jewel_gate_open": jewel_gate_open,
-        "mas_status":      mas_status,
-        "plan":            plan,
+        "ok":                    True,
+        "locked":                lock is not None,
+        "symbol":                symbol_raw,
+        "price":                 price,
+        "levels":                levels,
+        "mtf_cached":            mtf_cached,
+        "jewel_gate_open":       jewel_gate_open,
+        "mas_status":            mas_status,
+        "plan":                  plan,
+        "tf_verdicts":           tf_verdicts,
+        "daily_regime":          daily_regime,
+        "weekly_200sma_position": weekly_200sma_position,
     })
 
 
