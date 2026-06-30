@@ -1,12 +1,13 @@
 # gravity_engine.py
 # ==============================================================================
 # KABRODA GRAVITY ENGINE (BACKGROUND INGESTION & BEDROCK LOGGING)
-# AUDIT FIX: Initiated Daily Macro Structural Scan Trigger.
+# TARGET LOGIC v2: tiered structural targets, strength-filtered zones,
+#   Class 0 macro destination tier, daily pivot scanning, touch_count tracking.
 # ==============================================================================
 import asyncio
 import traceback
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import subprocess
 
 from database import SessionLocal, GravityMemory, DecisionJournal, CampaignLog
@@ -14,6 +15,79 @@ import battlebox_pipeline  # <-- SINGLE SOURCE OF TRUTH ENFORCED
 
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 
+# ---------------------------------------------------------------------------
+# HELPER: ATR
+# ---------------------------------------------------------------------------
+def _calc_atr(candles: List[Dict], period: int = 14) -> float:
+    if len(candles) < period + 1:
+        return 0.0
+    trs = []
+    for i in range(-period, 0):
+        h = float(candles[i]["high"])
+        l = float(candles[i]["low"])
+        prev_c = float(candles[i - 1]["close"])
+        trs.append(max(h - l, abs(h - prev_c), abs(l - prev_c)))
+    return sum(trs) / len(trs)
+
+
+# ---------------------------------------------------------------------------
+# HELPER: ENERGY GRADE
+# Reads trend/momentum alignment for a given TF's candles.
+# STRONG = aligned + MACD magnitude trending; MODERATE = aligned but weak;
+# WEAK = trend counter-directional or insufficient data.
+# ---------------------------------------------------------------------------
+def _compute_energy_grade(candles: List[Dict], bias: str) -> str:
+    if not candles or len(candles) < 50:
+        return "WEAK"
+    closes = [float(c["close"]) for c in candles]
+    ema30 = battlebox_pipeline._calc_ema_series(closes, 30)[-1]
+    ema50 = battlebox_pipeline._calc_ema_series(closes, 50)[-1]
+    trend_bullish = ema30 > ema50
+    macd = battlebox_pipeline._calc_macd(closes)
+    hist_bps = abs(macd["hist"] / ema50 * 10000) if ema50 != 0 else 0
+    macd_strength = "STRONG" if hist_bps >= 20 else "WEAK" if hist_bps >= 5 else "DEPLETED"
+    aligned = (bias == "LONG" and trend_bullish) or (bias == "SHORT" and not trend_bullish)
+    if aligned and macd_strength == "STRONG":
+        return "STRONG"
+    elif aligned:
+        return "MODERATE"
+    return "WEAK"
+
+
+# ---------------------------------------------------------------------------
+# HELPER: CLASS 0 MACRO LEVEL LOOKUP
+# Returns the nearest Elliott Wave pivot from gravity_memory in the given
+# price direction.  These are the weekly/macro structural destinations.
+# ---------------------------------------------------------------------------
+def _class0_above(db_sym: str, db, min_price: float) -> Optional[GravityMemory]:
+    return (
+        db.query(GravityMemory)
+        .filter(
+            GravityMemory.symbol == db_sym,
+            GravityMemory.source == "MACRO_ENGINE_CLASS_0",
+            GravityMemory.price > min_price,
+        )
+        .order_by(GravityMemory.price.asc())
+        .first()
+    )
+
+
+def _class0_below(db_sym: str, db, max_price: float) -> Optional[GravityMemory]:
+    return (
+        db.query(GravityMemory)
+        .filter(
+            GravityMemory.symbol == db_sym,
+            GravityMemory.source == "MACRO_ENGINE_CLASS_0",
+            GravityMemory.price < max_price,
+        )
+        .order_by(GravityMemory.price.desc())
+        .first()
+    )
+
+
+# ---------------------------------------------------------------------------
+# BEDROCK / RADAR LOGGING (unchanged)
+# ---------------------------------------------------------------------------
 def log_kabroda_bedrock(symbol: str, levels: dict, lock_ts: int):
     """Logs the 7-Day macro anchors (Daily S/R, 30m boundaries, Triggers)."""
     db = SessionLocal()
@@ -35,7 +109,7 @@ def log_kabroda_bedrock(symbol: str, levels: dict, lock_ts: int):
                 db.add(mem)
         db.commit()
         print(f"|| GRAVITY BEDROCK LOGGED || {db_sym} | 6 Daily Levels Locked")
-    except Exception as e:
+    except Exception:
         traceback.print_exc()
     finally:
         db.close()
@@ -73,36 +147,177 @@ def log_radar_anchors(symbol: str, raw_daily: List[Dict[str, Any]], raw_1h: List
     finally:
         db.close()
 
+
+# ---------------------------------------------------------------------------
+# PIVOT SCANNER
+# Scans closed candles for swing highs (SUPPLY) and lows (DEMAND).
+# v2: computes departure_move_pct at write time using post-pivot candles.
+# ---------------------------------------------------------------------------
 def _calculate_average_volume(candles: List[Dict[str, Any]], current_idx: int, period=20) -> float:
     if current_idx < period: return 1.0
     vols = [float(c["volume"]) for c in candles[current_idx-period : current_idx]]
     return sum(vols) / len(vols) if vols else 1.0
 
-def _scan_for_pivots(symbol: str, candles: List[Dict[str, Any]], timeframe: str, left=3, right=3):
+def _scan_for_pivots(candles: List[Dict[str, Any]], timeframe: str, left=3, right=3):
     pivots_found = []
     closed_candles = candles[:-1]
     if len(closed_candles) < left + right + 1: return pivots_found
+
+    if timeframe == "4h":
+        p_class = 1
+        source = "4H_PIVOT"
+    elif timeframe == "1d":
+        p_class = 1
+        source = "DAILY_PIVOT"
+    else:
+        p_class = 2
+        source = "1H_PIVOT"
+
     for i in range(left, len(closed_candles) - right):
-        ch = float(closed_candles[i]["high"]) 
-        cl = float(closed_candles[i]["low"]) 
+        ch = float(closed_candles[i]["high"])
+        cl = float(closed_candles[i]["low"])
         ts = int(closed_candles[i]["time"])
         vol = float(closed_candles[i]["volume"])
-        is_supply = all(float(closed_candles[i - j]["high"]) <= ch for j in range(1, left + 1)) and all(float(closed_candles[i + j]["high"]) < ch for j in range(1, right + 1))
-        is_demand = all(float(closed_candles[i - j]["low"]) >= cl for j in range(1, left + 1)) and all(float(closed_candles[i + j]["low"]) > cl for j in range(1, right + 1))
+
+        is_supply = all(float(closed_candles[i - j]["high"]) <= ch for j in range(1, left + 1)) and \
+                    all(float(closed_candles[i + j]["high"]) < ch for j in range(1, right + 1))
+        is_demand = all(float(closed_candles[i - j]["low"]) >= cl for j in range(1, left + 1)) and \
+                    all(float(closed_candles[i + j]["low"]) > cl for j in range(1, right + 1))
+
         if is_supply or is_demand:
             avg_vol = _calculate_average_volume(closed_candles, i)
             multiplier = 2.0 if (vol > avg_vol * 2.0) else 1.0
-            p_class = 1 if timeframe == "4h" else 2
-            if is_supply: pivots_found.append({"ts": ts, "price": ch, "type": "SUPPLY", "class": p_class, "heat": multiplier})
-            if is_demand: pivots_found.append({"ts": ts, "price": cl, "type": "DEMAND", "class": p_class, "heat": multiplier})
+
+            # v2: departure magnitude — how violently price left this zone
+            post = closed_candles[i + 1 : i + 4]
+
+            if is_supply:
+                if post:
+                    post_closes = [float(c["close"]) for c in post]
+                    departure_pct = (ch - min(post_closes)) / ch * 100 if ch > 0 else None
+                else:
+                    departure_pct = None
+                pivots_found.append({
+                    "ts": ts, "price": ch, "type": "SUPPLY", "source": source,
+                    "class": p_class, "heat": multiplier, "departure_pct": departure_pct,
+                })
+
+            if is_demand:
+                if post:
+                    post_closes = [float(c["close"]) for c in post]
+                    departure_pct = (max(post_closes) - cl) / cl * 100 if cl > 0 else None
+                else:
+                    departure_pct = None
+                pivots_found.append({
+                    "ts": ts, "price": cl, "type": "DEMAND", "source": source,
+                    "class": p_class, "heat": multiplier, "departure_pct": departure_pct,
+                })
+
     return pivots_found
 
-async def fill_decision_outcomes():
-    """Backfill 4H outcomes for DecisionJournal records older than 4 hours with null outcomes.
 
-    Foundation for the Performance Auditor — pure data collection, no judgement agent.
-    """
-    cutoff = datetime.utcnow() - timedelta(hours=4)
+# ---------------------------------------------------------------------------
+# ZONE TOUCH TRACKER  (runs every gravity loop iteration)
+# For each active intraday zone (4H / 1H / DAILY), checks whether the most
+# recent closed candle on the matching timeframe:
+#   - Approached within TOUCH_BAND → increment touch_count
+#   - Closed through the zone → mark active=False (zone invalidated)
+# touch_count is re-derived from the available candle window each run (idempotent).
+# "Touch" = approach within 0.3% band without a close-through.
+# ---------------------------------------------------------------------------
+def _update_zone_touches(
+    db_sym: str,
+    candles_4h: List[Dict],
+    candles_1h: List[Dict],
+    candles_1d: List[Dict],
+    db,
+) -> None:
+    TOUCH_BAND = 0.003        # within 0.3% of zone price = "touched"
+    INVALIDATION_BUF = 0.001  # close through by >0.1% = zone dead
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=60)
+
+    try:
+        zones = (
+            db.query(GravityMemory)
+            .filter(
+                GravityMemory.symbol == db_sym,
+                GravityMemory.source.in_(["4H_PIVOT", "1H_PIVOT", "DAILY_PIVOT"]),
+                GravityMemory.active == True,
+                GravityMemory.timestamp >= cutoff,
+            )
+            .all()
+        )
+
+        if not zones:
+            return
+
+        # Map timeframe → relevant closed candles
+        closed_4h = candles_4h[:-1] if candles_4h else []
+        closed_1h = candles_1h[:-1] if candles_1h else []
+        closed_1d = candles_1d[:-1] if candles_1d else []
+
+        source_to_candles = {
+            "4H_PIVOT":    closed_4h,
+            "DAILY_PIVOT": closed_1d,
+            "1H_PIVOT":    closed_1h,
+        }
+
+        changed = False
+        for zone in zones:
+            relevant = source_to_candles.get(zone.source, [])
+            if not relevant:
+                continue
+
+            zone_ts = zone.timestamp.replace(tzinfo=timezone.utc) if zone.timestamp.tzinfo is None else zone.timestamp
+            z = zone.price
+
+            touches = 0
+            invalidated = False
+
+            for c in relevant:
+                c_ts = datetime.fromtimestamp(int(c["time"]), tz=timezone.utc)
+                if c_ts <= zone_ts:
+                    continue  # only evaluate candles that closed AFTER zone was formed
+
+                h = float(c["high"])
+                l = float(c["low"])
+                close = float(c["close"])
+
+                if zone.level_type == "SUPPLY":
+                    if close >= z * (1 + INVALIDATION_BUF):
+                        invalidated = True
+                        break
+                    if h >= z * (1 - TOUCH_BAND):
+                        touches += 1
+                else:  # DEMAND
+                    if close <= z * (1 - INVALIDATION_BUF):
+                        invalidated = True
+                        break
+                    if l <= z * (1 + TOUCH_BAND):
+                        touches += 1
+
+            new_active = not invalidated
+            new_tc = touches
+
+            if zone.active != new_active or zone.touch_count != new_tc:
+                zone.active = new_active
+                zone.touch_count = new_tc
+                changed = True
+
+        if changed:
+            db.commit()
+
+    except Exception as e:
+        print(f"[ZONE TOUCH UPDATE] {db_sym} error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# DECISION JOURNAL OUTCOME BACKFILL (unchanged)
+# ---------------------------------------------------------------------------
+async def fill_decision_outcomes():
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=4)
     db = SessionLocal()
     try:
         pending = db.query(DecisionJournal).filter(
@@ -113,7 +328,6 @@ async def fill_decision_outcomes():
         if not pending:
             return
 
-        # Fetch each symbol's current price once and reuse.
         price_cache: Dict[str, float] = {}
         for rec in pending:
             sym = rec.symbol
@@ -130,7 +344,6 @@ async def fill_decision_outcomes():
                 continue
 
             pct_move = ((current_price - rec.asset_price) / rec.asset_price) * 100.0
-
             direction = (rec.confluence_direction or "").upper()
             if direction in ("BULLISH", "LONG"):
                 correct = pct_move > 0
@@ -151,30 +364,30 @@ async def fill_decision_outcomes():
         db.close()
 
 
+# ---------------------------------------------------------------------------
+# 4H BOS DETECTION — TARGET LOGIC v2
+#
+# ENTRY: 4H close beyond the most recent 4H SUPPLY (long) or DEMAND (short) zone.
+# STOP:  nearest strength-qualified 4H zone on the opposing side; 60-day lookback.
+#         Fallback: 1.5× 14-period ATR from entry.
+# T1:    nearest strength-qualified 4H zone beyond the broken level (not just
+#         beyond current price — the structural destination past the break).
+#         60-day lookback.  Fallback: nearest Class 0 macro level, then 2.5×ATR.
+# T2:    nearest Class 0 (Elliott Wave, macro) level beyond T1 in trade direction.
+#         These are the weekly/macro structural destinations.
+#         Fallback: Fibonacci extension off entry→T1 distance.
+# T3:    next Class 0 level beyond T2.  Fallback: Fib extension.
+# ---------------------------------------------------------------------------
 def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], db) -> None:
-    """
-    Detect a 4H Break of Structure against the most recent 4H structural zone in
-    gravity_memory, then write a campaign_log CANDIDATE row for audit observation.
-
-    Rules:
-    - Long BOS:  current 4H close > most recent 4H SUPPLY zone price.
-    - Short BOS: current 4H close < most recent 4H DEMAND zone price.
-    - One record per date_key (same dedup pattern as the 15M system).
-    - mas_approval_status = '4H_CANDIDATE' → monitored by ledger_closing_engine Phase 4.
-    - entry_filled_at set to detection time (BOS close = entry signal, no waiting).
-    - session_expires_at set to now + 5 days (hard cap; Phase 4 closes at expiry).
-    - Zones must be within the last 10 days (50 × 4H bars = gravity engine fetch window).
-    """
     try:
-        if not candles_4h or len(candles_4h) < 10:
+        if not candles_4h or len(candles_4h) < 14:
             return
 
         current_close = float(candles_4h[-1]["close"])
         now = datetime.now(timezone.utc)
         date_key = now.strftime("%Y-%m-%d")
-        cutoff = now - timedelta(days=10)
 
-        # De-dup: one candidate per day per symbol
+        # Dedup: one candidate per date_key per symbol
         existing = (
             db.query(CampaignLog)
             .filter(
@@ -187,14 +400,16 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
         if existing:
             return
 
-        # Most recent 4H SUPPLY and DEMAND zones within the fetch window
+        # --- BOS TRIGGER DETECTION (near-term only: most recent zone within 15 days) ---
+        bos_cutoff = now - timedelta(days=15)
         supply_zone = (
             db.query(GravityMemory)
             .filter(
                 GravityMemory.symbol == db_sym,
                 GravityMemory.source == "4H_PIVOT",
                 GravityMemory.level_type == "SUPPLY",
-                GravityMemory.timestamp >= cutoff,
+                GravityMemory.active == True,
+                GravityMemory.timestamp >= bos_cutoff,
             )
             .order_by(GravityMemory.timestamp.desc())
             .first()
@@ -205,7 +420,8 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
                 GravityMemory.symbol == db_sym,
                 GravityMemory.source == "4H_PIVOT",
                 GravityMemory.level_type == "DEMAND",
-                GravityMemory.timestamp >= cutoff,
+                GravityMemory.active == True,
+                GravityMemory.timestamp >= bos_cutoff,
             )
             .order_by(GravityMemory.timestamp.desc())
             .first()
@@ -214,83 +430,130 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
         if not supply_zone and not demand_zone:
             return
 
+        atr14 = _calc_atr(candles_4h, 14)
+
+        # --- STRENGTH FILTER PARAMS for stop/target zone selection ---
+        TARGET_LOOKBACK = now - timedelta(days=60)
+        MIN_HEAT = 2.0
+        MIN_DEPARTURE = 1.5   # % departure; NULL allowed (pre-v2 zones)
+        MAX_TOUCHES = 2       # exclude touch_count >= 3 (exhausted)
+
+        def _qualified_4h(level_type: str, price_filter, price_order):
+            return (
+                db.query(GravityMemory)
+                .filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "4H_PIVOT",
+                    GravityMemory.level_type == level_type,
+                    GravityMemory.active == True,
+                    GravityMemory.timestamp >= TARGET_LOOKBACK,
+                    GravityMemory.heat_multiplier >= MIN_HEAT,
+                    GravityMemory.touch_count <= MAX_TOUCHES,
+                    price_filter,
+                    # Allow NULL departure (pre-v2 zones) or meeting minimum
+                    (GravityMemory.departure_move_pct.is_(None)) |
+                    (GravityMemory.departure_move_pct >= MIN_DEPARTURE),
+                )
+                .order_by(price_order)
+                .first()
+            )
+
         bias = None
         stop_price = None
         t1_price = None
+        t2_price = None
+        t3_price = None
+        break_level_price = None
+        htf_anchor_type = None
+        htf_anchor_price_val = None
+        energy_grade = "WEAK"
 
         if supply_zone and current_close > supply_zone.price:
             bias = "LONG"
-            # Stop: nearest DEMAND zone below current price
-            stop_row = (
-                db.query(GravityMemory)
-                .filter(
-                    GravityMemory.symbol == db_sym,
-                    GravityMemory.source == "4H_PIVOT",
-                    GravityMemory.level_type == "DEMAND",
-                    GravityMemory.price < current_close,
-                    GravityMemory.timestamp >= cutoff,
-                )
-                .order_by(GravityMemory.price.desc())
-                .first()
+            break_level_price = supply_zone.price
+            energy_grade = _compute_energy_grade(candles_4h, "LONG")
+
+            # STOP: nearest qualified DEMAND zone below entry
+            stop_row = _qualified_4h(
+                "DEMAND",
+                GravityMemory.price < current_close,
+                GravityMemory.price.desc(),
             )
-            # T1: nearest SUPPLY zone above current price
-            t1_row = (
-                db.query(GravityMemory)
-                .filter(
-                    GravityMemory.symbol == db_sym,
-                    GravityMemory.source == "4H_PIVOT",
-                    GravityMemory.level_type == "SUPPLY",
-                    GravityMemory.price > current_close,
-                    GravityMemory.timestamp >= cutoff,
-                )
-                .order_by(GravityMemory.price.asc())
-                .first()
+            stop_price = stop_row.price if stop_row else round(current_close - 1.5 * atr14, 2)
+
+            # T1: nearest qualified 4H SUPPLY zone ABOVE the broken level (not just above entry)
+            t1_row = _qualified_4h(
+                "SUPPLY",
+                GravityMemory.price > break_level_price,
+                GravityMemory.price.asc(),
             )
-            stop_price = stop_row.price if stop_row else round(current_close * 0.95, 2)
-            t1_price   = t1_row.price   if t1_row   else round(current_close * 1.05, 2)
+            if t1_row:
+                t1_price = t1_row.price
+            else:
+                # Fallback 1: nearest Class 0 macro level above break_level
+                t1_c0 = _class0_above(db_sym, db, break_level_price)
+                t1_price = t1_c0.price if t1_c0 else round(current_close + 2.5 * atr14, 2)
+
+            # T2: nearest Class 0 level above T1 (the macro/weekly destination)
+            t2_c0 = _class0_above(db_sym, db, t1_price)
+            if t2_c0:
+                t2_price = t2_c0.price
+                htf_anchor_type = t2_c0.level_type
+                htf_anchor_price_val = t2_price
+                # T3: next Class 0 above T2
+                t3_c0 = _class0_above(db_sym, db, t2_price)
+                t3_price = t3_c0.price if t3_c0 else round(t2_price + (t2_price - t1_price) * 0.618, 2)
+            else:
+                htf_anchor_type = "FIB_FALLBACK"
+                t1_dist = t1_price - current_close
+                t2_price = round(t1_price + t1_dist * 1.618, 2)
+                t3_price = round(t1_price + t1_dist * 2.618, 2)
 
         elif demand_zone and current_close < demand_zone.price:
             bias = "SHORT"
-            # Stop: nearest SUPPLY zone above current price
-            stop_row = (
-                db.query(GravityMemory)
-                .filter(
-                    GravityMemory.symbol == db_sym,
-                    GravityMemory.source == "4H_PIVOT",
-                    GravityMemory.level_type == "SUPPLY",
-                    GravityMemory.price > current_close,
-                    GravityMemory.timestamp >= cutoff,
-                )
-                .order_by(GravityMemory.price.asc())
-                .first()
+            break_level_price = demand_zone.price
+            energy_grade = _compute_energy_grade(candles_4h, "SHORT")
+
+            # STOP: nearest qualified SUPPLY zone above entry
+            stop_row = _qualified_4h(
+                "SUPPLY",
+                GravityMemory.price > current_close,
+                GravityMemory.price.asc(),
             )
-            # T1: nearest DEMAND zone below current price
-            t1_row = (
-                db.query(GravityMemory)
-                .filter(
-                    GravityMemory.symbol == db_sym,
-                    GravityMemory.source == "4H_PIVOT",
-                    GravityMemory.level_type == "DEMAND",
-                    GravityMemory.price < current_close,
-                    GravityMemory.timestamp >= cutoff,
-                )
-                .order_by(GravityMemory.price.desc())
-                .first()
+            stop_price = stop_row.price if stop_row else round(current_close + 1.5 * atr14, 2)
+
+            # T1: nearest qualified 4H DEMAND zone BELOW the broken level
+            t1_row = _qualified_4h(
+                "DEMAND",
+                GravityMemory.price < break_level_price,
+                GravityMemory.price.desc(),
             )
-            stop_price = stop_row.price if stop_row else round(current_close * 1.05, 2)
-            t1_price   = t1_row.price   if t1_row   else round(current_close * 0.95, 2)
+            if t1_row:
+                t1_price = t1_row.price
+            else:
+                t1_c0 = _class0_below(db_sym, db, break_level_price)
+                t1_price = t1_c0.price if t1_c0 else round(current_close - 2.5 * atr14, 2)
+
+            # T2: nearest Class 0 level below T1
+            t2_c0 = _class0_below(db_sym, db, t1_price)
+            if t2_c0:
+                t2_price = t2_c0.price
+                htf_anchor_type = t2_c0.level_type
+                htf_anchor_price_val = t2_price
+                t3_c0 = _class0_below(db_sym, db, t2_price)
+                t3_price = t3_c0.price if t3_c0 else round(t2_price - (t1_price - t2_price) * 0.618, 2)
+            else:
+                htf_anchor_type = "FIB_FALLBACK"
+                t1_dist = current_close - t1_price
+                t2_price = round(t1_price - t1_dist * 1.618, 2)
+                t3_price = round(t1_price - t1_dist * 2.618, 2)
 
         if not bias:
             return
 
-        # T2/T3: structural extension approximated from the T1 distance
+        # Audit-only quality flag: T1 smaller than 1.5× ATR means target is inside noise floor
         t1_dist = abs(t1_price - current_close)
-        if bias == "LONG":
-            t2 = round(t1_price + t1_dist, 2)
-            t3 = round(t1_price + t1_dist * 1.618, 2)
-        else:
-            t2 = round(t1_price - t1_dist, 2)
-            t3 = round(t1_price - t1_dist * 1.618, 2)
+        target_too_small = (t1_dist < 1.5 * atr14) if atr14 > 0 else False
 
         row = CampaignLog(
             symbol=symbol,
@@ -301,46 +564,56 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
             entry_price=round(current_close, 2),
             stop_loss=round(stop_price, 2),
             t1=round(t1_price, 2),
-            t2=t2,
-            t3=t3,
+            t2=round(t2_price, 2),
+            t3=round(t3_price, 2),
             total_contracts=0.0,
             mas_approval_status="4H_CANDIDATE",
             is_canonical=False,
             session_timeframe="4H",
             entry_filled_at=now,
             session_expires_at=now + timedelta(days=5),
+            target_logic_version="v2",
+            target_too_small_flag=target_too_small,
+            htf_anchor_type=htf_anchor_type,
+            htf_anchor_price=htf_anchor_price_val,
+            energy_grade=energy_grade,
         )
         db.add(row)
         db.commit()
+        flag = " [TARGET_TOO_SMALL]" if target_too_small else ""
         print(
-            f"|| 4H BOS || {symbol} | {bias} | Close: ${current_close:.2f} "
-            f"| Stop: ${stop_price:.2f} | T1: ${t1_price:.2f} | CANDIDATE RECORDED"
+            f"|| 4H BOS v2 || {symbol} | {bias} | Entry: ${current_close:.2f} "
+            f"| Stop: ${stop_price:.2f} | T1: ${t1_price:.2f} | T2: ${t2_price:.2f} "
+            f"| HTF: {htf_anchor_type} | Energy: {energy_grade}{flag}"
         )
     except Exception as e:
         print(f"[4H BOS DETECTION] {symbol} error: {e}")
+        traceback.print_exc()
 
 
-def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], db) -> None:
-    """
-    Detect a 1H Break of Structure against the most recent 1H structural zone in
-    gravity_memory, then write a campaign_log CANDIDATE row for audit observation.
-
-    Gating: only fires when the 4H fuel gauge direction is aligned (read from the most
-    recent 4H_CANDIDATE row's bias, if one exists today). If no 4H_CANDIDATE exists,
-    allows the 1H signal through — the gating is informational at the candidate stage.
-
-    One record per date_key. Zones must be within the last 3 days (1H fetch window).
-    """
+# ---------------------------------------------------------------------------
+# 1H BOS DETECTION — TARGET LOGIC v2
+#
+# ENTRY: 1H close beyond the most recent 1H SUPPLY (long) or DEMAND (short) zone.
+# STOP:  nearest qualified 1H zone (opposing side), 20-day lookback.
+#         Fallback: 1.0× 14-period 1H ATR.
+# T1:    nearest qualified 1H zone beyond the broken level, 20-day lookback.
+#         Fallback: nearest DAILY_PIVOT in trade direction, then 2.0×ATR.
+# T2:    nearest DAILY_PIVOT beyond T1.  Fallback: Fib extension.
+# T3:    next DAILY_PIVOT beyond T2.  Fallback: Fib extension.
+# GATE:  4H trend alignment logged in energy_grade. Misalignment = WEAK energy
+#         but candidate still recorded (record always, flag only).
+# ---------------------------------------------------------------------------
+def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]], db) -> None:
     try:
-        if not candles_1h or len(candles_1h) < 10:
+        if not candles_1h or len(candles_1h) < 14:
             return
 
         current_close = float(candles_1h[-1]["close"])
         now = datetime.now(timezone.utc)
         date_key = now.strftime("%Y-%m-%d")
-        cutoff = now - timedelta(days=3)
 
-        # De-dup: one candidate per day per symbol
+        # Dedup
         existing = (
             db.query(CampaignLog)
             .filter(
@@ -353,14 +626,16 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], d
         if existing:
             return
 
-        # Most recent 1H SUPPLY and DEMAND zones within the fetch window
+        # --- BOS TRIGGER DETECTION (near-term: within 7 days) ---
+        bos_cutoff = now - timedelta(days=7)
         supply_zone = (
             db.query(GravityMemory)
             .filter(
                 GravityMemory.symbol == db_sym,
                 GravityMemory.source == "1H_PIVOT",
                 GravityMemory.level_type == "SUPPLY",
-                GravityMemory.timestamp >= cutoff,
+                GravityMemory.active == True,
+                GravityMemory.timestamp >= bos_cutoff,
             )
             .order_by(GravityMemory.timestamp.desc())
             .first()
@@ -371,7 +646,8 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], d
                 GravityMemory.symbol == db_sym,
                 GravityMemory.source == "1H_PIVOT",
                 GravityMemory.level_type == "DEMAND",
-                GravityMemory.timestamp >= cutoff,
+                GravityMemory.active == True,
+                GravityMemory.timestamp >= bos_cutoff,
             )
             .order_by(GravityMemory.timestamp.desc())
             .first()
@@ -380,78 +656,164 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], d
         if not supply_zone and not demand_zone:
             return
 
+        atr14 = _calc_atr(candles_1h, 14)
+
+        TARGET_LOOKBACK = now - timedelta(days=20)
+        MIN_HEAT = 2.0
+        MIN_DEPARTURE = 0.8   # lower threshold for 1H zones (smaller natural moves)
+        MAX_TOUCHES = 2
+
+        def _qualified_1h(level_type: str, price_filter, price_order):
+            return (
+                db.query(GravityMemory)
+                .filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "1H_PIVOT",
+                    GravityMemory.level_type == level_type,
+                    GravityMemory.active == True,
+                    GravityMemory.timestamp >= TARGET_LOOKBACK,
+                    GravityMemory.heat_multiplier >= MIN_HEAT,
+                    GravityMemory.touch_count <= MAX_TOUCHES,
+                    price_filter,
+                    (GravityMemory.departure_move_pct.is_(None)) |
+                    (GravityMemory.departure_move_pct >= MIN_DEPARTURE),
+                )
+                .order_by(price_order)
+                .first()
+            )
+
+        def _daily_pivot_above(min_price: float):
+            return (
+                db.query(GravityMemory)
+                .filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "DAILY_PIVOT",
+                    GravityMemory.level_type == "SUPPLY",
+                    GravityMemory.active == True,
+                    GravityMemory.price > min_price,
+                )
+                .order_by(GravityMemory.price.asc())
+                .first()
+            )
+
+        def _daily_pivot_below(max_price: float):
+            return (
+                db.query(GravityMemory)
+                .filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "DAILY_PIVOT",
+                    GravityMemory.level_type == "DEMAND",
+                    GravityMemory.active == True,
+                    GravityMemory.price < max_price,
+                )
+                .order_by(GravityMemory.price.desc())
+                .first()
+            )
+
         bias = None
         stop_price = None
         t1_price = None
+        t2_price = None
+        t3_price = None
+        break_level_price = None
+        htf_anchor_type = None
+        htf_anchor_price_val = None
+
+        # 4H trend alignment check for energy_grade
+        energy_grade_1h = _compute_energy_grade(candles_1h, "LONG")  # will set by bias below
 
         if supply_zone and current_close > supply_zone.price:
             bias = "LONG"
-            stop_row = (
-                db.query(GravityMemory)
-                .filter(
-                    GravityMemory.symbol == db_sym,
-                    GravityMemory.source == "1H_PIVOT",
-                    GravityMemory.level_type == "DEMAND",
-                    GravityMemory.price < current_close,
-                    GravityMemory.timestamp >= cutoff,
-                )
-                .order_by(GravityMemory.price.desc())
-                .first()
+            break_level_price = supply_zone.price
+            energy_grade_1h = _compute_energy_grade(candles_1h, "LONG")
+            # Degrade to WEAK if 4H trend is counter-directional
+            if candles_4h and len(candles_4h) >= 50:
+                closes_4h = [float(c["close"]) for c in candles_4h]
+                ema30_4h = battlebox_pipeline._calc_ema_series(closes_4h, 30)[-1]
+                ema50_4h = battlebox_pipeline._calc_ema_series(closes_4h, 50)[-1]
+                if ema30_4h <= ema50_4h:  # 4H is BEARISH, 1H LONG = misaligned
+                    energy_grade_1h = "WEAK"
+
+            stop_row = _qualified_1h(
+                "DEMAND",
+                GravityMemory.price < current_close,
+                GravityMemory.price.desc(),
             )
-            t1_row = (
-                db.query(GravityMemory)
-                .filter(
-                    GravityMemory.symbol == db_sym,
-                    GravityMemory.source == "1H_PIVOT",
-                    GravityMemory.level_type == "SUPPLY",
-                    GravityMemory.price > current_close,
-                    GravityMemory.timestamp >= cutoff,
-                )
-                .order_by(GravityMemory.price.asc())
-                .first()
+            stop_price = stop_row.price if stop_row else round(current_close - 1.0 * atr14, 2)
+
+            t1_row = _qualified_1h(
+                "SUPPLY",
+                GravityMemory.price > break_level_price,
+                GravityMemory.price.asc(),
             )
-            stop_price = stop_row.price if stop_row else round(current_close * 0.99, 2)
-            t1_price   = t1_row.price   if t1_row   else round(current_close * 1.02, 2)
+            if t1_row:
+                t1_price = t1_row.price
+            else:
+                dp = _daily_pivot_above(break_level_price)
+                t1_price = dp.price if dp else round(current_close + 2.0 * atr14, 2)
+
+            # T2: nearest DAILY_PIVOT above T1
+            t2_dp = _daily_pivot_above(t1_price)
+            if t2_dp:
+                t2_price = t2_dp.price
+                htf_anchor_type = "DAILY_PIVOT"
+                htf_anchor_price_val = t2_price
+                t3_dp = _daily_pivot_above(t2_price)
+                t3_price = t3_dp.price if t3_dp else round(t2_price + (t2_price - t1_price) * 0.618, 2)
+            else:
+                htf_anchor_type = "FIB_FALLBACK"
+                t1_dist = t1_price - current_close
+                t2_price = round(t1_price + t1_dist * 1.618, 2)
+                t3_price = round(t1_price + t1_dist * 2.618, 2)
 
         elif demand_zone and current_close < demand_zone.price:
             bias = "SHORT"
-            stop_row = (
-                db.query(GravityMemory)
-                .filter(
-                    GravityMemory.symbol == db_sym,
-                    GravityMemory.source == "1H_PIVOT",
-                    GravityMemory.level_type == "SUPPLY",
-                    GravityMemory.price > current_close,
-                    GravityMemory.timestamp >= cutoff,
-                )
-                .order_by(GravityMemory.price.asc())
-                .first()
+            break_level_price = demand_zone.price
+            energy_grade_1h = _compute_energy_grade(candles_1h, "SHORT")
+            if candles_4h and len(candles_4h) >= 50:
+                closes_4h = [float(c["close"]) for c in candles_4h]
+                ema30_4h = battlebox_pipeline._calc_ema_series(closes_4h, 30)[-1]
+                ema50_4h = battlebox_pipeline._calc_ema_series(closes_4h, 50)[-1]
+                if ema30_4h > ema50_4h:  # 4H is BULLISH, 1H SHORT = misaligned
+                    energy_grade_1h = "WEAK"
+
+            stop_row = _qualified_1h(
+                "SUPPLY",
+                GravityMemory.price > current_close,
+                GravityMemory.price.asc(),
             )
-            t1_row = (
-                db.query(GravityMemory)
-                .filter(
-                    GravityMemory.symbol == db_sym,
-                    GravityMemory.source == "1H_PIVOT",
-                    GravityMemory.level_type == "DEMAND",
-                    GravityMemory.price < current_close,
-                    GravityMemory.timestamp >= cutoff,
-                )
-                .order_by(GravityMemory.price.desc())
-                .first()
+            stop_price = stop_row.price if stop_row else round(current_close + 1.0 * atr14, 2)
+
+            t1_row = _qualified_1h(
+                "DEMAND",
+                GravityMemory.price < break_level_price,
+                GravityMemory.price.desc(),
             )
-            stop_price = stop_row.price if stop_row else round(current_close * 1.01, 2)
-            t1_price   = t1_row.price   if t1_row   else round(current_close * 0.98, 2)
+            if t1_row:
+                t1_price = t1_row.price
+            else:
+                dp = _daily_pivot_below(break_level_price)
+                t1_price = dp.price if dp else round(current_close - 2.0 * atr14, 2)
+
+            # T2: nearest DAILY_PIVOT below T1
+            t2_dp = _daily_pivot_below(t1_price)
+            if t2_dp:
+                t2_price = t2_dp.price
+                htf_anchor_type = "DAILY_PIVOT"
+                htf_anchor_price_val = t2_price
+                t3_dp = _daily_pivot_below(t2_price)
+                t3_price = t3_dp.price if t3_dp else round(t2_price - (t1_price - t2_price) * 0.618, 2)
+            else:
+                htf_anchor_type = "FIB_FALLBACK"
+                t1_dist = current_close - t1_price
+                t2_price = round(t1_price - t1_dist * 1.618, 2)
+                t3_price = round(t1_price - t1_dist * 2.618, 2)
 
         if not bias:
             return
 
         t1_dist = abs(t1_price - current_close)
-        if bias == "LONG":
-            t2 = round(t1_price + t1_dist, 2)
-            t3 = round(t1_price + t1_dist * 1.618, 2)
-        else:
-            t2 = round(t1_price - t1_dist, 2)
-            t3 = round(t1_price - t1_dist * 1.618, 2)
+        target_too_small = (t1_dist < 1.0 * atr14) if atr14 > 0 else False
 
         row = CampaignLog(
             symbol=symbol,
@@ -462,29 +824,39 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], d
             entry_price=round(current_close, 2),
             stop_loss=round(stop_price, 2),
             t1=round(t1_price, 2),
-            t2=t2,
-            t3=t3,
+            t2=round(t2_price, 2),
+            t3=round(t3_price, 2),
             total_contracts=0.0,
             mas_approval_status="1H_CANDIDATE",
             is_canonical=False,
             session_timeframe="1H",
             entry_filled_at=now,
             session_expires_at=now + timedelta(days=2),
+            target_logic_version="v2",
+            target_too_small_flag=target_too_small,
+            htf_anchor_type=htf_anchor_type,
+            htf_anchor_price=htf_anchor_price_val,
+            energy_grade=energy_grade_1h,
         )
         db.add(row)
         db.commit()
+        flag = " [TARGET_TOO_SMALL]" if target_too_small else ""
         print(
-            f"|| 1H BOS || {symbol} | {bias} | Close: ${current_close:.2f} "
-            f"| Stop: ${stop_price:.2f} | T1: ${t1_price:.2f} | CANDIDATE RECORDED"
+            f"|| 1H BOS v2 || {symbol} | {bias} | Entry: ${current_close:.2f} "
+            f"| Stop: ${stop_price:.2f} | T1: ${t1_price:.2f} | T2: ${t2_price:.2f} "
+            f"| HTF: {htf_anchor_type} | Energy: {energy_grade_1h}{flag}"
         )
     except Exception as e:
         print(f"[1H BOS DETECTION] {symbol} error: {e}")
+        traceback.print_exc()
 
 
+# ---------------------------------------------------------------------------
+# MAIN GRAVITY INGESTION LOOP
+# ---------------------------------------------------------------------------
 async def run_gravity_ingestion_loop():
-    print(">>> GRAVITY ENGINE: Initializing background loop (STRICT SSOT MODE)...")
-    
-    # KABRODA ARCHITECTURE UPGRADE: Trigger Macro Engine on boot
+    print(">>> GRAVITY ENGINE: Initializing background loop (v2 target logic, STRICT SSOT MODE)...")
+
     try:
         subprocess.Popen(["python", "kabroda_macro_engine.py"])
     except Exception as e:
@@ -498,41 +870,67 @@ async def run_gravity_ingestion_loop():
             for symbol in TARGETS:
                 db_sym = symbol.replace("/", "")
                 candles_4h = await battlebox_pipeline.fetch_live_4h(symbol, limit=50)
-                candles_1h = await battlebox_pipeline.fetch_live_1h(symbol, limit=200) 
-                candles_1d = await battlebox_pipeline.fetch_live_daily(symbol, limit=30)  
-                if not candles_4h or not candles_1h or not candles_1d: continue
+                candles_1h = await battlebox_pipeline.fetch_live_1h(symbol, limit=200)
+                candles_1d = await battlebox_pipeline.fetch_live_daily(symbol, limit=30)
+                if not candles_4h or not candles_1h or not candles_1d:
+                    continue
+
                 log_radar_anchors(db_sym, candles_1d, candles_1h)
+
+                # Pivot scanning: 4H, 1H, and daily
                 new_pivots = []
-                new_pivots.extend(_scan_for_pivots(db_sym, candles_4h, "4h"))
-                new_pivots.extend(_scan_for_pivots(db_sym, candles_1h, "1h"))
+                new_pivots.extend(_scan_for_pivots(candles_4h, "4h"))
+                new_pivots.extend(_scan_for_pivots(candles_1h, "1h"))
+                new_pivots.extend(_scan_for_pivots(candles_1d, "1d"))
+
                 for p in new_pivots:
                     dt = datetime.fromtimestamp(p["ts"], tz=timezone.utc)
-                    src = "4H_PIVOT" if p["class"] == 1 else "1H_PIVOT"
-                    exists = db.query(GravityMemory).filter(GravityMemory.symbol == db_sym, GravityMemory.timestamp == dt, GravityMemory.source == src).first()
+                    src = p["source"]
+                    exists = db.query(GravityMemory).filter(
+                        GravityMemory.symbol == db_sym,
+                        GravityMemory.timestamp == dt,
+                        GravityMemory.source == src,
+                    ).first()
                     if not exists:
-                        mem = GravityMemory(symbol=db_sym, timestamp=dt, source=src, level_type=p["type"], price=p["price"], permanence_class=p["class"], heat_multiplier=p["heat"])
+                        mem = GravityMemory(
+                            symbol=db_sym,
+                            timestamp=dt,
+                            source=src,
+                            level_type=p["type"],
+                            price=p["price"],
+                            permanence_class=p["class"],
+                            heat_multiplier=p["heat"],
+                            departure_move_pct=p.get("departure_pct"),
+                        )
                         db.add(mem)
                         db.commit()
-                        print(f"|| GRAVITY BEDROCK || {db_sym} | {src} {p['type']} @ ${p['price']} LOCKED. Heat: {p['heat']}")
-                # BOS detection — BTC only (campaign infrastructure is BTC/USDT only)
+                        print(
+                            f"|| GRAVITY BEDROCK || {db_sym} | {src} {p['type']} @ ${p['price']:.2f} "
+                            f"| Heat: {p['heat']} | Depart: {p.get('departure_pct', 'N/A')}"
+                        )
+
+                # Update zone touch counts and invalidate broken zones
+                _update_zone_touches(db_sym, candles_4h, candles_1h, candles_1d, db)
+
+                # BOS detection — BTC only
                 if symbol == "BTC/USDT":
                     _detect_4h_bos(symbol, db_sym, candles_4h, db)
-                    _detect_1h_bos(symbol, db_sym, candles_1h, db)
+                    _detect_1h_bos(symbol, db_sym, candles_1h, candles_4h, db)
+
         except Exception as e:
             print(f"Gravity Engine Iteration Error: {e}")
         finally:
             db.close()
-            
+
         loop_count += 1
-        # Re-run macro engine once every ~24 hours (assuming 900s sleep = 15 mins -> 96 loops)
         if loop_count >= 96:
             try:
                 subprocess.Popen(["python", "kabroda_macro_engine.py"])
-            except Exception: pass
+            except Exception:
+                pass
             loop_count = 0
 
         outcome_count += 1
-        # Fill DecisionJournal 4H outcomes every ~4 hours (900s sleep = 15 mins -> 16 loops)
         if outcome_count >= 16:
             try:
                 await fill_decision_outcomes()

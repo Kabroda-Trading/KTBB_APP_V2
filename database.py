@@ -229,6 +229,31 @@ def init_db():
     except Exception:
         pass
 
+    # --- TARGET LOGIC v2 — audit fields on campaign_logs ---
+    for _col in [
+        "target_logic_version VARCHAR DEFAULT 'v1'",
+        "target_too_small_flag BOOLEAN DEFAULT FALSE",
+        "htf_anchor_type VARCHAR",
+        "htf_anchor_price FLOAT",
+        "energy_grade VARCHAR",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE campaign_logs ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
+    # --- GRAVITY MEMORY — zone strength fields ---
+    for _col in [
+        "departure_move_pct FLOAT",
+        "touch_count INTEGER DEFAULT 0",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE gravity_memory ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- COMPONENT 0 EXTENSION — additional audit fields ---
     for _col in [
         "macro_structure_json TEXT",
@@ -309,6 +334,10 @@ class GravityMemory(Base):
     permanence_class = Column(Integer, nullable=False)
     heat_multiplier = Column(Float, default=1.0)
     active = Column(Boolean, default=True)
+
+    # Zone strength fields (v2 target logic)
+    departure_move_pct = Column(Float, nullable=True)   # % price moved away in 3 bars after zone formation
+    touch_count = Column(Integer, default=0)             # times price revisited this zone without breaking through
 
 # ---------------------------------------------------------
 # EXISTING: PERMANENT SESSION LOCKS
@@ -397,6 +426,15 @@ class CampaignLog(Base):
     #   "4H" = 4H BOS candidate detected by gravity engine.
     #   "1H" = 1H BOS candidate detected by gravity engine.
     session_timeframe = Column(String, nullable=True, default="15M")
+
+    # --- TARGET LOGIC v2 AUDIT FIELDS ---
+    # These fields are written only by the corrected target/stop construction (v2).
+    # v1 rows have NULL on all of these.  Audit-AI must filter WHERE target_logic_version='v2'.
+    target_logic_version = Column(String, nullable=True, default="v1")  # 'v1'=original broken, 'v2'=corrected
+    target_too_small_flag = Column(Boolean, default=False)               # audit-only; T1 < 1.5x ATR — never gates trade
+    htf_anchor_type = Column(String, nullable=True)                      # e.g. 'BULL_WAVE_3', 'DAILY_PIVOT', 'FIB_FALLBACK'
+    htf_anchor_price = Column(Float, nullable=True)                      # price of the higher-TF level that set T2
+    energy_grade = Column(String, nullable=True)                         # STRONG/MODERATE/WEAK at detection time
 
 # ---------------------------------------------------------
 # MTF CONFLUENCE READINGS (MORNING BRIEF HISTORY)

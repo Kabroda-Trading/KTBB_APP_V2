@@ -134,9 +134,87 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ## ► NEXT SESSION START
 *End-of-session marker: 2026-06-30*
 
+**2026-06-30 — Target logic v2 deployed: tiered structural targets, zone strength filtering, daily pivot scan, touch_count tracking, HTF destination layer.**
+
+### ✅ COMPLETED THIS SESSION (2026-06-30, second commit)
+
+**TARGET LOGIC v2 — Full correct rewrite of 4H/1H BOS target/stop construction.**
+
+This is NOT a patch. This is the complete replacement of the v1 "nearest zone" logic
+that was producing mis-scaled targets (e.g., 0.4:1 SHORT with a 670-point target on
+a 4H trade). Every candidate written from this deploy forward is on logic we trust
+and intend to keep. Old candidates (`target_logic_version='v1'`) are preserved but
+the audit-AI must filter `WHERE target_logic_version='v2'` for meaningful analysis.
+
+**Five bugs fixed (confirmed by code inspection, research report, live example):**
+1. "Nearest zone" → structural destination beyond broken level
+2. 10-day cutoff too short → 60-day (4H) / 20-day (1H) lookback
+3. No zone strength filter → departure_move_pct + heat_multiplier + touch_count gate
+4. No higher-TF anchor → 4H gets Class 0 macro Elliott Wave as T2/T3; 1H gets DAILY_PIVOT
+5. Arbitrary 5% fallback → ATR-based fallback; Class 0 fallback before ATR
+
+**Schema additions (database.py, ALTER TABLE in init_db()):**
+- `gravity_memory`: `departure_move_pct FLOAT`, `touch_count INTEGER DEFAULT 0`
+- `campaign_logs`: `target_logic_version VARCHAR DEFAULT 'v1'`, `target_too_small_flag BOOLEAN`,
+  `htf_anchor_type VARCHAR`, `htf_anchor_price FLOAT`, `energy_grade VARCHAR`
+
+**gravity_engine.py rewrites:**
+
+New helpers:
+- `_calc_atr(candles, period=14)` — 14-period ATR for fallback stop/target and noise-floor check
+- `_compute_energy_grade(candles, bias)` → STRONG/MODERATE/WEAK from EMA30/50 trend + MACD magnitude
+- `_class0_above(db_sym, db, min_price)` / `_class0_below()` — nearest Class 0 macro level query
+- `_update_zone_touches(db_sym, candles_4h, candles_1h, candles_1d, db)` — runs every loop:
+  re-derives touch_count from available candle window; flips `active=False` on full-body close-through
+
+`_scan_for_pivots()` — now takes `(candles, timeframe)` not `(symbol, candles, timeframe)`.
+  Adds `departure_move_pct` to each pivot dict (computed from post-pivot candles at write time).
+  Adds `source` key so write loop uses `p["source"]` directly instead of inferring from class.
+  Extends to daily candles: `timeframe="1d"` → `source="DAILY_PIVOT"`, `permanence_class=1`.
+
+`_detect_4h_bos()` — full rewrite:
+  - BOS detection zone: 15-day cutoff (what was just broken)
+  - STOP: nearest strength-qualified 4H zone, 60-day lookback (heat≥2.0, touch_count≤2,
+    departure_pct≥1.5% or NULL for pre-v2 zones)
+  - T1: nearest strength-qualified 4H zone ABOVE break_level_price (not above current_close);
+    fallback: nearest Class 0 above break_level, then 2.5×ATR
+  - T2: nearest Class 0 Elliott Wave level above T1 (the weekly/macro destination)
+  - T3: next Class 0 above T2; fallback: Fib extension off T1 distance
+  - `target_too_small_flag`: T1_dist < 1.5×ATR (audit-only; never blocks write)
+  - `energy_grade`: STRONG/MODERATE/WEAK at detection time
+  - All five new audit columns populated; `target_logic_version='v2'`
+
+`_detect_1h_bos()` — same overhaul at 1H scale:
+  - BOS detection: 7-day cutoff; T1 selection: 20-day lookback; MIN_DEPARTURE=0.8%
+  - T2: nearest DAILY_PIVOT (new source) above/below T1 — the daily structural destination
+  - 4H trend alignment check: if 4H EMA30/50 counter-directional to 1H bias → energy_grade=WEAK
+    (candidate still records — "record always, flag only")
+
+`run_gravity_ingestion_loop()` — extended:
+  - Daily pivot scan added: `_scan_for_pivots(candles_1d, "1d")`
+  - `_update_zone_touches()` called each iteration after pivot scan
+
+**Per-TF stop/target/exit logic (REVISED from v1 design spec):**
+
+| TF | Stop | T1 (intermediate) | T2 (macro destination) | T3 |
+|---|---|---|---|---|
+| **4H** | Nearest qualified 4H zone, 60-day; fallback 1.5×ATR | Nearest qualified 4H zone above break_level, 60-day; fallback Class 0 or 2.5×ATR | Nearest Class 0 (Elliott Wave macro) above T1 | Next Class 0 above T2; fallback Fib 0.618× T2-T1 |
+| **1H** | Nearest qualified 1H zone, 20-day; fallback 1.0×ATR | Nearest qualified 1H zone above break_level, 20-day; fallback DAILY_PIVOT or 2.0×ATR | Nearest DAILY_PIVOT above T1 | Next DAILY_PIVOT above T2; fallback Fib |
+| **15M** | UNCHANGED — opposing trigger (breakdown/breakout SSOT) | UNCHANGED — measured move (bo−bd) | Same as before | Same |
+
+**Audit data separation:**
+- `target_logic_version='v1'` on all rows written before this deploy
+- `target_logic_version='v2'` on all rows written after this deploy
+- Audit-AI hypothesis N-counting for 4H/1H must filter `WHERE target_logic_version='v2'`
+- Old v1 rows are preserved and visible in queries but excluded from signal analysis
+
+---
+
 **2026-06-30 — Phase 4 candidate monitoring live (commit `129837c`); Job 1/2/3 directive completed.**
 
-### ✅ COMPLETED THIS SESSION (2026-06-30)
+*(Earlier session — kept for reference)*
+
+### ✅ COMPLETED EARLIER THIS SESSION (2026-06-30)
 
 **Job 1 — CRITICAL GAP FIXED: 4H/1H candidate outcomes were never recorded.**
 
@@ -147,69 +225,14 @@ CANDIDATE rows (status=4H_CANDIDATE or 1H_CANDIDATE) were NEVER processed. After
 3-6 weeks, ALL 4H/1H candidates would have `closed_at=NULL`, `status=NULL`,
 `realized_pnl=NULL` — completely unauditable.
 
-**Fix:**
-1. `gravity_engine.py` — both BOS detectors now set at write time:
-   - `entry_filled_at = now` (BOS close = immediate entry, no waiting for trigger)
-   - `session_expires_at = now + 5 days` (4H) / `now + 2 days` (1H)
-2. `ledger_closing_engine.py` — Phase 4 added: queries CANDIDATE rows with
-   `entry_filled_at IS NOT NULL`, runs the same 1m Kraken OHLC scan as Phase 2,
-   closes on STOP or T1, records CLOSED_AT_EXPIRY at the time cap.
-
-Old CANDIDATE rows (written before deploy, `entry_filled_at=NULL`) are skipped
-by Phase 4 — safely ignored. New candidates from this deploy onward are fully
-monitored.
-
-**Job 1 Auditability Table — post-fix state:**
-
-| Question (3-6 weeks out) | Field | Table.Column | Status |
-|---|---|---|---|
-| Did 4H candidate hit target or stop? | status, realized_pnl | campaign_logs | **FIXED — Phase 4 writes outcomes** |
-| Entry, stop, T1 of 4H candidate | entry_price, stop_loss, t1 | campaign_logs | YES (was always set) |
-| When was 4H candidate detected? | created_at | campaign_logs.created_at | YES (auto-set) |
-| When did 4H trade resolve? | closed_at | campaign_logs.closed_at | **FIXED — Phase 4 sets closed_at** |
-| How long did the 4H trade take? | closed_at − created_at | computed | **FIXED — closed_at now populated** |
-| Same for 1H candidates | same fields | same table | **FIXED — Phase 4 handles both** |
-| H1-H6 regime fields (session_audit_log) | daily_21ema_direction, kinematic_grade, tf4h_macd_hist, etc. | session_audit_log | PARTIAL — non-NULL only from 2026-06-29. Rows before that date: NULL on Component 0 fields. 15M APPROVED rows DO get outcomes via backfill_outcome(). |
-| Do 4H/1H candidates write session_audit_log rows? | n/a | session_audit_log | NO — candidates write to campaign_logs only. H1-H6 hypotheses target 15M sessions (intentional). Future 4H/1H audit hypotheses query campaign_logs directly. |
-
-**Job 2 — Per-TF stop/target/exit logic (design spec, locked):**
-
-| TF | Entry signal | Stop | T1 | Duration cap | "Oil change" rule |
-|---|---|---|---|---|---|
-| **15M** | 2× 5M closes beyond trigger (acceptance gate) | Opposing trigger (breakdown for LONG, breakout for SHORT) | Measured move (bo−bd distance) | Session end 3PM ET (session_expires_at set by MAS flow) | EXPIRED at session close if no fill; CLOSED_AT_EXPIRY if filled but no resolution by next-session-open |
-| **4H** | 4H candle closes beyond 4H SUPPLY/DEMAND zone (BOS) | Nearest 4H DEMAND zone below entry (from gravity_memory) or 5% fallback | Nearest 4H SUPPLY zone above entry (from gravity_memory) or 5% fallback | 5 calendar days from detection | CLOSED_AT_EXPIRY at session_expires_at (now+5d) — fractional R computed from final candle |
-| **1H** | 1H candle closes beyond 1H SUPPLY/DEMAND zone (BOS) | Nearest 1H DEMAND zone below entry or 1% fallback | Nearest 1H SUPPLY zone above entry or 2% fallback | 2 calendar days from detection | CLOSED_AT_EXPIRY at session_expires_at (now+2d) — same fractional R logic |
-
-**Key design principle:** stops and targets are STRUCTURAL (nearest gravity_memory
-zone), not fixed percentage multiples. If no zone exists within range, the code
-falls back to a percentage estimate — this is a known data-quality limitation for
-early candidates before the gravity engine has enough pivot history.
-
-**Oil change rule (time/exhaustion exit):** any 4H/1H candidate still open at its
-`session_expires_at` is closed as CLOSED_AT_EXPIRY with fractional R. This is the
-"the setup has decayed — exit regardless" rule. It runs automatically in Phase 4 —
-no human action required. A trade that hasn't reached stop or T1 in 5 days (4H)
-or 2 days (1H) has failed structurally; carrying it longer introduces adverse
-overnight risk without improving expectancy.
-
-**Job 3 — Forward understanding (CC's own words for owner to confirm or correct):**
-
-The system now has three parallel trade-recording layers:
-1. **15M layer** — one session per day, MAS-approved, full lifecycle (Phases 1-3 of ledger engine). Audited by H1-H6 via session_audit_log.
-2. **4H layer** — continuous detection in gravity_engine loop. Candidates recorded with structural zone stops/targets. Outcomes back-filled by Phase 4. Data accumulates in campaign_logs (session_timeframe='4H'). Trust switches from CANDIDATE to LIVE after N=30 outcomes + audit-AI validates (master plan Step 9).
-3. **1H layer** — same pattern at 1H scale. Outcomes via Phase 4. Trust switch after same gate.
-
-**Paper-trade-first philosophy:** all three layers currently record data — none
-auto-execute. The 4H/1H candidates are structural observations only. The audit-AI
-(H1-H6) watches the 15M system. A future set of hypotheses (H7-H12) will watch the
-4H/1H data in campaign_logs once N≥30 candidates with outcomes exist. No parameter
-changes until N=100+, PROVISIONAL_FINDING tier, 3 consecutive weekly appearances.
-
-**Validation path:** in 3-6 weeks, query `campaign_logs WHERE session_timeframe='4H' AND closed_at IS NOT NULL` to see the first batch of 4H outcomes. The audit question "what fraction of 4H candidates hit T1 vs. stop vs. expired" is now answerable. Same for 1H. Before that data exists, trust nothing about these systems — they're instruments, not signals.
+**Fix:** Phase 4 added to ledger_closing_engine.py. BOS detectors now set
+`entry_filled_at=now` and `session_expires_at` at write time.
 
 ### CARRY FORWARD
-- Phase 4 forward verification: next gravity engine loop should print `|| LIFECYCLE P4 ||` logs for any open CANDIDATE rows. Confirm on Render logs.
-- Old CANDIDATE rows (pre-deploy, `entry_filled_at=NULL`): NOT retroactively processed — they will remain with NULL status. This is acceptable; they're unrecoverable.
+- **Forward verification:** next gravity engine loop should print `|| 4H BOS v2 ||` or `|| 1H BOS v2 ||` — confirm v2 log line on Render.
+- **Verification SQL:** `SELECT id, session_timeframe, bias, entry_price, stop_loss, t1, t2, htf_anchor_type, energy_grade, target_logic_version, target_too_small_flag FROM campaign_logs WHERE target_logic_version='v2' ORDER BY created_at DESC LIMIT 10;`
+- **Zone strength data accumulation:** departure_move_pct will be NULL on all gravity_memory rows until new pivots are detected post-deploy. The NULL-allowed filter means selection still works in the interim; quality improves as new pivots accumulate.
+- **Daily pivot forward check:** confirm `DAILY_PIVOT` rows appear in gravity_memory after next gravity loop run: `SELECT source, level_type, price, departure_move_pct FROM gravity_memory WHERE source='DAILY_PIVOT' ORDER BY timestamp DESC LIMIT 5;`
 - Panel 02 HIGH CONVICTION vs MODERATE mismatch (carry-forward, no urgency)
 - CoinGecko 429 recurring fix (carry-forward, publication blocker)
 
