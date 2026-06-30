@@ -222,6 +222,13 @@ def init_db():
         except Exception:
             pass
 
+    # --- CAMPAIGN LOGS — session_timeframe (4H/1H system support) ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN session_timeframe VARCHAR DEFAULT '15M'"))
+    except Exception:
+        pass
+
     # --- COMPONENT 0 EXTENSION — additional audit fields ---
     for _col in [
         "macro_structure_json TEXT",
@@ -384,6 +391,12 @@ class CampaignLog(Base):
     #   FALSE = legacy data (multi-symbol era, placeholder PnL, pre-track-record rows).
     #   Auto-set TRUE at creation for any BTC/USDT record. Historical set: IDs 74–90 (13 rows).
     is_canonical = Column(Boolean, default=False, nullable=False, server_default="0")
+
+    # session_timeframe: which system generated this record.
+    #   "15M" (default) = standard NY-session 15M system via MAS.
+    #   "4H" = 4H BOS candidate detected by gravity engine.
+    #   "1H" = 1H BOS candidate detected by gravity engine.
+    session_timeframe = Column(String, nullable=True, default="15M")
 
 # ---------------------------------------------------------
 # MTF CONFLUENCE READINGS (MORNING BRIEF HISTORY)

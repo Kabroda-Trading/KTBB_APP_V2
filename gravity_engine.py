@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any
 import subprocess
 
-from database import SessionLocal, GravityMemory, DecisionJournal
+from database import SessionLocal, GravityMemory, DecisionJournal, CampaignLog
 import battlebox_pipeline  # <-- SINGLE SOURCE OF TRUTH ENFORCED
 
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
@@ -151,6 +151,171 @@ async def fill_decision_outcomes():
         db.close()
 
 
+def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], db) -> None:
+    """
+    Detect a 4H Break of Structure against the most recent 4H structural zone in
+    gravity_memory, then write a campaign_log CANDIDATE row for audit observation.
+
+    Rules:
+    - Long BOS:  current 4H close > most recent 4H SUPPLY zone price.
+    - Short BOS: current 4H close < most recent 4H DEMAND zone price.
+    - One record per date_key (same dedup pattern as the 15M system).
+    - mas_approval_status = '4H_CANDIDATE' → never monitored by ledger_closing_engine.
+    - Zones must be within the last 10 days (50 × 4H bars = gravity engine fetch window).
+    """
+    try:
+        if not candles_4h or len(candles_4h) < 10:
+            return
+
+        current_close = float(candles_4h[-1]["close"])
+        now = datetime.now(timezone.utc)
+        date_key = now.strftime("%Y-%m-%d")
+        cutoff = now - timedelta(days=10)
+
+        # De-dup: one candidate per day per symbol
+        existing = (
+            db.query(CampaignLog)
+            .filter(
+                CampaignLog.symbol == symbol,
+                CampaignLog.session_id == "4h_system",
+                CampaignLog.date_key == date_key,
+            )
+            .first()
+        )
+        if existing:
+            return
+
+        # Most recent 4H SUPPLY and DEMAND zones within the fetch window
+        supply_zone = (
+            db.query(GravityMemory)
+            .filter(
+                GravityMemory.symbol == db_sym,
+                GravityMemory.source == "4H_PIVOT",
+                GravityMemory.level_type == "SUPPLY",
+                GravityMemory.timestamp >= cutoff,
+            )
+            .order_by(GravityMemory.timestamp.desc())
+            .first()
+        )
+        demand_zone = (
+            db.query(GravityMemory)
+            .filter(
+                GravityMemory.symbol == db_sym,
+                GravityMemory.source == "4H_PIVOT",
+                GravityMemory.level_type == "DEMAND",
+                GravityMemory.timestamp >= cutoff,
+            )
+            .order_by(GravityMemory.timestamp.desc())
+            .first()
+        )
+
+        if not supply_zone and not demand_zone:
+            return
+
+        bias = None
+        stop_price = None
+        t1_price = None
+
+        if supply_zone and current_close > supply_zone.price:
+            bias = "LONG"
+            # Stop: nearest DEMAND zone below current price
+            stop_row = (
+                db.query(GravityMemory)
+                .filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "4H_PIVOT",
+                    GravityMemory.level_type == "DEMAND",
+                    GravityMemory.price < current_close,
+                    GravityMemory.timestamp >= cutoff,
+                )
+                .order_by(GravityMemory.price.desc())
+                .first()
+            )
+            # T1: nearest SUPPLY zone above current price
+            t1_row = (
+                db.query(GravityMemory)
+                .filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "4H_PIVOT",
+                    GravityMemory.level_type == "SUPPLY",
+                    GravityMemory.price > current_close,
+                    GravityMemory.timestamp >= cutoff,
+                )
+                .order_by(GravityMemory.price.asc())
+                .first()
+            )
+            stop_price = stop_row.price if stop_row else round(current_close * 0.95, 2)
+            t1_price   = t1_row.price   if t1_row   else round(current_close * 1.05, 2)
+
+        elif demand_zone and current_close < demand_zone.price:
+            bias = "SHORT"
+            # Stop: nearest SUPPLY zone above current price
+            stop_row = (
+                db.query(GravityMemory)
+                .filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "4H_PIVOT",
+                    GravityMemory.level_type == "SUPPLY",
+                    GravityMemory.price > current_close,
+                    GravityMemory.timestamp >= cutoff,
+                )
+                .order_by(GravityMemory.price.asc())
+                .first()
+            )
+            # T1: nearest DEMAND zone below current price
+            t1_row = (
+                db.query(GravityMemory)
+                .filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "4H_PIVOT",
+                    GravityMemory.level_type == "DEMAND",
+                    GravityMemory.price < current_close,
+                    GravityMemory.timestamp >= cutoff,
+                )
+                .order_by(GravityMemory.price.desc())
+                .first()
+            )
+            stop_price = stop_row.price if stop_row else round(current_close * 1.05, 2)
+            t1_price   = t1_row.price   if t1_row   else round(current_close * 0.95, 2)
+
+        if not bias:
+            return
+
+        # T2/T3: structural extension approximated from the T1 distance
+        t1_dist = abs(t1_price - current_close)
+        if bias == "LONG":
+            t2 = round(t1_price + t1_dist, 2)
+            t3 = round(t1_price + t1_dist * 1.618, 2)
+        else:
+            t2 = round(t1_price - t1_dist, 2)
+            t3 = round(t1_price - t1_dist * 1.618, 2)
+
+        row = CampaignLog(
+            symbol=symbol,
+            date_key=date_key,
+            session_id="4h_system",
+            bias=bias,
+            grade="4H_CANDIDATE",
+            entry_price=round(current_close, 2),
+            stop_loss=round(stop_price, 2),
+            t1=round(t1_price, 2),
+            t2=t2,
+            t3=t3,
+            total_contracts=0.0,
+            mas_approval_status="4H_CANDIDATE",
+            is_canonical=False,
+            session_timeframe="4H",
+        )
+        db.add(row)
+        db.commit()
+        print(
+            f"|| 4H BOS || {symbol} | {bias} | Close: ${current_close:.2f} "
+            f"| Stop: ${stop_price:.2f} | T1: ${t1_price:.2f} | CANDIDATE RECORDED"
+        )
+    except Exception as e:
+        print(f"[4H BOS DETECTION] {symbol} error: {e}")
+
+
 async def run_gravity_ingestion_loop():
     print(">>> GRAVITY ENGINE: Initializing background loop (STRICT SSOT MODE)...")
     
@@ -184,6 +349,9 @@ async def run_gravity_ingestion_loop():
                         db.add(mem)
                         db.commit()
                         print(f"|| GRAVITY BEDROCK || {db_sym} | {src} {p['type']} @ ${p['price']} LOCKED. Heat: {p['heat']}")
+                # 4H BOS detection — BTC only (campaign infrastructure is BTC/USDT only)
+                if symbol == "BTC/USDT":
+                    _detect_4h_bos(symbol, db_sym, candles_4h, db)
         except Exception as e:
             print(f"Gravity Engine Iteration Error: {e}")
         finally:
