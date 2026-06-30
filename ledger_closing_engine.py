@@ -2,8 +2,9 @@
 # ==============================================================================
 # KABRODA TRADE-LIFECYCLE MONITOR  (W-9 replacement — 2026-06-11)
 # OHLC detection upgrade — 2026-06-16
+# Phase 4 candidate monitoring — 2026-06-30
 #
-# Three-phase state machine.
+# Four-phase state machine.
 #
 # PHASE 1 — Pre-entry
 #   Watches APPROVED records where entry_filled_at IS NULL.
@@ -144,7 +145,7 @@ def _observe_targets(c: CampaignLog, live: float) -> bool:
 
 
 async def run_ledger_audit_loop():
-    print(">>> TRADE-LIFECYCLE MONITOR: Initializing (W-9 engine, OHLC detection)...")
+    print(">>> TRADE-LIFECYCLE MONITOR: Initializing (W-9 engine, OHLC detection, Phase 4 candidates)...")
 
     while True:
         now_utc = datetime.now(timezone.utc)
@@ -352,6 +353,95 @@ async def run_ledger_audit_loop():
                 if _observe_targets(c, live):
                     db.commit()
                     print(f"|| LIFECYCLE P3 || {c.symbol} post-T1 target observation updated.")
+
+            # ── PHASE 4: Candidate monitoring (4H / 1H BOS candidates) ──────
+            # CANDIDATE rows are written by gravity_engine._detect_4h/1h_bos()
+            # with entry_filled_at=detection_time and session_expires_at=+5d/+2d.
+            # They are never APPROVED so Phases 1-3 skip them. Phase 4 closes
+            # them on stop/T1 hit (via OHLC) or time cap, recording outcomes so
+            # the 4H/1H candidates are auditable in campaign_logs.
+            candidates = db.query(CampaignLog).filter(
+                CampaignLog.mas_approval_status.in_(["4H_CANDIDATE", "1H_CANDIDATE"]),
+                CampaignLog.closed_at.is_(None),
+                CampaignLog.entry_filled_at.isnot(None),
+            ).all()
+
+            for c in candidates:
+                fill_ts_ms = max(
+                    int(_as_utc(c.entry_filled_at).timestamp() * 1000),
+                    int((now_utc - timedelta(minutes=710)).timestamp() * 1000),
+                )
+                candles = await _fetch_1m_since(c.symbol, since_ms=fill_ts_ms)
+
+                if not candles:
+                    if c.session_expires_at and now_utc >= _as_utc(c.session_expires_at):
+                        c.status = "EXPIRED"
+                        c.closed_at = now_utc
+                        c.realized_pnl = None
+                        db.commit()
+                        print(f"|| LIFECYCLE P4 || {c.symbol} {c.mas_approval_status} EXPIRED (no candles).")
+                    continue
+
+                closed = False
+                for candle in candles:
+                    if c.bias == "LONG":
+                        hit_stop = candle["l"] <= c.stop_loss
+                        hit_t1   = c.t1 is not None and candle["h"] >= c.t1
+                    else:
+                        hit_stop = candle["h"] >= c.stop_loss
+                        hit_t1   = c.t1 is not None and candle["l"] <= c.t1
+
+                    candle_ts = datetime.fromtimestamp(candle["ts"] / 1000, tz=timezone.utc)
+
+                    if hit_stop:
+                        c.status       = "CLOSED_LOSS"
+                        c.realized_pnl = -1.0
+                        c.target_hit   = "STOP"
+                        c.closed_at    = candle_ts
+                        closed = True
+                        tag = " (same-candle, stop wins)" if hit_t1 else ""
+                        print(f"|| LIFECYCLE P4 || {c.symbol} {c.mas_approval_status} STOP{tag} {candle_ts}. -1R.")
+                        break
+
+                    if hit_t1:
+                        c.status       = "CLOSED_WIN"
+                        c.realized_pnl = 1.0
+                        c.target_hit   = "T1"
+                        c.max_target_reached = _advance_target(c.max_target_reached, "T1")
+                        c.closed_at    = candle_ts
+                        closed = True
+                        print(f"|| LIFECYCLE P4 || {c.symbol} {c.mas_approval_status} T1 {candle_ts}. +1R.")
+                        break
+
+                if closed:
+                    db.commit()
+                    continue
+
+                # T2/T3 high-water mark update (non-closing observation)
+                obs_changed = False
+                if c.bias == "LONG":
+                    obs_changed = _observe_targets(c, max(can["h"] for can in candles))
+                elif c.bias == "SHORT":
+                    obs_changed = _observe_targets(c, min(can["l"] for can in candles))
+
+                # Time-cap expiry (5d for 4H, 2d for 1H — set at write time)
+                if c.session_expires_at and now_utc >= _as_utc(c.session_expires_at):
+                    final_close = candles[-1]["c"]
+                    stop_dist = max(abs(c.entry_price - c.stop_loss), 0.01)
+                    if c.bias == "LONG":
+                        frac_r = round((final_close - c.entry_price) / stop_dist, 4)
+                    else:
+                        frac_r = round((c.entry_price - final_close) / stop_dist, 4)
+                    c.status       = "CLOSED_AT_EXPIRY"
+                    c.realized_pnl = frac_r
+                    c.target_hit   = "EXPIRY"
+                    c.closed_at    = now_utc
+                    db.commit()
+                    print(f"|| LIFECYCLE P4 || {c.symbol} {c.mas_approval_status} CLOSED_AT_EXPIRY. R={frac_r:+.4f}.")
+                    continue
+
+                if obs_changed:
+                    db.commit()
 
         except Exception as e:
             print(f"|| LIFECYCLE MONITOR ERROR || {e}")

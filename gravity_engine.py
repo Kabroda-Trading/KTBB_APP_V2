@@ -160,7 +160,9 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
     - Long BOS:  current 4H close > most recent 4H SUPPLY zone price.
     - Short BOS: current 4H close < most recent 4H DEMAND zone price.
     - One record per date_key (same dedup pattern as the 15M system).
-    - mas_approval_status = '4H_CANDIDATE' → never monitored by ledger_closing_engine.
+    - mas_approval_status = '4H_CANDIDATE' → monitored by ledger_closing_engine Phase 4.
+    - entry_filled_at set to detection time (BOS close = entry signal, no waiting).
+    - session_expires_at set to now + 5 days (hard cap; Phase 4 closes at expiry).
     - Zones must be within the last 10 days (50 × 4H bars = gravity engine fetch window).
     """
     try:
@@ -305,6 +307,8 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
             mas_approval_status="4H_CANDIDATE",
             is_canonical=False,
             session_timeframe="4H",
+            entry_filled_at=now,
+            session_expires_at=now + timedelta(days=5),
         )
         db.add(row)
         db.commit()
@@ -464,6 +468,8 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], d
             mas_approval_status="1H_CANDIDATE",
             is_canonical=False,
             session_timeframe="1H",
+            entry_filled_at=now,
+            session_expires_at=now + timedelta(days=2),
         )
         db.add(row)
         db.commit()
