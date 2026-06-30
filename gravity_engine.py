@@ -1,13 +1,13 @@
 # gravity_engine.py
 # ==============================================================================
 # KABRODA GRAVITY ENGINE (BACKGROUND INGESTION & BEDROCK LOGGING)
-# TARGET LOGIC v2: tiered structural targets, strength-filtered zones,
-#   Class 0 macro destination tier, daily pivot scanning, touch_count tracking.
+# TARGET LOGIC v2: measured-move equal-leg projections from break level,
+#   ATR safety rails, strength-filtered stop zones, touch_count tracking.
 # ==============================================================================
 import asyncio
 import traceback
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import subprocess
 
 from database import SessionLocal, GravityMemory, DecisionJournal, CampaignLog
@@ -52,37 +52,6 @@ def _compute_energy_grade(candles: List[Dict], bias: str) -> str:
     elif aligned:
         return "MODERATE"
     return "WEAK"
-
-
-# ---------------------------------------------------------------------------
-# HELPER: CLASS 0 MACRO LEVEL LOOKUP
-# Returns the nearest Elliott Wave pivot from gravity_memory in the given
-# price direction.  These are the weekly/macro structural destinations.
-# ---------------------------------------------------------------------------
-def _class0_above(db_sym: str, db, min_price: float) -> Optional[GravityMemory]:
-    return (
-        db.query(GravityMemory)
-        .filter(
-            GravityMemory.symbol == db_sym,
-            GravityMemory.source == "MACRO_ENGINE_CLASS_0",
-            GravityMemory.price > min_price,
-        )
-        .order_by(GravityMemory.price.asc())
-        .first()
-    )
-
-
-def _class0_below(db_sym: str, db, max_price: float) -> Optional[GravityMemory]:
-    return (
-        db.query(GravityMemory)
-        .filter(
-            GravityMemory.symbol == db_sym,
-            GravityMemory.source == "MACRO_ENGINE_CLASS_0",
-            GravityMemory.price < max_price,
-        )
-        .order_by(GravityMemory.price.desc())
-        .first()
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -365,18 +334,20 @@ async def fill_decision_outcomes():
 
 
 # ---------------------------------------------------------------------------
-# 4H BOS DETECTION — TARGET LOGIC v2
+# 4H BOS DETECTION — TARGET LOGIC v2 (MEASURED MOVE)
 #
 # ENTRY: 4H close beyond the most recent 4H SUPPLY (long) or DEMAND (short) zone.
 # STOP:  nearest strength-qualified 4H zone on the opposing side; 60-day lookback.
 #         Fallback: 1.5× 14-period ATR from entry.
-# T1:    nearest strength-qualified 4H zone beyond the broken level (not just
-#         beyond current price — the structural destination past the break).
-#         60-day lookback.  Fallback: nearest Class 0 macro level, then 2.5×ATR.
-# T2:    nearest Class 0 (Elliott Wave, macro) level beyond T1 in trade direction.
-#         These are the weekly/macro structural destinations.
-#         Fallback: Fibonacci extension off entry→T1 distance.
-# T3:    next Class 0 level beyond T2.  Fallback: Fib extension.
+# TARGETS: equal-leg measured move from the break level.
+#   Base = distance from break_level_price to the nearest opposing 4H zone.
+#   T1 = break_level ± base  (1× leg)
+#   T2 = T1 ± base           (2× leg)
+#   T3 = T2 ± base           (3× leg)
+#   ATR rails: base < 1.5×ATR14 → floor to 1.5×ATR (target_too_small_flag=True)
+#              base > 5×ATR14   → cap to 3×ATR
+#              no opposing zone → base = 2×ATR (ATR_FALLBACK)
+# Macro / Class 0 levels: NEVER used for targets. Context and KDE only.
 # ---------------------------------------------------------------------------
 def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], db) -> None:
     try:
@@ -481,33 +452,41 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
             )
             stop_price = stop_row.price if stop_row else round(current_close - 1.5 * atr14, 2)
 
-            # T1: nearest qualified 4H SUPPLY zone ABOVE the broken level (not just above entry)
-            t1_row = _qualified_4h(
-                "SUPPLY",
-                GravityMemory.price > break_level_price,
-                GravityMemory.price.asc(),
+            # MEASURED MOVE: base = distance from break level to nearest opposing zone below it.
+            # The supply zone at break_level_price was the top of the prior consolidation range.
+            # The nearest demand zone below it marks the bottom of that same range.
+            # Projecting that range upward from the break level = equal-leg measured move.
+            opp_row = (
+                db.query(GravityMemory)
+                .filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "4H_PIVOT",
+                    GravityMemory.level_type == "DEMAND",
+                    GravityMemory.active == True,
+                    GravityMemory.timestamp >= TARGET_LOOKBACK,
+                    GravityMemory.price < break_level_price,
+                )
+                .order_by(GravityMemory.price.desc())
+                .first()
             )
-            if t1_row:
-                t1_price = t1_row.price
+            if opp_row:
+                raw_base = break_level_price - opp_row.price
+                htf_anchor_type = "STRUCTURAL_MEASURED_MOVE"
+                htf_anchor_price_val = opp_row.price
             else:
-                # Fallback 1: nearest Class 0 macro level above break_level
-                t1_c0 = _class0_above(db_sym, db, break_level_price)
-                t1_price = t1_c0.price if t1_c0 else round(current_close + 2.5 * atr14, 2)
+                raw_base = 2.0 * atr14
+                htf_anchor_type = "ATR_FALLBACK"
+                htf_anchor_price_val = None
 
-            # T2: nearest Class 0 level above T1 (the macro/weekly destination)
-            t2_c0 = _class0_above(db_sym, db, t1_price)
-            if t2_c0:
-                t2_price = t2_c0.price
-                htf_anchor_type = t2_c0.level_type
-                htf_anchor_price_val = t2_price
-                # T3: next Class 0 above T2
-                t3_c0 = _class0_above(db_sym, db, t2_price)
-                t3_price = t3_c0.price if t3_c0 else round(t2_price + (t2_price - t1_price) * 0.618, 2)
-            else:
-                htf_anchor_type = "FIB_FALLBACK"
-                t1_dist = t1_price - current_close
-                t2_price = round(t1_price + t1_dist * 1.618, 2)
-                t3_price = round(t1_price + t1_dist * 2.618, 2)
+            # ATR safety rails
+            target_too_small = (raw_base < 1.5 * atr14) if atr14 > 0 else False
+            base = max(raw_base, 1.5 * atr14) if atr14 > 0 else raw_base
+            if atr14 > 0 and base > 5.0 * atr14:
+                base = 3.0 * atr14
+
+            t1_price = round(break_level_price + base, 2)
+            t2_price = round(t1_price + base, 2)
+            t3_price = round(t2_price + base, 2)
 
         elif demand_zone and current_close < demand_zone.price:
             bias = "SHORT"
@@ -522,38 +501,44 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
             )
             stop_price = stop_row.price if stop_row else round(current_close + 1.5 * atr14, 2)
 
-            # T1: nearest qualified 4H DEMAND zone BELOW the broken level
-            t1_row = _qualified_4h(
-                "DEMAND",
-                GravityMemory.price < break_level_price,
-                GravityMemory.price.desc(),
+            # MEASURED MOVE: base = distance from break level to nearest opposing zone above it.
+            # The demand zone at break_level_price was the bottom of the prior consolidation range.
+            # The nearest supply zone above it marks the top of that same range.
+            # Projecting that range downward from the break level = equal-leg measured move.
+            opp_row = (
+                db.query(GravityMemory)
+                .filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "4H_PIVOT",
+                    GravityMemory.level_type == "SUPPLY",
+                    GravityMemory.active == True,
+                    GravityMemory.timestamp >= TARGET_LOOKBACK,
+                    GravityMemory.price > break_level_price,
+                )
+                .order_by(GravityMemory.price.asc())
+                .first()
             )
-            if t1_row:
-                t1_price = t1_row.price
+            if opp_row:
+                raw_base = opp_row.price - break_level_price
+                htf_anchor_type = "STRUCTURAL_MEASURED_MOVE"
+                htf_anchor_price_val = opp_row.price
             else:
-                t1_c0 = _class0_below(db_sym, db, break_level_price)
-                t1_price = t1_c0.price if t1_c0 else round(current_close - 2.5 * atr14, 2)
+                raw_base = 2.0 * atr14
+                htf_anchor_type = "ATR_FALLBACK"
+                htf_anchor_price_val = None
 
-            # T2: nearest Class 0 level below T1
-            t2_c0 = _class0_below(db_sym, db, t1_price)
-            if t2_c0:
-                t2_price = t2_c0.price
-                htf_anchor_type = t2_c0.level_type
-                htf_anchor_price_val = t2_price
-                t3_c0 = _class0_below(db_sym, db, t2_price)
-                t3_price = t3_c0.price if t3_c0 else round(t2_price - (t1_price - t2_price) * 0.618, 2)
-            else:
-                htf_anchor_type = "FIB_FALLBACK"
-                t1_dist = current_close - t1_price
-                t2_price = round(t1_price - t1_dist * 1.618, 2)
-                t3_price = round(t1_price - t1_dist * 2.618, 2)
+            # ATR safety rails
+            target_too_small = (raw_base < 1.5 * atr14) if atr14 > 0 else False
+            base = max(raw_base, 1.5 * atr14) if atr14 > 0 else raw_base
+            if atr14 > 0 and base > 5.0 * atr14:
+                base = 3.0 * atr14
+
+            t1_price = round(break_level_price - base, 2)
+            t2_price = round(t1_price - base, 2)
+            t3_price = round(t2_price - base, 2)
 
         if not bias:
             return
-
-        # Audit-only quality flag: T1 smaller than 1.5× ATR means target is inside noise floor
-        t1_dist = abs(t1_price - current_close)
-        target_too_small = (t1_dist < 1.5 * atr14) if atr14 > 0 else False
 
         row = CampaignLog(
             symbol=symbol,
@@ -592,15 +577,19 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
 
 
 # ---------------------------------------------------------------------------
-# 1H BOS DETECTION — TARGET LOGIC v2
+# 1H BOS DETECTION — TARGET LOGIC v2 (MEASURED MOVE)
 #
 # ENTRY: 1H close beyond the most recent 1H SUPPLY (long) or DEMAND (short) zone.
 # STOP:  nearest qualified 1H zone (opposing side), 20-day lookback.
 #         Fallback: 1.0× 14-period 1H ATR.
-# T1:    nearest qualified 1H zone beyond the broken level, 20-day lookback.
-#         Fallback: nearest DAILY_PIVOT in trade direction, then 2.0×ATR.
-# T2:    nearest DAILY_PIVOT beyond T1.  Fallback: Fib extension.
-# T3:    next DAILY_PIVOT beyond T2.  Fallback: Fib extension.
+# TARGETS: equal-leg measured move from the break level.
+#   Base = distance from break_level_price to the nearest opposing 1H zone.
+#   T1 = break_level ± base  (1× leg)
+#   T2 = T1 ± base           (2× leg)
+#   T3 = T2 ± base           (3× leg)
+#   ATR rails: base < 1.0×ATR14 → floor to 1.0×ATR (target_too_small_flag=True)
+#              base > 5×ATR14   → cap to 3×ATR
+#              no opposing zone → base = 2×ATR (ATR_FALLBACK)
 # GATE:  4H trend alignment logged in energy_grade. Misalignment = WEAK energy
 #         but candidate still recorded (record always, flag only).
 # ---------------------------------------------------------------------------
@@ -682,34 +671,6 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
                 .first()
             )
 
-        def _daily_pivot_above(min_price: float):
-            return (
-                db.query(GravityMemory)
-                .filter(
-                    GravityMemory.symbol == db_sym,
-                    GravityMemory.source == "DAILY_PIVOT",
-                    GravityMemory.level_type == "SUPPLY",
-                    GravityMemory.active == True,
-                    GravityMemory.price > min_price,
-                )
-                .order_by(GravityMemory.price.asc())
-                .first()
-            )
-
-        def _daily_pivot_below(max_price: float):
-            return (
-                db.query(GravityMemory)
-                .filter(
-                    GravityMemory.symbol == db_sym,
-                    GravityMemory.source == "DAILY_PIVOT",
-                    GravityMemory.level_type == "DEMAND",
-                    GravityMemory.active == True,
-                    GravityMemory.price < max_price,
-                )
-                .order_by(GravityMemory.price.desc())
-                .first()
-            )
-
         bias = None
         stop_price = None
         t1_price = None
@@ -741,30 +702,38 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
             )
             stop_price = stop_row.price if stop_row else round(current_close - 1.0 * atr14, 2)
 
-            t1_row = _qualified_1h(
-                "SUPPLY",
-                GravityMemory.price > break_level_price,
-                GravityMemory.price.asc(),
+            # MEASURED MOVE: base = nearest opposing 1H DEMAND zone below the break level.
+            opp_row = (
+                db.query(GravityMemory)
+                .filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "1H_PIVOT",
+                    GravityMemory.level_type == "DEMAND",
+                    GravityMemory.active == True,
+                    GravityMemory.timestamp >= TARGET_LOOKBACK,
+                    GravityMemory.price < break_level_price,
+                )
+                .order_by(GravityMemory.price.desc())
+                .first()
             )
-            if t1_row:
-                t1_price = t1_row.price
+            if opp_row:
+                raw_base = break_level_price - opp_row.price
+                htf_anchor_type = "STRUCTURAL_MEASURED_MOVE"
+                htf_anchor_price_val = opp_row.price
             else:
-                dp = _daily_pivot_above(break_level_price)
-                t1_price = dp.price if dp else round(current_close + 2.0 * atr14, 2)
+                raw_base = 2.0 * atr14
+                htf_anchor_type = "ATR_FALLBACK"
+                htf_anchor_price_val = None
 
-            # T2: nearest DAILY_PIVOT above T1
-            t2_dp = _daily_pivot_above(t1_price)
-            if t2_dp:
-                t2_price = t2_dp.price
-                htf_anchor_type = "DAILY_PIVOT"
-                htf_anchor_price_val = t2_price
-                t3_dp = _daily_pivot_above(t2_price)
-                t3_price = t3_dp.price if t3_dp else round(t2_price + (t2_price - t1_price) * 0.618, 2)
-            else:
-                htf_anchor_type = "FIB_FALLBACK"
-                t1_dist = t1_price - current_close
-                t2_price = round(t1_price + t1_dist * 1.618, 2)
-                t3_price = round(t1_price + t1_dist * 2.618, 2)
+            # ATR safety rails (1H: tighter floor of 1.0×ATR)
+            target_too_small = (raw_base < 1.0 * atr14) if atr14 > 0 else False
+            base = max(raw_base, 1.0 * atr14) if atr14 > 0 else raw_base
+            if atr14 > 0 and base > 5.0 * atr14:
+                base = 3.0 * atr14
+
+            t1_price = round(break_level_price + base, 2)
+            t2_price = round(t1_price + base, 2)
+            t3_price = round(t2_price + base, 2)
 
         elif demand_zone and current_close < demand_zone.price:
             bias = "SHORT"
@@ -784,36 +753,41 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
             )
             stop_price = stop_row.price if stop_row else round(current_close + 1.0 * atr14, 2)
 
-            t1_row = _qualified_1h(
-                "DEMAND",
-                GravityMemory.price < break_level_price,
-                GravityMemory.price.desc(),
+            # MEASURED MOVE: base = nearest opposing 1H SUPPLY zone above the break level.
+            opp_row = (
+                db.query(GravityMemory)
+                .filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "1H_PIVOT",
+                    GravityMemory.level_type == "SUPPLY",
+                    GravityMemory.active == True,
+                    GravityMemory.timestamp >= TARGET_LOOKBACK,
+                    GravityMemory.price > break_level_price,
+                )
+                .order_by(GravityMemory.price.asc())
+                .first()
             )
-            if t1_row:
-                t1_price = t1_row.price
+            if opp_row:
+                raw_base = opp_row.price - break_level_price
+                htf_anchor_type = "STRUCTURAL_MEASURED_MOVE"
+                htf_anchor_price_val = opp_row.price
             else:
-                dp = _daily_pivot_below(break_level_price)
-                t1_price = dp.price if dp else round(current_close - 2.0 * atr14, 2)
+                raw_base = 2.0 * atr14
+                htf_anchor_type = "ATR_FALLBACK"
+                htf_anchor_price_val = None
 
-            # T2: nearest DAILY_PIVOT below T1
-            t2_dp = _daily_pivot_below(t1_price)
-            if t2_dp:
-                t2_price = t2_dp.price
-                htf_anchor_type = "DAILY_PIVOT"
-                htf_anchor_price_val = t2_price
-                t3_dp = _daily_pivot_below(t2_price)
-                t3_price = t3_dp.price if t3_dp else round(t2_price - (t1_price - t2_price) * 0.618, 2)
-            else:
-                htf_anchor_type = "FIB_FALLBACK"
-                t1_dist = current_close - t1_price
-                t2_price = round(t1_price - t1_dist * 1.618, 2)
-                t3_price = round(t1_price - t1_dist * 2.618, 2)
+            # ATR safety rails (1H: tighter floor of 1.0×ATR)
+            target_too_small = (raw_base < 1.0 * atr14) if atr14 > 0 else False
+            base = max(raw_base, 1.0 * atr14) if atr14 > 0 else raw_base
+            if atr14 > 0 and base > 5.0 * atr14:
+                base = 3.0 * atr14
+
+            t1_price = round(break_level_price - base, 2)
+            t2_price = round(t1_price - base, 2)
+            t3_price = round(t2_price - base, 2)
 
         if not bias:
             return
-
-        t1_dist = abs(t1_price - current_close)
-        target_too_small = (t1_dist < 1.0 * atr14) if atr14 > 0 else False
 
         row = CampaignLog(
             symbol=symbol,

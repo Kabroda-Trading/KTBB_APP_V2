@@ -134,79 +134,62 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ## ► NEXT SESSION START
 *End-of-session marker: 2026-06-30*
 
-**2026-06-30 — Target logic v2 deployed: tiered structural targets, zone strength filtering, daily pivot scan, touch_count tracking, HTF destination layer.**
+**2026-06-30 — Target logic v2 CORRECTED: measured-move equal-leg projections replace the Class 0 / DAILY_PIVOT cascade.**
 
-### ✅ COMPLETED THIS SESSION (2026-06-30, second commit)
+### ✅ COMPLETED THIS SESSION (2026-06-30, third commit — pending push)
 
-**TARGET LOGIC v2 — Full correct rewrite of 4H/1H BOS target/stop construction.**
+**TARGET LOGIC v2 — ROOT FIX: Measured-move targets sized to the trade's own structural range.**
 
-This is NOT a patch. This is the complete replacement of the v1 "nearest zone" logic
-that was producing mis-scaled targets (e.g., 0.4:1 SHORT with a 670-point target on
-a 4H trade). Every candidate written from this deploy forward is on logic we trust
-and intend to keep. Old candidates (`target_logic_version='v1'`) are preserved but
-the audit-AI must filter `WHERE target_logic_version='v2'` for meaningful analysis.
+**The original v2 bug (caught before any v2 rows fired):** T2/T3 used `_class0_above/below()`
+(Elliott Wave macro pivots) and 1H used `_daily_pivot_above/below()`. Both produced targets
+unreachable in the trade's holding window — e.g., SHORT from $58K with T2 at $25,247 (BULL_WAVE_1
+from a prior cycle). Same fundamental error as v1, just in the opposite direction: target not
+sized to what price can realistically reach in the trade's window.
 
-**Five bugs fixed (confirmed by code inspection, research report, live example):**
-1. "Nearest zone" → structural destination beyond broken level
-2. 10-day cutoff too short → 60-day (4H) / 20-day (1H) lookback
-3. No zone strength filter → departure_move_pct + heat_multiplier + touch_count gate
-4. No higher-TF anchor → 4H gets Class 0 macro Elliott Wave as T2/T3; 1H gets DAILY_PIVOT
-5. Arbitrary 5% fallback → ATR-based fallback; Class 0 fallback before ATR
+**The fix — equal-leg measured move (same principle as the 15M system's bo−bd):**
+- `base` = distance from the break level to the nearest opposing 4H/1H zone on the other side.
+  - SHORT BOS broke demand at $D: nearest SUPPLY above $D → base = SUPPLY − $D
+  - LONG BOS broke supply at $S: nearest DEMAND below $S → base = $S − DEMAND
+- T1 = break_level ± base (1× leg from the break level, not from entry)
+- T2 = T1 ± base (2× leg)
+- T3 = T2 ± base (3× leg)
+- ATR safety rails (secondary, not primary):
+  - base < 1.5×ATR14 (4H) / 1.0×ATR14 (1H) → floor base, set `target_too_small_flag=True`
+  - base > 5×ATR14 → cap at 3×ATR14 (opposing zone is too old/wide)
+  - no opposing zone found → `base = 2×ATR14`, `htf_anchor_type='ATR_FALLBACK'`
+- `htf_anchor_type` now records `'STRUCTURAL_MEASURED_MOVE'` or `'ATR_FALLBACK'` — never a wave label.
+- Macro / Class 0 levels are NEVER trade targets. Context, KDE friction, and directional bias only.
 
-**Schema additions (database.py, ALTER TABLE in init_db()):**
-- `gravity_memory`: `departure_move_pct FLOAT`, `touch_count INTEGER DEFAULT 0`
-- `campaign_logs`: `target_logic_version VARCHAR DEFAULT 'v1'`, `target_too_small_flag BOOLEAN`,
-  `htf_anchor_type VARCHAR`, `htf_anchor_price FLOAT`, `energy_grade VARCHAR`
+**Removed from gravity_engine.py:**
+- `_class0_above()` / `_class0_below()` helper functions (were only used for targets — now gone)
+- `_daily_pivot_above()` / `_daily_pivot_below()` inner functions in `_detect_1h_bos()` (same)
+- `Optional` from `typing` import (was only used by the removed helpers)
 
-**gravity_engine.py rewrites:**
+**No schema changes this commit** — all five v2 audit columns already exist from the prior commit.
+`htf_anchor_type` column already exists; it now stores `STRUCTURAL_MEASURED_MOVE` / `ATR_FALLBACK`
+instead of a wave label — same column, corrected values.
 
-New helpers:
-- `_calc_atr(candles, period=14)` — 14-period ATR for fallback stop/target and noise-floor check
-- `_compute_energy_grade(candles, bias)` → STRONG/MODERATE/WEAK from EMA30/50 trend + MACD magnitude
-- `_class0_above(db_sym, db, min_price)` / `_class0_below()` — nearest Class 0 macro level query
-- `_update_zone_touches(db_sym, candles_4h, candles_1h, candles_1d, db)` — runs every loop:
-  re-derives touch_count from available candle window; flips `active=False` on full-body close-through
+**Dedup gate:** v1 rows 109/110 hold 2026-06-30 date_key. First v2 candidate fires at UTC midnight
+rollover to 2026-07-01. This fix landed before any v2 data was written — 'v2' tag is clean from row 1.
 
-`_scan_for_pivots()` — now takes `(candles, timeframe)` not `(symbol, candles, timeframe)`.
-  Adds `departure_move_pct` to each pivot dict (computed from post-pivot candles at write time).
-  Adds `source` key so write loop uses `p["source"]` directly instead of inferring from class.
-  Extends to daily candles: `timeframe="1d"` → `source="DAILY_PIVOT"`, `permanence_class=1`.
+**Per-TF stop/target/exit logic (FINAL — matches 15M principle):**
 
-`_detect_4h_bos()` — full rewrite:
-  - BOS detection zone: 15-day cutoff (what was just broken)
-  - STOP: nearest strength-qualified 4H zone, 60-day lookback (heat≥2.0, touch_count≤2,
-    departure_pct≥1.5% or NULL for pre-v2 zones)
-  - T1: nearest strength-qualified 4H zone ABOVE break_level_price (not above current_close);
-    fallback: nearest Class 0 above break_level, then 2.5×ATR
-  - T2: nearest Class 0 Elliott Wave level above T1 (the weekly/macro destination)
-  - T3: next Class 0 above T2; fallback: Fib extension off T1 distance
-  - `target_too_small_flag`: T1_dist < 1.5×ATR (audit-only; never blocks write)
-  - `energy_grade`: STRONG/MODERATE/WEAK at detection time
-  - All five new audit columns populated; `target_logic_version='v2'`
-
-`_detect_1h_bos()` — same overhaul at 1H scale:
-  - BOS detection: 7-day cutoff; T1 selection: 20-day lookback; MIN_DEPARTURE=0.8%
-  - T2: nearest DAILY_PIVOT (new source) above/below T1 — the daily structural destination
-  - 4H trend alignment check: if 4H EMA30/50 counter-directional to 1H bias → energy_grade=WEAK
-    (candidate still records — "record always, flag only")
-
-`run_gravity_ingestion_loop()` — extended:
-  - Daily pivot scan added: `_scan_for_pivots(candles_1d, "1d")`
-  - `_update_zone_touches()` called each iteration after pivot scan
-
-**Per-TF stop/target/exit logic (REVISED from v1 design spec):**
-
-| TF | Stop | T1 (intermediate) | T2 (macro destination) | T3 |
+| TF | Stop | T1 | T2 | T3 |
 |---|---|---|---|---|
-| **4H** | Nearest qualified 4H zone, 60-day; fallback 1.5×ATR | Nearest qualified 4H zone above break_level, 60-day; fallback Class 0 or 2.5×ATR | Nearest Class 0 (Elliott Wave macro) above T1 | Next Class 0 above T2; fallback Fib 0.618× T2-T1 |
-| **1H** | Nearest qualified 1H zone, 20-day; fallback 1.0×ATR | Nearest qualified 1H zone above break_level, 20-day; fallback DAILY_PIVOT or 2.0×ATR | Nearest DAILY_PIVOT above T1 | Next DAILY_PIVOT above T2; fallback Fib |
-| **15M** | UNCHANGED — opposing trigger (breakdown/breakout SSOT) | UNCHANGED — measured move (bo−bd) | Same as before | Same |
+| **4H** | Nearest qualified 4H zone (heat≥2.0, touch≤2, depart≥1.5%), 60-day; fallback 1.5×ATR | break_level + base | T1 + base | T2 + base |
+| **1H** | Nearest qualified 1H zone (heat≥2.0, touch≤2, depart≥0.8%), 20-day; fallback 1.0×ATR | break_level + base | T1 + base | T2 + base |
+| **15M** | UNCHANGED — opposing trigger | UNCHANGED — measured move (bo−bd) | Same | Same |
+
+Where `base` = range between break level and nearest opposing structural zone (ATR-floored/capped).
+
+**Prior session (2026-06-30 second commit) — schema + v2 scaffold:**
+- `gravity_memory`: `departure_move_pct FLOAT`, `touch_count INTEGER DEFAULT 0`
+- `campaign_logs`: `target_logic_version`, `target_too_small_flag`, `htf_anchor_type`, `htf_anchor_price`, `energy_grade`
+- `_calc_atr`, `_compute_energy_grade`, `_update_zone_touches`, daily pivot scan, zone touch tracking — all live
 
 **Audit data separation:**
-- `target_logic_version='v1'` on all rows written before this deploy
-- `target_logic_version='v2'` on all rows written after this deploy
-- Audit-AI hypothesis N-counting for 4H/1H must filter `WHERE target_logic_version='v2'`
-- Old v1 rows are preserved and visible in queries but excluded from signal analysis
+- `target_logic_version='v1'` — old rows, broken targets, exclude from signal analysis
+- `target_logic_version='v2'` — corrected measured-move targets, use for audit-AI N-counting
 
 ---
 
