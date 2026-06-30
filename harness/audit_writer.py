@@ -107,6 +107,17 @@ def write_decision_record(
     weekly_200sma_position: Optional[str] = None,
     weekly_200sma_distance_pct: Optional[float] = None,
     weekly_200sma_test_count: Optional[int] = None,
+    # Component 0 extension — additional frozen fields
+    macro_structure_json: Optional[str] = None,
+    tf1h_trend: Optional[str] = None,
+    tf1h_rsi: Optional[float] = None,
+    tf1h_adx_strength: Optional[str] = None,
+    tf4h_trend: Optional[str] = None,
+    tf4h_rsi: Optional[float] = None,
+    tf4h_adx_strength: Optional[str] = None,
+    tf4h_macd_hist: Optional[float] = None,
+    daily_200sma_position: Optional[str] = None,
+    daily_200sma_distance_pct: Optional[float] = None,
 ) -> None:
     """
     Write a frozen-at-decision audit record to session_audit_log.
@@ -183,6 +194,17 @@ def write_decision_record(
             weekly_200sma_position=weekly_200sma_position,
             weekly_200sma_distance_pct=weekly_200sma_distance_pct,
             weekly_200sma_test_count=weekly_200sma_test_count,
+            # Component 0 extension
+            macro_structure_json=macro_structure_json,
+            tf1h_trend=tf1h_trend,
+            tf1h_rsi=tf1h_rsi,
+            tf1h_adx_strength=tf1h_adx_strength,
+            tf4h_trend=tf4h_trend,
+            tf4h_rsi=tf4h_rsi,
+            tf4h_adx_strength=tf4h_adx_strength,
+            tf4h_macd_hist=tf4h_macd_hist,
+            daily_200sma_position=daily_200sma_position,
+            daily_200sma_distance_pct=daily_200sma_distance_pct,
             # label tier at write time
             label_tier=_tier_label_for_n(n_current),
         )

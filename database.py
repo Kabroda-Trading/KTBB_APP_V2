@@ -222,6 +222,25 @@ def init_db():
         except Exception:
             pass
 
+    # --- COMPONENT 0 EXTENSION — additional audit fields ---
+    for _col in [
+        "macro_structure_json TEXT",
+        "tf1h_trend VARCHAR",
+        "tf1h_rsi FLOAT",
+        "tf1h_adx_strength VARCHAR",
+        "tf4h_trend VARCHAR",
+        "tf4h_rsi FLOAT",
+        "tf4h_adx_strength VARCHAR",
+        "tf4h_macd_hist FLOAT",
+        "daily_200sma_position VARCHAR",
+        "daily_200sma_distance_pct FLOAT",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE session_audit_log ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- PHASE 3C JEWEL SPECIALIST — top-level scanner context columns ---
     for col_def in [
         "confluence_score INTEGER",
@@ -685,6 +704,18 @@ class SessionAuditLog(Base):
     weekly_200sma_position     = Column(String,  nullable=True)  # ABOVE / AT / BELOW (weekly 200 SMA)
     weekly_200sma_distance_pct = Column(Float,   nullable=True)
     weekly_200sma_test_count   = Column(Integer, nullable=True)  # consecutive completed daily closes within 1% of weekly 200 SMA
+
+    # ── COMPONENT 0 EXTENSION — additional audit fields frozen at decision time ──
+    macro_structure_json      = Column(String,  nullable=True)  # JSON array of Elliott Wave label strings
+    tf1h_trend                = Column(String,  nullable=True)  # BULLISH / BEARISH / NEUTRAL
+    tf1h_rsi                  = Column(Float,   nullable=True)
+    tf1h_adx_strength         = Column(String,  nullable=True)  # STRONG / MODERATE / WEAK
+    tf4h_trend                = Column(String,  nullable=True)  # BULLISH / BEARISH / NEUTRAL
+    tf4h_rsi                  = Column(Float,   nullable=True)
+    tf4h_adx_strength         = Column(String,  nullable=True)  # STRONG / MODERATE / WEAK
+    tf4h_macd_hist            = Column(Float,   nullable=True)
+    daily_200sma_position     = Column(String,  nullable=True)  # ABOVE / AT / BELOW
+    daily_200sma_distance_pct = Column(Float,   nullable=True)
 
     # ── AUDIT METADATA ──
     label_tier = Column(String, nullable=True)  # four-tier label at record time; updated at N milestones

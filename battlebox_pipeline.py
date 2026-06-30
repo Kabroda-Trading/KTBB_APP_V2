@@ -126,6 +126,8 @@ def _compute_mtf_structural_snapshot(
         "weekly_200sma_position":     None,
         "weekly_200sma_distance_pct": None,
         "weekly_200sma_test_count":   None,
+        "daily_200sma_position":     None,
+        "daily_200sma_distance_pct": None,
     }
 
     try:
@@ -190,6 +192,19 @@ def _compute_mtf_structural_snapshot(
                 else:
                     break
             snap["weekly_200sma_test_count"] = count
+    except Exception:
+        pass
+
+    try:
+        # ── Daily 200 SMA ─────────────────────────────────────────────────────
+        completed_daily = raw_daily[:-1] if len(raw_daily) > 1 else []
+        if len(completed_daily) >= 200:
+            sma200 = sum(float(c["close"]) for c in completed_daily[-200:]) / 200.0
+            dist = (current_price - sma200) / sma200 * 100.0
+            snap["daily_200sma_distance_pct"] = round(dist, 4)
+            snap["daily_200sma_position"] = (
+                "ABOVE" if dist > 0.3 else "BELOW" if dist < -0.3 else "AT"
+            )
     except Exception:
         pass
 

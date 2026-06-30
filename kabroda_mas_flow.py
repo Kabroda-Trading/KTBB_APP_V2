@@ -1339,8 +1339,31 @@ def run_mas_analysis(
     # the two calls, defeating the capture-at-decision-time principle.
     try:
         from harness.audit_writer import write_decision_record as _write_audit
+        import json as _audit_json
         _fuel = context.get("fuel_gauge", {})
         _mtf = context.get("mtf_structural_snapshot", {}) or {}
+        # Extract Component 0 extension fields
+        _macro_struct = context.get("macro_structure", [])
+        _macro_json = None
+        try:
+            _macro_json = _audit_json.dumps(
+                [m.get("type") for m in _macro_struct if m.get("type")]
+            )
+        except Exception:
+            pass
+        _tf1h = _fuel.get("1H", {})
+        _tf4h = _fuel.get("4H", {})
+        _j1h = _tf1h.get("jewel", {}) or {}
+        _j4h = _tf4h.get("jewel", {}) or {}
+        def _adx_label(j: dict):
+            adx = j.get("adx")
+            if adx is None:
+                return None
+            if j.get("adx_trending"):
+                return "STRONG"
+            if adx > 20:
+                return "MODERATE"
+            return "WEAK"
         _write_audit(
             symbol=symbol,
             date_key=date_key,
@@ -1371,6 +1394,16 @@ def run_mas_analysis(
             weekly_200sma_position=_mtf.get("weekly_200sma_position"),
             weekly_200sma_distance_pct=_mtf.get("weekly_200sma_distance_pct"),
             weekly_200sma_test_count=_mtf.get("weekly_200sma_test_count"),
+            macro_structure_json=_macro_json,
+            tf1h_trend=_tf1h.get("trend"),
+            tf1h_rsi=_tf1h.get("rsi"),
+            tf1h_adx_strength=_adx_label(_j1h),
+            tf4h_trend=_tf4h.get("trend"),
+            tf4h_rsi=_tf4h.get("rsi"),
+            tf4h_adx_strength=_adx_label(_j4h),
+            tf4h_macd_hist=_tf4h.get("macd_hist"),
+            daily_200sma_position=_mtf.get("daily_200sma_position"),
+            daily_200sma_distance_pct=_mtf.get("daily_200sma_distance_pct"),
         )
         # Read-back heartbeat — proves the row actually landed, visible in Render logs
         try:
