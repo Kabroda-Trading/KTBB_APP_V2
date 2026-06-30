@@ -976,14 +976,13 @@
         // ================================================================
         // TF STACK BUILDER — 4H / 1H / regime strip below each radar row
         // ================================================================
-        function _buildTfStack(sym, tfVerdicts, dailyRegime, weeklyPos) {
-            const tv4h = (tfVerdicts && tfVerdicts['4H']) || {};
-            const tv1h = (tfVerdicts && tfVerdicts['1H']) || {};
+        function _buildTfStack(sym, tfVerdicts, tfToday, dailyRegime, weeklyPos) {
+            const tv4h  = (tfVerdicts && tfVerdicts['4H'])  || {};
+            const tv1h  = (tfVerdicts && tfVerdicts['1H'])  || {};
+            const tv15m = (tfVerdicts && tfVerdicts['15M']) || {};
 
-            // Determine highest-priority active TF for TRADE THIS badge
-            const tradeTf = tv4h.status === 'BOS_ACTIVE' ? '4H'
-                          : tv1h.status === 'BOS_ACTIVE' ? '1H'
-                          : null;
+            // Highest-priority active TF from server-computed _which_tf_today()
+            const tradeTf = (tfToday && tfToday.primary_tf !== 'NONE') ? tfToday.primary_tf : null;
 
             function tfRow(tf, data) {
                 const active = data.status === 'BOS_ACTIVE';
@@ -1005,6 +1004,29 @@
                 return `<div class="tf-row">${badge}${detail}${tradeThis}</div>`;
             }
 
+            function mas15mRow(data) {
+                const status   = data.status || 'PENDING';
+                const approved = status === 'APPROVED';
+                const standDown = status === 'STAND_DOWN';
+                const color  = approved ? '#22c55e' : standDown ? '#475569' : '#1e293b';
+                const text   = approved ? '#22c55e' : standDown ? '#64748b' : '#334155';
+                const badge  = `<span class="tf-label" style="border-color:${color}; color:${text};">15M</span>`;
+                const tradeThis = (tradeTf === '15M') ? `<span class="tf-trade-this">TRADE THIS ★</span>` : '';
+                let detail = '';
+                if (approved) {
+                    const bias  = data.bias  ? `<span style="color:#22c55e; font-weight:700;">${data.bias}</span>` : '';
+                    const entry = data.entry ? `<span style="color:#475569;"> · Entry <b style="color:#94a3b8;">$${fmt(data.entry)}</b></span>` : '';
+                    const stop  = data.stop  ? `<span style="color:#475569;"> · Stop <b style="color:#ef4444;">$${fmt(data.stop)}</b></span>`   : '';
+                    const t1    = data.t1    ? `<span style="color:#475569;"> · T1 <b style="color:#eab308;">$${fmt(data.t1)}</b></span>`       : '';
+                    detail = `<span style="color:#22c55e; font-weight:700;">MAS: APPROVED</span>${bias ? ' · ' + bias.outerHTML||bias : ''}${entry}${stop}${t1}`;
+                } else if (standDown) {
+                    detail = `<span style="color:#64748b;">MAS: STAND DOWN</span>`;
+                } else {
+                    detail = `<span style="color:#334155;">MAS: ${status}</span>`;
+                }
+                return `<div class="tf-row">${badge}${detail}${tradeThis}</div>`;
+            }
+
             const regimeColor = dailyRegime === 'DAILY_BULL'          ? '#22c55e'
                               : dailyRegime === 'DAILY_RECOVERY'      ? '#4ade80'
                               : dailyRegime === 'DAILY_DISTRIBUTION'  ? '#f97316'
@@ -1017,7 +1039,7 @@
             const regimeBar  = (regimePart || weeklyPart)
                 ? `<div class="tf-regime-bar">${regimePart}${weeklyPart}</div>` : '';
 
-            return `<div class="tf-stack" data-tf-symbol="${sym}">${tfRow('4H', tv4h)}${tfRow('1H', tv1h)}${regimeBar}</div>`;
+            return `<div class="tf-stack" data-tf-symbol="${sym}">${tfRow('4H', tv4h)}${tfRow('1H', tv1h)}${mas15mRow(tv15m)}${regimeBar}</div>`;
         }
 
         // ================================================================
@@ -1091,6 +1113,7 @@
             const tfHtml = _buildTfStack(
                 snap.symbol,
                 snap.tf_verdicts || null,
+                snap.tf_today    || null,
                 snap.daily_regime || '—',
                 snap.weekly_200sma_position || '—'
             );
@@ -1187,6 +1210,7 @@
                     const tfEl = document.querySelector(`.tf-stack[data-tf-symbol="${t.symbol}"]`);
                     const newTfHtml = _buildTfStack(
                         t.symbol, t.tf_verdicts,
+                        t.tf_today    || null,
                         t.daily_regime || '—',
                         t.weekly_200sma_position || '—'
                     );
@@ -1244,6 +1268,7 @@
                 const tfHtml = _buildTfStack(
                     t.symbol,
                     t.tf_verdicts || null,
+                    t.tf_today    || null,
                     t.daily_regime || '—',
                     t.weekly_200sma_position || '—'
                 );

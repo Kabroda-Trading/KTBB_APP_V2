@@ -19,11 +19,15 @@ TARGETS = ["BTCUSDT"]
 
 
 def _get_tf_system_verdicts(symbol_norm: str) -> dict:
-    """Query campaign_logs for today's 4H and 1H BOS candidates. DB-only."""
+    """
+    Query campaign_logs for today's 4H, 1H, and 15M (MAS) statuses.
+    All three come from a single DB session — DB-only, no exchange calls.
+    """
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     result = {
-        "4H": {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None},
-        "1H": {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None},
+        "4H":  {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None},
+        "1H":  {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None},
+        "15M": {"status": "PENDING",    "bias": None, "entry": None, "stop": None, "t1": None},
     }
     try:
         with SessionLocal() as db:
@@ -53,9 +57,45 @@ def _get_tf_system_verdicts(symbol_norm: str) -> dict:
                     "stop": c1h.stop_loss,
                     "t1": c1h.t1,
                 }
+            c15m = (
+                db.query(CampaignLog)
+                .filter(
+                    CampaignLog.symbol == symbol_norm,
+                    CampaignLog.date_key == today,
+                    CampaignLog.is_canonical == True,
+                )
+                .order_by(CampaignLog.id.desc())
+                .first()
+            )
+            if c15m:
+                result["15M"] = {
+                    "status": c15m.mas_approval_status or "PENDING",
+                    "bias":   c15m.bias,
+                    "entry":  c15m.entry_price,
+                    "stop":   c15m.stop_loss,
+                    "t1":     c15m.t1,
+                }
     except Exception as e:
         print(f"[TF VERDICTS] {symbol_norm}: {e}")
     return result
+
+
+def _which_tf_today(tf_verdicts: dict) -> dict:
+    """
+    Return the highest-priority active timeframe for today.
+    Priority: 4H BOS > 1H BOS > 15M APPROVED > NONE.
+    Used to drive the TRADE THIS ★ badge on the radar TF stack.
+    """
+    v4h  = tf_verdicts.get("4H",  {})
+    v1h  = tf_verdicts.get("1H",  {})
+    v15m = tf_verdicts.get("15M", {})
+    if v4h.get("status") == "BOS_ACTIVE":
+        return {"primary_tf": "4H",   "flag": "4H_ACTIVE",      "bias": v4h.get("bias")}
+    if v1h.get("status") == "BOS_ACTIVE":
+        return {"primary_tf": "1H",   "flag": "1H_ACTIVE",      "bias": v1h.get("bias")}
+    if v15m.get("status") == "APPROVED":
+        return {"primary_tf": "15M",  "flag": "15M_APPROVED",   "bias": v15m.get("bias")}
+    return {"primary_tf": "NONE", "flag": "ALL_STAND_DOWN", "bias": None}
 
 
 def _compute_daily_regime(mtf_snap: dict) -> str:
@@ -407,6 +447,7 @@ async def scan_sector():
         sym_norm = sym.replace("USDT", "/USDT") if "/" not in sym else sym
         mtf_snap = context.get("mtf_structural_snapshot", {}) or {}
         tf_verdicts = _get_tf_system_verdicts(sym_norm)
+        tf_today    = _which_tf_today(tf_verdicts)
         daily_regime = _compute_daily_regime(mtf_snap)
         weekly_pos = mtf_snap.get("weekly_200sma_position") or ""
 
@@ -436,6 +477,7 @@ async def scan_sector():
             "levels": levels,
             "mtf_brief": mtf_brief,
             "tf_verdicts": tf_verdicts,
+            "tf_today": tf_today,
             "daily_regime": daily_regime,
             "weekly_200sma_position": weekly_pos,
             **dossier

@@ -773,8 +773,9 @@ async def api_radar_snapshot(db: Session = Depends(get_db)):
             "t3":          campaign.t3,
         }
 
-    # 5. TF system verdicts — 4H + 1H BOS candidates from campaign_logs (DB-only, <5ms)
+    # 5. TF system verdicts (4H + 1H + 15M) and which-TF-today decision
     tf_verdicts = market_radar._get_tf_system_verdicts(symbol_norm)
+    tf_today    = market_radar._which_tf_today(tf_verdicts)
 
     # 6. Daily regime + weekly 200 SMA position from most recent audit row
     daily_regime = "—"
@@ -801,6 +802,7 @@ async def api_radar_snapshot(db: Session = Depends(get_db)):
         "mas_status":            mas_status,
         "plan":                  plan,
         "tf_verdicts":           tf_verdicts,
+        "tf_today":              tf_today,
         "daily_regime":          daily_regime,
         "weekly_200sma_position": weekly_200sma_position,
     })
