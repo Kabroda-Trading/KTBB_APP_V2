@@ -912,6 +912,25 @@ async def audit_foreign_intel(payload: ForeignIntelPayload, request: Request, db
 
 # --- AGENT COST INFRASTRUCTURE (PHASE 1) ---
 
+@app.post("/api/admin/run-audit")
+async def api_run_audit(request: Request, db: Session = Depends(get_db)):
+    """
+    Trigger the Audit-AI weekly ledger run on demand. Admin only.
+    Runs all 6 pre-defined hypotheses against session_audit_log, writes
+    suggestions to audit_suggestion_log (N>=30 only), and appends a
+    Markdown brief to system_audit_log.
+    """
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    try:
+        import harness.audit_runner as _audit
+        brief = await asyncio.to_thread(_audit.main)
+        return JSONResponse({"ok": True, "brief": brief})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.get("/api/agents/cost")
 async def api_agents_cost(request: Request, db: Session = Depends(get_db)):
     """Returns 24h and 7-day agent spend summary. Admin only."""
