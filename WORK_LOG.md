@@ -132,6 +132,89 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ---
 
 ## ► NEXT SESSION START
+*End-of-session marker: 2026-06-30*
+
+**2026-06-30 — Phase 4 candidate monitoring live (commit `129837c`); Job 1/2/3 directive completed.**
+
+### ✅ COMPLETED THIS SESSION (2026-06-30)
+
+**Job 1 — CRITICAL GAP FIXED: 4H/1H candidate outcomes were never recorded.**
+
+The gap: `_detect_4h_bos()` and `_detect_1h_bos()` in `gravity_engine.py` wrote
+`campaign_log` rows with `entry_filled_at=NULL` and `session_expires_at=NULL`.
+The ledger engine's three phases all filter `mas_approval_status == 'APPROVED'` —
+CANDIDATE rows (status=4H_CANDIDATE or 1H_CANDIDATE) were NEVER processed. After
+3-6 weeks, ALL 4H/1H candidates would have `closed_at=NULL`, `status=NULL`,
+`realized_pnl=NULL` — completely unauditable.
+
+**Fix:**
+1. `gravity_engine.py` — both BOS detectors now set at write time:
+   - `entry_filled_at = now` (BOS close = immediate entry, no waiting for trigger)
+   - `session_expires_at = now + 5 days` (4H) / `now + 2 days` (1H)
+2. `ledger_closing_engine.py` — Phase 4 added: queries CANDIDATE rows with
+   `entry_filled_at IS NOT NULL`, runs the same 1m Kraken OHLC scan as Phase 2,
+   closes on STOP or T1, records CLOSED_AT_EXPIRY at the time cap.
+
+Old CANDIDATE rows (written before deploy, `entry_filled_at=NULL`) are skipped
+by Phase 4 — safely ignored. New candidates from this deploy onward are fully
+monitored.
+
+**Job 1 Auditability Table — post-fix state:**
+
+| Question (3-6 weeks out) | Field | Table.Column | Status |
+|---|---|---|---|
+| Did 4H candidate hit target or stop? | status, realized_pnl | campaign_logs | **FIXED — Phase 4 writes outcomes** |
+| Entry, stop, T1 of 4H candidate | entry_price, stop_loss, t1 | campaign_logs | YES (was always set) |
+| When was 4H candidate detected? | created_at | campaign_logs.created_at | YES (auto-set) |
+| When did 4H trade resolve? | closed_at | campaign_logs.closed_at | **FIXED — Phase 4 sets closed_at** |
+| How long did the 4H trade take? | closed_at − created_at | computed | **FIXED — closed_at now populated** |
+| Same for 1H candidates | same fields | same table | **FIXED — Phase 4 handles both** |
+| H1-H6 regime fields (session_audit_log) | daily_21ema_direction, kinematic_grade, tf4h_macd_hist, etc. | session_audit_log | PARTIAL — non-NULL only from 2026-06-29. Rows before that date: NULL on Component 0 fields. 15M APPROVED rows DO get outcomes via backfill_outcome(). |
+| Do 4H/1H candidates write session_audit_log rows? | n/a | session_audit_log | NO — candidates write to campaign_logs only. H1-H6 hypotheses target 15M sessions (intentional). Future 4H/1H audit hypotheses query campaign_logs directly. |
+
+**Job 2 — Per-TF stop/target/exit logic (design spec, locked):**
+
+| TF | Entry signal | Stop | T1 | Duration cap | "Oil change" rule |
+|---|---|---|---|---|---|
+| **15M** | 2× 5M closes beyond trigger (acceptance gate) | Opposing trigger (breakdown for LONG, breakout for SHORT) | Measured move (bo−bd distance) | Session end 3PM ET (session_expires_at set by MAS flow) | EXPIRED at session close if no fill; CLOSED_AT_EXPIRY if filled but no resolution by next-session-open |
+| **4H** | 4H candle closes beyond 4H SUPPLY/DEMAND zone (BOS) | Nearest 4H DEMAND zone below entry (from gravity_memory) or 5% fallback | Nearest 4H SUPPLY zone above entry (from gravity_memory) or 5% fallback | 5 calendar days from detection | CLOSED_AT_EXPIRY at session_expires_at (now+5d) — fractional R computed from final candle |
+| **1H** | 1H candle closes beyond 1H SUPPLY/DEMAND zone (BOS) | Nearest 1H DEMAND zone below entry or 1% fallback | Nearest 1H SUPPLY zone above entry or 2% fallback | 2 calendar days from detection | CLOSED_AT_EXPIRY at session_expires_at (now+2d) — same fractional R logic |
+
+**Key design principle:** stops and targets are STRUCTURAL (nearest gravity_memory
+zone), not fixed percentage multiples. If no zone exists within range, the code
+falls back to a percentage estimate — this is a known data-quality limitation for
+early candidates before the gravity engine has enough pivot history.
+
+**Oil change rule (time/exhaustion exit):** any 4H/1H candidate still open at its
+`session_expires_at` is closed as CLOSED_AT_EXPIRY with fractional R. This is the
+"the setup has decayed — exit regardless" rule. It runs automatically in Phase 4 —
+no human action required. A trade that hasn't reached stop or T1 in 5 days (4H)
+or 2 days (1H) has failed structurally; carrying it longer introduces adverse
+overnight risk without improving expectancy.
+
+**Job 3 — Forward understanding (CC's own words for owner to confirm or correct):**
+
+The system now has three parallel trade-recording layers:
+1. **15M layer** — one session per day, MAS-approved, full lifecycle (Phases 1-3 of ledger engine). Audited by H1-H6 via session_audit_log.
+2. **4H layer** — continuous detection in gravity_engine loop. Candidates recorded with structural zone stops/targets. Outcomes back-filled by Phase 4. Data accumulates in campaign_logs (session_timeframe='4H'). Trust switches from CANDIDATE to LIVE after N=30 outcomes + audit-AI validates (master plan Step 9).
+3. **1H layer** — same pattern at 1H scale. Outcomes via Phase 4. Trust switch after same gate.
+
+**Paper-trade-first philosophy:** all three layers currently record data — none
+auto-execute. The 4H/1H candidates are structural observations only. The audit-AI
+(H1-H6) watches the 15M system. A future set of hypotheses (H7-H12) will watch the
+4H/1H data in campaign_logs once N≥30 candidates with outcomes exist. No parameter
+changes until N=100+, PROVISIONAL_FINDING tier, 3 consecutive weekly appearances.
+
+**Validation path:** in 3-6 weeks, query `campaign_logs WHERE session_timeframe='4H' AND closed_at IS NOT NULL` to see the first batch of 4H outcomes. The audit question "what fraction of 4H candidates hit T1 vs. stop vs. expired" is now answerable. Same for 1H. Before that data exists, trust nothing about these systems — they're instruments, not signals.
+
+### CARRY FORWARD
+- Phase 4 forward verification: next gravity engine loop should print `|| LIFECYCLE P4 ||` logs for any open CANDIDATE rows. Confirm on Render logs.
+- Old CANDIDATE rows (pre-deploy, `entry_filled_at=NULL`): NOT retroactively processed — they will remain with NULL status. This is acceptable; they're unrecoverable.
+- Panel 02 HIGH CONVICTION vs MODERATE mismatch (carry-forward, no urgency)
+- CoinGecko 429 recurring fix (carry-forward, publication blocker)
+
+---
+
 *End-of-session marker: 2026-06-27*
 
 **2026-06-27/28 — All 5 gates passed. Phase 1 audit subsystem LIVE on production. First clean session row written 2026-06-28.**
