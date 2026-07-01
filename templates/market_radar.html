@@ -132,6 +132,19 @@
             margin-top: 3px;
             padding-top: 5px;
         }
+        .tf-actions { display: flex; gap: 5px; margin-left: auto; }
+        .tf-btn-copy {
+            font-family: 'JetBrains Mono'; font-size: 9px; font-weight: 700;
+            padding: 2px 7px; border: 1px solid #334155; border-radius: 3px;
+            background: #1e293b; color: #64748b; cursor: pointer; transition: 0.15s;
+        }
+        .tf-btn-copy:hover { background: #334155; color: #94a3b8; }
+        .tf-btn-cockpit {
+            font-family: 'JetBrains Mono'; font-size: 9px; font-weight: 700;
+            padding: 2px 8px; border: 1px solid #22c55e; border-radius: 3px;
+            background: rgba(34,197,94,0.08); color: #22c55e; cursor: pointer; transition: 0.15s;
+        }
+        .tf-btn-cockpit:hover { background: #22c55e; color: #000; }
 
         .lock-btn { font-size: 11px; padding: 12px 20px; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
         .lock-btn:hover:not(:disabled) { background: #eab308; color:#000; border-color: #eab308; }
@@ -550,6 +563,49 @@
             renderModal(activeData);
             document.getElementById('targetModal').style.display = 'block';
             document.body.style.overflow = 'hidden';
+        }
+
+        function openTfCockpit(sym, tf) {
+            const mem = window.tfCandidateMemory && window.tfCandidateMemory[sym + '_' + tf];
+            if (!mem) return;
+            const entry  = parseFloat(mem.entry  || 0);
+            const stop   = parseFloat(mem.stop   || 0);
+            const target = parseFloat(mem.target || 0);
+            const data = {
+                symbol: sym,
+                price: 0,
+                diagnostic_ledger: {timeframe: tf, type: tf + '_CANDIDATE'},
+                plan: {
+                    valid:   true,
+                    bias:    mem.bias,
+                    entry:   entry,
+                    stop:    stop,
+                    targets: [target, 0, 0],
+                },
+                mas_status: tf + '_CANDIDATE',
+                key: entry ? `${mem.bias}|${tf}_CANDIDATE|${entry.toFixed(2)}|${stop.toFixed(2)}|${target.toFixed(2)}||` : '',
+            };
+            activeData = data;
+            document.getElementById('tSym').innerText = sym.replace('USDT', '') + ' ' + tf + ' CANDIDATE COCKPIT';
+            renderModal(data);
+            document.getElementById('targetModal').style.display = 'block';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function copyTfLevel(sym, tf) {
+            const mem = window.tfCandidateMemory && window.tfCandidateMemory[sym + '_' + tf];
+            if (!mem) return;
+            const text = `${mem.bias}|${tf}|Entry:${mem.entry}|Stop:${mem.stop}|Target:${mem.target}`;
+            navigator.clipboard.writeText(text).then(() => {
+                const btns = document.querySelectorAll(`.tf-btn-copy`);
+                btns.forEach(b => {
+                    if (b.getAttribute('onclick') && b.getAttribute('onclick').includes(`'${sym}','${tf}'`)) {
+                        const orig = b.innerHTML;
+                        b.innerHTML = '✓ COPIED';
+                        setTimeout(() => b.innerHTML = orig, 1000);
+                    }
+                });
+            });
         }
 
         function closeModal() {
@@ -981,6 +1037,15 @@
             const tv1h  = (tfVerdicts && tfVerdicts['1H'])  || {};
             const tv15m = (tfVerdicts && tfVerdicts['15M']) || {};
 
+            // Seed candidate memory so COCKPIT/COPY buttons have access to levels
+            window.tfCandidateMemory = window.tfCandidateMemory || {};
+            if (tv4h.status === 'BOS_ACTIVE') {
+                window.tfCandidateMemory[sym + '_4H'] = {sym, bias: tv4h.bias, entry: tv4h.entry, stop: tv4h.stop, target: tv4h.t1};
+            }
+            if (tv1h.status === 'BOS_ACTIVE') {
+                window.tfCandidateMemory[sym + '_1H'] = {sym, bias: tv1h.bias, entry: tv1h.entry, stop: tv1h.stop, target: tv1h.t1};
+            }
+
             // Highest-priority active TF from server-computed _which_tf_today()
             const tradeTf = (tfToday && tfToday.primary_tf !== 'NONE') ? tfToday.primary_tf : null;
 
@@ -992,16 +1057,21 @@
                 const tradeThis = (tradeTf === tf)
                     ? `<span class="tf-trade-this">TRADE THIS ★</span>` : '';
                 let detail = '';
+                let actions = '';
                 if (active) {
                     const bias  = `<span style="color:${text}; font-weight:700;">${data.bias || ''}</span>`;
                     const entry = data.entry ? `<span style="color:#475569;"> · Entry <b style="color:#94a3b8;">$${fmt(data.entry)}</b></span>` : '';
                     const stop  = data.stop  ? `<span style="color:#475569;"> · Stop <b style="color:#ef4444;">$${fmt(data.stop)}</b></span>`   : '';
-                    const t1    = data.t1    ? `<span style="color:#475569;"> · T1 <b style="color:#eab308;">$${fmt(data.t1)}</b></span>`       : '';
+                    const t1    = data.t1    ? `<span style="color:#475569;"> · Target <b style="color:#eab308;">$${fmt(data.t1)}</b></span>`   : '';
                     detail = `${bias}${entry}${stop}${t1}`;
+                    actions = `<div class="tf-actions">
+                        <button class="tf-btn-copy" onclick="copyTfLevel('${sym}','${tf}')" title="Copy entry/stop/target">📋 COPY</button>
+                        <button class="tf-btn-cockpit" onclick="openTfCockpit('${sym}','${tf}')">COCKPIT →</button>
+                    </div>`;
                 } else {
                     detail = `<span style="color:#1e3a52;">MONITORING — no signal today</span>`;
                 }
-                return `<div class="tf-row">${badge}${detail}${tradeThis}</div>`;
+                return `<div class="tf-row">${badge}${detail}${tradeThis}${actions}</div>`;
             }
 
             function mas15mRow(data) {
@@ -1048,6 +1118,7 @@
         function renderSnapshotGrid(snap) {
             const grid = document.getElementById('radarTargetGrid');
             window.radarMemory = {};
+            window.tfCandidateMemory = {};
 
             if (!snap.locked) { grid.innerHTML = ''; return; }
 

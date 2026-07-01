@@ -80,26 +80,43 @@ def _get_tf_system_verdicts(symbol_norm: str) -> dict:
     return result
 
 
-def _is_bos_stale(verdict: dict, current_price: float, threshold: float = 0.75) -> bool:
+def _candidate_is_live(verdict: dict, current_price: float, threshold: float = 0.75) -> bool:
     """
-    Returns True if a BOS signal has already run ≥threshold fraction of its entry-to-T1
-    distance. At that point the entry opportunity has passed and TRADE THIS should not fire.
-    Example: entry $58,983, T1 $59,413, threshold 75% → stale when price > $59,305.
+    Returns True when a BOS candidate is still actionable at the current price.
+    Suppresses TRADE THIS on two conditions (both at threshold=75%):
+      - favorable drift: price has moved >=threshold of entry→target distance
+      - adverse drift:   price has moved >=threshold of entry→stop distance
+    Single unified check — replaces direction-specific guard pile.
     """
-    entry = verdict.get("entry")
-    t1    = verdict.get("t1")
-    bias  = verdict.get("bias", "")
-    if not entry or not t1 or not current_price:
-        return False
+    entry  = verdict.get("entry")
+    target = verdict.get("t1")
+    stop   = verdict.get("stop")
+    bias   = verdict.get("bias", "")
+    if not entry or not current_price:
+        return True
     try:
-        entry = float(entry); t1 = float(t1); current_price = float(current_price)
+        entry         = float(entry)
+        current_price = float(current_price)
+        target        = float(target) if target else None
+        stop          = float(stop)   if stop   else None
     except (TypeError, ValueError):
-        return False
-    if bias == "LONG" and t1 > entry:
-        return current_price >= entry + (t1 - entry) * threshold
-    if bias == "SHORT" and t1 < entry:
-        return current_price <= entry - (entry - t1) * threshold
-    return False
+        return True
+
+    if bias == "LONG":
+        if target and target > entry:
+            if current_price >= entry + (target - entry) * threshold:
+                return False  # favorable: entry window closed
+        if stop and entry > stop:
+            if current_price <= entry - (entry - stop) * threshold:
+                return False  # adverse: setup invalidated by market
+    elif bias == "SHORT":
+        if target and target < entry:
+            if current_price <= entry - (entry - target) * threshold:
+                return False  # favorable: entry window closed
+        if stop and stop > entry:
+            if current_price >= entry + (stop - entry) * threshold:
+                return False  # adverse: setup invalidated by market
+    return True
 
 
 def _which_tf_today(tf_verdicts: dict, current_price: float = 0.0) -> dict:
@@ -112,9 +129,9 @@ def _which_tf_today(tf_verdicts: dict, current_price: float = 0.0) -> dict:
     v4h  = tf_verdicts.get("4H",  {})
     v1h  = tf_verdicts.get("1H",  {})
     v15m = tf_verdicts.get("15M", {})
-    if v4h.get("status") == "BOS_ACTIVE" and not _is_bos_stale(v4h, current_price):
+    if v4h.get("status") == "BOS_ACTIVE" and _candidate_is_live(v4h, current_price):
         return {"primary_tf": "4H",   "flag": "4H_ACTIVE",      "bias": v4h.get("bias")}
-    if v1h.get("status") == "BOS_ACTIVE" and not _is_bos_stale(v1h, current_price):
+    if v1h.get("status") == "BOS_ACTIVE" and _candidate_is_live(v1h, current_price):
         return {"primary_tf": "1H",   "flag": "1H_ACTIVE",      "bias": v1h.get("bias")}
     if v15m.get("status") == "APPROVED":
         return {"primary_tf": "15M",  "flag": "15M_APPROVED",   "bias": v15m.get("bias")}

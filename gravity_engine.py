@@ -1,7 +1,7 @@
 # gravity_engine.py
 # ==============================================================================
 # KABRODA GRAVITY ENGINE (BACKGROUND INGESTION & BEDROCK LOGGING)
-# TARGET LOGIC v2: measured-move equal-leg projections from break level,
+# TARGET LOGIC v2: structural measured move from break level (single target per trade),
 #   ATR safety rails, strength-filtered stop zones, touch_count tracking.
 # ==============================================================================
 import asyncio
@@ -357,9 +357,7 @@ async def fill_decision_outcomes():
 #         Fallback: 1.5× 14-period ATR from entry.
 # TARGETS: equal-leg measured move from the break level.
 #   Base = distance from break_level_price to the nearest opposing 4H zone.
-#   T1 = break_level ± base  (1× leg)
-#   T2 = T1 ± base           (2× leg)
-#   T3 = T2 ± base           (3× leg)
+#   TARGET = break_level ± base  (1× measured move — single structural target)
 #   ATR rails: base < 1.5×ATR14 → floor to 1.5×ATR (target_too_small_flag=True)
 #              base > 5×ATR14   → cap to 3×ATR
 #              no opposing zone → base = 2×ATR (ATR_FALLBACK)
@@ -448,8 +446,6 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
         bias = None
         stop_price = None
         t1_price = None
-        t2_price = None
-        t3_price = None
         break_level_price = None
         htf_anchor_type = None
         htf_anchor_price_val = None
@@ -501,8 +497,6 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
                 base = 3.0 * atr14
 
             t1_price = round(break_level_price + base, 2)
-            t2_price = round(t1_price + base, 2)
-            t3_price = round(t2_price + base, 2)
 
         elif demand_zone and current_close < demand_zone.price:
             bias = "SHORT"
@@ -550,8 +544,6 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
                 base = 3.0 * atr14
 
             t1_price = round(break_level_price - base, 2)
-            t2_price = round(t1_price - base, 2)
-            t3_price = round(t2_price - base, 2)
 
         if not bias:
             return
@@ -565,8 +557,6 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
             entry_price=round(current_close, 2),
             stop_loss=round(stop_price, 2),
             t1=round(t1_price, 2),
-            t2=round(t2_price, 2),
-            t3=round(t3_price, 2),
             total_contracts=0.0,
             mas_approval_status="4H_CANDIDATE",
             is_canonical=False,
@@ -584,7 +574,7 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
         flag = " [TARGET_TOO_SMALL]" if target_too_small else ""
         print(
             f"|| 4H BOS v2 || {symbol} | {bias} | Entry: ${current_close:.2f} "
-            f"| Stop: ${stop_price:.2f} | T1: ${t1_price:.2f} | T2: ${t2_price:.2f} "
+            f"| Stop: ${stop_price:.2f} | Target: ${t1_price:.2f} "
             f"| HTF: {htf_anchor_type} | Energy: {energy_grade}{flag}"
         )
     except Exception as e:
@@ -600,9 +590,7 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
 #         Fallback: 1.0× 14-period 1H ATR.
 # TARGETS: equal-leg measured move from the break level.
 #   Base = distance from break_level_price to the nearest opposing 1H zone.
-#   T1 = break_level ± base  (1× leg)
-#   T2 = T1 ± base           (2× leg)
-#   T3 = T2 ± base           (3× leg)
+#   TARGET = break_level ± base  (1× measured move — single structural target)
 #   ATR rails: base < 1.0×ATR14 → floor to 1.0×ATR (target_too_small_flag=True)
 #              base > 5×ATR14   → cap to 3×ATR
 #              no opposing zone → base = 2×ATR (ATR_FALLBACK)
@@ -690,8 +678,6 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
         bias = None
         stop_price = None
         t1_price = None
-        t2_price = None
-        t3_price = None
         break_level_price = None
         htf_anchor_type = None
         htf_anchor_price_val = None
@@ -748,8 +734,6 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
                 base = 3.0 * atr14
 
             t1_price = round(break_level_price + base, 2)
-            t2_price = round(t1_price + base, 2)
-            t3_price = round(t2_price + base, 2)
 
         elif demand_zone and current_close < demand_zone.price:
             bias = "SHORT"
@@ -799,8 +783,6 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
                 base = 3.0 * atr14
 
             t1_price = round(break_level_price - base, 2)
-            t2_price = round(t1_price - base, 2)
-            t3_price = round(t2_price - base, 2)
 
         if not bias:
             return
@@ -814,8 +796,6 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
             entry_price=round(current_close, 2),
             stop_loss=round(stop_price, 2),
             t1=round(t1_price, 2),
-            t2=round(t2_price, 2),
-            t3=round(t3_price, 2),
             total_contracts=0.0,
             mas_approval_status="1H_CANDIDATE",
             is_canonical=False,
@@ -833,7 +813,7 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
         flag = " [TARGET_TOO_SMALL]" if target_too_small else ""
         print(
             f"|| 1H BOS v2 || {symbol} | {bias} | Entry: ${current_close:.2f} "
-            f"| Stop: ${stop_price:.2f} | T1: ${t1_price:.2f} | T2: ${t2_price:.2f} "
+            f"| Stop: ${stop_price:.2f} | Target: ${t1_price:.2f} "
             f"| HTF: {htf_anchor_type} | Energy: {energy_grade_1h}{flag}"
         )
     except Exception as e:
