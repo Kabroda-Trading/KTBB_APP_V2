@@ -449,7 +449,7 @@ def _build_synthetic_jewel(raw_15m: List[Dict], adx_4h: Optional[Dict] = None) -
     elif adx_secondary_fires:
         kinematic_grade      = "OVEREXTENDED"
         overextended_trigger = "ADX_SECONDARY"
-    elif bbwp_val <= 30.0 and ema9 > ema35:
+    elif bbwp_val <= 30.0 and ribbon_spread > 0.05:
         kinematic_grade      = "PRIMED"
         overextended_trigger = None
     else:
