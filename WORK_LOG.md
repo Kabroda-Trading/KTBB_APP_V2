@@ -157,15 +157,27 @@ Replaced `_is_bos_stale()` (favorable drift only) with `_candidate_is_live()` �
 - `openTfCockpit()` and `copyTfLevel()` functions added
 - CSS: `.tf-btn-copy`, `.tf-btn-cockpit`, `.tf-actions` styles added
 
+### DEPLOY VERIFICATION (2026-07-01, confirmed via Render deploy log for commit `6fae865`)
+
+```
+2026-07-01T14:09:20.362975896Z ==> Build successful 🎉
+2026-07-01T14:10:12.535238360Z INFO:     Application startup complete.
+2026-07-01T14:10:13.173495106Z >>> GRAVITY ENGINE: Initializing background loop (v3 target logic, STRICT SSOT MODE)...
+2026-07-01T14:10:13.173501796Z >>> TRADE-LIFECYCLE MONITOR: Initializing (W-9 engine, OHLC detection, Phase 4 candidates)...
+2026-07-01T14:10:27.688115426Z || MACRO ANCHORS LOCKED (SPOT) || BTCUSDT | Exact Waves Mapped: 10
+2026-07-01T14:10:15.939999726Z ==> Your service is live 🎉
+```
+No traceback, no crash-loop. The `(v3 target logic...)` boot line is the literal print statement changed in commit `6fae865` — direct proof the exact commit is running in production, not just that *some* deploy succeeded. **Committed ✅ · Pushed ✅ · Deployed & booted clean ✅ (evidence above).**
+
 ### CARRY FORWARD
 
 - **Verify BBWP/PMARP recording after next NY session:** `SELECT date_key, bbwp_15m, bbwp_state, pmarp_15m, pmarp_state FROM session_audit_log ORDER BY created_at DESC LIMIT 3;`
 - **Watch `adx_pmarp_agree` and `overextended_trigger`** — ADX secondary gate retained pending data proving PMARP covers the Jun-3 scenario.
 - **Phase 2 RSI Divergence** — deferred. Column pre-reserved as `rsi_divergence_type='NONE'`. Build after N≥20 sessions with outcomes.
-- **v3 single-target check:** `SELECT id, session_timeframe, target_logic_version, t1, t2, t3, htf_anchor_type FROM campaign_logs WHERE target_logic_version='v3' ORDER BY created_at DESC LIMIT 10;` — expect t2/t3 NULL on all rows (this is the v3 shape, not missing data).
-- **Confirm no `v2` rows are written after the deploy timestamp** — any `v2` row after cutover means the old code path is still live somewhere (deploy didn't fully replace the process, or a stale worker is running old code).
+- **v3 single-target check:** `SELECT id, session_timeframe, target_logic_version, t1, t2, t3, htf_anchor_type FROM campaign_logs WHERE target_logic_version='v3' ORDER BY created_at DESC LIMIT 10;` — expect t2/t3 NULL on all rows (this is the v3 shape, not missing data). **Not yet run — no 4H/1H BOS has fired since deploy.**
+- **Confirm no `v2` rows are written after 2026-07-01 14:10 UTC (deploy timestamp)** — any `v2` row after that means the old code path is still live somewhere.
 - **Watch for the next real 4H/1H BOS candidate post-deploy** — confirm T1 populated / T2,T3 NULL / `target_logic_version='v3'` on the actual row, and confirm the radar panel renders "Target" with working COPY/COCKPIT buttons.
-- **Symmetric lifecycle check confirmed by code trace, not yet by live example:** `_candidate_is_live()` in `market_radar.py` was verified symbolically for both LONG and SHORT × both favorable and adverse drift (see session notes) — all four branches suppress correctly at the 75% threshold. Confirm against a real adverse-drift candidate once one occurs.
+- **Symmetric lifecycle check confirmed by code trace, not yet by live example:** `_candidate_is_live()` in `market_radar.py` was verified symbolically for both LONG and SHORT × both favorable and adverse drift — all four branches suppress correctly at the 75% threshold (LONG: favorable suppresses at price≥entry+0.75×(target-entry), adverse suppresses at price≤entry-0.75×(entry-stop); SHORT is the exact mirror). Confirm against a real adverse-drift candidate once one occurs.
 
 ---
 
