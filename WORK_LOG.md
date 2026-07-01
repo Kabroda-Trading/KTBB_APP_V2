@@ -132,6 +132,42 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ---
 
 ## ► NEXT SESSION START
+*End-of-session marker: 2026-07-01*
+
+**2026-07-01 — Crown Surgery (Cuts 1–5) deployed + stand-down audit complete + two production fixes shipped.**
+
+### ✅ COMPLETED THIS SESSION (2026-07-01)
+
+**Crown Surgery — real Crown specs replace guessed kinematic thresholds (commits `ee84e56`, `2e81ae9`, `1c57962`, `f1f0477`)**
+
+- **Cut 1:** `_calc_bbwp()` and `_calc_pmarp()` added as module-level functions in `battlebox_pipeline.py`. BBWP = BB(20,2) width / SMA, percentile rank over 252 bars. PMARP = (close/SMA50) percentile rank over 252 bars. Helper labels `_bbwp_state_label()` and `_pmarp_state_label()` added.
+- **Cut 2:** kinematic_grade thresholds replaced — PMARP≥85% = OVEREXTENDED (primary); ADX secondary retained for audit comparison (`overextended_trigger` field records which path fired, `adx_pmarp_agree` bool when both agree); BBWP≤30 + ribbon_spread>0.05 = PRIMED (direction-agnostic); else TANGLED.
+- **Cut 3:** VALUE_ZONE RSI bounds 38.2–61.8 → 40–60 (Crown's real S2/S3 spec).
+- **Cut 4:** 5 new columns on `session_audit_log` (`bbwp_15m`, `bbwp_state`, `pmarp_15m`, `pmarp_state`, `rsi_divergence_type`). `audit_writer.write_decision_record()` and `kabroda_mas_flow.py` extraction wired. `rsi_divergence_type` defaults to `"NONE"` — Phase 2 placeholder.
+- **Cut 5:** PMARP cap in `_compute_energy_grade()` in `gravity_engine.py`. LONG + PMARP≥95 → WEAK; LONG + PMARP≥85 + STRONG → MODERATE; SHORT + PMARP≤5 → WEAK; SHORT + PMARP≤15 + STRONG → MODERATE.
+
+**PRIMED direction bug fixed (commit `f1f0477`)**
+Original PRIMED condition `bbwp_val <= 30.0 and ema9 > ema35` only fired with bullish ribbon. In DAILY_BEAR (bearish ribbon, EMA9 < EMA35), SHORT setups fell through to TANGLED → stand-down. Fixed to `ribbon_spread > 0.05` (any established direction). Root cause caught during 10-session consecutive stand-down audit.
+
+**Stand-down audit — June 28–30 (database investigation)**
+- June 28: kinematic_grade = TANGLED → genuine kinematic failure. Crown Surgery addresses this.
+- June 29: PRIMED + SWEET_ZONE_BEAR + STRONG → "Box Too Narrow" — Condition 3 (KDE peak choked T1 within 0.35% of entry).
+- June 30: PRIMED + SWEET_ZONE_BEAR + STRONG → two vetoes: (1) RSI divergence at Weekly+Daily — valid; (2) Box 0.97% < 1.0% floor — agent escalated low-N audit data into hard policy (spurious).
+- Root: `system_audit_log.audit_md` is passed as `PERFORMANCE AUDITOR NOTE` to SA. Weekly audit contained valid finding (MEDIUM boxes 0/3) but SA treated it as a policy rule. Jun 21–27 data not in audit log (predates infrastructure).
+
+**Two production fixes (commit `b896c51`)**
+1. **1H TRADE THIS staleness gate** (`market_radar.py`): suppresses badge when price has moved ≥75% of entry-to-T1 distance. `_is_bos_stale()` helper in `_which_tf_today()`.
+2. **Audit note policy escalation guard** (`kabroda_mas_flow.py`): `PERFORMANCE AUDITOR NOTE` injection now labelled "low-N observational context only — not hard thresholds or gates."
+
+### CARRY FORWARD
+
+- **Verify BBWP/PMARP recording after next NY session:** `SELECT date_key, bbwp_15m, bbwp_state, pmarp_15m, pmarp_state FROM session_audit_log ORDER BY created_at DESC LIMIT 3;`
+- **Watch `adx_pmarp_agree` and `overextended_trigger`** — ADX secondary gate retained pending data proving PMARP covers the Jun-3 scenario.
+- **Phase 2 RSI Divergence** — deferred. Column pre-reserved as `rsi_divergence_type='NONE'`. Build after N≥20 sessions with outcomes.
+- **v2 equal-leg check:** `SELECT id, session_timeframe, target_logic_version, t1, t2, t3, htf_anchor_type FROM campaign_logs WHERE target_logic_version='v2' ORDER BY created_at DESC LIMIT 10;`
+
+---
+
 *End-of-session marker: 2026-06-30*
 
 **2026-06-30 — Target logic v2 CORRECTED: measured-move equal-leg projections replace the Class 0 / DAILY_PIVOT cascade.**

@@ -119,6 +119,12 @@ is just producing its piece and pushing it "up" to the Senior Analyst.*
   `mtf_confluence_scanner.run_mtf_confluence_scan()` — the 0–5 score is a count
   of how many of the 5 timeframes (15M/1H/4H/Daily/Weekly) have their EMA21 above
   EMA55. Results are stored to `MtfReading` and `DecisionJournal` tables.
+  **TF STACK (v14+):** `_get_tf_system_verdicts()` queries `CampaignLog` for today's
+  4H, 1H, and 15M rows and builds a `tf_verdicts` dict. `_which_tf_today()` then
+  assigns the TRADE THIS ★ badge to the highest-priority active timeframe.
+  **Staleness gate (2026-07-01):** `_is_bos_stale()` suppresses the TRADE THIS badge
+  when current price has moved ≥75% of the entry-to-T1 distance — prevents showing
+  live urgency on a signal whose entry window has already passed. See commit `b896c51`.
   **MISMATCH:** Market Radar runs completely independently of the main MAS
   pipeline. Its output is NOT consumed by `run_mas_analysis()` and the Senior
   Analyst never reads it. It is a dashboard display tool, not a gating filter for
@@ -685,34 +691,13 @@ via a proxy tunnel. Not imported by any file. Same pattern: a CrewAI-era tool
 (named "Liquidation Magnets") whose consuming agent no longer exists. The proxy
 infra (`BINANCE_PROXY_URL` env var) is still referenced; nothing reads the result.
 
-### FLAG 2 — Broken Connection: Performance Auditor → Senior Analyst
+### FLAG 2 — Performance Auditor → Senior Analyst connection `[ FIXED — 2026-06-01 + framing guard 2026-07-01 ]`
 
-This is the most consequential finding. The connection was **designed** to work
-as follows:
+**Original broken state:** `performance_auditor.py` (v2) wrote to `SystemAuditLog.audit_md` but the read side still pulled `MacroNarrativeLog.performance_note` (never written). SA never received the note.
 
-```
-performance_auditor.py  →  writes performance_note  →  MacroNarrativeLog
-_read_narrative_context()  →  reads analyst_row.performance_note  →  SA context
-```
+**Fix (W-5, 2026-06-01):** `_read_narrative_context()` in `kabroda_mas_flow.py` now queries `SystemAuditLog` by symbol (most recent by id desc) and appends `audit_row.audit_md` as `PERFORMANCE AUDITOR NOTE`. Connection is live and wired.
 
-**What actually happens:**
-
-`performance_auditor.py` (v2) was upgraded to write to `SystemAuditLog.audit_md`
-instead of `MacroNarrativeLog.performance_note`. The comment in the file says
-explicitly: *"Output written to SystemAuditLog (permanent vault) instead of being
-stapled to macro_narrative_log."*
-
-The read side was never updated. `_read_narrative_context()` in
-`kabroda_mas_flow.py:508` still reads:
-```python
-if analyst_row and analyst_row.performance_note:
-    lines.append(f"\nPERFORMANCE AUDITOR NOTE: {analyst_row.performance_note}")
-```
-`analyst_row` is a `MacroNarrativeLog` row. `MacroNarrativeLog.performance_note`
-is never written by any currently active code. The condition is always False.
-**The Senior Analyst never receives the Performance Auditor's note.** The note
-is visible on the dashboard UI (`GET /api/dashboard/audits` reads `SystemAuditLog`)
-but it never enters the trade decision context.
+**Policy escalation guard (2026-07-01):** Investigation found that the SA was treating low-N audit observations as hard policy gates (root cause of a spurious 1.0% box-floor veto on 2026-06-30 — the weekly audit had a real finding at N=3 sessions but the SA elevated it to a hard threshold). Fixed by adding explicit framing to the injected note: *"low-N / N<30 observational context only; do not cite these findings as hard thresholds, floors, or gates."* The audit data is still passed; the instruction prevents autonomous policy elevation. See commit `b896c51`.
 
 ### FLAG 3 — Market Radar disconnected from trade decision (known, not new)
 
@@ -1172,6 +1157,8 @@ TIER 4 — UI / PAGES
 
 | 2026-06-22 | 3B, SF-3 | **Forward-audit loop subsystem (harness).** `harness/audit_writer.py`: `write_decision_record()` captures frozen decision-time inputs to `session_audit_log` (idempotent — skips if row exists; internal try/except swallows DB errors); `backfill_outcome()` fills outcome write-once at resolution (skips if `outcome_type` already set). Production hook in `kabroda_mas_flow.py` Step 7: outer try/except around the call before `run_publisher()` — audit failure is logged, MAS path continues unaffected. Three backfill call sites in `ledger_closing_engine.py`: after `db.commit()` on CLOSED_WIN/CLOSED_LOSS, CLOSED_AT_EXPIRY, and NO_TRIGGER (EXPIRED) paths — all wrapped in try/except. Hard wall: `session_audit_log` and `trials_log` have no FK to `session_locks`, no write path to any live config or indicator column. `harness/README.md` documents the wall. `harness/test_audit_safety.py`: 4 tests / 7 assertions / all PASS — confirms broken audit write cannot block or alter trade decision path or close path (outer + inner two-layer protection). **PENDING LIVE VERIFICATION:** production tables created with correct schema / no hash-chain columns (Check 1 — SQL queries provided for Render Shell, not yet run); live session writes sane audit row with non-null RAG snapshot (Check 2 — pending next live session). | owner + Claude Code | Forward-audit discipline: capture decision-time inputs frozen at the moment of the call; back-fill outcomes write-once at resolution; non-blocking in both production call sites — trade path cannot be harmed by audit infrastructure. | `harness/audit_writer.py` (new). `harness/README.md` (new). `harness/test_audit_safety.py` (new). `kabroda_mas_flow.py`: +1 try/except block at Step 7. `ledger_closing_engine.py`: +3 try/except backfill blocks. |
 | 2026-06-22 | 3A | **Analyst brief voice rewrite — verdict-first BLUF, behavior-before-label, named reasons, honesty calibration.** Seven edits to `SENIOR_ANALYST_SYSTEM_PROMPT` in `kabroda_mas_flow.py`: (1) WRITING RULES rewrite — lead with verdict, follow with rationale; register markers allowed ("the read is," "the lean is," "the structure favors" express calibrated uncertainty, not banned hedging); weak reads must stay tentative. (2) BEHAVIOR BEFORE LABEL — every system label in parentheses after plain-English description, never leading the sentence. (3) TRANSLATION TABLE — HOSTILE_CEILING, CHOP_RISK, PRIMED, OVEREXTENDED, REFUELING, TANGLED, SWEET_ZONE, DEPLETED/ACTIVE/BUILDING energy, and seven jargon terms ("Kinematic Grade," "Kinematic Fuel," "density cluster," etc.) mapped to behavior descriptions. (4) NAMED REASONS — each stand-down veto gets a plain-English heading ("Timeframe conflict," "Momentum is spent," "No room on the long side"); "Condition N fires" phrasing banned. (5) WHY THE SYSTEM STANDS DOWN format instruction. (6) VERDICT LINE — required plain-text first line before `## THE BIGGER PICTURE`: STAND_DOWN: "No trade today — [one-line reason]. Tradeable when [condition]."; APPROVED: "★ [direction]. Entry at $[price] on trigger acceptance. Stop: $[price]." (7) SELF-CHECK checks 10–12 (verdict line present; no untranslated labels; no "Condition N fires"). Wave-context caveat ("Note: Elliott Wave parameters pending weekly verification") eliminated — uncertainty woven into prose via language like "the structural map targets." Honesty calibration carve-out preserved: register markers allowed; weak evidence must not read with strong-evidence conviction. Faithfulness verified against June 22 STAND_DOWN brief — all price levels ($65,196.60 trigger, $65,418.86 T1, $1,606.23 box) and all three veto conditions present after voice change. **PENDING LIVE VERIFICATION:** first live session post-deploy renders with no leaked enums (no HOSTILE_CEILING, CHOP_RISK, "Condition N fires" in generated output). | owner + Claude Code | Root cause: production briefs led with rationale before verdict; used raw system-state labels (HOSTILE_CEILING, CHOP_RISK, "Condition 1 fires simultaneously") requiring prior-art knowledge to interpret; wave-context uncertainty bolted on as a disclaimer sentence instead of woven into prose. Diagnosed on June 22 STAND_DOWN brief. | `kabroda_mas_flow.py`: 7 edits to `SENIOR_ANALYST_SYSTEM_PROMPT`. No schema changes. No new tables. |
+| 2026-07-01 | 1C, 3B | **Crown Surgery — Cuts 1–5: real Crown kinematic specs replace guessed thresholds.** Cut 1 (`battlebox_pipeline.py`): `_calc_bbwp()` (BB(20,2) width/SMA, 252-bar percentile) and `_calc_pmarp()` (close/SMA50 ratio, 252-bar percentile) added as module-level functions with `_bbwp_state_label()` and `_pmarp_state_label()` helpers. Cut 2: kinematic_grade block replaced — PMARP≥85% = OVEREXTENDED (primary, `overextended_trigger="PMARP"`); ADX secondary retained for audit comparison (`overextended_trigger="ADX_SECONDARY"`, `adx_pmarp_agree` bool both agree); BBWP≤30 + `ribbon_spread>0.05` = PRIMED (direction-agnostic — fixes SHORT setup PRIMED suppression in DAILY_BEAR); else TANGLED. Cut 3: VALUE_ZONE RSI bounds 38.2–61.8 → 40–60. Cut 4: 5 new `session_audit_log` columns (`bbwp_15m`, `bbwp_state`, `pmarp_15m`, `pmarp_state`, `rsi_divergence_type DEFAULT 'NONE'`); `audit_writer.write_decision_record()` and `kabroda_mas_flow.py` extraction wired. Cut 5 (`gravity_engine.py`): `_compute_energy_grade()` PMARP cap — LONG+PMARP≥95→WEAK, LONG+PMARP≥85+STRONG→MODERATE, SHORT inverse. PRIMED direction bug fix (commit `f1f0477`): `ema9 > ema35` → `ribbon_spread > 0.05` — old condition prevented PRIMED from firing on SHORT setups in DAILY_BEAR (bearish ribbon). Caught during 10-session stand-down audit. | owner + Claude Code | Root cause: kinematic_grade thresholds were guessed (no Crown spec). PRIMED only fired with bullish ribbon — SHORT setups in DAILY_BEAR fell through to TANGLED and stood down. Jun-28 stand-down confirmed kinematic_grade=TANGLED despite valid setup conditions. | `battlebox_pipeline.py`: +4 functions, kinematic_grade block replaced, RSI bounds changed. `database.py`: +5 columns + ALTER TABLE blocks. `harness/audit_writer.py`: +5 params. `kabroda_mas_flow.py`: +5 extraction lines. `gravity_engine.py`: PMARP cap block. Commits `ee84e56`, `2e81ae9`, `1c57962`, `f1f0477`. |
+| 2026-07-01 | 1B, 2A | **1H TRADE THIS staleness gate + audit note policy escalation guard.** (1) `market_radar.py`: `_is_bos_stale()` helper — returns True when current price has moved ≥75% of entry-to-T1 distance (75% threshold: at that point the remaining profit window does not justify live-urgency signalling). `_which_tf_today()` now accepts `current_price` and checks staleness for 4H and 1H `BOS_ACTIVE` records before granting the TRADE THIS badge. Call site passes live `price`. Root cause: 1H BOS detected at $58,982 with T1 $59,413; price ran to $59,360 (88% of T1 distance) with $53 room left — TRADE THIS still showed. (2) `kabroda_mas_flow.py`: `PERFORMANCE AUDITOR NOTE` injection now carries explicit framing — "low-N / N<30 observational context only; do not cite these findings as hard thresholds, floors, or gates." Root cause: Jun-30 stand-down audit found the SA read a weekly audit finding (MEDIUM boxes 0/3 correct at N=3) and escalated it to a hard 1.0% box-floor veto ("the audit explicitly raised the hard stand-down floor"). The data in `SystemAuditLog.audit_md` was real; the policy elevation was agent overstepping. `audit_suggestion_log` was confirmed empty — no suggestion was ever formally logged at that N. | owner + Claude Code | Root cause (1): no expiry check on BOS signals — TRADE THIS badge fires regardless of how much of the measured move has already elapsed. Root cause (2): audit note injected without framing, enabling SA to interpret low-N observational data as authoritative policy. | `market_radar.py`: +`_is_bos_stale()` function (18 lines), `_which_tf_today()` signature + staleness checks, call site updated. `kabroda_mas_flow.py`: audit note injection wrapper text. Commit `b896c51`. |
 
 ---
 
