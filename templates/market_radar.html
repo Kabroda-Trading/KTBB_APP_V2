@@ -1037,23 +1037,34 @@
             const tv1h  = (tfVerdicts && tfVerdicts['1H'])  || {};
             const tv15m = (tfVerdicts && tfVerdicts['15M']) || {};
 
-            // Seed candidate memory so COCKPIT/COPY buttons have access to levels
+            // Seed candidate memory so COCKPIT/COPY buttons have access to levels.
+            // Only live (BOS_ACTIVE) candidates get seeded — a RESOLVED candidate must
+            // never leave a stale live-looking entry that COCKPIT/COPY could act on.
             window.tfCandidateMemory = window.tfCandidateMemory || {};
             if (tv4h.status === 'BOS_ACTIVE') {
                 window.tfCandidateMemory[sym + '_4H'] = {sym, bias: tv4h.bias, entry: tv4h.entry, stop: tv4h.stop, target: tv4h.t1};
+            } else {
+                delete window.tfCandidateMemory[sym + '_4H'];
             }
             if (tv1h.status === 'BOS_ACTIVE') {
                 window.tfCandidateMemory[sym + '_1H'] = {sym, bias: tv1h.bias, entry: tv1h.entry, stop: tv1h.stop, target: tv1h.t1};
+            } else {
+                delete window.tfCandidateMemory[sym + '_1H'];
             }
 
             // Highest-priority active TF from server-computed _which_tf_today()
             const tradeTf = (tfToday && tfToday.primary_tf !== 'NONE') ? tfToday.primary_tf : null;
 
             function tfRow(tf, data) {
-                const active = data.status === 'BOS_ACTIVE';
-                const color  = active ? (data.bias === 'LONG' ? '#22c55e' : '#ef4444') : '#1e293b';
-                const text   = active ? (data.bias === 'LONG' ? '#22c55e' : '#ef4444') : '#334155';
+                const active   = data.status === 'BOS_ACTIVE';
+                const resolved = data.status === 'RESOLVED';
+                const color  = active ? (data.bias === 'LONG' ? '#22c55e' : '#ef4444')
+                             : resolved ? '#334155' : '#1e293b';
+                const text   = active ? (data.bias === 'LONG' ? '#22c55e' : '#ef4444')
+                             : resolved ? '#64748b' : '#334155';
                 const badge  = `<span class="tf-label" style="border-color:${color}; color:${text};">${tf}</span>`;
+                // RESOLVED never wins TRADE THIS — tradeTf can only equal tf here if the
+                // server-side _which_tf_today() granted it, which requires status===BOS_ACTIVE.
                 const tradeThis = (tradeTf === tf)
                     ? `<span class="tf-trade-this">TRADE THIS ★</span>` : '';
                 let detail = '';
@@ -1068,6 +1079,28 @@
                         <button class="tf-btn-copy" onclick="copyTfLevel('${sym}','${tf}')" title="Copy entry/stop/target">📋 COPY</button>
                         <button class="tf-btn-cockpit" onclick="openTfCockpit('${sym}','${tf}')">COCKPIT →</button>
                     </div>`;
+                } else if (resolved) {
+                    const outcome = data.outcome || '';
+                    const pnl = (data.realized_pnl !== null && data.realized_pnl !== undefined) ? data.realized_pnl : null;
+                    let outcomeLabel, outcomeColor;
+                    if (outcome === 'CLOSED_WIN') {
+                        outcomeLabel = `WIN +${(pnl !== null ? pnl : 1).toFixed(2)}R`;
+                        outcomeColor = '#22c55e';
+                    } else if (outcome === 'CLOSED_LOSS') {
+                        outcomeLabel = `LOSS ${(pnl !== null ? pnl : -1).toFixed(2)}R`;
+                        outcomeColor = '#ef4444';
+                    } else if (outcome === 'CLOSED_AT_EXPIRY') {
+                        outcomeLabel = `EXPIRED (${pnl !== null ? pnl.toFixed(2) : '0.00'}R)`;
+                        outcomeColor = '#f97316';
+                    } else if (outcome === 'EXPIRED') {
+                        outcomeLabel = 'EXPIRED (no data)';
+                        outcomeColor = '#64748b';
+                    } else {
+                        outcomeLabel = outcome || 'CLOSED';
+                        outcomeColor = '#64748b';
+                    }
+                    detail = `<span style="color:${outcomeColor}; font-weight:700;">RESOLVED — ${outcomeLabel}</span>`;
+                    actions = `<div class="tf-actions"><span style="color:#334155; font-size:9px; font-family:'JetBrains Mono';">NO ACTION AVAILABLE</span></div>`;
                 } else {
                     detail = `<span style="color:#1e3a52;">MONITORING — no signal today</span>`;
                 }

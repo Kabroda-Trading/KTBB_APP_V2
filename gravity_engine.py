@@ -13,6 +13,7 @@ import subprocess
 
 from database import SessionLocal, GravityMemory, DecisionJournal, CampaignLog
 import battlebox_pipeline  # <-- SINGLE SOURCE OF TRUTH ENFORCED
+import notify
 
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 
@@ -578,6 +579,17 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
             f"| Stop: ${stop_price:.2f} | Target: ${t1_price:.2f} "
             f"| HTF: {htf_anchor_type} | Energy: {energy_grade}{flag}"
         )
+        try:
+            notify.send_admin_email(
+                subject=f"KABRODA 4H CANDIDATE OPEN — {symbol} {bias}",
+                body=(
+                    f"Symbol: {symbol}\nTimeframe: 4H\nBias: {bias}\n"
+                    f"Entry: ${current_close:.2f}\nStop: ${stop_price:.2f}\n"
+                    f"Target: ${t1_price:.2f}\nTarget logic version: v3"
+                ),
+            )
+        except Exception as e:
+            print(f"[NOTIFY ERROR] 4H open email failed: {e}")
     except Exception as e:
         print(f"[4H BOS DETECTION] {symbol} error: {e}")
         traceback.print_exc()
@@ -817,6 +829,17 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
             f"| Stop: ${stop_price:.2f} | Target: ${t1_price:.2f} "
             f"| HTF: {htf_anchor_type} | Energy: {energy_grade_1h}{flag}"
         )
+        try:
+            notify.send_admin_email(
+                subject=f"KABRODA 1H CANDIDATE OPEN — {symbol} {bias}",
+                body=(
+                    f"Symbol: {symbol}\nTimeframe: 1H\nBias: {bias}\n"
+                    f"Entry: ${current_close:.2f}\nStop: ${stop_price:.2f}\n"
+                    f"Target: ${t1_price:.2f}\nTarget logic version: v3"
+                ),
+            )
+        except Exception as e:
+            print(f"[NOTIFY ERROR] 1H open email failed: {e}")
     except Exception as e:
         print(f"[1H BOS DETECTION] {symbol} error: {e}")
         traceback.print_exc()

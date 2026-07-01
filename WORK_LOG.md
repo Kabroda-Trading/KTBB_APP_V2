@@ -134,6 +134,29 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ## ► NEXT SESSION START
 *End-of-session marker: 2026-07-01*
 
+**2026-07-01 (session 3) — Resolved-candidate display fix + admin email notifications (4H/1H open/close).**
+
+### ✅ COMPLETED THIS SESSION (2026-07-01, session 3)
+
+**Root cause: candidate 112 (1H LONG) closed CLOSED_WIN at 04:45 UTC — a real +1R win — but the radar kept rendering it as live for hours, with COPY/COCKPIT buttons still active, until the owner found out by accident.**
+
+**Fix 1 — Resolved-candidate display (`market_radar.py`, `templates/market_radar.html`)**
+`_get_tf_system_verdicts()` was setting `status: "BOS_ACTIVE"` unconditionally whenever a 4H/1H `CampaignLog` row existed for today — it never checked `closed_at`. This is the same engine-vs-body pattern as the earlier lifecycle fix: Phase 4 in `ledger_closing_engine.py` already knew the correct answer (the candidate IS closed, correctly recorded with `status='CLOSED_WIN'` and `closed_at` populated) — the bug was the display never reading that answer. Fixed the query, not the data:
+- New helper `_tf_candidate_verdict(c)` in `market_radar.py` — returns `status: "RESOLVED"` (with `outcome` and `realized_pnl`) when `c.closed_at is not None`, else `status: "BOS_ACTIVE"` as before.
+- `_which_tf_today()` already only grants TRADE THIS on `== "BOS_ACTIVE"` — confirmed this naturally excludes RESOLVED with no additional change needed; added an explicit comment documenting both suppression paths (price-drift via `_candidate_is_live()`, and resolved-state via the status check) so this isn't accidentally broken by a future edit.
+- `templates/market_radar.html`: `tfRow()` now renders a third state — RESOLVED shows "RESOLVED — WIN +1.00R" (green) / "LOSS −1.00R" (red) / "EXPIRED (...)" (orange/gray) in place of live Entry/Stop/Target, and disables COPY/COCKPIT (shows "NO ACTION AVAILABLE" instead). `window.tfCandidateMemory` seeding now explicitly deletes the entry when a candidate is not BOS_ACTIVE, so a stale live-looking memory entry can't be triggered even via manual console access.
+
+**Fix 2 — Admin email on 4H/1H candidate open AND close (`notify.py` new, wired into `gravity_engine.py` + `ledger_closing_engine.py`)**
+- New module `notify.py`: `send_admin_email(subject, body)` via stdlib `smtplib` (no new dependency). Recipient is `SMTP_DEST` — already provisioned in Render (`SMTP_USER`/`SMTP_PASS`/`SMTP_DEST` existed as env vars but were unused anywhere in the codebase, confirmed via repo-wide grep) — used directly rather than building a new admin-query/notification-preference system, matching the "don't over-build" instruction. Non-blocking: returns `False` and logs on any failure (missing config, connection error, auth error), never raises.
+- **Trigger 1 (open):** wired into both `_detect_4h_bos()` and `_detect_1h_bos()` in `gravity_engine.py`, immediately after the `CampaignLog` row commits. One email: symbol, timeframe, bias, entry, stop, target, `target_logic_version`.
+- **Trigger 2 (close):** new helper `_notify_candidate_closed(c)` in `ledger_closing_engine.py`, called at all four Phase 4 resolution branches (CLOSED_WIN, CLOSED_LOSS via the shared `if closed:` block, CLOSED_AT_EXPIRY, and the no-candles EXPIRED edge case). One email: outcome, realized PnL (as `+X.XXXXR`), time-to-resolve (hours between `entry_filled_at` and `closed_at`).
+- Rate limiting: none added — the existing daily dedup gate (one candidate row per symbol/timeframe/day) already caps this to at most 2 emails per timeframe per day.
+
+### DEPLOY VERIFICATION — PENDING
+Code compiles clean (`python -m py_compile` on all four touched files). Not yet pushed. Real test-send not yet confirmed — standalone script provided at session end for the owner to run locally with real `SMTP_*` values (redacted from Render's UI, not visible to Claude Code) and confirm delivery from their own inbox.
+
+---
+
 **2026-07-01 (session 2) — Single-target 4H/1H, unified lifecycle check, radar parity (commit `2328dac`).**
 
 ### ✅ COMPLETED THIS SESSION (2026-07-01, session 2)

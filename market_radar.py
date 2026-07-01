@@ -18,6 +18,37 @@ from database import SessionLocal, SessionLock, MtfReading, DecisionJournal, Cam
 TARGETS = ["BTCUSDT"]
 
 
+def _tf_candidate_verdict(c: CampaignLog) -> dict:
+    """
+    Builds the tf_verdicts entry for a 4H/1H candidate row. The engine (Phase 4
+    in ledger_closing_engine.py) already knows whether this candidate is open
+    or resolved — closed_at is the ground truth. This function reads that
+    answer rather than assuming "today's row" always means "live." A resolved
+    candidate must never render as BOS_ACTIVE: it would show working
+    COPY/COCKPIT buttons and could win the TRADE THIS badge for a trade that
+    already closed hours ago.
+    """
+    if c.closed_at is not None:
+        return {
+            "status": "RESOLVED",
+            "bias": c.bias,
+            "entry": c.entry_price,
+            "stop": c.stop_loss,
+            "t1": c.t1,
+            "outcome": c.status,
+            "realized_pnl": c.realized_pnl,
+        }
+    return {
+        "status": "BOS_ACTIVE",
+        "bias": c.bias,
+        "entry": c.entry_price,
+        "stop": c.stop_loss,
+        "t1": c.t1,
+        "outcome": None,
+        "realized_pnl": None,
+    }
+
+
 def _get_tf_system_verdicts(symbol_norm: str) -> dict:
     """
     Query campaign_logs for today's 4H, 1H, and 15M (MAS) statuses.
@@ -25,8 +56,8 @@ def _get_tf_system_verdicts(symbol_norm: str) -> dict:
     """
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     result = {
-        "4H":  {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None},
-        "1H":  {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None},
+        "4H":  {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None, "outcome": None, "realized_pnl": None},
+        "1H":  {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None, "outcome": None, "realized_pnl": None},
         "15M": {"status": "PENDING",    "bias": None, "entry": None, "stop": None, "t1": None},
     }
     try:
@@ -37,26 +68,14 @@ def _get_tf_system_verdicts(symbol_norm: str) -> dict:
                 CampaignLog.date_key == today,
             ).first()
             if c4h:
-                result["4H"] = {
-                    "status": "BOS_ACTIVE",
-                    "bias": c4h.bias,
-                    "entry": c4h.entry_price,
-                    "stop": c4h.stop_loss,
-                    "t1": c4h.t1,
-                }
+                result["4H"] = _tf_candidate_verdict(c4h)
             c1h = db.query(CampaignLog).filter(
                 CampaignLog.symbol == symbol_norm,
                 CampaignLog.session_id == "1h_system",
                 CampaignLog.date_key == today,
             ).first()
             if c1h:
-                result["1H"] = {
-                    "status": "BOS_ACTIVE",
-                    "bias": c1h.bias,
-                    "entry": c1h.entry_price,
-                    "stop": c1h.stop_loss,
-                    "t1": c1h.t1,
-                }
+                result["1H"] = _tf_candidate_verdict(c1h)
             c15m = (
                 db.query(CampaignLog)
                 .filter(
@@ -124,7 +143,13 @@ def _which_tf_today(tf_verdicts: dict, current_price: float = 0.0) -> dict:
     Return the highest-priority active timeframe for today.
     Priority: 4H BOS > 1H BOS > 15M APPROVED > NONE.
     Used to drive the TRADE THIS ★ badge on the radar TF stack.
-    Stale signals (price ≥75% of the way from entry to T1) are suppressed.
+    Two independent suppressions guard the badge, both required:
+      - price-drift staleness, checked by _candidate_is_live() below
+      - resolved-candidate state — a RESOLVED verdict never satisfies
+        == "BOS_ACTIVE" (set by _tf_candidate_verdict() once closed_at is
+        populated), so a closed trade can never win TRADE THIS regardless
+        of price. This is the fix for candidate 112 rendering as live hours
+        after it closed CLOSED_WIN.
     """
     v4h  = tf_verdicts.get("4H",  {})
     v1h  = tf_verdicts.get("1H",  {})

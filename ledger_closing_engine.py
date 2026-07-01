@@ -51,6 +51,7 @@ import ccxt.async_support as ccxt
 
 from database import CampaignLog, SessionLocal
 from session_manager import anchor_ts_for_utc_date, get_session_config
+import notify
 
 _ticker_exchange = ccxt.mexc({"enableRateLimit": True})
 _ohlc_exchange   = ccxt.kraken({"enableRateLimit": True})
@@ -142,6 +143,34 @@ def _observe_targets(c: CampaignLog, live: float) -> bool:
             changed = True
 
     return changed
+
+
+def _notify_candidate_closed(c: CampaignLog) -> None:
+    """
+    Fires the admin close-email for a resolved 4H/1H candidate. Called at each
+    Phase 4 resolution branch (CLOSED_WIN, CLOSED_LOSS, CLOSED_AT_EXPIRY,
+    EXPIRED). Non-blocking — a failure here must never interrupt the caller's
+    db.commit() or the lifecycle loop.
+    """
+    try:
+        tf = c.session_timeframe or "?"
+        duration = "unknown"
+        if c.entry_filled_at and c.closed_at:
+            delta = _as_utc(c.closed_at) - _as_utc(c.entry_filled_at)
+            hours = delta.total_seconds() / 3600.0
+            duration = f"{hours:.1f}h"
+        pnl_str = f"{c.realized_pnl:+.4f}R" if c.realized_pnl is not None else "N/A"
+        notify.send_admin_email(
+            subject=f"KABRODA {tf} CANDIDATE CLOSED — {c.symbol} {c.status}",
+            body=(
+                f"Symbol: {c.symbol}\nTimeframe: {tf}\nBias: {c.bias}\n"
+                f"Outcome: {c.status}\nRealized PnL: {pnl_str}\n"
+                f"Time to resolve: {duration}\n"
+                f"Entry: ${c.entry_price:.2f}\nStop: ${c.stop_loss:.2f}\nTarget: ${c.t1:.2f}"
+            ),
+        )
+    except Exception as e:
+        print(f"[NOTIFY ERROR] Close email failed for {c.symbol}: {e}")
 
 
 async def run_ledger_audit_loop():
@@ -380,6 +409,7 @@ async def run_ledger_audit_loop():
                         c.realized_pnl = None
                         db.commit()
                         print(f"|| LIFECYCLE P4 || {c.symbol} {c.mas_approval_status} EXPIRED (no candles).")
+                        _notify_candidate_closed(c)
                     continue
 
                 closed = False
@@ -415,6 +445,7 @@ async def run_ledger_audit_loop():
 
                 if closed:
                     db.commit()
+                    _notify_candidate_closed(c)
                     continue
 
                 # T2/T3 high-water mark update (non-closing observation)
@@ -438,6 +469,7 @@ async def run_ledger_audit_loop():
                     c.closed_at    = now_utc
                     db.commit()
                     print(f"|| LIFECYCLE P4 || {c.symbol} {c.mas_approval_status} CLOSED_AT_EXPIRY. R={frac_r:+.4f}.")
+                    _notify_candidate_closed(c)
                     continue
 
                 if obs_changed:
