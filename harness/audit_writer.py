@@ -118,6 +118,12 @@ def write_decision_record(
     tf4h_macd_hist: Optional[float] = None,
     daily_200sma_position: Optional[str] = None,
     daily_200sma_distance_pct: Optional[float] = None,
+    # Crown Surgery Cut 4 — BBWP/PMARP recording + RSI divergence type placeholder
+    bbwp_15m: Optional[float] = None,
+    bbwp_state: Optional[str] = None,
+    pmarp_15m: Optional[float] = None,
+    pmarp_state: Optional[str] = None,
+    rsi_divergence_type: Optional[str] = None,
 ) -> None:
     """
     Write a frozen-at-decision audit record to session_audit_log.
@@ -205,6 +211,12 @@ def write_decision_record(
             tf4h_macd_hist=tf4h_macd_hist,
             daily_200sma_position=daily_200sma_position,
             daily_200sma_distance_pct=daily_200sma_distance_pct,
+            # Crown Surgery Cut 4 — BBWP/PMARP at lock time
+            bbwp_15m=bbwp_15m,
+            bbwp_state=bbwp_state,
+            pmarp_15m=pmarp_15m,
+            pmarp_state=pmarp_state,
+            rsi_divergence_type=rsi_divergence_type or "NONE",
             # label tier at write time
             label_tier=_tier_label_for_n(n_current),
         )

@@ -273,6 +273,20 @@ def init_db():
         except Exception:
             pass
 
+    # --- CROWN SURGERY CUT 4 — BBWP/PMARP recording + RSI divergence placeholder ---
+    for _col in [
+        "bbwp_15m FLOAT",
+        "bbwp_state VARCHAR",
+        "pmarp_15m FLOAT",
+        "pmarp_state VARCHAR",
+        "rsi_divergence_type VARCHAR DEFAULT 'NONE'",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE session_audit_log ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- PHASE 3C JEWEL SPECIALIST — top-level scanner context columns ---
     for col_def in [
         "confluence_score INTEGER",
@@ -767,6 +781,13 @@ class SessionAuditLog(Base):
     tf4h_macd_hist            = Column(Float,   nullable=True)
     daily_200sma_position     = Column(String,  nullable=True)  # ABOVE / AT / BELOW
     daily_200sma_distance_pct = Column(Float,   nullable=True)
+
+    # ── CROWN SURGERY CUT 4 — BBWP/PMARP at decision time + RSI divergence placeholder ──
+    bbwp_15m            = Column(Float,  nullable=True)   # BBWP percentile on 15M candles at lock time (0-100)
+    bbwp_state          = Column(String, nullable=True)   # EXTREME_COMPRESSION / MODERATE_COMPRESSION / NEUTRAL / HIGH_EXPANSION / EXTREME_EXPANSION
+    pmarp_15m           = Column(Float,  nullable=True)   # PMARP percentile on 15M candles at lock time (0-100)
+    pmarp_state         = Column(String, nullable=True)   # EXTREME_DEPRESSED / MODERATE_DEPRESSED / NORMAL_DEVIATION / MODERATE_OVEREXTENDED / EXTREME_OVEREXTENDED
+    rsi_divergence_type = Column(String, nullable=True, default="NONE")  # Phase 2 placeholder: NONE / HIDDEN_BULLISH / HIDDEN_BEARISH / REGULAR_BULLISH / REGULAR_BEARISH
 
     # ── AUDIT METADATA ──
     label_tier = Column(String, nullable=True)  # four-tier label at record time; updated at N milestones

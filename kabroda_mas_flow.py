@@ -1404,6 +1404,12 @@ def run_mas_analysis(
             tf4h_macd_hist=_tf4h.get("macd_hist"),
             daily_200sma_position=_mtf.get("daily_200sma_position"),
             daily_200sma_distance_pct=_mtf.get("daily_200sma_distance_pct"),
+            # Crown Surgery Cut 4 — BBWP/PMARP from 15M JEWEL at decision time
+            bbwp_15m=_fuel.get("15M_JEWEL", {}).get("bbwp"),
+            bbwp_state=_fuel.get("15M_JEWEL", {}).get("bbwp_state"),
+            pmarp_15m=_fuel.get("15M_JEWEL", {}).get("pmarp"),
+            pmarp_state=_fuel.get("15M_JEWEL", {}).get("pmarp_state"),
+            rsi_divergence_type="NONE",
         )
         # Read-back heartbeat — proves the row actually landed, visible in Render logs
         try:
