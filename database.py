@@ -441,13 +441,19 @@ class CampaignLog(Base):
     #   "1H" = 1H BOS candidate detected by gravity engine.
     session_timeframe = Column(String, nullable=True, default="15M")
 
-    # --- TARGET LOGIC v2 AUDIT FIELDS ---
-    # These fields are written only by the corrected target/stop construction (v2).
-    # v1 rows have NULL on all of these.  Audit-AI must filter WHERE target_logic_version='v2'.
-    target_logic_version = Column(String, nullable=True, default="v1")  # 'v1'=original broken, 'v2'=corrected
+    # --- TARGET LOGIC AUDIT FIELDS ---
+    # These fields are written only by the corrected target/stop construction (v2+).
+    # v1 rows have NULL on all of these. Audit-AI must filter on the exact version tag —
+    # v2 and v3 rows have DIFFERENT SHAPES and must never be pooled together:
+    #   'v1' = original broken (Class 0 / DAILY_PIVOT cascade targets) — excluded from all audit.
+    #   'v2' = corrected equal-leg staged targets (T1/T2/T3 all populated). Legacy rows only,
+    #          frozen at the 2026-07-01 single-target cutover — no new v2 rows written.
+    #   'v3' = single structural target (T1 populated, T2/T3 always NULL by design — this is
+    #          not missing data, it is the v3 shape). Current logic as of 2026-07-01.
+    target_logic_version = Column(String, nullable=True, default="v1")
     target_too_small_flag = Column(Boolean, default=False)               # audit-only; T1 < 1.5x ATR — never gates trade
     htf_anchor_type = Column(String, nullable=True)                      # e.g. 'BULL_WAVE_3', 'DAILY_PIVOT', 'FIB_FALLBACK'
-    htf_anchor_price = Column(Float, nullable=True)                      # price of the higher-TF level that set T2
+    htf_anchor_price = Column(Float, nullable=True)                      # price of the higher-TF level that set the target
     energy_grade = Column(String, nullable=True)                         # STRONG/MODERATE/WEAK at detection time
 
 # ---------------------------------------------------------

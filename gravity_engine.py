@@ -1,8 +1,9 @@
 # gravity_engine.py
 # ==============================================================================
 # KABRODA GRAVITY ENGINE (BACKGROUND INGESTION & BEDROCK LOGGING)
-# TARGET LOGIC v2: structural measured move from break level (single target per trade),
+# TARGET LOGIC v3: structural measured move from break level (single target per trade),
 #   ATR safety rails, strength-filtered stop zones, touch_count tracking.
+#   (v2 = legacy staged T1/T2/T3, frozen 2026-07-01 — see database.py CampaignLog comment)
 # ==============================================================================
 import asyncio
 import traceback
@@ -350,7 +351,7 @@ async def fill_decision_outcomes():
 
 
 # ---------------------------------------------------------------------------
-# 4H BOS DETECTION — TARGET LOGIC v2 (MEASURED MOVE)
+# 4H BOS DETECTION — TARGET LOGIC v3 (SINGLE STRUCTURAL TARGET)
 #
 # ENTRY: 4H close beyond the most recent 4H SUPPLY (long) or DEMAND (short) zone.
 # STOP:  nearest strength-qualified 4H zone on the opposing side; 60-day lookback.
@@ -563,7 +564,7 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
             session_timeframe="4H",
             entry_filled_at=now,
             session_expires_at=now + timedelta(days=5),
-            target_logic_version="v2",
+            target_logic_version="v3",
             target_too_small_flag=target_too_small,
             htf_anchor_type=htf_anchor_type,
             htf_anchor_price=htf_anchor_price_val,
@@ -573,7 +574,7 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
         db.commit()
         flag = " [TARGET_TOO_SMALL]" if target_too_small else ""
         print(
-            f"|| 4H BOS v2 || {symbol} | {bias} | Entry: ${current_close:.2f} "
+            f"|| 4H BOS v3 || {symbol} | {bias} | Entry: ${current_close:.2f} "
             f"| Stop: ${stop_price:.2f} | Target: ${t1_price:.2f} "
             f"| HTF: {htf_anchor_type} | Energy: {energy_grade}{flag}"
         )
@@ -583,7 +584,7 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
 
 
 # ---------------------------------------------------------------------------
-# 1H BOS DETECTION — TARGET LOGIC v2 (MEASURED MOVE)
+# 1H BOS DETECTION — TARGET LOGIC v3 (SINGLE STRUCTURAL TARGET)
 #
 # ENTRY: 1H close beyond the most recent 1H SUPPLY (long) or DEMAND (short) zone.
 # STOP:  nearest qualified 1H zone (opposing side), 20-day lookback.
@@ -802,7 +803,7 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
             session_timeframe="1H",
             entry_filled_at=now,
             session_expires_at=now + timedelta(days=2),
-            target_logic_version="v2",
+            target_logic_version="v3",
             target_too_small_flag=target_too_small,
             htf_anchor_type=htf_anchor_type,
             htf_anchor_price=htf_anchor_price_val,
@@ -812,7 +813,7 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
         db.commit()
         flag = " [TARGET_TOO_SMALL]" if target_too_small else ""
         print(
-            f"|| 1H BOS v2 || {symbol} | {bias} | Entry: ${current_close:.2f} "
+            f"|| 1H BOS v3 || {symbol} | {bias} | Entry: ${current_close:.2f} "
             f"| Stop: ${stop_price:.2f} | Target: ${t1_price:.2f} "
             f"| HTF: {htf_anchor_type} | Energy: {energy_grade_1h}{flag}"
         )
@@ -825,7 +826,7 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
 # MAIN GRAVITY INGESTION LOOP
 # ---------------------------------------------------------------------------
 async def run_gravity_ingestion_loop():
-    print(">>> GRAVITY ENGINE: Initializing background loop (v2 target logic, STRICT SSOT MODE)...")
+    print(">>> GRAVITY ENGINE: Initializing background loop (v3 target logic, STRICT SSOT MODE)...")
 
     try:
         subprocess.Popen(["python", "kabroda_macro_engine.py"])

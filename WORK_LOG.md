@@ -141,6 +141,9 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 **Decision: Single structural target for 4H/1H (no T2/T3)**
 Crown's strategy code confirmed — S2 exits at `max(high[-15:])`, S3 exits at `min(low[-15:])` — one structural level, no ladder. Kabroda's own reasoning lands the same place: T1 (equal-leg measured move from the broken structural zone) is the only anchored target. T2/T3 were extrapolations with no structural basis in `gravity_memory`. Dropped from both `_detect_4h_bos()` and `_detect_1h_bos()` in `gravity_engine.py`. CampaignLog `t2`/`t3` now NULL for 4H/1H candidates — ledger engine already guards `if c.t2 is not None` so no downstream break.
 
+**Version-tag fix — v2/v3 discriminator (prevents old/new logic pooling in audit)**
+Candidate 112 (the original measured-move proof candidate) has T2/T3 populated under the OLD staged-target logic, tagged `target_logic_version='v2'`. Every candidate from this deploy forward has T2/T3 NULL under the NEW single-target logic — but was about to get the SAME `'v2'` tag, which would let old-shape and new-shape rows get silently pooled in any future audit query. **Fixed by bumping the tag to `'v3'`** for all candidates written under single-target logic going forward (`gravity_engine.py` lines writing `CampaignLog`, both 4H and 1H detectors). Chose `v3` over an ad-hoc `v2b` because it continues the existing sequence cleanly (`v1`=broken Class0/DAILY_PIVOT cascade, `v2`=corrected staged targets, `v3`=corrected single target) rather than inventing new ambiguous notation. Documented as a permanent discriminator in `database.py` CampaignLog comment block — not something to remember, it's written down at the column definition. **Audit rule going forward: `v2` rows = legacy staged shape (T1/T2/T3 populated), `v3` rows = current single-target shape (T1 populated, T2/T3 NULL by design, not missing data). Never average `v2` and `v3` rows together — they measure different trade constructions.**
+
 **Unified candidate lifecycle (`market_radar.py`)**
 Replaced `_is_bos_stale()` (favorable drift only) with `_candidate_is_live()` — one function, two conditions:
 - Favorable drift: price ≥75% from entry toward target → entry window closed
@@ -159,8 +162,10 @@ Replaced `_is_bos_stale()` (favorable drift only) with `_candidate_is_live()` �
 - **Verify BBWP/PMARP recording after next NY session:** `SELECT date_key, bbwp_15m, bbwp_state, pmarp_15m, pmarp_state FROM session_audit_log ORDER BY created_at DESC LIMIT 3;`
 - **Watch `adx_pmarp_agree` and `overextended_trigger`** — ADX secondary gate retained pending data proving PMARP covers the Jun-3 scenario.
 - **Phase 2 RSI Divergence** — deferred. Column pre-reserved as `rsi_divergence_type='NONE'`. Build after N≥20 sessions with outcomes.
-- **v2 single-target check (updated):** `SELECT id, session_timeframe, target_logic_version, t1, t2, t3, htf_anchor_type FROM campaign_logs WHERE target_logic_version='v2' ORDER BY created_at DESC LIMIT 10;` — expect t2/t3 NULL on all 4H/1H rows going forward.
-- **Push commit `2328dac`** when ready.
+- **v3 single-target check:** `SELECT id, session_timeframe, target_logic_version, t1, t2, t3, htf_anchor_type FROM campaign_logs WHERE target_logic_version='v3' ORDER BY created_at DESC LIMIT 10;` — expect t2/t3 NULL on all rows (this is the v3 shape, not missing data).
+- **Confirm no `v2` rows are written after the deploy timestamp** — any `v2` row after cutover means the old code path is still live somewhere (deploy didn't fully replace the process, or a stale worker is running old code).
+- **Watch for the next real 4H/1H BOS candidate post-deploy** — confirm T1 populated / T2,T3 NULL / `target_logic_version='v3'` on the actual row, and confirm the radar panel renders "Target" with working COPY/COCKPIT buttons.
+- **Symmetric lifecycle check confirmed by code trace, not yet by live example:** `_candidate_is_live()` in `market_radar.py` was verified symbolically for both LONG and SHORT × both favorable and adverse drift (see session notes) — all four branches suppress correctly at the 75% threshold. Confirm against a real adverse-drift candidate once one occurs.
 
 ---
 
