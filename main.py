@@ -933,6 +933,35 @@ async def api_run_audit(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+@app.post("/api/admin/test-notify")
+async def api_admin_test_notify(request: Request, db: Session = Depends(get_db)):
+    """
+    Fires one test admin email via notify.send_admin_email(), using the
+    real SMTP_* env vars already resolved in this running process (no
+    credentials pass through the browser or this endpoint). Admin only.
+    Used to confirm the 4H/1H candidate open/close email path is wired
+    correctly before relying on it in production.
+    """
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    import notify
+    ok = await asyncio.to_thread(
+        notify.send_admin_email,
+        "KABRODA NOTIFY TEST",
+        "This is a test send from /api/admin/test-notify. If you received "
+        "this, the SMTP notification path for 4H/1H candidate open/close "
+        "emails is confirmed working end to end.",
+    )
+    return JSONResponse({
+        "ok": ok,
+        "smtp_host": notify.SMTP_HOST,
+        "smtp_port": notify.SMTP_PORT,
+        "smtp_user_configured": bool(notify.SMTP_USER),
+        "smtp_dest_configured": bool(notify.SMTP_DEST),
+    })
+
+
 @app.get("/api/agents/cost")
 async def api_agents_cost(request: Request, db: Session = Depends(get_db)):
     """Returns 24h and 7-day agent spend summary. Admin only."""
