@@ -289,11 +289,72 @@ def _calc_stochastic(candles: List[Dict], k_period: int = 14, d_period: int = 3)
     d = sum(k_vals[-d_period:]) / min(d_period, len(k_vals))
     return {"k": round(k_vals[-1], 2), "d": round(d, 2)}
 
+
+# ── Crown BBWP / PMARP (Cut 1 — Crown's exact formulas, scalar output) ─────────
+
+def _calc_bbwp(closes: List[float], bb_period: int = 20, bb_std: float = 2.0, lookback: int = 252) -> float:
+    """BB Width Percentile: percentile rank of current BB width over `lookback` bars. Returns 50.0 if insufficient data."""
+    if len(closes) < bb_period + 1:
+        return 50.0
+    bbw: List[Optional[float]] = [None] * len(closes)
+    for i in range(bb_period - 1, len(closes)):
+        window = closes[i - bb_period + 1 : i + 1]
+        sma = sum(window) / bb_period
+        if sma == 0:
+            continue
+        variance = sum((x - sma) ** 2 for x in window) / bb_period
+        std = variance ** 0.5
+        bbw[i] = (sma + bb_std * std - (sma - bb_std * std)) / sma
+    cur = bbw[-1]
+    if cur is None:
+        return 50.0
+    start = max(0, len(closes) - lookback)
+    hist = [v for v in bbw[start:] if v is not None]
+    if not hist:
+        return 50.0
+    return round(sum(1 for v in hist if v < cur) / len(hist) * 100.0, 2)
+
+
+def _calc_pmarp(closes: List[float], ma_period: int = 50, lookback: int = 252) -> float:
+    """Price MA Ratio Percentile: percentile rank of (close/SMA50) over `lookback` bars. Returns 50.0 if insufficient data."""
+    if len(closes) < ma_period + 1:
+        return 50.0
+    pmar: List[Optional[float]] = [None] * len(closes)
+    for i in range(ma_period - 1, len(closes)):
+        sma = sum(closes[i - ma_period + 1 : i + 1]) / ma_period
+        if sma > 0:
+            pmar[i] = closes[i] / sma
+    cur = pmar[-1]
+    if cur is None:
+        return 50.0
+    start = max(0, len(closes) - lookback)
+    hist = [v for v in pmar[start:] if v is not None]
+    if not hist:
+        return 50.0
+    return round(sum(1 for v in hist if v < cur) / len(hist) * 100.0, 2)
+
+
+def _bbwp_state_label(val: float) -> str:
+    if val <= 5.0:  return "EXTREME_COMPRESSION"
+    if val <= 15.0: return "MODERATE_COMPRESSION"
+    if val >= 95.0: return "EXTREME_EXPANSION"
+    if val >= 85.0: return "HIGH_EXPANSION"
+    return "NEUTRAL"
+
+
+def _pmarp_state_label(val: float) -> str:
+    if val >= 95.0: return "EXTREME_OVEREXTENDED"
+    if val >= 85.0: return "MODERATE_OVEREXTENDED"
+    if val <= 5.0:  return "EXTREME_DEPRESSED"
+    if val <= 15.0: return "MODERATE_DEPRESSED"
+    return "NORMAL_DEVIATION"
+
+
 def _build_jewel_reading(candles: List[Dict]) -> Dict:
     """
     JEWEL indicator: EMA21/55 crossover state, ADX trend strength,
     Stochastic + RSI zone classification.
-    Value zone = 38.2–61.8. Extended = <20 or >80.
+    Value zone = 40–60 (Crown's real S2/S3 entry range). Extended = <20 or >80.
     Signal is BOUNCE_PRIMED when price hugs slow EMA inside value zone with ADX rising.
     """
     if not candles or len(candles) < 56:
@@ -313,11 +374,13 @@ def _build_jewel_reading(candles: List[Dict]) -> Dict:
     else:
         ema_state = "BEARISH_EXPANDING" if gap_now <= gap_prev else "BEARISH_COMPRESSING"
     rsi = _calc_rsi(closes)
-    if rsi < 20:         rsi_zone = "OVERSOLD_EXTREME"
-    elif rsi < 38.2:     rsi_zone = "OVERSOLD_VALUE"
-    elif rsi <= 61.8:    rsi_zone = "VALUE_ZONE"
-    elif rsi <= 80:      rsi_zone = "OVERBOUGHT_VALUE"
-    else:                rsi_zone = "OVERBOUGHT_EXTREME"
+    # Crown's real S2/S3 value zone: long entry 40-53, short entry 47-60 → unified 40-60.
+    # Previous 38.2-61.8 used Fibonacci retracement levels as RSI bounds — a guess.
+    if rsi < 20:       rsi_zone = "OVERSOLD_EXTREME"
+    elif rsi < 40.0:   rsi_zone = "OVERSOLD_VALUE"
+    elif rsi <= 60.0:  rsi_zone = "VALUE_ZONE"
+    elif rsi <= 80:    rsi_zone = "OVERBOUGHT_VALUE"
+    else:              rsi_zone = "OVERBOUGHT_EXTREME"
     stoch = _calc_stochastic(candles)
     if stoch["k"] < 20:     stoch_zone = "OVERSOLD"
     elif stoch["k"] <= 80:  stoch_zone = "NEUTRAL"
@@ -361,41 +424,61 @@ def _build_synthetic_jewel(raw_15m: List[Dict], adx_4h: Optional[Dict] = None) -
     ema55 = _calc_ema_series(closes, 55)[-1]
     
     sma200 = _calc_sma(closes, 200)
-    
+
     deviation_from_mean = abs(current_price - sma200) / sma200 * 100
     ribbon_spread = abs(ema9 - ema55) / ema55 * 100
-    
-    # CALIBRATION CHOICE B: gate OVEREXTENDED on 4H trend strength, not 15M ADX.
-    # Reason: after a sharp directional move the 15M ADX decays quickly (confirmed Jun 3:
-    # 15M ADX=14.3 despite 4H ADX=57.2) while the 4H trend is still fully intact.
-    # A 15M-only gate would re-block the fix for any session where the prior day was the
-    # big move. The 4H gate correctly distinguishes a ranging intraday spike (low 4H ADX)
-    # from a continuation session after a real multi-day trend (high 4H ADX).
-    adx_4h_strong = (adx_4h is not None and
-                     adx_4h.get("rising", False) and
-                     adx_4h.get("adx", 0.0) >= 25)
 
-    if deviation_from_mean > 1.5 and not adx_4h_strong:
-        kinematic_grade = "OVEREXTENDED"
-    elif ribbon_spread < 0.15:
-        kinematic_grade = "TANGLED"
+    # ── Crown's real overextension indicators (Cut 2) ─────────────────────────
+    bbwp_val  = _calc_bbwp(closes)
+    pmarp_val = _calc_pmarp(closes)
+    bbwp_lbl  = _bbwp_state_label(bbwp_val)
+    pmarp_lbl = _pmarp_state_label(pmarp_val)
+
+    # ADX secondary condition — Jun-3 fix retained for audit comparison.
+    # Crown's PMARP is the principled replacement; ADX secondary stays so the
+    # audit can determine whether PMARP cleanly covers the Jun-3 scenario.
+    adx_4h_strong      = (adx_4h is not None and
+                          adx_4h.get("rising", False) and
+                          adx_4h.get("adx", 0.0) >= 25)
+    adx_secondary_fires = (deviation_from_mean > 1.5 and not adx_4h_strong)
+
+    # PMARP primary → OVEREXTENDED; ADX secondary fires if PMARP disagrees (still OVEREXTENDED, logged separately)
+    if pmarp_val >= 85.0:
+        kinematic_grade      = "OVEREXTENDED"
+        overextended_trigger = "PMARP"
+    elif adx_secondary_fires:
+        kinematic_grade      = "OVEREXTENDED"
+        overextended_trigger = "ADX_SECONDARY"
+    elif bbwp_val <= 30.0 and ema9 > ema35:
+        kinematic_grade      = "PRIMED"
+        overextended_trigger = None
     else:
-        kinematic_grade = "PRIMED"
+        kinematic_grade      = "TANGLED"
+        overextended_trigger = None
+
+    # True when PMARP and ADX secondary agree on whether OVEREXTENDED; False = they disagree.
+    adx_pmarp_agree = (pmarp_val >= 85.0) == adx_secondary_fires
 
     exit_warning = kinematic_grade == "OVEREXTENDED" or (ribbon_spread < 0.10 and kinematic_grade == "TANGLED")
 
     return {
-        "rsi": round(rsi, 2),
-        "kinematic_grade": kinematic_grade,
+        "rsi":                   round(rsi, 2),
+        "kinematic_grade":       kinematic_grade,
+        "overextended_trigger":  overextended_trigger,
+        "adx_pmarp_agree":       adx_pmarp_agree,
+        "bbwp":                  bbwp_val,
+        "bbwp_state":            bbwp_lbl,
+        "pmarp":                 pmarp_val,
+        "pmarp_state":           pmarp_lbl,
         "deviation_from_mean_pct": round(deviation_from_mean, 2),
-        "ribbon_spread_pct": round(ribbon_spread, 2),
-        "exit_warning": exit_warning,
-        "ema9": round(ema9, 2),
-        "ema21": round(ema21, 2),
-        "ema35": round(ema35, 2),
-        "ema55": round(ema55, 2),
+        "ribbon_spread_pct":     round(ribbon_spread, 2),
+        "exit_warning":          exit_warning,
+        "ema9":   round(ema9, 2),
+        "ema21":  round(ema21, 2),
+        "ema35":  round(ema35, 2),
+        "ema55":  round(ema55, 2),
         "sma200": round(sma200, 2),
-        "jewel": _build_jewel_reading(raw_15m),
+        "jewel":  _build_jewel_reading(raw_15m),
     }
 
 def _build_fuel_gauge(raw_1h: List[Dict], raw_4h: List[Dict], raw_15m: List[Dict]) -> Dict:
