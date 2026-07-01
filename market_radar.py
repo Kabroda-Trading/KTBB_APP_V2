@@ -80,18 +80,41 @@ def _get_tf_system_verdicts(symbol_norm: str) -> dict:
     return result
 
 
-def _which_tf_today(tf_verdicts: dict) -> dict:
+def _is_bos_stale(verdict: dict, current_price: float, threshold: float = 0.75) -> bool:
+    """
+    Returns True if a BOS signal has already run ≥threshold fraction of its entry-to-T1
+    distance. At that point the entry opportunity has passed and TRADE THIS should not fire.
+    Example: entry $58,983, T1 $59,413, threshold 75% → stale when price > $59,305.
+    """
+    entry = verdict.get("entry")
+    t1    = verdict.get("t1")
+    bias  = verdict.get("bias", "")
+    if not entry or not t1 or not current_price:
+        return False
+    try:
+        entry = float(entry); t1 = float(t1); current_price = float(current_price)
+    except (TypeError, ValueError):
+        return False
+    if bias == "LONG" and t1 > entry:
+        return current_price >= entry + (t1 - entry) * threshold
+    if bias == "SHORT" and t1 < entry:
+        return current_price <= entry - (entry - t1) * threshold
+    return False
+
+
+def _which_tf_today(tf_verdicts: dict, current_price: float = 0.0) -> dict:
     """
     Return the highest-priority active timeframe for today.
     Priority: 4H BOS > 1H BOS > 15M APPROVED > NONE.
     Used to drive the TRADE THIS ★ badge on the radar TF stack.
+    Stale signals (price ≥75% of the way from entry to T1) are suppressed.
     """
     v4h  = tf_verdicts.get("4H",  {})
     v1h  = tf_verdicts.get("1H",  {})
     v15m = tf_verdicts.get("15M", {})
-    if v4h.get("status") == "BOS_ACTIVE":
+    if v4h.get("status") == "BOS_ACTIVE" and not _is_bos_stale(v4h, current_price):
         return {"primary_tf": "4H",   "flag": "4H_ACTIVE",      "bias": v4h.get("bias")}
-    if v1h.get("status") == "BOS_ACTIVE":
+    if v1h.get("status") == "BOS_ACTIVE" and not _is_bos_stale(v1h, current_price):
         return {"primary_tf": "1H",   "flag": "1H_ACTIVE",      "bias": v1h.get("bias")}
     if v15m.get("status") == "APPROVED":
         return {"primary_tf": "15M",  "flag": "15M_APPROVED",   "bias": v15m.get("bias")}
@@ -447,7 +470,7 @@ async def scan_sector():
         sym_norm = sym.replace("USDT", "/USDT") if "/" not in sym else sym
         mtf_snap = context.get("mtf_structural_snapshot", {}) or {}
         tf_verdicts = _get_tf_system_verdicts(sym_norm)
-        tf_today    = _which_tf_today(tf_verdicts)
+        tf_today    = _which_tf_today(tf_verdicts, current_price=price)
         daily_regime = _compute_daily_regime(mtf_snap)
         weekly_pos = mtf_snap.get("weekly_200sma_position") or ""
 

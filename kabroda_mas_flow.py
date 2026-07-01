@@ -680,7 +680,15 @@ def _read_narrative_context(symbol: str) -> str:
             .first()
         )
         if audit_row and audit_row.audit_md:
-            lines.append(f"\nPERFORMANCE AUDITOR NOTE: {audit_row.audit_md}")
+            # Framing is mandatory: the agent must not treat low-N audit patterns as
+            # hard thresholds or policy gates. Below N=30 per pattern these are
+            # directional observations only — awareness context, not rules.
+            lines.append(
+                f"\nPERFORMANCE AUDITOR NOTE (observational data — low sample size, N<30 "
+                f"per pattern; treat as awareness context only; do not cite these findings "
+                f"as hard thresholds, floors, or gates and do not apply them as rules):\n"
+                f"{audit_row.audit_md}"
+            )
 
         return "\n".join(lines)
 
