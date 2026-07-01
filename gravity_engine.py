@@ -48,10 +48,26 @@ def _compute_energy_grade(candles: List[Dict], bias: str) -> str:
     macd_strength = "STRONG" if hist_bps >= 20 else "WEAK" if hist_bps >= 5 else "DEPLETED"
     aligned = (bias == "LONG" and trend_bullish) or (bias == "SHORT" and not trend_bullish)
     if aligned and macd_strength == "STRONG":
-        return "STRONG"
+        grade = "STRONG"
     elif aligned:
-        return "MODERATE"
-    return "WEAK"
+        grade = "MODERATE"
+    else:
+        grade = "WEAK"
+    # Crown PMARP cap (Cut 5): overextended/depressed price → cap grade on trend-following entries.
+    # Only runs with ≥252 bars (enough history for meaningful percentile). No cap below threshold.
+    if len(closes) >= 252:
+        pmarp = battlebox_pipeline._calc_pmarp(closes)
+        if bias == "LONG":
+            if pmarp >= 95.0:
+                grade = "WEAK"                              # parabolic extension — chasing
+            elif pmarp >= 85.0 and grade == "STRONG":
+                grade = "MODERATE"                          # stretched, not extreme
+        elif bias == "SHORT":
+            if pmarp <= 5.0:
+                grade = "WEAK"                              # capitulation depth — mean reversion risk
+            elif pmarp <= 15.0 and grade == "STRONG":
+                grade = "MODERATE"
+    return grade
 
 
 # ---------------------------------------------------------------------------
