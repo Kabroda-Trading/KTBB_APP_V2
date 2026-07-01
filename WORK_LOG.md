@@ -134,9 +134,39 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ## ► NEXT SESSION START
 *End-of-session marker: 2026-07-01*
 
-**2026-07-01 — Crown Surgery (Cuts 1–5) deployed + stand-down audit complete + two production fixes shipped.**
+**2026-07-01 (session 2) — Single-target 4H/1H, unified lifecycle check, radar parity (commit `2328dac`).**
 
-### ✅ COMPLETED THIS SESSION (2026-07-01)
+### ✅ COMPLETED THIS SESSION (2026-07-01, session 2)
+
+**Decision: Single structural target for 4H/1H (no T2/T3)**
+Crown's strategy code confirmed — S2 exits at `max(high[-15:])`, S3 exits at `min(low[-15:])` — one structural level, no ladder. Kabroda's own reasoning lands the same place: T1 (equal-leg measured move from the broken structural zone) is the only anchored target. T2/T3 were extrapolations with no structural basis in `gravity_memory`. Dropped from both `_detect_4h_bos()` and `_detect_1h_bos()` in `gravity_engine.py`. CampaignLog `t2`/`t3` now NULL for 4H/1H candidates — ledger engine already guards `if c.t2 is not None` so no downstream break.
+
+**Unified candidate lifecycle (`market_radar.py`)**
+Replaced `_is_bos_stale()` (favorable drift only) with `_candidate_is_live()` — one function, two conditions:
+- Favorable drift: price ≥75% from entry toward target → entry window closed
+- Adverse drift: price ≥75% from entry toward stop → setup invalidated by market
+`_which_tf_today()` updated to call `_candidate_is_live()`. Single function, single owner (market_radar.py), no scattered patches.
+
+**Radar parity — 4H/1H panels now match 15M interactivity (`templates/market_radar.html`)**
+- COPY TRIGGERS button per panel: copies `BIAS|TF|Entry:X|Stop:X|Target:X` to clipboard
+- OPEN COCKPIT button per panel: opens mission cockpit modal populated with 4H/1H candidate levels
+- `window.tfCandidateMemory` seeded on every TF stack render (Phase 1, Phase 2, full grid)
+- `openTfCockpit()` and `copyTfLevel()` functions added
+- CSS: `.tf-btn-copy`, `.tf-btn-cockpit`, `.tf-actions` styles added
+
+### CARRY FORWARD
+
+- **Verify BBWP/PMARP recording after next NY session:** `SELECT date_key, bbwp_15m, bbwp_state, pmarp_15m, pmarp_state FROM session_audit_log ORDER BY created_at DESC LIMIT 3;`
+- **Watch `adx_pmarp_agree` and `overextended_trigger`** — ADX secondary gate retained pending data proving PMARP covers the Jun-3 scenario.
+- **Phase 2 RSI Divergence** — deferred. Column pre-reserved as `rsi_divergence_type='NONE'`. Build after N≥20 sessions with outcomes.
+- **v2 single-target check (updated):** `SELECT id, session_timeframe, target_logic_version, t1, t2, t3, htf_anchor_type FROM campaign_logs WHERE target_logic_version='v2' ORDER BY created_at DESC LIMIT 10;` — expect t2/t3 NULL on all 4H/1H rows going forward.
+- **Push commit `2328dac`** when ready.
+
+---
+
+**2026-07-01 (session 1) — Crown Surgery (Cuts 1–5) deployed + stand-down audit complete + two production fixes shipped.**
+
+### ✅ COMPLETED THIS SESSION (2026-07-01, session 1)
 
 **Crown Surgery — real Crown specs replace guessed kinematic thresholds (commits `ee84e56`, `2e81ae9`, `1c57962`, `f1f0477`)**
 
