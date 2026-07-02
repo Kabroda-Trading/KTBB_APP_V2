@@ -178,6 +178,31 @@ Second, closer read of `bold-hubble/strategies/` — this time hunting for full 
 
 **Important caveat — this is NOT "switch to copying Strategy 1's formula instead."** Strategy 1's own stop (`low_prices[-2]`, a single prior candle — even tighter than what we have now, would make whipsaw worse) and target (fixed 15%) still fail our own rules (Measured Move Rule bans fixed-% targets). The useful part isn't the formula — it's recognizing which entry family our trigger already belongs to, so any future testing compares against the right strategy's logic instead of the wrong one.
 
+### NEW REFERENCE MATERIAL ADDED (same session, later — owner-added, Discord-sourced, not GitHub)
+
+Owner added five new files to `bold-hubble/` plus a YouTube-stream extraction batch, pulled from Discord (Krown's own technical-analysis channel, the separate Meta Signals/Mafioso server, and Krown's `#streams` YouTube broadcast archive). Full inventory, with provenance flagged per source since trust level differs:
+
+**`KROWN_TRADING_MASTER_REFERENCE.md` + `krown_settings_and_rules.json` — Krown's own Discord, high trust.** This is the actual documented rule set, and it reveals **the Python code in `strategies/*.py` is a lossy, partly-wrong port of it** — not equivalent, as assumed all session. Direct comparison:
+
+| | Code (`strategies/*.py`) | Actual documented rule |
+|---|---|---|
+| S1 stop | `low_prices[-2]` (single prior candle) | **"Previous swing low"** (a real pivot) |
+| S1 target | Fixed `+15%` | **Dynamic trailing exit**: close below 20 SMA OR PMARP≥95% — not a hard target at all |
+| S2 target | `max(high[-15:])` (rolling window) | **1.272 Fibonacci extension** of the actual impulse leg |
+| S3 target | `min(low[-15:])` (rolling window) | **"Previous swing low"** (structural, not a fixed window) |
+| S4 target | Fixed `-6%` | **"Mean reversion toward the 20 SMA"** — a real, moving level |
+| S5 target | Fixed `-10%` | **1.618 Fibonacci extension** |
+
+Every one of the five strategies was simplified when coded into Python, in ways that matter: real swing pivots became fixed-N-bar windows, real Fibonacci extensions and dynamic MA-based exits became arbitrary fixed percentages. The real rule (swing-low stop) is much closer to what Test 4 found empirically working best tonight — this is convergent, not contradictory, evidence. **All testing done earlier tonight against the S2/S3 Python code should be understood as testing a flawed proxy, not Crown's actual rule.** The real rule (Fibonacci extension target computed from the actual impulse leg, swing-pivot stop) has not been tested yet.
+
+**`META_SIGNALS_MASTER_PLAYBOOK.md` + `META_SIGNALS_SHORT_MTF_PLAYBOOK.md` + `strategies/mafioso_mtf_signals.py` — Meta Signals/Mafioso Discord server, separate third-party service, lower trust.** This is NOT Krown's methodology — it's a different algorithmic signal provider that references Krown's indicators as a confirmation filter. **Same standing caveat already in this file from weeks ago applies: "Mafioso is a reference/mirror only — NOT a direction source, NOT a tiebreaker against Kabroda's own logic"** (see HTF STRUCTURAL ANTICIPATION pin, 2026-06-06). Still useful as an independent real-world pattern: live alerts show **partial profit at T1 (~1.0 RR, take 30-50%, move stop to breakeven), trail the remainder toward T2/T3 along the 20 SMA or 4H EMA 21** — same Fibonacci-staging philosophy the external research found earlier tonight, from a third independent source. Also states explicitly: **"SL Close Below/Above"** — never stop out on an intrabar wick, only a confirmed candle close past the level. `mafioso_mtf_signals.py` is just a regex text parser for their alert format — no calculation logic, not directly useful to us.
+
+**`BTC_LIVE_MARKET_OUTLOOK_JULY.md` — Krown's own Discord streams, June 23–July 1 2026 (exactly our current window).** Krown's entire current bias hinges on one indicator we don't have: the **"Revin Ribbons Midband."** Per his own quote: bearish bias holds while BTC is below it; he flips bullish immediately if reclaimed. Current key level cited: **$62,000–$62,100 reclaim + daily close above the midband** as the confirmation trigger for a trend reversal. This is macro-bias/narrative-layer content (closer to the earlier publication-content audit than tonight's stop/target investigation) but is genuinely current and dated — worth noting for whenever the publication-layer suggestion-box items (weekly RSI divergence, dominant-trend classifier) get picked up.
+
+**`extract/youtube_streams_analysis.json` + `extract/print_highlights.py` — 7 of Krown's YouTube streams (June 23–July 1), already extracted into structured highlights (17-27 per video), not yet read in depth.** Video titles: *Bitcoin Just Reclaimed $60K* (Jul 1), *Bitcoin Hovers Below $60K as S&P 500 Prints Best Quarter* (Jun 30), *While Retail Panics on Bitcoin, I'm Loading Up On These 2 Q3 Stocks* (Jun 29), *Micron's Record Earnings Couldn't Save the AI Trade* (Jun 26), *Hot Inflation Just Hit, Bitcoin's at Yearly Lows* (Jun 25), *Bitcoin, Chips, and Gold Are All Falling Together* (Jun 24), *Chips Just Got Routed, Bitcoin Hit My First Target* (Jun 23). **Not processed tonight — flagged as a real, rich resource for next time this area is opened, not rushed through now.**
+
+**Owner suggestion, not executed tonight:** clean up/convert the lossy Python strategy files into text-based documentation instead, given the code has now been shown to diverge from the actual rules in several places. Reasonable idea, not urgent — pinned here rather than acted on; the `KROWN_TRADING_MASTER_REFERENCE.md` file the owner already added essentially *is* this for the 5 core strategies already. Would matter more if/when the YouTube stream highlights get mined and need the same treatment.
+
 ### WHERE THIS LEAVES US — HONEST STATE, NO FINAL ANSWER
 
 **Confirmed, not in question:** the current gravity_memory nearest-zone stop/target mechanism is broken — wrong data source, produces near-coin-flip R:R, unrelated to actual current structure. This should not stay live as-is.
@@ -188,10 +213,11 @@ Second, closer read of `bold-hubble/strategies/` — this time hunting for full 
 - Single-target vs. staged Fibonacci-extension targets for 4H/1H — real tension between this session's two research passes, not resolved.
 - **The bigger architectural fork:** does 1H/4H stay as independent parallel systems (current design), or does this investigation's own evidence mean they should be rebuilt as entry-timing refinement layers nested inside 4H→Daily and 1H→4H structural reads? This is the same question as the already-gated HTF-anticipation / multi-TF SSE Engines pins — tonight didn't resolve it, but gave it real data-backed weight for when that gate opens.
 - **New from the bold-hubble re-read:** our 4H/1H entry style matches Crown's Strategy 1 (breakout/momentum) family, not Strategy 2/3 (pullback) family — any future stop/target testing should be evaluated against that same family's philosophy (ride the bigger structural move), not against S2/S3's tight scalp math. Doesn't hand us a formula (S1's own formula still breaks our rules) but narrows what "the right comparison" even means going forward.
+- **TOP PRIORITY NEXT TIME — untested:** the *actual* documented Krown rule (real swing-low pivot stop + real Fibonacci extension target computed from the real impulse leg, per `KROWN_TRADING_MASTER_REFERENCE.md`) has never been tested against real data — everything tested tonight against "Crown's method" was actually testing the lossy Python-code proxy. This is the natural next test, same rigor as everything else tonight (real MEXC historical candles, same candidate 112 example, honest reporting either way).
 
 **Connects to:** HTF STRUCTURAL ANTICIPATION pin (2026-06-06), MULTI-TIMEFRAME SSE ENGINES pin (2026-06-07) — both already gated behind "15M core proven solid." Tonight's findings should be read alongside those pins next time this area is opened, not as a separate thread.
 
-**No code was touched this session.** Pure investigation — real historical data, real formulas, real external research, a second close read of Crown's own strategy code, honestly reported including the parts that didn't work (Crown's S2/S3 formula, naive VRVP, textbook BBWP+ADX squeeze detection all tested and found insufficient on their own).
+**No code was touched this session.** Pure investigation — real historical data, real formulas, real external research, a second close read of Crown's own strategy code, new Discord-sourced reference material, honestly reported including the parts that didn't work (Crown's S2/S3 *code* formula, naive VRVP, textbook BBWP+ADX squeeze detection all tested and found insufficient on their own) and the parts not yet tested (the real documented rule, just discovered).
 
 ---
 
