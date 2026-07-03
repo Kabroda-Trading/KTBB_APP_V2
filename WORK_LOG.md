@@ -134,6 +134,31 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ## ► NEXT SESSION START
 *End-of-session marker: 2026-07-03*
 
+## ★ CORE-SOLIDITY PUNCH LIST — consolidated 2026-07-03, ranked by how directly each item blocks "clean, solid, actionable trades." Start here next session.
+
+Owner directive: stop pure investigation, start systematically fixing toward a rock-solid core. This list pulls together everything confirmed broken or unresolved across every session so far — nothing new, just consolidated and sequenced. Sequence agreed with owner before any code gets touched.
+
+**1. 4H/1H stop/target construction — THE core fix, everything else sits on top of this.**
+Confirmed broken: `_detect_4h_bos()`/`_detect_1h_bos()` in `gravity_engine.py` pull stop/target from the *nearest historical `gravity_memory` zone* — can be weeks old, unrelated to the current move. Real tested example (candidate 112): R:R of 1:1.03, a coin flip. Full diagnosis and everything tested lives in the 2026-07-01 session-4 investigation entry (below) and its "bold-hubble re-read" and "new reference material" addenda. **Design direction identified but not formalized or built:** a properly-scoped swing high/low window (empirically ~48-72 1H candles tested well; 4H equivalent untested) — matches both the real documented Krown rule (swing-pivot stop, not a fixed window or historical zone) and the entry style our BOS detector actually uses (breakout/momentum confirmation, Crown's "Strategy 1" family, not the pullback "Strategy 2/3" family). Target = measured move or Fibonacci extension from that range, not a rolling-window max/min. **Next step: formalize this into an actual design (what defines the range boundary precisely, does 4H need its own tested window size, single vs. staged Fibonacci target — still an open tension from the session-4 research) before writing code.**
+
+**2. Stop/target execution triggers on a single 1-minute wick, not a confirmed close on the trading timeframe.**
+Confirmed via code trace (`ledger_closing_engine.py` Phase 4, `_fetch_1m_since` — 1-minute OHLC checked against stop/target on every candle). Contradicts real trading discipline from two independent bold-hubble sources (Mafioso's stated rule, the break-and-retest research). Compounds #1 — even a correctly-sized stop from #1 could still get clipped by intrabar noise under the current execution model. **Fix candidate, not built:** check the stop/target condition against the trading-timeframe (1H/4H) candle's own close, not raw 1-minute OHLC.
+
+**3. Senior Analyst never receives an explicit "current price."**
+Confirmed via direct code trace: `battlebox_pipeline.get_live_battlebox()` computes live price but never threads it into the `context` dict passed to `_build_senior_analyst_context()` in `kabroda_mas_flow.py` — no `"price"`/`"current_price"` key anywhere in that function. Caused a real wrong price citation ($63,808 vs. real ~$61,600) in a live 2026-07-02 STAND_DOWN brief. Doesn't affect 4H/1H trade construction (computed independently in `gravity_engine.py`), but affects whether the 15M narrative/brief can be trusted. **Fix candidate, not built:** thread the existing `price` value into `context["current_price"]`, add one explicit labeled line in the SA's context.
+
+**Sequence agreed:** #1 first (the actual foundation), then #2 (smaller, more contained, natural follow-on while already touching stop/target logic), then #3 (one-line thread-through, contained fix in a different file).
+
+**Explicitly lower priority — enhancement, not core solidity, do not pull forward:** the runner/staged-profit mechanic (gated behind #1 being fixed and proven — can't build a runner on a broken foundation), RSI divergence for narrative, the Fibonacci EMA ribbon question, potential Revin Ribbons integration (that external build currently has confirmed real bugs — see below — not ready regardless).
+
+**Already fixed and deployed, not open anymore:** the t2/t3 NOT NULL constraint bug (commit `e1b9f7e`, confirmed live via deploy log same session).
+
+---
+
+**2026-07-03 — EXTERNAL: separate "teamwork_preview" multi-agent project (owner's other system) attempted a Revin Ribbons Python/Pine Script replica in `C:\Users\Shadow\Documents\antigravity\bold-hubble\`. Their own "Victory Auditor" reported "VICTORY CONFIRMED — 63/63 tests passing" based on *static code reading*, never actually executing the test suite** (their own report: "execution command was attempted but timed out... static analysis validates all 63 tests"). Ran the real suite directly (`python -m unittest tests/test_revin_suite.py`) — no permission issue in this environment, 0.034s. **Real result: 59 passing, 4 failing** — a genuine math bug in RMO's duration-vector scaling (off by 4x), two NaN-propagation crashes (`high`/`low` arrays), one missing input-validation guard. Wrote two review files directly into their project folder: `EXTERNAL_REVIEW_FROM_KTBB_SESSION.md` (architecture cross-check — midline/bands/RWP well-sourced and correct, RMO's specific internal parameters are the build's own unsourced invention) and `URGENT_VICTORY_CLAIM_IS_FALSE.md` (the false-verification callout, exact failing output, what needs to happen, an offer to help). Owner is following up directly with that team. **Not connected to KTBB_app_v2 in any way yet — nothing ported, nothing will be until that team produces a genuinely re-verified result.** Logged here only because it consumed real session time and the outcome (don't trust unverified "done" claims, from any source, ours or external) is directly relevant to how the punch list above should be executed — verify every fix the same way, with a real run, not a confident-sounding claim.
+
+---
+
 **2026-07-03 — CRITICAL FIX: t2/t3 NOT NULL constraint silently blocked every 4H/1H candidate write since the v3 single-target deploy (commit `e1b9f7e`).**
 
 ### WHAT HAPPENED
