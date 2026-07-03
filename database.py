@@ -243,6 +243,18 @@ def init_db():
         except Exception:
             pass
 
+    # --- TARGET LOGIC v3 — t2/t3 made nullable for single-target 4H/1H candidates ---
+    # v3 rows write t2=None/t3=None by design (see database.py CampaignLog comment).
+    # Column was still NOT NULL at the DB level, so every v3 4H/1H INSERT was failing
+    # and rolling back silently (NotNullViolation) since the single-target deploy —
+    # zero 4H/1H candidates recorded until this fix. v1/v2 rows are unaffected.
+    for _col in ["t2", "t3"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE campaign_logs ALTER COLUMN {_col} DROP NOT NULL"))
+        except Exception:
+            pass
+
     # --- GRAVITY MEMORY — zone strength fields ---
     for _col in [
         "departure_move_pct FLOAT",
@@ -384,8 +396,10 @@ class CampaignLog(Base):
     entry_price = Column(Float, nullable=False)
     stop_loss = Column(Float, nullable=False)
     t1 = Column(Float, nullable=False)
-    t2 = Column(Float, nullable=False)
-    t3 = Column(Float, nullable=False)
+    # t2/t3 nullable: v3 single-target 4H/1H candidates write NULL for both by design
+    # (see TARGET LOGIC AUDIT FIELDS comment below). v1/v2 rows still populate all three.
+    t2 = Column(Float, nullable=True)
+    t3 = Column(Float, nullable=True)
 
     total_contracts = Column(Float, nullable=False)
 
