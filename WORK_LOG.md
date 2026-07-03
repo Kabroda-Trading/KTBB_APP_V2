@@ -131,6 +131,55 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 
 ---
 
+## 🗺 ROADMAP — consolidated 2026-07-03, full read-through of every W-item, the Suggestion Box, and the Parking Lot
+
+*Purpose: answer "where are we, are we on track, what's next, does anything conflict" in one place, so no future fix gets built in isolation from what else is planned. Not a rewrite of history — a status snapshot with stale gates corrected where found. Re-consolidate whenever the picture gets muddy again, same as this pass.*
+
+### TIER 0 — FOUNDATION, CONFIRMED SOLID (don't re-litigate)
+- **W-9 Outcome-tracking data integrity** — ☑ FULLY CLOSED. Phantom losses, binary-R, entry-fill detection, three-phase lifecycle monitor — all fixed and live. Every downstream number (dashboard, auditor, RAG memory) can trust `CampaignLog` outcomes now.
+- **W-11 Auditor dataset contamination** — ☑ DONE. Auditor only sees real MAS decisions, radar page-view noise filtered out. 4-value decision tagging (`MAS_STAND_DOWN` etc.) shipped — stand-down accuracy is now computable.
+- **W-12 MAS scheduler autonomy** — ☑ CLOSED. Fires at lock_end_ts, DST-aware, autonomous even with zero page visits.
+- **W-7 Exhaustion bug (Fix 1+2, the ADX/harmonic-matrix direction-blind bugs)** — ☑ ALL STEPS CLOSED.
+- **W-5 Auditor-wire break** — ☑ DONE.
+
+### TIER 1 — ACTIVE / URGENT (today's punch list — see above, not repeated here)
+4H/1H stop/target construction, 1-minute wick execution, SA missing current price. Three real live examples now confirm the stop/target break; nothing here conflicts with anything below — this is genuinely the current bottleneck.
+
+### TIER 2 — IN PROGRESS, NOT YET CLOSED (worth knowing these are still open)
+- **W-1 Interpreter layer (organize/decide split)** — ◐ MTF Interpreter deployed and live; the broader "which Bucket A modules deserve their own interpreter" question was left open pending measurement, never revisited.
+- **W-2** — ◐ Same open question as W-1, dependent on it.
+- **W-6 Dashboard audit** — ◐ Read-only audit done, fix pass never happened.
+- **W-8 "Feed the Senior Analyst"** — ◐ A1/A2/A3 done and live (Jun-7 confirmed session). Tier B rescoped, B1 (PMARP direction-blindness) was explicitly PARKED — **worth checking: Crown Surgery Cut 2 (2026-07-01) made PMARP the PRIMARY kinematic_grade signal, direction-aware on both LONG and SHORT. This may have quietly resolved B1 without anyone updating its status — flag for verification, don't assume.**
+- **W-10 Audit output surfacing** — ◐ Partially resolved. Auditor output visible; token-limit truncation, Elliott Wave reasoning view, and nav links were still open as of last note.
+
+### TIER 3 — GATED behind "15M core proven solid across many live sessions" (the big one)
+This is the **W-14 STRENGTHENING PHASE cluster** — Multi-Timeframe SSE Engines (14b, "the biggest project on the board"), HTF Structural Anticipation (14c), and the signal-timing/VET-A-TRADE tool (14a). All three explicitly share one primary gate, stated plainly in W-14: *"A3 is 2 sessions old. W-7 Fix 3... is still OPEN. B1/PMARP direction-blind is parked."*
+
+**That gate description is from 2026-06-14 and is now stale in at least one respect:** B1/PMARP may be resolved by Crown Surgery (see Tier 2 above, needs verification, not confirmed). W-7 Fix 3 (SA prompt direction-awareness for CONDITION 2(a)) — status not reconfirmed in this pass, worth checking before assuming still open. **Net: this cluster is probably closer to its gate clearing than the last time anyone looked, but "closer" is not "cleared" — A3 needs many more live sessions regardless of the other two sub-conditions, and that's a time-based gate, not a code-fix gate. Don't rush it.**
+
+**Runner Mechanic** (master plan Component 4) is gated behind the Tier 1 stop/target fix specifically (needs N>0 real 4H trades with sound exit data) — narrower gate, not the same as the W-14 cluster, correctly sequenced right after Tier 1.
+
+### TIER 4 — GATED, gate partially stale (found this pass — worth re-opening the conversation, not silently closing it)
+- **Stand-Down Re-Arm Alerter** (2026-06-16) — gate was "15M-solid + notification infra (W-4)." W-4 (public Ghost/newsletter delivery) still doesn't exist. But a *different*, smaller piece of infrastructure now does — `notify.py`, the owner-facing SMTP email system built 2026-07-01 for 4H/1H candidate alerts. The alerter only ever needed to email the *owner*, not subscribers — this may functionally satisfy the notification half of its gate already. Still needs 15M-solid.
+- **Live Exhaustion Monitor** (2026-06-18) — same "W-4 notification infra" gate, same reasoning applies. Also gated behind W-9 Phase 2 (✅ actually done, confirmed above) — that part of its gate IS cleared.
+- **Neither of these is being unblocked right now** — flagging that the gate language is outdated, not declaring them ready to build. Worth a real conversation about whether `notify.py` genuinely covers what each one needs before either gets picked up.
+
+### TIER 5 — PUBLICATION / NARRATIVE LAYER, does not touch trade construction
+RSI divergence for narrative, dominant-trend classifier, the Fibonacci EMA ribbon question, potential Revin Ribbons integration (external build, confirmed real bugs as of 2026-07-03, not ready regardless of anything else). None of these block getting a trustworthy trade out the door.
+
+### TIER 6 — NEEDS A DECISION, NOT SCHEDULED
+- **W-13** — does a radar-page-view `DecisionJournal` row need a `session_id`? Low priority, no feature currently reads it.
+- **Single vs. staged Fibonacci target for 4H/1H** — real open tension surfaced during the Tier 1 investigation, needs resolving as part of that design, not separately.
+- **W-3 Backtest** — owner-flagged HIGH priority, parked "until structure is settled." Worth revisiting once Tier 1 lands, since that's exactly the kind of structural settling this was waiting on.
+
+### TIER 7 — COMPLIANCE / BUSINESS, separate track from engineering
+Attorney review hard-gate before any public launch (Educational Framing pin, 2026-06-04) — not started, not urgent until publication phase. Entity/citation growth playbook (Kabroda_Entity_Citation_Playbook.docx) — medium-term, sequenced hub → schema → Wikidata, not urgent now.
+
+### What this pass changed
+No code touched. Two stale gate descriptions caught and flagged (Tier 4) rather than left silently outdated. One "may already be resolved" flag raised for B1/PMARP (Tier 2/3) pending actual verification — not claimed as fixed without checking. Nothing here contradicts or requires undoing anything in the Tier 1 punch list — confirmed clean before starting that work.
+
+---
+
 ## ► NEXT SESSION START
 *End-of-session marker: 2026-07-03*
 
