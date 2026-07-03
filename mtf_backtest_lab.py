@@ -206,6 +206,69 @@ def kinematic_grade_15m_style(candles: List[Dict]) -> str:
         return "TANGLED"
 
 
+def calc_adx(candles: List[Dict], period: int = 14) -> Dict:
+    """Mirrors battlebox_pipeline._calc_adx() exactly -- the corrected, post-W-7-fix Wilder version."""
+    if len(candles) < period * 2 + 1:
+        return {"adx": 0.0, "rising": False}
+    plus_dm_vals, minus_dm_vals, tr_vals = [], [], []
+    for i in range(1, len(candles)):
+        h, l = candles[i]["high"], candles[i]["low"]
+        ph, pl, pc = candles[i-1]["high"], candles[i-1]["low"], candles[i-1]["close"]
+        up, dn = h - ph, pl - l
+        plus_dm_vals.append(up if (up > dn and up > 0) else 0.0)
+        minus_dm_vals.append(dn if (dn > up and dn > 0) else 0.0)
+        tr_vals.append(max(h - l, abs(h - pc), abs(l - pc)))
+
+    def wilder(vals):
+        if len(vals) < period:
+            return []
+        s = [sum(vals[:period]) / period]
+        for v in vals[period:]:
+            s.append(s[-1] - s[-1] / period + v / period)
+        return s
+
+    sm_pdm, sm_mdm, sm_tr = wilder(plus_dm_vals), wilder(minus_dm_vals), wilder(tr_vals)
+    if not sm_tr:
+        return {"adx": 0.0, "rising": False}
+    dx_vals = []
+    for i in range(len(sm_tr)):
+        tr = sm_tr[i]
+        if tr == 0:
+            dx_vals.append(0.0)
+            continue
+        pdi, mdi = 100 * sm_pdm[i] / tr, 100 * sm_mdm[i] / tr
+        dsum = pdi + mdi
+        dx_vals.append(100 * abs(pdi - mdi) / dsum if dsum > 0 else 0.0)
+    adx_vals = wilder(dx_vals)
+    if not adx_vals:
+        return {"adx": 0.0, "rising": False}
+    return {"adx": round(adx_vals[-1], 2), "rising": len(adx_vals) >= 2 and adx_vals[-1] > adx_vals[-2]}
+
+
+def volume_confirmed(candles: List[Dict], idx: int, lookback: int = 20) -> bool:
+    """Breakout candle's volume vs. its own rolling average -- cited by external research
+    as a real fake-out filter, currently used by zero energy formula in Kabroda."""
+    if idx < lookback:
+        return False
+    avg_vol = sum(c["volume"] for c in candles[idx - lookback:idx]) / lookback
+    return candles[idx]["volume"] > avg_vol
+
+
+def bbwp_descending_adx_elevated(candles: List[Dict], lookback_bars: int = 3, adx_floor: float = 25.0) -> bool:
+    """The specific 'energy building' regime found testing candidate 112: BBWP trending DOWN
+    (not just a static <=30 snapshot) while ADX is already elevated -- distinct from both the
+    current formula (no BBWP/ADX at all) and the 15M-style formula's static threshold check."""
+    closes = [c["close"] for c in candles]
+    if len(closes) < 260:
+        return False
+    bbwp_now = calc_bbwp(closes)
+    bbwp_prev = calc_bbwp(closes[:-lookback_bars])
+    descending = bbwp_now < bbwp_prev
+    adx = calc_adx(candles)
+    elevated = adx["adx"] >= adx_floor
+    return descending and elevated
+
+
 # ---------------------------------------------------------------------------
 # 4) BREAKOUT SCANNER — Crown Strategy 1 style: close breaks a confirmed pivot
 # ---------------------------------------------------------------------------
@@ -316,18 +379,21 @@ def main():
         hist = candles[:idx + 1]
         eg_current = energy_grade_current(hist, bias)
         eg_15m = kinematic_grade_15m_style(hist)
+        vol_conf = volume_confirmed(candles, idx)
+        bbwp_adx = bbwp_descending_adx_elevated(hist)
         outcome = walk_forward(candles, idx, bias, plan)
         rows.append({
             "dt": candles[idx]["dt"], "bias": bias, "entry": entry, "stop": plan["stop"],
             "t1": plan["t1"], "risk": plan["leg"],
             "energy_current": eg_current, "energy_15m": eg_15m,
+            "vol_confirmed": vol_conf, "bbwp_desc_adx_elevated": bbwp_adx,
             **outcome,
         })
 
-    print(f"{'Date':17s} {'Bias':5s} {'Entry':>10s} {'Stop':>10s} {'Risk%':>7s} {'EnergyCur':>10s} {'Energy15M':>11s} {'Outcome':>8s} {'R':>6s} {'Bars':>5s}")
+    print(f"{'Date':17s} {'Bias':5s} {'Entry':>10s} {'Risk%':>7s} {'EnergyCur':>10s} {'Energy15M':>11s} {'Vol':>5s} {'BBWPdesc':>9s} {'Outcome':>8s} {'R':>6s}")
     for r in rows:
         risk_pct = r["risk"] / r["entry"] * 100
-        print(f"{r['dt'].strftime('%Y-%m-%d %H:%M'):17s} {r['bias']:5s} {r['entry']:10.2f} {r['stop']:10.2f} {risk_pct:6.2f}% {r['energy_current']:>10s} {r['energy_15m']:>11s} {r['outcome']:>8s} {r['r_achieved']:6.2f} {str(r['bars_to_resolve']):>5s}")
+        print(f"{r['dt'].strftime('%Y-%m-%d %H:%M'):17s} {r['bias']:5s} {r['entry']:10.2f} {risk_pct:6.2f}% {r['energy_current']:>10s} {r['energy_15m']:>11s} {str(r['vol_confirmed']):>5s} {str(r['bbwp_desc_adx_elevated']):>9s} {r['outcome']:>8s} {r['r_achieved']:6.2f}")
 
     print(f"\n{'='*90}")
     print("AGGREGATE STATS")
@@ -351,6 +417,14 @@ def main():
     report("energy_15m == PRIMED only", [r for r in rows if r["energy_15m"] == "PRIMED"])
     report("energy_15m == TANGLED only", [r for r in rows if r["energy_15m"] == "TANGLED"])
     report("energy_15m == OVEREXTENDED only", [r for r in rows if r["energy_15m"] == "OVEREXTENDED"])
+    print()
+    report("volume_confirmed == True", [r for r in rows if r["vol_confirmed"]])
+    report("volume_confirmed == False", [r for r in rows if not r["vol_confirmed"]])
+    print()
+    report("BBWP-descending + ADX-elevated == True", [r for r in rows if r["bbwp_desc_adx_elevated"]])
+    report("BBWP-descending + ADX-elevated == False", [r for r in rows if not r["bbwp_desc_adx_elevated"]])
+    print()
+    report("volume_confirmed AND energy_15m==PRIMED", [r for r in rows if r["vol_confirmed"] and r["energy_15m"] == "PRIMED"])
 
 
 if __name__ == "__main__":
