@@ -132,7 +132,27 @@ This is the W-3 backtest target — not a generic backtester, but a weather-read
 ---
 
 ## ► NEXT SESSION START
-*End-of-session marker: 2026-07-01*
+*End-of-session marker: 2026-07-03*
+
+**2026-07-03 — CRITICAL FIX: t2/t3 NOT NULL constraint silently blocked every 4H/1H candidate write since the v3 single-target deploy (commit `e1b9f7e`).**
+
+### WHAT HAPPENED
+
+Owner pasted a live production error log (2026-07-03): a 1H SHORT BOS on BTC/USDT (entry $61,302.00) hit `psycopg.errors.NotNullViolation: null value in column "t2" of relation "campaign_logs" violates not-null constraint`. Root cause: the single-target (v3) refactor from 2026-07-01 (`gravity_engine.py`, commit `2328dac`) intentionally writes `t2=None, t3=None` for 4H/1H candidates — that's the whole point of the single-target design — but the `campaign_logs.t2`/`t3` columns were still `NOT NULL` at the database level. Every INSERT since that deploy failed and rolled back.
+
+**Scope of the miss: the v3 deploy went live 2026-07-01 ~15:08 UTC (confirmed via Render boot log that same session). This error surfaced 2026-07-03 ~00:38 UTC and recurred again at 00:52 UTC (retried on the next gravity-loop iteration, same failure).** Between those two points — roughly a day and a half — **zero 4H/1H candidates recorded successfully.** Any real BOS that fired in that window is unrecoverable from `campaign_logs` (the row was rolled back, never committed; the id sequence just skipped ahead, e.g. id 127 was consumed and burned). Not catastrophic (no live capital was on these CANDIDATE-only rows, and the 15M system was unaffected — it keeps its own T1/T2/T3, always populated), but real audit/observation data was lost for that window.
+
+### THE FIX (`database.py`)
+
+- `ALTER TABLE campaign_logs ALTER COLUMN t2 DROP NOT NULL` / same for `t3` — added to the existing `init_db()` ALTER-TABLE-in-try/except pattern (idempotent, safe to re-run, matches every other schema change in this file).
+- ORM model: `t2`/`t3` changed from `nullable=False` to `nullable=True`, with a comment explaining why (v3 candidates write NULL by design; v1/v2 rows still populate all three).
+- Verified every reader of `.t2`/`.t3` is safe: `ledger_closing_engine.py` already null-guards (`if c.t2 is not None`), `kabroda_mas_flow.py` and `publisher_crew.py` only touch the 15M system (unaffected — always populates t2/t3), `main.py`'s dict passthrough serializes `None` to JSON `null` safely.
+
+### CARRY FORWARD
+- **Confirm the fix is live and a real 4H/1H candidate writes successfully post-deploy** — watch for the next BOS and check `campaign_logs` for a clean insert with `t2=NULL, t3=NULL, target_logic_version='v3'`, no error in the Render log.
+- **This gap should have been caught earlier** — the single-target refactor (2026-07-01) removed `t2`/`t3` from the `CampaignLog()` constructor calls but nobody checked whether the column itself allowed NULL. Worth a quick self-check habit for future nullable-field changes: grep the actual `Column(...)` definition, not just the code writing to it.
+
+---
 
 **2026-07-01 (session 4) — 4H/1H stop/target construction: deep investigation, NO CODE CHANGED. Real conclusion: the current mechanism is confirmed broken, and we know why, but do not have a validated replacement yet.**
 
