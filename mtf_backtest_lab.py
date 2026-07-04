@@ -51,8 +51,11 @@ def fetch_candles(symbol: str, interval: str, start_dt: datetime.datetime, end_d
         if next_cursor <= cursor:
             break
         cursor = next_cursor
-        if len(batch) < 1000:
-            break
+        # NOTE: do NOT break on len(batch) < 1000 -- MEXC's public klines API silently caps
+        # every response at 500 candles regardless of the requested limit=1000. Treating a
+        # 500-row batch as "end of history" was truncating every multi-page fetch to ~500
+        # candles (confirmed empirically 2026-07-04). The outer `while cursor < end_dt` and
+        # the `if not batch` check above are sufficient to terminate correctly.
 
     seen = {}
     for c in all_raw:
@@ -91,9 +94,49 @@ def find_confirmed_pivots(candles: List[Dict], end_idx: int, left: int = 3, righ
     return pivots
 
 
+def find_confirmed_pivots_windowed(candles: List[Dict], end_idx: int, window_bars: int,
+                                    left: int = 3, right: int = 3, direction: str = "low"):
+    """Same convention as find_confirmed_pivots, but only scans indices >= end_idx - window_bars.
+    Validates the production fix: a recency-bounded, non-strength-gated nearest-pivot lookup
+    (replaces gravity_engine's heat_multiplier/touch_count/departure_move_pct qualification gate,
+    which was confirmed to skip past the nearest relevant pivot in favor of a distant one that
+    happened to clear the strength bar -- see WORK_LOG.md 2026-07-03 entry)."""
+    pivots = []
+    floor_idx = max(left, end_idx - window_bars)
+    for i in range(end_idx - right, floor_idx - 1, -1):
+        if direction == "low":
+            wv = candles[i]["low"]
+            is_pivot = all(candles[i - j]["low"] >= wv for j in range(1, left + 1)) and \
+                       all(candles[i + j]["low"] >= wv for j in range(1, right + 1))
+        else:
+            wv = candles[i]["high"]
+            is_pivot = all(candles[i - j]["high"] <= wv for j in range(1, left + 1)) and \
+                       all(candles[i + j]["high"] <= wv for j in range(1, right + 1))
+        if is_pivot:
+            pivots.append((i, wv))
+    return pivots
+
+
 # ---------------------------------------------------------------------------
 # 3) INDICATOR MATH — mirrors battlebox_pipeline.py exactly
 # ---------------------------------------------------------------------------
+
+
+def calc_atr(candles: List[Dict], period: int = 14) -> float:
+    """Mirrors gravity_engine._calc_atr(), but correctly excludes the still-forming last
+    candle first -- matching _scan_for_pivots' own closed_candles = candles[:-1] convention.
+    Production currently calls _calc_atr on the raw (unsliced) candle list; that inconsistency
+    is fixed here from the start rather than ported and fixed later."""
+    closed = candles[:-1]
+    if len(closed) < period + 1:
+        return 0.0
+    trs = []
+    for i in range(-period, 0):
+        h = closed[i]["high"]
+        l = closed[i]["low"]
+        prev_c = closed[i - 1]["close"]
+        trs.append(max(h - l, abs(h - prev_c), abs(l - prev_c)))
+    return sum(trs) / len(trs)
 
 def calc_ema_series(prices: List[float], period: int) -> List[float]:
     if not prices or len(prices) < period:
@@ -312,6 +355,42 @@ def build_trade_plan(candles: List[Dict], idx: int, bias: str, entry: float) -> 
     return {"stop": stop, "t1": t1, "t2": t2, "t3": t3, "leg": leg}
 
 
+def build_trade_plan_windowed(candles: List[Dict], idx: int, bias: str, entry: float,
+                               window_bars: int, atr_floor_mult: float, order_by: str = "recency") -> Optional[Dict]:
+    """Validates the production fix directly: stop = nearest confirmed pivot within a
+    recency-bounded window (no heat/touch/departure strength gate), leg = |entry - stop|,
+    targets = Fibonacci-staged (1.0x/1.618x/2.618x) off that leg, with the same ATR floor/cap
+    rails gravity_engine applies (1.5x floor for 4H, 1.0x floor for 1H, 3x cap above 5x).
+
+    order_by: "recency" (nearest confirmed pivot in time -- matches build_trade_plan's existing,
+    already-validated convention) or "price" (nearest confirmed pivot by price distance to entry --
+    matches gravity_engine's CURRENT query shape, a minimal diff from today's production code).
+    These are a real fork once a window can contain 2+ confirmed pivots -- test both, don't assume.
+    """
+    direction = "low" if bias == "LONG" else "high"
+    pivots = find_confirmed_pivots_windowed(candles, idx, window_bars, direction=direction)
+    if not pivots:
+        return None
+    if order_by == "price":
+        pivots = sorted(pivots, key=lambda p: p[1], reverse=(bias == "SHORT"))
+    _, stop = pivots[0]
+    raw_leg = abs(entry - stop)
+    if raw_leg <= 0:
+        return None
+
+    atr14 = calc_atr(candles[:idx + 1])
+    target_too_small = (raw_leg < atr_floor_mult * atr14) if atr14 > 0 else False
+    leg = max(raw_leg, atr_floor_mult * atr14) if atr14 > 0 else raw_leg
+    if atr14 > 0 and leg > 5.0 * atr14:
+        leg = 3.0 * atr14
+
+    if bias == "LONG":
+        t1, t2, t3 = entry + leg, entry + leg * 1.618, entry + leg * 2.618
+    else:
+        t1, t2, t3 = entry - leg, entry - leg * 1.618, entry - leg * 2.618
+    return {"stop": stop, "t1": t1, "t2": t2, "t3": t3, "leg": leg, "target_too_small": target_too_small}
+
+
 # ---------------------------------------------------------------------------
 # 6) FORWARD WALK — what actually happened after the signal
 # ---------------------------------------------------------------------------
@@ -349,7 +428,63 @@ def walk_forward(candles: List[Dict], idx: int, bias: str, plan: Dict, max_bars:
 
 
 # ---------------------------------------------------------------------------
-# 7) MAIN — run the full scan, report honest aggregate stats
+# 7) WINDOW-SIZE GRID TEST — validates the stop-selection fix BEFORE it ships
+#    (punch-list item #1: which recency window + tie-break ordering replaces
+#    gravity_engine's broken heat/touch/departure qualification gate)
+# ---------------------------------------------------------------------------
+
+def test_window_sizes(candles: List[Dict], signals: List[Dict], window_options: List[int],
+                       atr_floor_mult: float, order_by: str = "recency") -> List[tuple]:
+    """Grid-tests build_trade_plan_windowed across candidate window sizes (in bars, NOT
+    calendar days -- see main()'s conversion note). Includes a BASELINE row using today's
+    unrestricted build_trade_plan() (whole-history nearest pivot) so the windowed approach
+    can be compared against what the tool already validated, not just against itself."""
+    results = []
+    for window_bars in window_options:
+        rows = []
+        for sig in signals:
+            idx, bias, entry = sig["idx"], sig["bias"], sig["entry"]
+            plan = build_trade_plan_windowed(candles, idx, bias, entry, window_bars, atr_floor_mult, order_by=order_by)
+            if not plan:
+                continue
+            rows.append({"leg": plan["leg"], "entry": entry, **walk_forward(candles, idx, bias, plan)})
+        results.append((f"window={window_bars}", rows))
+
+    baseline_rows = []
+    for sig in signals:
+        idx, bias, entry = sig["idx"], sig["bias"], sig["entry"]
+        plan = build_trade_plan(candles, idx, bias, entry)
+        if not plan:
+            continue
+        baseline_rows.append({"leg": plan["leg"], "entry": entry, **walk_forward(candles, idx, bias, plan)})
+    results.append(("BASELINE(whole-history, current tool default)", baseline_rows))
+    return results
+
+
+def print_window_grid(results: List[tuple]) -> None:
+    print(f"\n{'Window':42s} {'N':>4s} {'WinRate':>8s} {'AvgR':>8s} {'Stopped':>8s} {'Unresolved':>11s} {'AvgLeg%':>8s}")
+    for label, rows in results:
+        if not rows:
+            print(f"{label:42s} N=0, no resolvable signals")
+            continue
+        n = len(rows)
+        avg_r = sum(r["r_achieved"] for r in rows) / n
+        wins = sum(1 for r in rows if r["r_achieved"] > 0)
+        stops = sum(1 for r in rows if r["outcome"] == "STOP")
+        unresolved = sum(1 for r in rows if r["outcome"] == "NO_RESOLUTION")
+        avg_leg_pct = sum(r["leg"] / r["entry"] * 100 for r in rows) / n
+        print(f"{label:42s} {n:4d} {wins/n*100:7.1f}% {avg_r:+8.3f} {stops:8d} {unresolved:11d} {avg_leg_pct:7.2f}%")
+    print(
+        "\nNOTE: at N<30 (this project's own bar) or N<100 (the sourced quant_prime_ai standard), "
+        "these numbers indicate direction only -- they cannot statistically prove one window beats "
+        "another. Prefer a window that's stable across 2-3 neighboring sizes over a lonely spike, "
+        "and be suspicious of a window that avoids stops only by being the widest option tested "
+        "(that's evasion, not improvement)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 8) MAIN — run the full scan, report honest aggregate stats
 # ---------------------------------------------------------------------------
 
 def main():
@@ -357,6 +492,12 @@ def main():
     ap.add_argument("--symbol", default="BTCUSDT")
     ap.add_argument("--tf", choices=["1h", "4h"], default="1h")
     ap.add_argument("--days", type=int, default=60)
+    ap.add_argument("--window-test", action="store_true",
+                     help="Grid-test windowed stop-selection (punch-list item #1 validation) instead of the default single-plan report.")
+    ap.add_argument("--windows", type=str, default="24,36,48,60,72,96",
+                     help="Comma-separated candidate window sizes IN BARS (not calendar days) to grid-test.")
+    ap.add_argument("--order-by", choices=["recency", "price"], default="recency",
+                     help="Tie-break when a window contains 2+ confirmed pivots: nearest-by-time (recency, matches the tool's existing validated convention) or nearest-by-price (matches gravity_engine's current production query shape).")
     args = ap.parse_args()
 
     interval = "60m" if args.tf == "1h" else "4h"
@@ -369,6 +510,20 @@ def main():
 
     signals = scan_breakouts(candles)
     print(f"Found {len(signals)} breakout signals (momentum/close-through-pivot style)\n")
+
+    if args.window_test:
+        atr_floor_mult = 1.5 if args.tf == "4h" else 1.0
+        window_options = [int(w.strip()) for w in args.windows.split(",") if w.strip()]
+        bar_hours = 4 if args.tf == "4h" else 1
+        print(f"WINDOW-SIZE GRID TEST -- tf={args.tf}  order_by={args.order_by}  atr_floor_mult={atr_floor_mult}")
+        print("Bar-to-calendar conversion for the windows below (bars are the tool's native unit; "
+              "gravity_engine's lookback is a timedelta in DAYS -- this conversion must be applied "
+              "explicitly when porting a chosen window into production, not eyeballed):")
+        for w in window_options:
+            print(f"  {w} bars  ==  {w * bar_hours / 24:.1f} calendar days")
+        results = test_window_sizes(candles, signals, window_options, atr_floor_mult, order_by=args.order_by)
+        print_window_grid(results)
+        return
 
     rows = []
     for sig in signals:

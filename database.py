@@ -458,12 +458,21 @@ class CampaignLog(Base):
     # --- TARGET LOGIC AUDIT FIELDS ---
     # These fields are written only by the corrected target/stop construction (v2+).
     # v1 rows have NULL on all of these. Audit-AI must filter on the exact version tag —
-    # v2 and v3 rows have DIFFERENT SHAPES and must never be pooled together:
+    # v2/v3/v4 rows have DIFFERENT SHAPES and must never be pooled together:
     #   'v1' = original broken (Class 0 / DAILY_PIVOT cascade targets) — excluded from all audit.
     #   'v2' = corrected equal-leg staged targets (T1/T2/T3 all populated). Legacy rows only,
     #          frozen at the 2026-07-01 single-target cutover — no new v2 rows written.
-    #   'v3' = single structural target (T1 populated, T2/T3 always NULL by design — this is
-    #          not missing data, it is the v3 shape). Current logic as of 2026-07-01.
+    #   'v3' = single structural target (T1 populated, T2/T3 always NULL by design — this
+    #          was the v3 shape, not missing data). Legacy rows only, frozen at the 2026-07-04
+    #          v4 cutover (stop-selection confirmed broken via real 2026-07-03 examples;
+    #          see WORK_LOG.md) — no new v3 rows written.
+    #   'v4' = windowed nearest-pivot stop (recency-bounded to a per-TF window empirically
+    #          chosen via mtf_backtest_lab.py --window-test: 5 calendar days for 4H, 2 for 1H;
+    #          no heat/touch/departure strength gate) + Fibonacci-staged T1/T2/T3
+    #          (1.0x/1.618x/2.618x of the entry-to-stop leg). T2/T3 ALWAYS populated
+    #          (unlike v3). htf_anchor_type/htf_anchor_price now describe the STOP's pivot
+    #          source (STOP_PIVOT | ATR_FALLBACK), not a target-side opposing zone as in v2/v3.
+    #          Current logic as of 2026-07-04.
     target_logic_version = Column(String, nullable=True, default="v1")
     target_too_small_flag = Column(Boolean, default=False)               # audit-only; T1 < 1.5x ATR — never gates trade
     htf_anchor_type = Column(String, nullable=True)                      # e.g. 'BULL_WAVE_3', 'DAILY_PIVOT', 'FIB_FALLBACK'
