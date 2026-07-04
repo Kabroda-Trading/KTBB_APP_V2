@@ -481,9 +481,16 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
                 stop_window_start,
             )
             if stop_row:
-                stop_price = stop_row.price
+                # Stop-hunt buffer: push past the raw pivot rather than resting
+                # exactly at it (a bare stop at an obvious technical level is a
+                # common wick-manipulation target). 0.25xATR reuses the same
+                # coefficient trade_structure_analyst.py already uses for its
+                # own wall-snap buffer. htf_anchor_price records the raw,
+                # unbuffered pivot (the level itself); stop_price is the
+                # executable, buffered value.
                 htf_anchor_type = "STOP_PIVOT"
                 htf_anchor_price_val = stop_row.price
+                stop_price = round(stop_row.price - 0.25 * atr14, 2)
             else:
                 stop_price = round(current_close - 1.5 * atr14, 2)
                 htf_anchor_type = "ATR_FALLBACK"
@@ -510,9 +517,10 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
                 stop_window_start,
             )
             if stop_row:
-                stop_price = stop_row.price
+                # Stop-hunt buffer -- see LONG branch above for rationale.
                 htf_anchor_type = "STOP_PIVOT"
                 htf_anchor_price_val = stop_row.price
+                stop_price = round(stop_row.price + 0.25 * atr14, 2)
             else:
                 stop_price = round(current_close + 1.5 * atr14, 2)
                 htf_anchor_type = "ATR_FALLBACK"
@@ -683,9 +691,10 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
                 stop_window_start,
             )
             if stop_row:
-                stop_price = stop_row.price
+                # Stop-hunt buffer -- see gravity_engine's 4H detector for rationale.
                 htf_anchor_type = "STOP_PIVOT"
                 htf_anchor_price_val = stop_row.price
+                stop_price = round(stop_row.price - 0.25 * atr14, 2)
             else:
                 stop_price = round(current_close - 1.0 * atr14, 2)
                 htf_anchor_type = "ATR_FALLBACK"
@@ -718,9 +727,10 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
                 stop_window_start,
             )
             if stop_row:
-                stop_price = stop_row.price
+                # Stop-hunt buffer -- see gravity_engine's 4H detector for rationale.
                 htf_anchor_type = "STOP_PIVOT"
                 htf_anchor_price_val = stop_row.price
+                stop_price = round(stop_row.price + 0.25 * atr14, 2)
             else:
                 stop_price = round(current_close + 1.0 * atr14, 2)
                 htf_anchor_type = "ATR_FALLBACK"
