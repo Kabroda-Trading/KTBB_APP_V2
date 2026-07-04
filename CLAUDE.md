@@ -160,7 +160,7 @@ The `ledger_closing_engine.py` monitors all records where `mas_approval_status =
 
 4. **Class 0 KDE weighting.** `permanence_class=0` levels receive `+15.0` kinetic friction in the KDE calculation. This ensures Elliott Wave macro beams dominate the density curve and are visible as true walls. Do not reduce this multiplier.
 
-5. **The stop loss assignment.** Stop loss is always the opposing trigger. Long entry → stop at `breakdown_trigger`. Short entry → stop at `breakout_trigger`. No tighter stops are permitted — the R calculation depends on this.
+5. **The stop loss assignment (15M).** Stop loss is *not* the raw opposing trigger. `trade_structure_analyst.py`'s `_structural_stop_long()`/`_structural_stop_short()` compute the actual stop as `r30_low − ATR×0.5` (long) / `r30_high + ATR×0.5` (short), snapped a further `ATR×0.25` beyond any intercepting HEAVY/MAXIMUM gravity wall. The raw opposing trigger (`bd`/`bo`) is retained only as an audit field (`original_stop` in `structure_reasoning`) — it is never the executable stop. T1/T2/T3 remain pinned to the raw trigger distance (rule #1 above) regardless of this stop adjustment — entry-to-stop and entry-to-target distances are not guaranteed equal, so realized R is computed at close time from the actual stored entry/stop/target values (`ledger_closing_engine.py`'s `_frac_r()`), never assumed to be a clean ±1R. Do not widen or tighten the ATR/wall-adjustment coefficients without evidence — this is the proven, live rule, not a placeholder.
 
 6. **`_inject_brief_to_database` as an upsert.** It must create a new `CampaignLog` if one doesn't exist. If you change it back to update-only, MAS output is silently discarded.
 
