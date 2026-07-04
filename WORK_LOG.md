@@ -193,7 +193,9 @@ No code touched. Two stale gate descriptions caught and flagged (Tier 4) rather 
 
 **Verified via `verify_r_accounting.py`** (new, standalone, synthetic — sidesteps the Kraken retroactive-history limit entirely since it's pure arithmetic against hand-computed cases, not live data replay): 8 cases (symmetric LONG/SHORT where old and new agree, floored-leg and capped-leg LONG/SHORT where the old formula was silently wrong, a real 15M-style ATR-adjusted-stop case, and the zero-risk anomaly case) — all 8 pass against hand-calculated expected R. 5 of 8 cases confirm the old hardcoded formula was already producing a wrong number before this fix.
 
-Sequence moves to item #2's real successor (already handled above) and then item #4 (energy-grade enforcement) per the original agreed order.
+**Committed (3 commits: `bb007ed`, `604f6ea`, `2368b71`) and pushed 2026-07-04.** **DEPLOY VERIFIED (2026-07-04 17:01 UTC):** Render build succeeded, no boot errors, `TRADE-LIFECYCLE MONITOR: Initializing` line confirms `ledger_closing_engine.py` loaded cleanly, service live at kabroda.com. **Still outstanding, carry-forward:** once the next T1 close (either system) or the next `STOP_PIVOT` 4H/1H candidate fires, spot-check `realized_pnl` and the buffer offset per the verification steps logged in the appendix plan file.
+
+Sequence moves to item #4 (energy-grade enforcement) per the original agreed order.
 
 ## ★ CORE-SOLIDITY PUNCH LIST — consolidated 2026-07-03, ranked by how directly each item blocks "clean, solid, actionable trades." Start here next session.
 
