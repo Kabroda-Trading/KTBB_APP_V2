@@ -115,6 +115,28 @@ def _advance_target(current: Optional[str], candidate: str) -> str:
     return current or candidate
 
 
+def _frac_r(entry_price: float, stop_loss: float, exit_price: float, is_long: bool) -> float:
+    """
+    True fractional R at close: (actual move) / (actual risk), direction-aware.
+
+    Not always 1.0 on a T1 hit: the 15M system's actual stop (r30_low/high
+    ATR/wall-adjusted, per trade_structure_analyst.py) is a different value
+    than the raw trigger distance T1/T2/T3 are staged from, so entry-to-stop
+    and entry-to-target distances are not guaranteed equal. A stop hit is
+    still always exactly -1R by definition (R is defined relative to your
+    own actual stop) -- only T1/T2/T3 hits need this computed, never assumed.
+
+    risk floor matches the existing convention already used in the
+    CLOSED_AT_EXPIRY branches (a zero-risk row is a data anomaly, not a
+    real trading state -- this just prevents a crash, not a correct answer).
+    """
+    risk = max(abs(entry_price - stop_loss), 0.01)
+    if risk <= 0.01:
+        print(f"|| LIFECYCLE || _frac_r: near-zero risk (entry={entry_price}, stop={stop_loss}) -- data anomaly, R floored.")
+    move = (exit_price - entry_price) if is_long else (entry_price - exit_price)
+    return round(move / risk, 4)
+
+
 def _observe_targets(c: CampaignLog, live: float) -> bool:
     """
     Update t2_reached, t3_reached, max_target_reached based on live price.
@@ -288,13 +310,14 @@ async def run_ledger_audit_loop():
                         break
 
                     if hit_t1:
+                        r = _frac_r(c.entry_price, c.stop_loss, c.t1, c.bias == "LONG")
                         c.status       = "CLOSED_WIN"
-                        c.realized_pnl = 1.0
+                        c.realized_pnl = r
                         c.target_hit   = "T1"
                         c.max_target_reached = _advance_target(c.max_target_reached, "T1")
                         c.closed_at    = candle_ts
                         closed = True
-                        print(f"|| LIFECYCLE P2 || {c.symbol} {c.bias} T1 {candle_ts}. +1R.")
+                        print(f"|| LIFECYCLE P2 || {c.symbol} {c.bias} T1 {candle_ts}. {r:+.4f}R.")
                         break
 
                 if closed:
@@ -326,14 +349,7 @@ async def run_ledger_audit_loop():
                 next_open = _next_session_open_utc(_as_utc(c.session_expires_at))
                 if now_utc >= next_open:
                     final_close = candles[-1]["c"]
-                    if c.bias == "LONG":
-                        frac_r = round(
-                            (final_close - c.entry_price) / (c.entry_price - c.stop_loss), 4
-                        )
-                    else:
-                        frac_r = round(
-                            (c.entry_price - final_close) / (c.stop_loss - c.entry_price), 4
-                        )
+                    frac_r = _frac_r(c.entry_price, c.stop_loss, final_close, c.bias == "LONG")
                     c.status       = "CLOSED_AT_EXPIRY"
                     c.realized_pnl = frac_r
                     c.target_hit   = "EXPIRY"
@@ -434,13 +450,14 @@ async def run_ledger_audit_loop():
                         break
 
                     if hit_t1:
+                        r = _frac_r(c.entry_price, c.stop_loss, c.t1, c.bias == "LONG")
                         c.status       = "CLOSED_WIN"
-                        c.realized_pnl = 1.0
+                        c.realized_pnl = r
                         c.target_hit   = "T1"
                         c.max_target_reached = _advance_target(c.max_target_reached, "T1")
                         c.closed_at    = candle_ts
                         closed = True
-                        print(f"|| LIFECYCLE P4 || {c.symbol} {c.mas_approval_status} T1 {candle_ts}. +1R.")
+                        print(f"|| LIFECYCLE P4 || {c.symbol} {c.mas_approval_status} T1 {candle_ts}. {r:+.4f}R.")
                         break
 
                 if closed:
@@ -458,11 +475,7 @@ async def run_ledger_audit_loop():
                 # Time-cap expiry (5d for 4H, 2d for 1H — set at write time)
                 if c.session_expires_at and now_utc >= _as_utc(c.session_expires_at):
                     final_close = candles[-1]["c"]
-                    stop_dist = max(abs(c.entry_price - c.stop_loss), 0.01)
-                    if c.bias == "LONG":
-                        frac_r = round((final_close - c.entry_price) / stop_dist, 4)
-                    else:
-                        frac_r = round((c.entry_price - final_close) / stop_dist, 4)
+                    frac_r = _frac_r(c.entry_price, c.stop_loss, final_close, c.bias == "LONG")
                     c.status       = "CLOSED_AT_EXPIRY"
                     c.realized_pnl = frac_r
                     c.target_hit   = "EXPIRY"
