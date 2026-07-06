@@ -136,6 +136,33 @@ def _compute_kinematic_grade(candles: List[Dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# HELPER: MACRO BIAS + WEEKLY 200 SMA POSITION (punch-list item #5, 2026-07-06)
+# macro_bias reuses battlebox_pipeline._calculate_weekly_force() (21-day vs
+# 7-day daily SMA crossover) exactly as the 15M system already computes it --
+# no reimplementation. Backtested against v4-consistent construction:
+#   1H: aligned-with-bias signals clearly outperform counter-trend
+#       (58.3%/+0.257R, N=84 vs 46.4%/-0.028R, N=69) -- HARD GATE on 1H.
+#   4H: INVERTED (counter-trend outperforms aligned, N=74-76) -- record only,
+#       do not gate; blocking would remove the currently-winning subset.
+# weekly_200sma_position reuses battlebox_pipeline._fetch_weekly_200sma()
+# (a gravity_memory row read, written every 24h by the macro engine) + the
+# same +-0.5% threshold _compute_mtf_structural_snapshot() already uses.
+# RECORD-ONLY on both timeframes -- not independently backtested (would need
+# ~1400+ days of daily history to test rigorously). See WORK_LOG.md 2026-07-06.
+# ---------------------------------------------------------------------------
+def _compute_macro_bias(candles_1d: List[Dict]) -> str:
+    return battlebox_pipeline._calculate_weekly_force(candles_1d)
+
+
+def _compute_weekly_200sma_position(symbol: str, current_price: float) -> Any:
+    w200sma = battlebox_pipeline._fetch_weekly_200sma(symbol)
+    if not w200sma or w200sma <= 0 or current_price <= 0:
+        return None
+    dist = (current_price - w200sma) / w200sma * 100.0
+    return "ABOVE" if dist > 0.5 else "BELOW" if dist < -0.5 else "AT"
+
+
+# ---------------------------------------------------------------------------
 # BEDROCK / RADAR LOGGING (unchanged)
 # ---------------------------------------------------------------------------
 def log_kabroda_bedrock(symbol: str, levels: dict, lock_ts: int):
@@ -437,7 +464,7 @@ async def fill_decision_outcomes():
 STOP_WINDOW_4H = timedelta(days=5)
 
 
-def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], db) -> None:
+def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], candles_1d: List[Dict[str, Any]], db) -> None:
     try:
         if not candles_4h or len(candles_4h) < 14:
             return
@@ -492,6 +519,8 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
         atr14 = _calc_atr(candles_4h, 14)
         stop_window_start = now - STOP_WINDOW_4H
         kinematic_grade = _compute_kinematic_grade(candles_4h)  # observational only, see helper docstring
+        macro_bias = _compute_macro_bias(candles_1d)  # record-only for 4H -- backtest showed this INVERTS, do not gate
+        weekly_200sma_position = _compute_weekly_200sma_position(symbol, current_close)  # record-only
 
         bias = None
         stop_price = None
@@ -592,6 +621,8 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
             htf_anchor_price=htf_anchor_price_val,
             energy_grade=energy_grade,
             kinematic_grade=kinematic_grade,
+            macro_bias=macro_bias,
+            weekly_200sma_position=weekly_200sma_position,
         )
         db.add(row)
         db.commit()
@@ -640,7 +671,7 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
 STOP_WINDOW_1H = timedelta(days=2)
 
 
-def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]], db) -> None:
+def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]], candles_1d: List[Dict[str, Any]], db) -> None:
     try:
         if not candles_1h or len(candles_1h) < 14:
             return
@@ -781,6 +812,17 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
         if not bias:
             return
 
+        # HARD GATE (1H only, 2026-07-06): reject candidates counter to the daily
+        # macro_bias. Backtested against v4-consistent construction: aligned-with-bias
+        # 1H signals clearly outperform counter-trend (58.3%/+0.257R, N=84 vs
+        # 46.4%/-0.028R, N=69). 4H showed the OPPOSITE pattern in the same backtest
+        # and is deliberately NOT gated -- see _compute_macro_bias docstring above.
+        # NEUTRAL does not block (thin N=14 sample, not clearly bad either direction).
+        macro_bias = _compute_macro_bias(candles_1d)
+        weekly_200sma_position = _compute_weekly_200sma_position(symbol, current_close)
+        if (bias == "LONG" and macro_bias == "BEARISH") or (bias == "SHORT" and macro_bias == "BULLISH"):
+            return
+
         row = CampaignLog(
             symbol=symbol,
             date_key=date_key,
@@ -804,6 +846,8 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
             htf_anchor_price=htf_anchor_price_val,
             energy_grade=energy_grade_1h,
             kinematic_grade=kinematic_grade,
+            macro_bias=macro_bias,
+            weekly_200sma_position=weekly_200sma_position,
         )
         db.add(row)
         db.commit()
@@ -893,8 +937,8 @@ async def run_gravity_ingestion_loop():
 
                 # BOS detection — BTC only
                 if symbol == "BTC/USDT":
-                    _detect_4h_bos(symbol, db_sym, candles_4h, db)
-                    _detect_1h_bos(symbol, db_sym, candles_1h, candles_4h, db)
+                    _detect_4h_bos(symbol, db_sym, candles_4h, candles_1d, db)
+                    _detect_1h_bos(symbol, db_sym, candles_1h, candles_4h, candles_1d, db)
 
         except Exception as e:
             print(f"Gravity Engine Iteration Error: {e}")

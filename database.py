@@ -237,6 +237,8 @@ def init_db():
         "htf_anchor_price FLOAT",
         "energy_grade VARCHAR",
         "kinematic_grade VARCHAR",
+        "macro_bias VARCHAR",
+        "weekly_200sma_position VARCHAR",
     ]:
         try:
             with engine.begin() as conn:
@@ -490,6 +492,21 @@ class CampaignLog(Base):
     # clears N>=30 per timeframe with a stable signal -- see WORK_LOG.md 2026-07-05 entry.
     # NULL on 15M rows (they don't go through the 4H/1H detectors that compute this).
     kinematic_grade = Column(String, nullable=True)
+
+    # macro_bias: BULLISH/BEARISH/NEUTRAL, battlebox_pipeline._calculate_weekly_force()
+    # (21-day vs 7-day daily SMA crossover), reused directly from the 15M system.
+    # Backtested (2026-07-06, v4-consistent construction): 1H aligned-with-bias signals
+    # clearly outperform counter-trend (58.3%/+0.257R vs 46.4%/-0.028R, N=84/69) -- HARD
+    # GATE on 1H: counter-trend candidates are never written. 4H is INVERTED in the same
+    # backtest (counter-trend outperforms aligned) -- record-only, NOT enforced, since
+    # blocking would remove the currently-winning subset. See WORK_LOG.md 2026-07-06.
+    macro_bias = Column(String, nullable=True)
+
+    # weekly_200sma_position: ABOVE/BELOW/AT, battlebox_pipeline._fetch_weekly_200sma()
+    # + the same +-0.5% threshold _compute_mtf_structural_snapshot() already uses.
+    # RECORD-ONLY on both 4H/1H -- not independently backtested (would need ~1400+ days
+    # of daily history to test rigorously); revisit once real production data accumulates.
+    weekly_200sma_position = Column(String, nullable=True)
 
 # ---------------------------------------------------------
 # MTF CONFLUENCE READINGS (MORNING BRIEF HISTORY)
