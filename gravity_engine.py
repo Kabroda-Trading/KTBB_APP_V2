@@ -163,10 +163,20 @@ def _compute_weekly_200sma_position(symbol: str, current_price: float) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# BEDROCK / RADAR LOGGING (unchanged)
+# BEDROCK / RADAR LOGGING
 # ---------------------------------------------------------------------------
 def log_kabroda_bedrock(symbol: str, levels: dict, lock_ts: int):
-    """Logs the 7-Day macro anchors (Daily S/R, 30m boundaries, Triggers)."""
+    """
+    Logs the 7-Day macro anchors (Daily S/R, 30m boundaries, Triggers).
+
+    Each level_type is a single rolling per-session snapshot -- only the latest
+    should be active. Before 2026-07-06 this never deactivated the previous
+    session's rows: 6 new rows get written every session lock, forever, and
+    this source ALSO gets an extra +1.5 KDE weight bonus specifically for
+    source=="7_DAY_KABRODA" (gravity_math.py) -- making stale accumulation here
+    the single largest contributor to the duplicate-inflated "wall" bug found
+    2026-07-06 (see WORK_LOG.md and log_radar_anchors() above).
+    """
     db = SessionLocal()
     try:
         db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
@@ -182,6 +192,12 @@ def log_kabroda_bedrock(symbol: str, levels: dict, lock_ts: int):
         }
         for l_type, price in mapping.items():
             if float(price) > 0:
+                db.query(GravityMemory).filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "7_DAY_KABRODA",
+                    GravityMemory.level_type == l_type,
+                    GravityMemory.active == True,
+                ).update({"active": False})
                 mem = GravityMemory(symbol=db_sym, timestamp=dt, source="7_DAY_KABRODA", level_type=l_type, price=float(price), permanence_class=2, heat_multiplier=1.0)
                 db.add(mem)
         db.commit()
@@ -192,7 +208,20 @@ def log_kabroda_bedrock(symbol: str, levels: dict, lock_ts: int):
         db.close()
 
 def log_radar_anchors(symbol: str, raw_daily: List[Dict[str, Any]], raw_1h: List[Dict[str, Any]]):
-    """Logs Macro (Weekly) and Micro (168H) trend anchor prices."""
+    """
+    Logs Macro (Weekly) and Micro (168H) trend anchor prices.
+
+    Each of these is a single ROLLING reference point, not a growing history --
+    only the latest snapshot should ever be active. Before 2026-07-06 this never
+    deactivated superseded rows: 168H_MICRO_ANCHOR writes hourly and 1W_MACRO_ANCHOR
+    writes weekly, both forever, with nothing ever setting active=False on the
+    previous one (unlike 4H_PIVOT/1H_PIVOT/DAILY_PIVOT, which _update_zone_touches()
+    already invalidates correctly). Confirmed via real production data: 13
+    simultaneously-active 168H_MICRO_ANCHOR rows clustered in one ~$160 band,
+    causing calculate_gravity_kde() to sum a duplicate-inflated density peak that
+    persisted as a "MAXIMUM" wall for nearly a month despite BTC moving tens of
+    thousands of dollars in between. See WORK_LOG.md 2026-07-06.
+    """
     db = SessionLocal()
     try:
         db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
@@ -208,6 +237,11 @@ def log_radar_anchors(symbol: str, raw_daily: List[Dict[str, Any]], raw_1h: List
                 macro_price = float(macro_candle["close"])
                 exists = db.query(GravityMemory).filter(GravityMemory.symbol == db_sym, GravityMemory.timestamp == last_sunday_dt, GravityMemory.source == "1W_MACRO_ANCHOR").first()
                 if not exists:
+                    db.query(GravityMemory).filter(
+                        GravityMemory.symbol == db_sym,
+                        GravityMemory.source == "1W_MACRO_ANCHOR",
+                        GravityMemory.active == True,
+                    ).update({"active": False})
                     db.add(GravityMemory(symbol=db_sym, timestamp=last_sunday_dt, source="1W_MACRO_ANCHOR", level_type="MACRO_LINE", price=macro_price, permanence_class=1, heat_multiplier=5.0))
                     print(f"|| GRAVITY MACRO || {db_sym} | Weekly Anchor @ ${macro_price} LOCKED.")
         if raw_1h and len(raw_1h) >= 168:
@@ -216,6 +250,11 @@ def log_radar_anchors(symbol: str, raw_daily: List[Dict[str, Any]], raw_1h: List
             micro_dt = datetime.fromtimestamp(int(micro_candle["time"]), tz=timezone.utc)
             exists = db.query(GravityMemory).filter(GravityMemory.symbol == db_sym, GravityMemory.timestamp == micro_dt, GravityMemory.source == "168H_MICRO_ANCHOR").first()
             if not exists:
+                db.query(GravityMemory).filter(
+                    GravityMemory.symbol == db_sym,
+                    GravityMemory.source == "168H_MICRO_ANCHOR",
+                    GravityMemory.active == True,
+                ).update({"active": False})
                 db.add(GravityMemory(symbol=db_sym, timestamp=micro_dt, source="168H_MICRO_ANCHOR", level_type="MICRO_LINE", price=micro_price, permanence_class=2, heat_multiplier=3.0))
                 print(f"|| GRAVITY MICRO || {db_sym} | 168H Rolling Anchor @ ${micro_price} LOCKED.")
         db.commit()
