@@ -236,6 +236,7 @@ def init_db():
         "htf_anchor_type VARCHAR",
         "htf_anchor_price FLOAT",
         "energy_grade VARCHAR",
+        "kinematic_grade VARCHAR",
     ]:
         try:
             with engine.begin() as conn:
@@ -478,6 +479,17 @@ class CampaignLog(Base):
     htf_anchor_type = Column(String, nullable=True)                      # e.g. 'BULL_WAVE_3', 'DAILY_PIVOT', 'FIB_FALLBACK'
     htf_anchor_price = Column(Float, nullable=True)                      # price of the higher-TF level that set the target
     energy_grade = Column(String, nullable=True)                         # STRONG/MODERATE/WEAK at detection time
+
+    # kinematic_grade: PRIMED/TANGLED/OVEREXTENDED, the 15M JEWEL's own market-state formula
+    # (BBWP/PMARP/EMA9-55 ribbon based), ported to 4H/1H as a SECOND, purely observational
+    # signal alongside energy_grade. RECORD-ONLY (2026-07-05 decision) -- neither this nor
+    # energy_grade gates candidate creation. Backtested against v4-consistent trade
+    # construction (N=167 1H, N=177 4H): no clean, reliable signal at current sample sizes
+    # on either formula for either timeframe (kinematic_grade is actually backwards on 4H --
+    # OVEREXTENDED outperforms PRIMED). Revisit enforcement only once real production data
+    # clears N>=30 per timeframe with a stable signal -- see WORK_LOG.md 2026-07-05 entry.
+    # NULL on 15M rows (they don't go through the 4H/1H detectors that compute this).
+    kinematic_grade = Column(String, nullable=True)
 
 # ---------------------------------------------------------
 # MTF CONFLUENCE READINGS (MORNING BRIEF HISTORY)

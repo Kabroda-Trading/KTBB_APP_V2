@@ -107,6 +107,35 @@ def _compute_energy_grade(candles: List[Dict], bias: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# HELPER: KINEMATIC GRADE (second, observational energy signal — 2026-07-05)
+# Ports the 15M JEWEL's own PRIMED/TANGLED/OVEREXTENDED formula (BBWP/PMARP/
+# ribbon-spread based, direction-agnostic market-state read) to 4H/1H, as a
+# SECOND signal alongside _compute_energy_grade -- NOT a replacement, and
+# NOT enforced. RECORD-ONLY: backtested against v4-consistent trade
+# construction (mtf_backtest_lab.py, N=167 1H / N=177 4H) and found no
+# clean, reliable signal at current sample sizes on either timeframe --
+# this formula is actually backwards on 4H (OVEREXTENDED outperforms
+# PRIMED), confirming its 252-bar lookback (42 real days on 4H vs. 2.6 days
+# on 15M) doesn't transfer across timeframes. See WORK_LOG.md 2026-07-05.
+# ---------------------------------------------------------------------------
+def _compute_kinematic_grade(candles: List[Dict]) -> str:
+    if not candles or len(candles) < 200:
+        return "TANGLED"
+    closes = [float(c["close"]) for c in candles]
+    ema9 = battlebox_pipeline._calc_ema_series(closes, 9)[-1]
+    ema55 = battlebox_pipeline._calc_ema_series(closes, 55)[-1]
+    ribbon_spread = abs(ema9 - ema55) / ema55 * 100
+    bbwp_val = battlebox_pipeline._calc_bbwp(closes)
+    pmarp_val = battlebox_pipeline._calc_pmarp(closes)
+    if pmarp_val >= 85.0:
+        return "OVEREXTENDED"
+    elif bbwp_val <= 30.0 and ribbon_spread > 0.05:
+        return "PRIMED"
+    else:
+        return "TANGLED"
+
+
+# ---------------------------------------------------------------------------
 # BEDROCK / RADAR LOGGING (unchanged)
 # ---------------------------------------------------------------------------
 def log_kabroda_bedrock(symbol: str, levels: dict, lock_ts: int):
@@ -462,6 +491,7 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
 
         atr14 = _calc_atr(candles_4h, 14)
         stop_window_start = now - STOP_WINDOW_4H
+        kinematic_grade = _compute_kinematic_grade(candles_4h)  # observational only, see helper docstring
 
         bias = None
         stop_price = None
@@ -561,6 +591,7 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], d
             htf_anchor_type=htf_anchor_type,
             htf_anchor_price=htf_anchor_price_val,
             energy_grade=energy_grade,
+            kinematic_grade=kinematic_grade,
         )
         db.add(row)
         db.commit()
@@ -663,6 +694,7 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
 
         atr14 = _calc_atr(candles_1h, 14)
         stop_window_start = now - STOP_WINDOW_1H
+        kinematic_grade = _compute_kinematic_grade(candles_1h)  # observational only, see helper docstring
 
         bias = None
         stop_price = None
@@ -771,6 +803,7 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
             htf_anchor_type=htf_anchor_type,
             htf_anchor_price=htf_anchor_price_val,
             energy_grade=energy_grade_1h,
+            kinematic_grade=kinematic_grade,
         )
         db.add(row)
         db.commit()
