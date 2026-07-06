@@ -3,8 +3,9 @@
 # KABRODA TRADE-LIFECYCLE MONITOR  (W-9 replacement — 2026-06-11)
 # OHLC detection upgrade — 2026-06-16
 # Phase 4 candidate monitoring — 2026-06-30
+# Phase 3B shadow runner tracking — 2026-07-06
 #
-# Four-phase state machine.
+# Five-phase state machine (four real phases + one shadow/record-only phase).
 #
 # PHASE 1 — Pre-entry
 #   Watches APPROVED records where entry_filled_at IS NULL.
@@ -35,6 +36,17 @@
 #   price subsequently reached T2/T3 via max_target_reached / t2_reached /
 #   t3_reached. Does NOT reopen the record or change status/pnl.
 #   Uses MEXC live-price snapshot (acceptable for non-closing observation).
+#
+# PHASE 3B — Shadow runner tracking (2026-07-06, 15M only, RECORD-ONLY)
+#   Seeded by Phase 2's T1-hit branch (shadow_runner_active=True, shadow_runner_
+#   stop=entry_price). Independently walks 1m candles forward (own last-scan
+#   watermark, own query, decoupled from real closed_at/status) trailing a
+#   stop toward a 15m EMA21 -- ratcheted only in the favorable direction, never
+#   below breakeven -- and resolving at a stop touch, a T3 touch, or a 5-day
+#   time cap. Models "close 50% at T1, run the rest" as a blended-R value
+#   (shadow_runner_blended_r) for comparison against the real, already-
+#   recorded realized_pnl. Never touches status/realized_pnl/closed_at.
+#   Does NOT apply to Phase 4 (4H/1H candidates) -- 15M only, by design.
 #
 # Legacy-row safety: all existing rows have session_expires_at = NULL. Every
 # phase query filters session_expires_at IS NOT NULL (Phase 1) or entry_filled_at
@@ -167,6 +179,28 @@ def _observe_targets(c: CampaignLog, live: float) -> bool:
     return changed
 
 
+def _floor_to_15m(ts_ms: int) -> int:
+    """Floor an epoch-ms timestamp to the start of its containing 15-minute bucket."""
+    bucket_ms = 15 * 60 * 1000
+    return (ts_ms // bucket_ms) * bucket_ms
+
+
+def _update_ema21(prev_ema: Optional[float], new_close: float, period: int = 21) -> float:
+    """
+    Incremental EMA update, one completed 15m bar at a time -- no look-ahead,
+    since each call only ever uses a bar that has already fully closed.
+
+    Seeded with the first bar's close rather than a full N-bar SMA warm-up
+    (an acknowledged simplification for this shadow/trial feature -- the seed
+    bias decays within roughly `period` bars, and this avoids needing to
+    buffer 21 bars of history before the runner's trail can start moving).
+    """
+    if prev_ema is None:
+        return new_close
+    k = 2.0 / (period + 1)
+    return prev_ema + k * (new_close - prev_ema)
+
+
 def _notify_candidate_closed(c: CampaignLog) -> None:
     """
     Fires the admin close-email for a resolved 4H/1H candidate. Called at each
@@ -196,7 +230,7 @@ def _notify_candidate_closed(c: CampaignLog) -> None:
 
 
 async def run_ledger_audit_loop():
-    print(">>> TRADE-LIFECYCLE MONITOR: Initializing (W-9 engine, OHLC detection, Phase 4 candidates)...")
+    print(">>> TRADE-LIFECYCLE MONITOR: Initializing (W-9 engine, OHLC detection, Phase 4 candidates, Phase 3B shadow runner)...")
 
     while True:
         now_utc = datetime.now(timezone.utc)
@@ -316,6 +350,12 @@ async def run_ledger_audit_loop():
                         c.target_hit   = "T1"
                         c.max_target_reached = _advance_target(c.max_target_reached, "T1")
                         c.closed_at    = candle_ts
+                        # Shadow-mode runner tracking (2026-07-06, 15M only, record-only) —
+                        # seeds Phase 3B below. Real status/realized_pnl/closed_at above are
+                        # completely unaffected by this.
+                        c.shadow_runner_active = True
+                        c.shadow_runner_stop = c.entry_price
+                        c.shadow_runner_last_scan_ts = candle_ts
                         closed = True
                         print(f"|| LIFECYCLE P2 || {c.symbol} {c.bias} T1 {candle_ts}. {r:+.4f}R.")
                         break
@@ -398,6 +438,92 @@ async def run_ledger_audit_loop():
                 if _observe_targets(c, live):
                     db.commit()
                     print(f"|| LIFECYCLE P3 || {c.symbol} post-T1 target observation updated.")
+
+            # ── PHASE 3B: Shadow runner tracking (2026-07-06, 15M only) ──────
+            # Seeded by Phase 2's T1-hit branch above (shadow_runner_active=True,
+            # shadow_runner_stop=entry_price). Independent of Phase 3 -- Phase 3 is
+            # ticker-only and time-boxed to the same session; this needs candle
+            # precision over a multi-day window, and is decoupled from the real
+            # closed_at/status exactly like Phase 3 already is.
+            #
+            # Walks 1m candles strictly chronologically so the trailing stop is
+            # ratcheted using only 15m bars that have already closed as of the
+            # candle being tested -- never a bar from that candle's own future
+            # (the look-ahead trap: naively recomputing "the current EMA21" once
+            # per tick and applying it retroactively across a re-scanned window
+            # would test old candles against a stop level the EMA hadn't reached
+            # yet at that historical moment).
+            #
+            # Real status/realized_pnl/closed_at are never touched here -- this
+            # only fills shadow_runner_* columns, modeling what "close 50% at T1,
+            # run the rest" would have produced, for review before ever
+            # considering flipping this live.
+            shadow_active = db.query(CampaignLog).filter(
+                CampaignLog.session_timeframe == "15M",
+                CampaignLog.is_canonical == True,
+                CampaignLog.shadow_runner_active == True,
+                CampaignLog.shadow_runner_closed_at.is_(None),
+            ).all()
+
+            for c in shadow_active:
+                since_ms = int(_as_utc(c.shadow_runner_last_scan_ts or c.closed_at).timestamp() * 1000)
+                candles = await _fetch_1m_since(c.symbol, since_ms=since_ms)
+                if not candles:
+                    continue
+
+                is_long = c.bias == "LONG"
+
+                for candle in candles:
+                    candle_ts = datetime.fromtimestamp(candle["ts"] / 1000, tz=timezone.utc)
+                    bucket_ts_ms = _floor_to_15m(candle["ts"])
+                    prev_bucket_ms = (
+                        int(_as_utc(c.shadow_runner_bucket_ts).timestamp() * 1000)
+                        if c.shadow_runner_bucket_ts is not None else None
+                    )
+
+                    # A new 15m bucket has started -- the previous one just closed.
+                    # Finalize it into the running EMA and ratchet the stop BEFORE
+                    # testing this candle for a touch (chronologically honest).
+                    if prev_bucket_ms is not None and bucket_ts_ms > prev_bucket_ms:
+                        c.shadow_runner_ema21 = _update_ema21(c.shadow_runner_ema21, c.shadow_runner_bucket_close)
+                        if is_long:
+                            c.shadow_runner_stop = max(c.shadow_runner_stop, c.shadow_runner_ema21)
+                        else:
+                            c.shadow_runner_stop = min(c.shadow_runner_stop, c.shadow_runner_ema21)
+
+                    c.shadow_runner_bucket_ts = datetime.fromtimestamp(bucket_ts_ms / 1000, tz=timezone.utc)
+                    c.shadow_runner_bucket_close = candle["c"]
+
+                    if is_long:
+                        hit_stop = candle["l"] <= c.shadow_runner_stop
+                        hit_t3   = c.t3 is not None and candle["h"] >= c.t3
+                    else:
+                        hit_stop = candle["h"] >= c.shadow_runner_stop
+                        hit_t3   = c.t3 is not None and candle["l"] <= c.t3
+
+                    if hit_stop or hit_t3:
+                        exit_price = c.shadow_runner_stop if hit_stop else c.t3
+                        reason = "STOP" if hit_stop else "T3"
+                        leg2_r = _frac_r(c.entry_price, c.stop_loss, exit_price, is_long)
+                        c.shadow_runner_leg2_r = leg2_r
+                        c.shadow_runner_blended_r = round(0.5 * c.realized_pnl + 0.5 * leg2_r, 4)
+                        c.shadow_runner_exit_reason = reason
+                        c.shadow_runner_closed_at = candle_ts
+                        print(f"|| LIFECYCLE P3B || {c.symbol} shadow runner {reason} {candle_ts}. leg2={leg2_r:+.4f}R blended={c.shadow_runner_blended_r:+.4f}R.")
+                        break
+
+                    if (candle_ts - _as_utc(c.closed_at)) > timedelta(days=5):
+                        leg2_r = _frac_r(c.entry_price, c.stop_loss, candle["c"], is_long)
+                        c.shadow_runner_leg2_r = leg2_r
+                        c.shadow_runner_blended_r = round(0.5 * c.realized_pnl + 0.5 * leg2_r, 4)
+                        c.shadow_runner_exit_reason = "TIME_CAP"
+                        c.shadow_runner_closed_at = candle_ts
+                        print(f"|| LIFECYCLE P3B || {c.symbol} shadow runner TIME_CAP {candle_ts}. leg2={leg2_r:+.4f}R blended={c.shadow_runner_blended_r:+.4f}R.")
+                        break
+
+                    c.shadow_runner_last_scan_ts = candle_ts
+
+                db.commit()
 
             # ── PHASE 4: Candidate monitoring (4H / 1H BOS candidates) ──────
             # CANDIDATE rows are written by gravity_engine._detect_4h/1h_bos()

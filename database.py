@@ -246,6 +246,25 @@ def init_db():
         except Exception:
             pass
 
+    # --- RUNNER MECHANIC (SHADOW MODE) — 15M-only, record-only T1-runner tracking ---
+    for _col in [
+        "shadow_runner_active BOOLEAN DEFAULT FALSE",
+        "shadow_runner_stop FLOAT",
+        "shadow_runner_ema21 FLOAT",
+        "shadow_runner_bucket_ts TIMESTAMP",
+        "shadow_runner_bucket_close FLOAT",
+        "shadow_runner_last_scan_ts TIMESTAMP",
+        "shadow_runner_closed_at TIMESTAMP",
+        "shadow_runner_exit_reason VARCHAR",
+        "shadow_runner_leg2_r FLOAT",
+        "shadow_runner_blended_r FLOAT",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE campaign_logs ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- TARGET LOGIC v3 — t2/t3 made nullable for single-target 4H/1H candidates ---
     # v3 rows write t2=None/t3=None by design (see database.py CampaignLog comment).
     # Column was still NOT NULL at the DB level, so every v3 4H/1H INSERT was failing
@@ -507,6 +526,27 @@ class CampaignLog(Base):
     # RECORD-ONLY on both 4H/1H -- not independently backtested (would need ~1400+ days
     # of daily history to test rigorously); revisit once real production data accumulates.
     weekly_200sma_position = Column(String, nullable=True)
+
+    # --- RUNNER MECHANIC (SHADOW MODE, 2026-07-06) -- 15M ONLY, RECORD-ONLY ---
+    # At a real T1 close, ledger_closing_engine.py's Phase 2 also seeds these fields
+    # and Phase 3B ("Shadow Runner Tracking") continues walking 1m candles forward,
+    # trailing a stop toward a 15m EMA21 (never loosening past breakeven) and
+    # resolving against a STOP touch, T3 touch, or a 5-day time cap. The REAL
+    # status/realized_pnl/closed_at fields are never touched by this -- shadow_runner_*
+    # only models what a "close 50% at T1, run the rest" mechanic would have produced,
+    # for comparison against the real, already-recorded T1 outcome before ever
+    # considering flipping this live. NULL/False on every row until its own T1 hits
+    # after this feature's deploy (no backfill of pre-existing T1 rows).
+    shadow_runner_active = Column(Boolean, default=False, server_default="0")
+    shadow_runner_stop = Column(Float, nullable=True)
+    shadow_runner_ema21 = Column(Float, nullable=True)
+    shadow_runner_bucket_ts = Column(DateTime, nullable=True)
+    shadow_runner_bucket_close = Column(Float, nullable=True)
+    shadow_runner_last_scan_ts = Column(DateTime, nullable=True)
+    shadow_runner_closed_at = Column(DateTime, nullable=True)
+    shadow_runner_exit_reason = Column(String, nullable=True)  # STOP | T3 | TIME_CAP
+    shadow_runner_leg2_r = Column(Float, nullable=True)
+    shadow_runner_blended_r = Column(Float, nullable=True)
 
 # ---------------------------------------------------------
 # MTF CONFLUENCE READINGS (MORNING BRIEF HISTORY)
