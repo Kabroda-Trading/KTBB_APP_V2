@@ -101,9 +101,7 @@
         <div class="header-panel">
             <h1 class="wr-title">MACRO WAR ROOM <span style="font-size: 12px; color: #666; font-family: 'Inter'; font-weight: 400;">// EXECUTIVE DASHBOARD</span></h1>
             <select id="symSelect" class="asset-selector" onchange="changeAssetRoute()">
-                <option value="BTC/USDT" {% if request.query_params.symbol == 'BTC/USDT' or not request.query_params.symbol %}selected{% endif %}>BTC/USDT</option>
-                <option value="ETH/USDT" {% if request.query_params.symbol == 'ETH/USDT' %}selected{% endif %}>ETH/USDT</option>
-                <option value="SOL/USDT" {% if request.query_params.symbol == 'SOL/USDT' %}selected{% endif %}>SOL/USDT</option>
+                <option value="BTC/USDT" selected>BTC/USDT</option>
             </select>
         </div>
 

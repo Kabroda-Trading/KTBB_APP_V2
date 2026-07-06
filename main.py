@@ -1126,6 +1126,32 @@ async def admin_delete_user(request: Request, user_id: str = Form(...), db: Sess
         db.commit()
     return RedirectResponse(url="/admin", status_code=303)
 
+@app.post("/admin/create-user")
+async def admin_create_user(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"): return JSONResponse({"ok": False, "error": "Unauthorized"})
+    payload = await request.json()
+    email = (payload.get("email") or "").strip().lower()
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+    if not email or not username or not password:
+        return JSONResponse({"ok": False, "error": "Email, username, and password are all required"})
+    if db.query(UserModel).filter(UserModel.email == email).first():
+        return JSONResponse({"ok": False, "error": "A user with that email already exists"})
+    new_user = UserModel(
+        email=email,
+        username=username,
+        first_name=(payload.get("first_name") or None),
+        last_name=(payload.get("last_name") or None),
+        password_hash=auth.hash_password(password),
+        subscription_status="active",
+        tier="basic",
+        is_admin=False,
+    )
+    db.add(new_user)
+    db.commit()
+    return JSONResponse({"ok": True})
+
 @app.post("/admin/toggle-role")
 async def admin_toggle_role(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)

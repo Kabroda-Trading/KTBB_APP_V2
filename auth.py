@@ -72,48 +72,19 @@ def login_action(request: Request, email: str = Form(...), password: str = Form(
     request.session[SESSION_KEY] = int(u.id)
     return RedirectResponse(url="/suite", status_code=303)
 
+# Public self-registration is closed (site is invite-only, not currently offering
+# memberships). These routes stay defined -- harmless redirect for any stale
+# bookmarked/indexed /register link -- rather than a dangling 404 or the old
+# TemplateNotFound crash (register.html doesn't exist; this used to redirect to
+# a hardcoded Whop checkout URL from a past membership-commerce era). Accounts
+# are now created directly by an admin via POST /admin/create-user.
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"request": request})
+    return RedirectResponse(url="/login")
 
 @router.post("/register")
-def register_action(
-    request: Request, 
-    first_name: str = Form(None),
-    last_name: str = Form(None),
-    username: str = Form(...),
-    email: str = Form(...), 
-    password: str = Form(...), 
-    db: Session = Depends(get_db)
-):
-    # AUDIT FIX: Removed init_db() to prevent SQLite deadlocks.
-    em = email.strip().lower()
-    
-    existing = db.query(UserModel).filter(UserModel.email == em).first()
-    if existing:
-        return RedirectResponse(url="/login?error=Email+already+registered", status_code=303)
-    
-    # Create the operative (Inactive until Whop Webhook fires)
-    new_user = UserModel(
-        email=em,
-        username=username,
-        first_name=first_name, 
-        last_name=last_name,   
-        password_hash=hash_password(password),
-        subscription_status="inactive",
-        tier="basic",            # <-- AUDIT FIX: Satisfies the Postgres NOT NULL constraint
-        is_admin=False
-    )
-    
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    
-    # Auto-login the user immediately
-    request.session[SESSION_KEY] = int(new_user.id)
-    
-    # Route them directly to the Whop Checkout link!
-    return RedirectResponse(url="https://whop.com/checkout/plan_TtQ6FGNPxooMc", status_code=303)
+def register_action(request: Request):
+    return RedirectResponse(url="/login", status_code=303)
 
 @router.get("/logout")
 def logout_action(request: Request):

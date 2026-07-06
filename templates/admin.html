@@ -83,7 +83,10 @@
     <div class="roster-card">
         <div class="card-header">
             <span class="card-title">Active Operator Roster</span>
-            <span class="card-title">{{ users|length }} UNITS</span>
+            <div style="display:flex; gap:10px; align-items:center;">
+                <span class="card-title">{{ users|length }} UNITS</span>
+                <button class="btn-test" onclick="openAddUser()">+ ADD USER</button>
+            </div>
         </div>
         <table>
             <thead>
@@ -282,13 +285,31 @@
         <div class="modal">
             <h3>Override Access Key</h3>
             <p style="color:#94a3b8; font-size:14px;">Set a new manual password for operator <span id="targetName" style="color:#fff; font-weight:700;"></span>.</p>
-            
+
             <input type="hidden" id="targetId">
             <input type="text" id="newPass" class="inp-pass" placeholder="Enter new password...">
-            
+
             <div class="modal-actions">
                 <button class="btn-action" onclick="closeReset()">CANCEL</button>
                 <button class="btn-save" onclick="submitReset()">CONFIRM OVERRIDE</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="addUserModal" class="modal-overlay">
+        <div class="modal">
+            <h3>Add Operator</h3>
+            <p style="color:#94a3b8; font-size:14px;">Create an account directly — no invite link, no checkout, active immediately.</p>
+
+            <input type="text" id="newUserFirst" class="inp-pass" placeholder="First name (optional)">
+            <input type="text" id="newUserLast" class="inp-pass" placeholder="Last name (optional)">
+            <input type="text" id="newUserUsername" class="inp-pass" placeholder="Username">
+            <input type="email" id="newUserEmail" class="inp-pass" placeholder="Email">
+            <input type="text" id="newUserPass" class="inp-pass" placeholder="Password">
+
+            <div class="modal-actions">
+                <button class="btn-action" onclick="closeAddUser()">CANCEL</button>
+                <button class="btn-save" onclick="submitAddUser()">CREATE ACCOUNT</button>
             </div>
         </div>
     </div>
@@ -353,6 +374,50 @@
                     alert("ERROR: " + data.error);
                 }
             } catch(e) {
+                alert("System Failure.");
+            }
+        }
+
+        // --- ADD USER MODAL LOGIC ---
+        const addUserModal = document.getElementById('addUserModal');
+
+        function openAddUser() {
+            document.getElementById('newUserFirst').value = '';
+            document.getElementById('newUserLast').value = '';
+            document.getElementById('newUserUsername').value = '';
+            document.getElementById('newUserEmail').value = '';
+            document.getElementById('newUserPass').value = '';
+            addUserModal.classList.add('active');
+        }
+
+        function closeAddUser() {
+            addUserModal.classList.remove('active');
+        }
+
+        async function submitAddUser() {
+            const first_name = document.getElementById('newUserFirst').value;
+            const last_name = document.getElementById('newUserLast').value;
+            const username = document.getElementById('newUserUsername').value;
+            const email = document.getElementById('newUserEmail').value;
+            const password = document.getElementById('newUserPass').value;
+
+            if (!username || !email || !password) return alert("Username, email, and password are required.");
+
+            try {
+                const res = await fetch('/admin/create-user', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ first_name, last_name, username, email, password })
+                });
+
+                const data = await res.json();
+                if (data.ok) {
+                    alert("SUCCESS. Account created.");
+                    window.location.reload();
+                } else {
+                    alert("ERROR: " + data.error);
+                }
+            } catch (e) {
                 alert("System Failure.");
             }
         }
