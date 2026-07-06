@@ -913,10 +913,12 @@ def _build_senior_analyst_context(
     kde_peaks = context.get("kde_peaks", [])
     macro_structure = context.get("macro_structure", [])
     macro_env = context.get("macro_environment", {})
+    current_price = context.get("current_price", 0)
 
     lines = [
         f"=== KABRODA SENIOR ANALYST CONTEXT ===",
         f"Symbol: {symbol} | Date: {date_key} | Session: {session_id}",
+        f"Current Price (at lock): ${current_price:,.2f}",
         "",
         "=== SESSION LEVELS (IMMUTABLE — LOCKED AT 9:00 AM ET) ===",
         f"Breakout Trigger:   ${bo:,.2f}",

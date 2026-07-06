@@ -653,8 +653,9 @@ def _compute_sse_packet(
     computed["context"]["macro_fibs"] = macro_fibs
     computed["context"]["micro_state"] = harmonic_data.get("micro_state", "CHOP")
     computed["context"]["1h_fuel_status"] = harmonic_data.get("1h_fuel_status", "UNKNOWN")
-    computed["context"]["macro_structure"] = macro_structure 
+    computed["context"]["macro_structure"] = macro_structure
     computed["context"]["macro_environment"] = macro_context # <-- NEW: External Context
+    computed["context"]["current_price"] = last_price # <-- Punch-list item #3: SA previously had no explicit current price
 
     return {
         "levels": computed["levels"], 
