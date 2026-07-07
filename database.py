@@ -792,6 +792,71 @@ class InterpreterLog(Base):
 
 
 # ---------------------------------------------------------
+# KULTI LONG-TERM INVESTING MODULE (2026-07-07)
+# Separate, advisory-only module -- BTC monthly-cadence buy-and-hold framework
+# (Eric Crown's "KULTI" course, see WORK_LOG.md for full design rationale).
+# Never auto-executes anything; "the framework flags WHEN, you decide HOW MUCH."
+# ---------------------------------------------------------
+class LtiCheckpoint(Base):
+    """
+    One frozen row per monthly LTI audit -- append-only, same write-once
+    discipline as MacroNarrativeLog/InterpreterLog/SessionAuditLog. Never
+    updated after creation.
+    """
+    __tablename__ = "lti_checkpoints"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    symbol     = Column(String, nullable=False, default="BTC/USDT", index=True)
+    date_key   = Column(String, nullable=False, index=True)  # "YYYY-MM" month key
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    # Raw component readings (Crown's 11-component KULTI stack, minus the
+    # meta "Strong Buy Filter" which is the confluence count itself)
+    bbwp                = Column(Float, nullable=True)
+    bbwp_state          = Column(String, nullable=True)
+    pmarp               = Column(Float, nullable=True)
+    pmarp_state         = Column(String, nullable=True)
+    rsi_weekly          = Column(Float, nullable=True)
+    pct_below_high      = Column(Float, nullable=True)
+    krown_cross_state   = Column(String, nullable=True)   # BULLISH_EXPANDING etc (JEWEL-style label)
+    weekly_ema_trend    = Column(String, nullable=True)
+    low_month_day_flag  = Column(Boolean, default=False)
+    moon_phase_flag     = Column(Boolean, default=False)
+    moon_phase_label    = Column(String, nullable=True)
+    hash_ribbons_state  = Column(String, nullable=True)   # CAPITULATION | RECOVERY | NEUTRAL | UNAVAILABLE
+    fear_greed_value    = Column(Integer, nullable=True)  # Pesto F&G proxy
+    fear_greed_label    = Column(String, nullable=True)
+
+    # Confluence engine output (Crown's Conviction Scale)
+    accumulation_signals_firing = Column(Integer, default=0)
+    distribution_signals_firing = Column(Integer, default=0)
+    conviction_label            = Column(String, nullable=True)  # NO_ACTION|WATCH|EXECUTE|VERY_HIGH|GENERATIONAL
+
+    # Kabroda-native additions (not in Crown's original course)
+    wave_label_snapshot   = Column(String, nullable=True)   # from MacroNarrativeLog at audit time
+    gravity_cross_confirm = Column(Boolean, default=False)
+    nearest_macro_level   = Column(Float, nullable=True)
+
+
+class LtiProtocol(Base):
+    """
+    The user's editable "One-Page Protocol" (Crown's 5-component + 3-rule
+    checklist artifact) -- a mutable single row, matching how every other
+    user-editable setting in this codebase works (e.g. UserModel via
+    POST /account/settings), not an append-only log.
+    """
+    __tablename__ = "lti_protocol"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    universe           = Column(String, nullable=True, default="BTC")
+    conviction_threshold = Column(Integer, default=4)   # user-chosen 3 / 4 / 5+
+    drawdown_protocol  = Column(String, nullable=True)
+    cash_floor_pct     = Column(Float, default=5.0)      # Crown's "Never-Fully-Out" floor
+    residual_trim_pct  = Column(Float, default=15.0)     # Crown's "15% Residual Rule"
+    updated_at         = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
 # SESSION AUDIT LOG (FORWARD-AUDIT LOOP — CANONICAL AUDIT RECORD)
 # One row per MAS session decision. Write-once discipline:
 #   - Frozen-at-decision columns set once when decision is made; never overwritten.
