@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Kabroda | Long-Term Investing</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        body { padding: 20px; margin: 0; overflow-x: hidden; }
+
+        .lti-container { max-width: 1200px; margin: 40px auto 80px; }
+
+        .lti-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid var(--border-mid); padding-bottom: 20px; margin-bottom: 30px; }
+        .lti-title { font-family: var(--font-mono); font-size: 30px; color: var(--text-primary); margin: 0; text-transform: uppercase; letter-spacing: 2px; }
+        .lti-subtitle { font-family: var(--font-body); font-size: 13px; color: var(--text-muted); margin-top: 6px; }
+        .lti-badge { font-family: var(--font-mono); font-size: 11px; font-weight: 700; padding: 5px 10px; border-radius: 4px; background: var(--gold-subtle); color: var(--gold); border: 1px solid rgba(201, 162, 74, 0.35); letter-spacing: 1px; }
+
+        .card { background: var(--bg-card); border: 1px solid var(--border-mid); border-radius: 8px; padding: 22px 26px; margin-bottom: 20px; }
+        .card-title { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0; }
+
+        .empty-state { color: var(--text-muted); font-family: var(--font-body); font-size: 14px; padding: 10px 0; }
+
+        /* Conviction summary */
+        .conviction-row { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+        .conviction-pill { font-family: var(--font-mono); font-size: 15px; font-weight: 800; padding: 10px 20px; border-radius: 6px; text-transform: uppercase; letter-spacing: 1px; border: 1px solid; }
+        .conv-NO_ACTION   { background: var(--neutral-bg); color: var(--neutral); border-color: var(--neutral); }
+        .conv-WATCH       { background: var(--warn-bg);    color: var(--warn);    border-color: var(--warn); }
+        .conv-EXECUTE, .conv-VERY_HIGH, .conv-GENERATIONAL { background: var(--win-bg); color: var(--win); border-color: var(--win); }
+        .fire-count { font-family: var(--font-mono); font-size: 13px; color: var(--text-secondary); }
+        .fire-count b { color: var(--text-primary); font-size: 16px; }
+        .fire-count.dist b { color: var(--loss); }
+        .fire-count.acc b { color: var(--win); }
+
+        /* Component grid */
+        .comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+        .comp-tile { background: var(--bg-surface); border: 1px solid var(--border-faint); border-radius: 6px; padding: 14px 16px; }
+        .comp-name { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+        .comp-value { font-family: var(--font-mono); font-size: 18px; font-weight: 700; color: var(--text-primary); }
+        .comp-state { font-family: var(--font-body); font-size: 11px; color: var(--text-secondary); margin-top: 3px; }
+        .comp-info-only { opacity: 0.65; }
+        .comp-info-only .comp-name::after { content: " (info only)"; color: var(--text-faint); text-transform: none; letter-spacing: 0; }
+
+        /* Interpreter narrative */
+        .narrative-text { font-family: var(--font-body); font-size: 14.5px; line-height: 1.7; color: var(--text-primary); }
+
+        /* Protocol form */
+        .protocol-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .protocol-field { display: flex; flex-direction: column; gap: 6px; }
+        .protocol-field.full { grid-column: 1 / -1; }
+        .protocol-label { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .protocol-input {
+            background: var(--bg-input); border: 1px solid var(--border-mid); color: var(--text-primary);
+            padding: 10px 12px; border-radius: 4px; font-family: var(--font-body); font-size: 14px;
+        }
+        .protocol-input:focus { outline: none; border-color: var(--accent); }
+        textarea.protocol-input { resize: vertical; min-height: 70px; font-family: var(--font-body); }
+        .protocol-save-row { display: flex; align-items: center; gap: 14px; margin-top: 18px; }
+        .save-status { font-family: var(--font-mono); font-size: 12px; color: var(--win); opacity: 0; transition: opacity 0.3s; }
+
+        /* History table */
+        table.lti-history { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12.5px; }
+        table.lti-history th { text-align: left; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10.5px; padding: 8px 10px; border-bottom: 1px solid var(--border-mid); }
+        table.lti-history td { padding: 9px 10px; border-bottom: 1px solid var(--border-faint); color: var(--text-secondary); }
+        table.lti-history td.strong { color: var(--text-primary); font-weight: 700; }
+    </style>
+</head>
+<body>
+    {% include 'nav.html' %}
+
+    <div class="lti-container">
+        <div class="lti-header">
+            <div>
+                <h1 class="lti-title">Long-Term Investing</h1>
+                <div class="lti-subtitle">KULTI — BTC Confluence Framework (Eric Crown) + Kabroda macro cross-confirmation. Advisory only — never auto-executes.</div>
+            </div>
+            <span class="lti-badge">MONTHLY AUDIT</span>
+        </div>
+
+        {% if not latest_checkpoint %}
+        <div class="card">
+            <p class="empty-state">No monthly audit has run yet. The first audit fires automatically on the 1st of next month, 00:00 UTC. Set up your One-Page Protocol below in the meantime.</p>
+        </div>
+        {% else %}
+
+        <div class="card">
+            <p class="card-title">Conviction Read — {{ latest_checkpoint.date_key }}</p>
+            <div class="conviction-row">
+                <span class="conviction-pill conv-{{ latest_checkpoint.conviction_label }}">{{ latest_checkpoint.conviction_label.replace('_', ' ') }}</span>
+                <span class="fire-count acc">Accumulation: <b>{{ latest_checkpoint.accumulation_signals_firing }}</b> firing</span>
+                <span class="fire-count dist">Distribution: <b>{{ latest_checkpoint.distribution_signals_firing }}</b> firing</span>
+                {% if latest_checkpoint.wave_label_snapshot %}
+                <span class="fire-count">Wave: <b>{{ latest_checkpoint.wave_label_snapshot }}</b></span>
+                {% endif %}
+                {% if latest_checkpoint.gravity_cross_confirm %}
+                <span class="fire-count">Gravity confirm: <b>${{ "%.2f"|format(latest_checkpoint.nearest_macro_level) }}</b></span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card">
+            <p class="card-title">Component Readings</p>
+            <div class="comp-grid">
+                <div class="comp-tile">
+                    <div class="comp-name">BBWP</div>
+                    <div class="comp-value">{{ latest_checkpoint.bbwp }}</div>
+                    <div class="comp-state">{{ latest_checkpoint.bbwp_state }}</div>
+                </div>
+                <div class="comp-tile">
+                    <div class="comp-name">PMARP (200 SMA)</div>
+                    <div class="comp-value">{{ latest_checkpoint.pmarp }}</div>
+                    <div class="comp-state">{{ latest_checkpoint.pmarp_state }}</div>
+                </div>
+                <div class="comp-tile">
+                    <div class="comp-name">Weekly RSI</div>
+                    <div class="comp-value">{{ latest_checkpoint.rsi_weekly }}</div>
+                </div>
+                <div class="comp-tile">
+                    <div class="comp-name">Krown Cross</div>
+                    <div class="comp-value" style="font-size:13px;">{{ latest_checkpoint.krown_cross_state }}</div>
+                </div>
+                <div class="comp-tile">
+                    <div class="comp-name">Weekly EMA Trend</div>
+                    <div class="comp-value" style="font-size:13px;">{{ latest_checkpoint.weekly_ema_trend }}</div>
+                </div>
+                <div class="comp-tile">
+                    <div class="comp-name">Hash Ribbons</div>
+                    <div class="comp-value" style="font-size:13px;">{{ latest_checkpoint.hash_ribbons_state }}</div>
+                    <div class="comp-state">Capriole methodology</div>
+                </div>
+                <div class="comp-tile">
+                    <div class="comp-name">Fear &amp; Greed</div>
+                    <div class="comp-value">{{ latest_checkpoint.fear_greed_value if latest_checkpoint.fear_greed_value is not none else '—' }}</div>
+                    <div class="comp-state">{{ latest_checkpoint.fear_greed_label }} (Pesto F&amp;G proxy)</div>
+                </div>
+                <div class="comp-tile comp-info-only">
+                    <div class="comp-name">% Below ATH</div>
+                    <div class="comp-value">{{ latest_checkpoint.pct_below_high }}%</div>
+                </div>
+                <div class="comp-tile comp-info-only">
+                    <div class="comp-name">Moon Phase</div>
+                    <div class="comp-value" style="font-size:13px;">{{ latest_checkpoint.moon_phase_label }}</div>
+                </div>
+                <div class="comp-tile comp-info-only">
+                    <div class="comp-name">Low Month Days</div>
+                    <div class="comp-value" style="font-size:13px;">{{ "FLAGGED" if latest_checkpoint.low_month_day_flag else "—" }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <p class="card-title">LTI Interpreter Read</p>
+            {% if latest_interpretation %}
+            <p class="narrative-text">{{ latest_interpretation }}</p>
+            {% else %}
+            <p class="empty-state">No interpreter narrative available for this audit — the raw component readout above is the full record.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <div class="card">
+            <p class="card-title">One-Page Protocol</p>
+            <form id="protocolForm" onsubmit="return false;">
+                <div class="protocol-grid">
+                    <div class="protocol-field">
+                        <label class="protocol-label">Your Universe</label>
+                        <input class="protocol-input" id="p-universe" value="{{ protocol.universe if protocol else 'BTC' }}">
+                    </div>
+                    <div class="protocol-field">
+                        <label class="protocol-label">Conviction Threshold</label>
+                        <input class="protocol-input" id="p-threshold" type="number" min="1" max="10" value="{{ protocol.conviction_threshold if protocol else 4 }}">
+                    </div>
+                    <div class="protocol-field">
+                        <label class="protocol-label">Cash Floor % (Never-Fully-Out Rule)</label>
+                        <input class="protocol-input" id="p-cashfloor" type="number" step="0.5" value="{{ protocol.cash_floor_pct if protocol else 5.0 }}">
+                    </div>
+                    <div class="protocol-field">
+                        <label class="protocol-label">Residual Trim % (15% Residual Rule)</label>
+                        <input class="protocol-input" id="p-residual" type="number" step="0.5" value="{{ protocol.residual_trim_pct if protocol else 15.0 }}">
+                    </div>
+                    <div class="protocol-field full">
+                        <label class="protocol-label">Drawdown Protocol (pre-committed plan for a 60%+ drawdown)</label>
+                        <textarea class="protocol-input" id="p-drawdown">{{ protocol.drawdown_protocol if protocol else '' }}</textarea>
+                    </div>
+                </div>
+                <div class="protocol-save-row">
+                    <button type="button" class="btn-primary" onclick="saveProtocol()">Save Protocol</button>
+                    <span class="save-status" id="saveStatus">Saved</span>
+                </div>
+            </form>
+        </div>
+
+        {% if checkpoint_history %}
+        <div class="card">
+            <p class="card-title">Checkpoint History</p>
+            <table class="lti-history">
+                <thead>
+                    <tr><th>Month</th><th>Conviction</th><th>Acc / Dist</th><th>Wave</th><th>BBWP</th><th>PMARP</th></tr>
+                </thead>
+                <tbody>
+                    {% for c in checkpoint_history %}
+                    <tr>
+                        <td class="strong">{{ c.date_key }}</td>
+                        <td>{{ c.conviction_label.replace('_', ' ') }}</td>
+                        <td>{{ c.accumulation_signals_firing }} / {{ c.distribution_signals_firing }}</td>
+                        <td>{{ c.wave_label_snapshot or '—' }}</td>
+                        <td>{{ c.bbwp }}</td>
+                        <td>{{ c.pmarp }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        async function saveProtocol() {
+            const payload = {
+                universe: document.getElementById('p-universe').value,
+                conviction_threshold: parseInt(document.getElementById('p-threshold').value || '4', 10),
+                cash_floor_pct: parseFloat(document.getElementById('p-cashfloor').value || '5.0'),
+                residual_trim_pct: parseFloat(document.getElementById('p-residual').value || '15.0'),
+                drawdown_protocol: document.getElementById('p-drawdown').value,
+            };
+            const res = await fetch('/api/lti/protocol', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const status = document.getElementById('saveStatus');
+            if (res.ok) {
+                status.textContent = 'Saved';
+                status.style.opacity = '1';
+                setTimeout(() => { status.style.opacity = '0'; }, 2000);
+            } else {
+                status.textContent = 'Save failed';
+                status.style.color = 'var(--loss)';
+                status.style.opacity = '1';
+            }
+        }
+    </script>
+    {% include 'footer.html' %}
+</body>
+</html>

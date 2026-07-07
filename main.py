@@ -32,13 +32,15 @@ import mtf_confluence_scanner
 import session_monitor
 import agent_core
 import session_manager
+import lti_engine
+import lti_interpreter
 
 from datetime import datetime, timezone, timedelta
 from jewel_specialist import run_jewel_snapshot
 from elliott_wave_specialist import run_elliott_wave_analysis
 from performance_auditor import run_performance_audit
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -75,6 +77,18 @@ def _seconds_until_sunday_2300() -> float:
     target = now.replace(hour=23, minute=0, second=0, microsecond=0) + timedelta(days=days_ahead)
     if target <= now:
         target += timedelta(weeks=1)
+    return (target - now).total_seconds()
+
+
+def _seconds_until_month_start() -> float:
+    """Seconds from now until the first of next calendar month, 00:00 UTC.
+    Anchored to the calendar-month boundary (not a rolling 30-day delta) so
+    month-length variation (28-31 days) doesn't drift the cadence."""
+    now = datetime.now(timezone.utc)
+    if now.month == 12:
+        target = now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:
+        target = now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
     return (target - now).total_seconds()
 
 
@@ -373,6 +387,77 @@ async def run_weekly_scheduler() -> None:
             await asyncio.sleep(300)
 
 
+async def run_monthly_lti_scheduler() -> None:
+    """
+    First of every calendar month, 00:00 UTC: run the KULTI monthly confluence
+    audit (lti_engine.run_lti_audit) + AI interpreter (lti_interpreter.run_
+    lti_interpretation), write one LtiCheckpoint row + one InterpreterLog row.
+    Advisory-only -- never auto-executes anything.
+    """
+    print("[SCHEDULER] Monthly LTI scheduler starting (KULTI confluence audit)...")
+    while True:
+        try:
+            seconds = _seconds_until_month_start()
+            print(f"[SCHEDULER] Monthly LTI: next run in {seconds / 3600:.1f}h (1st of month, 00:00 UTC)")
+            await asyncio.sleep(seconds)
+
+            now = datetime.now(timezone.utc)
+            date_key = now.strftime("%Y-%m")
+            first_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+            _db = SessionLocal()
+            try:
+                _already_ran = _db.query(LtiCheckpoint).filter(
+                    LtiCheckpoint.symbol == "BTC/USDT",
+                    LtiCheckpoint.created_at >= first_of_month,
+                ).first()
+            finally:
+                _db.close()
+
+            if _already_ran:
+                print(f"[SCHEDULER] Monthly LTI audit already ran this month ({_already_ran.date_key}) — skipping")
+            else:
+                print(f"[SCHEDULER] Monthly LTI audit firing for {date_key} (1st of month, 00:00 UTC)...")
+                try:
+                    audit = await asyncio.to_thread(lti_engine.run_lti_audit, symbol="BTC/USDT")
+                    interpretation = await asyncio.to_thread(lti_interpreter.run_lti_interpretation, audit)
+
+                    _db2 = SessionLocal()
+                    try:
+                        _db2.add(LtiCheckpoint(symbol=audit["symbol"], date_key=date_key,
+                            bbwp=audit["bbwp"], bbwp_state=audit["bbwp_state"],
+                            pmarp=audit["pmarp"], pmarp_state=audit["pmarp_state"],
+                            rsi_weekly=audit["rsi_weekly"], pct_below_high=audit["pct_below_high"],
+                            krown_cross_state=audit["krown_cross_state"], weekly_ema_trend=audit["weekly_ema_trend"],
+                            low_month_day_flag=audit["low_month_day_flag"], moon_phase_flag=audit["moon_phase_flag"],
+                            moon_phase_label=audit["moon_phase_label"], hash_ribbons_state=audit["hash_ribbons_state"],
+                            fear_greed_value=audit["fear_greed_value"], fear_greed_label=audit["fear_greed_label"],
+                            accumulation_signals_firing=audit["accumulation_signals_firing"],
+                            distribution_signals_firing=audit["distribution_signals_firing"],
+                            conviction_label=audit["conviction_label"], wave_label_snapshot=audit["wave_label_snapshot"],
+                            gravity_cross_confirm=audit["gravity_cross_confirm"], nearest_macro_level=audit["nearest_macro_level"],
+                        ))
+                        _db2.add(InterpreterLog(symbol=audit["symbol"], session_date=date_key, session_id="monthly_lti_audit",
+                            interpreter_name="lti_interpreter", output_text=interpretation,
+                            ran_successfully=interpretation is not None,
+                        ))
+                        _db2.commit()
+                    finally:
+                        _db2.close()
+                    print(f"[SCHEDULER] Monthly LTI audit: conviction={audit['conviction_label']}, interpreter={'OK' if interpretation else 'FAILED'}")
+                except Exception as e:
+                    print(f"[SCHEDULER] Monthly LTI audit failed: {e}")
+
+            # Sleep 1h to clear the month-start window before recalculating next fire
+            await asyncio.sleep(3600)
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[SCHEDULER] Monthly LTI outer error: {e}")
+            await asyncio.sleep(300)
+
+
 # ==============================================================================
 # OUTCOME TRACKER — runs every 4 hours
 # Fills DecisionJournal outcome fields for rows older than 4h.
@@ -453,6 +538,7 @@ async def lifespan(app: FastAPI):
     app.state.senior_analyst_task   = asyncio.create_task(run_senior_analyst_scheduler())
     app.state.jewel_task            = asyncio.create_task(run_jewel_scheduler())
     app.state.weekly_task           = asyncio.create_task(run_weekly_scheduler())
+    app.state.lti_task              = asyncio.create_task(run_monthly_lti_scheduler())
     app.state.outcome_tracker_task  = asyncio.create_task(run_outcome_tracker())
     app.state.monitor_task          = asyncio.create_task(session_monitor.run_session_monitor_loop())
     yield
@@ -462,6 +548,7 @@ async def lifespan(app: FastAPI):
     app.state.senior_analyst_task.cancel()
     app.state.jewel_task.cancel()
     app.state.weekly_task.cancel()
+    app.state.lti_task.cancel()
     app.state.outcome_tracker_task.cancel()
     app.state.monitor_task.cancel()
 
@@ -559,6 +646,53 @@ async def suite_dashboard_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
     return _template_or_fallback(request, templates, "suite_dashboard.html", ctx)
+
+@app.get("/suite/lti")
+async def lti_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
+
+    latest = db.query(LtiCheckpoint).filter(LtiCheckpoint.symbol == "BTC/USDT").order_by(LtiCheckpoint.id.desc()).first()
+    history = db.query(LtiCheckpoint).filter(LtiCheckpoint.symbol == "BTC/USDT").order_by(LtiCheckpoint.id.desc()).limit(12).all()
+    protocol = db.query(LtiProtocol).first()
+
+    latest_interpretation = None
+    if latest:
+        interp_row = db.query(InterpreterLog).filter(
+            InterpreterLog.interpreter_name == "lti_interpreter",
+            InterpreterLog.session_date == latest.date_key,
+        ).order_by(InterpreterLog.id.desc()).first()
+        latest_interpretation = interp_row.output_text if interp_row else None
+
+    ctx.update({
+        "latest_checkpoint": latest,
+        "checkpoint_history": history,
+        "protocol": protocol,
+        "latest_interpretation": latest_interpretation,
+    })
+    return _template_or_fallback(request, templates, "lti.html", ctx)
+
+
+@app.post("/api/lti/protocol")
+async def save_lti_protocol(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx["is_logged_in"]:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    protocol = db.query(LtiProtocol).first()
+    if not protocol:
+        protocol = LtiProtocol()
+        db.add(protocol)
+
+    protocol.universe = data.get("universe") or protocol.universe or "BTC"
+    protocol.conviction_threshold = int(data.get("conviction_threshold") or protocol.conviction_threshold or 4)
+    protocol.drawdown_protocol = data.get("drawdown_protocol", protocol.drawdown_protocol)
+    protocol.cash_floor_pct = float(data.get("cash_floor_pct") or protocol.cash_floor_pct or 5.0)
+    protocol.residual_trim_pct = float(data.get("residual_trim_pct") or protocol.residual_trim_pct or 15.0)
+    db.commit()
+    return {"status": "ok"}
+
 
 @app.get("/suite/macro-war-room")
 async def macro_war_room_page(request: Request, symbol: str = "BTC/USDT", db: Session = Depends(get_db)):
