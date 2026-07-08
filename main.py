@@ -40,7 +40,7 @@ from jewel_specialist import run_jewel_snapshot
 from elliott_wave_specialist import run_elliott_wave_analysis
 from performance_auditor import run_performance_audit
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -377,6 +377,41 @@ async def run_weekly_scheduler() -> None:
                 except Exception as e:
                     print(f"[SCHEDULER] Performance Auditor failed: {e}")
 
+            # Audit-AI (H1-H6, harness/audit_runner.py) — the already-built
+            # hypothesis engine, previously manual-only (Render Shell or the
+            # admin "RUN TEST CALL"-style button at POST /api/admin/run-audit).
+            # Now scheduled automatically for the first time (2026-07-08),
+            # WEEKLY specifically -- not folded into the new daily audit_ai.py
+            # scheduler below -- because audit_runner.py's own
+            # consecutive_runs_surfaced escalation ("3 consecutive runs at
+            # PROVISIONAL_FINDING+ -> owner review") was designed against a
+            # weekly cadence; running it daily would cheapen that discipline
+            # to "3 days" instead of "3 weeks." Dedup uses a content check
+            # (not just symbol+date_key, which SystemAuditLog shares with the
+            # Performance Auditor's own brief for the same day) since
+            # audit_runner.write_brief_to_system_log() writes a SystemAuditLog
+            # row every run regardless of whether any hypothesis reached N>=30.
+            _aa_db = SessionLocal()
+            try:
+                _aa_ran = _aa_db.query(SystemAuditLog).filter(
+                    SystemAuditLog.symbol == "BTC/USDT",
+                    SystemAuditLog.created_at >= since_week,
+                    SystemAuditLog.audit_md.contains("AUDIT-AI WEEKLY LEDGER"),
+                ).first()
+            finally:
+                _aa_db.close()
+
+            if _aa_ran:
+                print(f"[SCHEDULER] Audit-AI (H1-H6) already ran this week ({_aa_ran.date_key}) — skipping")
+            else:
+                print(f"[SCHEDULER] Audit-AI (H1-H6) firing for {date_key} (Sunday 23:00 UTC)...")
+                try:
+                    import harness.audit_runner as _audit_runner
+                    await asyncio.to_thread(_audit_runner.main)
+                    print("[SCHEDULER] Audit-AI (H1-H6): done")
+                except Exception as e:
+                    print(f"[SCHEDULER] Audit-AI (H1-H6) failed: {e}")
+
             # Sleep 1h to clear the Sunday 23:00 UTC window before recalculating next fire
             await asyncio.sleep(3600)
 
@@ -384,6 +419,54 @@ async def run_weekly_scheduler() -> None:
             raise
         except Exception as e:
             print(f"[SCHEDULER] Weekly outer error: {e}")
+            await asyncio.sleep(300)
+
+
+async def run_daily_4h1h_audit_scheduler() -> None:
+    """
+    Daily, 23:45 UTC: audit_ai.py's 4H/1H-focused hypothesis checks
+    (kinematic/energy grade, 4H macro-bias alignment, runner-mechanic
+    shadow-vs-real) plus the per-trade "why" digest across all three
+    timeframes (15M/1H/4H). New territory the 15M-only harness/ ecosystem
+    doesn't cover -- see WORK_LOG.md 2026-07-08 for the full design.
+    Dedup via DailyAuditLog.date_key (one digest per day).
+    """
+    print("[SCHEDULER] Daily 4H/1H audit scheduler starting (audit_ai.py)...")
+    while True:
+        try:
+            seconds = _seconds_until_utc(23, 45)
+            print(f"[SCHEDULER] Daily 4H/1H audit: next run in {seconds / 3600:.1f}h (23:45 UTC)")
+            await asyncio.sleep(seconds)
+
+            date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+            _da_db = SessionLocal()
+            try:
+                _da_ran = _da_db.query(DailyAuditLog).filter(DailyAuditLog.date_key == date_key).first()
+            finally:
+                _da_db.close()
+
+            if _da_ran:
+                print(f"[SCHEDULER] Daily 4H/1H audit already ran today ({date_key}) — skipping")
+            else:
+                print(f"[SCHEDULER] Daily 4H/1H audit firing for {date_key}...")
+                try:
+                    import audit_ai
+                    result = await asyncio.to_thread(audit_ai.run_daily_4h1h_audit)
+                    print(
+                        f"[SCHEDULER] Daily 4H/1H audit: 15M={result['trades_covered_15m']} "
+                        f"1H={result['trades_covered_1h']} 4H={result['trades_covered_4h']}"
+                    )
+                except Exception as e:
+                    print(f"[SCHEDULER] Daily 4H/1H audit failed: {e}")
+
+            # Sleep 1h to clear the 23:45 UTC window before recalculating next fire
+            await asyncio.sleep(3600)
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[SCHEDULER] Daily 4H/1H audit outer error: {e}")
             await asyncio.sleep(300)
 
 
@@ -539,6 +622,7 @@ async def lifespan(app: FastAPI):
     app.state.jewel_task            = asyncio.create_task(run_jewel_scheduler())
     app.state.weekly_task           = asyncio.create_task(run_weekly_scheduler())
     app.state.lti_task              = asyncio.create_task(run_monthly_lti_scheduler())
+    app.state.daily_audit_task      = asyncio.create_task(run_daily_4h1h_audit_scheduler())
     app.state.outcome_tracker_task  = asyncio.create_task(run_outcome_tracker())
     app.state.monitor_task          = asyncio.create_task(session_monitor.run_session_monitor_loop())
     yield
@@ -549,6 +633,7 @@ async def lifespan(app: FastAPI):
     app.state.jewel_task.cancel()
     app.state.weekly_task.cancel()
     app.state.lti_task.cancel()
+    app.state.daily_audit_task.cancel()
     app.state.outcome_tracker_task.cancel()
     app.state.monitor_task.cancel()
 
@@ -1221,23 +1306,46 @@ async def admin_roster_page(request: Request, db: Session = Depends(get_db)):
     if not ctx["is_admin"]: return RedirectResponse("/suite")
     users = db.query(UserModel).all()
     ctx["users"] = users
+    ctx["latest_daily_digest"] = db.query(DailyAuditLog).order_by(DailyAuditLog.id.desc()).first()
+    ctx["recent_suggestions"] = db.query(AuditSuggestionLog).order_by(AuditSuggestionLog.logged_at.desc()).limit(9).all()
     return _template_or_fallback(request, templates, "admin.html", ctx)
 
 @app.get("/admin/export-audit-ledger")
-async def export_audit_ledger(request: Request, db: Session = Depends(get_db)):
+async def export_audit_ledger(request: Request, start_date: str = None, end_date: str = None, db: Session = Depends(get_db)):
+    """
+    Unconditional full-dump when start_date/end_date are absent (preserves
+    the original behavior + nav.html's existing link exactly). When present
+    (ISO "YYYY-MM-DD" strings), filters CampaignLog.created_at to that
+    window and additionally includes DailyAuditLog (per-trade "why" digest),
+    AuditSuggestionLog (H1-H6 15M + H7-H9 4H/1H), and TrialsLog (binomial
+    checkpoints) rows for the same window -- "the whole json log" covering
+    every audit data source in one pull, not just raw trades.
+    """
     ctx = get_user_context(request, db)
-    if not ctx.get("is_admin"): 
+    if not ctx.get("is_admin"):
         return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=403)
-        
-    logs = db.query(CampaignLog).order_by(CampaignLog.created_at.desc()).all()
+
+    date_range = None
+    if start_date and end_date:
+        try:
+            range_start = datetime.strptime(start_date, "%Y-%m-%d")
+            range_end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+            date_range = (range_start, range_end)
+        except ValueError:
+            return JSONResponse({"ok": False, "error": "start_date/end_date must be YYYY-MM-DD"}, status_code=400)
+
+    campaign_q = db.query(CampaignLog).order_by(CampaignLog.created_at.desc())
+    if date_range:
+        campaign_q = campaign_q.filter(CampaignLog.created_at >= date_range[0], CampaignLog.created_at < date_range[1])
+    logs = campaign_q.all()
+
     audit_data = []
-    
     for l in logs:
         try:
             diagnostics = json.loads(l.diagnostic_data) if l.diagnostic_data else {}
         except Exception:
             diagnostics = {}
-            
+
         audit_data.append({
             "trade_id": l.id,
             "symbol": l.symbol,
@@ -1247,8 +1355,42 @@ async def export_audit_ledger(request: Request, db: Session = Depends(get_db)):
             "realized_pnl": l.realized_pnl,
             "diagnostics": diagnostics
         })
-        
-    return JSONResponse({"ok": True, "total_records": len(audit_data), "ledger": audit_data})
+
+    response = {"ok": True, "total_records": len(audit_data), "ledger": audit_data}
+
+    if date_range:
+        digest_q = db.query(DailyAuditLog).filter(
+            DailyAuditLog.created_at >= date_range[0], DailyAuditLog.created_at < date_range[1]
+        ).order_by(DailyAuditLog.created_at.desc())
+        response["daily_digests"] = [
+            {"date_key": d.date_key, "trades_covered_15m": d.trades_covered_15m,
+             "trades_covered_1h": d.trades_covered_1h, "trades_covered_4h": d.trades_covered_4h,
+             "digest": json.loads(d.digest_json)}
+            for d in digest_q.all()
+        ]
+
+        suggestion_q = db.query(AuditSuggestionLog).filter(
+            AuditSuggestionLog.logged_at >= date_range[0], AuditSuggestionLog.logged_at < date_range[1]
+        ).order_by(AuditSuggestionLog.logged_at.desc())
+        response["audit_suggestions"] = [
+            {"hypothesis_id": s.hypothesis_id, "hypothesis_text": s.hypothesis_text,
+             "tier_label": s.tier_label, "n_supporting": s.n_supporting,
+             "actual_win_rate": s.actual_win_rate, "suggestion_text": s.suggestion_text,
+             "consecutive_runs_surfaced": s.consecutive_runs_surfaced, "status": s.status}
+            for s in suggestion_q.all()
+        ]
+
+        trials_q = db.query(TrialsLog).filter(
+            TrialsLog.logged_at_utc >= date_range[0], TrialsLog.logged_at_utc < date_range[1]
+        ).order_by(TrialsLog.logged_at_utc.desc())
+        response["trials"] = [
+            {"test_type": t.test_type, "hypothesis": t.hypothesis, "result_summary": t.result_summary,
+             "result_accuracy_pct": t.result_accuracy_pct, "result_n": t.result_n,
+             "candidate_status": t.candidate_status}
+            for t in trials_q.all()
+        ]
+
+    return JSONResponse(response)
 
 @app.post("/admin/delete-user")
 async def admin_delete_user(request: Request, user_id: str = Form(...), db: Session = Depends(get_db)):
