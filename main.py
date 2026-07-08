@@ -621,7 +621,13 @@ async def lifespan(app: FastAPI):
     app.state.senior_analyst_task   = asyncio.create_task(run_senior_analyst_scheduler())
     app.state.jewel_task            = asyncio.create_task(run_jewel_scheduler())
     app.state.weekly_task           = asyncio.create_task(run_weekly_scheduler())
-    app.state.lti_task              = asyncio.create_task(run_monthly_lti_scheduler())
+    # KULTI LTI scheduler pulled 2026-07-08 -- see WORK_LOG.md. The design mixed
+    # trading-system paradigms (confluence-count tiers, borrowed JEWEL vocabulary,
+    # N-based validation thinking) into what should be a from-first-principles
+    # long-term investing system. Off until it's rebuilt properly. Function body
+    # left in place below, not deleted, in case pieces (real indicator math,
+    # Hash Ribbons) are worth reusing in the rebuild.
+    # app.state.lti_task            = asyncio.create_task(run_monthly_lti_scheduler())
     app.state.daily_audit_task      = asyncio.create_task(run_daily_4h1h_audit_scheduler())
     app.state.outcome_tracker_task  = asyncio.create_task(run_outcome_tracker())
     app.state.monitor_task          = asyncio.create_task(session_monitor.run_session_monitor_loop())
@@ -632,7 +638,6 @@ async def lifespan(app: FastAPI):
     app.state.senior_analyst_task.cancel()
     app.state.jewel_task.cancel()
     app.state.weekly_task.cancel()
-    app.state.lti_task.cancel()
     app.state.daily_audit_task.cancel()
     app.state.outcome_tracker_task.cancel()
     app.state.monitor_task.cancel()
@@ -734,49 +739,19 @@ async def suite_dashboard_page(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/suite/lti")
 async def lti_page(request: Request, db: Session = Depends(get_db)):
+    # KULTI LTI page pulled 2026-07-08 -- design mixed trading-system paradigms
+    # into what should be a from-first-principles investing system. See
+    # WORK_LOG.md. Route stays defined so no dangling crash for the URL, but
+    # fully inert until rebuilt -- matching the /register closure pattern.
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-
-    latest = db.query(LtiCheckpoint).filter(LtiCheckpoint.symbol == "BTC/USDT").order_by(LtiCheckpoint.id.desc()).first()
-    history = db.query(LtiCheckpoint).filter(LtiCheckpoint.symbol == "BTC/USDT").order_by(LtiCheckpoint.id.desc()).limit(12).all()
-    protocol = db.query(LtiProtocol).first()
-
-    latest_interpretation = None
-    if latest:
-        interp_row = db.query(InterpreterLog).filter(
-            InterpreterLog.interpreter_name == "lti_interpreter",
-            InterpreterLog.session_date == latest.date_key,
-        ).order_by(InterpreterLog.id.desc()).first()
-        latest_interpretation = interp_row.output_text if interp_row else None
-
-    ctx.update({
-        "latest_checkpoint": latest,
-        "checkpoint_history": history,
-        "protocol": protocol,
-        "latest_interpretation": latest_interpretation,
-    })
-    return _template_or_fallback(request, templates, "lti.html", ctx)
+    return RedirectResponse(url="/suite/dashboard", status_code=303)
 
 
 @app.post("/api/lti/protocol")
 async def save_lti_protocol(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx["is_logged_in"]:
-        raise HTTPException(status_code=401)
-
-    data = await request.json()
-    protocol = db.query(LtiProtocol).first()
-    if not protocol:
-        protocol = LtiProtocol()
-        db.add(protocol)
-
-    protocol.universe = data.get("universe") or protocol.universe or "BTC"
-    protocol.conviction_threshold = int(data.get("conviction_threshold") or protocol.conviction_threshold or 4)
-    protocol.drawdown_protocol = data.get("drawdown_protocol", protocol.drawdown_protocol)
-    protocol.cash_floor_pct = float(data.get("cash_floor_pct") or protocol.cash_floor_pct or 5.0)
-    protocol.residual_trim_pct = float(data.get("residual_trim_pct") or protocol.residual_trim_pct or 15.0)
-    db.commit()
-    return {"status": "ok"}
+    # Pulled alongside GET /suite/lti -- see note above.
+    return JSONResponse({"ok": False, "error": "KULTI is being rebuilt."}, status_code=410)
 
 
 @app.get("/suite/macro-war-room")
