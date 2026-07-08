@@ -857,6 +857,38 @@ class LtiProtocol(Base):
 
 
 # ---------------------------------------------------------
+# COMPONENT 6 EXTENSION — DAILY PER-TRADE "WHY" DIGEST (2026-07-08)
+# Pure deterministic fact-surfacing (Bucket A -- no LLM, no agent_core
+# dependency, no cost). Companion to the ALREADY-EXISTING Audit-AI hypothesis
+# ledger (harness/audit_runner.py + AuditSuggestionLog below, near
+# SessionAuditLog) -- that engine checks aggregate statistical hypotheses
+# (H1-H6) against SessionAuditLog (15M-only). This table covers the
+# complementary need: a per-trade "why did this specific trade fire" record
+# across ALL THREE timeframes (15M/1H/4H), reusing CampaignLog fields that
+# already exist -- nothing invented, only surfaced and formatted.
+# audit_ai.py has no import of anything that mutates trade construction, so
+# it cannot touch a live parameter even by accident.
+# ---------------------------------------------------------
+class DailyAuditLog(Base):
+    """
+    One row per day. digest_json surfaces, per trade across 15M/1H/4H, WHY
+    it fired (reusing already-populated fields -- mas_executive_brief/
+    structure_reasoning for 15M; macro_bias/kinematic_grade/energy_grade/
+    htf_anchor_type/htf_anchor_price for 4H/1H) -- nothing here is invented,
+    only surfaced and formatted from what already exists on CampaignLog.
+    """
+    __tablename__ = "daily_audit_log"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    date_key            = Column(String, nullable=False, index=True)  # "YYYY-MM-DD"
+    digest_json         = Column(String, nullable=False)
+    trades_covered_15m  = Column(Integer, default=0)
+    trades_covered_1h   = Column(Integer, default=0)
+    trades_covered_4h   = Column(Integer, default=0)
+    created_at          = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
 # SESSION AUDIT LOG (FORWARD-AUDIT LOOP — CANONICAL AUDIT RECORD)
 # One row per MAS session decision. Write-once discipline:
 #   - Frozen-at-decision columns set once when decision is made; never overwritten.
