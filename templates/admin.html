@@ -224,6 +224,98 @@
             </div>
         </div>
     </div>
+
+    <!-- AUDIT-AI + DATA EXPORT CARD -->
+    <div class="roster-card" style="margin-top: 24px;">
+        <div class="card-header">
+            <span class="card-title">Audit-AI &amp; Data Export</span>
+            {% if latest_daily_digest %}
+            <span class="card-title" style="color:#64748b; font-size:10px;">last digest: {{ latest_daily_digest.date_key }}</span>
+            {% endif %}
+        </div>
+
+        <div style="padding: 16px 20px 8px;">
+            {% if latest_daily_digest %}
+            <div style="font-family:'JetBrains Mono'; font-size:12px; color:#94a3b8; margin-bottom:16px;">
+                Today's digest ({{ latest_daily_digest.date_key }}):
+                <b style="color:#fff;">{{ latest_daily_digest.trades_covered_15m }}</b> 15M ·
+                <b style="color:#fff;">{{ latest_daily_digest.trades_covered_1h }}</b> 1H ·
+                <b style="color:#fff;">{{ latest_daily_digest.trades_covered_4h }}</b> 4H trades covered.
+            </div>
+            {% else %}
+            <div style="font-family:'JetBrains Mono'; font-size:12px; color:#64748b; margin-bottom:16px;">No daily digest yet — first run fires at 23:45 UTC tonight.</div>
+            {% endif %}
+
+            {% if recent_suggestions %}
+            <table style="width:100%; border-collapse:collapse; margin-bottom:16px;">
+                <thead>
+                    <tr>
+                        <th style="text-align:left; font-family:'JetBrains Mono'; font-size:10px; color:#64748b; text-transform:uppercase; padding:6px 8px; border-bottom:1px solid #334155;">Hypothesis</th>
+                        <th style="text-align:left; font-family:'JetBrains Mono'; font-size:10px; color:#64748b; text-transform:uppercase; padding:6px 8px; border-bottom:1px solid #334155;">Tier</th>
+                        <th style="text-align:left; font-family:'JetBrains Mono'; font-size:10px; color:#64748b; text-transform:uppercase; padding:6px 8px; border-bottom:1px solid #334155;">N</th>
+                        <th style="text-align:left; font-family:'JetBrains Mono'; font-size:10px; color:#64748b; text-transform:uppercase; padding:6px 8px; border-bottom:1px solid #334155;">Suggestion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in recent_suggestions %}
+                    <tr>
+                        <td style="font-family:'JetBrains Mono'; font-size:11px; color:#fff; padding:6px 8px; border-bottom:1px solid #1e293b; white-space:nowrap;">{{ s.hypothesis_id }}</td>
+                        <td style="font-family:'JetBrains Mono'; font-size:11px; color:#94a3b8; padding:6px 8px; border-bottom:1px solid #1e293b; white-space:nowrap;">{{ s.tier_label }}</td>
+                        <td style="font-family:'JetBrains Mono'; font-size:11px; color:#94a3b8; padding:6px 8px; border-bottom:1px solid #1e293b;">{{ s.n_supporting }}</td>
+                        <td style="font-family:'Inter'; font-size:11px; color:#cbd5e1; padding:6px 8px; border-bottom:1px solid #1e293b;">{{ s.suggestion_text }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div style="font-family:'JetBrains Mono'; font-size:12px; color:#64748b; margin-bottom:16px;">No Audit-AI findings logged yet — H1-H6 fire weekly (Sunday 23:00 UTC), H7-H9 fire daily (23:45 UTC).</div>
+            {% endif %}
+
+            <div style="display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; padding-bottom:16px;">
+                <div>
+                    <label style="display:block; font-family:'JetBrains Mono'; font-size:10px; color:#64748b; text-transform:uppercase; margin-bottom:4px;">Start Date</label>
+                    <input type="date" id="exportStartDate" style="background:#0f172a; border:1px solid #334155; color:#fff; padding:8px 10px; border-radius:4px; font-family:'JetBrains Mono'; font-size:12px;">
+                </div>
+                <div>
+                    <label style="display:block; font-family:'JetBrains Mono'; font-size:10px; color:#64748b; text-transform:uppercase; margin-bottom:4px;">End Date</label>
+                    <input type="date" id="exportEndDate" style="background:#0f172a; border:1px solid #334155; color:#fff; padding:8px 10px; border-radius:4px; font-family:'JetBrains Mono'; font-size:12px;">
+                </div>
+                <button class="btn-test" id="exportCopyBtn" onclick="copyAuditExport()">COPY JSON</button>
+                <span id="exportStatus" style="font-family:'JetBrains Mono'; font-size:11px; color:#64748b;"></span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        window.addEventListener('DOMContentLoaded', function () {
+            const t = new Date();
+            document.getElementById('exportEndDate').valueAsDate = t;
+            const p = new Date(); p.setDate(t.getDate() - 14);
+            document.getElementById('exportStartDate').valueAsDate = p;
+        });
+
+        async function copyAuditExport() {
+            const btn = document.getElementById('exportCopyBtn');
+            const status = document.getElementById('exportStatus');
+            const start = document.getElementById('exportStartDate').value;
+            const end = document.getElementById('exportEndDate').value;
+            if (!start || !end) { status.textContent = 'Pick both dates first'; return; }
+
+            status.textContent = 'Fetching…';
+            try {
+                const res = await fetch(`/admin/export-audit-ledger?start_date=${start}&end_date=${end}`);
+                const data = await res.json();
+                if (!data.ok) { status.textContent = 'Error: ' + (data.error || 'unknown'); return; }
+                await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+                const orig = btn.textContent;
+                btn.textContent = '✓ COPIED';
+                status.textContent = `${data.total_records} trades, ${(data.daily_digests || []).length} digests, ${(data.audit_suggestions || []).length} suggestions, ${(data.trials || []).length} trials`;
+                setTimeout(() => { btn.textContent = orig; }, 2000);
+            } catch (e) {
+                status.textContent = 'Fetch failed: ' + e;
+            }
+        }
+    </script>
     <script>
         async function loadAuditHeartbeat() {
             try {
