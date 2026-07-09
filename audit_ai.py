@@ -22,12 +22,13 @@
 #     equivalent exists anywhere in harness/ (baseline.py does categorical
 #     breakdowns, not per-trade records).
 #
-#   run_daily_4h1h_audit() -- three hypotheses in the 4H/1H space (kinematic/
+#   run_daily_4h1h_audit() -- four hypotheses in the 4H/1H space (kinematic/
 #     energy grade correlation, 4H macro-bias alignment, runner-mechanic
-#     shadow-vs-real). Each computes a live win-rate + tier_label() every
-#     day (always-on reading), plus fires binomial_checkpoint.run_checkpoint()
-#     for real significance testing at N=30/50/100 milestones (writes to the
-#     existing TrialsLog -- same audit trail the 15M side already uses).
+#     shadow-vs-real, cross-timeframe confluence agreement). Each computes a
+#     live win-rate + tier_label() every day (always-on reading), plus fires
+#     binomial_checkpoint.run_checkpoint() for real significance testing at
+#     N=30/50/100 milestones (writes to the existing TrialsLog -- same audit
+#     trail the 15M side already uses).
 #
 # AUTHORITY CAP: imports only `database`, `harness.tier_labels`,
 # `harness.binomial_checkpoint`, and stdlib. No import of gravity_engine /
@@ -130,6 +131,8 @@ def build_daily_digest(date_key: str) -> Dict[str, Any]:
                     "htf_anchor_type": c.htf_anchor_type,
                     "htf_anchor_price": c.htf_anchor_price,
                     "target_logic_version": c.target_logic_version,
+                    "confluence_dominant_direction": c.dominant_direction,
+                    "confluence_score": c.confluence_score,
                 }
 
             if c.shadow_runner_active:
@@ -308,14 +311,60 @@ def _check_runner_mechanic(db) -> None:
     )
 
 
+def _check_tf_agreement(db) -> None:
+    """
+    H10_TF_AGREEMENT (2026-07-09). At candidate-creation time, gravity_engine.py's
+    two detectors now call mtf_confluence_scanner.run_mtf_confluence_scan() once
+    and stash dominant_direction/confluence_score onto the row (see database.py
+    CampaignLog comment). This checks whether the live 5-TF confluence read
+    agreeing vs. opposing the candidate's own bias at fire time correlates with
+    outcome -- the concrete, evidence-generating answer to "does cross-timeframe
+    conflict actually matter," in place of eyeballing it. Record-only, same
+    tier-gated discipline as H7-H9. Rows created before this field existed have
+    dominant_direction=NULL and are excluded, not treated as "opposed."
+    """
+    rows = db.query(CampaignLog).filter(
+        _real_btc_row(),
+        CampaignLog.session_timeframe.in_(["4H", "1H"]),
+        CampaignLog.dominant_direction.isnot(None),
+    ).all()
+
+    def _agrees(r: CampaignLog) -> bool:
+        return (r.bias == "LONG" and r.dominant_direction == "BULLISH") or (r.bias == "SHORT" and r.dominant_direction == "BEARISH")
+
+    aligned = [r for r in rows if _agrees(r)]
+    opposing = [r for r in rows if not _agrees(r)]
+
+    al_wr, op_wr = _win_rate(aligned), _win_rate(opposing)
+    al_events, op_events = _to_events(aligned), _to_events(opposing)
+    n_supporting = len(al_events) + len(op_events)
+
+    suggestion = (
+        f"4H/1H candidates where the live confluence scanner agreed with the candidate's own bias: "
+        f"{al_wr}% win (N={len(al_events)}) vs. scanner opposed: {op_wr}% win (N={len(op_events)})."
+        if al_wr is not None and op_wr is not None else
+        f"Accumulating -- confluence-agreed N={len(al_events)}, confluence-opposed N={len(op_events)}."
+    )
+    _upsert_suggestion(
+        db, hypothesis_id="H10_TF_AGREEMENT",
+        hypothesis_text="4H/1H candidates: does the live mtf_confluence_scanner's dominant_direction agreeing vs. opposing the candidate's own bias at fire time correlate with outcome?",
+        n_total=len(rows), n_outcomes=n_supporting, n_supporting=len(al_events),
+        metric=al_wr, suggestion_text=suggestion,
+    )
+    if op_events:
+        run_checkpoint(op_events, stream_name="4h1h_confluence_opposed", win_field="win", win_value=True,
+                        date_range=f"through {datetime.utcnow().date()}")
+
+
 def run_daily_4h1h_audit() -> Dict[str, Any]:
-    """Public entry point. Runs all three 4H/1H hypothesis checks and today's
+    """Public entry point. Runs all four 4H/1H hypothesis checks and today's
     per-trade digest. Called daily from main.py's scheduler."""
     db = SessionLocal()
     try:
         _check_kinematic_energy(db)
         _check_macro_bias_4h(db)
         _check_runner_mechanic(db)
+        _check_tf_agreement(db)
     finally:
         db.close()
 
