@@ -15,8 +15,14 @@ import subprocess
 
 from database import SessionLocal, GravityMemory, DecisionJournal, CampaignLog
 import battlebox_pipeline  # <-- SINGLE SOURCE OF TRUTH ENFORCED
-import mtf_confluence_scanner
 import notify
+# mtf_confluence_scanner is imported lazily inside run_gravity_ingestion_loop(),
+# not at module level -- battlebox_pipeline imports gravity_engine at module
+# level, and mtf_confluence_scanner imports from battlebox_pipeline at module
+# level, so a top-level import here creates a circular import that breaks boot
+# (ImportError: cannot import name 'fetch_live_15m' from partially initialized
+# module 'battlebox_pipeline'). By the time the loop actually runs, all three
+# modules have finished initializing, so the lazy import is always safe.
 
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 
@@ -934,6 +940,7 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
 # ---------------------------------------------------------------------------
 async def run_gravity_ingestion_loop():
     print(">>> GRAVITY ENGINE: Initializing background loop (v4 target logic, STRICT SSOT MODE)...")
+    import mtf_confluence_scanner  # lazy -- see import-time comment near top of file
 
     try:
         subprocess.Popen(["python", "kabroda_macro_engine.py"])
