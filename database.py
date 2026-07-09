@@ -265,6 +265,17 @@ def init_db():
         except Exception:
             pass
 
+    # --- MTF CONFLUENCE CAPTURE — dominant_direction/confluence_score on campaign_logs ---
+    for _col in [
+        "dominant_direction VARCHAR",
+        "confluence_score INTEGER",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE campaign_logs ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- TARGET LOGIC v3 — t2/t3 made nullable for single-target 4H/1H candidates ---
     # v3 rows write t2=None/t3=None by design (see database.py CampaignLog comment).
     # Column was still NOT NULL at the DB level, so every v3 4H/1H INSERT was failing
@@ -547,6 +558,16 @@ class CampaignLog(Base):
     shadow_runner_exit_reason = Column(String, nullable=True)  # STOP | T3 | TIME_CAP
     shadow_runner_leg2_r = Column(Float, nullable=True)
     shadow_runner_blended_r = Column(Float, nullable=True)
+
+    # --- MTF CONFLUENCE CAPTURE (2026-07-09) -- 4H/1H ONLY, RECORD-ONLY ---
+    # At candidate-creation time, gravity_engine.py's two detectors call
+    # mtf_confluence_scanner.run_mtf_confluence_scan() once and stash the live
+    # 5-TF read here -- the same function that already powers Market Radar's
+    # bundled scan and the new standalone /api/confluence view. Answers "did
+    # the wider confluence read agree or oppose this specific candidate's
+    # bias" for audit_ai.py's H10_TF_AGREEMENT hypothesis. NULL on 15M rows.
+    dominant_direction = Column(String, nullable=True)   # BULLISH / BEARISH / NEUTRAL, from the scanner at fire time
+    confluence_score = Column(Integer, nullable=True)    # 0-5 timeframes aligned, from the scanner at fire time
 
 # ---------------------------------------------------------
 # MTF CONFLUENCE READINGS (MORNING BRIEF HISTORY)

@@ -10,11 +10,12 @@
 import asyncio
 import traceback
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import subprocess
 
 from database import SessionLocal, GravityMemory, DecisionJournal, CampaignLog
 import battlebox_pipeline  # <-- SINGLE SOURCE OF TRUTH ENFORCED
+import mtf_confluence_scanner
 import notify
 
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
@@ -503,7 +504,7 @@ async def fill_decision_outcomes():
 STOP_WINDOW_4H = timedelta(days=5)
 
 
-def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], candles_1d: List[Dict[str, Any]], db) -> None:
+def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], candles_1d: List[Dict[str, Any]], db, confluence: Optional[Dict[str, Any]] = None) -> None:
     try:
         if not candles_4h or len(candles_4h) < 14:
             return
@@ -560,6 +561,11 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], c
         kinematic_grade = _compute_kinematic_grade(candles_4h)  # observational only, see helper docstring
         macro_bias = _compute_macro_bias(candles_1d)  # record-only for 4H -- backtest showed this INVERTS, do not gate
         weekly_200sma_position = _compute_weekly_200sma_position(symbol, current_close)  # record-only
+        # confluence: live 5-TF read from mtf_confluence_scanner, fetched once per loop tick
+        # in run_gravity_ingestion_loop() and shared with _detect_1h_bos. Record-only --
+        # feeds audit_ai.py's H10_TF_AGREEMENT hypothesis, does not gate candidate creation.
+        conf_dominant_direction = confluence.get("dominant_direction") if confluence else None
+        conf_score = confluence.get("confluence_score") if confluence else None
 
         bias = None
         stop_price = None
@@ -662,6 +668,8 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], c
             kinematic_grade=kinematic_grade,
             macro_bias=macro_bias,
             weekly_200sma_position=weekly_200sma_position,
+            dominant_direction=conf_dominant_direction,
+            confluence_score=conf_score,
         )
         db.add(row)
         db.commit()
@@ -710,7 +718,7 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], c
 STOP_WINDOW_1H = timedelta(days=2)
 
 
-def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]], candles_1d: List[Dict[str, Any]], db) -> None:
+def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]], candles_1d: List[Dict[str, Any]], db, confluence: Optional[Dict[str, Any]] = None) -> None:
     try:
         if not candles_1h or len(candles_1h) < 14:
             return
@@ -862,6 +870,12 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
         if (bias == "LONG" and macro_bias == "BEARISH") or (bias == "SHORT" and macro_bias == "BULLISH"):
             return
 
+        # confluence: live 5-TF read from mtf_confluence_scanner, fetched once per loop tick
+        # in run_gravity_ingestion_loop() and shared with _detect_4h_bos. Record-only --
+        # feeds audit_ai.py's H10_TF_AGREEMENT hypothesis, does not gate candidate creation.
+        conf_dominant_direction = confluence.get("dominant_direction") if confluence else None
+        conf_score = confluence.get("confluence_score") if confluence else None
+
         row = CampaignLog(
             symbol=symbol,
             date_key=date_key,
@@ -887,6 +901,8 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
             kinematic_grade=kinematic_grade,
             macro_bias=macro_bias,
             weekly_200sma_position=weekly_200sma_position,
+            dominant_direction=conf_dominant_direction,
+            confluence_score=conf_score,
         )
         db.add(row)
         db.commit()
@@ -976,8 +992,15 @@ async def run_gravity_ingestion_loop():
 
                 # BOS detection — BTC only
                 if symbol == "BTC/USDT":
-                    _detect_4h_bos(symbol, db_sym, candles_4h, candles_1d, db)
-                    _detect_1h_bos(symbol, db_sym, candles_1h, candles_4h, candles_1d, db)
+                    # Single confluence scan per loop tick, shared by both detectors --
+                    # avoids doubling the live-candle fetch cost of the scanner.
+                    try:
+                        confluence = await mtf_confluence_scanner.run_mtf_confluence_scan(symbol)
+                    except Exception as e:
+                        print(f"[GRAVITY CONFLUENCE] {symbol} scan failed: {e}")
+                        confluence = None
+                    _detect_4h_bos(symbol, db_sym, candles_4h, candles_1d, db, confluence)
+                    _detect_1h_bos(symbol, db_sym, candles_1h, candles_4h, candles_1d, db, confluence)
 
         except Exception as e:
             print(f"Gravity Engine Iteration Error: {e}")
