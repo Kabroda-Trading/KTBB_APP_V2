@@ -55,6 +55,24 @@ def _safe_json(raw: Optional[str]) -> Any:
         return None
 
 
+def _real_btc_row():
+    """
+    Correct 'is this a real BTC/USDT row I should look at' filter for THIS
+    module -- covers all three timeframes. is_canonical == True is NOT that
+    filter: gravity_engine.py's _detect_4h_bos/_detect_1h_bos explicitly set
+    is_canonical=False on every 4H/1H candidate row by design (it exists to
+    keep candidates out of the 15M production track record's KPIs, not to
+    mark them as fake/legacy data). Found 2026-07-09 -- the first real day
+    of production data showed every 4H/1H check stuck at N=0 because this
+    module copied the 15M-only is_canonical==True convention without
+    checking it actually applied to candidate rows. It doesn't.
+    """
+    return and_(
+        CampaignLog.symbol == "BTC/USDT",
+        or_(CampaignLog.is_canonical == True, CampaignLog.session_timeframe.in_(["4H", "1H"])),
+    )
+
+
 # ==============================================================================
 # SECTION 1 — DAILY DIGEST (per-trade "why", all three timeframes)
 # ==============================================================================
@@ -71,7 +89,7 @@ def build_daily_digest(date_key: str) -> Dict[str, Any]:
         day_end = day_start + timedelta(days=1)
 
         rows = db.query(CampaignLog).filter(
-            CampaignLog.is_canonical == True,
+            _real_btc_row(),
             or_(
                 and_(CampaignLog.created_at >= day_start, CampaignLog.created_at < day_end),
                 and_(CampaignLog.closed_at >= day_start, CampaignLog.closed_at < day_end),
@@ -199,8 +217,9 @@ def _upsert_suggestion(db, *, hypothesis_id: str, hypothesis_text: str, n_total:
 
 def _check_kinematic_energy(db) -> None:
     rows = db.query(CampaignLog).filter(
+        _real_btc_row(),
         CampaignLog.session_timeframe.in_(["4H", "1H"]),
-        CampaignLog.is_canonical == True,
+        CampaignLog.target_logic_version == "v4",  # kinematic_grade/energy_grade only meaningful post-fix
     ).all()
 
     tangled_weak = [r for r in rows if r.kinematic_grade == "TANGLED" and r.energy_grade in ("WEAK", None)]
@@ -230,8 +249,8 @@ def _check_kinematic_energy(db) -> None:
 
 def _check_macro_bias_4h(db) -> None:
     rows = db.query(CampaignLog).filter(
+        _real_btc_row(),
         CampaignLog.session_timeframe == "4H",
-        CampaignLog.is_canonical == True,
         CampaignLog.macro_bias.isnot(None),
     ).all()
 
@@ -262,8 +281,8 @@ def _check_macro_bias_4h(db) -> None:
 
 def _check_runner_mechanic(db) -> None:
     rows = db.query(CampaignLog).filter(
+        _real_btc_row(),
         CampaignLog.shadow_runner_closed_at.isnot(None),
-        CampaignLog.is_canonical == True,
     ).all()
 
     n = len(rows)
