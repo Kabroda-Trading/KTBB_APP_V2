@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Kabroda | Confluence</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        body { padding: 0; }
+        .wrap { max-width: 1400px; margin: 0 auto; padding: 30px 24px 60px; }
+
+        .page-head { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px; border-bottom: 1px solid var(--border-mid); padding-bottom: 18px; margin-bottom: 24px; }
+        .page-head h1 { font-family: var(--font-mono); font-size: 20px; letter-spacing: 1px; color: #fff; margin: 0 0 4px; text-transform: uppercase; }
+        .page-head .sub { color: var(--text-muted); font-size: 12px; }
+        .page-head a.back { color: var(--text-secondary); text-decoration: none; font-size: 13px; }
+        .head-controls { display: flex; align-items: center; gap: 12px; }
+        select#symSelect { background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-mid); border-radius: 4px; padding: 7px 12px; font-family: var(--font-mono); font-size: 12px; }
+        .as-of { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
+
+        .summary-card { background: var(--bg-card); border: 1px solid var(--border-mid); border-left: 4px solid var(--accent); border-radius: 8px; padding: 20px 22px; margin-bottom: 20px; }
+        .summary-top { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+        .direction-tag { font-family: var(--font-mono); font-weight: 800; font-size: 22px; letter-spacing: 1px; }
+        .direction-tag.BULLISH { color: var(--win); }
+        .direction-tag.BEARISH { color: var(--loss); }
+        .direction-tag.NEUTRAL { color: var(--neutral); }
+        .score-tag { font-family: var(--font-mono); font-size: 13px; color: var(--text-secondary); }
+        .conviction-pill { font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.5px; padding: 3px 9px; border-radius: 3px; text-transform: uppercase; }
+        .conviction-pill.HIGH { background: var(--win-bg); color: var(--win); }
+        .conviction-pill.STANDARD { background: var(--warn-bg); color: var(--warn); }
+        .conviction-pill.LOW { background: var(--neutral-bg); color: var(--neutral); }
+        .summary-text { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+
+        .trend-recon { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 24px; }
+        .trend-box { background: var(--bg-surface); border: 1px solid var(--border-faint); border-radius: 6px; padding: 14px 16px; }
+        .trend-box .src { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .trend-box .rows { display: flex; gap: 20px; flex-wrap: wrap; }
+        .trend-box .row-item .k { font-family: var(--font-mono); font-size: 9px; color: var(--text-faint); text-transform: uppercase; }
+        .trend-box .row-item .v { font-family: var(--font-mono); font-size: 13px; font-weight: 700; margin-top: 2px; }
+        .v.BULLISH, .v.ABOVE { color: var(--win); }
+        .v.BEARISH, .v.BELOW { color: var(--loss); }
+        .v.NEUTRAL, .v.AT, .v.UNKNOWN { color: var(--neutral); }
+
+        .tf-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+        @media (max-width: 1100px) { .tf-grid { grid-template-columns: repeat(2, 1fr); } }
+        .tf-card { background: var(--bg-card); border: 1px solid var(--border-mid); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+        .tf-card.aligned { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
+        .tf-label { font-family: var(--font-mono); font-size: 13px; font-weight: 800; color: #fff; letter-spacing: 1px; display: flex; justify-content: space-between; align-items: center; }
+        .bias-chip { font-family: var(--font-mono); font-size: 9px; font-weight: 800; padding: 2px 7px; border-radius: 3px; text-transform: uppercase; }
+        .bias-chip.BULLISH { background: var(--win-bg); color: var(--win); }
+        .bias-chip.BEARISH { background: var(--loss-bg); color: var(--loss); }
+        .bias-chip.UNKNOWN { background: var(--neutral-bg); color: var(--neutral); }
+
+        .stat-line { display: flex; justify-content: space-between; font-size: 11px; }
+        .stat-line .k { color: var(--text-muted); }
+        .stat-line .v { font-family: var(--font-mono); color: var(--text-secondary); font-weight: 600; }
+        .stat-line .v.hot { color: var(--warn); }
+        .stat-line .v.strong { color: var(--accent-bright); }
+
+        .flag-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+        .flag { font-family: var(--font-mono); font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 3px; letter-spacing: 0.3px; text-transform: uppercase; }
+        .flag.compressed { background: rgba(59,130,246,0.15); color: #60a5fa; }
+        .flag.overextended { background: var(--warn-bg); color: var(--warn); }
+        .flag.divergence { background: rgba(168,85,247,0.15); color: #a78bfa; }
+
+        .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; }
+    </style>
+</head>
+<body>
+    {% include 'nav.html' %}
+
+    <div class="wrap">
+        <div class="page-head">
+            <div>
+                <a href="/suite/radar" class="back">&larr; Back to Radar</a>
+                <h1 style="margin-top:8px;">Confluence Scanner</h1>
+                <div class="sub">Live 5-timeframe direction vote — 15M / 1H / 4H / 1D / 1W. No session-lock dependency.</div>
+            </div>
+            <div class="head-controls">
+                <span class="as-of" id="asOf"></span>
+                <select id="symSelect" onchange="loadConfluence()">
+                    <option value="BTC/USDT">BTC/USDT</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="content">
+            <div class="empty-state">SYNCHRONIZING WITH KABRODA CORE...</div>
+        </div>
+    </div>
+
+    <script>
+        function fmtPrice(v) {
+            if (v == null) return '—';
+            return '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function tfCard(tf) {
+            const bias = tf.direction_vote || 'UNKNOWN';
+            const aligned = tf._aligned ? 'aligned' : '';
+            const adxCls = tf.adx_strength === 'STRONG' ? 'strong' : '';
+            const stoch = tf.stoch_rsi || {};
+            const flags = [];
+            if (tf.bbwp_compressed) flags.push('<span class="flag compressed">BBWP compressed</span>');
+            if (tf.pmarp_overextended) flags.push('<span class="flag overextended">PMARP overextended</span>');
+            if (tf.divergence && tf.divergence !== 'NONE') flags.push(`<span class="flag divergence">${tf.divergence.replace(/_/g,' ')}</span>`);
+
+            return `
+            <div class="tf-card ${aligned}">
+                <div class="tf-label">${tf.label}<span class="bias-chip ${bias}">${bias}</span></div>
+                <div class="stat-line"><span class="k">ADX</span><span class="v ${adxCls}">${tf.adx != null ? tf.adx.toFixed(1) : '—'} (${tf.adx_strength || '—'})</span></div>
+                <div class="stat-line"><span class="k">StochRSI</span><span class="v">${stoch.k != null ? stoch.k.toFixed(0) : '—'} / ${stoch.zone || '—'} ${stoch.curl && stoch.curl !== 'FLAT' ? '· ' + stoch.curl : ''}</span></div>
+                <div class="stat-line"><span class="k">BBWP</span><span class="v">${tf.bbwp_value != null ? tf.bbwp_value.toFixed(1) : '—'}</span></div>
+                <div class="stat-line"><span class="k">PMARP</span><span class="v">${tf.pmarp_value != null ? tf.pmarp_value.toFixed(1) : '—'} (${tf.pmarp_direction || '—'})</span></div>
+                ${flags.length ? `<div class="flag-row">${flags.join('')}</div>` : ''}
+            </div>`;
+        }
+
+        async function loadConfluence() {
+            const sym = document.getElementById('symSelect').value;
+            const content = document.getElementById('content');
+            try {
+                const res = await fetch(`/api/confluence?symbol=${encodeURIComponent(sym)}`);
+                const data = await res.json();
+                if (!data.ok) throw new Error(data.error || 'scan failed');
+
+                const order = ['15M', '1H', '4H', '1D', '1W'];
+                const tfs = data.timeframes || {};
+                order.forEach(k => { if (tfs[k]) tfs[k]._aligned = tfs[k].direction_vote === data.dominant_direction; });
+
+                const swt = data.scanner_weekly_trend || {};
+                const mwt = data.macro_weekly_trend;
+
+                content.innerHTML = `
+                <div class="summary-card">
+                    <div class="summary-top">
+                        <span class="direction-tag ${data.dominant_direction}">${data.dominant_direction}</span>
+                        <span class="score-tag">${data.confluence_score}/5 timeframes aligned</span>
+                        <span class="conviction-pill ${data.conviction}">${data.conviction} conviction</span>
+                        <span class="score-tag">Price: ${fmtPrice(data.current_price)}</span>
+                    </div>
+                    <div class="summary-text">${data.summary || ''}</div>
+                </div>
+
+                <div class="trend-recon">
+                    <div class="trend-box">
+                        <div class="src">${swt.source || 'Scanner weekly/daily read'}</div>
+                        <div class="rows">
+                            <div class="row-item"><div class="k">1W bias</div><div class="v ${swt['1W_ema_bias'] || 'UNKNOWN'}">${swt['1W_ema_bias'] || '—'}</div></div>
+                            <div class="row-item"><div class="k">1D bias</div><div class="v ${swt['1D_ema_bias'] || 'UNKNOWN'}">${swt['1D_ema_bias'] || '—'}</div></div>
+                        </div>
+                    </div>
+                    <div class="trend-box">
+                        <div class="src">${mwt ? mwt.source : 'kabroda_macro_engine (weekly 200 SMA)'}</div>
+                        ${mwt ? `
+                        <div class="rows">
+                            <div class="row-item"><div class="k">Position</div><div class="v ${mwt.position}">${mwt.position}</div></div>
+                            <div class="row-item"><div class="k">200 SMA</div><div class="v">${fmtPrice(mwt.weekly_200sma)}</div></div>
+                            <div class="row-item"><div class="k">Distance</div><div class="v">${mwt.distance_pct != null ? mwt.distance_pct.toFixed(2) + '%' : '—'}</div></div>
+                        </div>` : `<div class="rows"><div class="row-item"><div class="v UNKNOWN">Not yet written by macro engine</div></div></div>`}
+                    </div>
+                </div>
+
+                <div class="tf-grid">${order.map(k => tfs[k] ? tfCard(tfs[k]) : '').join('')}</div>
+                `;
+
+                const asOf = document.getElementById('asOf');
+                if (data.scanned_at) {
+                    const d = new Date(data.scanned_at);
+                    asOf.textContent = 'Scanned ' + d.toLocaleTimeString();
+                }
+            } catch (e) {
+                content.innerHTML = `<div class="empty-state" style="color:var(--loss);">SCAN FAILED: ${e.message}</div>`;
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadConfluence();
+            setInterval(loadConfluence, 60000);
+        });
+    </script>
+</body>
+</html>

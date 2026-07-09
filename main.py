@@ -731,6 +731,12 @@ async def gravity_map_page(request: Request, db: Session = Depends(get_db)):
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
     return _template_or_fallback(request, templates, "gravity_map.html", ctx)
 
+@app.get("/suite/confluence")
+async def confluence_page(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
+    return _template_or_fallback(request, templates, "confluence.html", ctx)
+
 @app.get("/suite/dashboard")
 async def suite_dashboard_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
@@ -889,6 +895,56 @@ async def api_gravity_scan(symbol: str = "BTC/USDT"):
         "symbol": symbol,
         "kde_data": kde_data,
         "macro_fibs": macro_fibs
+    })
+
+
+@app.get("/api/confluence")
+async def api_confluence_scan(symbol: str = "BTC/USDT"):
+    """
+    Standalone live 5-TF (15M/1H/4H/1D/1W) confluence read — exposes
+    mtf_confluence_scanner.run_mtf_confluence_scan() directly, which already
+    runs continuously inside Market Radar's bundled scan but has never been
+    surfaced as its own view. No session-lock or candidate-fire dependency;
+    same public-data rationale as /api/gravity/scan and /api/narrative/latest.
+
+    Also surfaces the macro engine's independent weekly-200-SMA trend read
+    (24h cadence, written by kabroda_macro_engine.py) alongside the scanner's
+    own EMA21/55-vote-based weekly/daily read. These are two different,
+    un-reconciled trend definitions that already coexist in this codebase —
+    shown here side by side, clearly labeled, rather than silently picking one.
+    """
+    db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
+    try:
+        scan = await mtf_confluence_scanner.run_mtf_confluence_scan(db_sym)
+    except Exception as e:
+        print(f"[CONFLUENCE API] {db_sym}: {e}")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    current_price = scan.get("current_price", 0.0)
+    weekly_200sma = await asyncio.to_thread(battlebox_pipeline._fetch_weekly_200sma, db_sym)
+
+    macro_weekly_trend = None
+    if weekly_200sma and weekly_200sma > 0 and current_price > 0:
+        dist = (current_price - weekly_200sma) / weekly_200sma * 100.0
+        macro_weekly_trend = {
+            "source": "kabroda_macro_engine (weekly 200 SMA, 24h cadence, session-lock frozen elsewhere)",
+            "weekly_200sma": round(weekly_200sma, 2),
+            "position": "ABOVE" if dist > 0.5 else "BELOW" if dist < -0.5 else "AT",
+            "distance_pct": round(dist, 4),
+        }
+
+    timeframes = scan.get("timeframes", {})
+    scanner_weekly_trend = {
+        "source": "mtf_confluence_scanner (EMA21/55 vote, live on-demand)",
+        "1W_ema_bias": timeframes.get("1W", {}).get("ema_bias"),
+        "1D_ema_bias": timeframes.get("1D", {}).get("ema_bias"),
+    }
+
+    return JSONResponse({
+        "ok": True,
+        **scan,
+        "macro_weekly_trend": macro_weekly_trend,
+        "scanner_weekly_trend": scanner_weekly_trend,
     })
 
 
