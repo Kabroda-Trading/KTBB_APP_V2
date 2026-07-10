@@ -30,6 +30,11 @@
         .conviction-pill.LOW { background: var(--neutral-bg); color: var(--neutral); }
         .summary-text { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
 
+        .plain-read-card { background: var(--bg-surface); border: 1px solid var(--border-mid); border-left: 4px solid var(--gold); border-radius: 8px; padding: 18px 22px; margin-bottom: 20px; }
+        .plain-read-card .prc-label { font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 1px; color: var(--gold); text-transform: uppercase; margin-bottom: 8px; }
+        .plain-read-card .prc-text { color: var(--text-primary); font-size: 14px; line-height: 1.7; }
+        .plain-read-card .prc-note { color: var(--text-faint); font-size: 10px; font-family: var(--font-mono); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-faint); }
+
         .trend-recon { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 24px; }
         .trend-box { background: var(--bg-surface); border: 1px solid var(--border-faint); border-radius: 6px; padding: 14px 16px; }
         .trend-box .src { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
@@ -102,7 +107,7 @@
             const flags = [];
             if (tf.bbwp_compressed) flags.push('<span class="flag compressed">BBWP compressed</span>');
             if (tf.pmarp_overextended) flags.push('<span class="flag overextended">PMARP overextended</span>');
-            if (tf.divergence && tf.divergence !== 'NONE') flags.push(`<span class="flag divergence">${tf.divergence.replace(/_/g,' ')}</span>`);
+            if (tf.divergence && tf.divergence !== 'NONE') flags.push(`<span class="flag divergence">${tf.divergence.replace(/_/g,' ')} DIVERGENCE</span>`);
 
             return `
             <div class="tf-card ${aligned}">
@@ -113,6 +118,46 @@
                 <div class="stat-line"><span class="k">PMARP</span><span class="v">${tf.pmarp_value != null ? tf.pmarp_value.toFixed(1) : '—'} (${tf.pmarp_direction || '—'})</span></div>
                 ${flags.length ? `<div class="flag-row">${flags.join('')}</div>` : ''}
             </div>`;
+        }
+
+        function buildPlainRead(data) {
+            const order = ['15M', '1H', '4H', '1D', '1W'];
+            const tfs = data.timeframes || {};
+            const dir = data.dominant_direction;
+            const score = data.confluence_score;
+
+            const aligned = order.filter(k => tfs[k] && tfs[k].direction_vote === dir);
+            const opposing = order.filter(k => tfs[k] && tfs[k].direction_vote && tfs[k].direction_vote !== dir && tfs[k].direction_vote !== 'NEUTRAL' && tfs[k].direction_vote !== 'UNKNOWN');
+            const macroTFs = ['1D', '1W'];
+            const macroAgrees  = macroTFs.every(k => aligned.includes(k));
+            const macroOpposes = macroTFs.every(k => opposing.includes(k));
+            const overextended = order.filter(k => tfs[k] && tfs[k].pmarp_overextended);
+            const diverging     = order.filter(k => tfs[k] && tfs[k].divergence && tfs[k].divergence !== 'NONE');
+
+            const lines = [];
+
+            if (dir === 'NEUTRAL') {
+                lines.push(`No real lean right now — the five timeframes are split evenly, so there's no confluence here to read anything into.`);
+            } else {
+                lines.push(`${score} of 5 timeframes lean ${dir.toLowerCase()}${aligned.length ? ' (' + aligned.join(', ') + ')' : ''}.`);
+                if (macroOpposes) {
+                    lines.push(`But the two biggest timeframes — Daily and Weekly — are both pointing the other way. Read this as a shorter-term move inside a bigger opposing trend, not full agreement top to bottom.`);
+                } else if (macroAgrees) {
+                    lines.push(`Daily and Weekly both agree with that lean, so the shorter-term move has the bigger trend behind it, not fighting it.`);
+                } else if (opposing.length) {
+                    lines.push(`${opposing.join(', ')} ${opposing.length === 1 ? 'is' : 'are'} pointing the other way, so it isn't unanimous.`);
+                }
+            }
+
+            if (overextended.length) {
+                lines.push(`${overextended.join(', ')} ${overextended.length === 1 ? 'is' : 'are'} stretched further than usual (PMARP overextended) — a pullback there wouldn't be surprising even if the overall lean holds.`);
+            }
+
+            if (diverging.length) {
+                lines.push(`Worth watching: ${diverging.join(', ')} ${diverging.length === 1 ? 'shows' : 'show'} RSI disagreeing with price — often an early sign a move is losing steam before price itself shows it.`);
+            }
+
+            return lines.join(' ');
         }
 
         async function loadConfluence() {
@@ -139,6 +184,12 @@
                         <span class="score-tag">Price: ${fmtPrice(data.current_price)}</span>
                     </div>
                     <div class="summary-text">${data.summary || ''}</div>
+                </div>
+
+                <div class="plain-read-card">
+                    <div class="prc-label">What This Means</div>
+                    <div class="prc-text">${buildPlainRead(data)}</div>
+                    <div class="prc-note">Context read only — this is not a trade signal. Entries, stops, and targets are the Senior Analyst's call, not this page's.</div>
                 </div>
 
                 <div class="trend-recon">
