@@ -1698,7 +1698,20 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
         wins   = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.status == "CLOSED_WIN", CampaignLog.is_canonical == True).scalar() or 0
         losses = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.status == "CLOSED_LOSS", CampaignLog.is_canonical == True).scalar() or 0
         win_rate = round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0.0
-        net_r = round(float(wins - losses), 2)
+        # Net R: real sum of realized_pnl, not a win/loss COUNT. A win/loss count
+        # (old: wins - losses) silently assumed every trade is a clean +-1R, which
+        # is exactly the assumption CLAUDE.md rule 5 and the 2026-07-04/05
+        # _frac_r() fix both explicitly reject -- stops are ATR/wall-adjusted, so
+        # realized R is rarely a clean 1.0. CLOSED_AT_EXPIRY included: it is a
+        # real filled outcome with a real fractional realized_pnl, not a "no
+        # trade" (that's EXPIRED, which stays excluded via the status filter).
+        net_r_raw = db.query(func.sum(CampaignLog.realized_pnl)).filter(
+            CampaignLog.symbol == "BTC/USDT",
+            CampaignLog.is_canonical == True,
+            CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY"]),
+            CampaignLog.realized_pnl.isnot(None),
+        ).scalar()
+        net_r = round(float(net_r_raw or 0.0), 4)
         since_7d = datetime.now(timezone.utc) - timedelta(days=7)
         spend_raw = db.query(func.sum(AgentRunLog.estimated_cost_usd)).filter(
             AgentRunLog.created_at >= since_7d).scalar()
@@ -1739,12 +1752,21 @@ async def api_dashboard_accuracy(request: Request, db: Session = Depends(get_db)
                              "incorrect_pct": round(c["incorrect"]/total*100,1) if total else 0,
                              "total": total}
             return result
-        grade_rows = db.query(DecisionJournal.kinematic_grade,
-            DecisionJournal.outcome_direction_correct, func.count(DecisionJournal.id)).filter(
-            DecisionJournal.symbol == "BTC/USDT",
-            DecisionJournal.outcome_direction_correct.isnot(None),
-            DecisionJournal.kinematic_grade.isnot(None)
-        ).group_by(DecisionJournal.kinematic_grade, DecisionJournal.outcome_direction_correct).all()
+        # Real 4H/1H CampaignLog data, not DecisionJournal.kinematic_grade (that
+        # field is the 15M radar-scan-level signal, unrelated to the 4H/1H
+        # candidate system -- this panel was labeled "4H Outcome vs. Session
+        # Bias" but was actually showing 15M data under a 4H title. "Correct"
+        # here means the resolved 4H/1H candidate closed net-positive R, same
+        # win definition audit_ai.py's H7 uses. N is still thin (record-only,
+        # unvalidated system) -- shown per-grade in the UI, not hidden.
+        grade_rows_4h1h = db.query(CampaignLog.kinematic_grade, CampaignLog.realized_pnl).filter(
+            CampaignLog.symbol == "BTC/USDT",
+            CampaignLog.session_timeframe.in_(["4H", "1H"]),
+            CampaignLog.kinematic_grade.isnot(None),
+            CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY"]),
+            CampaignLog.realized_pnl.isnot(None),
+        ).all()
+        grade_rows = [(g, (pnl or 0) > 0, 1) for g, pnl in grade_rows_4h1h]
         conf_rows = db.query(DecisionJournal.confluence_score,
             DecisionJournal.outcome_direction_correct, func.count(DecisionJournal.id)).filter(
             DecisionJournal.symbol == "BTC/USDT",
@@ -1791,8 +1813,12 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
         approval_rows = db.query(CampaignLog.mas_approval_status,
             func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.is_canonical == True).group_by(CampaignLog.mas_approval_status).all()
         approval_counts = {row[0]: row[1] for row in approval_rows}
+        # Real realized_pnl sum, not a hardcoded +-1.0 per win/loss -- same fix
+        # as the overview KPI's net_r, see comment there. CLOSED_AT_EXPIRY
+        # included (real fractional outcome), EXPIRED (unfilled, no trade) stays
+        # excluded via the status filter.
         pnl_rows = db.query(CampaignLog.closed_at, CampaignLog.date_key,
-            CampaignLog.status).filter(
+            CampaignLog.status, CampaignLog.realized_pnl).filter(
             CampaignLog.symbol == "BTC/USDT",
             CampaignLog.closed_at.isnot(None),
             CampaignLog.is_canonical == True,
@@ -1800,17 +1826,15 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
         cumulative = 0.0
         pnl_series = []
         for row in pnl_rows:
-            if row.status not in ("CLOSED_WIN", "CLOSED_LOSS"):
+            if row.status not in ("CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY") or row.realized_pnl is None:
                 continue
-            cumulative += 1.0 if row.status == "CLOSED_WIN" else -1.0
-            pnl_series.append({"date": row.date_key, "cumulative": round(cumulative, 2)})
+            cumulative += row.realized_pnl
+            pnl_series.append({"date": row.date_key, "cumulative": round(cumulative, 4)})
         trades = db.query(CampaignLog).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.is_canonical == True).order_by(CampaignLog.id.desc()).limit(50).all()
         trades_data = []
         for t in trades:
-            if t.status == "CLOSED_WIN":
-                r_pnl = "+1.0R"
-            elif t.status == "CLOSED_LOSS":
-                r_pnl = "-1.0R"
+            if t.status in ("CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY") and t.realized_pnl is not None:
+                r_pnl = f"{t.realized_pnl:+.4f}R"
             else:
                 r_pnl = None
             trades_data.append({

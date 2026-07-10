@@ -105,7 +105,7 @@
                 <div class="kpi-val" id="k-spend">—</div>
                 <div class="kpi-lbl">7-Day Agent Spend</div>
             </div>
-            <div class="kpi-card kpi-muted">
+            <div class="kpi-card kpi-muted" title="Near-zero is structurally expected, not a bug: Anthropic's prompt cache has a 5-minute window, and most Kabroda agents (Senior Analyst, interpreters, auditor) fire once per session -- there's rarely a second call to the same system prompt within 5 minutes for it to hit. Reads mainly come from same-run retries and the live SA chat.">
                 <div class="kpi-val" id="k-cache">—</div>
                 <div class="kpi-lbl">Cache Hit Rate</div>
             </div>
@@ -129,7 +129,7 @@
         <div class="chart-row row-1-1">
             <div class="chart-card">
                 <div class="chart-title">Directional Accuracy by Kinematic Grade</div>
-                <div class="chart-sub">4H outcome vs. session bias — PRIMED / OVEREXTENDED / TANGLED</div>
+                <div class="chart-sub">4H/1H candidate outcome vs. kinematic_grade — record-only system, N is thin</div>
                 <canvas id="chartGrade" height="160"></canvas>
             </div>
             <div class="chart-card">
@@ -354,7 +354,7 @@
         }
         tbody.innerHTML = d.trades.map(t => {
             const pnlStr = t.realized_pnl || '—';
-            const pnlCls = t.realized_pnl === '+1.0R' ? 's-win' : (t.realized_pnl === '-1.0R' ? 's-loss' : '');
+            const pnlCls = t.realized_pnl ? (t.realized_pnl.startsWith('+') ? 's-win' : (t.realized_pnl.startsWith('-') ? 's-loss' : '')) : '';
             const st  = (t.status || '').toLowerCase();
             const mas = (t.mas_approval_status || '').toLowerCase();
             const fmt = v => v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
@@ -377,13 +377,14 @@
         const d = await r.json();
         if (!d.ok) return;
 
-        // Grade accuracy
+        // Grade accuracy -- N shown in the label itself, not hidden, since
+        // this is now thin, record-only 4H/1H data (see main.py comment).
         const ga = d.grade_accuracy;
         const grades = Object.keys(ga);
         new Chart(document.getElementById('chartGrade'), {
             type: 'bar',
             data: {
-                labels: grades,
+                labels: grades.map(g => `${g} (N=${ga[g].total})`),
                 datasets: [
                     { label: 'Correct %',   data: grades.map(g => ga[g].correct_pct),   backgroundColor: C.cognac, borderRadius: 4 },
                     { label: 'Incorrect %', data: grades.map(g => ga[g].incorrect_pct), backgroundColor: C.muted,  borderRadius: 4 },
