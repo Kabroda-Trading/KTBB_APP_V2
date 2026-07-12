@@ -356,7 +356,8 @@ def build_trade_plan(candles: List[Dict], idx: int, bias: str, entry: float) -> 
 
 
 def build_trade_plan_windowed(candles: List[Dict], idx: int, bias: str, entry: float,
-                               window_bars: int, atr_floor_mult: float, order_by: str = "recency") -> Optional[Dict]:
+                               window_bars: int, atr_floor_mult: float, order_by: str = "recency",
+                               symmetric_fallback: bool = False) -> Optional[Dict]:
     """Validates the production fix directly: stop = nearest confirmed pivot within a
     recency-bounded window (no heat/touch/departure strength gate), leg = |entry - stop|,
     targets = Fibonacci-staged (1.0x/1.618x/2.618x) off that leg, with the same ATR floor/cap
@@ -366,23 +367,59 @@ def build_trade_plan_windowed(candles: List[Dict], idx: int, bias: str, entry: f
     already-validated convention) or "price" (nearest confirmed pivot by price distance to entry --
     matches gravity_engine's CURRENT query shape, a minimal diff from today's production code).
     These are a real fork once a window can contain 2+ confirmed pivots -- test both, don't assume.
+
+    ATR_FALLBACK (2026-07-12 parity fix): when no confirmed pivot exists in the window, this
+    now matches production's fallback (stop = entry -+ atr_floor_mult*ATR14) instead of
+    returning None -- those signals were previously silently excluded from every backtest
+    this tool has ever run.
+
+    symmetric_fallback (2026-07-12, APPENDIX "v4 STOP/TARGET ASYMMETRY"): False (default)
+    reproduces today's live v4 production behavior exactly -- a pivot-based stop stays pinned
+    to the pivot even when its distance would force the target-leg cap to fire, producing the
+    stop-vs-target asymmetry flagged 2026-07-12 (stop far, target capped close). True tests the
+    v5 candidate fix: any pivot whose raw_leg would exceed 5xATR is treated as if no pivot
+    existed at all, so BOTH stop and leg come from the same ATR_FALLBACK construction --
+    restoring "distance is one number" symmetry (CLAUDE.md's Measured Move Rule).
     """
     direction = "low" if bias == "LONG" else "high"
-    pivots = find_confirmed_pivots_windowed(candles, idx, window_bars, direction=direction)
-    if not pivots:
-        return None
-    if order_by == "price":
-        pivots = sorted(pivots, key=lambda p: p[1], reverse=(bias == "SHORT"))
-    _, stop = pivots[0]
-    raw_leg = abs(entry - stop)
-    if raw_leg <= 0:
-        return None
-
     atr14 = calc_atr(candles[:idx + 1])
-    target_too_small = (raw_leg < atr_floor_mult * atr14) if atr14 > 0 else False
-    leg = max(raw_leg, atr_floor_mult * atr14) if atr14 > 0 else raw_leg
-    if atr14 > 0 and leg > 5.0 * atr14:
-        leg = 3.0 * atr14
+
+    def _atr_fallback_plan():
+        # Matches production's ATR_FALLBACK branch exactly (gravity_engine.py's `else` arm
+        # when stop_row is None): stop = entry -+ atr_floor_mult*ATR14, leg = that same
+        # distance -- so leg == raw_leg here, never triggers the cap in this branch.
+        if atr14 <= 0:
+            return None
+        stop = entry - atr_floor_mult * atr14 if bias == "LONG" else entry + atr_floor_mult * atr14
+        return stop, atr_floor_mult * atr14, False
+
+    pivots = find_confirmed_pivots_windowed(candles, idx, window_bars, direction=direction)
+    if order_by == "price" and pivots:
+        pivots = sorted(pivots, key=lambda p: p[1], reverse=(bias == "SHORT"))
+
+    if not pivots:
+        fallback = _atr_fallback_plan()
+        if fallback is None:
+            return None
+        stop, leg, target_too_small = fallback
+    else:
+        _, stop = pivots[0]
+        raw_leg = abs(entry - stop)
+        if raw_leg <= 0:
+            return None
+
+        if symmetric_fallback and atr14 > 0 and raw_leg > 5.0 * atr14:
+            # v5 candidate: this pivot is too far to serve as the stop -- discard it,
+            # fall through to the same ATR_FALLBACK construction as the no-pivot case.
+            fallback = _atr_fallback_plan()
+            if fallback is None:
+                return None
+            stop, leg, target_too_small = fallback
+        else:
+            target_too_small = (raw_leg < atr_floor_mult * atr14) if atr14 > 0 else False
+            leg = max(raw_leg, atr_floor_mult * atr14) if atr14 > 0 else raw_leg
+            if atr14 > 0 and leg > 5.0 * atr14:
+                leg = 3.0 * atr14  # v4 (today's production): asymmetric cap, stop left unchanged
 
     if bias == "LONG":
         t1, t2, t3 = entry + leg, entry + leg * 1.618, entry + leg * 2.618
@@ -484,6 +521,99 @@ def print_window_grid(results: List[tuple]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 7B) SYMMETRY COMPARISON — validates the v5 asymmetric-stop fix BEFORE it ships
+#    (APPENDIX 2026-07-12: "v4 STOP/TARGET ASYMMETRY" -- stop pinned to a distant
+#    pivot while the target leg gets capped, breaking the Measured Move Rule's
+#    one-number-both-sides premise. Tests v4 (today) vs v5 (symmetric candidate)
+#    at the ALREADY-CHOSEN production window -- this is not re-opening the item #1
+#    window-size question, only testing what happens when the cap fires within it.)
+# ---------------------------------------------------------------------------
+
+def compare_symmetry(candles: List[Dict], signals: List[Dict], window_bars: int,
+                      atr_floor_mult: float) -> Dict:
+    """Runs the same historical signal set through today's v4 asymmetric construction
+    (symmetric_fallback=False) and the v5 symmetric candidate (symmetric_fallback=True),
+    at the production window size, order_by='recency' (the already-validated tie-break).
+    Reports how often the cap condition actually fires, and win-rate/avg-R for v4 vs v5
+    on just that affected subset, plus the full-sample aggregate as a sanity check that
+    untouched signals are truly identical between the two."""
+    v4_rows, v5_rows = [], []
+    affected_v4, affected_v5 = [], []
+    cap_fired_count = 0
+
+    for sig in signals:
+        idx, bias, entry = sig["idx"], sig["bias"], sig["entry"]
+
+        plan_v4 = build_trade_plan_windowed(candles, idx, bias, entry, window_bars, atr_floor_mult,
+                                             order_by="recency", symmetric_fallback=False)
+        plan_v5 = build_trade_plan_windowed(candles, idx, bias, entry, window_bars, atr_floor_mult,
+                                             order_by="recency", symmetric_fallback=True)
+        if not plan_v4 or not plan_v5:
+            continue
+
+        # The two constructions only diverge when the cap condition fires under v4 --
+        # a different stop is the direct signature of that, cheaper than recomputing ATR.
+        cap_fired = round(plan_v4["stop"], 6) != round(plan_v5["stop"], 6)
+
+        row_v4 = {"leg": plan_v4["leg"], "entry": entry, **walk_forward(candles, idx, bias, plan_v4)}
+        row_v5 = {"leg": plan_v5["leg"], "entry": entry, **walk_forward(candles, idx, bias, plan_v5)}
+        v4_rows.append(row_v4)
+        v5_rows.append(row_v5)
+
+        if cap_fired:
+            cap_fired_count += 1
+            affected_v4.append(row_v4)
+            affected_v5.append(row_v5)
+
+    return {
+        "total_signals": len(v4_rows),
+        "cap_fired_count": cap_fired_count,
+        "v4_all": v4_rows, "v5_all": v5_rows,
+        "v4_affected": affected_v4, "v5_affected": affected_v5,
+    }
+
+
+def print_symmetry_comparison(result: Dict) -> None:
+    def _stats(rows):
+        if not rows:
+            return None
+        n = len(rows)
+        avg_r = sum(r["r_achieved"] for r in rows) / n
+        wins = sum(1 for r in rows if r["r_achieved"] > 0)
+        stops = sum(1 for r in rows if r["outcome"] == "STOP")
+        unresolved = sum(1 for r in rows if r["outcome"] == "NO_RESOLUTION")
+        return n, wins / n * 100, avg_r, stops, unresolved
+
+    total = result["total_signals"]
+    cap_n = result["cap_fired_count"]
+    pct = (cap_n / total * 100) if total else 0.0
+    print(f"\nTotal resolvable signals: {total}")
+    print(f"Cap condition fired (raw_leg > 5xATR14, the asymmetry trigger): {cap_n} ({pct:.1f}% of signals)\n")
+
+    print(f"{'Population':46s} {'N':>4s} {'WinRate':>8s} {'AvgR':>8s} {'Stopped':>8s} {'Unresolved':>11s}")
+    for label, rows in [
+        ("FULL SAMPLE -- v4 (today, asymmetric)", result["v4_all"]),
+        ("FULL SAMPLE -- v5 (symmetric candidate)", result["v5_all"]),
+        ("CAP-AFFECTED ONLY -- v4 (today, asymmetric)", result["v4_affected"]),
+        ("CAP-AFFECTED ONLY -- v5 (symmetric candidate)", result["v5_affected"]),
+    ]:
+        stats = _stats(rows)
+        if stats is None:
+            print(f"{label:46s} N=0, no signals")
+            continue
+        n, wr, avg_r, stops, unresolved = stats
+        print(f"{label:46s} {n:4d} {wr:7.1f}% {avg_r:+8.3f} {stops:8d} {unresolved:11d}")
+
+    print(
+        "\nNOTE: this project's own bar is N>=30 before treating any number here as more than "
+        "directional. The CAP-AFFECTED subset is a small slice of the full sample by construction "
+        "-- if its N sits below 30, say so plainly rather than reading a conclusion into it. The "
+        "two FULL SAMPLE rows should differ by roughly the CAP-AFFECTED subset's contribution only "
+        "-- if they diverge by more than that, something outside the intended change moved too."
+    )
+
+
+# ---------------------------------------------------------------------------
 # 8) MAIN — run the full scan, report honest aggregate stats
 # ---------------------------------------------------------------------------
 
@@ -498,6 +628,8 @@ def main():
                      help="Comma-separated candidate window sizes IN BARS (not calendar days) to grid-test.")
     ap.add_argument("--order-by", choices=["recency", "price"], default="recency",
                      help="Tie-break when a window contains 2+ confirmed pivots: nearest-by-time (recency, matches the tool's existing validated convention) or nearest-by-price (matches gravity_engine's current production query shape).")
+    ap.add_argument("--compare-symmetry", action="store_true",
+                     help="APPENDIX 2026-07-12: compare today's v4 asymmetric stop/target construction against the v5 symmetric-fallback candidate at the production window size, instead of the default single-plan report.")
     args = ap.parse_args()
 
     interval = "60m" if args.tf == "1h" else "4h"
@@ -523,6 +655,17 @@ def main():
             print(f"  {w} bars  ==  {w * bar_hours / 24:.1f} calendar days")
         results = test_window_sizes(candles, signals, window_options, atr_floor_mult, order_by=args.order_by)
         print_window_grid(results)
+        return
+
+    if args.compare_symmetry:
+        atr_floor_mult = 1.5 if args.tf == "4h" else 1.0
+        # Production window sizes (STOP_WINDOW_4H=5 days, STOP_WINDOW_1H=2 days in
+        # gravity_engine.py), converted to bars -- the already-chosen values from item #1,
+        # not re-tested here. 4h: 5*24/4=30 bars. 1h: 2*24/1=48 bars.
+        window_bars = 30 if args.tf == "4h" else 48
+        print(f"SYMMETRY COMPARISON (v4 vs v5) -- tf={args.tf}  window_bars={window_bars}  atr_floor_mult={atr_floor_mult}")
+        result = compare_symmetry(candles, signals, window_bars, atr_floor_mult)
+        print_symmetry_comparison(result)
         return
 
     rows = []
