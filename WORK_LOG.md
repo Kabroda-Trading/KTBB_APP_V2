@@ -2008,6 +2008,16 @@ The weekly auditor's stand-down validation is the automated half; the daily manu
 
 ---
 
+**2026-07-13 | 4H/1H WATCH: first confluence-opposed candidate | id=152 (1H LONG) fired against the live confluence scanner's BEARISH read | Still open (PENDING) — one data point, not acted on**
+
+*Context:* Since `mtf_confluence_scanner` capture went live on 4H/1H candidates (2026-07-09 deploy), every candidate reviewed had the scanner agreeing with its own bias. id=152 (1H LONG, created 2026-07-12) is the first case where `confluence_dominant_direction=BEARISH` while the candidate itself fired LONG — the first real instance for H10_TF_AGREEMENT's "opposed" bucket in `audit_ai.py`. Logged here so the "first case" moment isn't lost to chat history even though the underlying data point is already captured automatically in the DB.
+
+**KEY WATCH HYPOTHESIS (one data point — not acted on):** does a confluence-opposed 4H/1H candidate underperform confluence-agreed ones once N builds? H10 tracks this automatically already; this entry is the human-readable cross-reference, not a duplicate mechanism.
+
+*Also flagging, not duplicating:* the v4 stop/target asymmetry investigation (real backtest, N=22/timeframe, symmetric fix rejected — decision NOT to ship) is a build/decision event, fully logged in the 2026-07-12 NEXT SESSION START entry above and the plan file's APPENDIX (2026-07-12). Not re-logged here since this section is for daily pattern-watching, not build history.
+
+---
+
 **2026-06-20 | APPROVED SHORT | Outcome: LOSS (−1R, stopped out) | Marginal-but-disclosed setup — system named its own failure risk accurately | Running tally: 4 correct stand-downs + 1 winning approval + 1 losing approval (disclosed-marginal, not questionable)**
 
 *Call:* APPROVED SHORT. Entry 63,232.92 | Stop 63,778.93 | T1 62,602.87 (T1-only cap applied by system). 15M closed below entry — would have filled. Within ~3 fifteen-minute candles, the third spiked up and tagged the stop. −1R loss. Price subsequently pushed UP into the breakout trigger (opposite direction).
