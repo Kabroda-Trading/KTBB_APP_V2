@@ -565,12 +565,33 @@
             document.body.style.overflow = 'hidden';
         }
 
+        // ================================================================
+        // MISSION KEY — the TradingView "Kabroda Mission Plotter" Pine Script
+        // requires EXACTLY 9 pipe-delimited fields (str.split(key,"|"), gated
+        // on array.size(parts) >= 9): bias|status|entry|stop|tp1|tp2|tp3|macro|micro.
+        // Fewer fields (or non-numeric target text like "Entry:X") means the
+        // indicator silently shows nothing -- "-- DATA MISSING --" and a blank
+        // HUD/chart. Found 2026-07-14: neither the 4H/1H cockpit key (7 fields)
+        // nor copyTfLevel's text format (5 fields, non-numeric) satisfied this.
+        // Single shared builder so every caller produces a valid key.
+        // ================================================================
+        function buildMissionKey9(bias, status, entry, stop, tp1, tp2, tp3, macro, micro) {
+            const fmt = v => (parseFloat(v) || 0).toFixed(2);
+            return [
+                bias || 'NONE', status || 'WAITING',
+                fmt(entry), fmt(stop), fmt(tp1), fmt(tp2), fmt(tp3),
+                macro || 'NEUTRAL', micro || 'NEUTRAL',
+            ].join('|');
+        }
+
         function openTfCockpit(sym, tf) {
             const mem = window.tfCandidateMemory && window.tfCandidateMemory[sym + '_' + tf];
             if (!mem) return;
-            const entry  = parseFloat(mem.entry  || 0);
-            const stop   = parseFloat(mem.stop   || 0);
-            const target = parseFloat(mem.target || 0);
+            const entry = parseFloat(mem.entry  || 0);
+            const stop  = parseFloat(mem.stop   || 0);
+            const tp1   = parseFloat(mem.target || 0);
+            const tp2   = parseFloat(mem.t2 || 0);
+            const tp3   = parseFloat(mem.t3 || 0);
             const data = {
                 symbol: sym,
                 price: 0,
@@ -580,10 +601,10 @@
                     bias:    mem.bias,
                     entry:   entry,
                     stop:    stop,
-                    targets: [target, 0, 0],
+                    targets: [tp1, tp2, tp3],
                 },
                 mas_status: tf + '_CANDIDATE',
-                key: entry ? `${mem.bias}|${tf}_CANDIDATE|${entry.toFixed(2)}|${stop.toFixed(2)}|${target.toFixed(2)}||` : '',
+                key: entry ? buildMissionKey9(mem.bias, tf + '_CANDIDATE', entry, stop, tp1, tp2, tp3, mem.macroBias, mem.dominantDirection) : '',
             };
             activeData = data;
             document.getElementById('tSym').innerText = sym.replace('USDT', '') + ' ' + tf + ' CANDIDATE COCKPIT';
@@ -595,7 +616,7 @@
         function copyTfLevel(sym, tf) {
             const mem = window.tfCandidateMemory && window.tfCandidateMemory[sym + '_' + tf];
             if (!mem) return;
-            const text = `${mem.bias}|${tf}|Entry:${mem.entry}|Stop:${mem.stop}|Target:${mem.target}`;
+            const text = buildMissionKey9(mem.bias, tf + '_CANDIDATE', mem.entry, mem.stop, mem.target, mem.t2, mem.t3, mem.macroBias, mem.dominantDirection);
             navigator.clipboard.writeText(text).then(() => {
                 const btns = document.querySelectorAll(`.tf-btn-copy`);
                 btns.forEach(b => {
@@ -1042,12 +1063,14 @@
             // never leave a stale live-looking entry that COCKPIT/COPY could act on.
             window.tfCandidateMemory = window.tfCandidateMemory || {};
             if (tv4h.status === 'BOS_ACTIVE') {
-                window.tfCandidateMemory[sym + '_4H'] = {sym, bias: tv4h.bias, entry: tv4h.entry, stop: tv4h.stop, target: tv4h.t1};
+                window.tfCandidateMemory[sym + '_4H'] = {sym, bias: tv4h.bias, entry: tv4h.entry, stop: tv4h.stop, target: tv4h.t1,
+                    t2: tv4h.t2, t3: tv4h.t3, macroBias: tv4h.macro_bias, dominantDirection: tv4h.dominant_direction};
             } else {
                 delete window.tfCandidateMemory[sym + '_4H'];
             }
             if (tv1h.status === 'BOS_ACTIVE') {
-                window.tfCandidateMemory[sym + '_1H'] = {sym, bias: tv1h.bias, entry: tv1h.entry, stop: tv1h.stop, target: tv1h.t1};
+                window.tfCandidateMemory[sym + '_1H'] = {sym, bias: tv1h.bias, entry: tv1h.entry, stop: tv1h.stop, target: tv1h.t1,
+                    t2: tv1h.t2, t3: tv1h.t3, macroBias: tv1h.macro_bias, dominantDirection: tv1h.dominant_direction};
             } else {
                 delete window.tfCandidateMemory[sym + '_1H'];
             }
@@ -1174,8 +1197,12 @@
                     indicator_string:   `${bo},${bd},${lvl.daily_resistance||0},${lvl.daily_support||0},${lvl.range30m_high||0},${lvl.range30m_low||0}`,
                     grade:              snap.mas_status || 'PENDING',
                     mas_status:         snap.mas_status || null,
+                    // Mission key needs exactly 9 fields (see buildMissionKey9) -- this
+                    // path is poll-driven (Phase 1, DB-only, must stay fast), so macro/
+                    // micro both reuse the already-cached mtf.confluence_direction rather
+                    // than firing a live /api/confluence fetch on every render tick.
                     key:                snap.mas_status === 'APPROVED'
-                        ? `${snap.plan.bias}|SA_APPROVED|${(snap.plan.entry_price||0).toFixed(2)}|${(snap.plan.stop_loss||0).toFixed(2)}|${(snap.plan.t1||0).toFixed(2)}|${(snap.plan.t2||0).toFixed(2)}|${(snap.plan.t3||0).toFixed(2)}`
+                        ? buildMissionKey9(snap.plan.bias, 'SA_APPROVED', snap.plan.entry_price, snap.plan.stop_loss, snap.plan.t1, snap.plan.t2, snap.plan.t3, dir, dir)
                         : '',
                     diagnostic_ledger:  {},
                     plan: {

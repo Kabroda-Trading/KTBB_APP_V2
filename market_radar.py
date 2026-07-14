@@ -28,6 +28,12 @@ def _tf_candidate_verdict(c: CampaignLog) -> dict:
     COPY/COCKPIT buttons and could win the TRADE THIS badge for a trade that
     already closed hours ago.
     """
+    # t2/t3/macro_bias/dominant_direction: already exist on the row (t2/t3 from
+    # v4 Fibonacci staging; macro_bias/dominant_direction from gravity_engine's
+    # candidate-time capture) but were never surfaced here -- the radar's own
+    # TradingView "COPY"/"COCKPIT" payloads were silently built from T1 only,
+    # with no macro/micro context. Found 2026-07-14 tracing why the Pine Script
+    # HUD indicator showed "DATA MISSING" for 4H/1H candidates.
     if c.closed_at is not None:
         return {
             "status": "RESOLVED",
@@ -35,6 +41,10 @@ def _tf_candidate_verdict(c: CampaignLog) -> dict:
             "entry": c.entry_price,
             "stop": c.stop_loss,
             "t1": c.t1,
+            "t2": c.t2,
+            "t3": c.t3,
+            "macro_bias": c.macro_bias,
+            "dominant_direction": c.dominant_direction,
             "outcome": c.status,
             "realized_pnl": c.realized_pnl,
         }
@@ -44,6 +54,10 @@ def _tf_candidate_verdict(c: CampaignLog) -> dict:
         "entry": c.entry_price,
         "stop": c.stop_loss,
         "t1": c.t1,
+        "t2": c.t2,
+        "t3": c.t3,
+        "macro_bias": c.macro_bias,
+        "dominant_direction": c.dominant_direction,
         "outcome": None,
         "realized_pnl": None,
     }
@@ -56,8 +70,8 @@ def _get_tf_system_verdicts(symbol_norm: str) -> dict:
     """
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     result = {
-        "4H":  {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None, "outcome": None, "realized_pnl": None},
-        "1H":  {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None, "outcome": None, "realized_pnl": None},
+        "4H":  {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None, "t2": None, "t3": None, "macro_bias": None, "dominant_direction": None, "outcome": None, "realized_pnl": None},
+        "1H":  {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None, "t2": None, "t3": None, "macro_bias": None, "dominant_direction": None, "outcome": None, "realized_pnl": None},
         "15M": {"status": "PENDING",    "bias": None, "entry": None, "stop": None, "t1": None},
     }
     try:
