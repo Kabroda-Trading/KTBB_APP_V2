@@ -2008,11 +2008,11 @@ The weekly auditor's stand-down validation is the automated half; the daily manu
 
 ---
 
-**2026-07-13 | 4H/1H WATCH: first confluence-opposed candidate | id=152 (1H LONG) fired against the live confluence scanner's BEARISH read | Still open (PENDING) — one data point, not acted on**
+**2026-07-13 | 4H/1H WATCH: confluence-opposed candidates, 2-for-2 losses so far | id=152 and id=154 (both 1H LONG) fired against the scanner's BEARISH read, both stopped out | N=2 — one data point, not two, not acted on**
 
-*Context:* Since `mtf_confluence_scanner` capture went live on 4H/1H candidates (2026-07-09 deploy), every candidate reviewed had the scanner agreeing with its own bias. id=152 (1H LONG, created 2026-07-12) is the first case where `confluence_dominant_direction=BEARISH` while the candidate itself fired LONG — the first real instance for H10_TF_AGREEMENT's "opposed" bucket in `audit_ai.py`. Logged here so the "first case" moment isn't lost to chat history even though the underlying data point is already captured automatically in the DB.
+*Context:* Since `mtf_confluence_scanner` capture went live on 4H/1H candidates (2026-07-09 deploy), every candidate had the scanner agreeing with its own bias until id=152 (1H LONG, created 2026-07-12) — the first case where `confluence_dominant_direction=BEARISH` while the candidate fired LONG. Update: id=152 has since resolved **CLOSED_LOSS (STOP)**. The same day, a second confluence-opposed candidate appeared — id=154 (1H LONG, created 2026-07-13, also scanner=BEARISH) — and it **also resolved CLOSED_LOSS**, stopped out at the identical timestamp (2026-07-13T00:41:00 UTC) as id=152. Both instances of H10_TF_AGREEMENT's "opposed" bucket so far: losses.
 
-**KEY WATCH HYPOTHESIS (one data point — not acted on):** does a confluence-opposed 4H/1H candidate underperform confluence-agreed ones once N builds? H10 tracks this automatically already; this entry is the human-readable cross-reference, not a duplicate mechanism.
+**KEY WATCH HYPOTHESIS (N=2 — not acted on, not close to meaningful):** does a confluence-opposed 4H/1H candidate underperform confluence-agreed ones once N builds? H10 tracks this automatically already; this entry is the human-readable cross-reference, not a duplicate mechanism. For contrast, the confluence-*agreed* population so far is mixed, not clean either: id=151 (agreed BULLISH) lost, id=147 (agreed BULLISH) closed at a small positive expiry, id=155 (agreed BEARISH, 4H) won T1. Nowhere near enough data on either side to read anything into this yet — flagging the shape, not a conclusion.
 
 *Also flagging, not duplicating:* the v4 stop/target asymmetry investigation (real backtest, N=22/timeframe, symmetric fix rejected — decision NOT to ship) is a build/decision event, fully logged in the 2026-07-12 NEXT SESSION START entry above and the plan file's APPENDIX (2026-07-12). Not re-logged here since this section is for daily pattern-watching, not build history.
 
