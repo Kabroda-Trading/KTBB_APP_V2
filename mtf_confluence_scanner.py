@@ -10,17 +10,14 @@
 # ==============================================================================
 
 import asyncio
-import os
-import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-# Add bold-hubble to path for Revin Suite imports
-_bh_path = os.path.join(os.path.dirname(__file__), "bold-hubble")
-if _bh_path not in sys.path:
-    sys.path.insert(0, _bh_path)
-
-from battlebox_pipeline import (
+# ── Shared data layer ─────────────────────────────────────────────────────
+# fetch_live_*, _normalize_symbol, _calc_ema_series, and _calc_adx are in
+# market_data.py to break the circular import chain (battlebox_pipeline →
+# gravity_engine → mtf_confluence_scanner → battlebox_pipeline).
+from market_data import (
     fetch_live_15m,
     fetch_live_1h,
     fetch_live_4h,
@@ -31,7 +28,7 @@ from battlebox_pipeline import (
 )
 import gravity_math
 
-# Revin Suite (R-Squared) imports
+# Revin Suite (R-Squared) imports — from bold-hubble package
 from indicators.revin_ribbons import calculate_revin_ribbons, analyze_ribbon_state
 from indicators.rmo import calculate_rmo, analyze_rmo_state
 from indicators.rwp import calculate_rwp, analyze_rwp_state

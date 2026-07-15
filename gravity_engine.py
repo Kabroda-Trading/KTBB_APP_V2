@@ -8,32 +8,24 @@
 #    — see database.py CampaignLog comment for all three shapes)
 # ==============================================================================
 import asyncio
-import os
-import sys
 import traceback
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 import subprocess
 
-# Add bold-hubble to path for Revin Suite imports
-_bh_path = os.path.join(os.path.dirname(__file__), "bold-hubble")
-if _bh_path not in sys.path:
-    sys.path.insert(0, _bh_path)
-
 from database import SessionLocal, GravityMemory, DecisionJournal, CampaignLog
 import battlebox_pipeline  # <-- SINGLE SOURCE OF TRUTH ENFORCED
 import notify
 
-# Revin Suite (R-Squared) imports
+# Revin Suite (R-Squared) imports — from bold-hubble package
 from indicators.revin_suite_engine import compute_revin_suite
 
-# mtf_confluence_scanner is imported lazily inside run_gravity_ingestion_loop(),
-# not at module level -- battlebox_pipeline imports gravity_engine at module
-# level, and mtf_confluence_scanner imports from battlebox_pipeline at module
-# level, so a top-level import here creates a circular import that breaks boot
-# (ImportError: cannot import name 'fetch_live_15m' from partially initialized
-# module 'battlebox_pipeline'). By the time the loop actually runs, all three
-# modules have finished initializing, so the lazy import is always safe.
+# mtf_confluence_scanner is imported at module level now that the circular
+# import chain (battlebox_pipeline → gravity_engine → mtf_confluence_scanner
+# → battlebox_pipeline) has been broken by extracting the shared data layer
+# into market_data.py. mtf_confluence_scanner now imports from market_data
+# instead of battlebox_pipeline, so there is no cycle.
+import mtf_confluence_scanner
 
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 
@@ -1000,7 +992,6 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
 # ---------------------------------------------------------------------------
 async def run_gravity_ingestion_loop():
     print(">>> GRAVITY ENGINE: Initializing background loop (v4 target logic, STRICT SSOT MODE)...")
-    import mtf_confluence_scanner  # lazy -- see import-time comment near top of file
 
     try:
         subprocess.Popen(["python", "kabroda_macro_engine.py"])
