@@ -200,7 +200,11 @@ def _collect_stats(symbol: str, cutoff: datetime) -> Dict[str, Any]:
         for d in decisions:
             if not d.bo_price or not d.bd_price or d.bo_price <= 0:
                 continue
-            pct    = (d.bo_price - d.bd_price) / d.bo_price * 100
+            # bo_price/bd_price are session-level upper/lower anchors
+            # (kabroda_mas_flow.py:1745-46): bo = max(...), bd = min(...).
+            # Always bo >= bd regardless of LONG/SHORT direction, so the
+            # difference is never negative. abs() is a defensive no-op.
+            pct    = abs(d.bo_price - d.bd_price) / d.bo_price * 100
             bucket = _box_bucket(pct)
 
             if d.outcome_direction_correct is True:    okey = "correct"
