@@ -8,14 +8,25 @@
 #    — see database.py CampaignLog comment for all three shapes)
 # ==============================================================================
 import asyncio
+import os
+import sys
 import traceback
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 import subprocess
 
+# Add bold-hubble to path for Revin Suite imports
+_bh_path = os.path.join(os.path.dirname(__file__), "bold-hubble")
+if _bh_path not in sys.path:
+    sys.path.insert(0, _bh_path)
+
 from database import SessionLocal, GravityMemory, DecisionJournal, CampaignLog
 import battlebox_pipeline  # <-- SINGLE SOURCE OF TRUTH ENFORCED
 import notify
+
+# Revin Suite (R-Squared) imports
+from indicators.revin_suite_engine import compute_revin_suite
+
 # mtf_confluence_scanner is imported lazily inside run_gravity_ingestion_loop(),
 # not at module level -- battlebox_pipeline imports gravity_engine at module
 # level, and mtf_confluence_scanner imports from battlebox_pipeline at module
@@ -167,6 +178,37 @@ def _compute_weekly_200sma_position(symbol: str, current_price: float) -> Any:
         return None
     dist = (current_price - w200sma) / w200sma * 100.0
     return "ABOVE" if dist > 0.5 else "BELOW" if dist < -0.5 else "AT"
+
+
+# ---------------------------------------------------------------------------
+# HELPER: EXTRACT REVIN SUITE FROM CONFLUENCE DICT
+# Pulls the Revin Suite fields for a specific timeframe from the MTF
+# confluence scanner output. RECORD-ONLY -- feeds audit_ai.py's Revin
+# alignment hypothesis, does not gate candidate creation.
+# ---------------------------------------------------------------------------
+def _extract_revin_from_confluence(
+    confluence: Optional[Dict[str, Any]], tf_label: str
+) -> Dict[str, Any]:
+    """Extract Revin Suite fields for a given timeframe label from the confluence dict."""
+    result: Dict[str, Any] = {
+        "revin_ribbon_zone": None,
+        "revin_midline_price": None,
+        "rmo_score": None,
+        "rmo_state": None,
+        "rwp_squeeze": None,
+    }
+    if not confluence:
+        return result
+    tf_data = confluence.get("timeframes", {})
+    tf = tf_data.get(tf_label, {})
+    if not tf or tf.get("error"):
+        return result
+    result["revin_ribbon_zone"] = tf.get("revin_ribbon_zone")
+    result["revin_midline_price"] = tf.get("revin_midline_price")
+    result["rmo_score"] = tf.get("rmo_score")
+    result["rmo_state"] = tf.get("rmo_state")
+    result["rwp_squeeze"] = tf.get("rwp_squeeze")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -649,6 +691,9 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], c
         if not bias:
             return
 
+        # Revin Suite: extract from the candidate's own timeframe (4H)
+        revin_4h = _extract_revin_from_confluence(confluence, "4H")
+
         row = CampaignLog(
             symbol=symbol,
             date_key=date_key,
@@ -676,6 +721,12 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], c
             weekly_200sma_position=weekly_200sma_position,
             dominant_direction=conf_dominant_direction,
             confluence_score=conf_score,
+            # Revin Suite fields
+            revin_ribbon_zone=revin_4h["revin_ribbon_zone"],
+            revin_midline_price=revin_4h["revin_midline_price"],
+            rmo_score=revin_4h["rmo_score"],
+            rmo_state=revin_4h["rmo_state"],
+            rwp_squeeze=revin_4h["rwp_squeeze"],
         )
         db.add(row)
         db.commit()
@@ -882,6 +933,9 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
         conf_dominant_direction = confluence.get("dominant_direction") if confluence else None
         conf_score = confluence.get("confluence_score") if confluence else None
 
+        # Revin Suite: extract from the candidate's own timeframe (1H)
+        revin_1h = _extract_revin_from_confluence(confluence, "1H")
+
         row = CampaignLog(
             symbol=symbol,
             date_key=date_key,
@@ -909,6 +963,12 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
             weekly_200sma_position=weekly_200sma_position,
             dominant_direction=conf_dominant_direction,
             confluence_score=conf_score,
+            # Revin Suite fields
+            revin_ribbon_zone=revin_1h["revin_ribbon_zone"],
+            revin_midline_price=revin_1h["revin_midline_price"],
+            rmo_score=revin_1h["rmo_score"],
+            rmo_state=revin_1h["rmo_state"],
+            rwp_squeeze=revin_1h["rwp_squeeze"],
         )
         db.add(row)
         db.commit()

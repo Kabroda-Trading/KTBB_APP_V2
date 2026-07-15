@@ -1,16 +1,24 @@
 # mtf_confluence_scanner.py
 # ==============================================================================
-# KABRODA MULTI-TIMEFRAME CONFLUENCE SCANNER v2.0
+# KABRODA MULTI-TIMEFRAME CONFLUENCE SCANNER v2.1
 # Purpose: Live 5-timeframe direction vote (15M/1H/4H/Daily/Weekly) with
 # StochRSI, EMA21/55 bias, ADX strength, BBWP compression gate, PMARP exit
-# protocol, RSI divergence detection, and unified jewel_signal synthesis.
+# protocol, RSI divergence detection, Revin Suite (R-Squared), and unified
+# jewel_signal synthesis.
 # Runs every 15 minutes via gravity engine loop. Standalone — read-only.
 # DO NOT modify battlebox_pipeline.py or any existing file.
 # ==============================================================================
 
 import asyncio
+import os
+import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+
+# Add bold-hubble to path for Revin Suite imports
+_bh_path = os.path.join(os.path.dirname(__file__), "bold-hubble")
+if _bh_path not in sys.path:
+    sys.path.insert(0, _bh_path)
 
 from battlebox_pipeline import (
     fetch_live_15m,
@@ -22,6 +30,12 @@ from battlebox_pipeline import (
     _calc_adx,
 )
 import gravity_math
+
+# Revin Suite (R-Squared) imports
+from indicators.revin_ribbons import calculate_revin_ribbons, analyze_ribbon_state
+from indicators.rmo import calculate_rmo, analyze_rmo_state
+from indicators.rwp import calculate_rwp, analyze_rwp_state
+from indicators.revin_suite_engine import compute_revin_suite
 
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 
@@ -364,8 +378,9 @@ def _build_jewel_signal(
     1. BBWP gate — any timeframe compressed?
     2. Direction from existing confluence vote
     3. Conviction from EMA alignment + StochRSI momentum support
-    4. PMARP exit warning
-    5. Divergence warning
+    4. Revin Suite — RWP squeeze as additional gate, RMO divergence as conviction
+    5. PMARP exit warning
+    6. Divergence warning
     """
     gate_open = any(v.get("bbwp_compressed", False) for v in tf_data.values())
     exit_warning = any(v.get("pmarp_overextended", False) for v in tf_data.values())
@@ -373,6 +388,18 @@ def _build_jewel_signal(
         v.get("divergence", "NONE") in {"BEARISH", "BULLISH"}
         for v in tf_data.values()
     )
+
+    # ── Revin Suite gates ───────────────────────────────────────────────
+    rwp_squeeze = any(v.get("rwp_squeeze", False) for v in tf_data.values())
+    rmo_overextended = any(v.get("rmo_overextended", False) for v in tf_data.values())
+    rmo_bullish = any(
+        v.get("rmo_state") == "BULLISH" for v in tf_data.values()
+    )
+    rmo_bearish = any(
+        v.get("rmo_state") == "BEARISH" for v in tf_data.values()
+    )
+    revin_gray_dot = any(v.get("revin_gray_dot", False) for v in tf_data.values())
+    revin_outer_band = any(v.get("revin_outer_band", False) for v in tf_data.values())
 
     if not gate_open:
         conviction = "LOW"
@@ -386,12 +413,28 @@ def _build_jewel_signal(
             1 for v in tf_data.values()
             if v.get("stoch_rsi", {}).get("curl") == momentum_target
         )
-        conviction = "STRONG" if direction_aligned >= 3 and momentum_supporting >= 2 else "MODERATE"
+        # Boost conviction if RWP squeeze confirms the gate
+        rwp_boost = 1 if rwp_squeeze else 0
+        # Boost conviction if RMO aligns with dominant direction
+        rmo_boost = 1 if (
+            (dominant_direction == "BULLISH" and rmo_bullish) or
+            (dominant_direction == "BEARISH" and rmo_bearish)
+        ) else 0
+        # STRONG if: (old AND-gate: direction + momentum) OR (Revin boosts substitute for momentum)
+        conviction = "STRONG" if (direction_aligned >= 3 and momentum_supporting >= 2) or (direction_aligned >= 3 and (rwp_boost + rmo_boost) >= 1) else "MODERATE"
 
     if not gate_open:
         summary = "Gate closed — no compression detected, stand down."
     else:
         parts = [f"Gate open. {dominant_direction.capitalize()} bias, {conviction.lower()} conviction."]
+        if rwp_squeeze:
+            parts.append("RWP squeeze confirms compression — breakout imminent.")
+        if rmo_overextended:
+            parts.append("RMO overextended — momentum exhaustion warning.")
+        if revin_gray_dot:
+            parts.append("Revin gray dot tested — support/resistance bounce zone.")
+        if revin_outer_band:
+            parts.append("Revin outer band touched — extreme price level.")
         if exit_warning:
             parts.append("Exit warning active — overextended on at least one timeframe.")
         if divergence_warning:
@@ -406,6 +449,10 @@ def _build_jewel_signal(
         "conviction": conviction,
         "exit_warning": exit_warning,
         "divergence_warning": divergence_warning,
+        "rwp_squeeze": rwp_squeeze,
+        "rmo_overextended": rmo_overextended,
+        "revin_gray_dot": revin_gray_dot,
+        "revin_outer_band": revin_outer_band,
         "signal_summary": summary,
     }
 
@@ -431,6 +478,17 @@ def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
         "pmarp_direction": "NEUTRAL",
         "divergence": "NONE",
         "divergence_strength": "NONE",
+        "revin_ribbon_zone": "UNKNOWN",
+        "revin_gray_dot": False,
+        "revin_outer_band": False,
+        "revin_midline_direction": "UNKNOWN",
+        "rmo_score": 0.0,
+        "rmo_state": "NEUTRAL",
+        "rmo_overextended": False,
+        "rwp_score": 50.0,
+        "rwp_state": "NEUTRAL",
+        "rwp_squeeze": False,
+        "rwp_expansion": False,
         "error": "insufficient_data",
     }
 
@@ -438,6 +496,8 @@ def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
         return error_result
 
     closes = [c["close"] for c in candles]
+    highs = [c["high"] for c in candles]
+    lows = [c["low"] for c in candles]
     ema21 = _calc_ema_series(closes, 21)
     ema55 = _calc_ema_series(closes, 55)
 
@@ -461,6 +521,13 @@ def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
     rsi_series = _calc_rsi_series(closes)
     divergence = _find_divergence(closes, rsi_series)
 
+    # ── Revin Suite (R-Squared) ─────────────────────────────────────────
+    revin_suite = compute_revin_suite(closes, highs, lows)
+    current = revin_suite["current"]
+    ribbon_state = current["ribbon_state"]
+    rmo_state = current["rmo_state"]
+    rwp_state = current["rwp_state"]
+
     return {
         "label": label,
         "ema_bias": ema_bias,
@@ -478,6 +545,21 @@ def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
         "pmarp_direction": pmarp["pmarp_direction"],
         "divergence": divergence["divergence"],
         "divergence_strength": divergence["divergence_strength"],
+        # Revin Suite fields
+        "revin_ribbon_zone": ribbon_state.get("zone", "UNKNOWN"),
+        "revin_gray_dot": ribbon_state.get("gray_dot_tested", False),
+        "revin_outer_band": ribbon_state.get("outer_band_tested", False),
+        "revin_midline_direction": ribbon_state.get("midline_direction", "UNKNOWN"),
+        "revin_midline_price": ribbon_state.get("midline_price"),
+        "revin_lower_1s_price": ribbon_state.get("lower_1σ_price"),
+        "revin_upper_1s_price": ribbon_state.get("upper_1σ_price"),
+        "rmo_score": rmo_state.get("score", 0.0),
+        "rmo_state": rmo_state.get("state", "NEUTRAL"),
+        "rmo_overextended": rmo_state.get("is_overextended", False),
+        "rwp_score": rwp_state.get("score", 50.0),
+        "rwp_state": rwp_state.get("state", "NEUTRAL"),
+        "rwp_squeeze": rwp_state.get("is_squeeze", False),
+        "rwp_expansion": rwp_state.get("is_expansion", False),
     }
 
 
@@ -540,6 +622,14 @@ def _build_summary(
     overextended = [v["label"] for v in tf_data.values() if v.get("pmarp_overextended")]
     diverging = [v["label"] for v in tf_data.values() if v.get("divergence", "NONE") != "NONE"]
 
+    # Revin Suite summary fields
+    rwp_squeeze_tfs = [v["label"] for v in tf_data.values() if v.get("rwp_squeeze")]
+    rmo_bullish_tfs = [v["label"] for v in tf_data.values() if v.get("rmo_state") == "BULLISH"]
+    rmo_bearish_tfs = [v["label"] for v in tf_data.values() if v.get("rmo_state") == "BEARISH"]
+    rmo_overextended_tfs = [v["label"] for v in tf_data.values() if v.get("rmo_overextended")]
+    revin_gray_dot_tfs = [v["label"] for v in tf_data.values() if v.get("revin_gray_dot")]
+    revin_outer_band_tfs = [v["label"] for v in tf_data.values() if v.get("revin_outer_band")]
+
     res = levels.get("nearest_resistance")
     sup = levels.get("nearest_support")
 
@@ -560,6 +650,18 @@ def _build_summary(
         parts.append(f"Opposing: {', '.join(opposing)}.")
     if compressed:
         parts.append(f"BBWP compressed (gate open) on: {', '.join(compressed)}.")
+    if rwp_squeeze_tfs:
+        parts.append(f"RWP squeeze on: {', '.join(rwp_squeeze_tfs)}.")
+    if rmo_bullish_tfs:
+        parts.append(f"RMO bullish on: {', '.join(rmo_bullish_tfs)}.")
+    if rmo_bearish_tfs:
+        parts.append(f"RMO bearish on: {', '.join(rmo_bearish_tfs)}.")
+    if rmo_overextended_tfs:
+        parts.append(f"RMO overextended on: {', '.join(rmo_overextended_tfs)}.")
+    if revin_gray_dot_tfs:
+        parts.append(f"Revin gray dot (support test) on: {', '.join(revin_gray_dot_tfs)}.")
+    if revin_outer_band_tfs:
+        parts.append(f"Revin outer band touched on: {', '.join(revin_outer_band_tfs)}.")
     if overextended:
         parts.append(f"PMARP overextended (exit warning) on: {', '.join(overextended)}.")
     if diverging:

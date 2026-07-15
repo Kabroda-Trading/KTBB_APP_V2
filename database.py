@@ -276,6 +276,23 @@ def init_db():
         except Exception:
             pass
 
+    # --- REVIN SUITE (R-SQUARED) — record-only Revin fields on campaign_logs ---
+    # Added 2026-07-15 alongside Phase 1b gravity_engine.py wiring.
+    # RECORD-ONLY — feeds audit_ai.py's Revin alignment hypothesis, does not
+    # gate candidate creation. NULL on 15M rows.
+    for _col in [
+        "revin_ribbon_zone VARCHAR",
+        "revin_midline_price FLOAT",
+        "rmo_score FLOAT",
+        "rmo_state VARCHAR",
+        "rwp_squeeze BOOLEAN DEFAULT FALSE",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE campaign_logs ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- TARGET LOGIC v3 — t2/t3 made nullable for single-target 4H/1H candidates ---
     # v3 rows write t2=None/t3=None by design (see database.py CampaignLog comment).
     # Column was still NOT NULL at the DB level, so every v3 4H/1H INSERT was failing
@@ -568,6 +585,18 @@ class CampaignLog(Base):
     # bias" for audit_ai.py's H10_TF_AGREEMENT hypothesis. NULL on 15M rows.
     dominant_direction = Column(String, nullable=True)   # BULLISH / BEARISH / NEUTRAL, from the scanner at fire time
     confluence_score = Column(Integer, nullable=True)    # 0-5 timeframes aligned, from the scanner at fire time
+
+    # --- REVIN SUITE CAPTURE (2026-07-15) -- 4H/1H ONLY, RECORD-ONLY ---
+    # Extracted from the same mtf_confluence_scanner run that populates
+    # dominant_direction/confluence_score above. Uses the candidate's own
+    # timeframe's Revin data (4H for 4H candidates, 1H for 1H candidates).
+    # RECORD-ONLY -- feeds audit_ai.py's Revin alignment hypothesis, does
+    # not gate candidate creation. NULL on 15M rows.
+    revin_ribbon_zone = Column(String, nullable=True)     # ABOVE_MIDLINE / BELOW_MIDLINE / AT_BAND / UNKNOWN
+    revin_midline_price = Column(Float, nullable=True)     # Revin Ribbons midline price (S/R level)
+    rmo_score = Column(Float, nullable=True)               # RMO momentum score (-100 to +100)
+    rmo_state = Column(String, nullable=True)              # BULLISH / BEARISH / NEUTRAL
+    rwp_squeeze = Column(Boolean, nullable=True)           # RWP squeeze active (confirms compression)
 
 # ---------------------------------------------------------
 # MTF CONFLUENCE READINGS (MORNING BRIEF HISTORY)
