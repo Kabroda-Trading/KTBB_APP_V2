@@ -223,7 +223,10 @@ def log_kabroda_bedrock(symbol: str, levels: dict, lock_ts: int):
     """
     db = SessionLocal()
     try:
-        db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
+        # gravity_memory stores symbols without a slash (BTCUSDT), matching
+        # calculate_gravity_kde()'s and the BOS detectors' query format --
+        # see CLAUDE.md's documented gravity_memory symbol exception.
+        db_sym = symbol.replace("/", "")
         dt = datetime.fromtimestamp(lock_ts, tz=timezone.utc)
         exists = db.query(GravityMemory).filter(
             GravityMemory.symbol == db_sym, GravityMemory.timestamp == dt, GravityMemory.source == "7_DAY_KABRODA"
@@ -268,7 +271,10 @@ def log_radar_anchors(symbol: str, raw_daily: List[Dict[str, Any]], raw_1h: List
     """
     db = SessionLocal()
     try:
-        db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
+        # gravity_memory stores symbols without a slash (BTCUSDT), matching
+        # calculate_gravity_kde()'s and the BOS detectors' query format --
+        # see CLAUDE.md's documented gravity_memory symbol exception.
+        db_sym = symbol.replace("/", "")
         now_utc = datetime.now(timezone.utc)
         if raw_daily:
             days_since_sunday = (now_utc.weekday() + 1) % 7
