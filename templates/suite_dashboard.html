@@ -9,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         .dash-wrap { max-width: 1400px; margin: 0 auto; padding: 40px 24px 80px; }
 
@@ -62,12 +63,26 @@
         .s-failed                { color: #8c4a3a; }
         .s-pending               { color: #6b5345; }
         .s-stand_down            { color: #94a3b8; font-weight: 800; }
+        .s-closed_at_expiry      { color: #a67c3a; font-weight: 800; }
+        .s-expired               { color: #6b5345; }
+        .s-mas_error             { color: #8c4a3a; font-weight: 800; }
 
         .empty-state { text-align: center; padding: 44px 20px; color: #5a3d2c; font-family: 'Playfair Display', serif; font-style: italic; font-size: 14px; }
 
         @media (max-width: 1100px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
         @media (max-width: 900px)  { .row-2-1, .row-1-1 { grid-template-columns: 1fr; } }
         @media (max-width: 600px)  { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+
+        /* TAB NAVIGATION */
+        .tab-bar { display: flex; gap: 4px; margin-bottom: 28px; border-bottom: 1px solid #4d3526; padding-bottom: 0; }
+        .tab-btn { background: transparent; border: none; color: #8a6f57; font-family: 'JetBrains Mono', monospace;
+                   font-size: 11px; font-weight: 700; padding: 10px 20px; cursor: pointer; letter-spacing: 1.5px;
+                   text-transform: uppercase; border-bottom: 2px solid transparent; margin-bottom: -1px;
+                   transition: color 0.2s, border-color 0.2s; }
+        .tab-btn:hover { color: #c9a880; }
+        .tab-btn.active { color: #c9a24a; border-bottom-color: #c9a24a; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
     </style>
 </head>
 <body>
@@ -83,7 +98,17 @@
             <div class="dash-ts" id="tsLabel">—</div>
         </div>
 
-        <!-- ── KPI ROW ───────────────────────────────────── -->
+        <!-- ── TAB NAVIGATION ─────────────────────────────── -->
+        <div class="tab-bar">
+            <button class="tab-btn active" data-tab="overview">Overview</button>
+            <button class="tab-btn" data-tab="live-system">Live System</button>
+            <button class="tab-btn" data-tab="parameters">Parameters</button>
+            <button class="tab-btn" data-tab="errors">Errors</button>
+            <button class="tab-btn" data-tab="analysis">Analysis</button>
+        </div>
+
+        <!-- ── TAB: OVERVIEW ─────────────────────────────── -->
+        <div class="tab-content active" id="tab-overview">
         <div class="kpi-grid">
             <div class="kpi-card kpi-muted">
                 <div class="kpi-val" id="k-sessions">—</div>
@@ -141,7 +166,7 @@
 
         <!-- ── ROW 4: Costs + JEWEL ───────────────────────── -->
         <div class="chart-row row-1-1">
-            <div class="chart-card" id="costCard">
+            <div class="chart-card" id="costCard" {% if not is_admin %}style="display: none;"{% endif %}>
                 <div class="chart-title">
                     Agent Cost — 7-Day Stack
                     <span class="admin-badge">Admin</span>
@@ -202,10 +227,157 @@
                         <tr><td colspan="8" class="empty-state">Loading trade history…</td></tr>
                     </tbody>
                 </table>
+            </div>  <!-- ── end trade history table ── -->
+
+        </div>  <!-- ── end tab-overview ── -->
+
+        <!-- ── TAB: LIVE SYSTEM ──────────────────────────── -->
+        <div class="tab-content" id="tab-live-system">
+            <div class="table-section">
+                <div class="table-header">Active Sessions</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>Symbol</th>
+                            <th>Session ID</th>
+                            <th>Date Key</th>
+                            <th>Lock Time</th>
+                        </tr></thead>
+                        <tbody id="liveSessionsBody">
+                            <tr><td colspan="4" class="empty-state">Loading active sessions…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="table-section">
+                <div class="table-header">Active Runners</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>Runner</th>
+                            <th>Status</th>
+                            <th>Last Run</th>
+                            <th>Next Run</th>
+                            <th>Error Count</th>
+                        </tr></thead>
+                        <tbody id="liveRunnersBody">
+                            <tr><td colspan="5" class="empty-state">Loading runner status…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="table-section">
+                <div class="table-header">Macro Engine</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>Symbol</th>
+                            <th>Latest Bias</th>
+                            <th>Active</th>
+                        </tr></thead>
+                        <tbody id="macroEngineBody">
+                            <tr><td colspan="3" class="empty-state">Loading macro engine data…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
 
-    </div>
+        <!-- ── TAB: PARAMETERS ──────────────────────────── -->
+        <div class="tab-content" id="tab-parameters">
+            <div class="table-section">
+                <div class="table-header">System Parameters</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>Name</th>
+                            <th>Value</th>
+                            <th>Description</th>
+                            <th>Source</th>
+                            <th>Last Updated</th>
+                        </tr></thead>
+                        <tbody id="paramsBody">
+                            <tr><td colspan="5" class="empty-state">Loading parameters…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="table-section">
+                <div class="table-header">Dependency Map</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>Component</th>
+                            <th>Depends On</th>
+                            <th>Relationship</th>
+                        </tr></thead>
+                        <tbody id="depsBody">
+                            <tr><td colspan="3" class="empty-state">Loading dependencies…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── TAB: ERRORS ──────────────────────────────── -->
+        <div class="tab-content" id="tab-errors">
+            <div class="chart-row row-1-1" style="margin-bottom:18px;">
+                <div class="chart-card">
+                    <div class="chart-title">System Health</div>
+                    <div class="chart-sub" id="healthSummary">Loading health status…</div>
+                    <div style="display:flex; gap:20px; margin-top:12px;">
+                        <div><span style="font-family:'JetBrains Mono',monospace; font-size:22px; font-weight:800; color:#5e8c66;" id="healthScore">—</span><div style="font-size:9px; color:#6b5345; letter-spacing:1px; text-transform:uppercase;">Health Score</div></div>
+                        <div><span style="font-family:'JetBrains Mono',monospace; font-size:22px; font-weight:800; color:#c9a24a;" id="healthStatus">—</span><div style="font-size:9px; color:#6b5345; letter-spacing:1px; text-transform:uppercase;">System Status</div></div>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title">Alert History</div>
+                    <div class="chart-sub">Critical alerts requiring attention</div>
+                    <div id="alertHistory" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#8c4a3a; padding:8px 0;">Loading alerts…</div>
+                </div>
+            </div>
+            <div class="table-section">
+                <div class="table-header">Error Log</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>ID</th>
+                            <th>Timestamp</th>
+                            <th>Type</th>
+                            <th>Message</th>
+                            <th>Resolved</th>
+                        </tr></thead>
+                        <tbody id="errorsBody">
+                            <tr><td colspan="5" class="empty-state">Loading error log…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── TAB: ANALYSIS ────────────────────────────── -->
+        <div class="tab-content" id="tab-analysis">
+            <div class="chart-row row-1-1" style="margin-bottom:18px;">
+                <div class="chart-card">
+                    <div class="chart-title">Run Analysis</div>
+                    <div class="chart-sub">Trigger a new system analysis</div>
+                    <button id="triggerAnalysisBtn" onclick="triggerAnalysis()"
+                            style="background:#c8813a; border:none; color:#0f172a; font-family:'JetBrains Mono',monospace;
+                                   font-size:12px; font-weight:700; padding:10px 24px; border-radius:6px;
+                                   cursor:pointer; letter-spacing:1px; margin-top:12px;">
+                        ▶ TRIGGER ANALYSIS
+                    </button>
+                    <div id="analysisResult" style="margin-top:14px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#c9a880;"></div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title">Recent Reports</div>
+                    <div class="chart-sub">Last 5 analysis reports</div>
+                    <div id="recentReports" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6b5345; padding:8px 0;">Loading reports…</div>
+                </div>
+            </div>
+        </div>
+
+    </div>  <!-- ── end dash-wrap ── -->
 
     <!-- ── NEWSLETTER READER MODAL ──────────────────────── -->
     <div id="nlModal" style="display:none; position:fixed; inset:0;
@@ -274,153 +446,182 @@
 
     // ── KPI OVERVIEW ──────────────────────────────────────
     async function loadOverview() {
-        const r = await fetch('/api/dashboard/overview');
-        const d = await r.json();
-        if (!d.ok) return;
+        try {
+            const r = await fetch('/api/dashboard/overview');
+            if (!r.ok) throw new Error("Status " + r.status);
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || "Unknown error");
 
-        document.getElementById('k-sessions').textContent = d.total_sessions;
-        document.getElementById('k-approved').textContent = d.approved_rate + '%';
-        document.getElementById('k-winrate').textContent  = d.win_rate + '%';
+            document.getElementById('k-sessions').textContent = d.total_sessions;
+            document.getElementById('k-approved').textContent = d.approved_rate + '%';
+            document.getElementById('k-winrate').textContent  = d.win_rate + '%';
 
-        const netrEl = document.getElementById('k-netr');
-        netrEl.textContent = (d.net_r >= 0 ? '+' : '') + d.net_r + 'R';
-        netrEl.style.color = d.net_r > 0 ? C.green : (d.net_r < 0 ? C.red : C.cream);
+            const netrEl = document.getElementById('k-netr');
+            netrEl.textContent = (d.net_r >= 0 ? '+' : '') + d.net_r + 'R';
+            netrEl.style.color = d.net_r > 0 ? C.green : (d.net_r < 0 ? C.red : C.cream);
 
-        document.getElementById('k-spend').textContent = '$' + d.spend_7d;
-        document.getElementById('k-cache').textContent = d.cache_hit_rate + '%';
+            document.getElementById('k-spend').textContent = '$' + d.spend_7d;
+            document.getElementById('k-cache').textContent = d.cache_hit_rate + '%';
 
-        const now = new Date();
-        document.getElementById('tsLabel').textContent =
-            'Updated ' + now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            const now = new Date();
+            document.getElementById('tsLabel').textContent =
+                'Updated ' + now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        } catch (e) {
+            console.error("Failed to load overview:", e);
+            document.getElementById('k-sessions').textContent = 'ERR';
+            document.getElementById('k-approved').textContent = 'ERR';
+            document.getElementById('k-winrate').textContent  = 'ERR';
+            document.getElementById('k-netr').textContent     = 'ERR';
+            document.getElementById('k-netr').style.color     = C.red;
+            document.getElementById('k-spend').textContent    = 'ERR';
+            document.getElementById('k-cache').textContent    = 'ERR';
+            document.getElementById('tsLabel').textContent    = 'Load Error';
+            document.getElementById('tsLabel').style.color    = C.red;
+        }
     }
 
     // ── MAS HISTORY: PnL LINE + APPROVAL DONUT + TRADE TABLE ──
     async function loadMasHistory() {
-        const r = await fetch('/api/dashboard/mas-history');
-        const d = await r.json();
-        if (!d.ok) return;
+        try {
+            const r = await fetch('/api/dashboard/mas-history');
+            if (!r.ok) throw new Error("Status " + r.status);
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || "Unknown error");
 
-        // Cumulative PnL line
-        new Chart(document.getElementById('chartPnL'), {
-            type: 'line',
-            data: {
-                labels: d.pnl_series.map(p => p.date),
-                datasets: [{
-                    label: 'Cumulative R',
-                    data:  d.pnl_series.map(p => p.cumulative),
-                    borderColor:     C.cognac,
-                    backgroundColor: 'rgba(200,129,58,0.07)',
-                    fill:            true,
-                    tension:         0.35,
-                    pointRadius:     d.pnl_series.length < 30 ? 4 : 2,
-                    pointBackgroundColor: C.cognac,
-                    borderWidth:     2,
-                }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: true,
-                plugins: { legend: { display: false }, tooltip: tooltipDefaults },
-                scales: scalesXY,
-            }
-        });
-
-        // Approval donut
-        const ap = d.approval_counts;
-        new Chart(document.getElementById('chartApproval'), {
-            type: 'doughnut',
-            data: {
-                labels: ['Approved', 'Rejected', 'Waiting', 'Error/Other'],
-                datasets: [{
-                    data: [ap.APPROVED||0, ap.REJECTED||0, ap.WAITING_FOR_15M||0, (ap.MAS_ERROR||0)+(ap.PENDING||0)],
-                    backgroundColor: [C.cognac, C.red, C.amber, C.muted],
-                    borderColor:     C.panel,
-                    borderWidth:     3,
-                }]
-            },
-            options: {
-                responsive: true, cutout: '72%',
-                plugins: {
-                    legend:  { position: 'bottom', labels: { color: C.leather, padding: 14 } },
-                    tooltip: tooltipDefaults,
+            // Cumulative PnL line
+            new Chart(document.getElementById('chartPnL'), {
+                type: 'line',
+                data: {
+                    labels: d.pnl_series.map(p => p.date),
+                    datasets: [{
+                        label: 'Cumulative R',
+                        data:  d.pnl_series.map(p => p.cumulative),
+                        borderColor:     C.cognac,
+                        backgroundColor: 'rgba(200,129,58,0.07)',
+                        fill:            true,
+                        tension:         0.35,
+                        pointRadius:     d.pnl_series.length < 30 ? 4 : 2,
+                        pointBackgroundColor: C.cognac,
+                        borderWidth:     2,
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: true,
+                    plugins: { legend: { display: false }, tooltip: tooltipDefaults },
+                    scales: scalesXY,
                 }
-            }
-        });
+            });
 
-        // Trade history table
-        const tbody = document.getElementById('tradeBody');
-        if (!d.trades.length) {
-            tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No trade history yet. Sessions will appear here after the first session lock.</td></tr>';
-            return;
+            // Approval donut
+            const ap = d.approval_counts;
+            new Chart(document.getElementById('chartApproval'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Approved', 'Rejected', 'Waiting', 'Error/Other'],
+                    datasets: [{
+                        data: [ap.APPROVED||0, ap.REJECTED||0, ap.WAITING_FOR_15M||0, (ap.MAS_ERROR||0)+(ap.PENDING||0)],
+                        backgroundColor: [C.green, C.red, C.amber, C.muted],
+                        borderColor:     C.panel,
+                        borderWidth:     3,
+                    }]
+                },
+                options: {
+                    responsive: true, cutout: '72%',
+                    plugins: {
+                        legend:  { position: 'bottom', labels: { color: C.leather, padding: 14 } },
+                        tooltip: tooltipDefaults,
+                    }
+                }
+            });
+
+            // Trade history table
+            const tbody = document.getElementById('tradeBody');
+            if (!d.trades.length) {
+                tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No trade history yet. Sessions will appear here after the first session lock.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = d.trades.map(t => {
+                const pnlStr = t.realized_pnl || '—';
+                const pnlCls = t.realized_pnl ? (t.realized_pnl.startsWith('+') ? 's-win' : (t.realized_pnl.startsWith('-') ? 's-loss' : '')) : '';
+                const st  = (t.status || '').toLowerCase();
+                const mas = (t.mas_approval_status || '').toLowerCase();
+                const fmt = v => v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
+                return `<tr>
+                    <td>${t.date_key || '—'}</td>
+                    <td style="color:#f2e3cf;font-weight:800;">${t.bias || '—'}</td>
+                    <td><span class="s-${mas}">${t.mas_approval_status || '—'}</span></td>
+                    <td><span class="s-${st}">${t.status || '—'}</span></td>
+                    <td>${fmt(t.entry_price)}</td>
+                    <td>${fmt(t.stop_loss)}</td>
+                    <td>${fmt(t.t1)}</td>
+                    <td class="${pnlCls}">${pnlStr}</td>
+                </tr>`;
+            }).join('');
+        } catch (e) {
+            console.error("Failed to load MAS history:", e);
+            document.getElementById('tradeBody').innerHTML = '<tr><td colspan="8" class="empty-state" style="color:#8c4a3a;">Failed to load trade history.</td></tr>';
+            document.getElementById('chartPnL').parentElement.innerHTML = `<div style="padding:40px; color:#8c4a3a; font-family:'JetBrains Mono',monospace; font-size:12px; text-align:center;">Failed to load PnL chart data.</div>`;
+            document.getElementById('chartApproval').parentElement.innerHTML = `<div style="padding:40px; color:#8c4a3a; font-family:'JetBrains Mono',monospace; font-size:12px; text-align:center;">Failed to load approval status data.</div>`;
         }
-        tbody.innerHTML = d.trades.map(t => {
-            const pnlStr = t.realized_pnl || '—';
-            const pnlCls = t.realized_pnl ? (t.realized_pnl.startsWith('+') ? 's-win' : (t.realized_pnl.startsWith('-') ? 's-loss' : '')) : '';
-            const st  = (t.status || '').toLowerCase();
-            const mas = (t.mas_approval_status || '').toLowerCase();
-            const fmt = v => v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
-            return `<tr>
-                <td>${t.date_key || '—'}</td>
-                <td style="color:#f2e3cf;font-weight:800;">${t.bias || '—'}</td>
-                <td><span class="s-${mas}">${t.mas_approval_status || '—'}</span></td>
-                <td><span class="s-${st}">${t.status || '—'}</span></td>
-                <td>${fmt(t.entry_price)}</td>
-                <td>${fmt(t.stop_loss)}</td>
-                <td>${fmt(t.t1)}</td>
-                <td class="${pnlCls}">${pnlStr}</td>
-            </tr>`;
-        }).join('');
     }
 
     // ── ACCURACY CHARTS ───────────────────────────────────
     async function loadAccuracy() {
-        const r = await fetch('/api/dashboard/accuracy');
-        const d = await r.json();
-        if (!d.ok) return;
+        try {
+            const r = await fetch('/api/dashboard/accuracy');
+            if (!r.ok) throw new Error("Status " + r.status);
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || "Unknown error");
 
-        // Grade accuracy -- N shown in the label itself, not hidden, since
-        // this is now thin, record-only 4H/1H data (see main.py comment).
-        const ga = d.grade_accuracy;
-        const grades = Object.keys(ga);
-        new Chart(document.getElementById('chartGrade'), {
-            type: 'bar',
-            data: {
-                labels: grades.map(g => `${g} (N=${ga[g].total})`),
-                datasets: [
-                    { label: 'Correct %',   data: grades.map(g => ga[g].correct_pct),   backgroundColor: C.cognac, borderRadius: 4 },
-                    { label: 'Incorrect %', data: grades.map(g => ga[g].incorrect_pct), backgroundColor: C.muted,  borderRadius: 4 },
-                ]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: true,
-                plugins: { legend: { labels: { color: C.leather } }, tooltip: tooltipDefaults },
-                scales: {
-                    x: { ...scalesXY.x },
-                    y: { ...scalesXY.y, max: 100, ticks: { color: C.leather, callback: v => v + '%' } },
+            // Grade accuracy -- N shown in the label itself, not hidden, since
+            // this is now thin, record-only 4H/1H data (see main.py comment).
+            const ga = d.grade_accuracy;
+            const grades = Object.keys(ga);
+            new Chart(document.getElementById('chartGrade'), {
+                type: 'bar',
+                data: {
+                    labels: grades.map(g => `${g} (N=${ga[g].total})`),
+                    datasets: [
+                        { label: 'Correct %',   data: grades.map(g => ga[g].correct_pct),   backgroundColor: C.cognac, borderRadius: 4 },
+                        { label: 'Incorrect %', data: grades.map(g => ga[g].incorrect_pct), backgroundColor: C.muted,  borderRadius: 4 },
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: true,
+                    plugins: { legend: { labels: { color: C.leather } }, tooltip: tooltipDefaults },
+                    scales: {
+                        x: { ...scalesXY.x },
+                        y: { ...scalesXY.y, max: 100, ticks: { color: C.leather, callback: v => v + '%' } },
+                    }
                 }
-            }
-        });
+            });
 
-        // Confluence accuracy
-        const ca = d.confluence_accuracy;
-        const scores = Object.keys(ca).sort((a,b) => Number(a)-Number(b));
-        new Chart(document.getElementById('chartConfluence'), {
-            type: 'bar',
-            data: {
-                labels: scores.map(s => 'Score ' + s),
-                datasets: [
-                    { label: 'Correct %',   data: scores.map(s => ca[s].correct_pct),   backgroundColor: C.green,  borderRadius: 4 },
-                    { label: 'Incorrect %', data: scores.map(s => ca[s].incorrect_pct), backgroundColor: C.muted,   borderRadius: 4 },
-                ]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: true,
-                plugins: { legend: { labels: { color: C.leather } }, tooltip: tooltipDefaults },
-                scales: {
-                    x: { ...scalesXY.x },
-                    y: { ...scalesXY.y, max: 100, ticks: { color: C.leather, callback: v => v + '%' } },
+            // Confluence accuracy
+            const ca = d.confluence_accuracy;
+            const scores = Object.keys(ca).sort((a,b) => Number(a)-Number(b));
+            new Chart(document.getElementById('chartConfluence'), {
+                type: 'bar',
+                data: {
+                    labels: scores.map(s => 'Score ' + s),
+                    datasets: [
+                        { label: 'Correct %',   data: scores.map(s => ca[s].correct_pct),   backgroundColor: C.green,  borderRadius: 4 },
+                        { label: 'Incorrect %', data: scores.map(s => ca[s].incorrect_pct), backgroundColor: C.muted,   borderRadius: 4 },
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: true,
+                    plugins: { legend: { labels: { color: C.leather } }, tooltip: tooltipDefaults },
+                    scales: {
+                        x: { ...scalesXY.x },
+                        y: { ...scalesXY.y, max: 100, ticks: { color: C.leather, callback: v => v + '%' } },
+                    }
                 }
-            }
-        });
+            });
+        } catch (e) {
+            console.error("Failed to load accuracy:", e);
+            document.getElementById('chartGrade').parentElement.innerHTML = `<div style="padding:40px; color:#8c4a3a; font-family:'JetBrains Mono',monospace; font-size:12px; text-align:center;">Failed to load grade accuracy.</div>`;
+            document.getElementById('chartConfluence').parentElement.innerHTML = `<div style="padding:40px; color:#8c4a3a; font-family:'JetBrains Mono',monospace; font-size:12px; text-align:center;">Failed to load confluence accuracy.</div>`;
+        }
     }
 
     // ── AGENT COSTS (ADMIN ONLY) ──────────────────────────
@@ -428,61 +629,72 @@
 
     async function loadCosts() {
         if (!IS_ADMIN) {
-            document.getElementById('costCard').style.opacity = '0.35';
-            document.getElementById('costCard').querySelector('.chart-sub').textContent = 'Admin access required to view cost data.';
+            document.getElementById('costCard').style.display = 'none';
             return;
         }
-        const r = await fetch('/api/dashboard/costs');
-        const d = await r.json();
-        if (!d.ok) return;
+        try {
+            const r = await fetch('/api/dashboard/costs');
+            if (!r.ok) throw new Error("Status " + r.status);
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || "Unknown error");
 
-        const palette = [C.cognac, C.green, C.gold, C.amber, C.muted, C.red];
-        new Chart(document.getElementById('chartCost'), {
-            type: 'bar',
-            data: {
-                labels: d.days,
-                datasets: d.agents.map((ag, i) => ({
-                    label: ag.name,
-                    data:  ag.values,
-                    backgroundColor: palette[i % palette.length],
-                    borderRadius: 2,
-                }))
-            },
-            options: {
-                responsive: true, maintainAspectRatio: true,
-                plugins: { legend: { labels: { color: C.leather } }, tooltip: tooltipDefaults },
-                scales: {
-                    x: { stacked: true, ...scalesXY.x },
-                    y: { stacked: true, ...scalesXY.y, ticks: { color: C.leather, callback: v => '$' + v.toFixed(3) } },
+            const palette = [C.cognac, C.green, C.gold, C.amber, C.muted, C.red];
+            new Chart(document.getElementById('chartCost'), {
+                type: 'bar',
+                data: {
+                    labels: d.days,
+                    datasets: d.agents.map((ag, i) => ({
+                        label: ag.name,
+                        data:  ag.values,
+                        backgroundColor: palette[i % palette.length],
+                        borderRadius: 2,
+                    }))
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: true,
+                    plugins: { legend: { labels: { color: C.leather } }, tooltip: tooltipDefaults },
+                    scales: {
+                        x: { stacked: true, ...scalesXY.x },
+                        y: { stacked: true, ...scalesXY.y, ticks: { color: C.leather, callback: v => '$' + v.toFixed(3) } },
+                    }
                 }
-            }
-        });
+            });
+        } catch (e) {
+            console.error("Failed to load costs:", e);
+            document.getElementById('chartCost').parentElement.innerHTML = `<div style="padding:40px; color:#8c4a3a; font-family:'JetBrains Mono',monospace; font-size:12px; text-align:center;">Failed to load cost data.</div>`;
+        }
     }
 
     // ── JEWEL GATE DONUT ──────────────────────────────────
     async function loadJewel() {
-        const r = await fetch('/api/dashboard/jewel');
-        const d = await r.json();
-        if (!d.ok) return;
-        new Chart(document.getElementById('chartJewel'), {
-            type: 'doughnut',
-            data: {
-                labels: ['Gate Open + Win', 'Gate Open + Loss', 'Gate Closed + Win', 'Gate Closed + Loss'],
-                datasets: [{
-                    data: [d.open_win, d.open_loss, d.closed_win, d.closed_loss],
-                    backgroundColor: [C.green, C.red, C.amber, C.muted],
-                    borderColor:     C.panel,
-                    borderWidth:     3,
-                }]
-            },
-            options: {
-                responsive: true, cutout: '68%',
-                plugins: {
-                    legend:  { position: 'bottom', labels: { color: C.leather, padding: 10, font: { size: 10 } } },
-                    tooltip: tooltipDefaults,
+        try {
+            const r = await fetch('/api/dashboard/jewel');
+            if (!r.ok) throw new Error("Status " + r.status);
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || "Unknown error");
+            new Chart(document.getElementById('chartJewel'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Gate Open + Win', 'Gate Open + Loss', 'Gate Closed + Win', 'Gate Closed + Loss'],
+                    datasets: [{
+                        data: [d.open_win, d.open_loss, d.closed_win, d.closed_loss],
+                        backgroundColor: [C.green, C.red, C.amber, C.muted],
+                        borderColor:     C.panel,
+                        borderWidth:     3,
+                    }]
+                },
+                options: {
+                    responsive: true, cutout: '68%',
+                    plugins: {
+                        legend:  { position: 'bottom', labels: { color: C.leather, padding: 10, font: { size: 10 } } },
+                        tooltip: tooltipDefaults,
+                    }
                 }
-            }
-        });
+            });
+        } catch (e) {
+            console.error("Failed to load Jewel:", e);
+            document.getElementById('chartJewel').parentElement.innerHTML = `<div style="padding:40px; color:#8c4a3a; font-family:'JetBrains Mono',monospace; font-size:12px; text-align:center;">Failed to load Jewel gate data.</div>`;
+        }
     }
 
     // ── INTERNAL SYSTEM AUDITS ────────────────────────────
@@ -562,10 +774,15 @@
     function openAuditModal(id) {
         const a = window.auditArchive[id];
         if (!a) return;
-        document.getElementById('nlModalMeta').textContent =
-            'SYSTEM AUDIT  ·  ' + (a.date_key || '—') + '  ·  ' + (a.created_at ? a.created_at.slice(0, 16).replace('T', ' ') + ' UTC' : '');
+        
+        const parts = [
+            'SYSTEM AUDIT',
+            a.date_key || '—',
+            a.created_at ? a.created_at.slice(0, 16).replace('T', ' ') + ' UTC' : ''
+        ].filter(Boolean);
+        document.getElementById('nlModalMeta').textContent = parts.join('  ·  ');
         document.getElementById('nlModalHeadline').textContent = 'Systemic Adviser Report — ' + (a.date_key || '');
-        document.getElementById('nlModalBody').textContent     = a.audit_md || '(No content)';
+        document.getElementById('nlModalBody').innerHTML       = marked.parse(a.audit_md || '(No content)');
         document.getElementById('nlModal').style.display       = 'block';
         document.body.style.overflow = 'hidden';
     }
@@ -574,35 +791,45 @@
     window.nlArchive = {};
 
     async function loadNewsletters() {
-        const r = await fetch('/api/dashboard/newsletters');
-        const d = await r.json();
-        if (!d.ok) return;
-        const tbody = document.getElementById('newsletterBody');
-        if (!d.newsletters.length) {
-            tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No newsletters generated yet. The first will appear here after the next session lock.</td></tr>';
-            return;
+        try {
+            const r = await fetch('/api/dashboard/newsletters');
+            const d = await r.json();
+            if (!d.ok) return;
+            const tbody = document.getElementById('newsletterBody');
+            if (!d.newsletters.length) {
+                tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No newsletters generated yet. The first will appear here after the next session lock.</td></tr>';
+                return;
+            }
+            window.nlArchive = {};
+            d.newsletters.forEach(n => { window.nlArchive[n.id] = n; });
+            tbody.innerHTML = d.newsletters.map(n => {
+                const apSt = (n.approval_status || '').toLowerCase();
+                const puSt = (n.publish_status  || '').toLowerCase();
+                return `<tr style="cursor:pointer;" onclick="openNlModal(${n.id})" title="Click to read full newsletter">
+                    <td>${n.date_key || '—'}</td>
+                    <td style="color:#f2e3cf; max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${n.headline || '—'}</td>
+                    <td><span class="s-${apSt}">${n.approval_status || '—'}</span></td>
+                    <td><span class="s-${puSt}">${n.publish_status || '—'}</span></td>
+                </tr>`;
+            }).join('');
+        } catch (e) {
+            console.error("Failed to load newsletters:", e);
+            document.getElementById('newsletterBody').innerHTML = '<tr><td colspan="4" class="empty-state" style="color:#8c4a3a;">Failed to load newsletters.</td></tr>';
         }
-        window.nlArchive = {};
-        d.newsletters.forEach(n => { window.nlArchive[n.id] = n; });
-        tbody.innerHTML = d.newsletters.map(n => {
-            const apSt = (n.approval_status || '').toLowerCase().replace(/_/g, '_');
-            const puSt = (n.publish_status  || '').toLowerCase();
-            return `<tr style="cursor:pointer;" onclick="openNlModal(${n.id})" title="Click to read full newsletter">
-                <td>${n.date_key || '—'}</td>
-                <td style="color:#f2e3cf; max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${n.headline || '—'}</td>
-                <td><span class="s-${apSt}">${n.approval_status || '—'}</span></td>
-                <td><span class="s-${puSt}">${n.publish_status || '—'}</span></td>
-            </tr>`;
-        }).join('');
     }
 
     function openNlModal(id) {
         const n = window.nlArchive[id];
         if (!n) return;
-        document.getElementById('nlModalMeta').textContent =
-            (n.date_key || '—') + '  ·  ' + (n.approval_status || '') + '  ·  ' + (n.publish_status || '');
+        
+        const parts = [
+            n.date_key || '—',
+            n.approval_status || '',
+            n.publish_status || ''
+        ].filter(Boolean);
+        document.getElementById('nlModalMeta').textContent = parts.join('  ·  ');
         document.getElementById('nlModalHeadline').textContent = n.headline || '(No headline)';
-        document.getElementById('nlModalBody').textContent     = n.newsletter_md || '(No content available)';
+        document.getElementById('nlModalBody').innerHTML       = marked.parse(n.newsletter_md || '(No content available)');
         document.getElementById('nlModal').style.display       = 'block';
         document.body.style.overflow = 'hidden';
     }
@@ -616,16 +843,217 @@
         if (e.key === 'Escape') closeNlModal();
     });
 
+    // ── TAB SWITCHING ────────────────────────────────────
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('.tab-btn');
+        if (!btn) return;
+        const tab = btn.dataset.tab;
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + tab).classList.add('active');
+    });
+
+    // ── LIVE SYSTEM TAB ──────────────────────────────────
+    async function loadLiveSystem() {
+        try {
+            const r = await fetch('/api/v1/system/state');
+            if (!r.ok) throw new Error('Status ' + r.status);
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || 'Unknown error');
+
+            // Active sessions
+            const sessBody = document.getElementById('liveSessionsBody');
+            if (!d.active_sessions || !d.active_sessions.length) {
+                sessBody.innerHTML = '<tr><td colspan="4" class="empty-state">No active sessions.</td></tr>';
+            } else {
+                sessBody.innerHTML = d.active_sessions.map(s => `<tr>
+                    <td>${s.symbol || '—'}</td>
+                    <td>${s.session_id || '—'}</td>
+                    <td>${s.date_key || '—'}</td>
+                    <td>${s.lock_time || '—'}</td>
+                </tr>`).join('');
+            }
+
+            // Active runners (from scheduler_health)
+            const runBody = document.getElementById('liveRunnersBody');
+            const sh = d.scheduler_health || {};
+            const runnerKeys = Object.keys(sh);
+            if (!runnerKeys.length) {
+                runBody.innerHTML = '<tr><td colspan="5" class="empty-state">No runner data.</td></tr>';
+            } else {
+                runBody.innerHTML = runnerKeys.map(k => {
+                    const v = sh[k] || {};
+                    const st = v.status || 'UNKNOWN';
+                    const stCls = st === 'WAITING' ? 's-approved' : (st === 'ERROR' ? 's-failed' : '');
+                    return `<tr>
+                        <td style="color:#f2e3cf;font-weight:800;">${k}</td>
+                        <td><span class="${stCls}">${st}</span></td>
+                        <td>${v.last_run ? v.last_run.slice(0,19).replace('T',' ') : '—'}</td>
+                        <td>${v.next_run ? v.next_run.slice(0,19).replace('T',' ') : '—'}</td>
+                        <td>${v.error_count || 0}</td>
+                    </tr>`;
+                }).join('');
+            }
+
+            // Macro engine
+            const macroBody = document.getElementById('macroEngineBody');
+            const me = d.macro_engine || {};
+            macroBody.innerHTML = `<tr>
+                <td>${me.symbol || 'BTC/USDT'}</td>
+                <td style="color:#f2e3cf;font-weight:800;">${me.latest_bias || 'UNKNOWN'}</td>
+                <td><span class="${me.active ? 's-approved' : 's-failed'}">${me.active ? 'ACTIVE' : 'INACTIVE'}</span></td>
+            </tr>`;
+        } catch (e) {
+            console.error('Failed to load live system:', e);
+            document.getElementById('liveSessionsBody').innerHTML = '<tr><td colspan="4" class="empty-state" style="color:#8c4a3a;">Failed to load.</td></tr>';
+            document.getElementById('liveRunnersBody').innerHTML = '<tr><td colspan="5" class="empty-state" style="color:#8c4a3a;">Failed to load.</td></tr>';
+            document.getElementById('macroEngineBody').innerHTML = '<tr><td colspan="3" class="empty-state" style="color:#8c4a3a;">Failed to load.</td></tr>';
+        }
+    }
+
+    // ── PARAMETERS TAB ────────────────────────────────────
+    async function loadParameters() {
+        try {
+            const r = await fetch('/api/v1/system/parameters');
+            if (!r.ok) throw new Error('Status ' + r.status);
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || 'Unknown error');
+
+            const paramsBody = document.getElementById('paramsBody');
+            if (!d.parameters || !d.parameters.length) {
+                paramsBody.innerHTML = '<tr><td colspan="5" class="empty-state">No parameters registered.</td></tr>';
+            } else {
+                paramsBody.innerHTML = d.parameters.map(p => `<tr>
+                    <td style="color:#f2e3cf;font-weight:800;">${p.name || '—'}</td>
+                    <td style="color:#c9a24a;font-weight:800;">${p.value || '—'}</td>
+                    <td>${p.description || '—'}</td>
+                    <td>${p.source || '—'}</td>
+                    <td>${p.last_updated ? p.last_updated.slice(0,19).replace('T',' ') : '—'}</td>
+                </tr>`).join('');
+            }
+
+            const depsBody = document.getElementById('depsBody');
+            if (!d.dependencies || !d.dependencies.length) {
+                depsBody.innerHTML = '<tr><td colspan="3" class="empty-state">No dependencies registered.</td></tr>';
+            } else {
+                depsBody.innerHTML = d.dependencies.map(dp => `<tr>
+                    <td style="color:#f2e3cf;font-weight:800;">${dp.name || '—'}</td>
+                    <td>${dp.depends_on || '—'}</td>
+                    <td>${dp.relationship_type || '—'}</td>
+                </tr>`).join('');
+            }
+        } catch (e) {
+            console.error('Failed to load parameters:', e);
+            document.getElementById('paramsBody').innerHTML = '<tr><td colspan="5" class="empty-state" style="color:#8c4a3a;">Failed to load.</td></tr>';
+            document.getElementById('depsBody').innerHTML = '<tr><td colspan="3" class="empty-state" style="color:#8c4a3a;">Failed to load.</td></tr>';
+        }
+    }
+
+    // ── ERRORS TAB ───────────────────────────────────────
+    async function loadErrors() {
+        try {
+            const r = await fetch('/api/v1/system/errors');
+            if (!r.ok) throw new Error('Status ' + r.status);
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || 'Unknown error');
+
+            // Health summary
+            const hs = d.health_summary || {};
+            document.getElementById('healthScore').textContent = hs.overall_health_score ?? '—';
+            document.getElementById('healthStatus').textContent = hs.system_ok ? 'OK' : 'ISSUES';
+            document.getElementById('healthStatus').style.color = hs.system_ok ? '#5e8c66' : '#8c4a3a';
+            document.getElementById('healthSummary').textContent = hs.system_ok
+                ? 'All systems operational.'
+                : `${(d.errors || []).length} error(s) detected.`;
+
+            // Alert history
+            const alerts = d.alert_history || [];
+            document.getElementById('alertHistory').innerHTML = alerts.length
+                ? alerts.map(a => `<div style="padding:4px 0; border-bottom:1px solid #3a2820;">${a.message ? a.message.slice(0,80) : 'Unknown alert'}</div>`).join('')
+                : '<div style="color:#6b5345;">No critical alerts.</div>';
+
+            // Error log
+            const errBody = document.getElementById('errorsBody');
+            if (!d.errors || !d.errors.length) {
+                errBody.innerHTML = '<tr><td colspan="5" class="empty-state">No errors recorded.</td></tr>';
+            } else {
+                errBody.innerHTML = d.errors.map(e => {
+                    const typeCls = e.error_type === 'critical' ? 's-failed' : (e.error_type === 'warning' ? 's-waiting' : '');
+                    return `<tr>
+                        <td>${e.id || '—'}</td>
+                        <td>${e.timestamp ? e.timestamp.slice(0,19).replace('T',' ') : '—'}</td>
+                        <td><span class="${typeCls}">${e.error_type || '—'}</span></td>
+                        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${e.message ? e.message.slice(0,100) : '—'}</td>
+                        <td>${e.resolved ? '✅' : '❌'}</td>
+                    </tr>`;
+                }).join('');
+            }
+        } catch (e) {
+            console.error('Failed to load errors:', e);
+            document.getElementById('healthScore').textContent = 'ERR';
+            document.getElementById('healthStatus').textContent = 'ERR';
+            document.getElementById('errorsBody').innerHTML = '<tr><td colspan="5" class="empty-state" style="color:#8c4a3a;">Failed to load.</td></tr>';
+        }
+    }
+
+    // ── ANALYSIS TAB ──────────────────────────────────────
+    async function triggerAnalysis() {
+        const btn = document.getElementById('triggerAnalysisBtn');
+        const result = document.getElementById('analysisResult');
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        result.textContent = 'Running analysis…';
+        result.style.color = '#c9a880';
+        try {
+            const r = await fetch('/api/v1/system/analysis/trigger', { method: 'POST' });
+            const d = await r.json();
+            if (d.status === 'running') {
+                result.innerHTML = `<span style="color:#5e8c66;">✓ Analysis complete.</span> Parameters evaluated: ${d.parameters_evaluated}. Last run: ${d.last_run_timestamp ? d.last_run_timestamp.slice(0,19).replace('T',' ') : '—'}`;
+            } else {
+                result.innerHTML = `<span style="color:#8c4a3a;">✗ ${d.error || 'Unknown error'}</span>`;
+            }
+        } catch (e) {
+            result.innerHTML = `<span style="color:#8c4a3a;">✗ Request failed: ${e.message}</span>`;
+        }
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        loadRecentReports();
+    }
+
+    async function loadRecentReports() {
+        try {
+            const r = await fetch('/api/v1/system/analysis/recent');
+            if (!r.ok) throw new Error('Status ' + r.status);
+            const d = await r.json();
+            const container = document.getElementById('recentReports');
+            if (!d.reports || !d.reports.length) {
+                container.innerHTML = '<div style="color:#6b5345;">No reports yet. Trigger an analysis above.</div>';
+            } else {
+                container.innerHTML = d.reports.map(rp => `<div style="padding:6px 0; border-bottom:1px solid #3a2820; display:flex; justify-content:space-between;">
+                    <span>${rp.query || 'Analysis'}</span>
+                    <span style="color:#6b5345;">${rp.status || '—'}</span>
+                </div>`).join('');
+            }
+        } catch (e) {
+            document.getElementById('recentReports').innerHTML = '<div style="color:#6b5345;">No reports yet.</div>';
+        }
+    }
+
     // ── INIT ──────────────────────────────────────────────
     async function initDashboard() {
         await Promise.all([
-            loadOverview(),
-            loadMasHistory(),
-            loadAccuracy(),
-            loadCosts(),
-            loadJewel(),
-            loadAudits(),
-            loadNewsletters(),
+            loadOverview().catch(e => console.error("loadOverview failed", e)),
+            loadMasHistory().catch(e => console.error("loadMasHistory failed", e)),
+            loadAccuracy().catch(e => console.error("loadAccuracy failed", e)),
+            loadCosts().catch(e => console.error("loadCosts failed", e)),
+            loadJewel().catch(e => console.error("loadJewel failed", e)),
+            loadAudits().catch(e => console.error("loadAudits failed", e)),
+            loadNewsletters().catch(e => console.error("loadNewsletters failed", e)),
+            loadLiveSystem().catch(e => console.error("loadLiveSystem failed", e)),
+            loadParameters().catch(e => console.error("loadParameters failed", e)),
+            loadErrors().catch(e => console.error("loadErrors failed", e)),
+            loadRecentReports().catch(e => console.error("loadRecentReports failed", e)),
         ]);
     }
 

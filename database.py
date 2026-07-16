@@ -103,6 +103,12 @@ def init_db():
     except Exception:
         pass
 
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE system_audit_log ADD COLUMN ran_successfully BOOLEAN DEFAULT TRUE"))
+    except Exception:
+        pass
+
     # --- FIX 1 — Outcome tracker backfill ---
     try:
         with engine.begin() as conn:
@@ -369,6 +375,14 @@ def init_db():
         except Exception:
             pass
 
+    # --- USERS TABLE MIGRATIONS (first_name/last_name added in M2 build) ---
+    for _col in ["first_name VARCHAR", "last_name VARCHAR"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -379,6 +393,8 @@ class UserModel(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
     username = Column(String)
+    first_name = Column(String)
+    last_name = Column(String)
     tradingview_id = Column(String)
     tier = Column(String, nullable=False, default="basic")
     session_tz = Column(String, nullable=False, default="UTC")
@@ -811,6 +827,7 @@ class SystemAuditLog(Base):
     symbol     = Column(String,  index=True, nullable=False)
     date_key   = Column(String,  index=True, nullable=False)
     audit_md   = Column(String,  nullable=False)
+    ran_successfully = Column(Boolean, default=True, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
@@ -1195,3 +1212,14 @@ class AuditSuggestionLog(Base):
     suggestion_text           = Column(String, nullable=False)
     consecutive_runs_surfaced = Column(Integer, default=1, nullable=False)
     status                    = Column(String, default="OPEN", nullable=False)  # OPEN / OWNER_REVIEWED / ACTED_ON / DISMISSED
+
+
+class SystemAnalysisReport(Base):
+    __tablename__ = "system_analysis_reports"
+    id = Column(Integer, primary_key=True, index=True)
+    analysis_id = Column(String, unique=True, index=True, nullable=False)
+    query = Column(String, nullable=False)
+    status = Column(String, default="PENDING", nullable=False)
+    report_json = Column(String, nullable=True)
+    error_message = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

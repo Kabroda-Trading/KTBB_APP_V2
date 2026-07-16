@@ -57,7 +57,12 @@ def ensure_bootstrap_admin(db: Session) -> None:
 # --- ROUTES ---
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": request.query_params.get("error")})
+    try:
+        tmpl = templates.env.get_template("login.html")
+        html = tmpl.render({"request": request, "error": request.query_params.get("error")})
+        return HTMLResponse(html)
+    except Exception as e:
+        return HTMLResponse(f"<h2>System Error: login.html</h2><p>{str(e)}</p>", status_code=500)
 
 @router.post("/login")
 def login_action(request: Request, email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
