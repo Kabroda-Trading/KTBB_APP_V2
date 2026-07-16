@@ -82,7 +82,7 @@
         .tab-btn:hover { color: #c9a880; }
         .tab-btn.active { color: #c9a24a; border-bottom-color: #c9a24a; }
         .tab-content { display: none; }
-        .tab-content.active { display: block; }
+        .tab-content.active { display: block; min-height: 400px; width: 100%; }
     </style>
 </head>
 <body>
@@ -851,7 +851,15 @@
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         btn.classList.add('active');
-        document.getElementById('tab-' + tab).classList.add('active');
+        const panel = document.getElementById('tab-' + tab);
+        panel.classList.add('active');
+        // Workaround for a confirmed 0x0 bounding-rect render collapse on
+        // newly-active tab panels that live browser inspection (computed
+        // style, DOM content, CSS cascade -- all correct) could not trace
+        // to a root cause. Forcing a synchronous reflow here, plus the
+        // min-height on .tab-content.active above, are defensive measures,
+        // not a diagnosed fix. See WORK_LOG.md 2026-07-16 entry.
+        void panel.offsetHeight;
     });
 
     // ── LIVE SYSTEM TAB ──────────────────────────────────
