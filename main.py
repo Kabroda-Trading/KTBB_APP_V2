@@ -2355,6 +2355,131 @@ async def get_system_state(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+@app.get("/api/v1/system/session-energy")
+async def get_session_energy(request: Request, db: Session = Depends(get_db)):
+    """
+    Admin-only. Returns the latest session lock's packet_data (fuel gauge,
+    levels, bias model, macro/micro state) for the Live System dashboard tab.
+    """
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+
+    try:
+        latest_lock = db.query(SessionLock).filter(
+            SessionLock.symbol == "BTC/USDT"
+        ).order_by(SessionLock.id.desc()).first()
+
+        if not latest_lock:
+            return JSONResponse({
+                "ok": True,
+                "has_data": False,
+                "message": "No session lock data found yet."
+            })
+
+        pkt = json.loads(latest_lock.packet_data)
+
+        # Extract the key sections for the dashboard
+        context = pkt.get("context", {})
+        fuel_gauge = context.get("fuel_gauge", {})
+        levels = pkt.get("levels", {})
+        bias_model = pkt.get("bias_model", {})
+        session = pkt.get("session", {})
+        htf_shelves = pkt.get("htf_shelves", {})
+
+        # jewel_gate_open lives on JewelSnapshotLog, not in the SessionLock
+        # packet -- pkt never carries this key. Same lookup pattern used
+        # elsewhere in this file (see the cockpit-prepopulation route).
+        jewel_row = db.query(JewelSnapshotLog).filter(
+            JewelSnapshotLog.symbol == "BTC/USDT"
+        ).order_by(JewelSnapshotLog.id.desc()).first()
+        jewel_gate_open = jewel_row.jewel_gate_open if jewel_row else None
+
+        return JSONResponse({
+            "ok": True,
+            "has_data": True,
+            "session": {
+                "id": session.get("id"),
+                "date_key": session.get("date_key"),
+                "label": session.get("label"),
+                "timeframe": session.get("timeframe"),
+            },
+            "fuel_gauge": {
+                "15m": fuel_gauge.get("15M_JEWEL", {}),
+                "1h": fuel_gauge.get("1H", {}),
+                "4h": fuel_gauge.get("4H", {}),
+            },
+            "levels": {
+                "breakout_trigger": levels.get("breakout_trigger"),
+                "breakdown_trigger": levels.get("breakdown_trigger"),
+                "range30m_high": levels.get("range30m_high"),
+                "range30m_low": levels.get("range30m_low"),
+                "f24_poc": levels.get("f24_poc"),
+                "atr": levels.get("atr"),
+                "daily_ema20": levels.get("daily_ema20"),
+                "daily_ema30": levels.get("daily_ema30"),
+                "daily_ema50": levels.get("daily_ema50"),
+            },
+            "bias_model": {
+                "daily_lean": bias_model.get("daily_lean"),
+                "permission_state": bias_model.get("permission_state"),
+            },
+            "macro_bias": context.get("macro_bias"),
+            "micro_bias": context.get("micro_bias"),
+            "micro_state": context.get("micro_state"),
+            "jewel_gate_open": jewel_gate_open,
+            "lock_time": pkt.get("lock_time"),
+            "current_price": context.get("current_price"),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/v1/system/audit-suggestions")
+async def get_audit_suggestions(request: Request, db: Session = Depends(get_db)):
+    """
+    Admin-only. Latest daily digest + recent Audit-AI hypothesis suggestions
+    (H1-H9, harness/audit_runner.py + audit_ai.py) for the dashboard's
+    Analysis tab. Same data /admin used to render server-side via Jinja2 --
+    exposed here as JSON so the dashboard's existing fetch-driven pattern
+    can consume it like every other tab.
+    """
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+
+    try:
+        digest = db.query(DailyAuditLog).order_by(DailyAuditLog.id.desc()).first()
+        suggestions = db.query(AuditSuggestionLog).order_by(
+            AuditSuggestionLog.logged_at.desc()
+        ).limit(9).all()
+
+        return JSONResponse({
+            "ok": True,
+            "latest_daily_digest": {
+                "date_key": digest.date_key,
+                "trades_covered_15m": digest.trades_covered_15m,
+                "trades_covered_1h": digest.trades_covered_1h,
+                "trades_covered_4h": digest.trades_covered_4h,
+            } if digest else None,
+            "recent_suggestions": [
+                {
+                    "hypothesis_id": s.hypothesis_id,
+                    "tier_label": s.tier_label,
+                    "n_supporting": s.n_supporting,
+                    "suggestion_text": s.suggestion_text,
+                }
+                for s in suggestions
+            ],
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.get("/api/v1/system/trades")
 async def get_system_trades(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)

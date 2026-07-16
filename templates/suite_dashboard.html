@@ -182,6 +182,61 @@
             </div>
         </div>
 
+        {% if is_admin %}
+        <!-- ── AGENT COST MONITOR (detail) ──────────────────── -->
+        <div class="chart-card" style="margin-bottom:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <div class="chart-title" style="margin-bottom:0;">Agent Cost Monitor <span class="admin-badge">Admin</span></div>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <span id="budgetPctLabel" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#8a6f57;">Loading…</span>
+                    <button id="testBtn" onclick="runTestCall()"
+                            style="background:transparent; border:1px solid #4d3526; color:#c9a880; font-family:'JetBrains Mono',monospace;
+                                   font-size:10px; font-weight:700; padding:6px 14px; border-radius:4px; cursor:pointer; letter-spacing:1px;">
+                        RUN TEST CALL
+                    </button>
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+                <div style="background:#1a120e; border:1px solid #4d3526; border-radius:6px; padding:12px;">
+                    <div style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">24H Spend</div>
+                    <div id="todaySpend" style="font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:800; color:#f2e3cf; margin-top:4px;">—</div>
+                    <div id="todayBudget" style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#6b5345; margin-top:2px;">of $— daily cap</div>
+                </div>
+                <div style="background:#1a120e; border:1px solid #4d3526; border-radius:6px; padding:12px;">
+                    <div style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">7-Day Spend</div>
+                    <div id="weekSpend" style="font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:800; color:#f2e3cf; margin-top:4px;">—</div>
+                    <div id="weekCalls" style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#6b5345; margin-top:2px;">— total calls</div>
+                </div>
+            </div>
+
+            <div style="background:#1a120e; border-radius:4px; height:6px; overflow:hidden; margin-bottom:16px;">
+                <div id="budgetBar" style="height:100%; width:0%; background:#c8813a; transition:width 0.3s;"></div>
+            </div>
+
+            <div style="overflow-x:auto;">
+                <table style="width:100%; border-collapse:collapse; font-family:'JetBrains Mono',monospace; font-size:10px;">
+                    <thead>
+                        <tr style="border-bottom:1px solid #4d3526;">
+                            <th style="padding:6px 8px; text-align:left; color:#8a6f57;">Agent</th>
+                            <th style="padding:6px 8px; text-align:left; color:#8a6f57;">Trigger</th>
+                            <th style="padding:6px 8px; text-align:left; color:#8a6f57;">Status</th>
+                            <th style="padding:6px 8px; text-align:right; color:#8a6f57;">In</th>
+                            <th style="padding:6px 8px; text-align:right; color:#8a6f57;">Out</th>
+                            <th style="padding:6px 8px; text-align:right; color:#8a6f57;">CR</th>
+                            <th style="padding:6px 8px; text-align:right; color:#8a6f57;">Cost</th>
+                            <th style="padding:6px 8px; text-align:right; color:#8a6f57;">Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="costTableBody">
+                        <tr><td colspan="8" style="padding:20px; text-align:center; color:#6b5345;">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="testResult" style="margin-top:12px; font-family:'JetBrains Mono',monospace; font-size:11px; white-space:pre-wrap;"></div>
+        </div>
+        {% endif %}
+
         <!-- ── INTERNAL SYSTEM AUDITS ───────────────────────── -->
         <div class="table-section" id="auditSection">
             <div class="table-header" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" onclick="toggleAuditList()">
@@ -283,6 +338,113 @@
                     </table>
                 </div>
             </div>
+
+            <!-- ── SESSION ENERGY (from session lock packet_data) ── -->
+            <div class="table-section">
+                <div class="table-header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span>Session Energy</span>
+                    <span id="energySessionLabel" style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#6b5345;">—</span>
+                </div>
+                <div class="chart-row row-1-1" style="margin-bottom:18px;">
+                    <!-- Fuel Gauge: 15M -->
+                    <div class="chart-card">
+                        <div class="chart-title">15M JEWEL</div>
+                        <div class="chart-sub" id="fuel15mStatus">Loading...</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Trend</span><br><span id="fuel15mTrend" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Momentum</span><br><span id="fuel15mMomentum" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">ADX</span><br><span id="fuel15mAdx" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">RSI</span><br><span id="fuel15mRsi" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Ribbon Spread</span><br><span id="fuel15mSpread" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Deviation</span><br><span id="fuel15mDev" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                        </div>
+                        <div id="fuel15mExit" style="margin-top:8px; font-family:'JetBrains Mono'; font-size:10px; color:#8c4a3a; display:none;"></div>
+                    </div>
+                    <!-- Fuel Gauge: 1H -->
+                    <div class="chart-card">
+                        <div class="chart-title">1H</div>
+                        <div class="chart-sub" id="fuel1hStatus">Loading...</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Trend</span><br><span id="fuel1hTrend" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Momentum</span><br><span id="fuel1hMomentum" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">ADX</span><br><span id="fuel1hAdx" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">RSI</span><br><span id="fuel1hRsi" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Ribbon Spread</span><br><span id="fuel1hSpread" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Deviation</span><br><span id="fuel1hDev" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                        </div>
+                        <div id="fuel1hExit" style="margin-top:8px; font-family:'JetBrains Mono'; font-size:10px; color:#8c4a3a; display:none;"></div>
+                    </div>
+                </div>
+                <div class="chart-row row-1-1" style="margin-bottom:18px;">
+                    <!-- Fuel Gauge: 4H -->
+                    <div class="chart-card">
+                        <div class="chart-title">4H</div>
+                        <div class="chart-sub" id="fuel4hStatus">Loading...</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Trend</span><br><span id="fuel4hTrend" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Momentum</span><br><span id="fuel4hMomentum" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">ADX</span><br><span id="fuel4hAdx" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">RSI</span><br><span id="fuel4hRsi" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Ribbon Spread</span><br><span id="fuel4hSpread" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Deviation</span><br><span id="fuel4hDev" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                        </div>
+                        <div id="fuel4hExit" style="margin-top:8px; font-family:'JetBrains Mono'; font-size:10px; color:#8c4a3a; display:none;"></div>
+                    </div>
+                    <!-- Bias Model + Levels -->
+                    <div class="chart-card">
+                        <div class="chart-title">Bias &amp; Levels</div>
+                        <div class="chart-sub" id="energyBiasSub">Loading...</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Daily Lean</span><br><span id="energyDailyLean" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Permission</span><br><span id="energyPermission" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Macro Bias</span><br><span id="energyMacroBias" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Micro Bias</span><br><span id="energyMicroBias" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Micro State</span><br><span id="energyMicroState" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Jewel Gate</span><br><span id="energyJewelGate" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
+                        </div>
+                        <div style="margin-top:12px; padding-top:12px; border-top:1px solid #4d3526;">
+                            <div style="font-family:'JetBrains Mono'; font-size:9px; color:#8a6f57; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">Key Levels</div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; font-family:'JetBrains Mono'; font-size:11px;">
+                                <div><span style="color:#6b5345;">BO:</span> <span id="energyBo" style="color:#5e8c66;">—</span></div>
+                                <div><span style="color:#6b5345;">BD:</span> <span id="energyBd" style="color:#8c4a3a;">—</span></div>
+                                <div><span style="color:#6b5345;">POC:</span> <span id="energyPoc" style="color:#c9a24a;">—</span></div>
+                                <div><span style="color:#6b5345;">R30H:</span> <span id="energyR30h" style="color:#f2e3cf;">—</span></div>
+                                <div><span style="color:#6b5345;">R30L:</span> <span id="energyR30l" style="color:#f2e3cf;">—</span></div>
+                                <div><span style="color:#6b5345;">ATR:</span> <span id="energyAtr" style="color:#f2e3cf;">—</span></div>
+                                <div><span style="color:#6b5345;">EMA20:</span> <span id="energyEma20" style="color:#94a3b8;">—</span></div>
+                                <div><span style="color:#6b5345;">EMA30:</span> <span id="energyEma30" style="color:#94a3b8;">—</span></div>
+                                <div><span style="color:#6b5345;">EMA50:</span> <span id="energyEma50" style="color:#94a3b8;">—</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── SYSTEM HEALTH (heartbeat from admin page) ── -->
+            <div class="table-section">
+                <div class="table-header">System Health</div>
+                <div class="table-wrap">
+                    <div style="padding: 16px 20px; display: flex; gap: 32px; flex-wrap: wrap;">
+                        <div>
+                            <div style="font-family:'JetBrains Mono'; font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">session_audit_log</div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span id="hbAuditDot" style="width:10px; height:10px; border-radius:50%; background:#334155; display:inline-block;"></span>
+                                <span id="hbAuditStatus" style="font-family:'JetBrains Mono'; font-size:13px; font-weight:800; color:#64748b;">—</span>
+                            </div>
+                            <div id="hbAuditDetail" style="font-family:'JetBrains Mono'; font-size:10px; color:#64748b; margin-top:4px;">loading...</div>
+                        </div>
+                        <div>
+                            <div style="font-family:'JetBrains Mono'; font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">monitor_event_log</div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span id="hbMonDot" style="width:10px; height:10px; border-radius:50%; background:#334155; display:inline-block;"></span>
+                                <span id="hbMonStatus" style="font-family:'JetBrains Mono'; font-size:13px; font-weight:800; color:#64748b;">—</span>
+                            </div>
+                            <div id="hbMonDetail" style="font-family:'JetBrains Mono'; font-size:10px; color:#64748b; margin-top:4px;">loading...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div>
 
         <!-- ── TAB: PARAMETERS ──────────────────────────── -->
@@ -419,6 +581,52 @@
                     <div id="flaggingResult" style="margin-top:10px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#c9a880;"></div>
                 </div>
             </div>
+
+            {% if is_admin %}
+            <!-- ── AUDIT-AI & DATA EXPORT ─────────────────────── -->
+            <div class="chart-card" style="margin-bottom:18px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <div class="chart-title" style="margin-bottom:0;">Audit-AI &amp; Data Export <span class="admin-badge">Admin</span></div>
+                    <span id="auditDigestLabel" style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#6b5345;"></span>
+                </div>
+                <div class="chart-sub">H1-H6 fire weekly (Sunday 23:00 UTC), H7-H9 fire daily (23:45 UTC)</div>
+
+                <div id="auditDigestSummary" style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#c9a880; margin:12px 0;">Loading digest…</div>
+
+                <div style="overflow-x:auto; margin-bottom:14px;">
+                    <table style="width:100%; border-collapse:collapse; font-family:'JetBrains Mono',monospace; font-size:10px;">
+                        <thead>
+                            <tr style="border-bottom:1px solid #4d3526;">
+                                <th style="padding:6px 8px; text-align:left; color:#8a6f57;">Hypothesis</th>
+                                <th style="padding:6px 8px; text-align:left; color:#8a6f57;">Tier</th>
+                                <th style="padding:6px 8px; text-align:left; color:#8a6f57;">N</th>
+                                <th style="padding:6px 8px; text-align:left; color:#8a6f57;">Suggestion</th>
+                            </tr>
+                        </thead>
+                        <tbody id="auditSuggestionsBody">
+                            <tr><td colspan="4" style="padding:20px; text-align:center; color:#6b5345;">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style="display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap;">
+                    <div>
+                        <label style="display:block; font-family:'JetBrains Mono',monospace; font-size:9px; color:#8a6f57; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Start Date</label>
+                        <input type="date" id="exportStartDate" style="background:#1a120e; border:1px solid #4d3526; color:#f2e3cf; padding:8px 10px; border-radius:4px; font-family:'JetBrains Mono',monospace; font-size:12px;">
+                    </div>
+                    <div>
+                        <label style="display:block; font-family:'JetBrains Mono',monospace; font-size:9px; color:#8a6f57; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">End Date</label>
+                        <input type="date" id="exportEndDate" style="background:#1a120e; border:1px solid #4d3526; color:#f2e3cf; padding:8px 10px; border-radius:4px; font-family:'JetBrains Mono',monospace; font-size:12px;">
+                    </div>
+                    <button id="exportCopyBtn" onclick="copyAuditExport()"
+                            style="background:transparent; border:1px solid #4d3526; color:#c9a880; font-family:'JetBrains Mono',monospace;
+                                   font-size:10px; font-weight:700; padding:8px 16px; border-radius:4px; cursor:pointer; letter-spacing:1px;">
+                        COPY JSON
+                    </button>
+                    <span id="exportStatus" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6b5345;"></span>
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <!-- ── TAB: SIGNAL ACCURACY ────────────────────────── -->
@@ -774,6 +982,145 @@
         }
     }
 
+    // ── AGENT COST MONITOR (detail) ────────────────────────
+    async function loadCostData() {
+        if (!document.getElementById('costTableBody')) return;
+        try {
+            const res = await fetch('/api/agents/cost');
+            const data = await res.json();
+            if (!data.ok) return;
+
+            const t = data.today;
+            const w = data.seven_day;
+            const pct = t.budget_pct || 0;
+
+            document.getElementById('todaySpend').textContent = '$' + t.total_usd.toFixed(4);
+            document.getElementById('todayBudget').textContent = 'of $' + t.budget_usd.toFixed(2) + ' daily cap';
+            document.getElementById('weekSpend').textContent = '$' + w.total_usd.toFixed(4);
+
+            const weekCalls = Object.values(w.by_agent || {}).reduce((s, a) => s + a.calls, 0);
+            document.getElementById('weekCalls').textContent = weekCalls + ' total calls';
+
+            document.getElementById('budgetPctLabel').textContent = pct.toFixed(1) + '% of daily budget';
+
+            const bar = document.getElementById('budgetBar');
+            bar.style.width = Math.min(pct, 100) + '%';
+            bar.style.background = pct >= 90 ? '#8c4a3a' : pct >= 70 ? '#a67c3a' : '#c8813a';
+
+            const tbody = document.getElementById('costTableBody');
+            const calls = data.last_10_calls || [];
+            if (calls.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="padding:20px; text-align:center; color:#6b5345;">No calls logged yet. Run a test call.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = calls.map(r => {
+                const sc = r.status === 'SUCCESS' ? '#5e8c66' : r.status === 'BUDGET_BLOCKED' ? '#a67c3a' : '#8c4a3a';
+                const cr = r.cache_read_tokens > 0 ? `<span style="color:#5e8c66">${r.cache_read_tokens}</span>` : '0';
+                return `<tr style="border-bottom:1px solid #2a1e18;">
+                    <td style="padding:6px 8px; color:#c9a880;">${r.agent_name}</td>
+                    <td style="padding:6px 8px; color:#6b5345;">${r.triggered_by}</td>
+                    <td style="padding:6px 8px; color:${sc}; font-weight:700;">${r.status}</td>
+                    <td style="padding:6px 8px; text-align:right; color:#c9a880;">${r.input_tokens}</td>
+                    <td style="padding:6px 8px; text-align:right; color:#c9a880;">${r.output_tokens}</td>
+                    <td style="padding:6px 8px; text-align:right;">${cr}</td>
+                    <td style="padding:6px 8px; text-align:right; color:#c9a24a;">$${r.estimated_cost_usd.toFixed(6)}</td>
+                    <td style="padding:6px 8px; text-align:right; color:#6b5345; font-size:9px;">${(r.created_at || '').replace(' UTC','')}</td>
+                </tr>`;
+            }).join('');
+        } catch (e) {
+            console.error('Cost load failed:', e);
+        }
+    }
+
+    async function runTestCall() {
+        const btn = document.getElementById('testBtn');
+        const out = document.getElementById('testResult');
+        btn.disabled = true;
+        btn.textContent = 'FIRING…';
+        out.textContent = '';
+
+        try {
+            const res = await fetch('/api/agents/test-call', { method: 'POST' });
+            const data = await res.json();
+            if (data.ok) {
+                out.style.color = '#5e8c66';
+                out.textContent = '✓ RESPONSE: ' + data.agent_response + '\n\nLOGGED ROW:\n' + JSON.stringify(data.logged_row, null, 2);
+                await loadCostData();
+            } else {
+                out.style.color = '#8c4a3a';
+                out.textContent = '✗ ERROR: ' + data.error;
+            }
+        } catch (e) {
+            out.style.color = '#8c4a3a';
+            out.textContent = '✗ Connection failed: ' + e;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'RUN TEST CALL';
+        }
+    }
+
+    // ── AUDIT-AI & DATA EXPORT ──────────────────────────────
+    async function loadAuditSuggestions() {
+        if (!document.getElementById('auditSuggestionsBody')) return;
+        try {
+            const res = await fetch('/api/v1/system/audit-suggestions');
+            const data = await res.json();
+            if (!data.ok) return;
+
+            const digest = data.latest_daily_digest;
+            const label = document.getElementById('auditDigestLabel');
+            const summary = document.getElementById('auditDigestSummary');
+            if (digest) {
+                label.textContent = 'last digest: ' + digest.date_key;
+                summary.innerHTML = `Today's digest (${digest.date_key}): ` +
+                    `<b style="color:#f2e3cf;">${digest.trades_covered_15m}</b> 15M &middot; ` +
+                    `<b style="color:#f2e3cf;">${digest.trades_covered_1h}</b> 1H &middot; ` +
+                    `<b style="color:#f2e3cf;">${digest.trades_covered_4h}</b> 4H trades covered.`;
+            } else {
+                summary.textContent = 'No daily digest yet — first run fires at 23:45 UTC.';
+            }
+
+            const tbody = document.getElementById('auditSuggestionsBody');
+            const suggestions = data.recent_suggestions || [];
+            if (suggestions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="padding:20px; text-align:center; color:#6b5345;">No Audit-AI findings logged yet.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = suggestions.map(s => `
+                <tr style="border-bottom:1px solid #2a1e18;">
+                    <td style="padding:6px 8px; color:#f2e3cf; white-space:nowrap;">${s.hypothesis_id}</td>
+                    <td style="padding:6px 8px; color:#c9a880; white-space:nowrap;">${s.tier_label}</td>
+                    <td style="padding:6px 8px; color:#c9a880;">${s.n_supporting}</td>
+                    <td style="padding:6px 8px; color:#c9a880; font-family:'Inter',sans-serif;">${s.suggestion_text}</td>
+                </tr>
+            `).join('');
+        } catch (e) {
+            console.error('loadAuditSuggestions failed:', e);
+        }
+    }
+
+    async function copyAuditExport() {
+        const btn = document.getElementById('exportCopyBtn');
+        const status = document.getElementById('exportStatus');
+        const start = document.getElementById('exportStartDate').value;
+        const end = document.getElementById('exportEndDate').value;
+        if (!start || !end) { status.textContent = 'Pick both dates first'; return; }
+
+        status.textContent = 'Fetching…';
+        try {
+            const res = await fetch(`/admin/export-audit-ledger?start_date=${start}&end_date=${end}`);
+            const data = await res.json();
+            if (!data.ok) { status.textContent = 'Error: ' + (data.error || 'unknown'); return; }
+            await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+            const orig = btn.textContent;
+            btn.textContent = '✓ COPIED';
+            status.textContent = `${data.total_records} trades, ${(data.daily_digests || []).length} digests, ${(data.audit_suggestions || []).length} suggestions, ${(data.trials || []).length} trials`;
+            setTimeout(() => { btn.textContent = orig; }, 2000);
+        } catch (e) {
+            status.textContent = 'Fetch failed: ' + e;
+        }
+    }
+
     // ── JEWEL GATE DONUT ──────────────────────────────────
     async function loadJewel() {
         try {
@@ -1067,6 +1414,166 @@
         }
     }
 
+    // ── SESSION ENERGY TAB ───────────────────────────────────
+    async function loadSessionEnergy() {
+        try {
+            const r = await fetch('/api/v1/system/session-energy');
+            if (!r.ok) throw new Error('Status ' + r.status);
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || 'Unknown error');
+            if (!d.has_data) {
+                document.getElementById('energySessionLabel').textContent = 'No data yet';
+                return;
+            }
+
+            // Session label
+            const sess = d.session || {};
+            document.getElementById('energySessionLabel').textContent = (sess.label || '?') + ' - ' + (sess.date_key || '?');
+
+            // Helper: set fuel gauge fields
+            function setFuel(tf, data) {
+                if (!data) return;
+                const prefix = 'fuel' + tf;
+                const trend = data.trend || '-';
+                const momentum = data.momentum || '-';
+                const adx = data.adx != null ? data.adx.toFixed(1) : '-';
+                const rsi = data.rsi != null ? data.rsi.toFixed(1) : '-';
+                const spread = data.ribbon_spread_pct != null ? (data.ribbon_spread_pct * 100).toFixed(2) + '%' : '-';
+                const dev = data.deviation != null ? data.deviation.toFixed(2) + '%' : '-';
+
+                document.getElementById(prefix + 'Trend').textContent = trend;
+                document.getElementById(prefix + 'Momentum').textContent = momentum;
+                document.getElementById(prefix + 'Adx').textContent = adx;
+                document.getElementById(prefix + 'Rsi').textContent = rsi;
+                document.getElementById(prefix + 'Spread').textContent = spread;
+                document.getElementById(prefix + 'Dev').textContent = dev;
+
+                // Color trend by direction
+                const trendEl = document.getElementById(prefix + 'Trend');
+                if (trend === 'BULLISH' || trend === 'BULLISH_TRENDING') trendEl.style.color = '#5e8c66';
+                else if (trend === 'BEARISH' || trend === 'BEARISH_TRENDING') trendEl.style.color = '#8c4a3a';
+                else trendEl.style.color = '#c9a24a';
+
+                // Exit warning
+                const exitEl = document.getElementById(prefix + 'Exit');
+                if (data.exit_warning) {
+                    exitEl.textContent = '! ' + data.exit_warning;
+                    exitEl.style.display = 'block';
+                } else {
+                    exitEl.style.display = 'none';
+                }
+
+                // Status line
+                document.getElementById(prefix + 'Status').textContent = 'ADX ' + adx + ' . RSI ' + rsi;
+            }
+
+            setFuel('15m', d.fuel_gauge ? d.fuel_gauge['15m'] : null);
+            setFuel('1h', d.fuel_gauge ? d.fuel_gauge['1h'] : null);
+            setFuel('4h', d.fuel_gauge ? d.fuel_gauge['4h'] : null);
+
+            // Bias model
+            const bm = d.bias_model || {};
+            // daily_lean/permission_state are nested objects ({direction/score/confidence},
+            // {state/active_side/...}), not plain strings -- pull the one field worth showing.
+            const dailyLean = bm.daily_lean || {};
+            document.getElementById('energyDailyLean').textContent = dailyLean.direction
+                ? dailyLean.direction.toUpperCase() + ' (' + dailyLean.confidence + '%)'
+                : '-';
+            const permissionState = bm.permission_state || {};
+            document.getElementById('energyPermission').textContent = permissionState.state || '-';
+            document.getElementById('energyMacroBias').textContent = d.macro_bias || '-';
+            document.getElementById('energyMicroBias').textContent = d.micro_bias || '-';
+            document.getElementById('energyMicroState').textContent = d.micro_state || '-';
+
+            // Jewel gate
+            const jg = document.getElementById('energyJewelGate');
+            if (d.jewel_gate_open === true) {
+                jg.textContent = 'OPEN';
+                jg.style.color = '#5e8c66';
+            } else if (d.jewel_gate_open === false) {
+                jg.textContent = 'CLOSED';
+                jg.style.color = '#8c4a3a';
+            } else {
+                jg.textContent = '-';
+                jg.style.color = '#f2e3cf';
+            }
+
+            // Levels
+            const lv = d.levels || {};
+            document.getElementById('energyBo').textContent = lv.breakout_trigger ? '$' + lv.breakout_trigger.toFixed(2) : '-';
+            document.getElementById('energyBd').textContent = lv.breakdown_trigger ? '$' + lv.breakdown_trigger.toFixed(2) : '-';
+            document.getElementById('energyPoc').textContent = lv.f24_poc ? '$' + lv.f24_poc.toFixed(2) : '-';
+            document.getElementById('energyR30h').textContent = lv.range30m_high ? '$' + lv.range30m_high.toFixed(2) : '-';
+            document.getElementById('energyR30l').textContent = lv.range30m_low ? '$' + lv.range30m_low.toFixed(2) : '-';
+            document.getElementById('energyAtr').textContent = lv.atr ? '$' + lv.atr.toFixed(2) : '-';
+            document.getElementById('energyEma20').textContent = lv.daily_ema20 ? '$' + lv.daily_ema20.toFixed(2) : '-';
+            document.getElementById('energyEma30').textContent = lv.daily_ema30 ? '$' + lv.daily_ema30.toFixed(2) : '-';
+            document.getElementById('energyEma50').textContent = lv.daily_ema50 ? '$' + lv.daily_ema50.toFixed(2) : '-';
+
+            // Bias sub
+            document.getElementById('energyBiasSub').textContent = 'Price: ' + (d.current_price ? '$' + d.current_price.toFixed(2) : '-') + ' . Lock: ' + (d.lock_time || '-');
+
+        } catch (e) {
+            console.error('Failed to load session energy:', e);
+            document.getElementById('energySessionLabel').textContent = 'Failed to load';
+        }
+    }
+
+    // ── SYSTEM HEALTH (heartbeat) ─────────────────────────────
+    async function loadHeartbeat() {
+        try {
+            const res = await fetch('/api/health/audit-heartbeat');
+            const d = await res.json();
+            if (!d.ok) return;
+
+            const sal = d.session_audit_log || {};
+            const mel = d.monitor_event_log || {};
+
+            const auditDot = document.getElementById('hbAuditDot');
+            const auditSt  = document.getElementById('hbAuditStatus');
+            const auditDt  = document.getElementById('hbAuditDetail');
+            if (sal.status === 'WRITING') {
+                auditDot.style.background = '#10b981';
+                auditSt.style.color = '#10b981';
+                auditSt.textContent = 'WRITING';
+                auditDt.textContent = 'last: ' + (sal.last_date_key || '-') + ' (' + (sal.last_status || '-') + ')  |  recent: ' + (sal.recent_count ?? '-') + ' rows';
+            } else if (sal.status === 'TABLE_MISSING') {
+                auditDot.style.background = '#ef4444';
+                auditSt.style.color = '#ef4444';
+                auditSt.textContent = 'TABLE MISSING';
+                auditDt.textContent = sal.error || '';
+            } else {
+                auditDot.style.background = '#f59e0b';
+                auditSt.style.color = '#f59e0b';
+                auditSt.textContent = 'DARK';
+                auditDt.textContent = 'Table exists - no rows yet';
+            }
+
+            const monDot = document.getElementById('hbMonDot');
+            const monSt  = document.getElementById('hbMonStatus');
+            const monDt  = document.getElementById('hbMonDetail');
+            if (mel.status === 'WRITING') {
+                monDot.style.background = '#10b981';
+                monSt.style.color = '#10b981';
+                monSt.textContent = 'WRITING';
+                monDt.textContent = 'last session: ' + (mel.last_session_date || '-') + '  poll seq: ' + (mel.last_poll_seq ?? '-') + '  |  recent: ' + (mel.recent_count ?? '-') + ' rows';
+            } else if (mel.status === 'TABLE_MISSING') {
+                monDot.style.background = '#ef4444';
+                monSt.style.color = '#ef4444';
+                monSt.textContent = 'TABLE MISSING';
+                monDt.textContent = mel.error || '';
+            } else {
+                monDot.style.background = '#f59e0b';
+                monSt.style.color = '#f59e0b';
+                monSt.textContent = 'DARK';
+                monDt.textContent = 'Table exists - no rows yet';
+            }
+        } catch (e) {
+            console.warn('Heartbeat fetch failed:', e);
+        }
+    }
+
+
     // ── ERRORS TAB ───────────────────────────────────────
     async function loadErrors() {
         try {
@@ -1159,15 +1666,26 @@
 
     // ── INIT ──────────────────────────────────────────────
     async function initDashboard() {
+        const exportEndEl = document.getElementById('exportEndDate');
+        const exportStartEl = document.getElementById('exportStartDate');
+        if (exportEndEl && exportStartEl) {
+            const t = new Date();
+            exportEndEl.valueAsDate = t;
+            const p = new Date(); p.setDate(t.getDate() - 14);
+            exportStartEl.valueAsDate = p;
+        }
         await Promise.all([
             loadOverview().catch(e => console.error("loadOverview failed", e)),
             loadMasHistory().catch(e => console.error("loadMasHistory failed", e)),
             loadAccuracy().catch(e => console.error("loadAccuracy failed", e)),
             loadCosts().catch(e => console.error("loadCosts failed", e)),
+            loadCostData().catch(e => console.error("loadCostData failed", e)),
             loadJewel().catch(e => console.error("loadJewel failed", e)),
             loadAudits().catch(e => console.error("loadAudits failed", e)),
             loadNewsletters().catch(e => console.error("loadNewsletters failed", e)),
             loadLiveSystem().catch(e => console.error("loadLiveSystem failed", e)),
+            loadSessionEnergy().catch(e => console.error("loadSessionEnergy failed", e)),
+            loadHeartbeat().catch(e => console.error("loadHeartbeat failed", e)),
             loadParameters().catch(e => console.error("loadParameters failed", e)),
             loadErrors().catch(e => console.error("loadErrors failed", e)),
             loadRecentReports().catch(e => console.error("loadRecentReports failed", e)),
@@ -1430,6 +1948,11 @@
         loadSignalAlerts();
         loadSignalWeights();
         loadAccuracyReport();
+        loadAuditSuggestions();
+        // Polling for Live System tab data
+        setInterval(loadSessionEnergy, 30000);
+        setInterval(loadHeartbeat, 60000);
+        setInterval(loadCostData, 30000);
     };
     </script>
 </body>
