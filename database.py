@@ -1222,4 +1222,55 @@ class SystemAnalysisReport(Base):
     status = Column(String, default="PENDING", nullable=False)
     report_json = Column(String, nullable=True)
     error_message = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
+# SIGNAL ACCURACY LOG (PHASE 1 — SIGNAL ACCURACY TRACKER)
+# Tracks every signal the system generates and checks whether
+# the predicted direction/outcome actually materialized.
+#
+# Write path: signal_accuracy_tracker.py (background scheduler)
+# Read path: dashboard /api/v1/system/signal-accuracy
+#
+# One row per signal instance. Write-once discipline:
+#   - prediction_* fields set at capture time
+#   - outcome_* fields set at check time (4h lookahead)
+#   - outcome_checked_at timestamps the check
+#
+# New table — picked up by Base.metadata.create_all() on
+# deploy. No ALTER TABLE migration needed.
+# ---------------------------------------------------------
+class SignalAccuracyLog(Base):
+    __tablename__ = "signal_accuracy_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True, nullable=False)          # "BTC/USDT"
+
+    # When the signal was generated (source row timestamp)
+    timestamp = Column(DateTime, nullable=False, index=True)
+
+    # Signal identity
+    signal_name = Column(String, nullable=False, index=True)     # jewel_gate | energy_grade | kinematic_grade | confluence_score | macro_bias | bbwp_state | pmarp_state | campaign_energy_grade | jewel_exit_warning
+    signal_value = Column(String, nullable=True)                 # OPEN/CLOSED | BUILDING/CHARGED/EXHAUSTED | PRIMED/OVEREXTENDED/TANGLED | etc.
+    signal_strength = Column(String, nullable=True)              # STRONG/MODERATE/WEAK (where applicable)
+
+    # What the signal predicted
+    prediction_direction = Column(String, nullable=True)         # BULLISH/BEARISH/NEUTRAL
+    prediction_price = Column(Float, nullable=True)              # price at prediction time
+
+    # What actually happened (set at check time)
+    outcome_direction = Column(String, nullable=True)             # UP/DOWN/SIDEWAYS/UNKNOWN
+    outcome_price = Column(Float, nullable=True)                 # price at check time
+    outcome_pct_move = Column(Float, nullable=True)              # % change from prediction to check
+    outcome_correct = Column(Boolean, nullable=True)             # True/False/None (None = SIDEWAYS or NEUTRAL)
+
+    # Metadata
+    lookahead_hours = Column(Integer, default=4, nullable=False)  # how many hours we waited before checking
+    outcome_checked_at = Column(DateTime, nullable=True)           # when we checked the outcome
+
+    # Source traceability
+    source_table = Column(String, nullable=True)                 # jewel_snapshot_log | decision_journal | campaign_logs | session_audit_log
+    source_id = Column(Integer, nullable=True)                   # PK of the source row
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

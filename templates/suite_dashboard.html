@@ -105,6 +105,7 @@
             <button class="tab-btn" data-tab="parameters">Parameters</button>
             <button class="tab-btn" data-tab="errors">Errors</button>
             <button class="tab-btn" data-tab="analysis">Analysis</button>
+            <button class="tab-btn" data-tab="signal-accuracy">Signal Accuracy</button>
         </div>
 
         <!-- ── TAB: OVERVIEW ─────────────────────────────── -->
@@ -374,6 +375,71 @@
                     <div class="chart-title">Recent Reports</div>
                     <div class="chart-sub">Last 5 analysis reports</div>
                     <div id="recentReports" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6b5345; padding:8px 0;">Loading reports…</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── TAB: SIGNAL ACCURACY ────────────────────────── -->
+        <div class="tab-content" id="tab-signal-accuracy">
+            <div class="chart-row row-1-1" style="margin-bottom:18px;">
+                <div class="chart-card">
+                    <div class="chart-title">Signal Accuracy Dashboard</div>
+                    <div class="chart-sub">Tracks every signal prediction vs actual outcome</div>
+                    <div style="display:flex; gap:12px; margin-top:12px; flex-wrap:wrap;">
+                        <button onclick="triggerSignalAccuracy()"
+                                style="background:#c8813a; border:none; color:#0f172a; font-family:'JetBrains Mono',monospace;
+                                       font-size:12px; font-weight:700; padding:10px 24px; border-radius:6px;
+                                       cursor:pointer; letter-spacing:1px;">
+                            ▶ RUN ACCURACY CHECK
+                        </button>
+                        <select id="saSignalFilter" onchange="loadSignalAccuracy()"
+                                style="background:#1a120e; border:1px solid #4d3526; color:#c9a880;
+                                       font-family:'JetBrains Mono',monospace; font-size:11px;
+                                       padding:8px 12px; border-radius:6px;">
+                            <option value="">All Signals</option>
+                            <option value="jewel_gate">JEWEL Gate</option>
+                            <option value="jewel_exit_warning">JEWEL Exit Warning</option>
+                            <option value="energy_grade">Energy Grade</option>
+                            <option value="kinematic_grade">Kinematic Grade</option>
+                            <option value="confluence_score">Confluence Score</option>
+                            <option value="macro_bias">Macro Bias</option>
+                            <option value="bbwp_state">BBWP State</option>
+                            <option value="pmarp_state">PMARP State</option>
+                            <option value="campaign_energy_grade">Campaign Energy</option>
+                        </select>
+                    </div>
+                    <div id="saResult" style="margin-top:14px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#c9a880;"></div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title">Accuracy Summary</div>
+                    <div class="chart-sub">Last 7 days — grouped by signal type</div>
+                    <div id="saSummary" style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:8px 0;">
+                        <div style="color:#6b5345;">Loading signal data…</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Signal accuracy table -->
+            <div class="chart-card" style="margin-top:12px;">
+                <div class="chart-title">Signal Performance</div>
+                <div class="chart-sub">Signal → Value → Accuracy</div>
+                <div style="overflow-x:auto; margin-top:8px;">
+                    <table id="saTable" style="width:100%; border-collapse:collapse; font-family:'JetBrains Mono',monospace; font-size:11px;">
+                        <thead>
+                            <tr style="border-bottom:1px solid #4d3526;">
+                                <th style="padding:8px 12px; text-align:left; color:#8c6a4a;">Signal</th>
+                                <th style="padding:8px 12px; text-align:left; color:#8c6a4a;">Value</th>
+                                <th style="padding:8px 12px; text-align:right; color:#8c6a4a;">Total</th>
+                                <th style="padding:8px 12px; text-align:right; color:#8c6a4a;">Correct</th>
+                                <th style="padding:8px 12px; text-align:right; color:#8c6a4a;">Incorrect</th>
+                                <th style="padding:8px 12px; text-align:right; color:#8c6a4a;">Neutral</th>
+                                <th style="padding:8px 12px; text-align:right; color:#8c6a4a;">Accuracy</th>
+                            </tr>
+                        </thead>
+                        <tbody id="saTableBody">
+                            <tr><td colspan="7" style="padding:20px; text-align:center; color:#6b5345;">Run accuracy check to populate data</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -1063,7 +1129,91 @@
             loadParameters().catch(e => console.error("loadParameters failed", e)),
             loadErrors().catch(e => console.error("loadErrors failed", e)),
             loadRecentReports().catch(e => console.error("loadRecentReports failed", e)),
+            loadSignalAccuracy().catch(e => console.error("loadSignalAccuracy failed", e)),
         ]);
+    }
+
+    // ── SIGNAL ACCURACY TAB ────────────────────────────────
+    async function triggerSignalAccuracy() {
+        const result = document.getElementById('saResult');
+        result.textContent = 'Running accuracy check…';
+        result.style.color = '#c9a880';
+        try {
+            const r = await fetch('/api/v1/system/signal-accuracy/trigger', { method: 'POST' });
+            const d = await r.json();
+            if (d.ok) {
+                result.innerHTML = `<span style="color:#5e8c66;">✓ Captured ${d.result.total} new signals</span>`;
+            } else {
+                result.innerHTML = `<span style="color:#8c4a3a;">✗ ${d.error || 'Unknown error'}</span>`;
+            }
+        } catch (e) {
+            result.innerHTML = `<span style="color:#8c4a3a;">✗ Request failed: ${e.message}</span>`;
+        }
+        loadSignalAccuracy();
+    }
+
+    async function loadSignalAccuracy() {
+        const signalName = document.getElementById('saSignalFilter')?.value || '';
+        const params = new URLSearchParams({ days: '7' });
+        if (signalName) params.set('signal_name', signalName);
+
+        try {
+            const r = await fetch('/api/v1/system/signal-accuracy?' + params.toString());
+            if (!r.ok) throw new Error('Status ' + r.status);
+            const d = await r.json();
+
+            // Summary card
+            const summary = document.getElementById('saSummary');
+            if (!d.stats || !d.stats.length) {
+                summary.innerHTML = '<div style="color:#6b5345;">No signal data yet. Run an accuracy check above.</div>';
+            } else {
+                const totalSignals = d.stats.reduce((s, x) => s + x.total, 0);
+                const totalCorrect = d.stats.reduce((s, x) => s + x.correct, 0);
+                const overallPct = totalSignals > 0 ? (totalCorrect / totalSignals * 100).toFixed(1) : '—';
+                const best = d.stats.reduce((a, b) => a.accuracy_pct > b.accuracy_pct ? a : b, d.stats[0]);
+                const worst = d.stats.reduce((a, b) => a.accuracy_pct < b.accuracy_pct ? a : b, d.stats[0]);
+
+                summary.innerHTML = `
+                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:8px;">
+                        <div style="background:#1a120e; border:1px solid #4d3526; border-radius:6px; padding:12px; text-align:center;">
+                            <div style="color:#8c6a4a; font-size:10px; letter-spacing:1px;">TOTAL SIGNALS</div>
+                            <div style="color:#c9a880; font-size:22px; font-weight:700; margin-top:4px;">${totalSignals}</div>
+                        </div>
+                        <div style="background:#1a120e; border:1px solid #4d3526; border-radius:6px; padding:12px; text-align:center;">
+                            <div style="color:#8c6a4a; font-size:10px; letter-spacing:1px;">OVERALL ACCURACY</div>
+                            <div style="color:${overallPct >= 50 ? '#5e8c66' : '#8c4a3a'}; font-size:22px; font-weight:700; margin-top:4px;">${overallPct}%</div>
+                        </div>
+                        <div style="background:#1a120e; border:1px solid #4d3526; border-radius:6px; padding:12px; text-align:center;">
+                            <div style="color:#8c6a4a; font-size:10px; letter-spacing:1px;">BEST / WORST</div>
+                            <div style="color:#5e8c66; font-size:13px; font-weight:600; margin-top:4px;">${best.signal_name}: ${best.accuracy_pct}%</div>
+                            <div style="color:#8c4a3a; font-size:13px; font-weight:600;">${worst.signal_name}: ${worst.accuracy_pct}%</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Table
+            const tbody = document.getElementById('saTableBody');
+            if (!d.stats || !d.stats.length) {
+                tbody.innerHTML = '<tr><td colspan="7" style="padding:20px; text-align:center; color:#6b5345;">No signal data yet.</td></tr>';
+            } else {
+                tbody.innerHTML = d.stats.map(s => {
+                    const pct = s.accuracy_pct;
+                    const color = pct >= 60 ? '#5e8c66' : pct >= 40 ? '#c9a880' : '#8c4a3a';
+                    return `<tr style="border-bottom:1px solid #2a1e18;">
+                        <td style="padding:8px 12px; color:#c9a880;">${s.signal_name}</td>
+                        <td style="padding:8px 12px; color:#8c6a4a;">${s.signal_value || '—'}</td>
+                        <td style="padding:8px 12px; text-align:right; color:#c9a880;">${s.total}</td>
+                        <td style="padding:8px 12px; text-align:right; color:#5e8c66;">${s.correct}</td>
+                        <td style="padding:8px 12px; text-align:right; color:#8c4a3a;">${s.incorrect}</td>
+                        <td style="padding:8px 12px; text-align:right; color:#6b5345;">${s.neutral}</td>
+                        <td style="padding:8px 12px; text-align:right; color:${color}; font-weight:700;">${pct}%</td>
+                    </tr>`;
+                }).join('');
+            }
+        } catch (e) {
+            document.getElementById('saSummary').innerHTML = '<div style="color:#8c4a3a;">Failed to load signal data.</div>';
+        }
     }
 
     document.addEventListener('DOMContentLoaded', initDashboard);

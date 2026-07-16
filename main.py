@@ -39,8 +39,9 @@ from datetime import datetime, timezone, timedelta
 from jewel_specialist import run_jewel_snapshot
 from elliott_wave_specialist import run_elliott_wave_analysis
 from performance_auditor import run_performance_audit
+import signal_accuracy_tracker
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalAccuracyLog
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -52,6 +53,7 @@ scheduler_health_registry = {
     "outcome_tracker": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "monthly_lti": {"last_run": None, "next_run": None, "status": "DISABLED", "error_count": 0, "last_error": None},
     "analysis_loop": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
+    "signal_accuracy": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
 }
 
 
@@ -795,6 +797,7 @@ async def lifespan(app: FastAPI):
     app.state.outcome_tracker_task  = asyncio.create_task(run_outcome_tracker())
     app.state.analysis_loop_task    = asyncio.create_task(run_analysis_loop_scheduler())
     app.state.monitor_task          = asyncio.create_task(session_monitor.run_session_monitor_loop())
+    app.state.signal_accuracy_task  = asyncio.create_task(run_signal_accuracy_scheduler())
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     app.state.gravity_task.cancel()
@@ -805,7 +808,50 @@ async def lifespan(app: FastAPI):
     app.state.daily_audit_task.cancel()
     app.state.outcome_tracker_task.cancel()
     app.state.analysis_loop_task.cancel()
+    app.state.signal_accuracy_task.cancel()
     app.state.monitor_task.cancel()
+
+
+# ==============================================================================
+# SIGNAL ACCURACY TRACKER — runs every 4 hours
+# Captures signals from jewel_snapshot_log, decision_journal, campaign_logs,
+# and session_audit_log, then checks outcomes against current price.
+# ==============================================================================
+
+async def run_signal_accuracy_scheduler() -> None:
+    """Every 4 hours: capture new signals and check their accuracy."""
+    print("[SCHEDULER] Signal Accuracy Tracker starting...")
+    while True:
+        try:
+            scheduler_health_registry["signal_accuracy"]["status"] = "EXECUTING"
+
+            # Fetch price in the async context (safe for shared ccxt client)
+            current_price = await _fetch_btc_price()
+
+            # Run the synchronous tick in a thread pool, passing the price
+            result = await asyncio.to_thread(
+                signal_accuracy_tracker.run_signal_accuracy_tick,
+                current_price=current_price,
+            )
+
+            scheduler_health_registry["signal_accuracy"]["last_run"] = datetime.now(timezone.utc).isoformat()
+            scheduler_health_registry["signal_accuracy"]["status"] = "OK" if result.get("status") == "OK" else "ERROR"
+            scheduler_health_registry["signal_accuracy"]["last_result"] = result
+
+            seconds = 14400  # 4 hours
+            next_run_dt = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+            scheduler_health_registry["signal_accuracy"]["next_run"] = next_run_dt.isoformat()
+            scheduler_health_registry["signal_accuracy"]["status"] = "WAITING"
+
+            await asyncio.sleep(seconds)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[SCHEDULER] Signal Accuracy Tracker error: {e}")
+            scheduler_health_registry["signal_accuracy"]["error_count"] += 1
+            scheduler_health_registry["signal_accuracy"]["last_error"] = str(e)
+            scheduler_health_registry["signal_accuracy"]["status"] = "ERROR"
+            await asyncio.sleep(300)
 
 app = FastAPI(title="Kabroda BattleBox", version="12.0", lifespan=lifespan)
 
@@ -2691,6 +2737,58 @@ async def trigger_analysis_loop(request: Request, db: Session = Depends(get_db))
         scheduler_health_registry["analysis_loop"]["status"] = "ERROR"
         scheduler_health_registry["analysis_loop"]["error_count"] += 1
         scheduler_health_registry["analysis_loop"]["last_error"] = str(e)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# ==============================================================================
+# SIGNAL ACCURACY API
+# ==============================================================================
+
+@app.get("/api/v1/system/signal-accuracy")
+async def get_signal_accuracy(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+
+    try:
+        import signal_accuracy_tracker as sat
+        signal_name = request.query_params.get("signal_name")
+        days = int(request.query_params.get("days", 7))
+
+        stats = sat.get_signal_accuracy(signal_name=signal_name, days=days)
+        timeline = None
+        if signal_name:
+            timeline = sat.get_signal_timeline(signal_name=signal_name, days=days)
+
+        return JSONResponse({
+            "ok": True,
+            "stats": stats,
+            "timeline": timeline,
+            "days": days,
+            "scheduler": scheduler_health_registry.get("signal_accuracy", {}),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/v1/system/signal-accuracy/trigger")
+async def trigger_signal_accuracy(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+
+    try:
+        current_price = await _fetch_btc_price()
+        result = await asyncio.to_thread(
+            signal_accuracy_tracker.run_signal_accuracy_tick,
+            current_price=current_price,
+        )
+        return JSONResponse({"ok": True, "result": result})
+    except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
