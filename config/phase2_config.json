@@ -1,0 +1,8 @@
+{
+  "action_mode": "FLAG_ONLY",
+  "min_samples": 100,
+  "affect_trading": false,
+  "accuracy_threshold_warn": 0.30,
+  "accuracy_threshold_critical": 0.15,
+  "flagging_interval_hours": 6
+}

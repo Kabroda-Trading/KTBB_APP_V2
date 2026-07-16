@@ -40,8 +40,11 @@ from jewel_specialist import run_jewel_snapshot
 from elliott_wave_specialist import run_elliott_wave_analysis
 from performance_auditor import run_performance_audit
 import signal_accuracy_tracker
+import signal_flagging_engine
+import signal_weight_manager
+import accuracy_report_generator
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalAccuracyLog
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalAccuracyLog, SystemAlertLog, SignalHealthLog, SignalWeight, AccuracyReport
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -54,6 +57,8 @@ scheduler_health_registry = {
     "monthly_lti": {"last_run": None, "next_run": None, "status": "DISABLED", "error_count": 0, "last_error": None},
     "analysis_loop": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "signal_accuracy": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
+    "signal_flagging": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
+    "accuracy_report": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
 }
 
 
@@ -798,6 +803,8 @@ async def lifespan(app: FastAPI):
     app.state.analysis_loop_task    = asyncio.create_task(run_analysis_loop_scheduler())
     app.state.monitor_task          = asyncio.create_task(session_monitor.run_session_monitor_loop())
     app.state.signal_accuracy_task  = asyncio.create_task(run_signal_accuracy_scheduler())
+    app.state.signal_flagging_task  = asyncio.create_task(run_signal_flagging_scheduler())
+    app.state.accuracy_report_task = asyncio.create_task(run_accuracy_report_scheduler())
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     app.state.gravity_task.cancel()
@@ -809,6 +816,8 @@ async def lifespan(app: FastAPI):
     app.state.outcome_tracker_task.cancel()
     app.state.analysis_loop_task.cancel()
     app.state.signal_accuracy_task.cancel()
+    app.state.signal_flagging_task.cancel()
+    app.state.accuracy_report_task.cancel()
     app.state.monitor_task.cancel()
 
 
@@ -852,6 +861,80 @@ async def run_signal_accuracy_scheduler() -> None:
             scheduler_health_registry["signal_accuracy"]["last_error"] = str(e)
             scheduler_health_registry["signal_accuracy"]["status"] = "ERROR"
             await asyncio.sleep(300)
+
+
+# ==============================================================================
+# PHASE 2: SIGNAL FLAGGING ENGINE — runs every 6 hours
+# Flags underperforming signals for human review (FLAG_ONLY mode).
+# No auto-adjustment — we collect data first, then decide.
+# ==============================================================================
+
+async def run_signal_flagging_scheduler() -> None:
+    """Every 6 hours: check signal health, flag underperformers for review."""
+    print("[SCHEDULER] Signal Flagging Engine starting...")
+    while True:
+        try:
+            scheduler_health_registry["signal_flagging"]["status"] = "EXECUTING"
+
+            result = await asyncio.to_thread(
+                signal_flagging_engine.run_flagging_tick,
+            )
+
+            scheduler_health_registry["signal_flagging"]["last_run"] = datetime.now(timezone.utc).isoformat()
+            scheduler_health_registry["signal_flagging"]["status"] = "OK" if result.get("status") == "OK" else "ERROR"
+            scheduler_health_registry["signal_flagging"]["last_result"] = result
+
+            seconds = 21600  # 6 hours
+            next_run_dt = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+            scheduler_health_registry["signal_flagging"]["next_run"] = next_run_dt.isoformat()
+            scheduler_health_registry["signal_flagging"]["status"] = "WAITING"
+
+            await asyncio.sleep(seconds)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[SCHEDULER] Signal Flagging Engine error: {e}")
+            scheduler_health_registry["signal_flagging"]["error_count"] += 1
+            scheduler_health_registry["signal_flagging"]["last_error"] = str(e)
+            scheduler_health_registry["signal_flagging"]["status"] = "ERROR"
+            await asyncio.sleep(300)
+
+
+# ==============================================================================
+# PHASE 2: ACCURACY REPORT GENERATOR — runs weekly
+# Generates a structured report of signal accuracy trends and flagged signals.
+# ==============================================================================
+
+async def run_accuracy_report_scheduler() -> None:
+    """Weekly: generate accuracy report with flagged signals summary."""
+    print("[SCHEDULER] Accuracy Report Generator starting...")
+    while True:
+        try:
+            scheduler_health_registry["accuracy_report"]["status"] = "EXECUTING"
+
+            result = await asyncio.to_thread(
+                accuracy_report_generator.generate_weekly_report,
+            )
+
+            scheduler_health_registry["accuracy_report"]["last_run"] = datetime.now(timezone.utc).isoformat()
+            scheduler_health_registry["accuracy_report"]["status"] = "OK" if result.get("status") != "ERROR" else "ERROR"
+            scheduler_health_registry["accuracy_report"]["last_result"] = {"summary": result.get("summary", "")}
+
+            seconds = 604800  # 7 days
+            next_run_dt = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+            scheduler_health_registry["accuracy_report"]["next_run"] = next_run_dt.isoformat()
+            scheduler_health_registry["accuracy_report"]["status"] = "WAITING"
+
+            await asyncio.sleep(seconds)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[SCHEDULER] Accuracy Report Generator error: {e}")
+            scheduler_health_registry["accuracy_report"]["error_count"] += 1
+            scheduler_health_registry["accuracy_report"]["last_error"] = str(e)
+            scheduler_health_registry["accuracy_report"]["status"] = "ERROR"
+            await asyncio.sleep(300)
+
 
 app = FastAPI(title="Kabroda BattleBox", version="12.0", lifespan=lifespan)
 
@@ -2787,6 +2870,117 @@ async def trigger_signal_accuracy(request: Request, db: Session = Depends(get_db
             signal_accuracy_tracker.run_signal_accuracy_tick,
             current_price=current_price,
         )
+        return JSONResponse({"ok": True, "result": result})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# ==============================================================================
+# PHASE 2: SIGNAL FLAGGING & ALERTS API
+# ==============================================================================
+
+@app.get("/api/v1/system/alerts")
+async def get_system_alerts(request: Request, db: Session = Depends(get_db)):
+    """Get all active (unresolved) system alerts."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+
+    try:
+        alerts = signal_flagging_engine.get_active_alerts()
+        return JSONResponse({
+            "ok": True,
+            "alerts": alerts,
+            "count": len(alerts),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/v1/system/alerts/{alert_id}/resolve")
+async def resolve_system_alert(alert_id: int, request: Request, db: Session = Depends(get_db)):
+    """Mark an alert as resolved."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+
+    try:
+        success = signal_flagging_engine.resolve_alert(alert_id)
+        return JSONResponse({"ok": success})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/v1/system/flagging/trigger")
+async def trigger_flagging_tick(request: Request, db: Session = Depends(get_db)):
+    """Manually trigger a flagging tick."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+
+    try:
+        result = await asyncio.to_thread(signal_flagging_engine.run_flagging_tick)
+        return JSONResponse({"ok": True, "result": result})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/v1/system/signal-weights")
+async def get_signal_weights(request: Request, db: Session = Depends(get_db)):
+    """Get all signal weights."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+
+    try:
+        weights = signal_weight_manager.get_all_weights()
+        return JSONResponse({
+            "ok": True,
+            "weights": weights,
+            "count": len(weights),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/v1/system/accuracy-report")
+async def get_accuracy_report(request: Request, db: Session = Depends(get_db)):
+    """Get the latest accuracy report."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+
+    try:
+        report = accuracy_report_generator.get_latest_report()
+        return JSONResponse({
+            "ok": True,
+            "report": report,
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/v1/system/accuracy-report/trigger")
+async def trigger_accuracy_report(request: Request, db: Session = Depends(get_db)):
+    """Manually generate an accuracy report."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+
+    try:
+        result = await asyncio.to_thread(accuracy_report_generator.generate_weekly_report)
         return JSONResponse({"ok": True, "result": result})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)

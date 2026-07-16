@@ -338,6 +338,22 @@
                     <div id="alertHistory" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#8c4a3a; padding:8px 0;">Loading alerts…</div>
                 </div>
             </div>
+            <div class="chart-row row-1-1" style="margin-bottom:18px;">
+                <div class="chart-card">
+                    <div class="chart-title">Signal Degradation Alerts</div>
+                    <div class="chart-sub">Signals flagged by the adaptive tuning loop</div>
+                    <div id="signalAlertsContainer" style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:8px 0;">
+                        <div style="color:#6b5345;">Loading signal alerts…</div>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title">Signal Weights</div>
+                    <div class="chart-sub">Accuracy-based weight adjustments (A/B experiment)</div>
+                    <div id="signalWeightsContainer" style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:8px 0;">
+                        <div style="color:#6b5345;">Loading signal weights…</div>
+                    </div>
+                </div>
+            </div>
             <div class="table-section">
                 <div class="table-header">Error Log</div>
                 <div class="table-wrap">
@@ -375,6 +391,32 @@
                     <div class="chart-title">Recent Reports</div>
                     <div class="chart-sub">Last 5 analysis reports</div>
                     <div id="recentReports" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6b5345; padding:8px 0;">Loading reports…</div>
+                </div>
+            </div>
+            <div class="chart-row row-1-1" style="margin-bottom:18px;">
+                <div class="chart-card">
+                    <div class="chart-title">Accuracy Report</div>
+                    <div class="chart-sub">Weekly signal accuracy trends & flagged signals</div>
+                    <div id="accuracyReportContainer" style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:8px 0;">
+                        <div style="color:#6b5345;">Loading accuracy report…</div>
+                    </div>
+                    <button onclick="triggerAccuracyReport()"
+                            style="background:#5e8c66; border:none; color:#0f172a; font-family:'JetBrains Mono',monospace;
+                                   font-size:11px; font-weight:700; padding:8px 18px; border-radius:6px;
+                                   cursor:pointer; letter-spacing:1px; margin-top:8px;">
+                        ▶ GENERATE REPORT
+                    </button>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title">Flagging Engine</div>
+                    <div class="chart-sub">Manual trigger for signal health check</div>
+                    <button onclick="triggerFlaggingTick()"
+                            style="background:#c8813a; border:none; color:#0f172a; font-family:'JetBrains Mono',monospace;
+                                   font-size:11px; font-weight:700; padding:8px 18px; border-radius:6px;
+                                   cursor:pointer; letter-spacing:1px; margin-top:12px;">
+                        ▶ RUN FLAGGING TICK
+                    </button>
+                    <div id="flaggingResult" style="margin-top:10px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#c9a880;"></div>
                 </div>
             </div>
         </div>
@@ -1217,6 +1259,178 @@
     }
 
     document.addEventListener('DOMContentLoaded', initDashboard);
+
+    // =========================================================================
+    // PHASE 2: ADAPTIVE SIGNAL TUNING LOOP — Dashboard Functions
+    // =========================================================================
+
+    async function loadSignalAlerts() {
+        const container = document.getElementById('signalAlertsContainer');
+        try {
+            const r = await fetch('/api/v1/system/alerts');
+            if (!r.ok) throw new Error('Status ' + r.status);
+            const d = await r.json();
+
+            if (!d.alerts || !d.alerts.length) {
+                container.innerHTML = '<div style="color:#5e8c66;">✓ No signal degradation alerts</div>';
+                return;
+            }
+
+            container.innerHTML = d.alerts.map(a => {
+                const severityColor = a.severity === 'CRITICAL' ? '#8c4a3a' : '#c9a24a';
+                const pathLabel = a.experiment_path === 'AUTO' ? 'AUTO' : 'FLAG';
+                return `<div style="border-left:3px solid ${severityColor}; padding:8px 12px; margin-bottom:8px; background:#1a120e; border-radius:4px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="color:${severityColor}; font-weight:700;">${a.alert_type}</span>
+                        <span style="color:#6b5345; font-size:10px;">${a.created_at ? new Date(a.created_at).toLocaleString() : ''}</span>
+                    </div>
+                    <div style="color:#c9a880; margin-top:4px;">${a.message}</div>
+                    <div style="display:flex; gap:12px; margin-top:4px; font-size:10px; color:#6b5345;">
+                        <span>Accuracy: ${a.accuracy_pct}%</span>
+                        <span>Samples: ${a.sample_count}</span>
+                        <span>Path: ${pathLabel}</span>
+                        <span style="cursor:pointer; color:#c9a24a;" onclick="resolveAlert(${a.id})">[Resolve]</span>
+                    </div>
+                </div>`;
+            }).join('');
+        } catch (e) {
+            container.innerHTML = '<div style="color:#8c4a3a;">Failed to load signal alerts.</div>';
+        }
+    }
+
+    async function resolveAlert(alertId) {
+        try {
+            const r = await fetch(`/api/v1/system/alerts/${alertId}/resolve`, { method: 'POST' });
+            const d = await r.json();
+            if (d.ok) loadSignalAlerts();
+        } catch (e) {
+            console.error('Resolve alert failed:', e);
+        }
+    }
+
+    async function loadSignalWeights() {
+        const container = document.getElementById('signalWeightsContainer');
+        try {
+            const r = await fetch('/api/v1/system/signal-weights');
+            if (!r.ok) throw new Error('Status ' + r.status);
+            const d = await r.json();
+
+            if (!d.weights || !d.weights.length) {
+                container.innerHTML = '<div style="color:#6b5345;">No signal weights yet. Run a flagging tick.</div>';
+                return;
+            }
+
+            container.innerHTML = d.weights.map(w => {
+                const weightColor = w.weight >= 1.0 ? '#5e8c66' : w.weight >= 0.5 ? '#c9a24a' : '#8c4a3a';
+                const quarantineBadge = w.is_quarantined ? '<span style="color:#8c4a3a; font-size:9px; margin-left:6px;">[QUARANTINED]</span>' : '';
+                return `<div style="display:flex; justify-content:space-between; padding:6px 8px; border-bottom:1px solid #2a1e18;">
+                    <span style="color:#c9a880;">${w.signal_name}${w.signal_value ? ': ' + w.signal_value : ''}${quarantineBadge}</span>
+                    <span style="color:${weightColor}; font-weight:700;">${w.weight.toFixed(2)}x</span>
+                </div>`;
+            }).join('');
+        } catch (e) {
+            container.innerHTML = '<div style="color:#8c4a3a;">Failed to load signal weights.</div>';
+        }
+    }
+
+    async function loadAccuracyReport() {
+        const container = document.getElementById('accuracyReportContainer');
+        try {
+            const r = await fetch('/api/v1/system/accuracy-report');
+            if (!r.ok) throw new Error('Status ' + r.status);
+            const d = await r.json();
+
+            if (!d.report || !d.report.report_data) {
+                container.innerHTML = '<div style="color:#6b5345;">No accuracy report yet. Generate one above.</div>';
+                return;
+            }
+
+            const data = d.report.report_data;
+            const overall = data.overall || {};
+            const top5 = data.top_5 || [];
+            const bottom5 = data.bottom_5 || [];
+            const flagged = data.flagged_signals || {};
+
+            let html = `<div style="margin-bottom:8px; color:#c9a880; font-size:11px;">${data.summary || ''}</div>`;
+
+            if (top5.length) {
+                html += '<div style="color:#5e8c66; font-size:10px; font-weight:700; margin-top:8px;">TOP PERFORMERS</div>';
+                html += top5.map(s => `<div style="display:flex; justify-content:space-between; padding:3px 0; font-size:10px;">
+                    <span style="color:#c9a880;">${s.signal_name}${s.signal_value ? ': ' + s.signal_value : ''}</span>
+                    <span style="color:#5e8c66;">${s.accuracy_pct}% (${s.sample_count})</span>
+                </div>`).join('');
+            }
+
+            if (bottom5.length) {
+                html += '<div style="color:#8c4a3a; font-size:10px; font-weight:700; margin-top:8px;">BOTTOM PERFORMERS</div>';
+                html += bottom5.map(s => `<div style="display:flex; justify-content:space-between; padding:3px 0; font-size:10px;">
+                    <span style="color:#c9a880;">${s.signal_name}${s.signal_value ? ': ' + s.signal_value : ''}</span>
+                    <span style="color:#8c4a3a;">${s.accuracy_pct}% (${s.sample_count})</span>
+                </div>`).join('');
+            }
+
+            if (flagged.total_flagged) {
+                html += '<div style="color:#c9a24a; font-size:10px; font-weight:700; margin-top:8px;">FLAGGED FOR REVIEW</div>';
+                html += `<div style="display:flex; justify-content:space-between; font-size:10px; padding:3px 0;">
+                    <span style="color:#c9a880;">${flagged.total_flagged} signals flagged</span>
+                    <span style="color:#8c4a3a;">${flagged.critical || 0} critical</span>
+                    <span style="color:#c9a24a;">${flagged.warnings || 0} warnings</span>
+                </div>`;
+                if (flagged.signals && flagged.signals.length) {
+                    html += `<div style="font-size:10px; color:#6b5345; margin-top:2px;">${flagged.signals.join(', ')}</div>`;
+                }
+            }
+
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = '<div style="color:#8c4a3a;">Failed to load accuracy report.</div>';
+        }
+    }
+
+    async function triggerAccuracyReport() {
+        const container = document.getElementById('accuracyReportContainer');
+        container.innerHTML = '<div style="color:#c9a880;">Generating report…</div>';
+        try {
+            const r = await fetch('/api/v1/system/accuracy-report/trigger', { method: 'POST' });
+            const d = await r.json();
+            if (d.ok) {
+                container.innerHTML = '<div style="color:#5e8c66;">✓ Report generated</div>';
+            } else {
+                container.innerHTML = `<div style="color:#8c4a3a;">✗ ${d.error || 'Failed'}</div>`;
+            }
+        } catch (e) {
+            container.innerHTML = `<div style="color:#8c4a3a;">✗ ${e.message}</div>`;
+        }
+        loadAccuracyReport();
+    }
+
+    async function triggerFlaggingTick() {
+        const result = document.getElementById('flaggingResult');
+        result.textContent = 'Running flagging tick…';
+        result.style.color = '#c9a880';
+        try {
+            const r = await fetch('/api/v1/system/flagging/trigger', { method: 'POST' });
+            const d = await r.json();
+            if (d.ok) {
+                result.innerHTML = `<span style="color:#5e8c66;">✓ ${d.result.alerts_created} alerts, ${d.result.weights_adjusted} weights adjusted</span>`;
+            } else {
+                result.innerHTML = `<span style="color:#8c4a3a;">✗ ${d.error || 'Unknown error'}</span>`;
+            }
+        } catch (e) {
+            result.innerHTML = `<span style="color:#8c4a3a;">✗ Request failed: ${e.message}</span>`;
+        }
+        loadSignalAlerts();
+        loadSignalWeights();
+    }
+
+    // Override initDashboard to also load Phase 2 data
+    const _origInit = initDashboard;
+    initDashboard = function() {
+        if (_origInit) _origInit();
+        loadSignalAlerts();
+        loadSignalWeights();
+        loadAccuracyReport();
+    };
     </script>
 </body>
 </html>
