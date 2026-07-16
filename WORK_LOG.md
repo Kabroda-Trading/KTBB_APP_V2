@@ -183,6 +183,14 @@ No code touched. Two stale gate descriptions caught and flagged (Tier 4) rather 
 ## ► NEXT SESSION START
 *End-of-session marker: 2026-07-15*
 
+**M2 System Diagnostic Command Center — built, deployed, verified live on Render (2026-07-15).** Built 7 admin-only diagnostic API endpoints (`/api/v1/system/state`, `/trades`, `/parameters`, `/errors`, `/analysis`, `/analysis/{id}`, `/analysis/trigger`) in `main.py` and a 5-tab dashboard UI in `suite_dashboard.html`. Fixed Jinja2/Starlette rendering compatibility (forward-compatibility guard). Implemented analysis loop deduping: extracted `_run_analysis_loop_body()` so scheduler and `/trigger` endpoint share identical, DB-derived logic. Fixed `admin_create_user` regression: restored `first_name`/`last_name` collection and added `ALTER TABLE` migration in `database.py`. Verified live: Option 1 (Admin/User mgmt), Option 2 (5-tab Dashboard), and Option 3 (Diagnostic APIs) all confirmed working on production. 83/83 E2E tests passing. commit `09be59d`.
+
+**Post-deploy fix: missing `/api/v1/system/analysis/recent` endpoint (2026-07-15).** Dashboard JS calls `fetch('/api/v1/system/analysis/recent')` on page load but the endpoint was never implemented — returned 404, which took down the entire `Promise.all()` init chain, leaving all 4 non-Overview tabs blank. Added the missing endpoint (queries last 5 `SystemAnalysisReport` rows). commit `0bf6dd8` (pushed, awaiting Render deploy).
+
+**Phase 3 already committed and on `origin/main` ahead of M2 (2026-07-15).** Position Sizing (`position_sizing/position_sizing.py`), Three Drives divergence (`indicators/three_drives.py`), and Exhaustion Monitor (`monitoring/exhaustion_monitor.py`) — all wired into their respective integration points (`gravity_engine.py`, `mtf_confluence_scanner.py`, `krown_system.py`, `ledger_closing_engine.py`). Verified empirically before commit. commit `5f88c7b`.
+
+**Next logical work:** Wire up an alerting/feedback loop so the system surfaces anomalies (win rate drops, error spikes, finding escalations) automatically rather than requiring manual dashboard checks. The `AuditSuggestionLog` table already has the escalation path (`OBSERVATION` → `PROVISIONAL_FINDING` → `OWNER_REVIEW_REQUESTED`) — just needs a mechanism to notify the owner when something escalates.
+
 **External handoff from owner's other agent team (KQAL) — reviewed before committing, found 2 real bugs in the "fixes" themselves, both corrected before shipping (2026-07-15).** Owner relayed a request to review and commit 3 files from a separate agent team's work: `market_context_oracle.py` (claimed fix for a yfinance MultiIndex crash), `performance_auditor.py` (claimed fix for "SHORT sessions silently dropped" from box-size analysis), and a new standalone module `bold-hubble/kqal/timeframe_analyzer.py` (per-timeframe win-rate/stop/target analysis, described as "the feedback loop Kabroda has been missing"). Read all three fully before touching git, same discipline as everything else this project — did not commit on the strength of the description alone.
 
 **Found, reported back, and the other team fixed correctly on the next pass:**
@@ -2190,6 +2198,8 @@ Not a questionable stand-down. Third correct stand-down in the current bear-pull
 - ☑ 2026-06-02 — W-1 MTF Interpreter: DEPLOYED live. commit ae45a71 (built) + a596909 (prompt refinements)
 - ☑ 2026-06-02 — GAP-1/GAP-2: Cockpit authority fix. Gray row border on STAND_DOWN, "STAND DOWN — SYSTEM INACTIVE" in Panel 02, blank trade card verified on screen on stand-down session. commit 8153553
 - ☑ 2026-06-02 — GAP-4 Phase 1: Gravity Interpreter DEPLOYED live — running alongside MTF interpreter as of 2026-06-02. Prompt reviewed and refined (both-directions coverage, decisively probabilistic rule, 6–8 sentences, max_tokens 600). commits 5ebbc2b (build) + 27cd466 (prompt refinements)
+- ☑ 2026-07-15 — **M2 System Diagnostic Command Center**: 7 admin diagnostic API endpoints + 5-tab dashboard UI + analysis loop deduping + `first_name`/`last_name` migration fix. Verified live on Render. commit `09be59d`
+- ☑ 2026-07-15 — **Post-deploy fix**: Added missing `GET /api/v1/system/analysis/recent` endpoint (dashboard JS called it on init, returned 404, took down all 4 non-Overview tabs). commit `0bf6dd8`
 
 ---
 
