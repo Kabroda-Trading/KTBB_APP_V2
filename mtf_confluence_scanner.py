@@ -28,6 +28,9 @@ from market_data import (
 )
 import gravity_math
 
+# Three Drives divergence detection (IMP-005)
+from indicators.three_drives import detect_three_drives
+
 # Revin Suite (R-Squared) imports — from bold-hubble package
 from indicators.revin_ribbons import calculate_revin_ribbons, analyze_ribbon_state
 from indicators.rmo import calculate_rmo, analyze_rmo_state
@@ -486,6 +489,7 @@ def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
         "rwp_state": "NEUTRAL",
         "rwp_squeeze": False,
         "rwp_expansion": False,
+        "three_drives": [],
         "error": "insufficient_data",
     }
 
@@ -525,6 +529,9 @@ def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
     rmo_state = current["rmo_state"]
     rwp_state = current["rwp_state"]
 
+    # ── Three Drives divergence (IMP-005) ───────────────────────────────
+    three_drives_result = detect_three_drives(highs, lows, rsi_series)
+
     return {
         "label": label,
         "ema_bias": ema_bias,
@@ -557,6 +564,7 @@ def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
         "rwp_state": rwp_state.get("state", "NEUTRAL"),
         "rwp_squeeze": rwp_state.get("is_squeeze", False),
         "rwp_expansion": rwp_state.get("is_expansion", False),
+        "three_drives": three_drives_result,
     }
 
 

@@ -9,4 +9,4 @@ description = "Kabroda Bold Hubble — Krown Trading Bible quantitative strategi
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["indicators*", "strategies*", "pipeline*", "kqal*"]
+include = ["indicators*", "strategies*", "pipeline*", "kqal*", "position_sizing*", "monitoring*"]

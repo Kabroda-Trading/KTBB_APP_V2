@@ -20,6 +20,9 @@ import notify
 # Revin Suite (R-Squared) imports — from bold-hubble package
 from indicators.revin_suite_engine import compute_revin_suite
 
+# Position Sizing (IMP-003) — from bold-hubble package
+from position_sizing import calc_position_size
+
 # mtf_confluence_scanner is imported at module level now that the circular
 # import chain (battlebox_pipeline → gravity_engine → mtf_confluence_scanner
 # → battlebox_pipeline) has been broken by extracting the shared data layer
@@ -697,7 +700,11 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], c
             t1=t1_price,
             t2=t2_price,
             t3=t3_price,
-            total_contracts=0.0,
+            total_contracts=calc_position_size(
+                entry_price=round(current_close, 2),
+                stop_price=round(stop_price, 2),
+                atr_value=atr14,
+            ),
             mas_approval_status="4H_CANDIDATE",
             is_canonical=False,
             session_timeframe="4H",
@@ -939,7 +946,11 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
             t1=t1_price,
             t2=t2_price,
             t3=t3_price,
-            total_contracts=0.0,
+            total_contracts=calc_position_size(
+                entry_price=round(current_close, 2),
+                stop_price=round(stop_price, 2),
+                atr_value=atr14,
+            ),
             mas_approval_status="1H_CANDIDATE",
             is_canonical=False,
             session_timeframe="1H",

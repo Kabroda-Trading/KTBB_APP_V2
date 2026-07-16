@@ -10,6 +10,9 @@ from indicators.rmo import calculate_rmo, analyze_rmo_state
 from indicators.rwp import calculate_rwp, analyze_rwp_state
 from indicators.revin_suite_engine import compute_revin_suite
 
+# Three Drives divergence detection (IMP-005)
+from indicators.three_drives import detect_three_drives
+
 from strategies.strategy_1_basic_trend import evaluate_strategy_1
 from strategies.strategy_2_uptrend_pullback_long import evaluate_strategy_2
 from strategies.strategy_3_downtrend_short import evaluate_strategy_3
@@ -93,6 +96,26 @@ def evaluate_market_confluence(high_prices: List[float], low_prices: List[float]
                 res["revin_penalty"] = "rmo_overextended"
             else:
                 res["revin_boost"] = "neutral"
+
+    # ── Three Drives divergence (IMP-005) ────────────────────────────────
+    # Detect 3-drive patterns and adjust strategy confidence accordingly.
+    # A confirmed Three Drives pattern in the same direction as the strategy
+    # bias is a strong alignment signal.
+    three_drives_results = detect_three_drives(high_prices, low_prices, rsi)
+    for name, res in [("Strategy_1_Macro_Trend", s1), ("Strategy_2_Uptrend_Pullback", s2),
+                      ("Strategy_3_Downtrend_Continuation", s3),
+                      ("Strategy_4_Uptrend_Exhaustion_Short", s4),
+                      ("Strategy_5_Downtrend_Vol_Short", s5)]:
+        action = res.get("action", "HOLD")
+        if action in ("BUY", "SELL"):
+            strategy_bias = "BULLISH" if action == "BUY" else "BEARISH"
+            for td in three_drives_results:
+                if td["pattern"] == strategy_bias and td["signal"] == "CONFIRMED":
+                    res["confidence"] = min(res.get("confidence", 0) + 15, 100)
+                    res["three_drives_boost"] = f"td_{td['pattern']}_c{td['confidence']:.0f}"
+                elif td["pattern"] == strategy_bias and td["signal"] == "PENDING":
+                    res["confidence"] = min(res.get("confidence", 0) + 5, 100)
+                    res["three_drives_boost"] = f"td_{td['pattern']}_pending"
     
     strategies_eval = {
         "Strategy_1_Macro_Trend": s1,

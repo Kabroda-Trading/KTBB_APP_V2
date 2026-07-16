@@ -77,6 +77,15 @@ from database import CampaignLog, GravityMemory, SessionLocal
 from session_manager import anchor_ts_for_utc_date, get_session_config
 import notify
 
+# Exhaustion monitor (IMP-006) — in-trade runner exhaustion detection
+from monitoring.exhaustion_monitor import check_exhaustion
+
+# 5m candle cache for exhaustion monitor — refreshed every 5 min per symbol
+# to avoid redundant Kraken calls while giving PMARP/BBWP enough history.
+import market_data
+_exhaustion_5m_cache: dict = {}  # symbol -> {"candles": [...], "refreshed_at": float}
+_EXHAUSTION_CACHE_TTL = 300.0  # 5 minutes
+
 _ticker_exchange = ccxt.mexc({"enableRateLimit": True})
 _ohlc_exchange   = ccxt.kraken({"enableRateLimit": True})
 
@@ -510,6 +519,26 @@ async def run_ledger_audit_loop():
                 if not candles:
                     continue
 
+                # ── Exhaustion check (IMP-006) ─────────────────────────────
+                # Fetch 5m candles with a 5-minute TTL cache to give PMARP/BBWP
+                # enough history (272+ candles) without hammering Kraken.
+                now_ts = datetime.now(timezone.utc).timestamp()
+                cached = _exhaustion_5m_cache.get(c.symbol)
+                if cached and (now_ts - cached["refreshed_at"]) < _EXHAUSTION_CACHE_TTL:
+                    candles_5m = cached["candles"]
+                else:
+                    candles_5m = await market_data.fetch_live_5m(c.symbol, limit=300)
+                    _exhaustion_5m_cache[c.symbol] = {"candles": candles_5m, "refreshed_at": now_ts}
+                exhaustion = check_exhaustion(
+                    candles_5m, candles_5m,
+                    {"entry_price": c.entry_price, "current_stop": c.shadow_runner_stop, "direction": c.bias},
+                )
+                if exhaustion["level"] in ("WARNING", "EXIT"):
+                    print(
+                        f"|| LIFECYCLE P3B || {c.symbol} exhaustion: {exhaustion['level']} "
+                        f"signals={[s['type'] for s in exhaustion['signals']]}"
+                    )
+
                 is_long = c.bias == "LONG"
 
                 for candle in candles:
@@ -683,6 +712,26 @@ async def run_ledger_audit_loop():
                 candles = await _fetch_1m_since(c.symbol, since_ms=since_ms)
                 if not candles:
                     continue
+
+                # ── Exhaustion check (IMP-006) ─────────────────────────────
+                # Fetch 5m candles with a 5-minute TTL cache to give PMARP/BBWP
+                # enough history (272+ candles) without hammering Kraken.
+                now_ts = datetime.now(timezone.utc).timestamp()
+                cached = _exhaustion_5m_cache.get(c.symbol)
+                if cached and (now_ts - cached["refreshed_at"]) < _EXHAUSTION_CACHE_TTL:
+                    candles_5m = cached["candles"]
+                else:
+                    candles_5m = await market_data.fetch_live_5m(c.symbol, limit=300)
+                    _exhaustion_5m_cache[c.symbol] = {"candles": candles_5m, "refreshed_at": now_ts}
+                exhaustion = check_exhaustion(
+                    candles_5m, candles_5m,
+                    {"entry_price": c.entry_price, "current_stop": c.shadow_runner_stop, "direction": c.bias},
+                )
+                if exhaustion["level"] in ("WARNING", "EXIT"):
+                    print(
+                        f"|| LIFECYCLE P4B || {c.symbol} {c.mas_approval_status} exhaustion: {exhaustion['level']} "
+                        f"signals={[s['type'] for s in exhaustion['signals']]}"
+                    )
 
                 is_long = c.bias == "LONG"
                 db_sym = c.symbol.replace("/", "")
