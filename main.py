@@ -2601,6 +2601,36 @@ async def post_system_analysis(request: Request, db: Session = Depends(get_db)):
         }, status_code=500)
 
 
+@app.get("/api/v1/system/analysis/recent")
+async def get_recent_analysis_reports(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+
+    try:
+        reports = db.query(SystemAnalysisReport).order_by(
+            SystemAnalysisReport.id.desc()
+        ).limit(5).all()
+
+        return JSONResponse({
+            "ok": True,
+            "reports": [
+                {
+                    "analysis_id": r.analysis_id,
+                    "query": r.query,
+                    "status": r.status,
+                    "error_message": r.error_message,
+                    "created_at": r.created_at.isoformat() if r.created_at else None
+                }
+                for r in reports
+            ]
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.get("/api/v1/system/analysis/{analysis_id}")
 async def get_system_analysis_by_id(analysis_id: str, request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
