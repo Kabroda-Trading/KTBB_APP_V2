@@ -124,10 +124,13 @@ def generate_weekly_report() -> dict:
             "flagged_signals": flagged_summary,
         }
         
-        # Summary text
+        # Summary text — include N range to prevent misleading unlabeled averages
         summary_parts = []
         if total_signals > 0:
-            summary_parts.append(f"{total_signals} signals tracked, average accuracy {avg_accuracy}%")
+            n_values = [h.get("sample_count", 0) or 0 for h in with_data]
+            n_min = min(n_values) if n_values else 0
+            n_max = max(n_values) if n_values else 0
+            summary_parts.append(f"{total_signals} signals tracked (N range: {n_min}-{n_max}), average accuracy {avg_accuracy}%")
         if improving:
             summary_parts.append(f"{len(improving)} signals improving")
         if decaying:
