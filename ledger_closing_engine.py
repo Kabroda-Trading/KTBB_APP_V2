@@ -281,6 +281,13 @@ async def run_ledger_audit_loop():
     print(">>> TRADE-LIFECYCLE MONITOR: Initializing (W-9 engine, OHLC detection, Phase 4 candidates, Phase 3B shadow runner)...")
 
     while True:
+        # Health monitoring
+        try:
+            from main import scheduler_health_registry as _lhr
+            _lhr["ledger_closing"]["last_run"] = datetime.now(timezone.utc).isoformat()
+            _lhr["ledger_closing"]["status"] = "EXECUTING"
+        except Exception:
+            pass
         now_utc = datetime.now(timezone.utc)
         # Per-cycle price cache — avoids redundant API calls for same symbol (Phase 1/3)
         price_cache: dict = {}

@@ -1018,6 +1018,13 @@ async def run_gravity_ingestion_loop():
     loop_count = 0
     outcome_count = 0
     while True:
+        # Health monitoring
+        try:
+            from main import scheduler_health_registry as _ghr
+            _ghr["gravity_engine"]["last_run"] = datetime.now(timezone.utc).isoformat()
+            _ghr["gravity_engine"]["status"] = "EXECUTING"
+        except Exception:
+            pass
         db = SessionLocal()
         try:
             for symbol in TARGETS:

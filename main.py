@@ -60,6 +60,8 @@ scheduler_health_registry = {
     "signal_accuracy": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "signal_flagging": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "accuracy_report": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
+    "gravity_engine": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
+    "ledger_closing": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
 }
 
 
@@ -998,6 +1000,22 @@ async def home(request: Request, db: Session = Depends(get_db)):
     if ctx["is_logged_in"]:
         return RedirectResponse(url="/suite/radar", status_code=303)
     return RedirectResponse(url="/login", status_code=303)
+
+
+# --- HEALTH ENDPOINT ---
+@app.get("/health")
+async def health():
+    """Render health check — no auth required. Returns trimmed scheduler statuses only."""
+    trimmed = {
+        name: {"last_run": info["last_run"], "status": info["status"]}
+        for name, info in scheduler_health_registry.items()
+    }
+    return {
+        "status": "OK",
+        "schedulers": trimmed,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
 
 # --- SUITE ROUTES ---
 @app.get("/suite")
