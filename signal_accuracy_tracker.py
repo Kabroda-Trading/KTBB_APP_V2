@@ -229,9 +229,15 @@ def _capture_decision_signals(db: Session, since: datetime, current_price: float
 
 def _capture_campaign_signals(db: Session, since: datetime, current_price: float) -> int:
     """Capture macro bias and energy grade signals from campaign_logs (4H/1H candidates)."""
+    # is_canonical=False means "keep out of the 15M production track record" --
+    # it is NOT a 4H/1H marker (it defaults to False and covers any non-canonical
+    # row for any reason). audit_ai.py's _real_btc_row() hit this exact bug on
+    # 2026-07-09 and settled on session_timeframe as the correct filter. macro_bias/
+    # energy_grade are only ever populated on 4H/1H rows anyway, so no is_canonical
+    # check is needed here at all.
     rows = db.query(CampaignLog).filter(
         CampaignLog.created_at >= since,
-        CampaignLog.is_canonical == True,
+        CampaignLog.session_timeframe.in_(["4H", "1H"]),
     ).all()
     
     existing = set()
