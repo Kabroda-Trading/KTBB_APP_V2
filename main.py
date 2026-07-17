@@ -6,7 +6,8 @@ import os
 import json 
 import traceback
 import re
-from typing import Any, Dict, Optional
+import hmac
+from typing import Any, Dict, Optional, Literal
 import asyncio
 from contextlib import asynccontextmanager 
 
@@ -44,7 +45,7 @@ import signal_flagging_engine
 import signal_weight_manager
 import accuracy_report_generator
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalAccuracyLog, SystemAlertLog, SignalHealthLog, SignalWeight, AccuracyReport
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalAccuracyLog, SystemAlertLog, SignalHealthLog, SignalWeight, AccuracyReport, SignalPerformanceLog
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -1508,6 +1509,106 @@ async def api_admin_test_notify(request: Request, db: Session = Depends(get_db))
         "smtp_user_configured": bool(notify.SMTP_USER),
         "smtp_dest_configured": bool(notify.SMTP_DEST),
     })
+
+
+# ==============================================================================
+# SIGNAL PERFORMANCE TRACKER — API ENDPOINT
+# ==============================================================================
+
+class SignalLogRequest(BaseModel):
+    """Validated request body for POST /api/signal/log."""
+    source: Literal["meta_signals", "kabroda_radar"]    # validated at parse time
+    symbol: str                                         # "BTC/USDT" (will be normalized)
+    direction: Literal["LONG", "SHORT"]                 # validated at parse time
+    entry_price: Optional[float] = None
+    stop_price: Optional[float] = None
+    tp1_price: Optional[float] = None
+    tp2_price: Optional[float] = None
+    tp3_price: Optional[float] = None
+    signal_timeframe: Optional[str] = None               # "15M" | "1H" | "4H" | etc.
+    price_action_regime: Optional[str] = None            # TRENDING | RANGING | COMPRESSING | EXPANDING
+    indicator_snapshot: Optional[dict] = None            # Full multi-TF indicator state
+    confluence_score: Optional[int] = None
+    dominant_direction: Optional[str] = None
+    conviction: Optional[str] = None
+    jewel_gate_open: Optional[bool] = None
+    jewel_direction: Optional[str] = None
+    jewel_conviction: Optional[str] = None
+    jewel_summary: Optional[str] = None
+    nearest_support: Optional[float] = None
+    nearest_resistance: Optional[float] = None
+    kabroda_read: Optional[str] = None
+    signal_timestamp: str                               # ISO 8601 datetime string
+
+
+@app.post("/api/signal/log")
+async def log_signal_performance(
+    body: SignalLogRequest,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Log a full signal performance snapshot to the database.
+
+    Auth: X-API-Key header must match SIGNAL_API_KEY env variable.
+    Idempotency: (source, symbol, direction, signal_timestamp) is unique.
+    Symbol is normalized to BTC/USDT format on write.
+    """
+    # --- Auth ---
+    api_key = request.headers.get("X-API-Key", "")
+    expected_key = os.getenv("SIGNAL_API_KEY", "")
+    if not expected_key or not hmac.compare_digest(api_key, expected_key):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+
+    # --- Normalize symbol ---
+    from market_data import _normalize_symbol
+    norm_symbol = _normalize_symbol(body.symbol)
+
+    # --- Parse timestamp ---
+    try:
+        ts = datetime.fromisoformat(body.signal_timestamp)
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid signal_timestamp (use ISO 8601)"}, status_code=400)
+
+    # --- Idempotency check ---
+    existing = db.query(SignalPerformanceLog).filter(
+        SignalPerformanceLog.source == body.source,
+        SignalPerformanceLog.symbol == norm_symbol,
+        SignalPerformanceLog.direction == body.direction,
+        SignalPerformanceLog.signal_timestamp == ts,
+    ).first()
+    if existing:
+        return JSONResponse({"ok": True, "id": existing.id, "duplicate": True})
+
+    # --- Build row ---
+    row = SignalPerformanceLog(
+        source=body.source,
+        symbol=norm_symbol,
+        direction=body.direction,
+        entry_price=body.entry_price,
+        stop_price=body.stop_price,
+        tp1_price=body.tp1_price,
+        tp2_price=body.tp2_price,
+        tp3_price=body.tp3_price,
+        signal_timeframe=body.signal_timeframe,
+        price_action_regime=body.price_action_regime,
+        indicator_snapshot=json.dumps(body.indicator_snapshot) if body.indicator_snapshot else None,
+        confluence_score=body.confluence_score,
+        dominant_direction=body.dominant_direction,
+        conviction=body.conviction,
+        jewel_gate_open=body.jewel_gate_open,
+        jewel_direction=body.jewel_direction,
+        jewel_conviction=body.jewel_conviction,
+        jewel_summary=body.jewel_summary,
+        nearest_support=body.nearest_support,
+        nearest_resistance=body.nearest_resistance,
+        kabroda_read=body.kabroda_read,
+        signal_timestamp=ts,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    return JSONResponse({"ok": True, "id": row.id, "duplicate": False})
 
 
 @app.get("/api/agents/cost")

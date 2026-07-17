@@ -1344,4 +1344,71 @@ class AccuracyReport(Base):
     trending_up = Column(Text, nullable=True)            # JSON: improving signals
     trending_down = Column(Text, nullable=True)          # JSON: decaying signals
     ab_comparison = Column(Text, nullable=True)          # JSON: A/B path comparison
-    summary = Column(String, nullable=True)
+    summary = Column(String, nullable=True)
+
+
+class SignalPerformanceLog(Base):
+    """Full indicator state snapshot at signal time, with outcome tracking.
+
+    One row per signal analyzed. The indicator_snapshot column stores the
+    complete multi-TF indicator state as JSON. Individual columns (confluence_score,
+    jewel_gate_open, etc.) are extracted for queryable analysis.
+
+    Idempotency: (source, symbol, direction, signal_timestamp) is unique.
+    Duplicate POSTs with the same values silently return the existing row.
+    """
+    __tablename__ = "signal_performance_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Signal identity
+    source = Column(String, nullable=False)             # "meta_signals" | "kabroda_radar"
+    symbol = Column(String, nullable=False, index=True) # "BTC/USDT" (normalized)
+    direction = Column(String, nullable=False)          # "LONG" | "SHORT"
+    entry_price = Column(Float, nullable=True)
+    stop_price = Column(Float, nullable=True)
+    tp1_price = Column(Float, nullable=True)
+    tp2_price = Column(Float, nullable=True)
+    tp3_price = Column(Float, nullable=True)
+    signal_timeframe = Column(String, nullable=True)    # "15M" | "1H" | "4H" | etc.
+
+    # Price action regime at signal time
+    price_action_regime = Column(String, nullable=True)  # TRENDING | RANGING | COMPRESSING | EXPANDING
+
+    # Full indicator state (JSON blob — all TFs, all indicators)
+    indicator_snapshot = Column(Text, nullable=True)
+
+    # Composite signals (extracted for queryable analysis)
+    confluence_score = Column(Integer, nullable=True)
+    dominant_direction = Column(String, nullable=True)
+    conviction = Column(String, nullable=True)
+    jewel_gate_open = Column(Boolean, nullable=True)
+    jewel_direction = Column(String, nullable=True)
+    jewel_conviction = Column(String, nullable=True)
+    jewel_summary = Column(String, nullable=True)
+
+    # Gravity (for BTC)
+    nearest_support = Column(Float, nullable=True)
+    nearest_resistance = Column(Float, nullable=True)
+
+    # Kabroda read / analysis text
+    kabroda_read = Column(Text, nullable=True)
+
+    # Outcome (set after the move plays out)
+    outcome_tp1_hit = Column(Boolean, nullable=True)
+    outcome_tp2_hit = Column(Boolean, nullable=True)
+    outcome_tp3_hit = Column(Boolean, nullable=True)
+    outcome_stop_hit = Column(Boolean, nullable=True)
+    outcome_max_favorable_pct = Column(Float, nullable=True)
+    outcome_max_adverse_pct = Column(Float, nullable=True)
+    outcome_price_action = Column(String, nullable=True)  # "UP" | "DOWN" | "SIDEWAYS"
+    outcome_checked_at = Column(DateTime, nullable=True)
+
+    # Post-mortem
+    post_mortem = Column(Text, nullable=True)
+
+    # Timestamps
+    signal_timestamp = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
