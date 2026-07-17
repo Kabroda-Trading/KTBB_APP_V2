@@ -342,6 +342,7 @@ def _build_jewel_reading(candles: List[Dict]) -> Dict:
 
 def _build_synthetic_jewel(raw_15m: List[Dict], adx_4h: Optional[Dict] = None) -> Dict:
     if not raw_15m or len(raw_15m) < 200:
+        print(f"[BBWP DIAG] _build_synthetic_jewel early return: raw_15m len={len(raw_15m) if raw_15m else 0}")
         return {"rsi": 50.0, "kinematic_grade": "TANGLED", "exit_warning": False}
         
     closes = [float(c["close"]) for c in raw_15m]
