@@ -453,6 +453,42 @@ Built and smoke-tested. Not yet deployed. Five files touched, all additive — n
 
 **Status: Phase 1 code complete and smoke-tested locally. Awaiting go-ahead to commit/deploy.**
 
+*(2026-07-18, later: committed as `5f46bb9`, pushed, deployed clean — boot log confirmed all schedulers started, no migration errors.)*
+
+---
+
+## Operating Protocol — How This Actually Gets Used
+
+*Added 2026-07-18 after Andy asked directly: we just built all this tracking — is there a written process for using it, or does this drift and get re-litigated from scratch the next time "let's do an audit" comes up? This section is that answer. It is reference material, not a design discussion — update it if the mechanism changes, don't re-argue it.*
+
+### What already runs on its own (confirmed live, 2026-07-18 boot log)
+
+Nobody has to remember to trigger a review. Two engines already run automatically and write to `audit_suggestion_log`, which the `/admin` page already renders (`recent_suggestions`, latest 9; `latest_daily_digest`):
+
+1. **Weekly** — `harness/audit_runner.py`, Sundays 23:00 UTC. Runs the 15M H1–H6 hypotheses (daily/weekly regime vs. outcome, 4H structural weakness vs. stand-down correctness, etc.), each N-gated through `harness/tier_labels.py`.
+2. **Daily** — `audit_ai.py`, 23:45 UTC. Runs the 4H/1H-focused H7–H10 hypotheses (kinematic/energy grade correlation, macro-bias alignment, shadow-runner comparison, timeframe agreement).
+
+The owner's actual periodic task is: glance at the `/admin` suggestions card. That *is* the check-in. It is not "schedule an audit" — the audit already happened; the question is just whether anything on that card is worth reading closely.
+
+### The escalation rule — this is what stops speculation from being mistaken for a finding
+
+A finding is only worth acting on, or even being presented as "the data says X," once it clears **`PROVISIONAL_FINDING` (N≥50) AND has recurred 3 cycles in a row** (`consecutive_runs_surfaced >= 3` — weekly for H1–H6, daily for H7–H10). Below that bar, a finding still shows up (visible, tracked, honest about its own N) but gets phrased as "early/thin signal, N=_, watching it" — never as a recommendation, never as something to act on. This was already the rule (v1.2, restated in v1.6's authority-cap section) — this paragraph just makes it explicit that it governs *conversation*, not only code: if either CC or DS brings you a pattern below that bar as though it's settled, that's a violation of the same discipline the tier system exists to enforce, not a genuinely new insight.
+
+### "Why did the 15M/1H/4H fire — can we look at it?" — the actual procedure, now that Phase 1 is live
+
+This is the direct answer to the scenario you described. As of today, the procedure is:
+
+1. Pull the `decision_log` row for that symbol/date/timeframe. It carries `campaign_log_id`/`session_audit_log_id` back to the full original record.
+2. Pull every `decision_gauge_reading` row for that `decision_id` — the complete, itemized gauge panel at the exact moment of the decision, one row per indicator, sourced from real code fields (see v1.6's mapping), not reconstructed from memory.
+3. Cross-reference `mas_executive_brief`/`structure_reasoning` (15M) or `htf_anchor_type`/`htf_anchor_price`/`macro_bias`/`kinematic_grade` (4H/1H) for the narrative reasoning that went with those numbers.
+4. That's the answer — a specific, cited, row-by-row reconstruction. Not a fresh Render-log grep, not "I think it's probably X based on how the system usually behaves."
+
+**Standing rule for both CC and DS:** a "why did this happen" question gets answered by querying the tracked record and citing what it actually contains, not by speculating from general knowledge of the system or improvising a new investigation each time. If the tracked data genuinely doesn't have the answer, that absence *is* the finding — log it as a real gap (the same way v1.4/v1.6 logged gaps in the design itself) rather than filling it with a guess dressed up as an answer.
+
+### What Phase 2/3 change here (so this section doesn't quietly go stale)
+
+Phase 2 (next ~2 weeks) is cross-checking the new tables against the old ones — this protocol doesn't change. Phase 3 (months out, gated on real `VALIDATED_EDGE` findings) is when the daily/weekly engines start surfacing *calibration* recommendations instead of just observational ones — the escalation rule above already describes that terminal state (system recommends via `audit_suggestion_log`, owner decides, nothing auto-applies). Nothing here needs rewriting when that happens; it already accounts for it.
+
 ---
 
 ## Change Log
@@ -467,3 +503,4 @@ Built and smoke-tested. Not yet deployed. Five files touched, all additive — n
 | 2026-07-18 | Antigravity | Closing responses — all three gaps resolved, design final, ready to build |
 | 2026-07-18 | CC | Pre-build verification — corrected 1H window (200 not 50), split the gauge mapping table by timeframe (energy_grade/confluence_score/dominant_direction/macro_bias are 4H/1H-only, not 15M), found and resolved the 4-value `approval_status` gap, sourced `atr_pct_at_decision` per timeframe. Starting Phase 1 build. |
 | 2026-07-18 | CC | Phase 1 build complete — 3 new tables, candle_history upsert hook, shared decision_log/decision_gauge_reading writer, wired into 15M + both 4H/1H detectors (trade and all 3 stand-down branches). Compiled, pyflakes-clean, smoke-tested against a throwaway DB. Not yet committed/deployed. |
+| 2026-07-18 | CC | Committed (`5f46bb9`), pushed, deployed clean. Added "Operating Protocol" section answering Andy's question: what already runs automatically, the escalation rule that stops thin findings from being treated as conclusions, and the concrete "why did X fire" lookup procedure now that decision_log/decision_gauge_reading are live. |
