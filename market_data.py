@@ -34,13 +34,65 @@ def _normalize_symbol(symbol: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# CANDLE_HISTORY PERSISTENCE — best-effort upsert, never blocks a live fetch
+# See UNIFIED_AUDIT_SYSTEM_PLAN.md Phase 1. Imports `database` lazily (not at
+# module level) so this module's own "zero dependency on other root-level
+# modules" guarantee (see header) still holds for the normal import graph —
+# database.py has no dependency back on market_data.py, so this is safe, but
+# keeping it a runtime import avoids widening this module's blast radius.
+# ---------------------------------------------------------------------------
+def _persist_candles(symbol: str, timeframe: str, rows: List[Dict[str, Any]]) -> None:
+    if not rows:
+        return
+    try:
+        import datetime as _dt
+        from database import SessionLocal, CandleHistory
+
+        timestamps = [_dt.datetime.utcfromtimestamp(r["time"]) for r in rows]
+        db = SessionLocal()
+        try:
+            existing = (
+                db.query(CandleHistory.timestamp)
+                .filter(
+                    CandleHistory.symbol == symbol,
+                    CandleHistory.timeframe == timeframe,
+                    CandleHistory.timestamp >= min(timestamps),
+                    CandleHistory.timestamp <= max(timestamps),
+                )
+                .all()
+            )
+            existing_ts = {t for (t,) in existing}
+            new_rows = [
+                CandleHistory(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    timestamp=ts,
+                    open=r["open"],
+                    high=r["high"],
+                    low=r["low"],
+                    close=r["close"],
+                    volume=r["volume"],
+                )
+                for r, ts in zip(rows, timestamps)
+                if ts not in existing_ts
+            ]
+            if new_rows:
+                db.bulk_save_objects(new_rows)
+                db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[CANDLE_HISTORY] persist failed ({timeframe} {symbol}): {e}")
+
+
+# ---------------------------------------------------------------------------
 # LIVE OHLCV FETCHERS — one per timeframe, all using _exchange_live
 # ---------------------------------------------------------------------------
 async def fetch_live_5m(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
     s = _normalize_symbol(symbol)
     try:
         rows = await _exchange_live.fetch_ohlcv(s, "5m", limit=limit)
-        return [
+        result = [
             {
                 "time": int(r[0] / 1000),
                 "open": float(r[1]),
@@ -51,6 +103,8 @@ async def fetch_live_5m(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
             }
             for r in rows
         ]
+        _persist_candles(s, "5M", result)
+        return result
     except Exception:
         return []
 
@@ -59,7 +113,7 @@ async def fetch_live_15m(symbol: str, limit: int = 300) -> List[Dict[str, Any]]:
     s = _normalize_symbol(symbol)
     try:
         rows = await _exchange_live.fetch_ohlcv(s, "15m", limit=limit)
-        return [
+        result = [
             {
                 "time": int(r[0] / 1000),
                 "open": float(r[1]),
@@ -70,6 +124,8 @@ async def fetch_live_15m(symbol: str, limit: int = 300) -> List[Dict[str, Any]]:
             }
             for r in rows
         ]
+        _persist_candles(s, "15M", result)
+        return result
     except Exception:
         return []
 
@@ -78,7 +134,7 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
     s = _normalize_symbol(symbol)
     try:
         rows = await _exchange_live.fetch_ohlcv(s, "1h", limit=limit)
-        return [
+        result = [
             {
                 "time": int(r[0] / 1000),
                 "open": float(r[1]),
@@ -89,6 +145,8 @@ async def fetch_live_1h(symbol: str, limit: int = 720) -> List[Dict[str, Any]]:
             }
             for r in rows
         ]
+        _persist_candles(s, "1H", result)
+        return result
     except Exception:
         return []
 
@@ -97,7 +155,7 @@ async def fetch_live_4h(symbol: str, limit: int = 200) -> List[Dict[str, Any]]:
     s = _normalize_symbol(symbol)
     try:
         rows = await _exchange_live.fetch_ohlcv(s, "4h", limit=limit)
-        return [
+        result = [
             {
                 "time": int(r[0] / 1000),
                 "open": float(r[1]),
@@ -108,6 +166,8 @@ async def fetch_live_4h(symbol: str, limit: int = 200) -> List[Dict[str, Any]]:
             }
             for r in rows
         ]
+        _persist_candles(s, "4H", result)
+        return result
     except Exception:
         return []
 
@@ -116,7 +176,7 @@ async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]
     s = _normalize_symbol(symbol)
     try:
         rows = await _exchange_live.fetch_ohlcv(s, "1d", limit=limit)
-        return [
+        result = [
             {
                 "time": int(r[0] / 1000),
                 "open": float(r[1]),
@@ -127,6 +187,8 @@ async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]
             }
             for r in rows
         ]
+        _persist_candles(s, "1D", result)
+        return result
     except Exception:
         return []
 

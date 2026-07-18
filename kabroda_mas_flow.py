@@ -12,7 +12,7 @@
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional, Tuple
 
 import pytz
@@ -1439,6 +1439,102 @@ def run_mas_analysis(
     except Exception as _audit_err:
         print(f"[AUDIT WRITER] Non-critical failure — MAS unaffected: {_audit_err}")
         print(f"[HEARTBEAT] session_audit_log: NO — write path threw ({type(_audit_err).__name__}: {_audit_err})")
+
+    # 7b. Unified Audit System dual-write (Phase 1, additive-only). See
+    # UNIFIED_AUDIT_SYSTEM_PLAN.md v1.6 for the decision_type mapping and the
+    # gauge source list — every value below is copied from the exact same
+    # already-verified extraction the step-7 _write_audit() call above uses,
+    # not re-derived, to avoid inventing a second, possibly-wrong source path.
+    # Non-blocking: any failure here must never affect the MAS decision path.
+    try:
+        from harness.unified_audit_writer import write_decision_log, gauge as _g
+        from database import SessionAuditLog as _SAL
+
+        # approval_status has 4 real values; WAITING_FOR_15M means "not yet
+        # evaluated" and is excluded entirely (same treatment as 4H/1H's
+        # INSUFFICIENT_CANDLES) — see v1.6.
+        _decision_type_map = {
+            "APPROVED": ("TRADE", None),
+            "STAND_DOWN": ("STAND_DOWN", None),
+            "REJECTED": ("STAND_DOWN", "CRO_REJECTED"),
+        }
+        _mapped = _decision_type_map.get(brief.approval_status)
+        if _mapped is not None:
+            _decision_type, _sd_reason = _mapped
+            _decided_at = datetime.now(timezone.utc)
+
+            _campaign_log_id = None
+            _session_audit_log_id = None
+            _lu_db = SessionLocal()
+            try:
+                _cl_row = (
+                    _lu_db.query(CampaignLog)
+                    .filter(CampaignLog.symbol == symbol, CampaignLog.session_id == session_id, CampaignLog.date_key == date_key)
+                    .first()
+                )
+                _campaign_log_id = _cl_row.id if _cl_row else None
+                _sal_row = (
+                    _lu_db.query(_SAL)
+                    .filter(_SAL.symbol == symbol, _SAL.session_id == session_id, _SAL.date_key == date_key)
+                    .first()
+                )
+                _session_audit_log_id = _sal_row.id if _sal_row else None
+            finally:
+                _lu_db.close()
+
+            _15m_jewel = _fuel.get("15M_JEWEL", {})
+            _gauges = [g for g in [
+                _g("15M", "energy_status", context.get("1h_fuel_status")),
+                _g("15M", "kinematic_grade", _15m_jewel.get("kinematic_grade")),
+                _g("15M", "bbwp", _15m_jewel.get("bbwp")),
+                _g("15M", "bbwp_state", _15m_jewel.get("bbwp_state")),
+                _g("15M", "pmarp", _15m_jewel.get("pmarp")),
+                _g("15M", "pmarp_state", _15m_jewel.get("pmarp_state")),
+                _g("15M", "rsi_divergence_type", "NONE"),
+                _g("1H", "trend", _tf1h.get("trend")),
+                _g("1H", "rsi", _tf1h.get("rsi")),
+                _g("1H", "adx_strength", _adx_label(_j1h)),
+                _g("4H", "trend", _tf4h.get("trend")),
+                _g("4H", "rsi", _tf4h.get("rsi")),
+                _g("4H", "adx_strength", _adx_label(_j4h)),
+                _g("4H", "macd_hist", _tf4h.get("macd_hist")),
+                _g("Daily", "daily_21ema_direction", _mtf.get("daily_21ema_direction")),
+                _g("Daily", "daily_200sma_position", _mtf.get("daily_200sma_position")),
+                _g("Weekly", "weekly_200sma_position", _mtf.get("weekly_200sma_position")),
+            ] if g]
+
+            _atr_val = levels.get("atr")
+            write_decision_log(
+                symbol=symbol,
+                decision_timeframe="15M",
+                decision_type=_decision_type,
+                date_key=date_key,
+                decided_at=_decided_at,
+                session_id=session_id,
+                bias=brief.bias,
+                entry_price=brief.entry_price,
+                stop_loss=brief.stop_loss,
+                t1=brief.t1,
+                t2=brief.t2,
+                t3=brief.t3,
+                atr_pct_at_decision=(
+                    round(float(_atr_val) / float(brief.entry_price) * 100.0, 4)
+                    if _atr_val and brief.entry_price else None
+                ),
+                # STAND_DOWN/TRADE window: the 30-min calibration window that
+                # produced the SSOT triggers this decision was locked from
+                # (CLAUDE.md: exactly 1800s from anchor_time to lock). TRADE
+                # rows get backfilled with their real lifetime at close in a
+                # later phase.
+                candle_window_start=_decided_at - timedelta(minutes=30),
+                candle_window_end=_decided_at,
+                stand_down_reason=_sd_reason,
+                campaign_log_id=_campaign_log_id,
+                session_audit_log_id=_session_audit_log_id,
+                gauge_readings=_gauges,
+            )
+    except Exception as _unified_audit_err:
+        print(f"[UNIFIED AUDIT] Non-critical failure — MAS unaffected: {_unified_audit_err}")
 
     # 8. Content Publishing Engine — non-fatal, same thread, isolated try/except
     try:

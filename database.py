@@ -1,5 +1,5 @@
 # database.py
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, text
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, text, UniqueConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
 import os
@@ -1411,4 +1411,111 @@ class SignalPerformanceLog(Base):
     signal_timestamp = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
+# UNIFIED AUDIT SYSTEM (2026-07-18) -- Phase 1
+# candle_history / decision_log / decision_gauge_reading
+#
+# Full design history in UNIFIED_AUDIT_SYSTEM_PLAN.md (v1.0-v1.6). Dual-write:
+# these tables are additive and run alongside session_audit_log/campaign_logs,
+# which remain the source of truth until Phase 3. Nothing here changes any
+# live behavior -- write-only, no code anywhere reads these tables to gate
+# a decision. New tables, no ALTER TABLE migration needed.
+#
+# Soft FKs only (campaign_log_id, session_audit_log_id, decision_id) --
+# no ORM relationship declared, matching SessionAuditLog's own established
+# convention in this file.
+# ---------------------------------------------------------
+class CandleHistory(Base):
+    """Every candle the system actually fetched, persisted for replay/audit.
+    Upsert hook lives in market_data.py's fetch_live_* functions. Retention:
+    keep forever -- BTC-only, ~35k rows/year even at 15M granularity (see
+    UNIFIED_AUDIT_SYSTEM_PLAN.md v1.1 Q4)."""
+    __tablename__ = "candle_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, nullable=False, index=True)       # "BTC/USDT"
+    timeframe = Column(String, nullable=False, index=True)    # "5M"/"15M"/"1H"/"4H"/"1D"
+    timestamp = Column(DateTime, nullable=False, index=True)  # candle open time, UTC
+    open = Column(Float, nullable=True)
+    high = Column(Float, nullable=True)
+    low = Column(Float, nullable=True)
+    close = Column(Float, nullable=True)
+    volume = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("symbol", "timeframe", "timestamp", name="uq_candle_history_symbol_tf_ts"),
+    )
+
+
+class DecisionLog(Base):
+    """One row per decision across 15M/1H/4H -- TRADE or STAND_DOWN. See
+    UNIFIED_AUDIT_SYSTEM_PLAN.md v1.6 for the decision_type mapping per
+    timeframe (15M's approval_status has 4 real values, not 2 -- APPROVED /
+    STAND_DOWN / REJECTED / WAITING_FOR_15M; WAITING_FOR_15M is excluded
+    entirely, REJECTED maps to STAND_DOWN with stand_down_reason=CRO_REJECTED)."""
+    __tablename__ = "decision_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, nullable=False, index=True)
+    decision_timeframe = Column(String, nullable=False, index=True)  # "15M"/"1H"/"4H"
+    decision_type = Column(String, nullable=False, index=True)       # "TRADE"/"STAND_DOWN"
+    session_id = Column(String, nullable=True)
+    date_key = Column(String, nullable=False, index=True)
+    decided_at = Column(DateTime, nullable=False)
+
+    bias = Column(String, nullable=True)
+    entry_price = Column(Float, nullable=True)
+    stop_loss = Column(Float, nullable=True)
+    t1 = Column(Float, nullable=True)
+    t2 = Column(Float, nullable=True)
+    t3 = Column(Float, nullable=True)
+    stop_distance_pct = Column(Float, nullable=True)      # computed at write time
+    target_distance_pct = Column(Float, nullable=True)    # computed at write time
+    atr_pct_at_decision = Column(Float, nullable=True)    # NULL on 15M for now -- see v1.6
+
+    outcome_status = Column(String, nullable=True)   # backfilled at resolution, mirrors campaign_logs.status /
+                                                       # session_audit_log.outcome_type vocabulary per timeframe
+    realized_r = Column(Float, nullable=True)
+
+    # STAND_DOWN: fixed lookback = the raw candle range the detector evaluated
+    # (4H: 50x4h, 1H: 200x1h, 15M: session_open->lock_time). TRADE: the trade's
+    # own lifetime, backfilled at close. See v1.6 for the corrected 1H number.
+    candle_window_start = Column(DateTime, nullable=True)
+    candle_window_end = Column(DateTime, nullable=True)
+
+    # NO_ZONES / NO_BOS / MACRO_BIAS_CONFLICT (4H/1H, code-verified branches) or
+    # CRO_REJECTED (15M only). NULL for 15M's own STAND_DOWN verdict -- that
+    # reasoning is LLM-authored prose (mas_executive_brief), not a coded branch.
+    stand_down_reason = Column(String, nullable=True)
+
+    # Soft FKs back to the still-authoritative source row this was dual-written from.
+    campaign_log_id = Column(Integer, nullable=True)
+    session_audit_log_id = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class DecisionGaugeReading(Base):
+    """One row per (decision, timeframe, gauge) -- normalized, so a new
+    indicator is a new row, never a schema migration. gauge_name reuses the
+    exact source field names already established in the codebase (see
+    UNIFIED_AUDIT_SYSTEM_PLAN.md v1.6's mapping table) -- 15M and 4H/1H each
+    have their own distinct gauge set and are NEVER coalesced under a shared
+    name unless the underlying computation really is identical (kinematic_grade,
+    weekly_200sma_position are the only two that are)."""
+    __tablename__ = "decision_gauge_reading"
+
+    id = Column(Integer, primary_key=True, index=True)
+    decision_id = Column(Integer, nullable=False, index=True)  # soft FK -> decision_log.id
+    timeframe = Column(String, nullable=False)      # "15M"/"1H"/"4H"/"Daily"/"Weekly"
+    gauge_name = Column(String, nullable=False, index=True)
+    value_numeric = Column(Float, nullable=True)
+    value_label = Column(String, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("decision_id", "timeframe", "gauge_name", name="uq_decision_gauge_reading"),
+    )
 

@@ -554,6 +554,8 @@ STOP_WINDOW_4H = timedelta(days=5)
 
 
 def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], candles_1d: List[Dict[str, Any]], db, confluence: Optional[Dict[str, Any]] = None) -> None:
+    from harness.unified_audit_writer import write_decision_log as _wdl, gauge as _dg
+
     try:
         if not candles_4h or len(candles_4h) < 14:
             return
@@ -603,6 +605,20 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], c
         )
 
         if not supply_zone and not demand_zone:
+            try:
+                _wdl(
+                    symbol=symbol,
+                    decision_timeframe="4H",
+                    decision_type="STAND_DOWN",
+                    date_key=date_key,
+                    decided_at=now,
+                    session_id="4h_system",
+                    stand_down_reason="NO_ZONES",
+                    candle_window_start=now - timedelta(hours=4 * 50),
+                    candle_window_end=now,
+                )
+            except Exception as _ua_err:
+                print(f"[UNIFIED AUDIT] 4H NO_ZONES write failed: {_ua_err}")
             return
 
         atr14 = _calc_atr(candles_4h, 14)
@@ -690,6 +706,28 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], c
             t3_price = round(current_close - leg * 2.618, 2)
 
         if not bias:
+            try:
+                _wdl(
+                    symbol=symbol,
+                    decision_timeframe="4H",
+                    decision_type="STAND_DOWN",
+                    date_key=date_key,
+                    decided_at=now,
+                    session_id="4h_system",
+                    stand_down_reason="NO_BOS",
+                    atr_pct_at_decision=(round(atr14 / current_close * 100.0, 4) if atr14 and current_close else None),
+                    candle_window_start=now - timedelta(hours=4 * 50),
+                    candle_window_end=now,
+                    gauge_readings=[g for g in [
+                        _dg("4H", "kinematic_grade", kinematic_grade),
+                        _dg("4H", "macro_bias", macro_bias),
+                        _dg("4H", "weekly_200sma_position", weekly_200sma_position),
+                        _dg("4H", "dominant_direction", conf_dominant_direction),
+                        _dg("4H", "confluence_score", conf_score),
+                    ] if g],
+                )
+            except Exception as _ua_err:
+                print(f"[UNIFIED AUDIT] 4H NO_BOS write failed: {_ua_err}")
             return
 
         # Revin Suite: extract from the candidate's own timeframe (4H)
@@ -735,6 +773,41 @@ def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], c
         )
         db.add(row)
         db.commit()
+
+        try:
+            _wdl(
+                symbol=symbol,
+                decision_timeframe="4H",
+                decision_type="TRADE",
+                date_key=date_key,
+                decided_at=now,
+                session_id="4h_system",
+                bias=bias,
+                entry_price=round(current_close, 2),
+                stop_loss=round(stop_price, 2),
+                t1=t1_price,
+                t2=t2_price,
+                t3=t3_price,
+                atr_pct_at_decision=(round(atr14 / current_close * 100.0, 4) if atr14 and current_close else None),
+                candle_window_start=now - timedelta(hours=4 * 50),
+                candle_window_end=now,
+                campaign_log_id=row.id,
+                gauge_readings=[g for g in [
+                    _dg("4H", "energy_grade", energy_grade),
+                    _dg("4H", "kinematic_grade", kinematic_grade),
+                    _dg("4H", "macro_bias", macro_bias),
+                    _dg("4H", "weekly_200sma_position", weekly_200sma_position),
+                    _dg("4H", "dominant_direction", conf_dominant_direction),
+                    _dg("4H", "confluence_score", conf_score),
+                    _dg("4H", "htf_anchor_type", htf_anchor_type),
+                    _dg("4H", "revin_ribbon_zone", revin_4h["revin_ribbon_zone"]),
+                    _dg("4H", "rmo_state", revin_4h["rmo_state"]),
+                    _dg("4H", "rwp_squeeze", revin_4h["rwp_squeeze"]),
+                ] if g],
+            )
+        except Exception as _ua_err:
+            print(f"[UNIFIED AUDIT] 4H TRADE write failed: {_ua_err}")
+
         flag = " [TARGET_TOO_SMALL]" if target_too_small else ""
         print(
             f"|| 4H BOS v4 || {symbol} | {bias} | Entry: ${current_close:.2f} "
@@ -781,6 +854,8 @@ STOP_WINDOW_1H = timedelta(days=2)
 
 
 def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]], candles_1d: List[Dict[str, Any]], db, confluence: Optional[Dict[str, Any]] = None) -> None:
+    from harness.unified_audit_writer import write_decision_log as _wdl, gauge as _dg
+
     try:
         if not candles_1h or len(candles_1h) < 14:
             return
@@ -830,6 +905,20 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
         )
 
         if not supply_zone and not demand_zone:
+            try:
+                _wdl(
+                    symbol=symbol,
+                    decision_timeframe="1H",
+                    decision_type="STAND_DOWN",
+                    date_key=date_key,
+                    decided_at=now,
+                    session_id="1h_system",
+                    stand_down_reason="NO_ZONES",
+                    candle_window_start=now - timedelta(hours=200),
+                    candle_window_end=now,
+                )
+            except Exception as _ua_err:
+                print(f"[UNIFIED AUDIT] 1H NO_ZONES write failed: {_ua_err}")
             return
 
         atr14 = _calc_atr(candles_1h, 14)
@@ -919,6 +1008,24 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
             t3_price = round(current_close - leg * 2.618, 2)
 
         if not bias:
+            try:
+                _wdl(
+                    symbol=symbol,
+                    decision_timeframe="1H",
+                    decision_type="STAND_DOWN",
+                    date_key=date_key,
+                    decided_at=now,
+                    session_id="1h_system",
+                    stand_down_reason="NO_BOS",
+                    atr_pct_at_decision=(round(atr14 / current_close * 100.0, 4) if atr14 and current_close else None),
+                    candle_window_start=now - timedelta(hours=200),
+                    candle_window_end=now,
+                    gauge_readings=[g for g in [
+                        _dg("1H", "kinematic_grade", kinematic_grade),
+                    ] if g],
+                )
+            except Exception as _ua_err:
+                print(f"[UNIFIED AUDIT] 1H NO_BOS write failed: {_ua_err}")
             return
 
         # HARD GATE (1H only, 2026-07-06): reject candidates counter to the daily
@@ -930,6 +1037,28 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
         macro_bias = _compute_macro_bias(candles_1d)
         weekly_200sma_position = _compute_weekly_200sma_position(symbol, current_close)
         if (bias == "LONG" and macro_bias == "BEARISH") or (bias == "SHORT" and macro_bias == "BULLISH"):
+            try:
+                _wdl(
+                    symbol=symbol,
+                    decision_timeframe="1H",
+                    decision_type="STAND_DOWN",
+                    date_key=date_key,
+                    decided_at=now,
+                    session_id="1h_system",
+                    stand_down_reason="MACRO_BIAS_CONFLICT",
+                    bias=bias,
+                    atr_pct_at_decision=(round(atr14 / current_close * 100.0, 4) if atr14 and current_close else None),
+                    candle_window_start=now - timedelta(hours=200),
+                    candle_window_end=now,
+                    gauge_readings=[g for g in [
+                        _dg("1H", "energy_grade", energy_grade_1h),
+                        _dg("1H", "kinematic_grade", kinematic_grade),
+                        _dg("1H", "macro_bias", macro_bias),
+                        _dg("1H", "weekly_200sma_position", weekly_200sma_position),
+                    ] if g],
+                )
+            except Exception as _ua_err:
+                print(f"[UNIFIED AUDIT] 1H MACRO_BIAS_CONFLICT write failed: {_ua_err}")
             return
 
         # confluence: live 5-TF read from mtf_confluence_scanner, fetched once per loop tick
@@ -981,6 +1110,41 @@ def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], c
         )
         db.add(row)
         db.commit()
+
+        try:
+            _wdl(
+                symbol=symbol,
+                decision_timeframe="1H",
+                decision_type="TRADE",
+                date_key=date_key,
+                decided_at=now,
+                session_id="1h_system",
+                bias=bias,
+                entry_price=round(current_close, 2),
+                stop_loss=round(stop_price, 2),
+                t1=t1_price,
+                t2=t2_price,
+                t3=t3_price,
+                atr_pct_at_decision=(round(atr14 / current_close * 100.0, 4) if atr14 and current_close else None),
+                candle_window_start=now - timedelta(hours=200),
+                candle_window_end=now,
+                campaign_log_id=row.id,
+                gauge_readings=[g for g in [
+                    _dg("1H", "energy_grade", energy_grade_1h),
+                    _dg("1H", "kinematic_grade", kinematic_grade),
+                    _dg("1H", "macro_bias", macro_bias),
+                    _dg("1H", "weekly_200sma_position", weekly_200sma_position),
+                    _dg("1H", "dominant_direction", conf_dominant_direction),
+                    _dg("1H", "confluence_score", conf_score),
+                    _dg("1H", "htf_anchor_type", htf_anchor_type),
+                    _dg("1H", "revin_ribbon_zone", revin_1h["revin_ribbon_zone"]),
+                    _dg("1H", "rmo_state", revin_1h["rmo_state"]),
+                    _dg("1H", "rwp_squeeze", revin_1h["rwp_squeeze"]),
+                ] if g],
+            )
+        except Exception as _ua_err:
+            print(f"[UNIFIED AUDIT] 1H TRADE write failed: {_ua_err}")
+
         flag = " [TARGET_TOO_SMALL]" if target_too_small else ""
         print(
             f"|| 1H BOS v4 || {symbol} | {bias} | Entry: ${current_close:.2f} "
