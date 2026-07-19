@@ -330,6 +330,11 @@ async def run_ledger_audit_loop():
                         )
                     except Exception as _ae:
                         print(f"[AUDIT BACKFILL] Non-critical failure: {_ae}")
+                    try:
+                        from harness.unified_audit_writer import backfill_decision_outcome as _dl_backfill
+                        _dl_backfill(campaign_log_id=c.id, outcome_status="NO_TRIGGER", realized_r=None)
+                    except Exception as _ae:
+                        print(f"[UNIFIED AUDIT BACKFILL] Non-critical failure: {_ae}")
                     print(f"|| LIFECYCLE P1 || {c.symbol} EXPIRED — session closed, entry never triggered.")
                     continue
 
@@ -429,6 +434,11 @@ async def run_ledger_audit_loop():
                         )
                     except Exception as _ae:
                         print(f"[AUDIT BACKFILL] Non-critical failure: {_ae}")
+                    try:
+                        from harness.unified_audit_writer import backfill_decision_outcome as _dl_backfill
+                        _dl_backfill(campaign_log_id=c.id, outcome_status=c.status, realized_r=c.realized_pnl)
+                    except Exception as _ae:
+                        print(f"[UNIFIED AUDIT BACKFILL] Non-critical failure: {_ae}")
                     continue
 
                 # No stop/T1 hit yet — update T2/T3 high-water marks from
@@ -463,6 +473,11 @@ async def run_ledger_audit_loop():
                         )
                     except Exception as _ae:
                         print(f"[AUDIT BACKFILL] Non-critical failure: {_ae}")
+                    try:
+                        from harness.unified_audit_writer import backfill_decision_outcome as _dl_backfill
+                        _dl_backfill(campaign_log_id=c.id, outcome_status="CLOSED_AT_EXPIRY", realized_r=frac_r)
+                    except Exception as _ae:
+                        print(f"[UNIFIED AUDIT BACKFILL] Non-critical failure: {_ae}")
                     print(f"|| LIFECYCLE P2 || {c.symbol} CLOSED_AT_EXPIRY (next session open). R={frac_r:+.4f}.")
                     continue
 
@@ -625,6 +640,11 @@ async def run_ledger_audit_loop():
                         c.closed_at = now_utc
                         c.realized_pnl = None
                         db.commit()
+                        try:
+                            from harness.unified_audit_writer import backfill_decision_outcome as _dl_backfill
+                            _dl_backfill(campaign_log_id=c.id, outcome_status="NO_TRIGGER", realized_r=None)
+                        except Exception as _ae:
+                            print(f"[UNIFIED AUDIT BACKFILL] Non-critical failure: {_ae}")
                         print(f"|| LIFECYCLE P4 || {c.symbol} {c.mas_approval_status} EXPIRED (no candles).")
                         _notify_candidate_closed(c)
                     continue
@@ -669,6 +689,11 @@ async def run_ledger_audit_loop():
 
                 if closed:
                     db.commit()
+                    try:
+                        from harness.unified_audit_writer import backfill_decision_outcome as _dl_backfill
+                        _dl_backfill(campaign_log_id=c.id, outcome_status=c.status, realized_r=c.realized_pnl)
+                    except Exception as _ae:
+                        print(f"[UNIFIED AUDIT BACKFILL] Non-critical failure: {_ae}")
                     _notify_candidate_closed(c)
                     continue
 
@@ -688,6 +713,11 @@ async def run_ledger_audit_loop():
                     c.target_hit   = "EXPIRY"
                     c.closed_at    = now_utc
                     db.commit()
+                    try:
+                        from harness.unified_audit_writer import backfill_decision_outcome as _dl_backfill
+                        _dl_backfill(campaign_log_id=c.id, outcome_status="CLOSED_AT_EXPIRY", realized_r=frac_r)
+                    except Exception as _ae:
+                        print(f"[UNIFIED AUDIT BACKFILL] Non-critical failure: {_ae}")
                     print(f"|| LIFECYCLE P4 || {c.symbol} {c.mas_approval_status} CLOSED_AT_EXPIRY. R={frac_r:+.4f}.")
                     _notify_candidate_closed(c)
                     continue

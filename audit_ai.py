@@ -42,9 +42,10 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, or_
 
-from database import SessionLocal, CampaignLog, AuditSuggestionLog
+from database import SessionLocal, CampaignLog, AuditSuggestionLog, DecisionLog
 from harness.tier_labels import tier_label
 from harness.binomial_checkpoint import run_checkpoint
+from harness.timeframe_calibration import get_calibration
 
 
 def _safe_json(raw: Optional[str]) -> Any:
@@ -356,15 +357,215 @@ def _check_tf_agreement(db) -> None:
                         date_range=f"through {datetime.utcnow().date()}")
 
 
+# ==============================================================================
+# SECTION 3 — H11-H16: decision_log/decision_gauge_reading CALIBRATION CHECKS
+# (2026-07-19, from CC_HANDOFF.md's DS exchange). These need ZERO outcome
+# data -- they run against decision_log's own fields (stop_distance_pct,
+# target_distance_pct, atr_pct_at_decision, decision_type, stand_down_reason),
+# which are populated on every decision, TRADE or STAND_DOWN, the moment it's
+# written. Distinct in kind from H7-H10/H17-H26 (win-rate-vs-gauge
+# correlations, which need outcome backfill first) -- these are structural
+# calibration/distribution checks on the decision record itself.
+#
+# H11-H14 use harness.timeframe_calibration's externally-sourced thresholds
+# as a starting hypothesis to log and watch (tier-gated) -- NOT an
+# enforcement gate. H15/H16 are pure distribution reports (no win/loss
+# concept), so they skip binomial_checkpoint like H9 does.
+# ==============================================================================
+
+def _trade_decisions(db, decision_timeframe: str) -> List[DecisionLog]:
+    return db.query(DecisionLog).filter(
+        DecisionLog.symbol == "BTC/USDT",
+        DecisionLog.decision_timeframe == decision_timeframe,
+        DecisionLog.decision_type == "TRADE",
+    ).all()
+
+
+def _check_target_calibration(db) -> None:
+    """H11. target_distance_pct / atr_pct_at_decision below the timeframe's
+    expected minimum multiplier. NOT the same mechanism as the known v4
+    stop/target cap-asymmetry from 2026-07-12 (a symmetry question) -- this
+    is a threshold question, independent of whether stop and target agree
+    with each other. See CC_HANDOFF.md 2026-07-19."""
+    checked, flagged = [], []
+    for tf in ("15M", "1H", "4H"):
+        cal = get_calibration(tf)
+        for r in _trade_decisions(db, tf):
+            if r.target_distance_pct is None or not r.atr_pct_at_decision:
+                continue
+            checked.append(r)
+            if (r.target_distance_pct / r.atr_pct_at_decision) < cal.target_atr_min:
+                flagged.append(r)
+
+    n = len(checked)
+    pct = round(len(flagged) / n * 100, 1) if n else None
+    suggestion = (
+        f"{len(flagged)}/{n} TRADE decisions ({pct}%) have target_distance_pct/atr below the "
+        f"timeframe's expected minimum target multiplier. Thresholds are external-research-sourced, "
+        f"not yet Kabroda-validated -- log and watch, not a gate (CC_HANDOFF.md 2026-07-19)."
+        if n else "No TRADE decisions with target_distance_pct + atr_pct_at_decision populated yet."
+    )
+    _upsert_suggestion(
+        db, hypothesis_id="H11_TARGET_CALIBRATION",
+        hypothesis_text="Does target_distance_pct/atr_pct_at_decision fall below the timeframe's expected target multiplier?",
+        n_total=n, n_outcomes=n, n_supporting=len(flagged), metric=pct, suggestion_text=suggestion,
+    )
+
+
+def _check_stop_calibration(db) -> None:
+    """H12. stop_distance_pct / atr_pct_at_decision outside the timeframe's
+    expected stop multiplier range (either too tight or too wide)."""
+    checked, flagged = [], []
+    for tf in ("15M", "1H", "4H"):
+        cal = get_calibration(tf)
+        for r in _trade_decisions(db, tf):
+            if r.stop_distance_pct is None or not r.atr_pct_at_decision:
+                continue
+            checked.append(r)
+            ratio = r.stop_distance_pct / r.atr_pct_at_decision
+            if ratio < cal.stop_atr_min or ratio > cal.stop_atr_max:
+                flagged.append(r)
+
+    n = len(checked)
+    pct = round(len(flagged) / n * 100, 1) if n else None
+    suggestion = (
+        f"{len(flagged)}/{n} TRADE decisions ({pct}%) have stop_distance_pct/atr outside the "
+        f"timeframe's expected stop multiplier range -- log and watch, not a gate."
+        if n else "No TRADE decisions with stop_distance_pct + atr_pct_at_decision populated yet."
+    )
+    _upsert_suggestion(
+        db, hypothesis_id="H12_STOP_CALIBRATION",
+        hypothesis_text="Does stop_distance_pct/atr_pct_at_decision fall outside the timeframe's expected stop multiplier range?",
+        n_total=n, n_outcomes=n, n_supporting=len(flagged), metric=pct, suggestion_text=suggestion,
+    )
+
+
+def _check_atr_health(db) -> None:
+    """H13. atr_pct_at_decision below the timeframe's minimum -- the
+    genuinely new question from CC_HANDOFF.md 2026-07-19 (is the absolute
+    move too small for this timeframe's label), independent of H11/H12's
+    ratio checks."""
+    checked, flagged = [], []
+    for tf in ("15M", "1H", "4H"):
+        cal = get_calibration(tf)
+        for r in _trade_decisions(db, tf):
+            if not r.atr_pct_at_decision:
+                continue
+            checked.append(r)
+            if r.atr_pct_at_decision < cal.min_atr_pct:
+                flagged.append(r)
+
+    n = len(checked)
+    pct = round(len(flagged) / n * 100, 1) if n else None
+    suggestion = (
+        f"{len(flagged)}/{n} TRADE decisions ({pct}%) have atr_pct_at_decision below the timeframe's "
+        f"expected minimum -- log and watch, not a gate."
+        if n else "No TRADE decisions with atr_pct_at_decision populated yet."
+    )
+    _upsert_suggestion(
+        db, hypothesis_id="H13_ATR_HEALTH",
+        hypothesis_text="Does atr_pct_at_decision fall below the timeframe's expected minimum (is the move too small for this timeframe's label)?",
+        n_total=n, n_outcomes=n, n_supporting=len(flagged), metric=pct, suggestion_text=suggestion,
+    )
+
+
+def _check_rr_ratio(db) -> None:
+    """H14. target_distance_pct / stop_distance_pct below the timeframe's
+    minimum R:R."""
+    checked, flagged = [], []
+    for tf in ("15M", "1H", "4H"):
+        cal = get_calibration(tf)
+        for r in _trade_decisions(db, tf):
+            if not r.target_distance_pct or not r.stop_distance_pct:
+                continue
+            checked.append(r)
+            if (r.target_distance_pct / r.stop_distance_pct) < cal.min_rr:
+                flagged.append(r)
+
+    n = len(checked)
+    pct = round(len(flagged) / n * 100, 1) if n else None
+    suggestion = (
+        f"{len(flagged)}/{n} TRADE decisions ({pct}%) have target/stop below the timeframe's "
+        f"minimum R:R -- log and watch, not a gate."
+        if n else "No TRADE decisions with both target_distance_pct and stop_distance_pct populated yet."
+    )
+    _upsert_suggestion(
+        db, hypothesis_id="H14_RR_RATIO",
+        hypothesis_text="Does target_distance_pct/stop_distance_pct fall below the timeframe's expected minimum R:R?",
+        n_total=n, n_outcomes=n, n_supporting=len(flagged), metric=pct, suggestion_text=suggestion,
+    )
+
+
+def _check_decision_distribution(db) -> None:
+    """H15. Pure descriptive: TRADE vs STAND_DOWN ratio per timeframe. No
+    win/loss concept -- skips binomial_checkpoint, same as H9."""
+    counts: Dict[str, Dict[str, int]] = {}
+    total = 0
+    for tf in ("15M", "1H", "4H"):
+        rows = db.query(DecisionLog).filter(
+            DecisionLog.symbol == "BTC/USDT", DecisionLog.decision_timeframe == tf,
+        ).all()
+        counts[tf] = {
+            "TRADE": sum(1 for r in rows if r.decision_type == "TRADE"),
+            "STAND_DOWN": sum(1 for r in rows if r.decision_type == "STAND_DOWN"),
+        }
+        total += len(rows)
+
+    suggestion = "; ".join(
+        f"{tf}: {c['TRADE']} TRADE / {c['STAND_DOWN']} STAND_DOWN" for tf, c in counts.items()
+    )
+    _upsert_suggestion(
+        db, hypothesis_id="H15_DECISION_DISTRIBUTION",
+        hypothesis_text="TRADE vs STAND_DOWN ratio per timeframe (descriptive, not a win-rate check).",
+        n_total=total, n_outcomes=total, n_supporting=total, metric=None, suggestion_text=suggestion,
+    )
+
+
+def _check_stand_down_reasons(db) -> None:
+    """H16. Pure descriptive: which stand_down_reason values are most common
+    per timeframe. No win/loss concept -- skips binomial_checkpoint."""
+    breakdown: Dict[str, Dict[str, int]] = {}
+    total = 0
+    for tf in ("15M", "1H", "4H"):
+        rows = db.query(DecisionLog).filter(
+            DecisionLog.symbol == "BTC/USDT",
+            DecisionLog.decision_timeframe == tf,
+            DecisionLog.decision_type == "STAND_DOWN",
+        ).all()
+        tf_counts: Dict[str, int] = {}
+        for r in rows:
+            key = r.stand_down_reason or "NONE"
+            tf_counts[key] = tf_counts.get(key, 0) + 1
+        breakdown[tf] = tf_counts
+        total += len(rows)
+
+    suggestion = "; ".join(
+        f"{tf}: " + ", ".join(f"{reason}={count}" for reason, count in sorted(c.items())) if c else f"{tf}: none"
+        for tf, c in breakdown.items()
+    )
+    _upsert_suggestion(
+        db, hypothesis_id="H16_STAND_DOWN_REASONS",
+        hypothesis_text="Distribution of stand_down_reason per timeframe (descriptive, not a win-rate check).",
+        n_total=total, n_outcomes=total, n_supporting=total, metric=None, suggestion_text=suggestion,
+    )
+
+
 def run_daily_4h1h_audit() -> Dict[str, Any]:
-    """Public entry point. Runs all four 4H/1H hypothesis checks and today's
-    per-trade digest. Called daily from main.py's scheduler."""
+    """Public entry point. Runs all four 4H/1H hypothesis checks, the six
+    decision_log calibration checks (H11-H16), and today's per-trade digest.
+    Called daily from main.py's scheduler."""
     db = SessionLocal()
     try:
         _check_kinematic_energy(db)
         _check_macro_bias_4h(db)
         _check_runner_mechanic(db)
         _check_tf_agreement(db)
+        _check_target_calibration(db)
+        _check_stop_calibration(db)
+        _check_atr_health(db)
+        _check_rr_ratio(db)
+        _check_decision_distribution(db)
+        _check_stand_down_reasons(db)
     finally:
         db.close()
 

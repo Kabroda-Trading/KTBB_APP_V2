@@ -22,6 +22,42 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import SessionLocal, DecisionLog, DecisionGaugeReading
 
+
+def backfill_decision_outcome(*, campaign_log_id: Optional[int], outcome_status: str, realized_r: Optional[float]) -> None:
+    """Back-fill outcome_status/realized_r on the decision_log row matching
+    a resolved CampaignLog row, via the campaign_log_id soft FK set at write
+    time. Write-once: skips if outcome_status is already set (matches
+    harness/audit_writer.backfill_outcome()'s own write-once discipline).
+    Non-blocking: any failure is logged and swallowed -- called from
+    ledger_closing_engine.py's close loop, which must never be blocked by
+    an audit-table failure. No-op if campaign_log_id is None (row wasn't
+    linked, e.g. written before Phase 1 shipped)."""
+    if campaign_log_id is None:
+        return
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(DecisionLog)
+            .filter(DecisionLog.campaign_log_id == campaign_log_id)
+            .order_by(DecisionLog.id.desc())
+            .first()
+        )
+        if not row:
+            return
+        if row.outcome_status is not None:
+            return
+        row.outcome_status = outcome_status
+        row.realized_r = realized_r
+        db.commit()
+    except Exception as e:
+        print(f"[UNIFIED AUDIT] decision_log outcome backfill failed (campaign_log_id={campaign_log_id}): {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
 GaugeTuple = Tuple[str, str, Optional[float], Optional[str]]
 
 
