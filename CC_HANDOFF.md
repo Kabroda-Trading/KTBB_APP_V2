@@ -291,3 +291,5 @@ When H17-H24 do get built later, frame them explicitly as "point H7-H10 at the r
 
 **Building backfill + H11-H16 now.**
 
+*Done — committed (`dcf4d91`), pushed, deploying. `harness/unified_audit_writer.backfill_decision_outcome()` wired into all 7 real resolution points in `ledger_closing_engine.py` (Phase 1/2 for 15M, Phase 4 for 4H/1H — 4H/1H had no prior backfill call to piggyback on, added fresh). `harness/timeframe_calibration.py` holds the ATR thresholds (log-and-watch, not enforced). H11-H16 added to `audit_ai.py`'s existing daily run, no new orchestrator. Verified: py_compile + pyflakes clean, smoke-tested against a throwaway DB — backfill's write-once behavior confirmed, and feeding it a row matching the real #164/#19 numbers correctly flagged all four calibration checks (6.5× stop/ATR, 1.2× target/ATR, 0.19 R:R, sub-threshold ATR). H17-H26 not built, not forgotten — held per the scope decision above. Ready for DS to review this build, or to start on H17-H26 later once real N justifies it.*
+
