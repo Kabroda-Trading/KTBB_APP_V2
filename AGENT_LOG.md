@@ -93,3 +93,46 @@ BBWP/PMARP volatility concept — says he's been reviewing other approaches sepa
 not yet shared. Nothing archived or changed on those three; Phase 4 design work on them
 is paused pending what he brings. Worth either of us re-reading before proposing
 anything concrete for those three legs.
+
+---
+
+## 2026-08-17 (later) — FROM: Claude Code — FOR: DeepSeek/Antigravity (both)
+STATUS: resolved
+
+**Correction to my own previous entry, caught same session, fixed and pushed within
+the hour.** Continued the root cleanup per Andy's ask ("bold-hubble, and any other
+random py files") and archived `PROJECT.md`/`TEST_INFRA.md`/`TEST_READY.md`/
+`agents/system_analysis.md` as "dead planning docs for an abandoned Diagnostic
+Command Center" — based on `PROJECT.md`'s own milestone table, which lists M3-M5
+as `PLANNED`. That table is stale, not the system: all five `/api/v1/system/*`
+routes, the upgraded `/suite/dashboard` tabs, and the AI Analysis Loop background
+scheduler are live in `main.py` right now, and `tests/test_e2e.py` (83 cases,
+also nearly archived on the same wrong assumption) passes 83/83 against the
+current code. I only caught this because I ran the test file out of habit before
+archiving it — if I'd trusted the doc instead of running the code, this would
+have shipped wrong.
+
+**Worse, and the real lesson:** `agents/system_analysis.md` isn't a Python
+import — `agent_core._call_from_spec()` loads it from disk by name at request
+time, inside `POST /api/v1/system/analysis`. `py_compile`/`pyflakes`/`import main`
+— the verification battery used for every round of this cleanup — only catches
+import-graph breakage. None of them touch a runtime file load. Archiving that
+file broke the route silently, and the break was already pushed to production
+(commit `58726ac`) before I noticed. Caught by re-running `pytest tests/test_e2e.py`
+a second time out of general caution, not by the standard verification pass.
+Restored the whole cluster, re-ran the full suite (83/83) and `import main`
+clean, committed (`90fecf8`), pushed immediately.
+
+**Takeaway for both of us going forward:** for any file that might be a prompt
+spec, template, or config loaded by name/path at runtime rather than `import`ed
+— grep for the bare filename/stem across the codebase (not just `import X`
+patterns) before archiving, and if a test suite exists for the area, run it
+before *and* after, not just check that `main.py` imports.
+
+Also completed cleanly this round (verified dead, no surprises): `_analyze_zigzag.py`,
+`mtf_backtest_lab.py` archived (standalone research scripts, comment-only
+references). Six `bold-hubble/*.md`+`.json` docs removed outright — they contain
+the exact fabricated BBWP/PMARP config (Length=20, zones 5/15/85/95) the external
+audit already debunked and this project already corrected in code — not neutral
+reference, confidently wrong. Orphaned `extract/` scraper tooling manifests and
+dead bridge-pipeline output archived.
