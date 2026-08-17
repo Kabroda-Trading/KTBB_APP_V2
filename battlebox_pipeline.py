@@ -221,10 +221,20 @@ def _calc_stochastic(candles: List[Dict], k_period: int = 14, d_period: int = 3)
     return {"k": round(k_vals[-1], 2), "d": round(d, 2)}
 
 
-# ── Crown BBWP / PMARP (Cut 1 — Crown's exact formulas, scalar output) ─────────
+# ── BBWP / PMARP — corrected 2026-08-17 against Trading Knowledge library ──────
+# Kabroda Audit AUDIT_FINDINGS.md #16-18: the previous config (BBWP period=20,
+# PMARP ma_period=50/lookback=252/SMA, zones 5/15/85/95) was never Krown-sourced
+# despite the "Crown's exact formulas" comment that used to sit here -- the
+# library's own audit independently rejected the same 5/15/85/95 BBWP zones as
+# unconfirmed. Real values below verified directly against
+# Trading Knowledge/knowledge/01_INDICATORS/{bbwp,pmarp}/README.md
+# (2026-08-16 provenance notes) by CC, not just cited secondhand.
 
-def _calc_bbwp(closes: List[float], bb_period: int = 20, bb_std: float = 2.0, lookback: int = 252) -> float:
-    """BB Width Percentile: percentile rank of current BB width over `lookback` bars. Returns 50.0 if insufficient data."""
+def _calc_bbwp(closes: List[float], bb_period: int = 13, bb_std: float = 2.0, lookback: int = 252) -> float:
+    """BB Width Percentile: percentile rank of current BB width over `lookback` bars.
+    bb_period=13 is Krown's directly-quoted, instructor-emphasized value
+    ("very specific there") -- not the generic public 20. lookback=252 and
+    bb_std=2.0 (public BB default) are unchanged. Returns 50.0 if insufficient data."""
     if len(closes) < bb_period + 1:
         return 50.0
     bbw: List[Optional[float]] = [None] * len(closes)
@@ -246,15 +256,28 @@ def _calc_bbwp(closes: List[float], bb_period: int = 20, bb_std: float = 2.0, lo
     return round(sum(1 for v in hist if v < cur) / len(hist) * 100.0, 2)
 
 
-def _calc_pmarp(closes: List[float], ma_period: int = 50, lookback: int = 252) -> float:
-    """Price MA Ratio Percentile: percentile rank of (close/SMA50) over `lookback` bars. Returns 50.0 if insufficient data."""
+def _calc_pmarp(candles: List[Dict], ma_period: int = 20, lookback: int = 350) -> float:
+    """Price MA Ratio Percentile: percentile rank of (close/VWMA) over `lookback` bars.
+    ma_period=20 (VWMA, not SMA) is QPAI's directly-quoted config; lookback=350 is
+    the most corroborated single number in the library -- confirmed independently
+    by two separate courses ("I do find myself actually using a lookback of 350
+    most often"). Falls back to a plain SMA if volume data is unavailable/zero for
+    a window, rather than dividing by zero. Returns 50.0 if insufficient data."""
+    closes = [float(c["close"]) for c in candles]
+    volumes = [float(c.get("volume") or 0.0) for c in candles]
     if len(closes) < ma_period + 1:
         return 50.0
     pmar: List[Optional[float]] = [None] * len(closes)
     for i in range(ma_period - 1, len(closes)):
-        sma = sum(closes[i - ma_period + 1 : i + 1]) / ma_period
-        if sma > 0:
-            pmar[i] = closes[i] / sma
+        price_window = closes[i - ma_period + 1 : i + 1]
+        vol_window = volumes[i - ma_period + 1 : i + 1]
+        vol_sum = sum(vol_window)
+        vwma = (
+            sum(p * v for p, v in zip(price_window, vol_window)) / vol_sum
+            if vol_sum > 0 else sum(price_window) / ma_period
+        )
+        if vwma > 0:
+            pmar[i] = closes[i] / vwma
     cur = pmar[-1]
     if cur is None:
         return 50.0
@@ -266,18 +289,25 @@ def _calc_pmarp(closes: List[float], ma_period: int = 50, lookback: int = 252) -
 
 
 def _bbwp_state_label(val: float) -> str:
-    if val <= 5.0:  return "EXTREME_COMPRESSION"
-    if val <= 15.0: return "MODERATE_COMPRESSION"
-    if val >= 95.0: return "EXTREME_EXPANSION"
-    if val >= 85.0: return "HIGH_EXPANSION"
+    """Krown System's actual strategy-trigger zones (Trading Bible checklists,
+    via Trading Knowledge/knowledge/01_INDICATORS/bbwp/README.md's "Trading
+    Implications" correction, 2026-08-16): <=38% / >=75% -- not the previously
+    used 5/15/85/95, which the library's own audit independently rejected as
+    untraceable. Collapsed from 5 states to 3: the finer EXTREME/MODERATE split
+    isn't part of the sourced trigger, so it isn't invented here."""
+    if val <= 38.0: return "COMPRESSION"
+    if val >= 75.0: return "EXPANSION"
     return "NEUTRAL"
 
 
 def _pmarp_state_label(val: float) -> str:
-    if val >= 95.0: return "EXTREME_OVEREXTENDED"
-    if val >= 85.0: return "MODERATE_OVEREXTENDED"
-    if val <= 5.0:  return "EXTREME_DEPRESSED"
-    if val <= 15.0: return "MODERATE_DEPRESSED"
+    """Library-confirmed boundary (Trading Bible PMARP lecture, direct quote):
+    85/15 is Krown's stated uptrend-extreme-high / downtrend-extreme-low
+    definition. The finer 95/5 sub-tier used previously is NOT confirmed in
+    either source transcript -- collapsed here rather than kept as an
+    invented finer split."""
+    if val >= 85.0: return "OVEREXTENDED"
+    if val <= 15.0: return "DEPRESSED"
     return "NORMAL_DEVIATION"
 
 
@@ -362,7 +392,7 @@ def _build_synthetic_jewel(raw_15m: List[Dict], adx_4h: Optional[Dict] = None) -
 
     # ── Crown's real overextension indicators (Cut 2) ─────────────────────────
     bbwp_val  = _calc_bbwp(closes)
-    pmarp_val = _calc_pmarp(closes)
+    pmarp_val = _calc_pmarp(raw_15m)  # takes candles now (VWMA needs volume), not just closes
     bbwp_lbl  = _bbwp_state_label(bbwp_val)
     pmarp_lbl = _pmarp_state_label(pmarp_val)
 

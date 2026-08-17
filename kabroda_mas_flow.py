@@ -65,6 +65,17 @@ class IntelAuditReport(BaseModel):
 # ==============================================================================
 # SECTION 2 — SYSTEM PROMPTS (CACHEABLE CONSTANTS)
 # Placed in system prompt so Anthropic's 5-min cache applies on repeated calls.
+#
+# 2026-08-17 (Kabroda Audit AUDIT_FINDINGS.md #19 / REBUILD_PLAN.md): removed
+# "15M Kinematic Grade is OVEREXTENDED" from STAND_DOWN CONDITION 2 (was
+# sub-condition c, at least-2-of-3 -- now both-of-2) and from the ALLOCATION
+# RULE's single-target trigger list. battlebox_pipeline.py's kinematic_grade
+# formula has zero validation evidence anywhere in the codebase for its 15M
+# form -- the only backtest ever run against it was of a ported copy on other
+# timeframes, and that one failed (gravity_engine.py's own docstring). Not
+# removed from the raw context dump below (still informational, same as
+# every other non-gating signal already shown to the model) -- only from the
+# two places it was functioning as an unvalidated formal gate.
 # ==============================================================================
 
 SENIOR_ANALYST_SYSTEM_PROMPT = """\
@@ -186,12 +197,11 @@ The 4H trend and 1H trend are in direct conflict. There is no coherent \
 directional energy. A measured move requires aligned timeframes — they are not.
 
 CONDITION 2 — MULTI-TIMEFRAME EXHAUSTION
-At least two of these are simultaneously true: \
+Both of these are simultaneously true: \
 (a) 4H Momentum strength is WEAK or DEPLETED — histogram near-zero or fading. \
 A STRONG NEGATIVE reading is healthy trend energy in a downtrend, not exhaustion, \
 and does not fire this condition. \
-(b) Kinematic Fuel is OVEREXTENDED or CHOP_RISK, \
-(c) 15M Kinematic Grade is OVEREXTENDED. \
+(b) Kinematic Fuel is OVEREXTENDED or CHOP_RISK. \
 The system has run out of fuel across the primary driving timeframes.
 
 CONDITION 3 — CHOKED TARGET
@@ -338,7 +348,6 @@ IF any of these conditions are true:
 - 4H momentum strength is WEAK or DEPLETED (histogram near-zero or fading)
 - 1H fuel_status is OVEREXTENDED or CHOP_RISK
 - jewel_exit_warning is active
-- 15M kinematic_grade is OVEREXTENDED
 - 1H or 4H RSI zone is OVERBOUGHT_EXTREME
 
 THEN write:
