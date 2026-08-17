@@ -1,0 +1,167 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0
+// © Kabroda | MISSION PLOTTER v1.3 (ARROW BLOCKS + R:R HUD)
+//@version=5
+indicator("Kabroda Mission Plotter v1.3", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// -----------------------------------------------------------------------------
+// 1. INPUTS
+// -----------------------------------------------------------------------------
+group_mission   = "/// MISSION CONTROL ///"
+mission_key     = input.string("", "Paste Flight Path Key", group=group_mission)
+show_lines      = input.bool(true, "Show Mission Lines & HUD", group=group_mission)
+
+group_vis   = "Visual Settings"
+pos_table   = input.string(position.top_right, "HUD Position", options=[position.top_right, position.bottom_right, position.top_left], group=group_vis)
+label_style = input.string("Block Arrow + Text", "Label Display Style", options=["Text Only", "Block Arrow + Text", "Block Arrow Only"], group=group_vis)
+
+// Colors
+c_bg        = #0f172a
+c_border    = #334155
+c_text      = #f8fafc
+c_bull      = #22c55e
+c_bear      = #ef4444
+c_neut      = #94a3b8
+c_tp        = #eab308
+
+// -----------------------------------------------------------------------------
+// 2. PARSE FROZEN KEY (From Website Vault)
+// -----------------------------------------------------------------------------
+var string p_bias   = "NONE"
+var string p_status = "WAITING"
+var float p_entry   = na
+var float p_stop    = na
+var float p_tp1     = na
+var float p_tp2     = na
+var float p_tp3     = na
+var string p_macro  = "NEUTRAL"
+var string p_micro  = "NEUTRAL"
+
+// Reset values every tick to ensure it clears if you delete the string
+p_bias   := "NONE"
+p_status := "WAITING"
+p_entry  := na
+p_stop   := na
+p_tp1    := na
+p_tp2    := na
+p_tp3    := na
+p_macro  := "NEUTRAL"
+p_micro  := "NEUTRAL"
+
+if show_lines and barstate.islast and str.length(mission_key) > 5
+    string[] parts = str.split(mission_key, "|")
+    if array.size(parts) >= 9
+        p_bias   := array.get(parts, 0)
+        p_status := array.get(parts, 1)
+        p_entry  := str.tonumber(array.get(parts, 2))
+        p_stop   := str.tonumber(array.get(parts, 3))
+        p_tp1    := str.tonumber(array.get(parts, 4))
+        p_tp2    := str.tonumber(array.get(parts, 5))
+        p_tp3    := str.tonumber(array.get(parts, 6))
+        p_macro  := array.get(parts, 7)
+        p_micro  := array.get(parts, 8)
+
+// -----------------------------------------------------------------------------
+// 2B. RISK:REWARD (v1.3 — computed straight from the parsed key, entry/stop/tp1
+// only. Surfaces the exact stop-vs-target ratio on the chart in real time,
+// instead of it only being checkable by hand after the fact.)
+// -----------------------------------------------------------------------------
+var string rr_txt = "--"
+var color  rr_col = c_neut
+
+rr_txt := "--"
+rr_col := c_neut
+
+if not na(p_entry) and not na(p_stop) and not na(p_tp1)
+    risk_dist   = math.abs(p_entry - p_stop)
+    reward_dist = math.abs(p_tp1 - p_entry)
+    if risk_dist > 0
+        rr = reward_dist / risk_dist
+        rr_txt := "1 : " + str.tostring(rr, "#.##")
+        rr_col := rr >= 1.5 ? c_bull : (rr >= 1.0 ? c_tp : c_bear)
+
+// -----------------------------------------------------------------------------
+// 3. DRAW FLIGHT PATH
+// -----------------------------------------------------------------------------
+var line l_ent = na
+var label lb_ent = na
+var line l_sl  = na
+var label lb_sl  = na
+var line l_t1  = na
+var label lb_t1  = na
+var line l_t2  = na
+var label lb_t2  = na
+var line l_t3  = na
+var label lb_t3  = na
+
+draw_clean(price, _col, _style, _txt, _l, _lb) =>
+    line.delete(_l)
+    label.delete(_lb)
+    if show_lines and not na(price) and price > 0 and p_bias != "NONE" and p_bias != "NEUTRAL"
+
+        // Dynamic Label Formatting based on User Settings
+        final_txt = label_style == "Block Arrow Only" ? "   " : (_txt + ": " + str.tostring(price, format.mintick))
+        bg_col    = label_style == "Text Only" ? color.new(_col, 100) : color.new(_col, 15) // 15% transparency for sleek block
+        txt_col   = label_style == "Text Only" ? _col : color.white
+
+        new_l = line.new(bar_index, price, bar_index + 10, price, color=_col, style=_style, width=1, extend=extend.both)
+        new_lb = label.new(bar_index + 5, price, final_txt, color=bg_col, textcolor=txt_col, style=label.style_label_left, size=size.small)
+
+        [new_l, new_lb]
+    else
+        [line(na), label(na)]
+
+if barstate.islast
+    [le, lbe] = draw_clean(p_entry, c_bull, line.style_solid,  "ENTRY", l_ent, lb_ent)
+    l_ent := le, lb_ent := lbe
+
+    [ls, lbs] = draw_clean(p_stop,  c_bear, line.style_dashed, "STOP", l_sl, lb_sl)
+    l_sl := ls, lb_sl := lbs
+
+    [lt1, lbt1] = draw_clean(p_tp1, c_tp, line.style_dotted, "TARGET 1", l_t1, lb_t1)
+    l_t1 := lt1, lb_t1 := lbt1
+
+    [lt2, lbt2] = draw_clean(p_tp2, c_tp, line.style_dotted, "TARGET 2", l_t2, lb_t2)
+    l_t2 := lt2, lb_t2 := lbt2
+
+    [lt3, lbt3] = draw_clean(p_tp3, c_tp, line.style_dotted, "TARGET 3", l_t3, lb_t3)
+    l_t3 := lt3, lb_t3 := lbt3
+
+// -----------------------------------------------------------------------------
+// 4. DRAW STATIC HUD
+// -----------------------------------------------------------------------------
+var table hud = table.new(pos_table, 2, 5, border_width=1, border_color=c_border, bgcolor=c_bg)
+
+get_col(bias_str) =>
+    bias_str == "BULLISH" ? c_bull : (bias_str == "BEARISH" ? c_bear : c_neut)
+
+if barstate.islast
+    // Only draw the HUD if the box is checked AND there is an active key
+    if show_lines and p_bias != "NONE"
+        mac_c = get_col(p_macro)
+        mic_c = get_col(p_micro)
+
+        // Header
+        table.merge_cells(hud, 0, 0, 1, 0)
+        table.cell(hud, 0, 0, "KABRODA INTEL", text_color=c_neut, text_size=size.small, text_font_family=font.family_monospace)
+
+        // Macro Row
+        table.cell(hud, 0, 1, "MACRO", text_color=c_text, text_size=size.small, text_font_family=font.family_monospace)
+        table.cell(hud, 1, 1, p_macro, text_color=mac_c, bgcolor=color.new(mac_c, 85), text_size=size.small, text_font_family=font.family_monospace)
+
+        // Micro Row
+        table.cell(hud, 0, 2, "MICRO", text_color=c_text, text_size=size.small, text_font_family=font.family_monospace)
+        table.cell(hud, 1, 2, p_micro, text_color=mic_c, bgcolor=color.new(mic_c, 85), text_size=size.small, text_font_family=font.family_monospace)
+
+        // R:R Row (v1.3) — risk:reward to TARGET 1, color-flagged so a lopsided
+        // stop-vs-target setup (the exact pattern flagged 2026-07-12/14) is
+        // visible on the chart itself, not just checkable by hand afterward.
+        table.cell(hud, 0, 3, "R : R", text_color=c_text, text_size=size.small, text_font_family=font.family_monospace)
+        table.cell(hud, 1, 3, rr_txt, text_color=rr_col, bgcolor=color.new(rr_col, 85), text_size=size.small, text_font_family=font.family_monospace)
+
+        // Active Mission Row
+        if p_bias != "NEUTRAL"
+            table.merge_cells(hud, 0, 4, 1, 4)
+            table.cell(hud, 0, 4, "PLAN: " + p_bias + " (" + p_status + ")", text_color=c_bg, bgcolor=c_tp, text_size=size.small, text_font_family=font.family_monospace)
+    else
+        // If the box is unchecked or the key is empty, wipe the table instantly
+        table.clear(hud, 0, 0, 1, 4)

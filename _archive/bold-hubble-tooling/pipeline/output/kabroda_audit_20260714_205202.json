@@ -1,0 +1,54 @@
+{
+  "report_generated": "2026-07-15T01:52:02.328743+00:00",
+  "videos_analyzed": 15,
+  "consensus_bias": {
+    "short_term": "bearish",
+    "medium_term": "neutral",
+    "long_term": "neutral"
+  },
+  "assets_monitored": [
+    "BTC",
+    "GOLD",
+    "NASDAQ",
+    "QQQ",
+    "SILVER",
+    "SPX",
+    "SPY",
+    "USD"
+  ],
+  "active_strategies": [
+    "strategy_4"
+  ],
+  "chart_config_recommendations": [
+    {
+      "indicator": "divergence",
+      "kabroda_tool": "divergence_scanner",
+      "chart_action": "alert_hidden_bearish",
+      "description": "Hidden Bearish divergence detected (x10)",
+      "alert_priority": "medium"
+    },
+    {
+      "indicator": "divergence",
+      "kabroda_tool": "divergence_scanner",
+      "chart_action": "alert_regular_bullish",
+      "description": "Regular Bullish divergence detected (x1)",
+      "alert_priority": "high"
+    },
+    {
+      "indicator": "divergence",
+      "kabroda_tool": "divergence_scanner",
+      "chart_action": "alert_hidden_bullish",
+      "description": "Hidden Bullish divergence detected (x6)",
+      "alert_priority": "medium"
+    },
+    {
+      "indicator": "divergence",
+      "kabroda_tool": "divergence_scanner",
+      "chart_action": "alert_regular_bearish",
+      "description": "Regular Bearish divergence detected (x1)",
+      "alert_priority": "high"
+    }
+  ],
+  "trade_setups": [],
+  "summary": "Short Term: \ud83d\udd34 BEARISH | Medium Term: \u26aa NEUTRAL | Long Term: \u26aa NEUTRAL\n\n\ud83d\udcca **Assets to monitor**: BTC, GOLD, NASDAQ, QQQ, SILVER, SPX, SPY, USD\n\n\u26a1 **Recommended Kabroda Actions**:"
+}

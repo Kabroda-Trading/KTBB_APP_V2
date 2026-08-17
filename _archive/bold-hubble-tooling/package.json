@@ -1,0 +1,14 @@
+{
+  "name": "krown-trading-extractor",
+  "version": "1.0.0",
+  "description": "Extracts course content and video transcripts from Krown Trading Teachable course",
+  "main": "extract/scraper.js",
+  "scripts": {
+    "extract": "node extract/scraper.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.12",
+    "node-fetch": "^2.7.0",
+    "puppeteer": "^22.0.0"
+  }
+}

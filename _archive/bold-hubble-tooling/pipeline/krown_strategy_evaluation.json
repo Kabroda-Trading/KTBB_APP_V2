@@ -1,0 +1,179 @@
+{
+  "system_version": "1.0.0-ktb-crypto",
+  "description": "Krown Trading Bible Quantitative Framework - Executable Strategy Rules & Evaluation Output",
+  "supported_indicators": [
+    "BBWP",
+    "PMARP",
+    "RSI_DIVERGENCE",
+    "DOMINANT_TREND_MA"
+  ],
+  "strategies": {
+    "Strategy_1": "Basic Long/Short Macro Trend System",
+    "Strategy_2": "Uptrend Pullback Long Scalp System",
+    "Strategy_3": "Downtrend Continuation Short Scalp System",
+    "Strategy_4": "Uptrend Parabolic Exhaustion Counter-Trend Short",
+    "Strategy_5": "Downtrend Volatility Surge Breakdown Short"
+  },
+  "simulation_results": {
+    "uptrend_pullback": {
+      "asset": "BTC/USDT (UPTREND_PULLBACK)",
+      "current_price": 77436.93,
+      "regime_summary": {
+        "dominant_trend": "UNDEFINED",
+        "trend_score": 0.0,
+        "volatility_bbwp": "13.86% (MODERATE_COMPRESSION)",
+        "mean_deviation_pmarp": "38.03% (NORMAL_DEVIATION)",
+        "momentum_rsi": 79.76
+      },
+      "detected_divergences": {},
+      "best_actionable_signal": {
+        "strategy_name": "NONE",
+        "details": {
+          "action": "HOLD",
+          "confidence": 0.0,
+          "reason": "No high-confidence Krown setup active"
+        }
+      },
+      "all_strategy_evaluations": {
+        "Strategy_1_Macro_Trend": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 50.0,
+          "reason": "No actionable setup. Trend: UNDEFINED, BBWP: 13.86%"
+        },
+        "Strategy_2_Uptrend_Pullback": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 0.0,
+          "reason": "Strategy #2 requires Uptrend. Current regime: UNDEFINED"
+        },
+        "Strategy_3_Downtrend_Continuation": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 0.0,
+          "reason": "Strategy #3 requires Downtrend. Current regime: UNDEFINED"
+        },
+        "Strategy_4_Uptrend_Exhaustion_Short": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 30.0,
+          "reason": "No exhaustion detected. PMARP: 38.03%, BBWP: 13.86%"
+        },
+        "Strategy_5_Downtrend_Vol_Short": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 40.0,
+          "reason": "No volatility surge setup. Regime: UNDEFINED, BBWP: 13.86%"
+        }
+      }
+    },
+    "breakout_squeeze": {
+      "asset": "BTC/USDT (BREAKOUT_SQUEEZE)",
+      "current_price": 94429.15,
+      "regime_summary": {
+        "dominant_trend": "STRONG_UPTREND",
+        "trend_score": 100.0,
+        "volatility_bbwp": "81.19% (NEUTRAL)",
+        "mean_deviation_pmarp": "98.59% (EXTREME_OVEREXTENDED)",
+        "momentum_rsi": 99.85
+      },
+      "detected_divergences": {
+        "regular_bearish": 3,
+        "hidden_bullish": 3
+      },
+      "best_actionable_signal": {
+        "strategy_name": "Strategy_1_Macro_Trend",
+        "details": {
+          "action": "TAKE_PROFIT_WARNING",
+          "direction": "LONG_EXIT",
+          "confidence": 85.0,
+          "reason": "PMARP extreme overextension (98.59%). Lock in profits / tighten trailing stop."
+        }
+      },
+      "all_strategy_evaluations": {
+        "Strategy_1_Macro_Trend": {
+          "action": "TAKE_PROFIT_WARNING",
+          "direction": "LONG_EXIT",
+          "confidence": 85.0,
+          "reason": "PMARP extreme overextension (98.59%). Lock in profits / tighten trailing stop."
+        },
+        "Strategy_2_Uptrend_Pullback": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 40.0,
+          "reason": "Waiting for optimal pullback zone. RSI: 99.85"
+        },
+        "Strategy_3_Downtrend_Continuation": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 0.0,
+          "reason": "Strategy #3 requires Downtrend. Current regime: STRONG_UPTREND"
+        },
+        "Strategy_4_Uptrend_Exhaustion_Short": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 30.0,
+          "reason": "No exhaustion detected. PMARP: 98.59%, BBWP: 81.19%"
+        },
+        "Strategy_5_Downtrend_Vol_Short": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 40.0,
+          "reason": "No volatility surge setup. Regime: STRONG_UPTREND, BBWP: 81.19%"
+        }
+      }
+    },
+    "downtrend_collapse": {
+      "asset": "BTC/USDT (DOWNTREND_COLLAPSE)",
+      "current_price": 17822.27,
+      "regime_summary": {
+        "dominant_trend": "UNDEFINED",
+        "trend_score": 0.0,
+        "volatility_bbwp": "99.01% (EXTREME_EXPANSION)",
+        "mean_deviation_pmarp": "0.0% (EXTREME_DEPRESSED)",
+        "momentum_rsi": 0.0
+      },
+      "detected_divergences": {},
+      "best_actionable_signal": {
+        "strategy_name": "NONE",
+        "details": {
+          "action": "HOLD",
+          "confidence": 0.0,
+          "reason": "No high-confidence Krown setup active"
+        }
+      },
+      "all_strategy_evaluations": {
+        "Strategy_1_Macro_Trend": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 50.0,
+          "reason": "No actionable setup. Trend: UNDEFINED, BBWP: 99.01%"
+        },
+        "Strategy_2_Uptrend_Pullback": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 0.0,
+          "reason": "Strategy #2 requires Uptrend. Current regime: UNDEFINED"
+        },
+        "Strategy_3_Downtrend_Continuation": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 0.0,
+          "reason": "Strategy #3 requires Downtrend. Current regime: UNDEFINED"
+        },
+        "Strategy_4_Uptrend_Exhaustion_Short": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 30.0,
+          "reason": "No exhaustion detected. PMARP: 0.0%, BBWP: 99.01%"
+        },
+        "Strategy_5_Downtrend_Vol_Short": {
+          "action": "HOLD",
+          "direction": "NEUTRAL",
+          "confidence": 40.0,
+          "reason": "No volatility surge setup. Regime: UNDEFINED, BBWP: 99.01%"
+        }
+      }
+    }
+  }
+}
