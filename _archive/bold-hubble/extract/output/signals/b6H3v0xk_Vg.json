@@ -1,0 +1,174 @@
+{
+  "video_id": "b6H3v0xk_Vg",
+  "video_title": "\ud83d\udea8Bitcoin Hovers Below $60K as S&P 500 Prints Best Quarter in 6 Years",
+  "extracted_at": "2026-07-15T01:47:39.380778+00:00",
+  "word_count": 24744,
+  "market_bias": {
+    "short_term": "bearish",
+    "medium_term": "neutral",
+    "long_term": "neutral"
+  },
+  "key_levels": {
+    "support": [],
+    "resistance": [
+      {
+        "price": 62500.0,
+        "context": "urrent, I guess, shorter term resistance at 62,500. Then more important, let's g"
+      }
+    ],
+    "targets": [
+      {
+        "price": 24.0,
+        "context": "to be fair. So, it's like why target 24 25 bucks when you can just ge"
+      }
+    ],
+    "midband": []
+  },
+  "indicators": {
+    "divergences": [
+      {
+        "type": "hidden bullish",
+        "count": 18
+      },
+      {
+        "type": "hidden bearish",
+        "count": 4
+      }
+    ],
+    "revin_ribbons": {
+      "mentioned": true
+    }
+  },
+  "active_strategies": [],
+  "assets_mentioned": [
+    "BTC",
+    "GOLD",
+    "NASDAQ",
+    "SILVER",
+    "SPX",
+    "SPY"
+  ],
+  "key_snippets": [
+    {
+      "keyword": "revan ribbon",
+      "snippet": "...er. But ultimately, I'm still have to remain bearish. And that is of course in combination with the Revan ribbons over here. As long as Bitcoin's below that midband, which has now crawled its way all the way down to 62,200 almost, I can't be bullish. In fact, uh I should actually go to CME's chart for this one...."
+    },
+    {
+      "keyword": "revan ribbon",
+      "snippet": "...ally the past week's video, which is between that first uh gray dots here in the lower band one for Revan Ribbons versus the actual lower of that band for Revan Ribbons. And that would give us a range between 61300 to the upside versus about 6 uh sorry 58 um sorry 58 650 to the downside. If Bitcoin does close b..."
+    },
+    {
+      "keyword": "midband",
+      "snippet": "...that is of course in combination with the Revan ribbons over here. As long as Bitcoin's below that midband, which has now crawled its way all the way down to 62,200 almost, I can't be bullish. In fact, uh I should actually go to CME's chart for this one. This one is certainly a lot more technically uh jus..."
+    },
+    {
+      "keyword": "midband",
+      "snippet": "...er to declare, hey, Bitcoin might have a reversal here? Again, going back to the rebon ribbons, the midband right here is 64,000 bucks. can't get anything more than just short-term bouncy sort of behavior for Bitcoin as long as you're below there. And even in the very very short term, you can see the same..."
+    },
+    {
+      "keyword": "gray dot",
+      "snippet": "...still occur from yesterday's video and really the past week's video, which is between that first uh gray dots here in the lower band one for Revan Ribbons versus the actual lower of that band for Revan Ribbons. And that would give us a range between 61300 to the upside versus about 6 uh sorry 58 um sorry 58..."
+    },
+    {
+      "keyword": "gray dot",
+      "snippet": "...would be the next technical targets based upon a break. Of course, if Bitcoin can break above these gray dots right here, I would be looking for test of that midband, but it must absolutely close above that midband to reclaim it, thus change around my own biases and whatnot. Until then, the trend is your fr..."
+    },
+    {
+      "keyword": "lower band",
+      "snippet": "...rday's video and really the past week's video, which is between that first uh gray dots here in the lower band one for Revan Ribbons versus the actual lower of that band for Revan Ribbons. And that would give us a range between 61300 to the upside versus about 6 uh sorry 58 um sorry 58 650 to the downside. If..."
+    },
+    {
+      "keyword": "lower band",
+      "snippet": "...erest. That would be 55,100. And I like the confluence between that and then the bottom end of this lower band two right here at 55150 as of right now for CME. These are going to flop around a little bit obviously, but for right now, uh that's where they that uh that is currently where they're coming in aroun..."
+    },
+    {
+      "keyword": "ema",
+      "snippet": "...at we were looking at from last week's uh videos, which is effectively a retest of that green uh 55 EMA right here in that red circle. If all of this is, you know, sounding foreign to you, check out the TA 101 program. It's literally 100% free. You can find it in the link description below. It's actual..."
+    },
+    {
+      "keyword": "ema",
+      "snippet": "...ust a an intim correction here, this is all good in the hood. And again, just basing off that red 5 EMA is completely fine on a general trending move. That's what we expect to happen. So that nothing crazy has happens here. And ultimately, as been going over throughout this month's correction, it's pro..."
+    },
+    {
+      "keyword": "sma",
+      "snippet": "...ou know, as far as what I'm doing here, you know, I still hold a core position in this. is somewhat smaller. Um, but yeah, I really want to see the monthly closure and the weekly closure, assuming they close anywhere here or higher. I think, you know, you got to put your wrist on somewhere if you want..."
+    },
+    {
+      "keyword": "sma",
+      "snippet": "...is one cuz I just I ain't holding on for [\u00a0__\u00a0] uh you know, for [\u00a0__\u00a0] like this. Um I just took a small loss there and just went on to the next one basically. Uh look, I think that it probably does end up breaking down personally. Um, but again, if you just want the setup, the setup is this last week..."
+    },
+    {
+      "keyword": "squeeze",
+      "snippet": "...strous, man. Um, don't laugh. 280 million in liquidations above price. stabilized funny rates short squeeze potential. I believe you. >> How's that ass? >> Okay. Um, great. 10,000 Bitcoin with generational wealth. Uh, Hoy Hoy, what about it? Um, oh, 10,000 you mean uh dollars. Uh, Binance. Um, this is not..."
+    },
+    {
+      "keyword": "divergence",
+      "snippet": "...e still seeing continuation. Really, nothing's changed here. We see another drive of hidden bullish divergence on caretaker's RSI right here. And this just looks to me like it wants to retest those highs. And [\u00a0__\u00a0] man. I mean, I don't think it's going to happen, you know, before end of day before end of clo..."
+    },
+    {
+      "keyword": "divergence",
+      "snippet": "...be this. On the six-month time frame on caretaker's RSI, we have one, two, three drives of bearish divergence come on the uh uh coming on the RSI. And generally, I'm going to look for a move down to the yellow 21 EMA. What I was really hoping to happen is that Bitcoin would end this month on a bounce and and..."
+    },
+    {
+      "keyword": "hidden bullish",
+      "snippet": "...ll uptren. We're still seeing continuation. Really, nothing's changed here. We see another drive of hidden bullish divergence on caretaker's RSI right here. And this just looks to me like it wants to retest those highs. And [\u00a0__\u00a0] man. I mean, I don't think it's going to happen, you know, before end of day before..."
+    },
+    {
+      "keyword": "hidden bullish",
+      "snippet": "...on a pullback in Q3 and then give it a chance to uh to, you know, to bolt back up. Um, actually no hidden bullish divergence here on Ketakers RSI, which is interesting, but I guess that does make sense because that is the previous low and this is lower. So, yeah, can't be hidden bullish. I suppose the six-month..."
+    },
+    {
+      "keyword": "hidden bearish",
+      "snippet": "...] Uh this thing is Oh my god. It's already a back at the lows. Holy [\u00a0__\u00a0] man. Uh another drop of hidden bearish divergence right there. Let me look at like the actual one. Curious to see what this looks like right now. God damn, man. Holy [\u00a0__\u00a0] Is are these really going to go and make new highs from here? The..."
+    },
+    {
+      "keyword": "hidden bearish",
+      "snippet": "...they're doing great. Um uh I look weekly, we'll start it off here. Harder from time frame. Terrible hidden bearish divergence. Um rejecting the yellow 21 EMA and just a nasty downtrend. How the [\u00a0__\u00a0] do these guys make money anyways? We have chat GBT now. Who the [\u00a0__\u00a0] uses Dolingo for real? Who the [\u00a0__\u00a0] is u..."
+    },
+    {
+      "keyword": "resistance",
+      "snippet": "...o the top side. Um that would show the 618 level as kind of like the current, I guess, shorter term resistance at 62,500. Then more important, let's go to the monthly and see if there's anything of note here. And the monthly, um I'm very I'm going to very curious to see how this one opens up coming into July...."
+    },
+    {
+      "keyword": "target",
+      "snippet": "...tinue to trend towards that next band um on these dotted areas right here. And that's going to be a target of about 56,850 between there and potentially even a wick down to like 55 uh 155 200. You know, those would be the next technical targets based upon a break. Of course, if Bitcoin can break above the..."
+    },
+    {
+      "keyword": "target",
+      "snippet": "...and potentially even a wick down to like 55 uh 155 200. You know, those would be the next technical targets based upon a break. Of course, if Bitcoin can break above these gray dots right here, I would be looking for test of that midband, but it must absolutely close above that midband to reclaim it, thus..."
+    },
+    {
+      "keyword": "take profit",
+      "snippet": "...ng. I'm going to be fair. Uh Chris Fellis says already daily weekly bought for long-term but up 50% take profit. Um I don't know. I I mean I always like taking profit when you're up big like that in general. Um do I think this one's going to go more up? Look, you're getting you're getting some um some bearish..."
+    },
+    {
+      "keyword": "long",
+      "snippet": "...of 2022. You can see throughout history, you know, this thing loves just base off of that on these long-term trending moves. In fact, you'll see it even better when we go to the S&P chart, which has, you know, the most longunning history. This one going back to like 1800s. Yeah. 187 1871. Um, you know,..."
+    },
+    {
+      "keyword": "long",
+      "snippet": "...oves. In fact, you'll see it even better when we go to the S&P chart, which has, you know, the most longunning history. This one going back to like 1800s. Yeah. 187 1871. Um, you know, you can see it over there. And throughout these long-term trending moves, you know, you can see Bitcoin and Bitcoin, yo..."
+    },
+    {
+      "keyword": "short",
+      "snippet": "...64,000 bucks. But again, you know, as long as Bitcoin's below there, I don't even have a reason for short-term bullishness, unfortunately. Even though we can see some things in the background, there certainly is potential as always. But god damn, man. Uh that is the minimum condition to even being open t..."
+    },
+    {
+      "keyword": "short",
+      "snippet": "...ack to the rebon ribbons, the midband right here is 64,000 bucks. can't get anything more than just short-term bouncy sort of behavior for Bitcoin as long as you're below there. And even in the very very short term, you can see the same range still occur from yesterday's video and really the past week's..."
+    },
+    {
+      "keyword": "bullish",
+      "snippet": "...en. We're still seeing continuation. Really, nothing's changed here. We see another drive of hidden bullish divergence on caretaker's RSI right here. And this just looks to me like it wants to retest those highs. And [\u00a0__\u00a0] man. I mean, I don't think it's going to happen, you know, before end of day before..."
+    },
+    {
+      "keyword": "bullish",
+      "snippet": "...n's below that midband, which has now crawled its way all the way down to 62,200 almost, I can't be bullish. In fact, uh I should actually go to CME's chart for this one. This one is certainly a lot more technically uh just beautiful. This one actually a little bit higher as well. This one at 64,000 bucks...."
+    },
+    {
+      "keyword": "bearish",
+      "snippet": "...ot the same [\u00a0__\u00a0] chart. Obviously not the same [\u00a0__\u00a0] chart. And if I do want to make the biggest bearish case for Bitcoin, it would certainly be this. On the six-month time frame on caretaker's RSI, we have one, two, three drives of bearish divergence come on the uh uh coming on the RSI. And generally,..."
+    }
+  ],
+  "summary": "Sentiment: bullish-leaning. Covers volatility analysis, divergence analysis, Revin Ribbons, key levels, trade setups. Mentions 1 price targets and 1 support/resistance levels."
+}

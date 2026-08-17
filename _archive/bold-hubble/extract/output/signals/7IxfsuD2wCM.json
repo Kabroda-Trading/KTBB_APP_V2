@@ -1,0 +1,114 @@
+{
+  "video_id": "7IxfsuD2wCM",
+  "video_title": "Here's How I Know When To Sell My Long Term Investments",
+  "extracted_at": "2026-07-15T01:47:42.600739+00:00",
+  "word_count": 5197,
+  "market_bias": {
+    "short_term": "bearish",
+    "medium_term": "neutral",
+    "long_term": "neutral"
+  },
+  "key_levels": {
+    "support": [],
+    "resistance": [],
+    "targets": [],
+    "midband": []
+  },
+  "indicators": {},
+  "active_strategies": [
+    {
+      "strategy": "strategy_4",
+      "trigger": "blow-off",
+      "mentioned": true
+    }
+  ],
+  "assets_mentioned": [
+    "BTC",
+    "GOLD",
+    "NASDAQ",
+    "SPY"
+  ],
+  "key_snippets": [
+    {
+      "keyword": "bbwp",
+      "snippet": "...time frame. This one a little bit cleaner. In this case, we can see extreme volatility, 100% on the BBWP indicator. This is by the way my preferred volatility indicator. It's freely available on TradingView. Just go to the to the what's it called? The public library here. Just type in BBWP created by my..."
+    },
+    {
+      "keyword": "bbwp",
+      "snippet": "...lable on TradingView. Just go to the to the what's it called? The public library here. Just type in BBWP created by my good friend Mr. The Caretaker. He's among the best coders in all of TradingView nationally no, recognized worldwide. He's great and also just really solid friend. Anyways, yeah, you kno..."
+    },
+    {
+      "keyword": "divergence",
+      "snippet": "...nd then, of course, the next one would be momentum oscillator. I like to use something like bearish divergence on the RSI. You could also use a MACD crossover on a very high term timeframe. Same thing with the RSI as well. We're talking about a weekly or a monthly, nothing less than that. These are where you..."
+    },
+    {
+      "keyword": "divergence",
+      "snippet": "...you know, general indices that kind of just march their way upwards and onwards. And then, bearish divergence is kind of like the nail in the coffin. So, these things, like I said, they will happen typically within a few bars of each other, or in some cases you will see them happen all at once. In in in whic..."
+    },
+    {
+      "keyword": "long",
+      "snippet": "...tion when all of these happen, but I can tell you that I have adopted this sort of framework for my long-term investments, and when I see these signals, I will absolutely sell some of my holdings. Now, when I say some, that might be, you know, as much as 80 to 85% or as little as 20%. It depends on the..."
+    },
+    {
+      "keyword": "long",
+      "snippet": "...of a core position, where I where I got it from, and essentially what I want to do with it, for how long, is going to decide how much I actually take off at those tops and then trade around. Anyways, moving into it from there, let's go over just the overall premise here. And look, many people know at le..."
+    },
+    {
+      "keyword": "short",
+      "snippet": "...bolas don't last. Now, I would strongly discourage you from taking from selling or or or especially shorting before, you know, you actually do see the reversal. Just high volatility in and of itself probably not going to get it done, but it is a warning signal. Things can generally go higher. Um uh but t..."
+    },
+    {
+      "keyword": "short",
+      "snippet": "...eekly right here, you know, you are running into extreme volatility, so maybe uh I mean, was like a short-term local high right there, but the a better example of this would have been look at um something like Bitcoin. Something like Bitcoin on the 2017 rally. This is just a picture-perfect um uh example..."
+    },
+    {
+      "keyword": "bullish",
+      "snippet": "...the past few months, um but now they're kind of escaping me uh cuz most things have been absolutely bullish recently. Uh but what are some of the ones that pat that topped out in the past few months? A lot of the defense stocks, actually. Um Where No, not this one, though. Uh maybe EUAD. Uh Actually, not s..."
+    },
+    {
+      "keyword": "bearish",
+      "snippet": "...you that, \"Hey, this does have a real issue here.\" Typically, these will come in the form of like a bearish engulfing or perhaps a shooting star, three black crows. These sort of things are what you're looking for there. And by the way, we're going to go over examples of these as well. So, uh so don't worr..."
+    },
+    {
+      "keyword": "bearish",
+      "snippet": "...e way. And then, of course, the next one would be momentum oscillator. I like to use something like bearish divergence on the RSI. You could also use a MACD crossover on a very high term timeframe. Same thing with the RSI as well. We're talking about a weekly or a monthly, nothing less than that. These are..."
+    },
+    {
+      "keyword": "strategy",
+      "snippet": "...because I heard that you should sell on Twitter. And look, that is obviously not going to be a good strategy. Why? Because well, you probably didn't even have that in, you know, you probably didn't even have have that in mind as a method to sell before you even entered the position to begin with. So, it was..."
+    },
+    {
+      "keyword": "strategy",
+      "snippet": "...n mind as a method to sell before you even entered the position to begin with. So, it wasn't even a strategy at all. You were just playing with the emotions of the market. And of course, when you play with the emotions of the market, well, you are going to get emotional results, which generally not very goo..."
+    },
+    {
+      "keyword": "confirmation",
+      "snippet": "...internet for whatever reason, but these are just from a bottomized morons who don't understand that confirmation of what you're looking at is incredibly valuable. Anyways, um, one bad candle, candle by the way, is not a top, but a textbook book reversal at a parabolic extreme is the market flinching. So, a real..."
+    },
+    {
+      "keyword": "volatility",
+      "snippet": "...t to our next slide. The next one, which typically comes hand-in-hand with this as well, is extreme volatility. Again, this will only happen on parabolic blow-off tops. Both volume and volatility. When you are in traditional markets, especially, these don't necessarily correlate as well when it comes to the m..."
+    },
+    {
+      "keyword": "volatility",
+      "snippet": "...ll, is extreme volatility. Again, this will only happen on parabolic blow-off tops. Both volume and volatility. When you are in traditional markets, especially, these don't necessarily correlate as well when it comes to the major indices. Now, when it comes to singular stocks, yes, you typically do see these..."
+    },
+    {
+      "keyword": "blow-off",
+      "snippet": "...es hand-in-hand with this as well, is extreme volatility. Again, this will only happen on parabolic blow-off tops. Both volume and volatility. When you are in traditional markets, especially, these don't necessarily correlate as well when it comes to the major indices. Now, when it comes to singular stocks,..."
+    },
+    {
+      "keyword": "blow-off",
+      "snippet": "...ndices. Now, when it comes to singular stocks, yes, you typically do see these operate in parabolic blow-off tops, but for the major indices like spy, Nasdaq, these sort of things, usually you actually rally into a macro high or a major high on declining volatility and even declining volume as well. But whe..."
+    },
+    {
+      "keyword": "momentum",
+      "snippet": "...portant. Also works on the downside as well, by the way. And then, of course, the next one would be momentum oscillator. I like to use something like bearish divergence on the RSI. You could also use a MACD crossover on a very high term timeframe. Same thing with the RSI as well. We're talking about a weekl..."
+    },
+    {
+      "keyword": "trend",
+      "snippet": "...worked for me. Anyways, moving on to there, we'll go into extreme volatility. It is this a healthy trend or a parabolic blow-off top? That's what volatility is more or less answering the question of. Tops aren't quiet for the most part. Like I said, when it comes to traditional market indices, different..."
+    }
+  ],
+  "summary": "Sentiment: bearish-leaning. Covers volatility analysis, divergence analysis, trade setups. Mentions 0 price targets and 0 support/resistance levels."
+}

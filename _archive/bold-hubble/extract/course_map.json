@@ -1,0 +1,636 @@
+[
+  {
+    "section_index": 1,
+    "section_title": "Quant AI",
+    "lectures": [
+      {
+        "id": "59422258",
+        "title": "Need Help? Ask Your Quant Companion AI! (Beta)",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/59422258",
+        "duration": null,
+        "type": "video"
+      }
+    ]
+  },
+  {
+    "section_index": 2,
+    "section_title": "Intro",
+    "lectures": [
+      {
+        "id": "62003670",
+        "title": "Intro & How To Make The Most Of This Bible",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62003670",
+        "duration": "19:54",
+        "type": "video"
+      },
+      {
+        "id": "51802223",
+        "title": "News, Media & Price",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51802223",
+        "duration": "11:39",
+        "type": "video"
+      },
+      {
+        "id": "57743050",
+        "title": "Exchange Bonuses & Fee Reduction Links",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57743050",
+        "duration": null,
+        "type": "text"
+      }
+    ]
+  },
+  {
+    "section_index": 3,
+    "section_title": "Indicators",
+    "lectures": [
+      {
+        "id": "51752848",
+        "title": "Moving Averages (MA's)",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51752848",
+        "duration": "36:05",
+        "type": "video"
+      },
+      {
+        "id": "64396079",
+        "title": "Moving Average Quiz",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/64396079",
+        "duration": null,
+        "type": "quiz"
+      },
+      {
+        "id": "51752849",
+        "title": "Price Range Compression",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51752849",
+        "duration": "25:42",
+        "type": "video"
+      },
+      {
+        "id": "64396131",
+        "title": "Price Range Compression Quiz",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/64396131",
+        "duration": null,
+        "type": "quiz"
+      },
+      {
+        "id": "51752385",
+        "title": "Bollinger Band Width Percentile (BBWP)",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51752385",
+        "duration": "25:35",
+        "type": "video"
+      },
+      {
+        "id": "64396194",
+        "title": "BBWP Quiz",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/64396194",
+        "duration": null,
+        "type": "quiz"
+      },
+      {
+        "id": "51752484",
+        "title": "Price Moving Average Ratio Percentile (PMARP)",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51752484",
+        "duration": "23:19",
+        "type": "video"
+      },
+      {
+        "id": "51752459",
+        "title": "Relative Strength Index (RSI)",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51752459",
+        "duration": "28:14",
+        "type": "video"
+      },
+      {
+        "id": "64433531",
+        "title": "RSI Quiz",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/64433531",
+        "duration": null,
+        "type": "quiz"
+      },
+      {
+        "id": "61964066",
+        "title": "MACD",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/61964066",
+        "duration": "18:19",
+        "type": "video"
+      },
+      {
+        "id": "64433331",
+        "title": "MACD Quiz",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/64433331",
+        "duration": null,
+        "type": "quiz"
+      },
+      {
+        "id": "51752533",
+        "title": "Fibonacci & The 50% Rule",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51752533",
+        "duration": "44:43",
+        "type": "video"
+      },
+      {
+        "id": "64433465",
+        "title": "Fibonacci & 50% Rule Quiz",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/64433465",
+        "duration": null,
+        "type": "quiz"
+      }
+    ]
+  },
+  {
+    "section_index": 4,
+    "section_title": "The Core Model Of Price",
+    "lectures": [
+      {
+        "id": "51754496",
+        "title": "Geometric Brownian Motion",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51754496",
+        "duration": "14:38",
+        "type": "video"
+      },
+      {
+        "id": "51754482",
+        "title": "Trend",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51754482",
+        "duration": "31:52",
+        "type": "video"
+      },
+      {
+        "id": "51754485",
+        "title": "Volatility",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51754485",
+        "duration": "29:07",
+        "type": "video"
+      },
+      {
+        "id": "51754494",
+        "title": "Momentum",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51754494",
+        "duration": "36:09",
+        "type": "video"
+      },
+      {
+        "id": "51754495",
+        "title": "The Krown System",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51754495",
+        "duration": "50:32",
+        "type": "video"
+      }
+    ]
+  },
+  {
+    "section_index": 5,
+    "section_title": "Classical Technical Analysis",
+    "lectures": [
+      {
+        "id": "60663891",
+        "title": "Dominant Trend: Trending Highs & Lows",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/60663891",
+        "duration": "28:35",
+        "type": "video"
+      },
+      {
+        "id": "60839310",
+        "title": "Mastering Patterns",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/60839310",
+        "duration": "23:28",
+        "type": "video"
+      },
+      {
+        "id": "60678112",
+        "title": "Range Reclaims: Creating A Model Around Support/Resistance Scalping",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/60678112",
+        "duration": "15:18",
+        "type": "video"
+      },
+      {
+        "id": "60793039",
+        "title": "Moving Averages & Systematized Scalping",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/60793039",
+        "duration": "26:20",
+        "type": "video"
+      },
+      {
+        "id": "60862136",
+        "title": "Time Analysis",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/60862136",
+        "duration": "25:44",
+        "type": "video"
+      },
+      {
+        "id": "60955639",
+        "title": "RSI Scalping Strategies",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/60955639",
+        "duration": "26:08",
+        "type": "video"
+      },
+      {
+        "id": "60895276",
+        "title": "Divergence Trading Strategies",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/60895276",
+        "duration": "39:13",
+        "type": "video"
+      },
+      {
+        "id": "61000601",
+        "title": "Rate Of Change - Generating Price Targets",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/61000601",
+        "duration": "17:16",
+        "type": "video"
+      },
+      {
+        "id": "61964226",
+        "title": "Price Discovery & Generating Targets Via Fib Extensions",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/61964226",
+        "duration": "18:08",
+        "type": "video"
+      },
+      {
+        "id": "61948412",
+        "title": "The 5 Commandments Of Strategy Creation",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/61948412",
+        "duration": "24:46",
+        "type": "video"
+      }
+    ]
+  },
+  {
+    "section_index": 6,
+    "section_title": "Long Term Investing",
+    "lectures": [
+      {
+        "id": "64247014",
+        "title": "Long Term Investing Psychology",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/64247014",
+        "duration": "68:16",
+        "type": "video"
+      }
+    ]
+  },
+  {
+    "section_index": 7,
+    "section_title": "Useful Statistics Definitions",
+    "lectures": [
+      {
+        "id": "57585125",
+        "title": "Trading & Statistics Definitions",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57585125",
+        "duration": null,
+        "type": "text"
+      }
+    ]
+  },
+  {
+    "section_index": 8,
+    "section_title": "Strategy Creation & Quantitative Testing",
+    "lectures": [
+      {
+        "id": "51754503",
+        "title": "Strategy Development",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51754503",
+        "duration": "20:29",
+        "type": "video"
+      },
+      {
+        "id": "51754505",
+        "title": "Creating A Base Strategy Template",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51754505",
+        "duration": "15:24",
+        "type": "video"
+      },
+      {
+        "id": "57567319",
+        "title": "Strategy Back-Testing Template",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57567319",
+        "duration": null,
+        "type": "text"
+      },
+      {
+        "id": "57567529",
+        "title": "How To Use The Strategy Back-Testing Template",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57567529",
+        "duration": "13:27",
+        "type": "video"
+      },
+      {
+        "id": "61336313",
+        "title": "Documenting Strategy Statistics Demonstration",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/61336313",
+        "duration": "7:13",
+        "type": "video"
+      },
+      {
+        "id": "61336309",
+        "title": "Calculating A Statistical Setup & Strategy",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/61336309",
+        "duration": "16:22",
+        "type": "video"
+      },
+      {
+        "id": "51754511",
+        "title": "Strategy Optimization Tactics",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51754511",
+        "duration": "23:46",
+        "type": "video"
+      },
+      {
+        "id": "51755040",
+        "title": "Forwards Walk Testing",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/51755040",
+        "duration": "15:55",
+        "type": "video"
+      }
+    ]
+  },
+  {
+    "section_index": 9,
+    "section_title": "Sample Strategies Template & Statistics",
+    "lectures": [
+      {
+        "id": "57667037",
+        "title": "Sample Strategies Overview",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57667037",
+        "duration": null,
+        "type": "text"
+      },
+      {
+        "id": "57666745",
+        "title": "Strategy #1 Template - Basic Long/Short Trend",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666745",
+        "duration": "29:05",
+        "type": "video"
+      },
+      {
+        "id": "57666774",
+        "title": "Strategy #2 Template - Uptrend Pullback Long Scalp",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666774",
+        "duration": "17:28",
+        "type": "video"
+      },
+      {
+        "id": "57666905",
+        "title": "Strategy #3 Template - Downtrend Continuation Short Scalp",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666905",
+        "duration": "17:22",
+        "type": "video"
+      },
+      {
+        "id": "57666928",
+        "title": "Strategy #4 Template - Uptrend Continuation Vol Short Scalp",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666928",
+        "duration": "20:48",
+        "type": "video"
+      },
+      {
+        "id": "57666999",
+        "title": "Strategy #5 Template - Downtrend Continuation Vol Short Scalp",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666999",
+        "duration": "18:56",
+        "type": "video"
+      }
+    ]
+  },
+  {
+    "section_index": 10,
+    "section_title": "Sample Strategy Statistics",
+    "lectures": [
+      {
+        "id": "57666771",
+        "title": "Strategy #1 Statistics Breakdown",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666771",
+        "duration": "20:43",
+        "type": "video"
+      },
+      {
+        "id": "57666895",
+        "title": "Strategy #2 Statistics Breakdown",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666895",
+        "duration": "17:04",
+        "type": "video"
+      },
+      {
+        "id": "57666906",
+        "title": "Strategy #3 Statistics Breakdown",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666906",
+        "duration": "7:36",
+        "type": "video"
+      },
+      {
+        "id": "57666929",
+        "title": "Strategy #4 Statistics Breakdown",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666929",
+        "duration": "7:09",
+        "type": "video"
+      },
+      {
+        "id": "57667000",
+        "title": "Strategy #5 Statistics Breakdown",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57667000",
+        "duration": "5:07",
+        "type": "video"
+      }
+    ]
+  },
+  {
+    "section_index": 11,
+    "section_title": "Live Trades",
+    "lectures": [
+      {
+        "id": "57666775",
+        "title": "Strategy #1 Live Trade",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666775",
+        "duration": "12:00",
+        "type": "video"
+      },
+      {
+        "id": "57666898",
+        "title": "Strategy #2 Live Trade",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666898",
+        "duration": "12:54",
+        "type": "video"
+      },
+      {
+        "id": "57666899",
+        "title": "Strategy #2 Live Trade",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666899",
+        "duration": "22:42",
+        "type": "video"
+      },
+      {
+        "id": "57666916",
+        "title": "Strategy #3 Live Trade",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666916",
+        "duration": "15:44",
+        "type": "video"
+      },
+      {
+        "id": "57666990",
+        "title": "Strategy #4 Live Trade",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666990",
+        "duration": "37:01",
+        "type": "video"
+      },
+      {
+        "id": "57666991",
+        "title": "Strategy #4 Live Trade (Optimizing Entry)",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/57666991",
+        "duration": "10:58",
+        "type": "video"
+      }
+    ]
+  },
+  {
+    "section_index": 12,
+    "section_title": "Trading Psychology - Introduction",
+    "lectures": [
+      {
+        "id": "62922963",
+        "title": "Intro & Making The Most Of This Program",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922963",
+        "duration": "7:55",
+        "type": "video"
+      },
+      {
+        "id": "62922964",
+        "title": "Biological Roots & Past Conditioning",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922964",
+        "duration": "27:26",
+        "type": "video"
+      },
+      {
+        "id": "62922965",
+        "title": "Social Conditioning & YOU",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922965",
+        "duration": "37:39",
+        "type": "video"
+      }
+    ]
+  },
+  {
+    "section_index": 13,
+    "section_title": "Trading Psychology - Reality & Ego",
+    "lectures": [
+      {
+        "id": "62922966",
+        "title": "Redefining Your Reality",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922966",
+        "duration": "21:00",
+        "type": "video"
+      },
+      {
+        "id": "62922967",
+        "title": "Responsibility",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922967",
+        "duration": "30:37",
+        "type": "video"
+      },
+      {
+        "id": "62922968",
+        "title": "Identity, Language & Reality - Redefining Your Ego",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922968",
+        "duration": "22:40",
+        "type": "video"
+      },
+      {
+        "id": "62922969",
+        "title": "Rock Bottom, Isolation & Authority",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922969",
+        "duration": "36:14",
+        "type": "video"
+      }
+    ]
+  },
+  {
+    "section_index": 14,
+    "section_title": "Trading Psychology - Strategy & Expectations & Execution",
+    "lectures": [
+      {
+        "id": "62922970",
+        "title": "Calculating A Statistical Setup & Strategy",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922970",
+        "duration": "16:21",
+        "type": "video"
+      },
+      {
+        "id": "62922971",
+        "title": "Expectations",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922971",
+        "duration": "21:59",
+        "type": "video"
+      },
+      {
+        "id": "62922972",
+        "title": "Abundance & Scarcity",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922972",
+        "duration": "15:57",
+        "type": "video"
+      },
+      {
+        "id": "62922973",
+        "title": "Documenting Statistics Demonstration",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922973",
+        "duration": "7:13",
+        "type": "video"
+      }
+    ]
+  },
+  {
+    "section_index": 15,
+    "section_title": "Trading Psychology - Addressing Strong Emotional States",
+    "lectures": [
+      {
+        "id": "62922974",
+        "title": "Assessing & Redefining FOMO",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922974",
+        "duration": "19:34",
+        "type": "video"
+      },
+      {
+        "id": "62922975",
+        "title": "Motivation & Discipline",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922975",
+        "duration": "18:20",
+        "type": "video"
+      }
+    ]
+  },
+  {
+    "section_index": 16,
+    "section_title": "Trading Psychology - Putting It All Together",
+    "lectures": [
+      {
+        "id": "62922976",
+        "title": "Integration - How To Change",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922976",
+        "duration": "28:43",
+        "type": "video"
+      },
+      {
+        "id": "62922977",
+        "title": "What's Worked Best For Me",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/62922977",
+        "duration": "19:35",
+        "type": "video"
+      }
+    ]
+  },
+  {
+    "section_index": 17,
+    "section_title": "Strategy Creation, Back-testing & Automation",
+    "lectures": [
+      {
+        "id": "52499137",
+        "title": "Loyalty Discount Special Offer",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/52499137",
+        "duration": null,
+        "type": "text"
+      },
+      {
+        "id": "53242366",
+        "title": "Generate Commission From Referring Others",
+        "url": "https://krown-trading.teachable.com/courses/ktb/lectures/53242366",
+        "duration": null,
+        "type": "video"
+      }
+    ]
+  }
+]

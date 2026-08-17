@@ -1,0 +1,110 @@
+{
+  "video_id": "V5le1_vYdMA",
+  "video_title": "Trading Psychology: The Real Science of Why 90% of Day Traders Fail",
+  "extracted_at": "2026-07-15T01:47:25.397662+00:00",
+  "word_count": 5946,
+  "market_bias": {
+    "short_term": "neutral",
+    "medium_term": "neutral",
+    "long_term": "neutral"
+  },
+  "key_levels": {
+    "support": [],
+    "resistance": [],
+    "targets": [],
+    "midband": []
+  },
+  "indicators": {},
+  "active_strategies": [],
+  "assets_mentioned": [
+    "BTC",
+    "SPX"
+  ],
+  "key_snippets": [
+    {
+      "keyword": "ema",
+      "snippet": "...A loss hurts twice as much as a gain feels good, if that makes sense. So, Nobel winning work by Kahneman and um Tversky uh proved a loss stings about two times as hard as a same size gain feels good. So, to dodge that sting, you hold the loser and pray, because you just you just don't want to take the..."
+    },
+    {
+      "keyword": "ema",
+      "snippet": "...r example, I'm going to long on the 15-minute when the RSI size below 35 and price is above the 200 EMA and funding is is neutral or negative. Confirm with rising open interest. Look, I'm not saying that that strategy is going to be great. I I'm just I'm just reading off the prompt right here. >> [laug..."
+    },
+    {
+      "keyword": "sma",
+      "snippet": "...know, on the investments that you actually win on, and therefore, you know, take the loss when it's small, because you can just use that in the future if, you know, if if you don't have um if you don't have any gains this year. And if you do have gains this year, you can just mark it against that. And..."
+    },
+    {
+      "keyword": "sma",
+      "snippet": "...n, if you're a psychopath or sociopath, maybe you don't deal with some of these, but that is a very small percentage of the population. And honestly, if you think you're a psychopath or sociopath, you're You might actually be. I don't know. I'm not a [\u00a0__\u00a0] psychologist, so I can't tell you, but I'm ju..."
+    },
+    {
+      "keyword": "stop loss",
+      "snippet": "...of execution for you as well. And then again, you need to know how to manage your position and your stop loss and take profit and any other extra rules that you may want to consider. Now, like I said, that's if you already kind of know about where you want to go. You can use the backtester from there. But if..."
+    },
+    {
+      "keyword": "stop loss",
+      "snippet": "...their average um entries are for longs and shorts. And you can also figure out where their average stop losses are, too. That is actually quite useful information cuz, you know, if they're going to lose more often than not, well, guess what? Doing what's opposite of them not going to be the worst you of all..."
+    },
+    {
+      "keyword": "take profit",
+      "snippet": "...or you as well. And then again, you need to know how to manage your position and your stop loss and take profit and any other extra rules that you may want to consider. Now, like I said, that's if you already kind of know about where you want to go. You can use the backtester from there. But if we go back here..."
+    },
+    {
+      "keyword": "long",
+      "snippet": "...ort of like one-liner that I could give you that has massively aided my especially investing career long-term is this. Sell your losers, buy your winners. Now again, most people do the opposite because they're like, \"Oh, well, I'm winning over here. So, if I win over there, I should realize that and the..."
+    },
+    {
+      "keyword": "long",
+      "snippet": "...e losers will lose in comparison to the winners. And remember, returns as an investor, especially a long-term investor, that is what you're measured on. That is your report card. Anyways, ODN studied 10,000 real accounts. People were about 60% more likely to sell a winner than a loser. And the losers th..."
+    },
+    {
+      "keyword": "short",
+      "snippet": "...stimulation in our environment, which today, you know, it comes in the form of like what? Watching short-form content and [\u00a0__\u00a0] like this. Like even my mom's [\u00a0__\u00a0] addicted to this stuff. It's actually insane how crazy it is. Doesn't matter, you know, if you're if you're super educated or not, everyon..."
+    },
+    {
+      "keyword": "short",
+      "snippet": "...ple, the CFE average entry, it'll show you the average entry of of the core of the cohort longs and shorts. What's the cohort? We're pulling from losing traders. We're We find the worst traders. >> [laughter] >> It's genius, but it's [\u00a0__\u00a0] up. Uh uh We find the worst performing traders, and and we figur..."
+    },
+    {
+      "keyword": "bias",
+      "snippet": "...me. Multiply that, you know, as you see fit. Anyways, same root, different bug. We got confirmation bias, sunk cost fallacies, anchoring, and FOMO with the herd. Classic stuff. We all fall into these. Again, if you're a psychopath or sociopath, maybe you don't deal with some of these, but that is a very..."
+    },
+    {
+      "keyword": "bias",
+      "snippet": "...not. You're probably not. Anyways, knowing this won't save you. Like I said, you think knowing the biases would fix them, but it doesn't. I know everyone cold. I've studied this for a long time. I spent most I spent like about five to six years in my in my 20s specifically studying this stuff. Um, and..."
+    },
+    {
+      "keyword": "strategy",
+      "snippet": "...at, \"Hey, I can lose a thousand dollars on any given trade, but assuming that I have my, of course, strategy set up, and if you haven't done this, then you are [\u00a0__\u00a0] but if you if you if you've actually gone through the rigmarole of setting up your strategy, back testing that strategy, forward testing that..."
+    },
+    {
+      "keyword": "strategy",
+      "snippet": "...n you are [\u00a0__\u00a0] but if you if you if you've actually gone through the rigmarole of setting up your strategy, back testing that strategy, forward testing that strategy, then slowly ramping it up with low dollar amounts into a real trading size, then that's okay. You know, if you've done that, then then you'..."
+    },
+    {
+      "keyword": "entry",
+      "snippet": "...l go over the solution in just a moment. It is free, by the way. Make the call before you're in it. Entry, exit, risk, all decided in advance. When your rational brain is actually online, that's when you want to do this work. That's where you actually put in your efforts as a trader, not being in trades..."
+    },
+    {
+      "keyword": "entry",
+      "snippet": "...ree, way um until very recently. And it is actually a platform that I invested myself. It's called sentrycommand.io. I'll give it to you in just a moment here, but the point is to take yourself out of the moment. Let an AI agent handle trading execution for you based upon the strategy that you create whi..."
+    },
+    {
+      "keyword": "confirmation",
+      "snippet": "...rence over time. Multiply that, you know, as you see fit. Anyways, same root, different bug. We got confirmation bias, sunk cost fallacies, anchoring, and FOMO with the herd. Classic stuff. We all fall into these. Again, if you're a psychopath or sociopath, maybe you don't deal with some of these, but that is a..."
+    },
+    {
+      "keyword": "discount",
+      "snippet": "...ain, all free. All you need to do is just, you know, sign up using my link. It'll also give you fee discounts when you actually trade, but it does not mean that you pay you you literally will pay less for fees. You're not going to pay anything extra than you would to trade. But the platform itself, Trade Sa..."
+    },
+    {
+      "keyword": "risk",
+      "snippet": "...g out by themselves, really. That's a dead person, you know? To be exercised from your tribe was to risk uh you know, just annihilation. So, naturally, our brain wants to avoid such things. That is why, in a lot of cases, you know, we are intrinsically motivated to follow the herd, in a way. Anyways, dr..."
+    },
+    {
+      "keyword": "risk",
+      "snippet": "...ng over or that you will experience as an investor or in any sort of high, you know, high-potential risk endeavor. Um it's a lot easier said than done, obviously. You're not going to get rid of it, really, cuz ultimately, these are survival adaptations. They're there to keep you safe, but they're really..."
+    }
+  ],
+  "summary": "Sentiment: neutral. Covers trade setups. Mentions 0 price targets and 0 support/resistance levels."
+}
