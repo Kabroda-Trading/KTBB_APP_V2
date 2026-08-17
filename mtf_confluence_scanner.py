@@ -28,14 +28,13 @@ from market_data import (
 )
 import gravity_math
 
-# Three Drives divergence detection (IMP-005)
-from indicators.three_drives import detect_three_drives
-
-# Revin Suite (R-Squared) imports — from bold-hubble package
-from indicators.revin_ribbons import calculate_revin_ribbons, analyze_ribbon_state
-from indicators.rmo import calculate_rmo, analyze_rmo_state
-from indicators.rwp import calculate_rwp, analyze_rwp_state
-from indicators.revin_suite_engine import compute_revin_suite
+# Three Drives / Revin Suite (revin_ribbons, rmo, rwp, revin_suite_engine)
+# removed 2026-08-17 -- Kabroda Audit AUDIT_FINDINGS.md #1-3/#5: all four
+# confirmed byte-for-byte fabricated formulas with false Krown attribution,
+# duplicating what's now properly sourced in Trading Knowledge/knowledge/.
+# See REBUILD_PLAN.md. _analyze_timeframe() below now returns the same
+# neutral placeholder values its own error_result already used for
+# insufficient-data cases -- no downstream consumer needed a code change.
 
 TARGETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 
@@ -522,15 +521,15 @@ def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
     rsi_series = _calc_rsi_series(closes)
     divergence = _find_divergence(closes, rsi_series)
 
-    # ── Revin Suite (R-Squared) ─────────────────────────────────────────
-    revin_suite = compute_revin_suite(closes, highs, lows)
-    current = revin_suite["current"]
-    ribbon_state = current["ribbon_state"]
-    rmo_state = current["rmo_state"]
-    rwp_state = current["rwp_state"]
-
-    # ── Three Drives divergence (IMP-005) ───────────────────────────────
-    three_drives_result = detect_three_drives(highs, lows, rsi_series)
+    # Revin Suite (ribbons/RMO/RWP) + Three Drives removed 2026-08-17 --
+    # confirmed fabricated, see import-block comment above. Neutral
+    # placeholders below match error_result's own shape exactly.
+    ribbon_state = {"zone": "UNKNOWN", "gray_dot_tested": False, "outer_band_tested": False,
+                     "midline_direction": "UNKNOWN", "midline_price": None,
+                     "lower_1σ_price": None, "upper_1σ_price": None}
+    rmo_state = {"score": 0.0, "state": "NEUTRAL", "is_overextended": False}
+    rwp_state = {"score": 50.0, "state": "NEUTRAL", "is_squeeze": False, "is_expansion": False}
+    three_drives_result = []
 
     return {
         "label": label,

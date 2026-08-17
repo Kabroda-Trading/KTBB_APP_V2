@@ -38,7 +38,6 @@ import lti_interpreter
 
 from datetime import datetime, timezone, timedelta
 from jewel_specialist import run_jewel_snapshot
-from elliott_wave_specialist import run_elliott_wave_analysis
 
 from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalAccuracyLog, SystemAlertLog, SignalHealthLog, SignalWeight, AccuracyReport, SignalPerformanceLog
 
@@ -364,35 +363,16 @@ async def run_weekly_scheduler() -> None:
             scheduler_health_registry["weekly"]["status"] = "EXECUTING"
 
             date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            current_price = await _fetch_btc_price()
 
             since_week = datetime.utcnow() - timedelta(days=7)
 
-            # Elliott Wave Specialist — dedup: skip if already ran this week
-            _ew_db = SessionLocal()
-            try:
-                _ew_ran = _ew_db.query(MacroNarrativeLog).filter(
-                    MacroNarrativeLog.symbol == "BTC/USDT",
-                    MacroNarrativeLog.authored_by == "elliott_wave_specialist",
-                    MacroNarrativeLog.created_at >= since_week,
-                ).first()
-            finally:
-                _ew_db.close()
-
-            if _ew_ran:
-                print(f"[SCHEDULER] Elliott Wave Specialist already ran this week ({_ew_ran.date_key}) — skipping")
-            else:
-                print(f"[SCHEDULER] Elliott Wave Specialist firing for {date_key} (Sunday 23:00 UTC)...")
-                try:
-                    result = await asyncio.to_thread(
-                        run_elliott_wave_analysis,
-                        symbol="BTC/USDT",
-                        current_price=current_price,
-                        date_key=date_key,
-                    )
-                    print(f"[SCHEDULER] Elliott Wave: {result.get('status')}")
-                except Exception as e:
-                    print(f"[SCHEDULER] Elliott Wave failed: {e}")
+            # Elliott Wave Specialist (LLM interpretation layer, elliott_wave_
+            # specialist.py) disabled 2026-08-17, same pass and same reason as
+            # run_mas_analysis() in kabroda_mas_flow.py -- part of "the agents"
+            # costing daily money. NOTE: this is the LLM interpreter only --
+            # kabroda_macro_engine.py's actual deterministic ZigZag wave-pivot
+            # detection is a separate subprocess on its own 24h schedule,
+            # untouched, out of scope for this rebuild (REBUILD_PLAN.md).
 
             # Performance Auditor + Audit-AI (H1-H6, harness/audit_runner.py)
             # archived 2026-08-17 -- Kabroda Audit AUDIT_FINDINGS.md confirmed

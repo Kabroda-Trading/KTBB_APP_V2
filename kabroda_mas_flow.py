@@ -1218,7 +1218,31 @@ def run_mas_analysis(
     Primary MAS pipeline. Fired at session lock (9:00 AM ET) by battlebox_pipeline.py.
     Produces an ExecutiveBrief and writes it to CampaignLog, DecisionJournal,
     and MacroNarrativeLog.
+
+    DISABLED 2026-08-17 (Andy's direct instruction, Kabroda Audit
+    REBUILD_PLAN.md): the LLM agent chain this function drives --
+    mtf_interpreter -> gravity_interpreter -> junior_analyst -> Senior
+    Analyst -> publisher_crew, 5 LLM calls per day -- was costing real money
+    daily without producing a decision worth trusting (AUDIT_FINDINGS.md
+    #15: the actual trade decision was an LLM reading free text, not code,
+    with no enforced Trend/Volatility/Structure/Momentum precedence).
+    Blocked centrally, right here, rather than by removing scheduler wiring
+    in main.py: `get_live_battlebox()` can also auto-trigger this function
+    directly via `asyncio.create_task()` on a new session lock (see that
+    function's own docstring) -- a scheduler-only disable would have missed
+    that entry point. All 3 real call sites (main.py x2, battlebox_pipeline.py)
+    fire-and-forget via asyncio.create_task/to_thread and never read the
+    return value, so this early return is safe everywhere. Stays off until
+    Phase 4 (the coded Trend/Volatility/Structure/Momentum decision layer)
+    replaces this chain -- not meant to be flipped back on as-is.
     """
+    print(f">>> SENIOR ANALYST: DISABLED 2026-08-17 -- LLM agent chain blocked per owner "
+          f"instruction, skipping for {symbol} | {session_id} (see Kabroda Audit REBUILD_PLAN.md)")
+    return {
+        "status": "DISABLED",
+        "message": "MAS LLM agent chain disabled 2026-08-17 -- see Kabroda Audit REBUILD_PLAN.md",
+    }
+
     print(f">>> SENIOR ANALYST: Initiating for {symbol} | {session_id}")
 
     levels = battlebox_payload.get("levels", {})
@@ -1559,7 +1583,18 @@ def interrogate_cro(symbol: str, user_message: str) -> str:
     Operator Commlink — direct query to Senior Analyst.
     Called by POST /api/research/chat-mas via asyncio.to_thread().
     Returns a plain string response.
+
+    DISABLED 2026-08-17 (Andy's direct instruction, same pass as
+    run_mas_analysis() above -- the LLM agent chain and this chat feature
+    were both flagged together as ongoing cost with no replacement worth
+    keeping yet). Re-enable only alongside Phase 4's coded decision layer,
+    not on its own.
     """
+    return (
+        "Operator Commlink is disabled (2026-08-17) — see Kabroda Audit "
+        "REBUILD_PLAN.md. Re-enabling pending the coded decision layer rebuild."
+    )
+
     db = SessionLocal()
     try:
         # Latest execution context from CampaignLog

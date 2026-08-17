@@ -17,8 +17,10 @@ from database import SessionLocal, GravityMemory, DecisionJournal, CampaignLog
 import battlebox_pipeline  # <-- SINGLE SOURCE OF TRUTH ENFORCED
 import notify
 
-# Revin Suite (R-Squared) imports — from bold-hubble package
-from indicators.revin_suite_engine import compute_revin_suite
+# Revin Suite import removed 2026-08-17 -- was unused here (compute_revin_suite
+# imported but never called in this file; the real usage was via
+# mtf_confluence_scanner's confluence dict, read by _extract_revin_from_
+# confluence() below). See mtf_confluence_scanner.py and REBUILD_PLAN.md.
 
 # Position Sizing (IMP-003) — from bold-hubble package
 from position_sizing import calc_position_size
