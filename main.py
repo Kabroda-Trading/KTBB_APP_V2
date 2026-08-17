@@ -39,11 +39,6 @@ import lti_interpreter
 from datetime import datetime, timezone, timedelta
 from jewel_specialist import run_jewel_snapshot
 from elliott_wave_specialist import run_elliott_wave_analysis
-from performance_auditor import run_performance_audit
-import signal_accuracy_tracker
-import signal_flagging_engine
-import signal_weight_manager
-import accuracy_report_generator
 
 from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalAccuracyLog, SystemAlertLog, SignalHealthLog, SignalWeight, AccuracyReport, SignalPerformanceLog
 
@@ -57,9 +52,6 @@ scheduler_health_registry = {
     "outcome_tracker": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "monthly_lti": {"last_run": None, "next_run": None, "status": "DISABLED", "error_count": 0, "last_error": None},
     "analysis_loop": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
-    "signal_accuracy": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
-    "signal_flagging": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
-    "accuracy_report": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "gravity_engine": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "ledger_closing": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
 }
@@ -402,67 +394,11 @@ async def run_weekly_scheduler() -> None:
                 except Exception as e:
                     print(f"[SCHEDULER] Elliott Wave failed: {e}")
 
-            # Performance Auditor — dedup: skip if a SystemAuditLog row already
-            # exists for this date_key. Checks the vault directly — immune to
-            # the race condition that previously caused double-fires when two
-            # instances both found performance_note IS NULL before either committed.
-            _pa_db = SessionLocal()
-            try:
-                _pa_ran = _pa_db.query(SystemAuditLog).filter(
-                    SystemAuditLog.symbol == "BTC/USDT",
-                    SystemAuditLog.date_key == date_key,
-                ).first()
-            finally:
-                _pa_db.close()
-
-            if _pa_ran:
-                print(f"[SCHEDULER] Performance Auditor: audit already in SystemAuditLog for {date_key} — skipping")
-            else:
-                print(f"[SCHEDULER] Performance Auditor firing for {date_key} (Sunday 23:00 UTC)...")
-                try:
-                    result = await asyncio.to_thread(
-                        run_performance_audit,
-                        symbol="BTC/USDT",
-                        date_key=date_key,
-                    )
-                    print(f"[SCHEDULER] Performance Auditor: {result.get('status')}")
-                except Exception as e:
-                    print(f"[SCHEDULER] Performance Auditor failed: {e}")
-
-            # Audit-AI (H1-H6, harness/audit_runner.py) — the already-built
-            # hypothesis engine, previously manual-only (Render Shell or the
-            # admin "RUN TEST CALL"-style button at POST /api/admin/run-audit).
-            # Now scheduled automatically for the first time (2026-07-08),
-            # WEEKLY specifically -- not folded into the new daily audit_ai.py
-            # scheduler below -- because audit_runner.py's own
-            # consecutive_runs_surfaced escalation ("3 consecutive runs at
-            # PROVISIONAL_FINDING+ -> owner review") was designed against a
-            # weekly cadence; running it daily would cheapen that discipline
-            # to "3 days" instead of "3 weeks." Dedup uses a content check
-            # (not just symbol+date_key, which SystemAuditLog shares with the
-            # Performance Auditor's own brief for the same day) since
-            # audit_runner.write_brief_to_system_log() writes a SystemAuditLog
-            # row every run regardless of whether any hypothesis reached N>=30.
-            _aa_db = SessionLocal()
-            try:
-                _aa_ran = _aa_db.query(SystemAuditLog).filter(
-                    SystemAuditLog.symbol == "BTC/USDT",
-                    SystemAuditLog.created_at >= since_week,
-                    SystemAuditLog.audit_md.contains("AUDIT-AI WEEKLY LEDGER"),
-                ).first()
-            finally:
-                _aa_db.close()
-
-            if _aa_ran:
-                print(f"[SCHEDULER] Audit-AI (H1-H6) already ran this week ({_aa_ran.date_key}) — skipping")
-            else:
-                print(f"[SCHEDULER] Audit-AI (H1-H6) firing for {date_key} (Sunday 23:00 UTC)...")
-                try:
-                    import harness.audit_runner as _audit_runner
-                    await asyncio.to_thread(_audit_runner.main)
-                    print("[SCHEDULER] Audit-AI (H1-H6): done")
-                except Exception as e:
-                    print(f"[SCHEDULER] Audit-AI (H1-H6) failed: {e}")
+            # Performance Auditor + Audit-AI (H1-H6, harness/audit_runner.py)
+            # archived 2026-08-17 -- Kabroda Audit AUDIT_FINDINGS.md confirmed
+            # both record-only; performance_auditor's one live-reaching path
+            # (SystemAuditLog -> Senior Analyst context) was already explicitly
+            # non-binding ("do not apply as rules"). Modules moved to _archive/.
 
             scheduler_health_registry["weekly"]["last_run"] = datetime.now(timezone.utc).isoformat()
             scheduler_health_registry["weekly"]["status"] = "WAITING"
@@ -480,64 +416,9 @@ async def run_weekly_scheduler() -> None:
             await asyncio.sleep(300)
 
 
-async def run_daily_4h1h_audit_scheduler() -> None:
-    """
-    Daily, 23:45 UTC: audit_ai.py's 4H/1H-focused hypothesis checks
-    (kinematic/energy grade, 4H macro-bias alignment, runner-mechanic
-    shadow-vs-real) plus the per-trade "why" digest across all three
-    timeframes (15M/1H/4H). New territory the 15M-only harness/ ecosystem
-    doesn't cover -- see WORK_LOG.md 2026-07-08 for the full design.
-    Dedup via DailyAuditLog.date_key (one digest per day).
-    """
-    print("[SCHEDULER] Daily 4H/1H audit scheduler starting (audit_ai.py)...")
-    while True:
-        try:
-            seconds = _seconds_until_utc(23, 45)
-            next_run_dt = datetime.now(timezone.utc) + timedelta(seconds=seconds)
-            scheduler_health_registry["daily_4h1h_audit"]["next_run"] = next_run_dt.isoformat()
-            scheduler_health_registry["daily_4h1h_audit"]["status"] = "WAITING"
-
-            print(f"[SCHEDULER] Daily 4H/1H audit: next run in {seconds / 3600:.1f}h (23:45 UTC)")
-            await asyncio.sleep(seconds)
-
-            scheduler_health_registry["daily_4h1h_audit"]["status"] = "EXECUTING"
-
-            date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-            _da_db = SessionLocal()
-            try:
-                _da_ran = _da_db.query(DailyAuditLog).filter(DailyAuditLog.date_key == date_key).first()
-            finally:
-                _da_db.close()
-
-            if _da_ran:
-                print(f"[SCHEDULER] Daily 4H/1H audit already ran today ({date_key}) — skipping")
-            else:
-                print(f"[SCHEDULER] Daily 4H/1H audit firing for {date_key}...")
-                try:
-                    import audit_ai
-                    result = await asyncio.to_thread(audit_ai.run_daily_4h1h_audit)
-                    print(
-                        f"[SCHEDULER] Daily 4H/1H audit: 15M={result['trades_covered_15m']} "
-                        f"1H={result['trades_covered_1h']} 4H={result['trades_covered_4h']}"
-                    )
-                except Exception as e:
-                    print(f"[SCHEDULER] Daily 4H/1H audit failed: {e}")
-
-            scheduler_health_registry["daily_4h1h_audit"]["last_run"] = datetime.now(timezone.utc).isoformat()
-            scheduler_health_registry["daily_4h1h_audit"]["status"] = "WAITING"
-
-            # Sleep 1h to clear the 23:45 UTC window before recalculating next fire
-            await asyncio.sleep(3600)
-
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            print(f"[SCHEDULER] Daily 4H/1H audit outer error: {e}")
-            scheduler_health_registry["daily_4h1h_audit"]["error_count"] += 1
-            scheduler_health_registry["daily_4h1h_audit"]["last_error"] = str(e)
-            scheduler_health_registry["daily_4h1h_audit"]["status"] = "ERROR"
-            await asyncio.sleep(300)
+# run_daily_4h1h_audit_scheduler (audit_ai.py, H7-H16) archived 2026-08-17 --
+# Kabroda Audit AUDIT_FINDINGS.md confirmed record-only, never fed a live
+# decision. Module moved to _archive/. See REBUILD_PLAN.md.
 
 
 async def run_monthly_lti_scheduler() -> None:
@@ -801,13 +682,12 @@ async def lifespan(app: FastAPI):
     # left in place below, not deleted, in case pieces (real indicator math,
     # Hash Ribbons) are worth reusing in the rebuild.
     # app.state.lti_task            = asyncio.create_task(run_monthly_lti_scheduler())
-    app.state.daily_audit_task      = asyncio.create_task(run_daily_4h1h_audit_scheduler())
     app.state.outcome_tracker_task  = asyncio.create_task(run_outcome_tracker())
     app.state.analysis_loop_task    = asyncio.create_task(run_analysis_loop_scheduler())
     app.state.monitor_task          = asyncio.create_task(session_monitor.run_session_monitor_loop())
-    app.state.signal_accuracy_task  = asyncio.create_task(run_signal_accuracy_scheduler())
-    app.state.signal_flagging_task  = asyncio.create_task(run_signal_flagging_scheduler())
-    app.state.accuracy_report_task = asyncio.create_task(run_accuracy_report_scheduler())
+    # signal_accuracy/signal_flagging/accuracy_report schedulers archived
+    # 2026-08-17 per Kabroda Audit REBUILD_PLAN.md -- confirmed record-only,
+    # never fed a live decision. Modules moved to _archive/.
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     app.state.gravity_task.cancel()
@@ -815,129 +695,17 @@ async def lifespan(app: FastAPI):
     app.state.senior_analyst_task.cancel()
     app.state.jewel_task.cancel()
     app.state.weekly_task.cancel()
-    app.state.daily_audit_task.cancel()
     app.state.outcome_tracker_task.cancel()
     app.state.analysis_loop_task.cancel()
-    app.state.signal_accuracy_task.cancel()
-    app.state.signal_flagging_task.cancel()
-    app.state.accuracy_report_task.cancel()
     app.state.monitor_task.cancel()
 
 
-# ==============================================================================
-# SIGNAL ACCURACY TRACKER — runs every 4 hours
-# Captures signals from jewel_snapshot_log, decision_journal, campaign_logs,
-# and session_audit_log, then checks outcomes against current price.
-# ==============================================================================
-
-async def run_signal_accuracy_scheduler() -> None:
-    """Every 4 hours: capture new signals and check their accuracy."""
-    print("[SCHEDULER] Signal Accuracy Tracker starting...")
-    while True:
-        try:
-            scheduler_health_registry["signal_accuracy"]["status"] = "EXECUTING"
-
-            # Fetch price in the async context (safe for shared ccxt client)
-            current_price = await _fetch_btc_price()
-
-            # Run the synchronous tick in a thread pool, passing the price
-            result = await asyncio.to_thread(
-                signal_accuracy_tracker.run_signal_accuracy_tick,
-                current_price=current_price,
-            )
-
-            scheduler_health_registry["signal_accuracy"]["last_run"] = datetime.now(timezone.utc).isoformat()
-            scheduler_health_registry["signal_accuracy"]["status"] = "OK" if result.get("status") == "OK" else "ERROR"
-            scheduler_health_registry["signal_accuracy"]["last_result"] = result
-
-            seconds = 14400  # 4 hours
-            next_run_dt = datetime.now(timezone.utc) + timedelta(seconds=seconds)
-            scheduler_health_registry["signal_accuracy"]["next_run"] = next_run_dt.isoformat()
-            scheduler_health_registry["signal_accuracy"]["status"] = "WAITING"
-
-            await asyncio.sleep(seconds)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            print(f"[SCHEDULER] Signal Accuracy Tracker error: {e}")
-            scheduler_health_registry["signal_accuracy"]["error_count"] += 1
-            scheduler_health_registry["signal_accuracy"]["last_error"] = str(e)
-            scheduler_health_registry["signal_accuracy"]["status"] = "ERROR"
-            await asyncio.sleep(300)
-
-
-# ==============================================================================
-# PHASE 2: SIGNAL FLAGGING ENGINE — runs every 6 hours
-# Flags underperforming signals for human review (FLAG_ONLY mode).
-# No auto-adjustment — we collect data first, then decide.
-# ==============================================================================
-
-async def run_signal_flagging_scheduler() -> None:
-    """Every 6 hours: check signal health, flag underperformers for review."""
-    print("[SCHEDULER] Signal Flagging Engine starting...")
-    while True:
-        try:
-            scheduler_health_registry["signal_flagging"]["status"] = "EXECUTING"
-
-            result = await asyncio.to_thread(
-                signal_flagging_engine.run_flagging_tick,
-            )
-
-            scheduler_health_registry["signal_flagging"]["last_run"] = datetime.now(timezone.utc).isoformat()
-            scheduler_health_registry["signal_flagging"]["status"] = "OK" if result.get("status") == "OK" else "ERROR"
-            scheduler_health_registry["signal_flagging"]["last_result"] = result
-
-            seconds = 21600  # 6 hours
-            next_run_dt = datetime.now(timezone.utc) + timedelta(seconds=seconds)
-            scheduler_health_registry["signal_flagging"]["next_run"] = next_run_dt.isoformat()
-            scheduler_health_registry["signal_flagging"]["status"] = "WAITING"
-
-            await asyncio.sleep(seconds)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            print(f"[SCHEDULER] Signal Flagging Engine error: {e}")
-            scheduler_health_registry["signal_flagging"]["error_count"] += 1
-            scheduler_health_registry["signal_flagging"]["last_error"] = str(e)
-            scheduler_health_registry["signal_flagging"]["status"] = "ERROR"
-            await asyncio.sleep(300)
-
-
-# ==============================================================================
-# PHASE 2: ACCURACY REPORT GENERATOR — runs weekly
-# Generates a structured report of signal accuracy trends and flagged signals.
-# ==============================================================================
-
-async def run_accuracy_report_scheduler() -> None:
-    """Weekly: generate accuracy report with flagged signals summary."""
-    print("[SCHEDULER] Accuracy Report Generator starting...")
-    while True:
-        try:
-            scheduler_health_registry["accuracy_report"]["status"] = "EXECUTING"
-
-            result = await asyncio.to_thread(
-                accuracy_report_generator.generate_weekly_report,
-            )
-
-            scheduler_health_registry["accuracy_report"]["last_run"] = datetime.now(timezone.utc).isoformat()
-            scheduler_health_registry["accuracy_report"]["status"] = "OK" if result.get("status") != "ERROR" else "ERROR"
-            scheduler_health_registry["accuracy_report"]["last_result"] = {"summary": result.get("summary", "")}
-
-            seconds = 604800  # 7 days
-            next_run_dt = datetime.now(timezone.utc) + timedelta(seconds=seconds)
-            scheduler_health_registry["accuracy_report"]["next_run"] = next_run_dt.isoformat()
-            scheduler_health_registry["accuracy_report"]["status"] = "WAITING"
-
-            await asyncio.sleep(seconds)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            print(f"[SCHEDULER] Accuracy Report Generator error: {e}")
-            scheduler_health_registry["accuracy_report"]["error_count"] += 1
-            scheduler_health_registry["accuracy_report"]["last_error"] = str(e)
-            scheduler_health_registry["accuracy_report"]["status"] = "ERROR"
-            await asyncio.sleep(300)
-
+# signal_accuracy_tracker / signal_flagging_engine / accuracy_report_generator
+# scheduler loops archived 2026-08-17 -- Kabroda Audit AUDIT_FINDINGS.md
+# confirmed these three (plus signal_weight_manager, see the API routes
+# below) never fed any live decision path; genuinely record-only, read
+# only by an admin-only dashboard. See REBUILD_PLAN.md. Modules moved to
+# _archive/.
 
 app = FastAPI(title="Kabroda BattleBox", version="12.0", lifespan=lifespan)
 
@@ -3068,167 +2836,16 @@ async def trigger_analysis_loop(request: Request, db: Session = Depends(get_db))
 
 
 # ==============================================================================
-# SIGNAL ACCURACY API
+# ARCHIVED 2026-08-17 -- Kabroda Audit REBUILD_PLAN.md
+# Removed: /api/v1/system/signal-accuracy(/trigger), /api/v1/system/alerts
+# (+/{id}/resolve), /api/v1/system/flagging/trigger, /api/v1/system/signal-
+# weights, /api/v1/system/accuracy-report(/trigger). All eight routes
+# fronted signal_accuracy_tracker.py / signal_flagging_engine.py /
+# signal_weight_manager.py / accuracy_report_generator.py -- confirmed
+# record-only, never read by any live decision path (AUDIT_FINDINGS.md
+# #43-48, #21-22). Modules moved to _archive/. Any admin-dashboard UI
+# element that called these will fail client-side (404), not server-side.
 # ==============================================================================
-
-@app.get("/api/v1/system/signal-accuracy")
-async def get_signal_accuracy(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-
-    try:
-        import signal_accuracy_tracker as sat
-        signal_name = request.query_params.get("signal_name")
-        days = int(request.query_params.get("days", 7))
-
-        stats = sat.get_signal_accuracy(signal_name=signal_name, days=days)
-        timeline = None
-        if signal_name:
-            timeline = sat.get_signal_timeline(signal_name=signal_name, days=days)
-
-        return JSONResponse({
-            "ok": True,
-            "stats": stats,
-            "timeline": timeline,
-            "days": days,
-            "scheduler": scheduler_health_registry.get("signal_accuracy", {}),
-        })
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.post("/api/v1/system/signal-accuracy/trigger")
-async def trigger_signal_accuracy(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-
-    try:
-        current_price = await _fetch_btc_price()
-        result = await asyncio.to_thread(
-            signal_accuracy_tracker.run_signal_accuracy_tick,
-            current_price=current_price,
-        )
-        return JSONResponse({"ok": True, "result": result})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-# ==============================================================================
-# PHASE 2: SIGNAL FLAGGING & ALERTS API
-# ==============================================================================
-
-@app.get("/api/v1/system/alerts")
-async def get_system_alerts(request: Request, db: Session = Depends(get_db)):
-    """Get all active (unresolved) system alerts."""
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-
-    try:
-        alerts = signal_flagging_engine.get_active_alerts()
-        return JSONResponse({
-            "ok": True,
-            "alerts": alerts,
-            "count": len(alerts),
-        })
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.post("/api/v1/system/alerts/{alert_id}/resolve")
-async def resolve_system_alert(alert_id: int, request: Request, db: Session = Depends(get_db)):
-    """Mark an alert as resolved."""
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-
-    try:
-        success = signal_flagging_engine.resolve_alert(alert_id)
-        return JSONResponse({"ok": success})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.post("/api/v1/system/flagging/trigger")
-async def trigger_flagging_tick(request: Request, db: Session = Depends(get_db)):
-    """Manually trigger a flagging tick."""
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-
-    try:
-        result = await asyncio.to_thread(signal_flagging_engine.run_flagging_tick)
-        return JSONResponse({"ok": True, "result": result})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.get("/api/v1/system/signal-weights")
-async def get_signal_weights(request: Request, db: Session = Depends(get_db)):
-    """Get all signal weights."""
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-
-    try:
-        weights = signal_weight_manager.get_all_weights()
-        return JSONResponse({
-            "ok": True,
-            "weights": weights,
-            "count": len(weights),
-        })
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.get("/api/v1/system/accuracy-report")
-async def get_accuracy_report(request: Request, db: Session = Depends(get_db)):
-    """Get the latest accuracy report."""
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-
-    try:
-        report = accuracy_report_generator.get_latest_report()
-        return JSONResponse({
-            "ok": True,
-            "report": report,
-        })
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.post("/api/v1/system/accuracy-report/trigger")
-async def trigger_accuracy_report(request: Request, db: Session = Depends(get_db)):
-    """Manually generate an accuracy report."""
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-
-    try:
-        result = await asyncio.to_thread(accuracy_report_generator.generate_weekly_report)
-        return JSONResponse({"ok": True, "result": result})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
