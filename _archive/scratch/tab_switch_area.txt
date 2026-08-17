@@ -1,0 +1,75 @@
+r: #a67c3a; font-weight: 800; }
+        .s-expired               { color: #6b5345; }
+        .s-mas_error             { color: #8c4a3a; font-weight: 800; }
+
+        .empty-state { text-align: center; padding: 44px 20px; color: #5a3d2c; font-family: 'Playfair Display', serif; font-style: italic; font-size: 14px; }
+
+        @media (max-width: 1100px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 900px)  { .row-2-1, .row-1-1 { grid-template-columns: 1fr; } }
+        @media (max-width: 600px)  { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+
+        /* TAB NAVIGATION */
+        .tab-bar { display: flex; gap: 4px; margin-bottom: 28px; border-bottom: 1px solid #4d3526; padding-bottom: 0; }
+        .tab-btn { background: transparent; border: none; color: #8a6f57; font-family: 'JetBrains Mono', monospace;
+                   font-size: 11px; font-weight: 700; padding: 10px 20px; cursor: pointer; letter-spacing: 1.5px;
+                   text-transform: uppercase; border-bottom: 2px solid transparent; margin-bottom: -1px;
+                   transition: color 0.2s, border-color 0.2s; }
+        .tab-btn:hover { color: #c9a880; }
+        .tab-btn.active { color: #c9a24a; border-bottom-color: #c9a24a; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; min-height: 400px; width: 100%; }
+    </style>
+</head>
+<body>
+    {% include 'nav.html' %}
+
+    <div class="dash-wrap">
+
+        <div class="dash-header">
+            <div>
+                <h1 class="dash-title">Executive Dashboard</h1>
+                <div class="dash-subtitle">Kabroda Intelligence System — Performance &amp; Operations</div>
+            </div>
+            <div class="dash-ts" id="tsLabel">—</div>
+        </div>
+
+        <!-- ── TAB NAVIGATION ─────────────────────────────── -->
+        <div class="tab-bar">
+            <button class="tab-btn active" data-tab="overview">Overview</button>
+            <button class="tab-btn" data-tab="live-system">Live System</button>
+            <button class="tab-btn" data-tab="parameters">Parameters</button>
+            <button class="tab-btn" data-tab="errors">Errors</button>
+            <button class="tab-btn" data-tab="analysis">Analysis</button>
+            <button class="tab-btn" data-tab="signal-accuracy">Signal Accuracy</button>
+        </div>
+
+        <!-- ── TAB: OVERVIEW ─────────────────────────────── -->
+        <div class="tab-content active" id="tab-overview">
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-muted">
+                <div class="kpi-val" id="k-sessions">—</div>
+                <div class="kpi-lbl">Total Sessions</div>
+            </div>
+            <div class="kpi-card kpi-cognac">
+                <div class="kpi-val" id="k-approved">—</div>
+                <div class="kpi-lbl">Approved Rate</div>
+            </div>
+            <div class="kpi-card kpi-green">
+                <div class="kpi-val" id="k-winrate">—</div>
+                <div class="kpi-lbl">Win Rate</div>
+            </div>
+            <div class="kpi-card kpi-gold">
+                <div class="kpi-val" id="k-netr">—</div>
+                <div class="kpi-lbl">Net R Lifetime</div>
+            </div>
+            <div class="kpi-card kpi-red">
+                <div class="kpi-val" id="k-spend">—</div>
+                <div class="kpi-lbl">7-Day Agent Spend</div>
+            </div>
+            <div class="kpi-card kpi-muted" title="Near-zero is structurally expected, not a bug: Anthropic's prompt cache has a 5-minute window, and most Kabroda agents (Senior Analyst, interpreters, auditor) fire once per session -- there's rarely a second call to the same system prompt within 5 minutes for it to hit. Reads mainly come from same-run retries and the live SA chat.">
+                <div class="kpi-val" id="k-cache">—</div>
+                <div class="kpi-lbl">Cache Hit Rate</div>
+            </div>
+        </div>
+
+        <!-- ── ROW 2: PnL + Approval ────────

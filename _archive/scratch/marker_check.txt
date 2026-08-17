@@ -1,0 +1,1 @@
+'         </div>\n                            <div id="hbMonDetail" style="font-family:\'JetBrains Mono\'; font-size:10px; color:#64748b; margin-top:4px;">loading...</div>\n                        </div>\n                    </div>\n                </div>\n            </div>\n        </div>\n\n        <!-- ── TAB: PARAMETERS ──────────────────────────── -->\n '

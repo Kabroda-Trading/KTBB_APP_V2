@@ -1,0 +1,94 @@
+tab-live-system">
+            <div class="table-section">
+                <div class="table-header">Active Sessions</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>Symbol</th>
+                            <th>Session ID</th>
+                            <th>Date Key</th>
+                            <th>Lock Time</th>
+                        </tr></thead>
+                        <tbody id="liveSessionsBody">
+                            <tr><td colspan="4" class="empty-state">Loading active sessions…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="table-section">
+                <div class="table-header">Active Runners</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>Runner</th>
+                            <th>Status</th>
+                            <th>Last Run</th>
+                            <th>Next Run</th>
+                            <th>Error Count</th>
+                        </tr></thead>
+                        <tbody id="liveRunnersBody">
+                            <tr><td colspan="5" class="empty-state">Loading runner status…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="table-section">
+                <div class="table-header">Macro Engine</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>Symbol</th>
+                            <th>Latest Bias</th>
+                            <th>Active</th>
+                        </tr></thead>
+                        <tbody id="macroEngineBody">
+                            <tr><td colspan="3" class="empty-state">Loading macro engine data…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── TAB: PARAMETERS ──────────────────────────── -->
+        <div class="tab-content" id="tab-parameters">
+            <div class="table-section">
+                <div class="table-header">System Parameters</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>Name</th>
+                            <th>Value</th>
+                            <th>Description</th>
+                            <th>Source</th>
+                            <th>Last Updated</th>
+                        </tr></thead>
+                        <tbody id="paramsBody">
+                            <tr><td colspan="5" class="empty-state">Loading parameters…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="table-section">
+                <div class="table-header">Dependency Map</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>Component</th>
+                            <th>Depends On</th>
+                            <th>Relationship</th>
+                        </tr></thead>
+                        <tbody id="depsBody">
+                            <tr><td colspan="3" class="empty-state">Loading dependencies…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── TAB: ERRORS ──────────────────────────────── -->
+        <div class="tab-content" id="tab-errors">
+            <div class="chart-row row-1-1" style="margin-bottom:18px;">
+                <div class="chart-card">
+                    <div class="chart-title">System Health</div>
+                    <div class="chart-sub" id="healthSummary">Loading health status…</div>
+          

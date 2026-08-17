@@ -1,0 +1,10 @@
+_origInit = initDashboard;
+    initDashboard = function() {
+        if (_origInit) _origInit();
+        loadSignalAlerts();
+        loadSignalWeights();
+        loadAccuracyReport();
+    };
+    </script>
+</body>
+</html>
