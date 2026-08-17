@@ -1,0 +1,483 @@
+{
+  "overall": {
+    "total_trades": 50,
+    "win_count": 24,
+    "loss_count": 19,
+    "expired_count": 7,
+    "win_rate": 0.48,
+    "net_r": 18.05,
+    "avg_r": 0.361,
+    "avg_win_r": 1.6015,
+    "avg_loss_r": -1.0952,
+    "profit_factor": 1.7166,
+    "max_win_r": 2.97,
+    "max_loss_r": -1.89,
+    "std_r": 1.5557,
+    "insufficient_data": false
+  },
+  "alignment_based": {
+    "aligned": {
+      "count": 9,
+      "win_rate": 0.7777777777777778,
+      "win_count": 7,
+      "loss_count": 1,
+      "expired_count": 1,
+      "net_r": 12.83,
+      "avg_r": 1.4256,
+      "avg_win_r": 1.94,
+      "avg_loss_r": -0.375,
+      "profit_factor": 18.1067,
+      "insufficient_data": false
+    },
+    "misaligned": {
+      "count": 8,
+      "win_rate": 0.25,
+      "win_count": 2,
+      "loss_count": 6,
+      "expired_count": 0,
+      "net_r": -6.84,
+      "avg_r": -0.855,
+      "avg_win_r": 0.6,
+      "avg_loss_r": -1.34,
+      "profit_factor": 0.1493,
+      "insufficient_data": false
+    },
+    "neutral": {
+      "count": 33,
+      "win_rate": 0.45454545454545453,
+      "win_count": 15,
+      "loss_count": 12,
+      "expired_count": 6,
+      "net_r": 12.06,
+      "avg_r": 0.3655,
+      "avg_win_r": 1.5811,
+      "avg_loss_r": -1.0933,
+      "profit_factor": 1.7354,
+      "insufficient_data": false
+    },
+    "alignment_delta": 0.5278
+  },
+  "timeframe_breakdown": {
+    "per_timeframe": {
+      "15M": {
+        "count": 16,
+        "win_rate": 0.3125,
+        "win_count": 5,
+        "loss_count": 7,
+        "net_r": -0.39,
+        "avg_r": -0.0244,
+        "avg_win_r": 1.1229,
+        "avg_loss_r": -0.9167,
+        "profit_factor": 0.9527,
+        "insufficient_data": false
+      },
+      "1H": {
+        "count": 18,
+        "win_rate": 0.3888888888888889,
+        "win_count": 7,
+        "loss_count": 9,
+        "net_r": 0.97,
+        "avg_r": 0.0539,
+        "avg_win_r": 1.5975,
+        "avg_loss_r": -1.181,
+        "profit_factor": 1.0821,
+        "insufficient_data": false
+      },
+      "4H": {
+        "count": 16,
+        "win_rate": 0.75,
+        "win_count": 12,
+        "loss_count": 3,
+        "net_r": 17.47,
+        "avg_r": 1.0919,
+        "avg_win_r": 1.8833,
+        "avg_loss_r": -1.2825,
+        "profit_factor": 4.4055,
+        "insufficient_data": false
+      }
+    },
+    "best_timeframe": "4H",
+    "worst_timeframe": "15M"
+  },
+  "strategy_performance": {
+    "per_strategy": {
+      "strategy_4": {
+        "name": "Counter-Trend Parabolic Exhaustion Short",
+        "count": 12,
+        "win_rate": 0.6666666666666666,
+        "win_count": 8,
+        "loss_count": 2,
+        "net_r": 11.04,
+        "avg_r": 0.92,
+        "avg_win_r": 1.4667,
+        "avg_loss_r": -0.72,
+        "profit_factor": 6.1111,
+        "insufficient_data": false
+      },
+      "strategy_1": {
+        "name": "Macro Trend Breakout",
+        "count": 16,
+        "win_rate": 0.3125,
+        "win_count": 5,
+        "loss_count": 8,
+        "net_r": -2.89,
+        "avg_r": -0.1806,
+        "avg_win_r": 1.0629,
+        "avg_loss_r": -1.1478,
+        "profit_factor": 0.7202,
+        "insufficient_data": false
+      },
+      "strategy_3": {
+        "name": "Downtrend Continuation Rally-Sell",
+        "count": 9,
+        "win_rate": 0.5555555555555556,
+        "win_count": 5,
+        "loss_count": 3,
+        "net_r": 4.39,
+        "avg_r": 0.4878,
+        "avg_win_r": 1.928,
+        "avg_loss_r": -1.3125,
+        "profit_factor": 1.8362,
+        "insufficient_data": false
+      },
+      "strategy_5": {
+        "name": "Momentum Breakdown Short",
+        "count": 5,
+        "win_rate": 0.4,
+        "win_count": 2,
+        "loss_count": 2,
+        "net_r": 1.27,
+        "avg_r": 0.254,
+        "avg_win_r": 1.805,
+        "avg_loss_r": -0.78,
+        "profit_factor": 1.5427,
+        "insufficient_data": false
+      },
+      "strategy_2": {
+        "name": "Uptrend Pullback Dip-Buy",
+        "count": 8,
+        "win_rate": 0.5,
+        "win_count": 4,
+        "loss_count": 4,
+        "net_r": 4.24,
+        "avg_r": 0.53,
+        "avg_win_r": 2.3375,
+        "avg_loss_r": -1.2775,
+        "profit_factor": 1.8297,
+        "insufficient_data": false
+      }
+    },
+    "best_by_win_rate": [
+      "strategy_4",
+      "strategy_3",
+      "strategy_2"
+    ],
+    "worst_by_win_rate": [
+      "strategy_2",
+      "strategy_5",
+      "strategy_1"
+    ],
+    "best_by_net_r": [
+      "strategy_4",
+      "strategy_3",
+      "strategy_2"
+    ]
+  },
+  "indicator_correlation": {
+    "bbwp": {
+      "per_state": {
+        "high_expansion": {
+          "count": 17,
+          "win_rate": 0.5882352941176471,
+          "win_count": 10,
+          "loss_count": 5,
+          "net_r": 10.97,
+          "avg_r": 0.6453,
+          "avg_win_r": 1.722,
+          "avg_loss_r": -0.8929,
+          "profit_factor": 2.7552,
+          "insufficient_data": false
+        },
+        "extreme_squeeze": {
+          "count": 7,
+          "win_rate": 0.2857142857142857,
+          "win_count": 2,
+          "loss_count": 4,
+          "net_r": -0.49,
+          "avg_r": -0.07,
+          "avg_win_r": 1.0133,
+          "avg_loss_r": -0.8825,
+          "profit_factor": 0.8612,
+          "insufficient_data": false
+        },
+        "normal": {
+          "count": 6,
+          "win_rate": 0.16666666666666666,
+          "win_count": 1,
+          "loss_count": 4,
+          "net_r": -4.21,
+          "avg_r": -0.7017,
+          "avg_win_r": 1.35,
+          "avg_loss_r": -1.7275,
+          "profit_factor": 0.3907,
+          "insufficient_data": false
+        },
+        "moderate_squeeze": {
+          "count": 14,
+          "win_rate": 0.5714285714285714,
+          "win_count": 8,
+          "loss_count": 5,
+          "net_r": 7.43,
+          "avg_r": 0.5307,
+          "avg_win_r": 1.87,
+          "avg_loss_r": -1.255,
+          "profit_factor": 1.9867,
+          "insufficient_data": false
+        },
+        "extreme_exhaustion": {
+          "count": 6,
+          "win_rate": 0.5,
+          "win_count": 3,
+          "loss_count": 1,
+          "net_r": 4.35,
+          "avg_r": 0.725,
+          "avg_win_r": 1.33,
+          "avg_loss_r": -0.485,
+          "profit_factor": 5.4845,
+          "insufficient_data": false
+        }
+      },
+      "best_state": "high_expansion",
+      "worst_state": "normal"
+    },
+    "pmarp": {
+      "per_state": {
+        "overextended_top": {
+          "count": 17,
+          "win_rate": 0.35294117647058826,
+          "win_count": 6,
+          "loss_count": 9,
+          "net_r": -1.74,
+          "avg_r": -0.1024,
+          "avg_win_r": 1.4343,
+          "avg_loss_r": -1.178,
+          "profit_factor": 0.8523,
+          "insufficient_data": false
+        },
+        "normal": {
+          "count": 16,
+          "win_rate": 0.6875,
+          "win_count": 11,
+          "loss_count": 4,
+          "net_r": 15.19,
+          "avg_r": 0.9494,
+          "avg_win_r": 1.9018,
+          "avg_loss_r": -1.146,
+          "profit_factor": 3.651,
+          "insufficient_data": false
+        },
+        "capitulation_discount": {
+          "count": 17,
+          "win_rate": 0.4117647058823529,
+          "win_count": 7,
+          "loss_count": 6,
+          "net_r": 4.6,
+          "avg_r": 0.2706,
+          "avg_win_r": 1.3644,
+          "avg_loss_r": -0.96,
+          "profit_factor": 1.599,
+          "insufficient_data": false
+        }
+      },
+      "best_state": "normal",
+      "worst_state": "overextended_top"
+    },
+    "kinematic_grade": {
+      "per_state": {
+        "B": {
+          "count": 12,
+          "win_rate": 0.75,
+          "win_count": 9,
+          "loss_count": 3,
+          "net_r": 13.94,
+          "avg_r": 1.1617,
+          "avg_win_r": 1.9422,
+          "avg_loss_r": -1.18,
+          "profit_factor": 4.9379,
+          "insufficient_data": false
+        },
+        "D": {
+          "count": 7,
+          "win_rate": 0.42857142857142855,
+          "win_count": 3,
+          "loss_count": 2,
+          "net_r": 0.78,
+          "avg_r": 0.1114,
+          "avg_win_r": 1.4267,
+          "avg_loss_r": -0.875,
+          "profit_factor": 1.2229,
+          "insufficient_data": false
+        },
+        "F": {
+          "count": 13,
+          "win_rate": 0.5384615384615384,
+          "win_count": 7,
+          "loss_count": 3,
+          "net_r": 7.27,
+          "avg_r": 0.5592,
+          "avg_win_r": 1.3089,
+          "avg_loss_r": -1.1275,
+          "profit_factor": 2.612,
+          "insufficient_data": false
+        },
+        "A": {
+          "count": 7,
+          "win_rate": 0.2857142857142857,
+          "win_count": 2,
+          "loss_count": 5,
+          "net_r": -1.54,
+          "avg_r": -0.22,
+          "avg_win_r": 2.415,
+          "avg_loss_r": -1.274,
+          "profit_factor": 0.7582,
+          "insufficient_data": false
+        },
+        "C": {
+          "count": 11,
+          "win_rate": 0.2727272727272727,
+          "win_count": 3,
+          "loss_count": 6,
+          "net_r": -2.4,
+          "avg_r": -0.2182,
+          "avg_win_r": 1.2175,
+          "avg_loss_r": -1.0386,
+          "profit_factor": 0.6699,
+          "insufficient_data": false
+        }
+      },
+      "best_state": "B",
+      "worst_state": "C"
+    },
+    "energy_grade": {
+      "per_state": {
+        "neutral": {
+          "count": 20,
+          "win_rate": 0.45,
+          "win_count": 9,
+          "loss_count": 9,
+          "net_r": 3.57,
+          "avg_r": 0.1785,
+          "avg_win_r": 1.8478,
+          "avg_loss_r": -1.1873,
+          "profit_factor": 1.2734,
+          "insufficient_data": false
+        },
+        "falling": {
+          "count": 15,
+          "win_rate": 0.3333333333333333,
+          "win_count": 5,
+          "loss_count": 8,
+          "net_r": 1.15,
+          "avg_r": 0.0767,
+          "avg_win_r": 1.68,
+          "avg_loss_r": -0.9922,
+          "profit_factor": 1.1288,
+          "insufficient_data": false
+        },
+        "rising": {
+          "count": 15,
+          "win_rate": 0.6666666666666666,
+          "win_count": 10,
+          "loss_count": 2,
+          "net_r": 13.33,
+          "avg_r": 0.8887,
+          "avg_win_r": 1.3775,
+          "avg_loss_r": -1.0667,
+          "profit_factor": 5.1656,
+          "insufficient_data": false
+        }
+      },
+      "best_state": "rising",
+      "worst_state": "falling"
+    }
+  },
+  "recent_trend": {
+    "last_10": {
+      "count": 10,
+      "win_rate": 0.4,
+      "win_count": 4,
+      "loss_count": 4,
+      "net_r": 1.57,
+      "avg_r": 0.157,
+      "avg_win_r": 1.552,
+      "avg_loss_r": -1.238,
+      "profit_factor": 1.2536,
+      "insufficient_data": false
+    },
+    "rolling_7d": {
+      "count": 35,
+      "win_rate": 0.5142857142857142,
+      "win_count": 18,
+      "loss_count": 13,
+      "net_r": 15.65,
+      "avg_r": 0.4471,
+      "avg_win_r": 1.8095,
+      "avg_loss_r": -1.1706,
+      "profit_factor": 1.8356,
+      "insufficient_data": false
+    },
+    "trend_direction": "stable",
+    "trend_confidence": "medium"
+  },
+  "patterns": [
+    {
+      "pattern": "ALIGNMENT_MATTERS",
+      "evidence": "Aligned trades win rate (77.8%) is higher than misaligned (25.0%) by 52.8%. Aligned N=9, Misaligned N=8.",
+      "confidence": "high",
+      "recommendation": "Prioritize trades where Kabroda and Krown biases align. Avoid or reduce size on misaligned setups."
+    },
+    {
+      "pattern": "TIMEFRAME_SPECIALIZATION",
+      "evidence": "Best timeframe: 4H (75.0% win rate, N=16). Worst: 15M (31.2% win rate, N=16). Delta: 43.8%.",
+      "confidence": "high",
+      "recommendation": "Focus on 4H timeframe trades where performance is strongest. Consider filtering out 15M setups or reducing position size."
+    },
+    {
+      "pattern": "INDICATOR_SIGNAL",
+      "evidence": "Indicator 'bbwp': state 'high_expansion' predicts wins (58.8%, N=17) vs state 'normal' (16.7%, N=6). Delta: 42.2%.",
+      "confidence": "high",
+      "recommendation": "Favor trades where bbwp is in 'high_expansion' state. Avoid or reduce size when in 'normal' state."
+    },
+    {
+      "pattern": "INDICATOR_SIGNAL",
+      "evidence": "Indicator 'pmarp': state 'normal' predicts wins (68.8%, N=16) vs state 'overextended_top' (35.3%, N=17). Delta: 33.5%.",
+      "confidence": "high",
+      "recommendation": "Favor trades where pmarp is in 'normal' state. Avoid or reduce size when in 'overextended_top' state."
+    },
+    {
+      "pattern": "INDICATOR_SIGNAL",
+      "evidence": "Indicator 'kinematic_grade': state 'B' predicts wins (75.0%, N=12) vs state 'C' (27.3%, N=11). Delta: 47.7%.",
+      "confidence": "high",
+      "recommendation": "Favor trades where kinematic_grade is in 'B' state. Avoid or reduce size when in 'C' state."
+    },
+    {
+      "pattern": "INDICATOR_SIGNAL",
+      "evidence": "Indicator 'energy_grade': state 'rising' predicts wins (66.7%, N=15) vs state 'falling' (33.3%, N=15). Delta: 33.3%.",
+      "confidence": "high",
+      "recommendation": "Favor trades where energy_grade is in 'rising' state. Avoid or reduce size when in 'falling' state."
+    },
+    {
+      "pattern": "STRATEGY_STRENGTH",
+      "evidence": "Best strategy: Counter-Trend Parabolic Exhaustion Short (66.7% win rate, R=11.04, N=12). Worst: Uptrend Pullback Dip-Buy (50.0% win rate, R=4.24, N=8).",
+      "confidence": "medium",
+      "recommendation": "Allocate more capital to Counter-Trend Parabolic Exhaustion Short. Review and refine Uptrend Pullback Dip-Buy entry criteria."
+    }
+  ],
+  "metadata": {
+    "generated_at": "2026-07-15T17:48:10.840136+00:00",
+    "module": "kqal.trade_validator",
+    "version": "1.0.0",
+    "trades_analyzed": 50,
+    "alignment_data_provided": false
+  }
+}

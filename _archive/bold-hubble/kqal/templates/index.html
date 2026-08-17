@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KQAL — Kabroda Quality Assurance Layer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    /* Inline critical styles for initial render */
+    .app-container { opacity: 0; }
+    .app-container.ready { opacity: 1; transition: opacity 0.3s ease; }
+  </style>
+</head>
+<body>
+  <div class="app-container" id="app">
+    <!-- ============================================================
+         HEADER
+         ============================================================ -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="header-logo">
+          <div class="logo-icon">KQ</div>
+          <div class="header-title">
+            <h1>KQAL</h1>
+            <div class="subtitle">Kabroda Quality Assurance Layer</div>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="header-time" id="headerTime">—</div>
+        <button class="btn-refresh" id="btnRefresh" onclick="refreshAll()">
+          <span class="icon">⟳</span>
+          <span>Refresh</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- ============================================================
+         TOP ROW: Alignment Score + Dimension Breakdown
+         ============================================================ -->
+    <div class="grid-2" id="topRow">
+      <!-- Alignment Score Card -->
+      <div class="card animate-in" id="cardAlignment">
+        <div class="card-header">
+          <span class="card-title">Alignment Score</span>
+          <span class="card-badge badge-blue" id="alignmentBadge">Loading</span>
+        </div>
+        <div class="score-gauge-container" id="alignmentGaugeContainer">
+          <div class="score-gauge">
+            <svg viewBox="0 0 120 120">
+              <circle class="bg-circle" cx="60" cy="60" r="52"/>
+              <circle class="progress-circle" id="alignmentArc" cx="60" cy="60" r="52"
+                      stroke-dasharray="326.73" stroke-dashoffset="326.73"/>
+            </svg>
+            <div class="score-value">
+              <div class="number" id="alignmentNumber">—</div>
+              <div class="label">/ 10</div>
+            </div>
+          </div>
+          <div class="score-label-text" id="alignmentLabel">Loading...</div>
+        </div>
+        <div style="text-align:center;margin-top:var(--space-sm);font-size:0.75rem;color:var(--text-muted)">
+          <span id="alignmentVideos">—</span> videos analyzed
+        </div>
+      </div>
+
+      <!-- Dimension Breakdown Card -->
+      <div class="card animate-in" id="cardDimensions">
+        <div class="card-header">
+          <span class="card-title">Dimension Breakdown</span>
+          <span class="card-badge badge-blue" data-tooltip="Each dimension out of 2.0">5 dims</span>
+        </div>
+        <div class="dimension-list" id="dimensionList">
+          <div class="skeleton skeleton-bar" style="width:100%"></div>
+          <div class="skeleton skeleton-bar" style="width:90%"></div>
+          <div class="skeleton skeleton-bar" style="width:95%"></div>
+          <div class="skeleton skeleton-bar" style="width:85%"></div>
+          <div class="skeleton skeleton-bar" style="width:92%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         GAP ANALYSIS
+         ============================================================ -->
+    <div class="grid-full" style="margin-bottom:var(--space-lg)">
+      <div class="card animate-in" id="cardGaps">
+        <div class="card-header">
+          <span class="card-title">Gap Analysis</span>
+          <span class="card-badge badge-amber" id="gapCount">0 gaps</span>
+        </div>
+        <div class="gap-list" id="gapList">
+          <div class="empty-state">
+            <div class="icon">🔍</div>
+            <p>Loading gap analysis...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         MIDDLE ROW: Trade Validation + Improvement Queue
+         ============================================================ -->
+    <div class="grid-2" id="middleRow">
+      <!-- Trade Validation Card -->
+      <div class="card animate-in" id="cardValidation">
+        <div class="card-header">
+          <span class="card-title">Trade Validation</span>
+          <span class="card-badge badge-green" id="validationBadge">—</span>
+        </div>
+        <div class="stat-grid" id="validationStats">
+          <div class="skeleton skeleton-text" style="width:60%;margin:0 auto"></div>
+          <div class="skeleton skeleton-text" style="width:60%;margin:0 auto"></div>
+          <div class="skeleton skeleton-text" style="width:60%;margin:0 auto"></div>
+          <div class="skeleton skeleton-text" style="width:60%;margin:0 auto"></div>
+        </div>
+        <div style="margin-top:var(--space-md)">
+          <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:var(--space-sm)">Timeframe Performance</div>
+          <div id="timeframeBars" style="display:flex;gap:var(--space-sm);align-items:flex-end;height:80px">
+            <div class="skeleton skeleton-bar" style="width:23%;height:60px"></div>
+            <div class="skeleton skeleton-bar" style="width:23%;height:60px"></div>
+            <div class="skeleton skeleton-bar" style="width:23%;height:60px"></div>
+            <div class="skeleton skeleton-bar" style="width:23%;height:60px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Improvement Queue Card -->
+      <div class="card animate-in" id="cardQueue">
+        <div class="card-header">
+          <span class="card-title">Improvement Queue</span>
+          <span class="card-badge badge-amber" id="queueCount">0 items</span>
+        </div>
+        <div class="queue-list" id="queueList">
+          <div class="skeleton skeleton-text" style="width:95%"></div>
+          <div class="skeleton skeleton-text" style="width:90%"></div>
+          <div class="skeleton skeleton-text" style="width:85%"></div>
+          <div class="skeleton skeleton-text" style="width:92%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         BOTTOM ROW: Krown vs Kabroda Side by Side
+         ============================================================ -->
+    <div class="grid-full">
+      <div class="card animate-in" id="cardComparison">
+        <div class="card-header">
+          <span class="card-title">Krown vs Kabroda — Side by Side</span>
+          <span class="card-badge badge-blue" id="comparisonTime">—</span>
+        </div>
+        <div class="comparison-grid" id="comparisonGrid">
+          <div class="comparison-column">
+            <div class="comparison-column-title krown">🔵 KROWN</div>
+            <div id="krownContent">
+              <div class="skeleton skeleton-text" style="width:70%"></div>
+              <div class="skeleton skeleton-text" style="width:60%"></div>
+              <div class="skeleton skeleton-text" style="width:80%"></div>
+              <div class="skeleton skeleton-text" style="width:55%"></div>
+            </div>
+          </div>
+          <div class="comparison-column">
+            <div class="comparison-column-title kabroda">🟣 KABRODA</div>
+            <div id="kabrodaContent">
+              <div class="skeleton skeleton-text" style="width:70%"></div>
+              <div class="skeleton skeleton-text" style="width:60%"></div>
+              <div class="skeleton skeleton-text" style="width:80%"></div>
+              <div class="skeleton skeleton-text" style="width:55%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         FOOTER
+         ============================================================ -->
+    <div style="text-align:center;padding:var(--space-xl) 0 var(--space-md);color:var(--text-muted);font-size:0.75rem;border-top:1px solid var(--border-subtle);margin-top:var(--space-xl)">
+      KQAL v1.0.0 — Kabroda Quality Assurance Layer &nbsp;·&nbsp; Auto-refreshes every 60s &nbsp;·&nbsp;
+      <span id="footerTime">—</span>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       JAVASCRIPT
+       ============================================================ -->
+  <script>
+    // ==================================================================
+    // State
+    // ==================================================================
+    const state = {
+      alignment: null,
+      validation: null,
+      queue: null,
+      krown: null,
+      kabroda: null,
+      loading: false,
+    };
+
+    // ==================================================================
+    // DOM Helpers
+    // ==================================================================
+    const $ = (id) => document.getElementById(id);
+    const CIRCUMFERENCE = 2 * Math.PI * 52; // ~326.73
+
+    // ==================================================================
+    // Color Helpers
+    // ==================================================================
+    function scoreColor(score) {
+      if (score >= 8) return 'green';
+      if (score >= 5) return 'amber';
+      return 'red';
+    }
+
+    function pctColor(pct) {
+      if (pct >= 80) return 'green';
+      if (pct >= 50) return 'amber';
+      return 'red';
+    }
+
+    // ==================================================================
+    // Clock
+    // ==================================================================
+    function updateClock() {
+      const now = new Date();
+      const time = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const date = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      $('headerTime').textContent = `${date} ${time}`;
+      $('footerTime').textContent = `Last updated: ${time}`;
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    // ==================================================================
+    // Render: Alignment Score Gauge
+    // ==================================================================
+    function renderAlignment(data) {
+      if (!data || data.status === 'no_data' || data.status === 'error') {
+        $('alignmentNumber').textContent = '—';
+        $('alignmentNumber').className = 'number';
+        $('alignmentLabel').textContent = 'No Data';
+        $('alignmentLabel').className = 'score-label-text';
+        $('alignmentBadge').textContent = 'OFFLINE';
+        $('alignmentBadge').className = 'card-badge badge-red';
+        $('alignmentVideos').textContent = '0';
+        return;
+      }
+
+      const score = data.alignment_score || 0;
+      const pct = data.alignment_pct || 0;
+      const color = scoreColor(score);
+      const offset = CIRCUMFERENCE - (pct / 100) * CIRCUMFERENCE;
+
+      $('alignmentNumber').textContent = score.toFixed(1);
+      $('alignmentNumber').className = `number ${color}`;
+      $('alignmentLabel').textContent = data.alignment_label || '—';
+      $('alignmentLabel').className = `score-label-text ${color}`;
+      $('alignmentBadge').textContent = `${pct.toFixed(0)}%`;
+      $('alignmentBadge').className = `card-badge badge-${color === 'green' ? 'green' : color === 'amber' ? 'amber' : 'red'}`;
+      $('alignmentVideos').textContent = data.videos_analyzed || 0;
+
+      const arc = $('alignmentArc');
+      arc.style.strokeDashoffset = offset;
+      arc.className = `progress-circle ${color}`;
+    }
+
+    // ==================================================================
+    // Render: Dimension Breakdown
+    // ==================================================================
+    function renderDimensions(data) {
+      const list = $('dimensionList');
+      if (!data || !data.dimensions) {
+        list.innerHTML = '<div class="empty-state"><p>No dimension data available</p></div>';
+        return;
+      }
+
+      const dims = data.dimensions;
+      const dimOrder = ['bias', 'strategy', 'indicator', 'confluence', 'execution'];
+      const dimColors = { bias: 'indigo', strategy: 'cyan', indicator: 'green', confluence: 'amber', execution: 'indigo' };
+      const dimIcons = { bias: '🎯', strategy: '📋', indicator: '📊', confluence: '🔗', execution: '⚡' };
+
+      list.innerHTML = dimOrder.map(key => {
+        const d = dims[key];
+        if (!d) return '';
+        const pct = (d.score / d.max) * 100;
+        const color = dimColors[key] || 'indigo';
+        const icon = dimIcons[key] || '•';
+        const detail = typeof d.detail === 'string' ? d.detail
+                      : Array.isArray(d.detail) ? d.detail.join(', ')
+                      : typeof d.detail === 'object' ? Object.values(d.detail).join(', ')
+                      : '';
+        return `
+          <div class="dimension-item" data-tooltip="${d.label}: ${d.score}/${d.max}">
+            <div class="dimension-header">
+              <span class="dimension-name">${icon} ${d.label}</span>
+              <span class="dimension-score">${d.score.toFixed(1)} / ${d.max.toFixed(1)}</span>
+            </div>
+            <div class="dimension-bar">
+              <div class="dimension-bar-fill ${color}" style="width:${pct}%"></div>
+            </div>
+            ${detail ? `<div class="dimension-detail">${detail}</div>` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    // ==================================================================
+    // Render: Gap Analysis
+    // ==================================================================
+    function renderGaps(data) {
+      const list = $('gapList');
+      const count = $('gapCount');
+      if (!data || !data.gaps || data.gaps.length === 0) {
+        list.innerHTML = '<div class="empty-state"><div class="icon">✅</div><p>No gaps detected — alignment is solid</p></div>';
+        count.textContent = '0 gaps';
+        count.className = 'card-badge badge-green';
+        return;
+      }
+
+      const gaps = data.gaps;
+      count.textContent = `${gaps.length} gap${gaps.length > 1 ? 's' : ''}`;
+      count.className = `card-badge ${gaps.some(g => g.severity === 'high') ? 'badge-red' : 'badge-amber'}`;
+
+      const severityIcons = { high: '🔴', medium: '⚠️', low: 'ℹ️' };
+
+      list.innerHTML = gaps.map(g => `
+        <div class="gap-item severity-${g.severity}">
+          <div class="gap-icon">${severityIcons[g.severity] || '⚠️'}</div>
+          <div class="gap-content">
+            <div class="gap-title">${g.title}</div>
+            <div class="gap-description">${g.description}</div>
+            ${g.impact ? `<div class="gap-impact">+${g.impact}</div>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // ==================================================================
+    // Render: Trade Validation
+    // ==================================================================
+    function renderValidation(data) {
+      const stats = $('validationStats');
+      const badge = $('validationBadge');
+      const tfBars = $('timeframeBars');
+
+      if (!data || data.status === 'no_data') {
+        stats.innerHTML = '<div class="empty-state"><p>No validation data</p></div>';
+        badge.textContent = 'NO DATA';
+        badge.className = 'card-badge badge-red';
+        tfBars.innerHTML = '';
+        return;
+      }
+
+      const delta = data.delta || 0;
+      const deltaColor = delta >= 20 ? 'green' : delta >= 10 ? 'amber' : 'red';
+      badge.textContent = `Δ ${delta > 0 ? '+' : ''}${delta.toFixed(0)}%`;
+      badge.className = `card-badge badge-${deltaColor}`;
+
+      stats.innerHTML = `
+        <div class="stat-card">
+          <div class="stat-value green">${data.aligned_win_rate || 0}%</div>
+          <div class="stat-label">Aligned WR</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value red">${data.misaligned_win_rate || 0}%</div>
+          <div class="stat-label">Misaligned WR</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value ${deltaColor} stat-delta">${delta > 0 ? '+' : ''}${delta.toFixed(1)}%</div>
+          <div class="stat-label">Delta</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value cyan">${data.best_timeframe || '—'}</div>
+          <div class="stat-label">Best TF (${data.best_tf_win_rate || 0}%)</div>
+        </div>
+      `;
+
+      // Timeframe bars
+      const tf = data.timeframe_performance || {};
+      const tfOrder = ['15m', '1h', '4h', '1d'];
+      const maxWr = Math.max(...tfOrder.map(t => tf[t]?.win_rate || 0), 1);
+      const tfColors = { '15m': '#06b6d4', '1h': '#6366f1', '4h': '#8b5cf6', '1d': '#10b981' };
+
+      tfBars.innerHTML = tfOrder.map(t => {
+        const perf = tf[t] || { trades: 0, wins: 0, win_rate: 0 };
+        const height = maxWr > 0 ? (perf.win_rate / maxWr) * 100 : 0;
+        return `
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+            <div style="font-size:0.7rem;color:var(--text-muted);font-weight:600">${perf.win_rate.toFixed(0)}%</div>
+            <div style="width:100%;height:60px;display:flex;align-items:flex-end;justify-content:center">
+              <div style="width:70%;height:${Math.max(height, 4)}%;background:${tfColors[t]};border-radius:4px 4px 0 0;transition:height 0.8s cubic-bezier(0.4,0,0.2,1);box-shadow:0 0 10px ${tfColors[t]}40"></div>
+            </div>
+            <div style="font-size:0.7rem;color:var(--text-muted)">${t}</div>
+            <div style="font-size:0.65rem;color:var(--text-muted)">${perf.trades} trades</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // ==================================================================
+    // Render: Improvement Queue
+    // ==================================================================
+    function renderQueue(data) {
+      const list = $('queueList');
+      const count = $('queueCount');
+      if (!data || !data.items || data.items.length === 0) {
+        list.innerHTML = '<div class="empty-state"><div class="icon">✅</div><p>No improvements pending</p></div>';
+        count.textContent = '0 items';
+        count.className = 'card-badge badge-green';
+        return;
+      }
+
+      const items = data.items;
+      count.textContent = `${data.total} items`;
+      const hasHigh = data.high_count > 0;
+      count.className = `card-badge ${hasHigh ? 'badge-red' : data.medium_count > 0 ? 'badge-amber' : 'badge-blue'}`;
+
+      const priorityIcons = { HIGH: '🔴', MEDIUM: '🟡', LOW: '🔵' };
+
+      list.innerHTML = items.map((item, i) => `
+        <div class="queue-item" style="animation-delay:${i * 0.05}s">
+          <div class="queue-priority ${item.priority.toLowerCase()}">${priorityIcons[item.priority] || '•'} ${item.priority}</div>
+          <div class="queue-content">
+            <div class="queue-title">${item.title}</div>
+            <div class="queue-desc">${item.description}</div>
+            <div class="queue-meta">
+              <span>📈 ${item.impact}</span>
+              <span>⏱ ${item.effort || '—'}</span>
+              <span>📌 ${item.status || 'pending'}</span>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // ==================================================================
+    // Render: Krown vs Kabroda Comparison
+    // ==================================================================
+    function renderComparison(krownData, kabrodaData) {
+      const krownEl = $('krownContent');
+      const kabrodaEl = $('kabrodaContent');
+      const timeEl = $('comparisonTime');
+
+      if (!krownData || krownData.status === 'no_data') {
+        krownEl.innerHTML = '<div class="empty-state"><p>No Krown data</p></div>';
+        kabrodaEl.innerHTML = '<div class="empty-state"><p>No Kabroda data</p></div>';
+        return;
+      }
+
+      // Krown side
+      const bias = krownData.bias || {};
+      const stBias = bias.short_term || 'neutral';
+      const mtBias = bias.medium_term || 'neutral';
+      const ltBias = bias.long_term || 'neutral';
+      const biasEmoji = { bullish: '🟢', bearish: '🔴', neutral: '⚪' };
+
+      // Latest video
+      const latest = krownData.latest_video || {};
+
+      // Indicators
+      const inds = krownData.indicators || {};
+      const indChips = Object.entries(inds)
+        .filter(([k, v]) => v > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6)
+        .map(([k, v]) => {
+          const label = k.replace(/^divergence_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          return `<span class="krown-indicator-chip">${label} <span class="count">${v}</span></span>`;
+        }).join('');
+
+      krownEl.innerHTML = `
+        <div class="comparison-row">
+          <span class="comparison-label">Bias (ST)</span>
+          <span class="comparison-value">${biasEmoji[stBias] || '⚪'} ${stBias.toUpperCase()}</span>
+        </div>
+        <div class="comparison-row">
+          <span class="comparison-label">Bias (MT)</span>
+          <span class="comparison-value">${biasEmoji[mtBias] || '⚪'} ${mtBias.toUpperCase()}</span>
+        </div>
+        <div class="comparison-row">
+          <span class="comparison-label">Bias (LT)</span>
+          <span class="comparison-value">${biasEmoji[ltBias] || '⚪'} ${ltBias.toUpperCase()}</span>
+        </div>
+        <div class="comparison-row">
+          <span class="comparison-label">Videos</span>
+          <span class="comparison-value">${krownData.total_videos || 0}</span>
+        </div>
+        <div class="comparison-row">
+          <span class="comparison-label">Assets</span>
+          <span class="comparison-value">${(krownData.assets || []).join(', ') || '—'}</span>
+        </div>
+        ${latest.title ? `
+        <div style="margin-top:var(--space-sm);font-size:0.7rem;color:var(--text-muted);padding:var(--space-sm);background:rgba(255,255,255,0.03);border-radius:var(--radius-sm)">
+          📺 ${latest.title.substring(0, 60)}${latest.title.length > 60 ? '…' : ''}
+        </div>` : ''}
+        ${indChips ? `<div class="krown-indicators">${indChips}</div>` : ''}
+      `;
+
+      // Kabroda side
+      const audit = kabrodaData?.audit || {};
+      const bridge = kabrodaData?.bridge || {};
+      const consensus = audit.consensus_bias || {};
+      const kabrodaSt = consensus.short_term || 'neutral';
+      const kabrodaMt = consensus.medium_term || 'neutral';
+      const kabrodaLt = consensus.long_term || 'neutral';
+
+      // Compare biases
+      const stMatch = stBias === kabrodaSt;
+      const mtMatch = mtBias === kabrodaMt;
+      const ltMatch = ltBias === kabrodaLt;
+
+      kabrodaEl.innerHTML = `
+        <div class="comparison-row">
+          <span class="comparison-label">Bias (ST)</span>
+          <span class="comparison-value">${biasEmoji[kabrodaSt] || '⚪'} ${kabrodaSt.toUpperCase()}
+            <span class="comparison-status">${stMatch ? '✅' : '⚠️'}</span>
+          </span>
+        </div>
+        <div class="comparison-row">
+          <span class="comparison-label">Bias (MT)</span>
+          <span class="comparison-value">${biasEmoji[kabrodaMt] || '⚪'} ${kabrodaMt.toUpperCase()}
+            <span class="comparison-status">${mtMatch ? '✅' : '⚠️'}</span>
+          </span>
+        </div>
+        <div class="comparison-row">
+          <span class="comparison-label">Bias (LT)</span>
+          <span class="comparison-value">${biasEmoji[kabrodaLt] || '⚪'} ${kabrodaLt.toUpperCase()}
+            <span class="comparison-status">${ltMatch ? '✅' : '⚠️'}</span>
+          </span>
+        </div>
+        <div class="comparison-row">
+          <span class="comparison-label">Signals Processed</span>
+          <span class="comparison-value">${bridge.signals_processed || 0}</span>
+        </div>
+        <div class="comparison-row">
+          <span class="comparison-label">Assets Monitored</span>
+          <span class="comparison-value">${(audit.assets_monitored || []).join(', ') || '—'}</span>
+        </div>
+        <div class="comparison-row">
+          <span class="comparison-label">Strategies</span>
+          <span class="comparison-value">${(audit.active_strategies || []).length || 0}</span>
+        </div>
+        ${bridge.last_bridge_run ? `
+        <div style="margin-top:var(--space-sm);font-size:0.7rem;color:var(--text-muted);padding:var(--space-sm);background:rgba(255,255,255,0.03);border-radius:var(--radius-sm)">
+          🕐 Last bridge: ${new Date(bridge.last_bridge_run).toLocaleString()}
+        </div>` : ''}
+      `;
+
+      timeEl.textContent = krownData.last_updated
+        ? new Date(krownData.last_updated).toLocaleTimeString()
+        : '—';
+    }
+
+    // ==================================================================
+    // Fetch & Render All
+    // ==================================================================
+    async function fetchAll() {
+      if (state.loading) return;
+      state.loading = true;
+      $('btnRefresh').classList.add('loading');
+
+      try {
+        const endpoints = [
+          { key: 'alignment', url: '/api/alignment' },
+          { key: 'validation', url: '/api/validation' },
+          { key: 'queue', url: '/api/queue' },
+          { key: 'krown', url: '/api/krown' },
+          { key: 'kabroda', url: '/api/kabroda/overview' },
+        ];
+
+        const results = await Promise.all(
+          endpoints.map(ep =>
+            fetch(ep.url)
+              .then(r => r.json())
+              .then(data => ({ key: ep.key, data }))
+              .catch(err => ({ key: ep.key, data: { status: 'error', error: err.message } }))
+          )
+        );
+
+        results.forEach(({ key, data }) => {
+          state[key] = data;
+        });
+
+        // Render all
+        renderAlignment(state.alignment);
+        renderDimensions(state.alignment);
+        renderGaps(state.alignment);
+        renderValidation(state.validation);
+        renderQueue(state.queue);
+        renderComparison(state.krown, state.kabroda);
+
+      } catch (err) {
+        console.error('Fetch error:', err);
+      } finally {
+        state.loading = false;
+        $('btnRefresh').classList.remove('loading');
+      }
+    }
+
+    // ==================================================================
+    // Refresh Handler
+    // ==================================================================
+    async function refreshAll() {
+      // Force backend refresh first
+      try {
+        await fetch('/api/refresh');
+      } catch (e) {
+        console.warn('Refresh endpoint unavailable, fetching cached data', e);
+      }
+      await fetchAll();
+    }
+
+    // ==================================================================
+    // Auto-refresh every 60 seconds
+    // ==================================================================
+    setInterval(fetchAll, 60000);
+
+    // ==================================================================
+    // Init
+    // ==================================================================
+    document.addEventListener('DOMContentLoaded', async () => {
+      $('app').classList.add('ready');
+      await fetchAll();
+    });
+  </script>
+</body>
+</html>
