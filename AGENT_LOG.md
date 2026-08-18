@@ -136,3 +136,73 @@ the exact fabricated BBWP/PMARP config (Length=20, zones 5/15/85/95) the externa
 audit already debunked and this project already corrected in code — not neutral
 reference, confidently wrong. Orphaned `extract/` scraper tooling manifests and
 dead bridge-pipeline output archived.
+
+---
+
+## 2026-08-17 (session close) — FROM: Claude Code — FOR: DeepSeek/Antigravity
+STATUS: open
+
+**Andy is switching to you for the next stretch of work (token conservation on
+his CC session) — this entry is meant to be everything you need without him
+re-explaining, and without either of us re-reading this whole file line by
+line.** Full detail is in the entries above (all 2026-08-17); this is the
+condensed version.
+
+### Where things stand, in order
+1. An independent external audit (`C:\Users\Shadow\Workspace\Kabroda Audit`,
+   cross-checked against `C:\Users\Shadow\Workspace\Trading Knowledge`) found
+   real fabrication in Kabroda's indicator stack and confirmed the LLM-driven
+   decision chain was the core structural problem — see
+   `Kabroda Audit/AUDIT_FINDINGS.md` + 4 companion docs if you need the
+   original evidence, but `Kabroda Audit/REBUILD_PLAN.md` is the distilled,
+   already-corrected action plan and is the doc to read if you only read one.
+2. Andy's decision from that: strip to the proven core, kill the LLM agent
+   chain entirely (cost + bad calls, real money lost), rebuild the decision
+   layer as **real code**, not an LLM reading prose.
+3. Executed this session (11 commits, `46eb0a0` through `11b0364`, all pushed
+   and deployed to kabroda.com): LLM chain disabled (`run_mas_analysis`,
+   `interrogate_cro`, weekly Elliott Wave interpreter — all return
+   immediately, dead bodies left in place below per this codebase's existing
+   convention), fabricated indicators archived (Revin Ribbons/RMO/RWP/Three
+   Drives/EMA Ribbon), BBWP/PMARP corrected to library-verified numbers, and
+   four rounds of root-level dead-code/dead-doc cleanup (full detail in the
+   entries above — including one real mistake made and fixed same-session:
+   archived a runtime-loaded prompt spec that broke a live route, caught by
+   re-running the E2E suite, restored within the hour — logged in full above,
+   worth reading if you're about to archive anything yourself).
+4. **Real, current consequence: the daily brief produces nothing right now.**
+   Nothing replaces the LLM chain yet. That's accepted, not an oversight.
+
+### What's next: Phase 4 — the coded decision layer
+This is genuinely new design work, not cleanup. Shape is sketched in
+`REBUILD_PLAN.md` §4 (trend/volatility/structure/momentum, each as real code
+instead of a prompt) — read it, don't re-derive it.
+
+**Andy's explicit, unresolved pushback (his words, not mine to resolve for
+him):** he does not want the EMA trend vote, the gravity engine/gravity math,
+or `battlebox_pipeline.py`'s BBWP/PMARP volatility concept treated as settled
+for Phase 4. He said he's been separately reviewing other approaches that
+might do better on trend/structure/volatility, hasn't shared specifics yet.
+**This is the actual open question to work through with him** — not a solved
+problem waiting for code.
+
+### Scope boundary for this stretch (Andy's ask, stated directly to me before
+this handoff): **design and conversation only.** Ask him clarifying
+questions, work through what Phase 4's trend/structure/volatility legs
+should actually be, produce a workflow/design write-up he can bring back for
+review. **Do not write or execute code, do not move/archive/delete files,
+do not touch the live app.** If the design work surfaces something that
+seems ready to build, that's the signal to hand back to Claude Code (or get
+explicit sign-off from Andy first) — not to start implementing directly.
+
+### Reference docs if you need more than this entry
+- `REBUILD_PLAN.md` (Kabroda Audit project) — the plan, §7 has the full
+  cleanup detail if needed.
+- `CC_HANDOFF_REVIEW.md` (this repo, root) — real backtest evidence
+  (N=167/177) that `kinematic_grade` predicts backwards; relevant if momentum
+  design comes up.
+- `AUDIT_SYSTEM_DESIGN_REVIEW_RESPONSE.md` (this repo, root) — this session's
+  own audit-system design decisions, including the `MACRO_BIAS_CONFLICT`
+  1H-only backtest citation (N=84/N=69).
+- Everything above this entry in this file, chronological, if something here
+  is unclear.
