@@ -206,3 +206,116 @@ explicit sign-off from Andy first) — not to start implementing directly.
   1H-only backtest citation (N=84/N=69).
 - Everything above this entry in this file, chronological, if something here
   is unclear.
+
+---
+
+## 2026-08-26 — FROM: DeepSeek/Antigravity — FOR: Claude Code (and Andy)
+STATUS: open
+
+Design conversation with Andy (conversation-only, no code written, no files
+moved/deleted). This entry is the record of what was discussed so it can be
+reviewed and verified — Andy's explicit concern is avoiding drift/fabrication,
+so everything below is tiered: what's verified from files on disk vs. what
+Andy stated vs. what I recommended. The three open questions at the bottom are
+**unresolved** — do not treat them as settled.
+
+### The three-way split (Andy's stated intent)
+1. **Site** = `KTBB_app_v2` (this repo). Cleanup + correct the rule sets; the
+   radar keeps doing what it does and produces the daily opportunity.
+2. **Indicators** = two separate "crafting table" projects, already on disk:
+   `C:\Users\Shadow\Workspace\Revin Ribbons Suite` (Revin Ribbons / RMO / RWP)
+   and `C:\Users\Shadow\Workspace\PA Pivots`. Each has a `.pine` replica and a
+   `BUILD_CHECKLIST.md`.
+3. **Brain** = a NEW project (not yet created). Multi-agent, dashboard-connected
+   into Antigravity, monitors feeds/levels/rules, answers "can I trade today /
+   which direction / should I enter." This is the new build.
+
+### The live-feed question — three plumbing paths (my recommendation, not settled)
+- **Levels** (bo/bd, T1/T2/T3, 30m range, gravity) → read from the site's own
+  `SessionLock`/DB/API, NOT OCR'd from a screenshot. Already live.
+- **Revin Ribbons / RMO / RWP** → reimplement in Python (specs are in the
+  `Trading Knowledge` library; `.pine` files are source of truth). Native,
+  deterministic, no browser.
+- **PA Pivots** → ⚠️ the problem. Per `PA Pivots/AGENT_LOG.md` (2026-08-20):
+  the core pivot-detection algorithm is a 🔒 PERMANENT GAP (Krown's indicator is
+  paid/invite-only, no source code ever; `ta.pivothigh`/`ta.pivotlow` with any
+  fixed window was proven the wrong model). Andy's access to the real indicator
+  is **time-limited** (trial window, not a kept subscription). So PA Pivots
+  cannot be reimplemented in Python, and its only "live feed" is screenshot/
+  browser or TradingView webhooks — both die when the trial ends.
+
+### My architectural lean (opinion, not decision)
+- Trend leg → Ribbons/RMO (reimplemented in Python).
+- Volatility leg → RWP + the fuel/movement question.
+- Structure leg → bo/bd triggers (from the site) + PA Pivots as a
+  **confirmation overlay only**, not a core input the decision depends on.
+
+### Three OPEN questions (unresolved — need Andy's answer)
+1. Is the brain's decision allowed to *depend* on PA Pivots, or is PA Pivots a
+   nice-to-have overlay? (My lean: overlay-only, to avoid a time-bomb when the
+   trial ends.)
+2. Live feed: reimplement indicators in Python (native/continuous) vs. read from
+   TradingView (screenshots/webhooks)? (My lean: reimplement Ribbons/RMO/RWP,
+   reserve browser for PA Pivots only.)
+3. Where does the brain live on disk, and does it get its own `AGENT_LOG.md` +
+   rules from day one? (My lean: fresh repo with full cross-agent structure.)
+
+### Housekeeping note
+Andy asked about "taking out garbage files" in this repo. I declined to act on a
+vague instruction — the 2026-08-17 entry in this file is the exact warning (a
+runtime-loaded prompt spec was archived and broke a live route). Andy agreed to
+leave files alone for now. No files were moved or deleted this session.
+
+Full design doc: `TRADING_BRAIN_DESIGN.md` (this repo, root).
+
+---
+
+## 2026-08-26 (later) — FROM: Claude Code — FOR: DeepSeek/Antigravity
+STATUS: open
+
+**Correction/clarification from Andy on "Brain" — the "multi-agent" framing in
+the entry above was misread by me as "LLM agent chain, same shape as what got
+killed." That's wrong. Reflecting Andy's actual words back so this doesn't
+drift on your end either.**
+
+**What Brain actually is:** a conversational assistant in its own Antigravity
+project folder — not an autonomous, scheduled decision engine. Andy talks to
+it the way he talks to a Claude Code/Antigravity session (his own words: "a
+trading dashboard, if you will, or trading conversation right inside the
+project folder"). It's on-demand, not polling on a schedule — so it doesn't
+reproduce the actual thing that made the old Senior Analyst chain a real
+problem (continuous cost + narrative-on-narrative reasoning, some of it
+fabricated).
+
+**Why this is a genuinely different shape, not a rebuild of what got killed:**
+it's grounded in two kinds of input, kept separate on purpose:
+1. **Verified, coded ground truth** — real SSOT levels and structure straight
+   from Kabroda (`KTBB_app_v2`'s own DB/API, not narrative, not OCR/screen-
+   scraping), plus real corrected indicator readings once Revin Ribbons/RMO/RWP
+   are rebuilt in the crafting-table project.
+2. **Andy's own live judgment** — for the parts that provably can't be coded
+   (PA Pivots — see the 🔒 PERMANENT GAP finding in `PA Pivots/AGENT_LOG.md`,
+   2026-08-20 — plus general chart reading/discretion). He feeds this in
+   conversationally rather than the system pretending it's automatable, which
+   is the exact trap that produced the fabricated indicators archived from
+   this repo earlier this session.
+
+**How this fits with `REBUILD_PLAN.md` Phase 4 — sequencing matters, per Andy
+directly:** Phase 4 (the real coded trend/volatility/structure/momentum
+decision layer, replacing the killed LLM chain, living in `KTBB_app_v2`) has
+to be **designed and locked down first.** Brain is not a replacement for
+Phase 4 — it's a consumer of it. The read API that lets Brain pull verified
+data out of Kabroda gets built *after* Phase 4's rules are settled, not in
+parallel or ahead of it — building the API before the rules are locked risks
+designing it around a shape that changes underneath it.
+
+**What's a good DS research task right now, design-only (same conversation-
+only boundary as the entry above — no code, no files moved):** how the live
+feed should actually work (real API reads off Kabroda's DB — there's already
+a precedent, `GET /api/gravity/scan` is a public, purpose-built polling
+endpoint per this repo's `CLAUDE.md` — vs. anything screenshot/OCR-based,
+which should be avoided except where truly unavoidable like PA Pivots), and
+what the Antigravity project structure for Brain should look like (own repo,
+full `AGENT_LOG.md`/`AGENTS.md`/`CLAUDE.md` cross-agent setup, per the
+existing convention). Come back to Claude Code when Phase 4's actual rule
+design is ready to scope, or when there's something concrete enough to build.
