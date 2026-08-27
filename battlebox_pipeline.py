@@ -701,6 +701,34 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                     except Exception as _conf_err:
                         print(f"[CONFLUENCE SCAN] Capture failed (non-blocking): {_conf_err}")
 
+                    # ── STOCHASTIC CROSS (Phase 4 — the literal entry trigger the
+                    # momentum leg of decision_engine.py's graded model reads) ──
+                    try:
+                        pkt.setdefault("context", {})["stoch_cross_15m"] = _calc_stochastic_cross(raw_15m)
+                    except Exception as _stoch_err:
+                        print(f"[STOCH CROSS] Capture failed (non-blocking): {_stoch_err}")
+
+                    # ── STRUCTURE STATE (Phase 4 — the acceptance gate, evaluated
+                    # against whatever post-lock 5m candles exist AT THIS MOMENT.
+                    # run_mas_analysis() fires once, right here, essentially at
+                    # lock -- structure will usually correctly show WAIT/no
+                    # permission yet at this exact instant (2 consecutive closes
+                    # takes >=10 minutes of post-lock candles to earn). That's
+                    # honest, not a bug -- matches ExecutiveBrief's original
+                    # WAITING_FOR_15M value, which existed for exactly this
+                    # reason. The live, continuously-updating picture as the day
+                    # progresses is what market_radar.py reads separately, via
+                    # this same function called fresh on every poll (see
+                    # battlebox["session_battle"] a few lines below, already
+                    # computed live on every get_live_battlebox() call). ──
+                    try:
+                        _post_lock_at_fire = [c for c in raw_5m if int(c["time"]) >= int(pkt["lock_time"])]
+                        pkt.setdefault("context", {})["structure_state"] = structure_state_engine.compute_structure_state(
+                            levels=pkt["levels"], candles_5m_post_lock=_post_lock_at_fire, tuning=tuning or {}
+                        )
+                    except Exception as _struct_err:
+                        print(f"[STRUCTURE STATE] Capture failed (non-blocking): {_struct_err}")
+
                     _LOCKED_PACKETS[session_key] = pkt
 
                     # Persist lock to DB in its own try/except so a write failure

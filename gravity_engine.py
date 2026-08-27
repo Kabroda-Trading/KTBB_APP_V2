@@ -556,6 +556,19 @@ STOP_WINDOW_4H = timedelta(days=5)
 
 
 def _detect_4h_bos(symbol: str, db_sym: str, candles_4h: List[Dict[str, Any]], candles_1d: List[Dict[str, Any]], db, confluence: Optional[Dict[str, Any]] = None) -> None:
+    """
+    DISABLED 2026-08-27 (Phase 4 lock-in, Andy's direct instruction): this
+    function's own candidate-generation logic (raw price-vs-zone-level cross)
+    doesn't follow the same trend/volatility/momentum checklist discipline the
+    15M system now has via decision_engine.py -- "if we're going to put the
+    1H/4H trades on there, they need to follow the same behaviors that 15M
+    trade. If it can't, there's no point in putting them there." Zone
+    detection stays (still cited elsewhere); candidate writing stops until/
+    unless this gets rebuilt to the same discipline. Dead body left in place
+    below, not deleted, matching this project's established convention.
+    """
+    return
+
     from harness.unified_audit_writer import write_decision_log as _wdl, gauge as _dg
 
     try:
@@ -856,6 +869,13 @@ STOP_WINDOW_1H = timedelta(days=2)
 
 
 def _detect_1h_bos(symbol: str, db_sym: str, candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]], candles_1d: List[Dict[str, Any]], db, confluence: Optional[Dict[str, Any]] = None) -> None:
+    """
+    DISABLED 2026-08-27 (Phase 4 lock-in) -- same reasoning as
+    _detect_4h_bos() immediately above: doesn't follow the 15M system's
+    discipline. See that function's docstring for the full reasoning.
+    """
+    return
+
     from harness.unified_audit_writer import write_decision_log as _wdl, gauge as _dg
 
     try:

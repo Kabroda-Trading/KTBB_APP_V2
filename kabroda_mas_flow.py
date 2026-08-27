@@ -13,17 +13,14 @@
 import json
 import re
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import pytz
 
 from pydantic import BaseModel, Field
 
 import agent_core
-import gravity_interpreter
-import junior_analyst
-import mtf_interpreter
-import publisher_crew
+import decision_engine
 import trade_structure_analyst
 from database import (
     SessionLocal,
@@ -41,9 +38,13 @@ from database import (
 # ==============================================================================
 
 class ExecutiveBrief(BaseModel):
-    """Strict output schema for the Senior Analyst."""
-    approval_status: str = Field(description="Must be 'APPROVED', 'REJECTED', 'WAITING_FOR_15M', or 'STAND_DOWN'")
-    tactical_brief: str = Field(description="The brief from ## TODAY'S ENERGY through ## THE OTHER SIDE. For STAND_DOWN, replaces ## TODAY'S TRADE SETUP and ## THE LEVELS with ## WHY THE SYSTEM STANDS DOWN, ## THE STRUCTURAL LANDSCAPE, and ## WHAT WOULD CHANGE THIS.")
+    """Strict output schema for the decision layer. Originally the Senior
+    Analyst LLM's output schema; unchanged in shape since the graded coded
+    decision layer (decision_engine.py) replaced it 2026-08-27, so existing
+    consumers (CampaignLog injection, dashboards) don't need to change."""
+    approval_status: str = Field(description="'APPROVED' or 'STAND_DOWN' (REJECTED/WAITING_FOR_15M are legacy LLM-era values, no longer produced)")
+    conviction: str = Field(default="NEUTRAL", description="STRONG_LONG/LEAN_LONG/NEUTRAL/LEAN_SHORT/STRONG_SHORT — the graded conviction tier decision_engine.py actually reasons in; approval_status is derived from this (NEUTRAL -> STAND_DOWN, everything else -> APPROVED).")
+    tactical_brief: str = Field(description="Short, deterministic reason string (the matched confirmation legs, or the stand-down reason). No LLM prose generated here anymore.")
     bias: str = Field(description="'LONG', 'SHORT', or 'NEUTRAL'")
     entry_price: float = Field(description="The exact trigger entry price.")
     stop_loss: float = Field(description="The exact stop loss (the opposing trigger).")
@@ -1219,157 +1220,53 @@ def run_mas_analysis(
     Produces an ExecutiveBrief and writes it to CampaignLog, DecisionJournal,
     and MacroNarrativeLog.
 
-    DISABLED 2026-08-17 (Andy's direct instruction, Kabroda Audit
-    REBUILD_PLAN.md): the LLM agent chain this function drives --
-    mtf_interpreter -> gravity_interpreter -> junior_analyst -> Senior
-    Analyst -> publisher_crew, 5 LLM calls per day -- was costing real money
-    daily without producing a decision worth trusting (AUDIT_FINDINGS.md
-    #15: the actual trade decision was an LLM reading free text, not code,
-    with no enforced Trend/Volatility/Structure/Momentum precedence).
-    Blocked centrally, right here, rather than by removing scheduler wiring
-    in main.py: `get_live_battlebox()` can also auto-trigger this function
-    directly via `asyncio.create_task()` on a new session lock (see that
-    function's own docstring) -- a scheduler-only disable would have missed
-    that entry point. All 3 real call sites (main.py x2, battlebox_pipeline.py)
-    fire-and-forget via asyncio.create_task/to_thread and never read the
-    return value, so this early return is safe everywhere. Stays off until
-    Phase 4 (the coded Trend/Volatility/Structure/Momentum decision layer)
-    replaces this chain -- not meant to be flipped back on as-is.
+    REBUILT 2026-08-27 (Phase 4 lock-in). The LLM agent chain this function
+    used to drive -- mtf_interpreter -> gravity_interpreter -> junior_analyst
+    -> Senior Analyst LLM -> publisher_crew -- was disabled 2026-08-17
+    (AUDIT_FINDINGS.md #15: the trade decision was an LLM reading free text,
+    no enforced precedence) and is now fully replaced, not just bypassed:
+    the decision itself comes from decision_engine.evaluate_15m_decision(),
+    a deterministic graded-conviction model (see decision_engine.py's own
+    header for the full design, locked after CONFLUENCE_RESEARCH_REPORT.md).
+    No LLM call anywhere in this path. No publishing/newsletter generation
+    (publisher_crew.run_publisher() removed, not just skipped) -- decision
+    output is a structured record, not narrative.
     """
-    print(f">>> SENIOR ANALYST: DISABLED 2026-08-17 -- LLM agent chain blocked per owner "
-          f"instruction, skipping for {symbol} | {session_id} (see Kabroda Audit REBUILD_PLAN.md)")
-    return {
-        "status": "DISABLED",
-        "message": "MAS LLM agent chain disabled 2026-08-17 -- see Kabroda Audit REBUILD_PLAN.md",
-    }
-
-    print(f">>> SENIOR ANALYST: Initiating for {symbol} | {session_id}")
+    print(f">>> DECISION ENGINE: Evaluating {symbol} | {session_id}")
 
     levels = battlebox_payload.get("levels", {})
     context = battlebox_payload.get("context", {})
-    bias_model = battlebox_payload.get("bias_model", {})
 
     bo = float(levels.get("breakout_trigger") or 0)
     bd = float(levels.get("breakdown_trigger") or 0)
 
-    # 1. Python math — LLM never computes targets
+    # 1. Python math — the Measured Move Rule, unchanged, inviolable.
     raw_targets = _compute_targets(bo, bd)
 
     # 1b. Trade Structure Analyst — structural stops + gravity-snapped targets
     _tsa_result = trade_structure_analyst.apply_trade_structure(levels, context, raw_targets)
     targets = _tsa_result
-    structure_notes = _tsa_result.get("structure_notes", "")
     structure_reasoning = _tsa_result.get("reasoning", {})
 
-    # 2. Gather all context
-    cro_memory = _fetch_cro_memory(symbol)
-    narrative_ctx = _read_narrative_context(symbol)
-    jewel_ctx = _read_jewel_context(symbol)
-
-    # 2b. MTF Interpreter — Bucket B pre-digests the energy picture for the SA.
-    # Fail-open: any exception → mtf_read = None → raw energy block used instead.
-    mtf_read: Optional[str] = None
-    try:
-        mtf_read = mtf_interpreter.run_mtf_interpretation(context, jewel_ctx)
-    except Exception as _mtf_err:
-        print(f"[MTF INTERPRETER] Skipped — raw energy block in use: {_mtf_err}")
-    try:
-        _log_interpreter(symbol, date_key, session_id, "mtf_interpreter", mtf_read)
-    except Exception:
-        pass
-
-    # 2c. Gravity Interpreter — Bucket B pre-digests the wall/airspace picture for the SA.
-    # Fail-open: any exception → gravity_read = None → raw GRAVITY WALLS sections used instead.
-    gravity_read: Optional[str] = None
-    try:
-        gravity_read = gravity_interpreter.run_gravity_interpretation(levels, context, targets)
-    except Exception as _grav_err:
-        print(f"[GRAVITY INTERPRETER] Skipped — raw wall sections in use: {_grav_err}")
-    try:
-        _log_interpreter(symbol, date_key, session_id, "gravity_interpreter", gravity_read)
-    except Exception:
-        pass
-
-    # 2d. Junior Analyst — reconciles MTF + gravity reads into one intelligence package.
-    # Fail-open (three-layer guarantee):
-    #   L1: run_junior_analysis() catches all exceptions internally → returns None
-    #   L2: outer try/except here → junior_read stays None
-    #   L3: _build_senior_analyst_context() fall-through → SA reads mtf_read + gravity_read
-    #       directly, byte-for-byte identical to today's baseline. No regression.
-    # v1: full interpreter reads still appear in SA context below the package (source material).
-    # v2: consolidate to JA-only once InterpreterLog confirms reliability (MAP 2 / Principle 3).
-    junior_read: Optional[str] = None
-    try:
-        junior_read = junior_analyst.run_junior_analysis(mtf_read, gravity_read, levels, targets, bias_model=bias_model)
-    except Exception as _ja_err:
-        print(f"[JUNIOR ANALYST] Skipped — interpreters feeding SA directly: {_ja_err}")
-    try:
-        _log_interpreter(symbol, date_key, session_id, "junior_analyst", junior_read)
-    except Exception:
-        pass
-
-    # 3. Build the full context string
-    context_text = _build_senior_analyst_context(
-        symbol=symbol,
-        date_key=date_key,
-        session_id=session_id,
+    # 2. The graded decision itself. structure_state comes from the same
+    # 2-consecutive-close acceptance gate that's always computed at session
+    # lock (structure_state_engine.compute_structure_state(), called inside
+    # battlebox_pipeline.py's packet build) -- read from context, not
+    # recomputed here, so this function has exactly one source of truth for
+    # "has price earned permission to trade."
+    structure_state = context.get("structure_state", {})
+    confluence_scan = context.get("confluence_scan", {})
+    decision_dict, decision_gauges = decision_engine.evaluate_15m_decision(
         levels=levels,
-        context=context,
         targets=targets,
-        cro_memory=cro_memory,
-        narrative_ctx=narrative_ctx,
-        jewel_ctx=jewel_ctx,
-        structure_notes=structure_notes,
-        mtf_read=mtf_read,
-        gravity_read=gravity_read,
-        junior_read=junior_read,
+        structure_state=structure_state,
+        confluence_15m=confluence_scan.get("15M"),
+        confluence_1h=confluence_scan.get("1H"),
+        confluence_4h=confluence_scan.get("4H"),
+        stoch_cross_15m=context.get("stoch_cross_15m"),
     )
-
-    # 4. Call Senior Analyst through agent_core (budget gate runs automatically)
-    try:
-        response_text = agent_core._call_agent(
-            agent_name="senior_analyst",
-            system_prompt=SENIOR_ANALYST_SYSTEM_PROMPT,
-            context_text=context_text,
-            triggered_by="session_lock",
-            max_tokens=4096,
-        )
-    except RuntimeError as e:
-        # Budget blocked
-        _mark_mas_error(symbol, session_id, date_key, str(e))
-        return {"status": "ERROR", "message": str(e)}
-    except Exception as e:
-        _mark_mas_error(symbol, session_id, date_key, str(e))
-        return {"status": "ERROR", "message": str(e)}
-
-    # 5. Parse JSON response — one retry on failure
-    brief: Optional[ExecutiveBrief] = None
+    brief = ExecutiveBrief(**decision_dict)
     narrative_text_for_log: Optional[str] = None
-    _final_response_text = response_text  # tracks which response text actually parsed successfully
-
-    try:
-        brief, narrative_text_for_log = _parse_brief(response_text, ExecutiveBrief)
-    except Exception as parse_err:
-        print(f"SENIOR ANALYST: Parse failed on first attempt ({parse_err}). Retrying...")
-        retry_context = (
-            context_text
-            + "\n\n[CORRECTION: Your previous response was not valid JSON. "
-            "Return ONLY the JSON object, no markdown fences, no other text.]"
-        )
-        try:
-            response_text2 = agent_core._call_agent(
-                agent_name="senior_analyst",
-                system_prompt=SENIOR_ANALYST_SYSTEM_PROMPT,
-                context_text=retry_context,
-                triggered_by="session_lock_retry",
-                max_tokens=4096,
-            )
-            brief, narrative_text_for_log = _parse_brief(response_text2, ExecutiveBrief)
-            _final_response_text = response_text2  # retry succeeded; capture the successful text
-        except Exception as e2:
-            err = f"JSON parse failed after retry: {e2}"
-            _mark_mas_error(symbol, session_id, date_key, err)
-            return {"status": "ERROR", "message": err}
 
     # 6. Write to all three database locations
     _inject_brief_to_database(symbol, session_id, date_key, brief, structure_reasoning)
@@ -1424,8 +1321,8 @@ def run_mas_analysis(
             kinematic_grade=_fuel.get("15M_JEWEL", {}).get("kinematic_grade"),
             micro_state=context.get("micro_state"),
             kde_peaks=context.get("kde_peaks"),
-            rag_memory_snapshot=cro_memory,
-            agent_chain={"senior_analyst": _final_response_text},
+            rag_memory_snapshot=None,  # no LLM/RAG memory consumed by the coded decision layer
+            agent_chain={"decision_engine": json.dumps(decision_dict, default=str)},
             model_version=agent_core._MODEL,
             daily_21ema_direction=_mtf.get("daily_21ema_direction"),
             daily_21ema_position=_mtf.get("daily_21ema_position"),
@@ -1534,7 +1431,7 @@ def run_mas_analysis(
                 _g("Daily", "daily_21ema_direction", _mtf.get("daily_21ema_direction")),
                 _g("Daily", "daily_200sma_position", _mtf.get("daily_200sma_position")),
                 _g("Weekly", "weekly_200sma_position", _mtf.get("weekly_200sma_position")),
-            ] if g]
+            ] if g] + decision_gauges  # the graded model's own checklist -- conviction tier + which legs confirmed
 
             _atr_val = levels.get("atr")
             write_decision_log(
@@ -1569,11 +1466,9 @@ def run_mas_analysis(
     except Exception as _unified_audit_err:
         print(f"[UNIFIED AUDIT] Non-critical failure — MAS unaffected: {_unified_audit_err}")
 
-    # 8. Content Publishing Engine — non-fatal, same thread, isolated try/except
-    try:
-        publisher_crew.run_publisher(symbol, session_id, date_key, brief)
-    except Exception as pub_err:
-        print(f"[PUBLISHER] Non-critical failure — MAS unaffected: {pub_err}")
+    # Step 8 (Content Publishing Engine / publisher_crew.run_publisher()) removed
+    # 2026-08-27 -- no newsletter/narrative gets generated by the graded coded
+    # decision layer (decision_engine.py), so there's nothing left to publish.
 
     return {"status": "SUCCESS", "brief": brief.dict()}
 

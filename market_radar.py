@@ -1,18 +1,19 @@
 # market_radar.py
 # ==============================================================================
-# KABRODA MARKET RADAR v14.4 (MORNING BRIEF UPGRADE)
-# AUDIT: Removed conflicting Harmonic/Kinematic gating. Strictly evaluates
-# structural breakouts against the 6 primary triggers (bo, bd, res, sup, r30).
-# v14.4 ADD: MTF Confluence brief injected per symbol. No existing logic changed.
+# KABRODA MARKET RADAR v15 (PHASE 4 LOCK-IN, 2026-08-27)
+# Reads the real graded decision (decision_engine.py) directly, live, on every
+# scan -- replaces the independent _build_dossier()/_score_setup() scorer that
+# used to compute its own separate GRADE A/B/STAND DOWN verdict, disconnected
+# from the actual decision layer. See AGENT_LOG.md 2026-08-27 for why.
 # ==============================================================================
-import os
 import json
 import asyncio
 import datetime
-from datetime import timedelta
 import battlebox_pipeline
-import gravity_math
+import decision_engine
 import mtf_confluence_scanner
+import structure_state_engine
+import trade_structure_analyst
 from database import SessionLocal, SessionLock, MtfReading, DecisionJournal, CampaignLog
 
 TARGETS = ["BTCUSDT"]
@@ -194,9 +195,15 @@ def _compute_daily_regime(mtf_snap: dict) -> str:
 async def _try_locked_shortcut(symbol: str):
     """
     If a SessionLock already exists for today's us_ny_futures session, read it
-    directly from the DB. No MEXC call — price is read from the locked packet.
-    Returns a battlebox-compatible response dict, or None if no lock exists.
-    Bypasses the 1500-candle MEXC fetch when the session is already established.
+    directly from the DB. Avoids the full 1500-candle multi-timeframe MEXC
+    pull, but still does one lightweight live 5m fetch to recompute structure
+    state fresh -- Phase 4 (2026-08-27): the acceptance gate is only earned
+    over the course of the day as post-lock candles close beyond the trigger,
+    so a structure_state frozen at lock time (from pkt["context"]) would show
+    stale/no-permission state for the rest of the day, every day. The radar
+    needs the live answer, not the moment-of-lock snapshot -- that's what
+    decision_engine.py actually gates on. Returns a battlebox-compatible
+    response dict, or None if no lock exists.
     """
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     norm = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
@@ -215,13 +222,27 @@ async def _try_locked_shortcut(symbol: str):
 
     levels = pkt.get("levels", {})
     price = float(levels.get("anchor_price") or 0.0)
+    context = pkt.get("context", {})
+
+    try:
+        lock_time = int(pkt.get("lock_time") or 0)
+        live_5m = await battlebox_pipeline.fetch_live_5m(symbol, limit=300)
+        if live_5m:
+            price = float(live_5m[-1]["close"])
+            post_lock = [c for c in live_5m if int(c["time"]) >= lock_time]
+            context = dict(context)
+            context["structure_state"] = structure_state_engine.compute_structure_state(
+                levels=levels, candles_5m_post_lock=post_lock
+            )
+    except Exception as _live_state_err:
+        print(f"[RADAR SHORTCUT] Live structure-state refresh failed (using frozen lock-time state): {_live_state_err}")
 
     return {
         "status": "OK",
         "price": price,
         "battlebox": {
             "levels": levels,
-            "context": pkt.get("context", {})
+            "context": context
         }
     }
 
@@ -240,146 +261,91 @@ def _make_indicator_string(levels):
     if not levels: return "0,0,0,0,0,0"
     return f"{levels.get('breakout_trigger',0)},{levels.get('breakdown_trigger',0)},{levels.get('daily_resistance',0)},{levels.get('daily_support',0)},{levels.get('range30m_high',0)},{levels.get('range30m_low',0)}"
 
-def _run_measured_move_audit(entry: float, vector: str, bo: float, bd: float, peaks: list):
-    """
-    Calculates targets based strictly on the Session Box (BO - BD)
-    and checks for Gravity Wall blockages in the airspace.
-    """
-    audit = {
-        "stop": 0.0, "t1": 0.0, "t2": 0.0, "t3": 0.0,
-        "airspace_clear": True, "blocking_wall": 0.0
-    }
+# _run_measured_move_audit()/_score_setup() (independent, disconnected scorer
+# with its own separate GRADE A/B/STAND DOWN verdict -- and a real bug: GRADE B
+# was mathematically unreachable, "Clear Airspace" always added its 4 points
+# unconditionally) removed 2026-08-27, Phase 4 lock-in. _build_dossier() now
+# reads the real, live graded decision (decision_engine.py) directly instead
+# of computing a second, parallel one -- see AGENT_LOG.md for the discovery.
 
-    # 1. Define the Session Box Risk
-    box_size = abs(bo - bd)
-    if box_size == 0: box_size = entry * 0.01
+_GRADE_COLOR = {
+    "STRONG_LONG": "GREEN", "STRONG_SHORT": "GREEN",
+    "LEAN_LONG": "YELLOW", "LEAN_SHORT": "YELLOW",
+    "NEUTRAL": "GRAY",
+}
+_GRADE_BRIEFING = {
+    "STRONG_LONG": "🟢 STRONG LONG — trend, structure, and confirmation all align.",
+    "STRONG_SHORT": "🟢 STRONG SHORT — trend, structure, and confirmation all align.",
+    "LEAN_LONG": "🟡 LEAN LONG — trend and structure confirm, only partial volatility/momentum support.",
+    "LEAN_SHORT": "🟡 LEAN SHORT — trend and structure confirm, only partial volatility/momentum support.",
+    "NEUTRAL": "⚪ NEUTRAL — no valid thesis right now.",
+}
 
-    # 2. Extract Gravity Obstacles
-    overhead = sorted([p for p in peaks if p["price"] > entry], key=lambda x: x["price"])
-    underneath = sorted([p for p in peaks if p["price"] < entry], key=lambda x: x["price"], reverse=True)
 
-    if vector == "LONG":
-        audit["stop"] = bd
-        audit["t1"] = entry + box_size
-        audit["t2"] = entry + (box_size * 1.618)
-        audit["t3"] = entry + (box_size * 2.618)
+def _build_dossier(symbol: str, price: float, levels: dict, context: dict) -> dict:
+    """Calls decision_engine.evaluate_15m_decision() directly with live data
+    -- the exact same function run_mas_analysis() calls, so the radar and the
+    official daily decision record can never silently disagree about what the
+    rules say. structure_state here is LIVE (recomputed fresh by
+    _try_locked_shortcut()/get_live_battlebox() on every call, not frozen at
+    lock time) -- that's what makes this an honest "what's true right now"
+    read, not a stale morning snapshot."""
+    bo = float(levels.get("breakout_trigger", 0) or 0)
+    bd = float(levels.get("breakdown_trigger", 0) or 0)
 
-        heavy_ovr = [p for p in overhead if p["intensity"] in ["HEAVY", "MAXIMUM"]]
-        if heavy_ovr and heavy_ovr[0]["price"] < audit["t1"]:
-            audit["airspace_clear"] = False
-            audit["blocking_wall"] = heavy_ovr[0]["price"]
+    structure_state = context.get("structure_state", {})
+    confluence_scan = context.get("confluence_scan", {})
+    stoch_cross = context.get("stoch_cross_15m")
 
-    elif vector == "SHORT":
-        audit["stop"] = bo
-        audit["t1"] = entry - box_size
-        audit["t2"] = entry - (box_size * 1.618)
-        audit["t3"] = entry - (box_size * 2.618)
-
-        heavy_und = [p for p in underneath if p["intensity"] in ["HEAVY", "MAXIMUM"]]
-        if heavy_und and heavy_und[0]["price"] > audit["t1"]:
-            audit["airspace_clear"] = False
-            audit["blocking_wall"] = heavy_und[0]["price"]
-
-    return audit, box_size
-
-def _score_setup(vector: str, macro_bias: str, micro_bias: str, entry: float, bo: float, bd: float, peaks: list):
-    checks = []
-    missing = []
-
-    audit, box_size = _run_measured_move_audit(entry, vector, bo, bd, peaks)
-
-    # GATE 1: Session Box Risk
-    box_pct = (box_size / entry) * 100
-    if box_pct > 1.5:
-        return "STAND DOWN", 0, [], f"🔴 HALT: Session Box is too wide ({box_pct:.2f}%).", audit, box_size
-
-    # GATE 2: Airspace Clearance (Gravity Walls)
-    if not audit["airspace_clear"]:
-        return "STAND DOWN", 0, [], f"🔴 HALT: Airspace Blocked by Gravity Wall at {audit['blocking_wall']}.", audit, box_size
-
-    # THE WEIGHTED SCORING MATRIX
-    score = 0
-    max_score = 10
-
-    # Ensure Macro Bias supports the structural breakout
-    if vector == "LONG" and macro_bias == "BULLISH":
-        score += 6; checks.append("✓ Macro Bias Alignment Confirmed")
-    elif vector == "SHORT" and macro_bias == "BEARISH":
-        score += 6; checks.append("✓ Macro Bias Alignment Confirmed")
+    if bo == 0 or bd == 0:
+        decision = {"conviction": "NEUTRAL", "tactical_brief": "Missing triggers.", "bias": "NEUTRAL",
+                    "entry_price": 0.0, "stop_loss": 0.0, "t1": 0.0, "t2": 0.0, "t3": 0.0}
     else:
-        missing.append("Macro Bias Alignment")
-
-    score += 4; checks.append("✓ Clear Airspace to Target 1")
-
-    pct = max(0, (score / max_score) * 100)
-
-    grade = "STAND DOWN"
-    rejection_reason = ""
-
-    if pct == 100:
-        grade = "GRADE A"
-    elif pct >= 60:
-        grade = "GRADE B"
-    else:
-        grade = "STAND DOWN"
-        rejection_reason = f"🔴 ABORT: Missing alignment: " + ", ".join(missing)
-
-    return grade, pct, checks, rejection_reason, audit, box_size
-
-def _build_dossier(symbol, price, levels, macro_bias, micro_bias, kde_peaks):
-    bo = float(levels.get("breakout_trigger", 0))
-    bd = float(levels.get("breakdown_trigger", 0))
-
-    favored = "NEUTRAL"
-    if micro_bias == "BULLISH": favored = "LONG"
-    elif micro_bias == "BEARISH": favored = "SHORT"
-
-    entry = bo if favored == "LONG" else bd
-
-    if favored == "NEUTRAL" or bo == 0 or bd == 0:
-        return {
-            "favored": "NEUTRAL", "grade": "STAND DOWN", "score_pct": 0, "color_code": "GRAY",
-            "briefing": "Market is in absolute neutral consolidation or missing triggers.",
-            "checks": [], "diagnostic_ledger": {}, "plan": {"valid": False}
+        distance = round(bo - bd, 2)
+        raw_targets = {
+            "distance": distance,
+            "long": {"entry": bo, "stop": bd, "t1": round(bo + distance, 2),
+                      "t2": round(bo + distance * 1.618, 2), "t3": round(bo + distance * 2.618, 2)},
+            "short": {"entry": bd, "stop": bo, "t1": round(bd - distance, 2),
+                       "t2": round(bd - distance * 1.618, 2), "t3": round(bd - distance * 2.618, 2)},
         }
+        targets = trade_structure_analyst.apply_trade_structure(
+            levels, {"kde_peaks": context.get("kde_peaks", [])}, raw_targets
+        )
+        decision, _gauges = decision_engine.evaluate_15m_decision(
+            levels=levels, targets=targets, structure_state=structure_state,
+            confluence_15m=confluence_scan.get("15M"), confluence_1h=confluence_scan.get("1H"),
+            confluence_4h=confluence_scan.get("4H"), stoch_cross_15m=stoch_cross,
+        )
 
-    grade, score_pct, checks, rejection_reason, audit, box_size = _score_setup(favored, macro_bias, micro_bias, entry, bo, bd, kde_peaks)
-
-    color = "GRAY"
-    briefing = ""
-
-    if grade == "GRADE A":
-        color = "GREEN"
-        briefing = "🟢 ELITE ALIGNMENT. Structural Breakout Verified against Macro Trend."
-    elif grade == "GRADE B":
-        color = "YELLOW"
-        briefing = "🟡 STANDARD OPERATION. Executable, but expect friction. Scale out aggressively."
-    elif grade == "STAND DOWN":
-        color = "RED"
-        briefing = rejection_reason
+    conviction = decision["conviction"]
+    favored = decision["bias"]
+    is_valid = conviction != "NEUTRAL"
 
     plan = {
-        "valid": grade in ["GRADE A", "GRADE B"],
-        "bias": favored,
-        "entry": entry,
-        "stop": audit["stop"],
-        "targets": [audit["t1"], audit["t2"], audit["t3"]]
+        "valid": is_valid, "bias": favored,
+        "entry": decision["entry_price"], "stop": decision["stop_loss"],
+        "targets": [decision["t1"], decision["t2"], decision["t3"]],
     }
-
-    diagnostic_ledger = {
-        "vector_direction": favored,
-        "session_box_size": box_size,
-        "airspace_clear": audit["airspace_clear"]
-    }
-    if not plan["valid"]:
-        diagnostic_ledger["rejection_reason"] = rejection_reason
-
-    key = f"{plan['bias']}|{grade}|{plan['entry']:.2f}|{plan['stop']:.2f}|{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}|{macro_bias}|{micro_bias}" if plan["valid"] else ""
+    # 9-field shape matches the JS-side buildMissionKey9() contract exactly
+    # (bias|status|entry|stop|tp1|tp2|tp3|macro|micro) -- the old dossier key
+    # had this shape too; conviction (STRONG_LONG etc.) takes the "status"
+    # slot where GRADE A/B used to sit.
+    key = (
+        f"{favored}|{conviction}|{plan['entry']:.2f}|{plan['stop']:.2f}|"
+        f"{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}|"
+        f"{context.get('macro_bias', 'NEUTRAL')}|{context.get('micro_bias', 'NEUTRAL')}"
+        if is_valid else ""
+    )
 
     return {
-        "favored": favored, "grade": grade, "score_pct": score_pct, "color_code": color,
-        "briefing": briefing, "checks": checks, "diagnostic_ledger": diagnostic_ledger,
-        "plan": plan, "key": key
+        "favored": favored,
+        "grade": conviction,  # STRONG_LONG/LEAN_LONG/NEUTRAL/LEAN_SHORT/STRONG_SHORT -- not GRADE A/B anymore
+        "score_pct": 100 if conviction.startswith("STRONG") else (50 if conviction.startswith("LEAN") else 0),
+        "color_code": _GRADE_COLOR.get(conviction, "GRAY"),
+        "briefing": _GRADE_BRIEFING.get(conviction, decision["tactical_brief"]),
+        "checks": [], "diagnostic_ledger": {"reason": decision["tactical_brief"]},
+        "plan": plan, "key": key,
     }
 
 
@@ -479,9 +445,8 @@ async def analyze_target(symbol):
 
     macro_bias = context.get("macro_bias", "NEUTRAL")
     micro_bias = context.get("micro_bias", "NEUTRAL")
-    kde_peaks = context.get("kde_peaks", [])
 
-    dossier = _build_dossier(symbol, price, levels, macro_bias, micro_bias, kde_peaks)
+    dossier = _build_dossier(symbol, price, levels, context)
 
     return {
         "ok": True,
@@ -518,9 +483,8 @@ async def scan_sector():
 
         macro_bias = context.get("macro_bias", "NEUTRAL")
         micro_bias = context.get("micro_bias", "NEUTRAL")
-        kde_peaks = context.get("kde_peaks", [])
 
-        dossier = _build_dossier(sym, price, levels, macro_bias, micro_bias, kde_peaks)
+        dossier = _build_dossier(sym, price, levels, context)
 
         # TF system verdicts (4H + 1H candidates) and daily regime
         sym_norm = sym.replace("USDT", "/USDT") if "/" not in sym else sym
@@ -586,12 +550,10 @@ async def scan_sector():
 
         # --- DECISION JOURNAL (Performance Auditor foundation — data collection only) ---
         try:
-            grade = dossier.get("grade", "STAND DOWN")
-            decision_type = {
-                "GRADE A": "GRADE_A",
-                "GRADE B": "GRADE_B",
-                "STAND DOWN": "STAND_DOWN",
-            }.get(grade, "STAND_DOWN")
+            # dossier["grade"] is now the real conviction tier from
+            # decision_engine.py (STRONG_LONG/LEAN_LONG/NEUTRAL/LEAN_SHORT/
+            # STRONG_SHORT) -- written as-is, no remapping needed.
+            decision_type = dossier.get("grade", "NEUTRAL")
 
             with SessionLocal() as db:
                 journal = DecisionJournal(

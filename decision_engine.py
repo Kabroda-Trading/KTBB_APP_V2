@@ -1,35 +1,27 @@
 # decision_engine.py
 # ==============================================================================
-# PHASE 4 — CODED 15M DECISION LAYER
-# Replaces the disabled LLM chain (Senior Analyst + interpreters, see
-# kabroda_mas_flow.py's DISABLED comment) with real, deterministic code.
-# Spec source: EXTERNAL_VALIDATION_REPORT.md (this repo, root) — the 4
-# Krown System templates, citation-backed against Trading Knowledge.
+# PHASE 4 — CODED 15M DECISION LAYER (graded conviction model)
+# Replaces the disabled LLM chain (see kabroda_mas_flow.py's DISABLED comment).
 #
-# SCOPE, stated plainly rather than silently narrowed: only Templates 1
-# (Uptrend Long) and 3 (Downtrend Short) are implemented. Templates 2/4
-# (Counter-Trend Short/Long) describe a pullback-to-55-EMA entry mechanic
-# that is a genuinely different entry philosophy from Kabroda's own
-# breakout-and-acceptance structure system (sse_engine.py/
-# structure_state_engine.py) -- forcing them in would mean inventing a
-# second, conflicting entry trigger rather than confirming the one
-# structure already produced. Left out for v1, not silently dropped.
+# Design locked 2026-08-27 after CONFLUENCE_RESEARCH_REPORT.md (6-agent
+# research pass): a rigid trend-AND-volatility-AND-momentum gate is a real,
+# documented anti-pattern -- a 4-year backtest of that shape produced 1,213
+# stand-downs against 228 approved trades, and the approved trades lost money
+# on average. The fix, per the report and Andy's lock-in: structure stays a
+# hard prerequisite; trend becomes a hard veto; volatility and momentum
+# become GRADED contributors (confirm/don't, not gate/don't); 1H/4H fuel
+# agreement is an informational booster that can upgrade LEAN to STRONG but
+# never vetoes and never manufactures a signal alone. Output is a 3-tier
+# conviction (STRONG/LEAN/NEUTRAL) per direction, not binary pass/fail.
 #
-# DESIGN, per Andy's direct correction to the first draft of this plan:
-#   - Structure (structure_state_engine.compute_structure_state()) is the
-#     PRIMARY gate -- has price earned permission to trade, and which side.
-#     Untouched, not recomputed here.
-#   - The matched template (trend + volatility + momentum, evaluated on
-#     15M's OWN data only) either confirms that side (APPROVED) or vetoes
-#     it (STAND_DOWN, named reason) -- one clear decision-maker, not a
-#     second cross-timeframe ruling.
-#   - 1H/4H confluence is attached as an informational gauge ONLY. It never
-#     changes APPROVED to STAND_DOWN or back. "Does the 1H/4H have fuel" is
-#     answered honestly on the output, not used as a hidden veto.
-#   - STAND_DOWN is a first-class, equally-valid output -- not a fallback.
-#   - No prose, no formatting, no LLM call anywhere in this file. Cost is
-#     zero. tactical_brief/formatted_newsletter_md are short, deterministic
-#     status strings only.
+# SCOPE, stated plainly: only the trend-continuation direction Kabroda's own
+# structure system naturally produces (breakout + acceptance) is covered.
+# The Krown System's counter-trend templates (a pullback-to-55-EMA entry) are
+# a genuinely different entry mechanism, deliberately not built here -- it
+# would mean a second, conflicting entry trigger, against the "one clean
+# decision-maker" principle this whole rebuild is anchored on.
+#
+# No LLM call anywhere in this file. No prose generation. Cost is zero.
 # ==============================================================================
 
 from __future__ import annotations
@@ -45,17 +37,19 @@ BBWP_COMPRESSION = 38.0
 BBWP_EXPANSION = 75.0
 PMARP_OVEREXTENDED = 85.0
 
+_BULLISH_DIVERGENCE = {"BULLISH", "HIDDEN_BULLISH"}
+_BEARISH_DIVERGENCE = {"BEARISH", "HIDDEN_BEARISH"}
+
 
 def _tf_reading(confluence_tf: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Safe defaults for a missing/error timeframe reading -- never crash on
-    absent data, just fail the template match honestly (STAND_DOWN)."""
+    absent data, just fail honestly toward NEUTRAL."""
     c = confluence_tf or {}
     return {
         "direction_vote": c.get("direction_vote", "UNKNOWN"),
-        "ema21": c.get("ema21"),
-        "ema55": c.get("ema55"),
         "bbwp_value": c.get("bbwp_value", 50.0),
         "pmarp_value": c.get("pmarp_value", 50.0),
+        "divergence": c.get("divergence", "NONE"),
     }
 
 
@@ -69,11 +63,12 @@ def evaluate_15m_decision(
     stoch_cross_15m: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], List[GaugeTuple]]:
     """Returns (decision_dict, gauge_readings). decision_dict has exactly
-    the ExecutiveBrief field names (kabroda_mas_flow.py) so the caller can
-    do `ExecutiveBrief(**decision_dict)` directly -- this module does not
-    import ExecutiveBrief itself, to avoid a decision_engine <->
-    kabroda_mas_flow import cycle (kabroda_mas_flow already imports this
-    module to call it)."""
+    the ExecutiveBrief field names (kabroda_mas_flow.py) plus a `conviction`
+    field (STRONG_LONG/LEAN_LONG/NEUTRAL/LEAN_SHORT/STRONG_SHORT) -- callers
+    do `ExecutiveBrief(**{k: v for k, v in decision_dict.items() if k in
+    ExecutiveBrief.__fields__})`. This module does not import ExecutiveBrief
+    itself, to avoid a decision_engine <-> kabroda_mas_flow import cycle
+    (kabroda_mas_flow already imports this module to call it)."""
 
     tf15 = _tf_reading(confluence_15m)
     tf1h = _tf_reading(confluence_1h)
@@ -84,74 +79,94 @@ def evaluate_15m_decision(
     action = structure_state.get("action") if structure_state else None
     side = permission.get("side")  # "LONG" | "SHORT" | None
 
+    def _agrees(direction_vote: str) -> Optional[bool]:
+        """None when the reading is UNKNOWN/insufficient data -- treated as
+        non-confirming, not as a false disagreement."""
+        if direction_vote not in ("BULLISH", "BEARISH"):
+            return None
+        if side == "LONG":
+            return direction_vote == "BULLISH"
+        if side == "SHORT":
+            return direction_vote == "BEARISH"
+        return None
+
+    trend_agrees = _agrees(tf15["direction_vote"])
+
+    volatility_confirms: Optional[bool] = None
+    momentum_confirms: Optional[bool] = None
+    fuel_confirms: Optional[bool] = None
+
+    if side in ("LONG", "SHORT"):
+        bbwp_actionable = tf15["bbwp_value"] <= BBWP_COMPRESSION or tf15["bbwp_value"] >= BBWP_EXPANSION
+        pmarp_not_opposing = (
+            tf15["pmarp_value"] < PMARP_OVEREXTENDED if side == "LONG"
+            else tf15["pmarp_value"] > (100.0 - PMARP_OVEREXTENDED)
+        )
+        volatility_confirms = bbwp_actionable and pmarp_not_opposing
+
+        stoch_confirms = stoch.get("cross_up") if side == "LONG" else stoch.get("cross_down")
+        div_set = _BULLISH_DIVERGENCE if side == "LONG" else _BEARISH_DIVERGENCE
+        divergence_confirms = tf15["divergence"] in div_set
+        momentum_confirms = bool(stoch_confirms) or divergence_confirms
+
+        fuel_1h = _agrees(tf1h["direction_vote"])
+        fuel_4h = _agrees(tf4h["direction_vote"])
+        fuel_confirms = bool(fuel_1h) and bool(fuel_4h)
+
     gauges: List[GaugeTuple] = [g for g in [
         _gauge("15M", "trend_direction_vote", tf15["direction_vote"]),
+        _gauge("15M", "trend_agrees", trend_agrees),
         _gauge("15M", "bbwp_value", tf15["bbwp_value"]),
         _gauge("15M", "pmarp_value", tf15["pmarp_value"]),
+        _gauge("15M", "divergence", tf15["divergence"]),
         _gauge("15M", "stoch_cross_up", stoch.get("cross_up")),
         _gauge("15M", "stoch_cross_down", stoch.get("cross_down")),
+        _gauge("15M", "volatility_confirms", volatility_confirms),
+        _gauge("15M", "momentum_confirms", momentum_confirms),
         _gauge("15M", "structure_action", action),
         _gauge("15M", "structure_side", side),
         _gauge("1H", "trend_direction_vote", tf1h["direction_vote"]),
-        _gauge("1H", "fuel_agrees", (tf1h["direction_vote"] == "BULLISH" and side == "LONG")
-               or (tf1h["direction_vote"] == "BEARISH" and side == "SHORT") if side else None),
         _gauge("4H", "trend_direction_vote", tf4h["direction_vote"]),
-        _gauge("4H", "fuel_agrees", (tf4h["direction_vote"] == "BULLISH" and side == "LONG")
-               or (tf4h["direction_vote"] == "BEARISH" and side == "SHORT") if side else None),
+        _gauge("1H_4H", "fuel_confirms", fuel_confirms),
     ] if g]
 
-    def _stand_down(reason: str) -> Tuple[Dict[str, Any], List[GaugeTuple]]:
+    def _result(conviction: str, reason: str) -> Tuple[Dict[str, Any], List[GaugeTuple]]:
+        is_neutral = conviction == "NEUTRAL"
+        bias = "NEUTRAL" if is_neutral else conviction.split("_")[1]
+        tgt = (targets or {}).get(bias.lower(), {}) if not is_neutral else {}
         return {
-            "approval_status": "STAND_DOWN",
+            "approval_status": "STAND_DOWN" if is_neutral else "APPROVED",
+            "conviction": conviction,
             "tactical_brief": reason,
-            "bias": "NEUTRAL",
-            "entry_price": 0.0,
-            "stop_loss": 0.0,
-            "t1": 0.0,
-            "t2": 0.0,
-            "t3": 0.0,
+            "bias": bias,
+            "entry_price": tgt.get("entry", 0.0),
+            "stop_loss": tgt.get("stop", 0.0),
+            "t1": tgt.get("t1", 0.0),
+            "t2": tgt.get("t2", 0.0),
+            "t3": tgt.get("t3", 0.0),
             "formatted_newsletter_md": "",
         }, gauges
 
     if action != "GO" or side not in ("LONG", "SHORT"):
-        return _stand_down(f"NO_STRUCTURE_PERMISSION ({action or 'UNKNOWN'})")
+        return _result("NEUTRAL", f"NO_STRUCTURE_PERMISSION ({action or 'UNKNOWN'})")
 
-    tgt = (targets or {}).get(side.lower())
-    if not tgt:
-        return _stand_down("NO_TARGETS_COMPUTED")
+    if not trend_agrees:
+        return _result("NEUTRAL", f"TREND_VETO ({tf15['direction_vote']} vs structure side {side})")
 
-    if side == "LONG":
-        # Template 1 -- Uptrend Long: 21 EMA > 55 EMA, BBWP in an actionable
-        # zone (compressed and about to break, OR already expanding to
-        # confirm the move), PMARP not already overextended (that's an exit
-        # signal per the template, not an entry green light), momentum
-        # (stochastic) not actively crossing down against the trade.
-        trend_ok = tf15["direction_vote"] == "BULLISH"
-        volatility_ok = tf15["bbwp_value"] <= BBWP_COMPRESSION or tf15["bbwp_value"] >= BBWP_EXPANSION
-        momentum_ok = tf15["pmarp_value"] < PMARP_OVEREXTENDED and not stoch.get("cross_down")
-        template = "TEMPLATE_1_UPTREND_LONG"
-    else:
-        # Template 3 -- Downtrend Short: mirror of Template 1.
-        trend_ok = tf15["direction_vote"] == "BEARISH"
-        volatility_ok = tf15["bbwp_value"] <= BBWP_COMPRESSION or tf15["bbwp_value"] >= BBWP_EXPANSION
-        momentum_ok = tf15["pmarp_value"] > (100.0 - PMARP_OVEREXTENDED) and not stoch.get("cross_up")
-        template = "TEMPLATE_3_DOWNTREND_SHORT"
+    if not (targets or {}).get(side.lower()):
+        return _result("NEUTRAL", "NO_TARGETS_COMPUTED")
 
-    if not trend_ok:
-        return _stand_down(f"TREND_DISAGREES_WITH_STRUCTURE ({tf15['direction_vote']})")
-    if not volatility_ok:
-        return _stand_down(f"VOLATILITY_NOT_ACTIONABLE (bbwp={tf15['bbwp_value']})")
-    if not momentum_ok:
-        return _stand_down(f"MOMENTUM_DOES_NOT_CONFIRM (pmarp={tf15['pmarp_value']})")
+    confirm_count = sum([bool(volatility_confirms), bool(momentum_confirms)])
 
-    return {
-        "approval_status": "APPROVED",
-        "tactical_brief": template,
-        "bias": side,
-        "entry_price": tgt["entry"],
-        "stop_loss": tgt["stop"],
-        "t1": tgt["t1"],
-        "t2": tgt["t2"],
-        "t3": tgt["t3"],
-        "formatted_newsletter_md": "",
-    }, gauges
+    if confirm_count == 0:
+        return _result("NEUTRAL", "NO_CONFIRMATION (trend agrees, but volatility and momentum both silent)")
+
+    if confirm_count == 2:
+        return _result(f"STRONG_{side}", "STRONG: trend + volatility + momentum all confirm")
+
+    # confirm_count == 1: LEAN, unless 1H/4H fuel agreement upgrades it to
+    # STRONG -- fuel can boost an existing lean, never manufacture a signal
+    # alone (confirm_count == 0 always stays NEUTRAL regardless of fuel).
+    if fuel_confirms:
+        return _result(f"STRONG_{side}", "STRONG: trend + one of volatility/momentum + 1H/4H fuel all confirm")
+    return _result(f"LEAN_{side}", "LEAN: trend confirms, only one of volatility/momentum confirms")
