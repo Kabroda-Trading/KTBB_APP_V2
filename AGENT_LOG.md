@@ -319,3 +319,50 @@ what the Antigravity project structure for Brain should look like (own repo,
 full `AGENT_LOG.md`/`AGENTS.md`/`CLAUDE.md` cross-agent setup, per the
 existing convention). Come back to Claude Code when Phase 4's actual rule
 design is ready to scope, or when there's something concrete enough to build.
+
+---
+
+## 2026-08-27 — FROM: Claude Code — FOR: DeepSeek/Antigravity
+STATUS: open
+
+**Real research task ready for you: `CONFLUENCE_RESEARCH_BRIEF.md` (this
+repo, root). Read that file for the actual brief — this entry is the "why,"
+so you're not starting cold.**
+
+Since the Brain conversation above, a lot happened directly in this repo:
+Phase 4 (the coded 15M decision layer) got built, backtested against 4 years
+of real OKX price data, and the backtest itself got debugged three separate
+times as real methodology bugs surfaced — an unbounded acceptance window, a
+stop calculation that silently forced every trade to ±1R, a 5m-vs-1m
+resolution precision gap. Full detail isn't repeated here; the file is
+`phase4_backtest.py` plus the log outputs (`_backtest_4y_output.log`,
+`_backtest_4y_1m_output.log`) if you need the receipts.
+
+**The real finding, once the bugs were fixed:** the current rigid design —
+trend AND volatility AND momentum must ALL align or it's STAND_DOWN — is too
+coarse. 4-year backtest: 1,213 stand-downs against 228 approved trades, and
+the approved trades lost money on average (-0.126R). Andy's diagnosis, and
+it's the right one: a system that says "stand down" almost every day isn't
+correctly reading "no signal" — it's failing to distinguish "genuinely
+nothing happening" from "mostly aligned, one thing's soft." A real trader
+grades conviction (strong / lean / neutral), not binary pass/fail.
+
+**What `CONFLUENCE_RESEARCH_BRIEF.md` actually asks:** not "what does
+indicator X mean" (already validated, see `EXTERNAL_VALIDATION_REPORT.md`)
+but how real, established traders/systems combine multiple partially-aligned
+or conflicting signals into a graded conviction call — confluence scoring
+methodology, how tiers get defined, whether one strong disagreement should
+override majority agreement, and real named examples with sources. Same
+anti-fabrication discipline as the validation report (check the library
+first, tag every claim, "not found" ≠ "fabricated").
+
+**Also worth knowing if it comes up:** Andy explicitly does NOT want Phase 4
+tested again until it's built completely per the real spec — all 4 Krown
+templates (not just the 2 trend-following ones currently built), RSI/
+divergence wired into the decision (currently absent), and a real answer on
+whether gravity-wall snapping can be reconstructed from price history for
+backtesting (untested assumption, not a confirmed permanent gap — worth
+checking before assuming it can't be done, the way `_calc_bbwp`'s SMA-5 gap
+turned out to be fixable once actually checked). Testing a deliberately
+partial build and presenting the results as meaningful was a real mistake
+this session — don't repeat it.

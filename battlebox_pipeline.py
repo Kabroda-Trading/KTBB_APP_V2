@@ -22,6 +22,7 @@ import structure_state_engine
 import gravity_engine
 import gravity_math
 import kabroda_mas_flow
+import mtf_confluence_scanner  # <-- Phase 4: confluence_scan (real 21/55 EMA + BBWP/PMARP per TF)
 import market_context_oracle  # <-- NEW: Import the Macro Oracle
 from database import SessionLocal, SessionLock, GravityMemory 
 
@@ -47,6 +48,8 @@ from market_data import (
     fetch_live_daily,
     _calc_ema_series,
     _calc_adx,
+    _calc_bbwp,
+    _calc_pmarp,
 )
 
 
@@ -221,71 +224,42 @@ def _calc_stochastic(candles: List[Dict], k_period: int = 14, d_period: int = 3)
     return {"k": round(k_vals[-1], 2), "d": round(d, 2)}
 
 
-# ── BBWP / PMARP — corrected 2026-08-17 against Trading Knowledge library ──────
-# Kabroda Audit AUDIT_FINDINGS.md #16-18: the previous config (BBWP period=20,
-# PMARP ma_period=50/lookback=252/SMA, zones 5/15/85/95) was never Krown-sourced
-# despite the "Crown's exact formulas" comment that used to sit here -- the
-# library's own audit independently rejected the same 5/15/85/95 BBWP zones as
-# unconfirmed. Real values below verified directly against
-# Trading Knowledge/knowledge/01_INDICATORS/{bbwp,pmarp}/README.md
-# (2026-08-16 provenance notes) by CC, not just cited secondhand.
-
-def _calc_bbwp(closes: List[float], bb_period: int = 13, bb_std: float = 2.0, lookback: int = 252) -> float:
-    """BB Width Percentile: percentile rank of current BB width over `lookback` bars.
-    bb_period=13 is Krown's directly-quoted, instructor-emphasized value
-    ("very specific there") -- not the generic public 20. lookback=252 and
-    bb_std=2.0 (public BB default) are unchanged. Returns 50.0 if insufficient data."""
-    if len(closes) < bb_period + 1:
-        return 50.0
-    bbw: List[Optional[float]] = [None] * len(closes)
-    for i in range(bb_period - 1, len(closes)):
-        window = closes[i - bb_period + 1 : i + 1]
-        sma = sum(window) / bb_period
-        if sma == 0:
-            continue
-        variance = sum((x - sma) ** 2 for x in window) / bb_period
-        std = variance ** 0.5
-        bbw[i] = (sma + bb_std * std - (sma - bb_std * std)) / sma
-    cur = bbw[-1]
-    if cur is None:
-        return 50.0
-    start = max(0, len(closes) - lookback)
-    hist = [v for v in bbw[start:] if v is not None]
-    if not hist:
-        return 50.0
-    return round(sum(1 for v in hist if v < cur) / len(hist) * 100.0, 2)
+def _calc_stochastic_cross(candles: List[Dict], k_period: int = 14, d_period: int = 3) -> Dict:
+    """Stochastic %K/%D cross-event detection -- the literal entry trigger the
+    4 Krown System templates require (EXTERNAL_VALIDATION_REPORT.md,
+    2026-08-26). `_calc_stochastic()` alone can't answer this; it only
+    returns one bar's k/d, with no prior bar to compare against for a cross."""
+    if len(candles) < k_period + d_period:
+        return {"k": 50.0, "d": 50.0, "cross_up": False, "cross_down": False}
+    k_vals = []
+    for i in range(k_period - 1, len(candles)):
+        window = candles[i - k_period + 1: i + 1]
+        hh = max(float(c["high"]) for c in window)
+        ll = min(float(c["low"]) for c in window)
+        cl = float(candles[i]["close"])
+        k_vals.append(100 * (cl - ll) / (hh - ll) if hh != ll else 50.0)
+    if len(k_vals) < d_period + 1:
+        return {"k": round(k_vals[-1], 2), "d": round(k_vals[-1], 2), "cross_up": False, "cross_down": False}
+    d_vals = [
+        sum(k_vals[i - d_period + 1: i + 1]) / d_period
+        for i in range(d_period - 1, len(k_vals))
+    ]
+    if len(d_vals) < 2:
+        return {"k": round(k_vals[-1], 2), "d": round(d_vals[-1], 2), "cross_up": False, "cross_down": False}
+    k_now, k_prev = k_vals[-1], k_vals[-2]
+    d_now, d_prev = d_vals[-1], d_vals[-2]
+    return {
+        "k": round(k_now, 2),
+        "d": round(d_now, 2),
+        "cross_up": k_prev <= d_prev and k_now > d_now,
+        "cross_down": k_prev >= d_prev and k_now < d_now,
+    }
 
 
-def _calc_pmarp(candles: List[Dict], ma_period: int = 20, lookback: int = 350) -> float:
-    """Price MA Ratio Percentile: percentile rank of (close/VWMA) over `lookback` bars.
-    ma_period=20 (VWMA, not SMA) is QPAI's directly-quoted config; lookback=350 is
-    the most corroborated single number in the library -- confirmed independently
-    by two separate courses ("I do find myself actually using a lookback of 350
-    most often"). Falls back to a plain SMA if volume data is unavailable/zero for
-    a window, rather than dividing by zero. Returns 50.0 if insufficient data."""
-    closes = [float(c["close"]) for c in candles]
-    volumes = [float(c.get("volume") or 0.0) for c in candles]
-    if len(closes) < ma_period + 1:
-        return 50.0
-    pmar: List[Optional[float]] = [None] * len(closes)
-    for i in range(ma_period - 1, len(closes)):
-        price_window = closes[i - ma_period + 1 : i + 1]
-        vol_window = volumes[i - ma_period + 1 : i + 1]
-        vol_sum = sum(vol_window)
-        vwma = (
-            sum(p * v for p, v in zip(price_window, vol_window)) / vol_sum
-            if vol_sum > 0 else sum(price_window) / ma_period
-        )
-        if vwma > 0:
-            pmar[i] = closes[i] / vwma
-    cur = pmar[-1]
-    if cur is None:
-        return 50.0
-    start = max(0, len(closes) - lookback)
-    hist = [v for v in pmar[start:] if v is not None]
-    if not hist:
-        return 50.0
-    return round(sum(1 for v in hist if v < cur) / len(hist) * 100.0, 2)
+# ── BBWP / PMARP now live in market_data.py (imported above) -- both this
+# file and mtf_confluence_scanner.py share the one corrected implementation.
+# See market_data.py's own comment for why (2026-08-26 Phase 4 build: a
+# second, drifted copy was found in mtf_confluence_scanner.py).
 
 
 def _bbwp_state_label(val: float) -> str:
@@ -718,6 +692,14 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                         pkt.setdefault("context", {})["mtf_structural_snapshot"] = _mtf_snap
                     except Exception as _mtf_err:
                         print(f"[MTF SNAPSHOT] Capture failed (non-blocking): {_mtf_err}")
+
+                    # ── CONFLUENCE SCAN (Phase 4 — corrected 21/55 EMA + BBWP/PMARP per
+                    # timeframe, the single source of truth decision_engine.py reads
+                    # trend/volatility from; see market_data.py's BBWP/PMARP comment) ──
+                    try:
+                        pkt.setdefault("context", {})["confluence_scan"] = await mtf_confluence_scanner.run_mtf_confluence_scan(norm_sym)
+                    except Exception as _conf_err:
+                        print(f"[CONFLUENCE SCAN] Capture failed (non-blocking): {_conf_err}")
 
                     _LOCKED_PACKETS[session_key] = pkt
 

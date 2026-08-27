@@ -25,6 +25,8 @@ from market_data import (
     _normalize_symbol,
     _calc_ema_series,
     _calc_adx,
+    _calc_bbwp,
+    _calc_pmarp,
 )
 import gravity_math
 
@@ -171,107 +173,26 @@ def _calc_stoch_rsi(
 
 
 # ------------------------------------------------------------------------------
-# BBWP — Bollinger Band Width Percentile
-# Gate condition: bbwp_compressed=True means volatility is compressed and an
-# expansion move is imminent. The JEWEL system only signals direction when
-# at least one timeframe is compressed.
+# BBWP / PMARP now live in market_data.py (imported above), shared with
+# battlebox_pipeline.py -- this file used to carry its own separate,
+# never-corrected copy (period=20, EMA21-based PMARP, no real zone
+# thresholds) that drifted silently after battlebox_pipeline.py got the real
+# fix on 2026-08-17. Found and fixed 2026-08-26 (Phase 4 build). The wrapper
+# below adapts the shared functions' plain-float return into the
+# dict-with-zone-labels shape this file's callers expect, using the real,
+# citation-backed zones (EXTERNAL_VALIDATION_REPORT.md, 2026-08-26): BBWP
+# <=38/>=75, PMARP >=85 overextended -- not the old, wrong 25.0/75.0 split.
 # ------------------------------------------------------------------------------
 
-def _calc_bbwp(candles: List[Dict], period: int = 20, lookback: int = 252) -> Dict[str, Any]:
-    """
-    Percentile rank of current Bollinger Band width vs the last `lookback` values.
-    bbwp_value < 25 = compression — gate open for JEWEL direction signal.
-    Falls back to raw band width (not percentile) when fewer than 50 bars available.
-    """
-    fallback = {"bbwp_value": 50.0, "bbwp_compressed": False}
-    closes = [c["close"] for c in candles]
-    if len(closes) < period + 1:
-        return fallback
-
-    bw_series: List[float] = []
-    for i in range(period - 1, len(closes)):
-        window = closes[i - period + 1 : i + 1]
-        sma = sum(window) / period
-        if sma == 0.0:
-            bw_series.append(0.0)
-            continue
-        variance = sum((x - sma) ** 2 for x in window) / period
-        std = variance ** 0.5
-        # (upper_bb - lower_bb) / sma * 100 = (4 * std) / sma * 100
-        bw_series.append((4.0 * std) / sma * 100.0)
-
-    if not bw_series:
-        return fallback
-
-    current_bw = bw_series[-1]
-
-    if len(bw_series) < 50:
-        # Not enough history — return raw band width, flag < 25 as compressed
-        return {"bbwp_value": round(current_bw, 4), "bbwp_compressed": current_bw < 25.0}
-
-    # Percentile rank of current_bw vs up to `lookback` historical values
-    history = bw_series[-(min(lookback, len(bw_series)) + 1) : -1]
-    if not history:
-        return {"bbwp_value": round(current_bw, 4), "bbwp_compressed": current_bw < 25.0}
-
-    rank = sum(1 for v in history if v <= current_bw) / len(history) * 100.0
-    return {"bbwp_value": round(rank, 2), "bbwp_compressed": rank < 25.0}
+def _bbwp_reading(closes: List[float]) -> Dict[str, Any]:
+    val = _calc_bbwp(closes)
+    return {"bbwp_value": val, "bbwp_compressed": val <= 38.0}
 
 
-# ------------------------------------------------------------------------------
-# PMARP — Price Moving Average Ratio Percentile
-# Exit protocol: pmarp_overextended=True means price has stretched too far
-# from its mean and a mean-reversion pull-back is likely.
-# ------------------------------------------------------------------------------
-
-def _calc_pmarp(
-    closes: List[float], ema21_series: List[float], lookback: int = 252
-) -> Dict[str, Any]:
-    """
-    Percentile rank of how far current price has deviated from EMA21.
-    pmarp_value > 75 = overextended — exit signal.
-    ema21_series must be the output of _calc_ema_series(closes, 21):
-    length = len(closes) - 20, where ema21_series[i] aligns to closes[i + 20].
-    """
-    fallback = {"pmarp_value": 50.0, "pmarp_overextended": False, "pmarp_direction": "NEUTRAL"}
-    if not closes or not ema21_series:
-        return fallback
-
-    # Align: ema21_series[i] corresponds to closes[offset + i]
-    offset = len(closes) - len(ema21_series)
-    aligned_closes = closes[offset:]
-
-    ratio_series: List[float] = []
-    for c, e in zip(aligned_closes, ema21_series):
-        ratio_series.append((c - e) / e * 100.0 if e != 0.0 else 0.0)
-
-    if not ratio_series:
-        return fallback
-
-    current_ratio = ratio_series[-1]
-    direction = "ABOVE" if current_ratio >= 0.0 else "BELOW"
-
-    if len(ratio_series) < 50:
-        return {
-            "pmarp_value": round(abs(current_ratio), 4),
-            "pmarp_overextended": False,
-            "pmarp_direction": direction,
-        }
-
-    history = ratio_series[-(min(lookback, len(ratio_series)) + 1) : -1]
-    if not history:
-        return {
-            "pmarp_value": round(abs(current_ratio), 4),
-            "pmarp_overextended": False,
-            "pmarp_direction": direction,
-        }
-
-    rank = sum(1 for v in history if v <= current_ratio) / len(history) * 100.0
-    return {
-        "pmarp_value": round(rank, 2),
-        "pmarp_overextended": rank > 75.0,
-        "pmarp_direction": direction,
-    }
+def _pmarp_reading(candles: List[Dict], closes: List[float], ema21_series: List[float]) -> Dict[str, Any]:
+    val = _calc_pmarp(candles)
+    direction = "ABOVE" if (closes and ema21_series and closes[-1] >= ema21_series[-1]) else "BELOW"
+    return {"pmarp_value": val, "pmarp_overextended": val >= 85.0, "pmarp_direction": direction}
 
 
 # ------------------------------------------------------------------------------
@@ -515,8 +436,8 @@ def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
     adx_strength = "STRONG" if adx_val > 25 else "WEAK"
     adx_rising = adx_data.get("rising", False)
 
-    bbwp = _calc_bbwp(candles)
-    pmarp = _calc_pmarp(closes, ema21)
+    bbwp = _bbwp_reading(closes)
+    pmarp = _pmarp_reading(candles, closes, ema21)
 
     rsi_series = _calc_rsi_series(closes)
     divergence = _find_divergence(closes, rsi_series)

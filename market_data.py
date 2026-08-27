@@ -241,3 +241,79 @@ def _calc_adx(candles: List[Dict], period: int = 14) -> Dict:
         "minus_di": round(mdi_vals[-1] if mdi_vals else 0.0, 2),
         "rising": len(adx_vals) >= 2 and adx_vals[-1] > adx_vals[-2],
     }
+
+
+# ---------------------------------------------------------------------------
+# BBWP / PMARP — the single, shared, corrected implementation.
+# Moved here 2026-08-26 (Phase 4 build) because `mtf_confluence_scanner.py`
+# had its OWN separate, never-corrected copy (period=20, EMA21-based PMARP,
+# no real zone thresholds) that drifted silently after `battlebox_pipeline.py`
+# got the real fix on 2026-08-17 -- exactly the kind of duplication this
+# module's "single shared calc" pattern (see `_calc_ema_series`/`_calc_adx`
+# above) already exists to prevent. Both callers now import from here; do
+# not let a third copy happen -- any file that needs BBWP/PMARP imports these.
+#
+# Values verified directly against Trading Knowledge/knowledge/01_INDICATORS/
+# {bbwp,pmarp}/README.md and cross-checked by EXTERNAL_VALIDATION_REPORT.md
+# (2026-08-26, library-citation audit): BBWP length=13, SMA-5 smoothing of
+# the width series (not the raw current-bar width), lookback=252. PMARP
+# ma_period=20 (VWMA), lookback=350.
+# ---------------------------------------------------------------------------
+def _calc_bbwp(closes: List[float], bb_period: int = 13, bb_std: float = 2.0,
+               lookback: int = 252, smooth: int = 5) -> float:
+    """BB Width Percentile: percentile rank of the `smooth`-bar SMA of BB
+    width over `lookback` bars -- not the raw current-bar width. Returns
+    50.0 if insufficient data."""
+    if len(closes) < bb_period + smooth:
+        return 50.0
+    bbw: List[Optional[float]] = [None] * len(closes)
+    for i in range(bb_period - 1, len(closes)):
+        window = closes[i - bb_period + 1: i + 1]
+        sma = sum(window) / bb_period
+        if sma == 0:
+            continue
+        variance = sum((x - sma) ** 2 for x in window) / bb_period
+        std = variance ** 0.5
+        bbw[i] = (sma + bb_std * std - (sma - bb_std * std)) / sma
+    valid = [v for v in bbw if v is not None]
+    if len(valid) < smooth:
+        return 50.0
+    smoothed = [
+        sum(valid[i - smooth + 1: i + 1]) / smooth
+        for i in range(smooth - 1, len(valid))
+    ]
+    cur = smoothed[-1]
+    start = max(0, len(smoothed) - lookback)
+    hist = smoothed[start:]
+    if not hist:
+        return 50.0
+    return round(sum(1 for v in hist if v < cur) / len(hist) * 100.0, 2)
+
+
+def _calc_pmarp(candles: List[Dict], ma_period: int = 20, lookback: int = 350) -> float:
+    """Price MA Ratio Percentile: percentile rank of (close/VWMA) over
+    `lookback` bars. Falls back to a plain SMA if volume data is
+    unavailable/zero for a window. Returns 50.0 if insufficient data."""
+    closes = [float(c["close"]) for c in candles]
+    volumes = [float(c.get("volume") or 0.0) for c in candles]
+    if len(closes) < ma_period + 1:
+        return 50.0
+    pmar: List[Optional[float]] = [None] * len(closes)
+    for i in range(ma_period - 1, len(closes)):
+        price_window = closes[i - ma_period + 1: i + 1]
+        vol_window = volumes[i - ma_period + 1: i + 1]
+        vol_sum = sum(vol_window)
+        vwma = (
+            sum(p * v for p, v in zip(price_window, vol_window)) / vol_sum
+            if vol_sum > 0 else sum(price_window) / ma_period
+        )
+        if vwma > 0:
+            pmar[i] = closes[i] / vwma
+    cur = pmar[-1]
+    if cur is None:
+        return 50.0
+    start = max(0, len(closes) - lookback)
+    hist = [v for v in pmar[start:] if v is not None]
+    if not hist:
+        return 50.0
+    return round(sum(1 for v in hist if v < cur) / len(hist) * 100.0, 2)
