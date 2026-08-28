@@ -237,6 +237,18 @@ async def _try_locked_shortcut(symbol: str):
     except Exception as _live_state_err:
         print(f"[RADAR SHORTCUT] Live structure-state refresh failed (using frozen lock-time state): {_live_state_err}")
 
+    # Live confluence_scan refresh -- same reasoning as structure_state above.
+    # The packet's own confluence_scan was computed ONCE, at lock, and frozen
+    # in SessionLock.packet_data ever since -- trend/BBWP/PMARP/divergence are
+    # NOT static facts the way bo/bd are, they're meant to keep updating all
+    # day. Real gap, found while answering Andy's direct question about
+    # whether Brain gets genuinely live tool data (2026-08-27): it didn't,
+    # for this field, until now.
+    try:
+        context["confluence_scan"] = await mtf_confluence_scanner.run_mtf_confluence_scan(norm)
+    except Exception as _live_conf_err:
+        print(f"[RADAR SHORTCUT] Live confluence-scan refresh failed (using frozen lock-time data): {_live_conf_err}")
+
     return {
         "status": "OK",
         "price": price,
@@ -519,6 +531,11 @@ async def scan_sector():
             "indicator_string": _make_indicator_string(levels), "full_intel": json.dumps(res, default=str),
             "levels": levels,
             "mtf_brief": mtf_brief,
+            # Full live per-timeframe confluence (real 21/55 EMA, BBWP/PMARP,
+            # divergence) -- genuinely live as of 2026-08-27 (_try_locked_shortcut
+            # now recomputes this fresh every call, not frozen at session lock).
+            # mtf_brief above is only a summary; this is the real detail.
+            "confluence_scan": context.get("confluence_scan", {}),
             "tf_verdicts": tf_verdicts,
             "tf_today": tf_today,
             "daily_regime": daily_regime,
