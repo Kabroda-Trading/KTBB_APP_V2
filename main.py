@@ -24,7 +24,6 @@ import auth
 import battlebox_pipeline
 import market_radar
 import research_lab
-import market_simulator
 import gravity_engine
 import gravity_math
 import kabroda_mas_flow
@@ -1486,11 +1485,11 @@ async def account_settings(request: Request, db: Session = Depends(get_db)):
     return {"status": "ok"}
 
 # --- ADMIN ROUTES ---
-@app.get("/admin/simulator")
-async def admin_simulator_page(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx["is_admin"]: return RedirectResponse("/suite")
-    return _template_or_fallback(request, templates, "market_simulator.html", ctx)
+# /admin/simulator + market_simulator.py archived 2026-08-28 -- Andy's call:
+# it was an earlier attempt at what Kabroda AI Brain now does properly, and
+# its own logic ("Predator Stop"/"Primal Max"/"Jailbreaks") didn't match the
+# real, current methodology anyway (a stale duplicate, same class of problem
+# market_radar.py's dead scorer had before this session's Phase 4 rewrite).
 
 @app.get("/admin/research")
 async def admin_research_page(request: Request, db: Session = Depends(get_db)):
@@ -1836,23 +1835,8 @@ async def research_run(request: Request, db: Session = Depends(get_db)):
         traceback.print_exc()
         return JSONResponse({"ok": False, "error": str(e)})
 
-@app.post("/api/simulator/run")
-async def simulator_run(request: Request, db: Session = Depends(get_db)):
-    uid = request.session.get(auth.SESSION_KEY)
-    if not uid: raise HTTPException(status_code=401)
-    
-    user = db.query(UserModel).filter(UserModel.id == uid).first()
-    
-    if not getattr(user, "is_admin", False): 
-        return JSONResponse({"ok": False, "error": "Admin access required for heavy backtesting computations."}, status_code=403)
-    
-    payload = await request.json()
-    try:
-        out = await market_simulator.run_simulation(payload)
-        return JSONResponse(out)
-    except Exception as e:
-        traceback.print_exc()
-        return JSONResponse({"ok": False, "error": str(e)})
+# /api/simulator/run + market_simulator.py archived 2026-08-28 -- see the
+# /admin/simulator removal note above.
 
 # ==============================================================================
 # EXECUTIVE DASHBOARD API ROUTES (Phase 6 — read-only DB queries)
