@@ -786,8 +786,15 @@ async def suite_research_lab_page(request: Request, db: Session = Depends(get_db
 
 @app.get("/suite/radar")
 async def radar_page(request: Request, db: Session = Depends(get_db)):
+    # Public, 2026-08-27, Andy's direct instruction: "let anyone go to the radar
+    # and use it for what it's built for." Safe to open -- the page itself has
+    # zero server-rendered template variables (pure static HTML/JS, confirmed
+    # by grep before this change) and both APIs it calls
+    # (/api/radar/snapshot, /api/radar/scan) were already public/unauthenticated
+    # by design (same pattern as /api/gravity/scan, see this file's own header
+    # comment on that endpoint). This login gate was never protecting the
+    # underlying data -- only the convenience of viewing the page.
     ctx = get_user_context(request, db)
-    if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
     return _template_or_fallback(request, templates, "market_radar.html", ctx)
 
 @app.get("/suite/gravity-map")
@@ -1034,11 +1041,15 @@ async def api_radar_snapshot(db: Session = Depends(get_db)):
 
     levels = {}
     price = 0.0
+    confluence_scan = {}
     if lock:
         try:
             pkt = json.loads(lock.packet_data)
             levels = pkt.get("levels", {})
             price = float(levels.get("anchor_price") or 0)
+            # Already computed once at lock and stored -- no live fetch needed,
+            # keeps this endpoint's "Phase 1, zero exchange I/O" contract intact.
+            confluence_scan = pkt.get("context", {}).get("confluence_scan", {})
         except Exception:
             pass
 
@@ -1077,6 +1088,7 @@ async def api_radar_snapshot(db: Session = Depends(get_db)):
     ).order_by(CampaignLog.id.desc()).first()
 
     mas_status = campaign.mas_approval_status if campaign else None
+    conviction = campaign.conviction if campaign else None
     plan = None
     if campaign and campaign.entry_price:
         plan = {
@@ -1115,11 +1127,13 @@ async def api_radar_snapshot(db: Session = Depends(get_db)):
         "mtf_cached":            mtf_cached,
         "jewel_gate_open":       jewel_gate_open,
         "mas_status":            mas_status,
+        "conviction":            conviction,  # STRONG_LONG/LEAN_LONG/NEUTRAL/LEAN_SHORT/STRONG_SHORT
         "plan":                  plan,
         "tf_verdicts":           tf_verdicts,
         "tf_today":              tf_today,
         "daily_regime":          daily_regime,
         "weekly_200sma_position": weekly_200sma_position,
+        "confluence_scan":       confluence_scan,  # real 21/55 EMA + BBWP/PMARP + divergence per timeframe
     })
 
 

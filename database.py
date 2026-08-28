@@ -65,6 +65,13 @@ def init_db():
     except Exception:
         pass
 
+    # --- PHASE 4 LOCK-IN (2026-08-27) ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE campaign_logs ADD COLUMN conviction VARCHAR"))
+    except Exception:
+        pass
+
     # --- DECISION JOURNAL OUTCOME MIGRATIONS (filled later by the 4H auditor task) ---
     try:
         with engine.begin() as conn:
@@ -483,6 +490,13 @@ class CampaignLog(Base):
     # --- MAS UPGRADE COLUMNS ---
     mas_executive_brief = Column(String, nullable=True)
     mas_approval_status = Column(String, default="PENDING", nullable=False)
+    # conviction: STRONG_LONG/LEAN_LONG/NEUTRAL/LEAN_SHORT/STRONG_SHORT --
+    # decision_engine.py's real graded tier (2026-08-27 Phase 4 lock-in).
+    # mas_approval_status alone (APPROVED/STAND_DOWN) collapses STRONG and
+    # LEAN into the same value; this is the finer read, needed by anything
+    # (the Brain project's read API) that wants the real conviction, not
+    # just approved-or-not.
+    conviction = Column(String, nullable=True)
     formatted_newsletter = Column(String, nullable=True)
     target_hit = Column(String, nullable=True)   # T1 | T2 | T3 | STOP — the target the trade CLOSED AT
     structure_reasoning = Column(String, nullable=True)  # JSON: Trade Structure Analyst audit trail
