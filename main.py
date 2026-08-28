@@ -158,10 +158,14 @@ async def _fire_senior_analyst(date_key: str) -> None:
     """
     db = SessionLocal()
     try:
-        existing_brief = db.query(MacroNarrativeLog).filter(
-            MacroNarrativeLog.symbol == "BTC/USDT",
-            MacroNarrativeLog.authored_by == "senior_analyst",
-            MacroNarrativeLog.date_key == date_key,
+        # Dedup source switched 2026-08-28: MacroNarrativeLog's senior_analyst
+        # rows stopped being written this session (narrative text had been
+        # permanently empty since the LLM step was removed) -- CampaignLog is
+        # the real, canonical "did this already run" signal.
+        existing_brief = db.query(CampaignLog).filter(
+            CampaignLog.symbol == "BTC/USDT",
+            CampaignLog.date_key == date_key,
+            CampaignLog.is_canonical == True,
         ).first()
         if existing_brief:
             print(f"[SCHEDULER] Senior Analyst already ran for {date_key} — skipping")
@@ -254,10 +258,12 @@ async def run_senior_analyst_scheduler() -> None:
         print(f"[SCHEDULER] Boot check: looking for today's Senior Analyst brief ({date_key})...")
         db = SessionLocal()
         try:
-            existing = db.query(MacroNarrativeLog).filter(
-                MacroNarrativeLog.symbol == "BTC/USDT",
-                MacroNarrativeLog.authored_by == "senior_analyst",
-                MacroNarrativeLog.date_key == date_key,
+            # Dedup source switched 2026-08-28 -- see _fire_senior_analyst()'s
+            # matching comment above.
+            existing = db.query(CampaignLog).filter(
+                CampaignLog.symbol == "BTC/USDT",
+                CampaignLog.date_key == date_key,
+                CampaignLog.is_canonical == True,
             ).first()
         finally:
             db.close()
@@ -841,32 +847,28 @@ async def macro_war_room_page(request: Request, symbol: str = "BTC/USDT", db: Se
     latest_log = db.query(CampaignLog).filter(CampaignLog.symbol == db_sym, CampaignLog.is_canonical == True).order_by(CampaignLog.id.desc()).first()
     
     if latest_log and not latest_log.mas_executive_brief and latest_log.mas_approval_status == 'PENDING':
-        # Dedup: if MacroNarrativeLog already has a senior_analyst row for this date,
-        # the brief is written or in-flight — do not fire a second run_mas_analysis().
-        existing_narrative = db.query(MacroNarrativeLog).filter(
-            MacroNarrativeLog.symbol == db_sym,
-            MacroNarrativeLog.authored_by == "senior_analyst",
-            MacroNarrativeLog.date_key == latest_log.date_key,
+        # Dedup simplified 2026-08-28: the outer condition (no brief written
+        # yet AND status still PENDING) is already the correct, sufficient
+        # gate on CampaignLog -- the canonical record -- so the old inner
+        # check against MacroNarrativeLog's senior_analyst rows (which
+        # stopped being written this session) was redundant on top of it.
+        lock_record = db.query(SessionLock).filter(
+            SessionLock.symbol == db_sym,
+            SessionLock.session_id == latest_log.session_id,
+            SessionLock.date_key == latest_log.date_key
         ).first()
 
-        if not existing_narrative:
-            lock_record = db.query(SessionLock).filter(
-                SessionLock.symbol == db_sym,
-                SessionLock.session_id == latest_log.session_id,
-                SessionLock.date_key == latest_log.date_key
-            ).first()
-
-            if lock_record:
-                pkt = json.loads(lock_record.packet_data)
-                asyncio.create_task(
-                    asyncio.to_thread(
-                        kabroda_mas_flow.run_mas_analysis,
-                        symbol=db_sym,
-                        session_id=latest_log.session_id,
-                        date_key=latest_log.date_key,
-                        battlebox_payload=pkt
-                    )
+        if lock_record:
+            pkt = json.loads(lock_record.packet_data)
+            asyncio.create_task(
+                asyncio.to_thread(
+                    kabroda_mas_flow.run_mas_analysis,
+                    symbol=db_sym,
+                    session_id=latest_log.session_id,
+                    date_key=latest_log.date_key,
+                    battlebox_payload=pkt
                 )
+            )
     
     ctx["mas_log"] = latest_log
     return _template_or_fallback(request, templates, "macro_war_room.html", ctx)
@@ -876,30 +878,32 @@ async def macro_war_room_page(request: Request, symbol: str = "BTC/USDT", db: Se
 async def api_narrative_latest(symbol: str = "BTC/USDT"):
     """
     Single endpoint serving War Room, Market Radar Panel 00, and Gravity Map sidebar.
-    Returns latest Senior Analyst narrative, Elliott Wave state, and JEWEL snapshot.
-    No authentication required — data is not sensitive.
+    Returns latest tactical brief and JEWEL snapshot. No authentication required
+    — data is not sensitive.
+
+    2026-08-28: narrative/wave sourcing changed. MacroNarrativeLog's
+    senior_analyst rows stopped being written this session (narrative_text had
+    been permanently empty since the Senior Analyst LLM step was removed;
+    tactical_text duplicated what CampaignLog already has). elliott_wave_specialist
+    rows stopped 2026-08-17 (writer archived) -- the "wave" field had been
+    silently serving month-stale data as if current. Andy's call: archive this
+    concept, rebuild it properly in Kabroda AI Brain (needs continuous live
+    watching, not a once-a-day hardcoded write). tactical_text now reads from
+    CampaignLog directly (the real, canonical source); wave is always null so
+    the front-end's existing `if (!data.wave)` fallback hides the section
+    cleanly instead of showing stale content forever.
     """
     db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
 
     db = SessionLocal()
     try:
         analyst_row = (
-            db.query(MacroNarrativeLog)
+            db.query(CampaignLog)
             .filter(
-                MacroNarrativeLog.symbol == db_sym,
-                MacroNarrativeLog.authored_by == "senior_analyst",
+                CampaignLog.symbol == db_sym,
+                CampaignLog.is_canonical == True,
             )
-            .order_by(MacroNarrativeLog.id.desc())
-            .first()
-        )
-
-        wave_row = (
-            db.query(MacroNarrativeLog)
-            .filter(
-                MacroNarrativeLog.symbol == db_sym,
-                MacroNarrativeLog.authored_by == "elliott_wave_specialist",
-            )
-            .order_by(MacroNarrativeLog.id.desc())
+            .order_by(CampaignLog.id.desc())
             .first()
         )
 
@@ -915,22 +919,12 @@ async def api_narrative_latest(symbol: str = "BTC/USDT"):
             "symbol": db_sym,
             "date_key": analyst_row.date_key if analyst_row else None,
             "narrative": {
-                "narrative_text":   analyst_row.narrative_text   if analyst_row else None,
-                "tactical_text":    analyst_row.tactical_text    if analyst_row else None,
-                "performance_note": analyst_row.performance_note if analyst_row else None,
-                "date_key":         analyst_row.date_key         if analyst_row else None,
+                "narrative_text":   None,  # no longer generated -- see docstring
+                "tactical_text":    analyst_row.mas_executive_brief if analyst_row else None,
+                "performance_note": None,
+                "date_key":         analyst_row.date_key if analyst_row else None,
             },
-            "wave": {
-                "wave_label":            wave_row.wave_label            if wave_row else None,
-                "wave_status":           wave_row.wave_status           if wave_row else None,
-                "completion_pct":        wave_row.completion_pct        if wave_row else None,
-                "wave_origin_price":     wave_row.wave_origin_price     if wave_row else None,
-                "wave_target_price":     wave_row.wave_target_price     if wave_row else None,
-                "invalidation_price":    wave_row.invalidation_price    if wave_row else None,
-                "confirmation_condition":wave_row.confirmation_condition if wave_row else None,
-                "wave_reasoning":        wave_row.wave_reasoning        if wave_row else None,
-                "date_key":              wave_row.date_key              if wave_row else None,
-            } if wave_row else None,
+            "wave": None,  # elliott_wave_specialist writer archived 2026-08-17 -- see docstring
             "jewel": {
                 "jewel_gate_open":         jewel_row.jewel_gate_open         if jewel_row else None,
                 "jewel_conviction":        jewel_row.jewel_conviction        if jewel_row else None,

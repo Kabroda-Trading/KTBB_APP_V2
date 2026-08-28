@@ -1266,12 +1266,17 @@ def run_mas_analysis(
         stoch_cross_15m=context.get("stoch_cross_15m"),
     )
     brief = ExecutiveBrief(**decision_dict)
-    narrative_text_for_log: Optional[str] = None
 
-    # 6. Write to all three database locations
+    # 6. Write to database. _write_narrative_log() call removed 2026-08-28 --
+    # its narrative_text has been permanently empty since the Senior Analyst
+    # LLM step it depended on was removed in this session's Phase 4 rewrite,
+    # and its wave-narrative counterpart (elliott_wave_specialist.py) was
+    # already archived 2026-08-17. That narrative concept is being rebuilt
+    # into Kabroda AI Brain instead (Andy's call, 2026-08-28) -- a hardcoded
+    # once-a-day write can't do what continuous live watching can. The
+    # function itself is left defined below, unused, for reference.
     _inject_brief_to_database(symbol, session_id, date_key, brief, structure_reasoning)
     _inject_decision_journal(symbol, session_id, date_key, brief, battlebox_payload)
-    _write_narrative_log(symbol, date_key, brief, narrative_text_for_log)
 
     # 7. Forward-audit record — frozen at decision time (Adj. 3: non-blocking).
     # cro_memory is the REUSED reference from step 2 — not a re-fetch (Adj. 1).
