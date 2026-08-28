@@ -39,7 +39,7 @@ import lti_interpreter
 from datetime import datetime, timezone, timedelta
 from jewel_specialist import run_jewel_snapshot
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalAccuracyLog, SystemAlertLog, SignalHealthLog, SignalWeight, AccuracyReport, SignalPerformanceLog
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalPerformanceLog
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
