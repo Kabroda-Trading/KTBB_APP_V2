@@ -482,10 +482,10 @@ async def scan_sector():
 
         # --- DECISION JOURNAL (Performance Auditor foundation — data collection only) ---
         try:
-            # dossier["grade"] is now the real conviction tier from
-            # decision_engine.py (STRONG_LONG/LEAN_LONG/NEUTRAL/LEAN_SHORT/
-            # STRONG_SHORT) -- written as-is, no remapping needed.
-            decision_type = dossier.get("grade", "NEUTRAL")
+            # dossier["grade"] is the real calibrated-gate state from
+            # decision_engine.py (TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS,
+            # 2026-08-30 rebuild) -- written as-is, no remapping needed.
+            decision_type = dossier.get("grade", "PASS")
 
             with SessionLocal() as db:
                 journal = DecisionJournal(

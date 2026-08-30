@@ -946,15 +946,14 @@
 
             document.getElementById('rawKey').value = d.key;
 
-            // Phase 4 (2026-08-27): rename radar grade labels in the display string
-            // only — rawKey stays unchanged so the TradingView "COPY TO HUD" payload
-            // keeps its 9-field format (bias|status|entry|stop|tp1|tp2|tp3|macro|micro).
+            // 2026-08-30 rebuild: rename radar state labels in the display
+            // string only — rawKey stays unchanged so the TradingView
+            // "COPY TO HUD" payload keeps its 9-field format
+            // (bias|status|entry|stop|tp1|tp2|tp3|macro|micro).
             let visualKey = d.key
                 ? d.key.replace(/\|/g, " | ")
-                        .replace(/STRONG_LONG/g, 'STRONG: LONG')
-                        .replace(/STRONG_SHORT/g, 'STRONG: SHORT')
-                        .replace(/LEAN_LONG/g, 'LEAN: LONG')
-                        .replace(/LEAN_SHORT/g, 'LEAN: SHORT')
+                        .replace(/TAKE_PREMIUM/g, 'TAKE: PREMIUM')
+                        .replace(/TAKE_STANDARD/g, 'TAKE: STANDARD')
                 : "-- DATA MISSING --";
             document.getElementById('hudPayload').innerHTML = visualKey;
 
@@ -1025,16 +1024,15 @@
                 jewelDot = `<div class="rrc-energy" style="background:${dotColor}18; border-color:${dotColor}; color:${dotColor}; font-size:10px;" title="${dotTitle}">${dotLabel}</div>`;
             }
 
-            // Phase 4 (2026-08-27): masStatus is either the official
-            // CampaignLog verdict (APPROVED/STAND_DOWN) or, in the full-grid
-            // path where no CampaignLog row exists yet, the live conviction
-            // tier straight from decision_engine.py (STRONG_LONG/LEAN_LONG/
-            // NEUTRAL/LEAN_SHORT/STRONG_SHORT) -- same source of truth,
-            // shown as text either way, not just a border color.
-            const masColor  = masStatus === 'APPROVED' || masStatus === 'STRONG_LONG' || masStatus === 'STRONG_SHORT' ? '#22c55e'
-                            : masStatus === 'LEAN_LONG' || masStatus === 'LEAN_SHORT'  ? '#eab308'
-                            : masStatus === 'STAND_DOWN' || masStatus === 'NEUTRAL'    ? '#94a3b8'
-                            : masStatus === 'REJECTED'     ? '#ef4444'
+            // 2026-08-30 rebuild: masStatus is either the official CampaignLog
+            // verdict (APPROVED/STAND_DOWN) or, in the full-grid path where no
+            // CampaignLog row exists yet, the live calibrated-gate state
+            // straight from decision_engine.py (TAKE_PREMIUM/TAKE_STANDARD/
+            // ALMOST/PASS) -- same source of truth, shown as text either way,
+            // not just a border color.
+            const masColor  = masStatus === 'APPROVED' || masStatus === 'TAKE_PREMIUM' || masStatus === 'TAKE_STANDARD' ? '#22c55e'
+                            : masStatus === 'ALMOST' ? '#eab308'
+                            : masStatus === 'STAND_DOWN' || masStatus === 'PASS' ? '#94a3b8'
                             : '#64748b';
             const masBadge  = masStatus
                 ? `<div class="rrc-badge" style="border-color:${masColor}; color:${masColor}; font-size:10px;">${masStatus}</div>`
@@ -1324,17 +1322,17 @@
                     cockpitBtn.className = 'rrc-cockpit rrc-cockpit-active';
                 }
 
-                // Phase 4 (2026-08-27): row border driven by SA verdict (mas_status)
-                // when available; falls back to the live radar grade (the same
-                // decision_engine.py conviction tier, called fresh on every scan --
-                // not a second, disconnected scorer anymore) when no SA verdict
-                // exists yet (pre-session). Both paths now read the same real
-                // decision, so this fallback isn't "different logic," just an
-                // earlier or later read of the identical source of truth.
+                // 2026-08-30 rebuild: row border driven by the SA verdict
+                // (mas_status) when available; falls back to the live radar
+                // state (the same calibrated-gate call, called fresh on every
+                // scan) when no SA verdict exists yet (pre-session). Both
+                // paths read the same real decision, so this fallback isn't
+                // "different logic," just an earlier or later read of the
+                // identical source of truth.
                 const _masStatus = window.radarMemory[t.symbol].mas_status;
                 const actionable = _masStatus
                     ? (_masStatus === 'APPROVED')
-                    : (t.grade === 'STRONG_LONG' || t.grade === 'STRONG_SHORT' || t.grade === 'LEAN_LONG' || t.grade === 'LEAN_SHORT');
+                    : (t.grade === 'TAKE_PREMIUM' || t.grade === 'TAKE_STANDARD');
                 row.className = `radar-row-c ${actionable ? 'rrc-active' : 'rrc-down'}`;
                 row.setAttribute('data-symbol', t.symbol);
 
@@ -1402,10 +1400,10 @@
                 const lvl    = t.levels || {};
                 const bo     = lvl.breakout_trigger  || 0;
                 const bd     = lvl.breakdown_trigger || 0;
-                // Phase 4 (2026-08-27): full-grid path has no cached mas_status,
-                // reads the live decision_engine.py conviction tier directly --
-                // same source of truth as the snapshot path, just always live here.
-                const actionable = (t.grade === 'STRONG_LONG' || t.grade === 'STRONG_SHORT' || t.grade === 'LEAN_LONG' || t.grade === 'LEAN_SHORT');
+                // 2026-08-30 rebuild: full-grid path has no cached mas_status,
+                // reads the live calibrated-gate state directly -- same
+                // source of truth as the snapshot path, just always live here.
+                const actionable = (t.grade === 'TAKE_PREMIUM' || t.grade === 'TAKE_STANDARD');
 
                 const rowHtml = _buildRow(
                     t.symbol, t.price, dir, score, energy, bo, bd,
