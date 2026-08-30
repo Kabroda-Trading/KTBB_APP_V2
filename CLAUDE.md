@@ -4,6 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## Reading DeepSeek/Antigravity's Conversation History
+
+The user also works on this project through Antigravity (running DeepSeek), a separate agent from Claude Code. That agent's conversations persist permanently to disk as JSONL transcripts, and Claude Code can read them directly to get up to speed on work that happened outside this session — no need to ask the user to re-explain what DeepSeek already did.
+
+**Where:** `C:\Users\Shadow\.gemini\antigravity\brain\<conversationId>\.system_generated\logs\transcript_full.jsonl` — one JSON object per line, fields include `step_index`, `source` (`USER_EXPLICIT`/`SYSTEM`/`MODEL`), `type` (`USER_INPUT`/`CONVERSATION_HISTORY`/`PLANNER_RESPONSE`), `created_at`, and `content`. User text is wrapped in `<USER_REQUEST>...</USER_REQUEST>` tags. DeepSeek's real prose responses have `source: "MODEL"` with non-empty `content`; most other MODEL entries are tool-call output only (often large — file dumps, bash output) and are low signal for understanding intent.
+
+**Finding the right conversation:** `C:\Users\Shadow\Workspace\claude-antigravity-bridge\state\registry.json` maps `conversationId` → `{transcriptPath, workspacePaths, modelName, lastSeenAt}`. Match on `workspacePaths` containing this project's path to find the relevant conversation(s).
+
+**How to actually do this well:** these transcripts get large (multi-MB, thousands of entries) and are dominated by tool-call noise. Don't try to read one raw start-to-finish. Dispatch a subagent (Explore or general-purpose) with a narrow brief: read the transcript alongside this project's own docs (`WORK_LOG.md`, `SYSTEM_FLOW.md`, `CC_HANDOFF.md`), and produce a structured report — what was built, why, what's still open, what looks off. This worked well in practice (2026-08-06): a subagent read `WORK_LOG.md` and `SYSTEM_FLOW.md` in full plus a sampled pass over the transcript, and surfaced a real, load-bearing finding neither doc stated explicitly: both governing docs had stopped being updated on 2026-07-16, right as a second track of undocumented work (`bold-hubble/kqal`) went live in production.
+
+**A known failure mode to watch for:** DeepSeek has, at least once, invoked a headless Claude Code session mid-conversation and then written the resulting content into an Antigravity-internal artifact copy (`C:\Users\Shadow\.gemini\antigravity\brain\<conversationId>\.system_generated\...`) instead of the real project file. If a user references a finding or handoff doc that doesn't match what's actually in the repo, check whether it landed in the right place before assuming the work wasn't done — search the brain folder, not just this project directory.
+
+---
+
 ## Running the App
 
 ```bash
@@ -42,31 +56,43 @@ After 30 minutes, `sse_engine.py` computes two permanent levels for the session:
 
 These two triggers are the **Single Source of Truth (SSOT)** for the entire session. They are frozen into a `SessionLock` database record and never recomputed. Every downstream calculation — targets, stops, MAS analysis, structure state — derives from them.
 
-### The Measured Move Rule (Inviolable)
+### The Calibrated Gate (rebuilt 2026-08-30 — supersedes the old Measured Move Rule)
 
-All price targets are computed from the **distance between the two triggers**, not from arbitrary RR ratios:
+The site's original target formula (1×/1.618×/2.618× of the bo–bd distance, "Measured Move") was never backtested against real outcomes at scale, and when it finally was — a 1,913-trigger-break backtest, 2021–2026, `Kabroda AI Brain` repo — it lost money on kabroda.com's own real filled trades (71 trades, 29.8% win, −0.30R avg, −21.4R total). Andy authorized a full replacement, not a patch. Source of truth: `KABRODA_REBUILD_SPEC.md` + `CALIBRATION.md` in the `Kabroda AI Brain` repo. Live implementation: `decision_engine.py`, `reachability.py`, `htf_fuel.py`, `fuel_gate.py`, `market_regime.py`, `micro_regime.py`.
+
+**The gate.** Evaluated once, on the first 5m close beyond BO or BD — not the old 2-consecutive-close acceptance count (that's what the backtest actually measured; the gate below, which includes real volume confirmation, is the false-breakout filter now). All four required for a TAKE:
+
+1. **Reachability** — `box / dailyATR14 ≤ 0.55` (`box = bo − bd`). A wide box puts T1 out of reach; this is the single strongest signal in the backtest.
+2. **5M fuel** — real push volume at the trigger cross, median push ≥ 0.8× the prior-24h baseline (`fuel_gate.py`).
+3. **HTF carry** — ≥1 of {1H, 4H} trend (fresh 9/21 EMA read, `htf_fuel.py`) backs the side. This doesn't change whether T1 gets hit — it changes how far the winner runs (the runner's fuel).
+4. **Live hour** — trigger hour not in the dead-tape set (`<12 UTC` or `18–21 UTC`).
+
+**Tier.** `PREMIUM` when both HTF timeframes align AND box/ATR ≤ 0.40 (tighter, both timeframes carrying — size up, hold the runner to T3). `STANDARD` otherwise. Both are real TAKE signals; the difference is size, not management.
+
+**Hard vetoes** (cap the result below TAKE even if the gate passes): ghost push (no real volume — ≥`NO_FUEL`), DEAD 15m regime (no participation), counter-trend on a GOOD daily table (don't fight a strong trend), 15M divergence against the side (spec's own caveat: weak evidence at 15M, kept as specified pending a 4H/daily upgrade).
+
+**Targets and stop** — box multiples, no gravity dependency (gravity is a separate reference page now, not a decision input):
 
 ```
-Distance = breakout_trigger - breakdown_trigger
+box = breakout_trigger − breakdown_trigger
 
-T1 = Entry ± Distance          (1:1 measured move)
-T2 = Entry ± (Distance × 1.618)  (Fibonacci extension)
-T3 = Entry ± (Distance × 2.618)  (Fibonacci extension)
+Entry = the trigger itself (bo for long, bd for short)
+Stop  = r30_low − 0.12×box (long)  /  r30_high + 0.12×box (short)
+T1 = trigger ± 0.618×box
+T2 = trigger ± 1.0×box   (the measured move)
+T3 = trigger ± 1.618×box
+Runner stop (after T1) = trigger ∓ 0.15×box
 ```
 
-**Nothing overrides this math.** The CRO agent is specifically instructed to reject any trade plan that uses a different target calculation. If a target is set manually or arrived at by a different method, it is wrong.
+**Management, identical for both tiers**: 30% off at T1, stop moves to the runner-stop level, 70% rides to T3. Tested against alternatives (50/50 at T1/T2, 100%-at-T1) — this beat both.
 
-### Permission Logic: Acceptance Before Execution
+**Four outcomes only, no grades, no score**: `TAKE_PREMIUM` / `TAKE_STANDARD` / `ALMOST` (one gate condition still missing) / `PASS` (always with a specific, stated reason). This is what `decision_engine.evaluate_15m_decision()` returns, and it's the same function `run_mas_analysis()` and the live radar (`market_radar.py`'s `_build_dossier()`) both call — they can never silently disagree.
 
-Price crossing a trigger is not enough to trade. The **Structure State Engine** (`structure_state_engine.py`) counts how many consecutive 5m closes have occurred beyond the trigger. The default requirement is **2 consecutive closes** beyond the trigger line.
-
-- 0 closes beyond → `action: HOLD FIRE`
-- 1 close beyond → `action: WAIT` (acceptance in progress)
-- 2+ consecutive closes beyond → `action: GO` (permission earned)
-
-This is the "acceptance" protocol. It filters false breakouts. The 5m candles evaluated are always **post-lock only** — candles from during the 30m calibration window are never used for permission evaluation.
+Every gate evaluation, TAKE or PASS alike, is logged to the `gate_log` table (`database.py`) — this is the forward-incubation record the Kabroda AI Brain reads to confirm live results track the backtest.
 
 ### The Gravity Map
+
+**As of 2026-08-30, this is a standalone reference page, not a decision input.** Andy's explicit call: gravity has real merit as a tool to look at, but it doesn't belong influencing the trade call. The calibrated gate's stop/target formula doesn't reference it at all. Kept exactly as described below — the computation is unchanged — just no longer wired into `decision_engine.py`.
 
 The gravity system is a two-layer price memory model:
 
@@ -94,43 +120,15 @@ These are the levels that create the heavy gravity walls the Liquidity Scavenger
 
 ---
 
-## The Six MAS Agents — What Each One Actually Does
+## The Decision Layer — What's Actually Live (no LLM agents anymore)
 
-All agents use `claude-sonnet-4-6`. They run sequentially. Each agent only has access to the data explicitly passed in its task description — they have no tools and no internet access.
+This section used to describe a 6-agent CrewAI/LLM crew (Macro Structural Architect, Micro Liquidity Scavenger, Kinematic Momentum Quant, Chief Risk Officer, Chief Content Officer, Intel Auditor). That crew was disabled 2026-08-17 (it was an LLM reading free text with no enforced precedence) and its replacement — a hand-coded graded-conviction model — was itself fully replaced 2026-08-30 by the calibrated gate described above. Both are gone from the decision path, not just superseded in spirit; the `crewai`/`langchain-anthropic` packages were removed from `requirements.txt` since nothing imports them anymore.
 
-### 1. Macro Structural Architect
-**Input**: Daily S/R levels, macro bias (21-day weekly force), macro structure array (Elliott Wave labels from gravity_memory), macro_environment dict (SPX/DXY/VIX from Yahoo Finance).
-**Job**: Determine whether the daily structure supports the session's directional bias. Identify if the market is in an impulsive trend or corrective chop based on wave labels. Assess whether traditional finance (risk-on/risk-off) is favorable.
-**Good output**: "Daily structure is in BULL_WAVE_4 corrective territory with BEAR DXY and VIX below 20. Risk posture is RISK-ON. Bias: LONG."
-**Fluff**: Any generic market commentary not tied to the specific wave labels or macro metrics provided.
+**What actually runs now, per 15M decision:**
+- `decision_engine.evaluate_15m_decision()` — the calibrated gate. Deterministic, zero LLM calls, zero cost. See "The Calibrated Gate" above for the full logic.
+- Called from two places that must never disagree: `kabroda_mas_flow.run_mas_analysis()` (fires at session lock, writes the official `CampaignLog`/`GateLog` record) and `market_radar._build_dossier()` (the live public radar/API, recomputes fresh on every call).
 
-### 2. Micro Liquidity Scavenger
-**Input**: Breakout trigger, breakdown trigger, KDE peaks list (price + heat_score + intensity).
-**Job**: Determine whether the airspace above the breakout trigger (for longs) or below the breakdown trigger (for shorts) is clear or blocked by a heavy KDE peak. A MAXIMUM intensity peak sitting 0.3% above the breakout trigger is a serious problem. A clear air zone means the measured move target is structurally viable.
-**Good output**: "Breakout trigger at $97,450. Nearest KDE peak above is HEAVY intensity at $98,200 — 0.77% clearance. T1 at $98,900 is in clear airspace. LONG setup has viable runway."
-**Fluff**: Describing what KDE means, generic liquidity commentary, vague statements about "strong levels nearby."
-
-### 3. Kinematic Momentum Quant
-**Input**: Fuel gauge (1H and 4H EMA trend + MACD momentum), 15M JEWEL (RSI, kinematic_grade, ribbon spread, EMA9/21/35/55, SMA200), micro_state (SWEET_ZONE / PULLBACK / HOSTILE_CEILING / EXHAUSTION / CHOP).
-**Job**: Confirm whether there is sufficient kinetic energy for a breakout. The 15M JEWEL's `kinematic_grade` is the primary signal: PRIMED = fuel exists, OVEREXTENDED = exhaustion risk, TANGLED = no clear momentum. Cross-check with 1H/4H trend alignment.
-**Good output**: "15M JEWEL: PRIMED. RSI 61. Ribbon spread 0.42% — not overextended. 1H: BULLISH trend, POSITIVE momentum. 4H: BULLISH tide. Harmonic state: SWEET_ZONE. System has velocity for a breakout."
-**Fluff**: Describing what RSI means, generic momentum commentary, repeating input values without synthesis.
-
-### 4. Chief Risk Officer (Ghost Lead)
-**Input**: Reports from the three upstream agents + breakout/breakdown triggers + RAG memory (last 5 closed trades: win/loss count, net PnL, performance warning if losses > wins).
-**Job**: The final gatekeeper. Synthesizes the three agent reports. If any two reports conflict, or if the macro posture is RISK-OFF/HIGH VOLATILITY, reject the setup. Apply Measured Move math to calculate exact entry, stop, and T1/T2/T3. The stop loss is always the opposing trigger (if entering long at breakout, stop = breakdown trigger). Consult the memory bank — if recent performance is poor, reject marginal setups. Output a plain-English execution plan with exact prices. **Do NOT output JSON.**
-**Good output**: "APPROVED. LONG entry at $97,450 on breakout acceptance. Stop: $96,100 (breakdown trigger, 1.38% risk). T1: $98,800 (+$1,350), T2: $99,634 (+1.618R), T3: $100,947 (+2.618R). Macro aligned, airspace clear, fuel primed. Memory bank: 3W/1L, system performing. Execute."
-**Fluff**: Hedged language, "consider the possibility that," restating what the upstream agents said without a verdict.
-
-### 5. Chief Content Officer
-**Input**: The CRO's plain-English execution plan (from task context chain).
-**Job**: Format the CRO's output into a Markdown newsletter article using Kabroda terminology. Then emit the complete `ExecutiveBrief` Pydantic JSON with the formatted Markdown placed into `formatted_newsletter_md`. This task carries `output_pydantic=ExecutiveBrief` — CrewAI will attempt to parse the output as that schema. If parsing fails, `task_cco.output.pydantic` is `None` and the system logs `MAS_ERROR`.
-**Required Pydantic fields**: `approval_status` (APPROVED/REJECTED/WAITING_FOR_15M), `tactical_brief`, `bias` (LONG/SHORT/NEUTRAL), `entry_price`, `stop_loss`, `t1`, `t2`, `t3`, `formatted_newsletter_md`.
-**Kabroda terminology to use**: "Kinetic Friction," "Ghost Lead Verdict," "Tactical Perimeter," "Measured Move," "Permission Earned."
-**Good output**: A Markdown article with a clear header, the verdict, exact numbers, and the rationale. No generic financial disclaimers.
-
-### 6. Intel Auditor (Standalone — Not in Main MAS Crew)
-Only used by `POST /api/research/audit-intel`. Takes a foreign signal (MetaSignals format), compares it against the current session's Kabroda SSOT, and outputs `IntelAuditReport` (verdict: CONFIRMED/REJECTED/HIGH_RISK, kabroda_variance, recalculated_target_1). Not part of the main 5-agent sequential crew.
+**Intel Auditor** (`IntelAuditReport`, `POST /api/research/audit-intel`) is a separate, still-standing standalone tool — takes a foreign signal (MetaSignals format), compares it against the current session's Kabroda SSOT. Not touched by the 2026-08-30 rebuild; worth a look at whether its own logic still makes sense given the gate replaced what it was comparing against, but that's open, not yet decided.
 
 ---
 
@@ -152,19 +150,21 @@ The `ledger_closing_engine.py` monitors all records where `mas_approval_status =
 
 ## What Must Never Be Changed
 
-1. **The Measured Move formula.** `T1 = Entry ± (bo - bd)`. T2 and T3 use 1.618× and 2.618× that distance. No exceptions. Do not introduce fixed RR ratios (1:2, 1:3) anywhere.
+1. **The calibrated gate's formulas.** `T1/T2/T3 = trigger ± 0.618×/1.0×/1.618×box`; `stop = r30 ∓ 0.12×box`; `MAX_BOX_ATR = 0.55`; `VOL_FUELED = 0.8`. These trace to a real, measured backtest (`KABRODA_REBUILD_SPEC.md`/`CALIBRATION.md`, `Kabroda AI Brain` repo) — do not retune them here without evidence from that repo's calibration process. This rule itself is not permanent in the sense the old Measured Move Rule claimed to be — the whole point of the `gate_log` table (§ below) is that these numbers get revisited as forward data comes in — but they are not a local guess to tweak casually either.
 
-2. **The 30-minute session lock.** The calibration window is exactly 1800 seconds from `anchor_time`. Levels computed during this window are the SSOT. They are never recomputed mid-session once locked, regardless of how much price moves.
+2. **The 30-minute session lock.** The calibration window is exactly 1800 seconds from `anchor_time`. Levels computed during this window are the SSOT. They are never recomputed mid-session once locked, regardless of how much price moves. Unchanged by the 2026-08-30 rebuild — this is the "core pieces stay" part.
 
-3. **The acceptance gate.** Price crossing a trigger does NOT grant permission. Two consecutive 5m closes beyond the trigger are required. Do not reduce this to 1 or remove the check — it is the primary false-breakout filter.
+3. **The gate evaluates on the first 5m close beyond BO/BD**, not a close count. This replaced the old 2-consecutive-close acceptance requirement (2026-08-30, Andy's explicit call) — the 4-condition gate itself, which includes real volume confirmation, is the false-breakout filter now. Do not reintroduce a close-count requirement in front of the gate; that would mean running behavior that was never actually backtested.
 
-4. **Class 0 KDE weighting.** `permanence_class=0` levels receive `+15.0` kinetic friction in the KDE calculation. This ensures Elliott Wave macro beams dominate the density curve and are visible as true walls. Do not reduce this multiplier.
+4. **Class 0 KDE weighting.** `permanence_class=0` levels receive `+15.0` kinetic friction in the KDE calculation. Gravity is decoupled from the trade decision (2026-08-30) but this weighting still governs the gravity map itself, which stays as its own reference page. Do not reduce this multiplier.
 
-5. **The stop loss assignment (15M).** Stop loss is *not* the raw opposing trigger. `trade_structure_analyst.py`'s `_structural_stop_long()`/`_structural_stop_short()` compute the actual stop as `r30_low − ATR×0.5` (long) / `r30_high + ATR×0.5` (short), snapped a further `ATR×0.25` beyond any intercepting HEAVY/MAXIMUM gravity wall. The raw opposing trigger (`bd`/`bo`) is retained only as an audit field (`original_stop` in `structure_reasoning`) — it is never the executable stop. T1/T2/T3 remain pinned to the raw trigger distance (rule #1 above) regardless of this stop adjustment — entry-to-stop and entry-to-target distances are not guaranteed equal, so realized R is computed at close time from the actual stored entry/stop/target values (`ledger_closing_engine.py`'s `_frac_r()`), never assumed to be a clean ±1R. Do not widen or tighten the ATR/wall-adjustment coefficients without evidence — this is the proven, live rule, not a placeholder.
+5. **The stop loss has no gravity dependency anymore.** As of 2026-08-30, stop = `r30 ∓ 0.12×box` (see rule 1) — no ATR, no gravity-wall snapping. `trade_structure_analyst.py` (the old ATR+gravity-wall stop) is archived, not a reference implementation to fall back to.
 
-6. **`_inject_brief_to_database` as an upsert.** It must create a new `CampaignLog` if one doesn't exist. If you change it back to update-only, MAS output is silently discarded.
+6. **`_inject_brief_to_database` as an upsert.** It must create a new `CampaignLog` if one doesn't exist. If you change it back to update-only, decision output is silently discarded.
 
 7. **Symbol normalization before DB writes.** Always call `_normalize_symbol()` or equivalent before writing to `session_locks` or `campaign_logs`. The `gravity_memory` table uses the no-slash format — do not change that either.
+
+8. **Log every gate evaluation.** `_inject_gate_log()` writes to `GateLog` on every call to `run_mas_analysis()` — TAKE or PASS alike, not just approved trades. This is the forward-incubation record (`KABRODA_REBUILD_SPEC.md` §9); do not make this conditional on the outcome.
 
 ---
 
@@ -184,3 +184,11 @@ The macro engine (`kabroda_macro_engine.py`) runs as a **subprocess**, not an as
 ## The Unauthenticated Endpoint
 
 `GET /api/gravity/scan` requires no login. The War Room JS polls it every 60 seconds to update the gravity map and KPI cards. Do not add sensitive position data or user-specific data to its response.
+
+---
+
+## Cross-Agent Handoff
+
+This project uses AGENT_LOG.md for asynchronous handoff notes between Claude
+Code and DeepSeek/Antigravity. Read it before starting work; append entries,
+never edit past ones. Full convention: ~/.claude/CLAUDE.md (global).
