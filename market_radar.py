@@ -89,19 +89,15 @@ def _which_tf_today(tf_verdicts: dict, current_price: float = 0.0) -> dict:
     return {"primary_tf": "NONE", "flag": "ALL_STAND_DOWN", "bias": None}
 
 
-def _compute_daily_regime(mtf_snap: dict) -> str:
-    """Derive plain-English daily regime label from MTF snapshot fields."""
-    direction = (mtf_snap.get("daily_21ema_direction") or "FLAT").upper()
-    pos200 = (mtf_snap.get("daily_200sma_position") or "").upper()
-    if direction == "SLOPING_UP" and pos200 in ("ABOVE", "AT", ""):
-        return "DAILY_BULL"
-    if direction == "SLOPING_UP" and pos200 == "BELOW":
-        return "DAILY_RECOVERY"
-    if direction == "SLOPING_DOWN" and pos200 == "BELOW":
-        return "DAILY_BEAR"
-    if direction == "SLOPING_DOWN" and pos200 in ("ABOVE", "AT"):
-        return "DAILY_DISTRIBUTION"
-    return "DAILY_NEUTRAL"
+# _compute_daily_regime() removed 2026-08-30 -- a separate, never-validated
+# heuristic (EMA-slope + 200SMA-position -> DAILY_BULL/BEAR/RECOVERY/
+# DISTRIBUTION), disconnected from and predating market_regime.py's real,
+# calibrated classification (Kaufman Efficiency Ratio + ADX + fakeout-rate +
+# vol-trend, backtested against 1,913 trades). Andy's call: kabroda.com
+# should show what was actually tested, not a guess sitting next to it.
+# The gate already computes the real regime (for its own counter-trend veto)
+# -- callers now read that instead (dossier["market_regime_table"] /
+# GateLog.daily_regime_table).
 
 async def _try_locked_shortcut(symbol: str):
     """
@@ -279,6 +275,13 @@ async def _build_dossier(symbol: str, price: float, levels: dict, context: dict)
         "briefing": _legacy_briefing(state, side, decision["tactical_brief"]),
         "checks": [], "diagnostic_ledger": {"reason": decision["tactical_brief"], "gate": decision.get("gate")},
         "plan": plan, "key": key,
+        # The real, validated regime read (market_regime.py/micro_regime.py,
+        # 2026-08-30) -- already computed by the gate itself for its
+        # counter-trend/dead-tape vetoes, surfaced here instead of a separate,
+        # never-validated heuristic (_compute_daily_regime(), removed).
+        "market_regime_table":   decision.get("market_regime_table"),
+        "market_regime_quality": decision.get("market_regime_quality"),
+        "micro_regime":          decision.get("micro_regime"),
     }
 
 
@@ -419,12 +422,19 @@ async def scan_sector():
 
         dossier = await _build_dossier(sym, price, levels, context)
 
-        # TF system verdicts (4H + 1H candidates) and daily regime
+        # TF system verdicts (15M only -- 1H/4H retired) and the real,
+        # validated regime read (from the dossier -- decision_engine.py
+        # already computed it live via market_regime.py/micro_regime.py;
+        # _compute_daily_regime()'s old, never-validated EMA/200SMA heuristic
+        # is removed, not just unused).
         sym_norm = sym.replace("USDT", "/USDT") if "/" not in sym else sym
         mtf_snap = context.get("mtf_structural_snapshot", {}) or {}
         tf_verdicts = _get_tf_system_verdicts(sym_norm)
         tf_today    = _which_tf_today(tf_verdicts, current_price=price)
-        daily_regime = _compute_daily_regime(mtf_snap)
+        daily_regime = dossier.get("market_regime_table")
+        # weekly_200sma_position is real, separate, live infrastructure
+        # (battlebox_pipeline._fetch_weekly_200sma()) -- unrelated to the old
+        # daily-regime heuristic just replaced, not touched here.
         weekly_pos = mtf_snap.get("weekly_200sma_position") or ""
 
         mtf_brief = mtf if isinstance(mtf, dict) and "error" not in mtf else {}
@@ -435,17 +445,10 @@ async def scan_sector():
             direction = mtf_brief.get("confluence_direction", "NEUTRAL")
             energy    = mtf_brief.get("energy_status", "BUILDING")
             mtf_brief["action_sentence"] = _build_action_sentence(direction, energy, bo_val, bd_val)
-            dist = abs(bo_val - bd_val)
-            if direction == "BULLISH" and bo_val > 0 and dist > 0:
-                mtf_brief["t1"] = round(bo_val + dist, 2)
-                mtf_brief["t2"] = round(bo_val + dist * 1.618, 2)
-                mtf_brief["t3"] = round(bo_val + dist * 2.618, 2)
-            elif direction == "BEARISH" and bd_val > 0 and dist > 0:
-                mtf_brief["t1"] = round(bd_val - dist, 2)
-                mtf_brief["t2"] = round(bd_val - dist * 1.618, 2)
-                mtf_brief["t3"] = round(bd_val - dist * 2.618, 2)
-            else:
-                mtf_brief["t1"] = mtf_brief["t2"] = mtf_brief["t3"] = 0.0
+            # mtf_brief.t1/t2/t3 (the old 1x/1.618x/2.618x Fibonacci calc)
+            # removed 2026-08-30 -- never read by the frontend (grepped),
+            # dead output computing wrong, pre-rebuild target math for no
+            # reason. The real targets are dossier["plan"]["targets"].
 
         radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,

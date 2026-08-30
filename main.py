@@ -1086,23 +1086,33 @@ async def api_radar_snapshot(db: Session = Depends(get_db)):
             "t3":          campaign.t3,
         }
 
-    # 5. TF system verdicts (4H + 1H + 15M) and which-TF-today decision
+    # 5. TF system verdicts (15M only -- 1H/4H retired) and which-TF-today decision
     tf_verdicts = market_radar._get_tf_system_verdicts(symbol_norm)
     tf_today    = market_radar._which_tf_today(tf_verdicts)
 
-    # 6. Daily regime + weekly 200 SMA position from most recent audit row
+    # 6. Daily regime (the real, validated read -- market_regime.py, from the
+    # most recent GateLog row) + weekly 200 SMA position (real, separate,
+    # live infrastructure -- battlebox_pipeline._fetch_weekly_200sma(), still
+    # read from the audit row). The old daily_regime heuristic
+    # (_compute_daily_regime(), EMA-slope + 200SMA-position guessing) is
+    # removed -- kabroda.com now shows what was actually calibrated and
+    # tested, not a separate, never-validated label (Andy's call, 2026-08-30).
     daily_regime = "—"
     weekly_200sma_position = "—"
-    from database import SessionAuditLog as _SAL
+    from database import SessionAuditLog as _SAL, GateLog as _GL
     audit_row = db.query(_SAL).filter(
         _SAL.symbol == symbol_norm,
     ).order_by(_SAL.id.desc()).first()
     if audit_row:
-        daily_regime = market_radar._compute_daily_regime({
-            "daily_21ema_direction": audit_row.daily_21ema_direction,
-            "daily_200sma_position": getattr(audit_row, "daily_200sma_position", None),
-        })
         weekly_200sma_position = getattr(audit_row, "weekly_200sma_position", None) or "—"
+    gate_row = db.query(_GL).filter(
+        _GL.symbol == symbol_norm,
+        _GL.daily_regime_table.isnot(None),
+    ).order_by(_GL.id.desc()).first()
+    if gate_row:
+        daily_regime = gate_row.daily_regime_table
+        if gate_row.daily_regime_quality:
+            daily_regime = f"{daily_regime} ({gate_row.daily_regime_quality})"
 
     return JSONResponse({
         "ok":                    True,

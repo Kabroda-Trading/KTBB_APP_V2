@@ -1003,6 +1003,7 @@
         // ================================================================
         function _buildTfStack(sym, tfVerdicts, tfToday, dailyRegime, weeklyPos) {
             const tv15m = (tfVerdicts && tfVerdicts['15M']) || {};
+            dailyRegime = dailyRegime || '—';  // guard .startsWith() below against null/undefined
 
             function mas15mRow(data) {
                 const state = data.state;  // TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS
@@ -1033,10 +1034,16 @@
                 return `<div class="tf-row">${badge}${bias}${plan}</div>${reason}`;
             }
 
-            const regimeColor = dailyRegime === 'DAILY_BULL'          ? '#22c55e'
-                              : dailyRegime === 'DAILY_RECOVERY'      ? '#4ade80'
-                              : dailyRegime === 'DAILY_DISTRIBUTION'  ? '#f97316'
-                              : dailyRegime === 'DAILY_BEAR'          ? '#ef4444'
+            // 2026-08-30: real, calibrated regime labels (market_regime.py --
+            // Kaufman Efficiency Ratio + ADX + fakeout-rate, backtested
+            // against 1,913 trades), not the old, never-validated DAILY_BULL/
+            // BEAR/RECOVERY/DISTRIBUTION guess.
+            const regimeColor = dailyRegime.startsWith('TRENDING_UP')      ? '#22c55e'
+                              : dailyRegime.startsWith('TRENDING_DOWN')    ? '#ef4444'
+                              : dailyRegime.startsWith('CHOP')             ? '#f97316'
+                              : dailyRegime.startsWith('DEAD')             ? '#ef4444'
+                              : dailyRegime.startsWith('VOLATILE_NO_TREND')? '#eab308'
+                              : dailyRegime.startsWith('MIXED')            ? '#94a3b8'
                               : '#475569';
             const regimePart = (dailyRegime && dailyRegime !== '—')
                 ? `Regime: <b style="color:${regimeColor};">${dailyRegime}</b>` : '';

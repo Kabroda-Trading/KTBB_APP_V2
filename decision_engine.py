@@ -161,6 +161,12 @@ def evaluate_15m_decision(
     price = float(levels.get("price") or 0)
     box = (bo - bd) if (bo and bd and bo > bd) else 0.0
 
+    # Set before the earliest possible _result() call (the no-signal-yet
+    # early return below) so the closure always has a value, even when the
+    # gate short-circuits before market_regime.py/micro_regime.py ever run.
+    daily: Optional[Dict[str, Any]] = None
+    micro: Optional[Dict[str, Any]] = None
+
     def _result(state: str, side: Optional[str], headline: str, gate: Optional[Dict[str, Any]],
                 plan: Optional[Dict[str, Any]], gauges: List[GaugeTuple]) -> Tuple[Dict[str, Any], List[GaugeTuple]]:
         is_take = state in ("TAKE_PREMIUM", "TAKE_STANDARD")
@@ -180,6 +186,13 @@ def evaluate_15m_decision(
             "formatted_newsletter_md": "",
             "gate": gate,
             "plan": plan,
+            # The REAL, validated regime classification (KABRODA_REBUILD_SPEC.md /
+            # CALIBRATION.md, Kabroda AI Brain repo) -- already computed for the
+            # counter-trend/dead-tape vetoes below, now actually surfaced for
+            # display instead of being silently discarded after the veto check.
+            "market_regime_table":   (daily or {}).get("table"),
+            "market_regime_quality": (daily or {}).get("quality"),
+            "micro_regime":          (micro or {}).get("regime"),
         }
         return d, gauges
 
