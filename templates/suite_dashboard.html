@@ -189,12 +189,10 @@
                 <div class="chart-title" style="margin-bottom:0;">Agent Cost Monitor <span class="admin-badge">Admin</span></div>
                 <div style="display:flex; gap:10px; align-items:center;">
                     <span id="budgetPctLabel" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#8a6f57;">Loading…</span>
-                    <button id="testBtn" onclick="runTestCall()"
-                            style="background:transparent; border:1px solid #4d3526; color:#c9a880; font-family:'JetBrains Mono',monospace;
-                                   font-size:10px; font-weight:700; padding:6px 14px; border-radius:4px; cursor:pointer; letter-spacing:1px;">
-                        RUN TEST CALL
-                    </button>
                 </div>
+                <!-- "RUN TEST CALL" button removed 2026-08-30 -- fired a real,
+                     paid LLM call for no operational reason. Andy's call: no
+                     LLM tied to Kabroda's cost path, period. -->
             </div>
 
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
@@ -233,7 +231,6 @@
                     </tbody>
                 </table>
             </div>
-            <div id="testResult" style="margin-top:12px; font-family:'JetBrains Mono',monospace; font-size:11px; white-space:pre-wrap;"></div>
         </div>
         {% endif %}
 
@@ -1032,32 +1029,8 @@
         }
     }
 
-    async function runTestCall() {
-        const btn = document.getElementById('testBtn');
-        const out = document.getElementById('testResult');
-        btn.disabled = true;
-        btn.textContent = 'FIRING…';
-        out.textContent = '';
-
-        try {
-            const res = await fetch('/api/agents/test-call', { method: 'POST' });
-            const data = await res.json();
-            if (data.ok) {
-                out.style.color = '#5e8c66';
-                out.textContent = '✓ RESPONSE: ' + data.agent_response + '\n\nLOGGED ROW:\n' + JSON.stringify(data.logged_row, null, 2);
-                await loadCostData();
-            } else {
-                out.style.color = '#8c4a3a';
-                out.textContent = '✗ ERROR: ' + data.error;
-            }
-        } catch (e) {
-            out.style.color = '#8c4a3a';
-            out.textContent = '✗ Connection failed: ' + e;
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'RUN TEST CALL';
-        }
-    }
+    // runTestCall() removed 2026-08-30 -- fired POST /api/agents/test-call,
+    // a real paid LLM call with no operational purpose. Route removed too.
 
     // ── AUDIT-AI & DATA EXPORT ──────────────────────────────
     async function loadAuditSuggestions() {

@@ -6,12 +6,17 @@
 #
 # PUBLIC API (signatures frozen — do not change):
 #   run_mas_analysis(symbol, session_id, date_key, battlebox_payload)
-#   interrogate_cro(symbol, user_message)
 #
-# audit_foreign_intel_pipeline() (the Intel Auditor) removed 2026-08-30 --
-# Andy's call: gone entirely. The last LLM-based tool in this file; its
-# gravity-as-decision-gate and third measured-move formula had both gone
-# stale under this session's calibrated-gate rebuild.
+# 2026-08-30: no LLM tied to Kabroda's cost path, period (Andy's call). Both
+# other public functions this file used to expose are gone, not stubbed:
+#   - audit_foreign_intel_pipeline() (the Intel Auditor) -- its gravity-as-
+#     decision-gate and third measured-move formula had gone stale under
+#     this session's calibrated-gate rebuild anyway.
+#   - interrogate_cro() (the Operator Commlink chat) -- already a stub since
+#     2026-08-17; interactive Q&A is Kabroda AI Brain's job now.
+# run_mas_analysis() itself has been LLM-free since the calibrated gate
+# replaced the old decision layer earlier this session -- it calls
+# decision_engine.py, deterministic, zero LLM, zero cost.
 # ==============================================================================
 
 import json
@@ -481,36 +486,9 @@ paragraph. This is used for cross-day memory.
 """
 
 
-COMMLINK_SYSTEM_PROMPT = """\
-You are the Kabroda Senior Analyst communicating directly with the Operator \
-in the Macro War Room via the Commlink.
-
-CRITICAL — SCOPE OF YOUR KNOWLEDGE: You operate from the lock-time Market \
-Brief only. You have NO live price feed, NO real-time indicator data, and NO \
-visibility into what price has done since the brief was generated. Do NOT \
-infer, estimate, or extrapolate live price from brief data.
-
-When the Operator asks a live trade-management question — where is price now, \
-should I hold or close, has T1 tagged, how is the runner — state this clearly: \
-"I do not have live price data. I can only speak to what the brief showed at \
-lock time. For current state, check the live monitor or your chart." \
-Do not give a confident directive on a question you cannot answer honestly.
-
-For questions the brief CAN answer — target levels, stop placement, the \
-structural reasoning behind the setup, momentum and conviction at lock time — \
-answer directly and concisely.
-
-You enforce the Single Source of Truth (SSOT). Rely ONLY on Kabroda Measured \
-Move math, Gravity physics, and the context provided. Do not invent external \
-data. Do not hedge on things within your scope. Every statement within your \
-scope is declarative.
-
-If the Operator asks for a price target or entry, confirm whether it aligns \
-with the pre-computed targets in your context. If it does not align, say so \
-directly and state the correct values.
-
-Keep responses under 200 words unless the Operator explicitly requests detail.
-"""
+# COMMLINK_SYSTEM_PROMPT removed 2026-08-30 -- prompt for the removed
+# interrogate_cro() Operator Commlink. See that function's old location for
+# the full reasoning.
 
 
 # INTEL_AUDITOR_SYSTEM_PROMPT removed 2026-08-30 -- system prompt for the
@@ -1406,78 +1384,14 @@ def run_mas_analysis(
     return {"status": "SUCCESS", "brief": brief.dict()}
 
 
-def interrogate_cro(symbol: str, user_message: str) -> str:
-    """
-    Operator Commlink — direct query to Senior Analyst.
-    Called by POST /api/research/chat-mas via asyncio.to_thread().
-    Returns a plain string response.
-
-    DISABLED 2026-08-17 (Andy's direct instruction, same pass as
-    run_mas_analysis() above -- the LLM agent chain and this chat feature
-    were both flagged together as ongoing cost with no replacement worth
-    keeping yet). Re-enable only alongside Phase 4's coded decision layer,
-    not on its own.
-    """
-    return (
-        "Operator Commlink is disabled (2026-08-17) — see Kabroda Audit "
-        "REBUILD_PLAN.md. Re-enabling pending the coded decision layer rebuild."
-    )
-
-    db = SessionLocal()
-    try:
-        # Latest execution context from CampaignLog
-        log = (
-            db.query(CampaignLog)
-            .filter(
-                CampaignLog.symbol == symbol,
-                CampaignLog.is_canonical == True,
-            )
-            .order_by(CampaignLog.id.desc())
-            .first()
-        )
-        execution_ctx = "No active campaign data. Analyzing raw market conditions."
-        if log:
-            execution_ctx = (
-                f"LATEST SESSION DATA:\n"
-                f"  Approval Status: {log.mas_approval_status}\n"
-                f"  Bias: {log.bias}\n"
-                f"  Entry: ${log.entry_price:,.2f}\n"
-                f"  Stop:  ${log.stop_loss:,.2f}\n"
-                f"  T1:    ${log.t1:,.2f}\n"
-                f"  Brief excerpt: {(log.mas_executive_brief or '')[:300]}"
-            )
-
-        # Latest narrative context from MacroNarrativeLog
-        narrative_ctx = _read_narrative_context(symbol)
-
-    except Exception as e:
-        execution_ctx = f"Database error: {e}"
-        narrative_ctx = "Narrative context unavailable."
-    finally:
-        db.close()
-
-    context_text = (
-        f"=== OPERATOR COMMLINK ===\n"
-        f"Symbol: {symbol}\n\n"
-        f"{execution_ctx}\n\n"
-        f"{narrative_ctx}\n\n"
-        f"=== OPERATOR QUESTION ===\n"
-        f"{user_message}"
-    )
-
-    try:
-        return agent_core._call_agent(
-            agent_name="senior_analyst_commlink",
-            system_prompt=COMMLINK_SYSTEM_PROMPT,
-            context_text=context_text,
-            triggered_by="operator_request",
-            max_tokens=512,
-        )
-    except RuntimeError as e:
-        return f"COMMLINK BLOCKED: {e}"
-    except Exception as e:
-        print(f"COMMLINK ERROR: {e}")
-        return f"COMMLINK FAILURE: {str(e)}"
+# interrogate_cro() (the Operator Commlink chat feature) removed 2026-08-30 --
+# Andy's call: no LLM tied to Kabroda's cost path, period. It had already
+# been a stub since 2026-08-17 (zero live cost), kept only pending "the coded
+# decision layer" -- that rebuild happened (the calibrated gate), but Andy's
+# direction was to retire this rather than re-enable it: interactive Q&A is
+# Kabroda AI Brain's job now, a dedicated tool, not a second, smaller one
+# living inside kabroda.com. POST /api/research/chat-mas (main.py) and the
+# chat box in templates/macro_war_room.html are both removed too.
 
 
 # audit_foreign_intel_pipeline() removed 2026-08-30 -- the Intel Auditor.

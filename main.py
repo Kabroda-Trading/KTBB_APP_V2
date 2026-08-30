@@ -32,7 +32,6 @@ import session_monitor
 import agent_core
 import session_manager
 import lti_engine
-import lti_interpreter
 
 from datetime import datetime, timezone, timedelta
 from jewel_specialist import run_jewel_snapshot
@@ -408,9 +407,13 @@ async def run_weekly_scheduler() -> None:
 async def run_monthly_lti_scheduler() -> None:
     """
     First of every calendar month, 00:00 UTC: run the KULTI monthly confluence
-    audit (lti_engine.run_lti_audit) + AI interpreter (lti_interpreter.run_
-    lti_interpretation), write one LtiCheckpoint row + one InterpreterLog row.
-    Advisory-only -- never auto-executes anything.
+    audit (lti_engine.run_lti_audit, deterministic, no LLM) and write one
+    LtiCheckpoint row. Advisory-only -- never auto-executes anything.
+
+    2026-08-30: the AI interpreter step (lti_interpreter.run_lti_interpretation)
+    is removed -- Andy's call, no LLM tied to Kabroda's cost path, and no
+    generated publication/brief of any kind. The deterministic audit itself
+    stays; it's real numeric data (BBWP/PMARP/RSI/etc.), not a written brief.
     """
     print("[SCHEDULER] Monthly LTI scheduler starting (KULTI confluence audit)...")
     while True:
@@ -444,7 +447,6 @@ async def run_monthly_lti_scheduler() -> None:
                 print(f"[SCHEDULER] Monthly LTI audit firing for {date_key} (1st of month, 00:00 UTC)...")
                 try:
                     audit = await asyncio.to_thread(lti_engine.run_lti_audit, symbol="BTC/USDT")
-                    interpretation = await asyncio.to_thread(lti_interpreter.run_lti_interpretation, audit)
 
                     _db2 = SessionLocal()
                     try:
@@ -461,14 +463,10 @@ async def run_monthly_lti_scheduler() -> None:
                             conviction_label=audit["conviction_label"], wave_label_snapshot=audit["wave_label_snapshot"],
                             gravity_cross_confirm=audit["gravity_cross_confirm"], nearest_macro_level=audit["nearest_macro_level"],
                         ))
-                        _db2.add(InterpreterLog(symbol=audit["symbol"], session_date=date_key, session_id="monthly_lti_audit",
-                            interpreter_name="lti_interpreter", output_text=interpretation,
-                            ran_successfully=interpretation is not None,
-                        ))
                         _db2.commit()
                     finally:
                         _db2.close()
-                    print(f"[SCHEDULER] Monthly LTI audit: conviction={audit['conviction_label']}, interpreter={'OK' if interpretation else 'FAILED'}")
+                    print(f"[SCHEDULER] Monthly LTI audit: conviction={audit['conviction_label']}")
                 except Exception as e:
                     print(f"[SCHEDULER] Monthly LTI audit failed: {e}")
 
@@ -1142,23 +1140,15 @@ async def api_live_price():
         return JSONResponse({"ok": False, "price": 0, "error": str(e)})
 
 
-class MASChatPayload(BaseModel):
-    symbol: str
-    message: str
-
-@app.post("/api/research/chat-mas")
-async def chat_with_mas(payload: MASChatPayload, request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"): 
-        return JSONResponse({"ok": False, "error": "Unauthorized"})
-    
-    db_sym = payload.symbol.replace("USDT", "/USDT") if "/" not in payload.symbol else payload.symbol
-    response_text = await asyncio.to_thread(kabroda_mas_flow.interrogate_cro, db_sym, payload.message)
-    
-    return JSONResponse({"ok": True, "reply": response_text})
+# /api/research/chat-mas + MASChatPayload removed 2026-08-30 -- Andy's call:
+# no LLM tied to Kabroda's cost path, period. interrogate_cro() was already
+# a stub (disabled 2026-08-17, zero live cost), so this was dead weight
+# giving the false impression a working chat feature sat behind it. That job
+# belongs to Kabroda AI Brain now, a dedicated conversational tool, not a
+# second, smaller version of it living inside kabroda.com.
 
 # /api/research/audit-intel (the Intel Auditor) removed 2026-08-30 -- Andy's
-# call: gone entirely. It was the last LLM-based tool left in the codebase
+# call: gone entirely, one of several LLM-based tools removed this session
 # (an agent_core._call_agent() call per use, real cost), and its methodology
 # had gone stale under this session's rebuild: it gated on gravity walls as
 # BLOCKED/HIGH_RISK/CLEAR (gravity is a decoupled reference page now, not a
@@ -1328,47 +1318,11 @@ async def api_agents_cost(request: Request, db: Session = Depends(get_db)):
     return JSONResponse(summary)
 
 
-@app.post("/api/agents/test-call")
-async def api_agents_test_call(request: Request, db: Session = Depends(get_db)):
-    """
-    Phase 1 success test. Fires one minimal _call_agent() invocation,
-    writes a row to agent_run_log, and returns the response + cost.
-    Admin only.
-    """
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
-
-    system_prompt = (
-        "You are a cost-tracking verification agent for the Kabroda trading "
-        "intelligence system. Your only function is to confirm that the Phase 1 "
-        "cost infrastructure is operational."
-    )
-    context_text = (
-        "Confirm system status. "
-        "Respond with exactly one line: PHASE_1_COST_INFRASTRUCTURE_ONLINE"
-    )
-
-    try:
-        result = await asyncio.to_thread(
-            agent_core._call_agent,
-            "infrastructure_test",
-            system_prompt,
-            context_text,
-            "admin_test",
-        )
-        summary = await asyncio.to_thread(agent_core.get_cost_summary)
-        last_call = summary.get("last_10_calls", [{}])[0]
-        return JSONResponse({
-            "ok": True,
-            "agent_response": result,
-            "logged_row": last_call,
-            "next_step": "Visit /api/agents/cost to see full summary.",
-        })
-    except RuntimeError as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=402)
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+# /api/agents/test-call removed 2026-08-30 -- fired a real, paid
+# agent_core._call_agent() invocation for no operational purpose (an old
+# "Phase 1 infrastructure test" button). Andy's call: no LLM tied to
+# Kabroda's cost path, period. /api/agents/cost (above) stays -- it only
+# reads existing cost-log rows, doesn't generate new spend.
 
 
 @app.get("/indicators")
@@ -2574,52 +2528,35 @@ async def post_system_analysis(request: Request, db: Session = Depends(get_db)):
             "recent_system_errors": errors_data
         }
         
-        context_text = json.dumps(context_data, indent=2)
-        
-        if os.environ.get("ANTHROPIC_API_KEY"):
-            response_text = await asyncio.to_thread(
-                agent_core._call_from_spec,
-                "system_analysis",
-                context_text,
-                "manual"
-            )
-            cleaned_response = response_text.strip()
-            if cleaned_response.startswith("```json"):
-                cleaned_response = cleaned_response[7:]
-            if cleaned_response.endswith("```"):
-                cleaned_response = cleaned_response[:-3]
-            cleaned_response = cleaned_response.strip()
-            
-            try:
-                parsed_json = json.loads(cleaned_response)
-            except Exception:
-                raise ValueError(f"Agent response was not valid JSON: {response_text}")
-        else:
-            # Fallback dynamic evaluation if Anthropic API key is missing (e.g., test environment)
-            verdict = "STABLE"
-            if len(errors_data) > 3:
-                verdict = "RISK_ALERT"
-            elif win_rate < 0.5 and len(recent_trades) > 0:
-                verdict = "OPTIMIZE"
-                
-            parsed_json = {
-                "summary": f"System status is {verdict.lower()} based on automated analysis of {len(recent_trades)} recent trades and {len(errors_data)} error events.",
-                "verdict": verdict,
-                "data_metrics": {
-                    "win_rate": win_rate,
-                    "total_trades": len(recent_trades),
-                    "error_count": len(errors_data)
-                },
-                "recommendations": [
-                    {
-                        "parameter": "daily_budget_limit_usd",
-                        "observation": f"Daily cap is set to {daily_cap}.",
-                        "suggestion": "Keep monitoring."
-                    }
-                ],
-                "confidence_score": 0.95
-            }
-            
+        # 2026-08-30: deterministic only, no LLM branch -- Andy's call, no AI
+        # tied to Kabroda's cost path, period. This was already the fallback
+        # used whenever ANTHROPIC_API_KEY was missing; promoted to the only
+        # path rather than removing the feature -- same real error-count/
+        # win-rate thresholds as before, just always used now.
+        verdict = "STABLE"
+        if len(errors_data) > 3:
+            verdict = "RISK_ALERT"
+        elif win_rate < 0.5 and len(recent_trades) > 0:
+            verdict = "OPTIMIZE"
+
+        parsed_json = {
+            "summary": f"System status is {verdict.lower()} based on automated analysis of {len(recent_trades)} recent trades and {len(errors_data)} error events.",
+            "verdict": verdict,
+            "data_metrics": {
+                "win_rate": win_rate,
+                "total_trades": len(recent_trades),
+                "error_count": len(errors_data)
+            },
+            "recommendations": [
+                {
+                    "parameter": "daily_budget_limit_usd",
+                    "observation": f"Daily cap is set to {daily_cap}.",
+                    "suggestion": "Keep monitoring."
+                }
+            ],
+            "confidence_score": 0.95
+        }
+
         # Ensure recommendations is present
         if "recommendations" not in parsed_json:
             parsed_json["recommendations"] = []

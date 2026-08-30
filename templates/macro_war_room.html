@@ -155,20 +155,10 @@
                 {% endif %}
             </div>
 
-            <div class="commlink-terminal">
-                <div class="cl-title">OPERATOR COMMLINK // DIRECT INTERROGATION</div>
-                
-                <div class="chat-window" id="chatWindow">
-                    <div class="chat-bubble chat-cro">
-                        <strong>GHOST LEAD [CRO]:</strong> Uplink secure. I have locked the SSOT variables for {{ request.query_params.symbol | default('BTC/USDT') }}. How can I assist with your execution logic?
-                    </div>
-                </div>
-
-                <div class="chat-input-container">
-                    <input type="text" id="chatInput" class="chat-input" placeholder="Query the Chief Risk Officer..." onkeypress="handleEnter(event)">
-                    <button class="chat-btn" onclick="sendMessage()" id="chatSendBtn">SEND</button>
-                </div>
-            </div>
+            <!-- Operator Commlink chat panel removed 2026-08-30 -- called the
+                 removed interrogate_cro()/POST /api/research/chat-mas. Andy's
+                 call: no LLM tied to Kabroda's cost path. Interactive Q&A is
+                 Kabroda AI Brain's job now. -->
         </div>
 
         <!-- "External Intel Injection" panel removed 2026-08-30 -- called the
@@ -237,67 +227,8 @@
             });
         }
 
-        // --- NEW: Chat Interface Logic ---
-        function handleEnter(e) {
-            if (e.key === 'Enter') sendMessage();
-        }
-
-        async function sendMessage() {
-            const inputEl = document.getElementById('chatInput');
-            const msg = inputEl.value.trim();
-            if (!msg) return;
-
-            const chatWindow = document.getElementById('chatWindow');
-            const sym = document.getElementById('symSelect').value;
-            const btn = document.getElementById('chatSendBtn');
-
-            const userBubble = document.createElement('div');
-            userBubble.className = 'chat-bubble chat-user';
-            userBubble.innerText = msg;
-            chatWindow.appendChild(userBubble);
-            
-            inputEl.value = '';
-            btn.disabled = true;
-            btn.innerText = '...';
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-
-            try {
-                const res = await fetch('/api/research/chat-mas', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ symbol: sym, message: msg })
-                });
-                
-                const data = await res.json();
-                
-                const croBubble = document.createElement('div');
-                croBubble.className = 'chat-bubble chat-cro';
-                
-                if (data.ok) {
-                    const label = document.createElement('strong');
-                    label.textContent = 'GHOST LEAD: ';
-                    croBubble.appendChild(label);
-                    croBubble.appendChild(document.createTextNode(data.reply));
-                } else {
-                    croBubble.textContent = 'SYSTEM ERROR: Interrogation failed. Recon lost.';
-                    croBubble.style.color = '#ef4444';
-                    croBubble.style.borderColor = '#ef4444';
-                }
-                chatWindow.appendChild(croBubble);
-
-            } catch (e) {
-                const errorBubble = document.createElement('div');
-                errorBubble.className = 'chat-bubble chat-cro';
-                errorBubble.innerHTML = `<strong>SYSTEM ERROR:</strong> Uplink severed.`;
-                errorBubble.style.color = '#ef4444';
-                errorBubble.style.borderColor = '#ef4444';
-                chatWindow.appendChild(errorBubble);
-            } finally {
-                btn.disabled = false;
-                btn.innerText = 'SEND';
-                chatWindow.scrollTop = chatWindow.scrollHeight;
-            }
-        }
+        // handleEnter()/sendMessage() removed 2026-08-30 -- drove the removed
+        // Operator Commlink chat panel (called /api/research/chat-mas, gone).
 
         // --- RESTORED JS FUNCTIONS ---
         async function fetchWarRoomData() {
