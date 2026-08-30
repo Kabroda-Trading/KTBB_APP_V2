@@ -73,7 +73,7 @@ from typing import Optional
 
 import ccxt.async_support as ccxt
 
-from database import CampaignLog, GravityMemory, SessionLocal
+from database import CampaignLog, GravityMemory, SessionLocal, GateLog
 from session_manager import anchor_ts_for_utc_date, get_session_config
 import notify
 
@@ -275,6 +275,62 @@ def _notify_candidate_closed(c: CampaignLog) -> None:
         )
     except Exception as e:
         print(f"[NOTIFY ERROR] Close email failed for {c.symbol}: {e}")
+
+
+def _backfill_gate_log(db, now_utc: datetime) -> None:
+    """KABRODA_REBUILD_SPEC.md §9 -- fills in what actually happened for each
+    TAKE_PREMIUM/TAKE_STANDARD gate_log row once its matching CampaignLog
+    record resolves. Deliberately reuses CampaignLog's already-verified
+    close-detection instead of re-scanning candles from scratch -- every
+    15M decision (TAKE or PASS) already upserts a CampaignLog row
+    (_inject_brief_to_database, unconditional), so matching by
+    (symbol, date_key) is reliable, not a guess.
+
+    Honest scope: this fills first_target_hit / stopped_first / r_t1only /
+    mgmt_label, all directly available from CampaignLog's own resolved
+    fields. bars_to_t1/t2/t3, r_runner, mfe_r, and faked_first are NOT
+    computed here -- they need a real candle-level reconstruction pass this
+    function doesn't do. Left null rather than faked; a genuine gap, not a
+    guessed value with a caveat stapled on.
+    """
+    pending = db.query(GateLog).filter(
+        GateLog.state.in_(["TAKE_PREMIUM", "TAKE_STANDARD"]),
+        GateLog.backfilled_at.is_(None),
+    ).all()
+    if not pending:
+        return
+
+    for row in pending:
+        campaign = db.query(CampaignLog).filter(
+            CampaignLog.symbol == row.symbol,
+            CampaignLog.date_key == row.date_key,
+            CampaignLog.is_canonical == True,
+        ).order_by(CampaignLog.id.desc()).first()
+
+        if not campaign:
+            continue  # no matching record yet -- try again next tick
+
+        if campaign.closed_at is None:
+            # Still open. Only give up (and record a null/unknown outcome)
+            # once the session itself is long past due -- don't backfill a
+            # live trade as if it were resolved.
+            expires = getattr(campaign, "session_expires_at", None)
+            if expires is None or _as_utc(expires) > now_utc:
+                continue
+            if (now_utc - _as_utc(expires)) < timedelta(hours=6):
+                continue  # give the lifecycle monitor a little more room first
+
+        row.first_target_hit = {"T1": "T1", "T2": "T2", "T3": "T3"}.get(campaign.target_hit)
+        row.stopped_first = campaign.status == "CLOSED_LOSS"
+        row.faked_first = None
+        row.r_t1only = campaign.realized_pnl
+        row.mgmt_label = campaign.status or "UNRESOLVED"
+        row.backfilled_at = now_utc
+        print(f"|| GATE LOG BACKFILL || {row.symbol} {row.date_key} -> {row.mgmt_label} "
+              f"(R={row.r_t1only})" if row.r_t1only is not None else
+              f"|| GATE LOG BACKFILL || {row.symbol} {row.date_key} -> {row.mgmt_label}")
+
+    db.commit()
 
 
 async def run_ledger_audit_loop():
@@ -828,6 +884,15 @@ async def run_ledger_audit_loop():
                     c.shadow_runner_last_scan_ts = candle_ts
 
                 db.commit()
+
+            # ── PHASE 5: gate_log backfill (non-blocking) ────────────────
+            # KABRODA_REBUILD_SPEC.md §9. Kept isolated with its own
+            # try/except so a failure here never breaks the CampaignLog
+            # lifecycle phases above it.
+            try:
+                _backfill_gate_log(db, now_utc)
+            except Exception as _ge:
+                print(f"[GATE LOG BACKFILL] Non-critical failure: {_ge}")
 
         except Exception as e:
             print(f"|| LIFECYCLE MONITOR ERROR || {e}")
