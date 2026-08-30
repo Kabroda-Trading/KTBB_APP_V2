@@ -22,7 +22,6 @@ from pydantic import BaseModel
 import auth
 import battlebox_pipeline
 import market_radar
-import research_lab
 import gravity_engine
 import gravity_math
 import kabroda_mas_flow
@@ -780,11 +779,8 @@ async def battle_control_page(request: Request, db: Session = Depends(get_db)):
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
     return _template_or_fallback(request, templates, "suite_home.html", ctx)
 
-@app.get("/suite/research-lab")
-async def suite_research_lab_page(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    return _template_or_fallback(request, templates, "research_lab.html", ctx)
+# /suite/research-lab removed 2026-08-30 -- research_lab.py archived, real
+# backtest validation lives in the Kabroda AI Brain repo now.
 
 @app.get("/suite/radar")
 async def radar_page(request: Request, db: Session = Depends(get_db)):
@@ -1379,11 +1375,8 @@ async def account_settings(request: Request, db: Session = Depends(get_db)):
 # real, current methodology anyway (a stale duplicate, same class of problem
 # market_radar.py's dead scorer had before this session's Phase 4 rewrite).
 
-@app.get("/admin/research")
-async def admin_research_page(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx["is_admin"]: return RedirectResponse("/suite")
-    return _template_or_fallback(request, templates, "research_lab.html", ctx)
+# /admin/research removed 2026-08-30 -- see the /suite/research-lab removal
+# note above.
 
 # /admin/mission + mission_brief.html removed 2026-08-30 -- a static
 # glossary page teaching an older, unrelated framework (MAGNET/SUFFOCATED/
@@ -1714,18 +1707,8 @@ async def run_radar_scan(request: Request):
     print(f"[RADAR] returning {len(results)} results")
     return {"ok": True, "results": results}
 
-@app.post("/api/research/run")
-async def research_run(request: Request, db: Session = Depends(get_db)):
-    uid = request.session.get(auth.SESSION_KEY)
-    if not uid: raise HTTPException(status_code=401)
-    
-    payload = await request.json()
-    try:
-        out = await research_lab.run_research_lab(payload)
-        return JSONResponse(out)
-    except Exception as e:
-        traceback.print_exc()
-        return JSONResponse({"ok": False, "error": str(e)})
+# /api/research/run removed 2026-08-30 -- see the /suite/research-lab
+# removal note above.
 
 # /api/simulator/run + market_simulator.py archived 2026-08-28 -- see the
 # /admin/simulator removal note above.

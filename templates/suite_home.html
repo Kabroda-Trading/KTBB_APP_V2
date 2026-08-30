@@ -67,16 +67,10 @@
                 <div class="arrow">MANAGE &rarr;</div>
             </a>
 
-            {% if is_admin %}
-                <a href="/admin/research" class="module-card" style="border-color: #facc15;">
-                    <div>
-                        <div class="icon">🔬</div>
-                        <div class="card-title">RESEARCH LAB <span class="admin-tag">ADMIN</span></div>
-                        <div class="card-desc">Backtest the structural engine against historical datasets.</div>
-                    </div>
-                    <div class="arrow" style="color: #facc15;">OPEN LAB &rarr;</div>
-                </a>
-            {% endif %}
+            <!-- Research Lab module card removed 2026-08-30 -- research_lab.py
+                 archived, real backtest validation lives in the Kabroda AI
+                 Brain repo now. -->
+
         </div>
     </div>
     {% include 'footer.html' %}
