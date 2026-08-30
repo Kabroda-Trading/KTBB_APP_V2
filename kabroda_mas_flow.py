@@ -7,7 +7,11 @@
 # PUBLIC API (signatures frozen — do not change):
 #   run_mas_analysis(symbol, session_id, date_key, battlebox_payload)
 #   interrogate_cro(symbol, user_message)
-#   audit_foreign_intel_pipeline(intel_packet, battlebox_payload, mtf_context)
+#
+# audit_foreign_intel_pipeline() (the Intel Auditor) removed 2026-08-30 --
+# Andy's call: gone entirely. The last LLM-based tool in this file; its
+# gravity-as-decision-gate and third measured-move formula had both gone
+# stale under this session's calibrated-gate rebuild.
 # ==============================================================================
 
 import json
@@ -60,13 +64,7 @@ class ExecutiveBrief(BaseModel):
     tier: Optional[str] = Field(default=None, description="PREMIUM/STANDARD/None — the calibrated gate's tier (2026-08-30 rebuild).")
 
 
-class IntelAuditReport(BaseModel):
-    """Strict output schema for the Intel Auditor."""
-    gravity_verdict: str = Field(description="'CLEAR', 'BLOCKED', or 'HIGH_RISK'.")
-    momentum_verdict: str = Field(description="'BUILDING', 'EXHAUSTED', or 'MIXED'.")
-    measured_move_t1: float = Field(description="T1 recalculated from the signal's own box.")
-    overall_verdict: str = Field(description="'CONFIRMED', 'CAUTION', or 'REJECTED'.")
-    reasoning: str = Field(description="Plain-English summary of all three audit sections.")
+# IntelAuditReport removed 2026-08-30 -- schema for the removed Intel Auditor.
 
 
 # ==============================================================================
@@ -515,58 +513,9 @@ Keep responses under 200 words unless the Operator explicitly requests detail.
 """
 
 
-INTEL_AUDITOR_SYSTEM_PROMPT = """\
-You are the Kabroda External Intel Auditor — a counter-intelligence analyst \
-who does not trust third-party signals. When given a foreign intel packet, \
-you run a strict three-source audit.
-
-═══════════════════════════════════════════════════════
-AUDIT METHODOLOGY
-═══════════════════════════════════════════════════════
-
-SECTION 1 — GRAVITY AUDIT
-Compare the signal's targets against the Kabroda KDE gravity peaks. Flag \
-any HEAVY or MAXIMUM gravity wall (especially Class 0 / permanence_class=0 \
-beams) sitting between the entry and a target. If a target must trade THROUGH \
-such a wall: gravity_verdict = "BLOCKED" (HEAVY wall) or "HIGH_RISK" \
-(MAXIMUM/Class 0 wall). If airspace is clear: gravity_verdict = "CLEAR".
-
-SECTION 2 — MOMENTUM AUDIT
-Read the Multi-Timeframe scan for the signal's own timeframe (4H signal → \
-read timeframes["4H"], 1H signal → timeframes["1H"]). From that entry:
-- stoch_rsi zone OVERBOUGHT against a LONG, or OVERSOLD against a SHORT = EXHAUSTED
-- zone VALUE_HIGH/VALUE_LOW aligned with the trade direction = BUILDING
-- Otherwise or data unavailable = MIXED
-Set momentum_verdict accordingly.
-
-SECTION 3 — MEASURED MOVE AUDIT
-Discard the signal's arbitrary targets. Recalculate T1 from the signal's \
-own box: box = abs(entry_price - stop_loss).
-LONG: measured_move_t1 = entry_price + box
-SHORT: measured_move_t1 = entry_price - box
-Set measured_move_t1 to this value.
-
-FINAL SYNTHESIS
-overall_verdict:
-  "CONFIRMED" = gravity CLEAR AND momentum BUILDING
-  "REJECTED"  = gravity HIGH_RISK OR momentum EXHAUSTED against the trade
-  "CAUTION"   = anything mixed or borderline
-Write a plain-English "reasoning" covering all three sections.
-
-═══════════════════════════════════════════════════════
-OUTPUT FORMAT (MANDATORY)
-═══════════════════════════════════════════════════════
-
-Return ONLY a valid JSON object. No markdown fences. No preamble.
-
-{
-  "gravity_verdict": "CLEAR" or "BLOCKED" or "HIGH_RISK",
-  "momentum_verdict": "BUILDING" or "EXHAUSTED" or "MIXED",
-  "measured_move_t1": <float>,
-  "overall_verdict": "CONFIRMED" or "CAUTION" or "REJECTED",
-  "reasoning": "<plain-English summary of all three sections>"
-}
-"""
+# INTEL_AUDITOR_SYSTEM_PROMPT removed 2026-08-30 -- system prompt for the
+# removed Intel Auditor. Its gravity-as-decision-gate and third measured-move
+# formula had both gone stale under this session's calibrated-gate rebuild.
 
 
 # ==============================================================================
@@ -1531,59 +1480,9 @@ def interrogate_cro(symbol: str, user_message: str) -> str:
         return f"COMMLINK FAILURE: {str(e)}"
 
 
-def audit_foreign_intel_pipeline(
-    intel_packet: Dict[str, Any],
-    battlebox_payload: Dict[str, Any],
-    mtf_context: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """
-    External Intel Auditor pipeline. Called by POST /api/research/audit-intel.
-    Runs a three-source audit (gravity / momentum / measured move) on a
-    third-party signal packet and returns an IntelAuditReport.
-    """
-    print(f">>> INTEL AUDITOR: Auditing signal for {intel_packet.get('symbol')}")
-
-    levels = battlebox_payload.get("levels", {})
-    context = battlebox_payload.get("context", {})
-
-    context_text = (
-        f"=== FOREIGN INTEL PACKET ===\n"
-        f"{json.dumps(intel_packet, indent=2)}\n\n"
-        f"=== KABRODA SSOT (GRAVITY) ===\n"
-        f"Breakout Trigger:  ${levels.get('breakout_trigger', 0):,.2f}\n"
-        f"Breakdown Trigger: ${levels.get('breakdown_trigger', 0):,.2f}\n"
-        f"KDE Gravity Peaks:\n"
-        + "\n".join(
-            f"  ${p.get('price',0):,.2f} | {p.get('intensity','?')} | "
-            f"Heat: {p.get('heat_score',0):.1f}"
-            for p in context.get("kde_peaks", [])[:12]
-        )
-        + f"\n\n=== LIVE MTF CONFLUENCE (MOMENTUM) ===\n"
-        f"{json.dumps(mtf_context or {}, indent=2)}\n\n"
-        "Run the three-section audit per your system instructions. "
-        "Return ONLY the JSON object."
-    )
-
-    try:
-        response_text = agent_core._call_agent(
-            agent_name="intel_auditor",
-            system_prompt=INTEL_AUDITOR_SYSTEM_PROMPT,
-            context_text=context_text,
-            triggered_by="audit_request",
-            max_tokens=1024,
-        )
-    except RuntimeError as e:
-        return {"status": "ERROR", "message": str(e)}
-    except Exception as e:
-        print(f"INTEL AUDIT API ERROR: {e}")
-        return {"status": "ERROR", "message": str(e)}
-
-    try:
-        audit_output, _ = _parse_brief(response_text, IntelAuditReport)
-        return {"status": "SUCCESS", "report": audit_output.dict()}
-    except Exception as e:
-        print(f"INTEL AUDIT PARSE ERROR: {e}")
-        return {"status": "ERROR", "message": f"Parse failed: {e}"}
+# audit_foreign_intel_pipeline() removed 2026-08-30 -- the Intel Auditor.
+# Andy's call: gone entirely, the last LLM-based tool in this file. See the
+# module header comment for the full reasoning.
 
 
 # ==============================================================================

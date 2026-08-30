@@ -128,7 +128,7 @@ This section used to describe a 6-agent CrewAI/LLM crew (Macro Structural Archit
 - `decision_engine.evaluate_15m_decision()` — the calibrated gate. Deterministic, zero LLM calls, zero cost. See "The Calibrated Gate" above for the full logic.
 - Called from two places that must never disagree: `kabroda_mas_flow.run_mas_analysis()` (fires at session lock, writes the official `CampaignLog`/`GateLog` record) and `market_radar._build_dossier()` (the live public radar/API, recomputes fresh on every call).
 
-**Intel Auditor** (`IntelAuditReport`, `POST /api/research/audit-intel`) is a separate, still-standing standalone tool — takes a foreign signal (MetaSignals format), compares it against the current session's Kabroda SSOT. Not touched by the 2026-08-30 rebuild; worth a look at whether its own logic still makes sense given the gate replaced what it was comparing against, but that's open, not yet decided.
+**Intel Auditor** — removed 2026-08-30 (Andy's call: gone entirely). It used to take a foreign signal (MetaSignals format) and have an LLM compare it against Kabroda's SSOT — gravity walls as a BLOCKED/HIGH_RISK/CLEAR gate, plus a third, different measured-move formula. Both had gone stale under the calibrated-gate rebuild, and it was the last LLM-based tool left in the codebase (a paid `agent_core._call_agent()` call per use). `IntelAuditReport`, `INTEL_AUDITOR_SYSTEM_PROMPT`, `audit_foreign_intel_pipeline()` (`kabroda_mas_flow.py`), the `POST /api/research/audit-intel` route (`main.py`), and the "External Intel Injection" panel (`templates/macro_war_room.html`) are all gone, not archived.
 
 ---
 

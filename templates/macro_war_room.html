@@ -171,24 +171,9 @@
             </div>
         </div>
 
-        <div class="ghost-lead-terminal" style="margin-top: 0px; border-left-color: #facc15;">
-            <div class="gl-header" style="border-bottom-color: rgba(250, 204, 21, 0.3);">
-                <span class="gl-title" style="color: #facc15;">External Intel Injection // Manual Uplink</span>
-            </div>
-            
-            <div style="display: flex; gap: 16px; align-items: flex-start; position: relative; z-index: 2;">
-                <textarea id="foreignIntelInput" placeholder="Paste MetaSignals raw text here...&#10;Example:&#10;BTC | USDT @ $76,821.20 - 1H - 1.1 G1&#10;Target 1: 77,870.68..." 
-                    style="flex: 1; background: #050505; border: 1px solid #333; color: #94a3b8; font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 12px; border-radius: 6px; min-height: 120px; resize: vertical; outline: none;"></textarea>
-                
-                <button onclick="submitForeignIntel()" style="background: rgba(250, 204, 21, 0.1); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.5); padding: 12px 24px; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-weight: 800; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s;">
-                    Audit Intel
-                </button>
-            </div>
-            
-            <div id="intelResponseConsole" style="margin-top: 16px; font-size: 12px; color: #22c55e; display: none; position: relative; z-index: 2;">
-                > Awaiting execution...
-            </div>
-        </div>
+        <!-- "External Intel Injection" panel removed 2026-08-30 -- called the
+             now-removed Intel Auditor (POST /api/research/audit-intel).
+             Andy's call: gone entirely. -->
 
         <div class="kpi-grid">
             <div id="kpi-cycle" class="kpi-card state-neutral">
@@ -428,82 +413,9 @@
             });
         }
 
-        async function submitForeignIntel() {
-            const rawText = document.getElementById('foreignIntelInput').value;
-            const consoleDiv = document.getElementById('intelResponseConsole');
-            
-            if (!rawText.trim()) {
-                consoleDiv.style.display = 'block';
-                consoleDiv.style.color = '#ef4444';
-                consoleDiv.innerText = "> ERROR: No intel provided.";
-                return;
-            }
-
-            consoleDiv.style.display = 'block';
-            consoleDiv.style.color = '#facc15';
-            consoleDiv.innerText = "> Transmitting intel to backend parser...";
-
-            try {
-                const res = await fetch('/api/research/audit-intel', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ raw_text: rawText })
-                });
-                
-                const data = await res.json();
-                
-                if (data.ok) {
-                    const audit = data.audit;
-                    consoleDiv.style.display = 'block';
-                    consoleDiv.style.color = '#22c55e';
-
-                    const overall = audit.overall_verdict || 'UNKNOWN';
-                    let verdictColor = '#22c55e';
-                    if (overall === 'REJECTED') {
-                        verdictColor = '#ef4444';
-                    } else if (overall === 'CAUTION') {
-                        verdictColor = '#facc15';
-                    }
-
-                    const gravityColor = (audit.gravity_verdict === 'CLEAR') ? '#22c55e' : '#ef4444';
-                    const momentumColor = (audit.momentum_verdict === 'BUILDING') ? '#22c55e'
-                        : (audit.momentum_verdict === 'EXHAUSTED') ? '#ef4444' : '#facc15';
-                    const t1 = (typeof audit.measured_move_t1 === 'number')
-                        ? '$' + audit.measured_move_t1.toFixed(2) : 'N/A';
-
-                    consoleDiv.innerHTML = `
-                        <div style="margin-top: 10px; border: 1px solid ${verdictColor}; padding: 16px; border-radius: 6px; background: rgba(0, 0, 0, 0.4);">
-                            <div style="font-weight: 800; color: #fff; margin-bottom: 12px; font-size: 14px; letter-spacing: 1px;">
-                                OVERALL VERDICT: <span style="color: ${verdictColor};">${overall}</span>
-                            </div>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
-                                <div style="border: 1px solid #333; border-radius: 6px; padding: 10px;">
-                                    <div style="color: #64748b; font-size: 10px; letter-spacing: 1px; text-transform: uppercase;">Gravity Audit</div>
-                                    <div style="color: ${gravityColor}; font-weight: 800; font-size: 14px; margin-top: 4px;">${audit.gravity_verdict || 'N/A'}</div>
-                                </div>
-                                <div style="border: 1px solid #333; border-radius: 6px; padding: 10px;">
-                                    <div style="color: #64748b; font-size: 10px; letter-spacing: 1px; text-transform: uppercase;">Momentum Audit</div>
-                                    <div style="color: ${momentumColor}; font-weight: 800; font-size: 14px; margin-top: 4px;">${audit.momentum_verdict || 'N/A'}</div>
-                                </div>
-                            </div>
-                            <div style="color: #0ea5e9; font-weight: 700; font-size: 13px; margin-bottom: 12px;">
-                                MEASURED MOVE T1 (SIGNAL BOX): ${t1}
-                            </div>
-                            <div style="color: #94a3b8; line-height: 1.5; border-top: 1px dashed #333; padding-top: 12px;">
-                                > ${audit.reasoning || ''}
-                            </div>
-                        </div>
-                    `;
-                    document.getElementById('foreignIntelInput').value = '';
-                } else {
-                    consoleDiv.style.color = '#ef4444';
-                    consoleDiv.innerText = `> ERROR: ${data.error}`;
-                }
-            } catch (e) {
-                consoleDiv.style.color = '#ef4444';
-                consoleDiv.innerText = "> CRITICAL ERROR: Uplink failed.";
-            }
-        }
+        // submitForeignIntel() removed 2026-08-30 -- called the now-removed
+        // Intel Auditor (POST /api/research/audit-intel). Andy's call: gone
+        // entirely, along with the panel that called it above.
 
         // Refresh gravity data every 60 seconds
         setInterval(fetchWarRoomData, 60000);

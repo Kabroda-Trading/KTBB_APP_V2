@@ -5,7 +5,6 @@
 import os
 import json 
 import traceback
-import re
 import hmac
 from typing import Any, Dict, Optional, Literal
 import asyncio
@@ -1143,10 +1142,6 @@ async def api_live_price():
         return JSONResponse({"ok": False, "price": 0, "error": str(e)})
 
 
-# --- KABRODA ARCHITECTURE: FOREIGN INTEL PARSER & MAS ROUTING ---
-class ForeignIntelPayload(BaseModel):
-    raw_text: str
-
 class MASChatPayload(BaseModel):
     symbol: str
     message: str
@@ -1162,77 +1157,16 @@ async def chat_with_mas(payload: MASChatPayload, request: Request, db: Session =
     
     return JSONResponse({"ok": True, "reply": response_text})
 
-@app.post("/api/research/audit-intel")
-async def audit_foreign_intel(payload: ForeignIntelPayload, request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"): 
-        return JSONResponse({"ok": False, "error": "Unauthorized"})
-
-    text = payload.raw_text
-    try:
-        header_match = re.search(r'([A-Z]+)\s*\|\s*([A-Z]+)\s*@\s*\$([\d,.]+)', text)
-        asset = f"{header_match.group(1)}/{header_match.group(2)}"
-        entry_price = float(header_match.group(3).replace(',', ''))
-        
-        t1 = float(re.search(r'Target 1:\s*([\d,.]+)', text).group(1).replace(',', ''))
-        t2 = float(re.search(r'Target 2:\s*([\d,.]+)', text).group(1).replace(',', ''))
-        t3 = float(re.search(r'Target 3:\s*([\d,.]+)', text).group(1).replace(',', ''))
-        sl = float(re.search(r'SL Close Below:\s*([\d,.]+)', text).group(1).replace(',', ''))
-
-        bias = "LONG" if t1 > entry_price else "SHORT"
-
-        # Timeframe lives in the MetaSignals header, e.g. "BTC | USDT @ $76,821.20 - 1H - 1.1 G1"
-        tf_match = re.search(r'@\s*\$[\d,.]+\s*-\s*(\d+\s*[HMDWhmdw])', text)
-        timeframe = tf_match.group(1).replace(' ', '').upper() if tf_match else "UNKNOWN"
-
-        parsed_packet = {
-            "source": "MetaSignals",
-            "symbol": asset,
-            "bias": bias,
-            "timeframe": timeframe,
-            "entry_price": entry_price,
-            "targets": [t1, t2, t3],
-            "stop_loss": sl
-        }
-
-        db_sym = asset.replace("USDT", "/USDT") if "/" not in asset else asset
-        
-        lock_record = db.query(SessionLock).filter(
-            SessionLock.symbol == db_sym
-        ).order_by(SessionLock.id.desc()).first()
-                
-        if not lock_record:
-            return JSONResponse({"ok": False, "error": f"No active Kabroda session locked for {asset} in DB. Cannot perform audit."})
-
-        current_ssot = json.loads(lock_record.packet_data)
-
-        # Third data source: live multi-timeframe confluence for the momentum audit.
-        try:
-            mtf_context = await mtf_confluence_scanner.run_mtf_confluence_scan(db_sym)
-        except Exception as mtf_err:
-            print(f"[AUDIT MTF ERROR] {db_sym}: {mtf_err}")
-            mtf_context = {"error": str(mtf_err)}
-
-        audit_result = await asyncio.to_thread(
-            kabroda_mas_flow.audit_foreign_intel_pipeline,
-            parsed_packet, current_ssot, mtf_context
-        )
-        
-        if audit_result["status"] == "SUCCESS":
-            return JSONResponse({
-                "ok": True, 
-                "message": "Intel audited successfully.", 
-                "data": parsed_packet,
-                "audit": audit_result["report"]
-            })
-        else:
-            return JSONResponse({"ok": False, "error": "Agent failed to analyze intel. See server logs."})
-
-    except Exception as e:
-        return JSONResponse({
-            "ok": False, 
-            "error": "Failed to parse intel. Ensure the text perfectly matches the MetaSignals format."
-        })
+# /api/research/audit-intel (the Intel Auditor) removed 2026-08-30 -- Andy's
+# call: gone entirely. It was the last LLM-based tool left in the codebase
+# (an agent_core._call_agent() call per use, real cost), and its methodology
+# had gone stale under this session's rebuild: it gated on gravity walls as
+# BLOCKED/HIGH_RISK/CLEAR (gravity is a decoupled reference page now, not a
+# decision input) and recalculated targets with a third, different formula
+# from both the old and new measured-move math. See kabroda_mas_flow.py for
+# the removed audit_foreign_intel_pipeline()/IntelAuditReport/
+# INTEL_AUDITOR_SYSTEM_PROMPT and templates/macro_war_room.html for the
+# removed UI panel that called this route.
 
 # --- AGENT COST INFRASTRUCTURE (PHASE 1) ---
 
