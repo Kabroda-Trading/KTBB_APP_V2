@@ -19,9 +19,11 @@ import pytz
 
 from pydantic import BaseModel, Field
 
+import asyncio
+
 import agent_core
 import decision_engine
-import trade_structure_analyst
+import market_data
 from database import (
     SessionLocal,
     CampaignLog,
@@ -30,6 +32,7 @@ from database import (
     JewelSnapshotLog,
     SystemAuditLog,
     InterpreterLog,
+    GateLog,
 )
 
 
@@ -39,11 +42,12 @@ from database import (
 
 class ExecutiveBrief(BaseModel):
     """Strict output schema for the decision layer. Originally the Senior
-    Analyst LLM's output schema; unchanged in shape since the graded coded
-    decision layer (decision_engine.py) replaced it 2026-08-27, so existing
-    consumers (CampaignLog injection, dashboards) don't need to change."""
+    Analyst LLM's output schema, kept unchanged in shape for existing
+    consumers (CampaignLog injection, dashboards) across two rewrites: the
+    graded coded decision layer (2026-08-27) and the calibrated-gate rebuild
+    (2026-08-30, KABRODA_REBUILD_SPEC.md) that replaced it."""
     approval_status: str = Field(description="'APPROVED' or 'STAND_DOWN' (REJECTED/WAITING_FOR_15M are legacy LLM-era values, no longer produced)")
-    conviction: str = Field(default="NEUTRAL", description="STRONG_LONG/LEAN_LONG/NEUTRAL/LEAN_SHORT/STRONG_SHORT — the graded conviction tier decision_engine.py actually reasons in; approval_status is derived from this (NEUTRAL -> STAND_DOWN, everything else -> APPROVED).")
+    conviction: str = Field(default="PASS", description="TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS — the calibrated gate's four-outcome verdict (2026-08-30 rebuild). approval_status is derived from this (TAKE_* -> APPROVED, ALMOST/PASS -> STAND_DOWN).")
     tactical_brief: str = Field(description="Short, deterministic reason string (the matched confirmation legs, or the stand-down reason). No LLM prose generated here anymore.")
     bias: str = Field(description="'LONG', 'SHORT', or 'NEUTRAL'")
     entry_price: float = Field(description="The exact trigger entry price.")
@@ -52,6 +56,8 @@ class ExecutiveBrief(BaseModel):
     t2: float = Field(description="Target 2 — pre-computed, copy exactly.")
     t3: float = Field(description="Target 3 — pre-computed, copy exactly.")
     formatted_newsletter_md: str = Field(description="Complete brief in Markdown: all ## sections from THE BIGGER PICTURE through THE OTHER SIDE.")
+    side: Optional[str] = Field(default=None, description="LONG/SHORT/None — the calibrated gate's candidate side (2026-08-30 rebuild).")
+    tier: Optional[str] = Field(default=None, description="PREMIUM/STANDARD/None — the calibrated gate's tier (2026-08-30 rebuild).")
 
 
 class IntelAuditReport(BaseModel):
@@ -801,38 +807,11 @@ def _read_jewel_context(symbol: str) -> str:
         db.close()
 
 
-# ==============================================================================
-# SECTION 5 — PYTHON MATH (LLM NEVER COMPUTES TARGETS)
-# ==============================================================================
-
-def _compute_targets(bo: float, bd: float) -> dict:
-    """
-    Computes all targets for both LONG and SHORT scenarios.
-    Returns a dict the context builder formats into the prompt.
-    The LLM copies these values — it does not calculate.
-    """
-    if bo == 0 or bd == 0:
-        return {}
-
-    distance = bo - bd
-    return {
-        "distance": round(distance, 2),
-        "long": {
-            "entry": bo,
-            "stop": bd,
-            "t1": round(bo + distance, 2),
-            "t2": round(bo + distance * 1.618, 2),
-            "t3": round(bo + distance * 2.618, 2),
-        },
-        "short": {
-            "entry": bd,
-            "stop": bo,
-            "t1": round(bd - distance, 2),
-            "t2": round(bd - distance * 1.618, 2),
-            "t3": round(bd - distance * 2.618, 2),
-        },
-    }
-
+# SECTION 5 (old "Python math" Fibonacci target block) removed 2026-08-30 --
+# _compute_targets() (1x/1.618x/2.618x of the bo-bd distance) is the old
+# Measured Move Rule, fully replaced by decision_engine.py's box-multiple
+# formula (0.618x/1.0x/1.618x, KABRODA_REBUILD_SPEC.md §6). Not kept as a
+# reference -- Andy's explicit call: nothing old stays in the decision path.
 
 # ==============================================================================
 # SECTION 6 — JSON PARSING WITH RETRY SUPPORT
@@ -1220,63 +1199,63 @@ def run_mas_analysis(
     Produces an ExecutiveBrief and writes it to CampaignLog, DecisionJournal,
     and MacroNarrativeLog.
 
-    REBUILT 2026-08-27 (Phase 4 lock-in). The LLM agent chain this function
-    used to drive -- mtf_interpreter -> gravity_interpreter -> junior_analyst
-    -> Senior Analyst LLM -> publisher_crew -- was disabled 2026-08-17
-    (AUDIT_FINDINGS.md #15: the trade decision was an LLM reading free text,
-    no enforced precedence) and is now fully replaced, not just bypassed:
-    the decision itself comes from decision_engine.evaluate_15m_decision(),
-    a deterministic graded-conviction model (see decision_engine.py's own
-    header for the full design, locked after CONFLUENCE_RESEARCH_REPORT.md).
-    No LLM call anywhere in this path. No publishing/newsletter generation
-    (publisher_crew.run_publisher() removed, not just skipped) -- decision
-    output is a structured record, not narrative.
+    REBUILT 2026-08-30 (KABRODA_REBUILD_SPEC.md, Kabroda AI Brain repo).
+    Andy's explicit, direct authorization for a full replacement: the old
+    graded-conviction model (2026-08-27) and the ATR+gravity-wall stop/target
+    math (trade_structure_analyst.py) are both gone, not patched around.
+    decision_engine.py now implements the calibrated 4-condition gate
+    (reachability + fuel + HTF carry + live hour), validated on a 1,913-trade
+    backtest AND on kabroda.com's own 123 real locks. No LLM call anywhere in
+    this path, no publishing/newsletter generation, no gravity dependency.
     """
-    print(f">>> DECISION ENGINE: Evaluating {symbol} | {session_id}")
+    print(f">>> GATE: Evaluating {symbol} | {session_id}")
 
-    levels = battlebox_payload.get("levels", {})
+    levels = dict(battlebox_payload.get("levels", {}))
     context = battlebox_payload.get("context", {})
-
-    bo = float(levels.get("breakout_trigger") or 0)
-    bd = float(levels.get("breakdown_trigger") or 0)
-
-    # 1. Python math — the Measured Move Rule, unchanged, inviolable.
-    raw_targets = _compute_targets(bo, bd)
-
-    # 1b. Trade Structure Analyst — structural stops + gravity-snapped targets
-    _tsa_result = trade_structure_analyst.apply_trade_structure(levels, context, raw_targets)
-    targets = _tsa_result
-    structure_reasoning = _tsa_result.get("reasoning", {})
-
-    # 2. The graded decision itself. structure_state comes from the same
-    # 2-consecutive-close acceptance gate that's always computed at session
-    # lock (structure_state_engine.compute_structure_state(), called inside
-    # battlebox_pipeline.py's packet build) -- read from context, not
-    # recomputed here, so this function has exactly one source of truth for
-    # "has price earned permission to trade."
     structure_state = context.get("structure_state", {})
     confluence_scan = context.get("confluence_scan", {})
+
+    # The gate needs candles this packet doesn't carry (5m/15m/1h/4h/1d for
+    # fuel/HTF/regime/daily-ATR reads) -- fetched fresh here rather than
+    # threading them through battlebox_pipeline's whole context-build chain,
+    # since this function fires once per session (or on restart recovery),
+    # not on every hot-path call. Runs inside its own thread (asyncio.to_thread
+    # per the caller), so a fresh event loop via asyncio.run() is safe here.
+    async def _fetch_all():
+        return await asyncio.gather(
+            market_data.fetch_live_5m(symbol, limit=400),
+            market_data.fetch_live_15m(symbol, limit=300),
+            market_data.fetch_live_1h(symbol, limit=100),
+            market_data.fetch_live_4h(symbol, limit=100),
+            market_data.fetch_live_daily(symbol, limit=60),
+        )
+    try:
+        candles_5m, candles_15m, candles_1h, candles_4h, candles_1d = asyncio.run(_fetch_all())
+    except Exception as e:
+        print(f"GATE CANDLE FETCH ERROR: {e}")
+        candles_5m = candles_15m = candles_1h = candles_4h = candles_1d = []
+
+    daily_atr14 = market_data._calc_daily_atr14(candles_1d)
+    levels["daily_atr14"] = daily_atr14
+    levels["price"] = float(candles_5m[-1]["close"]) if candles_5m else 0.0
+    now_utc = datetime.now(timezone.utc)
+
     decision_dict, decision_gauges = decision_engine.evaluate_15m_decision(
         levels=levels,
-        targets=targets,
         structure_state=structure_state,
         confluence_15m=confluence_scan.get("15M"),
-        confluence_1h=confluence_scan.get("1H"),
-        confluence_4h=confluence_scan.get("4H"),
-        stoch_cross_15m=context.get("stoch_cross_15m"),
+        candles_5m=candles_5m,
+        candles_15m=candles_15m,
+        candles_1h=candles_1h,
+        candles_4h=candles_4h,
+        candles_1d=candles_1d,
+        session_hour_utc=now_utc.hour,
     )
-    brief = ExecutiveBrief(**decision_dict)
+    brief = ExecutiveBrief(**{k: v for k, v in decision_dict.items() if k in ExecutiveBrief.model_fields})
 
-    # 6. Write to database. _write_narrative_log() call removed 2026-08-28 --
-    # its narrative_text has been permanently empty since the Senior Analyst
-    # LLM step it depended on was removed in this session's Phase 4 rewrite,
-    # and its wave-narrative counterpart (elliott_wave_specialist.py) was
-    # already archived 2026-08-17. That narrative concept is being rebuilt
-    # into Kabroda AI Brain instead (Andy's call, 2026-08-28) -- a hardcoded
-    # once-a-day write can't do what continuous live watching can. The
-    # function itself is left defined below, unused, for reference.
-    _inject_brief_to_database(symbol, session_id, date_key, brief, structure_reasoning)
+    _inject_brief_to_database(symbol, session_id, date_key, brief, decision_dict.get("gate"))
     _inject_decision_journal(symbol, session_id, date_key, brief, battlebox_payload)
+    _inject_gate_log(symbol, date_key, now_utc, levels, decision_dict)
 
     # 7. Forward-audit record — frozen at decision time (Adj. 3: non-blocking).
     # cro_memory is the REUSED reference from step 2 — not a re-fetch (Adj. 1).
@@ -1726,6 +1705,62 @@ def _inject_brief_to_database(
         print(f"|| MAS OVERLAY || Brief injected for {symbol}.")
     except Exception as e:
         print(f"MAS DATABASE INJECTION ERROR: {e}")
+    finally:
+        db.close()
+
+
+def _inject_gate_log(
+    symbol: str,
+    date_key: str,
+    evaluated_at: datetime,
+    levels: Dict[str, Any],
+    decision_dict: Dict[str, Any],
+) -> None:
+    """KABRODA_REBUILD_SPEC.md §9 — one row per gate evaluation, TAKE or PASS
+    alike. Andy's explicit call: log every detail. Backfill (24h outcome)
+    fields are left null here -- ledger_closing_engine.py wiring is a
+    fast-follow, not yet built (flagged, not silently skipped)."""
+    gate = decision_dict.get("gate") or {}
+    plan = decision_dict.get("plan") or {}
+    reach = gate.get("reach") or {}
+    checks = gate.get("checks") or {}
+    db = SessionLocal()
+    try:
+        row = GateLog(
+            date_key=date_key,
+            lock_ts=evaluated_at,
+            symbol=symbol,
+            side=decision_dict.get("side"),
+            breakout_trigger=levels.get("breakout_trigger"),
+            breakdown_trigger=levels.get("breakdown_trigger"),
+            box=reach.get("ratio") and (levels.get("breakout_trigger", 0) - levels.get("breakdown_trigger", 0)),
+            anchor=levels.get("anchor_price"),
+            range30m_high=levels.get("range30m_high"),
+            range30m_low=levels.get("range30m_low"),
+            daily_atr14=levels.get("daily_atr14"),
+            box_atr_ratio=reach.get("ratio"),
+            trigger_hour_utc=evaluated_at.hour,
+            hour_ok=checks.get("session_hour"),
+            veto=None if decision_dict.get("verdict_state") in ("TAKE_PREMIUM", "TAKE_STANDARD", "ALMOST") else (
+                (decision_dict.get("tactical_brief") or "")[:200] if gate.get("tier") is None and gate.get("misses") else None
+            ),
+            gate_pass=gate.get("pass"),
+            gate_tier=gate.get("tier"),
+            state=decision_dict.get("verdict_state", "PASS"),
+            headline=decision_dict.get("tactical_brief"),
+            entry=plan.get("entry"),
+            stop=plan.get("stop"),
+            t1=plan.get("t1"),
+            t2=plan.get("t2"),
+            t3=plan.get("t3"),
+            subtrig_stop=plan.get("subtrig_stop"),
+            gate_detail_json=json.dumps(gate, default=str),
+        )
+        db.add(row)
+        db.commit()
+        print(f"|| GATE LOG || {symbol} {date_key} -> {row.state}")
+    except Exception as e:
+        print(f"GATE LOG INJECTION ERROR: {e}")
     finally:
         db.close()
 

@@ -9,11 +9,12 @@
 import json
 import asyncio
 import datetime
+from typing import Optional
 import battlebox_pipeline
 import decision_engine
+import market_data
 import mtf_confluence_scanner
 import structure_state_engine
-import trade_structure_analyst
 from database import SessionLocal, SessionLock, MtfReading, DecisionJournal, CampaignLog
 
 TARGETS = ["BTCUSDT"]
@@ -280,71 +281,80 @@ def _make_indicator_string(levels):
 # reads the real, live graded decision (decision_engine.py) directly instead
 # of computing a second, parallel one -- see AGENT_LOG.md for the discovery.
 
-_GRADE_COLOR = {
-    "STRONG_LONG": "GREEN", "STRONG_SHORT": "GREEN",
-    "LEAN_LONG": "YELLOW", "LEAN_SHORT": "YELLOW",
-    "NEUTRAL": "GRAY",
-}
-_GRADE_BRIEFING = {
-    "STRONG_LONG": "🟢 STRONG LONG — trend, structure, and confirmation all align.",
-    "STRONG_SHORT": "🟢 STRONG SHORT — trend, structure, and confirmation all align.",
-    "LEAN_LONG": "🟡 LEAN LONG — trend and structure confirm, only partial volatility/momentum support.",
-    "LEAN_SHORT": "🟡 LEAN SHORT — trend and structure confirm, only partial volatility/momentum support.",
-    "NEUTRAL": "⚪ NEUTRAL — no valid thesis right now.",
+# Legacy-shaped compatibility fields, kept only until the §8 radar rebuild
+# lands (KABRODA_REBUILD_SPEC.md) -- score_pct/grade/color_code are explicitly
+# on the CUT list (§11.1: "0-100 score_pct as the verdict -- non-monotonic
+# with outcome"), not a real signal. They're mapped here so the current
+# frontend doesn't break while the new four-outcome headline card (TAKE
+# PREMIUM/TAKE STANDARD/ALMOST/PASS) is still being built.
+_STATE_COLOR = {
+    "TAKE_PREMIUM": "GREEN", "TAKE_STANDARD": "GREEN",
+    "ALMOST": "YELLOW", "PASS": "GRAY",
 }
 
 
-def _build_dossier(symbol: str, price: float, levels: dict, context: dict) -> dict:
+def _legacy_briefing(state: str, side: Optional[str], headline: str) -> str:
+    if state == "TAKE_PREMIUM":
+        return f"🟢🟢 TAKE — PREMIUM ({side}) — {headline}"
+    if state == "TAKE_STANDARD":
+        return f"🟢 TAKE — STANDARD ({side}) — {headline}"
+    if state == "ALMOST":
+        return f"🟡 ALMOST — {headline}"
+    return f"⚪ PASS — {headline}"
+
+
+async def _build_dossier(symbol: str, price: float, levels: dict, context: dict) -> dict:
     """Calls decision_engine.evaluate_15m_decision() directly with live data
     -- the exact same function run_mas_analysis() calls, so the radar and the
     official daily decision record can never silently disagree about what the
     rules say. structure_state here is LIVE (recomputed fresh by
     _try_locked_shortcut()/get_live_battlebox() on every call, not frozen at
-    lock time) -- that's what makes this an honest "what's true right now"
-    read, not a stale morning snapshot."""
+    lock time). Candles are fetched fresh on every call -- the calibrated
+    gate needs real 5m/1h/4h/1d reads, not a cached summary
+    (KABRODA_REBUILD_SPEC.md §2-3, 2026-08-30 rebuild)."""
     bo = float(levels.get("breakout_trigger", 0) or 0)
     bd = float(levels.get("breakdown_trigger", 0) or 0)
 
     structure_state = context.get("structure_state", {})
     confluence_scan = context.get("confluence_scan", {})
-    stoch_cross = context.get("stoch_cross_15m")
 
     if bo == 0 or bd == 0:
-        decision = {"conviction": "NEUTRAL", "tactical_brief": "Missing triggers.", "bias": "NEUTRAL",
+        decision = {"verdict_state": "PASS", "side": None, "tier": None,
+                    "tactical_brief": "Missing triggers.", "bias": "NEUTRAL",
                     "entry_price": 0.0, "stop_loss": 0.0, "t1": 0.0, "t2": 0.0, "t3": 0.0}
     else:
-        distance = round(bo - bd, 2)
-        raw_targets = {
-            "distance": distance,
-            "long": {"entry": bo, "stop": bd, "t1": round(bo + distance, 2),
-                      "t2": round(bo + distance * 1.618, 2), "t3": round(bo + distance * 2.618, 2)},
-            "short": {"entry": bd, "stop": bo, "t1": round(bd - distance, 2),
-                       "t2": round(bd - distance * 1.618, 2), "t3": round(bd - distance * 2.618, 2)},
-        }
-        targets = trade_structure_analyst.apply_trade_structure(
-            levels, {"kde_peaks": context.get("kde_peaks", [])}, raw_targets
+        candles_5m, candles_15m, candles_1h, candles_4h, candles_1d = await asyncio.gather(
+            market_data.fetch_live_5m(symbol, limit=400),
+            market_data.fetch_live_15m(symbol, limit=300),
+            market_data.fetch_live_1h(symbol, limit=100),
+            market_data.fetch_live_4h(symbol, limit=100),
+            market_data.fetch_live_daily(symbol, limit=60),
         )
+        gate_levels = dict(levels)
+        gate_levels["daily_atr14"] = market_data._calc_daily_atr14(candles_1d)
+        gate_levels["price"] = float(candles_5m[-1]["close"]) if candles_5m else price
         decision, _gauges = decision_engine.evaluate_15m_decision(
-            levels=levels, targets=targets, structure_state=structure_state,
-            confluence_15m=confluence_scan.get("15M"), confluence_1h=confluence_scan.get("1H"),
-            confluence_4h=confluence_scan.get("4H"), stoch_cross_15m=stoch_cross,
+            levels=gate_levels, structure_state=structure_state,
+            confluence_15m=confluence_scan.get("15M"),
+            candles_5m=candles_5m, candles_15m=candles_15m,
+            candles_1h=candles_1h, candles_4h=candles_4h, candles_1d=candles_1d,
+            session_hour_utc=datetime.datetime.now(datetime.timezone.utc).hour,
         )
 
-    conviction = decision["conviction"]
+    state = decision["verdict_state"]
+    side = decision.get("side")
     favored = decision["bias"]
-    is_valid = conviction != "NEUTRAL"
+    is_valid = state in ("TAKE_PREMIUM", "TAKE_STANDARD")
 
     plan = {
-        "valid": is_valid, "bias": favored,
+        "valid": is_valid, "bias": favored, "tier": decision.get("tier"), "state": state,
         "entry": decision["entry_price"], "stop": decision["stop_loss"],
         "targets": [decision["t1"], decision["t2"], decision["t3"]],
     }
     # 9-field shape matches the JS-side buildMissionKey9() contract exactly
-    # (bias|status|entry|stop|tp1|tp2|tp3|macro|micro) -- the old dossier key
-    # had this shape too; conviction (STRONG_LONG etc.) takes the "status"
-    # slot where GRADE A/B used to sit.
+    # (bias|status|entry|stop|tp1|tp2|tp3|macro|micro).
     key = (
-        f"{favored}|{conviction}|{plan['entry']:.2f}|{plan['stop']:.2f}|"
+        f"{favored}|{state}|{plan['entry']:.2f}|{plan['stop']:.2f}|"
         f"{plan['targets'][0]:.2f}|{plan['targets'][1]:.2f}|{plan['targets'][2]:.2f}|"
         f"{context.get('macro_bias', 'NEUTRAL')}|{context.get('micro_bias', 'NEUTRAL')}"
         if is_valid else ""
@@ -352,11 +362,12 @@ def _build_dossier(symbol: str, price: float, levels: dict, context: dict) -> di
 
     return {
         "favored": favored,
-        "grade": conviction,  # STRONG_LONG/LEAN_LONG/NEUTRAL/LEAN_SHORT/STRONG_SHORT -- not GRADE A/B anymore
-        "score_pct": 100 if conviction.startswith("STRONG") else (50 if conviction.startswith("LEAN") else 0),
-        "color_code": _GRADE_COLOR.get(conviction, "GRAY"),
-        "briefing": _GRADE_BRIEFING.get(conviction, decision["tactical_brief"]),
-        "checks": [], "diagnostic_ledger": {"reason": decision["tactical_brief"]},
+        "verdict_state": state,          # TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS -- the real answer
+        "grade": state,                  # legacy field name, same value -- see module note above
+        "score_pct": 100 if state == "TAKE_PREMIUM" else (75 if state == "TAKE_STANDARD" else (40 if state == "ALMOST" else 0)),
+        "color_code": _STATE_COLOR.get(state, "GRAY"),
+        "briefing": _legacy_briefing(state, side, decision["tactical_brief"]),
+        "checks": [], "diagnostic_ledger": {"reason": decision["tactical_brief"], "gate": decision.get("gate")},
         "plan": plan, "key": key,
     }
 
@@ -458,7 +469,7 @@ async def analyze_target(symbol):
     macro_bias = context.get("macro_bias", "NEUTRAL")
     micro_bias = context.get("micro_bias", "NEUTRAL")
 
-    dossier = _build_dossier(symbol, price, levels, context)
+    dossier = await _build_dossier(symbol, price, levels, context)
 
     return {
         "ok": True,
@@ -496,7 +507,7 @@ async def scan_sector():
         macro_bias = context.get("macro_bias", "NEUTRAL")
         micro_bias = context.get("micro_bias", "NEUTRAL")
 
-        dossier = _build_dossier(sym, price, levels, context)
+        dossier = await _build_dossier(sym, price, levels, context)
 
         # TF system verdicts (4H + 1H candidates) and daily regime
         sym_norm = sym.replace("USDT", "/USDT") if "/" not in sym else sym

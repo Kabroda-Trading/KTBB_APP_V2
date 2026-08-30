@@ -1,5 +1,5 @@
 # database.py
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, text, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, text, UniqueConstraint, Index
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
 import os
@@ -1417,5 +1417,73 @@ class DecisionGaugeReading(Base):
 
     __table_args__ = (
         UniqueConstraint("decision_id", "timeframe", "gauge_name", name="uq_decision_gauge_reading"),
+    )
+
+
+class GateLog(Base):
+    """The calibrated-gate forward-incubation record — KABRODA_REBUILD_SPEC.md
+    §9. One row per gate evaluation (every trigger-break, TAKE or PASS alike),
+    logged at the break; backfilled with the real outcome after 24h. This IS
+    the beta-phase track record the Kabroda AI Brain reads to confirm forward
+    performance matches the backtest and propose calibration tweaks. Andy's
+    explicit call, 2026-08-30: log every detail, no exceptions."""
+    __tablename__ = "gate_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # --- at the break ---
+    date_key = Column(String, index=True, nullable=False)
+    lock_ts = Column(DateTime, nullable=True)
+    symbol = Column(String, index=True, nullable=False)
+    side = Column(String, nullable=True)          # LONG | SHORT | None (no trigger yet)
+    breakout_trigger = Column(Float, nullable=True)
+    breakdown_trigger = Column(Float, nullable=True)
+    box = Column(Float, nullable=True)
+    anchor = Column(Float, nullable=True)
+    range30m_high = Column(Float, nullable=True)
+    range30m_low = Column(Float, nullable=True)
+    daily_atr14 = Column(Float, nullable=True)
+    box_atr_ratio = Column(Float, nullable=True)
+    trigger_hour_utc = Column(Integer, nullable=True)
+    push_vol_ratio = Column(Float, nullable=True)
+    fuel_state = Column(String, nullable=True)     # FUELED | CONFLICTED | NO_FUEL | NO_PUSH | UNKNOWN
+    trend_1h = Column(String, nullable=True)
+    trend_4h = Column(String, nullable=True)
+    htf_aligned = Column(Integer, nullable=True)
+    htf_opposed = Column(Integer, nullable=True)
+    hour_ok = Column(Boolean, nullable=True)
+    daily_regime_table = Column(String, nullable=True)
+    daily_regime_quality = Column(String, nullable=True)
+    micro_regime = Column(String, nullable=True)
+    veto = Column(String, nullable=True)           # which hard veto fired, if any
+    gate_pass = Column(Boolean, nullable=True)
+    gate_tier = Column(String, nullable=True)       # PREMIUM | STANDARD | None
+    state = Column(String, nullable=False)          # TAKE_PREMIUM | TAKE_STANDARD | ALMOST | PASS
+    headline = Column(String, nullable=True)
+    entry = Column(Float, nullable=True)
+    stop = Column(Float, nullable=True)
+    t1 = Column(Float, nullable=True)
+    t2 = Column(Float, nullable=True)
+    t3 = Column(Float, nullable=True)
+    subtrig_stop = Column(Float, nullable=True)
+    gate_detail_json = Column(String, nullable=True)   # full gate dict, for audit
+
+    # --- backfilled after 24h (ledger_closing_engine.py, TODO: wire the fill) ---
+    first_target_hit = Column(String, nullable=True)    # T1 | T2 | T3 | none
+    stopped_first = Column(Boolean, nullable=True)
+    faked_first = Column(Boolean, nullable=True)
+    bars_to_t1 = Column(Integer, nullable=True)
+    bars_to_t2 = Column(Integer, nullable=True)
+    bars_to_t3 = Column(Integer, nullable=True)
+    r_t1only = Column(Float, nullable=True)
+    r_runner = Column(Float, nullable=True)
+    mfe_r = Column(Float, nullable=True)
+    mgmt_label = Column(String, nullable=True)
+    backfilled_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_gate_log_symbol_date", "symbol", "date_key"),
     )
 

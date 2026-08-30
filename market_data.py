@@ -196,6 +196,21 @@ async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]
 # ---------------------------------------------------------------------------
 # CALCULATION HELPERS — pure functions, no external dependencies
 # ---------------------------------------------------------------------------
+def _calc_daily_atr14(candles_1d: List[Dict[str, Any]], period: int = 14) -> float:
+    """Daily ATR(14) — simple mean of (high - low) over the last `period` DAILY
+    candles. KABRODA_REBUILD_SPEC.md §3/§12: the gate's reachability condition
+    (box / dailyATR14 <= 0.55) needs this specifically, not the short-timeframe
+    ATR already in the locked packet (~0.2% of price, wrong scale). The spec
+    is explicit: the backtest validated the simple mean-range, not Wilder's
+    smoothed ATR — use the same method that was actually measured, not a
+    fancier one that wasn't."""
+    if not candles_1d or len(candles_1d) < period:
+        return 0.0
+    window = candles_1d[-period:]
+    ranges = [float(c["high"]) - float(c["low"]) for c in window]
+    return round(sum(ranges) / len(ranges), 4)
+
+
 def _calc_ema_series(prices: List[float], period: int) -> List[float]:
     if not prices or len(prices) < period:
         return []
