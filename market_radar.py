@@ -20,78 +20,31 @@ from database import SessionLocal, SessionLock, MtfReading, DecisionJournal, Cam
 TARGETS = ["BTCUSDT"]
 
 
-def _tf_candidate_verdict(c: CampaignLog) -> dict:
-    """
-    Builds the tf_verdicts entry for a 4H/1H candidate row. The engine (Phase 4
-    in ledger_closing_engine.py) already knows whether this candidate is open
-    or resolved — closed_at is the ground truth. This function reads that
-    answer rather than assuming "today's row" always means "live." A resolved
-    candidate must never render as BOS_ACTIVE: it would show working
-    COPY/COCKPIT buttons and could win the TRADE THIS badge for a trade that
-    already closed hours ago.
-    """
-    # t2/t3/macro_bias/dominant_direction: already exist on the row (t2/t3 from
-    # v4 Fibonacci staging; macro_bias/dominant_direction from gravity_engine's
-    # candidate-time capture) but were never surfaced here -- the radar's own
-    # TradingView "COPY"/"COCKPIT" payloads were silently built from T1 only,
-    # with no macro/micro context. Found 2026-07-14 tracing why the Pine Script
-    # HUD indicator showed "DATA MISSING" for 4H/1H candidates.
-    if c.closed_at is not None:
-        return {
-            "status": "RESOLVED",
-            "bias": c.bias,
-            "entry": c.entry_price,
-            "stop": c.stop_loss,
-            "t1": c.t1,
-            "t2": c.t2,
-            "t3": c.t3,
-            "macro_bias": c.macro_bias,
-            "dominant_direction": c.dominant_direction,
-            "outcome": c.status,
-            "realized_pnl": c.realized_pnl,
-        }
-    return {
-        "status": "BOS_ACTIVE",
-        "bias": c.bias,
-        "entry": c.entry_price,
-        "stop": c.stop_loss,
-        "t1": c.t1,
-        "t2": c.t2,
-        "t3": c.t3,
-        "macro_bias": c.macro_bias,
-        "dominant_direction": c.dominant_direction,
-        "outcome": None,
-        "realized_pnl": None,
-    }
+# _tf_candidate_verdict() removed 2026-08-30 -- built tf_verdicts entries for
+# 4H/1H CampaignLog candidate rows. The independent 1H/4H trading system that
+# produced those rows is retired (see _get_tf_system_verdicts() below);
+# nothing constructs 4h_system/1h_system CampaignLog rows anymore, so this
+# had no remaining caller.
 
 
 def _get_tf_system_verdicts(symbol_norm: str) -> dict:
     """
-    Query campaign_logs for today's 4H, 1H, and 15M (MAS) statuses.
-    All three come from a single DB session — DB-only, no exchange calls.
+    15M only. The independent 1H/4H trading system is retired (its trade-
+    creating functions, gravity_engine.py's _detect_4h_bos/_detect_1h_bos,
+    were already disabled 2026-08-27; Andy's call 2026-08-30: gone entirely,
+    not just de-emphasized -- KABRODA_REBUILD_SPEC.md). 4H/1H always report
+    RETIRED now instead of querying the frozen 4h_system/1h_system
+    CampaignLog rows from before the disable, which would otherwise keep
+    showing an old, closed trade as if it mattered forever.
     """
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     result = {
-        "4H":  {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None, "t2": None, "t3": None, "macro_bias": None, "dominant_direction": None, "outcome": None, "realized_pnl": None},
-        "1H":  {"status": "MONITORING", "bias": None, "entry": None, "stop": None, "t1": None, "t2": None, "t3": None, "macro_bias": None, "dominant_direction": None, "outcome": None, "realized_pnl": None},
+        "4H":  {"status": "RETIRED", "bias": None, "entry": None, "stop": None, "t1": None, "t2": None, "t3": None, "macro_bias": None, "dominant_direction": None, "outcome": None, "realized_pnl": None},
+        "1H":  {"status": "RETIRED", "bias": None, "entry": None, "stop": None, "t1": None, "t2": None, "t3": None, "macro_bias": None, "dominant_direction": None, "outcome": None, "realized_pnl": None},
         "15M": {"status": "PENDING",    "bias": None, "entry": None, "stop": None, "t1": None},
     }
     try:
         with SessionLocal() as db:
-            c4h = db.query(CampaignLog).filter(
-                CampaignLog.symbol == symbol_norm,
-                CampaignLog.session_id == "4h_system",
-                CampaignLog.date_key == today,
-            ).first()
-            if c4h:
-                result["4H"] = _tf_candidate_verdict(c4h)
-            c1h = db.query(CampaignLog).filter(
-                CampaignLog.symbol == symbol_norm,
-                CampaignLog.session_id == "1h_system",
-                CampaignLog.date_key == today,
-            ).first()
-            if c1h:
-                result["1H"] = _tf_candidate_verdict(c1h)
             c15m = (
                 db.query(CampaignLog)
                 .filter(
@@ -115,67 +68,18 @@ def _get_tf_system_verdicts(symbol_norm: str) -> dict:
     return result
 
 
-def _candidate_is_live(verdict: dict, current_price: float, threshold: float = 0.75) -> bool:
-    """
-    Returns True when a BOS candidate is still actionable at the current price.
-    Suppresses TRADE THIS on two conditions (both at threshold=75%):
-      - favorable drift: price has moved >=threshold of entry→target distance
-      - adverse drift:   price has moved >=threshold of entry→stop distance
-    Single unified check — replaces direction-specific guard pile.
-    """
-    entry  = verdict.get("entry")
-    target = verdict.get("t1")
-    stop   = verdict.get("stop")
-    bias   = verdict.get("bias", "")
-    if not entry or not current_price:
-        return True
-    try:
-        entry         = float(entry)
-        current_price = float(current_price)
-        target        = float(target) if target else None
-        stop          = float(stop)   if stop   else None
-    except (TypeError, ValueError):
-        return True
-
-    if bias == "LONG":
-        if target and target > entry:
-            if current_price >= entry + (target - entry) * threshold:
-                return False  # favorable: entry window closed
-        if stop and entry > stop:
-            if current_price <= entry - (entry - stop) * threshold:
-                return False  # adverse: setup invalidated by market
-    elif bias == "SHORT":
-        if target and target < entry:
-            if current_price <= entry - (entry - target) * threshold:
-                return False  # favorable: entry window closed
-        if stop and stop > entry:
-            if current_price >= entry + (stop - entry) * threshold:
-                return False  # adverse: setup invalidated by market
-    return True
+# _candidate_is_live() removed 2026-08-30 -- price-drift staleness check for
+# 4H/1H BOS candidates. Only caller was _which_tf_today()'s now-removed 4H/1H
+# branches; the independent 1H/4H trading system is retired.
 
 
 def _which_tf_today(tf_verdicts: dict, current_price: float = 0.0) -> dict:
-    """
-    Return the highest-priority active timeframe for today.
-    Priority: 4H BOS > 1H BOS > 15M APPROVED > NONE.
-    Used to drive the TRADE THIS ★ badge on the radar TF stack.
-    Two independent suppressions guard the badge, both required:
-      - price-drift staleness, checked by _candidate_is_live() below
-      - resolved-candidate state — a RESOLVED verdict never satisfies
-        == "BOS_ACTIVE" (set by _tf_candidate_verdict() once closed_at is
-        populated), so a closed trade can never win TRADE THIS regardless
-        of price. This is the fix for candidate 112 rendering as live hours
-        after it closed CLOSED_WIN.
-    """
-    v4h  = tf_verdicts.get("4H",  {})
-    v1h  = tf_verdicts.get("1H",  {})
+    """15M only now -- the independent 1H/4H trading system is retired
+    (Andy's call, 2026-08-30, KABRODA_REBUILD_SPEC.md). Drives the TRADE
+    THIS star badge on the radar."""
     v15m = tf_verdicts.get("15M", {})
-    if v4h.get("status") == "BOS_ACTIVE" and _candidate_is_live(v4h, current_price):
-        return {"primary_tf": "4H",   "flag": "4H_ACTIVE",      "bias": v4h.get("bias")}
-    if v1h.get("status") == "BOS_ACTIVE" and _candidate_is_live(v1h, current_price):
-        return {"primary_tf": "1H",   "flag": "1H_ACTIVE",      "bias": v1h.get("bias")}
     if v15m.get("status") == "APPROVED":
-        return {"primary_tf": "15M",  "flag": "15M_APPROVED",   "bias": v15m.get("bias")}
+        return {"primary_tf": "15M", "flag": "15M_APPROVED", "bias": v15m.get("bias")}
     return {"primary_tf": "NONE", "flag": "ALL_STAND_DOWN", "bias": None}
 
 
