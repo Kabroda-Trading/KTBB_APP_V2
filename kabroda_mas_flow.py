@@ -1579,6 +1579,7 @@ def _inject_brief_to_database(
         log.mas_executive_brief = brief.tactical_brief
         log.mas_approval_status = brief.approval_status
         log.conviction = brief.conviction
+        log.tier = brief.tier
         log.bias = brief.bias
         log.entry_price = brief.entry_price
         log.stop_loss = brief.stop_loss

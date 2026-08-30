@@ -113,17 +113,6 @@
             font-size: 10px;
             letter-spacing: 1px;
         }
-        .tf-trade-this {
-            background: rgba(234,179,8,0.12);
-            border: 1px solid #eab308;
-            color: #eab308;
-            padding: 2px 8px;
-            border-radius: 3px;
-            font-size: 9px;
-            font-weight: 800;
-            letter-spacing: 1.5px;
-            white-space: nowrap;
-        }
         .tf-regime-bar {
             font-family: 'JetBrains Mono';
             font-size: 10px;
@@ -132,19 +121,6 @@
             margin-top: 3px;
             padding-top: 5px;
         }
-        .tf-actions { display: flex; gap: 5px; margin-left: auto; }
-        .tf-btn-copy {
-            font-family: 'JetBrains Mono'; font-size: 9px; font-weight: 700;
-            padding: 2px 7px; border: 1px solid #334155; border-radius: 3px;
-            background: #1e293b; color: #64748b; cursor: pointer; transition: 0.15s;
-        }
-        .tf-btn-copy:hover { background: #334155; color: #94a3b8; }
-        .tf-btn-cockpit {
-            font-family: 'JetBrains Mono'; font-size: 9px; font-weight: 700;
-            padding: 2px 8px; border: 1px solid #22c55e; border-radius: 3px;
-            background: rgba(34,197,94,0.08); color: #22c55e; cursor: pointer; transition: 0.15s;
-        }
-        .tf-btn-cockpit:hover { background: #22c55e; color: #000; }
 
         .lock-btn { font-size: 11px; padding: 12px 20px; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; cursor: pointer; transition: 0.2s; font-family: 'JetBrains Mono'; font-weight: 700; text-transform: uppercase; }
         .lock-btn:hover:not(:disabled) { background: #eab308; color:#000; border-color: #eab308; }
@@ -584,50 +560,10 @@
             ].join('|');
         }
 
-        function openTfCockpit(sym, tf) {
-            const mem = window.tfCandidateMemory && window.tfCandidateMemory[sym + '_' + tf];
-            if (!mem) return;
-            const entry = parseFloat(mem.entry  || 0);
-            const stop  = parseFloat(mem.stop   || 0);
-            const tp1   = parseFloat(mem.target || 0);
-            const tp2   = parseFloat(mem.t2 || 0);
-            const tp3   = parseFloat(mem.t3 || 0);
-            const data = {
-                symbol: sym,
-                price: 0,
-                diagnostic_ledger: {timeframe: tf, type: tf + '_CANDIDATE'},
-                plan: {
-                    valid:   true,
-                    bias:    mem.bias,
-                    entry:   entry,
-                    stop:    stop,
-                    targets: [tp1, tp2, tp3],
-                },
-                mas_status: tf + '_CANDIDATE',
-                key: entry ? buildMissionKey9(mem.bias, tf + '_CANDIDATE', entry, stop, tp1, tp2, tp3, mem.macroBias, mem.dominantDirection) : '',
-            };
-            activeData = data;
-            document.getElementById('tSym').innerText = sym.replace('USDT', '') + ' ' + tf + ' CANDIDATE COCKPIT';
-            renderModal(data);
-            document.getElementById('targetModal').style.display = 'block';
-            document.body.style.overflow = 'hidden';
-        }
-
-        function copyTfLevel(sym, tf) {
-            const mem = window.tfCandidateMemory && window.tfCandidateMemory[sym + '_' + tf];
-            if (!mem) return;
-            const text = buildMissionKey9(mem.bias, tf + '_CANDIDATE', mem.entry, mem.stop, mem.target, mem.t2, mem.t3, mem.macroBias, mem.dominantDirection);
-            navigator.clipboard.writeText(text).then(() => {
-                const btns = document.querySelectorAll(`.tf-btn-copy`);
-                btns.forEach(b => {
-                    if (b.getAttribute('onclick') && b.getAttribute('onclick').includes(`'${sym}','${tf}'`)) {
-                        const orig = b.innerHTML;
-                        b.innerHTML = '✓ COPIED';
-                        setTimeout(() => b.innerHTML = orig, 1000);
-                    }
-                });
-            });
-        }
+        // openTfCockpit()/copyTfLevel() removed 2026-08-30 -- only served the
+        // 4H/1H TF-stack rows, which are gone (the independent 1H/4H trading
+        // system is retired). The 15M cockpit (openModal(), below) is
+        // untouched -- that's the real, live decision, not a candidate.
 
         function closeModal() {
             document.getElementById('targetModal').style.display = 'none';
@@ -1059,106 +995,42 @@
         }
 
         // ================================================================
-        // TF STACK BUILDER — 4H / 1H / regime strip below each radar row
+        // TF STACK BUILDER — 15M decisive state + regime strip below each row.
+        // 2026-08-30 rebuild: the independent 4H/1H trading system is retired
+        // (Andy's call — "clean up the radar back to just the fifteen minute"),
+        // so the 4H/1H rows, their COPY/COCKPIT buttons, and the candidate-
+        // memory seeding that fed them are gone, not just hidden.
         // ================================================================
         function _buildTfStack(sym, tfVerdicts, tfToday, dailyRegime, weeklyPos) {
-            const tv4h  = (tfVerdicts && tfVerdicts['4H'])  || {};
-            const tv1h  = (tfVerdicts && tfVerdicts['1H'])  || {};
             const tv15m = (tfVerdicts && tfVerdicts['15M']) || {};
 
-            // Seed candidate memory so COCKPIT/COPY buttons have access to levels.
-            // Only live (BOS_ACTIVE) candidates get seeded — a RESOLVED candidate must
-            // never leave a stale live-looking entry that COCKPIT/COPY could act on.
-            window.tfCandidateMemory = window.tfCandidateMemory || {};
-            if (tv4h.status === 'BOS_ACTIVE') {
-                window.tfCandidateMemory[sym + '_4H'] = {sym, bias: tv4h.bias, entry: tv4h.entry, stop: tv4h.stop, target: tv4h.t1,
-                    t2: tv4h.t2, t3: tv4h.t3, macroBias: tv4h.macro_bias, dominantDirection: tv4h.dominant_direction};
-            } else {
-                delete window.tfCandidateMemory[sym + '_4H'];
-            }
-            if (tv1h.status === 'BOS_ACTIVE') {
-                window.tfCandidateMemory[sym + '_1H'] = {sym, bias: tv1h.bias, entry: tv1h.entry, stop: tv1h.stop, target: tv1h.t1,
-                    t2: tv1h.t2, t3: tv1h.t3, macroBias: tv1h.macro_bias, dominantDirection: tv1h.dominant_direction};
-            } else {
-                delete window.tfCandidateMemory[sym + '_1H'];
-            }
-
-            // Highest-priority active TF from server-computed _which_tf_today()
-            const tradeTf = (tfToday && tfToday.primary_tf !== 'NONE') ? tfToday.primary_tf : null;
-
-            function tfRow(tf, data) {
-                const active   = data.status === 'BOS_ACTIVE';
-                const resolved = data.status === 'RESOLVED';
-                const color  = active ? (data.bias === 'LONG' ? '#22c55e' : '#ef4444')
-                             : resolved ? '#334155' : '#1e293b';
-                const text   = active ? (data.bias === 'LONG' ? '#22c55e' : '#ef4444')
-                             : resolved ? '#64748b' : '#334155';
-                const badge  = `<span class="tf-label" style="border-color:${color}; color:${text};">${tf}</span>`;
-                // RESOLVED never wins TRADE THIS — tradeTf can only equal tf here if the
-                // server-side _which_tf_today() granted it, which requires status===BOS_ACTIVE.
-                const tradeThis = (tradeTf === tf)
-                    ? `<span class="tf-trade-this">TRADE THIS ★</span>` : '';
-                let detail = '';
-                let actions = '';
-                if (active) {
-                    const bias  = `<span style="color:${text}; font-weight:700;">${data.bias || ''}</span>`;
-                    const entry = data.entry ? `<span style="color:#475569;"> · Entry <b style="color:#94a3b8;">$${fmt(data.entry)}</b></span>` : '';
-                    const stop  = data.stop  ? `<span style="color:#475569;"> · Stop <b style="color:#ef4444;">$${fmt(data.stop)}</b></span>`   : '';
-                    const t1    = data.t1    ? `<span style="color:#475569;"> · Target <b style="color:#eab308;">$${fmt(data.t1)}</b></span>`   : '';
-                    detail = `${bias}${entry}${stop}${t1}`;
-                    actions = `<div class="tf-actions">
-                        <button class="tf-btn-copy" onclick="copyTfLevel('${sym}','${tf}')" title="Copy entry/stop/target">📋 COPY</button>
-                        <button class="tf-btn-cockpit" onclick="openTfCockpit('${sym}','${tf}')">COCKPIT →</button>
-                    </div>`;
-                } else if (resolved) {
-                    const outcome = data.outcome || '';
-                    const pnl = (data.realized_pnl !== null && data.realized_pnl !== undefined) ? data.realized_pnl : null;
-                    let outcomeLabel, outcomeColor;
-                    if (outcome === 'CLOSED_WIN') {
-                        outcomeLabel = `WIN +${(pnl !== null ? pnl : 1).toFixed(2)}R`;
-                        outcomeColor = '#22c55e';
-                    } else if (outcome === 'CLOSED_LOSS') {
-                        outcomeLabel = `LOSS ${(pnl !== null ? pnl : -1).toFixed(2)}R`;
-                        outcomeColor = '#ef4444';
-                    } else if (outcome === 'CLOSED_AT_EXPIRY') {
-                        outcomeLabel = `EXPIRED (${pnl !== null ? pnl.toFixed(2) : '0.00'}R)`;
-                        outcomeColor = '#f97316';
-                    } else if (outcome === 'EXPIRED') {
-                        outcomeLabel = 'EXPIRED (no data)';
-                        outcomeColor = '#64748b';
-                    } else {
-                        outcomeLabel = outcome || 'CLOSED';
-                        outcomeColor = '#64748b';
-                    }
-                    detail = `<span style="color:${outcomeColor}; font-weight:700;">RESOLVED — ${outcomeLabel}</span>`;
-                    actions = `<div class="tf-actions"><span style="color:#334155; font-size:9px; font-family:'JetBrains Mono';">NO ACTION AVAILABLE</span></div>`;
-                } else {
-                    detail = `<span style="color:#1e3a52;">MONITORING — no signal today</span>`;
-                }
-                return `<div class="tf-row">${badge}${detail}${tradeThis}${actions}</div>`;
-            }
-
             function mas15mRow(data) {
-                const status   = data.status || 'PENDING';
-                const approved = status === 'APPROVED';
-                const standDown = status === 'STAND_DOWN';
-                const color  = approved ? '#22c55e' : standDown ? '#475569' : '#1e293b';
-                const text   = approved ? '#22c55e' : standDown ? '#64748b' : '#334155';
-                const badge  = `<span class="tf-label" style="border-color:${color}; color:${text};">15M</span>`;
-                const tradeThis = (tradeTf === '15M') ? `<span class="tf-trade-this">TRADE THIS ★</span>` : '';
-                let detail = '';
-                if (approved) {
-                    const bias  = data.bias  ? `<span style="color:#22c55e; font-weight:700;">${data.bias}</span>` : '';
+                const state = data.state;  // TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS
+                const isTake = state === 'TAKE_PREMIUM' || state === 'TAKE_STANDARD';
+                const color = state === 'TAKE_PREMIUM' ? '#22c55e'
+                            : state === 'TAKE_STANDARD' ? '#22c55e'
+                            : state === 'ALMOST'        ? '#eab308'
+                            : state === 'PASS'          ? '#64748b'
+                            : '#334155';
+                const stampText = state === 'TAKE_PREMIUM' ? '🟢🟢 TAKE — PREMIUM'
+                                 : state === 'TAKE_STANDARD' ? '🟢 TAKE — STANDARD'
+                                 : state === 'ALMOST'        ? '🟡 ALMOST'
+                                 : state === 'PASS'          ? '⚪ PASS'
+                                 : (data.status || 'PENDING');
+                const badge = `<span class="tf-label" style="border-color:${color}; color:${color}; font-weight:800;">${stampText}</span>`;
+                const bias  = data.bias ? `<span style="color:${color}; font-weight:700;"> ${data.bias}</span>` : '';
+                let plan = '';
+                if (isTake) {
                     const entry = data.entry ? `<span style="color:#475569;"> · Entry <b style="color:#94a3b8;">$${fmt(data.entry)}</b></span>` : '';
                     const stop  = data.stop  ? `<span style="color:#475569;"> · Stop <b style="color:#ef4444;">$${fmt(data.stop)}</b></span>`   : '';
                     const t1    = data.t1    ? `<span style="color:#475569;"> · T1 <b style="color:#eab308;">$${fmt(data.t1)}</b></span>`       : '';
-                    detail = `<span style="color:#22c55e; font-weight:700;">MAS: APPROVED</span>${bias ? ' · ' + bias.outerHTML||bias : ''}${entry}${stop}${t1}`;
-                } else if (standDown) {
-                    detail = `<span style="color:#64748b;">MAS: STAND DOWN</span>`;
-                } else {
-                    detail = `<span style="color:#334155;">MAS: ${status}</span>`;
+                    const t2    = data.t2    ? `<span style="color:#475569;"> · T2 <b style="color:#eab308;">$${fmt(data.t2)}</b></span>`       : '';
+                    const t3    = data.t3    ? `<span style="color:#475569;"> · T3 <b style="color:#eab308;">$${fmt(data.t3)}</b></span>`       : '';
+                    plan = `${entry}${stop}${t1}${t2}${t3}`;
                 }
-                return `<div class="tf-row">${badge}${detail}${tradeThis}</div>`;
+                const reason = data.headline
+                    ? `<div class="tf-reason" style="color:#94a3b8; font-size:11px; margin-top:4px;">${data.headline}</div>` : '';
+                return `<div class="tf-row">${badge}${bias}${plan}</div>${reason}`;
             }
 
             const regimeColor = dailyRegime === 'DAILY_BULL'          ? '#22c55e'
@@ -1173,7 +1045,7 @@
             const regimeBar  = (regimePart || weeklyPart)
                 ? `<div class="tf-regime-bar">${regimePart}${weeklyPart}</div>` : '';
 
-            return `<div class="tf-stack" data-tf-symbol="${sym}">${tfRow('4H', tv4h)}${tfRow('1H', tv1h)}${mas15mRow(tv15m)}${regimeBar}</div>`;
+            return `<div class="tf-stack" data-tf-symbol="${sym}">${mas15mRow(tv15m)}${regimeBar}</div>`;
         }
 
         // ================================================================
@@ -1182,7 +1054,6 @@
         function renderSnapshotGrid(snap) {
             const grid = document.getElementById('radarTargetGrid');
             window.radarMemory = {};
-            window.tfCandidateMemory = {};
 
             if (!snap.locked) { grid.innerHTML = ''; return; }
 

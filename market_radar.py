@@ -39,9 +39,10 @@ def _get_tf_system_verdicts(symbol_norm: str) -> dict:
     """
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     result = {
-        "4H":  {"status": "RETIRED", "bias": None, "entry": None, "stop": None, "t1": None, "t2": None, "t3": None, "macro_bias": None, "dominant_direction": None, "outcome": None, "realized_pnl": None},
-        "1H":  {"status": "RETIRED", "bias": None, "entry": None, "stop": None, "t1": None, "t2": None, "t3": None, "macro_bias": None, "dominant_direction": None, "outcome": None, "realized_pnl": None},
-        "15M": {"status": "PENDING",    "bias": None, "entry": None, "stop": None, "t1": None},
+        "4H":  {"status": "RETIRED"},
+        "1H":  {"status": "RETIRED"},
+        "15M": {"status": "PENDING", "state": None, "tier": None, "headline": None,
+                "bias": None, "entry": None, "stop": None, "t1": None, "t2": None, "t3": None},
     }
     try:
         with SessionLocal() as db:
@@ -57,11 +58,16 @@ def _get_tf_system_verdicts(symbol_norm: str) -> dict:
             )
             if c15m:
                 result["15M"] = {
-                    "status": c15m.mas_approval_status or "PENDING",
-                    "bias":   c15m.bias,
-                    "entry":  c15m.entry_price,
-                    "stop":   c15m.stop_loss,
-                    "t1":     c15m.t1,
+                    "status":   c15m.mas_approval_status or "PENDING",
+                    "state":    c15m.conviction,    # TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS
+                    "tier":     c15m.tier,          # PREMIUM/STANDARD/None
+                    "headline": c15m.mas_executive_brief,  # the real reason, plain English
+                    "bias":     c15m.bias,
+                    "entry":    c15m.entry_price,
+                    "stop":     c15m.stop_loss,
+                    "t1":       c15m.t1,
+                    "t2":       c15m.t2,
+                    "t3":       c15m.t3,
                 }
     except Exception as e:
         print(f"[TF VERDICTS] {symbol_norm}: {e}")
