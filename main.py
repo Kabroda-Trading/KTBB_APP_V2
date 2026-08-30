@@ -1385,11 +1385,15 @@ async def admin_research_page(request: Request, db: Session = Depends(get_db)):
     if not ctx["is_admin"]: return RedirectResponse("/suite")
     return _template_or_fallback(request, templates, "research_lab.html", ctx)
 
-@app.get("/admin/mission")
-async def mission_brief(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx["is_admin"]: return RedirectResponse("/suite")
-    return _template_or_fallback(request, templates, "mission_brief.html", ctx)
+# /admin/mission + mission_brief.html removed 2026-08-30 -- a static
+# glossary page teaching an older, unrelated framework (MAGNET/SUFFOCATED/
+# JAILBREAK templates, hardcoded "2025 DATA" stats) that predates even the
+# graded-conviction model, let alone tonight's calibrated-gate rebuild.
+# Not linked from anywhere live (grepped every template + main.py) -- only
+# reachable by typing the exact URL. Archived, not rewritten: the real
+# rules now live in CLAUDE.md and KABRODA_REBUILD_SPEC.md, not a hand-authored
+# admin page that would need to be kept in sync by hand every time the
+# system changes.
 
 @app.get("/admin")
 async def admin_roster_page(request: Request, db: Session = Depends(get_db)):
