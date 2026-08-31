@@ -51,10 +51,12 @@ At the open of each trading session (defined in `session_manager.py`), the syste
 
 After 30 minutes, `sse_engine.py` computes two permanent levels for the session:
 
-- **Breakout Trigger (`bo`)** — the price where a confirmed long trade becomes valid. Derived from `max(r30_high, 24h VRVP Value Area High)`, then pushed a minimum distance from the anchor to prevent false triggers.
-- **Breakdown Trigger (`bd`)** — the price where a confirmed short trade becomes valid. Derived from `min(r30_low, 24h VRVP Value Area Low)`, same logic inverted.
+- **Breakout Trigger (`bo`)** — the price where a confirmed long trade becomes valid. Derived from `max(r30_high, 24h TPO Value Area High)`, then pushed a minimum distance from the anchor to prevent false triggers.
+- **Breakdown Trigger (`bd`)** — the price where a confirmed short trade becomes valid. Derived from `min(r30_low, 24h TPO Value Area Low)`, same logic inverted.
 
-These two triggers are the **Single Source of Truth (SSOT)** for the entire session. They are frozen into a `SessionLock` database record and never recomputed. Every downstream calculation — targets, stops, MAS analysis, structure state — derives from them.
+**The 24h value area is time-based (TPO), not volume-based (VRVP), as of 2026-08-30.** `sse_engine.py`'s `_calculate_tpo_value_area()` counts bars *touching* each price row over the trailing 24h — Steidlmayer's original Market Profile method — instead of accumulating volume per row. This drops the exchange volume-feed dependency entirely. Validated in the `Kabroda AI Brain` repo (`KABRODA_REBUILD_SPEC.md` §10, `LEVEL_METHODOLOGY.md`, `compare_levels.py`) against kabroda.com's own 123 real VRVP locks: 88% same-side, 78% same-outcome, 1.00x median box ratio — the two methods pick essentially the same levels, so the swap is a reliability upgrade (no volume-feed dependency), not a strategy change. The output field names (`f24_poc`/`f24_vah`/`f24_val`) are unchanged; only how they're computed changed. `sse_engine.py`'s port of the algorithm (`_calculate_tpo_value_area`) is verified bit-for-bit identical to Brain's `brain/engine/repro_levels.py::_tpo_value_area()` on randomized synthetic data — do not let the two drift; if Brain's algorithm changes, port the change here too.
+
+These two triggers are the **Single Source of Truth (SSOT)** for the entire session. They are frozen into a `SessionLock` database record and never recomputed. Every downstream calculation — targets, stops, the calibrated gate — derives from them.
 
 ### The Calibrated Gate (rebuilt 2026-08-30 — supersedes the old Measured Move Rule)
 

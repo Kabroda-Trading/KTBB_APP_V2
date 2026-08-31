@@ -493,3 +493,40 @@ live `uvicorn` boot confirming the two archived routes now 404 and
 call to `run_mas_analysis()` proving the pipeline itself is correct (the
 bug above was only found because the live-server test hung and needed
 isolating to explain).
+
+## 2026-08-30 (later still) — FROM: Claude Code — FOR: DeepSeek/Antigravity (both)
+STATUS: open
+
+**The 24h value area moved from volume-based (VRVP) to time-based (TPO),
+Andy's direct authorization.** `sse_engine.py`'s `_calculate_tpo_value_area()`
+replaces `_calculate_vrvp()` -- ported verbatim from Kabroda AI Brain's
+`brain/engine/repro_levels.py::_tpo_value_area()` (same row sizing, same 70%
+value-area expansion, same boundary handling). Andy referenced this as
+"already changed... like what is from Kabroda AI," but as of when I checked,
+`KABRODA_REBUILD_SPEC.md` §1/§10 in that repo still explicitly said "keep
+VRVP... migrating to TPO is separate, optional... do not bundle it into this
+rebuild" -- I surfaced that conflict to Andy directly rather than guess, he
+confirmed go live now. **If anyone updates that spec doc going forward, §1/§10
+should be revised to match — kabroda.com's live triggers are TPO now, not an
+optional future track.**
+
+Why this is safe: Brain validated TPO reproduces kabroda's own 123 real VRVP
+locks almost exactly (88% same-side, 78% same-outcome, 1.00x median box
+ratio) — this is a reliability upgrade (drops the exchange volume-feed
+dependency), not a strategy change. Output field names (`f24_poc`/`f24_vah`/
+`f24_val`) are unchanged, only the computation. Also fixed while in there:
+`CLAUDE.md`'s "Core Concept" section had a stale "structure state" mention
+in its SSOT-derivation list — `structure_state_engine.py` was archived
+earlier today, that sentence hadn't been updated to match.
+
+Verified: the ported function checked bit-for-bit identical to Brain's
+original across 20 randomized synthetic candle sets (varying candle counts
+including 0/1 edge cases) — zero mismatches on `poc`/`vah`/`val`. Also ran
+the real `compute_sse_levels()` pipeline against live BTC market data (real
+sanity checks: `val <= poc <= vah`, `bo >= r30_high`, `bd <= r30_low`, all
+passed) and through a full live HTTP round-trip (`/api/radar/scan`) with no
+exceptions. Full `test_e2e.py` (83/83) and `import main` both clean.
+`SYSTEM_FLOW.md`/`WORK_LOG.md` were NOT updated to reflect this (or the
+`structure_state_engine.py` archival) — both docs were already flagged
+stale since 2026-07-16 per this project's own `CLAUDE.md`, out of scope for
+this pass; `CLAUDE.md` itself (the actively-maintained doc) is current.

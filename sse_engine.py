@@ -1,13 +1,24 @@
 # sse_engine.py
 # ==============================================================================
-# STRATEGIC STRUCTURAL ENGINE (SSE) v2.4 - SNIPER READY
+# STRATEGIC STRUCTURAL ENGINE (SSE) v2.5 - TIME-BASED VALUE AREA
 # ==============================================================================
 # Contract:
 # 1) Native input timeframe is 5m.
 # 2) 15m/1h/4h are derived internally via resampling.
-# 3) Triggers are calculated from 30m anchor range + 24h VRVP edges + pivot shelves.
+# 3) Triggers are calculated from 30m anchor range + 24h TPO value-area edges
+#    + pivot shelves.
 # 4) Now supports "Tuning" overrides for Research Lab optimization.
 # 5) EXPORTS: ATR, Slope, Structure Score, and DAILY 30/50 EMAs.
+#
+# 2026-08-30: the 24h value area moved from volume-weighted (VRVP) to
+# time-based (TPO, Steidlmayer's original Market Profile method) per Andy's
+# direct authorization. Validated in Kabroda AI Brain against kabroda.com's
+# own 123 real VRVP locks: 88% same-side, 78% same-outcome, 1.00x median box
+# ratio (KABRODA_REBUILD_SPEC.md SS10, LEVEL_METHODOLOGY.md, compare_levels.py,
+# brain/engine/repro_levels.py -- that repo's _tpo_value_area() is the source
+# this file's _calculate_tpo_value_area() is ported from, verbatim algorithm).
+# Drops the exchange volume-feed dependency entirely. Output level keys
+# (f24_poc/f24_vah/f24_val) are unchanged -- only how they're computed.
 # ==============================================================================
 
 from __future__ import annotations
@@ -114,9 +125,21 @@ class Shelf:
     strength: float
 
 # ---------------------------------------------------------
-# 2) VRVP ENGINE
+# 2) TPO VALUE AREA ENGINE (time-based, no volume feed)
 # ---------------------------------------------------------
-def _calculate_vrvp(candles: List[Dict[str, Any]], row_size_pct: float = 0.001) -> Dict[str, float]:
+def _calculate_tpo_value_area(
+    candles: List[Dict[str, Any]], row_size_pct: float = 0.001, value_area_pct: float = 0.70
+) -> Dict[str, float]:
+    """Time-based value area (Steidlmayer's original Market Profile method).
+    Counts BARS touching each price row -- not volume -- so this has zero
+    dependency on the exchange's volume feed. Ported verbatim (same row
+    sizing, same 70% value-area expansion, same boundary handling) from
+    Kabroda AI Brain's brain/engine/repro_levels.py::_tpo_value_area(),
+    validated there against kabroda.com's own 123 real VRVP locks (88%
+    same-side, 78% same-outcome, 1.00x median box ratio). Replaces
+    _calculate_vrvp() as of 2026-08-30 (Andy's direct authorization) --
+    KABRODA_REBUILD_SPEC.md SS10.
+    """
     if not candles:
         return {"poc": 0.0, "vah": 0.0, "val": 0.0}
 
@@ -127,36 +150,35 @@ def _calculate_vrvp(candles: List[Dict[str, Any]], row_size_pct: float = 0.001) 
 
     row_size = max(min_p * row_size_pct, 1.0)
     num_bins = int((max_p - min_p) / row_size) + 1
-    volume_profile = [0.0] * num_bins
-    total_volume = 0.0
+    tpo_profile = [0] * num_bins
 
     for c in candles:
-        typical = (float(c["high"]) + float(c["low"]) + float(c["close"])) / 3.0
-        vol = float(c.get("volume", 0.0))
-        bin_idx = int((typical - min_p) / row_size)
-        if 0 <= bin_idx < num_bins:
-            volume_profile[bin_idx] += vol
-            total_volume += vol
+        bin_lo = max(0, int((float(c["low"]) - min_p) / row_size))
+        bin_hi = min(num_bins - 1, int((float(c["high"]) - min_p) / row_size))
+        for i in range(bin_lo, bin_hi + 1):
+            tpo_profile[i] += 1
 
-    max_vol_idx = max(range(num_bins), key=lambda i: volume_profile[i])
-    poc = min_p + (max_vol_idx * row_size)
+    total = sum(tpo_profile)
+    poc_idx = max(range(num_bins), key=lambda i: tpo_profile[i])
+    poc = min_p + (poc_idx * row_size)
 
-    # 70% value area
-    target = total_volume * 0.70
-    curr = volume_profile[max_vol_idx]
-    up = down = max_vol_idx
+    # 70% value area -- greedily expand toward whichever side has more bars
+    # touching the next row; boundary sentinel is -1 (not 0) so a genuine
+    # zero-count row in the middle of the range doesn't falsely halt
+    # expansion (matches Brain's validated algorithm exactly).
+    target = total * value_area_pct
+    acc = tpo_profile[poc_idx]
+    up = down = poc_idx
 
-    while curr < target:
-        v_up = volume_profile[up + 1] if up < num_bins - 1 else 0.0
-        v_dn = volume_profile[down - 1] if down > 0 else 0.0
-        if v_up == 0 and v_dn == 0:
-            break
+    while acc < target and (up < num_bins - 1 or down > 0):
+        v_up = tpo_profile[up + 1] if up < num_bins - 1 else -1
+        v_dn = tpo_profile[down - 1] if down > 0 else -1
         if v_up >= v_dn:
-            curr += v_up
             up += 1
+            acc += max(v_up, 0)
         else:
-            curr += v_dn
             down -= 1
+            acc += max(v_dn, 0)
 
     return {"poc": float(poc), "vah": float(min_p + (up * row_size)), "val": float(min_p + (down * row_size))}
 
@@ -205,18 +227,18 @@ def _select_daily_levels(resistance: List[Shelf], support: List[Shelf]) -> Tuple
 # 4) CONTEXT & TRIGGER LOGIC
 # ---------------------------------------------------------
 def _pick_trigger_candidates(
-    anchor_px: float, 
-    r30_h: float, 
-    r30_l: float, 
-    vrvp_24h: Dict[str, float], 
-    daily_sup: float, 
+    anchor_px: float,
+    r30_h: float,
+    r30_l: float,
+    value_area_24h: Dict[str, float],
+    daily_sup: float,
     daily_res: float,
     tuning: Dict[str, Any] = None  # <--- NEW ARGUMENT
 ) -> Tuple[float, float]:
-    
+
     # Base: prioritize R30 extremes, then value edge, then daily pivot
-    bo_base = max(r30_h, float(vrvp_24h.get("vah", 0.0))) if r30_h > 0 else float(daily_res)
-    bd_base = min(r30_l, float(vrvp_24h.get("val", 0.0))) if r30_l > 0 else float(daily_sup)
+    bo_base = max(r30_h, float(value_area_24h.get("vah", 0.0))) if r30_h > 0 else float(daily_res)
+    bd_base = min(r30_l, float(value_area_24h.get("val", 0.0))) if r30_l > 0 else float(daily_sup)
 
     # Tuning Logic (Default to 20 bps / 0.2% if no tuning provided)
     tuning = tuning or {}
@@ -426,15 +448,15 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
     if ds == 0.0 and locked_15m:
         ds = min(float(c["low"]) for c in locked_15m[-96:])
 
-    # 2) VRVP (24h)
-    vrvp_24h = _calculate_vrvp(context_24h_15m)
+    # 2) 24h value area (time-based / TPO -- see module header, 2026-08-30)
+    value_area_24h = _calculate_tpo_value_area(context_24h_15m)
 
     # 3) Triggers (anchor-based)
-    tuning_cfg = inputs.get("tuning", {}) 
-    
+    tuning_cfg = inputs.get("tuning", {})
+
     bo, bd = _pick_trigger_candidates(
-        anchor_px, r30_h, r30_l, vrvp_24h, ds, dr, 
-        tuning=tuning_cfg 
+        anchor_px, r30_h, r30_l, value_area_24h, ds, dr,
+        tuning=tuning_cfg
     )
 
     # 4) Context & bias
@@ -443,9 +465,9 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
         live_px=live_px,
         bo=bo,
         bd=bd,
-        f24_poc=vrvp_24h["poc"],
-        f24_vah=vrvp_24h["vah"],
-        f24_val=vrvp_24h["val"],
+        f24_poc=value_area_24h["poc"],
+        f24_vah=value_area_24h["vah"],
+        f24_val=value_area_24h["val"],
         candles_15m=locked_15m,
         daily_candles=daily_candles,
     )
@@ -463,9 +485,9 @@ def compute_sse_levels(inputs: Dict[str, Any]) -> Dict[str, Any]:
             "breakdown_trigger": float(bd),
             "range30m_high": float(r30_h),
             "range30m_low": float(r30_l),
-            "f24_poc": float(vrvp_24h["poc"]),
-            "f24_vah": float(vrvp_24h["vah"]),
-            "f24_val": float(vrvp_24h["val"]),
+            "f24_poc": float(value_area_24h["poc"]),
+            "f24_vah": float(value_area_24h["vah"]),
+            "f24_val": float(value_area_24h["val"]),
             
             # --- NEW EXPORTS ---
             "atr": ctx["volatility"]["atr_14"], 
