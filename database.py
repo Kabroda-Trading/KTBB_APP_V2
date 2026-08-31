@@ -681,6 +681,78 @@ class CampaignLog(Base):
 # CLAUDE.md), just unmapped.
 
 # ---------------------------------------------------------
+# TRADE PLAN (KABRODA_COM_TRADE_PLAN_SPEC.md SS3/SS5, 2026-08-31)
+# One plan per session, generated once at the 8:00 CT (13:00 UTC) lock,
+# never re-generated intraday -- the anti-flip-flop rule (SS1). State
+# transitions are one-way. This is a NEW, additive object: it does not
+# replace or feed CampaignLog.stop_loss / any R-multiple math (see
+# stop_planner.py's header and docs/STOP_BASIS_ANSWER.md in the Kabroda AI
+# Brain repo -- confirmed directly with Andy, 2026-08-31, before this table
+# existed). management describes the VALIDATED rule already running in
+# ledger_closing_engine.py (30% at T1, fixed runner-stop, 70% to T3, same
+# both tiers) -- the spec's own first draft said something different
+# (tier-dependent, stop-to-breakeven); caught as a real spec/code mismatch
+# and corrected in the Brain repo (commit d8a33ce) rather than silently
+# picking one. This table's own status vocabulary — NO_PLAN | WAITING |
+# ARMED | VETOED | FILLED | STOPPED | REENTRY_ARMED | DONE — is unrelated
+# to CampaignLog.status (PENDING/CLOSED_WIN/CLOSED_LOSS/...); don't conflate
+# the two state machines.
+# ---------------------------------------------------------
+class TradePlan(Base):
+    __tablename__ = "trade_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True, nullable=False)
+    date_key = Column(String, index=True, nullable=False)
+    session_id = Column(String, nullable=False)
+
+    status = Column(String, default="NO_PLAN", nullable=False)
+    direction = Column(String, nullable=True)     # LONG | SHORT | None (NO_PLAN)
+    tier = Column(String, nullable=True)           # PREMIUM | STANDARD | None
+
+    entry_mode = Column(String, nullable=True)     # TRIGGER_AT_LEVEL | RETEST_LIMIT_AT_LINE, set at commit
+    trigger_price = Column(Float, nullable=True)
+    commit_after = Column(DateTime, nullable=True)  # anchor_time + 45min (08:45 CT / 09:45 ET open-window rule)
+
+    # Execution stop from stop_planner.py -- the 24h core-zone stop. NOT
+    # CampaignLog.stop_loss (r30-based); see the table docstring above.
+    stop_price = Column(Float, nullable=True)
+    stop_basis = Column(String, nullable=True)
+    stop_dist_atr = Column(Float, nullable=True)
+
+    t1 = Column(Float, nullable=True)
+    t2 = Column(Float, nullable=True)
+    t3 = Column(Float, nullable=True)
+    management = Column(String, nullable=True)      # human-readable rule text for the brief
+
+    fuel_requirement = Column(String, nullable=True)
+    rr_floor_ok = Column(Boolean, nullable=True)
+    rr_ratio = Column(Float, nullable=True)
+
+    no_plan_reason = Column(String, nullable=True)   # populated when status == NO_PLAN
+    plan_text = Column(String, nullable=True)         # the rendered pre-commit brief (SS4)
+
+    # --- intraday state, set by one-way transitions only (SS5) ---
+    cross_time = Column(DateTime, nullable=True)
+    fuel_at_cross = Column(String, nullable=True)    # FUELED | CONFLICTED | NO_FUEL
+    fill_time = Column(DateTime, nullable=True)
+    fill_price = Column(Float, nullable=True)
+    faked_first = Column(Boolean, nullable=True)
+    stopped_time = Column(DateTime, nullable=True)
+
+    reentry_used = Column(Boolean, default=False, nullable=False, server_default="0")
+    reentry_cross_time = Column(DateTime, nullable=True)
+    reentry_fill_price = Column(Float, nullable=True)
+
+    # The site displays THIS, not a new opinion (SS5) -- every transition
+    # writes a plain-English reason here.
+    last_transition_reason = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
 # DECISION JOURNAL (PERFORMANCE AUDITOR FOUNDATION — DATA COLLECTION ONLY)
 # ---------------------------------------------------------
 class DecisionJournal(Base):

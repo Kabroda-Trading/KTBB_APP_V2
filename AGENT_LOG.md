@@ -858,3 +858,67 @@ TAKE/PASS.
 to the cross-moment specifically), §6 re-entry, §9 (forward-test log +
 drift check — Andy's explicit priority: this is what actually answers
 "is live matching what backtest said should happen," not a nice-to-have).
+
+## 2026-08-31 (later still) — FROM: Claude Code — FOR: DeepSeek/Antigravity (both)
+STATUS: open
+
+**Built §3 (the TradePlan object) + §4 (the pre-commit brief), and caught
+a second real spec/code mismatch before it shipped.**
+
+Before writing the `management` field, cross-checked the spec's own text
+against what's actually running: the spec's §3 schema (and §4's brief
+example) described tier-dependent management ("PREMIUM: partial at T1,
+stop to BE, runner to T2/T3 / STANDARD: 100% at T1") — different from the
+validated, already-implemented rule in `ledger_closing_engine.py`
+(30% at T1, stop to a FIXED runner-stop level — not breakeven — 70% to
+T3, same for both tiers). Surfaced this to Andy directly before writing
+the field. Confirmed: the spec text was written from memory and was
+wrong against `trade_management.csv` (n=165) — 30/subtrig averages
++0.346R vs +0.320R for 30/BE and +0.224R for 100%-at-T1, and is best-or-
+tied in every regime. Fixed in the Brain repo (commit d8a33ce, both §3
+and §4). `ledger_closing_engine.py` is untouched — it was already right.
+
+**Built:**
+- `database.py`: new `TradePlan` table (`trade_plans`) — a genuinely
+  separate object/state-vocabulary from `CampaignLog` (status values
+  NO_PLAN/WAITING/ARMED/VETOED/FILLED/STOPPED/REENTRY_ARMED/DONE, not
+  PENDING/CLOSED_WIN/CLOSED_LOSS — don't conflate the two state machines).
+  `stop_price`/`stop_basis`/`stop_dist_atr` come from `stop_planner.py`
+  (still additive, still not `CampaignLog.stop_loss`). Picked up
+  automatically by `Base.metadata.create_all()` -- new table, no ALTER
+  TABLE migration needed.
+- `trade_plan.py`: `build_trade_plan()` — pure function, takes an already-
+  computed gate decision (`decision_engine.evaluate_15m_decision()`'s
+  output) plus `stop_planner.py`'s inputs, returns NO_PLAN (with the
+  gate's own specific reason, reused verbatim) or WAITING (direction,
+  tier, trigger, stop, targets, the corrected management text,
+  `commit_after` = anchor + 45min). Also runs the §6 R:R floor check here
+  (T1 distance ÷ core-zone stop distance ≥ 1:1) — when it fails, this
+  goes straight to NO_PLAN rather than inventing an arbitrary "when do we
+  downgrade tier vs. NO_PLAN" split the spec doesn't actually define;
+  matches the doc's own stated philosophy ("the safe stop is too far for
+  this target, so the hand isn't worth playing, not... pretend the R:R is
+  fine"). Flagged, not silently decided, for review. `entry_mode` is left
+  `None` at generation — the spec's own TRIGGER_AT_LEVEL vs. RETEST_LIMIT_
+  AT_LINE choice depends on live price at `commit_after`, which hasn't
+  happened yet when the plan is built at lock.
+- `render_brief()`: renders the SS4 pre-commit brief text from a built
+  plan — every number copied from the plan object, nothing recomputed
+  (SS4's own rule).
+
+Verified: 7 new unit tests (`tests/test_trade_plan.py`) covering NO_PLAN
+on a PASS gate state, a full WAITING plan on both LONG and SHORT, the R:R-
+floor NO_PLAN path (a wide swing-low-forced stop killing R:R to a close
+T1), the ATR-unavailable guard, and both brief-rendering branches — plus
+a live end-to-end run against real BTC market data through the real gate
+(`decision_engine.evaluate_15m_decision()`) into `build_trade_plan()` and
+a real DB write/round-trip (confirmed the new `trade_plans` table gets
+created automatically). Full suite now 106 passed, same 5 pre-existing
+unrelated `test_dashboard_fixes.py` errors.
+
+**Not yet built:** the intraday state-machine monitoring (WAITING→ARMED→
+FILLED→STOPPED→REENTRY_ARMED→DONE) — this needs live 1m/5m candle
+scanning similar in shape to `ledger_closing_engine.py`'s Phase 2, and is
+a separate, comparably-sized piece of work. `build_trade_plan()` above
+only covers the AT-LOCK generation (NO_PLAN or WAITING); nothing advances
+the state past that yet. Next.
