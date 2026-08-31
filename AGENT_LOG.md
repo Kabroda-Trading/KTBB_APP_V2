@@ -939,3 +939,18 @@ Re: your reply confirming §8's "wide stop available" means *survived the day*, 
 24 new tests, `tests/test_trade_plan_state_machine.py`, full suite 130 passed (5 pre-existing `test_dashboard_fixes.py` errors confirmed unrelated via `git stash`, not caused by this).
 
 Still open, next up: wire `build_trade_plan()`/the state machine into the live pipeline (session lock + a new monitoring loop, `main.py`'s `lifespan()`), then SS9 (forward-test log + drift check).
+
+## 2026-08-31 (state machine fully wired + live-verified) — FROM: Claude Code — FOR: both
+STATUS: open
+
+TradePlan (SS3/SS4/SS5/SS7/SS8) is now fully wired end-to-end, not just built standalone:
+
+- `build_trade_plan()` is called from `kabroda_mas_flow.run_mas_analysis()`, the real session-lock call site, on the SAME `decision_dict` already written to CampaignLog/GateLog. Create-only upsert (`_inject_trade_plan_to_database`) — deliberately not CampaignLog's always-update pattern, so a restart-recovery re-run can never wipe out real intraday state-machine progress. Field-name bug caught while wiring: `sse_engine.py`'s levels dict key is `range30m_high`/`range30m_low`, not `r30_high`/`r30_low`.
+- `trade_plan_engine.py` (new file): the async monitoring loop, mirroring `ledger_closing_engine.py`'s structure, registered in `main.py`'s `lifespan()` (`scheduler_health_registry["trade_plan"]`). Routes WAITING/VETOED → `advance_waiting_plan()`, REENTRY_ARMED → `advance_reentry_plan()` (new, one-attempt-max, no VETOED-retry), FILLED → `check_wide_stop_or_t1()` then `mirror_campaign_outcome()`, STOPPED → a fresh fuel re-check at the original trigger.
+- Caught a second same-day design bug before it ran: a STOPPED row's `NO_PUSH` fuel read (price simply hasn't come back to the trigger yet) is not "fuel gone" — treating it that way would resolve every wick-fake to DONE on the very next poll. Fixed, covered by a dedicated regression test.
+
+Verified for real, not just synthetic: a manual dry run fetched real Kraken candles, ran real `sse_engine.compute_sse_levels()`, called the real `run_mas_analysis()` against a throwaway DB, and landed a correct NO_PLAN TradePlan row matching CampaignLog's own STAND_DOWN verdict. Then did a full live `uvicorn` boot (throwaway DB/port) and confirmed `>>> TRADE PLAN MONITOR: Initializing...` starts cleanly alongside gravity/ledger with no startup exception, and the app serves real traffic (`/api/gravity/scan` → 200) with real gravity data flowing.
+
+37 new tests total across this build (24 state-machine unit tests + 8 engine-loop integration tests + advance_reentry_plan coverage folded into the 24). Full suite: 143 passed (5 pre-existing unrelated `test_dashboard_fixes.py` errors, confirmed via `git stash` before this work started).
+
+Still open, next up: SS9 (forward-test log + drift check) — the piece Andy specifically flagged as the actual priority ("that should be raising a red flag"). Also still flagged from the prior entry: `CampaignLog.execution_stop` (both stops logged for the forward-test wick-survival comparison) doesn't exist in `database.py` yet.
