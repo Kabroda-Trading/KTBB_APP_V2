@@ -801,3 +801,60 @@ same as more symbols get added later) rather than just patching the race
 condition. Verified against the exact real shape (`plan: null, mas_status:
 STAND_DOWN, conviction: PASS`) live on the sandbox server today. Full
 `test_e2e.py` + `test_runner_mechanic.py` (89) still clean.
+
+## 2026-08-31 (later) — FROM: Claude Code — FOR: DeepSeek/Antigravity (both)
+STATUS: open
+
+**Started the Trade Plan build (`KABRODA_COM_TRADE_PLAN_SPEC.md`), per §11's
+own build order.** §2 audit first: kabroda.com already has everything the
+spec asks for as a foundation (lock levels, decisive radar grade, 5m/15m
+feed, the gate stack including fuel_gate.py's 0.8/0.35 thresholds — exact
+match to what §7/`ORDER_MECHANICS.md` cite) except the "pressure checklist"
+(`brain/engine/pressure_checklist.py` — a pre-move, non-gating energy score
+for the WAITING state; genuinely absent from kabroda.com, optional
+enhancement, not a blocker). Nothing missing that needed building first.
+
+Before touching the stop planner (§6), surfaced a real scope question to
+Andy directly: does the new 24h core-zone stop replace `CampaignLog.
+stop_loss` (the r30-based risk basis for every R-multiple in the system —
+gate log, the runner mechanic verified yesterday) system-wide, or is it a
+separate, additive field for the order brief only? Confirmed via `docs/
+STOP_BASIS_ANSWER.md` (commit 6dd4318): **additive**. `stop_loss` stays
+r30-based everywhere it already is; the core-zone stop is new, its own
+field, purely for what Andy actually places at the exchange. Nothing from
+yesterday touched.
+
+**Built `stop_planner.py`** (§6): `_find_swing_points()` (all confirmed
+swing highs/lows in the 24h window, not just the most recent — reuses
+`sse_engine._find_pivots()`'s left/right confirmation logic since that
+only returns the single latest pivot), `_find_sweep_wicks()` (candles
+whose wick is a large fraction of their range — a liquidity-sweep zone,
+distinct from a confirmed pivot), `plan_stop()` (picks the nearest zone in
+the trade's direction among swing points/f24 VAH-VAL/r30 boundary/sweep
+wicks, buffers by 0.125×ATR — the midpoint of the spec's 0.1-0.15 range —
+falls back to 1.5×ATR when no distinct zone exists), and `rr_floor_ok()`
+(the §6 sanity check, T1 distance ÷ stop distance ≥ floor — a standalone
+check function, doesn't decide tier/NO_PLAN itself, that's the Trade Plan
+builder's job next).
+
+Verified: 10 new unit tests (`tests/test_stop_planner.py`) — swing/sweep
+detection on hand-constructed candles with precisely known expected zones,
+nearest-zone selection on both sides, the no-zone fallback, the ATR-zero
+guard, and the R:R floor check both passing and failing — plus a live
+sanity run against real current BTC market data (stop correctly below/
+above entry on LONG/SHORT, real ATR-scaled distances, R:R floor computed
+against a synthetic T1). Full suite now 99 passed, same 5 pre-existing
+unrelated `test_dashboard_fixes.py` errors.
+
+Also fixed a real, reported bug found along the way (unrelated to this
+spec): "Open Cockpit" did nothing on any PASS/no-trade day (the common
+case) — `renderSnapshotGrid()` only populated `radarMemory`/enabled the
+button when a CampaignLog plan existed. Fixed to always populate/enable,
+matching Andy's own stated wish for uniform cockpit access regardless of
+TAKE/PASS.
+
+**Next:** §3 (TradePlan object + state machine), §4 (pre-commit brief),
+§5 (fuel gate at cross — already ported in `fuel_gate.py`, needs wiring
+to the cross-moment specifically), §6 re-entry, §9 (forward-test log +
+drift check — Andy's explicit priority: this is what actually answers
+"is live matching what backtest said should happen," not a nice-to-have).
