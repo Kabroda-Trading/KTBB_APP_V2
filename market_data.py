@@ -9,14 +9,85 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
+import weakref
 from typing import Any, Dict, List, Optional
 
 import ccxt.async_support as ccxt
 
 # ---------------------------------------------------------------------------
-# EXCHANGE CLIENT — single Kraken instance shared by all fetch functions
+# EXCHANGE CLIENT — one Kraken instance per asyncio event loop
 # ---------------------------------------------------------------------------
-_exchange_live = ccxt.kraken({"enableRateLimit": True, "timeout": 10000})
+# 2026-08-30 fix: this used to be a single module-level ccxt instance shared
+# across every caller. ccxt's async client lazily binds its aiohttp
+# ClientSession to whichever event loop first uses it. kabroda_mas_flow.py's
+# run_mas_analysis() -- the function that writes CampaignLog/GateLog/the
+# whole audit trail -- runs its own candle fetch via asyncio.run(_fetch_all())
+# inside asyncio.to_thread() (by design: it needs its own fresh loop in a
+# background thread). If the MAIN loop had already touched the shared client
+# first (which it always does in production -- an HTTP request handler calls
+# battlebox_pipeline.get_live_battlebox() and THAT fires the background
+# thread), the background thread's fresh loop trying to reuse that same
+# aiohttp session hangs indefinitely: no exception, no timeout, not even
+# cancellable via asyncio.wait_for() (confirmed reproducible, twice, with a
+# real live process -- the underlying OS thread stays blocked past 45s and
+# has to be killed). Keying the client by the running loop (a WeakKeyDictionary
+# so a loop's entry is dropped once the loop itself is garbage-collected)
+# gives every event loop its own client, fixing the hang with zero call-site
+# changes anywhere in the codebase. The client for a given loop is still
+# reused across repeated calls within that same loop's lifetime -- this is
+# not "recreate every call," it only creates a second client when a genuinely
+# different loop shows up.
+_exchange_clients: "weakref.WeakKeyDictionary[Any, Any]" = weakref.WeakKeyDictionary()
+_exchange_clients_lock = threading.Lock()
+
+
+def _get_exchange():
+    loop = asyncio.get_running_loop()
+    with _exchange_clients_lock:
+        client = _exchange_clients.get(loop)
+        if client is None:
+            client = ccxt.kraken({"enableRateLimit": True, "timeout": 10000})
+            _exchange_clients[loop] = client
+        return client
+
+
+class _ExchangeLiveProxy:
+    """Backward-compatible attribute proxy -- existing code (this module's
+    own fetch functions, battlebox_pipeline.py's re-export) refers to
+    `_exchange_live.fetch_ohlcv(...)` etc.; this resolves to the correct
+    per-loop client on every attribute access instead of a single fixed
+    instance, so no call site needs to change."""
+
+    def __getattr__(self, name):
+        return getattr(_get_exchange(), name)
+
+
+async def close_exchange_for_current_loop() -> None:
+    """Closes and forgets the exchange client bound to the CURRENTLY running
+    event loop, if one was created. The long-lived main event loop (serving
+    HTTP requests) should never call this -- it wants its client to persist
+    for the process lifetime. This exists for genuinely short-lived loops
+    (e.g. kabroda_mas_flow.py's asyncio.run(_fetch_all()) inside
+    asyncio.to_thread(), which creates a brand-new loop on every
+    run_mas_analysis() call): without an explicit close, each such loop
+    leaves its aiohttp connector unclosed when the loop exits (ccxt's own
+    warning: "kraken requires ... an explicit call to the .close()
+    coroutine"), leaking one open connection per session lock over the
+    life of a long-running server. Safe to call even if no client was ever
+    created for this loop."""
+    loop = asyncio.get_running_loop()
+    with _exchange_clients_lock:
+        client = _exchange_clients.pop(loop, None)
+    if client is not None:
+        try:
+            await client.close()
+        except Exception:
+            pass
+
+
+_exchange_live = _ExchangeLiveProxy()
 
 
 # ---------------------------------------------------------------------------

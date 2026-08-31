@@ -538,15 +538,24 @@ def run_mas_analysis(
     # threading them through battlebox_pipeline's whole context-build chain,
     # since this function fires once per session (or on restart recovery),
     # not on every hot-path call. Runs inside its own thread (asyncio.to_thread
-    # per the caller), so a fresh event loop via asyncio.run() is safe here.
+    # per the caller), so a fresh event loop via asyncio.run() is safe here --
+    # market_data.py gives that fresh loop its own exchange client (2026-08-30
+    # fix, see market_data.py's own comment) rather than reusing the main
+    # loop's, which used to hang this function forever, silently, on every
+    # real session lock. Close that loop-scoped client before the loop exits
+    # (asyncio.run() tears the loop down right after this coroutine returns)
+    # so it doesn't leak an unclosed connection every time this fires.
     async def _fetch_all():
-        return await asyncio.gather(
-            market_data.fetch_live_5m(symbol, limit=400),
-            market_data.fetch_live_15m(symbol, limit=300),
-            market_data.fetch_live_1h(symbol, limit=100),
-            market_data.fetch_live_4h(symbol, limit=100),
-            market_data.fetch_live_daily(symbol, limit=60),
-        )
+        try:
+            return await asyncio.gather(
+                market_data.fetch_live_5m(symbol, limit=400),
+                market_data.fetch_live_15m(symbol, limit=300),
+                market_data.fetch_live_1h(symbol, limit=100),
+                market_data.fetch_live_4h(symbol, limit=100),
+                market_data.fetch_live_daily(symbol, limit=60),
+            )
+        finally:
+            await market_data.close_exchange_for_current_loop()
     try:
         candles_5m, candles_15m, candles_1h, candles_4h, candles_1d = asyncio.run(_fetch_all())
     except Exception as e:
@@ -718,6 +727,18 @@ def run_mas_analysis(
                 _lu_db.close()
 
             _15m_jewel = _fuel.get("15M_JEWEL", {})
+            # "1H"/"trend" and "4H"/"trend" removed from this local list 2026-08-30
+            # -- decision_gauges (below) already supplies both, from decision_
+            # engine.py's own htf_fuel.py-based (9/21 EMA, KABRODA_REBUILD_SPEC.md
+            # SS2) reading. This list's version was battlebox_pipeline.py's older,
+            # unvalidated EMA30/50 fuel_gauge trend -- a different computation
+            # sharing the same gauge_name, which was silently colliding on the
+            # DecisionGaugeReading (decision_id, timeframe, gauge_name) unique
+            # constraint and failing the whole gauge-readings insert on every
+            # single call (confirmed: reproduces on a fresh DB, first call,
+            # zero concurrency involved -- not a race condition). Keeping only
+            # the validated decision_engine.py reading is also the correct
+            # choice on the merits, not just the deduplication.
             _gauges = [g for g in [
                 _g("15M", "energy_status", context.get("1h_fuel_status")),
                 _g("15M", "kinematic_grade", _15m_jewel.get("kinematic_grade")),
@@ -726,10 +747,8 @@ def run_mas_analysis(
                 _g("15M", "pmarp", _15m_jewel.get("pmarp")),
                 _g("15M", "pmarp_state", _15m_jewel.get("pmarp_state")),
                 _g("15M", "rsi_divergence_type", "NONE"),
-                _g("1H", "trend", _tf1h.get("trend")),
                 _g("1H", "rsi", _tf1h.get("rsi")),
                 _g("1H", "adx_strength", _adx_label(_j1h)),
-                _g("4H", "trend", _tf4h.get("trend")),
                 _g("4H", "rsi", _tf4h.get("rsi")),
                 _g("4H", "adx_strength", _adx_label(_j4h)),
                 _g("4H", "macd_hist", _tf4h.get("macd_hist")),

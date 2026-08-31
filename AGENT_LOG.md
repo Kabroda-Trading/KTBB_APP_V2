@@ -530,3 +530,65 @@ exceptions. Full `test_e2e.py` (83/83) and `import main` both clean.
 `structure_state_engine.py` archival) — both docs were already flagged
 stale since 2026-07-16 per this project's own `CLAUDE.md`, out of scope for
 this pass; `CLAUDE.md` itself (the actively-maintained doc) is current.
+
+## 2026-08-30 (later still) — FROM: Claude Code — FOR: DeepSeek/Antigravity (both)
+STATUS: resolved
+
+**Fixed the exchange-client hang flagged in the earlier entry — this was
+the actual "is the 15M gate running at all in production" blocker, not a
+minor cleanup item.** Confirmed with a clean, isolated reproduction (no
+concurrency involved, first call on a fresh DB): `market_data.py`'s shared
+module-level `_exchange_live` (a single `ccxt.kraken(...)` instance) binds
+its aiohttp session to whichever event loop touches it first. Production's
+real call order is: an HTTP request handler calls `battlebox_pipeline.
+get_live_battlebox()` on the MAIN loop (which touches the client first),
+and THAT function is what fires `run_mas_analysis()` via `asyncio.to_
+thread()` in a background thread with its OWN fresh `asyncio.run()` loop.
+That background loop reusing the main loop's already-bound client hangs
+**indefinitely** — no exception, no timeout, not even cancellable via
+`asyncio.wait_for()` (the underlying OS thread just stays blocked; had to
+be killed externally). Since this is the exact call order every real
+session lock uses, **every single gate evaluation and its full audit trail
+(`CampaignLog`, `GateLog`, `session_audit_log`, `decision_log`,
+`decision_gauge_reading`) was almost certainly silently failing to
+complete in production**, however long this pattern has been live.
+
+Fix: `market_data.py` now keys the exchange client by the *running event
+loop* (a `WeakKeyDictionary`, so an entry is dropped once its loop is
+garbage-collected) instead of one fixed global — `_exchange_live` is now a
+proxy object that resolves to the correct per-loop client on every
+attribute access, so zero call sites anywhere needed to change.
+`kabroda_mas_flow.py`'s `_fetch_all()` explicitly closes its loop-scoped
+client in a `finally` block before its short-lived loop exits (added
+`market_data.close_exchange_for_current_loop()`), since ccxt async clients
+need an explicit `.close()` — without it, this fix would trade "hangs
+forever" for "leaks one open connection per session lock over the life of
+a long-running server." The main, long-lived server loop is untouched —
+it keeps its one client for the process lifetime, as it should.
+
+**Also found and fixed while re-testing (a second, real, independent
+bug this hang had been masking):** the Unified Audit System's per-decision
+gauge list had a genuine duplicate — `kabroda_mas_flow.py`'s local gauge
+list included its own `("1H","trend",...)`/`("4H","trend",...)` entries
+(from `battlebox_pipeline.py`'s older, unvalidated EMA30/50 fuel_gauge
+trend read) *in addition to* `decision_engine.py`'s own gauge list, which
+already emits those exact two `(timeframe, gauge_name)` pairs from its
+validated `htf_fuel.py` (9/21 EMA, `KABRODA_REBUILD_SPEC.md` §2) reading.
+Both got concatenated into one list and handed to `write_decision_log()`,
+which failed every single `decision_gauge_reading` insert batch on the
+`(decision_id, timeframe, gauge_name)` UNIQUE constraint — reproduced on a
+single, non-concurrent, fresh-DB call, so this wasn't a race condition,
+it was deterministic. Fix: removed the two duplicate entries from kabroda_
+mas_flow.py's local list, keeping decision_engine.py's validated reading
+(the correct choice on the merits too, not just deduplication).
+
+Verified via a clean, isolated reproduction of the exact production call
+order (main-loop touch → background `asyncio.to_thread` fire) both before
+the fix (confirmed hang, twice) and after (both the hang and the gauge
+UNIQUE-constraint error gone; a repeat call in the same process also
+succeeded, proving the per-loop client is reused correctly within a loop's
+lifetime, not recreated every call) — plus a full live `uvicorn` boot with
+a real `/api/radar/scan` HTTP request producing exactly 1 row each in
+`campaign_logs`/`gate_log`/`session_audit_log`/`decision_log` and 27 real
+rows in `decision_gauge_reading`, zero errors. `test_e2e.py` (83/83) and
+`import main` both clean throughout.
