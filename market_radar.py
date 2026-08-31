@@ -15,7 +15,7 @@ import decision_engine
 import market_data
 import mtf_confluence_scanner
 import structure_state_engine
-from database import SessionLocal, SessionLock, MtfReading, DecisionJournal, CampaignLog
+from database import SessionLocal, SessionLock, DecisionJournal, CampaignLog
 
 TARGETS = ["BTCUSDT"]
 
@@ -285,89 +285,12 @@ async def _build_dossier(symbol: str, price: float, levels: dict, context: dict)
     }
 
 
-async def get_mtf_brief(symbol: str) -> dict:
-    """
-    Returns Morning Brief data for a symbol using the MTF confluence scanner.
-    Energy status is derived from 15M StochRSI zone and curl direction.
-    btc_master_switch is only populated when symbol is BTC.
-    """
-    try:
-        scan = await mtf_confluence_scanner.run_mtf_confluence_scan(symbol)
-    except Exception as e:
-        print(f"[MTF BRIEF ERROR] {symbol}: {e}")
-        return {"error": str(e)}
-
-    direction = scan.get("dominant_direction", "NEUTRAL")
-    score = scan.get("confluence_score", 0)
-    conviction = scan.get("conviction", "LOW")
-    timeframes = scan.get("timeframes", {})
-    tf_15m = timeframes.get("15M", {})
-    stoch = tf_15m.get("stoch_rsi", {})
-    zone_15m = stoch.get("zone", "NEUTRAL")
-    curl_15m = stoch.get("curl", "FLAT")
-
-    # Energy status: derived from 15M StochRSI relative to directional bias
-    if direction == "BULLISH":
-        if zone_15m == "OVERBOUGHT":
-            energy = "EXHAUSTED"
-        elif zone_15m == "VALUE_HIGH":
-            energy = "BURNING"
-        else:
-            energy = "BUILDING"
-    elif direction == "BEARISH":
-        if zone_15m == "OVERSOLD":
-            energy = "EXHAUSTED"
-        elif zone_15m == "VALUE_LOW":
-            energy = "BURNING"
-        else:
-            energy = "BUILDING"
-    else:
-        energy = "BUILDING"
-
-    # Plain-English action sentence
-    base = symbol.replace("USDT", "").replace("/", "")
-    if direction == "BULLISH":
-        action = f"{base} bullish on {score}/5 TFs ({conviction} conviction). Energy: {energy}. Watch breakout trigger."
-    elif direction == "BEARISH":
-        action = f"{base} bearish on {score}/5 TFs ({conviction} conviction). Energy: {energy}. Watch breakdown trigger."
-    else:
-        action = f"{base} split — no directional confluence ({score}/5). Await trigger break for clarity."
-
-    is_btc = "BTC" in symbol.upper()
-    btc_master_switch = (direction == "BULLISH" and score >= 3) if is_btc else None
-
-    return {
-        "confluence_score": score,
-        "confluence_direction": direction,
-        "energy_status": energy,
-        "action_sentence": action,
-        "btc_master_switch": btc_master_switch,
-        "conviction": conviction,
-        "nearest_resistance": scan.get("nearest_resistance"),
-        "nearest_support": scan.get("nearest_support"),
-        "summary": scan.get("summary", ""),
-    }
-
-def _build_action_sentence(direction: str, energy: str, bo: float, bd: float) -> str:
-    bo_str = f"${bo:,.2f}" if bo > 0 else "trigger"
-    bd_str = f"${bd:,.2f}" if bd > 0 else "trigger"
-
-    if direction == "BULLISH":
-        if energy == "EXHAUSTED":
-            return f"Momentum exhausted. Longs overextended — do not chase. Pullback toward {bd_str} possible."
-        elif energy == "BURNING":
-            return f"Trend running hot above {bo_str}. Long bias active. Scale out aggressively near resistance."
-        else:
-            return f"Momentum building. Long setup active above {bo_str}. Higher timeframes aligned."
-    elif direction == "BEARISH":
-        if energy == "EXHAUSTED":
-            return f"Energy burned out. Watch for breakdown below {bd_str}. Do not chase longs."
-        elif energy == "BURNING":
-            return f"Bear trend running hot below {bd_str}. Short bias active. Cover aggressively near support."
-        else:
-            return f"Bearish pressure building. Short setup active below {bd_str}. Higher timeframes aligned."
-    else:
-        return "No clear direction. Stay flat until confluence improves."
+# get_mtf_brief() / _build_action_sentence() removed 2026-08-30 -- both built
+# entirely on the old confluence vote-tally (confluence_score/dominant_
+# direction/conviction) that mtf_confluence_scanner.run_mtf_confluence_scan()
+# no longer returns. Andy's call: strip it out entirely, not patch around the
+# now-missing fields. The radar's real per-symbol call is decision_engine.py's
+# gate (via _build_dossier() below), not a second, separate "morning brief."
 
 
 async def analyze_target(symbol):
@@ -396,16 +319,13 @@ async def analyze_target(symbol):
 async def scan_sector():
     radar_grid = []
 
-    # Run battlebox scans and MTF briefs in parallel for all targets.
-    # _get_bb_data uses the session-lock shortcut when available, skipping the
-    # 1500-candle MEXC fetch for sessions that are already established.
+    # 2026-08-30: mtf_tasks/get_mtf_brief() removed -- the old "morning
+    # brief" built entirely on the retired confluence vote-tally. Only the
+    # real battlebox/gate pipeline runs now.
     bb_tasks = [_get_bb_data(sym) for sym in TARGETS]
-    mtf_tasks = [get_mtf_brief(sym) for sym in TARGETS]
-    all_results = await asyncio.gather(*bb_tasks, *mtf_tasks, return_exceptions=True)
-    bb_results = all_results[:len(TARGETS)]
-    mtf_results = all_results[len(TARGETS):]
+    bb_results = await asyncio.gather(*bb_tasks, return_exceptions=True)
 
-    for sym, res, mtf in zip(TARGETS, bb_results, mtf_results):
+    for sym, res in zip(TARGETS, bb_results):
         if isinstance(res, Exception) or res.get("status") == "ERROR":
             print(f"[RADAR SCAN] {sym} failed: {res}")
             continue
@@ -437,28 +357,16 @@ async def scan_sector():
         # daily-regime heuristic just replaced, not touched here.
         weekly_pos = mtf_snap.get("weekly_200sma_position") or ""
 
-        mtf_brief = mtf if isinstance(mtf, dict) and "error" not in mtf else {}
-
         bo_val = float(levels.get("breakout_trigger", 0) or 0)
         bd_val = float(levels.get("breakdown_trigger", 0) or 0)
-        if mtf_brief:
-            direction = mtf_brief.get("confluence_direction", "NEUTRAL")
-            energy    = mtf_brief.get("energy_status", "BUILDING")
-            mtf_brief["action_sentence"] = _build_action_sentence(direction, energy, bo_val, bd_val)
-            # mtf_brief.t1/t2/t3 (the old 1x/1.618x/2.618x Fibonacci calc)
-            # removed 2026-08-30 -- never read by the frontend (grepped),
-            # dead output computing wrong, pre-rebuild target math for no
-            # reason. The real targets are dossier["plan"]["targets"].
 
         radar_item = {
             "symbol": sym, "price": price, "macro_bias": macro_bias, "micro_bias": micro_bias,
             "indicator_string": _make_indicator_string(levels), "full_intel": json.dumps(res, default=str),
             "levels": levels,
-            "mtf_brief": mtf_brief,
             # Full live per-timeframe confluence (real 21/55 EMA, BBWP/PMARP,
             # divergence) -- genuinely live as of 2026-08-27 (_try_locked_shortcut
             # now recomputes this fresh every call, not frozen at session lock).
-            # mtf_brief above is only a summary; this is the real detail.
             "confluence_scan": context.get("confluence_scan", {}),
             "tf_verdicts": tf_verdicts,
             "tf_today": tf_today,
@@ -470,26 +378,15 @@ async def scan_sector():
         radar_item["sort_weight"] = dossier["score_pct"]
         radar_grid.append(radar_item)
 
-        try:
-            with SessionLocal() as db:
-                reading = MtfReading(
-                    symbol=sym.replace("USDT", "/USDT"),
-                    timestamp=datetime.datetime.utcnow(),
-                    confluence_score=mtf_brief.get("confluence_score", 0) if mtf_brief else 0,
-                    confluence_direction=mtf_brief.get("confluence_direction", "NEUTRAL") if mtf_brief else "NEUTRAL",
-                    energy_status=mtf_brief.get("energy_status", "BUILDING") if mtf_brief else "BUILDING",
-                    timeframe_data=json.dumps(mtf_brief, default=str),
-                    bo_price=bo_val,
-                    bd_price=bd_val,
-                    asset_price=price,
-                    session_date=datetime.datetime.utcnow().strftime("%Y-%m-%d")
-                )
-                db.add(reading)
-                db.commit()
-        except Exception as e:
-            print(f"[MTF DB SAVE ERROR] {sym}: {e}")
+        # MtfReading write removed 2026-08-30 -- existed only to snapshot the
+        # old mtf_brief (confluence_score/direction/energy_status), gone.
 
         # --- DECISION JOURNAL (Performance Auditor foundation — data collection only) ---
+        # confluence_score/confluence_direction/energy_status columns are no
+        # longer populated with meaningful data (their source, the old
+        # confluence vote-tally, is retired) -- left at their column defaults
+        # rather than dropped from the schema; everything else here (the real
+        # gate state, levels, briefing, full context) is untouched.
         try:
             # dossier["grade"] is the real calibrated-gate state from
             # decision_engine.py (TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS,
@@ -501,9 +398,6 @@ async def scan_sector():
                     symbol=sym.replace("USDT", "/USDT"),
                     timestamp=datetime.datetime.utcnow(),
                     decision_type=decision_type,
-                    confluence_score=mtf_brief.get("confluence_score", 0) if mtf_brief else 0,
-                    confluence_direction=mtf_brief.get("confluence_direction", "NEUTRAL") if mtf_brief else "NEUTRAL",
-                    energy_status=mtf_brief.get("energy_status", "BUILDING") if mtf_brief else "BUILDING",
                     bo_price=bo_val,
                     bd_price=bd_val,
                     asset_price=price,

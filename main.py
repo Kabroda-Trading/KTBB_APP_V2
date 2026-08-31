@@ -33,9 +33,8 @@ import session_manager
 import lti_engine
 
 from datetime import datetime, timezone, timedelta
-from jewel_specialist import run_jewel_snapshot
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, JewelSnapshotLog, DecisionJournal, NewsletterLog, MtfReading, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalPerformanceLog
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, DecisionJournal, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalPerformanceLog
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -58,15 +57,8 @@ scheduler_health_registry = {
 # catches all exceptions internally so a crashing agent never kills the server.
 # ==============================================================================
 
-# JEWEL session transitions sorted by UTC hour (ET label → UTC time)
-_JEWEL_SCHEDULE = [
-    ( 1, 0, "ASIA_OPEN"),    # 8:00 PM ET  → 01:00 UTC
-    ( 5, 0, "ASIA_MIDDAY"),  # 12:00 AM ET → 05:00 UTC
-    ( 9, 0, "LONDON_OPEN"),  # 4:00 AM ET  → 09:00 UTC
-    (14, 0, "NY_OPEN"),      # 9:00 AM ET  → 14:00 UTC
-    (18, 0, "NY_MIDDAY"),    # 1:00 PM ET  → 18:00 UTC
-    (21, 0, "NY_CLOSE"),     # 4:00 PM ET  → 21:00 UTC
-]
+# _JEWEL_SCHEDULE removed 2026-08-30 -- see the run_jewel_scheduler()
+# removal note below.
 
 
 def _seconds_until_utc(hour: int, minute: int = 0) -> float:
@@ -114,21 +106,6 @@ def _seconds_until_lock_end() -> float:
     if lock_end_utc <= now:
         lock_end_utc += timedelta(days=1)
     return (lock_end_utc - now).total_seconds()
-
-
-def _next_jewel_slot():
-    """Returns (seconds_to_wait, session_label) for the next JEWEL snapshot."""
-    now = datetime.now(timezone.utc)
-    today = now.date()
-    candidates = []
-    for hour, minute, label in _JEWEL_SCHEDULE:
-        t = datetime(today.year, today.month, today.day, hour, minute, 0, tzinfo=timezone.utc)
-        if t <= now:
-            t += timedelta(days=1)
-        candidates.append((t, label))
-    candidates.sort(key=lambda x: x[0])
-    next_time, next_label = candidates[0]
-    return (next_time - now).total_seconds(), next_label
 
 
 async def _fetch_btc_price() -> float:
@@ -303,47 +280,10 @@ async def run_senior_analyst_scheduler() -> None:
             await asyncio.sleep(300)
 
 
-async def run_jewel_scheduler() -> None:
-    """6x daily JEWEL snapshots at each session transition."""
-    print("[SCHEDULER] JEWEL Specialist scheduler starting...")
-    while True:
-        try:
-            seconds, session_label = _next_jewel_slot()
-            next_run_dt = datetime.now(timezone.utc) + timedelta(seconds=seconds)
-            scheduler_health_registry["jewel"]["next_run"] = next_run_dt.isoformat()
-            scheduler_health_registry["jewel"]["status"] = "WAITING"
-
-            print(f"[SCHEDULER] JEWEL: next snapshot is {session_label} in {seconds / 3600:.1f}h")
-            await asyncio.sleep(seconds)
-
-            scheduler_health_registry["jewel"]["status"] = "EXECUTING"
-
-            current_price = await _fetch_btc_price()
-            date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            print(f"[SCHEDULER] JEWEL snapshot: {session_label} | ${current_price:,.2f}")
-
-            try:
-                result = await run_jewel_snapshot(
-                    symbol="BTC/USDT",
-                    session_label=session_label,
-                    current_price=current_price,
-                    date_key=date_key,
-                )
-                print(f"[SCHEDULER] JEWEL {session_label}: {result.get('status')}")
-            except Exception as e:
-                print(f"[SCHEDULER] JEWEL {session_label} failed: {e}")
-
-            scheduler_health_registry["jewel"]["last_run"] = datetime.now(timezone.utc).isoformat()
-            scheduler_health_registry["jewel"]["status"] = "WAITING"
-
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            print(f"[SCHEDULER] JEWEL outer error: {e}")
-            scheduler_health_registry["jewel"]["error_count"] += 1
-            scheduler_health_registry["jewel"]["last_error"] = str(e)
-            scheduler_health_registry["jewel"]["status"] = "ERROR"
-            await asyncio.sleep(60)
+# run_jewel_scheduler() removed 2026-08-30 -- drove jewel_specialist.py's 6x/
+# daily snapshot of the old confluence vote-tally/JEWEL signal, both gone
+# (see mtf_confluence_scanner.py's removal note). jewel_specialist.py
+# archived, its only purpose was feeding this scheduler.
 
 
 async def run_weekly_scheduler() -> None:
@@ -654,7 +594,8 @@ async def lifespan(app: FastAPI):
     app.state.gravity_task          = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
     app.state.ledger_task           = asyncio.create_task(ledger_closing_engine.run_ledger_audit_loop())
     app.state.senior_analyst_task   = asyncio.create_task(run_senior_analyst_scheduler())
-    app.state.jewel_task            = asyncio.create_task(run_jewel_scheduler())
+    # jewel_task (run_jewel_scheduler) removed 2026-08-30 -- see that
+    # function's old location for the removal note.
     app.state.weekly_task           = asyncio.create_task(run_weekly_scheduler())
     # KULTI LTI scheduler pulled 2026-07-08 -- see WORK_LOG.md. The design mixed
     # trading-system paradigms (confluence-count tiers, borrowed JEWEL vocabulary,
@@ -674,7 +615,6 @@ async def lifespan(app: FastAPI):
     app.state.gravity_task.cancel()
     app.state.ledger_task.cancel()
     app.state.senior_analyst_task.cancel()
-    app.state.jewel_task.cancel()
     app.state.weekly_task.cancel()
     app.state.outcome_tracker_task.cancel()
     app.state.analysis_loop_task.cancel()
@@ -801,11 +741,9 @@ async def gravity_map_page(request: Request, db: Session = Depends(get_db)):
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
     return _template_or_fallback(request, templates, "gravity_map.html", ctx)
 
-@app.get("/suite/confluence")
-async def confluence_page(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    return _template_or_fallback(request, templates, "confluence.html", ctx)
+# /suite/confluence + confluence.html removed 2026-08-30 -- presented the
+# old confluence vote-tally/JEWEL signal as if it mattered. Gone, not
+# archived-in-place, per Andy's call (see mtf_confluence_scanner.py).
 
 @app.get("/suite/dashboard")
 async def suite_dashboard_page(request: Request, db: Session = Depends(get_db)):
@@ -899,12 +837,10 @@ async def api_narrative_latest(symbol: str = "BTC/USDT"):
             .first()
         )
 
-        jewel_row = (
-            db.query(JewelSnapshotLog)
-            .filter(JewelSnapshotLog.symbol == db_sym)
-            .order_by(JewelSnapshotLog.id.desc())
-            .first()
-        )
+        # jewel_row / JewelSnapshotLog read removed 2026-08-30 -- jewel_specialist.py
+        # (the only writer) is archived, nothing populates this table anymore.
+        # "jewel": null below so the front-end's existing !data.jewel fallback
+        # hides that panel cleanly instead of showing frozen data forever.
 
         return JSONResponse({
             "ok": True,
@@ -917,16 +853,7 @@ async def api_narrative_latest(symbol: str = "BTC/USDT"):
                 "date_key":         analyst_row.date_key if analyst_row else None,
             },
             "wave": None,  # elliott_wave_specialist writer archived 2026-08-17 -- see docstring
-            "jewel": {
-                "jewel_gate_open":         jewel_row.jewel_gate_open         if jewel_row else None,
-                "jewel_conviction":        jewel_row.jewel_conviction        if jewel_row else None,
-                "jewel_exit_warning":      jewel_row.jewel_exit_warning      if jewel_row else None,
-                "jewel_divergence_warning":jewel_row.jewel_divergence_warning if jewel_row else None,
-                "jewel_signal_summary":    jewel_row.jewel_signal_summary    if jewel_row else None,
-                "dominant_direction":      jewel_row.dominant_direction      if jewel_row else None,
-                "session_label":           jewel_row.session_label           if jewel_row else None,
-                "timestamp":               jewel_row.timestamp.isoformat()   if jewel_row and jewel_row.timestamp else None,
-            } if jewel_row else None,
+            "jewel": None,  # JEWEL system retired 2026-08-30 -- see comment above
         })
     except Exception as e:
         print(f"[NARRATIVE API] Error: {e}")
@@ -956,63 +883,26 @@ async def api_gravity_scan(symbol: str = "BTC/USDT"):
     })
 
 
-@app.get("/api/confluence")
-async def api_confluence_scan(symbol: str = "BTC/USDT"):
-    """
-    Standalone live 5-TF (15M/1H/4H/1D/1W) confluence read — exposes
-    mtf_confluence_scanner.run_mtf_confluence_scan() directly, which already
-    runs continuously inside Market Radar's bundled scan but has never been
-    surfaced as its own view. No session-lock or candidate-fire dependency;
-    same public-data rationale as /api/gravity/scan and /api/narrative/latest.
-
-    Also surfaces the macro engine's independent weekly-200-SMA trend read
-    (24h cadence, written by kabroda_macro_engine.py) alongside the scanner's
-    own EMA21/55-vote-based weekly/daily read. These are two different,
-    un-reconciled trend definitions that already coexist in this codebase —
-    shown here side by side, clearly labeled, rather than silently picking one.
-    """
-    db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
-    try:
-        scan = await mtf_confluence_scanner.run_mtf_confluence_scan(db_sym)
-    except Exception as e:
-        print(f"[CONFLUENCE API] {db_sym}: {e}")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-    current_price = scan.get("current_price", 0.0)
-    weekly_200sma = await asyncio.to_thread(battlebox_pipeline._fetch_weekly_200sma, db_sym)
-
-    macro_weekly_trend = None
-    if weekly_200sma and weekly_200sma > 0 and current_price > 0:
-        dist = (current_price - weekly_200sma) / weekly_200sma * 100.0
-        macro_weekly_trend = {
-            "source": "kabroda_macro_engine (weekly 200 SMA, 24h cadence, session-lock frozen elsewhere)",
-            "weekly_200sma": round(weekly_200sma, 2),
-            "position": "ABOVE" if dist > 0.5 else "BELOW" if dist < -0.5 else "AT",
-            "distance_pct": round(dist, 4),
-        }
-
-    timeframes = scan.get("timeframes", {})
-    scanner_weekly_trend = {
-        "source": "mtf_confluence_scanner (EMA21/55 vote, live on-demand)",
-        "1W_ema_bias": timeframes.get("1W", {}).get("ema_bias"),
-        "1D_ema_bias": timeframes.get("1D", {}).get("ema_bias"),
-    }
-
-    return JSONResponse({
-        "ok": True,
-        **scan,
-        "macro_weekly_trend": macro_weekly_trend,
-        "scanner_weekly_trend": scanner_weekly_trend,
-    })
+# /api/confluence removed 2026-08-30 -- exposed the old confluence vote-tally
+# plus two different, "un-reconciled" (its own docstring's word) weekly-trend
+# definitions side by side. Exactly the kind of silent-conflict surface Andy
+# wants zero of anywhere near the 15M decision. Gone, not archived-in-place.
 
 
 @app.get("/api/radar/snapshot")
 async def api_radar_snapshot(db: Session = Depends(get_db)):
     """
     Phase 1 of the two-phase radar render. Pure DB reads — zero exchange I/O.
-    Returns: locked session levels + most recent MtfReading + JEWEL gate + MAS status.
-    Target response time: < 100ms. Called before POST /api/radar/scan so the UI
-    can render structural truth instantly while live MTF data loads in the background.
+    Returns: locked session levels + MAS status. Target response time: < 100ms.
+    Called before POST /api/radar/scan so the UI can render structural truth
+    instantly while live MTF data loads in the background.
+
+    2026-08-30: MtfReading and JewelSnapshotLog reads removed -- both tables'
+    only writers (the old confluence vote-tally / JEWEL system) are retired.
+    mtf_cached / jewel_gate_open below are always empty now; kept as response
+    keys (not removed from the JSON shape) so nothing downstream that reads
+    this endpoint breaks on a missing key, but there is nothing left to
+    populate them and there won't be again.
     """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     symbol_norm = "BTC/USDT"
@@ -1039,34 +929,10 @@ async def api_radar_snapshot(db: Session = Depends(get_db)):
         except Exception:
             pass
 
-    # 2. Latest MtfReading — written on every scan_sector() call and every gravity loop tick
-    mtf_row = db.query(MtfReading).filter(
-        MtfReading.symbol == symbol_norm
-    ).order_by(MtfReading.id.desc()).first()
-
     mtf_cached: dict = {}
-    if mtf_row:
-        mtf_cached = {
-            "confluence_direction": mtf_row.confluence_direction,
-            "confluence_score":     mtf_row.confluence_score,
-            "energy_status":        mtf_row.energy_status,
-            "bo_price":             mtf_row.bo_price,
-            "bd_price":             mtf_row.bd_price,
-            "asset_price":          mtf_row.asset_price,
-            "scanned_at":           mtf_row.timestamp.isoformat() if mtf_row.timestamp else None,
-        }
-        # Prefer MtfReading asset_price — more recent than the locked anchor
-        if mtf_row.asset_price and mtf_row.asset_price > 0:
-            price = mtf_row.asset_price
+    jewel_gate_open = None
 
-    # 3. Latest JEWEL snapshot — for the gate dot
-    jewel_row = db.query(JewelSnapshotLog).filter(
-        JewelSnapshotLog.symbol == symbol_norm
-    ).order_by(JewelSnapshotLog.id.desc()).first()
-
-    jewel_gate_open = jewel_row.jewel_gate_open if jewel_row else None
-
-    # 4. Today's MAS verdict — for the status badge and cockpit pre-population
+    # 2. Today's MAS verdict — for the status badge and cockpit pre-population
     campaign = db.query(CampaignLog).filter(
         CampaignLog.symbol == symbol_norm,
         CampaignLog.date_key == today,
@@ -1779,10 +1645,11 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
             AgentRunLog.created_at >= since_7d).first()
         total_tok = (tok[0] or 0) + (tok[1] or 0)
         cache_hit_rate = round((tok[1] or 0) / total_tok * 100, 1) if total_tok > 0 else 0.0
-        newsletter_count = db.query(func.count(NewsletterLog.id)).scalar() or 0
+        # newsletter_count removed 2026-08-30 -- NewsletterLog orphaned since
+        # publisher_crew.py was archived; also never read by the frontend.
         return JSONResponse({"ok": True, "total_sessions": total, "approved_rate": approved_rate,
             "win_rate": win_rate, "net_r": net_r, "spend_7d": spend_7d,
-            "cache_hit_rate": cache_hit_rate, "newsletter_count": newsletter_count})
+            "cache_hit_rate": cache_hit_rate})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -1910,63 +1777,14 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-@app.get("/api/dashboard/jewel")
-async def api_dashboard_jewel(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    try:
-        snapshots = db.query(JewelSnapshotLog).filter(
-            JewelSnapshotLog.session_label == "NY_OPEN").all()
-        
-        date_keys = {snap.timestamp.strftime("%Y-%m-%d") for snap in snapshots if snap.timestamp}
-        trades_by_date = {}
-        if date_keys:
-            campaigns = db.query(CampaignLog).filter(
-                CampaignLog.symbol == "BTC/USDT",
-                CampaignLog.date_key.in_(list(date_keys)),
-                CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS"]),
-                CampaignLog.is_canonical == True,
-                CampaignLog.session_timeframe == "15M"
-            ).all()
-            for t in campaigns:
-                if t.date_key not in trades_by_date:
-                    trades_by_date[t.date_key] = t
-
-        open_win = open_loss = closed_win = closed_loss = 0
-        for snap in snapshots:
-            if not snap.timestamp:
-                continue
-            date_key = snap.timestamp.strftime("%Y-%m-%d")
-            trade = trades_by_date.get(date_key)
-            if not trade:
-                continue
-            is_win = trade.status == "CLOSED_WIN"
-            if snap.jewel_gate_open:
-                open_win  += (1 if is_win else 0)
-                open_loss += (0 if is_win else 1)
-            else:
-                closed_win  += (1 if is_win else 0)
-                closed_loss += (0 if is_win else 1)
-        return JSONResponse({"ok": True, "open_win": open_win, "open_loss": open_loss,
-                             "closed_win": closed_win, "closed_loss": closed_loss})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.get("/api/dashboard/newsletters")
-async def api_dashboard_newsletters(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    try:
-        rows = db.query(NewsletterLog).order_by(NewsletterLog.id.desc()).limit(30).all()
-        data = [{"id": r.id, "date_key": r.date_key, "headline": r.headline,
-                 "approval_status": r.approval_status, "publish_status": r.publish_status,
-                 "newsletter_md": r.newsletter_md or ""} for r in rows]
-        return JSONResponse({"ok": True, "newsletters": data})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+# /api/dashboard/jewel removed 2026-08-30 -- analyzed the old JEWEL gate vs.
+# outcome, both retired (jewel_specialist.py archived, nothing writes new
+# JewelSnapshotLog rows). Would only ever show historical (frozen) data.
+#
+# /api/dashboard/newsletters removed 2026-08-30 -- NewsletterLog has been
+# orphaned since publisher_crew.py was archived (2026-08-30, earlier commit);
+# nothing writes to it. A newsletter viewer is also exactly what "no
+# publication" rules out directly, not just incidentally dead.
 
 
 @app.get("/api/dashboard/audits")
@@ -2133,13 +1951,8 @@ async def get_session_energy(request: Request, db: Session = Depends(get_db)):
         session = pkt.get("session", {})
         htf_shelves = pkt.get("htf_shelves", {})
 
-        # jewel_gate_open lives on JewelSnapshotLog, not in the SessionLock
-        # packet -- pkt never carries this key. Same lookup pattern used
-        # elsewhere in this file (see the cockpit-prepopulation route).
-        jewel_row = db.query(JewelSnapshotLog).filter(
-            JewelSnapshotLog.symbol == "BTC/USDT"
-        ).order_by(JewelSnapshotLog.id.desc()).first()
-        jewel_gate_open = jewel_row.jewel_gate_open if jewel_row else None
+        # jewel_gate_open removed 2026-08-30 -- JewelSnapshotLog's only writer
+        # (jewel_specialist.py) is archived, nothing populates it anymore.
 
         return JSONResponse({
             "ok": True,
@@ -2173,7 +1986,7 @@ async def get_session_energy(request: Request, db: Session = Depends(get_db)):
             "macro_bias": context.get("macro_bias"),
             "micro_bias": context.get("micro_bias"),
             "micro_state": context.get("micro_state"),
-            "jewel_gate_open": jewel_gate_open,
+            "jewel_gate_open": None,
             "lock_time": pkt.get("lock_time"),
             "current_price": context.get("current_price"),
         })

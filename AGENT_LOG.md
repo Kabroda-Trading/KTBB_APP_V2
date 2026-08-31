@@ -366,3 +366,66 @@ checking before assuming it can't be done, the way `_calc_bbwp`'s SMA-5 gap
 turned out to be fixable once actually checked). Testing a deliberately
 partial build and presenting the results as meaningful was a real mistake
 this session — don't repeat it.
+
+## 2026-08-30 — FROM: Claude Code — FOR: DeepSeek/Antigravity (both)
+STATUS: open
+
+**The 2026-08-27 entry above (CONFLUENCE_RESEARCH_BRIEF.md) is superseded —
+don't act on it.** Andy did not want the graded-conviction model
+(STRONG/LEAN/NEUTRAL) that entry was built around. Instead he pointed this
+repo at `KABRODA_REBUILD_SPEC.md` in the Kabroda AI Brain repo — a real,
+already-validated spec (1,913-trade, 5-year backtest, independently
+corroborated against kabroda.com's own 123 real VRVP locks) — and gave
+direct authorization for a full replacement of the 15M decision layer per
+that spec, no graded tiers, no confluence scoring. If `CONFLUENCE_RESEARCH_
+BRIEF.md` research is still in progress or was completed, it's no longer
+needed for this decision layer; check with Andy before spending more time on
+it.
+
+**What actually shipped this session, in order:**
+1. The calibrated gate itself — `reachability.py`, `htf_fuel.py`,
+   `fuel_gate.py`, `market_regime.py`, `micro_regime.py` (all new, ported
+   from KABRODA_REBUILD_SPEC.md), `decision_engine.py` fully rewritten
+   around `evaluate_15m_decision()`. Four outputs only:
+   TAKE_PREMIUM / TAKE_STANDARD / ALMOST / PASS. Management math (entry/
+   stop/T1/T2/T3, box = bo-bd) also per spec. `GateLog` table added to log
+   every evaluation. See this repo's own `CLAUDE.md` (rewritten to match).
+2. **A full purge of everything not sourced from that spec** — Andy's
+   words: "Everything gets ripped out. All the jewel, all the confluences,
+   all the rule sets... I don't wanna hear any of that ever [conflicting-
+   indicator caveats] anywhere in this system." Removed: the old confluence
+   vote-tally (`mtf_confluence_scanner.py`'s `_build_jewel_signal`/
+   `_find_key_levels`/`_build_summary`, `market_radar.py`'s `get_mtf_brief`/
+   `_build_action_sentence`), the entire old LLM Senior Analyst pipeline in
+   `kabroda_mas_flow.py` (~600 lines — RAG memory reader, cross-day
+   narrative/jewel context readers, JSON-retry parser, prompt builder, two
+   log writers — all dead once the coded gate replaced the LLM call), the
+   Intel Auditor, the Operator Commlink stub, Research Lab, the JEWEL
+   scheduler/`jewel_specialist.py`, `/suite/confluence`, and every dashboard
+   card/route that only existed to display that old data
+   (`/api/dashboard/jewel`, `/api/dashboard/newsletters`, the JEWEL Gate vs.
+   Trade Outcome chart, the Newsletter Archive table). `MtfReading`,
+   `JewelSnapshotLog`, `NewsletterLog` tables removed from `database.py`
+   (writers/readers confirmed zero live references first).
+3. Found and fixed one real bug while in there: `kabroda_mas_flow.py`'s
+   `run_mas_analysis()` referenced `bo`/`bd` that were never defined in its
+   own scope (stale leftover from the old prompt builder) — silently caught
+   by a try/except, so `bo_trigger`/`bd_trigger` were never landing in the
+   audit table. Fixed.
+
+**Still open, not done this session:** `battlebox_pipeline.py` needs the
+same stripping-down Andy asked for — down to only daily S/R, 30M high/low,
+BO/BD triggers, and session timing. Not started yet. Also: `MacroNarrativeLog`/
+`SystemAuditLog`/`InterpreterLog` in `database.py` now have zero live
+writers (their old LLM writers are gone) but main.py's admin dashboard still
+reads them for historical display — left alone this pass since it's an
+admin-audit-history concern, not part of the 15M decision path; flagging in
+case it's worth a cleanup pass later.
+
+**Verification for all of the above:** `py_compile` on every touched file,
+`import main` against a throwaway DB, full `test_e2e.py` (83/83 passing),
+and a live `uvicorn` boot with real HTTP requests including a live
+`/api/radar/scan` call against real MEXC data end-to-end — no exceptions,
+no dangling references. `tests/test_dashboard_fixes.py` has a pre-existing,
+unrelated fixture bug (`CampaignLog.session_id` NOT NULL violation) that
+predates this session's changes — not fixed, flagged only.

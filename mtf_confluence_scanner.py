@@ -28,7 +28,6 @@ from market_data import (
     _calc_bbwp,
     _calc_pmarp,
 )
-import gravity_math
 
 # Three Drives / Revin Suite (revin_ribbons, rmo, rwp, revin_suite_engine)
 # removed 2026-08-17 -- Kabroda Audit AUDIT_FINDINGS.md #1-3/#5: all four
@@ -283,99 +282,13 @@ def _find_divergence(
     return fallback
 
 
-# ------------------------------------------------------------------------------
-# JEWEL SIGNAL — Sequential synthesis of all components
-# This is the primary output the Senior Analyst reads. It answers:
-# "Is the market ready to move, in which direction, and how confidently?"
-# ------------------------------------------------------------------------------
-
-def _build_jewel_signal(
-    tf_data: Dict[str, Dict],
-    dominant_direction: str,
-) -> Dict[str, Any]:
-    """
-    Sequential Krown logic:
-    1. BBWP gate — any timeframe compressed?
-    2. Direction from existing confluence vote
-    3. Conviction from EMA alignment + StochRSI momentum support
-    4. Revin Suite — RWP squeeze as additional gate, RMO divergence as conviction
-    5. PMARP exit warning
-    6. Divergence warning
-    """
-    gate_open = any(v.get("bbwp_compressed", False) for v in tf_data.values())
-    exit_warning = any(v.get("pmarp_overextended", False) for v in tf_data.values())
-    divergence_warning = any(
-        v.get("divergence", "NONE") in {"BEARISH", "BULLISH"}
-        for v in tf_data.values()
-    )
-
-    # ── Revin Suite gates ───────────────────────────────────────────────
-    rwp_squeeze = any(v.get("rwp_squeeze", False) for v in tf_data.values())
-    rmo_overextended = any(v.get("rmo_overextended", False) for v in tf_data.values())
-    rmo_bullish = any(
-        v.get("rmo_state") == "BULLISH" for v in tf_data.values()
-    )
-    rmo_bearish = any(
-        v.get("rmo_state") == "BEARISH" for v in tf_data.values()
-    )
-    revin_gray_dot = any(v.get("revin_gray_dot", False) for v in tf_data.values())
-    revin_outer_band = any(v.get("revin_outer_band", False) for v in tf_data.values())
-
-    if not gate_open:
-        conviction = "LOW"
-    else:
-        momentum_target = "UP" if dominant_direction == "BULLISH" else "DOWN"
-        direction_aligned = sum(
-            1 for v in tf_data.values()
-            if v.get("direction_vote") == dominant_direction
-        )
-        momentum_supporting = sum(
-            1 for v in tf_data.values()
-            if v.get("stoch_rsi", {}).get("curl") == momentum_target
-        )
-        # Boost conviction if RWP squeeze confirms the gate
-        rwp_boost = 1 if rwp_squeeze else 0
-        # Boost conviction if RMO aligns with dominant direction
-        rmo_boost = 1 if (
-            (dominant_direction == "BULLISH" and rmo_bullish) or
-            (dominant_direction == "BEARISH" and rmo_bearish)
-        ) else 0
-        # STRONG if: (old AND-gate: direction + momentum) OR (Revin boosts substitute for momentum)
-        conviction = "STRONG" if (direction_aligned >= 3 and momentum_supporting >= 2) or (direction_aligned >= 3 and (rwp_boost + rmo_boost) >= 1) else "MODERATE"
-
-    if not gate_open:
-        summary = "Gate closed — no compression detected, stand down."
-    else:
-        parts = [f"Gate open. {dominant_direction.capitalize()} bias, {conviction.lower()} conviction."]
-        if rwp_squeeze:
-            parts.append("RWP squeeze confirms compression — breakout imminent.")
-        if rmo_overextended:
-            parts.append("RMO overextended — momentum exhaustion warning.")
-        if revin_gray_dot:
-            parts.append("Revin gray dot tested — support/resistance bounce zone.")
-        if revin_outer_band:
-            parts.append("Revin outer band touched — extreme price level.")
-        if exit_warning:
-            parts.append("Exit warning active — overextended on at least one timeframe.")
-        if divergence_warning:
-            parts.append("Divergence detected — potential reversal signal.")
-        if not exit_warning and not divergence_warning:
-            parts.append("No exit warnings. Setup clean.")
-        summary = " ".join(parts)
-
-    return {
-        "gate_open": gate_open,
-        "direction": dominant_direction,
-        "conviction": conviction,
-        "exit_warning": exit_warning,
-        "divergence_warning": divergence_warning,
-        "rwp_squeeze": rwp_squeeze,
-        "rmo_overextended": rmo_overextended,
-        "revin_gray_dot": revin_gray_dot,
-        "revin_outer_band": revin_outer_band,
-        "signal_summary": summary,
-    }
-
+# _build_jewel_signal() removed 2026-08-30 -- the old "Krown/JEWEL" sequential
+# scoring system (its own comment called out the "old AND-gate"). Andy's call:
+# strip it out entirely, not just stop calling it -- it was never validated
+# and doesn't feed the real gate (decision_engine.py). jewel_specialist.py
+# (which existed only to snapshot this system's output 6x/day),
+# JewelSnapshotLog, the confluence_score/dominant_direction vote-tally below,
+# and templates/confluence.html are all removed alongside it.
 
 # ------------------------------------------------------------------------------
 # PER-TIMEFRAME ANALYSIS
@@ -488,133 +401,29 @@ def _analyze_timeframe(candles: List[Dict], label: str) -> Dict[str, Any]:
     }
 
 
-# ------------------------------------------------------------------------------
-# KEY LEVELS
-# ------------------------------------------------------------------------------
-
-def _find_key_levels(
-    symbol: str, candles_4h: List[Dict], current_price: float
-) -> Dict[str, Optional[float]]:
-    """Primary: KDE peaks from gravity_math. Fallback: 4H highs/lows."""
-    resistance: Optional[float] = None
-    support: Optional[float] = None
-
-    try:
-        kde = gravity_math.calculate_gravity_kde(symbol)
-        peaks = kde.get("peaks", [])
-        if peaks:
-            above = [p["price"] for p in peaks if p["price"] > current_price]
-            below = [p["price"] for p in peaks if p["price"] < current_price]
-            resistance = min(above) if above else None
-            support = max(below) if below else None
-    except Exception:
-        pass
-
-    if resistance is None or support is None:
-        highs = sorted([c["high"] for c in candles_4h if c["high"] > current_price])
-        lows = sorted([c["low"] for c in candles_4h if c["low"] < current_price], reverse=True)
-        if resistance is None and highs:
-            resistance = round(highs[0], 4)
-        if support is None and lows:
-            support = round(lows[0], 4)
-
-    return {
-        "nearest_resistance": round(resistance, 4) if resistance else None,
-        "nearest_support": round(support, 4) if support else None,
-    }
-
-
-# ------------------------------------------------------------------------------
-# PLAIN-ENGLISH SUMMARY
-# ------------------------------------------------------------------------------
-
-def _build_summary(
-    tf_data: Dict[str, Dict],
-    score: int,
-    conviction: str,
-    dominant_direction: str,
-    current_price: float,
-    levels: Dict[str, Optional[float]],
-) -> str:
-    aligned = [v["label"] for v in tf_data.values() if v.get("direction_vote") == dominant_direction]
-    opposing = [v["label"] for v in tf_data.values() if v.get("direction_vote") not in (dominant_direction, "NEUTRAL", "UNKNOWN")]
-    curl_up = [v["label"] for v in tf_data.values() if v.get("stoch_rsi", {}).get("curl") == "UP"]
-    curl_down = [v["label"] for v in tf_data.values() if v.get("stoch_rsi", {}).get("curl") == "DOWN"]
-    overbought = [v["label"] for v in tf_data.values() if v.get("stoch_rsi", {}).get("zone") == "OVERBOUGHT"]
-    oversold = [v["label"] for v in tf_data.values() if v.get("stoch_rsi", {}).get("zone") == "OVERSOLD"]
-    strong_adx = [v["label"] for v in tf_data.values() if v.get("adx_strength") == "STRONG"]
-    compressed = [v["label"] for v in tf_data.values() if v.get("bbwp_compressed")]
-    overextended = [v["label"] for v in tf_data.values() if v.get("pmarp_overextended")]
-    diverging = [v["label"] for v in tf_data.values() if v.get("divergence", "NONE") != "NONE"]
-
-    # Revin Suite summary fields
-    rwp_squeeze_tfs = [v["label"] for v in tf_data.values() if v.get("rwp_squeeze")]
-    rmo_bullish_tfs = [v["label"] for v in tf_data.values() if v.get("rmo_state") == "BULLISH"]
-    rmo_bearish_tfs = [v["label"] for v in tf_data.values() if v.get("rmo_state") == "BEARISH"]
-    rmo_overextended_tfs = [v["label"] for v in tf_data.values() if v.get("rmo_overextended")]
-    revin_gray_dot_tfs = [v["label"] for v in tf_data.values() if v.get("revin_gray_dot")]
-    revin_outer_band_tfs = [v["label"] for v in tf_data.values() if v.get("revin_outer_band")]
-
-    res = levels.get("nearest_resistance")
-    sup = levels.get("nearest_support")
-
-    if dominant_direction == "NEUTRAL":
-        parts = [
-            f"SPLIT MARKET — no directional confluence ({score}/5 timeframes agree).",
-            f"Price at {current_price}.",
-        ]
-    else:
-        parts = [
-            f"{conviction} {dominant_direction} confluence ({score}/5 timeframes aligned).",
-            f"Price at {current_price}.",
-        ]
-
-    if aligned:
-        parts.append(f"Aligned TFs: {', '.join(aligned)}.")
-    if opposing:
-        parts.append(f"Opposing: {', '.join(opposing)}.")
-    if compressed:
-        parts.append(f"BBWP compressed (gate open) on: {', '.join(compressed)}.")
-    if rwp_squeeze_tfs:
-        parts.append(f"RWP squeeze on: {', '.join(rwp_squeeze_tfs)}.")
-    if rmo_bullish_tfs:
-        parts.append(f"RMO bullish on: {', '.join(rmo_bullish_tfs)}.")
-    if rmo_bearish_tfs:
-        parts.append(f"RMO bearish on: {', '.join(rmo_bearish_tfs)}.")
-    if rmo_overextended_tfs:
-        parts.append(f"RMO overextended on: {', '.join(rmo_overextended_tfs)}.")
-    if revin_gray_dot_tfs:
-        parts.append(f"Revin gray dot (support test) on: {', '.join(revin_gray_dot_tfs)}.")
-    if revin_outer_band_tfs:
-        parts.append(f"Revin outer band touched on: {', '.join(revin_outer_band_tfs)}.")
-    if overextended:
-        parts.append(f"PMARP overextended (exit warning) on: {', '.join(overextended)}.")
-    if diverging:
-        parts.append(f"RSI divergence on: {', '.join(diverging)}.")
-    if curl_up:
-        parts.append(f"StochRSI curling UP on: {', '.join(curl_up)}.")
-    if curl_down:
-        parts.append(f"StochRSI curling DOWN on: {', '.join(curl_down)}.")
-    if overbought:
-        parts.append(f"Overbought (risk of rejection): {', '.join(overbought)}.")
-    if oversold:
-        parts.append(f"Oversold (potential bounce zone): {', '.join(oversold)}.")
-    if strong_adx:
-        parts.append(f"Strong trend momentum (ADX>25) on: {', '.join(strong_adx)}.")
-    if res:
-        parts.append(f"Nearest resistance: {res}.")
-    if sup:
-        parts.append(f"Nearest support: {sup}.")
-
-    return " ".join(parts)
-
+# _find_key_levels() / _build_summary() removed 2026-08-30 -- both existed
+# only to feed the old confluence vote-tally narrative below (nearest_
+# resistance/support, plain-English summary strings), no remaining caller.
 
 # ------------------------------------------------------------------------------
 # MAIN SCAN FUNCTIONS
 # ------------------------------------------------------------------------------
 
 async def run_mtf_confluence_scan(symbol: str) -> Dict[str, Any]:
-    """Run full 5-TF JEWEL scan for a single symbol. Live data only."""
+    """Run the real, per-timeframe indicator scan (EMA/BBWP/PMARP/StochRSI/
+    ADX/divergence) for a symbol. Live data only.
+
+    2026-08-30: the old confluence vote-tally (bull/bear count across 5 TFs
+    -> confluence_score/dominant_direction/conviction) and the JEWEL signal
+    built on top of it are removed -- Andy's call, strip it out entirely.
+    Neither ever fed the real gate (decision_engine.py only reads
+    timeframes["15M"]["divergence"] from this scan's output, for the real
+    15M-divergence hard veto) and the vote-tally was never validated --
+    KABRODA_REBUILD_SPEC.md explicitly names this pattern (a multi-factor
+    point tally producing the trade call) as the thing that lost money on
+    kabroda.com's own real trades. _analyze_timeframe()'s real indicator
+    math is untouched below -- that's legitimate, corrected, still-needed
+    infrastructure, not part of what's being cut."""
     norm_sym = _normalize_symbol(symbol)
 
     # 4H bumped to 280 so percentile rank covers full 252-period lookback
@@ -637,50 +446,10 @@ async def run_mtf_confluence_scan(symbol: str) -> Dict[str, Any]:
         "1W": _analyze_timeframe(raw_weekly, "1W"),
     }
 
-    bull_count = sum(1 for v in tf_data.values() if v.get("direction_vote") == "BULLISH")
-    bear_count = sum(1 for v in tf_data.values() if v.get("direction_vote") == "BEARISH")
-
-    if bull_count > bear_count:
-        dominant_direction = "BULLISH"
-        score = bull_count
-    elif bear_count > bull_count:
-        dominant_direction = "BEARISH"
-        score = bear_count
-    else:
-        dominant_direction = "NEUTRAL"
-        score = max(bull_count, bear_count)
-
-    if score >= 4:
-        conviction = "HIGH"
-    elif score == 3:
-        conviction = "STANDARD"
-    else:
-        conviction = "LOW"
-
-    any_tf_compressed = any(v.get("bbwp_compressed", False) for v in tf_data.values())
-    any_tf_overextended = any(v.get("pmarp_overextended", False) for v in tf_data.values())
-    any_tf_divergence = any(v.get("divergence", "NONE") != "NONE" for v in tf_data.values())
-
-    jewel_signal = _build_jewel_signal(tf_data, dominant_direction)
-
-    levels = _find_key_levels(norm_sym, raw_4h, current_price)
-
-    summary = _build_summary(tf_data, score, conviction, dominant_direction, current_price, levels)
-
     return {
         "symbol": norm_sym,
         "current_price": current_price,
         "timeframes": tf_data,
-        "confluence_score": score,
-        "dominant_direction": dominant_direction,
-        "conviction": conviction,
-        "nearest_resistance": levels["nearest_resistance"],
-        "nearest_support": levels["nearest_support"],
-        "any_tf_compressed": any_tf_compressed,
-        "any_tf_overextended": any_tf_overextended,
-        "any_tf_divergence": any_tf_divergence,
-        "jewel_signal": jewel_signal,
-        "summary": summary,
         "scanned_at": datetime.now(tz=timezone.utc).isoformat(),
     }
 

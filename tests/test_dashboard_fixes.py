@@ -18,7 +18,6 @@ from database import (
     UserModel,
     CampaignLog,
     AgentRunLog,
-    JewelSnapshotLog,
 )
 import auth
 from main import app
@@ -154,22 +153,11 @@ def setup_test_db():
         cache_read_tokens=25
     )
     db.add_all([r1, r2])
-    
-    # Create JewelSnapshotLog for N+1 query and Jewel gate testing
-    j1 = JewelSnapshotLog(
-        session_label="NY_OPEN",
-        timestamp=datetime.utcnow() - timedelta(days=2),
-        jewel_gate_open=True,
-        symbol="BTC/USDT"
-    )
-    j2 = JewelSnapshotLog(
-        session_label="NY_OPEN",
-        timestamp=datetime.utcnow() - timedelta(days=1),
-        jewel_gate_open=False,
-        symbol="BTC/USDT"
-    )
-    db.add_all([j1, j2])
-    
+
+    # JewelSnapshotLog fixture rows removed 2026-08-30 -- the table itself is
+    # gone (JewelSnapshotLog's only writer, jewel_specialist.py, is archived;
+    # see database.py's removal note).
+
     db.commit()
     db.close()
     
@@ -224,12 +212,5 @@ def test_api_dashboard_mas_history(basic_client):
     assert data["ok"] is True
     assert len(data["pnl_series"]) == 3
 
-def test_api_dashboard_jewel(basic_client):
-    response = basic_client.get("/api/dashboard/jewel")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["ok"] is True
-    assert data["open_win"] == 1
-    assert data["closed_loss"] == 1
-    assert data["open_loss"] == 0
-    assert data["closed_win"] == 0
+# test_api_dashboard_jewel removed 2026-08-30 -- tested /api/dashboard/jewel,
+# already removed from main.py (JewelSnapshotLog's only writer is archived).

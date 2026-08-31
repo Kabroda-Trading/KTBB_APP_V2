@@ -636,23 +636,12 @@ class CampaignLog(Base):
     rmo_state = Column(String, nullable=True)              # BULLISH / BEARISH / NEUTRAL
     rwp_squeeze = Column(Boolean, nullable=True)           # RWP squeeze active (confirms compression)
 
-# ---------------------------------------------------------
-# MTF CONFLUENCE READINGS (MORNING BRIEF HISTORY)
-# ---------------------------------------------------------
-class MtfReading(Base):
-    __tablename__ = "mtf_readings"
-
-    id = Column(Integer, primary_key=True, index=True)
-    symbol = Column(String, index=True, nullable=False)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
-    confluence_score = Column(Integer, nullable=False, default=0)
-    confluence_direction = Column(String, nullable=False, default="NEUTRAL")
-    energy_status = Column(String, nullable=False, default="BUILDING")
-    timeframe_data = Column(String, nullable=True)
-    bo_price = Column(Float, nullable=True)
-    bd_price = Column(Float, nullable=True)
-    asset_price = Column(Float, nullable=True)
-    session_date = Column(String, nullable=True)
+# MtfReading ("Morning Brief" history) removed 2026-08-30 -- its only writer
+# was market_radar.py's scan_sector(), which stopped populating it alongside
+# the rest of the old confluence vote-tally purge. Zero readers anywhere
+# (grepped). The underlying mtf_readings SQLite table is left in place (no
+# migration framework -- see the "Database Schema Notes" section of
+# CLAUDE.md), just unmapped.
 
 # ---------------------------------------------------------
 # DECISION JOURNAL (PERFORMANCE AUDITOR FOUNDATION — DATA COLLECTION ONLY)
@@ -762,78 +751,18 @@ class MacroNarrativeLog(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
-# ---------------------------------------------------------
-# JEWEL SNAPSHOT LOG (PHASE 2 — 6 DAILY TIMEFRAME SNAPSHOTS)
-# Captures JEWEL state across all 5 timeframes at 6 fixed
-# session transitions per day. Senior Analyst reads the last
-# 6 entries (24 hours) before writing the morning brief.
-#
-# session_label values:
-#   NY_OPEN, NY_MIDDAY, NY_CLOSE,
-#   ASIA_OPEN, ASIA_MIDDAY, LONDON_OPEN
-#
-# tf_*_state fields: JSON strings with keys:
-#   direction, zone, momentum, adx_strength
-# ---------------------------------------------------------
-class JewelSnapshotLog(Base):
-    __tablename__ = "jewel_snapshot_log"
+# JewelSnapshotLog removed 2026-08-30 -- its only writer (jewel_specialist.py)
+# is archived, and its only reader (main.py's /api/dashboard/jewel,
+# /api/radar/snapshot, /api/narrative/latest jewel fields, kabroda_mas_flow.py's
+# Senior Analyst context reader) are all removed alongside the jewel/confluence
+# purge (grepped, zero live references left). The underlying jewel_snapshot_log
+# SQLite table is left in place (no migration framework), just unmapped.
 
-    id = Column(Integer, primary_key=True, index=True)
-    symbol = Column(String, nullable=False, index=True, default="BTC/USDT")
-    timestamp = Column(DateTime, nullable=False, index=True)
-
-    session_label = Column(String, nullable=False)   # NY_OPEN | NY_MIDDAY | ...
-
-    asset_price = Column(Float, nullable=False)
-
-    tf_15m_state = Column(String, nullable=True)     # JSON: direction/zone/momentum/adx
-    tf_1h_state = Column(String, nullable=True)
-    tf_4h_state = Column(String, nullable=True)
-    tf_daily_state = Column(String, nullable=True)
-    tf_weekly_state = Column(String, nullable=True)
-
-    # --- PHASE 3C: scanner top-level context ---
-    confluence_score      = Column(Integer, nullable=True)
-    dominant_direction    = Column(String, nullable=True)
-    conviction            = Column(String, nullable=True)
-    any_tf_compressed     = Column(Boolean, nullable=True)
-    any_tf_overextended   = Column(Boolean, nullable=True)
-    any_tf_divergence     = Column(Boolean, nullable=True)
-    jewel_gate_open       = Column(Boolean, nullable=True)
-    jewel_conviction      = Column(String, nullable=True)
-    jewel_exit_warning    = Column(Boolean, nullable=True)
-    jewel_divergence_warning = Column(Boolean, nullable=True)
-    jewel_signal_summary  = Column(String, nullable=True)
-
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-
-
-# ---------------------------------------------------------
-# NEWSLETTER LOG (PHASE 6 — CONTENT PUBLISHING ENGINE)
-# Stores the Publisher agent's daily newsletter output.
-# publish_status lifecycle: DRAFT → PUBLISHED | FAILED
-# ghost_post_id populated after Ghost API publish step.
-# New table — created by Base.metadata.create_all(), no ALTER needed.
-# ---------------------------------------------------------
-class NewsletterLog(Base):
-    __tablename__ = "newsletter_log"
-
-    id            = Column(Integer, primary_key=True, index=True)
-    symbol        = Column(String, index=True, nullable=False)
-    date_key      = Column(String, index=True, nullable=False)
-    session_id    = Column(String, nullable=False)
-
-    approval_status = Column(String, nullable=True)    # APPROVED / REJECTED / WAITING_FOR_15M
-    headline        = Column(String, nullable=True)
-    newsletter_md   = Column(String, nullable=True)    # Full Markdown article
-    newsletter_html = Column(String, nullable=True)    # Reserved for Ghost publish step
-
-    publish_status = Column(String, default="DRAFT", nullable=False)  # DRAFT / PUBLISHED / FAILED
-    published_at   = Column(DateTime, nullable=True)
-    ghost_post_id  = Column(String, nullable=True)     # Populated after Ghost API publish
-
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-
+# NewsletterLog removed 2026-08-30 -- its only writer (publisher_crew.py) was
+# archived when the Content Publishing Engine (Step 8 of the old MAS flow) was
+# retired; the graded coded decision layer generates no newsletter. Its only
+# reader (main.py's /api/dashboard/newsletters) is removed too. The underlying
+# newsletter_log SQLite table is left in place, just unmapped.
 
 # ---------------------------------------------------------
 # SYSTEM AUDIT LOG (PERFORMANCE AUDITOR VAULT)

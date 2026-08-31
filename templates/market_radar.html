@@ -946,19 +946,8 @@
         // ================================================================
         // ROW BUILDER — shared by Phase 1 snapshot and Phase 2 full render
         // ================================================================
-        function _buildRow(sym, price, dir, score, energy, bo, bd, jewelGateOpen, rowClass, cockpitEnabled, masStatus) {
+        function _buildRow(sym, price, bo, bd, rowClass, cockpitEnabled, masStatus) {
             const base        = (sym || '').replace('USDT', '');
-            const dirArrow    = dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '●';
-            const dirColor    = dir === 'BULLISH' ? '#22c55e' : dir === 'BEARISH' ? '#ef4444' : '#eab308';
-            const energyColor = energy === 'BUILDING' ? '#22c55e' : energy === 'BURNING' ? '#eab308' : '#ef4444';
-
-            let jewelDot = '';
-            if (sym === 'BTCUSDT' && jewelGateOpen !== null) {
-                const dotColor = jewelGateOpen ? '#22c55e' : '#475569';
-                const dotLabel = jewelGateOpen ? 'JEWEL ●' : 'JEWEL ○';
-                const dotTitle = jewelGateOpen ? 'JEWEL Gate OPEN — BBWP compressed' : 'JEWEL Gate CLOSED';
-                jewelDot = `<div class="rrc-energy" style="background:${dotColor}18; border-color:${dotColor}; color:${dotColor}; font-size:10px;" title="${dotTitle}">${dotLabel}</div>`;
-            }
 
             // 2026-08-30 rebuild: masStatus is either the official CampaignLog
             // verdict (APPROVED/STAND_DOWN) or, in the full-grid path where no
@@ -981,9 +970,6 @@
                     <div class="rrc-sym-name">${base}</div>
                     <div class="rrc-sym-price">$${fmt(price)}</div>
                 </div>
-                <div class="rrc-badge" data-mtf-dir style="border-color:${dirColor}; color:${dirColor};">${dirArrow} ${dir} ${score}/5</div>
-                <div class="rrc-energy" data-mtf-energy style="background:${energyColor}18; border-color:${energyColor}; color:${energyColor};">${energy}</div>
-                ${jewelDot}
                 ${masBadge}
                 <div class="rrc-level">BO <b>$${fmt(bo)}</b></div>
                 <div class="rrc-level">BD <b>$${fmt(bd)}</b></div>
@@ -1067,10 +1053,10 @@
             const levels  = snap.levels || {};
             const bo      = levels.breakout_trigger  || 0;
             const bd      = levels.breakdown_trigger || 0;
-            const mtf     = snap.mtf_cached || {};
-            const dir     = mtf.confluence_direction || 'NEUTRAL';
-            const score   = mtf.confluence_score     || 0;
-            const energy  = mtf.energy_status        || 'BUILDING';
+            // snap.mtf_cached (main.py) is permanently {} as of 2026-08-30 --
+            // kept in the API response for shape-compatibility only, not read
+            // here anymore (confluence_direction/score/energy_status/
+            // scanned_at all gone with the old confluence vote-tally).
             const price   = snap.price || 0;
 
             // Seed radarMemory so the cockpit can open with CampaignLog data
@@ -1083,12 +1069,12 @@
                     indicator_string:   `${bo},${bd},${lvl.daily_resistance||0},${lvl.daily_support||0},${lvl.range30m_high||0},${lvl.range30m_low||0}`,
                     grade:              snap.mas_status || 'PENDING',
                     mas_status:         snap.mas_status || null,
-                    // Mission key needs exactly 9 fields (see buildMissionKey9) -- this
-                    // path is poll-driven (Phase 1, DB-only, must stay fast), so macro/
-                    // micro both reuse the already-cached mtf.confluence_direction rather
-                    // than firing a live /api/confluence fetch on every render tick.
+                    // Mission key needs exactly 9 fields (see buildMissionKey9) -- the
+                    // macro/micro slots used to reuse mtf.confluence_direction, retired
+                    // 2026-08-30 alongside the rest of the old confluence vote-tally;
+                    // 'NEUTRAL' is a static placeholder, not a live read.
                     key:                snap.mas_status === 'APPROVED'
-                        ? buildMissionKey9(snap.plan.bias, 'SA_APPROVED', snap.plan.entry_price, snap.plan.stop_loss, snap.plan.t1, snap.plan.t2, snap.plan.t3, dir, dir)
+                        ? buildMissionKey9(snap.plan.bias, 'SA_APPROVED', snap.plan.entry_price, snap.plan.stop_loss, snap.plan.t1, snap.plan.t2, snap.plan.t3, 'NEUTRAL', 'NEUTRAL')
                         : '',
                     diagnostic_ledger:  {},
                     plan: {
@@ -1101,27 +1087,14 @@
                 };
             }
 
-            // Staleness label for cached MTF direction badge
-            let ageLabel = '';
-            if (mtf.scanned_at) {
-                const ageMin = Math.round((Date.now() - new Date(mtf.scanned_at).getTime()) / 60000);
-                ageLabel = ` <span style="font-size:9px;color:#475569;">(${ageMin}m ago)</span>`;
-            }
-
             const cockpitEnabled = !!(snap.plan && snap.plan.entry_price);
             const rowClass       = 'rrc-active';
 
             // Build the row then inject a SYNCING overlay badge
             let rowHtml = _buildRow(
-                snap.symbol, price, dir, score, energy, bo, bd,
-                snap.jewel_gate_open, rowClass, cockpitEnabled, snap.mas_status
+                snap.symbol, price, bo, bd, rowClass, cockpitEnabled, snap.mas_status
             );
 
-            // Inject age hint into the direction badge and SYNCING pill before closing actions div
-            rowHtml = rowHtml.replace(
-                `>${dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '●'} ${dir} ${score}/5</div>`,
-                `>${dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '●'} ${dir} ${score}/5${ageLabel}</div>`
-            );
             rowHtml = rowHtml.replace(
                 `<div class="rrc-actions">`,
                 `<div class="rrc-badge syncing-badge" style="border-color:#334155;color:#475569;font-size:10px;">SYNCING LIVE…</div><div class="rrc-actions">`
@@ -1142,7 +1115,7 @@
         // ================================================================
         // PHASE 2 — overlay live MTF data onto Phase 1 rows in-place
         // ================================================================
-        function updateMtfOverlay(liveData, jewelGateOpen) {
+        function updateMtfOverlay(liveData) {
             if (!liveData || !liveData.ok) return;
 
             liveData.results.forEach(t => {
@@ -1159,31 +1132,9 @@
                 if (!row) return;
                 if (t.status === 'CALIBRATING') return;
 
-                const brief  = t.mtf_brief || {};
-                const dir    = brief.confluence_direction || 'NEUTRAL';
-                const score  = brief.confluence_score     || 0;
-                const energy = brief.energy_status        || 'BUILDING';
-
-                const dirArrow    = dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '●';
-                const dirColor    = dir === 'BULLISH' ? '#22c55e' : dir === 'BEARISH' ? '#ef4444' : '#eab308';
-                const energyColor = energy === 'BUILDING' ? '#22c55e' : energy === 'BURNING' ? '#eab308' : '#ef4444';
-
-                // Update direction badge (data-mtf-dir)
-                const dirBadge = row.querySelector('[data-mtf-dir]');
-                if (dirBadge) {
-                    dirBadge.style.borderColor = dirColor;
-                    dirBadge.style.color       = dirColor;
-                    dirBadge.innerHTML         = `${dirArrow} ${dir} ${score}/5`;
-                }
-
-                // Update energy badge (data-mtf-energy)
-                const energyBadge = row.querySelector('[data-mtf-energy]');
-                if (energyBadge) {
-                    energyBadge.style.background  = `${energyColor}18`;
-                    energyBadge.style.borderColor = energyColor;
-                    energyBadge.style.color       = energyColor;
-                    energyBadge.textContent       = energy;
-                }
+                // mtf_brief-driven direction/energy badges removed 2026-08-30 --
+                // t.mtf_brief no longer exists (market_radar.py's radar_item
+                // dropped it with the rest of the old confluence vote-tally).
 
                 // Remove SYNCING badge
                 const syncBadge = row.querySelector('.syncing-badge');
@@ -1214,19 +1165,6 @@
                 row.className = `radar-row-c ${actionable ? 'rrc-active' : 'rrc-down'}`;
                 row.setAttribute('data-symbol', t.symbol);
 
-                // Update JEWEL dot if present
-                if (t.symbol === 'BTCUSDT' && jewelGateOpen !== null) {
-                    const dotColor = jewelGateOpen ? '#22c55e' : '#475569';
-                    const dotLabel = jewelGateOpen ? 'JEWEL ●' : 'JEWEL ○';
-                    const existingDot = row.querySelector('[title*="JEWEL"]');
-                    if (existingDot) {
-                        existingDot.style.background  = `${dotColor}18`;
-                        existingDot.style.borderColor = dotColor;
-                        existingDot.style.color       = dotColor;
-                        existingDot.textContent       = dotLabel;
-                    }
-                }
-
                 // Update or inject TF stack with live Phase 2 data
                 if (t.tf_verdicts) {
                     const tfEl = document.querySelector(`.tf-stack[data-tf-symbol="${t.symbol}"]`);
@@ -1250,7 +1188,7 @@
         // ================================================================
         // FULL GRID RENDER — used when Phase 1 has no locked data
         // ================================================================
-        function renderFullGrid(results, jewelGateOpen) {
+        function renderFullGrid(results) {
             const grid = document.getElementById('radarTargetGrid');
             let html   = '';
 
@@ -1271,10 +1209,6 @@
                     return;
                 }
 
-                const brief  = t.mtf_brief || {};
-                const dir    = brief.confluence_direction || 'NEUTRAL';
-                const score  = brief.confluence_score     || 0;
-                const energy = brief.energy_status        || 'BUILDING';
                 const lvl    = t.levels || {};
                 const bo     = lvl.breakout_trigger  || 0;
                 const bd     = lvl.breakdown_trigger || 0;
@@ -1284,8 +1218,7 @@
                 const actionable = (t.grade === 'TAKE_PREMIUM' || t.grade === 'TAKE_STANDARD');
 
                 const rowHtml = _buildRow(
-                    t.symbol, t.price, dir, score, energy, bo, bd,
-                    t.symbol === 'BTCUSDT' ? jewelGateOpen : null,
+                    t.symbol, t.price, bo, bd,
                     actionable ? 'rrc-active' : 'rrc-down',
                     true, t.grade || null
                 ).replace('class="radar-row-c ', 'class="radar-row-c radar-row-c-capped ');
@@ -1333,22 +1266,21 @@
             }
 
             // === PHASE 2: Live MTF scan (runs regardless — updates snapshot or does full render) ===
+            // The old jewelGateOpen fetch (/api/narrative/latest, jData.jewel) was
+            // removed 2026-08-30 -- that endpoint's "jewel" field is permanently
+            // null now (JewelSnapshotLog's only writer, jewel_specialist.py, is
+            // archived), so it was one dead HTTP round-trip per scan for a value
+            // nothing reads anymore.
             try {
-                const [scanRes, jRes] = await Promise.all([
-                    fetch('/api/radar/scan', { method: 'POST' }),
-                    fetch('/api/narrative/latest?symbol=BTC/USDT'),
-                ]);
-                const scanData     = await scanRes.json();
-                const jData        = await jRes.json();
-                const jewelGateOpen = (jData.ok && jData.jewel) ? jData.jewel.jewel_gate_open : null;
+                const scanData = await fetch('/api/radar/scan', { method: 'POST' }).then(r => r.json());
 
                 if (snapRendered) {
-                    updateMtfOverlay(scanData, jewelGateOpen);
+                    updateMtfOverlay(scanData);
                 } else {
                     // No Phase 1 data — first load of the day or pre-market
                     window.radarMemory = {};
                     if (scanData.ok) scanData.results.forEach(t => { window.radarMemory[t.symbol] = t; });
-                    renderFullGrid(scanData.results || [], jewelGateOpen);
+                    renderFullGrid(scanData.results || []);
                     loader.style.display = 'none';
                     grid.style.display   = 'grid';
                 }
