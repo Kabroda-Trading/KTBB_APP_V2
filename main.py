@@ -3,15 +3,17 @@
 # KABRODA UNIFIED SERVER: PRIVATE TEAM TERMINAL
 # ---------------------------------------------------------
 import os
-import json 
+import json
 import traceback
 import hmac
+import csv
+import io
 from typing import Any, Dict, Optional, Literal
 import asyncio
-from contextlib import asynccontextmanager 
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Form, HTTPException, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.templating import Jinja2Templates
@@ -1190,6 +1192,55 @@ async def log_signal_performance(
     db.refresh(row)
 
     return JSONResponse({"ok": True, "id": row.id, "duplicate": False})
+
+
+@app.get("/api/export/gate-log.csv")
+async def export_gate_log_csv(request: Request, since: Optional[str] = None, symbol: Optional[str] = None, db: Session = Depends(get_db)):
+    """KABRODA_COM_TRADE_PLAN_SPEC.md SS9a/SS9c -- the ONE site-side piece
+    of the forward-test log division of labor (AGENT_LOG.md, DeepSeek/Andy,
+    2026-08-31, Kabroda AI Brain repo commit c5487a6): kabroda.com RECORDS
+    (writes GateLog -- locks, plans, transitions, everything the site
+    knows, mechanical facts only); the Brain AUDITS (§9b drift check, §9c
+    reconciliation, and fills the pressure/would_have_r columns on its own
+    closure pass). This export is how the Brain pulls rows without
+    touching site internals -- kabroda.com does not run any analytics on
+    this data itself, by design.
+
+    Auth: X-API-Key header must match GATE_LOG_EXPORT_API_KEY env var
+    (same pattern as /api/signal/log's SIGNAL_API_KEY -- fails closed if
+    the env var is unset).
+    Params: since=YYYY-MM-DD (optional, date_key >= this -- for
+    incremental pulls); symbol=BTC/USDT (optional filter).
+    Every GateLog column is included, in declaration order -- this
+    endpoint does not pick and choose; the Brain's own tooling decides
+    what it needs from the full row, matching §9c's "the log is the
+    source of truth, everything else is a view over it."
+    """
+    api_key = request.headers.get("X-API-Key", "")
+    expected_key = os.getenv("GATE_LOG_EXPORT_API_KEY", "")
+    if not expected_key or not hmac.compare_digest(api_key, expected_key):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+
+    from database import GateLog as _GateLogExport
+    query = db.query(_GateLogExport)
+    if since:
+        query = query.filter(_GateLogExport.date_key >= since)
+    if symbol:
+        query = query.filter(_GateLogExport.symbol == symbol)
+    rows = query.order_by(_GateLogExport.date_key.asc(), _GateLogExport.id.asc()).all()
+
+    columns = [c.name for c in _GateLogExport.__table__.columns]
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(columns)
+    for row in rows:
+        writer.writerow([getattr(row, col) for col in columns])
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=gate_log_export.csv"},
+    )
 
 
 @app.get("/api/agents/cost")

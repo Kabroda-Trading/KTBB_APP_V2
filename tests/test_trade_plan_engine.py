@@ -89,9 +89,31 @@ def poll_env(monkeypatch):
     db.query(CampaignLog).delete()
     db.commit()
     db.close()
-    now = dt.datetime.now(timezone.utc)
+    # `now` here is used only to build FIELD VALUES (commit_after/fill_time
+    # offsets) for assertion consistency -- run_trade_plan_loop() itself
+    # calls datetime.now(timezone.utc) LIVE, uncontrolled by this fixture,
+    # for the actual now_utc it passes into _advance_one(). That real
+    # now_utc is compared against session_expires_at, which _advance_one()
+    # derives fresh from row.date_key via the real
+    # _compute_session_expires_at() (NY Futures close, 15:00 ET / 19:00 UTC
+    # in August) -- so a hardcoded date_key is flaky-by-design: every test
+    # that doesn't care about session expiry starts silently failing the
+    # moment real wall-clock time crosses 19:00 UTC on whatever day this
+    # suite happens to run (found 2026-08-31, ~19:02 UTC real time, mid-
+    # session). DEFAULT_DATE_KEY is computed from REAL current time (a day
+    # ahead) specifically so session_expires_at always lands safely in the
+    # future regardless of when the suite runs -- decoupled from `now`
+    # below, which stays a fixed, deterministic value purely for building
+    # readable, consistent field offsets (matching test_trade_plan_state_
+    # machine.py's own fixed NOW constant). Nothing in _advance_one() cross-
+    # checks date_key against commit_after/fill_time's own date component,
+    # so this split is harmless. Tests that need an ALREADY-expired session
+    # (e.g. session-expiry tests) pass an explicit past date_key instead.
+    DEFAULT_DATE_KEY = (dt.datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+    now = dt.datetime(2026, 8, 31, 14, 0, 0, tzinfo=timezone.utc)
 
-    def make_plan(symbol="BTC/USDT", date_key="2026-08-31", session_id="us_ny_futures", **kwargs):
+    def make_plan(symbol="BTC/USDT", date_key=None, session_id="us_ny_futures", **kwargs):
+        date_key = date_key or DEFAULT_DATE_KEY
         db = SessionLocal()
         defaults = dict(
             symbol=symbol, date_key=date_key, session_id=session_id,
@@ -104,7 +126,8 @@ def poll_env(monkeypatch):
         db.commit()
         db.close()
 
-    def make_campaign(symbol="BTC/USDT", date_key="2026-08-31", session_id="us_ny_futures", **kwargs):
+    def make_campaign(symbol="BTC/USDT", date_key=None, session_id="us_ny_futures", **kwargs):
+        date_key = date_key or DEFAULT_DATE_KEY  # must match make_plan()'s default so the two join correctly
         db = SessionLocal()
         defaults = dict(
             symbol=symbol, date_key=date_key, session_id=session_id,

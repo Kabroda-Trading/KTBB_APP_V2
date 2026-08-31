@@ -25,7 +25,7 @@ pip install -r requirements.txt
 python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Production deploys to Render at kabroda.com on port 10000. There is no test suite — validate by running the server and hitting routes.
+Production deploys to Render at kabroda.com on port 10000. `pytest tests/` is a real, growing suite (170+ tests as of 2026-08-31) — run it, plus a live server + real routes for anything touching live behavior. (This line used to say "there is no test suite" — stale; keep it truthful as the suite grows.)
 
 ## Required Environment Variables
 
@@ -37,6 +37,8 @@ PUBLIC_BASE_URL       # Used to auto-detect HTTPS for secure cookies
 ADMIN_EMAIL           # Bootstrap admin on first boot
 ADMIN_PASSWORD        # Bootstrap admin password
 COINALYZE_API_KEY     # Optional — open interest fuel multiplier
+GATE_LOG_EXPORT_API_KEY  # Optional — required only to use GET /api/export/gate-log.csv
+                         # (the Kabroda AI Brain's SS9 forward-test log pull; X-API-Key header)
 ```
 
 ---
@@ -91,6 +93,8 @@ Runner stop (after T1) = trigger ∓ 0.15×box
 **Four outcomes only, no grades, no score**: `TAKE_PREMIUM` / `TAKE_STANDARD` / `ALMOST` (one gate condition still missing) / `PASS` (always with a specific, stated reason). This is what `decision_engine.evaluate_15m_decision()` returns, and it's the same function `run_mas_analysis()` and the live radar (`market_radar.py`'s `_build_dossier()`) both call — they can never silently disagree.
 
 Every gate evaluation, TAKE or PASS alike, is logged to the `gate_log` table (`database.py`) — this is the forward-incubation record the Kabroda AI Brain reads to confirm live results track the backtest.
+
+**Division of labor (locked 2026-08-31, `Kabroda AI Brain` repo AGENT_LOG.md commit `c5487a6`): kabroda.com is the recorder, the Brain is the auditor.** The site writes complete `gate_log` rows (locks, plans, state transitions — mechanical facts only, including the additive TradePlan-execution columns backfilled by `_backfill_gate_log_execution()` in `ledger_closing_engine.py`) and exposes them via `GET /api/export/gate-log.csv` (`X-API-Key` header, `GATE_LOG_EXPORT_API_KEY` env var; `since`/`symbol` query params). The site does **not** run the monthly drift check, does **not** do plan-ID reconciliation, and does **not** compute `gate_log.pressure` or `gate_log.would_have_r` — those three are explicitly Brain-side (the Brain's own closure pass fills `pressure`/`would_have_r` directly into the same table). Displaying a drift verdict or running that analysis on the site would be a "new opinion" — exactly what SS5's state-machine design forbids.
 
 ### The Gravity Map
 
