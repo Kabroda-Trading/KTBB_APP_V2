@@ -1,18 +1,17 @@
 # trade_plan.py
 # ==============================================================================
-# TRADE PLAN — GENERATION + PRE-COMMIT BRIEF
-# KABRODA_COM_TRADE_PLAN_SPEC.md SS3 (the plan object), SS4 (the brief).
-# Generated ONCE at the session lock, never re-generated intraday (SS1's
-# anti-flip-flop rule). This module builds the plan; it does not run the
-# intraday state machine (SS5) -- that's a separate monitoring loop, not
-# yet built (see AGENT_LOG.md).
+# TRADE PLAN — GENERATION + PRE-COMMIT BRIEF + INTRADAY STATE MACHINE
+# KABRODA_COM_TRADE_PLAN_SPEC.md SS3 (the plan object), SS4 (the brief),
+# SS5 (the state machine), SS8 (re-entry). Generated ONCE at the session
+# lock, never re-generated intraday (SS1's anti-flip-flop rule).
 #
 # Composed entirely from things that already exist and are already
 # validated: decision_engine.py's gate decision (levels, tier, entry/stop/
-# targets -- the SSOT, untouched), and stop_planner.py's NEW, additive
+# targets -- the SSOT, untouched), stop_planner.py's NEW, additive
 # execution stop (confirmed with Andy, 2026-08-31, docs/STOP_BASIS_ANSWER.md
-# in the Kabroda AI Brain repo -- does not replace or feed
-# decision_engine.py's r30-based stop_loss anywhere).
+# in the Kabroda AI Brain repo -- does not replace or feed decision_
+# engine.py's r30-based stop_loss anywhere), and fuel_gate.py (already
+# ported from Brain, SS7).
 #
 # management text: the VALIDATED rule (30% off at T1, 70% runner, stop to
 # the fixed runner-stop level, T3 -- same for BOTH tiers), matching what
@@ -21,12 +20,23 @@
 # code mismatch, caught and corrected in the Brain repo (commit d8a33ce)
 # rather than silently picked one way. Do not let this drift from
 # ledger_closing_engine.py's real behavior again without the same check.
+#
+# Intraday state machine design (2026-08-31): TradePlan's own monitoring
+# only covers the PRE-FILL, fuel-gated entry logic (WAITING/VETOED/FILLED)
+# -- that's genuinely new, CampaignLog's own fill detection (ledger_
+# closing_engine.py Phase 1) is price-only, no fuel gating. POST-fill
+# management (T1 partial/runner-stop/T3) is NOT re-implemented a second
+# time here -- mirror_campaign_outcome() below watches CampaignLog's own
+# already-verified terminal status for the same session instead. Don't
+# rebuild what yesterday's 6 regression tests already cover.
 # ==============================================================================
 
 from __future__ import annotations
 
 import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+import fuel_gate
 
 import stop_planner as sp
 
@@ -210,3 +220,149 @@ def render_brief(plan: Dict[str, Any]) -> str:
         "wick-fake rule.",
     ]
     return "\n".join(lines)
+
+
+# ==============================================================================
+# INTRADAY STATE MACHINE (SS5) — pre-fill, fuel-gated entry logic
+# ==============================================================================
+
+def advance_waiting_plan(
+    plan: Dict[str, Any],
+    now_utc: datetime.datetime,
+    session_expires_at: Optional[datetime.datetime],
+    candles_5m: List[Dict[str, Any]],
+    live_price: float,
+) -> Optional[Dict[str, Any]]:
+    """Pre-fill transitions ONLY: WAITING/VETOED -> FILLED/VETOED/DONE.
+
+    Held until commit_after (the open-window rule) — SS1's "no plan
+    generated intraday" rule doesn't mean no MONITORING before commit_after,
+    it means the plan's fixed fields (trigger/stop/targets/tier) never
+    change; whether/when it fires is exactly what this function decides.
+
+    ARMED and FILLED collapse into one transition here: a stop/limit order
+    sitting exactly at trigger_price fills the instant price touches it --
+    this is advisory tracking (SS1 point 2, never real order placement),
+    so there's no meaningful gap between "fuel confirmed + touched" and
+    "filled" at candle-poll granularity.
+
+    Returns a dict of field updates to apply to the TradePlan row, or None
+    if nothing changed this poll. Caller (the monitoring loop) owns the DB
+    read/write/commit -- this function is pure given its inputs, matching
+    build_trade_plan()'s style and this codebase's small-single-purpose-
+    module convention.
+    """
+    status = plan.get("status")
+    if status not in ("WAITING", "VETOED"):
+        return None
+
+    commit_after = plan.get("commit_after")
+    if commit_after and now_utc < commit_after:
+        return None  # still in the open-window hold -- nothing to check yet
+
+    if session_expires_at and now_utc >= session_expires_at and plan.get("cross_time") is None:
+        return {"status": "DONE", "last_transition_reason": "session ended, trigger never crossed"}
+
+    is_long = plan.get("direction") == "LONG"
+    side = "LONG" if is_long else "SHORT"
+    trigger = plan.get("trigger_price")
+
+    fuel = fuel_gate.evaluate_fuel_gate(candles_5m, trigger, side)
+    verdict = fuel.get("verdict")
+
+    if verdict == "NO_PUSH":
+        return None  # not touched yet
+
+    updates: Dict[str, Any] = {"cross_time": now_utc, "fuel_at_cross": verdict}
+
+    # entry_mode decided the first time price actually reaches the trigger
+    # at/after commit_after -- SS2's "already broken out at commit time" rule.
+    if plan.get("entry_mode") is None:
+        already_broken_out = (live_price > trigger) if is_long else (live_price < trigger)
+        updates["entry_mode"] = "RETEST_LIMIT_AT_LINE" if already_broken_out else "TRIGGER_AT_LEVEL"
+
+    if verdict == "FUELED":
+        updates["status"] = "FILLED"
+        updates["fill_time"] = now_utc
+        updates["fill_price"] = trigger
+        push_ratio = (fuel.get("checks") or {}).get("push_volume", {}).get("ratio")
+        prefix = "second " if status == "VETOED" else ""
+        updates["last_transition_reason"] = f"{prefix}cross fueled ({push_ratio}x baseline) -- filled"
+        return updates
+
+    # NO_FUEL / CONFLICTED
+    if status == "VETOED":
+        # This is already the second cross (VETOED can only be reached after
+        # exactly one unfueled cross -- no counter column needed).
+        updates["status"] = "DONE"
+        updates["last_transition_reason"] = f"second cross also unfueled ({verdict}) -- no energy, done for the day"
+        return updates
+
+    updates["status"] = "VETOED"
+    updates["last_transition_reason"] = f"cross unfueled ({verdict}) -- waiting for the retest"
+    return updates
+
+
+def mirror_campaign_outcome(
+    plan: Dict[str, Any],
+    campaign_status: Optional[str],
+    campaign_target_hit: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """Once FILLED, TradePlan does not re-scan candles for T1/runner/T3 --
+    that's CampaignLog's job (ledger_closing_engine.py, verified 2026-08-30
+    with 6 regression tests). This mirrors that ALREADY-RESOLVED terminal
+    outcome into TradePlan's own status instead of duplicating the scan.
+
+    campaign_status/campaign_target_hit: the matching CampaignLog row's own
+    .status/.target_hit for the same (symbol, date_key, session_id).
+    """
+    if plan.get("status") != "FILLED":
+        return None
+    if campaign_status not in ("CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY"):
+        return None  # still open, nothing to mirror yet
+
+    if campaign_status == "CLOSED_LOSS" and campaign_target_hit == "STOP":
+        # Stopped BEFORE ever reaching T1 -- the wick-fake scenario SS8 is
+        # about. Re-entry eligibility (a separate fuel check) is decided by
+        # check_reentry_eligibility(), not here.
+        return {
+            "status": "STOPPED",
+            "stopped_time": datetime.datetime.utcnow(),
+            "last_transition_reason": "stopped before T1 (wick-fake candidate)",
+        }
+
+    # T1 was reached (RUNNER_STOP/T3), or CLOSED_AT_EXPIRY at any point --
+    # the management sequence ran its course (or the session ended without
+    # ever getting a clean stop-before-T1). Whatever the final blended R
+    # was, the plan itself is done; it is not a re-entry candidate.
+    return {
+        "status": "DONE",
+        "last_transition_reason": f"management complete ({campaign_status}/{campaign_target_hit})",
+    }
+
+
+def check_reentry_eligibility(plan: Dict[str, Any], fuel_still_fueled: bool) -> Dict[str, Any]:
+    """SS8: after a STOPPED (wick-fake) outcome, one re-entry is allowed IF
+    the fuel gate still reads FUELED.
+
+    OPEN TENSION (flagged, not silently resolved -- 2026-08-31): SS8 also
+    says "if the wide stop from SS6 is available (R:R still >= 1:1), the
+    re-entry path is not used -- the wide stop already dominates it." But
+    build_trade_plan() never lets a plan reach WAITING/FILLED without
+    R:R >= 1:1 in the first place (a failing floor goes straight to
+    NO_PLAN -- Andy's confirmed call, 2026-08-31, see build_trade_plan()'s
+    own comment). That means the wide stop is ALWAYS "available" for any
+    plan that reaches STOPPED, which by SS8's own literal text would mean
+    re-entry should never actually fire in this system. This function
+    implements the fuel-check mechanically as specified; whether
+    REENTRY_ARMED should ever actually be reachable given the above is a
+    real, unresolved design question worth confirming before it shows on
+    a live plan, not something to guess past.
+    """
+    if plan.get("status") != "STOPPED":
+        return {"status": "DONE", "last_transition_reason": "not eligible for re-entry check"}
+    if plan.get("reentry_used"):
+        return {"status": "DONE", "last_transition_reason": "re-entry already used"}
+    if fuel_still_fueled:
+        return {"status": "REENTRY_ARMED", "last_transition_reason": "fuel still FUELED -- one re-entry armed"}
+    return {"status": "DONE", "last_transition_reason": "fuel not FUELED after stop -- no re-entry, done"}
