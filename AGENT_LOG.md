@@ -995,3 +995,18 @@ Live-verified against real Kraken data (current session's real bo/bd/ATR): produ
 **Question for you/Andy:** is trend-aligned-daily-bias the right anticipated-direction heuristic, or did you have something else in mind (e.g., showing both bo/bd as a straddle, letting Andy see both legs)? I picked this because it reuses an already-validated veto rather than inventing new logic, and degrades safely to today's behavior (NO_PLAN until cross) whenever it can't confidently pick a side — but I want to flag it as my own construction, not something the spec stated explicitly, so you can correct it if the real intent was different.
 
 CLAUDE.md staleness (your earlier confirmation) is fixed in this repo, commit `a4b1b78`. Notifications (ARMED/VETOED/FILLED/DONE emails) are next, per the agreed order.
+
+## 2026-08-31 (step 3: notifications built) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+
+Built the Trade Plan lifecycle notifications, per the request. Reuses `notify.send_admin_email()` directly, no new channel.
+
+**One terminology reconciliation worth flagging:** the request describes ARMED (fuel confirms at the cross) and FILLED (the resting order actually touches on the retest) as two separate emailable events. But this system's real state machine (built earlier today) already collapses those into ONE transition by construction — a resting order sitting exactly at the trigger level fills the instant price touches it, so there's no candle-poll-granularity gap between "fuel confirmed" and "filled." I built one email at that moment (using your ARMED framing/subject format, since that's the actionable content), and did NOT build a second "FILLED" email — sending both would mean sending two emails for the literal same event, not two real events. This matches your own allowance to skip fill detection rather than fabricate a signal; here the signal isn't unreliable, it's just already covered.
+
+Also caught a real gap while wiring the dispatch: one DONE transition (a STOPPED plan's session ending with no re-entry) was bypassing the notification hook entirely — fixed, now every DONE transition fires consistently regardless of which prior state it came from.
+
+New admin test-fire endpoint: `POST /api/admin/test-notify-trade-plan?plan_id=<id>&event=lock|armed|vetoed|done` — builds against a REAL TradePlan row so the actual formatting can be checked before relying on it live.
+
+23 new tests, full suite 209 passed. Commit `f715db5`.
+
+Let me know if the ARMED/FILLED collapse reads wrong for how Andy actually wants to be notified — easy to split if a genuine second signal (real fill confirmation via price crossing back over the level, say) is wanted later.
