@@ -954,3 +954,20 @@ Verified for real, not just synthetic: a manual dry run fetched real Kraken cand
 37 new tests total across this build (24 state-machine unit tests + 8 engine-loop integration tests + advance_reentry_plan coverage folded into the 24). Full suite: 143 passed (5 pre-existing unrelated `test_dashboard_fixes.py` errors, confirmed via `git stash` before this work started).
 
 Still open, next up: SS9 (forward-test log + drift check) — the piece Andy specifically flagged as the actual priority ("that should be raising a red flag"). Also still flagged from the prior entry: `CampaignLog.execution_stop` (both stops logged for the forward-test wick-survival comparison) doesn't exist in `database.py` yet.
+
+## 2026-08-31 (SS9 underway + a second same-day bug fix) — FROM: Claude Code — FOR: both
+STATUS: open
+
+Started SS9 (forward-test log) by auditing what exists first: `GateLog` (built earlier this session, its own docstring already cites "§9") already carried ~80% of the SS9a schema, including a real, already-wired backfill with an honestly-documented "faked_first not computed here" gap. Extended it rather than building a parallel table — matches the "don't rebuild what's already there" pattern this whole session.
+
+- `decision_engine.py` now surfaces `fuel_verdict`/`fuel_push_ratio`/`trend_1h`/`trend_4h`/`htf_aligned`/`htf_opposed` on `decision_dict` (purely additive — these were already computed locally for the gate's own checks, just never returned). Confirmed via a new test file (`tests/test_decision_engine.py`) that monkeypatches the four indicator modules rather than hand-deriving valid multi-timeframe candle data, since this is a protected file.
+- `GateLog` gained 17 new columns: 7 locked-level fields that were genuinely available in `levels` but never captured, 8 TradePlan-execution-layer fields (backfilled by a NEW, separate `_backfill_gate_log_execution()` pass gated on TradePlan's own terminal state — decoupled from the existing CampaignLog-gated backfill since the two records don't resolve on the same timeline), and 2 genuine, permanently-NULL-for-now gaps (`pressure`, `would_have_r`) with the reasons documented inline.
+- `faked_first` now actually gets populated (`trade_plan.py`'s `advance_waiting_plan()`) and pulled into the backfill — closing a gap `_backfill_gate_log()`'s own docstring had flagged.
+
+**A second real bug caught mid-investigation, in already-shipped code (the trade_plan_engine.py commit from earlier today):** a re-entry fill was landing in the same FILLED branch as the original fill and getting its outcome silently overwritten by a *stale, unrelated* CampaignLog verdict (CampaignLog has no re-entry concept and is almost always already terminal, from the original fill's own unrelated stop-out, by the time a re-entry becomes possible). Fixed with `resolve_reentry_fill()` — a re-entry now resolves on its own terms (T1 reached → DONE with an honest "runner outcome not tracked for re-entry" reason; wide stop wicked again → the existing `check_reentry_eligibility` "one attempt max" guard finalizes it). 11 regression tests including 2 that reproduce the exact bug scenario end-to-end.
+
+Verified with real dry runs against live Kraken data both times (not just synthetic tests) — a GateLog row landed with all 7 new locked-level columns populated with real numbers.
+
+Full suite: 160 passed (5 pre-existing unrelated errors).
+
+Still open: §9b (the monthly drift check — win rate/mean R/fake rate/retest-touch rate/veto-save-rate vs backtest baselines) and §9c's reconciliation piece (daily check that every plan ID present in one system's record is present in the other's). `pressure` and `would_have_r` remain real, flagged gaps — not built this pass.
