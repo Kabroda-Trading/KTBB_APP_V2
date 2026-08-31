@@ -648,6 +648,28 @@ def _inject_gate_log(
             t3=plan.get("t3"),
             subtrig_stop=plan.get("subtrig_stop"),
             gate_detail_json=json.dumps(gate, default=str),
+            # Columns that existed in the schema already but were never
+            # actually passed here (2026-08-31 fix -- confirmed by reading
+            # this constructor call, not assumed): decision_engine.py now
+            # surfaces these raw diagnostic values on decision_dict itself
+            # (see its own 2026-08-31 comment) purely so this can populate
+            # them without re-deriving anything.
+            push_vol_ratio=decision_dict.get("fuel_push_ratio"),
+            fuel_state=decision_dict.get("fuel_verdict"),
+            trend_1h=decision_dict.get("trend_1h"),
+            trend_4h=decision_dict.get("trend_4h"),
+            htf_aligned=decision_dict.get("htf_aligned"),
+            htf_opposed=decision_dict.get("htf_opposed"),
+            # SS9a locked levels -- genuinely available in `levels` (sse_
+            # engine.py's compute_sse_levels() output), just not previously
+            # captured here.
+            daily_support=levels.get("daily_support"),
+            daily_resistance=levels.get("daily_resistance"),
+            f24_poc=levels.get("f24_poc"),
+            f24_vah=levels.get("f24_vah"),
+            f24_val=levels.get("f24_val"),
+            slope=levels.get("slope"),
+            structure_score=levels.get("structure_score"),
         )
         db.add(row)
         db.commit()

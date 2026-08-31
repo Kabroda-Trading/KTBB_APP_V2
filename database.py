@@ -412,6 +412,24 @@ def init_db():
         except Exception:
             pass
 
+    # --- GATE_LOG SS9a MIGRATIONS (2026-08-31 -- see the GateLog class
+    # docstring above for what each column is and why) ---
+    for _col in [
+        "daily_support FLOAT", "daily_resistance FLOAT",
+        "f24_poc FLOAT", "f24_vah FLOAT", "f24_val FLOAT",
+        "slope FLOAT", "structure_score FLOAT",
+        "execution_entry_mode VARCHAR", "execution_fill_time TIMESTAMP",
+        "execution_fill_price FLOAT", "execution_stop_price FLOAT",
+        "execution_stop_basis VARCHAR", "execution_stop_dist_atr FLOAT",
+        "reentry_used BOOLEAN", "execution_backfilled_at TIMESTAMP",
+        "pressure VARCHAR", "would_have_r FLOAT",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE gate_log ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -1526,6 +1544,51 @@ class GateLog(Base):
     mfe_r = Column(Float, nullable=True)
     mgmt_label = Column(String, nullable=True)
     backfilled_at = Column(DateTime, nullable=True)
+
+    # --- SS9a locked-level columns (2026-08-31, KABRODA_COM_TRADE_PLAN_
+    # SPEC.md) -- captured verbatim from the 8:00 lock, same as the rest of
+    # this table's "at the break" section above; genuinely available in
+    # sse_engine.py's levels dict, just not previously wired here. ---
+    daily_support = Column(Float, nullable=True)
+    daily_resistance = Column(Float, nullable=True)
+    f24_poc = Column(Float, nullable=True)
+    f24_vah = Column(Float, nullable=True)
+    f24_val = Column(Float, nullable=True)
+    slope = Column(Float, nullable=True)
+    structure_score = Column(Float, nullable=True)
+
+    # --- SS9a execution columns -- TradePlan's additive execution layer
+    # (stop_planner.py's core-zone stop, NOT this table's own `stop`
+    # above, which is the r30-based analysis stop). Backfilled by a
+    # SEPARATE pass (_backfill_gate_log_execution(), ledger_closing_
+    # engine.py) once the matching TradePlan row itself reaches DONE --
+    # decoupled from `backfilled_at` above (CampaignLog-sourced fields)
+    # because a TradePlan row, especially one that goes through re-entry,
+    # can easily still be open when CampaignLog has already resolved, and
+    # the reverse. Two independent writers, two independent flags. ---
+    execution_entry_mode = Column(String, nullable=True)
+    execution_fill_time = Column(DateTime, nullable=True)
+    execution_fill_price = Column(Float, nullable=True)
+    execution_stop_price = Column(Float, nullable=True)
+    execution_stop_basis = Column(String, nullable=True)
+    execution_stop_dist_atr = Column(Float, nullable=True)
+    reentry_used = Column(Boolean, nullable=True)
+    execution_backfilled_at = Column(DateTime, nullable=True)
+
+    # --- SS9a columns that are genuine, documented gaps -- present in the
+    # schema (the spec names both) but never populated by any write path
+    # yet. NULL here means "not yet computed," never a guess:
+    #   pressure: brain/engine's pressure_checklist.py (pre-move energy
+    #     scoring) has not been ported to kabroda.com at all.
+    #   would_have_r: the counterfactual R a skipped (NO_PLAN/VETOED-done)
+    #     day would have produced needs a real candle-level simulation
+    #     against decision_engine.py's own theoretical entry/stop/targets
+    #     -- not built. decision_engine.py currently zeroes entry/stop/t1/
+    #     t2/t3 for non-TAKE states (see evaluate_15m_decision()'s
+    #     _result()), so even the raw levels to simulate against don't
+    #     exist yet without a further, deliberate change there. ---
+    pressure = Column(String, nullable=True)
+    would_have_r = Column(Float, nullable=True)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 

@@ -106,7 +106,7 @@ from typing import Optional
 
 import ccxt.async_support as ccxt
 
-from database import CampaignLog, GravityMemory, SessionLocal, GateLog
+from database import CampaignLog, GravityMemory, SessionLocal, GateLog, TradePlan
 from session_manager import anchor_ts_for_utc_date, get_session_config
 import notify
 
@@ -321,10 +321,18 @@ def _backfill_gate_log(db, now_utc: datetime) -> None:
 
     Honest scope: this fills first_target_hit / stopped_first / r_t1only /
     mgmt_label, all directly available from CampaignLog's own resolved
-    fields. bars_to_t1/t2/t3, r_runner, mfe_r, and faked_first are NOT
-    computed here -- they need a real candle-level reconstruction pass this
-    function doesn't do. Left null rather than faked; a genuine gap, not a
-    guessed value with a caveat stapled on.
+    fields, plus faked_first (2026-08-31 -- pulled from the matching
+    TradePlan row now that trade_plan.py's advance_waiting_plan() actually
+    computes it; previously hardcoded None here). bars_to_t1/t2/t3,
+    r_runner, and mfe_r are still NOT computed here -- they need a real
+    candle-level reconstruction pass this function doesn't do. Left null
+    rather than faked; a genuine gap, not a guessed value with a caveat
+    stapled on. TradePlan's OWN execution-layer fields (entry_mode,
+    fill_time/price, execution stop, re-entry) are backfilled separately
+    by _backfill_gate_log_execution() below, gated on TradePlan reaching
+    DONE rather than on CampaignLog -- the two records don't always
+    resolve on the same timeline (a re-entry can still be open after
+    CampaignLog has long since closed, or vice versa).
     """
     pending = db.query(GateLog).filter(
         GateLog.state.in_(["TAKE_PREMIUM", "TAKE_STANDARD"]),
@@ -355,13 +363,70 @@ def _backfill_gate_log(db, now_utc: datetime) -> None:
 
         row.first_target_hit = {"T1": "T1", "T2": "T2", "T3": "T3"}.get(campaign.target_hit)
         row.stopped_first = campaign.status == "CLOSED_LOSS"
-        row.faked_first = None
+        # faked_first is stable from the moment of first fill onward (it
+        # never changes after), so it's safe to pull here even though this
+        # backfill is gated on CampaignLog, not TradePlan, resolving.
+        plan_row = db.query(TradePlan).filter(
+            TradePlan.symbol == row.symbol, TradePlan.date_key == row.date_key,
+        ).order_by(TradePlan.id.desc()).first()
+        row.faked_first = plan_row.faked_first if plan_row else None
         row.r_t1only = campaign.realized_pnl
         row.mgmt_label = campaign.status or "UNRESOLVED"
         row.backfilled_at = now_utc
         print(f"|| GATE LOG BACKFILL || {row.symbol} {row.date_key} -> {row.mgmt_label} "
               f"(R={row.r_t1only})" if row.r_t1only is not None else
               f"|| GATE LOG BACKFILL || {row.symbol} {row.date_key} -> {row.mgmt_label}")
+
+    db.commit()
+
+
+def _backfill_gate_log_execution(db, now_utc: datetime) -> None:
+    """KABRODA_COM_TRADE_PLAN_SPEC.md SS9a -- fills GateLog's execution_*
+    columns from the matching TradePlan row once THAT row itself reaches a
+    terminal state (DONE, or NO_PLAN which is already terminal at
+    creation). Deliberately a separate pass with its own
+    execution_backfilled_at flag, not folded into _backfill_gate_log()
+    above: TradePlan and CampaignLog do not always resolve on the same
+    timeline (a re-entry can still be open well after CampaignLog has
+    closed on its own tighter stop, or vice versa), so gating this on
+    CampaignLog's resolution could permanently strand these columns at
+    None for any row where TradePlan finishes later.
+
+    reentry_R is deliberately not filled -- see trade_plan.py's
+    resolve_reentry_fill(): a re-entry's own runner/T3 outcome isn't
+    tracked anywhere (CampaignLog has no re-entry concept, and TradePlan
+    doesn't re-scan for it either). A genuine, documented gap.
+    """
+    pending = db.query(GateLog).filter(
+        GateLog.execution_backfilled_at.is_(None),
+    ).all()
+    if not pending:
+        return
+
+    for row in pending:
+        plan_row = (
+            db.query(TradePlan)
+            .filter(TradePlan.symbol == row.symbol, TradePlan.date_key == row.date_key)
+            .order_by(TradePlan.id.desc())
+            .first()
+        )
+        if not plan_row:
+            continue  # no matching TradePlan row (yet, or ever) -- try again next tick
+
+        if plan_row.status not in ("NO_PLAN", "DONE"):
+            continue  # still in flight -- don't capture a mid-flight snapshot
+
+        row.execution_entry_mode = plan_row.entry_mode
+        row.execution_fill_time = plan_row.fill_time
+        row.execution_fill_price = plan_row.fill_price
+        row.execution_stop_price = plan_row.stop_price
+        row.execution_stop_basis = plan_row.stop_basis
+        row.execution_stop_dist_atr = plan_row.stop_dist_atr
+        row.reentry_used = plan_row.reentry_used
+        row.execution_backfilled_at = now_utc
+        print(f"|| GATE LOG EXECUTION BACKFILL || {row.symbol} {row.date_key} -> "
+              f"TradePlan {plan_row.status} (fill={row.execution_fill_price}, "
+              f"reentry={row.reentry_used})")
 
     db.commit()
 
@@ -990,6 +1055,11 @@ async def run_ledger_audit_loop():
                 _backfill_gate_log(db, now_utc)
             except Exception as _ge:
                 print(f"[GATE LOG BACKFILL] Non-critical failure: {_ge}")
+
+            try:
+                _backfill_gate_log_execution(db, now_utc)
+            except Exception as _gee:
+                print(f"[GATE LOG EXECUTION BACKFILL] Non-critical failure: {_gee}")
 
         except Exception as e:
             print(f"|| LIFECYCLE MONITOR ERROR || {e}")
