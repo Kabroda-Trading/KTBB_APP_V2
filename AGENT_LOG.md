@@ -706,3 +706,76 @@ the real, honest `macro_engine` response (`active: false` on a fresh
 sandbox where the subprocess can't actually run — accurate, not the old
 hardcoded lie) alongside the intact `active_runners`/`recent_errors`/
 `scheduler_health` fields.
+
+## 2026-08-30 (real runner mechanic, live) — FROM: Claude Code — FOR: DeepSeek/Antigravity (both)
+STATUS: resolved
+
+**The biggest finding of this whole readiness audit.** While checking
+`ledger_closing_engine.py` for alignment with the rebuild, found the
+authoritative `status`/`realized_pnl`/`closed_at` fields were still closing
+100% of the position at T1 touch, full stop — the exact alternative
+`KABRODA_REBUILD_SPEC.md` §6 says the calibration backtest *beat* ("30% off
+at T1, stop moves to the runner-stop level, 70% rides to T3... tested
+against alternatives (50/50 at T1/T2, 100%-at-T1) — this beat both"). The
+only thing resembling a runner was a separate, non-authoritative "shadow"
+tracker (2026-07-06, `shadow_runner_*` columns) that modeled the OTHER
+rejected alternative (50/50, EMA-trailing stop) and explicitly never
+touched the real fields — its own comment said so: "Real status/
+realized_pnl/closed_at above are completely unaffected by this." Neither
+mechanism matched what was actually validated. Every real `CampaignLog.
+realized_pnl` on kabroda.com, and everything downstream reading it
+(win-rate, `AuditSuggestionLog`, any live-vs-backtest comparison), was
+computed under a rejected management rule.
+
+Surfaced this to Andy via AskUserQuestion before touching real trade-
+tracking logic (a genuine architectural fork, high stakes, substantial
+rewrite) rather than assuming — he confirmed: rewrite it now.
+
+**What changed:** `database.py`'s `CampaignLog` gained 4 columns
+(`runner_active`, `runner_stop`, `runner_started_at`, `t1_leg_r`) via the
+established raw-ALTER-TABLE-in-`init_db()` pattern. `ledger_closing_engine.
+py`'s Phase 2 (15M only — the retired 4H/1H Phase 4 path is untouched,
+out of scope) is now a real two-leg state machine: LEG 1 (100% of
+position) watches the original stop vs T1 exactly as before, except a T1
+touch is no longer terminal — it locks in `t1_leg_r = 0.30 * (T1's R)`,
+computes the fixed runner-stop (`entry -+ 0.15*box`, box derived exactly
+from `t2 = trigger + 1.0*box` since box itself isn't stored), and opens
+LEG 2 (the 70% runner) in the same candle-scan pass if the batch has more
+candles left. LEG 2 watches the runner-stop vs T3; whichever hits first
+resolves the trade with `realized_pnl = t1_leg_r + 0.70 * (that leg's R)`.
+A runner-stop touch is `CLOSED_LOSS`/`target_hit="RUNNER_STOP"` (usually a
+small net loss or near-breakeven now, not the old flat -1.0, since 30% is
+already banked) — a real, deliberate change to what "loss" means for a
+post-T1 trade, not a bug. Legacy/partial rows missing t2/t3 fall back to
+the old terminal-at-T1 close rather than crash. The `CLOSED_AT_EXPIRY`
+fallback (next session open, neither leg resolved) blends `t1_leg_r` with
+a mark-to-market runner leg the same way. Cross-poll continuity handled
+explicitly: each poll re-fetches candles from `entry_filled_at` (capped to
+a rolling window), which can re-include the pre-T1 candles even after the
+runner is already active — LEG 2's scan filters to candles at/after
+`runner_started_at` so a stale early candle can never spuriously match
+runner_stop/T3 against irrelevant history (this was the trickiest part to
+get right and the one most worth testing explicitly).
+
+The old shadow tracker (`shadow_runner_*`, Phase 3B/4B) is no longer
+seeded at new T1 touches — the real mechanic owns that event now — but its
+own scan/resolve logic is untouched, so any rows already shadow-active
+from before this cutover still finish correctly; it just naturally goes
+dormant for new trades. Not deleted, superseded.
+
+**Verified thoroughly, not just compiled:** wrote `tests/test_runner_
+mechanic.py`, a new permanent regression suite (6 tests) that monkeypatches
+the exchange-facing calls and runs the ACTUAL `run_ledger_audit_loop()`
+coroutine against synthetic candle sequences with hand-computed expected R
+values — not a reimplementation of the logic being tested. Covers: stop
+before T1 (unchanged -1R), T1 then runner-stop across two polls (proves
+cross-poll continuity doesn't misfire on stale candles), T1 then T3 across
+two polls, T1 and T3 both touching in the SAME batch (same-day resolution
+in one pass), a legacy row missing t2/t3 (terminal-at-T1 fallback), and a
+runner-active row genuinely unresolved at session expiry (blended
+mark-to-market R). All 6 pass. Also ran the full suite (`test_e2e.py`
+83 + these 6 = 89 passed), `import main`, and a live `uvicorn` boot
+confirming the schema migration applies cleanly and the loop starts with
+no errors. `CLAUDE.md`'s CampaignLog-lifecycle paragraph was significantly
+stale (described a flat "+1R at T1" close and referenced the CRO agent,
+removed earlier this session) — rewritten to match.

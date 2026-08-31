@@ -285,6 +285,21 @@ def init_db():
         except Exception:
             pass
 
+    # --- RUNNER MECHANIC (LIVE) — 15M-only, the validated 30%-at-T1 /
+    # fixed-runner-stop / 70%-to-T3 rule (KABRODA_REBUILD_SPEC.md SS6),
+    # authoritative as of 2026-08-30 -- see the CampaignLog model comment.
+    for _col in [
+        "runner_active BOOLEAN DEFAULT FALSE",
+        "runner_stop FLOAT",
+        "runner_started_at TIMESTAMP",
+        "t1_leg_r FLOAT",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE campaign_logs ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- MTF CONFLUENCE CAPTURE — dominant_direction/confluence_score on campaign_logs ---
     for _col in [
         "dominant_direction VARCHAR",
@@ -613,6 +628,28 @@ class CampaignLog(Base):
     shadow_runner_exit_reason = Column(String, nullable=True)  # STOP | T3 | TIME_CAP
     shadow_runner_leg2_r = Column(Float, nullable=True)
     shadow_runner_blended_r = Column(Float, nullable=True)
+
+    # --- RUNNER MECHANIC (LIVE, 2026-08-30) -- 15M ONLY, AUTHORITATIVE ---
+    # The shadow_runner_* columns above modeled "close 50% at T1, run the
+    # rest" (2026-07-06) as a record-only comparison against a real ledger
+    # that closed 100% at T1 -- KABRODA_REBUILD_SPEC.md SS6 later validated a
+    # DIFFERENT split (30% at T1, fixed runner-stop, 70% to T3) as the actual
+    # winning management rule, beating both 50/50 and 100%-at-T1 in the
+    # calibration backtest. Found 2026-08-30: the real status/realized_pnl
+    # fields were still closing 100% at T1 -- the rejected alternative, not
+    # the validated rule -- with the shadow tracker still only modeling the
+    # OTHER rejected alternative. Neither matched what was actually
+    # validated. These columns make the validated rule the real, live
+    # mechanic: ledger_closing_engine.py's Phase 2 sets them at a T1 touch
+    # and status/realized_pnl/closed_at are now only set when the runner leg
+    # itself resolves (runner_stop touch, T3 touch, or session-open time cap).
+    # shadow_runner_* above is left in place (legacy rows still resolve via
+    # Phase 3B) but no longer seeded at new T1 touches -- superseded, not
+    # deleted.
+    runner_active = Column(Boolean, default=False, server_default="0")
+    runner_stop = Column(Float, nullable=True)          # fixed level: entry -+ 0.15*box, set once at T1
+    runner_started_at = Column(DateTime, nullable=True)  # candle ts of the T1 touch that opened the runner leg
+    t1_leg_r = Column(Float, nullable=True)              # 0.30 * (T1's R relative to the original stop) -- the locked-in leg
 
     # --- MTF CONFLUENCE CAPTURE (2026-07-09) -- 4H/1H ONLY, RECORD-ONLY ---
     # At candidate-creation time, gravity_engine.py's two detectors call

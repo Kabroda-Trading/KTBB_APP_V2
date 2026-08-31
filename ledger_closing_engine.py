@@ -3,10 +3,9 @@
 # KABRODA TRADE-LIFECYCLE MONITOR  (W-9 replacement — 2026-06-11)
 # OHLC detection upgrade — 2026-06-16
 # Phase 4 candidate monitoring — 2026-06-30
-# Phase 3B shadow runner tracking (15M, EMA-based) — 2026-07-06
+# Phase 3B shadow runner tracking (15M, EMA-based) — 2026-07-06, SUPERSEDED
 # Phase 4B shadow runner tracking (4H/1H, zone-based) — 2026-07-07
-#
-# Six-phase state machine (four real phases + two shadow/record-only phases).
+# Real 30/70 runner mechanic (15M, fixed runner-stop) — 2026-08-30, LIVE
 #
 # PHASE 1 — Pre-entry
 #   Watches APPROVED records where entry_filled_at IS NULL.
@@ -14,39 +13,72 @@
 #   CRITICAL: stop hit while entry_filled_at IS NULL is NOT a loss — it is still
 #   EXPIRED. The phantom-loss trap required price to cross entry FIRST.
 #
-# PHASE 2 — In-trade (OHLC-based, bounded by next session open)
-#   Runs only after entry_filled_at is set. Watches stop + T1 via 1m Kraken
-#   OHLCV candles — NOT ticker snapshots. Filled trades are NOT clock-expired
-#   at session_expires_at (3 PM ET). They run until stop or T1 is hit, or until
-#   the NEXT session open (next day 8:30 AM ET) without resolution. The 3 PM
+# PHASE 2 — In-trade (OHLC-based, bounded by next session open), two legs
+#   Runs only after entry_filled_at is set. Watches 1m Kraken OHLCV candles —
+#   NOT ticker snapshots. Filled trades are NOT clock-expired at
+#   session_expires_at (3 PM ET) — they run until fully resolved or until the
+#   NEXT session open (next day 8:30 AM ET) without resolution. The 3 PM
 #   session_expires_at is the Phase 1 entry-window boundary only.
 #
-#   Stop-first rule on same-candle ambiguity (conservative). At 1m granularity
-#   this requires a ~$1,690 intrabar range for BTC at current levels — rare.
+#   LEG 1 (100% of position, until T1): original stop vs T1.
+#     Stop hit first → CLOSED_LOSS, -1R, terminal.
+#     T1 hit first → NOT terminal (2026-08-30 rebuild). 30% of the position is
+#       realized at T1's R (t1_leg_r = 0.30 * that R); the stop for the
+#       remaining 70% moves to a FIXED runner-stop = entry -+ 0.15*box
+#       (KABRODA_REBUILD_SPEC.md SS6, box derived exactly from t2 = trigger +
+#       1.0*box). runner_active flips True and LEG 2 begins, in the same
+#       candle-scan pass if the batch has more candles left.
+#     Legacy/partial rows missing t2 or t3 (nothing to derive a runner-stop
+#     from) fall back to the pre-2026-08-30 terminal-at-T1 close instead of
+#     crashing the poll loop.
 #
-#   Genuinely-unresolved case (neither stop nor T1 hit by next session open):
-#   CLOSED_AT_EXPIRY / fractional R / target_hit="EXPIRY".
+#   LEG 2 (runner, 70% of position, only after T1): fixed runner-stop vs T3.
+#     Runner-stop hit → CLOSED_LOSS, target_hit="RUNNER_STOP", blended R =
+#       t1_leg_r + 0.70 * (runner-stop's R). Usually a small net loss or
+#       near-breakeven, not the old flat -1.0 -- 30% already banked at T1.
+#     T3 hit → CLOSED_WIN, target_hit="T3", blended R = t1_leg_r + 0.70 *
+#       (T3's R). This IS the validated management rule -- 30% off at T1,
+#       stop to the runner-stop level, 70% rides to T3 -- tested against
+#       both 50/50 and 100%-at-T1 alternatives and beat both. See the
+#       CampaignLog model's "RUNNER MECHANIC (LIVE)" comment in database.py.
+#
+#   Stop-first rule on same-candle ambiguity (conservative), on BOTH legs.
+#   At 1m granularity this requires a large intrabar range — rare.
+#
+#   Genuinely-unresolved case (neither leg's exit hit by next session open):
+#   CLOSED_AT_EXPIRY / fractional R (blended with t1_leg_r if the runner leg
+#   was the one still open) / target_hit="EXPIRY".
+#
+#   Cross-poll continuity: each poll re-fetches candles from entry_filled_at
+#   (capped to a rolling 710min window), so a batch can re-include candles
+#   from BEFORE T1 touched even after runner_active is already True. Leg 2's
+#   scan filters to candles at/after runner_started_at so a stale early
+#   candle can never spuriously match runner_stop/T3 against irrelevant
+#   pre-T1 history.
 #
 #   KNOWN LIMITATION R1 (minor, accounting): a trade that hits stop between
 #   midnight UTC and next session open has closed_at on the following calendar
 #   date. Grouping by campaign date_key (session label) is accurate; grouping
 #   by closed_at::date will shift that outcome to the next day's audit bucket.
 #
-# PHASE 3 — Post-exit observation
-#   After a T1 close, keeps observing until session_expires_at. Logs whether
-#   price subsequently reached T2/T3 via max_target_reached / t2_reached /
-#   t3_reached. Does NOT reopen the record or change status/pnl.
-#   Uses MEXC live-price snapshot (acceptable for non-closing observation).
+# PHASE 3 — Post-exit observation (now effectively legacy-only)
+#   Watches rows with closed_at set AND target_hit=="T1" for continued T2/T3
+#   observation. Under the pre-2026-08-30 model T1 was always terminal, so
+#   this had live rows to watch; under the current model T1 is never terminal
+#   for a row with t2/t3 populated (it becomes a runner instead), so this
+#   phase naturally stops finding new matches going forward. Left as-is —
+#   still correct for any pre-existing T1-closed legacy rows still open.
 #
-# PHASE 3B — Shadow runner tracking (2026-07-06, 15M only, RECORD-ONLY)
-#   Seeded by Phase 2's T1-hit branch (shadow_runner_active=True, shadow_runner_
-#   stop=entry_price). Independently walks 1m candles forward (own last-scan
-#   watermark, own query, decoupled from real closed_at/status) trailing a
-#   stop toward a 15m EMA21 -- ratcheted only in the favorable direction, never
-#   below breakeven -- and resolving at a stop touch, a T3 touch, or a 5-day
-#   time cap. Models "close 50% at T1, run the rest" as a blended-R value
-#   (shadow_runner_blended_r) for comparison against the real, already-
-#   recorded realized_pnl. Never touches status/realized_pnl/closed_at.
+# PHASE 3B — Shadow runner tracking (2026-07-06, 15M only, RECORD-ONLY,
+# SUPERSEDED 2026-08-30)
+#   Modeled "close 50% at T1, run the rest" (a 15m-EMA-trailing stop) as a
+#   record-only comparison against a ledger that closed 100% at T1 — an
+#   exploration of a DIFFERENT split and a DIFFERENT stop style than what
+#   KABRODA_REBUILD_SPEC.md SS6 later validated (30/70, fixed runner-stop).
+#   No longer seeded at new T1 touches (Phase 2's real runner mechanic now
+#   owns that event) — this phase's own scan/resolve logic is untouched and
+#   still correctly finishes off any rows already shadow-active from before
+#   the cutover, then goes dormant for good.
 #
 # PHASE 4B -- Shadow runner tracking (2026-07-07, 4H/1H, RECORD-ONLY)
 #   The 4H/1H counterpart to Phase 3B. Seeded by Phase 4's T1-hit branch.
@@ -58,7 +90,8 @@
 #   columns as Phase 3B (mutually exclusive populations by query filter, so
 #   no schema conflict); T3 stays the fixed v4 Fibonacci target -- only the
 #   stop trails. Resolves at stop touch, T3 touch, or a 5d(4H)/2d(1H) time
-#   cap measured from the real T1 close.
+#   cap measured from the real T1 close. Untouched by the 2026-08-30 change
+#   (4H/1H candidate creation is retired; only legacy rows still resolve here).
 #
 # Legacy-row safety: all existing rows have session_expires_at = NULL. Every
 # phase query filters session_expires_at IS NOT NULL (Phase 1) or entry_filled_at
@@ -436,45 +469,103 @@ async def run_ledger_audit_loop():
                 if not candles:
                     continue
 
+                # If the runner leg (below) is already active from a prior
+                # poll, this batch was re-fetched from entry_filled_at (or the
+                # rolling 710min window) and can include the SAME candles
+                # already scanned before T1 touched -- filter to candles at or
+                # after the T1 touch so a stale early candle can never
+                # spuriously match runner_stop/T3 against irrelevant history.
+                if c.runner_active and c.runner_started_at is not None:
+                    _runner_start_ms = int(_as_utc(c.runner_started_at).timestamp() * 1000)
+                    candles_to_scan = [cd for cd in candles if cd["ts"] >= _runner_start_ms]
+                    if not candles_to_scan:
+                        continue
+                else:
+                    candles_to_scan = candles
+
                 closed = False
+                is_long = c.bias == "LONG"
 
-                # Scan chronologically. Stop-first on same-candle (conservative).
-                for candle in candles:
-                    if c.bias == "LONG":
-                        hit_stop = candle["l"] <= c.stop_loss
-                        hit_t1   = c.t1 is not None and candle["h"] >= c.t1
-                    else:
-                        hit_stop = candle["h"] >= c.stop_loss
-                        hit_t1   = c.t1 is not None and candle["l"] <= c.t1
-
+                # Scan chronologically. Stop-first on same-candle (conservative,
+                # applies to both legs: original stop vs T1, and runner-stop vs T3).
+                for candle in candles_to_scan:
                     candle_ts = datetime.fromtimestamp(candle["ts"] / 1000, tz=timezone.utc)
 
-                    if hit_stop:
-                        c.status       = "CLOSED_LOSS"
-                        c.realized_pnl = -1.0
-                        c.target_hit   = "STOP"
-                        c.closed_at    = candle_ts
-                        closed = True
-                        tag = " (same-candle, stop wins)" if hit_t1 else ""
-                        print(f"|| LIFECYCLE P2 || {c.symbol} {c.bias} STOP{tag} {candle_ts}. -1R.")
-                        break
+                    if not c.runner_active:
+                        # ── LEG 1 (100% of position): original stop vs T1 ──
+                        hit_stop = candle["l"] <= c.stop_loss if is_long else candle["h"] >= c.stop_loss
+                        hit_t1   = c.t1 is not None and (candle["h"] >= c.t1 if is_long else candle["l"] <= c.t1)
 
-                    if hit_t1:
-                        r = _frac_r(c.entry_price, c.stop_loss, c.t1, c.bias == "LONG")
-                        c.status       = "CLOSED_WIN"
-                        c.realized_pnl = r
-                        c.target_hit   = "T1"
-                        c.max_target_reached = _advance_target(c.max_target_reached, "T1")
-                        c.closed_at    = candle_ts
-                        # Shadow-mode runner tracking (2026-07-06, 15M only, record-only) —
-                        # seeds Phase 3B below. Real status/realized_pnl/closed_at above are
-                        # completely unaffected by this.
-                        c.shadow_runner_active = True
-                        c.shadow_runner_stop = c.entry_price
-                        c.shadow_runner_last_scan_ts = candle_ts
-                        closed = True
-                        print(f"|| LIFECYCLE P2 || {c.symbol} {c.bias} T1 {candle_ts}. {r:+.4f}R.")
-                        break
+                        if hit_stop:
+                            c.status       = "CLOSED_LOSS"
+                            c.realized_pnl = -1.0
+                            c.target_hit   = "STOP"
+                            c.closed_at    = candle_ts
+                            closed = True
+                            tag = " (same-candle, stop wins)" if hit_t1 else ""
+                            print(f"|| LIFECYCLE P2 || {c.symbol} {c.bias} STOP{tag} {candle_ts}. -1R.")
+                            break
+
+                        if hit_t1:
+                            c.max_target_reached = _advance_target(c.max_target_reached, "T1")
+                            t1_r = _frac_r(c.entry_price, c.stop_loss, c.t1, is_long)
+
+                            if c.t2 is None or c.t3 is None:
+                                # Legacy/partial row -- no t2/t3 to derive a
+                                # runner-stop from (box = |t2 - entry|).
+                                # Fall back to the pre-2026-08-30 terminal-at-
+                                # T1 behavior rather than crash on one bad row.
+                                c.status       = "CLOSED_WIN"
+                                c.realized_pnl = t1_r
+                                c.target_hit   = "T1"
+                                c.closed_at    = candle_ts
+                                closed = True
+                                print(f"|| LIFECYCLE P2 || {c.symbol} {c.bias} T1 {candle_ts}. {t1_r:+.4f}R (no t2/t3 -- legacy row, terminal close).")
+                                break
+
+                            # 30% off at T1, stop moves to the runner-stop
+                            # level, 70% rides to T3 -- KABRODA_REBUILD_SPEC.md
+                            # SS6, the validated management rule (beat both
+                            # 50/50 and 100%-at-T1 in the calibration
+                            # backtest). box is exact from t2 = trigger + 1.0*box.
+                            box = abs(c.t2 - c.entry_price)
+                            c.t1_leg_r          = 0.30 * t1_r
+                            c.runner_active     = True
+                            c.runner_stop       = c.entry_price - 0.15 * box if is_long else c.entry_price + 0.15 * box
+                            c.runner_started_at = candle_ts
+                            print(f"|| LIFECYCLE P2 || {c.symbol} {c.bias} T1 {candle_ts}. 30% @ {t1_r:+.4f}R (locked {c.t1_leg_r:+.4f}R). Runner stop {c.runner_stop:.2f}, riding to T3 {c.t3:.2f}.")
+                            # Fall through in the SAME loop pass, on the SAME
+                            # candles_to_scan list -- if the runner leg also
+                            # resolves within this batch (a fast-moving day),
+                            # catch it now instead of waiting a poll cycle.
+                            continue
+
+                    else:
+                        # ── LEG 2 (runner, 70% of position): fixed runner-stop vs T3 ──
+                        hit_runner_stop = candle["l"] <= c.runner_stop if is_long else candle["h"] >= c.runner_stop
+                        hit_t3 = c.t3 is not None and (candle["h"] >= c.t3 if is_long else candle["l"] <= c.t3)
+
+                        if hit_runner_stop:
+                            runner_r = _frac_r(c.entry_price, c.stop_loss, c.runner_stop, is_long)
+                            c.status       = "CLOSED_LOSS"
+                            c.realized_pnl = c.t1_leg_r + 0.70 * runner_r
+                            c.target_hit   = "RUNNER_STOP"
+                            c.closed_at    = candle_ts
+                            closed = True
+                            tag = " (same-candle, runner-stop wins)" if hit_t3 else ""
+                            print(f"|| LIFECYCLE P2 || {c.symbol} {c.bias} RUNNER STOP{tag} {candle_ts}. Blended {c.realized_pnl:+.4f}R (30%@{c.t1_leg_r:+.4f}R + 70%@{runner_r:+.4f}R).")
+                            break
+
+                        if hit_t3:
+                            t3_r = _frac_r(c.entry_price, c.stop_loss, c.t3, is_long)
+                            c.status       = "CLOSED_WIN"
+                            c.realized_pnl = c.t1_leg_r + 0.70 * t3_r
+                            c.target_hit   = "T3"
+                            c.max_target_reached = _advance_target(c.max_target_reached, "T3")
+                            c.closed_at    = candle_ts
+                            closed = True
+                            print(f"|| LIFECYCLE P2 || {c.symbol} {c.bias} T3 {candle_ts}. Blended {c.realized_pnl:+.4f}R (30%@{c.t1_leg_r:+.4f}R + 70%@{t3_r:+.4f}R).")
+                            break
 
                 if closed:
                     db.commit()
@@ -497,20 +588,26 @@ async def run_ledger_audit_loop():
                         print(f"[UNIFIED AUDIT BACKFILL] Non-critical failure: {_ae}")
                     continue
 
-                # No stop/T1 hit yet — update T2/T3 high-water marks from
-                # period extremes of all scanned candles.
+                # Neither leg resolved yet — update T2/T3 high-water marks
+                # from period extremes of the candles just scanned.
                 obs_changed = False
-                if c.bias == "LONG":
-                    obs_changed = _observe_targets(c, max(can["h"] for can in candles))
-                elif c.bias == "SHORT":
-                    obs_changed = _observe_targets(c, min(can["l"] for can in candles))
+                if is_long:
+                    obs_changed = _observe_targets(c, max(cd["h"] for cd in candles_to_scan))
+                else:
+                    obs_changed = _observe_targets(c, min(cd["l"] for cd in candles_to_scan))
 
-                # Genuinely-unresolved boundary: next session open reached with
-                # no stop or T1 hit. Record fractional R from final candle close.
+                # Genuinely-unresolved boundary: next session open reached
+                # with neither leg's exit condition hit. Record fractional R
+                # from the final close, blended with the T1 leg's already-
+                # locked-in 30% if the runner leg was the one still open.
                 next_open = _next_session_open_utc(_as_utc(c.session_expires_at))
                 if now_utc >= next_open:
-                    final_close = candles[-1]["c"]
-                    frac_r = _frac_r(c.entry_price, c.stop_loss, final_close, c.bias == "LONG")
+                    final_close = candles_to_scan[-1]["c"]
+                    if c.runner_active:
+                        runner_frac_r = _frac_r(c.entry_price, c.stop_loss, final_close, is_long)
+                        frac_r = c.t1_leg_r + 0.70 * runner_frac_r
+                    else:
+                        frac_r = _frac_r(c.entry_price, c.stop_loss, final_close, is_long)
                     c.status       = "CLOSED_AT_EXPIRY"
                     c.realized_pnl = frac_r
                     c.target_hit   = "EXPIRY"
