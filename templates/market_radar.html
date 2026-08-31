@@ -1059,35 +1059,56 @@
             // scanned_at all gone with the old confluence vote-tally).
             const price   = snap.price || 0;
 
-            // Seed radarMemory so the cockpit can open with CampaignLog data
-            if (snap.plan) {
-                const lvl = snap.levels || {};
-                window.radarMemory[snap.symbol] = {
-                    symbol:             snap.symbol,
-                    price:              price,
-                    levels:             lvl,
-                    indicator_string:   `${bo},${bd},${lvl.daily_resistance||0},${lvl.daily_support||0},${lvl.range30m_high||0},${lvl.range30m_low||0}`,
-                    grade:              snap.mas_status || 'PENDING',
-                    mas_status:         snap.mas_status || null,
-                    // Mission key needs exactly 9 fields (see buildMissionKey9) -- the
-                    // macro/micro slots used to reuse mtf.confluence_direction, retired
-                    // 2026-08-30 alongside the rest of the old confluence vote-tally;
-                    // 'NEUTRAL' is a static placeholder, not a live read.
-                    key:                snap.mas_status === 'APPROVED'
-                        ? buildMissionKey9(snap.plan.bias, 'SA_APPROVED', snap.plan.entry_price, snap.plan.stop_loss, snap.plan.t1, snap.plan.t2, snap.plan.t3, 'NEUTRAL', 'NEUTRAL')
-                        : '',
-                    diagnostic_ledger:  {},
-                    plan: {
-                        valid:   true,
-                        bias:    snap.plan.bias,
-                        entry:   snap.plan.entry_price,
-                        stop:    snap.plan.stop_loss,
-                        targets: [snap.plan.t1 || 0, snap.plan.t2 || 0, snap.plan.t3 || 0],
-                    },
-                };
-            }
+            // Seed radarMemory so the cockpit can open, TAKE day or PASS day
+            // alike (2026-08-31 fix -- see below). Andy's own words: the
+            // cockpit should give "the details we're looking for just for
+            // uniformity," clickable the same way regardless of whether
+            // there's an active plan today.
+            const lvl = snap.levels || {};
+            window.radarMemory[snap.symbol] = {
+                symbol:             snap.symbol,
+                price:              price,
+                levels:             lvl,
+                indicator_string:   `${bo},${bd},${lvl.daily_resistance||0},${lvl.daily_support||0},${lvl.range30m_high||0},${lvl.range30m_low||0}`,
+                grade:              snap.mas_status || snap.conviction || 'PENDING',
+                mas_status:         snap.mas_status || null,
+                // Mission key needs exactly 9 fields (see buildMissionKey9) -- the
+                // macro/micro slots used to reuse mtf.confluence_direction, retired
+                // 2026-08-30 alongside the rest of the old confluence vote-tally;
+                // 'NEUTRAL' is a static placeholder, not a live read.
+                key:                (snap.mas_status === 'APPROVED' && snap.plan)
+                    ? buildMissionKey9(snap.plan.bias, 'SA_APPROVED', snap.plan.entry_price, snap.plan.stop_loss, snap.plan.t1, snap.plan.t2, snap.plan.t3, 'NEUTRAL', 'NEUTRAL')
+                    : '',
+                diagnostic_ledger:  {},
+                // snap.plan is null on a PASS/no-trade day (main.py only
+                // populates it from an APPROVED CampaignLog) -- fall back to
+                // a well-formed, inactive plan object (same shape market_
+                // radar.py's _build_dossier() always returns) so the cockpit
+                // still opens and shows real levels/context, just with
+                // dashes where entry/stop/targets would be.
+                plan: snap.plan ? {
+                    valid:   true,
+                    bias:    snap.plan.bias,
+                    entry:   snap.plan.entry_price,
+                    stop:    snap.plan.stop_loss,
+                    targets: [snap.plan.t1 || 0, snap.plan.t2 || 0, snap.plan.t3 || 0],
+                } : {
+                    valid: false, bias: 'NEUTRAL', entry: 0, stop: 0, targets: [0, 0, 0],
+                },
+            };
 
-            const cockpitEnabled = !!(snap.plan && snap.plan.entry_price);
+            // 2026-08-31 fix: this used to be !!(snap.plan && snap.plan.
+            // entry_price) -- false on every PASS/no-trade day, which is
+            // MOST days by design (KABRODA_REBUILD_SPEC.md SS8.4: ~8 of 29
+            // trigger-breaks a month are TAKE). The button then sat
+            // `disabled` until Phase 2's updateMtfOverlay() force-enabled it
+            // a few seconds later -- clicking in that window (or before
+            // noticing the muted style) did nothing, which is what this was
+            // reported as. Andy wants uniform access to the cockpit's
+            // detail view regardless of TAKE/PASS, so it's just always
+            // enabled now -- matches what renderFullGrid() (below) already
+            // does for the no-snapshot-yet path.
+            const cockpitEnabled = true;
             const rowClass       = 'rrc-active';
 
             // Build the row then inject a SYNCING overlay badge

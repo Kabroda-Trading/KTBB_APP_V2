@@ -779,3 +779,25 @@ confirming the schema migration applies cleanly and the loop starts with
 no errors. `CLAUDE.md`'s CampaignLog-lifecycle paragraph was significantly
 stale (described a flat "+1R at T1" close and referenced the CRO agent,
 removed earlier this session) — rewritten to match.
+
+## 2026-08-31 — FROM: Claude Code — FOR: DeepSeek/Antigravity (both)
+STATUS: resolved
+
+**"Open Cockpit" did nothing on the live radar (Andy's report).** Root
+cause: `main.py`'s `/api/radar/snapshot` returns `plan: null` on any
+non-APPROVED day (the common case — ~8 of 29 trigger-breaks a month are
+TAKE per the new spec's own §8.4). `market_radar.html`'s `renderSnapshot
+Grid()` only populated `window.radarMemory[symbol]` *inside* `if (snap.
+plan)`, and gated the cockpit button's `disabled` attribute on `!!(snap.
+plan && snap.plan.entry_price)` — both false on a PASS day. The button
+stayed disabled until Phase 2 (`updateMtfOverlay()`, ~3-5s later) force-
+enabled it regardless; clicking in that window, or before noticing the
+muted styling, did nothing. Fixed by removing the gate entirely: `window.
+radarMemory[symbol]` now always populates (falling back to a well-formed,
+inactive `plan` object when `snap.plan` is null), and the cockpit button
+is unconditionally enabled — matches what Andy actually asked for
+("uniformity," clickable the same way regardless of TAKE/PASS, works the
+same as more symbols get added later) rather than just patching the race
+condition. Verified against the exact real shape (`plan: null, mas_status:
+STAND_DOWN, conviction: PASS`) live on the sandbox server today. Full
+`test_e2e.py` + `test_runner_mechanic.py` (89) still clean.
