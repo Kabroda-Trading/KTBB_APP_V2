@@ -205,6 +205,18 @@ def run_mas_analysis(
             f24_vah=levels.get("f24_vah", 0.0),
             f24_val=levels.get("f24_val", 0.0),
             daily_atr14=daily_atr14,
+            # 2026-08-31 fix (WAITING-visibility gap, Andy via the live
+            # site) -- feeds trade_plan.anticipate_setup() so a plan can
+            # generate at lock EVEN BEFORE any trigger has crossed, instead
+            # of always falling to NO_PLAN until decision_dict already has
+            # a side. See build_trade_plan()'s own docstring.
+            breakout_trigger=bo,
+            breakdown_trigger=bd,
+            candles_15m=candles_15m,
+            candles_1d=candles_1d,
+            candles_1h=candles_1h,
+            candles_4h=candles_4h,
+            session_hour_utc=now_utc.hour,
         )
         _inject_trade_plan_to_database(symbol, session_id, date_key, plan_fields)
     except Exception as _tp_err:

@@ -147,3 +147,123 @@ def test_render_brief_waiting_plan_has_every_number():
     assert "BUY" in text
     assert "PREMIUM" in text
     assert "ORDER 2" in text  # retest-limit fallback always mentioned
+
+
+def test_render_brief_tbd_tier_before_the_cross():
+    # 2026-08-31 fix: a pre-cross-anticipated plan has tier=None until the
+    # real cross stamps it -- must not print "Tier: None".
+    plan = {
+        "date_key": "2026-08-31", "symbol": "BTC/USDT", "status": "WAITING",
+        "direction": "LONG", "tier": None,
+        "trigger_price": 100.0, "stop_price": 95.0, "stop_basis": "beyond sweep wick low",
+        "t1": 110.0, "t2": 120.0, "t3": 130.0,
+        "commit_after": ANCHOR + datetime.timedelta(minutes=45),
+        "fuel_requirement": tp.FUEL_REQUIREMENT_TEXT,
+        "management": tp.MANAGEMENT_TEXT,
+    }
+    text = tp.render_brief(plan)
+    assert "Tier: None" not in text
+    assert "TBD" in text
+
+
+# ------------------------------------------------------------------ build_trade_plan(): pre-cross path
+# (2026-08-31, WAITING-visibility fix -- Andy found via the live site,
+# Kabroda AI Brain AGENT_LOG.md. anticipate_setup() itself is covered in
+# tests/test_anticipate_setup.py; these isolate build_trade_plan()'s own
+# NEW branch logic by monkeypatching anticipate_setup directly.)
+
+def _precross_kwargs(candles_24h=None):
+    return dict(
+        symbol="BTC/USDT", date_key="2026-08-31", session_id="us_ny_futures",
+        decision_dict=_pass_decision("Price is inside the box -- no trigger crossed yet. Waiting for BO/BD."),
+        anchor_time=ANCHOR, candles_24h=candles_24h if candles_24h is not None else _flat_candles(price=90.0),
+        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=25.0,
+        breakout_trigger=100.0, breakdown_trigger=90.0,
+        candles_15m=[{}], candles_1d=[{}], candles_1h=[{}], candles_4h=[{}],
+        session_hour_utc=15,
+    )
+
+
+def test_precross_viable_produces_waiting_plan_with_tier_none(monkeypatch):
+    monkeypatch.setattr(tp, "anticipate_setup", lambda *a, **k: {
+        "viable": True, "side": "LONG", "reason": "anticipating LONG -- test",
+    })
+    plan = tp.build_trade_plan(**_precross_kwargs())
+    assert plan["status"] == "WAITING"
+    assert plan["direction"] == "LONG"
+    assert plan["tier"] is None
+    assert plan["trigger_price"] == 100.0  # breakout_trigger, via decision_engine._plan_for_side
+    assert plan["last_transition_reason"] == "anticipating LONG -- test"
+    assert plan["t1"] > plan["trigger_price"]  # box-multiple targets computed for real
+
+
+def test_precross_not_viable_produces_no_plan(monkeypatch):
+    monkeypatch.setattr(tp, "anticipate_setup", lambda *a, **k: {
+        "viable": False, "reason": "box/ATR ratio 1.42 > 0.55",
+    })
+    plan = tp.build_trade_plan(**_precross_kwargs())
+    assert plan["status"] == "NO_PLAN"
+    assert plan["no_plan_reason"] == "box/ATR ratio 1.42 > 0.55"
+
+
+def test_precross_missing_inputs_falls_back_to_original_behavior():
+    # No breakout_trigger/candles_15m/etc supplied -- an older caller, or
+    # simply not wired -- must not crash, must match pre-fix behavior.
+    kwargs = _precross_kwargs()
+    for k in ("breakout_trigger", "breakdown_trigger", "candles_15m", "candles_1d"):
+        kwargs[k] = None
+    plan = tp.build_trade_plan(**kwargs)
+    assert plan["status"] == "NO_PLAN"
+    assert plan["no_plan_reason"] == "Price is inside the box -- no trigger crossed yet. Waiting for BO/BD."
+
+
+def test_precross_still_respects_rr_floor(monkeypatch):
+    monkeypatch.setattr(tp, "anticipate_setup", lambda *a, **k: {
+        "viable": True, "side": "LONG", "reason": "anticipating LONG -- test",
+    })
+    # A confirmed swing low far below entry forces a wide stop, same
+    # mechanism test_no_plan_when_core_zone_stop_kills_rr already covers
+    # for the post-cross path -- must apply identically pre-cross.
+    candles = (
+        [{"open": 98, "high": 99, "low": 97, "close": 98} for _ in range(3)]
+        + [{"open": 60, "high": 61, "low": 60, "close": 60.5}]
+        + [{"open": 98, "high": 99, "low": 97, "close": 98} for _ in range(3)]
+    )
+    kwargs = _precross_kwargs(candles_24h=candles)
+    kwargs["breakout_trigger"], kwargs["breakdown_trigger"] = 100.0, 99.0  # tight box -> T1 close, easy to blow the floor
+    plan = tp.build_trade_plan(**kwargs)
+    assert plan["status"] == "NO_PLAN"
+    assert "R:R" in plan["no_plan_reason"]
+    assert plan["direction"] == "LONG"  # still recorded, per the existing post-cross behavior
+
+
+# ------------------------------------------------------------------ _stamp_tier_at_cross / advance_waiting_plan tier stamping
+
+def test_stamp_tier_at_cross_premium(monkeypatch):
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
+    })
+    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0}  # box=10, atr=25 -> ratio=0.4 -> PREMIUM boundary
+    tier = tp._stamp_tier_at_cross(plan, [{}], [{}], daily_atr14=25.0)
+    assert tier == "PREMIUM"
+
+
+def test_stamp_tier_at_cross_standard_when_htf_not_fully_aligned(monkeypatch):
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BULLISH", "trend_4h": "NEUTRAL", "aligned": 1, "opposed": 0,
+    })
+    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0}
+    tier = tp._stamp_tier_at_cross(plan, [{}], [{}], daily_atr14=25.0)
+    assert tier == "STANDARD"
+
+
+def test_stamp_tier_at_cross_standard_when_box_too_wide_for_premium(monkeypatch):
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
+    })
+    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 150.0}  # box=50, atr=25 -> ratio=2.0
+    tier = tp._stamp_tier_at_cross(plan, [{}], [{}], daily_atr14=25.0)
+    assert tier == "STANDARD"

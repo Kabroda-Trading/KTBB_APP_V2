@@ -79,11 +79,25 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
         live_price = float(candles_5m[-1]["close"])
         plan_dict = {
             "status": row.status, "direction": row.direction,
-            "trigger_price": row.trigger_price,
+            "trigger_price": row.trigger_price, "t2": row.t2,
             "commit_after": _as_utc(row.commit_after),
-            "entry_mode": row.entry_mode,
+            "entry_mode": row.entry_mode, "tier": row.tier,
         }
-        updates = tp.advance_waiting_plan(plan_dict, now_utc, session_expires_at, candles_5m, live_price)
+        # Only fetch 1H/4H/daily -- and only when the plan's tier is still
+        # None -- for _stamp_tier_at_cross() (2026-08-31 WAITING-visibility
+        # fix). A plan generated with a real tier already (the original,
+        # already-crossed TAKE path) never needs this extra fetch.
+        candles_1h = candles_4h = None
+        daily_atr14 = None
+        if row.tier is None:
+            candles_1h = await market_data.fetch_live_1h(symbol, limit=100)
+            candles_4h = await market_data.fetch_live_4h(symbol, limit=100)
+            candles_1d = await market_data.fetch_live_daily(symbol, limit=60)
+            daily_atr14 = market_data._calc_daily_atr14(candles_1d)
+        updates = tp.advance_waiting_plan(
+            plan_dict, now_utc, session_expires_at, candles_5m, live_price,
+            candles_1h=candles_1h, candles_4h=candles_4h, daily_atr14=daily_atr14,
+        )
         _apply(row, updates, symbol)
 
     elif row.status == "REENTRY_ARMED":

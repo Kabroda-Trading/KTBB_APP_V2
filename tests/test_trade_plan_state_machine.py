@@ -73,6 +73,48 @@ def test_advance_waiting_fueled_cross_fills():
     assert "filled" in result["last_transition_reason"]
 
 
+def test_advance_waiting_fueled_cross_stamps_tier_when_none(monkeypatch):
+    # 2026-08-31 fix: a pre-cross-anticipated plan (tier=None at generation)
+    # gets its tier stamped at the real cross, once HTF/box-ATR data is
+    # actually available.
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
+    })
+    plan = _plan(direction="LONG", trigger=100.0, tier=None, t2=110.0)  # box=10, atr=25 -> ratio=0.4 -> PREMIUM
+    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)
+    result = tp.advance_waiting_plan(
+        plan, NOW, SESSION_EXPIRES, candles, live_price=100.0,
+        candles_1h=[{}], candles_4h=[{}], daily_atr14=25.0,
+    )
+    assert result["status"] == "FILLED"
+    assert result["tier"] == "PREMIUM"
+
+
+def test_advance_waiting_fueled_cross_never_overrides_existing_tier(monkeypatch):
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
+    })
+    plan = _plan(direction="LONG", trigger=100.0, tier="STANDARD", t2=110.0)  # already known, from the post-cross path
+    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)
+    result = tp.advance_waiting_plan(
+        plan, NOW, SESSION_EXPIRES, candles, live_price=100.0,
+        candles_1h=[{}], candles_4h=[{}], daily_atr14=25.0,
+    )
+    assert "tier" not in result  # never re-decided
+
+
+def test_advance_waiting_fueled_cross_no_tier_stamp_without_1h4h_data():
+    # Missing candles_1h/4h/daily_atr14 -- must not crash, tier stays
+    # unset (matches pre-fix behavior for any caller not yet passing them).
+    plan = _plan(direction="LONG", trigger=100.0, tier=None)
+    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)
+    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=100.0)
+    assert result["status"] == "FILLED"
+    assert "tier" not in result
+
+
 def test_advance_waiting_fueled_cross_already_broken_out_uses_retest_mode():
     plan = _plan(direction="LONG", trigger=100.0)
     candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)

@@ -73,57 +73,121 @@ COMMIT_OFFSET_MINUTES = 45  # anchor_time + 45min = 08:45 CT / 09:45 ET (the ope
 _TAKE_STATES = ("TAKE_PREMIUM", "TAKE_STANDARD")
 
 
-def build_trade_plan(
-    symbol: str,
-    date_key: str,
-    session_id: str,
-    decision_dict: Dict[str, Any],
-    anchor_time: datetime.datetime,
-    candles_24h: list,
+def anticipate_setup(
+    breakout_trigger: float,
+    breakdown_trigger: float,
+    daily_atr14: float,
+    candles_15m: List[Dict[str, Any]],
+    candles_1d: List[Dict[str, Any]],
+    candles_1h: List[Dict[str, Any]],
+    candles_4h: List[Dict[str, Any]],
+    session_hour_utc: Optional[int],
+) -> Dict[str, Any]:
+    """The real fix for the 2026-08-31 "WAITING-state plan visibility gap"
+    Andy found on the live site (Kabroda AI Brain AGENT_LOG.md): the plan
+    was only ever generated once decision_engine.evaluate_15m_decision()
+    already returns a TAKE state -- which requires `side` to already be
+    known, which requires the trigger to have ALREADY crossed. That's
+    backwards from SS4's own example brief (full levels shown at WAITING,
+    before any cross) and the real order mechanics DeepSeek documented:
+    Andy rests a trigger order AT THE LEVEL before the cross -- only the
+    TIER stamp waits for the fuel check at the cross ("cross mechanics
+    clarified for Andy", same log).
+
+    This answers the ONE question decision_engine.py's real gate genuinely
+    can't answer pre-cross: which direction to anticipate. Everything else
+    the gate checks (reachability, daily regime/counter-trend, 15m DEAD
+    tape, HTF trend, session hour) is already knowable at lock -- none of
+    it depends on price having crossed a trigger, only FUEL does (push
+    volume needs the actual crossing candle, unavailable pre-cross). So
+    this reuses decision_engine.py's own collaborator modules directly
+    (reachability.py, market_regime.py, micro_regime.py, htf_fuel.py --
+    never reimplements their logic) to run everything except the fuel
+    check, picking the trend-aligned side using the SAME logic the gate's
+    own counter-trend veto already encodes (a break against a GOOD-quality
+    daily bias gets vetoed anyway, so the aligned side is the only one
+    that could pass).
+
+    Returns {"viable": False, "reason": str} (-> NO_PLAN) or
+    {"viable": True, "side": "LONG"|"SHORT", "reason": str} (-> WAITING;
+    tier is stamped later, at the real cross, by advance_waiting_plan()).
+
+    A genuinely undetermined direction (no daily bias, no HTF lean) is NOT
+    guessed at -- it returns viable=False, deferring to the ORIGINAL
+    cross-based path (unchanged, still correct): the plan stays NO_PLAN
+    until an actual cross gives decision_engine.py's real gate a side to
+    evaluate, same as today's behavior for every case, not just this one.
+    """
+    import decision_engine as _decision_engine
+    import htf_fuel as _htf_fuel
+    import market_regime as _market_regime
+    import micro_regime as _micro_regime
+    import reachability as _reachability
+
+    bo, bd = float(breakout_trigger or 0), float(breakdown_trigger or 0)
+    atr = float(daily_atr14 or 0)
+    box = (bo - bd) if (bo and bd and bo > bd) else 0.0
+
+    reach = _reachability.reachability(box, atr)
+    if not reach["ok"]:
+        return {"viable": False, "reason": reach["note"]}
+
+    if session_hour_utc is not None and session_hour_utc in _decision_engine.DEAD_HOURS:
+        return {"viable": False, "reason": f"{session_hour_utc:02d}:00 UTC is a dead-tape hour"}
+
+    micro = _micro_regime.classify_regime(candles_15m)
+    if micro.get("regime") == "DEAD":
+        return {"viable": False, "reason": "15M regime is DEAD -- no participation"}
+
+    daily = _market_regime.classify_market_regime(candles_1d)
+    daily_bias = (daily.get("policy") or {}).get("bias")
+    daily_quality = daily.get("quality")
+
+    # trend_1h/trend_4h are side-independent raw reads -- the `side` arg
+    # htf_fuel() takes only affects the aligned/opposed COUNT it also
+    # returns, which is recomputed here for both hypothetical sides
+    # instead (no need to call it twice).
+    htf = _htf_fuel.htf_fuel(candles_1h, candles_4h, "LONG")
+    trend_1h, trend_4h = htf.get("trend_1h"), htf.get("trend_4h")
+    long_aligned = sum(1 for t in (trend_1h, trend_4h) if t == "BULLISH")
+    short_aligned = sum(1 for t in (trend_1h, trend_4h) if t == "BEARISH")
+
+    side: Optional[str] = None
+    reason: Optional[str] = None
+    if daily_quality == "GOOD" and daily_bias in ("UP", "DOWN"):
+        side = "LONG" if daily_bias == "UP" else "SHORT"
+        reason = f"anticipating {side} -- aligned with a {daily_bias} daily trend on a GOOD table"
+    elif long_aligned > short_aligned:
+        side, reason = "LONG", f"anticipating LONG -- {long_aligned}/2 HTF timeframes bullish"
+    elif short_aligned > long_aligned:
+        side, reason = "SHORT", f"anticipating SHORT -- {short_aligned}/2 HTF timeframes bearish"
+
+    if side is None:
+        return {"viable": False, "reason": "no clear directional bias yet -- awaiting a cross to determine side"}
+    return {"viable": True, "side": side, "reason": reason}
+
+
+def _build_waiting_plan(
+    base: Dict[str, Any],
+    side: str,
+    entry_price: float,
+    t1: float,
+    t2: float,
+    t3: float,
     r30_high: float,
     r30_low: float,
     f24_vah: float,
     f24_val: float,
     daily_atr14: float,
+    candles_24h: list,
+    tier: Optional[str],
+    generation_reason: str,
 ) -> Dict[str, Any]:
-    """Builds the TradePlan fields (a dict, ready for the TradePlan model)
-    from an already-computed gate decision (decision_engine.evaluate_15m_
-    decision()'s decision_dict) plus the inputs stop_planner.py needs.
-
-    Returns a dict matching database.TradePlan's columns (caller writes it
-    to the DB and is responsible for the (symbol, date_key, session_id)
-    upsert -- this function is a pure builder, no DB access, matching the
-    rest of this codebase's small-single-purpose-module pattern).
-    """
-    state = decision_dict.get("verdict_state")
-    commit_after = anchor_time + datetime.timedelta(minutes=COMMIT_OFFSET_MINUTES)
-
-    base = {
-        "symbol": symbol, "date_key": date_key, "session_id": session_id,
-        "commit_after": commit_after,
-        "fuel_requirement": FUEL_REQUIREMENT_TEXT,
-        "management": MANAGEMENT_TEXT,
-    }
-
-    if state not in _TAKE_STATES:
-        # NO_PLAN is a valid, common outcome (SS3) -- not an error case.
-        # decision_dict["tactical_brief"] is already the gate's own specific
-        # reason (decision_engine.py's misses list), reused verbatim rather
-        # than re-derived.
-        return {
-            **base,
-            "status": "NO_PLAN",
-            "no_plan_reason": decision_dict.get("tactical_brief") or f"gate state: {state}",
-        }
-
-    side = decision_dict.get("side")
+    """Shared by both build_trade_plan() paths (an already-crossed TAKE
+    decision, and the pre-cross anticipate_setup() path) -- the stop-
+    planning/R:R-floor logic is identical either way; only the source of
+    side/entry/t1/t2/t3/tier differs."""
     is_long = side == "LONG"
-    entry_price = float(decision_dict["entry_price"])
-    t1 = float(decision_dict["t1"])
-    t2 = float(decision_dict["t2"])
-    t3 = float(decision_dict["t3"])
-    tier = decision_dict.get("tier")
-
     stop_plan = sp.plan_stop(
         candles_24h=candles_24h,
         entry_price=entry_price, is_long=is_long,
@@ -177,8 +241,107 @@ def build_trade_plan(
         "t1": t1, "t2": t2, "t3": t3,
         "rr_floor_ok": True,
         "rr_ratio": rr["ratio"],
-        "last_transition_reason": "plan generated at lock",
+        "last_transition_reason": generation_reason,
     }
+
+
+def build_trade_plan(
+    symbol: str,
+    date_key: str,
+    session_id: str,
+    decision_dict: Dict[str, Any],
+    anchor_time: datetime.datetime,
+    candles_24h: list,
+    r30_high: float,
+    r30_low: float,
+    f24_vah: float,
+    f24_val: float,
+    daily_atr14: float,
+    breakout_trigger: Optional[float] = None,
+    breakdown_trigger: Optional[float] = None,
+    candles_15m: Optional[list] = None,
+    candles_1d: Optional[list] = None,
+    candles_1h: Optional[list] = None,
+    candles_4h: Optional[list] = None,
+    session_hour_utc: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Builds the TradePlan fields (a dict, ready for the TradePlan model)
+    from an already-computed gate decision (decision_engine.evaluate_15m_
+    decision()'s decision_dict) plus the inputs stop_planner.py needs.
+
+    The new optional params (breakout_trigger/breakdown_trigger/candles_15m/
+    candles_1d/candles_1h/candles_4h/session_hour_utc) feed
+    anticipate_setup() for the PRE-cross case (decision_dict["side"] is
+    None, verdict_state PASS -- see that function's docstring). Omitting
+    them falls back to the original NO_PLAN-until-a-real-cross behavior
+    rather than crashing, for any caller that hasn't been updated.
+
+    Returns a dict matching database.TradePlan's columns (caller writes it
+    to the DB and is responsible for the (symbol, date_key, session_id)
+    upsert -- this function is a pure builder, no DB access, matching the
+    rest of this codebase's small-single-purpose-module pattern).
+    """
+    state = decision_dict.get("verdict_state")
+    commit_after = anchor_time + datetime.timedelta(minutes=COMMIT_OFFSET_MINUTES)
+
+    base = {
+        "symbol": symbol, "date_key": date_key, "session_id": session_id,
+        "commit_after": commit_after,
+        "fuel_requirement": FUEL_REQUIREMENT_TEXT,
+        "management": MANAGEMENT_TEXT,
+    }
+
+    if decision_dict.get("side") is None and state == "PASS":
+        have_precross_inputs = (
+            breakout_trigger and breakdown_trigger
+            and candles_15m is not None and candles_1d is not None
+        )
+        if have_precross_inputs:
+            import decision_engine as _decision_engine
+            anticipated = anticipate_setup(
+                breakout_trigger, breakdown_trigger, daily_atr14,
+                candles_15m, candles_1d, candles_1h or [], candles_4h or [],
+                session_hour_utc,
+            )
+            if not anticipated["viable"]:
+                return {**base, "status": "NO_PLAN", "no_plan_reason": anticipated["reason"]}
+            plan = _decision_engine._plan_for_side(
+                anticipated["side"], breakout_trigger, breakdown_trigger, r30_high, r30_low,
+            )
+            return _build_waiting_plan(
+                base, anticipated["side"], plan["entry"], plan["t1"], plan["t2"], plan["t3"],
+                r30_high, r30_low, f24_vah, f24_val, daily_atr14, candles_24h,
+                tier=None,  # stamped at the real cross -- advance_waiting_plan()
+                generation_reason=anticipated["reason"],
+            )
+        # No pre-cross inputs supplied -- original behavior, unchanged.
+        return {
+            **base,
+            "status": "NO_PLAN",
+            "no_plan_reason": decision_dict.get("tactical_brief") or f"gate state: {state}",
+        }
+
+    if state not in _TAKE_STATES:
+        # A cross ALREADY happened and the real gate said no -- its reason
+        # is authoritative (fuel/vetoes already evaluated for real), never
+        # overridden by the pre-cross heuristic above.
+        return {
+            **base,
+            "status": "NO_PLAN",
+            "no_plan_reason": decision_dict.get("tactical_brief") or f"gate state: {state}",
+        }
+
+    side = decision_dict.get("side")
+    entry_price = float(decision_dict["entry_price"])
+    t1 = float(decision_dict["t1"])
+    t2 = float(decision_dict["t2"])
+    t3 = float(decision_dict["t3"])
+    tier = decision_dict.get("tier")
+
+    return _build_waiting_plan(
+        base, side, entry_price, t1, t2, t3, r30_high, r30_low, f24_vah, f24_val,
+        daily_atr14, candles_24h, tier, generation_reason="plan generated at lock",
+    )
 
 
 def render_brief(plan: Dict[str, Any]) -> str:
@@ -208,9 +371,14 @@ def render_brief(plan: Dict[str, Any]) -> str:
     commit_str = commit_after.strftime("%H:%M UTC") if isinstance(commit_after, datetime.datetime) else str(commit_after)
     verb = "BUY" if direction == "LONG" else "SELL"
 
+    if tier is None:
+        tier_line = "Tier: TBD — stamped at the cross once the fuel check confirms (size, not the entry itself)"
+    else:
+        tier_line = f"Tier: {tier} ({'runner management active' if tier == 'PREMIUM' else 'standard sizing'})"
+
     lines = [
         f"TRADE PLAN — {date_key} — {symbol} — STATUS: {plan.get('status')}",
-        f"Tier: {tier} ({'runner management active' if tier == 'PREMIUM' else 'standard sizing'})",
+        tier_line,
         "",
         f"  WAIT UNTIL {commit_str} to commit (post-open-window rule — the "
         f"first ~1h after equity open degrades every trigger; commit_after "
@@ -240,12 +408,44 @@ def render_brief(plan: Dict[str, Any]) -> str:
 # INTRADAY STATE MACHINE (SS5) — pre-fill, fuel-gated entry logic
 # ==============================================================================
 
+def _stamp_tier_at_cross(
+    plan: Dict[str, Any],
+    candles_1h: List[Dict[str, Any]],
+    candles_4h: List[Dict[str, Any]],
+    daily_atr14: float,
+) -> str:
+    """PREMIUM if both HTF timeframes back the side AND box/ATR <= 0.40 at
+    the cross, else STANDARD -- decision_engine.py's own _core_gate() tier
+    formula, recomputed here (not reimplemented differently), for a plan
+    whose tier was left None at generation (the anticipate_setup() pre-
+    cross path -- see build_trade_plan()'s docstring) because it genuinely
+    couldn't be known until now.
+    """
+    import htf_fuel as _htf_fuel
+    import reachability as _reachability
+
+    side = plan.get("direction")
+    htf = _htf_fuel.htf_fuel(candles_1h, candles_4h, side)
+    aligned = htf.get("aligned") or 0
+
+    trigger, t2 = plan.get("trigger_price"), plan.get("t2")
+    box = abs(t2 - trigger) if (trigger is not None and t2 is not None) else 0.0
+    reach = _reachability.reachability(box, daily_atr14)
+    ratio = reach.get("ratio")
+
+    premium = aligned == 2 and ratio is not None and ratio <= _reachability.PREMIUM_BOX_ATR
+    return "PREMIUM" if premium else "STANDARD"
+
+
 def advance_waiting_plan(
     plan: Dict[str, Any],
     now_utc: datetime.datetime,
     session_expires_at: Optional[datetime.datetime],
     candles_5m: List[Dict[str, Any]],
     live_price: float,
+    candles_1h: Optional[List[Dict[str, Any]]] = None,
+    candles_4h: Optional[List[Dict[str, Any]]] = None,
+    daily_atr14: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     """Pre-fill transitions ONLY: WAITING/VETOED -> FILLED/VETOED/DONE.
 
@@ -253,6 +453,13 @@ def advance_waiting_plan(
     generated intraday" rule doesn't mean no MONITORING before commit_after,
     it means the plan's fixed fields (trigger/stop/targets/tier) never
     change; whether/when it fires is exactly what this function decides.
+
+    candles_1h/candles_4h/daily_atr14 (all optional) feed _stamp_tier_at_
+    cross() -- ONLY used, and only needed, when plan["tier"] is still None
+    at the FUELED fill (the anticipate_setup() pre-cross generation path
+    defers tier to the cross on purpose). A plan generated with a tier
+    already known (the original, already-crossed TAKE path) is left
+    untouched -- this never re-decides an existing tier.
 
     ARMED and FILLED collapse into one transition here: a stop/limit order
     sitting exactly at trigger_price fills the instant price touches it --
@@ -307,6 +514,8 @@ def advance_waiting_plan(
         push_ratio = (fuel.get("checks") or {}).get("push_volume", {}).get("ratio")
         prefix = "second " if status == "VETOED" else ""
         updates["last_transition_reason"] = f"{prefix}cross fueled ({push_ratio}x baseline) -- filled"
+        if plan.get("tier") is None and candles_1h is not None and candles_4h is not None and daily_atr14:
+            updates["tier"] = _stamp_tier_at_cross(plan, candles_1h, candles_4h, daily_atr14)
         return updates
 
     # NO_FUEL / CONFLICTED

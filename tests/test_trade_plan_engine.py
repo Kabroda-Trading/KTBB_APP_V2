@@ -141,15 +141,30 @@ def poll_env(monkeypatch):
         db.commit()
         db.close()
 
-    def run_polls(candles_5m_by_symbol=None, candles_1m_by_symbol=None, polls=1):
+    def run_polls(candles_5m_by_symbol=None, candles_1m_by_symbol=None, polls=1,
+                  candles_1h_by_symbol=None, candles_4h_by_symbol=None, daily_atr14=0.0):
         candles_5m_by_symbol = candles_5m_by_symbol or {}
         candles_1m_by_symbol = candles_1m_by_symbol or {}
+        candles_1h_by_symbol = candles_1h_by_symbol or {}
+        candles_4h_by_symbol = candles_4h_by_symbol or {}
 
         async def fake_5m(symbol, limit=310):
             return candles_5m_by_symbol.get(symbol, [])
 
         async def fake_1m(symbol, since_ms, limit=720):
             return candles_1m_by_symbol.get(symbol, [])
+
+        async def fake_1h(symbol, limit=100):
+            return candles_1h_by_symbol.get(symbol, [])
+
+        async def fake_4h(symbol, limit=100):
+            return candles_4h_by_symbol.get(symbol, [])
+
+        async def fake_daily(symbol, limit=60):
+            return []  # unused directly -- fake_atr below controls the value tier-stamping sees
+
+        def fake_atr(candles_1d):
+            return daily_atr14
 
         sleeps = {"n": 0}
 
@@ -159,6 +174,10 @@ def poll_env(monkeypatch):
                 raise _StopLoop()
 
         monkeypatch.setattr(tpe.market_data, "fetch_live_5m", fake_5m)
+        monkeypatch.setattr(tpe.market_data, "fetch_live_1h", fake_1h)
+        monkeypatch.setattr(tpe.market_data, "fetch_live_4h", fake_4h)
+        monkeypatch.setattr(tpe.market_data, "fetch_live_daily", fake_daily)
+        monkeypatch.setattr(tpe.market_data, "_calc_daily_atr14", fake_atr)
         monkeypatch.setattr(tpe, "_fetch_1m_since", fake_1m)
         monkeypatch.setattr(tpe.asyncio, "sleep", fake_sleep)
 
@@ -198,6 +217,23 @@ def test_waiting_fueled_cross_fills_via_loop(poll_env):
     assert row.status == "FILLED"
     assert row.fill_price == 100.0
     assert row.entry_mode in ("TRIGGER_AT_LEVEL", "RETEST_LIMIT_AT_LINE")
+
+
+def test_waiting_fueled_cross_stamps_tier_via_loop(poll_env, monkeypatch):
+    # 2026-08-31 fix: a plan generated pre-cross (tier=None) gets a real
+    # tier stamped through the actual monitoring loop, not just the pure
+    # function in isolation.
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
+    })
+    poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0, tier=None, t2=110.0)
+    candles = _fueled_5m_candles(100.0, is_long=True)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=25.0)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "FILLED"
+    assert row.tier == "PREMIUM"  # box=10 (t2-trigger), atr=25 -> ratio=0.4, both HTF aligned
 
 
 def test_reentry_armed_fueled_cross_fills_via_loop(poll_env):
