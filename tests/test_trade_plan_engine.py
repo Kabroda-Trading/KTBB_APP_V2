@@ -28,6 +28,7 @@ import pytest
 import database
 from database import SessionLocal, TradePlan, CampaignLog
 import trade_plan_engine as tpe
+import notify
 
 
 def _clean_db_files():
@@ -206,6 +207,85 @@ def poll_env(monkeypatch):
     db.commit()
     db.close()
     _clean_db_files()
+
+
+# ------------------------------------------------------------------ notifications
+# (Andy's build request, trade_plan_notify.py -- one email per required
+# state transition: ARMED/VETOED/DONE, never STOPPED/REENTRY_ARMED)
+
+def _capture_emails(monkeypatch):
+    sent = []
+    def fake_send(subject, body):
+        sent.append((subject, body))
+        return True
+    monkeypatch.setattr(notify, "send_admin_email", fake_send)
+    return sent
+
+
+def test_waiting_fueled_cross_sends_armed_email_via_loop(poll_env, monkeypatch):
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_plan"](
+        status="WAITING", direction="LONG", trigger_price=100.0,
+        stop_price=90.0, stop_basis="beyond sweep wick low", t1=112.0, t2=120.0, t3=132.0,
+    )
+    candles = _fueled_5m_candles(100.0, is_long=True)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    assert len(sent) == 1
+    assert sent[0][0].startswith("KABRODA ARMED")
+
+
+def test_waiting_unfueled_cross_sends_vetoed_email_via_loop(poll_env, monkeypatch):
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0)
+    candles = _thin_5m_candles(100.0, is_long=True)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    assert len(sent) == 1
+    assert sent[0][0].startswith("KABRODA VETOED")
+
+
+def test_waiting_session_expiry_sends_done_email_via_loop(poll_env, monkeypatch):
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0, date_key="2020-01-01")
+    # _advance_one() bails before ever checking session expiry if
+    # fetch_live_5m returns empty (same as a real "market data unavailable"
+    # skip) -- supply real (untouched) candles so the expiry branch is
+    # actually reached, matching how a live poll would look.
+    candles = _no_push_5m_candles(100.0, is_long=True)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    assert len(sent) == 1
+    assert sent[0][0].startswith("KABRODA DONE")
+
+
+def test_filled_wide_stop_wicked_sends_no_email_via_loop(poll_env, monkeypatch):
+    # STOPPED is a real transition -- just not a required notify event.
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_plan"](
+        status="FILLED", direction="LONG", trigger_price=100.0,
+        stop_price=90.0, t1=112.0, fill_time=poll_env["now"] - timedelta(minutes=30),
+    )
+    candles_1m = [_c1m(98, 101), _c1m(89.0, 99.0)]  # stop touched, T1 never reached
+    poll_env["run_polls"](candles_1m_by_symbol={"BTC/USDT": candles_1m}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "STOPPED"
+    assert sent == []
+
+
+def test_filled_t1_reached_sends_done_email_via_loop(poll_env, monkeypatch):
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_plan"](
+        status="FILLED", direction="LONG", trigger_price=100.0,
+        stop_price=90.0, t1=112.0, fill_time=poll_env["now"] - timedelta(minutes=30),
+    )
+    poll_env["make_campaign"](status="CLOSED_WIN")
+    candles_1m = [_c1m(98, 101), _c1m(111.0, 113.0)]
+    poll_env["run_polls"](candles_1m_by_symbol={"BTC/USDT": candles_1m}, polls=1)
+
+    assert len(sent) == 1
+    assert sent[0][0].startswith("KABRODA DONE")
 
 
 def test_waiting_fueled_cross_fills_via_loop(poll_env):

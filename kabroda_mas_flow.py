@@ -605,6 +605,21 @@ def _inject_trade_plan_to_database(
         db.add(row)
         db.commit()
         print(f"|| TRADE PLAN || {fields.get('status')} plan written for {symbol} | {session_id} | {date_key}.")
+
+        # Daily lock email (Andy's build request, trade_plan_notify.py) --
+        # only when a plan is actually tradeable (status WAITING); a
+        # NO_PLAN day sends nothing, by design (see that module's header).
+        # Non-blocking: a notification failure must never affect the
+        # already-committed plan write above.
+        try:
+            import notify
+            import trade_plan_notify
+            mail = trade_plan_notify.build_lock_email(row.__dict__)
+            if mail:
+                subject, body = mail
+                notify.send_admin_email(subject, body)
+        except Exception as _notify_err:
+            print(f"[TRADE PLAN] Lock-email notification failed: {_notify_err}")
     except Exception as e:
         print(f"TRADE PLAN DATABASE INJECTION ERROR: {e}")
     finally:

@@ -152,9 +152,13 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
 
     elif row.status == "STOPPED":
         if now_utc >= session_expires_at:
-            row.status = "DONE"
-            row.last_transition_reason = "session ended, no qualifying re-entry cross after stop"
-            print(f"|| TRADE PLAN || {symbol} {row.session_id} {row.date_key}: DONE -- {row.last_transition_reason}")
+            # Routed through _apply() (not a direct setattr+print, unlike
+            # WIDE_STOP_FIRST's -> STOPPED transition above) specifically
+            # so the DONE notification hook fires -- DONE is a required
+            # notify event, STOPPED is not.
+            _apply(row, {"status": "DONE",
+                         "last_transition_reason": "session ended, no qualifying re-entry cross after stop"},
+                   symbol)
             return
         candles_5m = await market_data.fetch_live_5m(symbol, limit=310)
         if not candles_5m:
@@ -176,6 +180,26 @@ def _apply(row: TradePlan, updates, symbol: str) -> None:
     if row.status != prev_status:
         print(f"|| TRADE PLAN || {symbol} {row.session_id} {row.date_key}: "
               f"{prev_status} -> {row.status} -- {updates.get('last_transition_reason')}")
+        _notify_transition(prev_status, row, symbol)
+
+
+def _notify_transition(prev_status: str, row: TradePlan, symbol: str) -> None:
+    """One email per real state transition, only for the required events
+    (ARMED/VETOED/DONE) -- trade_plan_notify.py's own docstring has the
+    full reasoning. Matches ledger_closing_engine.py's own established
+    pattern: notify.send_admin_email() called directly (not asyncio.
+    to_thread-wrapped) inside an async loop -- an occasional blocking SMTP
+    round-trip is an accepted cost at this loop's 60s cadence."""
+    try:
+        import notify
+        import trade_plan_notify
+
+        mail = trade_plan_notify.notification_for_transition(prev_status, row.__dict__)
+        if mail:
+            subject, body = mail
+            notify.send_admin_email(subject, body)
+    except Exception as e:
+        print(f"|| TRADE PLAN || Notification failed for {symbol}: {e}")
 
 
 async def run_trade_plan_loop():

@@ -1094,6 +1094,52 @@ async def api_admin_test_notify(request: Request, db: Session = Depends(get_db))
     })
 
 
+@app.post("/api/admin/test-notify-trade-plan")
+async def api_admin_test_notify_trade_plan(
+    request: Request, plan_id: int, event: str = "lock", db: Session = Depends(get_db)
+):
+    """
+    Fires one real Trade Plan email (trade_plan_notify.py) built from an
+    ACTUAL TradePlan row, so its real formatting can be verified before
+    relying on it live -- the plan-specific test fire Andy's build
+    request asked for, as an alternative to extending /api/admin/test-
+    notify with synthetic content. Admin only.
+
+    event: one of "lock" | "armed" | "vetoed" | "done" -- picks which
+    builder in trade_plan_notify.py to use against the real row. "lock"
+    only sends if the row's actual status is WAITING (matches the real
+    gate exactly, not simulated).
+    """
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+
+    from database import TradePlan as _TradePlan
+    row = db.query(_TradePlan).filter(_TradePlan.id == plan_id).first()
+    if row is None:
+        return JSONResponse({"ok": False, "error": f"No TradePlan row with id={plan_id}"}, status_code=404)
+
+    import notify
+    import trade_plan_notify
+    builders = {
+        "lock": trade_plan_notify.build_lock_email,
+        "armed": trade_plan_notify.build_armed_email,
+        "vetoed": trade_plan_notify.build_vetoed_email,
+        "done": trade_plan_notify.build_done_email,
+    }
+    builder = builders.get(event)
+    if builder is None:
+        return JSONResponse({"ok": False, "error": f"Unknown event '{event}' -- use one of {list(builders)}"}, status_code=400)
+
+    mail = builder(row.__dict__)
+    if mail is None:
+        return JSONResponse({"ok": False, "error": f"'{event}' email does not apply to this row's current status ({row.status})"})
+
+    subject, body = mail
+    ok = await asyncio.to_thread(notify.send_admin_email, subject, body)
+    return JSONResponse({"ok": ok, "subject": subject, "plan_id": plan_id, "event": event})
+
+
 # ==============================================================================
 # SIGNAL PERFORMANCE TRACKER — API ENDPOINT
 # ==============================================================================
