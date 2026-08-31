@@ -1,8 +1,19 @@
 # battlebox_pipeline.py
 # ==============================================================================
-# KABRODA BATTLEBOX PIPELINE — v11.4 (MACRO ORACLE UPGRADE)
-# Purpose: Calculates Full EMA Alignment & Mean Deviation.
-# UPGRADE: Injected market_context_oracle into the SSOT payload.
+# KABRODA BATTLEBOX PIPELINE
+# Computes the session SSOT (daily S/R, 30M range, breakout/breakdown
+# triggers, session timing -- via sse_engine.py) plus the context the
+# forward-audit trail (harness/audit_writer.py, harness/unified_audit_
+# writer.py) tracks: fuel_gauge, micro_state/1h_fuel_status, kde_peaks,
+# macro_structure, mtf_structural_snapshot, confluence_scan.
+#
+# Stripped 2026-08-30 (Andy's call): macro_bias/micro_bias, the Macro Oracle
+# (market_context_oracle.py, now archived), macro_fibs (Gravity Map computes
+# its own copy independently), war_map_context/session_battle (structure_
+# state_engine.py's old 2-consecutive-close acceptance gate -- superseded by
+# the calibrated gate's own first-5m-close test, structure_state_engine.py
+# is now archived), and stoch_cross_15m -- all confirmed zero live readers
+# once decision_engine.py's rebuild and the jewel/confluence purge landed.
 # ==============================================================================
 
 from __future__ import annotations
@@ -18,13 +29,11 @@ import ccxt.async_support as ccxt
 
 import session_manager
 import sse_engine
-import structure_state_engine
 import gravity_engine
 import gravity_math
 import kabroda_mas_flow
 import mtf_confluence_scanner  # <-- Phase 4: confluence_scan (real 21/55 EMA + BBWP/PMARP per TF)
-import market_context_oracle  # <-- NEW: Import the Macro Oracle
-from database import SessionLocal, SessionLock, GravityMemory 
+from database import SessionLocal, SessionLock, GravityMemory
 
 SESSION_CONFIGS = session_manager.SESSION_CONFIGS
 
@@ -224,37 +233,11 @@ def _calc_stochastic(candles: List[Dict], k_period: int = 14, d_period: int = 3)
     return {"k": round(k_vals[-1], 2), "d": round(d, 2)}
 
 
-def _calc_stochastic_cross(candles: List[Dict], k_period: int = 14, d_period: int = 3) -> Dict:
-    """Stochastic %K/%D cross-event detection -- the literal entry trigger the
-    4 Krown System templates require (EXTERNAL_VALIDATION_REPORT.md,
-    2026-08-26). `_calc_stochastic()` alone can't answer this; it only
-    returns one bar's k/d, with no prior bar to compare against for a cross."""
-    if len(candles) < k_period + d_period:
-        return {"k": 50.0, "d": 50.0, "cross_up": False, "cross_down": False}
-    k_vals = []
-    for i in range(k_period - 1, len(candles)):
-        window = candles[i - k_period + 1: i + 1]
-        hh = max(float(c["high"]) for c in window)
-        ll = min(float(c["low"]) for c in window)
-        cl = float(candles[i]["close"])
-        k_vals.append(100 * (cl - ll) / (hh - ll) if hh != ll else 50.0)
-    if len(k_vals) < d_period + 1:
-        return {"k": round(k_vals[-1], 2), "d": round(k_vals[-1], 2), "cross_up": False, "cross_down": False}
-    d_vals = [
-        sum(k_vals[i - d_period + 1: i + 1]) / d_period
-        for i in range(d_period - 1, len(k_vals))
-    ]
-    if len(d_vals) < 2:
-        return {"k": round(k_vals[-1], 2), "d": round(d_vals[-1], 2), "cross_up": False, "cross_down": False}
-    k_now, k_prev = k_vals[-1], k_vals[-2]
-    d_now, d_prev = d_vals[-1], d_vals[-2]
-    return {
-        "k": round(k_now, 2),
-        "d": round(d_now, 2),
-        "cross_up": k_prev <= d_prev and k_now > d_now,
-        "cross_down": k_prev >= d_prev and k_now < d_now,
-    }
-
+# _calc_stochastic_cross() removed 2026-08-30 -- its only output,
+# context["stoch_cross_15m"], had zero readers anywhere (decision_engine.py
+# reads its own momentum leg from mtf_confluence_scanner's confluence_15m
+# instead; grepped, confirmed no other consumer). Dead computation on every
+# session lock.
 
 # ── BBWP / PMARP now live in market_data.py (imported above) -- both this
 # file and mtf_confluence_scanner.py share the one corrected implementation.
@@ -449,22 +432,10 @@ def _build_fuel_gauge(raw_1h: List[Dict], raw_4h: List[Dict], raw_15m: List[Dict
         "15M_JEWEL": _build_synthetic_jewel(raw_15m, adx_4h=_calc_adx(raw_4h)),
     }
 
-def _calculate_weekly_force(daily_candles: list) -> str:
-    if not daily_candles or len(daily_candles) < 21:
-        return "NEUTRAL"
-
-    closes = [float(c["close"]) for c in daily_candles]
-    current_price = closes[-1]
-
-    macro_baseline_21 = sum(closes[-21:]) / 21
-    micro_baseline_7 = sum(closes[-7:]) / 7
-
-    if current_price > macro_baseline_21 and micro_baseline_7 > macro_baseline_21:
-        return "BULLISH"
-    elif current_price < macro_baseline_21 and micro_baseline_7 < macro_baseline_21:
-        return "BEARISH"
-    
-    return "NEUTRAL"
+# _calculate_weekly_force() (macro_bias) removed 2026-08-30 -- its only
+# consumer was the /api/v1/system/session-energy dashboard route, itself
+# removed alongside it (Andy's call). Not read by decision_engine.py or any
+# remaining template (grepped, confirmed zero live consumers).
 
 def _calculate_harmonic_matrix(candles_1h: list, candles_4h: list) -> dict:
     def get_ema(prices, period):
@@ -505,25 +476,14 @@ def _calculate_harmonic_matrix(candles_1h: list, candles_4h: list) -> dict:
         if spread_wide and not trend_is_strong: return {"micro_state": "EXHAUSTION", "1h_fuel_status": "OVEREXTENDED"}
         return {"micro_state": "SWEET_ZONE_BEAR", "1h_fuel_status": "STRONG"}
 
-def _calculate_168h_micro_bias(raw_1h: List[Dict[str, Any]]) -> str:
-    if not raw_1h or len(raw_1h) < 168: return "NEUTRAL"
-    pct_change = ((float(raw_1h[-1]["close"]) - float(raw_1h[-168]["close"])) / float(raw_1h[-168]["close"])) * 100.0
-    if pct_change > 1.00: return "BULLISH"
-    elif pct_change < -1.00: return "BEARISH"
-    return "NEUTRAL"
-
-def _safe_placeholder_state(reason: str = "Waiting...") -> Dict[str, Any]:
-    return {"action": "HOLD FIRE", "reason": reason, "permission": {"status": "NOT_EARNED", "side": "NONE"}, "acceptance_progress": {"count": 0, "required": 2, "side_hint": "NONE"}, "location": {"relative_to_triggers": "INSIDE"}, "execution": {"pause_state": "NONE", "resumption_state": "NONE", "gates_mode": "PREVIEW", "locked_at": None, "levels": {"failure": 0.0, "continuation": 0.0}}, "diagnostics": {"fail_reason": "WAITING"}}
-
-def _war_map_from_1h(raw_1h: List[Dict[str, Any]]) -> Dict[str, Any]:
-    if not raw_1h: return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "UNCLEAR", "note": "No 1h data."}
-    closes = [float(c["close"]) for c in raw_1h]
-    if len(closes) < 22: return {"status": "PLACEHOLDER", "lean": "NEUTRAL", "phase": "TRANSITION", "note": "Insufficient history."}
-    alpha = 2.0 / (21.0 + 1.0)
-    ema = closes[0]
-    for px in closes[1:]: ema = (px * alpha) + (ema * (1 - alpha))
-    lean = "BULLISH" if closes[-1] > ema else "BEARISH"
-    return {"status": "LIVE", "lean": lean, "phase": "TRANSITION", "note": f"Pressure is {lean}."}
+# _calculate_168h_micro_bias() (micro_bias), _safe_placeholder_state(), and
+# _war_map_from_1h() (war_map_context) removed 2026-08-30. micro_bias had the
+# same fate as macro_bias above. _safe_placeholder_state()/_war_map_from_1h()
+# fed the "session_battle"/"war_map_context" battlebox keys, which only the
+# now-removed /api/dmr/live route exposed and nothing displayed (grepped
+# every template, zero references) -- structure_state_engine's acceptance-gate
+# concept itself is superseded by the calibrated gate's own first-5m-close
+# test (see decision_engine.py), so this whole computation was dead weight.
 
 def _fetch_macro_structure(symbol: str) -> List[Dict[str, Any]]:
     db = SessionLocal()
@@ -541,8 +501,8 @@ def _fetch_macro_structure(symbol: str) -> List[Dict[str, Any]]:
         db.close()
 
 def _compute_sse_packet(
-    raw_5m: List[Dict], anchor_ts: int, macro_bias: str, micro_bias: str, fuel_gauge: Dict, kde_data: Dict, macro_fibs: Dict, harmonic_data: Dict, macro_structure: List[Dict], macro_context: Dict, tuning: Optional[Dict] = None, raw_daily: List[Dict] = None  
-) -> Dict[str, Any]: 
+    raw_5m: List[Dict], anchor_ts: int, fuel_gauge: Dict, kde_data: Dict, harmonic_data: Dict, macro_structure: List[Dict], tuning: Optional[Dict] = None, raw_daily: List[Dict] = None
+) -> Dict[str, Any]:
     lock_end_ts = int(anchor_ts) + 1800
     calibration = [c for c in raw_5m if anchor_ts <= int(c["time"]) < lock_end_ts]
     
@@ -582,15 +542,11 @@ def _compute_sse_packet(
 
     if "context" not in computed: computed["context"] = {}
     
-    computed["context"]["macro_bias"] = macro_bias
-    computed["context"]["micro_bias"] = micro_bias
     computed["context"]["fuel_gauge"] = fuel_gauge
     computed["context"]["kde_peaks"] = kde_data.get("peaks", [])
-    computed["context"]["macro_fibs"] = macro_fibs
     computed["context"]["micro_state"] = harmonic_data.get("micro_state", "CHOP")
     computed["context"]["1h_fuel_status"] = harmonic_data.get("1h_fuel_status", "UNKNOWN")
     computed["context"]["macro_structure"] = macro_structure
-    computed["context"]["macro_environment"] = macro_context # <-- NEW: External Context
     computed["context"]["current_price"] = last_price # <-- Punch-list item #3: SA previously had no explicit current price
 
     return {
@@ -604,23 +560,25 @@ def _compute_sse_packet(
 
 async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id: Optional[str] = None, operator_flex: bool = False, tuning: Optional[Dict] = None) -> Dict[str, Any]:
     # Concurrent fetching of required data arrays to prevent blocking
+    # market_context_oracle.get_global_macro_context() task removed 2026-08-30
+    # -- its only output, context["macro_environment"], had zero readers
+    # anywhere (its only consumer was the removed session-energy route);
+    # market_context_oracle.py itself is archived, orphaned by this.
     fetch_tasks = [
         fetch_live_5m(symbol),
         fetch_live_15m(symbol),
         fetch_live_1h(symbol),
         fetch_live_4h(symbol),
         fetch_live_daily(symbol),
-        market_context_oracle.get_global_macro_context() # <-- NEW: Fetch the Oracle data
     ]
-    
+
     results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
-    
+
     raw_5m = results[0] if not isinstance(results[0], Exception) else []
     raw_15m = results[1] if not isinstance(results[1], Exception) else []
     raw_1h = results[2] if not isinstance(results[2], Exception) else []
     raw_4h = results[3] if not isinstance(results[3], Exception) else []
     raw_daily = results[4] if not isinstance(results[4], Exception) else []
-    macro_context = results[5] if not isinstance(results[5], Exception) else {}
 
     if not raw_5m: return {"status": "ERROR", "message": "No Data"}
 
@@ -629,33 +587,28 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     anchor_ts = int(session["anchor_time"])
     lock_end_ts = anchor_ts + 1800
 
-    macro_bias = _calculate_weekly_force(raw_daily)
-    micro_bias = _calculate_168h_micro_bias(raw_1h)
-    
     fuel_gauge = _build_fuel_gauge(raw_1h, raw_4h, raw_15m)
     harmonic_data = _calculate_harmonic_matrix(raw_1h, raw_4h)
-    macro_structure = _fetch_macro_structure(symbol) 
+    macro_structure = _fetch_macro_structure(symbol)
 
     kde_data = gravity_math.calculate_gravity_kde(symbol)
-    macro_fibs = gravity_math.calculate_macro_fibs(raw_daily, [])
+    # gravity_math.calculate_macro_fibs() call removed 2026-08-30 -- the
+    # Gravity Map page computes its own copy independently (main.py's own
+    # gravity-scan route calls calculate_macro_fibs() directly), so this
+    # copy, feeding only context["macro_fibs"], had zero readers left.
 
     if int(now_utc.timestamp()) < lock_end_ts:
-        wm = _war_map_from_1h(raw_1h)
         return {
-            "status": "CALIBRATING", "timestamp": now_utc.strftime("%H:%M UTC"), "price": float(raw_5m[-1]["close"]), "energy": "CALIBRATING", 
+            "status": "CALIBRATING", "timestamp": now_utc.strftime("%H:%M UTC"), "price": float(raw_5m[-1]["close"]), "energy": "CALIBRATING",
             "battlebox": {
                 "raw_15m": raw_15m,
-                "war_map_context": wm, "session_battle": _safe_placeholder_state("Calibrating..."), "session": session, "levels": {}, "bias_model": {}, 
+                "session": session, "levels": {}, "bias_model": {},
                 "context": {
-                    "macro_bias": macro_bias, 
-                    "micro_bias": micro_bias, 
-                    "fuel_gauge": fuel_gauge, 
-                    "kde_peaks": kde_data.get("peaks", []), 
-                    "macro_fibs": macro_fibs,
+                    "fuel_gauge": fuel_gauge,
+                    "kde_peaks": kde_data.get("peaks", []),
                     "micro_state": harmonic_data.get("micro_state"),
                     "1h_fuel_status": harmonic_data.get("1h_fuel_status"),
                     "macro_structure": macro_structure,
-                    "macro_environment": macro_context
                 }
             }
         }
@@ -677,9 +630,9 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                 if existing_lock:
                     _LOCKED_PACKETS[session_key] = json.loads(existing_lock.packet_data)
                 else:
-                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, macro_structure, macro_context, tuning=tuning, raw_daily=raw_daily)
+                    pkt = _compute_sse_packet(raw_5m, anchor_ts, fuel_gauge, kde_data, harmonic_data, macro_structure, tuning=tuning, raw_daily=raw_daily)
                     if "error" in pkt:
-                        return {"status": "ERROR", "message": pkt["error"], "battlebox": {"raw_15m": raw_15m, "war_map_context": _war_map_from_1h(raw_1h), "session_battle": _safe_placeholder_state(pkt["error"]), "session": session, "levels": {}, "bias_model": {}, "context": {}}}
+                        return {"status": "ERROR", "message": pkt["error"], "battlebox": {"raw_15m": raw_15m, "session": session, "levels": {}, "bias_model": {}, "context": {}}}
 
                     # ── MTF STRUCTURAL SNAPSHOT (Phase 1 capture — frozen with the lock) ──
                     try:
@@ -701,33 +654,16 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                     except Exception as _conf_err:
                         print(f"[CONFLUENCE SCAN] Capture failed (non-blocking): {_conf_err}")
 
-                    # ── STOCHASTIC CROSS (Phase 4 — the literal entry trigger the
-                    # momentum leg of decision_engine.py's graded model reads) ──
-                    try:
-                        pkt.setdefault("context", {})["stoch_cross_15m"] = _calc_stochastic_cross(raw_15m)
-                    except Exception as _stoch_err:
-                        print(f"[STOCH CROSS] Capture failed (non-blocking): {_stoch_err}")
-
-                    # ── STRUCTURE STATE (Phase 4 — the acceptance gate, evaluated
-                    # against whatever post-lock 5m candles exist AT THIS MOMENT.
-                    # run_mas_analysis() fires once, right here, essentially at
-                    # lock -- structure will usually correctly show WAIT/no
-                    # permission yet at this exact instant (2 consecutive closes
-                    # takes >=10 minutes of post-lock candles to earn). That's
-                    # honest, not a bug -- matches ExecutiveBrief's original
-                    # WAITING_FOR_15M value, which existed for exactly this
-                    # reason. The live, continuously-updating picture as the day
-                    # progresses is what market_radar.py reads separately, via
-                    # this same function called fresh on every poll (see
-                    # battlebox["session_battle"] a few lines below, already
-                    # computed live on every get_live_battlebox() call). ──
-                    try:
-                        _post_lock_at_fire = [c for c in raw_5m if int(c["time"]) >= int(pkt["lock_time"])]
-                        pkt.setdefault("context", {})["structure_state"] = structure_state_engine.compute_structure_state(
-                            levels=pkt["levels"], candles_5m_post_lock=_post_lock_at_fire, tuning=tuning or {}
-                        )
-                    except Exception as _struct_err:
-                        print(f"[STRUCTURE STATE] Capture failed (non-blocking): {_struct_err}")
+                    # STOCHASTIC CROSS / STRUCTURE STATE captures removed 2026-08-30 --
+                    # stoch_cross_15m and structure_state (the old 2-consecutive-close
+                    # acceptance gate, structure_state_engine.py) both had zero readers
+                    # left: decision_engine.py's calibrated gate never reads either
+                    # (confirmed by grep -- its momentum leg reads confluence_scan
+                    # instead, and its side/entry test is the first 5m close beyond
+                    # BO/BD, not a structure-state acceptance count), and no template
+                    # displays them. structure_state_engine.py and its only other
+                    # caller (market_radar.py's live recompute) are both retired
+                    # alongside this.
 
                     _LOCKED_PACKETS[session_key] = pkt
 
@@ -764,7 +700,7 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                 print(f"DATABASE VAULT ERROR: {e}")
                 traceback.print_exc()
                 if session_key not in _LOCKED_PACKETS:
-                    pkt = _compute_sse_packet(raw_5m, anchor_ts, macro_bias, micro_bias, fuel_gauge, kde_data, macro_fibs, harmonic_data, macro_structure, macro_context, tuning=tuning, raw_daily=raw_daily)
+                    pkt = _compute_sse_packet(raw_5m, anchor_ts, fuel_gauge, kde_data, harmonic_data, macro_structure, tuning=tuning, raw_daily=raw_daily)
                     if "error" not in pkt:
                         _LOCKED_PACKETS[session_key] = pkt
             finally:
@@ -777,15 +713,13 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     levels = pkt["levels"]
     lock_time = int(pkt["lock_time"])
     post_lock = [c for c in raw_5m if int(c["time"]) >= lock_time]
-    
-    state = structure_state_engine.compute_structure_state(levels=levels, candles_5m_post_lock=post_lock, tuning=tuning or {})
 
     return {
-        "status": "OK", "timestamp": now_utc.strftime("%H:%M UTC"), "price": float(raw_5m[-1]["close"]), "energy": session.get("energy", "ACTIVE"), 
+        "status": "OK", "timestamp": now_utc.strftime("%H:%M UTC"), "price": float(raw_5m[-1]["close"]), "energy": session.get("energy", "ACTIVE"),
         "battlebox": {
             "raw_15m": raw_15m,
-            "war_map_context": _war_map_from_1h(raw_1h), "session_battle": state, "levels": levels, "session": session, 
+            "levels": levels, "session": session,
             "bias_model": pkt.get("bias_model", {}), "context": pkt.get("context", {}), "htf_shelves": pkt.get("htf_shelves", {}), "meta": pkt.get("meta", {})
-        }, 
+        },
         "candles": post_lock
     }

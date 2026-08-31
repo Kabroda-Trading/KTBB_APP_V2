@@ -429,3 +429,67 @@ and a live `uvicorn` boot with real HTTP requests including a live
 no dangling references. `tests/test_dashboard_fixes.py` has a pre-existing,
 unrelated fixture bug (`CampaignLog.session_id` NOT NULL violation) that
 predates this session's changes — not fixed, flagged only.
+
+## 2026-08-30 (later) — FROM: Claude Code — FOR: DeepSeek/Antigravity (both)
+STATUS: open
+
+**`battlebox_pipeline.py` stripped to what Andy actually asked for.** His
+words: "the main thing is the daily support and resistance, the thirty
+minute high and low, the breakout trigger, breakdown trigger, but there's
+also timing... those need to be stripped through too because there's only
+a few things we're actually using in there." Mapped every consumer first
+(AskUserQuestion on two real forks — session-energy dashboard tab: user
+chose remove it too; `/api/dmr/live`: user chose archive it) before cutting
+anything. Removed: `macro_bias`/`micro_bias` (`_calculate_weekly_force`/
+`_calculate_168h_micro_bias`), the Macro Oracle (`market_context_oracle.py`,
+archived), `macro_fibs` (Gravity Map computes its own copy independently,
+this was a redundant second one), `war_map_context`/`session_battle`
+(`structure_state_engine.py`'s old 2-consecutive-close acceptance gate --
+confirmed via grep that `decision_engine.py` never actually reads the
+`structure_state` parameter it was being handed, dead pass-through since
+the calibrated-gate rebuild; `structure_state_engine.py` archived), and
+`stoch_cross_15m` (zero readers). Kept, confirmed still load-bearing:
+`fuel_gauge`, `micro_state`/`1h_fuel_status`, `kde_peaks`, `macro_structure`,
+`mtf_structural_snapshot`, `confluence_scan` -- all feed the forward-audit
+trail (`harness/audit_writer.py`, `harness/unified_audit_writer.py`), which
+is real "track everything" infrastructure, not decision-path duplication
+like the jewel/confluence stuff was. Don't mistake one for the other if you
+touch this file next.
+
+**Found a real, pre-existing production reliability bug while verifying --
+unrelated to today's edits, not yet fixed:** `market_data.py`'s
+`_exchange_live` is a single module-level `ccxt.kraken(...)` instance,
+created once at import time. `kabroda_mas_flow.run_mas_analysis()` fetches
+its own candles via `asyncio.run(_fetch_all())` inside `asyncio.to_thread()`
+(by design, documented in this repo's `CLAUDE.md` -- it runs in its own
+thread so a fresh event loop is safe *for code that doesn't share state
+across loops*). Reproduced directly: if the main event loop touches
+`_exchange_live` first (e.g. any request that calls
+`battlebox_pipeline.get_live_battlebox()`), then a background
+`asyncio.to_thread(run_mas_analysis, ...)` call in the *same process*
+hangs indefinitely trying to reuse that same ccxt/aiohttp client from a
+different thread's event loop -- no timeout, no exception, just stuck (confirmed
+past 90s+, well past the client's own 10s timeout config). When
+`run_mas_analysis()` is the *first* thing to touch `_exchange_live` in a
+fresh process, it completes cleanly in ~7.5s and writes correctly to every
+audit table (`CampaignLog`, `DecisionJournal`, `GateLog`,
+`session_audit_log` via the heartbeat, `decision_log` via the unified
+writer) -- so the gate math itself is fine, this is purely a cross-thread
+exchange-client reuse bug. **This matches exactly how the real server runs**
+(an HTTP request touches the main loop's exchange client first, then a
+session-lock event fires `run_mas_analysis()` via `asyncio.to_thread()`) --
+worth checking whether this explains any gaps Andy's noticed in real
+`gate_log`/`session_audit_log` data on kabroda.com. Likely fix: give
+`run_mas_analysis()` its own exchange client instance instead of sharing
+the module-level one (or route through `asyncio.run_coroutine_threadsafe`
+against the main loop instead of spinning up a second one). Not fixed here
+-- found while verifying an unrelated cleanup pass, flagged for a dedicated
+pass rather than folded in silently.
+
+Verified via `py_compile`, `import main`, full `test_e2e.py` (83/83), a
+live `uvicorn` boot confirming the two archived routes now 404 and
+`/api/radar/scan` returns correctly-stripped context (no `macro_bias`/
+`structure_state`/etc. keys), and a direct, isolated `asyncio.to_thread`
+call to `run_mas_analysis()` proving the pipeline itself is correct (the
+bug above was only found because the live-server test hung and needed
+isolating to explain).

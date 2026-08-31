@@ -138,7 +138,6 @@ def _core_gate(*, box: float, atr: float, fuel: Dict[str, Any],
 def evaluate_15m_decision(
     *,
     levels: Dict[str, Any],
-    structure_state: Dict[str, Any],
     confluence_15m: Optional[Dict[str, Any]],
     candles_5m: List[Dict[str, Any]],
     candles_15m: List[Dict[str, Any]],

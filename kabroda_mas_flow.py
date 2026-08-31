@@ -531,7 +531,6 @@ def run_mas_analysis(
 
     levels = dict(battlebox_payload.get("levels", {}))
     context = battlebox_payload.get("context", {})
-    structure_state = context.get("structure_state", {})
     confluence_scan = context.get("confluence_scan", {})
 
     # The gate needs candles this packet doesn't carry (5m/15m/1h/4h/1d for
@@ -568,7 +567,6 @@ def run_mas_analysis(
 
     decision_dict, decision_gauges = decision_engine.evaluate_15m_decision(
         levels=levels,
-        structure_state=structure_state,
         confluence_15m=confluence_scan.get("15M"),
         candles_5m=candles_5m,
         candles_15m=candles_15m,

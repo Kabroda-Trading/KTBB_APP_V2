@@ -14,7 +14,6 @@ import battlebox_pipeline
 import decision_engine
 import market_data
 import mtf_confluence_scanner
-import structure_state_engine
 from database import SessionLocal, SessionLock, DecisionJournal, CampaignLog
 
 TARGETS = ["BTCUSDT"]
@@ -103,14 +102,8 @@ async def _try_locked_shortcut(symbol: str):
     """
     If a SessionLock already exists for today's us_ny_futures session, read it
     directly from the DB. Avoids the full 1500-candle multi-timeframe MEXC
-    pull, but still does one lightweight live 5m fetch to recompute structure
-    state fresh -- Phase 4 (2026-08-27): the acceptance gate is only earned
-    over the course of the day as post-lock candles close beyond the trigger,
-    so a structure_state frozen at lock time (from pkt["context"]) would show
-    stale/no-permission state for the rest of the day, every day. The radar
-    needs the live answer, not the moment-of-lock snapshot -- that's what
-    decision_engine.py actually gates on. Returns a battlebox-compatible
-    response dict, or None if no lock exists.
+    pull, but still does one lightweight live 5m fetch to get a fresh price.
+    Returns a battlebox-compatible response dict, or None if no lock exists.
     """
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     norm = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
@@ -131,18 +124,18 @@ async def _try_locked_shortcut(symbol: str):
     price = float(levels.get("anchor_price") or 0.0)
     context = pkt.get("context", {})
 
+    # structure_state_engine.compute_structure_state() call removed 2026-08-30
+    # -- decision_engine.evaluate_15m_decision() never reads a structure_state
+    # parameter (confirmed: the old 2-consecutive-close acceptance gate it
+    # computed was superseded by the calibrated gate's own first-5m-close
+    # test), and no template displays it. This lightweight live 5m fetch is
+    # kept only for a fresh price.
     try:
-        lock_time = int(pkt.get("lock_time") or 0)
         live_5m = await battlebox_pipeline.fetch_live_5m(symbol, limit=300)
         if live_5m:
             price = float(live_5m[-1]["close"])
-            post_lock = [c for c in live_5m if int(c["time"]) >= lock_time]
-            context = dict(context)
-            context["structure_state"] = structure_state_engine.compute_structure_state(
-                levels=levels, candles_5m_post_lock=post_lock
-            )
-    except Exception as _live_state_err:
-        print(f"[RADAR SHORTCUT] Live structure-state refresh failed (using frozen lock-time state): {_live_state_err}")
+    except Exception as _live_price_err:
+        print(f"[RADAR SHORTCUT] Live price refresh failed (using frozen lock-time price): {_live_price_err}")
 
     # Live confluence_scan refresh -- same reasoning as structure_state above.
     # The packet's own confluence_scan was computed ONCE, at lock, and frozen
@@ -213,15 +206,12 @@ async def _build_dossier(symbol: str, price: float, levels: dict, context: dict)
     """Calls decision_engine.evaluate_15m_decision() directly with live data
     -- the exact same function run_mas_analysis() calls, so the radar and the
     official daily decision record can never silently disagree about what the
-    rules say. structure_state here is LIVE (recomputed fresh by
-    _try_locked_shortcut()/get_live_battlebox() on every call, not frozen at
-    lock time). Candles are fetched fresh on every call -- the calibrated
+    rules say. Candles are fetched fresh on every call -- the calibrated
     gate needs real 5m/1h/4h/1d reads, not a cached summary
     (KABRODA_REBUILD_SPEC.md §2-3, 2026-08-30 rebuild)."""
     bo = float(levels.get("breakout_trigger", 0) or 0)
     bd = float(levels.get("breakdown_trigger", 0) or 0)
 
-    structure_state = context.get("structure_state", {})
     confluence_scan = context.get("confluence_scan", {})
 
     if bo == 0 or bd == 0:
@@ -240,7 +230,7 @@ async def _build_dossier(symbol: str, price: float, levels: dict, context: dict)
         gate_levels["daily_atr14"] = market_data._calc_daily_atr14(candles_1d)
         gate_levels["price"] = float(candles_5m[-1]["close"]) if candles_5m else price
         decision, _gauges = decision_engine.evaluate_15m_decision(
-            levels=gate_levels, structure_state=structure_state,
+            levels=gate_levels,
             confluence_15m=confluence_scan.get("15M"),
             candles_5m=candles_5m, candles_15m=candles_15m,
             candles_1h=candles_1h, candles_4h=candles_4h, candles_1d=candles_1d,

@@ -318,86 +318,13 @@
                 </div>
             </div>
 
-            <!-- ── SESSION ENERGY (from session lock packet_data) ── -->
-            <div class="table-section">
-                <div class="table-header" style="display:flex; justify-content:space-between; align-items:center;">
-                    <span>Session Energy</span>
-                    <span id="energySessionLabel" style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#6b5345;">—</span>
-                </div>
-                <div class="chart-row row-1-1" style="margin-bottom:18px;">
-                    <!-- Fuel Gauge: 15M -->
-                    <div class="chart-card">
-                        <div class="chart-title">15M JEWEL</div>
-                        <div class="chart-sub" id="fuel15mStatus">Loading...</div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Trend</span><br><span id="fuel15mTrend" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Momentum</span><br><span id="fuel15mMomentum" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">ADX</span><br><span id="fuel15mAdx" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">RSI</span><br><span id="fuel15mRsi" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Ribbon Spread</span><br><span id="fuel15mSpread" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Deviation</span><br><span id="fuel15mDev" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                        </div>
-                        <div id="fuel15mExit" style="margin-top:8px; font-family:'JetBrains Mono'; font-size:10px; color:#8c4a3a; display:none;"></div>
-                    </div>
-                    <!-- Fuel Gauge: 1H -->
-                    <div class="chart-card">
-                        <div class="chart-title">1H</div>
-                        <div class="chart-sub" id="fuel1hStatus">Loading...</div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Trend</span><br><span id="fuel1hTrend" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Momentum</span><br><span id="fuel1hMomentum" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">ADX</span><br><span id="fuel1hAdx" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">RSI</span><br><span id="fuel1hRsi" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Ribbon Spread</span><br><span id="fuel1hSpread" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Deviation</span><br><span id="fuel1hDev" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                        </div>
-                        <div id="fuel1hExit" style="margin-top:8px; font-family:'JetBrains Mono'; font-size:10px; color:#8c4a3a; display:none;"></div>
-                    </div>
-                </div>
-                <div class="chart-row row-1-1" style="margin-bottom:18px;">
-                    <!-- Fuel Gauge: 4H -->
-                    <div class="chart-card">
-                        <div class="chart-title">4H</div>
-                        <div class="chart-sub" id="fuel4hStatus">Loading...</div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Trend</span><br><span id="fuel4hTrend" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Momentum</span><br><span id="fuel4hMomentum" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">ADX</span><br><span id="fuel4hAdx" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">RSI</span><br><span id="fuel4hRsi" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Ribbon Spread</span><br><span id="fuel4hSpread" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Deviation</span><br><span id="fuel4hDev" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                        </div>
-                        <div id="fuel4hExit" style="margin-top:8px; font-family:'JetBrains Mono'; font-size:10px; color:#8c4a3a; display:none;"></div>
-                    </div>
-                    <!-- Bias Model + Levels -->
-                    <div class="chart-card">
-                        <div class="chart-title">Bias &amp; Levels</div>
-                        <div class="chart-sub" id="energyBiasSub">Loading...</div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Daily Lean</span><br><span id="energyDailyLean" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Permission</span><br><span id="energyPermission" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Macro Bias</span><br><span id="energyMacroBias" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Micro Bias</span><br><span id="energyMicroBias" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Micro State</span><br><span id="energyMicroState" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                            <div><span style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">Jewel Gate</span><br><span id="energyJewelGate" style="font-family:'JetBrains Mono'; font-size:16px; font-weight:800; color:#f2e3cf;">—</span></div>
-                        </div>
-                        <div style="margin-top:12px; padding-top:12px; border-top:1px solid #4d3526;">
-                            <div style="font-family:'JetBrains Mono'; font-size:9px; color:#8a6f57; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">Key Levels</div>
-                            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; font-family:'JetBrains Mono'; font-size:11px;">
-                                <div><span style="color:#6b5345;">BO:</span> <span id="energyBo" style="color:#5e8c66;">—</span></div>
-                                <div><span style="color:#6b5345;">BD:</span> <span id="energyBd" style="color:#8c4a3a;">—</span></div>
-                                <div><span style="color:#6b5345;">POC:</span> <span id="energyPoc" style="color:#c9a24a;">—</span></div>
-                                <div><span style="color:#6b5345;">R30H:</span> <span id="energyR30h" style="color:#f2e3cf;">—</span></div>
-                                <div><span style="color:#6b5345;">R30L:</span> <span id="energyR30l" style="color:#f2e3cf;">—</span></div>
-                                <div><span style="color:#6b5345;">ATR:</span> <span id="energyAtr" style="color:#f2e3cf;">—</span></div>
-                                <div><span style="color:#6b5345;">EMA20:</span> <span id="energyEma20" style="color:#94a3b8;">—</span></div>
-                                <div><span style="color:#6b5345;">EMA30:</span> <span id="energyEma30" style="color:#94a3b8;">—</span></div>
-                                <div><span style="color:#6b5345;">EMA50:</span> <span id="energyEma50" style="color:#94a3b8;">—</span></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <!-- Session Energy table-section removed 2026-08-30 -- read
+                 /api/v1/system/session-energy, itself removed alongside
+                 battlebox_pipeline.py's strip-down (macro_bias/micro_bias/
+                 structure_state no longer exist). Active Sessions/Runners/
+                 Macro Engine above and System Health below are untouched --
+                 both are real, sourced from a different route
+                 (/api/v1/system/state), unaffected by this. -->
 
             <!-- ── SYSTEM HEALTH (heartbeat from admin page) ── -->
             <div class="table-section">
@@ -1301,110 +1228,9 @@
         }
     }
 
-    // ── SESSION ENERGY TAB ───────────────────────────────────
-    async function loadSessionEnergy() {
-        try {
-            const r = await fetch('/api/v1/system/session-energy');
-            if (!r.ok) throw new Error('Status ' + r.status);
-            const d = await r.json();
-            if (!d.ok) throw new Error(d.error || 'Unknown error');
-            if (!d.has_data) {
-                document.getElementById('energySessionLabel').textContent = 'No data yet';
-                return;
-            }
-
-            // Session label
-            const sess = d.session || {};
-            document.getElementById('energySessionLabel').textContent = (sess.label || '?') + ' - ' + (sess.date_key || '?');
-
-            // Helper: set fuel gauge fields
-            function setFuel(tf, data) {
-                if (!data) return;
-                const prefix = 'fuel' + tf;
-                const trend = data.trend || '-';
-                const momentum = data.momentum || '-';
-                const adx = data.adx != null ? data.adx.toFixed(1) : '-';
-                const rsi = data.rsi != null ? data.rsi.toFixed(1) : '-';
-                const spread = data.ribbon_spread_pct != null ? (data.ribbon_spread_pct * 100).toFixed(2) + '%' : '-';
-                const dev = data.deviation != null ? data.deviation.toFixed(2) + '%' : '-';
-
-                document.getElementById(prefix + 'Trend').textContent = trend;
-                document.getElementById(prefix + 'Momentum').textContent = momentum;
-                document.getElementById(prefix + 'Adx').textContent = adx;
-                document.getElementById(prefix + 'Rsi').textContent = rsi;
-                document.getElementById(prefix + 'Spread').textContent = spread;
-                document.getElementById(prefix + 'Dev').textContent = dev;
-
-                // Color trend by direction
-                const trendEl = document.getElementById(prefix + 'Trend');
-                if (trend === 'BULLISH' || trend === 'BULLISH_TRENDING') trendEl.style.color = '#5e8c66';
-                else if (trend === 'BEARISH' || trend === 'BEARISH_TRENDING') trendEl.style.color = '#8c4a3a';
-                else trendEl.style.color = '#c9a24a';
-
-                // Exit warning
-                const exitEl = document.getElementById(prefix + 'Exit');
-                if (data.exit_warning) {
-                    exitEl.textContent = '! ' + data.exit_warning;
-                    exitEl.style.display = 'block';
-                } else {
-                    exitEl.style.display = 'none';
-                }
-
-                // Status line
-                document.getElementById(prefix + 'Status').textContent = 'ADX ' + adx + ' . RSI ' + rsi;
-            }
-
-            setFuel('15m', d.fuel_gauge ? d.fuel_gauge['15m'] : null);
-            setFuel('1h', d.fuel_gauge ? d.fuel_gauge['1h'] : null);
-            setFuel('4h', d.fuel_gauge ? d.fuel_gauge['4h'] : null);
-
-            // Bias model
-            const bm = d.bias_model || {};
-            // daily_lean/permission_state are nested objects ({direction/score/confidence},
-            // {state/active_side/...}), not plain strings -- pull the one field worth showing.
-            const dailyLean = bm.daily_lean || {};
-            document.getElementById('energyDailyLean').textContent = dailyLean.direction
-                ? dailyLean.direction.toUpperCase() + ' (' + dailyLean.confidence + '%)'
-                : '-';
-            const permissionState = bm.permission_state || {};
-            document.getElementById('energyPermission').textContent = permissionState.state || '-';
-            document.getElementById('energyMacroBias').textContent = d.macro_bias || '-';
-            document.getElementById('energyMicroBias').textContent = d.micro_bias || '-';
-            document.getElementById('energyMicroState').textContent = d.micro_state || '-';
-
-            // Jewel gate
-            const jg = document.getElementById('energyJewelGate');
-            if (d.jewel_gate_open === true) {
-                jg.textContent = 'OPEN';
-                jg.style.color = '#5e8c66';
-            } else if (d.jewel_gate_open === false) {
-                jg.textContent = 'CLOSED';
-                jg.style.color = '#8c4a3a';
-            } else {
-                jg.textContent = '-';
-                jg.style.color = '#f2e3cf';
-            }
-
-            // Levels
-            const lv = d.levels || {};
-            document.getElementById('energyBo').textContent = lv.breakout_trigger ? '$' + lv.breakout_trigger.toFixed(2) : '-';
-            document.getElementById('energyBd').textContent = lv.breakdown_trigger ? '$' + lv.breakdown_trigger.toFixed(2) : '-';
-            document.getElementById('energyPoc').textContent = lv.f24_poc ? '$' + lv.f24_poc.toFixed(2) : '-';
-            document.getElementById('energyR30h').textContent = lv.range30m_high ? '$' + lv.range30m_high.toFixed(2) : '-';
-            document.getElementById('energyR30l').textContent = lv.range30m_low ? '$' + lv.range30m_low.toFixed(2) : '-';
-            document.getElementById('energyAtr').textContent = lv.atr ? '$' + lv.atr.toFixed(2) : '-';
-            document.getElementById('energyEma20').textContent = lv.daily_ema20 ? '$' + lv.daily_ema20.toFixed(2) : '-';
-            document.getElementById('energyEma30').textContent = lv.daily_ema30 ? '$' + lv.daily_ema30.toFixed(2) : '-';
-            document.getElementById('energyEma50').textContent = lv.daily_ema50 ? '$' + lv.daily_ema50.toFixed(2) : '-';
-
-            // Bias sub
-            document.getElementById('energyBiasSub').textContent = 'Price: ' + (d.current_price ? '$' + d.current_price.toFixed(2) : '-') + ' . Lock: ' + (d.lock_time || '-');
-
-        } catch (e) {
-            console.error('Failed to load session energy:', e);
-            document.getElementById('energySessionLabel').textContent = 'Failed to load';
-        }
-    }
+    // loadSessionEnergy()/setFuel() removed 2026-08-30 -- read
+    // /api/v1/system/session-energy, itself removed alongside
+    // battlebox_pipeline.py's strip-down.
 
     // ── SYSTEM HEALTH (heartbeat) ─────────────────────────────
     async function loadHeartbeat() {
@@ -1569,7 +1395,6 @@
             loadCostData().catch(e => console.error("loadCostData failed", e)),
             loadAudits().catch(e => console.error("loadAudits failed", e)),
             loadLiveSystem().catch(e => console.error("loadLiveSystem failed", e)),
-            loadSessionEnergy().catch(e => console.error("loadSessionEnergy failed", e)),
             loadHeartbeat().catch(e => console.error("loadHeartbeat failed", e)),
             loadParameters().catch(e => console.error("loadParameters failed", e)),
             loadErrors().catch(e => console.error("loadErrors failed", e)),
@@ -1835,7 +1660,6 @@
         loadAccuracyReport();
         loadAuditSuggestions();
         // Polling for Live System tab data
-        setInterval(loadSessionEnergy, 30000);
         setInterval(loadHeartbeat, 60000);
         setInterval(loadCostData, 30000);
     };

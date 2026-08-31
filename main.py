@@ -1559,22 +1559,11 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
         out = await battlebox_pipeline.get_session_review(symbol=symbol)
     return JSONResponse(out)
 
-@app.post("/api/dmr/live")
-async def dmr_live(request: Request, db: Session = Depends(get_db)):
-    uid = request.session.get(auth.SESSION_KEY)
-    if not uid: raise HTTPException(status_code=401)
-    user = db.query(UserModel).filter(UserModel.id == uid).first()
-    
-    payload = await request.json()
-    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    
-    out = await battlebox_pipeline.get_live_battlebox(
-        symbol=symbol,
-        session_mode=(payload.get("session_mode") or "AUTO").upper(),
-        manual_id=payload.get("manual_session_id") or payload.get("session_id"),
-        operator_flex=getattr(user, "operator_flex", False)
-    )
-    return JSONResponse(out)
+# /api/dmr/live removed 2026-08-30 -- returned battlebox_pipeline.py's entire
+# unfiltered get_live_battlebox() payload, but had zero frontend callers
+# (grepped every template/JS, nothing fetches it) and zero test coverage.
+# Andy's call: archive it. market_radar.py's own routes (/api/radar/snapshot,
+# /api/radar/scan) are the real, live consumers of battlebox_pipeline.py now.
 
 @app.post("/api/radar/scan")
 async def run_radar_scan(request: Request):
@@ -1917,81 +1906,15 @@ async def get_system_state(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-@app.get("/api/v1/system/session-energy")
-async def get_session_energy(request: Request, db: Session = Depends(get_db)):
-    """
-    Admin-only. Returns the latest session lock's packet_data (fuel gauge,
-    levels, bias model, macro/micro state) for the Live System dashboard tab.
-    """
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-
-    try:
-        latest_lock = db.query(SessionLock).filter(
-            SessionLock.symbol == "BTC/USDT"
-        ).order_by(SessionLock.id.desc()).first()
-
-        if not latest_lock:
-            return JSONResponse({
-                "ok": True,
-                "has_data": False,
-                "message": "No session lock data found yet."
-            })
-
-        pkt = json.loads(latest_lock.packet_data)
-
-        # Extract the key sections for the dashboard
-        context = pkt.get("context", {})
-        fuel_gauge = context.get("fuel_gauge", {})
-        levels = pkt.get("levels", {})
-        bias_model = pkt.get("bias_model", {})
-        session = pkt.get("session", {})
-        htf_shelves = pkt.get("htf_shelves", {})
-
-        # jewel_gate_open removed 2026-08-30 -- JewelSnapshotLog's only writer
-        # (jewel_specialist.py) is archived, nothing populates it anymore.
-
-        return JSONResponse({
-            "ok": True,
-            "has_data": True,
-            "session": {
-                "id": session.get("id"),
-                "date_key": session.get("date_key"),
-                "label": session.get("label"),
-                "timeframe": session.get("timeframe"),
-            },
-            "fuel_gauge": {
-                "15m": fuel_gauge.get("15M_JEWEL", {}),
-                "1h": fuel_gauge.get("1H", {}),
-                "4h": fuel_gauge.get("4H", {}),
-            },
-            "levels": {
-                "breakout_trigger": levels.get("breakout_trigger"),
-                "breakdown_trigger": levels.get("breakdown_trigger"),
-                "range30m_high": levels.get("range30m_high"),
-                "range30m_low": levels.get("range30m_low"),
-                "f24_poc": levels.get("f24_poc"),
-                "atr": levels.get("atr"),
-                "daily_ema20": levels.get("daily_ema20"),
-                "daily_ema30": levels.get("daily_ema30"),
-                "daily_ema50": levels.get("daily_ema50"),
-            },
-            "bias_model": {
-                "daily_lean": bias_model.get("daily_lean"),
-                "permission_state": bias_model.get("permission_state"),
-            },
-            "macro_bias": context.get("macro_bias"),
-            "micro_bias": context.get("micro_bias"),
-            "micro_state": context.get("micro_state"),
-            "jewel_gate_open": None,
-            "lock_time": pkt.get("lock_time"),
-            "current_price": context.get("current_price"),
-        })
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+# /api/v1/system/session-energy (the "Live System" dashboard tab) removed
+# 2026-08-30, alongside battlebox_pipeline.py being stripped to only what the
+# calibrated gate + forward-audit trail actually need. Andy's call: the tab
+# itself was junk, not worth preserving separately. macro_bias/micro_bias
+# (battlebox_pipeline.py's _calculate_weekly_force()/_calculate_168h_micro_
+# bias()) no longer exist at all; bias_model (daily_lean/permission_state,
+# from sse_engine.py) is untouched and still flows through the packet, it
+# just has no reader left now that this was its only consumer.
+# suite_dashboard.html's Live System tab UI removed alongside it.
 
 
 @app.get("/api/v1/system/audit-suggestions")
