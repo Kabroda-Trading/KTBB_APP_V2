@@ -658,3 +658,51 @@ Verified: `py_compile` on every touched file, `import main`, full
 `test_e2e.py` (83/83), and two separate live `uvicorn` boots (one isolated
 to the date_key fix, one exercising the full scan→snapshot round-trip)
 confirming correct behavior end-to-end.
+
+## 2026-08-30 (deferred item #1) — FROM: Claude Code — FOR: DeepSeek/Antigravity (both)
+STATUS: resolved
+
+Picked up the first item explicitly deferred earlier: `MacroNarrativeLog`/
+`SystemAuditLog`/`InterpreterLog` have zero live writers now, still read by
+admin dashboards. Investigated whether that's harmless historical display
+(fine) or actively misleading (not fine, same category as the earlier
+`JewelSnapshotLog` fix) — turned out to be a mix.
+
+**Found and fixed a real one:** `/api/v1/system/state`'s "Macro Engine"
+panel read `MacroNarrativeLog.wave_status` (frozen since the old LLM Senior
+Analyst died) and hardcoded `active: True` unconditionally — so the "Live
+System" dashboard permanently showed the macro engine as ACTIVE regardless
+of whether `kabroda_macro_engine.py`'s subprocess had actually run recently.
+Fixed with a real signal: that subprocess deletes-and-reinserts all of a
+symbol's Elliott Wave anchors into `gravity_memory` (source=
+"MACRO_ENGINE_CLASS_0") with one shared timestamp on every run, so
+`MAX(timestamp)` for that source+symbol is an honest "last successful run"
+check. `active` is now `True` only if that run was within 30h (real 24h
+cadence + buffer); `latest_anchor` now shows the actual most recent wave
+level mapped, not a frozen narrative string. Frontend (`suite_dashboard.
+html`) updated to match: table gained a "Last Run" column, status reads
+FRESH/STALE instead of a fake ACTIVE/INACTIVE.
+
+**Caught myself scope-creeping and pulled back:** initially also removed
+`active_runners` (a hardcoded, unused-by-frontend list) and `recent_errors`
+(sourced from the same dead `SystemAuditLog`) from this same route, on the
+reasoning that both were dead weight. Broke 5 tests — `recent_errors` turned
+out to have real, deliberate test coverage (`test_f1_state_excessive_
+errors`'s 50-row truncation check) that I hadn't checked before removing it
+(only grepped the frontend template, not the test suite). Neither field was
+actually part of the misleading-`macro_engine` bug or the "is the 15M gate
+ready" goal — restored both rather than expanding the fix's scope to match
+a test suite I should have checked first. Lesson for next time: "confirmed
+via grep" needs to include the test suite, not just the frontend, before
+removing an API field.
+
+`lti_engine.py`'s own `MacroNarrativeLog` read (a different `authored_by`
+value, `elliott_wave_specialist`) was left untouched — that's the separate,
+already-deferred KULTI LTI module, out of scope here.
+
+Verified: `py_compile`, `import main`, full `test_e2e.py` (83/83 — confirmed
+the regression, then confirmed the fix), and a live `uvicorn` boot showing
+the real, honest `macro_engine` response (`active: false` on a fresh
+sandbox where the subprocess can't actually run — accurate, not the old
+hardcoded lie) alongside the intact `active_runners`/`recent_errors`/
+`scheduler_health` fields.

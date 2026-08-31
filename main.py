@@ -34,7 +34,7 @@ import lti_engine
 
 from datetime import datetime, timezone, timedelta
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, DecisionJournal, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalPerformanceLog
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, DecisionJournal, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalPerformanceLog, GravityMemory
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -1873,23 +1873,51 @@ async def get_system_state(request: Request, db: Session = Depends(get_db)):
             }
             for lock in locks
         ]
-        
+
         # 2. active_runners: active runners list
         active_runners = ["gravity_engine", "ledger_closing_engine", "session_monitor", "analysis_loop"]
-        
-        # 3. macro_engine: latest macro narrative state
-        latest_narrative = db.query(MacroNarrativeLog).order_by(MacroNarrativeLog.id.desc()).first()
+
+        # 3. macro_engine: real freshness check, not a frozen LLM narrative.
+        # This used to read MacroNarrativeLog.wave_status with active always
+        # hardcoded True -- MacroNarrativeLog has had zero writers since the
+        # old LLM Senior Analyst pipeline was retired, so this was showing a
+        # permanently frozen (potentially very old) value labeled ACTIVE
+        # regardless of whether anything had actually run. The REAL macro
+        # engine (kabroda_macro_engine.py, the ZigZag Elliott Wave scanner
+        # subprocess) writes to gravity_memory with source=
+        # "MACRO_ENGINE_CLASS_0", deleting and reinserting all of a symbol's
+        # anchors with one shared timestamp on every run -- so MAX(timestamp)
+        # for that source+symbol is exactly "when did the macro engine last
+        # successfully complete a run," a real, honest signal.
+        _latest_anchor = (
+            db.query(GravityMemory)
+            .filter(GravityMemory.symbol == "BTCUSDT", GravityMemory.source == "MACRO_ENGINE_CLASS_0")
+            .order_by(GravityMemory.timestamp.desc())
+            .first()
+        )
+        _anchor_ts = _latest_anchor.timestamp if _latest_anchor else None
+        if _anchor_ts is not None and _anchor_ts.tzinfo is not None:
+            _anchor_ts = _anchor_ts.replace(tzinfo=None)
+        # Runs every 24h (gravity_engine.py) -- 30h window gives real buffer
+        # before flagging stale without being so loose it hides a real outage.
+        _macro_fresh = bool(_anchor_ts and (datetime.utcnow() - _anchor_ts) < timedelta(hours=30))
         macro_engine_data = {
             "symbol": "BTC/USDT",
-            "latest_bias": latest_narrative.wave_status if latest_narrative else "UNKNOWN",
-            "active": True
+            "latest_anchor": f"{_latest_anchor.level_type} @ ${_latest_anchor.price:,.2f}" if _latest_anchor else None,
+            "last_run_at": _anchor_ts.isoformat() if _anchor_ts else None,
+            "active": _macro_fresh,
         }
-        
-        # 4. recent_errors: system audit logs with ran_successfully == False
+
+        # 4. recent_errors: system audit logs with ran_successfully == False.
+        # SystemAuditLog has had zero writers since the old Performance
+        # Auditor was archived, so this is currently always empty in
+        # production -- kept anyway (not part of the misleading-macro_engine
+        # fix's scope, and genuinely tested -- see test_f1_state_excessive_
+        # errors's 50-row truncation check) rather than removed as a drive-by.
         errs = db.query(SystemAuditLog).filter(
             SystemAuditLog.ran_successfully == False
         ).order_by(SystemAuditLog.id.desc()).limit(50).all()
-        
+
         recent_errors_list = [
             {
                 "id": e.id,
@@ -1901,7 +1929,7 @@ async def get_system_state(request: Request, db: Session = Depends(get_db)):
             }
             for e in errs
         ]
-        
+
         return JSONResponse({
             "ok": True,
             "active_sessions": active_sessions,

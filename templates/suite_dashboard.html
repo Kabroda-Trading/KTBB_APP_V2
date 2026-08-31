@@ -308,11 +308,12 @@
                     <table>
                         <thead><tr>
                             <th>Symbol</th>
-                            <th>Latest Bias</th>
-                            <th>Active</th>
+                            <th>Latest Anchor</th>
+                            <th>Last Run</th>
+                            <th>Status</th>
                         </tr></thead>
                         <tbody id="macroEngineBody">
-                            <tr><td colspan="3" class="empty-state">Loading macro engine data…</td></tr>
+                            <tr><td colspan="4" class="empty-state">Loading macro engine data…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1174,19 +1175,24 @@
                 }).join('');
             }
 
-            // Macro engine
+            // Macro engine -- real freshness (2026-08-30): active is a
+            // genuine "did kabroda_macro_engine.py's subprocess complete a
+            // run in the last 30h" check (main.py, via gravity_memory's
+            // MACRO_ENGINE_CLASS_0 rows), not a hardcoded true. latest_anchor
+            // is the actual most recent Elliott Wave level it mapped.
             const macroBody = document.getElementById('macroEngineBody');
             const me = d.macro_engine || {};
             macroBody.innerHTML = `<tr>
                 <td>${me.symbol || 'BTC/USDT'}</td>
-                <td style="color:#f2e3cf;font-weight:800;">${me.latest_bias || 'UNKNOWN'}</td>
-                <td><span class="${me.active ? 's-approved' : 's-failed'}">${me.active ? 'ACTIVE' : 'INACTIVE'}</span></td>
+                <td style="color:#f2e3cf;font-weight:800;">${me.latest_anchor || '—'}</td>
+                <td>${me.last_run_at ? me.last_run_at.slice(0,19).replace('T',' ') : '—'}</td>
+                <td><span class="${me.active ? 's-approved' : 's-failed'}">${me.active ? 'FRESH' : 'STALE'}</span></td>
             </tr>`;
         } catch (e) {
             console.error('Failed to load live system:', e);
             document.getElementById('liveSessionsBody').innerHTML = '<tr><td colspan="4" class="empty-state" style="color:#8c4a3a;">Failed to load.</td></tr>';
             document.getElementById('liveRunnersBody').innerHTML = '<tr><td colspan="5" class="empty-state" style="color:#8c4a3a;">Failed to load.</td></tr>';
-            document.getElementById('macroEngineBody').innerHTML = '<tr><td colspan="3" class="empty-state" style="color:#8c4a3a;">Failed to load.</td></tr>';
+            document.getElementById('macroEngineBody').innerHTML = '<tr><td colspan="4" class="empty-state" style="color:#8c4a3a;">Failed to load.</td></tr>';
         }
     }
 
