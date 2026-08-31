@@ -29,6 +29,20 @@
 # time here -- mirror_campaign_outcome() below watches CampaignLog's own
 # already-verified terminal status for the same session instead. Don't
 # rebuild what yesterday's 6 regression tests already cover.
+#
+# CORRECTION (2026-08-31, same day): the STOPPED (wick-fake) determination
+# CANNOT come from CampaignLog's terminal status -- an earlier draft of
+# this file did exactly that (CampaignLog CLOSED_LOSS/STOP -> TradePlan
+# STOPPED) and it was a real bug, caught before ever reaching the caller
+# wiring. CampaignLog.stop_loss is the r30-based, UNCHANGED risk-basis
+# stop (tighter, usually). TradePlan.stop_price is stop_planner.py's
+# separate, wider, additive execution stop (see the module comment
+# above) -- CampaignLog can stop out on its own tighter level while
+# TradePlan's wider stop was never even touched, and that is NOT a
+# wick-fake of TradePlan's own plan. So whether TradePlan's wide stop was
+# hit before T1 is answered by check_wide_stop_or_t1() below, which scans
+# TradePlan's own stop_price/t1 directly; mirror_campaign_outcome() now
+# only ever produces DONE (it can no longer produce STOPPED).
 # ==============================================================================
 
 from __future__ import annotations
@@ -303,41 +317,73 @@ def advance_waiting_plan(
     return updates
 
 
+def check_wide_stop_or_t1(
+    plan: Dict[str, Any],
+    candles_since_fill: List[Dict[str, Any]],
+) -> Optional[str]:
+    """Post-fill: did TradePlan's OWN wide stop (stop_price, stop_planner.py's
+    core-zone execution stop) get touched before T1?
+
+    Deliberately separate from mirror_campaign_outcome() below -- see the
+    module-header CORRECTION note. CampaignLog tracks a DIFFERENT, tighter
+    stop (r30-based stop_loss, unchanged, the system's R-multiple risk
+    basis), so its terminal status cannot answer whether TradePlan's own
+    wider stop got wicked; only a direct scan of stop_price/t1 can.
+
+    candles_since_fill: 1m candles from fill_time forward, chronological,
+    using the same {"l","h","ts"} shape ledger_closing_engine.py's own
+    scan already uses (so a caller can share one _fetch_1m_since() result
+    instead of fetching twice).
+
+    Returns "WIDE_STOP_FIRST", "T1_FIRST", "NEITHER_YET", or None if the
+    plan isn't FILLED or is missing stop_price/t1.
+    """
+    if plan.get("status") != "FILLED":
+        return None
+    stop = plan.get("stop_price")
+    t1 = plan.get("t1")
+    if stop is None or t1 is None:
+        return None
+    is_long = plan.get("direction") == "LONG"
+
+    for candle in candles_since_fill:
+        hit_stop = candle["l"] <= stop if is_long else candle["h"] >= stop
+        hit_t1 = candle["h"] >= t1 if is_long else candle["l"] <= t1
+        if hit_stop:
+            # Stop-first on same-candle ambiguity (conservative) -- matches
+            # ledger_closing_engine.py's own documented convention exactly.
+            return "WIDE_STOP_FIRST"
+        if hit_t1:
+            return "T1_FIRST"
+    return "NEITHER_YET"
+
+
 def mirror_campaign_outcome(
     plan: Dict[str, Any],
     campaign_status: Optional[str],
-    campaign_target_hit: Optional[str],
 ) -> Optional[Dict[str, Any]]:
-    """Once FILLED, TradePlan does not re-scan candles for T1/runner/T3 --
-    that's CampaignLog's job (ledger_closing_engine.py, verified 2026-08-30
-    with 6 regression tests). This mirrors that ALREADY-RESOLVED terminal
-    outcome into TradePlan's own status instead of duplicating the scan.
+    """Once FILLED, and provided check_wide_stop_or_t1() has NOT already
+    fired WIDE_STOP_FIRST (that -- and only that -- is what can move a
+    plan to STOPPED), TradePlan does not re-scan candles for the rest of
+    T1/runner/T3 -- that's CampaignLog's job (ledger_closing_engine.py,
+    verified 2026-08-30 with 6 regression tests). This just mirrors that
+    ALREADY-RESOLVED terminal outcome into a plain DONE once the
+    underlying trade actually closes, whatever the real result was (a
+    win, CampaignLog's own tighter-stop loss, or a session expiry) --
+    TradePlan's own re-entry question was already answered, or ruled out,
+    by the wide-stop check, not by this.
 
-    campaign_status/campaign_target_hit: the matching CampaignLog row's own
-    .status/.target_hit for the same (symbol, date_key, session_id).
+    campaign_status: the matching CampaignLog row's own .status for the
+    same (symbol, date_key, session_id).
     """
     if plan.get("status") != "FILLED":
         return None
     if campaign_status not in ("CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY"):
         return None  # still open, nothing to mirror yet
 
-    if campaign_status == "CLOSED_LOSS" and campaign_target_hit == "STOP":
-        # Stopped BEFORE ever reaching T1 -- the wick-fake scenario SS8 is
-        # about. Re-entry eligibility (a separate fuel check) is decided by
-        # check_reentry_eligibility(), not here.
-        return {
-            "status": "STOPPED",
-            "stopped_time": datetime.datetime.utcnow(),
-            "last_transition_reason": "stopped before T1 (wick-fake candidate)",
-        }
-
-    # T1 was reached (RUNNER_STOP/T3), or CLOSED_AT_EXPIRY at any point --
-    # the management sequence ran its course (or the session ended without
-    # ever getting a clean stop-before-T1). Whatever the final blended R
-    # was, the plan itself is done; it is not a re-entry candidate.
     return {
         "status": "DONE",
-        "last_transition_reason": f"management complete ({campaign_status}/{campaign_target_hit})",
+        "last_transition_reason": f"management complete ({campaign_status})",
     }
 
 

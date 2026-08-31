@@ -128,43 +128,75 @@ def test_advance_waiting_short_side_fueled():
     assert result["fill_price"] == 100.0
 
 
+# ------------------------------------------------------------------ check_wide_stop_or_t1
+
+def _c1m(l, h):
+    return {"l": l, "h": h, "ts": 0}
+
+
+def test_wide_stop_ignores_non_filled_plan():
+    plan = _plan(status="WAITING", stop_price=90.0, t1=112.0)
+    assert tp.check_wide_stop_or_t1(plan, [_c1m(89.0, 91.0)]) is None
+
+
+def test_wide_stop_missing_fields_returns_none():
+    plan = _plan(status="FILLED")  # no stop_price/t1 set
+    assert tp.check_wide_stop_or_t1(plan, [_c1m(89.0, 91.0)]) is None
+
+
+def test_wide_stop_hit_before_t1_long():
+    plan = _plan(status="FILLED", direction="LONG", trigger=100.0, stop_price=90.0, t1=112.0)
+    candles = [_c1m(98, 101), _c1m(89.0, 99.0), _c1m(113.0, 114.0)]  # stop touched on candle 2, t1 on candle 3
+    assert tp.check_wide_stop_or_t1(plan, candles) == "WIDE_STOP_FIRST"
+
+
+def test_wide_stop_t1_reached_first_long():
+    plan = _plan(status="FILLED", direction="LONG", trigger=100.0, stop_price=90.0, t1=112.0)
+    candles = [_c1m(98, 101), _c1m(111.0, 113.0), _c1m(89.0, 91.0)]  # t1 touched before the later stop dip
+    assert tp.check_wide_stop_or_t1(plan, candles) == "T1_FIRST"
+
+
+def test_wide_stop_neither_touched_yet():
+    plan = _plan(status="FILLED", direction="LONG", trigger=100.0, stop_price=90.0, t1=112.0)
+    candles = [_c1m(98, 101), _c1m(97.0, 102.0)]
+    assert tp.check_wide_stop_or_t1(plan, candles) == "NEITHER_YET"
+
+
+def test_wide_stop_same_candle_ambiguity_stop_wins_long():
+    plan = _plan(status="FILLED", direction="LONG", trigger=100.0, stop_price=90.0, t1=112.0)
+    candles = [_c1m(89.0, 113.0)]  # one wild candle touches both -- conservative stop-first
+    assert tp.check_wide_stop_or_t1(plan, candles) == "WIDE_STOP_FIRST"
+
+
+def test_wide_stop_short_side():
+    plan = _plan(status="FILLED", direction="SHORT", trigger=100.0, stop_price=110.0, t1=88.0)
+    candles = [_c1m(99.0, 101.0), _c1m(87.0, 89.0)]  # t1 touched, stop never approached
+    assert tp.check_wide_stop_or_t1(plan, candles) == "T1_FIRST"
+
+
 # ------------------------------------------------------------------ mirror_campaign_outcome
 
 def test_mirror_ignores_non_filled_plan():
     plan = _plan(status="WAITING")
-    assert tp.mirror_campaign_outcome(plan, "CLOSED_LOSS", "STOP") is None
+    assert tp.mirror_campaign_outcome(plan, "CLOSED_LOSS") is None
 
 
 def test_mirror_ignores_still_open_campaign():
     plan = _plan(status="FILLED")
-    assert tp.mirror_campaign_outcome(plan, "PENDING", None) is None
-    assert tp.mirror_campaign_outcome(plan, None, None) is None
+    assert tp.mirror_campaign_outcome(plan, "PENDING") is None
+    assert tp.mirror_campaign_outcome(plan, None) is None
 
 
-def test_mirror_stopped_before_t1():
+def test_mirror_never_produces_stopped():
+    # CampaignLog's own tighter (r30) stop firing is NOT TradePlan's wide-
+    # stop wick-fake -- see the 2026-08-31 CORRECTION in trade_plan.py.
+    # mirror_campaign_outcome() must map every terminal CampaignLog status
+    # to DONE, never STOPPED -- only check_wide_stop_or_t1() can do that.
     plan = _plan(status="FILLED")
-    result = tp.mirror_campaign_outcome(plan, "CLOSED_LOSS", "STOP")
-    assert result["status"] == "STOPPED"
-    assert "wick-fake" in result["last_transition_reason"]
-    assert isinstance(result["stopped_time"], datetime.datetime)
-
-
-def test_mirror_done_on_win():
-    plan = _plan(status="FILLED")
-    result = tp.mirror_campaign_outcome(plan, "CLOSED_WIN", "T3")
-    assert result["status"] == "DONE"
-
-
-def test_mirror_done_on_runner_stop_after_t1():
-    plan = _plan(status="FILLED")
-    result = tp.mirror_campaign_outcome(plan, "CLOSED_LOSS", "RUNNER_STOP")
-    assert result["status"] == "DONE"  # T1 was reached first -- not a wick-fake, not re-entry eligible
-
-
-def test_mirror_done_on_expiry():
-    plan = _plan(status="FILLED")
-    result = tp.mirror_campaign_outcome(plan, "CLOSED_AT_EXPIRY", None)
-    assert result["status"] == "DONE"
+    for campaign_status in ("CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY"):
+        result = tp.mirror_campaign_outcome(plan, campaign_status)
+        assert result["status"] == "DONE"
+        assert campaign_status in result["last_transition_reason"]
 
 
 # ------------------------------------------------------------------ check_reentry_eligibility
