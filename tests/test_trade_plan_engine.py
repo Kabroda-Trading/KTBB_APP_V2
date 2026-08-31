@@ -215,6 +215,40 @@ def test_filled_t1_reached_then_campaign_resolves_done_via_loop(poll_env):
     assert "CLOSED_WIN" in row.last_transition_reason
 
 
+def test_reentry_filled_ignores_stale_campaign_and_keeps_polling_via_loop(poll_env):
+    """Regression: a re-entry fill must NOT be closed out by mirroring a
+    STALE, terminal CampaignLog row left over from the ORIGINAL fill's own
+    (unrelated) stop-out. Before the fix, this would have closed to DONE
+    on the very first poll even though nothing has happened to the
+    re-entry itself yet."""
+    poll_env["make_plan"](
+        status="FILLED", direction="LONG", trigger_price=100.0,
+        stop_price=90.0, t1=112.0, fill_time=poll_env["now"] - timedelta(minutes=5),
+        reentry_used=True,
+    )
+    poll_env["make_campaign"](status="CLOSED_LOSS", target_hit="STOP")  # stale, from the original fill
+    candles_1m = [_c1m(98, 101)]  # wide stop not hit, T1 not reached -- NEITHER_YET
+    poll_env["run_polls"](candles_1m_by_symbol={"BTC/USDT": candles_1m}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "FILLED"  # unchanged -- not wrongly closed via the stale CampaignLog
+
+
+def test_reentry_filled_t1_reached_resolves_done_without_campaign_via_loop(poll_env):
+    poll_env["make_plan"](
+        status="FILLED", direction="LONG", trigger_price=100.0,
+        stop_price=90.0, t1=112.0, fill_time=poll_env["now"] - timedelta(minutes=5),
+        reentry_used=True,
+    )
+    poll_env["make_campaign"](status="CLOSED_LOSS", target_hit="STOP")  # stale, must be ignored
+    candles_1m = [_c1m(111.0, 113.0)]  # T1 reached
+    poll_env["run_polls"](candles_1m_by_symbol={"BTC/USDT": candles_1m}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "DONE"
+    assert "documented gap" in row.last_transition_reason
+
+
 def test_stopped_no_push_stays_stopped_not_prematurely_done(poll_env):
     """Regression: NO_PUSH must NOT be treated as 'fuel gone' -- the row
     must be left alone to wait for a real cross, not resolved to DONE."""

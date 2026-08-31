@@ -380,8 +380,20 @@ def mirror_campaign_outcome(
 
     campaign_status: the matching CampaignLog row's own .status for the
     same (symbol, date_key, session_id).
+
+    Never applies to a re-entry fill (plan["reentry_used"] is True) --
+    CampaignLog tracks only the ORIGINAL fill and has no re-entry concept
+    at all, so by the time a re-entry even becomes possible (the original
+    fill already had to stop out on its OWN, tighter r30 stop first),
+    CampaignLog is almost always already terminal from that unrelated
+    event. Mirroring it here would silently close the re-entry out using
+    a stale verdict -- a real bug, caught before any live re-entry ever
+    exercised this path. resolve_reentry_fill() is the re-entry
+    counterpart.
     """
     if plan.get("status") != "FILLED":
+        return None
+    if plan.get("reentry_used"):
         return None
     if campaign_status not in ("CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY"):
         return None  # still open, nothing to mirror yet
@@ -390,6 +402,37 @@ def mirror_campaign_outcome(
         "status": "DONE",
         "last_transition_reason": f"management complete ({campaign_status})",
     }
+
+
+def resolve_reentry_fill(
+    plan: Dict[str, Any],
+    wide_stop_verdict: Optional[str],
+    now_utc: datetime.datetime,
+    session_expires_at: Optional[datetime.datetime],
+) -> Optional[Dict[str, Any]]:
+    """T1_FIRST / NEITHER_YET resolution for a re-entry-sourced FILLED plan
+    (plan["reentry_used"] is True) -- mirror_campaign_outcome() refuses
+    these (see its own docstring), so they need a distinct resolution.
+
+    WIDE_STOP_FIRST is deliberately NOT handled here -- the caller routes
+    that to the same STOPPED transition every FILLED plan gets;
+    check_reentry_eligibility()'s own reentry_used guard already finalizes
+    a second stop-out to DONE on the very next poll ("one attempt max"),
+    so no separate path is needed for it in this function.
+    """
+    if plan.get("status") != "FILLED" or not plan.get("reentry_used"):
+        return None
+    if wide_stop_verdict == "T1_FIRST":
+        return {
+            "status": "DONE",
+            "last_transition_reason": (
+                "re-entry reached T1 -- full runner/T3 outcome isn't "
+                "tracked for re-entry fills (documented gap, not guessed)"
+            ),
+        }
+    if session_expires_at and now_utc >= session_expires_at:
+        return {"status": "DONE", "last_transition_reason": "session ended, re-entry outcome unresolved"}
+    return None
 
 
 def check_reentry_eligibility(plan: Dict[str, Any], fuel_still_fueled: bool) -> Dict[str, Any]:

@@ -189,6 +189,16 @@ def test_mirror_ignores_still_open_campaign():
     assert tp.mirror_campaign_outcome(plan, None) is None
 
 
+def test_mirror_refuses_reentry_fills_even_with_a_terminal_campaign():
+    # Regression: CampaignLog has no re-entry concept and is almost always
+    # already terminal (from the ORIGINAL fill's own stop-out) by the time
+    # a re-entry fills -- mirroring it here would silently close the
+    # re-entry out on a stale, unrelated verdict.
+    plan = _plan(status="FILLED", reentry_used=True)
+    assert tp.mirror_campaign_outcome(plan, "CLOSED_LOSS") is None
+    assert tp.mirror_campaign_outcome(plan, "CLOSED_WIN") is None
+
+
 def test_mirror_never_produces_stopped():
     # CampaignLog's own tighter (r30) stop firing is NOT TradePlan's wide-
     # stop wick-fake -- see the 2026-08-31 CORRECTION in trade_plan.py.
@@ -271,3 +281,42 @@ def test_reentry_advance_unfueled_cross_goes_straight_to_done():
     result = tp.advance_reentry_plan(plan, NOW, SESSION_EXPIRES, candles)
     assert result["status"] == "DONE"
     assert result["reentry_used"] is True
+
+
+# ------------------------------------------------------------------ resolve_reentry_fill
+
+def test_resolve_reentry_ignores_non_reentry_plans():
+    plan = _plan(status="FILLED", reentry_used=False)
+    assert tp.resolve_reentry_fill(plan, "T1_FIRST", NOW, SESSION_EXPIRES) is None
+
+
+def test_resolve_reentry_ignores_non_filled_status():
+    plan = _plan(status="STOPPED", reentry_used=True)
+    assert tp.resolve_reentry_fill(plan, "T1_FIRST", NOW, SESSION_EXPIRES) is None
+
+
+def test_resolve_reentry_t1_first_is_done_with_documented_gap():
+    plan = _plan(status="FILLED", reentry_used=True)
+    result = tp.resolve_reentry_fill(plan, "T1_FIRST", NOW, SESSION_EXPIRES)
+    assert result["status"] == "DONE"
+    assert "documented gap" in result["last_transition_reason"]
+
+
+def test_resolve_reentry_neither_yet_keeps_polling():
+    plan = _plan(status="FILLED", reentry_used=True)
+    assert tp.resolve_reentry_fill(plan, "NEITHER_YET", NOW, SESSION_EXPIRES) is None
+
+
+def test_resolve_reentry_session_expired_becomes_done():
+    plan = _plan(status="FILLED", reentry_used=True)
+    result = tp.resolve_reentry_fill(plan, "NEITHER_YET", SESSION_EXPIRES, SESSION_EXPIRES)
+    assert result["status"] == "DONE"
+    assert "unresolved" in result["last_transition_reason"]
+
+
+def test_resolve_reentry_does_not_handle_wide_stop_first():
+    # WIDE_STOP_FIRST is deliberately routed elsewhere (the same STOPPED
+    # transition every FILLED plan gets) -- this function must not produce
+    # a transition for it, to avoid a second, conflicting STOPPED path.
+    plan = _plan(status="FILLED", reentry_used=True)
+    assert tp.resolve_reentry_fill(plan, "WIDE_STOP_FIRST", NOW, SESSION_EXPIRES) is None

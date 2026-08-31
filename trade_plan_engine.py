@@ -102,7 +102,8 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
         if not candles_1m:
             return
         plan_dict = {"status": row.status, "direction": row.direction,
-                     "stop_price": row.stop_price, "t1": row.t1}
+                     "stop_price": row.stop_price, "t1": row.t1,
+                     "reentry_used": row.reentry_used}
         verdict = tp.check_wide_stop_or_t1(plan_dict, candles_1m)
 
         if verdict == "WIDE_STOP_FIRST":
@@ -112,9 +113,17 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
             print(f"|| TRADE PLAN || {symbol} {row.session_id} {row.date_key}: STOPPED -- {row.last_transition_reason}")
             return
 
-        # T1_FIRST or NEITHER_YET: the wide-stop question is settled (or
-        # moot) for now -- defer to CampaignLog's own already-verified
-        # terminal status for the rest of management.
+        if row.reentry_used:
+            # A re-entry fill has no CampaignLog equivalent to mirror --
+            # see mirror_campaign_outcome()'s and resolve_reentry_fill()'s
+            # own docstrings.
+            updates = tp.resolve_reentry_fill(plan_dict, verdict, now_utc, session_expires_at)
+            _apply(row, updates, symbol)
+            return
+
+        # T1_FIRST or NEITHER_YET on the ORIGINAL fill: the wide-stop
+        # question is settled (or moot) for now -- defer to CampaignLog's
+        # own already-verified terminal status for the rest of management.
         campaign = (
             db.query(CampaignLog)
             .filter(
