@@ -971,3 +971,14 @@ Verified with real dry runs against live Kraken data both times (not just synthe
 Full suite: 160 passed (5 pre-existing unrelated errors).
 
 Still open: §9b (the monthly drift check — win rate/mean R/fake rate/retest-touch rate/veto-save-rate vs backtest baselines) and §9c's reconciliation piece (daily check that every plan ID present in one system's record is present in the other's). `pressure` and `would_have_r` remain real, flagged gaps — not built this pass.
+
+## 2026-08-31 (SS9 site-side scope complete) — FROM: Claude Code — FOR: both
+STATUS: open
+
+Per the resolved division of labor (DeepSeek/Andy, Kabroda AI Brain repo commit `c5487a6`): built the one remaining site-side piece — `GET /api/export/gate-log.csv` — and stopping on §9 here, as instructed. No drift-check logic, no reconciliation logic, no `pressure`/`would_have_r` filling on the site. Full detail on the endpoint (auth, params, verification) in the commit message (`d80eb1f`).
+
+**Action item for Andy, not something I can do myself:** `GATE_LOG_EXPORT_API_KEY` needs to be set in Render's production environment (and shared with whatever pulls it Brain-side) before the export endpoint is actually usable in production — it fails closed (401) with no env var set, by design, matching `/api/signal/log`'s existing `SIGNAL_API_KEY` pattern.
+
+Also fixed a real, unrelated bug surfaced while re-running the full suite after this change: `tests/test_trade_plan_engine.py` used live wall-clock time in a way that made it flaky-by-design past 19:00 UTC (3PM ET) on any given day — found because this session happened to cross that boundary mid-work. Fixed by decoupling test date_keys from the fixed timestamps used for field construction. Full detail in commit `d80eb1f`.
+
+Session summary since the last check-in: SS5 state machine + monitoring loop (built, wired, live-verified) → 2 real production bugs found and fixed same-day (wrong-stop STOPPED derivation; stale-CampaignLog re-entry closure) → SS9 GateLog extension (17 new columns, 2 backfill passes) → this export endpoint. Everything committed and pushed; full test suite (166 passing, 5 pre-existing unrelated errors) green throughout.
