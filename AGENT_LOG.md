@@ -592,3 +592,69 @@ a real `/api/radar/scan` HTTP request producing exactly 1 row each in
 `campaign_logs`/`gate_log`/`session_audit_log`/`decision_log` and 27 real
 rows in `decision_gauge_reading`, zero errors. `test_e2e.py` (83/83) and
 `import main` both clean throughout.
+
+## 2026-08-30 (readiness audit, later still) — FROM: Claude Code — FOR: DeepSeek/Antigravity (both)
+STATUS: resolved
+
+Andy asked "what else do we need to audit and make sure everything is ready
+to run the 15min trading within the radar." Continued straight from the
+exchange-client-hang fix above. Found and fixed one more real bug, cleaned
+up one dead constant, and confirmed several things are already in good
+shape.
+
+**Real bug #3 this pass: session `date_key` computed two different ways,
+disagreeing for 13 hours every single day.** `session_manager.py`'s
+`date_key` is anchored to the session's 13:00 UTC lock time. Three call
+sites instead computed "today" as raw UTC calendar midnight
+(`datetime.now(timezone.utc).strftime("%Y-%m-%d")`), which rolls over 13
+hours *before* the session's real date_key does:
+- `main.py`'s `/api/radar/snapshot` (Phase 1 fast-path — the primary route
+  that renders locked session levels) missed the still-active SessionLock
+  and CampaignLog entirely during that window, reporting the session as
+  not-locked when it really was.
+- `market_radar.py`'s `_try_locked_shortcut()` missed the SessionLock too,
+  silently falling back to the slow full 1500-candle-pull path every poll
+  (a real perf regression, not a correctness break — the slow path still
+  computes the right date_key internally and self-corrects).
+- `market_radar.py`'s `_get_tf_system_verdicts()` missed the CampaignLog
+  row, showing the TF-stack detail row as PENDING for a session that had
+  already made its real TAKE/PASS call (confirmed reproducible on the live
+  system — real UTC time was already into the next calendar day while the
+  session's actual, correct date_key was still yesterday's).
+
+Fix: added `market_radar._current_session_date_key()` (calls
+`session_manager.resolve_current_session()` for the real, session-anchored
+date, not calendar midnight) and pointed all three call sites at it (the
+`main.py` one inline, same call). Verified directly against the exact DB/
+timestamp that reproduced the bug — `tf_verdicts.15M` went from `PENDING`
+to the real `PASS` state with the correct headline, matching the live gate
+output exactly — then re-verified via a fresh live boot (`/api/radar/
+snapshot` now correctly reports `locked: true` with the right state).
+
+**Also removed:** `SENIOR_ANALYST_SYSTEM_PROMPT`, a ~400-line dead system
+prompt in `kabroda_mas_flow.py` with zero callers anywhere — leftover from
+the old LLM Senior Analyst pipeline, missed in the earlier purge pass.
+
+**Confirmed already in good shape, no changes needed:**
+- `GateLog` logs unconditionally on every `run_mas_analysis()` call (TAKE
+  or PASS alike), correctly scoped to once per session lock, not every
+  live radar poll — matches this project's own `CLAUDE.md` rule #8.
+- The decisive four-outcome radar headline (`KABRODA_REBUILD_SPEC.md` §8)
+  is real: `tactical_brief`/`headline` text comes from `decision_engine.py`'s
+  actual `gate["misses"]` list (specific reasons like "box/ATR ratio too
+  wide", not generic filler), and the 🟢🟢/🟢/🟡/⚪ four-outcome badge format
+  is wired through `mas15mRow()` in `market_radar.html`.
+- The macro engine subprocess (`kabroda_macro_engine.py`) is unaffected by
+  the exchange-client fix — it's a fully separate OS process each run, no
+  cross-loop sharing risk there regardless.
+
+**Still open, explicitly deferred (not part of the 15M decision path, lower
+priority):** `MacroNarrativeLog`/`SystemAuditLog`/`InterpreterLog` have
+zero live writers now but `main.py`'s admin dashboards still read them for
+historical display; `SYSTEM_FLOW.md`/`WORK_LOG.md` remain stale since
+2026-07-16, unrelated to this pass's scope.
+
+Verified: `py_compile` on every touched file, `import main`, full
+`test_e2e.py` (83/83), and two separate live `uvicorn` boots (one isolated
+to the date_key fix, one exercising the full scan→snapshot round-trip)
+confirming correct behavior end-to-end.

@@ -14,9 +14,31 @@ import battlebox_pipeline
 import decision_engine
 import market_data
 import mtf_confluence_scanner
+import session_manager
 from database import SessionLocal, SessionLock, DecisionJournal, CampaignLog
 
 TARGETS = ["BTCUSDT"]
+
+
+def _current_session_date_key() -> str:
+    """The active us_ny_futures session's date_key -- anchored to the 13:00
+    UTC session lock (session_manager.resolve_current_session()), NOT raw
+    UTC calendar midnight. Found 2026-08-30 while auditing radar readiness:
+    both this function's former callers (_try_locked_shortcut(),
+    _get_tf_system_verdicts()) used to compute "today" as
+    datetime.utcnow().strftime("%Y-%m-%d") directly -- which rolls over 13
+    hours EARLY relative to the session's real date_key rollover (13:00
+    UTC, not 00:00 UTC). For that whole 13-hour window every single day,
+    the radar looked up a date_key one day ahead of the still-active
+    session's real one: _try_locked_shortcut() always missed the real,
+    valid SessionLock (falling back to the slow full-fetch path every
+    poll, not a correctness break but a real performance regression), and
+    _get_tf_system_verdicts() always missed the real, valid CampaignLog row
+    (showing PENDING in the TF-stack detail row for a session that had
+    already made its real TAKE/PASS call, confirmed reproducible)."""
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    session = session_manager.resolve_current_session(now_utc, "AUTO")
+    return session["date_key"]
 
 
 # _tf_candidate_verdict() removed 2026-08-30 -- built tf_verdicts entries for
@@ -36,7 +58,7 @@ def _get_tf_system_verdicts(symbol_norm: str) -> dict:
     CampaignLog rows from before the disable, which would otherwise keep
     showing an old, closed trade as if it mattered forever.
     """
-    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    today = _current_session_date_key()
     result = {
         "4H":  {"status": "RETIRED"},
         "1H":  {"status": "RETIRED"},
@@ -105,7 +127,7 @@ async def _try_locked_shortcut(symbol: str):
     pull, but still does one lightweight live 5m fetch to get a fresh price.
     Returns a battlebox-compatible response dict, or None if no lock exists.
     """
-    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    today = _current_session_date_key()
     norm = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
     try:
         with SessionLocal() as db:

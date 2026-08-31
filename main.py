@@ -903,8 +903,16 @@ async def api_radar_snapshot(db: Session = Depends(get_db)):
     keys (not removed from the JSON shape) so nothing downstream that reads
     this endpoint breaks on a missing key, but there is nothing left to
     populate them and there won't be again.
+
+    2026-08-30 (later): `today` fixed to use the session's own date_key
+    (anchored to the 13:00 UTC lock) instead of raw UTC calendar midnight --
+    the two disagree for 13 hours every single day (00:00-13:00 UTC), during
+    which this route was missing the still-active SessionLock entirely and
+    showing "not locked" for a session that really was. See market_radar.py's
+    _current_session_date_key() for the full writeup (found and fixed there
+    first, then found here too).
     """
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = session_manager.resolve_current_session(datetime.now(timezone.utc), "AUTO")["date_key"]
     symbol_norm = "BTC/USDT"
     symbol_raw  = "BTCUSDT"
 
