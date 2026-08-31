@@ -33,11 +33,14 @@ import asyncio
 import agent_core
 import decision_engine
 import market_data
+import session_manager
+import trade_plan
 from database import (
     SessionLocal,
     CampaignLog,
     DecisionJournal,
     GateLog,
+    TradePlan,
 )
 
 
@@ -180,6 +183,32 @@ def run_mas_analysis(
     _inject_brief_to_database(symbol, session_id, date_key, brief, decision_dict.get("gate"))
     _inject_decision_journal(symbol, session_id, date_key, brief, battlebox_payload)
     _inject_gate_log(symbol, date_key, now_utc, levels, decision_dict)
+
+    # 6b. Trade Plan (KABRODA_COM_TRADE_PLAN_SPEC.md, additive -- SS3/SS4).
+    # Built from the SAME decision_dict just written to CampaignLog above,
+    # never a second, independently-computed decision -- the "two call
+    # sites must never disagree" invariant extends to this new layer too.
+    # Non-blocking: TradePlan is additive; a failure here must never affect
+    # the SSOT CampaignLog/GateLog writes above.
+    try:
+        _anchor_pkt = session_manager.resolve_anchor_time(session_id)
+        anchor_time = datetime.fromtimestamp(_anchor_pkt["anchor_ts"], tz=timezone.utc)
+        plan_fields = trade_plan.build_trade_plan(
+            symbol=symbol,
+            date_key=date_key,
+            session_id=session_id,
+            decision_dict=decision_dict,
+            anchor_time=anchor_time,
+            candles_24h=candles_5m,
+            r30_high=levels.get("range30m_high", 0.0),
+            r30_low=levels.get("range30m_low", 0.0),
+            f24_vah=levels.get("f24_vah", 0.0),
+            f24_val=levels.get("f24_val", 0.0),
+            daily_atr14=daily_atr14,
+        )
+        _inject_trade_plan_to_database(symbol, session_id, date_key, plan_fields)
+    except Exception as _tp_err:
+        print(f"[TRADE PLAN] Non-critical failure -- MAS unaffected: {_tp_err}")
 
     # 7. Forward-audit record — frozen at decision time (non-blocking).
     try:
@@ -523,6 +552,49 @@ def _inject_brief_to_database(
         print(f"|| MAS OVERLAY || Brief injected for {symbol}.")
     except Exception as e:
         print(f"MAS DATABASE INJECTION ERROR: {e}")
+    finally:
+        db.close()
+
+
+def _inject_trade_plan_to_database(
+    symbol: str, session_id: str, date_key: str, plan_fields: Dict[str, Any],
+) -> None:
+    """Create-only upsert for TradePlan -- deliberately NOT the same
+    always-update pattern _inject_brief_to_database() above uses.
+    KABRODA_COM_TRADE_PLAN_SPEC.md SS1's anti-flip-flop rule: a TradePlan
+    is generated ONCE at session lock and never re-generated intraday. If
+    a row already exists for this (symbol, date_key, session_id) -- e.g. a
+    restart-recovery re-run of run_mas_analysis() -- skip entirely rather
+    than overwrite: by the time a row exists it may already carry real
+    intraday state-machine progress (WAITING/VETOED/FILLED/STOPPED/...)
+    written by the monitoring loop, and CampaignLog's own always-update
+    pattern silently resetting terminal state on a restart re-run is a
+    pre-existing, separate landmine this function must not repeat.
+    """
+    db = SessionLocal()
+    try:
+        existing = (
+            db.query(TradePlan)
+            .filter(
+                TradePlan.symbol == symbol,
+                TradePlan.session_id == session_id,
+                TradePlan.date_key == date_key,
+            )
+            .first()
+        )
+        if existing is not None:
+            print(f"|| TRADE PLAN || Row already exists for {symbol} | {session_id} | {date_key} -- not re-generated (SS1 anti-flip-flop rule).")
+            return
+
+        fields = dict(plan_fields)
+        fields["plan_text"] = trade_plan.render_brief(fields)
+        valid_cols = set(TradePlan.__table__.columns.keys())
+        row = TradePlan(**{k: v for k, v in fields.items() if k in valid_cols})
+        db.add(row)
+        db.commit()
+        print(f"|| TRADE PLAN || {fields.get('status')} plan written for {symbol} | {session_id} | {date_key}.")
+    except Exception as e:
+        print(f"TRADE PLAN DATABASE INJECTION ERROR: {e}")
     finally:
         db.close()
 
