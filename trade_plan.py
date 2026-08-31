@@ -299,6 +299,11 @@ def advance_waiting_plan(
         updates["status"] = "FILLED"
         updates["fill_time"] = now_utc
         updates["fill_price"] = trigger
+        # faked_first (SS9a): did the FIRST cross wick back before
+        # acceptance? True only when this fill is the retest after an
+        # earlier unfueled cross (status was already VETOED coming in) --
+        # a direct first-cross fill is a clean acceptance, not a fake.
+        updates["faked_first"] = (status == "VETOED")
         push_ratio = (fuel.get("checks") or {}).get("push_volume", {}).get("ratio")
         prefix = "second " if status == "VETOED" else ""
         updates["last_transition_reason"] = f"{prefix}cross fueled ({push_ratio}x baseline) -- filled"

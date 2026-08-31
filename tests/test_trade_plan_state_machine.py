@@ -69,6 +69,7 @@ def test_advance_waiting_fueled_cross_fills():
     assert result["cross_time"] == NOW
     assert result["fuel_at_cross"] == "FUELED"
     assert result["entry_mode"] == "TRIGGER_AT_LEVEL"  # live_price == trigger, not beyond it
+    assert result["faked_first"] is False  # clean first-cross fill, not a retest
     assert "filled" in result["last_transition_reason"]
 
 
@@ -94,6 +95,7 @@ def test_advance_vetoed_second_cross_fueled_fills():
     candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)
     result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=100.0)
     assert result["status"] == "FILLED"
+    assert result["faked_first"] is True  # first cross wicked back (VETOED) before this retest filled
     assert "second" in result["last_transition_reason"]
     # entry_mode already set on the plan -- must not be re-decided/overwritten
     assert "entry_mode" not in result

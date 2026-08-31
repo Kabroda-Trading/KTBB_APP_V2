@@ -165,6 +165,8 @@ def evaluate_15m_decision(
     # gate short-circuits before market_regime.py/micro_regime.py ever run.
     daily: Optional[Dict[str, Any]] = None
     micro: Optional[Dict[str, Any]] = None
+    htf: Optional[Dict[str, Any]] = None
+    fuel: Optional[Dict[str, Any]] = None
 
     def _result(state: str, side: Optional[str], headline: str, gate: Optional[Dict[str, Any]],
                 plan: Optional[Dict[str, Any]], gauges: List[GaugeTuple]) -> Tuple[Dict[str, Any], List[GaugeTuple]]:
@@ -192,6 +194,16 @@ def evaluate_15m_decision(
             "market_regime_table":   (daily or {}).get("table"),
             "market_regime_quality": (daily or {}).get("quality"),
             "micro_regime":          (micro or {}).get("regime"),
+            # Raw diagnostic values (2026-08-31, SS9a forward-test log) --
+            # already computed above for the gate's own checks/gauges, just
+            # not previously surfaced on decision_dict itself. Purely
+            # additive: no formula, threshold, or verdict changes here.
+            "fuel_verdict":   (fuel or {}).get("verdict"),
+            "fuel_push_ratio": ((fuel or {}).get("checks", {}).get("push_volume", {}) or {}).get("ratio"),
+            "trend_1h": (htf or {}).get("trend_1h"),
+            "trend_4h": (htf or {}).get("trend_4h"),
+            "htf_aligned": (htf or {}).get("aligned"),
+            "htf_opposed": (htf or {}).get("opposed"),
         }
         return d, gauges
 
