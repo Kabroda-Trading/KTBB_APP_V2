@@ -26,6 +26,7 @@ import gravity_engine
 import gravity_math
 import kabroda_mas_flow
 import ledger_closing_engine
+import trade_plan_engine
 import mtf_confluence_scanner
 import session_monitor
 import agent_core
@@ -48,6 +49,7 @@ scheduler_health_registry = {
     "analysis_loop": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "gravity_engine": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "ledger_closing": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
+    "trade_plan": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
 }
 
 
@@ -593,6 +595,7 @@ async def lifespan(app: FastAPI):
     init_db()
     app.state.gravity_task          = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
     app.state.ledger_task           = asyncio.create_task(ledger_closing_engine.run_ledger_audit_loop())
+    app.state.trade_plan_task       = asyncio.create_task(trade_plan_engine.run_trade_plan_loop())
     app.state.senior_analyst_task   = asyncio.create_task(run_senior_analyst_scheduler())
     # jewel_task (run_jewel_scheduler) removed 2026-08-30 -- see that
     # function's old location for the removal note.
@@ -614,6 +617,7 @@ async def lifespan(app: FastAPI):
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     app.state.gravity_task.cancel()
     app.state.ledger_task.cancel()
+    app.state.trade_plan_task.cancel()
     app.state.senior_analyst_task.cancel()
     app.state.weekly_task.cancel()
     app.state.outcome_tracker_task.cancel()

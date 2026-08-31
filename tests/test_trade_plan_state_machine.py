@@ -225,3 +225,47 @@ def test_reentry_done_when_not_stopped():
     result = tp.check_reentry_eligibility(plan, fuel_still_fueled=True)
     assert result["status"] == "DONE"
     assert "not eligible" in result["last_transition_reason"]
+
+
+# ------------------------------------------------------------------ advance_reentry_plan
+
+def test_reentry_advance_ignores_non_armed_status():
+    for status in ("WAITING", "VETOED", "FILLED", "STOPPED", "DONE", "NO_PLAN"):
+        plan = _plan(status=status)
+        assert tp.advance_reentry_plan(plan, NOW, SESSION_EXPIRES, _candles()) is None
+
+
+def test_reentry_advance_session_expiry_no_cross():
+    plan = _plan(status="REENTRY_ARMED", direction="LONG", trigger=100.0)
+    result = tp.advance_reentry_plan(plan, SESSION_EXPIRES, SESSION_EXPIRES, _candles(touched=False))
+    assert result["status"] == "DONE"
+    assert result["reentry_used"] is True
+    assert "window closed" in result["last_transition_reason"]
+
+
+def test_reentry_advance_no_touch_returns_none():
+    plan = _plan(status="REENTRY_ARMED", direction="LONG", trigger=100.0)
+    result = tp.advance_reentry_plan(plan, NOW, SESSION_EXPIRES, _candles(side="LONG", touched=False))
+    assert result is None
+
+
+def test_reentry_advance_fueled_cross_fills():
+    plan = _plan(status="REENTRY_ARMED", direction="LONG", trigger=100.0)
+    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)  # ratio 1.0 -> FUELED
+    result = tp.advance_reentry_plan(plan, NOW, SESSION_EXPIRES, candles)
+    assert result["status"] == "FILLED"
+    assert result["reentry_used"] is True
+    assert result["reentry_fill_price"] == 100.0
+    assert result["reentry_cross_time"] == NOW
+    assert result["fill_price"] == 100.0
+    assert "one attempt used" in result["last_transition_reason"]
+
+
+def test_reentry_advance_unfueled_cross_goes_straight_to_done():
+    # "One attempt max" -- unlike advance_waiting_plan, an unfueled re-entry
+    # cross does NOT arm a second retest watch.
+    plan = _plan(status="REENTRY_ARMED", direction="LONG", trigger=100.0)
+    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=2.0, touched=True)  # thin
+    result = tp.advance_reentry_plan(plan, NOW, SESSION_EXPIRES, candles)
+    assert result["status"] == "DONE"
+    assert result["reentry_used"] is True

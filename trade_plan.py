@@ -391,19 +391,15 @@ def check_reentry_eligibility(plan: Dict[str, Any], fuel_still_fueled: bool) -> 
     """SS8: after a STOPPED (wick-fake) outcome, one re-entry is allowed IF
     the fuel gate still reads FUELED.
 
-    OPEN TENSION (flagged, not silently resolved -- 2026-08-31): SS8 also
-    says "if the wide stop from SS6 is available (R:R still >= 1:1), the
-    re-entry path is not used -- the wide stop already dominates it." But
-    build_trade_plan() never lets a plan reach WAITING/FILLED without
-    R:R >= 1:1 in the first place (a failing floor goes straight to
-    NO_PLAN -- Andy's confirmed call, 2026-08-31, see build_trade_plan()'s
-    own comment). That means the wide stop is ALWAYS "available" for any
-    plan that reaches STOPPED, which by SS8's own literal text would mean
-    re-entry should never actually fire in this system. This function
-    implements the fuel-check mechanically as specified; whether
-    REENTRY_ARMED should ever actually be reachable given the above is a
-    real, unresolved design question worth confirming before it shows on
-    a live plan, not something to guess past.
+    RESOLVED (2026-08-31, DeepSeek/Andy, AGENT_LOG.md): SS8's "if the wide
+    stop is available, re-entry is not used" means SURVIVED THE DAY, not
+    existed at plan time -- every FILLED plan had an R:R-valid wide stop,
+    but that stop can still be wicked through (measured: 1/39 gate-
+    approved fake sessions hit the 24h core-zone stop within 2h). STOPPED
+    is exactly that event now that check_wide_stop_or_t1() derives it from
+    TradePlan's own stop_price (not CampaignLog's tighter r30 stop -- see
+    that function's docstring), so REENTRY_ARMED is genuinely reachable
+    here, not dead code.
     """
     if plan.get("status") != "STOPPED":
         return {"status": "DONE", "last_transition_reason": "not eligible for re-entry check"}
@@ -412,3 +408,50 @@ def check_reentry_eligibility(plan: Dict[str, Any], fuel_still_fueled: bool) -> 
     if fuel_still_fueled:
         return {"status": "REENTRY_ARMED", "last_transition_reason": "fuel still FUELED -- one re-entry armed"}
     return {"status": "DONE", "last_transition_reason": "fuel not FUELED after stop -- no re-entry, done"}
+
+
+def advance_reentry_plan(
+    plan: Dict[str, Any],
+    now_utc: datetime.datetime,
+    session_expires_at: Optional[datetime.datetime],
+    candles_5m: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """SS8: the one re-entry attempt itself, once check_reentry_eligibility()
+    has set REENTRY_ARMED. Deliberately NOT advance_waiting_plan() reused --
+    re-entry has no commit_after gate (the open-window rule already applied
+    hours earlier, to the original plan) and no VETOED-retry loop ("one
+    attempt max," SS8's own words): an unfueled re-entry cross goes
+    straight to DONE, it does not arm a second retest watch.
+    """
+    if plan.get("status") != "REENTRY_ARMED":
+        return None
+    if session_expires_at and now_utc >= session_expires_at:
+        return {"status": "DONE", "reentry_used": True,
+                "last_transition_reason": "session ended, re-entry window closed"}
+
+    side = "LONG" if plan.get("direction") == "LONG" else "SHORT"
+    trigger = plan.get("trigger_price")
+    fuel = fuel_gate.evaluate_fuel_gate(candles_5m, trigger, side)
+    verdict = fuel.get("verdict")
+
+    if verdict == "NO_PUSH":
+        return None  # not touched yet
+
+    if verdict == "FUELED":
+        return {
+            "status": "FILLED",
+            "reentry_used": True,
+            "reentry_cross_time": now_utc,
+            "reentry_fill_price": trigger,
+            "fill_time": now_utc,
+            "fill_price": trigger,
+            "cross_time": now_utc,
+            "fuel_at_cross": verdict,
+            "last_transition_reason": "re-entry cross fueled -- filled (one attempt used)",
+        }
+
+    return {
+        "status": "DONE",
+        "reentry_used": True,
+        "last_transition_reason": f"re-entry cross unfueled ({verdict}) -- one attempt used, done",
+    }

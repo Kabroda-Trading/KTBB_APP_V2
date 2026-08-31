@@ -1,0 +1,199 @@
+# trade_plan_engine.py
+# ==============================================================================
+# TRADE PLAN INTRADAY MONITOR
+# KABRODA_COM_TRADE_PLAN_SPEC.md SS5/SS7/SS8 -- the async driver for
+# trade_plan.py's pure state-machine functions (advance_waiting_plan,
+# advance_reentry_plan, check_wide_stop_or_t1, mirror_campaign_outcome,
+# check_reentry_eligibility). Same relationship ledger_closing_engine.py
+# has to CampaignLog's Phase 1/2 logic -- kept in its OWN file, not inside
+# trade_plan.py, so trade_plan.py stays the pure, dependency-free,
+# easily-tested module its own header describes ("no DB/network").
+#
+# One continuous asyncio task, registered once in main.py's lifespan() and
+# alive for the process's whole life -- the same safe pattern
+# ledger_closing_engine.py's own module-level ccxt usage relies on.
+# Module-level/shared exchange clients are only unsafe when reused ACROSS
+# event loops (market_data.py's 2026-08-30 fix, AGENT_LOG.md) -- this loop,
+# like ledger_closing_engine's, never crosses loops, so market_data.py's
+# fetch_live_5m() (already loop-safe) and ledger_closing_engine.py's own
+# _fetch_1m_since() (module-level Kraken client, one continuous loop) are
+# both reused directly rather than a third parallel client being stood up.
+#
+# Per-status routing, once per 60s poll cycle:
+#   WAITING / VETOED -> advance_waiting_plan()   (5m candles + live price)
+#   REENTRY_ARMED     -> advance_reentry_plan()   (5m candles)
+#   FILLED            -> check_wide_stop_or_t1() first -- TradePlan's OWN
+#                        wide stop, scanned against 1m candles since
+#                        fill_time. Only a WIDE_STOP_FIRST verdict can move
+#                        a FILLED plan to STOPPED (see trade_plan.py's
+#                        2026-08-31 CORRECTION -- CampaignLog's own status
+#                        cannot answer this, it tracks a different, tighter
+#                        stop). Otherwise mirror_campaign_outcome() closes
+#                        the plan to DONE once the matching CampaignLog row
+#                        resolves on its own (win, its own tighter-stop
+#                        loss, or expiry) -- no second T1/runner/T3 scan,
+#                        that stays ledger_closing_engine.py's job.
+#   STOPPED           -> re-checks fuel at the ORIGINAL trigger. A NO_PUSH
+#                        read (price not currently back beyond trigger) is
+#                        NOT a "no fuel" verdict -- it means the re-entry
+#                        question hasn't been asked yet, so the row is left
+#                        untouched to wait for a real cross. Only once
+#                        price actually returns to the trigger does
+#                        check_reentry_eligibility() get a real verdict.
+#                        Session expiry with no qualifying cross -> DONE.
+# ==============================================================================
+
+import asyncio
+from datetime import datetime, timezone
+
+from database import SessionLocal, TradePlan, CampaignLog
+import fuel_gate
+import trade_plan as tp
+import market_data
+from ledger_closing_engine import _fetch_1m_since
+from kabroda_mas_flow import _compute_session_expires_at
+
+_POLL_SECONDS = 60
+
+
+def _as_utc(dt):
+    """PostgreSQL/SQLite can return naive UTC on read-back -- same helper
+    as ledger_closing_engine.py's own _as_utc()."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
+    """Applies at most one state transition to `row`, in place. The
+    caller's loop body commits (or rolls back on error) per record,
+    matching ledger_closing_engine.py's per-record commit pattern."""
+    symbol = row.symbol
+    side = "LONG" if row.direction == "LONG" else "SHORT"
+    session_expires_at = _compute_session_expires_at(row.session_id, row.date_key)
+
+    if row.status in ("WAITING", "VETOED"):
+        candles_5m = await market_data.fetch_live_5m(symbol, limit=310)
+        if not candles_5m:
+            return
+        live_price = float(candles_5m[-1]["close"])
+        plan_dict = {
+            "status": row.status, "direction": row.direction,
+            "trigger_price": row.trigger_price,
+            "commit_after": _as_utc(row.commit_after),
+            "entry_mode": row.entry_mode,
+        }
+        updates = tp.advance_waiting_plan(plan_dict, now_utc, session_expires_at, candles_5m, live_price)
+        _apply(row, updates, symbol)
+
+    elif row.status == "REENTRY_ARMED":
+        candles_5m = await market_data.fetch_live_5m(symbol, limit=310)
+        if not candles_5m:
+            return
+        plan_dict = {"status": row.status, "direction": row.direction, "trigger_price": row.trigger_price}
+        updates = tp.advance_reentry_plan(plan_dict, now_utc, session_expires_at, candles_5m)
+        _apply(row, updates, symbol)
+
+    elif row.status == "FILLED":
+        if row.fill_time is None or row.stop_price is None or row.t1 is None:
+            return  # incomplete row -- nothing safe to check yet
+        fill_ms = int(_as_utc(row.fill_time).timestamp() * 1000)
+        candles_1m = await _fetch_1m_since(symbol, since_ms=fill_ms)
+        if not candles_1m:
+            return
+        plan_dict = {"status": row.status, "direction": row.direction,
+                     "stop_price": row.stop_price, "t1": row.t1}
+        verdict = tp.check_wide_stop_or_t1(plan_dict, candles_1m)
+
+        if verdict == "WIDE_STOP_FIRST":
+            row.status = "STOPPED"
+            row.stopped_time = now_utc
+            row.last_transition_reason = "TradePlan's own wide stop wicked before T1"
+            print(f"|| TRADE PLAN || {symbol} {row.session_id} {row.date_key}: STOPPED -- {row.last_transition_reason}")
+            return
+
+        # T1_FIRST or NEITHER_YET: the wide-stop question is settled (or
+        # moot) for now -- defer to CampaignLog's own already-verified
+        # terminal status for the rest of management.
+        campaign = (
+            db.query(CampaignLog)
+            .filter(
+                CampaignLog.symbol == symbol,
+                CampaignLog.session_id == row.session_id,
+                CampaignLog.date_key == row.date_key,
+            )
+            .first()
+        )
+        updates = tp.mirror_campaign_outcome(plan_dict, campaign.status if campaign else None)
+        _apply(row, updates, symbol)
+
+    elif row.status == "STOPPED":
+        if now_utc >= session_expires_at:
+            row.status = "DONE"
+            row.last_transition_reason = "session ended, no qualifying re-entry cross after stop"
+            print(f"|| TRADE PLAN || {symbol} {row.session_id} {row.date_key}: DONE -- {row.last_transition_reason}")
+            return
+        candles_5m = await market_data.fetch_live_5m(symbol, limit=310)
+        if not candles_5m:
+            return
+        fuel = fuel_gate.evaluate_fuel_gate(candles_5m, row.trigger_price, side)
+        if fuel.get("verdict") == "NO_PUSH":
+            return  # price hasn't come back to the trigger yet -- not a verdict, keep waiting
+        plan_dict = {"status": row.status, "reentry_used": row.reentry_used}
+        updates = tp.check_reentry_eligibility(plan_dict, fuel_still_fueled=(fuel.get("verdict") == "FUELED"))
+        _apply(row, updates, symbol)
+
+
+def _apply(row: TradePlan, updates, symbol: str) -> None:
+    if not updates:
+        return
+    prev_status = row.status
+    for k, v in updates.items():
+        setattr(row, k, v)
+    if row.status != prev_status:
+        print(f"|| TRADE PLAN || {symbol} {row.session_id} {row.date_key}: "
+              f"{prev_status} -> {row.status} -- {updates.get('last_transition_reason')}")
+
+
+async def run_trade_plan_loop():
+    print(">>> TRADE PLAN MONITOR: Initializing (SS5/SS7/SS8 intraday state machine)...")
+    while True:
+        try:
+            from main import scheduler_health_registry as _thr
+            _thr["trade_plan"]["last_run"] = datetime.now(timezone.utc).isoformat()
+            _thr["trade_plan"]["status"] = "EXECUTING"
+        except Exception:
+            pass
+
+        now_utc = datetime.now(timezone.utc)
+        db = SessionLocal()
+        try:
+            rows = db.query(TradePlan).filter(
+                TradePlan.status.in_(["WAITING", "VETOED", "FILLED", "STOPPED", "REENTRY_ARMED"])
+            ).all()
+            for row in rows:
+                try:
+                    await _advance_one(db, row, now_utc)
+                    db.commit()
+                except Exception as _row_err:
+                    db.rollback()
+                    print(f"|| TRADE PLAN || Row error {row.symbol} {row.session_id} {row.date_key}: {_row_err}")
+
+            try:
+                from main import scheduler_health_registry as _thr2
+                _thr2["trade_plan"]["status"] = "WAITING"
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"|| TRADE PLAN MONITOR ERROR: {e}")
+            try:
+                from main import scheduler_health_registry as _thr3
+                _thr3["trade_plan"]["status"] = "ERROR"
+                _thr3["trade_plan"]["error_count"] += 1
+                _thr3["trade_plan"]["last_error"] = str(e)
+            except Exception:
+                pass
+        finally:
+            db.close()
+
+        await asyncio.sleep(_POLL_SECONDS)

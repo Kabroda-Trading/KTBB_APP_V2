@@ -1,0 +1,258 @@
+"""
+Regression coverage for trade_plan_engine.py's monitoring loop -- runs the
+ACTUAL run_trade_plan_loop() coroutine against monkeypatched exchange calls
+and synthetic candle sequences, exercising the real production code path
+(not a reimplementation), matching tests/test_runner_mechanic.py's
+established harness pattern for ledger_closing_engine.py.
+
+Includes a dedicated regression test for a bug caught during design (not
+in shipped code): treating a STOPPED row's NO_PUSH fuel read as "not
+fueled" would prematurely resolve every wick-fake to DONE the very next
+poll, since price is rarely still beyond the trigger the instant after a
+stop-out. The loop must leave the row untouched until price actually
+returns to the trigger.
+"""
+import os
+
+os.environ["DATABASE_URL"] = "sqlite:///./kabroda_test_trade_plan_engine.db"
+
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import asyncio
+import datetime as dt
+from datetime import timezone, timedelta
+
+import pytest
+
+import database
+from database import SessionLocal, TradePlan, CampaignLog
+import trade_plan_engine as tpe
+
+
+def _clean_db_files():
+    for path in ["kabroda_test_trade_plan_engine.db", "kabroda_test_trade_plan_engine.db-journal",
+                 "kabroda_test_trade_plan_engine.db-shm", "kabroda_test_trade_plan_engine.db-wal"]:
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+
+
+class _StopLoop(Exception):
+    """Raised by the mocked asyncio.sleep to end run_trade_plan_loop()'s
+    while-True after a fixed number of iterations."""
+
+
+def _c5m(close, volume):
+    return {"close": close, "volume": volume}
+
+
+def _fueled_5m_candles(trigger, is_long, baseline_vol=10.0, push_vol=10.0, baseline_n=250, push_n=6):
+    """ratio = push_vol/baseline_vol -- 1.0 here, comfortably >= VOL_FUELED (0.8)."""
+    near = trigger - 5.0 if is_long else trigger + 5.0
+    beyond = trigger + 5.0 if is_long else trigger - 5.0
+    return ([_c5m(near, baseline_vol)] * baseline_n) + ([_c5m(beyond, push_vol)] * push_n)
+
+
+def _thin_5m_candles(trigger, is_long, baseline_vol=10.0, push_vol=2.0, baseline_n=250, push_n=6):
+    near = trigger - 5.0 if is_long else trigger + 5.0
+    beyond = trigger + 5.0 if is_long else trigger - 5.0
+    return ([_c5m(near, baseline_vol)] * baseline_n) + ([_c5m(beyond, push_vol)] * push_n)
+
+
+def _no_push_5m_candles(trigger, is_long, baseline_vol=10.0, n=256):
+    """Price never crosses the trigger -- fuel_gate.measure_push_volume's NO_PUSH case."""
+    near = trigger - 5.0 if is_long else trigger + 5.0
+    return [_c5m(near, baseline_vol)] * n
+
+
+def _c1m(l, h, ts=0):
+    return {"l": l, "h": h, "ts": ts}
+
+
+@pytest.fixture
+def poll_env(monkeypatch):
+    # database.py's engine is created once, from os.environ["DATABASE_URL"]
+    # at MODULE IMPORT time, and cached for the whole pytest process --
+    # whichever db-touching test file imports `database` FIRST wins that
+    # race (alphabetically, tests/test_runner_mechanic.py), regardless of
+    # what this file's own os.environ["DATABASE_URL"] says. _clean_db_files()
+    # alone can silently no-op against the wrong path in that case, letting
+    # rows from earlier tests/files accumulate and leak into this file's
+    # runs. Row-level cleanup (not file-level) is robust to that either way.
+    _clean_db_files()
+    database.init_db()
+    db = SessionLocal()
+    db.query(TradePlan).delete()
+    db.query(CampaignLog).delete()
+    db.commit()
+    db.close()
+    now = dt.datetime.now(timezone.utc)
+
+    def make_plan(symbol="BTC/USDT", date_key="2026-08-31", session_id="us_ny_futures", **kwargs):
+        db = SessionLocal()
+        defaults = dict(
+            symbol=symbol, date_key=date_key, session_id=session_id,
+            status="WAITING", direction="LONG", trigger_price=100.0,
+            commit_after=now - timedelta(minutes=5),
+        )
+        defaults.update(kwargs)
+        row = TradePlan(**defaults)
+        db.add(row)
+        db.commit()
+        db.close()
+
+    def make_campaign(symbol="BTC/USDT", date_key="2026-08-31", session_id="us_ny_futures", **kwargs):
+        db = SessionLocal()
+        defaults = dict(
+            symbol=symbol, date_key=date_key, session_id=session_id,
+            bias="LONG", grade="TAKE_STANDARD", entry_price=100.0, stop_loss=95.0,
+            t1=112.0, t2=120.0, t3=132.0, total_contracts=1.0,
+            status="PENDING", is_canonical=True,
+        )
+        defaults.update(kwargs)
+        row = CampaignLog(**defaults)
+        db.add(row)
+        db.commit()
+        db.close()
+
+    def run_polls(candles_5m_by_symbol=None, candles_1m_by_symbol=None, polls=1):
+        candles_5m_by_symbol = candles_5m_by_symbol or {}
+        candles_1m_by_symbol = candles_1m_by_symbol or {}
+
+        async def fake_5m(symbol, limit=310):
+            return candles_5m_by_symbol.get(symbol, [])
+
+        async def fake_1m(symbol, since_ms, limit=720):
+            return candles_1m_by_symbol.get(symbol, [])
+
+        sleeps = {"n": 0}
+
+        async def fake_sleep(seconds):
+            sleeps["n"] += 1
+            if sleeps["n"] >= polls:
+                raise _StopLoop()
+
+        monkeypatch.setattr(tpe.market_data, "fetch_live_5m", fake_5m)
+        monkeypatch.setattr(tpe, "_fetch_1m_since", fake_1m)
+        monkeypatch.setattr(tpe.asyncio, "sleep", fake_sleep)
+
+        async def main():
+            try:
+                await tpe.run_trade_plan_loop()
+            except _StopLoop:
+                pass
+
+        asyncio.run(main())
+
+    def get_plan(symbol="BTC/USDT"):
+        db = SessionLocal()
+        row = db.query(TradePlan).filter(TradePlan.symbol == symbol).first()
+        db.close()
+        return row
+
+    yield {
+        "now": now, "make_plan": make_plan, "make_campaign": make_campaign,
+        "run_polls": run_polls, "get_plan": get_plan,
+    }
+
+    db = SessionLocal()
+    db.query(TradePlan).delete()
+    db.query(CampaignLog).delete()
+    db.commit()
+    db.close()
+    _clean_db_files()
+
+
+def test_waiting_fueled_cross_fills_via_loop(poll_env):
+    poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0)
+    candles = _fueled_5m_candles(100.0, is_long=True)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "FILLED"
+    assert row.fill_price == 100.0
+    assert row.entry_mode in ("TRIGGER_AT_LEVEL", "RETEST_LIMIT_AT_LINE")
+
+
+def test_reentry_armed_fueled_cross_fills_via_loop(poll_env):
+    poll_env["make_plan"](status="REENTRY_ARMED", direction="LONG", trigger_price=100.0, reentry_used=False)
+    candles = _fueled_5m_candles(100.0, is_long=True)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "FILLED"
+    assert row.reentry_used is True
+    assert row.reentry_fill_price == 100.0
+
+
+def test_filled_wide_stop_wicked_becomes_stopped_via_loop(poll_env):
+    poll_env["make_plan"](
+        status="FILLED", direction="LONG", trigger_price=100.0,
+        stop_price=90.0, t1=112.0, fill_time=poll_env["now"] - timedelta(minutes=30),
+    )
+    candles_1m = [_c1m(98, 101), _c1m(89.0, 99.0)]  # stop touched, T1 never reached
+    poll_env["run_polls"](candles_1m_by_symbol={"BTC/USDT": candles_1m}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "STOPPED"
+    assert row.stopped_time is not None
+
+
+def test_filled_t1_reached_then_campaign_resolves_done_via_loop(poll_env):
+    poll_env["make_plan"](
+        status="FILLED", direction="LONG", trigger_price=100.0,
+        stop_price=90.0, t1=112.0, fill_time=poll_env["now"] - timedelta(minutes=30),
+    )
+    poll_env["make_campaign"](status="CLOSED_WIN")
+    candles_1m = [_c1m(98, 101), _c1m(111.0, 113.0)]  # T1 reached, wide stop never touched
+    poll_env["run_polls"](candles_1m_by_symbol={"BTC/USDT": candles_1m}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "DONE"
+    assert "CLOSED_WIN" in row.last_transition_reason
+
+
+def test_stopped_no_push_stays_stopped_not_prematurely_done(poll_env):
+    """Regression: NO_PUSH must NOT be treated as 'fuel gone' -- the row
+    must be left alone to wait for a real cross, not resolved to DONE."""
+    poll_env["make_plan"](status="STOPPED", direction="LONG", trigger_price=100.0, reentry_used=False)
+    candles = _no_push_5m_candles(100.0, is_long=True)  # price never returns to the trigger
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "STOPPED"  # unchanged -- not DONE
+
+
+def test_stopped_fueled_recross_becomes_reentry_armed_via_loop(poll_env):
+    poll_env["make_plan"](status="STOPPED", direction="LONG", trigger_price=100.0, reentry_used=False)
+    candles = _fueled_5m_candles(100.0, is_long=True)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "REENTRY_ARMED"
+
+
+def test_stopped_thin_recross_becomes_done_via_loop(poll_env):
+    poll_env["make_plan"](status="STOPPED", direction="LONG", trigger_price=100.0, reentry_used=False)
+    candles = _thin_5m_candles(100.0, is_long=True)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "DONE"
+
+
+def test_stopped_session_expired_no_cross_becomes_done_via_loop(poll_env):
+    # A date_key far in the past -- _compute_session_expires_at derives a
+    # boundary that's already well behind "now" for any session.
+    poll_env["make_plan"](
+        status="STOPPED", direction="LONG", trigger_price=100.0,
+        reentry_used=False, date_key="2020-01-01",
+    )
+    poll_env["run_polls"](polls=1)  # no candles needed -- expiry check comes first
+
+    row = poll_env["get_plan"]()
+    assert row.status == "DONE"
+    assert "session ended" in row.last_transition_reason
