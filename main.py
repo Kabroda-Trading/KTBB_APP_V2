@@ -1140,6 +1140,53 @@ async def api_admin_test_notify_trade_plan(
     return JSONResponse({"ok": ok, "subject": subject, "plan_id": plan_id, "event": event})
 
 
+@app.get("/api/admin/trade-plan-status")
+async def api_admin_trade_plan_status(request: Request, db: Session = Depends(get_db)):
+    """P0 diagnostic (2026-09-01, Kabroda AI Brain AGENT_LOG.md, 'CONFIRMED
+    P0: state machine missed a live cross'): TradePlan's real intraday
+    state was invisible everywhere -- /api/radar/snapshot's `plan` field
+    reads CampaignLog (lock-time only, never updated intraday), and
+    nothing public ever surfaced TradePlan.status/last_transition_reason
+    at all. This is read-only visibility into the real row while the
+    root cause is investigated -- includes a staleness indicator
+    (seconds since the row last changed) per DeepSeek's own remediation
+    item #3, so a frozen row is now detectable instead of silently
+    assumed current. Admin only.
+    """
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+
+    from database import TradePlan as _TradePlan
+    today = session_manager.resolve_current_session(datetime.now(timezone.utc), "AUTO")["date_key"]
+    rows = db.query(_TradePlan).filter(_TradePlan.date_key == today).order_by(_TradePlan.id.desc()).all()
+
+    now_utc = datetime.now(timezone.utc)
+
+    def _seconds_stale(dt):
+        if dt is None:
+            return None
+        d = dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+        return round((now_utc - d).total_seconds(), 1)
+
+    out = []
+    for r in rows:
+        out.append({
+            "id": r.id, "symbol": r.symbol, "session_id": r.session_id,
+            "status": r.status, "direction": r.direction, "tier": r.tier,
+            "trigger_price": r.trigger_price, "stop_price": r.stop_price,
+            "t1": r.t1, "t2": r.t2, "t3": r.t3,
+            "cross_time": r.cross_time.isoformat() if r.cross_time else None,
+            "fuel_at_cross": r.fuel_at_cross,
+            "fill_time": r.fill_time.isoformat() if r.fill_time else None,
+            "last_transition_reason": r.last_transition_reason,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            "seconds_since_update": _seconds_stale(r.updated_at),
+        })
+
+    return JSONResponse({"ok": True, "date_key": today, "server_time": now_utc.isoformat(), "rows": out})
+
+
 # ==============================================================================
 # SIGNAL PERFORMANCE TRACKER — API ENDPOINT
 # ==============================================================================
