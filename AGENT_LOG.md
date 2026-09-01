@@ -1010,3 +1010,20 @@ New admin test-fire endpoint: `POST /api/admin/test-notify-trade-plan?plan_id=<i
 23 new tests, full suite 209 passed. Commit `f715db5`.
 
 Let me know if the ARMED/FILLED collapse reads wrong for how Andy actually wants to be notified — easy to split if a genuine second signal (real fill confirmation via price crossing back over the level, say) is wanted later.
+
+## 2026-09-01 (P0 root-caused and fixed) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open (fix shipped, deploy needs verification; one real follow-up question)
+
+Read the 4-entry index. Root cause, with high confidence (confirmed against the incident's own facts before I even needed the diagnostic to load):
+
+**Today's daily table was TRENDING_UP/GOOD.** `anticipate_setup()` (built 2026-08-31, the WAITING-visibility fix) picks the trend-aligned side whenever the daily table is GOOD — so it anticipated **LONG**, watching the BO trigger only. But price broke DOWN through BD instead — a real, confirmed counter-trend move (your own day-3 review flagged the 15M bearish EMA/hidden-bearish-divergence conflict against the daily UP bias — this is exactly that scenario playing out). `advance_waiting_plan()`'s fuel check only ever watches the ONE anticipated trigger. When the LONG side read NO_PUSH (price nowhere near BO), that was read as "nothing happened" — when in fact the market had already moved 200+ points through the untracked SHORT side. The plan sat WAITING, completely blind, for the entire window. This is the exact live counter-example to the open question I flagged yesterday (daily-bias-alignment heuristic vs. tracking both sides) — now answered by real incident data, not hypothetically.
+
+**Fix shipped** (commit `b1096a0`): on a NO_PUSH read, `advance_waiting_plan()` now also checks whether the OPPOSITE trigger has been broken (derived from already-known fields, no new column). If so, transitions to DONE with an honest, specific reason instead of silent indefinite WAITING — stops the dangerous blindness immediately. 5 new tests including a real-loop reproduction of today's exact incident.
+
+**What this fix does NOT do:** build a real plan for the side that actually broke. It just makes the system honest about "your anticipated direction was wrong, here's what actually happened, no plan exists for that side today." Whether the system should instead track BOTH bo/bd from lock (a real dual-sided redesign) is the deeper question — flagged, not decided here under incident pressure. Given today's evidence, I now lean toward yes, but want your/Andy's call before building it.
+
+**Also shipped in this same pass** (commit `c3998b1`): `GET /api/admin/trade-plan-status` — read-only visibility into TradePlan's real intraday state (with a staleness timestamp, per your remediation item #3). Confirmed via live production query: `/api/radar/snapshot`'s `plan` field reads `CampaignLog`, which is written once at lock and never updated intraday — structurally incapable of ever reflecting a live cross regardless of what TradePlan does. This endpoint is the fix for "no way to see what TradePlan actually did."
+
+**Deploy status flag:** as of this entry, `/api/admin/trade-plan-status` is NOT yet showing in the live OpenAPI schema (checked repeatedly over ~5+ min) — same symptom as the export-endpoint deploy lag from yesterday, which needed a manual clear-build redeploy from Andy. `/api/admin/test-notify-trade-plan` (from the notifications commit) IS live, so the P0 fix itself (`b1096a0`, same deploy pipeline) may also need a manual redeploy nudge to actually take effect. Please verify.
+
+Item #4 from the incident (honest backfill of today's session, marked reconstructed) not yet done — want to confirm the fix is live and correct first before writing a backfill row.
