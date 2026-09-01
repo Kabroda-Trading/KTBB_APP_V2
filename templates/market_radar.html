@@ -20,6 +20,25 @@
         .btn-scan { background: #0ea5e9; color: #000; font-weight: 800; font-family: 'JetBrains Mono'; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; text-transform: uppercase; transition: 0.2s; box-shadow: 0 0 15px rgba(14, 165, 233, 0.2); }
         .btn-scan:hover { background: #38bdf8; }
 
+        /* Trade Plan live-state panel (2026-09-01 -- radar/email parity,
+           Kabroda AI Brain repo AGENT_LOG.md "question from Andy: does the
+           radar page mirror the email?"). Levels stay lock-time by design
+           (the grid below); this is the ONE thing on the page that must be
+           live -- the same TradePlan state the email is driven from, not a
+           second, independent gate re-evaluation (/api/radar/scan has no
+           memory of a cross that already retraced -- see the panel's own
+           JS comment). Polls independently of REFRESH INTEL. */
+        .plan-state-panel { display: none; border: 1px solid var(--border); background: var(--panel); border-radius: 6px; padding: 16px 20px; margin-bottom: 24px; font-family: 'JetBrains Mono'; }
+        .plan-state-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .plan-state-badge { font-weight: 800; font-size: 13px; padding: 4px 12px; border-radius: 4px; text-transform: uppercase; letter-spacing: 1px; }
+        .plan-state-badge.st-waiting, .plan-state-badge.st-vetoed { background: var(--yellow); color: #1a1208; }
+        .plan-state-badge.st-filled, .plan-state-badge.st-reentry_armed { background: var(--green); color: #0a140c; }
+        .plan-state-badge.st-stopped { background: var(--red); color: #1a0d0a; }
+        .plan-state-badge.st-done, .plan-state-badge.st-no_plan { background: var(--gray); color: #140d09; }
+        .plan-state-detail { color: var(--white); font-size: 13px; }
+        .plan-state-reason { color: #b8a68f; font-size: 12px; margin-top: 8px; }
+        .plan-state-asof { color: #6b5a47; font-size: 11px; margin-top: 6px; }
+
         .radar-grid { display: grid; gap: 12px; }
 
         /* ================================================================
@@ -368,6 +387,16 @@
             <div style="display: flex; align-items: center;">
                 <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
             </div>
+        </div>
+
+        <div id="planStatePanel" class="plan-state-panel">
+            <div class="plan-state-row">
+                <span style="color:#6b5a47; font-size:11px; text-transform:uppercase; letter-spacing:1px;">Trade Plan</span>
+                <span id="planStateBadge" class="plan-state-badge"></span>
+                <span id="planStateDetail" class="plan-state-detail"></span>
+            </div>
+            <div id="planStateReason" class="plan-state-reason"></div>
+            <div id="planStateAsOf" class="plan-state-asof"></div>
         </div>
 
         <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">
@@ -1318,8 +1347,61 @@
             }
         }
 
+        // ================================================================
+        // TRADE PLAN LIVE STATE (2026-09-01 -- radar/email parity)
+        // Polls GET /api/admin/trade-plan-status independently of
+        // forceScan() above -- that button-driven flow only fires once on
+        // load (or on manual click), which is exactly the "radar shows one
+        // thing, email says another" gap Andy flagged. This panel is the
+        // SAME state the email is built from (trade_plan_engine.py's real,
+        // stateful, one-way transitions), not a second independent gate
+        // read: /api/radar/scan recomputes the gate fresh with NO memory of
+        // a cross that already happened and retraced -- exactly the kind
+        // of round-trip that made day 3 confusing. Admin-session only
+        // (same as the endpoint itself); a 403 just hides the panel rather
+        // than erroring, since a non-admin viewer was never going to see
+        // TradePlan detail anyway.
+        // ================================================================
+        function renderPlanState(row) {
+            const panel = document.getElementById('planStatePanel');
+            if (!row) { panel.style.display = 'none'; return; }
+
+            const badge = document.getElementById('planStateBadge');
+            badge.textContent = row.status;
+            badge.className = 'plan-state-badge st-' + row.status.toLowerCase();
+
+            const bits = [];
+            if (row.direction) bits.push(row.direction);
+            if (row.tier) bits.push(row.tier);
+            if (row.trigger_price) bits.push('@ ' + Number(row.trigger_price).toLocaleString(undefined, {maximumFractionDigits: 2}));
+            document.getElementById('planStateDetail').textContent = bits.join(' · ');
+
+            document.getElementById('planStateReason').textContent = row.last_transition_reason || '';
+
+            const staleness = row.seconds_since_update != null ? Math.round(row.seconds_since_update) + 's ago' : 'unknown';
+            document.getElementById('planStateAsOf').textContent =
+                'live · updated ' + staleness + (row.cross_time ? ' · cross ' + new Date(row.cross_time).toLocaleTimeString() : '');
+
+            panel.style.display = 'block';
+        }
+
+        async function pollPlanState() {
+            try {
+                const data = await fetch('/api/admin/trade-plan-status').then(r => r.ok ? r.json() : null);
+                if (!data || !data.ok || !data.rows || !data.rows.length) {
+                    document.getElementById('planStatePanel').style.display = 'none';
+                    return;
+                }
+                renderPlanState(data.rows[0]);
+            } catch (e) {
+                console.warn('[RADAR] Trade Plan live-state poll failed:', e);
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             forceScan();
+            pollPlanState();
+            setInterval(pollPlanState, 45000);
         });
     </script>
 </body>
