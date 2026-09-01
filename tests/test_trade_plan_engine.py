@@ -21,14 +21,18 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import asyncio
 import datetime as dt
+import json
 from datetime import timezone, timedelta
 
 import pytest
 
 import database
-from database import SessionLocal, TradePlan, CampaignLog
+from database import SessionLocal, TradePlan, CampaignLog, SessionLock
 import trade_plan_engine as tpe
 import notify
+import market_regime
+import micro_regime
+import htf_fuel
 
 
 def _clean_db_files():
@@ -161,6 +165,9 @@ def poll_env(monkeypatch):
         async def fake_4h(symbol, limit=100):
             return candles_4h_by_symbol.get(symbol, [])
 
+        async def fake_15m(symbol, limit=300):
+            return candles_5m_by_symbol.get(symbol, [])  # reuse the 5m fixture data -- content doesn't matter for these tests
+
         async def fake_daily(symbol, limit=60):
             return []  # unused directly -- fake_atr below controls the value tier-stamping sees
 
@@ -175,6 +182,7 @@ def poll_env(monkeypatch):
                 raise _StopLoop()
 
         monkeypatch.setattr(tpe.market_data, "fetch_live_5m", fake_5m)
+        monkeypatch.setattr(tpe.market_data, "fetch_live_15m", fake_15m)
         monkeypatch.setattr(tpe.market_data, "fetch_live_1h", fake_1h)
         monkeypatch.setattr(tpe.market_data, "fetch_live_4h", fake_4h)
         monkeypatch.setattr(tpe.market_data, "fetch_live_daily", fake_daily)
@@ -196,14 +204,33 @@ def poll_env(monkeypatch):
         db.close()
         return row
 
+    def make_lock(symbol="BTC/USDT", date_key=None, session_id="us_ny_futures", levels=None):
+        # 2026-09-01 P0 follow-up: _enrich_opposite_break_with_full_gate()
+        # reads the real SessionLock row for the locked levels, same as
+        # DeepSeek's own incident reconstruction and market_radar.py's
+        # live dossier.
+        date_key = date_key or DEFAULT_DATE_KEY
+        db = SessionLocal()
+        db.query(SessionLock).filter(
+            SessionLock.symbol == symbol, SessionLock.session_id == session_id, SessionLock.date_key == date_key,
+        ).delete()
+        row = SessionLock(
+            symbol=symbol, session_id=session_id, date_key=date_key, lock_time=0,
+            packet_data=json.dumps({"levels": levels or {}}),
+        )
+        db.add(row)
+        db.commit()
+        db.close()
+
     yield {
         "now": now, "make_plan": make_plan, "make_campaign": make_campaign,
-        "run_polls": run_polls, "get_plan": get_plan,
+        "make_lock": make_lock, "run_polls": run_polls, "get_plan": get_plan,
     }
 
     db = SessionLocal()
     db.query(TradePlan).delete()
     db.query(CampaignLog).delete()
+    db.query(SessionLock).delete()
     db.commit()
     db.close()
     _clean_db_files()
@@ -291,7 +318,9 @@ def test_filled_t1_reached_sends_done_email_via_loop(poll_env, monkeypatch):
 def test_waiting_opposite_side_break_sends_done_email_via_loop(poll_env, monkeypatch):
     # P0 regression, real loop: a LONG-anticipated plan must detect (and
     # notify on) a real break through the OPPOSITE trigger, not sit
-    # WAITING forever with zero signal.
+    # WAITING forever with zero signal. No SessionLock row exists for this
+    # test -- the full-gate enrichment below can't run without one, so
+    # this specifically exercises the plain fallback path.
     sent = _capture_emails(monkeypatch)
     poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0, t2=110.0)
     candles = [{"close": 85.0, "volume": 10.0} for _ in range(30)]  # opposite (SHORT) trigger = 90, broken
@@ -302,6 +331,37 @@ def test_waiting_opposite_side_break_sends_done_email_via_loop(poll_env, monkeyp
     assert "OPPOSITE trigger" in row.last_transition_reason
     assert len(sent) == 1
     assert sent[0][0].startswith("KABRODA DONE")
+
+
+def test_waiting_opposite_side_break_full_gate_sends_vetoed_email_via_loop(poll_env, monkeypatch):
+    # 2026-09-01 P0 follow-up: with a real SessionLock available, the
+    # opposite-break enrichment runs the ACTUAL, unmodified gate and Andy
+    # gets the real verdict -- reproducing the incident's own resolution
+    # (a confirmed counter-trend veto, not a missed trade).
+    sent = _capture_emails(monkeypatch)
+    monkeypatch.setattr(market_regime, "classify_market_regime", lambda candles: {
+        "table": "TRENDING_UP", "quality": "GOOD", "policy": {"bias": "UP"},
+    })
+    monkeypatch.setattr(micro_regime, "classify_regime", lambda candles: {"regime": "TRENDING"})
+    monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BEARISH", "trend_4h": "NEUTRAL", "aligned": 0, "opposed": 1,
+    })
+
+    poll_env["make_lock"](levels={
+        "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
+        "range30m_high": 100.0, "range30m_low": 90.0,
+    })
+    poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0, t2=110.0)
+    candles = [{"close": 85.0, "volume": 10.0} for _ in range(30)]  # closes below BD=90 -> real side=SHORT
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "DONE"
+    assert "full gate ran" in row.last_transition_reason
+    assert "counter-trend" in row.last_transition_reason.lower() or "UP daily trend" in row.last_transition_reason
+    assert len(sent) == 1
+    assert sent[0][0].startswith("KABRODA VETOED")
+    assert "SHORT" in sent[0][0]
 
 
 def test_waiting_fueled_cross_fills_via_loop(poll_env):

@@ -89,6 +89,22 @@ def test_done_email_no_trade_today():
     assert "no trade today" in subject
 
 
+def test_done_email_opposite_break_is_framed_as_vetoed():
+    # 2026-09-01 P0 follow-up: an opposite-trigger break with a full-gate
+    # verdict attached must read as the VETOED call it actually is, not a
+    # generic "nothing happened" DONE.
+    plan = _plan(
+        "DONE", direction="LONG",
+        last_transition_reason="opposite side crossed -- full gate ran: SHORT against a UP daily trend on a good table.",
+        opposite_side="SHORT", opposite_trigger=77751.2, gate_headline="SHORT against a UP daily trend...",
+    )
+    subject, body = tpn.build_done_email(plan)
+    assert subject == "KABRODA VETOED - BTCUSDT SHORT @ 77751 - counter-trend"
+    assert "full gate ran" in body
+    assert "anticipated side (LONG)" in body
+    assert "Plan ID: 42" in body
+
+
 # ------------------------------------------------------------------ notification_for_transition dispatch
 
 def test_dispatch_fills_to_armed():

@@ -97,10 +97,36 @@ def build_vetoed_email(plan: Dict[str, Any]) -> Tuple[str, str]:
 
 def build_done_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     symbol = _symbol_compact(plan.get("symbol", ""))
+    reason = plan.get("last_transition_reason") or "session complete"
+
+    # 2026-09-01 P0 follow-up (Kabroda AI Brain AGENT_LOG.md, "CC's dual-
+    # sided question answered from the corpus: track BOTH triggers"): a
+    # break through the OPPOSITE (untradeable) trigger still resolves to
+    # DONE (one plan per session, only the anticipated side is tradeable
+    # -- the veto stays), but trade_plan_engine.py's opposite-break
+    # enrichment attaches the REAL full-gate verdict as transient row
+    # attributes (never persisted -- see _enrich_opposite_break_with_
+    # full_gate()'s own docstring). When present, this is framed as the
+    # VETOED-style call it actually is, not a bare "nothing happened"
+    # DONE -- the whole point of this fix is Andy getting the message the
+    # gate actually produced.
+    opposite_side = plan.get("opposite_side")
+    if opposite_side:
+        opposite_trigger = plan.get("opposite_trigger")
+        trig_str = f"{opposite_trigger:.0f}" if opposite_trigger else "?"
+        subject = f"KABRODA VETOED - {symbol} {opposite_side} @ {trig_str} - counter-trend"
+        body = (
+            f"The opposite side crossed and the full gate ran on it -- {reason}.\n\n"
+            f"This system only trades the anticipated side ({plan.get('direction')}); "
+            f"the veto on {opposite_side} stands, same as it would have if this had "
+            f"been the anticipated side from the start.\n\n"
+            f"  Plan ID: {plan.get('id')}"
+        )
+        return subject, body
+
     direction = plan.get("direction")
     label = f"{direction} traded" if direction else "no trade today"
     subject = f"KABRODA DONE - {symbol} - {label}"
-    reason = plan.get("last_transition_reason") or "session complete"
     body = f"Session complete -- {reason}.\n\n  Plan ID: {plan.get('id')}"
     return subject, body
 

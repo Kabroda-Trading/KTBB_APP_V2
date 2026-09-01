@@ -44,9 +44,11 @@
 # ==============================================================================
 
 import asyncio
+import json
 from datetime import datetime, timezone
+from typing import Optional
 
-from database import SessionLocal, TradePlan, CampaignLog
+from database import SessionLocal, TradePlan, CampaignLog, SessionLock
 import fuel_gate
 import trade_plan as tp
 import market_data
@@ -62,6 +64,78 @@ def _as_utc(dt):
     if dt is None:
         return None
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+async def _enrich_opposite_break_with_full_gate(db, row: TradePlan) -> Optional[dict]:
+    """2026-09-01 P0 follow-up (Kabroda AI Brain repo AGENT_LOG.md, 'CC's
+    dual-sided question answered from the corpus: track BOTH triggers'):
+    advance_waiting_plan()'s interim opposite-break detection only
+    reports THAT the untracked trigger broke, not what the validated gate
+    actually says about it. DeepSeek's corpus-backed recommendation: track
+    both triggers for DETECTION, run the FULL gate on whichever breaks,
+    and send the honest verdict -- not just 'wrong side, no plan.' Reuses
+    decision_engine.evaluate_15m_decision() directly against the
+    SessionLock's own locked levels (the SAME real, unmodified gate,
+    never a second implementation) -- exactly how DeepSeek's own
+    reconstruction was done and how market_radar._build_dossier()
+    already evaluates live crosses elsewhere in this codebase.
+
+    Returns a dict of EXTRA fields (reason/opposite_side/opposite_trigger/
+    gate_headline) for the caller to fold into `updates` before _apply()
+    -- these are NOT TradePlan columns, so _apply()'s setattr() makes them
+    transient, in-memory-only attributes on `row` (never persisted, never
+    written by db.commit()), visible to trade_plan_notify.py's builders
+    via row.__dict__ for THIS poll's notification only. Best-effort:
+    returns None on any failure or missing data, leaving the plain
+    fallback text advance_waiting_plan() already set.
+    """
+    lock = (
+        db.query(SessionLock)
+        .filter(
+            SessionLock.symbol == row.symbol,
+            SessionLock.session_id == row.session_id,
+            SessionLock.date_key == row.date_key,
+        )
+        .first()
+    )
+    if lock is None:
+        return None
+    try:
+        levels = dict(json.loads(lock.packet_data).get("levels", {}))
+    except Exception:
+        return None
+
+    candles_5m, candles_15m, candles_1h, candles_4h, candles_1d = await asyncio.gather(
+        market_data.fetch_live_5m(row.symbol, limit=400),
+        market_data.fetch_live_15m(row.symbol, limit=300),
+        market_data.fetch_live_1h(row.symbol, limit=100),
+        market_data.fetch_live_4h(row.symbol, limit=100),
+        market_data.fetch_live_daily(row.symbol, limit=60),
+    )
+    if not candles_5m:
+        return None
+
+    levels["daily_atr14"] = market_data._calc_daily_atr14(candles_1d)
+    levels["price"] = float(candles_5m[-1]["close"])
+
+    import decision_engine
+    decision, _gauges = decision_engine.evaluate_15m_decision(
+        levels=levels, confluence_15m=None,
+        candles_5m=candles_5m, candles_15m=candles_15m,
+        candles_1h=candles_1h, candles_4h=candles_4h, candles_1d=candles_1d,
+        session_hour_utc=datetime.now(timezone.utc).hour,
+    )
+    headline = decision.get("tactical_brief")
+    opposite_side = decision.get("side")
+    if not headline or not opposite_side:
+        return None
+
+    return {
+        "last_transition_reason": f"opposite side crossed -- full gate ran: {headline}",
+        "opposite_side": opposite_side,
+        "opposite_trigger": levels.get("breakout_trigger") if opposite_side == "LONG" else levels.get("breakdown_trigger"),
+        "gate_headline": headline,
+    }
 
 
 async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
@@ -98,6 +172,13 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
             plan_dict, now_utc, session_expires_at, candles_5m, live_price,
             candles_1h=candles_1h, candles_4h=candles_4h, daily_atr14=daily_atr14,
         )
+        if updates and updates.get("status") == "DONE" and "OPPOSITE trigger" in (updates.get("last_transition_reason") or ""):
+            try:
+                enrichment = await _enrich_opposite_break_with_full_gate(db, row)
+                if enrichment:
+                    updates.update(enrichment)
+            except Exception as _enrich_err:
+                print(f"|| TRADE PLAN || Opposite-break enrichment failed for {symbol}: {_enrich_err}")
         _apply(row, updates, symbol)
 
     elif row.status == "REENTRY_ARMED":
