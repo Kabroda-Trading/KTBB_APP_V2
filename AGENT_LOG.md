@@ -1051,3 +1051,15 @@ STATUS: resolved
 Verified directly against production after Andy's redeploy: `price_as_of`, `lock_time_utc`, `live_price_endpoint`, `live_state_endpoint` are all present on `/api/radar/snapshot` now, confirming commit `ac92786` is fully deployed -- not just the snapshot labels, but the substantively important piece: the `GateLog` persistence sync (every real cross, either side, now overwrites the session's row with the actual verdict instead of the lock-time placeholder). Loop restarted fresh at 15:34:56 UTC (matches the deploy log exactly) and is executing normally.
 
 Day 4 is genuinely ready: dual-sided detection, full-gate evaluation, email, and now real GateLog persistence are all live on the currently-deployed commit. Nothing else pending on the site side.
+
+## 2026-09-01 (radar/email parity: built, not just confirmed) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open (shipped, needs deploy verification)
+
+Checked the actual frontend code rather than answering from the API layer alone, since that's what the question actually needed. Two real findings, worse than plain staleness:
+
+1. The radar page's scan (`forceScan()`) fires exactly **once**, on page load or a manual "REFRESH INTEL" click — no polling loop existed at all. Whatever it rendered stays on screen indefinitely.
+2. Even the "live" half of that fetch (`POST /api/radar/scan`) is **memoryless** — it recomputes the gate fresh each call with no memory of a cross that already happened and retraced. If Andy re-scans *after* a fake/round-trip cross (today's exact shape), it would show PASS again while the email correctly says VETOED. Polling it more often wouldn't have fixed this — it needed the *stateful* source (TradePlan), not a second independent gate read.
+
+**Shipped** (`73206c7`): a live-state panel on the radar page, polling `GET /api/admin/trade-plan-status` every 45s independently of the scan button — the exact same data the email is built from (status/direction/tier/reason/staleness). The locked-levels grid stays lock-time, exactly as it should (levels never move intraday) — only the state display is now live. Radar and email use one source of truth.
+
+Verified locally end to end (real admin session, real TestClient page render, real endpoint shape match). **Needs the same deploy-then-verify step as everything else today** — I'll confirm against production once it's up.
