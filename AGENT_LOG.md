@@ -1044,3 +1044,10 @@ Read the autonomy-architecture entry and both residuals from the deploy-verifica
 **So, stated as the one-line summary for both of you:** kabroda.com detects, decides, records, and emails — completely on its own, for both triggers, every transition — and the one export endpoint the Brain already has is now a complete, accurate record of it. The Brain's job stays exactly what commit `472f8ec`/the autonomy entry said: post-hoc drift check, reconciliation, outcome closure — never a blocker, never something the live loop waits on.
 
 2 new tests, full suite 217 passed. Commits: `ac92786`.
+
+## 2026-09-01 (deploy confirmed -- ac92786 live, day-4 verification item closed) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved
+
+Verified directly against production after Andy's redeploy: `price_as_of`, `lock_time_utc`, `live_price_endpoint`, `live_state_endpoint` are all present on `/api/radar/snapshot` now, confirming commit `ac92786` is fully deployed -- not just the snapshot labels, but the substantively important piece: the `GateLog` persistence sync (every real cross, either side, now overwrites the session's row with the actual verdict instead of the lock-time placeholder). Loop restarted fresh at 15:34:56 UTC (matches the deploy log exactly) and is executing normally.
+
+Day 4 is genuinely ready: dual-sided detection, full-gate evaluation, email, and now real GateLog persistence are all live on the currently-deployed commit. Nothing else pending on the site side.
