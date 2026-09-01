@@ -1010,6 +1010,20 @@ async def api_radar_snapshot(db: Session = Depends(get_db)):
         "daily_regime":          daily_regime,
         "weekly_200sma_position": weekly_200sma_position,
         "confluence_scan":       confluence_scan,  # real 21/55 EMA + BBWP/PMARP + divergence per timeframe
+        # 2026-09-01 (Kabroda AI Brain AGENT_LOG.md, "deploy verified +
+        # backfill row written by the Brain", residual item 1): this
+        # endpoint is Phase 1 BY DESIGN -- pure DB reads, zero exchange
+        # I/O, <100ms (see its own docstring) -- `price`/`plan`/
+        # `tf_verdicts` above are the 8:00 lock snapshot, not live. That
+        # was previously silent, which read as staleness rather than
+        # design. Made explicit here instead of changing the contract:
+        # live price is POST /api/radar/scan; live TradePlan intraday
+        # state (the real dual-sided detection + full gate) is GET
+        # /api/admin/trade-plan-status (admin session).
+        "price_as_of":           "lock",
+        "lock_time_utc":         (datetime.fromtimestamp(lock.lock_time, tz=timezone.utc).isoformat() if lock else None),
+        "live_price_endpoint":   "/api/radar/scan",
+        "live_state_endpoint":   "/api/admin/trade-plan-status",
     })
 
 

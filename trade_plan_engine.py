@@ -66,28 +66,17 @@ def _as_utc(dt):
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
-async def _enrich_opposite_break_with_full_gate(db, row: TradePlan) -> Optional[dict]:
-    """2026-09-01 P0 follow-up (Kabroda AI Brain repo AGENT_LOG.md, 'CC's
-    dual-sided question answered from the corpus: track BOTH triggers'):
-    advance_waiting_plan()'s interim opposite-break detection only
-    reports THAT the untracked trigger broke, not what the validated gate
-    actually says about it. DeepSeek's corpus-backed recommendation: track
-    both triggers for DETECTION, run the FULL gate on whichever breaks,
-    and send the honest verdict -- not just 'wrong side, no plan.' Reuses
-    decision_engine.evaluate_15m_decision() directly against the
-    SessionLock's own locked levels (the SAME real, unmodified gate,
-    never a second implementation) -- exactly how DeepSeek's own
-    reconstruction was done and how market_radar._build_dossier()
-    already evaluates live crosses elsewhere in this codebase.
+async def _run_full_gate(db, row: TradePlan) -> Optional[dict]:
+    """Runs the REAL, unmodified decision_engine.evaluate_15m_decision()
+    against the SessionLock's own locked levels + fresh candles -- exactly
+    how DeepSeek's own incident reconstruction was done and how market_
+    radar._build_dossier() already evaluates live crosses elsewhere.
+    Shared by both call sites that need a full-gate read intraday (the
+    opposite-break enrichment, and the anticipated side's own cross) so
+    there is one real implementation, not two.
 
-    Returns a dict of EXTRA fields (reason/opposite_side/opposite_trigger/
-    gate_headline) for the caller to fold into `updates` before _apply()
-    -- these are NOT TradePlan columns, so _apply()'s setattr() makes them
-    transient, in-memory-only attributes on `row` (never persisted, never
-    written by db.commit()), visible to trade_plan_notify.py's builders
-    via row.__dict__ for THIS poll's notification only. Best-effort:
-    returns None on any failure or missing data, leaving the plain
-    fallback text advance_waiting_plan() already set.
+    Returns {"decision": ..., "levels": ...} or None on any failure/
+    missing data (no SessionLock, no candles). Never raises.
     """
     lock = (
         db.query(SessionLock)
@@ -125,10 +114,42 @@ async def _enrich_opposite_break_with_full_gate(db, row: TradePlan) -> Optional[
         candles_1h=candles_1h, candles_4h=candles_4h, candles_1d=candles_1d,
         session_hour_utc=datetime.now(timezone.utc).hour,
     )
+    return {"decision": decision, "levels": levels}
+
+
+async def _enrich_opposite_break_with_full_gate(db, row: TradePlan) -> Optional[dict]:
+    """2026-09-01 P0 follow-up (Kabroda AI Brain repo AGENT_LOG.md, 'CC's
+    dual-sided question answered from the corpus: track BOTH triggers'):
+    advance_waiting_plan()'s interim opposite-break detection only
+    reports THAT the untracked trigger broke, not what the validated gate
+    actually says about it. DeepSeek's corpus-backed recommendation: track
+    both triggers for DETECTION, run the FULL gate on whichever breaks,
+    and send the honest verdict -- not just 'wrong side, no plan.'
+
+    Returns a dict of EXTRA fields (reason/opposite_side/opposite_trigger/
+    gate_headline) for the caller to fold into `updates` before _apply()
+    -- these are NOT TradePlan columns, so _apply()'s setattr() makes them
+    transient, in-memory-only attributes on `row` (never persisted, never
+    written by db.commit()), visible to trade_plan_notify.py's builders
+    via row.__dict__ for THIS poll's notification only. Best-effort:
+    returns None on any failure or missing data, leaving the plain
+    fallback text advance_waiting_plan() already set. Also persists the
+    real verdict to GateLog -- see _persist_verdict_to_gate_log()'s own
+    docstring for why.
+    """
+    result = await _run_full_gate(db, row)
+    if result is None:
+        return None
+    decision, levels = result["decision"], result["levels"]
     headline = decision.get("tactical_brief")
     opposite_side = decision.get("side")
     if not headline or not opposite_side:
         return None
+
+    try:
+        _persist_verdict_to_gate_log(db, row, decision)
+    except Exception as _persist_err:
+        print(f"|| TRADE PLAN || GateLog persist failed for {row.symbol}: {_persist_err}")
 
     return {
         "last_transition_reason": f"opposite side crossed -- full gate ran: {headline}",
@@ -136,6 +157,85 @@ async def _enrich_opposite_break_with_full_gate(db, row: TradePlan) -> Optional[
         "opposite_trigger": levels.get("breakout_trigger") if opposite_side == "LONG" else levels.get("breakdown_trigger"),
         "gate_headline": headline,
     }
+
+
+async def _sync_gate_log_for_own_cross(db, row: TradePlan) -> None:
+    """The anticipated side's own cross (WAITING/VETOED -> FILLED/VETOED/
+    DONE, advance_waiting_plan()'s normal path) has the SAME gap the
+    opposite-break enrichment above fixes: GateLog's row was written once,
+    at lock, before any cross -- so even a real, correctly-ARMED trade
+    left GateLog frozen at 'PASS, no cross yet' forever. DeepSeek's
+    steady-state expectation ('the site's own row IS the verdict row...
+    written at each transition: lock -> cross -> full gate -> ARMED/
+    VETOED/DONE -> email') covers this path too, not just the opposite-
+    side one. Best-effort, non-blocking -- a sync failure here must never
+    affect the real TradePlan transition or its email, both already
+    applied by the time this runs.
+    """
+    try:
+        result = await _run_full_gate(db, row)
+        if result is None:
+            return
+        _persist_verdict_to_gate_log(db, row, result["decision"])
+    except Exception as _sync_err:
+        print(f"|| TRADE PLAN || GateLog sync failed for {row.symbol}: {_sync_err}")
+
+
+def _persist_verdict_to_gate_log(db, row: TradePlan, decision: dict) -> None:
+    """Writes the REAL, now-known verdict into today's GateLog row --
+    replacing its lock-time PASS placeholder (no cross had happened yet
+    at the 8:00 lock) with what actually happened. Without this, the
+    dual-sided detection's full-gate call (2026-09-01 P0 follow-up)
+    produced an accurate email but no persistent record: the Brain's
+    forward-test log (pulled via GET /api/export/gate-log.csv) would
+    still show a stale PASS for a session that was actually a real,
+    detected, correctly-vetoed cross. Matches exactly what DeepSeek's own
+    manual backfill recorded for day 3 (AGENT_LOG.md, 'deploy verified +
+    backfill row written by the Brain') -- this makes day 4 onward self-
+    sufficient, no manual reconstruction needed ('steady-state row
+    ownership clarified for Andy': "the site's own row IS the verdict
+    row"). Field-for-field, this mirrors kabroda_mas_flow.py's own
+    _inject_gate_log() mapping -- not a second, possibly-drifting
+    implementation of what a decision_dict means.
+    """
+    from database import GateLog
+    gate_row = (
+        db.query(GateLog)
+        .filter(GateLog.symbol == row.symbol, GateLog.date_key == row.date_key)
+        .order_by(GateLog.id.desc())
+        .first()
+    )
+    if gate_row is None:
+        return
+
+    gate = decision.get("gate") or {}
+    plan = decision.get("plan") or {}
+    misses = gate.get("misses") or []
+
+    gate_row.state = decision.get("verdict_state")
+    gate_row.side = decision.get("side")
+    gate_row.headline = decision.get("tactical_brief")
+    gate_row.gate_pass = gate.get("pass")
+    gate_row.gate_tier = gate.get("tier")
+    gate_row.veto = misses[0][:200] if misses else None
+    gate_row.push_vol_ratio = decision.get("fuel_push_ratio")
+    gate_row.fuel_state = decision.get("fuel_verdict")
+    gate_row.trend_1h = decision.get("trend_1h")
+    gate_row.trend_4h = decision.get("trend_4h")
+    gate_row.htf_aligned = decision.get("htf_aligned")
+    gate_row.htf_opposed = decision.get("htf_opposed")
+    gate_row.daily_regime_table = decision.get("market_regime_table")
+    gate_row.daily_regime_quality = decision.get("market_regime_quality")
+    gate_row.micro_regime = decision.get("micro_regime")
+    gate_row.entry = plan.get("entry")
+    gate_row.stop = plan.get("stop")
+    gate_row.t1 = plan.get("t1")
+    gate_row.t2 = plan.get("t2")
+    gate_row.t3 = plan.get("t3")
+    gate_row.subtrig_stop = plan.get("subtrig_stop")
+    gate_row.trigger_hour_utc = datetime.now(timezone.utc).hour
+    gate_row.gate_detail_json = json.dumps(gate, default=str)
+    print(f"|| TRADE PLAN || GateLog row synced with real cross verdict: {row.symbol} {row.date_key} -> {gate_row.state}")
 
 
 async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
@@ -173,12 +273,23 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
             candles_1h=candles_1h, candles_4h=candles_4h, daily_atr14=daily_atr14,
         )
         if updates and updates.get("status") == "DONE" and "OPPOSITE trigger" in (updates.get("last_transition_reason") or ""):
+            # The untracked (opposite) trigger broke -- run the full gate
+            # on IT, and persist that verdict to GateLog.
             try:
                 enrichment = await _enrich_opposite_break_with_full_gate(db, row)
                 if enrichment:
                     updates.update(enrichment)
             except Exception as _enrich_err:
                 print(f"|| TRADE PLAN || Opposite-break enrichment failed for {symbol}: {_enrich_err}")
+        elif updates and "cross_time" in updates:
+            # The ANTICIPATED side crossed for real (FILLED or VETOED) --
+            # same GateLog staleness gap, opposite cause. Applied first so
+            # row.status/etc already reflect the real transition before
+            # this reads them; the sync itself never touches `updates`,
+            # so it can't affect the transition or its email.
+            _apply(row, updates, symbol)
+            await _sync_gate_log_for_own_cross(db, row)
+            return
         _apply(row, updates, symbol)
 
     elif row.status == "REENTRY_ARMED":

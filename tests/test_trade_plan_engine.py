@@ -27,7 +27,7 @@ from datetime import timezone, timedelta
 import pytest
 
 import database
-from database import SessionLocal, TradePlan, CampaignLog, SessionLock
+from database import SessionLocal, TradePlan, CampaignLog, SessionLock, GateLog
 import trade_plan_engine as tpe
 import notify
 import market_regime
@@ -222,15 +222,37 @@ def poll_env(monkeypatch):
         db.commit()
         db.close()
 
+    def make_gate_log(symbol="BTC/USDT", date_key=None, state="PASS", **kwargs):
+        date_key = date_key or DEFAULT_DATE_KEY
+        db = SessionLocal()
+        row = GateLog(symbol=symbol, date_key=date_key, state=state, **kwargs)
+        db.add(row)
+        db.commit()
+        db.close()
+
+    def get_gate_log(symbol="BTC/USDT", date_key=None):
+        date_key = date_key or DEFAULT_DATE_KEY
+        db = SessionLocal()
+        row = (
+            db.query(GateLog)
+            .filter(GateLog.symbol == symbol, GateLog.date_key == date_key)
+            .order_by(GateLog.id.desc())
+            .first()
+        )
+        db.close()
+        return row
+
     yield {
         "now": now, "make_plan": make_plan, "make_campaign": make_campaign,
-        "make_lock": make_lock, "run_polls": run_polls, "get_plan": get_plan,
+        "make_lock": make_lock, "make_gate_log": make_gate_log, "get_gate_log": get_gate_log,
+        "run_polls": run_polls, "get_plan": get_plan,
     }
 
     db = SessionLocal()
     db.query(TradePlan).delete()
     db.query(CampaignLog).delete()
     db.query(SessionLock).delete()
+    db.query(GateLog).delete()
     db.commit()
     db.close()
     _clean_db_files()
@@ -351,6 +373,7 @@ def test_waiting_opposite_side_break_full_gate_sends_vetoed_email_via_loop(poll_
         "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
         "range30m_high": 100.0, "range30m_low": 90.0,
     })
+    poll_env["make_gate_log"](state="PASS")  # the stale lock-time placeholder, must get overwritten
     poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0, t2=110.0)
     candles = [{"close": 85.0, "volume": 10.0} for _ in range(30)]  # closes below BD=90 -> real side=SHORT
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
@@ -362,6 +385,46 @@ def test_waiting_opposite_side_break_full_gate_sends_vetoed_email_via_loop(poll_
     assert len(sent) == 1
     assert sent[0][0].startswith("KABRODA VETOED")
     assert "SHORT" in sent[0][0]
+
+    # 2026-09-01 (steady-state row ownership): the Brain's forward-test
+    # log (GateLog, exported via /api/export/gate-log.csv) must reflect
+    # this real, detected verdict -- not stay frozen at the lock-time PASS.
+    gate_row = poll_env["get_gate_log"]()
+    assert gate_row.state == "PASS"  # decision_engine's own verdict_state for a vetoed cross
+    assert gate_row.side == "SHORT"
+    assert "counter-trend" in gate_row.headline.lower() or "UP daily trend" in gate_row.headline
+    assert gate_row.daily_regime_table == "TRENDING_UP"
+    assert gate_row.daily_regime_quality == "GOOD"
+
+
+def test_waiting_own_cross_syncs_gate_log_via_loop(poll_env, monkeypatch):
+    # The SAME staleness gap, opposite cause: the ANTICIPATED side's own
+    # cross (a real ARMED trade) must also overwrite the lock-time
+    # placeholder -- not just the opposite-break path.
+    monkeypatch.setattr(market_regime, "classify_market_regime", lambda candles: {
+        "table": "TRENDING_UP", "quality": "GOOD", "policy": {"bias": "UP"},
+    })
+    monkeypatch.setattr(micro_regime, "classify_regime", lambda candles: {"regime": "TRENDING"})
+    monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
+    })
+
+    poll_env["make_lock"](levels={
+        "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
+        "range30m_high": 100.0, "range30m_low": 90.0,
+    })
+    poll_env["make_gate_log"](state="PASS")
+    poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0, t2=110.0)
+    candles = _fueled_5m_candles(100.0, is_long=True)  # real fill on the anticipated (LONG) side
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "FILLED"
+
+    gate_row = poll_env["get_gate_log"]()
+    assert gate_row.side == "LONG"
+    assert gate_row.state in ("TAKE_PREMIUM", "TAKE_STANDARD", "ALMOST", "PASS")
+    assert gate_row.daily_regime_table == "TRENDING_UP"
 
 
 def test_waiting_fueled_cross_fills_via_loop(poll_env):
