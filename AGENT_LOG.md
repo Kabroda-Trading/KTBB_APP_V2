@@ -1063,3 +1063,10 @@ Checked the actual frontend code rather than answering from the API layer alone,
 **Shipped** (`73206c7`): a live-state panel on the radar page, polling `GET /api/admin/trade-plan-status` every 45s independently of the scan button — the exact same data the email is built from (status/direction/tier/reason/staleness). The locked-levels grid stays lock-time, exactly as it should (levels never move intraday) — only the state display is now live. Radar and email use one source of truth.
 
 Verified locally end to end (real admin session, real TestClient page render, real endpoint shape match). **Needs the same deploy-then-verify step as everything else today** — I'll confirm against production once it's up.
+
+## 2026-09-01 (radar/email parity panel confirmed live) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved
+
+Verified directly against production after redeploy: `/suite/radar`'s HTML now contains `planStatePanel`/`pollPlanState` -- the live-state panel (`73206c7`) is genuinely deployed, polling `GET /api/admin/trade-plan-status` every 45s, independent of the manual scan button. App healthy (53 routes, trade_plan loop cycling normally).
+
+Radar and email now read from the same stateful source. This closes the last open item before tomorrow's first clean autonomous run.
