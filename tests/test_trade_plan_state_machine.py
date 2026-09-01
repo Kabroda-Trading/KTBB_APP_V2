@@ -58,6 +58,60 @@ def test_advance_waiting_no_touch_returns_none():
     assert result is None
 
 
+# P0 regression (2026-09-01, confirmed live -- Kabroda AI Brain repo
+# AGENT_LOG.md "CONFIRMED P0: state machine missed a live cross"): a
+# LONG-anticipated plan (trend-aligned with a GOOD daily table) sat
+# WAITING forever, with zero detection, while price broke DOWN through
+# the OPPOSITE trigger (a real, confirmed 5m close below BD, per Andy's
+# own chart) -- a genuine counter-trend move the daily-bias heuristic
+# didn't anticipate. NO_PUSH on the LONG side was silently treated as
+# "nothing happened," when in fact the market had already moved through
+# the untracked side.
+
+def test_advance_waiting_detects_opposite_side_break_p0():
+    # trigger=100 (LONG, anticipated), t2=110 -> box=10 -> opposite
+    # (SHORT) trigger = 90. Price broke down to 85, well through 90 --
+    # candles never approach 100 at all (LONG side reads NO_PUSH).
+    plan = _plan(direction="LONG", trigger=100.0, t2=110.0)
+    candles = [{"close": 85.0, "volume": 10.0} for _ in range(30)]
+    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=85.0)
+    assert result is not None
+    assert result["status"] == "DONE"
+    assert "OPPOSITE trigger" in result["last_transition_reason"]
+    assert "90.00" in result["last_transition_reason"]
+    assert "SHORT" in result["last_transition_reason"]
+
+
+def test_advance_waiting_opposite_break_short_side():
+    # Mirror: SHORT-anticipated plan (trigger=90), t2=80 -> box=10 ->
+    # opposite (LONG) trigger = 100. Price broke UP to 105.
+    plan = _plan(direction="SHORT", trigger=90.0, t2=80.0)
+    candles = [{"close": 105.0, "volume": 10.0} for _ in range(30)]
+    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=105.0)
+    assert result["status"] == "DONE"
+    assert "OPPOSITE trigger" in result["last_transition_reason"]
+    assert "100.00" in result["last_transition_reason"]
+    assert "LONG" in result["last_transition_reason"]
+
+
+def test_advance_waiting_neither_side_touched_still_returns_none():
+    # Sanity: genuinely no movement on either side must still return None,
+    # not be swept up by the new opposite-side check.
+    plan = _plan(direction="LONG", trigger=100.0, t2=110.0)
+    candles = [{"close": 95.0, "volume": 10.0} for _ in range(30)]  # between 90 and 100
+    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=95.0)
+    assert result is None
+
+
+def test_advance_waiting_opposite_check_safe_without_t2():
+    # A plan missing t2 (shouldn't happen on a real row, but must not
+    # crash) -- falls back to the original None-on-NO_PUSH behavior.
+    plan = _plan(direction="LONG", trigger=100.0)  # no t2
+    candles = [{"close": 85.0, "volume": 10.0} for _ in range(30)]
+    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=85.0)
+    assert result is None
+
+
 def test_advance_waiting_fueled_cross_fills():
     plan = _plan(direction="LONG", trigger=100.0)
     candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)  # ratio 1.0 -> FUELED

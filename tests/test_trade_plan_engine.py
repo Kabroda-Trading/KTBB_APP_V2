@@ -288,6 +288,22 @@ def test_filled_t1_reached_sends_done_email_via_loop(poll_env, monkeypatch):
     assert sent[0][0].startswith("KABRODA DONE")
 
 
+def test_waiting_opposite_side_break_sends_done_email_via_loop(poll_env, monkeypatch):
+    # P0 regression, real loop: a LONG-anticipated plan must detect (and
+    # notify on) a real break through the OPPOSITE trigger, not sit
+    # WAITING forever with zero signal.
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0, t2=110.0)
+    candles = [{"close": 85.0, "volume": 10.0} for _ in range(30)]  # opposite (SHORT) trigger = 90, broken
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "DONE"
+    assert "OPPOSITE trigger" in row.last_transition_reason
+    assert len(sent) == 1
+    assert sent[0][0].startswith("KABRODA DONE")
+
+
 def test_waiting_fueled_cross_fills_via_loop(poll_env):
     poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0)
     candles = _fueled_5m_candles(100.0, is_long=True)

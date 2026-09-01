@@ -492,7 +492,34 @@ def advance_waiting_plan(
     verdict = fuel.get("verdict")
 
     if verdict == "NO_PUSH":
-        return None  # not touched yet
+        # P0 FIX (2026-09-01, confirmed live -- Kabroda AI Brain repo
+        # AGENT_LOG.md "CONFIRMED P0: state machine missed a live cross"):
+        # NO_PUSH on the anticipated side does NOT mean nothing happened --
+        # anticipate_setup() picks ONE direction at lock (e.g. trend-
+        # aligned with a GOOD daily table), but price can break the
+        # OPPOSITE trigger instead (a genuine counter-trend move --
+        # decision_engine.py's own counter-trend veto treats this as a
+        # real, expected scenario, not noise). Without this check the
+        # plan sat WAITING forever while price moved 200+ points through
+        # the other trigger with zero detection, no email, nothing.
+        # box is derivable from already-known fields (t2 = trigger +/-
+        # 1.0*box) -- no new field needed to reconstruct the untaken side.
+        trigger_price, t2 = plan.get("trigger_price"), plan.get("t2")
+        if trigger_price is not None and t2 is not None:
+            box = abs(t2 - trigger_price)
+            opposite_trigger = trigger_price - box if is_long else trigger_price + box
+            opposite_side = "SHORT" if is_long else "LONG"
+            opposite_beyond = (live_price < opposite_trigger) if is_long else (live_price > opposite_trigger)
+            if opposite_beyond:
+                return {
+                    "status": "DONE",
+                    "last_transition_reason": (
+                        f"price broke the OPPOSITE trigger ({opposite_trigger:,.2f}) -- "
+                        f"counter to the anticipated {side}; this plan only covers "
+                        f"{side}, no plan exists for the {opposite_side} side today"
+                    ),
+                }
+        return None  # not touched on either side yet
 
     updates: Dict[str, Any] = {"cross_time": now_utc, "fuel_at_cross": verdict}
 
