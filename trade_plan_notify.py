@@ -85,7 +85,7 @@ def build_lock_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     # too (trade_plan_engine.py), and a later real cross that clears the
     # FULL gate (including the counter-trend veto) promotes straight to
     # FILLED and sends the normal ARMED email -- see trade_plan.py's
-    # promote_no_plan_on_real_cross(). So this copy must NOT claim silence
+    # advance_no_plan(). So this copy must NOT claim silence
     # is guaranteed (that was true, and tested, before this decision -- see
     # the AGENT_LOG.md entry this replaces). If nothing ever crosses, the
     # session ends with NO further email (notification_for_transition()
@@ -164,6 +164,25 @@ def build_done_email(plan: Dict[str, Any]) -> Tuple[str, str]:
         )
         return subject, body
 
+    # 2026-09-02 (Andy's poll-routing decision, exact contract per Kabroda
+    # AI Brain AGENT_LOG.md 15:45/15:50 CT): a NO_PLAN row's later real
+    # cross that the full gate declines resolves to DONE (trade_plan.py's
+    # advance_no_plan(), "no repeated attempts") but must still read as
+    # the VETOED call it is -- same reasoning as the opposite_side branch
+    # above, different shape (there was no anticipated side to be
+    # "opposite" of; this row never anticipated a direction at all).
+    vetoed_cross_side = plan.get("vetoed_cross_side")
+    if vetoed_cross_side:
+        vetoed_cross_trigger = plan.get("vetoed_cross_trigger")
+        trig_str = f"{vetoed_cross_trigger:.0f}" if vetoed_cross_trigger else "?"
+        subject = f"KABRODA VETOED - {symbol} {vetoed_cross_side} @ {trig_str} - stand down"
+        body = (
+            f"A cross happened and the full gate ran on it -- {reason}.\n\n"
+            f"No trade today; this was the only cross evaluated this session.\n\n"
+            f"  Plan ID: {plan.get('id')}"
+        )
+        return subject, body
+
     direction = plan.get("direction")
     label = f"{direction} traded" if direction else "no trade today"
     subject = f"KABRODA DONE - {symbol} - {label}"
@@ -185,7 +204,7 @@ def notification_for_transition(prev_status: str, plan: Dict[str, Any]) -> Optio
     if status == "VETOED":
         return build_vetoed_email(plan)
     if status == "DONE":
-        if prev_status == "NO_PLAN":
+        if prev_status == "NO_PLAN" and not plan.get("vetoed_cross_side"):
             # 2026-09-02 poll-routing decision: a NO_PLAN row that never
             # gets a real cross transitions to DONE at session expiry
             # (trade_plan_engine.py) purely so it stops being polled
@@ -194,7 +213,11 @@ def notification_for_transition(prev_status: str, plan: Dict[str, Any]) -> Optio
             # "silence means this held for the session"; a second "no
             # trade today" email here would contradict that promise and
             # be pure spam, the exact anti-spam violation this module
-            # exists to prevent.
+            # exists to prevent. The `vetoed_cross_side` exception is a
+            # DIFFERENT NO_PLAN->DONE transition -- a real cross happened
+            # and the full gate declined it, which per the agreed contract
+            # (Kabroda AI Brain AGENT_LOG.md, 15:45/15:50 CT) IS a required
+            # email ("fail -> VETOED + email with reason"), not silence.
             return None
         return build_done_email(plan)
     return None

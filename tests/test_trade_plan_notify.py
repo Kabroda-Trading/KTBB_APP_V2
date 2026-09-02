@@ -140,6 +140,24 @@ def test_done_email_opposite_break_is_framed_as_vetoed():
     assert "Plan ID: 42" in body
 
 
+def test_done_email_no_plan_vetoed_cross_is_framed_as_vetoed():
+    # 2026-09-02 poll-routing decision: a NO_PLAN row's later real cross
+    # that the full gate declines must ALSO read as VETOED, not a bare
+    # "no trade today" DONE -- same category of fix as the opposite_side
+    # branch above, different shape (no anticipated direction here at
+    # all, since the row started NO_PLAN with direction=None).
+    plan = _plan(
+        "DONE", direction=None,
+        last_transition_reason="cross confirmed, full gate declined -- SHORT: PASS -- counter-trend on a GOOD daily table",
+        vetoed_cross_side="SHORT", vetoed_cross_trigger=64200.0,
+    )
+    subject, body = tpn.build_done_email(plan)
+    assert subject == "KABRODA VETOED - BTCUSDT SHORT @ 64200 - stand down"
+    assert "full gate ran" in body
+    assert "counter-trend on a GOOD daily table" in body
+    assert "Plan ID: 42" in body
+
+
 # ------------------------------------------------------------------ notification_for_transition dispatch
 
 def test_dispatch_fills_to_armed():
@@ -177,6 +195,16 @@ def test_dispatch_no_plan_to_done_at_expiry_produces_no_email():
     # nothing would follow unless a real cross changed it, so this specific
     # transition must NOT email (that would contradict the promise).
     assert tpn.notification_for_transition("NO_PLAN", _plan("DONE")) is None
+
+
+def test_dispatch_no_plan_vetoed_cross_still_emails():
+    # The OTHER NO_PLAN->DONE transition -- a real cross happened and the
+    # full gate declined it -- is a required email per the agreed contract
+    # ("fail -> VETOED + email with reason"), not silence. Must NOT be
+    # caught by the expiry-suppression logic above.
+    mail = tpn.notification_for_transition("NO_PLAN", _plan("DONE", vetoed_cross_side="SHORT", vetoed_cross_trigger=64200.0))
+    assert mail is not None
+    assert mail[0].startswith("KABRODA VETOED")
 
 
 def test_dispatch_done_from_other_statuses_still_emails():

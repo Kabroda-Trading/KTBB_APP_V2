@@ -20,23 +20,28 @@
 # both reused directly rather than a third parallel client being stood up.
 #
 # Per-status routing, once per 60s poll cycle:
-#   NO_PLAN           -> promote_no_plan_on_real_cross() (2026-09-02, Andy's
-#                        poll-routing decision -- Kabroda AI Brain repo
+#   NO_PLAN           -> advance_no_plan() (2026-09-02, Andy's poll-routing
+#                        decision, exact contract worked out with DeepSeek
+#                        at 15:45/15:50 CT -- Kabroda AI Brain repo
 #                        AGENT_LOG.md). Re-runs the REAL full gate
 #                        (decision_engine.evaluate_15m_decision() via
 #                        _run_full_gate(), same as the opposite-break/own-
 #                        cross paths below -- NOT the pre-cross anticipate_
 #                        setup() heuristic build_trade_plan() used at lock).
-#                        A genuine later TAKE (fuel/HTF/reachability/hour
-#                        all pass, no hard veto incl. counter-trend)
-#                        promotes straight to FILLED -- FUELED collapses
-#                        ARMED+FILLED the same way it does for the
-#                        anticipated-side path, since a TAKE verdict already
-#                        implies fuel=FUELED. Session expiry with no
-#                        qualifying cross -> DONE, but WITHOUT an email
-#                        (trade_plan_notify.py suppresses it -- the STAND
-#                        DOWN lock email already told Andy nothing would
-#                        follow unless a real cross changed it).
+#                        No cross yet -> silent. ALMOST (one soft condition
+#                        still open) -> silent, not yet a verdict. A genuine
+#                        TAKE -> promotes straight to FILLED (FUELED
+#                        collapses ARMED+FILLED, same as the anticipated-
+#                        side path). A real cross the gate DECLINES (hard
+#                        veto incl. counter-trend, or multiple soft misses)
+#                        -> DONE with a VETOED-framed email (trade_plan_
+#                        notify.py), "no repeated attempts" per the
+#                        contract. Session expiry with no cross ever ->
+#                        DONE with NO email (the STAND DOWN lock email
+#                        already told Andy nothing would follow unless a
+#                        real cross changed it) -- trade_plan_notify.py
+#                        tells these two DONE cases apart via whether
+#                        vetoed_cross_side is set.
 #   WAITING / VETOED -> advance_waiting_plan()   (5m candles + live price)
 #   REENTRY_ARMED     -> advance_reentry_plan()   (5m candles)
 #   FILLED            -> check_wide_stop_or_t1() first -- TradePlan's OWN
@@ -381,7 +386,7 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
         if result is None:
             return
         decision, levels = result["decision"], result["levels"]
-        updates = tp.promote_no_plan_on_real_cross(
+        updates = tp.advance_no_plan(
             decision, result["candles_5m"],
             r30_high=levels.get("range30m_high", 0.0), r30_low=levels.get("range30m_low", 0.0),
             f24_vah=levels.get("f24_vah", 0.0), f24_val=levels.get("f24_val", 0.0),

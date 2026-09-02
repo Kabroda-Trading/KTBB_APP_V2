@@ -355,7 +355,7 @@ def build_trade_plan(
     )
 
 
-def promote_no_plan_on_real_cross(
+def advance_no_plan(
     decision_dict: Dict[str, Any],
     candles_24h: list,
     r30_high: float,
@@ -366,30 +366,72 @@ def promote_no_plan_on_real_cross(
     now_utc: datetime.datetime,
 ) -> Optional[Dict[str, Any]]:
     """Andy's 2026-09-02 decision (Kabroda AI Brain repo AGENT_LOG.md,
-    "poll-routing decision"): a NO_PLAN morning is no longer permanently
-    final for the rest of the session. trade_plan_engine.py now polls
-    NO_PLAN rows too, re-running the REAL, full decision_engine.py gate
-    (not the pre-cross anticipate_setup() heuristic build_trade_plan()
-    used at lock -- this is decision_engine.evaluate_15m_decision() itself,
-    same as the already-live opposite-break/own-cross paths, including the
-    counter-trend veto). If it now confirms a genuine TAKE, this promotes
-    the row straight to FILLED -- the SAME FUELED-collapses-ARMED+FILLED
-    convention advance_waiting_plan() already uses for the anticipated-side
-    path, since a TAKE verdict already implies fuel=FUELED by construction
-    (one of the gate's own four required conditions) -- there is no
-    meaningful "resting order" gap to model separately here either.
+    "poll-routing decision", finalized 15:45/15:50 CT after the exact
+    contract was worked out with DeepSeek): a NO_PLAN morning is no longer
+    permanently final for the rest of the session. trade_plan_engine.py
+    now polls NO_PLAN rows too, re-running the REAL, full decision_engine.py
+    gate on every poll (not the pre-cross anticipate_setup() heuristic
+    build_trade_plan() used at lock -- this is decision_engine.evaluate_
+    15m_decision() itself, same as the already-live opposite-break/own-
+    cross paths, including the counter-trend veto). The agreed contract,
+    verbatim: "a later clean 5m-close cross through either trigger re-runs
+    the FULL gate ... pass -> ARMED + email at that moment; fail -> VETOED
+    + email with reason; no cross -> silence; first cross defines the
+    session side; after a vetoed re-run the session is DONE (no repeated
+    attempts)". Three real outcomes, not two -- an earlier draft of this
+    function only handled the first and silently did nothing for the
+    third, which would have violated the agreed contract by leaving Andy
+    with no email on a real, resolved counter-trend veto. Caught and fixed
+    before this ever ran live.
 
-    Returns None if the decision isn't a real TAKE (caller does nothing,
-    silently -- no state change, no email, matching every other "still
-    waiting" poll outcome in this module) or if a stop can't be safely
-    planned (ATR unavailable / R:R floor fails) -- same NO_PLAN-preserving
-    philosophy build_trade_plan() itself uses: never guess a stop just to
-    force a promotion.
+    - No cross yet (`side` is None -- price still inside the box): returns
+      None, silently. Matches every other "still waiting" poll outcome in
+      this module.
+    - `ALMOST` (one soft gate condition still open -- fuel/HTF/hour, NOT a
+      hard veto, those always resolve to PASS): also returns None. This is
+      deliberately NOT treated as a fail -- it can still resolve to a real
+      TAKE on a later poll (e.g. fuel confirms next candle), and forcing a
+      verdict here would be exactly the premature-negative call the whole
+      gate design (CLAUDE.md rule 3: evaluate on the qualifying close, not
+      a count) exists to avoid.
+    - A real TAKE: promotes straight to FILLED -- the SAME FUELED-
+      collapses-ARMED+FILLED convention advance_waiting_plan() already
+      uses for the anticipated-side path, since a TAKE verdict already
+      implies fuel=FUELED by construction. Returns None instead (stay
+      NO_PLAN, keep watching) if a stop can't be safely planned (ATR
+      unavailable / R:R floor fails) -- same NO_PLAN-preserving philosophy
+      build_trade_plan() itself uses: never guess a stop to force a
+      promotion; matches the ALMOST case's philosophy too, since a bad
+      stop this poll doesn't mean it stays bad next poll.
+    - A real fail (`side` is set, state is PASS -- either a hard veto or
+      multiple soft misses): resolves to DONE, carrying `vetoed_cross_
+      side`/`vetoed_cross_trigger` so trade_plan_notify.py's build_done_
+      email() can render this as the VETOED call it actually is (see that
+      function), not a bare "nothing happened" DONE. "No repeated
+      attempts" per the contract -- unlike the anticipated-side WAITING->
+      VETOED path (which held a resting order and gets one retest), a
+      NO_PLAN promotion never had a resting order, so there's no retest to
+      wait for; one real cross resolves the session outright.
     """
-    if decision_dict.get("verdict_state") not in _TAKE_STATES:
-        return None
-
+    state = decision_dict.get("verdict_state")
     side = decision_dict.get("side")
+
+    if side is None:
+        return None  # still inside the box -- no cross yet
+
+    if state == "ALMOST":
+        return None  # one soft condition still open -- could still resolve later, not a verdict yet
+
+    if state not in _TAKE_STATES:
+        headline = decision_dict.get("tactical_brief") or f"{side}: gate declined"
+        return {
+            "status": "DONE",
+            "cross_time": now_utc,
+            "vetoed_cross_side": side,
+            "vetoed_cross_trigger": decision_dict.get("entry_price"),
+            "last_transition_reason": f"cross confirmed, full gate declined -- {headline}",
+        }
+
     entry_price = float(decision_dict["entry_price"])
     t1 = float(decision_dict["t1"])
     t2 = float(decision_dict["t2"])

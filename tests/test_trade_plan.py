@@ -297,14 +297,28 @@ def test_stamp_tier_at_cross_standard_when_box_too_wide_for_premium(monkeypatch)
     assert tier == "STANDARD"
 
 
-# ------------------------------------------------------------------ promote_no_plan_on_real_cross (2026-09-02, Andy's poll-routing decision)
+# ------------------------------------------------------------------ advance_no_plan (2026-09-02, Andy's poll-routing decision)
+# Exact contract (Kabroda AI Brain repo AGENT_LOG.md, 15:45/15:50 CT): no
+# cross -> silence; ALMOST -> silence (not yet a verdict); real TAKE ->
+# FILLED; real fail (a cross happened, gate declined) -> DONE with a
+# VETOED-framed email, "no repeated attempts."
 
 NOW = datetime.datetime(2026, 9, 2, 15, 0, 0, tzinfo=datetime.timezone.utc)
 
 
-def test_promote_no_plan_on_real_take_goes_to_filled():
+def _declined_decision(side="SHORT", reason="counter-trend on a GOOD daily table"):
+    """A REAL cross (side is set), gate declined -- verdict_state PASS,
+    distinct from _pass_decision()'s side=None (no cross yet) case."""
+    return {
+        "verdict_state": "PASS", "side": side, "tier": None,
+        "entry_price": 90.0, "stop_loss": 0.0, "t1": 0.0, "t2": 0.0, "t3": 0.0,
+        "tactical_brief": f"{side}: PASS -- {reason}",
+    }
+
+
+def test_advance_no_plan_on_real_take_goes_to_filled():
     decision = _take_decision(side="LONG", tier="STANDARD", entry=100.0, t1=112.0, t2=120.0, t3=132.0)
-    updates = tp.promote_no_plan_on_real_cross(
+    updates = tp.advance_no_plan(
         decision, candles_24h=_flat_candles(price=150.0),
         r30_high=160.0, r30_low=155.0, f24_vah=170.0, f24_val=165.0, daily_atr14=2.0,
         now_utc=NOW,
@@ -325,21 +339,51 @@ def test_promote_no_plan_on_real_take_goes_to_filled():
     assert "real cross" in updates["last_transition_reason"]
 
 
-def test_promote_no_plan_returns_none_when_not_a_real_take():
-    for state in ("PASS", "ALMOST"):
-        decision = _pass_decision("some gate miss")
-        decision["verdict_state"] = state
-        updates = tp.promote_no_plan_on_real_cross(
-            decision, candles_24h=_flat_candles(),
-            r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
-            now_utc=NOW,
-        )
-        assert updates is None
+def test_advance_no_plan_returns_none_when_no_cross_yet():
+    # _pass_decision()'s side=None IS the "still inside the box" case.
+    decision = _pass_decision("Price is inside the box -- no trigger crossed yet.")
+    updates = tp.advance_no_plan(
+        decision, candles_24h=_flat_candles(),
+        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
+        now_utc=NOW,
+    )
+    assert updates is None
 
 
-def test_promote_no_plan_returns_none_when_atr_unavailable():
+def test_advance_no_plan_returns_none_on_almost():
+    # A real cross (side set), but only one soft condition still open --
+    # NOT a verdict yet, must NOT resolve to DONE prematurely.
+    decision = _declined_decision(side="LONG", reason="one thing still needed")
+    decision["verdict_state"] = "ALMOST"
+    updates = tp.advance_no_plan(
+        decision, candles_24h=_flat_candles(),
+        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
+        now_utc=NOW,
+    )
+    assert updates is None
+
+
+def test_advance_no_plan_on_real_fail_goes_to_done_with_vetoed_framing():
+    # THE gap caught before this ever shipped: an earlier draft only
+    # handled the TAKE case and silently did nothing here, which would
+    # have violated the agreed contract ("fail -> VETOED + email").
+    decision = _declined_decision(side="SHORT", reason="counter-trend on a GOOD daily table")
+    updates = tp.advance_no_plan(
+        decision, candles_24h=_flat_candles(),
+        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
+        now_utc=NOW,
+    )
+    assert updates is not None
+    assert updates["status"] == "DONE"
+    assert updates["cross_time"] == NOW
+    assert updates["vetoed_cross_side"] == "SHORT"
+    assert updates["vetoed_cross_trigger"] == 90.0
+    assert "counter-trend on a GOOD daily table" in updates["last_transition_reason"]
+
+
+def test_advance_no_plan_returns_none_when_atr_unavailable():
     decision = _take_decision()
-    updates = tp.promote_no_plan_on_real_cross(
+    updates = tp.advance_no_plan(
         decision, candles_24h=_flat_candles(),
         r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=0.0,
         now_utc=NOW,
@@ -347,7 +391,7 @@ def test_promote_no_plan_returns_none_when_atr_unavailable():
     assert updates is None
 
 
-def test_promote_no_plan_returns_none_when_rr_floor_fails():
+def test_advance_no_plan_returns_none_when_rr_floor_fails():
     entry, t1 = 100.0, 101.0  # T1 very close -- easy to blow the floor
     candles = (
         [{"open": 98, "high": 99, "low": 97, "close": 98} for _ in range(3)]
@@ -355,7 +399,7 @@ def test_promote_no_plan_returns_none_when_rr_floor_fails():
         + [{"open": 98, "high": 99, "low": 97, "close": 98} for _ in range(3)]
     )
     decision = _take_decision(side="LONG", tier="STANDARD", entry=entry, t1=t1, t2=110.0, t3=120.0)
-    updates = tp.promote_no_plan_on_real_cross(
+    updates = tp.advance_no_plan(
         decision, candles_24h=candles,
         r30_high=105.0, r30_low=103.0, f24_vah=110.0, f24_val=108.0, daily_atr14=2.0,
         now_utc=NOW,

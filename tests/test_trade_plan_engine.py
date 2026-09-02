@@ -429,16 +429,16 @@ def test_waiting_own_cross_syncs_gate_log_via_loop(poll_env, monkeypatch):
 
 def _fueled_5m_ohlc_candles(trigger, is_long, baseline_vol=10.0, push_vol=10.0, baseline_n=250, push_n=6, near_offset=2.0):
     """Same shape/fuel math as _fueled_5m_candles(), but with full OHLC --
-    promote_no_plan_on_real_cross() feeds these into stop_planner.py's
-    swing/sweep detection (_find_swing_points/_find_sweep_wicks), which
-    needs open/high/low, not just close/volume like the WAITING-path
-    tests above only ever needed (advance_waiting_plan()'s FILLED
-    transition doesn't call stop_planner -- the stop was already planned
-    at lock). near_offset defaults tight (2.0, not _fueled_5m_candles()'s
-    5.0) so the swing-low/high stop_planner finds off the "near" baseline
-    stays close enough to entry to clear the R:R floor against a real
-    box-derived T1 -- confirmed against stop_planner.plan_stop()/
-    rr_floor_ok() directly before picking this value."""
+    advance_no_plan() feeds these into stop_planner.py's swing/sweep
+    detection (_find_swing_points/_find_sweep_wicks), which needs open/
+    high/low, not just close/volume like the WAITING-path tests above
+    only ever needed (advance_waiting_plan()'s FILLED transition doesn't
+    call stop_planner -- the stop was already planned at lock). near_offset
+    defaults tight (2.0, not _fueled_5m_candles()'s 5.0) so the swing-low/
+    high stop_planner finds off the "near" baseline stays close enough to
+    entry to clear the R:R floor against a real box-derived T1 -- confirmed
+    against stop_planner.plan_stop()/rr_floor_ok() directly before picking
+    this value."""
     near = trigger - near_offset if is_long else trigger + near_offset
     beyond = trigger + 5.0 if is_long else trigger - 5.0
 
@@ -453,7 +453,7 @@ def _fueled_5m_ohlc_candles(trigger, is_long, baseline_vol=10.0, push_vol=10.0, 
 # REAL run_trade_plan_loop() path, same harness style as the opposite-
 # break/own-cross tests above (real market_regime/micro_regime/htf_fuel
 # modules monkeypatched, real decision_engine.evaluate_15m_decision() and
-# trade_plan.promote_no_plan_on_real_cross() both run for real).
+# trade_plan.advance_no_plan() both run for real).
 
 def test_no_plan_real_cross_promotes_to_filled_and_sends_armed_email(poll_env, monkeypatch):
     import decision_engine
@@ -510,6 +510,52 @@ def test_no_plan_stays_no_plan_when_gate_still_says_no(poll_env, monkeypatch):
     row = poll_env["get_plan"]()
     assert row.status == "NO_PLAN"  # unchanged -- still silently waiting
     assert sent == []  # no email for a non-event
+
+
+def test_no_plan_real_cross_declined_by_gate_becomes_done_with_vetoed_email(poll_env, monkeypatch):
+    # THE gap caught before this ever shipped: an earlier draft only
+    # handled the TAKE case above and silently did nothing for a real
+    # cross the gate declines -- the agreed contract (Kabroda AI Brain
+    # AGENT_LOG.md, 15:45/15:50 CT) requires "fail -> VETOED + email with
+    # reason," not silence. This reproduces exactly that: a real cross
+    # through BD, but the daily table is GOOD+UP, so SHORT hits the
+    # counter-trend hard veto.
+    import decision_engine
+    monkeypatch.setattr(decision_engine, "DEAD_HOURS", set())
+    sent = _capture_emails(monkeypatch)
+    monkeypatch.setattr(market_regime, "classify_market_regime", lambda candles: {
+        "table": "TRENDING_UP", "quality": "GOOD", "policy": {"bias": "UP"},
+    })
+    monkeypatch.setattr(micro_regime, "classify_regime", lambda candles: {"regime": "TRENDING"})
+    monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BEARISH", "trend_4h": "NEUTRAL", "aligned": 0, "opposed": 1,
+    })
+
+    poll_env["make_lock"](levels={
+        "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
+        "range30m_high": 100.0, "range30m_low": 90.0,
+    })
+    poll_env["make_gate_log"](state="PASS")
+    poll_env["make_plan"](status="NO_PLAN", direction=None, trigger_price=None)
+    candles = _fueled_5m_ohlc_candles(90.0, is_long=False)  # real fueled break through BD -> SHORT, but counter-trend
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=20.0)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "DONE"
+    # vetoed_cross_side/vetoed_cross_trigger are transient, in-memory-only
+    # fields (not TradePlan columns -- same "never persisted" pattern as
+    # opposite_side/opposite_trigger elsewhere in this file), so they don't
+    # survive get_plan()'s fresh query; verified instead via the email
+    # they drove and the persisted last_transition_reason/GateLog below.
+    assert "counter-trend" in row.last_transition_reason.lower() or "UP daily trend" in row.last_transition_reason
+
+    assert len(sent) == 1
+    assert sent[0][0].startswith("KABRODA VETOED")
+    assert "SHORT" in sent[0][0]
+
+    gate_row = poll_env["get_gate_log"]()
+    assert gate_row.state == "PASS"
+    assert gate_row.side == "SHORT"
 
 
 def test_no_plan_session_expired_no_cross_becomes_done_without_email(poll_env, monkeypatch):
