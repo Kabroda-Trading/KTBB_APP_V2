@@ -29,9 +29,31 @@ def _plan(status, **extra):
 
 # ------------------------------------------------------------------ build_lock_email
 
-def test_lock_email_only_for_waiting_status():
-    assert tpn.build_lock_email(_plan("NO_PLAN")) is None
-    assert tpn.build_lock_email(_plan("VETOED")) is None
+def test_lock_email_fires_for_no_plan_too():
+    # 2026-09-02 fix: NO_PLAN mornings used to send nothing (the day-4
+    # email-delivery incident, Kabroda AI Brain repo AGENT_LOG.md,
+    # 2026-09-02 11:00 CT) -- LOCK now always fires, framed as a briefing.
+    mail = tpn.build_lock_email(_plan(
+        "NO_PLAN", no_plan_reason="counter-trend on a GOOD daily table",
+        breakout_trigger=65500.0, breakdown_trigger=64200.0,
+    ))
+    assert mail is not None
+    subject, body = mail
+    assert subject == "KABRODA NO PLAN - BTCUSDT - watching only"
+    assert "counter-trend on a GOOD daily table" in body
+    assert "65500" in body or "65,500" in body  # BO level surfaced
+    assert "64200" in body or "64,200" in body  # BD level surfaced
+    assert "Plan ID: 42" in body
+
+
+def test_lock_email_no_plan_without_levels_still_sends():
+    # Legacy/no-precross-inputs path -- no breakout_trigger/breakdown_
+    # trigger available. Must still send, just without the levels lines.
+    mail = tpn.build_lock_email(_plan("NO_PLAN", no_plan_reason="gate state: STAND_DOWN"))
+    assert mail is not None
+    subject, body = mail
+    assert subject == "KABRODA NO PLAN - BTCUSDT - watching only"
+    assert "gate state: STAND_DOWN" in body
 
 
 def test_lock_email_waiting_has_full_brief_and_plan_id():

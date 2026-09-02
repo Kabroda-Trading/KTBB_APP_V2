@@ -607,17 +607,25 @@ def _inject_trade_plan_to_database(
         print(f"|| TRADE PLAN || {fields.get('status')} plan written for {symbol} | {session_id} | {date_key}.")
 
         # Daily lock email (Andy's build request, trade_plan_notify.py) --
-        # only when a plan is actually tradeable (status WAITING); a
-        # NO_PLAN day sends nothing, by design (see that module's header).
-        # Non-blocking: a notification failure must never affect the
-        # already-committed plan write above.
+        # fires for EVERY session lock now, WAITING or NO_PLAN alike (see
+        # that module's header for why the old WAITING-only default was
+        # reversed 2026-09-02 -- it caused a real production incident,
+        # zero emails on a NO_PLAN morning). Built from `fields` (the raw
+        # dict build_trade_plan() returned), not `row.__dict__` -- `fields`
+        # still carries the transient breakout_trigger/breakdown_trigger/
+        # r30_high/r30_low keys the email needs, which `row.__dict__` lost
+        # (they're not real TradePlan columns, dropped by the valid_cols
+        # filter above). `id` is only assigned by the db.add()/commit()
+        # above, so it's added in here rather than being in `fields`
+        # already. Non-blocking: a notification failure must never affect
+        # the already-committed plan write above.
         try:
             import notify
             import trade_plan_notify
-            mail = trade_plan_notify.build_lock_email(row.__dict__)
-            if mail:
-                subject, body = mail
-                notify.send_admin_email(subject, body)
+            mail_fields = dict(fields)
+            mail_fields["id"] = row.id
+            subject, body = trade_plan_notify.build_lock_email(mail_fields)
+            notify.send_admin_email(subject, body)
         except Exception as _notify_err:
             print(f"[TRADE PLAN] Lock-email notification failed: {_notify_err}")
     except Exception as e:

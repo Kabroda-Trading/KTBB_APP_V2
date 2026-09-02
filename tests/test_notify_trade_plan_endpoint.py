@@ -108,10 +108,13 @@ def test_lock_event_fires_for_real_waiting_plan(env):
     assert "79062" in env["sent"][0][0]
 
 
-def test_armed_event_does_not_apply_returns_ok_false(env):
-    # build_lock_email() only applies to a WAITING-status row for "lock",
-    # but "armed" always builds regardless of status -- test the inverse:
-    # "lock" on a non-WAITING row correctly reports it doesn't apply.
+def test_lock_event_also_fires_for_a_non_waiting_row(env):
+    # 2026-09-02 fix (day-4 email-delivery incident, Kabroda AI Brain repo
+    # AGENT_LOG.md): build_lock_email() used to apply only to a WAITING-
+    # status row, so "lock" against e.g. a DONE row reported ok=False and
+    # sent nothing -- that WAITING-only gate is exactly what caused zero
+    # emails on a real NO_PLAN morning. "lock" now always builds, for any
+    # status, framed as a briefing.
     db = env["db"]
     plan = db.query(TradePlan).filter(TradePlan.id == env["plan_id"]).first()
     plan.status = "DONE"
@@ -122,5 +125,5 @@ def test_armed_event_does_not_apply_returns_ok_false(env):
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["ok"] is False
-    assert env["sent"] == []
+    assert body["ok"] is True
+    assert len(env["sent"]) == 1

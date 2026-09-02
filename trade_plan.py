@@ -289,6 +289,17 @@ def build_trade_plan(
         "commit_after": commit_after,
         "fuel_requirement": FUEL_REQUIREMENT_TEXT,
         "management": MANAGEMENT_TEXT,
+        # Transient (NOT TradePlan columns -- dropped by _inject_trade_plan_
+        # to_database()'s valid_cols filter before the DB write). Carried
+        # through every return path, including NO_PLAN, so the lock-time
+        # email (trade_plan_notify.py) can show "the structure being
+        # watched" even on a no-trade morning -- Andy's confirmed UX
+        # (Kabroda AI Brain AGENT_LOG.md, 2026-09-02 12:00 CT), the gap
+        # behind the day-4 email-delivery incident (same file, 11:00 CT).
+        "breakout_trigger": breakout_trigger,
+        "breakdown_trigger": breakdown_trigger,
+        "r30_high": r30_high,
+        "r30_low": r30_low,
     }
 
     if decision_dict.get("side") is None and state == "PASS":
@@ -354,9 +365,17 @@ def render_brief(plan: Dict[str, Any]) -> str:
 
     if plan.get("status") == "NO_PLAN":
         reason = plan.get("no_plan_reason") or "gate did not approve a setup"
+        bo, bd = plan.get("breakout_trigger"), plan.get("breakdown_trigger")
+        levels_line = (
+            f"\n  Breakout trigger (BO): {bo:.0f}\n  Breakdown trigger (BD): {bd:.0f}\n"
+            if bo and bd else ""
+        )
+        direction = plan.get("direction")
+        watching_line = f"\n  Anticipated side, if either crosses: {direction}\n" if direction else ""
         return (
             f"TRADE PLAN — {date_key} — {symbol} — STATUS: NO_PLAN\n\n"
-            f"  NO PLAN TODAY — {reason}\n\n"
+            f"  NO PLAN TODAY — {reason}\n"
+            f"{levels_line}{watching_line}\n"
             f"  NO_PLAN is a valid, common outcome. This does not become a "
             f"plan later in the day."
         )

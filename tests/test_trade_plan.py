@@ -128,6 +128,34 @@ def test_render_brief_no_plan():
     assert "does not become a plan later" in text.lower() or "does not become a" in text
 
 
+def test_no_plan_carries_locked_levels_for_the_lock_email():
+    # 2026-09-02 fix (day-4 email-delivery incident): NO_PLAN must still
+    # carry the locked bo/bd levels through as transient fields, so the
+    # lock-time email can show "the structure being watched" even on a
+    # no-trade morning.
+    plan = tp.build_trade_plan(
+        symbol="BTC/USDT", date_key="2026-08-31", session_id="us_ny_futures",
+        decision_dict=_pass_decision("counter-trend on a GOOD daily table"),
+        anchor_time=ANCHOR, candles_24h=_flat_candles(),
+        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
+        breakout_trigger=65500.0, breakdown_trigger=64200.0,
+    )
+    assert plan["status"] == "NO_PLAN"
+    assert plan["breakout_trigger"] == 65500.0
+    assert plan["breakdown_trigger"] == 64200.0
+
+
+def test_render_brief_no_plan_shows_levels_when_available():
+    plan = {
+        "date_key": "2026-08-31", "symbol": "BTC/USDT",
+        "status": "NO_PLAN", "no_plan_reason": "counter-trend on a GOOD daily table",
+        "breakout_trigger": 65500.0, "breakdown_trigger": 64200.0,
+    }
+    text = tp.render_brief(plan)
+    assert "65500" in text or "65,500" in text
+    assert "64200" in text or "64,200" in text
+
+
 def test_render_brief_waiting_plan_has_every_number():
     plan = {
         "date_key": "2026-08-31", "symbol": "BTC/USDT", "status": "WAITING",

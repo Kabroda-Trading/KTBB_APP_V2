@@ -1121,8 +1121,9 @@ async def api_admin_test_notify_trade_plan(
 
     event: one of "lock" | "armed" | "vetoed" | "done" -- picks which
     builder in trade_plan_notify.py to use against the real row. "lock"
-    only sends if the row's actual status is WAITING (matches the real
-    gate exactly, not simulated).
+    now always sends regardless of the row's actual status (2026-09-02 --
+    see trade_plan_notify.py's module header for why the old WAITING-only
+    gate was reversed).
     """
     ctx = get_user_context(request, db)
     if not ctx.get("is_admin"):

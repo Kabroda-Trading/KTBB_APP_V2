@@ -9,10 +9,18 @@
 #
 # REQUIRED EVENTS, and only these (anti-spam is the point of the state
 # machine, per the request):
-#   1. LOCK  -- sent once, at plan generation, ONLY when a plan is
-#      tradeable (status WAITING). NO_PLAN days get no email by default
-#      (the request left this "optional, Andy can decide" -- default to
-#      the less-spammy choice; easy to flip later).
+#   1. LOCK -- sent once, at plan generation, for EVERY session regardless
+#      of outcome (WAITING or NO_PLAN alike). Originally NO_PLAN mornings
+#      sent nothing ("optional, Andy can decide" -- defaulted to the
+#      less-spammy choice). That default caused a real, confirmed
+#      production incident: zero emails on a NO_PLAN morning despite the
+#      site correctly writing the gate-log row and radar verdict (Kabroda
+#      AI Brain repo AGENT_LOG.md, 2026-09-02 11:00 CT, "DAY-4 EMAIL
+#      FAILURE"). Andy's UX call, confirmed the same day at 12:00 CT: "one
+#      lock-time email per morning (levels + the structure being watched +
+#      the verdict-so-far), then silence until a transition" -- so LOCK now
+#      always fires, framed as a morning briefing rather than a bare
+#      NO_PLAN state dump.
 #   2. ARMED -- the fuel check confirms at the cross: "place/confirm your
 #      order." This is the one that matters. In THIS system's actual state
 #      machine (trade_plan.py's advance_waiting_plan()/advance_reentry_
@@ -51,16 +59,26 @@ def _symbol_compact(symbol: str) -> str:
     return (symbol or "").replace("/", "")
 
 
-def build_lock_email(plan: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-    """Only for a tradeable plan (status WAITING) -- a NO_PLAN day gets no
-    email by default (see module header)."""
-    if plan.get("status") != "WAITING":
-        return None
+def build_lock_email(plan: Dict[str, Any]) -> Tuple[str, str]:
+    """Fires once per session lock, for every outcome (see module header --
+    this used to be WAITING-only). `render_brief()` is the single source
+    of truth for the body either way (SS4's own rule: never recompute a
+    number the plan object already has); this function only decides the
+    subject line and appends the anti-spam/plan-ID footer."""
     symbol = _symbol_compact(plan.get("symbol", ""))
-    direction = plan.get("direction") or "?"
-    trigger = plan.get("trigger_price")
-    subject = f"KABRODA PLAN - {symbol} {direction} @ {trigger:.0f}" if trigger else f"KABRODA PLAN - {symbol} {direction}"
-    body = tp.render_brief(plan) + f"\n\n  Plan ID: {plan.get('id')}"
+    if plan.get("status") == "WAITING":
+        direction = plan.get("direction") or "?"
+        trigger = plan.get("trigger_price")
+        subject = f"KABRODA PLAN - {symbol} {direction} @ {trigger:.0f}" if trigger else f"KABRODA PLAN - {symbol} {direction}"
+        body = tp.render_brief(plan) + f"\n\n  Plan ID: {plan.get('id')}"
+        return subject, body
+
+    subject = f"KABRODA NO PLAN - {symbol} - watching only"
+    body = (
+        tp.render_brief(plan)
+        + "\n\n  Email again only if this changes."
+        + f"\n  Plan ID: {plan.get('id')}"
+    )
     return subject, body
 
 
