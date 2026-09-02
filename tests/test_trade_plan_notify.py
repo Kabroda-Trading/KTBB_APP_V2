@@ -56,14 +56,17 @@ def test_lock_email_no_plan_without_levels_still_sends():
     assert "gate state: STAND_DOWN" in body
 
 
-def test_lock_email_no_plan_does_not_promise_a_followup():
-    # 2026-09-02 13:00 CT (Kabroda AI Brain repo AGENT_LOG.md): a NO_PLAN
-    # row is NOT in trade_plan_engine.py's poll routing, so it is never
-    # re-checked -- the copy must not claim a transition email will follow,
-    # that would be false under the current, still-unbuilt poll-routing gap.
+def test_lock_email_no_plan_mentions_possible_followup():
+    # 2026-09-02 (Andy's poll-routing decision, Kabroda AI Brain repo
+    # AGENT_LOG.md): NO_PLAN rows ARE now polled (trade_plan_engine.py),
+    # and a later real cross that clears the full gate promotes to FILLED
+    # and emails -- so this copy must NOT claim silence is guaranteed (an
+    # earlier version of this test asserted the opposite; that promise
+    # became false the moment poll-routing was added and had to be
+    # reverted here too).
     _, body = tpn.build_lock_email(_plan("NO_PLAN", no_plan_reason="box/ATR ratio 0.62 > 0.55"))
-    assert "transition email" not in body.lower()
-    assert "full verdict for today" in body.lower()
+    assert "armed email" in body.lower()
+    assert "clears the full gate" in body.lower()
 
 
 def test_lock_email_waiting_has_full_brief_and_plan_id():
@@ -165,3 +168,22 @@ def test_dispatch_stopped_produces_no_email():
 
 def test_dispatch_reentry_armed_produces_no_email():
     assert tpn.notification_for_transition("STOPPED", _plan("REENTRY_ARMED")) is None
+
+
+def test_dispatch_no_plan_to_done_at_expiry_produces_no_email():
+    # 2026-09-02 poll-routing decision: a NO_PLAN row that never gets a
+    # real cross transitions to DONE at session expiry purely so it stops
+    # being polled forever -- the STAND DOWN lock email already told Andy
+    # nothing would follow unless a real cross changed it, so this specific
+    # transition must NOT email (that would contradict the promise).
+    assert tpn.notification_for_transition("NO_PLAN", _plan("DONE")) is None
+
+
+def test_dispatch_done_from_other_statuses_still_emails():
+    # Only the NO_PLAN->DONE bookkeeping transition is suppressed -- every
+    # other path to DONE (a filled trade concluding, a stopped plan's
+    # session ending, etc.) is a real event and must still email.
+    for prev in ("FILLED", "STOPPED", "VETOED", "REENTRY_ARMED", "WAITING"):
+        mail = tpn.notification_for_transition(prev, _plan("DONE"))
+        assert mail is not None
+        assert mail[0].startswith("KABRODA DONE")

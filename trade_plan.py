@@ -355,6 +355,81 @@ def build_trade_plan(
     )
 
 
+def promote_no_plan_on_real_cross(
+    decision_dict: Dict[str, Any],
+    candles_24h: list,
+    r30_high: float,
+    r30_low: float,
+    f24_vah: float,
+    f24_val: float,
+    daily_atr14: float,
+    now_utc: datetime.datetime,
+) -> Optional[Dict[str, Any]]:
+    """Andy's 2026-09-02 decision (Kabroda AI Brain repo AGENT_LOG.md,
+    "poll-routing decision"): a NO_PLAN morning is no longer permanently
+    final for the rest of the session. trade_plan_engine.py now polls
+    NO_PLAN rows too, re-running the REAL, full decision_engine.py gate
+    (not the pre-cross anticipate_setup() heuristic build_trade_plan()
+    used at lock -- this is decision_engine.evaluate_15m_decision() itself,
+    same as the already-live opposite-break/own-cross paths, including the
+    counter-trend veto). If it now confirms a genuine TAKE, this promotes
+    the row straight to FILLED -- the SAME FUELED-collapses-ARMED+FILLED
+    convention advance_waiting_plan() already uses for the anticipated-side
+    path, since a TAKE verdict already implies fuel=FUELED by construction
+    (one of the gate's own four required conditions) -- there is no
+    meaningful "resting order" gap to model separately here either.
+
+    Returns None if the decision isn't a real TAKE (caller does nothing,
+    silently -- no state change, no email, matching every other "still
+    waiting" poll outcome in this module) or if a stop can't be safely
+    planned (ATR unavailable / R:R floor fails) -- same NO_PLAN-preserving
+    philosophy build_trade_plan() itself uses: never guess a stop just to
+    force a promotion.
+    """
+    if decision_dict.get("verdict_state") not in _TAKE_STATES:
+        return None
+
+    side = decision_dict.get("side")
+    entry_price = float(decision_dict["entry_price"])
+    t1 = float(decision_dict["t1"])
+    t2 = float(decision_dict["t2"])
+    t3 = float(decision_dict["t3"])
+    tier = decision_dict.get("tier")
+    is_long = side == "LONG"
+
+    stop_plan = sp.plan_stop(
+        candles_24h=candles_24h, entry_price=entry_price, is_long=is_long,
+        r30_high=r30_high, r30_low=r30_low, f24_vah=f24_vah, f24_val=f24_val,
+        daily_atr14=daily_atr14,
+    )
+    if stop_plan["stop_price"] is None:
+        return None
+
+    rr = sp.rr_floor_ok(entry_price, stop_plan["stop_price"], t1, is_long=is_long)
+    if not rr["ok"]:
+        return None
+
+    headline = decision_dict.get("tactical_brief") or f"{side} real cross confirmed"
+    return {
+        "status": "FILLED",
+        "direction": side, "tier": tier,
+        "trigger_price": entry_price,
+        "stop_price": stop_plan["stop_price"], "stop_basis": stop_plan["stop_basis"],
+        "stop_dist_atr": stop_plan["stop_dist_atr"],
+        "t1": t1, "t2": t2, "t3": t3,
+        "management": MANAGEMENT_TEXT,
+        # Detected via a 60s poll, always after the fact -- price is
+        # already beyond the trigger every time this fires, matching
+        # advance_waiting_plan()'s own "already_broken_out" branch.
+        "entry_mode": "RETEST_LIMIT_AT_LINE",
+        "rr_floor_ok": True, "rr_ratio": rr["ratio"],
+        "cross_time": now_utc, "fuel_at_cross": "FUELED",
+        "fill_time": now_utc, "fill_price": entry_price,
+        "faked_first": False,
+        "last_transition_reason": f"NO_PLAN morning re-evaluated on a later real cross -- {headline}",
+    }
+
+
 def render_brief(plan: Dict[str, Any]) -> str:
     """Renders the pre-commit brief (SS4) from a built plan dict (as
     returned by build_trade_plan(), or a TradePlan row's __dict__). Every

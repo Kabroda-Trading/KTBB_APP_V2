@@ -295,3 +295,69 @@ def test_stamp_tier_at_cross_standard_when_box_too_wide_for_premium(monkeypatch)
     plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 150.0}  # box=50, atr=25 -> ratio=2.0
     tier = tp._stamp_tier_at_cross(plan, [{}], [{}], daily_atr14=25.0)
     assert tier == "STANDARD"
+
+
+# ------------------------------------------------------------------ promote_no_plan_on_real_cross (2026-09-02, Andy's poll-routing decision)
+
+NOW = datetime.datetime(2026, 9, 2, 15, 0, 0, tzinfo=datetime.timezone.utc)
+
+
+def test_promote_no_plan_on_real_take_goes_to_filled():
+    decision = _take_decision(side="LONG", tier="STANDARD", entry=100.0, t1=112.0, t2=120.0, t3=132.0)
+    updates = tp.promote_no_plan_on_real_cross(
+        decision, candles_24h=_flat_candles(price=150.0),
+        r30_high=160.0, r30_low=155.0, f24_vah=170.0, f24_val=165.0, daily_atr14=2.0,
+        now_utc=NOW,
+    )
+    assert updates is not None
+    assert updates["status"] == "FILLED"
+    assert updates["direction"] == "LONG"
+    assert updates["tier"] == "STANDARD"
+    assert updates["trigger_price"] == 100.0
+    assert updates["t1"] == 112.0 and updates["t2"] == 120.0 and updates["t3"] == 132.0
+    assert updates["stop_price"] == pytest.approx(97.0)  # 100 - 1.5*2.0, same fallback math as build_trade_plan()
+    assert updates["cross_time"] == NOW
+    assert updates["fuel_at_cross"] == "FUELED"  # a TAKE verdict already implies fuel=FUELED
+    assert updates["fill_time"] == NOW
+    assert updates["fill_price"] == 100.0  # the trigger, not a "live price" -- matches advance_waiting_plan()'s own convention
+    assert updates["entry_mode"] == "RETEST_LIMIT_AT_LINE"
+    assert updates["faked_first"] is False
+    assert "real cross" in updates["last_transition_reason"]
+
+
+def test_promote_no_plan_returns_none_when_not_a_real_take():
+    for state in ("PASS", "ALMOST"):
+        decision = _pass_decision("some gate miss")
+        decision["verdict_state"] = state
+        updates = tp.promote_no_plan_on_real_cross(
+            decision, candles_24h=_flat_candles(),
+            r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
+            now_utc=NOW,
+        )
+        assert updates is None
+
+
+def test_promote_no_plan_returns_none_when_atr_unavailable():
+    decision = _take_decision()
+    updates = tp.promote_no_plan_on_real_cross(
+        decision, candles_24h=_flat_candles(),
+        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=0.0,
+        now_utc=NOW,
+    )
+    assert updates is None
+
+
+def test_promote_no_plan_returns_none_when_rr_floor_fails():
+    entry, t1 = 100.0, 101.0  # T1 very close -- easy to blow the floor
+    candles = (
+        [{"open": 98, "high": 99, "low": 97, "close": 98} for _ in range(3)]
+        + [{"open": 60, "high": 61, "low": 60, "close": 60.5}]  # confirmed swing low far below entry
+        + [{"open": 98, "high": 99, "low": 97, "close": 98} for _ in range(3)]
+    )
+    decision = _take_decision(side="LONG", tier="STANDARD", entry=entry, t1=t1, t2=110.0, t3=120.0)
+    updates = tp.promote_no_plan_on_real_cross(
+        decision, candles_24h=candles,
+        r30_high=105.0, r30_low=103.0, f24_vah=110.0, f24_val=108.0, daily_atr14=2.0,
+        now_utc=NOW,
+    )
+    assert updates is None

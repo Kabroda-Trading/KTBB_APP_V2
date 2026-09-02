@@ -81,18 +81,23 @@ def build_lock_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     # STAND DOWN, not a graded WATCH tier (that would need the separate,
     # not-yet-built NC-follow-up confirmation logic to be honest).
     #
-    # IMPORTANT: do not promise a follow-up email here. trade_plan_engine.py's
-    # poll routing does not include NO_PLAN (only WAITING/VETOED/REENTRY_
-    # ARMED/FILLED/STOPPED) -- a NO_PLAN row is never re-checked, so there is
-    # no transition to send. Saying otherwise would be exactly the kind of
-    # confident-but-wrong claim this project's own discipline exists to
-    # prevent (see the same AGENT_LOG.md entry, "NO_PLAN poll-routing gap").
-    # If that gap ever gets closed, this copy needs to change with it.
+    # 2026-09-02, Andy's poll-routing decision: NO_PLAN rows are now polled
+    # too (trade_plan_engine.py), and a later real cross that clears the
+    # FULL gate (including the counter-trend veto) promotes straight to
+    # FILLED and sends the normal ARMED email -- see trade_plan.py's
+    # promote_no_plan_on_real_cross(). So this copy must NOT claim silence
+    # is guaranteed (that was true, and tested, before this decision -- see
+    # the AGENT_LOG.md entry this replaces). If nothing ever crosses, the
+    # session ends with NO further email (notification_for_transition()
+    # below suppresses the DONE transition specifically for a plan that
+    # started NO_PLAN, since "no trade happened" was already communicated
+    # here) -- but a real cross CAN still email.
     subject = f"KABRODA STAND DOWN - {symbol} - do not watch"
     body = (
         "Nothing to watch this morning -- do not wait by the computer. "
-        "This is the full verdict for today; no further email will follow "
-        "for this session.\n\n"
+        "If a later cross clears the full gate, you'll get an ARMED email "
+        "with the real plan; otherwise, silence means this stand-down "
+        "held for the rest of the session.\n\n"
         + tp.render_brief(plan)
         + f"\n\n  Plan ID: {plan.get('id')}"
     )
@@ -180,5 +185,16 @@ def notification_for_transition(prev_status: str, plan: Dict[str, Any]) -> Optio
     if status == "VETOED":
         return build_vetoed_email(plan)
     if status == "DONE":
+        if prev_status == "NO_PLAN":
+            # 2026-09-02 poll-routing decision: a NO_PLAN row that never
+            # gets a real cross transitions to DONE at session expiry
+            # (trade_plan_engine.py) purely so it stops being polled
+            # forever -- it is bookkeeping, not a new event. The STAND
+            # DOWN lock email (build_lock_email()) already told Andy
+            # "silence means this held for the session"; a second "no
+            # trade today" email here would contradict that promise and
+            # be pure spam, the exact anti-spam violation this module
+            # exists to prevent.
+            return None
         return build_done_email(plan)
     return None

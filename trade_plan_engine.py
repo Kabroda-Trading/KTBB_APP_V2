@@ -20,6 +20,23 @@
 # both reused directly rather than a third parallel client being stood up.
 #
 # Per-status routing, once per 60s poll cycle:
+#   NO_PLAN           -> promote_no_plan_on_real_cross() (2026-09-02, Andy's
+#                        poll-routing decision -- Kabroda AI Brain repo
+#                        AGENT_LOG.md). Re-runs the REAL full gate
+#                        (decision_engine.evaluate_15m_decision() via
+#                        _run_full_gate(), same as the opposite-break/own-
+#                        cross paths below -- NOT the pre-cross anticipate_
+#                        setup() heuristic build_trade_plan() used at lock).
+#                        A genuine later TAKE (fuel/HTF/reachability/hour
+#                        all pass, no hard veto incl. counter-trend)
+#                        promotes straight to FILLED -- FUELED collapses
+#                        ARMED+FILLED the same way it does for the
+#                        anticipated-side path, since a TAKE verdict already
+#                        implies fuel=FUELED. Session expiry with no
+#                        qualifying cross -> DONE, but WITHOUT an email
+#                        (trade_plan_notify.py suppresses it -- the STAND
+#                        DOWN lock email already told Andy nothing would
+#                        follow unless a real cross changed it).
 #   WAITING / VETOED -> advance_waiting_plan()   (5m candles + live price)
 #   REENTRY_ARMED     -> advance_reentry_plan()   (5m candles)
 #   FILLED            -> check_wide_stop_or_t1() first -- TradePlan's OWN
@@ -114,7 +131,11 @@ async def _run_full_gate(db, row: TradePlan) -> Optional[dict]:
         candles_1h=candles_1h, candles_4h=candles_4h, candles_1d=candles_1d,
         session_hour_utc=datetime.now(timezone.utc).hour,
     )
-    return {"decision": decision, "levels": levels}
+    # candles_5m included for callers that need a real 24h-ish candle
+    # window on a real cross without a second fetch (promote_no_plan_on_
+    # real_cross()'s stop-planning needs -- stop_planner.py's swing/sweep
+    # detection wants the same window this function already pulled).
+    return {"decision": decision, "levels": levels, "candles_5m": candles_5m}
 
 
 async def _enrich_opposite_break_with_full_gate(db, row: TradePlan) -> Optional[dict]:
@@ -342,6 +363,38 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
         updates = tp.mirror_campaign_outcome(plan_dict, campaign.status if campaign else None)
         _apply(row, updates, symbol)
 
+    elif row.status == "NO_PLAN":
+        # Andy's 2026-09-02 poll-routing decision (Kabroda AI Brain repo
+        # AGENT_LOG.md): a NO_PLAN morning is no longer permanently final.
+        # Re-run the REAL full gate every poll; a genuine later TAKE
+        # (including the counter-trend veto, unlike the pre-cross
+        # anticipate_setup() heuristic used at lock) promotes straight to
+        # FILLED. Session-expiry check FIRST and cheap (no exchange calls)
+        # so old, never-crossed NO_PLAN rows fall out of the polled set
+        # instead of being re-fetched from Kraken forever.
+        if now_utc >= session_expires_at:
+            _apply(row, {"status": "DONE",
+                         "last_transition_reason": "session ended, no real cross ever confirmed the gate"},
+                   symbol)
+            return
+        result = await _run_full_gate(db, row)
+        if result is None:
+            return
+        decision, levels = result["decision"], result["levels"]
+        updates = tp.promote_no_plan_on_real_cross(
+            decision, result["candles_5m"],
+            r30_high=levels.get("range30m_high", 0.0), r30_low=levels.get("range30m_low", 0.0),
+            f24_vah=levels.get("f24_vah", 0.0), f24_val=levels.get("f24_val", 0.0),
+            daily_atr14=levels.get("daily_atr14"), now_utc=now_utc,
+        )
+        if updates is None:
+            return  # still no real, qualifying setup -- keep waiting silently
+        _apply(row, updates, symbol)
+        try:
+            _persist_verdict_to_gate_log(db, row, decision)
+        except Exception as _persist_err:
+            print(f"|| TRADE PLAN || GateLog persist failed for {row.symbol}: {_persist_err}")
+
     elif row.status == "STOPPED":
         if now_utc >= session_expires_at:
             # Routed through _apply() (not a direct setattr+print, unlike
@@ -408,7 +461,7 @@ async def run_trade_plan_loop():
         db = SessionLocal()
         try:
             rows = db.query(TradePlan).filter(
-                TradePlan.status.in_(["WAITING", "VETOED", "FILLED", "STOPPED", "REENTRY_ARMED"])
+                TradePlan.status.in_(["WAITING", "VETOED", "FILLED", "STOPPED", "REENTRY_ARMED", "NO_PLAN"])
             ).all()
             for row in rows:
                 try:
