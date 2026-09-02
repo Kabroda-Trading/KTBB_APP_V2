@@ -39,7 +39,7 @@ def test_lock_email_fires_for_no_plan_too():
     ))
     assert mail is not None
     subject, body = mail
-    assert subject == "KABRODA NO PLAN - BTCUSDT - watching only"
+    assert subject == "KABRODA STAND DOWN - BTCUSDT - do not watch"
     assert "counter-trend on a GOOD daily table" in body
     assert "65500" in body or "65,500" in body  # BO level surfaced
     assert "64200" in body or "64,200" in body  # BD level surfaced
@@ -52,8 +52,18 @@ def test_lock_email_no_plan_without_levels_still_sends():
     mail = tpn.build_lock_email(_plan("NO_PLAN", no_plan_reason="gate state: STAND_DOWN"))
     assert mail is not None
     subject, body = mail
-    assert subject == "KABRODA NO PLAN - BTCUSDT - watching only"
+    assert subject == "KABRODA STAND DOWN - BTCUSDT - do not watch"
     assert "gate state: STAND_DOWN" in body
+
+
+def test_lock_email_no_plan_does_not_promise_a_followup():
+    # 2026-09-02 13:00 CT (Kabroda AI Brain repo AGENT_LOG.md): a NO_PLAN
+    # row is NOT in trade_plan_engine.py's poll routing, so it is never
+    # re-checked -- the copy must not claim a transition email will follow,
+    # that would be false under the current, still-unbuilt poll-routing gap.
+    _, body = tpn.build_lock_email(_plan("NO_PLAN", no_plan_reason="box/ATR ratio 0.62 > 0.55"))
+    assert "transition email" not in body.lower()
+    assert "full verdict for today" in body.lower()
 
 
 def test_lock_email_waiting_has_full_brief_and_plan_id():

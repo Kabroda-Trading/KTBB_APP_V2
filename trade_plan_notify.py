@@ -73,11 +73,28 @@ def build_lock_email(plan: Dict[str, Any]) -> Tuple[str, str]:
         body = tp.render_brief(plan) + f"\n\n  Plan ID: {plan.get('id')}"
         return subject, body
 
-    subject = f"KABRODA NO PLAN - {symbol} - watching only"
+    # Two-tier disposition (STAND DOWN vs LIVE), per DeepSeek's corpus
+    # validation (Kabroda AI Brain repo AGENT_LOG.md, 2026-09-02 13:00 CT):
+    # individual gate-miss reasons don't separate paying from dead
+    # stand-asides in the backtest (all flat, ~0R either way) -- the
+    # disposition is only justified in aggregate, so this stays a plain
+    # STAND DOWN, not a graded WATCH tier (that would need the separate,
+    # not-yet-built NC-follow-up confirmation logic to be honest).
+    #
+    # IMPORTANT: do not promise a follow-up email here. trade_plan_engine.py's
+    # poll routing does not include NO_PLAN (only WAITING/VETOED/REENTRY_
+    # ARMED/FILLED/STOPPED) -- a NO_PLAN row is never re-checked, so there is
+    # no transition to send. Saying otherwise would be exactly the kind of
+    # confident-but-wrong claim this project's own discipline exists to
+    # prevent (see the same AGENT_LOG.md entry, "NO_PLAN poll-routing gap").
+    # If that gap ever gets closed, this copy needs to change with it.
+    subject = f"KABRODA STAND DOWN - {symbol} - do not watch"
     body = (
-        tp.render_brief(plan)
-        + "\n\n  Email again only if this changes."
-        + f"\n  Plan ID: {plan.get('id')}"
+        "Nothing to watch this morning -- do not wait by the computer. "
+        "This is the full verdict for today; no further email will follow "
+        "for this session.\n\n"
+        + tp.render_brief(plan)
+        + f"\n\n  Plan ID: {plan.get('id')}"
     )
     return subject, body
 
