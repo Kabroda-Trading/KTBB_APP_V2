@@ -156,6 +156,15 @@ def run_mas_analysis(
         print(f"GATE CANDLE FETCH ERROR: {e}")
         candles_5m = candles_15m = candles_1h = candles_4h = candles_1d = []
 
+    # 2026-09-04 P0 fix (Kabroda AI Brain repo AGENT_LOG.md): strip a
+    # still-forming trailing 5m candle before it can be read as a
+    # confirmed close -- see market_data.confirmed_5m_closes()'s own
+    # docstring for the incident. This is the SSOT lock-time gate call;
+    # market_radar.py's live dossier and trade_plan_engine.py's polling
+    # both get the same fix, so all three evaluators of decision_engine's
+    # gate agree on what "confirmed" means.
+    candles_5m = market_data.confirmed_5m_closes(candles_5m)
+
     daily_atr14 = market_data._calc_daily_atr14(candles_1d)
     levels["daily_atr14"] = daily_atr14
     levels["price"] = float(candles_5m[-1]["close"]) if candles_5m else 0.0

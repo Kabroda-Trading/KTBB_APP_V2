@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 import weakref
 from typing import Any, Dict, List, Optional
 
@@ -178,6 +179,47 @@ async def fetch_live_5m(symbol: str, limit: int = 1500) -> List[Dict[str, Any]]:
         return result
     except Exception:
         return []
+
+
+def confirmed_5m_closes(candles_5m: List[Dict[str, Any]], now_ts: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Strips a trailing STILL-FORMING 5m candle, if present.
+
+    2026-09-04 P0 (Kabroda AI Brain repo AGENT_LOG.md, DeepSeek + Andy):
+    ccxt's fetch_ohlcv() returns the current, in-progress bar as its last
+    row -- its "close" field is really the live/last-traded price,
+    updating in real time as the bar forms, not a confirmed close. Every
+    cross-detection consumer that reads candles_5m[-1]["close"] as if it
+    were a finished bar's close was vulnerable to a wick momentarily
+    poking through a trigger during a poll being read as a real, confirmed
+    5m-close cross -- exactly what happened live: an 8:35 CT bar wicked
+    through BD (low 78,973) but closed back above it (79,349, confirmed
+    against real Kraken 5m OHLC), and the system evaluated it as a cross
+    anyway because whatever candle was last in the fetched list at poll
+    time got trusted regardless of whether its 5-minute window had
+    actually elapsed.
+
+    Callers that fetch 5m candles for CROSS/TRIGGER detection (decision_
+    engine.py's side determination, fuel_gate.py's push-volume/NO_PUSH
+    read, trade_plan_engine.py's live_price) MUST call this on the result
+    before using the last candle's close for any trigger comparison.
+    Callers that want the live/current price for DISPLAY purposes (e.g.
+    a "current price" ticker) should NOT use this -- they want the
+    unfiltered list, including the in-progress bar.
+
+    A candle is "confirmed" once its full 5-minute window has elapsed:
+    now_ts >= candle["time"] (open time, seconds) + 300. Drops at most the
+    one trailing candle -- every earlier candle in the list is already a
+    real historical bar with a real close, untouched.
+    """
+    if not candles_5m:
+        return candles_5m
+    if now_ts is None:
+        now_ts = time.time()
+    last = candles_5m[-1]
+    candle_open = last.get("time")
+    if candle_open is not None and now_ts < candle_open + 300:
+        return candles_5m[:-1]
+    return candles_5m
 
 
 async def fetch_live_15m(symbol: str, limit: int = 300) -> List[Dict[str, Any]]:

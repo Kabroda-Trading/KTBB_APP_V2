@@ -512,6 +512,76 @@ def test_no_plan_stays_no_plan_when_gate_still_says_no(poll_env, monkeypatch):
     assert sent == []  # no email for a non-event
 
 
+def test_no_plan_wick_through_still_forming_candle_does_not_trigger_evaluation(poll_env, monkeypatch):
+    # THE exact 2026-09-04 P0 incident (Kabroda AI Brain repo AGENT_LOG.md,
+    # DeepSeek + Andy), reproduced end to end through the REAL poll loop --
+    # not just market_data.confirmed_5m_closes()'s own isolated unit tests.
+    # An 8:35 CT bar wicked through BD (low 78,973) but closed back above
+    # it (79,349); the system evaluated it as a real cross anyway because
+    # candles_5m[-1]["close"] was trusted even though that bar's 5-minute
+    # window hadn't elapsed yet. Reproduced here at trigger=90 for round
+    # numbers: the trailing candle's CURRENT (in-progress) price sits below
+    # BD=90, but its 5m window is still open -- must NOT read as a cross.
+    import time as _time
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_lock"](levels={
+        "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
+        "range30m_high": 100.0, "range30m_low": 90.0,
+    })
+    poll_env["make_plan"](status="NO_PLAN", direction=None, trigger_price=None)
+
+    now = _time.time()
+    def c(open_ts, close):
+        return {"time": int(open_ts), "open": close, "high": close, "low": close, "close": close, "volume": 10.0}
+    candles = (
+        [c(now - 300 * (i + 2), 95.0) for i in range(50)][::-1]  # confirmed history, inside the box (near BD)
+        + [c(now, 89.0)]  # still-forming candle, CURRENT price wicked below BD -- NOT yet confirmed
+    )
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "NO_PLAN"  # the wick must NOT have been read as a cross
+    assert sent == []  # no evaluation fired -> no email, matching Andy's exact report
+
+
+def test_no_plan_confirmed_close_through_trigger_does_trigger_evaluation(poll_env, monkeypatch):
+    # The other half of DeepSeek's spec: once that same candle's window has
+    # genuinely elapsed (a real, confirmed close beyond the trigger), the
+    # cross MUST still be detected -- confirmed_5m_closes() only strips a
+    # truly still-forming trailing candle, never a real closed one.
+    import time as _time
+    import decision_engine
+    monkeypatch.setattr(decision_engine, "DEAD_HOURS", set())
+    sent = _capture_emails(monkeypatch)
+    monkeypatch.setattr(market_regime, "classify_market_regime", lambda candles: {
+        "table": "TRENDING_UP", "quality": "GOOD", "policy": {"bias": "DOWN"},
+    })
+    monkeypatch.setattr(micro_regime, "classify_regime", lambda candles: {"regime": "TRENDING"})
+    monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BEARISH", "trend_4h": "NEUTRAL", "aligned": 1, "opposed": 0,
+    })
+    poll_env["make_lock"](levels={
+        "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
+        "range30m_high": 100.0, "range30m_low": 90.0,
+        "f24_vah": 105.0, "f24_val": 85.0,
+    })
+    poll_env["make_gate_log"](state="PASS")
+    poll_env["make_plan"](status="NO_PLAN", direction=None, trigger_price=None)
+
+    now = _time.time()
+    def c(open_ts, close, vol=10.0):
+        return {"time": int(open_ts), "open": close, "high": close + 0.5, "low": close - 0.5, "close": close, "volume": vol}
+    candles = (
+        [c(now - 300 * (i + 8), 92.0) for i in range(250)][::-1]  # baseline, near BD
+        + [c(now - 300 * (i + 2), 85.0, vol=10.0) for i in range(6)][::-1]  # fueled push through BD, CONFIRMED closes
+    )
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=20.0)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "FILLED"  # a real, confirmed cross -- must be detected
+    assert len(sent) == 1
+
+
 def test_no_plan_real_cross_declined_by_gate_becomes_done_with_vetoed_email(poll_env, monkeypatch):
     # THE gap caught before this ever shipped: an earlier draft only
     # handled the TAKE case above and silently did nothing for a real

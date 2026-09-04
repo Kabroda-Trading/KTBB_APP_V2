@@ -123,6 +123,10 @@ async def _run_full_gate(db, row: TradePlan) -> Optional[dict]:
         market_data.fetch_live_4h(row.symbol, limit=100),
         market_data.fetch_live_daily(row.symbol, limit=60),
     )
+    # 2026-09-04 P0 fix: strip a still-forming trailing 5m candle before ANY
+    # cross/trigger comparison -- see market_data.confirmed_5m_closes()'s
+    # own docstring for the incident this fixes.
+    candles_5m = market_data.confirmed_5m_closes(candles_5m)
     if not candles_5m:
         return None
 
@@ -273,7 +277,7 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
     session_expires_at = _compute_session_expires_at(row.session_id, row.date_key)
 
     if row.status in ("WAITING", "VETOED"):
-        candles_5m = await market_data.fetch_live_5m(symbol, limit=310)
+        candles_5m = market_data.confirmed_5m_closes(await market_data.fetch_live_5m(symbol, limit=310))
         if not candles_5m:
             return
         live_price = float(candles_5m[-1]["close"])
@@ -319,7 +323,7 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
         _apply(row, updates, symbol)
 
     elif row.status == "REENTRY_ARMED":
-        candles_5m = await market_data.fetch_live_5m(symbol, limit=310)
+        candles_5m = market_data.confirmed_5m_closes(await market_data.fetch_live_5m(symbol, limit=310))
         if not candles_5m:
             return
         plan_dict = {"status": row.status, "direction": row.direction, "trigger_price": row.trigger_price}
@@ -410,7 +414,7 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
                          "last_transition_reason": "session ended, no qualifying re-entry cross after stop"},
                    symbol)
             return
-        candles_5m = await market_data.fetch_live_5m(symbol, limit=310)
+        candles_5m = market_data.confirmed_5m_closes(await market_data.fetch_live_5m(symbol, limit=310))
         if not candles_5m:
             return
         fuel = fuel_gate.evaluate_fuel_gate(candles_5m, row.trigger_price, side)

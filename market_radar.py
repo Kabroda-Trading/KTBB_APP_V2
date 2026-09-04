@@ -248,6 +248,12 @@ async def _build_dossier(symbol: str, price: float, levels: dict, context: dict)
             market_data.fetch_live_4h(symbol, limit=100),
             market_data.fetch_live_daily(symbol, limit=60),
         )
+        # 2026-09-04 P0 fix: strip a still-forming trailing 5m candle before
+        # it can be read as a confirmed close -- see market_data.confirmed_
+        # 5m_closes()'s own docstring for the incident. This is one of the
+        # two (now three, with trade_plan_engine.py) real evaluators of
+        # decision_engine's gate that CLAUDE.md says must never disagree.
+        candles_5m = market_data.confirmed_5m_closes(candles_5m)
         gate_levels = dict(levels)
         gate_levels["daily_atr14"] = market_data._calc_daily_atr14(candles_1d)
         gate_levels["price"] = float(candles_5m[-1]["close"]) if candles_5m else price
