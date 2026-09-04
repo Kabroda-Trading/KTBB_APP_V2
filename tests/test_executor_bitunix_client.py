@@ -112,3 +112,53 @@ def test_place_order_and_set_tpsl_still_deliberately_unimplemented():
 
     assert asyncio.run(_try_place_order()) is True
     assert asyncio.run(_try_set_tpsl()) is True
+
+
+# ------------------------------------------------------------------ read-only endpoint request construction
+# (verifies the RIGHT path/query gets built -- not a real network call;
+# _request() itself is monkeypatched to capture what it was asked to do)
+
+def _capture_request(monkeypatch, client):
+    calls = []
+
+    async def fake_request(self, method, path, query=None, body=None):
+        calls.append({"method": method, "path": path, "query": query, "body": body})
+        return {"captured": True}
+
+    monkeypatch.setattr(ebc.BitunixClient, "_request", fake_request)
+    return calls
+
+
+def test_get_balance_calls_the_right_endpoint(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.get_balance())
+    assert calls == [{"method": "GET", "path": "/api/v1/futures/account", "query": {"marginCoin": "USDT"}, "body": None}]
+
+
+def test_get_position_calls_the_right_endpoint(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.get_position("BTCUSDT"))
+    assert calls == [{"method": "GET", "path": "/api/v1/futures/position/get_pending_positions",
+                       "query": {"symbol": "BTCUSDT"}, "body": None}]
+
+
+def test_get_leverage_and_margin_mode_calls_the_right_endpoint(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.get_leverage_and_margin_mode("BTCUSDT"))
+    assert calls == [{"method": "GET", "path": "/api/v1/futures/account/get_leverage_margin_mode",
+                       "query": {"symbol": "BTCUSDT", "marginCoin": "USDT"}, "body": None}]
+
+
+def test_get_trading_pairs_calls_the_right_endpoint(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.get_trading_pairs("BTCUSDT"))
+    assert calls == [{"method": "GET", "path": "/api/v1/futures/market/trading_pairs",
+                       "query": {"symbols": "BTCUSDT"}, "body": None}]

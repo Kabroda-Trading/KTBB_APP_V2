@@ -33,10 +33,12 @@
 # with no separator (doc's own example: {"id":1,"uid":200} -> "id1uid200").
 # body: compact JSON (no whitespace), empty string if no body.
 #
-# Endpoints verified against bitunix.com/api-docs/futures/account/
-# get_single_account.html and .../position/get_pending_positions.html:
+# Read-only endpoints verified against bitunix.com/api-docs (each page
+# named in its own method's docstring below):
 #   GET /api/v1/futures/account?marginCoin=USDT
 #   GET /api/v1/futures/position/get_pending_positions
+#   GET /api/v1/futures/account/get_leverage_margin_mode
+#   GET /api/v1/futures/market/trading_pairs
 # place_order/set_tpsl endpoints are ALSO verified (POST /api/v1/futures/
 # trade/place_order, POST /api/v1/futures/tpsl/position/place_order) but
 # DELIBERATELY still raise NotImplementedError -- see those methods'
@@ -165,6 +167,29 @@ class BitunixClient:
         -- that's a real Stage 2/3 improvement, flagged, not built here)."""
         query = {"symbol": symbol} if symbol else None
         return await self._request("GET", "/api/v1/futures/position/get_pending_positions", query=query)
+
+    async def get_leverage_and_margin_mode(self, symbol: str, margin_coin: str = "USDT") -> Dict[str, Any]:
+        """GET /api/v1/futures/account/get_leverage_margin_mode -- verified
+        against bitunix.com/api-docs/futures/account/get_leverage_and_margin_mode.html
+        (2026-09-05, DeepSeek's own flagged addition to the read-only
+        verification set). Returns `leverage` (int) and `marginMode`
+        ("ISOLATION"|"CROSS") for the real account -- lets the bot verify
+        isolated+10x is ACTUALLY set on the exchange rather than trust
+        `ExecutorAccount.margin_mode`/`leverage_baseline` as configured."""
+        return await self._request("GET", "/api/v1/futures/account/get_leverage_margin_mode",
+                                    query={"symbol": symbol, "marginCoin": margin_coin})
+
+    async def get_trading_pairs(self, symbols: Optional[str] = None) -> Dict[str, Any]:
+        """GET /api/v1/futures/market/trading_pairs -- verified against
+        bitunix.com/api-docs/futures/market/get_trading_pairs.html.
+        `symbols` is a comma-separated string (e.g. "BTCUSDT"), optional
+        (omit for all pairs). Response includes `minTradeVolume` (the
+        real minimum order size) and `basePrecision`/`quotePrecision` --
+        needed before any real order can be sized correctly; a synthetic
+        assumption here would be exactly the kind of guess this project's
+        discipline exists to avoid."""
+        query = {"symbols": symbols} if symbols else None
+        return await self._request("GET", "/api/v1/futures/market/trading_pairs", query=query)
 
     # --- ORDER-PLACING -- NOT built yet, deliberately ---
 

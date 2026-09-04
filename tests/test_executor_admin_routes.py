@@ -119,19 +119,33 @@ def test_connection_test_non_owner_gets_403(env):
     assert resp.status_code == 403
 
 
+def _patch_verify_auth_reads(monkeypatch, executor_bitunix_client, get_balance=None, get_leverage=None, get_pairs=None):
+    """Shared helper: monkeypatch all three verify-auth read calls at
+    once, each with its own configurable fake (default: a plausible
+    success payload)."""
+    async def default_get_balance(self, margin_coin="USDT"):
+        return {"marginCoin": "USDT", "available": "1234.56", "margin": "0"}
+
+    async def default_get_leverage(self, symbol, margin_coin="USDT"):
+        return {"symbol": symbol, "leverage": 10, "marginMode": "ISOLATION"}
+
+    async def default_get_pairs(self, symbols=None):
+        return {"symbol": "BTCUSDT", "minTradeVolume": "0.0001"}
+
+    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_balance", get_balance or default_get_balance)
+    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_leverage_and_margin_mode", get_leverage or default_get_leverage)
+    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_trading_pairs", get_pairs or default_get_pairs)
+
+
 def test_connection_test_success_never_places_an_order(env, monkeypatch):
     import executor_bitunix_client
-    called = {"get_balance": 0, "place_order": 0}
-
-    async def fake_get_balance(self, margin_coin="USDT"):
-        called["get_balance"] += 1
-        return {"marginCoin": "USDT", "available": "1234.56", "margin": "0"}
+    called = {"place_order": 0}
 
     async def fake_place_order(self, *a, **k):
         called["place_order"] += 1
-        raise AssertionError("place_order must never be called by test-connection")
+        raise AssertionError("place_order must never be called by verify-auth")
 
-    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_balance", fake_get_balance)
+    _patch_verify_auth_reads(monkeypatch, executor_bitunix_client)
     monkeypatch.setattr(executor_bitunix_client.BitunixClient, "place_order", fake_place_order)
 
     client = _login("exec_owner@kabroda.com", "ownerpass123")
@@ -142,8 +156,10 @@ def test_connection_test_success_never_places_an_order(env, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
-    assert body["response"]["available"] == "1234.56"
-    assert called["get_balance"] == 1
+    assert body["checks"]["get_balance"]["ok"] is True
+    assert body["checks"]["get_balance"]["response"]["available"] == "1234.56"
+    assert body["checks"]["get_leverage_and_margin_mode"]["response"]["marginMode"] == "ISOLATION"
+    assert body["checks"]["get_trading_pairs"]["response"]["minTradeVolume"] == "0.0001"
     assert called["place_order"] == 0
 
 
@@ -153,15 +169,22 @@ def test_connection_test_failure_reports_error_not_500(env, monkeypatch):
     async def fake_get_balance_fails(self, margin_coin="USDT"):
         raise RuntimeError("simulated network/auth failure")
 
-    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_balance", fake_get_balance_fails)
+    _patch_verify_auth_reads(monkeypatch, executor_bitunix_client, get_balance=fake_get_balance_fails)
 
     client = _login("exec_owner@kabroda.com", "ownerpass123")
     client.post(f"/api/executor/accounts/{env['account_id']}/credentials",
                 json={"api_key": "real-key", "api_secret": "real-secret"})
 
     resp = client.post(f"/api/executor/accounts/{env['account_id']}/test-connection")
-    assert resp.status_code == 502
-    assert "simulated network/auth failure" in resp.json()["error"]
+    assert resp.status_code == 200  # the route itself succeeds -- the failure is reported per-check
+    body = resp.json()
+    assert body["ok"] is False  # overall verify-auth fails since one check failed
+    assert body["checks"]["get_balance"]["ok"] is False
+    assert "simulated network/auth failure" in body["checks"]["get_balance"]["error"]
+    # the OTHER two checks still ran and are reported independently -- one
+    # failing endpoint doesn't hide whether the rest of the signing chain works
+    assert body["checks"]["get_leverage_and_margin_mode"]["ok"] is True
+    assert body["checks"]["get_trading_pairs"]["ok"] is True
 
 
 def test_non_owner_non_admin_gets_403_on_kill_switch(env):

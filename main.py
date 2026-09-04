@@ -1312,15 +1312,16 @@ async def api_executor_set_credentials(account_id: int, request: Request, body: 
 
 @app.post("/api/executor/accounts/{account_id}/test-connection")
 async def api_executor_test_connection(account_id: int, request: Request, db: Session = Depends(get_db)):
-    """2026-09-05 (Bitunix has no demo/paper-trading environment --
-    verified, see AGENT_LOG.md and executor_bitunix_client.py's own
-    header). This is the safe substitute Andy's own sequencing call
-    asked for: a REAL, read-only call (GET /api/v1/futures/account) that
-    proves the signing chain and credentials actually work against a
-    real Bitunix account, with zero financial risk -- no order is ever
-    placed by this route. Deliberately does NOT call get_position() here
-    too (keep this one action doing one real thing, easy to reason
-    about) -- can be added once this is proven out.
+    """"verify-auth" (2026-09-05, Andy + DeepSeek's own framing: this
+    needs no live signal, run it on demand, today). Bitunix has no demo/
+    paper-trading environment -- verified, see AGENT_LOG.md and
+    executor_bitunix_client.py's own header -- so this is the real
+    substitute: three independent REAL, READ-ONLY calls that prove the
+    signing chain and credentials work, with zero financial risk. No
+    order is ever placed by this route. Each call is reported
+    independently (one failing doesn't hide whether the others passed) --
+    genuinely useful diagnostic if the signing chain is only partially
+    right (e.g. a bug specific to one endpoint's query-param shape).
     """
     ctx = get_user_context(request, db)
     account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
@@ -1335,22 +1336,26 @@ async def api_executor_test_connection(account_id: int, request: Request, db: Se
 
     import executor_bitunix_client
     client = executor_bitunix_client.BitunixClient(api_key, api_secret)
-    try:
-        result = await client.get_balance()
-    except Exception as e:
-        _executor_accounts.write_audit(
-            db, "ERROR", f"connection test failed for account {account.id}: {e}",
-            account_id=account.id, actor=ctx.get("email") or "unknown",
-        )
-        db.commit()
-        return JSONResponse({"ok": False, "error": f"request failed: {e}"}, status_code=502)
 
+    checks = {}
+    for name, coro in (
+        ("get_balance", client.get_balance()),
+        ("get_leverage_and_margin_mode", client.get_leverage_and_margin_mode("BTCUSDT")),
+        ("get_trading_pairs", client.get_trading_pairs("BTCUSDT")),
+    ):
+        try:
+            checks[name] = {"ok": True, "response": await coro}
+        except Exception as e:
+            checks[name] = {"ok": False, "error": str(e)}
+
+    all_ok = all(c["ok"] for c in checks.values())
     _executor_accounts.write_audit(
-        db, "CONNECTION_TESTED", f"connection test succeeded for account {account.id}",
-        account_id=account.id, actor=ctx.get("email") or "unknown", detail=result,
+        db, "CONNECTION_TESTED" if all_ok else "ERROR",
+        f"verify-auth {'succeeded' if all_ok else 'partially or fully failed'} for account {account.id}",
+        account_id=account.id, actor=ctx.get("email") or "unknown", detail=checks,
     )
     db.commit()
-    return JSONResponse({"ok": True, "response": result})
+    return JSONResponse({"ok": all_ok, "checks": checks})
 
 
 @app.post("/api/executor/accounts/{account_id}/kill-switch")

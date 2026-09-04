@@ -166,7 +166,7 @@ async function loadAccounts() {
                     <button class="btn" onclick="setCredentials(${a.id})" style="align-self:flex-end;">SAVE CREDENTIALS</button>
                 </div>
                 <div style="margin-top:10px;">
-                    <button class="btn ${a.has_credentials ? 'btn-ok' : ''}" onclick="testConnection(${a.id})" ${a.has_credentials ? '' : 'disabled'}>TEST CONNECTION (read-only, no order placed)</button>
+                    <button class="btn ${a.has_credentials ? 'btn-ok' : ''}" onclick="testConnection(${a.id})" ${a.has_credentials ? '' : 'disabled'}>VERIFY AUTH (read-only, no order placed)</button>
                     <div id="testResult-${a.id}" class="empty" style="margin-top:8px; display:none; white-space:pre-wrap;"></div>
                 </div>
             </details>
@@ -244,13 +244,12 @@ async function setCredentials(id) {
 async function testConnection(id) {
     const box = document.getElementById(`testResult-${id}`);
     box.style.display = "block";
-    box.textContent = "Testing (real, read-only call -- GET account balance, no order placed)...";
+    box.textContent = "Verifying (3 real, read-only calls -- balance, leverage/margin mode, trading pairs -- no order placed)...";
     const resp = await api(`/api/executor/accounts/${id}/test-connection`, { method: "POST" });
-    if (resp.ok) {
-        box.textContent = "CONNECTION OK -- real Bitunix response:\n" + JSON.stringify(resp.response, null, 2);
-    } else {
-        box.textContent = "CONNECTION FAILED: " + (resp.error || "unknown error");
-    }
+    const lines = Object.entries(resp.checks || {}).map(([name, c]) =>
+        c.ok ? `[OK] ${name}:\n${JSON.stringify(c.response, null, 2)}` : `[FAILED] ${name}: ${c.error}`
+    );
+    box.textContent = (resp.ok ? "VERIFY-AUTH: ALL CHECKS PASSED\n\n" : "VERIFY-AUTH: ONE OR MORE CHECKS FAILED\n\n") + lines.join("\n\n");
 }
 
 async function loadOrders() {
