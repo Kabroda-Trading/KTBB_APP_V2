@@ -196,3 +196,28 @@ def test_owner_can_edit_risk_state(env):
 
     get_resp = client.get(f"/api/executor/accounts/{env['account_id']}/risk-state")
     assert get_resp.json()["risk_state"]["risk_last_usd"] == 250.0
+
+
+# ------------------------------------------------------------------ page rendering (the create-account form)
+
+def test_admin_page_renders_create_account_form_with_user_picker(env):
+    # 2026-09-05: the page shipped with the POST /api/executor/accounts
+    # route wired but no actual button/form to call it -- caught live by
+    # Andy after deploy. This locks in that the form (and its user
+    # dropdown, admin-only) actually renders.
+    client = _login("exec_admin@kabroda.com", "adminpass123")
+    resp = client.get("/admin/executor")
+    assert resp.status_code == 200
+    assert "CREATE ACCOUNT" in resp.text
+    assert "newAccountUserId" in resp.text
+    assert f"#{env['owner_id']}" in resp.text  # the owner user appears in the picker
+
+
+def test_owner_page_renders_without_create_account_form(env):
+    # A non-admin owner can still see the page (their own account, kill
+    # switch, etc.) but must NOT see the admin-only create-account form
+    # (creation itself is admin-only at the route level too).
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.get("/admin/executor")
+    assert resp.status_code == 200
+    assert "CREATE ACCOUNT" not in resp.text

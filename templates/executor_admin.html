@@ -70,6 +70,25 @@
         </div>
     </div>
 
+    {% if is_admin %}
+    <div class="card">
+        <div class="card-header"><span class="card-title">Create Account</span></div>
+        <div class="card-body">
+            <div class="risk-form">
+                <label>User<select id="newAccountUserId">
+                    {% for u in all_users %}
+                    <option value="{{ u.id }}">#{{ u.id }} -- {{ u.email }}</option>
+                    {% endfor %}
+                </select></label>
+                <label>Label<input type="text" id="newAccountLabel" placeholder="e.g. andy_bitunix_main"></label>
+                <label>Exchange<input type="text" id="newAccountExchange" value="bitunix"></label>
+                <button class="btn btn-ok" onclick="createAccount()" style="align-self:flex-end;">CREATE ACCOUNT</button>
+            </div>
+            <p class="empty" style="margin-top:8px;">Creates a new account in DRY_RUN mode, active immediately -- it will start producing dry-run "would-place" rows on the next real ARMED signal even before credentials are set (Stage 1 never calls the exchange regardless of mode, so this is safe). Engage its kill switch below if you want to create it without it acting yet.</p>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card">
         <div class="card-header">
             <span class="card-title">Accounts</span>
@@ -170,6 +189,19 @@ async function engageKillSwitch(id) {
 async function releaseKillSwitch(id) {
     await api(`/api/executor/accounts/${id}/kill-switch/release`, { method: "POST" });
     loadAccounts();
+}
+async function createAccount() {
+    const user_id = parseInt(document.getElementById("newAccountUserId").value, 10);
+    const label = document.getElementById("newAccountLabel").value.trim();
+    const exchange = document.getElementById("newAccountExchange").value.trim() || "bitunix";
+    if (!label) { alert("Enter a label for the account (e.g. andy_bitunix_main)."); return; }
+    const resp = await api("/api/executor/accounts", { method: "POST", body: JSON.stringify({ user_id, label, exchange }) });
+    if (resp.ok) {
+        document.getElementById("newAccountLabel").value = "";
+        loadAccounts();
+    } else {
+        alert(resp.error || "failed to create account");
+    }
 }
 async function engageGlobalKillSwitch() {
     const reason = prompt("Reason for engaging the GLOBAL kill switch:", "manual") || "manual";

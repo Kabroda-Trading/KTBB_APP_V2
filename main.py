@@ -1445,6 +1445,11 @@ async def page_executor_admin(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx.get("is_logged_in"):
         return RedirectResponse("/login", status_code=303)
+    if ctx.get("is_admin"):
+        # For the "create account" form's user picker -- account creation
+        # itself is admin-only (POST /api/executor/accounts), same as the
+        # roster page's own user list (main.py's admin_roster_page()).
+        ctx["all_users"] = db.query(UserModel).order_by(UserModel.id).all()
     return _template_or_fallback(request, templates, "executor_admin.html", ctx)
 
 

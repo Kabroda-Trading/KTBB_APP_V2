@@ -1172,4 +1172,15 @@ The full Stage-1 (DRY-RUN only, zero real exchange calls) executor bot from the 
 
 **Manual, non-code steps still needed from Andy** (not something I can or should do myself): provision `EXECUTOR_CREDENTIAL_KEY` on Render (a real `Fernet.generate_key()` value, not chosen by me); once that's live, migrate the existing bare `BITUNIX_API_KEY`/`SECRET` Render env vars into `executor_accounts` row 1 via the new admin UI's credential form (the bare env vars can stay in place until Stage 2 cutover, then get retired). Leverage/margin-mode confirmation (isolated + 10x, with the bot's own liq-vs-stop check) is already built exactly as your 15:20/15:25 CT entries specified.
 
-Full diff: commit (this session, pending).
+Full diff: commit `79a8c52`.
+
+## 2026-09-05 (real gap Andy caught live: no create-account button) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved
+
+Andy deployed and used the page for real -- and caught a genuine gap: `POST /api/executor/accounts` (create) was fully built and tested at the API level, but `executor_admin.html` never actually had a button or form calling it. The page could show/manage accounts once they existed, but there was no way to create the first one through the UI at all -- an oversight in the original build, not a design decision.
+
+Fixed: a "Create Account" card (admin-only, matching the route's own admin-only restriction), with a user picker populated from the real `users` table, a label field, and an exchange field defaulting to `bitunix`. `page_executor_admin()` now passes `all_users` into the template context for admins only. Two new regression tests confirm the form renders for admins (with the real user list) and is absent for non-admin owners.
+
+Verified: 307 passed (up from 305, same 5 pre-existing unrelated errors), live `TestClient` render confirms the form appears with the expected fields/JS wired.
+
+This is the create-the-first-account step -- once it's live, Andy can actually make his own account row, then set credentials, then watch real dry-run output accumulate on real ARMED signals.
