@@ -1595,4 +1595,168 @@ class GateLog(Base):
     __table_args__ = (
         Index("ix_gate_log_symbol_date", "symbol", "date_key"),
     )
+
+
+# ---------------------------------------------------------
+# EXECUTOR BOT (Stage 1, DRY-RUN only) -- Andy's request, design settled
+# over a multi-day conversation with DeepSeek (Kabroda AI Brain repo
+# AGENT_LOG.md, 2026-09-04). Converts an already-decided TradePlan FILLED
+# row into a real exchange order on Bitunix futures. "Bot = hands, brain
+# stays in Kabroda" -- these tables never feed a decision back into
+# TradePlan/decision_engine.py, they only record what the executor did
+# (or, in Stage 1, would have done) in response to a decision already
+# made elsewhere. No ForeignKey() objects used here -- matching this
+# file's own established convention (every other *_id column in this
+# file is a plain Integer with a comment, not a real FK constraint).
+# ---------------------------------------------------------
+class ExecutorAccount(Base):
+    """One row per real trading account (Andy's own Bitunix account is
+    row 1; a second trader's account can be added the same way -- multi-
+    account support from day one, not bolted on later). Credentials are
+    stored ENCRYPTED (executor_crypto.py's Fernet helper) -- plaintext
+    values never touch this table or any log."""
+    __tablename__ = "executor_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)   # users.id, owner
+    label = Column(String, nullable=False)                   # e.g. "andy_bitunix_main"
+    exchange = Column(String, nullable=False, default="bitunix")
+    mode = Column(String, nullable=False, default="DRY_RUN")  # DRY_RUN | PAPER | LIVE
+
+    api_key_encrypted = Column(Text, nullable=True)
+    api_secret_encrypted = Column(Text, nullable=True)
+    credential_set_at = Column(DateTime, nullable=True)
+    credential_set_by = Column(String, nullable=True)         # admin/owner email
+
+    is_active = Column(Boolean, nullable=False, default=True)
+    kill_switch_engaged = Column(Boolean, nullable=False, default=False)
+    kill_switch_engaged_at = Column(DateTime, nullable=True)
+    kill_switch_engaged_by = Column(String, nullable=True)
+    kill_switch_reason = Column(String, nullable=True)
+
+    margin_mode = Column(String, nullable=False, default="ISOLATED")
+    leverage_baseline = Column(Integer, nullable=False, default=10)
+    max_margin_pct_of_balance = Column(Float, nullable=False, default=0.80)
+    # Stage 1 placeholder -- there is no real balance query yet (no
+    # exchange calls at all in Stage 1). Admin-edited so the leverage-
+    # reduction math (executor_sizing.suggest_leverage()) can be built
+    # and tested end to end now rather than deferred to Stage 2.
+    assumed_balance_usd = Column(Float, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class ExecutorRiskState(Base):
+    """Persistent, restart-surviving compounding state -- one row per
+    account (unique account_id). Andy's rule: risk_next = min(max(
+    risk_last + compounding_factor*last_trade_pnl, floor), cap)."""
+    __tablename__ = "executor_risk_state"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, nullable=False, unique=True, index=True)  # executor_accounts.id
+
+    risk_last_usd = Column(Float, nullable=False, default=100.0)
+    risk_floor_usd = Column(Float, nullable=False, default=100.0)
+    risk_cap_usd = Column(Float, nullable=False, default=1000.0)
+    compounding_factor = Column(Float, nullable=False, default=0.10)
+    last_trade_pnl_usd = Column(Float, nullable=True)
+    last_updated_from_trade_plan_id = Column(Integer, nullable=True)  # trade_plans.id, traceability only
+
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class ExecutorOrder(Base):
+    """The 'would-place' record in Stage 1 (mode=DRY_RUN always here);
+    becomes the real order record in Stage 2/3 without a schema change.
+    One row per (TradePlan FILLED event) x (account that acted on it).
+    entry/stop/t1/t2/t3 here are a DENORMALIZED SNAPSHOT for audit
+    immutability -- TradePlan stays the one authoritative source, this
+    table never overrides or feeds back into it."""
+    __tablename__ = "executor_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    trade_plan_id = Column(Integer, nullable=False, index=True)   # trade_plans.id
+    account_id = Column(Integer, nullable=False, index=True)      # executor_accounts.id
+    mode = Column(String, nullable=False)   # snapshot of account.mode at decision time
+
+    symbol = Column(String, nullable=True)
+    direction = Column(String, nullable=True)   # LONG | SHORT
+    entry_price = Column(Float, nullable=True)
+    stop_price = Column(Float, nullable=True)
+    t1_price = Column(Float, nullable=True)
+    t2_price = Column(Float, nullable=True)
+    t3_price = Column(Float, nullable=True)
+
+    risk_dollars_used = Column(Float, nullable=True)
+    stop_distance = Column(Float, nullable=True)
+    qty = Column(Float, nullable=True)
+    leverage_used = Column(Integer, nullable=True)
+    margin_required_usd = Column(Float, nullable=True)
+    liquidation_price_estimate = Column(Float, nullable=True)
+    liquidation_check_passed = Column(Boolean, nullable=True)
+    liquidation_check_detail = Column(String, nullable=True)
+
+    # WOULD_PLACE | REJECTED | SKIPPED_KILL_SWITCH | SKIPPED_ACCOUNT_INACTIVE
+    # | SKIPPED_ALREADY_IN_TRADE | ERROR
+    decision = Column(String, nullable=False)
+    decision_reason = Column(String, nullable=True)
+
+    # Always NULL in Stage 1 -- populated once Stage 2/3 places real orders.
+    exchange_order_id = Column(String, nullable=True)
+    exchange_response_json = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("trade_plan_id", "account_id", name="uq_executor_order_plan_account"),
+    )
+
+
+class ExecutorAuditLog(Base):
+    """Append-only (insert-only by code convention -- never UPDATE/DELETE
+    a row here). Every real decision point the executor makes, Stage 1 or
+    later: would-place, rejected, kill-switch changes, credential changes,
+    account changes. Andy's own standing rule for this project: every new
+    mechanism ships with full audit tracking from day one."""
+    __tablename__ = "executor_audit_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    occurred_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False, index=True)
+    account_id = Column(Integer, nullable=True, index=True)      # executor_accounts.id
+    trade_plan_id = Column(Integer, nullable=True)                # trade_plans.id
+    executor_order_id = Column(Integer, nullable=True)            # executor_orders.id
+
+    # ORDER_WOULD_PLACE | ORDER_PLACED | ORDER_REJECTED | LIQUIDATION_CHECK_FAILED
+    # | T1_PARTIAL_DETECTED | SL_MOVED_TO_BREAKEVEN | KILL_SWITCH_ENGAGED
+    # | KILL_SWITCH_RELEASED | RISK_STATE_UPDATED | CREDENTIAL_SET
+    # | CREDENTIAL_ROTATED | ACCOUNT_CREATED | ACCOUNT_DEACTIVATED
+    # | MODE_CHANGED | ERROR
+    # Stage 1 code only ever writes a subset of these -- the rest exist
+    # now for forward schema compatibility with Stage 2/3, not dead weight.
+    event_type = Column(String, nullable=False, index=True)
+    actor = Column(String, nullable=True)   # "system" for bot-driven rows, an email for human-driven ones
+    detail_json = Column(Text, nullable=True)
+    message = Column(String, nullable=True)
+
+
+class ExecutorGlobalConfig(Base):
+    """Singleton row (config_key='executor_global'), MonitorConfig-shaped.
+    The GLOBAL kill switch -- ANDed with each account's own kill_switch_
+    engaged flag in executor_accounts.is_account_tradeable(); both must
+    be clear for the bot to act on any account."""
+    __tablename__ = "executor_global_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    config_key = Column(String, unique=True, nullable=False)
+
+    global_kill_switch_engaged = Column(Boolean, nullable=False, default=False)
+    global_kill_switch_engaged_at = Column(DateTime, nullable=True)
+    global_kill_switch_engaged_by = Column(String, nullable=True)
+    global_kill_switch_reason = Column(String, nullable=True)
+
+    stage_default_mode = Column(String, nullable=False, default="DRY_RUN")
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 

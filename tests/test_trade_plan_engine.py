@@ -28,6 +28,7 @@ import pytest
 
 import database
 from database import SessionLocal, TradePlan, CampaignLog, SessionLock, GateLog
+from database import ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig
 import trade_plan_engine as tpe
 import notify
 import market_regime
@@ -92,6 +93,16 @@ def poll_env(monkeypatch):
     db = SessionLocal()
     db.query(TradePlan).delete()
     db.query(CampaignLog).delete()
+    # 2026-09-04: the executor bot's hook (trade_plan_engine.py's
+    # _notify_executor()) now fires on every real FILLED transition this
+    # file's tests drive -- ExecutorOrder's (trade_plan_id, account_id)
+    # unique constraint means a leftover row from an earlier test FILE
+    # (this module.engine is shared/cached across the whole pytest
+    # session, per the comment above) can collide and roll back this
+    # file's own TradePlan write. Row-level cleanup here too, same
+    # rationale as TradePlan/CampaignLog above.
+    for _model in (ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig):
+        db.query(_model).delete()
     db.commit()
     db.close()
     # `now` here is used only to build FIELD VALUES (commit_after/fill_time
@@ -253,6 +264,8 @@ def poll_env(monkeypatch):
     db.query(CampaignLog).delete()
     db.query(SessionLock).delete()
     db.query(GateLog).delete()
+    for _model in (ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig):
+        db.query(_model).delete()
     db.commit()
     db.close()
     _clean_db_files()

@@ -595,6 +595,18 @@ async def run_analysis_loop_scheduler() -> None:
 async def lifespan(app: FastAPI):
     print(">>> BOOTING KABRODA SYSTEM: Initializing Database Schema...")
     init_db()
+    try:
+        import executor_crypto
+        executor_crypto.validate_key_configured()
+    except Exception as e:
+        # Deliberately NOT a hard crash of the whole app -- EXECUTOR_
+        # CREDENTIAL_KEY won't exist on Render until Andy actually sets
+        # it, and this is a Stage-1-only feature nobody is using yet;
+        # crashing all of kabroda.com over an unconfigured, not-yet-active
+        # subsystem would be a far worse outcome than a loud boot warning.
+        # The credential-set/decrypt routes themselves still fail cleanly
+        # if actually used before the key is configured.
+        print(f">>> WARNING: executor credential encryption is not configured -- {e}")
     app.state.gravity_task          = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
     app.state.ledger_task           = asyncio.create_task(ledger_closing_engine.run_ledger_audit_loop())
     app.state.trade_plan_task       = asyncio.create_task(trade_plan_engine.run_trade_plan_loop())
@@ -1200,6 +1212,240 @@ async def api_admin_trade_plan_status(request: Request, db: Session = Depends(ge
         })
 
     return JSONResponse({"ok": True, "date_key": today, "server_time": now_utc.isoformat(), "rows": out})
+
+
+# ==============================================================================
+# EXECUTOR BOT ADMIN API (Stage 1, DRY-RUN only) -- Andy's request, design
+# settled over a multi-day conversation with DeepSeek (Kabroda AI Brain repo
+# AGENT_LOG.md, 2026-09-04). Thin surface: reads DB state, writes control
+# flags. Never imports executor_bitunix_client.py, never calls
+# executor_accounts.get_decrypted_credentials() -- even if this admin UI
+# were compromised, there are no keys reachable from it (Andy's own
+# explicit requirement).
+# ==============================================================================
+
+from database import ExecutorAccount as _ExecutorAccount, ExecutorOrder as _ExecutorOrder, ExecutorAuditLog as _ExecutorAuditLog
+import executor_accounts as _executor_accounts
+import executor_control as _executor_control
+
+
+def _executor_owner_or_admin(ctx: Dict[str, Any], account: Optional["_ExecutorAccount"]) -> bool:
+    if ctx.get("is_admin"):
+        return True
+    user = ctx.get("user")
+    return bool(account and user and account.user_id == getattr(user, "id", None))
+
+
+class ExecutorCreateAccountRequest(BaseModel):
+    user_id: int
+    label: str
+    exchange: str = "bitunix"
+
+
+class ExecutorSetCredentialsRequest(BaseModel):
+    api_key: str
+    api_secret: str
+
+
+class ExecutorKillSwitchRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+class ExecutorRiskStateUpdateRequest(BaseModel):
+    risk_last_usd: Optional[float] = None
+    risk_floor_usd: Optional[float] = None
+    risk_cap_usd: Optional[float] = None
+    compounding_factor: Optional[float] = None
+
+
+def _serialize_account(account: "_ExecutorAccount") -> Dict[str, Any]:
+    # Credential fields are NEVER included, on purpose -- not even a
+    # masked/truncated form.
+    return {
+        "id": account.id, "user_id": account.user_id, "label": account.label,
+        "exchange": account.exchange, "mode": account.mode, "is_active": account.is_active,
+        "kill_switch_engaged": account.kill_switch_engaged,
+        "kill_switch_reason": account.kill_switch_reason,
+        "margin_mode": account.margin_mode, "leverage_baseline": account.leverage_baseline,
+        "max_margin_pct_of_balance": account.max_margin_pct_of_balance,
+        "assumed_balance_usd": account.assumed_balance_usd,
+        "has_credentials": bool(account.api_key_encrypted),
+        "credential_set_at": account.credential_set_at.isoformat() if account.credential_set_at else None,
+    }
+
+
+@app.get("/api/executor/accounts")
+async def api_executor_list_accounts(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Login required."}, status_code=403)
+    q = db.query(_ExecutorAccount)
+    if not ctx.get("is_admin"):
+        q = q.filter(_ExecutorAccount.user_id == ctx["user"].id)
+    accounts = q.order_by(_ExecutorAccount.id).all()
+    return JSONResponse({"ok": True, "accounts": [_serialize_account(a) for a in accounts]})
+
+
+@app.post("/api/executor/accounts")
+async def api_executor_create_account(request: Request, body: ExecutorCreateAccountRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    account = _executor_accounts.create_account(db, user_id=body.user_id, label=body.label, exchange=body.exchange, created_by=ctx.get("email"))
+    db.commit()
+    return JSONResponse({"ok": True, "account": _serialize_account(account)})
+
+
+@app.post("/api/executor/accounts/{account_id}/credentials")
+async def api_executor_set_credentials(account_id: int, request: Request, body: ExecutorSetCredentialsRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    _executor_accounts.set_credentials(db, account, body.api_key, body.api_secret, set_by=ctx.get("email") or "unknown")
+    db.commit()
+    # Response NEVER echoes the submitted value -- confirmation only.
+    return JSONResponse({"ok": True, "credential_set_at": account.credential_set_at.isoformat()})
+
+
+@app.post("/api/executor/accounts/{account_id}/kill-switch")
+async def api_executor_engage_kill_switch(account_id: int, request: Request, body: ExecutorKillSwitchRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    _executor_accounts.engage_kill_switch(db, account, reason=body.reason or "manual", by=ctx.get("email") or "unknown")
+    db.commit()
+    return JSONResponse({"ok": True, "account": _serialize_account(account)})
+
+
+@app.post("/api/executor/accounts/{account_id}/kill-switch/release")
+async def api_executor_release_kill_switch(account_id: int, request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    _executor_accounts.release_kill_switch(db, account, by=ctx.get("email") or "unknown")
+    db.commit()
+    return JSONResponse({"ok": True, "account": _serialize_account(account)})
+
+
+@app.post("/api/executor/global-kill-switch")
+async def api_executor_engage_global_kill_switch(request: Request, body: ExecutorKillSwitchRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    _executor_control.engage_global_kill_switch(db, reason=body.reason or "manual", by=ctx.get("email") or "unknown")
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/executor/global-kill-switch/release")
+async def api_executor_release_global_kill_switch(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    _executor_control.release_global_kill_switch(db, by=ctx.get("email") or "unknown")
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/executor/accounts/{account_id}/risk-state")
+async def api_executor_get_risk_state(account_id: int, request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    state = _executor_accounts.get_or_init_risk_state(db, account)
+    db.commit()
+    return JSONResponse({"ok": True, "risk_state": {
+        "risk_last_usd": state.risk_last_usd, "risk_floor_usd": state.risk_floor_usd,
+        "risk_cap_usd": state.risk_cap_usd, "compounding_factor": state.compounding_factor,
+        "last_trade_pnl_usd": state.last_trade_pnl_usd,
+    }})
+
+
+@app.post("/api/executor/accounts/{account_id}/risk-state")
+async def api_executor_update_risk_state(account_id: int, request: Request, body: ExecutorRiskStateUpdateRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    changes = {field: getattr(body, field) for field in
+               ("risk_last_usd", "risk_floor_usd", "risk_cap_usd", "compounding_factor")
+               if getattr(body, field) is not None}
+    state = _executor_accounts.update_risk_state(db, account, changes, updated_by=ctx.get("email") or "unknown")
+    db.commit()
+    return JSONResponse({"ok": True, "risk_state": {
+        "risk_last_usd": state.risk_last_usd, "risk_floor_usd": state.risk_floor_usd,
+        "risk_cap_usd": state.risk_cap_usd, "compounding_factor": state.compounding_factor,
+    }})
+
+
+@app.get("/api/executor/orders")
+async def api_executor_list_orders(request: Request, db: Session = Depends(get_db), account_id: Optional[int] = None, limit: int = 100):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Login required."}, status_code=403)
+    q = db.query(_ExecutorOrder)
+    if account_id is not None:
+        account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+        if account is None or not _executor_owner_or_admin(ctx, account):
+            return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+        q = q.filter(_ExecutorOrder.account_id == account_id)
+    elif not ctx.get("is_admin"):
+        owned_ids = [a.id for a in db.query(_ExecutorAccount).filter_by(user_id=ctx["user"].id).all()]
+        q = q.filter(_ExecutorOrder.account_id.in_(owned_ids)) if owned_ids else q.filter(_ExecutorOrder.id.is_(None))
+    orders = q.order_by(_ExecutorOrder.id.desc()).limit(min(limit, 500)).all()
+    return JSONResponse({"ok": True, "orders": [{
+        "id": o.id, "trade_plan_id": o.trade_plan_id, "account_id": o.account_id, "mode": o.mode,
+        "symbol": o.symbol, "direction": o.direction, "entry_price": o.entry_price, "stop_price": o.stop_price,
+        "t1_price": o.t1_price, "t2_price": o.t2_price, "t3_price": o.t3_price,
+        "risk_dollars_used": o.risk_dollars_used, "qty": o.qty, "leverage_used": o.leverage_used,
+        "margin_required_usd": o.margin_required_usd, "liquidation_price_estimate": o.liquidation_price_estimate,
+        "liquidation_check_passed": o.liquidation_check_passed, "decision": o.decision,
+        "decision_reason": o.decision_reason, "created_at": o.created_at.isoformat() if o.created_at else None,
+    } for o in orders]})
+
+
+@app.get("/api/executor/audit-log")
+async def api_executor_audit_log(request: Request, db: Session = Depends(get_db), account_id: Optional[int] = None, limit: int = 200):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Login required."}, status_code=403)
+    q = db.query(_ExecutorAuditLog)
+    if account_id is not None:
+        account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+        if account is None or not _executor_owner_or_admin(ctx, account):
+            return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+        q = q.filter(_ExecutorAuditLog.account_id == account_id)
+    elif not ctx.get("is_admin"):
+        owned_ids = [a.id for a in db.query(_ExecutorAccount).filter_by(user_id=ctx["user"].id).all()]
+        q = q.filter(_ExecutorAuditLog.account_id.in_(owned_ids)) if owned_ids else q.filter(_ExecutorAuditLog.id.is_(None))
+    rows = q.order_by(_ExecutorAuditLog.id.desc()).limit(min(limit, 1000)).all()
+    return JSONResponse({"ok": True, "audit_log": [{
+        "id": r.id, "occurred_at": r.occurred_at.isoformat() if r.occurred_at else None,
+        "account_id": r.account_id, "trade_plan_id": r.trade_plan_id, "executor_order_id": r.executor_order_id,
+        "event_type": r.event_type, "actor": r.actor, "message": r.message,
+    } for r in rows]})
+
+
+@app.get("/admin/executor")
+async def page_executor_admin(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return RedirectResponse("/login", status_code=303)
+    return _template_or_fallback(request, templates, "executor_admin.html", ctx)
 
 
 # ==============================================================================

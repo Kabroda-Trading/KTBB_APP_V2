@@ -317,10 +317,10 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
             # row.status/etc already reflect the real transition before
             # this reads them; the sync itself never touches `updates`,
             # so it can't affect the transition or its email.
-            _apply(row, updates, symbol)
+            await _apply(db, row, updates, symbol)
             await _sync_gate_log_for_own_cross(db, row)
             return
-        _apply(row, updates, symbol)
+        await _apply(db, row, updates, symbol)
 
     elif row.status == "REENTRY_ARMED":
         candles_5m = market_data.confirmed_5m_closes(await market_data.fetch_live_5m(symbol, limit=310))
@@ -328,7 +328,7 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
             return
         plan_dict = {"status": row.status, "direction": row.direction, "trigger_price": row.trigger_price}
         updates = tp.advance_reentry_plan(plan_dict, now_utc, session_expires_at, candles_5m)
-        _apply(row, updates, symbol)
+        await _apply(db, row, updates, symbol)
 
     elif row.status == "FILLED":
         if row.fill_time is None or row.stop_price is None or row.t1 is None:
@@ -354,7 +354,7 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
             # see mirror_campaign_outcome()'s and resolve_reentry_fill()'s
             # own docstrings.
             updates = tp.resolve_reentry_fill(plan_dict, verdict, now_utc, session_expires_at)
-            _apply(row, updates, symbol)
+            await _apply(db, row, updates, symbol)
             return
 
         # T1_FIRST or NEITHER_YET on the ORIGINAL fill: the wide-stop
@@ -370,7 +370,7 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
             .first()
         )
         updates = tp.mirror_campaign_outcome(plan_dict, campaign.status if campaign else None)
-        _apply(row, updates, symbol)
+        await _apply(db, row, updates, symbol)
 
     elif row.status == "NO_PLAN":
         # Andy's 2026-09-02 poll-routing decision (Kabroda AI Brain repo
@@ -382,7 +382,7 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
         # so old, never-crossed NO_PLAN rows fall out of the polled set
         # instead of being re-fetched from Kraken forever.
         if now_utc >= session_expires_at:
-            _apply(row, {"status": "DONE",
+            await _apply(db, row, {"status": "DONE",
                          "last_transition_reason": "session ended, no real cross ever confirmed the gate"},
                    symbol)
             return
@@ -398,7 +398,7 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
         )
         if updates is None:
             return  # still no real, qualifying setup -- keep waiting silently
-        _apply(row, updates, symbol)
+        await _apply(db, row, updates, symbol)
         try:
             _persist_verdict_to_gate_log(db, row, decision)
         except Exception as _persist_err:
@@ -410,7 +410,7 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
             # WIDE_STOP_FIRST's -> STOPPED transition above) specifically
             # so the DONE notification hook fires -- DONE is a required
             # notify event, STOPPED is not.
-            _apply(row, {"status": "DONE",
+            await _apply(db, row, {"status": "DONE",
                          "last_transition_reason": "session ended, no qualifying re-entry cross after stop"},
                    symbol)
             return
@@ -422,10 +422,10 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
             return  # price hasn't come back to the trigger yet -- not a verdict, keep waiting
         plan_dict = {"status": row.status, "reentry_used": row.reentry_used}
         updates = tp.check_reentry_eligibility(plan_dict, fuel_still_fueled=(fuel.get("verdict") == "FUELED"))
-        _apply(row, updates, symbol)
+        await _apply(db, row, updates, symbol)
 
 
-def _apply(row: TradePlan, updates, symbol: str) -> None:
+async def _apply(db, row: TradePlan, updates, symbol: str) -> None:
     if not updates:
         return
     prev_status = row.status
@@ -435,6 +435,7 @@ def _apply(row: TradePlan, updates, symbol: str) -> None:
         print(f"|| TRADE PLAN || {symbol} {row.session_id} {row.date_key}: "
               f"{prev_status} -> {row.status} -- {updates.get('last_transition_reason')}")
         _notify_transition(prev_status, row, symbol)
+        await _notify_executor(db, prev_status, row, symbol)
 
 
 def _notify_transition(prev_status: str, row: TradePlan, symbol: str) -> None:
@@ -454,6 +455,24 @@ def _notify_transition(prev_status: str, row: TradePlan, symbol: str) -> None:
             notify.send_admin_email(subject, body)
     except Exception as e:
         print(f"|| TRADE PLAN || Notification failed for {symbol}: {e}")
+
+
+async def _notify_executor(db, prev_status: str, row: TradePlan, symbol: str) -> None:
+    """The executor bot's hook (Stage 1 of the Bitunix executor, Kabroda
+    AI Brain repo AGENT_LOG.md, 2026-09-04) -- fires alongside, not
+    instead of, _notify_transition() above. Only acts on the exact ARMED/
+    FILLED moment (this codebase's own code already documents ARMED and
+    FILLED as literally the same transition by construction). Swallows
+    EVERY exception and only prints -- an executor bug must NEVER block,
+    delay, or roll back the real TradePlan write, which stays the
+    untouchable trading brain. 'Bot = hands, brain stays in Kabroda.'"""
+    if row.status != "FILLED":
+        return
+    try:
+        import executor_engine
+        await executor_engine.process_fill(db, row)
+    except Exception as e:
+        print(f"|| EXECUTOR || Hook failed for {symbol}: {e}")
 
 
 async def run_trade_plan_loop():

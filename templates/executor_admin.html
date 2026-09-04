@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>KABRODA // EXECUTOR</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        body { background: #140d09; color: #f2e3cf; font-family: 'Inter', sans-serif; padding: 20px; }
+
+        .exec-header { display: flex; justify-content: space-between; align-items: center; margin: 30px 0 15px; }
+        .exec-title { font-family: 'JetBrains Mono'; font-size: 14px; font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: 1px; }
+        .stage-badge { background: rgba(250, 204, 21, 0.1); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.3); padding: 4px 10px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 800; }
+
+        .card { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; margin-bottom: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+        .card-header { background: #1e293b; padding: 12px 18px; display: flex; justify-content: space-between; align-items: center; }
+        .card-title { font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: 1px; }
+        .card-body { padding: 16px 18px; }
+
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+        th { color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid #334155; }
+        td { padding: 10px; border-bottom: 1px solid #1e293b; color: #e2e8f0; font-family: 'JetBrains Mono'; font-size: 12px; }
+        tr:last-child td { border-bottom: none; }
+
+        .badge { padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 800; font-family: 'JetBrains Mono'; text-transform: uppercase; }
+        .badge-ok { background: rgba(16,185,129,0.1); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+        .badge-warn { background: rgba(245,158,11,0.1); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+        .badge-danger { background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+        .badge-neutral { background: rgba(148,163,184,0.1); color: #94a3b8; border: 1px solid rgba(148,163,184,0.3); }
+
+        .btn { border: 1px solid #475569; color: #cbd5e1; background: transparent; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; margin-left: 6px; }
+        .btn:hover { background: #334155; color: #fff; }
+        .btn-danger { border-color: #7f1d1d; color: #fca5a5; }
+        .btn-danger:hover { background: #450a0a; color: #fff; }
+        .btn-ok { border-color: #065f46; color: #6ee7b7; }
+        .btn-ok:hover { background: #064e3b; color: #fff; }
+
+        input[type=text], input[type=number], input[type=password] { background: #020617; border: 1px solid #475569; color: #fff; padding: 8px 10px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 12px; }
+
+        .risk-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; }
+        .risk-form label { font-size: 11px; color: #94a3b8; display: flex; flex-direction: column; gap: 4px; }
+        .risk-form input { width: 100px; }
+
+        .empty { color: #64748b; font-size: 12px; padding: 10px; font-family: 'JetBrains Mono'; }
+        #globalStatus { margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+
+    {% include 'nav.html' %}
+
+    <div class="exec-header">
+        <span class="exec-title">Executor Bot -- Bitunix Futures</span>
+        <span class="stage-badge">STAGE 1 -- DRY RUN ONLY, NO REAL ORDERS</span>
+    </div>
+
+    <div class="card" id="globalStatus">
+        <div class="card-header">
+            <span class="card-title">Global Kill Switch</span>
+            {% if is_admin %}
+            <div>
+                <button class="btn btn-danger" onclick="engageGlobalKillSwitch()">ENGAGE GLOBAL STOP</button>
+                <button class="btn btn-ok" onclick="releaseGlobalKillSwitch()">RELEASE</button>
+            </div>
+            {% endif %}
+        </div>
+        <div class="card-body">
+            <p class="empty">Both the global switch and each account's own kill switch must be clear for that account to trade. Stage 1 never places a real order regardless -- this controls whether a dry-run "would-place" record gets written at all.</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Accounts</span>
+            <span id="accountCount" class="card-title"></span>
+        </div>
+        <div class="card-body" id="accountsBody">
+            <p class="empty">Loading...</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><span class="card-title">Recent Dry-Run Orders</span></div>
+        <div class="card-body" id="ordersBody">
+            <p class="empty">Loading...</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><span class="card-title">Audit Log</span></div>
+        <div class="card-body" id="auditBody">
+            <p class="empty">Loading...</p>
+        </div>
+    </div>
+
+<script>
+async function api(path, opts) {
+    const resp = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+    return resp.json();
+}
+
+function escapeHtml(s) {
+    return (s === null || s === undefined) ? "" : String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+async function loadAccounts() {
+    const data = await api("/api/executor/accounts");
+    const body = document.getElementById("accountsBody");
+    const count = document.getElementById("accountCount");
+    if (!data.ok) { body.innerHTML = `<p class="empty">${escapeHtml(data.error || "failed to load")}</p>`; return; }
+    count.textContent = data.accounts.length + " ACCOUNT(S)";
+    if (!data.accounts.length) { body.innerHTML = '<p class="empty">No accounts yet.</p>'; return; }
+
+    body.innerHTML = data.accounts.map(a => `
+        <div style="border:1px solid #1e293b; border-radius:6px; padding:14px; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <strong style="font-family:'JetBrains Mono'; font-size:13px;">${escapeHtml(a.label)}</strong>
+                    <span class="badge badge-neutral" style="margin-left:8px;">${escapeHtml(a.exchange)}</span>
+                    <span class="badge ${a.mode === 'DRY_RUN' ? 'badge-ok' : 'badge-warn'}" style="margin-left:4px;">${escapeHtml(a.mode)}</span>
+                    ${a.kill_switch_engaged ? '<span class="badge badge-danger" style="margin-left:4px;">KILL SWITCH ENGAGED</span>' : '<span class="badge badge-ok" style="margin-left:4px;">ACTIVE</span>'}
+                    ${a.has_credentials ? '' : '<span class="badge badge-warn" style="margin-left:4px;">NO CREDENTIALS SET</span>'}
+                </div>
+                <div>
+                    ${a.kill_switch_engaged
+                        ? `<button class="btn btn-ok" onclick="releaseKillSwitch(${a.id})">RELEASE KILL SWITCH</button>`
+                        : `<button class="btn btn-danger" onclick="engageKillSwitch(${a.id})">ENGAGE KILL SWITCH</button>`}
+                </div>
+            </div>
+            <div style="font-size:11px; color:#64748b; margin-top:8px; font-family:'JetBrains Mono';">
+                margin: ${escapeHtml(a.margin_mode)} @ ${a.leverage_baseline}x baseline
+                &middot; assumed balance: ${a.assumed_balance_usd !== null ? '$' + a.assumed_balance_usd : 'not set'}
+            </div>
+            <div class="risk-form" id="riskForm-${a.id}">
+                <label>Risk last ($)<input type="number" step="0.01" id="riskLast-${a.id}"></label>
+                <label>Floor ($)<input type="number" step="0.01" id="riskFloor-${a.id}"></label>
+                <label>Cap ($)<input type="number" step="0.01" id="riskCap-${a.id}"></label>
+                <label>Compounding factor<input type="number" step="0.01" id="riskFactor-${a.id}"></label>
+                <button class="btn" onclick="saveRiskState(${a.id})" style="align-self:flex-end;">SAVE</button>
+            </div>
+            <details style="margin-top:10px;">
+                <summary style="cursor:pointer; font-size:11px; color:#94a3b8;">Set / rotate exchange credentials</summary>
+                <div class="risk-form">
+                    <label>API key<input type="password" id="apiKey-${a.id}"></label>
+                    <label>API secret<input type="password" id="apiSecret-${a.id}"></label>
+                    <button class="btn" onclick="setCredentials(${a.id})" style="align-self:flex-end;">SAVE CREDENTIALS</button>
+                </div>
+            </details>
+        </div>
+    `).join("");
+
+    // populate risk-state fields per account
+    for (const a of data.accounts) {
+        const rs = await api(`/api/executor/accounts/${a.id}/risk-state`);
+        if (rs.ok) {
+            document.getElementById(`riskLast-${a.id}`).value = rs.risk_state.risk_last_usd ?? "";
+            document.getElementById(`riskFloor-${a.id}`).value = rs.risk_state.risk_floor_usd ?? "";
+            document.getElementById(`riskCap-${a.id}`).value = rs.risk_state.risk_cap_usd ?? "";
+            document.getElementById(`riskFactor-${a.id}`).value = rs.risk_state.compounding_factor ?? "";
+        }
+    }
+}
+
+async function engageKillSwitch(id) {
+    const reason = prompt("Reason for engaging this account's kill switch:", "manual") || "manual";
+    await api(`/api/executor/accounts/${id}/kill-switch`, { method: "POST", body: JSON.stringify({ reason }) });
+    loadAccounts();
+}
+async function releaseKillSwitch(id) {
+    await api(`/api/executor/accounts/${id}/kill-switch/release`, { method: "POST" });
+    loadAccounts();
+}
+async function engageGlobalKillSwitch() {
+    const reason = prompt("Reason for engaging the GLOBAL kill switch:", "manual") || "manual";
+    await api("/api/executor/global-kill-switch", { method: "POST", body: JSON.stringify({ reason }) });
+    loadAccounts();
+}
+async function releaseGlobalKillSwitch() {
+    await api("/api/executor/global-kill-switch/release", { method: "POST" });
+    loadAccounts();
+}
+async function saveRiskState(id) {
+    const body = {
+        risk_last_usd: parseFloat(document.getElementById(`riskLast-${id}`).value) || null,
+        risk_floor_usd: parseFloat(document.getElementById(`riskFloor-${id}`).value) || null,
+        risk_cap_usd: parseFloat(document.getElementById(`riskCap-${id}`).value) || null,
+        compounding_factor: parseFloat(document.getElementById(`riskFactor-${id}`).value) || null,
+    };
+    await api(`/api/executor/accounts/${id}/risk-state`, { method: "POST", body: JSON.stringify(body) });
+    loadAccounts();
+}
+async function setCredentials(id) {
+    const api_key = document.getElementById(`apiKey-${id}`).value;
+    const api_secret = document.getElementById(`apiSecret-${id}`).value;
+    if (!api_key || !api_secret) { alert("Enter both the API key and secret."); return; }
+    const resp = await api(`/api/executor/accounts/${id}/credentials`, { method: "POST", body: JSON.stringify({ api_key, api_secret }) });
+    if (resp.ok) {
+        document.getElementById(`apiKey-${id}`).value = "";
+        document.getElementById(`apiSecret-${id}`).value = "";
+        alert("Credentials saved.");
+        loadAccounts();
+    } else {
+        alert(resp.error || "failed to save credentials");
+    }
+}
+
+async function loadOrders() {
+    const data = await api("/api/executor/orders?limit=50");
+    const body = document.getElementById("ordersBody");
+    if (!data.ok) { body.innerHTML = `<p class="empty">${escapeHtml(data.error || "failed to load")}</p>`; return; }
+    if (!data.orders.length) { body.innerHTML = '<p class="empty">No dry-run orders yet.</p>'; return; }
+    body.innerHTML = `<table><thead><tr><th>ID</th><th>Symbol</th><th>Dir</th><th>Qty</th><th>Lev</th><th>Decision</th><th>Reason</th><th>When</th></tr></thead><tbody>` +
+        data.orders.map(o => `<tr>
+            <td>#${o.id}</td><td>${escapeHtml(o.symbol)}</td><td>${escapeHtml(o.direction)}</td>
+            <td>${o.qty !== null ? o.qty.toFixed(4) : "-"}</td><td>${o.leverage_used ?? "-"}</td>
+            <td><span class="badge ${o.decision === 'WOULD_PLACE' ? 'badge-ok' : (o.decision === 'REJECTED' ? 'badge-danger' : 'badge-neutral')}">${escapeHtml(o.decision)}</span></td>
+            <td style="max-width:320px; white-space:normal;">${escapeHtml(o.decision_reason)}</td>
+            <td>${o.created_at ? new Date(o.created_at).toLocaleString() : "-"}</td>
+        </tr>`).join("") + `</tbody></table>`;
+}
+
+async function loadAuditLog() {
+    const data = await api("/api/executor/audit-log?limit=100");
+    const body = document.getElementById("auditBody");
+    if (!data.ok) { body.innerHTML = `<p class="empty">${escapeHtml(data.error || "failed to load")}</p>`; return; }
+    if (!data.audit_log.length) { body.innerHTML = '<p class="empty">No audit entries yet.</p>'; return; }
+    body.innerHTML = `<table><thead><tr><th>When</th><th>Event</th><th>Actor</th><th>Message</th></tr></thead><tbody>` +
+        data.audit_log.map(r => `<tr>
+            <td>${r.occurred_at ? new Date(r.occurred_at).toLocaleString() : "-"}</td>
+            <td><span class="badge badge-neutral">${escapeHtml(r.event_type)}</span></td>
+            <td>${escapeHtml(r.actor)}</td>
+            <td style="max-width:420px; white-space:normal;">${escapeHtml(r.message)}</td>
+        </tr>`).join("") + `</tbody></table>`;
+}
+
+loadAccounts();
+loadOrders();
+loadAuditLog();
+</script>
+
+</body>
+</html>
