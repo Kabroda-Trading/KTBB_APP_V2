@@ -23,12 +23,15 @@ from database import ExecutorAccount, ExecutorAuditLog, ExecutorRiskState
 import executor_crypto
 
 
-def _write_audit(
+def write_audit(
     db: Session, event_type: str, message: str,
     account_id: Optional[int] = None, trade_plan_id: Optional[int] = None,
     executor_order_id: Optional[int] = None, actor: Optional[str] = None,
     detail: Optional[Dict[str, Any]] = None,
 ) -> None:
+    """Public -- the one place any caller (this module, executor_engine.py,
+    or main.py's admin routes) writes an ExecutorAuditLog row, so no
+    caller ever needs to construct one by hand."""
     db.add(ExecutorAuditLog(
         account_id=account_id, trade_plan_id=trade_plan_id, executor_order_id=executor_order_id,
         event_type=event_type, actor=actor or "system", message=message,
@@ -40,7 +43,7 @@ def create_account(db: Session, user_id: int, label: str, exchange: str = "bitun
     account = ExecutorAccount(user_id=user_id, label=label, exchange=exchange, mode="DRY_RUN")
     db.add(account)
     db.flush()  # populate account.id for the audit row below
-    _write_audit(db, "ACCOUNT_CREATED", f"account '{label}' created for user {user_id}", account_id=account.id, actor=created_by)
+    write_audit(db, "ACCOUNT_CREATED", f"account '{label}' created for user {user_id}", account_id=account.id, actor=created_by)
     return account
 
 
@@ -53,7 +56,7 @@ def set_credentials(db: Session, account: ExecutorAccount, api_key: str, api_sec
     account.api_secret_encrypted = executor_crypto.encrypt_secret(api_secret)
     account.credential_set_at = datetime.datetime.utcnow()
     account.credential_set_by = set_by
-    _write_audit(
+    write_audit(
         db, "CREDENTIAL_ROTATED" if is_rotation else "CREDENTIAL_SET",
         f"credentials {'rotated' if is_rotation else 'set'} for account {account.id}",
         account_id=account.id, actor=set_by,
@@ -77,7 +80,7 @@ def engage_kill_switch(db: Session, account: ExecutorAccount, reason: str, by: s
     account.kill_switch_engaged_at = datetime.datetime.utcnow()
     account.kill_switch_engaged_by = by
     account.kill_switch_reason = reason
-    _write_audit(db, "KILL_SWITCH_ENGAGED", f"account {account.id} kill switch engaged -- {reason}", account_id=account.id, actor=by)
+    write_audit(db, "KILL_SWITCH_ENGAGED", f"account {account.id} kill switch engaged -- {reason}", account_id=account.id, actor=by)
 
 
 def release_kill_switch(db: Session, account: ExecutorAccount, by: str) -> None:
@@ -85,7 +88,7 @@ def release_kill_switch(db: Session, account: ExecutorAccount, by: str) -> None:
     account.kill_switch_engaged_at = None
     account.kill_switch_engaged_by = None
     account.kill_switch_reason = None
-    _write_audit(db, "KILL_SWITCH_RELEASED", f"account {account.id} kill switch released", account_id=account.id, actor=by)
+    write_audit(db, "KILL_SWITCH_RELEASED", f"account {account.id} kill switch released", account_id=account.id, actor=by)
 
 
 def get_or_init_risk_state(db: Session, account: ExecutorAccount) -> ExecutorRiskState:
@@ -106,7 +109,7 @@ def update_risk_state(db: Session, account: ExecutorAccount, changes: Dict[str, 
     for field, value in changes.items():
         setattr(state, field, value)
     if changes:
-        _write_audit(
+        write_audit(
             db, "RISK_STATE_UPDATED", f"risk state updated for account {account.id}: {changes}",
             account_id=account.id, actor=updated_by, detail=changes,
         )

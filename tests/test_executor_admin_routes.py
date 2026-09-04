@@ -104,6 +104,66 @@ def test_non_owner_non_admin_gets_403_on_credentials(env):
     assert resp.status_code == 403
 
 
+# ------------------------------------------------------------------ test-connection (real, read-only Bitunix call -- monkeypatched here)
+
+def test_connection_test_requires_credentials_first(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/test-connection")
+    assert resp.status_code == 400
+    assert "credentials" in resp.json()["error"].lower()
+
+
+def test_connection_test_non_owner_gets_403(env):
+    client = _login("exec_other@kabroda.com", "otherpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/test-connection")
+    assert resp.status_code == 403
+
+
+def test_connection_test_success_never_places_an_order(env, monkeypatch):
+    import executor_bitunix_client
+    called = {"get_balance": 0, "place_order": 0}
+
+    async def fake_get_balance(self, margin_coin="USDT"):
+        called["get_balance"] += 1
+        return {"marginCoin": "USDT", "available": "1234.56", "margin": "0"}
+
+    async def fake_place_order(self, *a, **k):
+        called["place_order"] += 1
+        raise AssertionError("place_order must never be called by test-connection")
+
+    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_balance", fake_get_balance)
+    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "place_order", fake_place_order)
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    client.post(f"/api/executor/accounts/{env['account_id']}/credentials",
+                json={"api_key": "real-key", "api_secret": "real-secret"})
+
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/test-connection")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["response"]["available"] == "1234.56"
+    assert called["get_balance"] == 1
+    assert called["place_order"] == 0
+
+
+def test_connection_test_failure_reports_error_not_500(env, monkeypatch):
+    import executor_bitunix_client
+
+    async def fake_get_balance_fails(self, margin_coin="USDT"):
+        raise RuntimeError("simulated network/auth failure")
+
+    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_balance", fake_get_balance_fails)
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    client.post(f"/api/executor/accounts/{env['account_id']}/credentials",
+                json={"api_key": "real-key", "api_secret": "real-secret"})
+
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/test-connection")
+    assert resp.status_code == 502
+    assert "simulated network/auth failure" in resp.json()["error"]
+
+
 def test_non_owner_non_admin_gets_403_on_kill_switch(env):
     client = _login("exec_other@kabroda.com", "otherpass123")
     resp = client.post(f"/api/executor/accounts/{env['account_id']}/kill-switch", json={"reason": "test"})

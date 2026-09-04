@@ -1310,6 +1310,49 @@ async def api_executor_set_credentials(account_id: int, request: Request, body: 
     return JSONResponse({"ok": True, "credential_set_at": account.credential_set_at.isoformat()})
 
 
+@app.post("/api/executor/accounts/{account_id}/test-connection")
+async def api_executor_test_connection(account_id: int, request: Request, db: Session = Depends(get_db)):
+    """2026-09-05 (Bitunix has no demo/paper-trading environment --
+    verified, see AGENT_LOG.md and executor_bitunix_client.py's own
+    header). This is the safe substitute Andy's own sequencing call
+    asked for: a REAL, read-only call (GET /api/v1/futures/account) that
+    proves the signing chain and credentials actually work against a
+    real Bitunix account, with zero financial risk -- no order is ever
+    placed by this route. Deliberately does NOT call get_position() here
+    too (keep this one action doing one real thing, easy to reason
+    about) -- can be added once this is proven out.
+    """
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+
+    api_key, api_secret = _executor_accounts.get_decrypted_credentials(account)
+    if not api_key or not api_secret:
+        return JSONResponse({"ok": False, "error": "No credentials set on this account yet."}, status_code=400)
+
+    import executor_bitunix_client
+    client = executor_bitunix_client.BitunixClient(api_key, api_secret)
+    try:
+        result = await client.get_balance()
+    except Exception as e:
+        _executor_accounts.write_audit(
+            db, "ERROR", f"connection test failed for account {account.id}: {e}",
+            account_id=account.id, actor=ctx.get("email") or "unknown",
+        )
+        db.commit()
+        return JSONResponse({"ok": False, "error": f"request failed: {e}"}, status_code=502)
+
+    _executor_accounts.write_audit(
+        db, "CONNECTION_TESTED", f"connection test succeeded for account {account.id}",
+        account_id=account.id, actor=ctx.get("email") or "unknown", detail=result,
+    )
+    db.commit()
+    return JSONResponse({"ok": True, "response": result})
+
+
 @app.post("/api/executor/accounts/{account_id}/kill-switch")
 async def api_executor_engage_kill_switch(account_id: int, request: Request, body: ExecutorKillSwitchRequest, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
