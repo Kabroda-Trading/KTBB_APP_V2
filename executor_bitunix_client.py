@@ -196,7 +196,17 @@ class BitunixClient:
         Response includes a real exchange-computed `liqPrice` per
         position -- worth using instead of executor_sizing.py's own
         estimate once this is wired into the plan builder (not done yet
-        -- that's a real Stage 2/3 improvement, flagged, not built here)."""
+        -- that's a real Stage 2/3 improvement, flagged, not built here).
+
+        CORRECTION (2026-09-05, verified against a real filled position,
+        not assumed from docs): the docs claim the response's `side`
+        field is "LONG"/"SHORT", but a real response returns "BUY"/
+        "SELL" instead -- the docs are simply wrong here. Any caller
+        matching on this field must compare against "BUY"/"SELL", not
+        "LONG"/"SHORT" (see executor_mechanism_test.py's
+        _TEST_POSITION_SIDE for the real value, discovered the hard way
+        after this exact mismatch caused 4 straight live-order
+        mechanism-test failures)."""
         query = {"symbol": symbol} if symbol else None
         return await self._request("GET", "/api/v1/futures/position/get_pending_positions", query=query)
 

@@ -50,7 +50,18 @@ class MechanismTestInvalidState(Exception):
 
 
 _TEST_SYMBOL = "BTCUSDT"
-_TEST_DIRECTION = "LONG"
+_TEST_DIRECTION = "LONG"   # human-readable / stored in ExecutorMechanismTest.direction
+# 2026-09-05, verified against Andy's real account response (test #4):
+# Bitunix's real get_position endpoint returns side: "BUY"/"SELL" for
+# an open position, NOT "LONG"/"SHORT" as their own docs claim (docs:
+# "side (string): Position direction: LONG or SHORT" -- directly
+# contradicted by the real, live response). This is the actual root
+# cause of all four live failures: the order-fill confirmation
+# (get_order_detail) worked correctly every time, but the SUBSEQUENT
+# position-list match against "LONG" never matched anything, since
+# that literal string never appears in a real response. Real data
+# overrides the docs here, not the other way around.
+_TEST_POSITION_SIDE = "BUY"
 _FILL_POLL_INTERVAL_SEC = 1.0
 _FILL_POLL_MAX_ATTEMPTS = 10
 _DEFAULT_TP_SL_PCT = 0.01
@@ -89,9 +100,11 @@ def _extract_pair(pairs_resp: Dict[str, Any], symbol: str) -> Dict[str, Any]:
 
 def _find_open_long_position(pos_resp: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """get_position()'s data is a LIST -- filter for an open LONG BTCUSDT
-    position. Returns the single match, None if there isn't one, or
-    raises a clear error if there's more than one -- an ambiguous state
-    this module refuses to guess through rather than silently picking one.
+    position (real wire value side=="BUY", see _TEST_POSITION_SIDE's own
+    comment for why -- NOT "LONG", contrary to Bitunix's own docs).
+    Returns the single match, None if there isn't one, or raises a clear
+    error if there's more than one -- an ambiguous state this module
+    refuses to guess through rather than silently picking one.
 
     2026-09-05 fix: a real Bitunix API-level error (non-zero `code`) was
     being silently treated as "zero positions" because `pos_resp.get(
@@ -101,7 +114,7 @@ def _find_open_long_position(pos_resp: Dict[str, Any]) -> Optional[Dict[str, Any
     if pos_resp.get("code") not in (0, None):
         raise ValueError(f"get_position returned a real API error: code={pos_resp.get('code')} msg={pos_resp.get('msg')!r}")
     positions: List[Dict[str, Any]] = pos_resp.get("data") or []
-    matches = [p for p in positions if p.get("symbol") == _TEST_SYMBOL and p.get("side") == _TEST_DIRECTION]
+    matches = [p for p in positions if p.get("symbol") == _TEST_SYMBOL and p.get("side") == _TEST_POSITION_SIDE]
     if len(matches) > 1:
         raise ValueError(
             f"found {len(matches)} open {_TEST_DIRECTION} {_TEST_SYMBOL} positions -- "

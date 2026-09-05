@@ -77,8 +77,11 @@ def _no_position_response():
 
 
 def _one_long_position_response(position_id="pos1", avg_open_price=100.0):
+    # side="BUY", not "LONG" -- verified against a real account response
+    # (2026-09-05); Bitunix's own docs claim LONG/SHORT but the real API
+    # returns BUY/SELL. See _TEST_POSITION_SIDE's own comment.
     return {"code": 0, "data": [{
-        "positionId": position_id, "symbol": "BTCUSDT", "side": "LONG",
+        "positionId": position_id, "symbol": "BTCUSDT", "side": "BUY",
         "avgOpenPrice": str(avg_open_price), "qty": "0.0001",
     }], "msg": "Success"}
 

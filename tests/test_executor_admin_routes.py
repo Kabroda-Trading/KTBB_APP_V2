@@ -376,7 +376,10 @@ def _patch_happy_path_client(monkeypatch):
         # gone by then.
         if call_state["get_position_calls"] in (1, 3):
             return {"code": 0, "data": [], "msg": "Success"}
-        return {"code": 0, "data": [{"positionId": "pos1", "symbol": "BTCUSDT", "side": "LONG", "avgOpenPrice": "100.0", "qty": "0.0002"}], "msg": "Success"}
+        # side="BUY", not "LONG" -- verified against a real account
+        # response (2026-09-05); Bitunix's docs claim LONG/SHORT but the
+        # real API returns BUY/SELL.
+        return {"code": 0, "data": [{"positionId": "pos1", "symbol": "BTCUSDT", "side": "BUY", "avgOpenPrice": "100.0", "qty": "0.0002"}], "msg": "Success"}
 
     async def fake_get_trading_pairs(self, symbol):
         return {"code": 0, "data": [{"symbol": "BTCUSDT", "minTradeVolume": "0.0001", "basePrecision": 4, "quotePrecision": 1}], "msg": "Success"}
