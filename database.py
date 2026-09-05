@@ -447,7 +447,7 @@ def init_db():
     # mechanism test; see ExecutorGlobalConfig/ExecutorOrder/
     # ExecutorAuditLog's own comments for what each column is) ---
     for _col in [
-        "live_orders_enabled BOOLEAN DEFAULT 0", "live_orders_enabled_at TIMESTAMP",
+        "live_orders_enabled BOOLEAN DEFAULT FALSE", "live_orders_enabled_at TIMESTAMP",
         "live_orders_enabled_by VARCHAR", "live_orders_enabled_reason VARCHAR",
     ]:
         try:
