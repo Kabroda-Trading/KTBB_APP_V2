@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.templating import Jinja2Templates
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -1315,13 +1316,21 @@ def _serialize_account(account: "_ExecutorAccount") -> Dict[str, Any]:
 
 @app.get("/api/executor/accounts")
 async def api_executor_list_accounts(request: Request, db: Session = Depends(get_db)):
+    # 2026-09-05: deliberately NO admin bypass here, on Andy's own explicit
+    # request -- each real user (his own account, "Gross Monkey"'s own
+    # separate account) runs an independent real exchange account, and
+    # seeing everyone's mixed together by default is a real risk of
+    # confusing/misclicking on the wrong one's real money. Admin retains
+    # the ability to ACT on a specific known account id via
+    # _executor_owner_or_admin() on every individual account-scoped route
+    # (unchanged) -- what's removed here is only the default LISTING
+    # bypass, not the emergency-intervention permission.
     ctx = get_user_context(request, db)
     if not ctx.get("is_logged_in"):
         return JSONResponse({"ok": False, "error": "Login required."}, status_code=403)
-    q = db.query(_ExecutorAccount)
-    if not ctx.get("is_admin"):
-        q = q.filter(_ExecutorAccount.user_id == ctx["user"].id)
-    accounts = q.order_by(_ExecutorAccount.id).all()
+    accounts = db.query(_ExecutorAccount).filter(
+        _ExecutorAccount.user_id == ctx["user"].id
+    ).order_by(_ExecutorAccount.id).all()
     return JSONResponse({"ok": True, "accounts": [_serialize_account(a) for a in accounts]})
 
 
@@ -1490,7 +1499,10 @@ async def api_executor_list_orders(request: Request, db: Session = Depends(get_d
         if account is None or not _executor_owner_or_admin(ctx, account):
             return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
         q = q.filter(_ExecutorOrder.account_id == account_id)
-    elif not ctx.get("is_admin"):
+    else:
+        # No admin bypass here either (2026-09-05, same reasoning as
+        # api_executor_list_accounts) -- without an explicit account_id,
+        # this always scopes to the logged-in user's own accounts.
         owned_ids = [a.id for a in db.query(_ExecutorAccount).filter_by(user_id=ctx["user"].id).all()]
         q = q.filter(_ExecutorOrder.account_id.in_(owned_ids)) if owned_ids else q.filter(_ExecutorOrder.id.is_(None))
     orders = q.order_by(_ExecutorOrder.id.desc()).limit(min(limit, 500)).all()
@@ -1516,9 +1528,19 @@ async def api_executor_audit_log(request: Request, db: Session = Depends(get_db)
         if account is None or not _executor_owner_or_admin(ctx, account):
             return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
         q = q.filter(_ExecutorAuditLog.account_id == account_id)
-    elif not ctx.get("is_admin"):
+    else:
+        # No per-ACCOUNT admin bypass here (2026-09-05, same reasoning as
+        # api_executor_list_accounts) -- without an explicit account_id,
+        # this scopes to the logged-in user's own accounts, admin
+        # included. Exception, deliberately kept: GLOBAL events
+        # (account_id IS NULL -- global kill switch, live-orders enable/
+        # disable) are admin-only ACTIONS in the first place, not another
+        # user's private trade data, so admin still sees those here.
         owned_ids = [a.id for a in db.query(_ExecutorAccount).filter_by(user_id=ctx["user"].id).all()]
-        q = q.filter(_ExecutorAuditLog.account_id.in_(owned_ids)) if owned_ids else q.filter(_ExecutorAuditLog.id.is_(None))
+        if ctx.get("is_admin"):
+            q = q.filter(or_(_ExecutorAuditLog.account_id.in_(owned_ids), _ExecutorAuditLog.account_id.is_(None)))
+        else:
+            q = q.filter(_ExecutorAuditLog.account_id.in_(owned_ids)) if owned_ids else q.filter(_ExecutorAuditLog.id.is_(None))
     rows = q.order_by(_ExecutorAuditLog.id.desc()).limit(min(limit, 1000)).all()
     return JSONResponse({"ok": True, "audit_log": [{
         "id": r.id, "occurred_at": r.occurred_at.isoformat() if r.occurred_at else None,

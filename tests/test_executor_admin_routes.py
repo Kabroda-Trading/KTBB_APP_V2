@@ -98,11 +98,44 @@ def test_owner_sees_only_their_own_account(env):
     assert [a["id"] for a in body["accounts"]] == [env["account_id"]]
 
 
-def test_admin_sees_all_accounts(env):
+def test_admin_no_longer_sees_other_users_accounts_in_list(env):
+    # 2026-09-05: deliberate change, Andy's own explicit request -- each
+    # real user runs an independent real exchange account, and admin
+    # seeing everyone's mixed together by default risked confusing/
+    # misclicking on the wrong one's real money. Admin gets NO listing
+    # bypass anymore; only the owner sees their own account here.
     client = _login("exec_admin@kabroda.com", "adminpass123")
     resp = client.get("/api/executor/accounts")
+    assert resp.status_code == 200
     body = resp.json()
-    assert env["account_id"] in [a["id"] for a in body["accounts"]]
+    assert env["account_id"] not in [a["id"] for a in body["accounts"]]
+
+
+def test_admin_no_longer_sees_other_users_orders_or_audit_log_without_explicit_account_id(env):
+    client = _login("exec_admin@kabroda.com", "adminpass123")
+    orders_resp = client.get("/api/executor/orders")
+    assert orders_resp.status_code == 200
+    assert all(o["account_id"] != env["account_id"] for o in orders_resp.json()["orders"])
+
+    audit_resp = client.get("/api/executor/audit-log")
+    assert audit_resp.status_code == 200
+    assert all(r["account_id"] != env["account_id"] for r in audit_resp.json()["audit_log"])
+
+
+def test_admin_can_still_act_on_a_specific_known_account_id(env):
+    # The emergency-intervention path stays intact -- admin can't SEE the
+    # account in a default listing anymore, but _executor_owner_or_admin()
+    # still lets them act on it directly by id if they already know it.
+    client = _login("exec_admin@kabroda.com", "adminpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/kill-switch", json={"reason": "admin intervention test"})
+    assert resp.status_code == 200
+
+    resp = client.get(f"/api/executor/accounts/{env['account_id']}/risk-state")
+    assert resp.status_code == 200
+
+    # And admin CAN still see it when explicitly scoped by account_id.
+    orders_resp = client.get(f"/api/executor/orders?account_id={env['account_id']}")
+    assert orders_resp.status_code == 200
 
 
 def test_non_owner_non_admin_gets_403_on_credentials(env):
