@@ -1544,6 +1544,13 @@ def _serialize_mechanism_test(t: "_ExecutorMechanismTest") -> Dict[str, Any]:
         "partial_close_response_json": t.partial_close_response_json,
         "sl_breakeven_response_json": t.sl_breakeven_response_json,
         "flash_close_response_json": t.flash_close_response_json,
+        # 2026-09-05: these three were added to the DB (fill/position/
+        # TP-SL confirmation checks) but never wired into this
+        # serializer -- a real gap that hid the exact data needed to
+        # diagnose why a confirmation check failed.
+        "order_detail_response_json": t.order_detail_response_json,
+        "position_check_response_json": t.position_check_response_json,
+        "tpsl_check_response_json": t.tpsl_check_response_json,
     }
 
 

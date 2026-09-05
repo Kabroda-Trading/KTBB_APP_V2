@@ -471,6 +471,14 @@ def test_tiny_test_full_ladder_happy_path_via_routes(env, monkeypatch):
     assert body["ok"] is True
     assert body["test"]["status"] == "TPSL_SET"
     test_id = body["test"]["id"]
+    # 2026-09-05 regression guard: these three confirmation-check raw
+    # responses were added to the DB but silently missing from the
+    # serializer for a while -- exactly the data needed to diagnose a
+    # real incident, and it wasn't reaching the API response at all.
+    assert "order_detail_response_json" in body["test"]
+    assert "position_check_response_json" in body["test"]
+    assert "tpsl_check_response_json" in body["test"]
+    assert body["test"]["order_detail_response_json"] is not None
 
     resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/partial-close",
                         json={"confirm": _CONFIRM_TINY_TEST_PARTIAL_CLOSE})
