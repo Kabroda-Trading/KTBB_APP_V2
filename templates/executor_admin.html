@@ -330,32 +330,61 @@ function renderTinyTestSection(accountId, hasCredentials, active, allTests) {
     return html;
 }
 
-async function placeTinyTest(accountId) {
+// Real error detail lives at resp.test.error_detail on the "ok:false but
+// the call itself succeeded" path (e.g. fill-poll timeout) -- resp.error
+// only exists on the gated/blocked/exception paths. Check both, in order,
+// so the alert always shows the actual reason instead of a generic one.
+function _tinyTestErrorMessage(resp, fallback) {
+    return resp.error || (resp.test && resp.test.error_detail) || fallback;
+}
+
+// Guards against a double-click firing two overlapping real requests --
+// each action can take several seconds (place polls for a fill up to
+// ~10s), and a second click before the first returns could otherwise
+// send a second real order/close to the exchange.
+const _tinyTestInFlight = {};
+
+async function _runTinyTestAction(key, btn, path, body, fallbackMsg, accountId) {
+    if (_tinyTestInFlight[key]) return;
+    _tinyTestInFlight[key] = true;
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "WORKING...";
+    try {
+        const resp = await api(path, { method: "POST", body: JSON.stringify(body) });
+        if (!resp.ok) { alert(_tinyTestErrorMessage(resp, fallbackMsg)); }
+    } finally {
+        _tinyTestInFlight[key] = false;
+        loadTinyTestForAccount(accountId, true);
+    }
+}
+
+async function placeTinyTest(accountId, btn) {
     const tp_pct = parseFloat(document.getElementById(`tinyTpPct-${accountId}`).value) || 0.01;
     const sl_pct = parseFloat(document.getElementById(`tinySlPct-${accountId}`).value) || 0.01;
     const confirm_ = document.getElementById(`tinyPlaceConfirm-${accountId}`).value;
-    const resp = await api(`/api/executor/accounts/${accountId}/tiny-test/place`, { method: "POST", body: JSON.stringify({ confirm: confirm_, tp_pct, sl_pct }) });
-    if (!resp.ok) { alert(resp.error || "failed to place tiny test order"); }
-    loadTinyTestForAccount(accountId, true);
+    await _runTinyTestAction(`place-${accountId}`, btn,
+        `/api/executor/accounts/${accountId}/tiny-test/place`,
+        { confirm: confirm_, tp_pct, sl_pct }, "failed to place tiny test order", accountId);
 }
-async function partialCloseTinyTest(accountId, testId) {
+async function partialCloseTinyTest(accountId, testId, btn) {
     const pct = (parseFloat(document.getElementById(`tinyPartialPct-${accountId}`).value) || 50) / 100;
     const confirm_ = document.getElementById(`tinyPartialConfirm-${accountId}`).value;
-    const resp = await api(`/api/executor/accounts/${accountId}/tiny-test/${testId}/partial-close`, { method: "POST", body: JSON.stringify({ confirm: confirm_, pct }) });
-    if (!resp.ok) { alert(resp.error || "failed to partial-close"); }
-    loadTinyTestForAccount(accountId, true);
+    await _runTinyTestAction(`partial-${accountId}`, btn,
+        `/api/executor/accounts/${accountId}/tiny-test/${testId}/partial-close`,
+        { confirm: confirm_, pct }, "failed to partial-close", accountId);
 }
-async function moveSlBreakevenTinyTest(accountId, testId) {
+async function moveSlBreakevenTinyTest(accountId, testId, btn) {
     const confirm_ = document.getElementById(`tinySlConfirm-${accountId}`).value;
-    const resp = await api(`/api/executor/accounts/${accountId}/tiny-test/${testId}/move-sl-breakeven`, { method: "POST", body: JSON.stringify({ confirm: confirm_ }) });
-    if (!resp.ok) { alert(resp.error || "failed to move SL to breakeven"); }
-    loadTinyTestForAccount(accountId, true);
+    await _runTinyTestAction(`breakeven-${accountId}`, btn,
+        `/api/executor/accounts/${accountId}/tiny-test/${testId}/move-sl-breakeven`,
+        { confirm: confirm_ }, "failed to move SL to breakeven", accountId);
 }
-async function flashCloseTinyTest(accountId, testId) {
+async function flashCloseTinyTest(accountId, testId, btn) {
     const confirm_ = document.getElementById(`tinyFlashConfirm-${accountId}`).value;
-    const resp = await api(`/api/executor/accounts/${accountId}/tiny-test/${testId}/flash-close`, { method: "POST", body: JSON.stringify({ confirm: confirm_ }) });
-    if (!resp.ok) { alert(resp.error || "failed to flash close"); }
-    loadTinyTestForAccount(accountId, true);
+    await _runTinyTestAction(`flash-${accountId}`, btn,
+        `/api/executor/accounts/${accountId}/tiny-test/${testId}/flash-close`,
+        { confirm: confirm_ }, "failed to flash close", accountId);
 }
 
 async function engageKillSwitch(id) {
