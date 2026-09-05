@@ -2,16 +2,32 @@
 # ==============================================================================
 # EXECUTOR PLAN BUILDER -- reads an already-FILLED TradePlan row + an
 # account's own risk state, and computes the hypothetical order that
-# account would place. Pure "compute and return," writes nothing itself --
-# the caller (executor_engine.py) owns persistence. This is the layer
+# account would place. Writes nothing itself -- the caller (executor_
+# engine.py) owns persistence. Not a pure function anymore as of
+# 2026-09-05 (it makes one real, read-only exchange call to verify
+# leverage/margin mode when credentials are set -- see below), but still
+# never mutates the DB or the exchange. This is the layer
 # that never re-decides the trade: direction/entry/stop/T1/T2/T3 all come
 # straight off the TradePlan row, verbatim. Stage 1 of the Bitunix
 # executor bot.
+#
+# 2026-09-05: now queries the REAL leverage/margin mode from the exchange
+# before every computation (async), rather than trusting a stored
+# ExecutorAccount.leverage_baseline/margin_mode -- this is the direct
+# fix for a real drift caught live: Andy's account's actual leverage
+# (40x) didn't match what the whole design assumed (10x). See
+# executor_sizing.py's own header for why the bot never "suggests" a
+# leverage to use -- Bitunix's real place_order API has no leverage
+# parameter at all; it's a pre-set account/symbol config the bot only
+# ever reads, never changes. If the real leverage makes the trade unsafe
+# (liquidation inside the stop), this REFUSES the trade -- it does not
+# call change_leverage() to silently fix it (a real account mutation the
+# bot was never asked to make -- default OFF, Andy's own explicit call).
 # ==============================================================================
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
@@ -20,7 +36,36 @@ import executor_sizing
 from database import ExecutorAccount, ExecutorOrder, ExecutorRiskState, TradePlan
 
 
-def build_hypothetical_order(
+async def _query_real_leverage_and_margin_mode(account: ExecutorAccount, symbol: str) -> Dict[str, Any]:
+    """Returns {"leverage": int, "margin_mode": str, "source": str}.
+    Falls back to the account's configured baseline (clearly labeled as
+    unverified) if no credentials are set yet or the query fails -- never
+    crashes the whole computation over a network hiccup, but never
+    silently pretends a fallback is a verified value either."""
+    api_key, api_secret = executor_accounts.get_decrypted_credentials(account)
+    if not api_key or not api_secret:
+        return {
+            "leverage": account.leverage_baseline, "margin_mode": account.margin_mode,
+            "source": "no credentials set yet -- using configured baseline, NOT verified against the exchange",
+        }
+
+    import executor_bitunix_client
+    client = executor_bitunix_client.BitunixClient(api_key, api_secret)
+    try:
+        resp = await client.get_leverage_and_margin_mode(symbol.replace("/", ""))
+        data = resp["data"]
+        return {
+            "leverage": int(data["leverage"]), "margin_mode": data["marginMode"],
+            "source": "verified against the real exchange account",
+        }
+    except Exception as e:
+        return {
+            "leverage": account.leverage_baseline, "margin_mode": account.margin_mode,
+            "source": f"exchange query failed ({e}) -- using configured baseline, NOT verified against the exchange",
+        }
+
+
+async def build_hypothetical_order(
     db: Session, trade_plan_row: TradePlan, account: ExecutorAccount, risk_state: ExecutorRiskState,
 ) -> Dict[str, Any]:
     base = {
@@ -74,13 +119,11 @@ def build_hypothetical_order(
     except ValueError as e:
         return {**base, "decision": "ERROR", "decision_reason": f"sizing failed: {e}"}
 
-    leverage, lev_detail = executor_sizing.suggest_leverage(
-        entry_price=entry_price, stop_price=stop_price, direction=direction, qty=qty,
-        leverage_baseline=account.leverage_baseline, free_balance_usd=account.assumed_balance_usd,
-        max_margin_pct=account.max_margin_pct_of_balance,
-    )
-    liq_price = executor_sizing.estimate_liquidation_price(entry_price, leverage, direction)
-    liq_ok, liq_detail = executor_sizing.check_liquidation_safety(entry_price, stop_price, liq_price, direction)
+    exchange_state = await _query_real_leverage_and_margin_mode(account, trade_plan_row.symbol)
+    leverage = exchange_state["leverage"]
+    margin_mode = exchange_state["margin_mode"]
+
+    liq_ok, liq_detail, liq_price = executor_sizing.check_leverage_is_safe(entry_price, stop_price, direction, leverage)
     margin_required = (entry_price * qty) / leverage
 
     result = {
@@ -95,6 +138,14 @@ def build_hypothetical_order(
         "liquidation_check_passed": liq_ok,
         "liquidation_check_detail": liq_detail,
     }
+    if margin_mode != account.margin_mode:
+        return {
+            **result, "decision": "REJECTED",
+            "decision_reason": (
+                f"real exchange margin mode ({margin_mode}) does not match configured "
+                f"({account.margin_mode}) -- {exchange_state['source']}; fix the mismatch before trading"
+            ),
+        }
     if not liq_ok:
-        return {**result, "decision": "REJECTED", "decision_reason": liq_detail}
-    return {**result, "decision": "WOULD_PLACE", "decision_reason": f"{lev_detail}; {liq_detail}"}
+        return {**result, "decision": "REJECTED", "decision_reason": f"{liq_detail} ({exchange_state['source']})"}
+    return {**result, "decision": "WOULD_PLACE", "decision_reason": f"leverage {leverage}x, {exchange_state['source']}; {liq_detail}"}

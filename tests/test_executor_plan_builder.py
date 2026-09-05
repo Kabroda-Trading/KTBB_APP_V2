@@ -2,7 +2,19 @@
 Unit coverage for executor_plan_builder.py -- DB-backed with hand-built
 TradePlan/ExecutorAccount/ExecutorRiskState rows, same fixture style as
 tests/test_executor_accounts.py.
+
+build_hypothetical_order() is async (2026-09-05 -- it queries the real
+exchange leverage/margin mode when credentials are set). Most tests in
+this file have no credentials set, so they exercise the "no credentials
+yet -- use configured baseline" fallback path automatically -- exactly
+the same values these tests already asserted. The credentialed / real-
+exchange-query path (leverage/margin-mode mismatch REJECTED paths, and
+the exchange-query-failure fallback) is covered by the dedicated tests
+at the bottom of this file, which monkeypatch
+executor_bitunix_client.BitunixClient.get_leverage_and_margin_mode
+directly -- no real network call.
 """
+import asyncio
 import os
 
 os.environ["DATABASE_URL"] = "sqlite:///./kabroda_test_executor_plan_builder.db"
@@ -82,7 +94,7 @@ def test_would_place_normal_case(db):
     account, state = _make_account(db, assumed_balance_usd=100000.0)  # huge balance -- no margin pressure
     # risk_last_usd default 100.0 -> qty = 100/5 = 20.0
 
-    order = epb.build_hypothetical_order(db, plan, account, state)
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
     assert order["decision"] == "WOULD_PLACE"
     assert order["qty"] == pytest.approx(20.0)
     assert order["stop_distance"] == pytest.approx(5.0)
@@ -95,7 +107,7 @@ def test_would_place_normal_case(db):
 def test_would_place_short_side(db):
     plan = _make_filled_plan(db, direction="SHORT", entry=100.0, stop=105.0)
     account, state = _make_account(db, assumed_balance_usd=100000.0)
-    order = epb.build_hypothetical_order(db, plan, account, state)
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
     assert order["decision"] == "WOULD_PLACE"
     assert order["direction"] == "SHORT"
     assert order["liquidation_price_estimate"] == pytest.approx(110.0)
@@ -112,7 +124,7 @@ def test_rejected_when_liquidation_inside_stop(db):
     plan = _make_filled_plan(db, entry=100.0, stop=99.5)   # stop_distance=0.5
     account, state = _make_account(db, leverage_baseline=250, assumed_balance_usd=100000.0)
     # liq at 250x LONG: 100*(1-1/250)=99.6, distance 0.4 < stop_distance 0.5 -- UNSAFE
-    order = epb.build_hypothetical_order(db, plan, account, state)
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
     assert order["decision"] == "REJECTED"
     assert order["liquidation_check_passed"] is False
     assert "refuse this trade" in order["decision_reason"]
@@ -125,7 +137,7 @@ def test_skipped_when_account_kill_switch_engaged(db):
     account, state = _make_account(db)
     ea.engage_kill_switch(db, account, reason="testing", by="andy@kabroda.com")
     db.commit()
-    order = epb.build_hypothetical_order(db, plan, account, state)
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
     assert order["decision"] == "SKIPPED_KILL_SWITCH"
 
 
@@ -134,7 +146,7 @@ def test_skipped_when_account_inactive(db):
     account, state = _make_account(db)
     account.is_active = False
     db.commit()
-    order = epb.build_hypothetical_order(db, plan, account, state)
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
     assert order["decision"] == "SKIPPED_ACCOUNT_INACTIVE"
 
 
@@ -143,12 +155,12 @@ def test_skipped_when_account_inactive(db):
 def test_skipped_already_in_trade_same_plan_twice(db):
     plan = _make_filled_plan(db)
     account, state = _make_account(db, assumed_balance_usd=100000.0)
-    first = epb.build_hypothetical_order(db, plan, account, state)
+    first = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
     assert first["decision"] == "WOULD_PLACE"
     db.add(ExecutorOrder(**{k: v for k, v in first.items() if k in ExecutorOrder.__table__.columns.keys()}))
     db.commit()
 
-    second = epb.build_hypothetical_order(db, plan, account, state)
+    second = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
     assert second["decision"] == "SKIPPED_ALREADY_IN_TRADE"
 
 
@@ -156,14 +168,14 @@ def test_skipped_already_in_trade_different_open_plan(db):
     account, state = _make_account(db, assumed_balance_usd=100000.0)
 
     plan1 = _make_filled_plan(db, symbol="BTC/USDT", date_key="2026-09-03")
-    order1 = epb.build_hypothetical_order(db, plan1, account, state)
+    order1 = asyncio.run(epb.build_hypothetical_order(db, plan1, account, state))
     assert order1["decision"] == "WOULD_PLACE"
     db.add(ExecutorOrder(**{k: v for k, v in order1.items() if k in ExecutorOrder.__table__.columns.keys()}))
     db.commit()
     # plan1 stays "FILLED" (not DONE) -- still open
 
     plan2 = _make_filled_plan(db, symbol="ETH/USDT", date_key="2026-09-04")
-    order2 = epb.build_hypothetical_order(db, plan2, account, state)
+    order2 = asyncio.run(epb.build_hypothetical_order(db, plan2, account, state))
     assert order2["decision"] == "SKIPPED_ALREADY_IN_TRADE"
 
 
@@ -171,11 +183,102 @@ def test_not_skipped_when_prior_plan_is_done(db):
     account, state = _make_account(db, assumed_balance_usd=100000.0)
 
     plan1 = _make_filled_plan(db, symbol="BTC/USDT", date_key="2026-09-03")
-    order1 = epb.build_hypothetical_order(db, plan1, account, state)
+    order1 = asyncio.run(epb.build_hypothetical_order(db, plan1, account, state))
     db.add(ExecutorOrder(**{k: v for k, v in order1.items() if k in ExecutorOrder.__table__.columns.keys()}))
     plan1.status = "DONE"   # resolved
     db.commit()
 
     plan2 = _make_filled_plan(db, symbol="ETH/USDT", date_key="2026-09-04")
-    order2 = epb.build_hypothetical_order(db, plan2, account, state)
+    order2 = asyncio.run(epb.build_hypothetical_order(db, plan2, account, state))
     assert order2["decision"] == "WOULD_PLACE"
+
+
+# ------------------------------------------------------------------ credentialed / real-exchange-query path
+# (2026-09-05 -- the direct fix for the real leverage-mismatch incident:
+# Andy's real Bitunix account was 40x while the whole design assumed
+# 10x. These monkeypatch executor_bitunix_client.BitunixClient at the
+# method level -- no real network call -- to prove the REJECTED/
+# WOULD_PLACE paths driven by a real queried value actually fire.)
+
+def _set_fake_credentials(db, account):
+    ea.set_credentials(db, account, api_key="fake-key", api_secret="fake-secret", set_by="test@kabroda.com")
+    db.commit()
+
+
+def _patch_leverage_query(monkeypatch, leverage, margin_mode):
+    import executor_bitunix_client
+
+    async def fake_get_leverage_and_margin_mode(self, symbol, margin_coin="USDT"):
+        return {"code": 0, "data": {"leverage": leverage, "marginMode": margin_mode}, "msg": "Success"}
+
+    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_leverage_and_margin_mode", fake_get_leverage_and_margin_mode)
+
+
+def test_would_place_uses_real_queried_leverage_when_credentials_set(db, monkeypatch):
+    # Real account leverage (40x, exactly Andy's real incident value)
+    # differs from the account's configured baseline (10x) -- the
+    # verified exchange value must win, not the stored baseline. Stop is
+    # tight enough (distance 1) to stay safely inside the 40x liquidation
+    # distance (2.5) -- this test isolates "real leverage used" from
+    # "leverage safety," which is covered separately below.
+    plan = _make_filled_plan(db, entry=100.0, stop=99.0)   # stop_distance=1
+    account, state = _make_account(db, leverage_baseline=10, assumed_balance_usd=100000.0)
+    _set_fake_credentials(db, account)
+    _patch_leverage_query(monkeypatch, leverage=40, margin_mode=account.margin_mode)
+
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
+    assert order["decision"] == "WOULD_PLACE"
+    assert order["leverage_used"] == 40
+    assert "verified against the real exchange account" in order["decision_reason"]
+    # liq at 40x LONG: 100*(1-1/40)=97.5, distance 2.5 > stop_distance 1 -- safe
+    assert order["liquidation_price_estimate"] == pytest.approx(97.5)
+
+
+def test_rejected_when_real_margin_mode_mismatches_configured(db, monkeypatch):
+    plan = _make_filled_plan(db, entry=100.0, stop=95.0)
+    account, state = _make_account(db, assumed_balance_usd=100000.0)
+    _set_fake_credentials(db, account)
+    # Account is configured "ISOLATION" (database.py's real default) --
+    # simulate the exchange actually reporting "CROSS" instead.
+    _patch_leverage_query(monkeypatch, leverage=account.leverage_baseline, margin_mode="CROSS")
+
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
+    assert order["decision"] == "REJECTED"
+    assert "margin mode" in order["decision_reason"]
+    assert "CROSS" in order["decision_reason"]
+
+
+def test_rejected_when_real_leverage_is_unsafe_for_the_stop(db, monkeypatch):
+    # entry 100, stop 99.5 (distance 0.5) at a real queried 250x:
+    # liq = 100*(1-1/250) = 99.6, distance 0.4 < stop_distance 0.5 -- unsafe.
+    # The account's own configured baseline (10x) would have looked safe --
+    # proves the REAL queried value, not the baseline, drives the refusal.
+    plan = _make_filled_plan(db, entry=100.0, stop=99.5)
+    account, state = _make_account(db, leverage_baseline=10, assumed_balance_usd=100000.0)
+    _set_fake_credentials(db, account)
+    _patch_leverage_query(monkeypatch, leverage=250, margin_mode=account.margin_mode)
+
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
+    assert order["decision"] == "REJECTED"
+    assert order["liquidation_check_passed"] is False
+    assert order["leverage_used"] == 250
+    assert "refuse this trade" in order["decision_reason"]
+
+
+def test_falls_back_to_baseline_when_exchange_query_fails(db, monkeypatch):
+    import executor_bitunix_client
+
+    async def fake_raises(self, symbol, margin_coin="USDT"):
+        raise RuntimeError("simulated network failure")
+
+    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_leverage_and_margin_mode", fake_raises)
+
+    plan = _make_filled_plan(db, entry=100.0, stop=95.0)
+    account, state = _make_account(db, leverage_baseline=10, assumed_balance_usd=100000.0)
+    _set_fake_credentials(db, account)
+
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
+    assert order["decision"] == "WOULD_PLACE"
+    assert order["leverage_used"] == 10  # falls back to the configured baseline
+    assert "exchange query failed" in order["decision_reason"]
+    assert "NOT verified against the exchange" in order["decision_reason"]

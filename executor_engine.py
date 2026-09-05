@@ -49,8 +49,11 @@ def _audit_event_type(order_dict: Dict[str, Any]) -> str:
 async def _process_account(db: Session, trade_plan_row: TradePlan, account: ExecutorAccount) -> None:
     risk_state = executor_accounts.get_or_init_risk_state(db, account)
 
-    # Pure computation -- can raise (a bug here must not corrupt the DB).
-    order_dict = executor_plan_builder.build_hypothetical_order(db, trade_plan_row, account, risk_state)
+    # Can raise (a bug here must not corrupt the DB) -- now also makes a
+    # real, read-only exchange call (query real leverage/margin mode)
+    # when the account has credentials set, see executor_plan_builder.py's
+    # own header for why.
+    order_dict = await executor_plan_builder.build_hypothetical_order(db, trade_plan_row, account, risk_state)
 
     if account.mode in ("PAPER", "LIVE"):
         # Stage 2/3 -- no such account exists yet in Stage 1 (every

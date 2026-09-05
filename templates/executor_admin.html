@@ -151,6 +151,11 @@ async function loadAccounts() {
                 margin: ${escapeHtml(a.margin_mode)} @ ${a.leverage_baseline}x baseline
                 &middot; assumed balance: ${a.assumed_balance_usd !== null ? '$' + a.assumed_balance_usd : 'not set'}
             </div>
+            <div style="margin-top:10px; padding:10px; border:1px solid ${a.has_credentials ? '#065f46' : '#334155'}; border-radius:6px; background:${a.has_credentials ? 'rgba(16,185,129,0.06)' : 'transparent'};">
+                <button class="btn ${a.has_credentials ? 'btn-ok' : ''}" onclick="testConnection(${a.id})" ${a.has_credentials ? '' : 'disabled'}>VERIFY AUTH (read-only, no order placed)</button>
+                ${a.has_credentials ? '' : '<span class="empty" style="margin-left:8px;">set credentials below first</span>'}
+                <div id="testResult-${a.id}" class="empty" style="margin-top:8px; display:none; white-space:pre-wrap;"></div>
+            </div>
             <div class="risk-form" id="riskForm-${a.id}">
                 <label>Risk last ($)<input type="number" step="0.01" id="riskLast-${a.id}"></label>
                 <label>Floor ($)<input type="number" step="0.01" id="riskFloor-${a.id}"></label>
@@ -164,10 +169,6 @@ async function loadAccounts() {
                     <label>API key<input type="password" id="apiKey-${a.id}"></label>
                     <label>API secret<input type="password" id="apiSecret-${a.id}"></label>
                     <button class="btn" onclick="setCredentials(${a.id})" style="align-self:flex-end;">SAVE CREDENTIALS</button>
-                </div>
-                <div style="margin-top:10px;">
-                    <button class="btn ${a.has_credentials ? 'btn-ok' : ''}" onclick="testConnection(${a.id})" ${a.has_credentials ? '' : 'disabled'}>VERIFY AUTH (read-only, no order placed)</button>
-                    <div id="testResult-${a.id}" class="empty" style="margin-top:8px; display:none; white-space:pre-wrap;"></div>
                 </div>
             </details>
         </div>

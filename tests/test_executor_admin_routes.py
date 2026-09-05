@@ -238,6 +238,7 @@ def test_credential_set_response_never_contains_the_secret(env):
 # ------------------------------------------------------------------ kill-switch toggle reflected in a subsequent dry run
 
 def test_kill_switch_toggle_reflected_in_next_plan_build(env):
+    import asyncio
     import executor_plan_builder
     from database import TradePlan
 
@@ -256,7 +257,7 @@ def test_kill_switch_toggle_reflected_in_next_plan_build(env):
     # would block the TestClient's OWN db session (a different thread)
     # from writing -- SQLite single-writer locking, not an app bug.
 
-    before = executor_plan_builder.build_hypothetical_order(db, plan, account, state)
+    before = asyncio.run(executor_plan_builder.build_hypothetical_order(db, plan, account, state))
     assert before["decision"] == "WOULD_PLACE"
 
     client = _login("exec_owner@kabroda.com", "ownerpass123")
@@ -264,7 +265,7 @@ def test_kill_switch_toggle_reflected_in_next_plan_build(env):
     assert resp.status_code == 200
 
     db.refresh(account)
-    after = executor_plan_builder.build_hypothetical_order(db, plan, account, state)
+    after = asyncio.run(executor_plan_builder.build_hypothetical_order(db, plan, account, state))
     assert after["decision"] == "SKIPPED_KILL_SWITCH"
 
 

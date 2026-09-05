@@ -26,7 +26,20 @@ def get_db():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
-    
+
+    # --- ONE-TIME DATA FIX (idempotent -- matches nothing once corrected) ---
+    # 2026-09-05: executor_accounts.margin_mode's default was "ISOLATED"
+    # for a short window before being corrected to "ISOLATION" (Bitunix's
+    # actual API vocabulary). Andy's real account row was created during
+    # that window and needs its stored value corrected, not just new rows
+    # going forward -- see the column's own comment for why the string
+    # must match exactly.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE executor_accounts SET margin_mode = 'ISOLATION' WHERE margin_mode = 'ISOLATED'"))
+    except Exception:
+        pass
+
     # --- MIGRATION PATCHES (POSTGRESQL SAFE) ---
     try:
         with engine.begin() as conn:
@@ -1634,7 +1647,13 @@ class ExecutorAccount(Base):
     kill_switch_engaged_by = Column(String, nullable=True)
     kill_switch_reason = Column(String, nullable=True)
 
-    margin_mode = Column(String, nullable=False, default="ISOLATED")
+    # "ISOLATION", not "ISOLATED" -- matches Bitunix's own real API
+    # vocabulary EXACTLY (their get_leverage_and_margin_mode endpoint's
+    # marginMode field returns "ISOLATION"|"CROSS", confirmed against a
+    # real account response 2026-09-05). A mismatched string here would
+    # make executor_plan_builder.py's real-vs-configured margin-mode
+    # check falsely reject every real trade.
+    margin_mode = Column(String, nullable=False, default="ISOLATION")
     leverage_baseline = Column(Integer, nullable=False, default=10)
     max_margin_pct_of_balance = Column(Float, nullable=False, default=0.80)
     # Stage 1 placeholder -- there is no real balance query yet (no

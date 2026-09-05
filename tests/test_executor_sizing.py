@@ -109,46 +109,42 @@ def test_liquidation_safety_stop_on_wrong_side():
     assert "wrong side" in detail
 
 
-# ------------------------------------------------------------------ suggest_leverage
+# ------------------------------------------------------------------ check_leverage_is_safe
+# (replaces the old suggest_leverage() -- Bitunix's real place_order API
+# has no leverage parameter, so "suggesting" one to use was never
+# actionable. This checks whatever REAL leverage the caller already
+# queried from the exchange.)
 
-def test_suggest_leverage_baseline_sufficient():
-    # notional = 100*1 = 100; margin at 10x = 10; balance 1000, threshold 800 -- comfortably fine
-    lev, detail = es.suggest_leverage(
-        entry_price=100.0, stop_price=95.0, direction="LONG", qty=1.0,
-        leverage_baseline=10, free_balance_usd=1000.0,
-    )
-    assert lev == 10
-    assert "baseline leverage OK" in detail
-
-
-def test_suggest_leverage_raises_when_margin_pressured_and_still_safe():
-    # notional = 100*10 = 1000; balance 100, threshold 80. margin_at(10)=100>80.
-    # Hand-verified: margin drops <=80 first at 13x (1000/13=76.9); stop_distance=5
-    # (entry 100, stop 95) stays liq-safe at 13x (liq=100*(1-1/13)=92.3, distance 7.7>5).
-    lev, detail = es.suggest_leverage(
-        entry_price=100.0, stop_price=95.0, direction="LONG", qty=10.0,
-        leverage_baseline=10, free_balance_usd=100.0, max_margin_pct=0.80,
-    )
-    assert lev == 13
-    assert "10x -> 13x" in detail
+def test_check_leverage_is_safe_long_passes():
+    # entry 100, stop 95 (distance 5) at 10x: liq=90, distance 10 > 5 -- safe
+    ok, detail, liq = es.check_leverage_is_safe(100.0, 95.0, "LONG", 10)
+    assert ok is True
+    assert liq == pytest.approx(90.0)
+    assert "stop fires first" in detail
 
 
-def test_suggest_leverage_refuses_to_raise_past_liquidation_safety():
-    # notional = 100*20 = 2000; balance 100, threshold 80 -- needs high leverage
-    # to satisfy margin, but stop_distance=6 (entry 100, stop 94) goes liq-unsafe
-    # starting at 17x (100/17=5.88<6) -- must refuse rather than pick an unsafe lev.
-    lev, detail = es.suggest_leverage(
-        entry_price=100.0, stop_price=94.0, direction="LONG", qty=20.0,
-        leverage_baseline=10, free_balance_usd=100.0, max_margin_pct=0.80, max_leverage=20,
-    )
-    assert lev == 10  # falls back to baseline, does NOT pick the unsafe higher leverage
-    assert "reduce risk_dollars" in detail
+def test_check_leverage_is_safe_refuses_high_leverage_like_andys_real_account():
+    # The real scenario this replaces: Andy's actual account was set to
+    # 40x while the design assumed 10x. At 40x with a tight-ish stop
+    # (entry 100, stop 99, distance 1): liq = 100*(1-1/40) = 97.5,
+    # distance 2.5 > 1 -- still safe here (40x isn't unsafe for EVERY
+    # stop, only tight ones -- see the next test for where it fails).
+    ok, detail, liq = es.check_leverage_is_safe(100.0, 99.0, "LONG", 40)
+    assert ok is True
+    assert liq == pytest.approx(97.5)
 
 
-def test_suggest_leverage_no_balance_figure_uses_baseline_unchecked():
-    lev, detail = es.suggest_leverage(
-        entry_price=100.0, stop_price=95.0, direction="LONG", qty=10.0,
-        leverage_baseline=10, free_balance_usd=None,
-    )
-    assert lev == 10
-    assert "no balance figure" in detail
+def test_check_leverage_is_safe_refuses_when_real_leverage_is_too_high_for_the_stop():
+    # entry 100, stop 97.5 (distance 2.5) at 40x: liq=97.5, distance 2.5 --
+    # NOT strictly greater than the stop distance -- unsafe (liquidation
+    # at or inside the stop, not comfortably beyond it).
+    ok, detail, liq = es.check_leverage_is_safe(100.0, 97.5, "LONG", 40)
+    assert ok is False
+    assert liq == pytest.approx(97.5)
+    assert "refuse this trade" in detail
+
+
+def test_check_leverage_is_safe_short():
+    ok, detail, liq = es.check_leverage_is_safe(100.0, 105.0, "SHORT", 10)
+    assert ok is True
+    assert liq == pytest.approx(110.0)

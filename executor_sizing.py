@@ -94,59 +94,37 @@ def check_liquidation_safety(
     )
 
 
-# Deliberately not a strict >80% "reduce leverage" rule as an earlier design
-# note phrased it -- margin_required = notional / leverage, so for a FIXED
-# qty (already set by compute_qty()'s risk-based sizing), LOWERING leverage
-# INCREASES margin required, it does not reduce it. Raising leverage is what
-# relieves margin pressure for a fixed notional. (This corrects a numeric
-# example in the design conversation -- Kabroda AI Brain repo AGENT_LOG.md,
-# 2026-09-04 15:25 CT -- that described a lower leverage producing a lower
-# margin figure; the arithmetic there doesn't hold for a fixed qty. Flagged
-# back to AGENT_LOG.md separately rather than silently propagated here.)
-# Raising leverage to relieve margin pressure moves liquidation CLOSER to
-# entry, so this function never returns a leverage that would fail
-# check_liquidation_safety() against the given stop -- if no leverage up to
-# max_leverage satisfies both constraints, it says so rather than picking
-# an unsafe one.
-def suggest_leverage(
-    entry_price: float, stop_price: float, direction: str, qty: float,
-    leverage_baseline: int, free_balance_usd: Optional[float],
-    max_margin_pct: float = 0.80, max_leverage: int = 20,
-) -> Tuple[int, str]:
-    notional = entry_price * qty
-
-    def margin_at(lev: int) -> float:
-        return notional / lev
-
-    if not free_balance_usd or free_balance_usd <= 0:
-        return leverage_baseline, "no balance figure available -- using baseline leverage unchecked"
-
-    margin = margin_at(leverage_baseline)
-    if margin <= max_margin_pct * free_balance_usd:
-        return leverage_baseline, (
-            f"margin ${margin:.2f} at {leverage_baseline}x is within "
-            f"{max_margin_pct:.0%} of ${free_balance_usd:.2f} balance -- baseline leverage OK"
-        )
-
-    lev = leverage_baseline
-    while lev < max_leverage:
-        lev += 1
-        margin = margin_at(lev)
-        liq = estimate_liquidation_price(entry_price, lev, direction)
-        safe, _ = check_liquidation_safety(entry_price, stop_price, liq, direction)
-        if not safe:
-            return leverage_baseline, (
-                f"margin pressure at {leverage_baseline}x (${margin_at(leverage_baseline):.2f}), "
-                f"but raising leverage further would violate the liquidation-vs-stop safety "
-                f"check at {lev}x -- reduce risk_dollars instead of raising leverage"
-            )
-        if margin <= max_margin_pct * free_balance_usd:
-            return lev, (
-                f"leverage raised {leverage_baseline}x -> {lev}x to bring margin "
-                f"(${margin:.2f}) within {max_margin_pct:.0%} of ${free_balance_usd:.2f} balance"
-            )
-
-    return leverage_baseline, (
-        f"even at {max_leverage}x, margin (${margin_at(max_leverage):.2f}) exceeds "
-        f"{max_margin_pct:.0%} of ${free_balance_usd:.2f} balance -- reduce risk_dollars instead"
-    )
+# 2026-09-05 CORRECTION, replacing an earlier design: this codebase used to
+# have a suggest_leverage() that computed a "suggested" leverage to relieve
+# margin pressure by raising it. That model doesn't match how Bitunix
+# actually works -- verified directly against their place_order API
+# parameters (symbol/qty/price/side/tradeSide/orderType/effect/tpPrice/
+# slPrice/etc.): there is NO leverage parameter on an order. Leverage is a
+# pre-set account/symbol-level configuration (changed only via a separate
+# change_leverage call), not something chosen per-trade. So "suggesting" a
+# leverage the bot never actually applies was dead computation -- the real
+# order always executes at whatever leverage is ALREADY set on the
+# exchange, known or not.
+#
+# This was caught for real, not hypothetically: the first live verify-auth
+# check against Andy's real account (2026-09-05) returned leverage=40,
+# while the whole design (and this account's own configured
+# `leverage_baseline`) assumed 10x -- a real, silent drift between assumed
+# and actual exchange state. Andy's resolution, now the standing
+# principle: the bot queries the REAL leverage before every trade and
+# sizes against reality, never a stored baseline; if that real leverage
+# makes the liquidation-vs-stop check unsafe, the bot REFUSES the trade
+# and says so loudly -- it does NOT call change_leverage() to silently fix
+# it (that mutates real account state as a side effect the bot was never
+# asked to take -- default OFF, matching this project's own "never guess,
+# never fabricate a fix" discipline).
+def check_leverage_is_safe(
+    entry_price: float, stop_price: float, direction: str, leverage: int,
+) -> Tuple[bool, str, float]:
+    """Given the REAL, already-queried leverage (executor_bitunix_client.
+    BitunixClient.get_leverage_and_margin_mode()), returns (is_safe,
+    detail, liquidation_price_estimate). Callers must query the real
+    value themselves -- this function never assumes or defaults one."""
+    liq_price = estimate_liquidation_price(entry_price, leverage, direction)
+    safe, detail = check_liquidation_safety(entry_price, stop_price, liq_price, direction)
+    return safe, detail, liq_price
