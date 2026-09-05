@@ -275,7 +275,7 @@ function renderTinyTestSection(accountId, hasCredentials, active, allTests) {
                 <label>TP %<input type="number" step="0.001" id="tinyTpPct-${accountId}" value="0.01" style="width:70px;"></label>
                 <label>SL %<input type="number" step="0.001" id="tinySlPct-${accountId}" value="0.01" style="width:70px;"></label>
                 <label>Type exactly: CONFIRM PLACE TINY LIVE ORDER<input type="text" id="tinyPlaceConfirm-${accountId}"></label>
-                <button class="btn btn-danger" onclick="placeTinyTest(${accountId})" style="align-self:flex-end;">PLACE TINY LIVE ORDER</button>
+                <button class="btn btn-danger" onclick="placeTinyTest(${accountId}, this)" style="align-self:flex-end;">PLACE TINY LIVE ORDER</button>
             </div>`;
     } else {
         html += `
@@ -291,7 +291,7 @@ function renderTinyTestSection(accountId, hasCredentials, active, allTests) {
                 <div class="risk-form">
                     <label>Partial close %<input type="number" step="1" id="tinyPartialPct-${accountId}" value="50" style="width:70px;"></label>
                     <label>Type exactly: CONFIRM PARTIAL CLOSE<input type="text" id="tinyPartialConfirm-${accountId}"></label>
-                    <button class="btn btn-danger" onclick="partialCloseTinyTest(${accountId}, ${active.id})" style="align-self:flex-end;">PARTIAL CLOSE</button>
+                    <button class="btn btn-danger" onclick="partialCloseTinyTest(${accountId}, ${active.id}, this)" style="align-self:flex-end;">PARTIAL CLOSE</button>
                 </div>`;
         } else {
             html += '<p class="empty">Partial close requires status TPSL_SET.</p>';
@@ -301,7 +301,7 @@ function renderTinyTestSection(accountId, hasCredentials, active, allTests) {
             html += `
                 <div class="risk-form">
                     <label>Type exactly: CONFIRM MOVE SL TO BREAKEVEN<input type="text" id="tinySlConfirm-${accountId}"></label>
-                    <button class="btn btn-danger" onclick="moveSlBreakevenTinyTest(${accountId}, ${active.id})" style="align-self:flex-end;">MOVE SL TO BREAKEVEN</button>
+                    <button class="btn btn-danger" onclick="moveSlBreakevenTinyTest(${accountId}, ${active.id}, this)" style="align-self:flex-end;">MOVE SL TO BREAKEVEN</button>
                 </div>`;
         } else if (active.status !== "SL_MOVED_BREAKEVEN") {
             html += '<p class="empty">Move-SL-to-breakeven requires status PARTIAL_CLOSED.</p>';
@@ -311,7 +311,7 @@ function renderTinyTestSection(accountId, hasCredentials, active, allTests) {
             html += `
                 <div class="risk-form">
                     <label>Type exactly: CONFIRM FLASH CLOSE REMAINDER<input type="text" id="tinyFlashConfirm-${accountId}"></label>
-                    <button class="btn btn-danger" onclick="flashCloseTinyTest(${accountId}, ${active.id})" style="align-self:flex-end;">FLASH CLOSE REMAINDER</button>
+                    <button class="btn btn-danger" onclick="flashCloseTinyTest(${accountId}, ${active.id}, this)" style="align-self:flex-end;">FLASH CLOSE REMAINDER</button>
                 </div>`;
         } else {
             html += '<p class="empty">Flash close requires status PARTIAL_CLOSED or SL_MOVED_BREAKEVEN.</p>';
