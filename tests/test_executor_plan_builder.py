@@ -214,6 +214,25 @@ def _patch_leverage_query(monkeypatch, leverage, margin_mode):
     monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_leverage_and_margin_mode", fake_get_leverage_and_margin_mode)
 
 
+def _patch_mmr_query(monkeypatch, mmr=0.0, start=0, end=10_000_000):
+    # Default mmr=0.0 with a huge bracket -- reproduces the pre-MMR naive
+    # liquidation formula exactly, so tests that only care about leverage
+    # behavior don't need to also hand-recompute a real mmr's effect.
+    # ALWAYS applied alongside _patch_leverage_query for any credentialed
+    # test -- otherwise build_hypothetical_order() makes a REAL,
+    # unmocked get_position_tiers network call (this project's own
+    # testing discipline: no real network call in any test, ever).
+    import executor_bitunix_client
+
+    async def fake_get_position_tiers(self, symbol):
+        return {"code": 0, "data": [
+            {"symbol": symbol, "level": 1, "startValue": str(start), "endValue": str(end),
+             "leverage": 125, "maintenanceMarginRate": str(mmr)},
+        ], "msg": "Success"}
+
+    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_position_tiers", fake_get_position_tiers)
+
+
 def test_would_place_uses_real_queried_leverage_when_credentials_set(db, monkeypatch):
     # Real account leverage (40x, exactly Andy's real incident value)
     # differs from the account's configured baseline (10x) -- the
@@ -225,6 +244,7 @@ def test_would_place_uses_real_queried_leverage_when_credentials_set(db, monkeyp
     account, state = _make_account(db, leverage_baseline=10, assumed_balance_usd=100000.0)
     _set_fake_credentials(db, account)
     _patch_leverage_query(monkeypatch, leverage=40, margin_mode=account.margin_mode)
+    _patch_mmr_query(monkeypatch)
 
     order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
     assert order["decision"] == "WOULD_PLACE"
@@ -241,6 +261,7 @@ def test_rejected_when_real_margin_mode_mismatches_configured(db, monkeypatch):
     # Account is configured "ISOLATION" (database.py's real default) --
     # simulate the exchange actually reporting "CROSS" instead.
     _patch_leverage_query(monkeypatch, leverage=account.leverage_baseline, margin_mode="CROSS")
+    _patch_mmr_query(monkeypatch)
 
     order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
     assert order["decision"] == "REJECTED"
@@ -257,6 +278,7 @@ def test_rejected_when_real_leverage_is_unsafe_for_the_stop(db, monkeypatch):
     account, state = _make_account(db, leverage_baseline=10, assumed_balance_usd=100000.0)
     _set_fake_credentials(db, account)
     _patch_leverage_query(monkeypatch, leverage=250, margin_mode=account.margin_mode)
+    _patch_mmr_query(monkeypatch)
 
     order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
     assert order["decision"] == "REJECTED"
@@ -272,6 +294,7 @@ def test_falls_back_to_baseline_when_exchange_query_fails(db, monkeypatch):
         raise RuntimeError("simulated network failure")
 
     monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_leverage_and_margin_mode", fake_raises)
+    _patch_mmr_query(monkeypatch)
 
     plan = _make_filled_plan(db, entry=100.0, stop=95.0)
     account, state = _make_account(db, leverage_baseline=10, assumed_balance_usd=100000.0)
@@ -282,3 +305,88 @@ def test_falls_back_to_baseline_when_exchange_query_fails(db, monkeypatch):
     assert order["leverage_used"] == 10  # falls back to the configured baseline
     assert "exchange query failed" in order["decision_reason"]
     assert "NOT verified against the exchange" in order["decision_reason"]
+
+
+# ------------------------------------------------------------------ maintenance margin rate (Stage 2, 2026-09-05)
+# The live get_position_tiers query folded into the safety check --
+# never a hardcoded MMR table, same philosophy as the leverage query.
+
+def test_would_place_uses_real_queried_mmr_and_selects_the_right_notional_tier(db, monkeypatch):
+    # liq at 125x, mmr=0.004: 100*(1-1/125+0.004)=99.6, distance 0.4 --
+    # stop must be tighter than that to stay safe (isolates "correct
+    # tier selection" from "leverage safety," covered in the next test).
+    plan = _make_filled_plan(db, entry=100.0, stop=99.7)   # stop_distance=0.3
+    account, state = _make_account(db, leverage_baseline=125, assumed_balance_usd=100000.0)
+    _set_fake_credentials(db, account)
+    _patch_leverage_query(monkeypatch, leverage=125, margin_mode=account.margin_mode)
+    # Two tiers -- the trade's notional must land in tier 1, not tier 2.
+    import executor_bitunix_client
+
+    async def fake_tiers(self, symbol):
+        return {"code": 0, "data": [
+            {"symbol": symbol, "level": 1, "startValue": "0", "endValue": "50000",
+             "leverage": 125, "maintenanceMarginRate": "0.004"},
+            {"symbol": symbol, "level": 2, "startValue": "50000", "endValue": "200000",
+             "leverage": 100, "maintenanceMarginRate": "0.005"},
+        ], "msg": "Success"}
+
+    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_position_tiers", fake_tiers)
+
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
+    assert order["decision"] == "WOULD_PLACE"
+    assert order["maintenance_margin_rate_used"] == pytest.approx(0.004)
+    assert order["liquidation_price_estimate"] == pytest.approx(99.6)
+    assert "verified against the real exchange position tiers" in order["decision_reason"]
+
+
+def test_real_mmr_can_flip_a_would_place_to_rejected(db, monkeypatch):
+    # entry 100, stop 97.6 (distance 2.4) at 40x: naive (mmr=0) liq=97.5,
+    # distance 2.5 > 2.4 -- would look SAFE without the real mmr. With a
+    # real mmr of 0.004: liq = 100*(1-1/40+0.004) = 97.9, distance 2.1 <
+    # 2.4 -- REJECTED. This is the real safety improvement this fix buys.
+    plan = _make_filled_plan(db, entry=100.0, stop=97.6)
+    account, state = _make_account(db, leverage_baseline=40, assumed_balance_usd=100000.0)
+    _set_fake_credentials(db, account)
+    _patch_leverage_query(monkeypatch, leverage=40, margin_mode=account.margin_mode)
+    _patch_mmr_query(monkeypatch, mmr=0.004)
+
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
+    assert order["decision"] == "REJECTED"
+    assert order["liquidation_check_passed"] is False
+    assert order["maintenance_margin_rate_used"] == pytest.approx(0.004)
+    assert order["liquidation_price_estimate"] == pytest.approx(97.9)
+
+
+def test_mmr_query_failure_falls_back_to_conservative_constant_not_zero(db, monkeypatch):
+    import executor_bitunix_client
+
+    async def fake_tiers_raises(self, symbol):
+        raise RuntimeError("simulated tiers query failure")
+
+    plan = _make_filled_plan(db, entry=100.0, stop=95.0)
+    account, state = _make_account(db, leverage_baseline=10, assumed_balance_usd=100000.0)
+    _set_fake_credentials(db, account)
+    _patch_leverage_query(monkeypatch, leverage=10, margin_mode=account.margin_mode)
+    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_position_tiers", fake_tiers_raises)
+
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
+    # A query FAILURE (credentials exist, call was attempted) uses the
+    # elevated conservative fallback (0.01), unlike the benign "no
+    # credentials yet" case which uses 0.0 -- never hard-blocks purely
+    # because the tiers query failed, but never silently assumes 0 either.
+    assert order["maintenance_margin_rate_used"] == pytest.approx(0.01)
+    assert "NOT verified against the exchange" in order["decision_reason"]
+
+
+def test_no_credentials_uses_zero_mmr_not_the_conservative_fallback(db):
+    # The benign "never connected yet" case -- matches
+    # _query_real_leverage_and_margin_mode()'s own no-credentials
+    # behavior (reuse the baseline, don't get artificially more cautious).
+    plan = _make_filled_plan(db, entry=100.0, stop=95.0)
+    account, state = _make_account(db, leverage_baseline=10, assumed_balance_usd=100000.0)
+    # no _set_fake_credentials() call -- account has no credentials set
+
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
+    assert order["decision"] == "WOULD_PLACE"
+    assert order["maintenance_margin_rate_used"] == pytest.approx(0.0)
+    assert order["liquidation_price_estimate"] == pytest.approx(90.0)  # naive formula, unchanged

@@ -22,10 +22,18 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 import database
-from database import SessionLocal, UserModel, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig
+from database import (
+    SessionLocal, UserModel, ExecutorAccount, ExecutorRiskState, ExecutorOrder,
+    ExecutorAuditLog, ExecutorGlobalConfig, ExecutorMechanismTest,
+)
 import auth
 import executor_accounts as ea
-from main import app
+import executor_control as ec
+import executor_bitunix_client as ebc
+from main import (
+    app, _CONFIRM_ENABLE_LIVE_ORDERS, _CONFIRM_TINY_TEST_PLACE,
+    _CONFIRM_TINY_TEST_PARTIAL_CLOSE, _CONFIRM_TINY_TEST_MOVE_SL, _CONFIRM_TINY_TEST_FLASH_CLOSE,
+)
 
 
 def _clean_db_files():
@@ -44,7 +52,7 @@ def env(monkeypatch):
     _clean_db_files()
     database.init_db()
     db = SessionLocal()
-    for model in (ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorAccount, ExecutorGlobalConfig):
+    for model in (ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorAccount, ExecutorGlobalConfig, ExecutorMechanismTest):
         db.query(model).delete()
     db.query(UserModel).filter(UserModel.email.in_([
         "exec_admin@kabroda.com", "exec_owner@kabroda.com", "exec_other@kabroda.com",
@@ -305,3 +313,206 @@ def test_owner_page_renders_without_create_account_form(env):
     resp = client.get("/admin/executor")
     assert resp.status_code == 200
     assert "CREATE ACCOUNT" not in resp.text
+
+
+# ------------------------------------------------------------------ live orders global gate (Stage 2, 2026-09-05)
+
+def test_global_config_defaults_to_both_flags_false(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.get("/api/executor/global-config")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"ok": True, "global_kill_switch_engaged": False, "live_orders_enabled": False}
+
+
+def test_non_admin_cannot_enable_live_orders(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post("/api/executor/live-orders/enable", json={"reason": "testing", "confirm": _CONFIRM_ENABLE_LIVE_ORDERS})
+    assert resp.status_code == 403
+
+
+def test_enable_live_orders_wrong_confirm_phrase_returns_400(env):
+    client = _login("exec_admin@kabroda.com", "adminpass123")
+    resp = client.post("/api/executor/live-orders/enable", json={"reason": "testing", "confirm": "nope"})
+    assert resp.status_code == 400
+    assert client.get("/api/executor/global-config").json()["live_orders_enabled"] is False
+
+
+def test_admin_enable_then_disable_live_orders_reflected_in_global_config_and_audit_log(env):
+    client = _login("exec_admin@kabroda.com", "adminpass123")
+    resp = client.post("/api/executor/live-orders/enable", json={"reason": "tiny order test", "confirm": _CONFIRM_ENABLE_LIVE_ORDERS})
+    assert resp.status_code == 200
+    assert client.get("/api/executor/global-config").json()["live_orders_enabled"] is True
+
+    resp = client.post("/api/executor/live-orders/disable")
+    assert resp.status_code == 200
+    assert client.get("/api/executor/global-config").json()["live_orders_enabled"] is False
+
+    audit = client.get("/api/executor/audit-log").json()["audit_log"]
+    event_types = [r["event_type"] for r in audit]
+    assert "LIVE_ORDERS_ENABLED" in event_types
+    assert "LIVE_ORDERS_DISABLED" in event_types
+
+
+# ------------------------------------------------------------------ tiny order mechanism test (Stage 2, 2026-09-05)
+# REAL MONEY -- BitunixClient methods are monkeypatched at the class
+# level for every test here, no real network call is ever made.
+
+def _enable_live_orders_and_credentials(env, client_admin):
+    client_admin.post("/api/executor/live-orders/enable", json={"reason": "testing", "confirm": _CONFIRM_ENABLE_LIVE_ORDERS})
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    ea.set_credentials(db, account, api_key="fake-key", api_secret="fake-secret", set_by="test@kabroda.com")
+    db.commit()
+
+
+def _patch_happy_path_client(monkeypatch):
+    call_state = {"get_position_calls": 0}
+
+    async def fake_get_position(self, symbol):
+        call_state["get_position_calls"] += 1
+        if call_state["get_position_calls"] == 1:
+            return {"code": 0, "data": [], "msg": "Success"}
+        return {"code": 0, "data": [{"positionId": "pos1", "symbol": "BTCUSDT", "side": "LONG", "avgOpenPrice": "100.0", "qty": "0.0002"}], "msg": "Success"}
+
+    async def fake_get_trading_pairs(self, symbol):
+        return {"code": 0, "data": [{"symbol": "BTCUSDT", "minTradeVolume": "0.0001", "basePrecision": 4, "quotePrecision": 1}], "msg": "Success"}
+
+    async def fake_place_order(self, **kwargs):
+        return {"code": 0, "data": {"orderId": "order1", "clientId": "client1"}, "msg": "Success"}
+
+    async def fake_set_position_tpsl(self, **kwargs):
+        return {"code": 0, "data": {"orderId": "tpsl1"}, "msg": "Success"}
+
+    async def fake_modify_tpsl(self, **kwargs):
+        return {"code": 0, "data": {"orderId": "breakeven1"}, "msg": "Success"}
+
+    async def fake_close_position(self, position_id):
+        return {"code": 0, "data": {"positionId": position_id}, "msg": "Success"}
+
+    monkeypatch.setattr(ebc.BitunixClient, "get_position", fake_get_position)
+    monkeypatch.setattr(ebc.BitunixClient, "get_trading_pairs", fake_get_trading_pairs)
+    monkeypatch.setattr(ebc.BitunixClient, "place_order", fake_place_order)
+    monkeypatch.setattr(ebc.BitunixClient, "set_position_tpsl", fake_set_position_tpsl)
+    monkeypatch.setattr(ebc.BitunixClient, "modify_position_tp_sl_order", fake_modify_tpsl)
+    monkeypatch.setattr(ebc.BitunixClient, "close_position", fake_close_position)
+
+
+def test_tiny_test_place_blocked_when_live_orders_disabled_returns_403_even_with_correct_confirm_and_credentials(env, monkeypatch):
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    ea.set_credentials(db, account, api_key="fake-key", api_secret="fake-secret", set_by="test@kabroda.com")
+    db.commit()
+    # live orders NOT enabled
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/tiny-test/place",
+                        json={"confirm": _CONFIRM_TINY_TEST_PLACE})
+    assert resp.status_code == 403
+    assert "live orders" in resp.json()["error"]
+
+
+def test_tiny_test_place_wrong_confirm_phrase_returns_400(env):
+    client_admin = _login("exec_admin@kabroda.com", "adminpass123")
+    _enable_live_orders_and_credentials(env, client_admin)
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/tiny-test/place", json={"confirm": "nope"})
+    assert resp.status_code == 400
+
+
+def test_tiny_test_place_non_owner_non_admin_returns_403(env):
+    client_admin = _login("exec_admin@kabroda.com", "adminpass123")
+    _enable_live_orders_and_credentials(env, client_admin)
+
+    client = _login("exec_other@kabroda.com", "otherpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/tiny-test/place",
+                        json={"confirm": _CONFIRM_TINY_TEST_PLACE})
+    assert resp.status_code == 403
+
+
+def test_tiny_test_place_blocked_by_account_kill_switch_even_when_live_orders_enabled(env):
+    client_admin = _login("exec_admin@kabroda.com", "adminpass123")
+    _enable_live_orders_and_credentials(env, client_admin)
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    ea.engage_kill_switch(db, account, reason="testing", by="andy@kabroda.com")
+    db.commit()
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/tiny-test/place",
+                        json={"confirm": _CONFIRM_TINY_TEST_PLACE})
+    assert resp.status_code == 403
+    assert "kill switch" in resp.json()["error"]
+
+
+def test_tiny_test_full_ladder_happy_path_via_routes(env, monkeypatch):
+    client_admin = _login("exec_admin@kabroda.com", "adminpass123")
+    _enable_live_orders_and_credentials(env, client_admin)
+    _patch_happy_path_client(monkeypatch)
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    account_id = env["account_id"]
+
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/place", json={"confirm": _CONFIRM_TINY_TEST_PLACE})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["test"]["status"] == "TPSL_SET"
+    test_id = body["test"]["id"]
+
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/partial-close",
+                        json={"confirm": _CONFIRM_TINY_TEST_PARTIAL_CLOSE})
+    assert resp.status_code == 200
+    assert resp.json()["test"]["status"] == "PARTIAL_CLOSED"
+
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/move-sl-breakeven",
+                        json={"confirm": _CONFIRM_TINY_TEST_MOVE_SL})
+    assert resp.status_code == 200
+    assert resp.json()["test"]["status"] == "SL_MOVED_BREAKEVEN"
+
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/flash-close",
+                        json={"confirm": _CONFIRM_TINY_TEST_FLASH_CLOSE})
+    assert resp.status_code == 200
+    assert resp.json()["test"]["status"] == "FULLY_CLOSED"
+
+    audit_events = [r["event_type"] for r in client.get("/api/executor/audit-log").json()["audit_log"]]
+    for expected in ("TEST_MECHANISM_STARTED", "TEST_ORDER_PLACED", "TEST_ORDER_FILL_CONFIRMED",
+                     "TEST_INITIAL_TPSL_SET", "TEST_PARTIAL_CLOSED", "TEST_SL_MOVED_TO_BREAKEVEN",
+                     "TEST_POSITION_FLASH_CLOSED"):
+        assert expected in audit_events
+
+
+def test_tiny_test_action_called_out_of_order_returns_409(env, monkeypatch):
+    client_admin = _login("exec_admin@kabroda.com", "adminpass123")
+    _enable_live_orders_and_credentials(env, client_admin)
+    _patch_happy_path_client(monkeypatch)
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    account_id = env["account_id"]
+
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/place", json={"confirm": _CONFIRM_TINY_TEST_PLACE})
+    test_id = resp.json()["test"]["id"]
+
+    # Skip straight to flash-close before any partial-close -- must reject.
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/flash-close",
+                        json={"confirm": _CONFIRM_TINY_TEST_FLASH_CLOSE})
+    assert resp.status_code == 409
+
+
+def test_tiny_test_list_endpoint_scoped_to_owner(env, monkeypatch):
+    client_admin = _login("exec_admin@kabroda.com", "adminpass123")
+    _enable_live_orders_and_credentials(env, client_admin)
+    _patch_happy_path_client(monkeypatch)
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    account_id = env["account_id"]
+    client.post(f"/api/executor/accounts/{account_id}/tiny-test/place", json={"confirm": _CONFIRM_TINY_TEST_PLACE})
+
+    resp = client.get(f"/api/executor/accounts/{account_id}/tiny-test")
+    assert resp.status_code == 200
+    assert len(resp.json()["tests"]) == 1
+
+    other_client = _login("exec_other@kabroda.com", "otherpass123")
+    resp = other_client.get(f"/api/executor/accounts/{account_id}/tiny-test")
+    assert resp.status_code == 403

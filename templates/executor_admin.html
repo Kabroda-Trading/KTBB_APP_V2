@@ -44,6 +44,10 @@
 
         .empty { color: #64748b; font-size: 12px; padding: 10px; font-family: 'JetBrains Mono'; }
         #globalStatus { margin-bottom: 20px; }
+
+        .danger-zone { border: 1px solid #7f1d1d; background: rgba(127,29,29,0.06); border-radius: 6px; padding: 12px; margin-top: 10px; }
+        .danger-zone-title { font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 800; color: #fca5a5; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+        .danger-zone input[type=text] { width: 260px; }
     </style>
 </head>
 <body>
@@ -52,12 +56,12 @@
 
     <div class="exec-header">
         <span class="exec-title">Executor Bot -- Bitunix Futures</span>
-        <span class="stage-badge">STAGE 1 -- DRY RUN ONLY, NO REAL ORDERS</span>
+        <span class="stage-badge">STAGE 1 DRY-RUN LIVE -- STAGE 2 REAL-MONEY TEST GATED OFF BY DEFAULT</span>
     </div>
 
     <div class="card" id="globalStatus">
         <div class="card-header">
-            <span class="card-title">Global Kill Switch</span>
+            <span class="card-title">Global Kill Switch <span id="killSwitchStatusBadge"></span></span>
             {% if is_admin %}
             <div>
                 <button class="btn btn-danger" onclick="engageGlobalKillSwitch()">ENGAGE GLOBAL STOP</button>
@@ -66,7 +70,26 @@
             {% endif %}
         </div>
         <div class="card-body">
-            <p class="empty">Both the global switch and each account's own kill switch must be clear for that account to trade. Stage 1 never places a real order regardless -- this controls whether a dry-run "would-place" record gets written at all.</p>
+            <p class="empty">Both the global switch and each account's own kill switch must be clear for that account to trade. Stage 1 never places a real order regardless -- this controls whether a dry-run "would-place" record gets written at all. It also blocks Stage 2's real-money tiny order test below, same as a real trade.</p>
+        </div>
+    </div>
+
+    <div class="card" id="liveOrdersStatus">
+        <div class="card-header">
+            <span class="card-title">Live Orders -- Global Switch <span id="liveOrdersStatusBadge"></span></span>
+        </div>
+        <div class="card-body">
+            <p class="empty">Both this GLOBAL switch and each account's own kill switch must be clear for ANY real-money action below to succeed. This does NOT affect Stage 1's dry-run pipeline, which never calls the exchange regardless.</p>
+            {% if is_admin %}
+            <div class="risk-form">
+                <label>Reason<input type="text" id="liveOrdersReason" placeholder="e.g. tiny order mechanism test"></label>
+                <label>Type exactly: CONFIRM ENABLE LIVE ORDERS<input type="text" id="liveOrdersConfirm" placeholder="CONFIRM ENABLE LIVE ORDERS"></label>
+                <button class="btn btn-danger" onclick="enableLiveOrders()" style="align-self:flex-end;">ENABLE LIVE ORDERS</button>
+                <button class="btn btn-ok" onclick="disableLiveOrders()" style="align-self:flex-end;">DISABLE LIVE ORDERS</button>
+            </div>
+            {% else %}
+            <p class="empty">Admin only to enable/disable.</p>
+            {% endif %}
         </div>
     </div>
 
@@ -123,6 +146,37 @@ function escapeHtml(s) {
     return (s === null || s === undefined) ? "" : String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 
+// ------------------------------------------------------------------ live orders global gate (Stage 2, 2026-09-05)
+
+let globalConfig = { global_kill_switch_engaged: false, live_orders_enabled: false };
+
+async function loadGlobalConfig() {
+    const data = await api("/api/executor/global-config");
+    if (data.ok) globalConfig = data;
+    const killBadge = document.getElementById("killSwitchStatusBadge");
+    if (killBadge) killBadge.innerHTML = globalConfig.global_kill_switch_engaged
+        ? '<span class="badge badge-danger">ENGAGED</span>' : '<span class="badge badge-ok">CLEAR</span>';
+    const liveBadge = document.getElementById("liveOrdersStatusBadge");
+    if (liveBadge) liveBadge.innerHTML = globalConfig.live_orders_enabled
+        ? '<span class="badge badge-danger">ENABLED -- REAL ORDERS CAN BE PLACED</span>' : '<span class="badge badge-neutral">DISABLED</span>';
+}
+
+async function enableLiveOrders() {
+    const reason = document.getElementById("liveOrdersReason").value.trim();
+    const confirm_ = document.getElementById("liveOrdersConfirm").value;
+    if (!reason) { alert("Enter a reason."); return; }
+    const resp = await api("/api/executor/live-orders/enable", { method: "POST", body: JSON.stringify({ reason, confirm: confirm_ }) });
+    if (!resp.ok) { alert(resp.error || "failed to enable live orders"); return; }
+    document.getElementById("liveOrdersConfirm").value = "";
+    await loadGlobalConfig();
+    loadAccounts();
+}
+async function disableLiveOrders() {
+    await api("/api/executor/live-orders/disable", { method: "POST" });
+    await loadGlobalConfig();
+    loadAccounts();
+}
+
 async function loadAccounts() {
     const data = await api("/api/executor/accounts");
     const body = document.getElementById("accountsBody");
@@ -156,6 +210,10 @@ async function loadAccounts() {
                 ${a.has_credentials ? '' : '<span class="empty" style="margin-left:8px;">set credentials below first</span>'}
                 <div id="testResult-${a.id}" class="empty" style="margin-top:8px; display:none; white-space:pre-wrap;"></div>
             </div>
+            <div class="danger-zone" id="tinyTest-${a.id}">
+                <div class="danger-zone-title">Real Money -- Live Mechanism Test (BTCUSDT LONG only)</div>
+                <p class="empty">Loading...</p>
+            </div>
             <div class="risk-form" id="riskForm-${a.id}">
                 <label>Risk last ($)<input type="number" step="0.01" id="riskLast-${a.id}"></label>
                 <label>Floor ($)<input type="number" step="0.01" id="riskFloor-${a.id}"></label>
@@ -183,7 +241,121 @@ async function loadAccounts() {
             document.getElementById(`riskCap-${a.id}`).value = rs.risk_state.risk_cap_usd ?? "";
             document.getElementById(`riskFactor-${a.id}`).value = rs.risk_state.compounding_factor ?? "";
         }
+        loadTinyTestForAccount(a.id, a.has_credentials);
     }
+}
+
+// ------------------------------------------------------------------ tiny order mechanism test (Stage 2, 2026-09-05)
+// REAL MONEY. Confirm phrases are read from real <input> fields, never
+// a JS prompt() -- a second, visible layer of friction on top of the
+// server's own gating.
+
+const _TINY_TEST_ACTIVE_STATUSES = ["STARTED", "ORDER_PLACED", "FILL_CONFIRMED", "TPSL_SET", "PARTIAL_CLOSED", "SL_MOVED_BREAKEVEN"];
+
+async function loadTinyTestForAccount(accountId, hasCredentials) {
+    const box = document.getElementById(`tinyTest-${accountId}`);
+    if (!box) return;
+    const data = await api(`/api/executor/accounts/${accountId}/tiny-test`);
+    const tests = data.ok ? data.tests : [];
+    const active = tests.find(t => _TINY_TEST_ACTIVE_STATUSES.includes(t.status));
+    box.innerHTML = renderTinyTestSection(accountId, hasCredentials, active, tests);
+}
+
+function renderTinyTestSection(accountId, hasCredentials, active, allTests) {
+    const enabled = globalConfig.live_orders_enabled;
+    let html = '<div class="danger-zone-title">Real Money -- Live Mechanism Test (BTCUSDT LONG only)</div>';
+
+    if (!enabled) {
+        html += '<p class="empty">Live orders are DISABLED globally -- enable them in the card above first.</p>';
+    } else if (!hasCredentials) {
+        html += '<p class="empty">Set credentials below first.</p>';
+    } else if (!active) {
+        html += `
+            <div class="risk-form">
+                <label>TP %<input type="number" step="0.001" id="tinyTpPct-${accountId}" value="0.01" style="width:70px;"></label>
+                <label>SL %<input type="number" step="0.001" id="tinySlPct-${accountId}" value="0.01" style="width:70px;"></label>
+                <label>Type exactly: CONFIRM PLACE TINY LIVE ORDER<input type="text" id="tinyPlaceConfirm-${accountId}"></label>
+                <button class="btn btn-danger" onclick="placeTinyTest(${accountId})" style="align-self:flex-end;">PLACE TINY LIVE ORDER</button>
+            </div>`;
+    } else {
+        html += `
+            <div style="font-family:'JetBrains Mono'; font-size:11px; margin-bottom:8px;">
+                <span class="badge badge-warn">${escapeHtml(active.status)}</span>
+                qty=${active.qty ?? "-"} &middot; position=${escapeHtml(active.position_id) || "-"} &middot;
+                fill=${active.fill_price ?? "-"} &middot; TP=${active.initial_tp_price ?? "-"} &middot; SL=${active.initial_sl_price ?? "-"}
+                ${active.breakeven_sl_price ? ` &middot; breakeven SL=${active.breakeven_sl_price}` : ""}
+            </div>`;
+
+        if (active.status === "TPSL_SET") {
+            html += `
+                <div class="risk-form">
+                    <label>Partial close %<input type="number" step="1" id="tinyPartialPct-${accountId}" value="50" style="width:70px;"></label>
+                    <label>Type exactly: CONFIRM PARTIAL CLOSE<input type="text" id="tinyPartialConfirm-${accountId}"></label>
+                    <button class="btn btn-danger" onclick="partialCloseTinyTest(${accountId}, ${active.id})" style="align-self:flex-end;">PARTIAL CLOSE</button>
+                </div>`;
+        } else {
+            html += '<p class="empty">Partial close requires status TPSL_SET.</p>';
+        }
+
+        if (active.status === "PARTIAL_CLOSED") {
+            html += `
+                <div class="risk-form">
+                    <label>Type exactly: CONFIRM MOVE SL TO BREAKEVEN<input type="text" id="tinySlConfirm-${accountId}"></label>
+                    <button class="btn btn-danger" onclick="moveSlBreakevenTinyTest(${accountId}, ${active.id})" style="align-self:flex-end;">MOVE SL TO BREAKEVEN</button>
+                </div>`;
+        } else if (active.status !== "SL_MOVED_BREAKEVEN") {
+            html += '<p class="empty">Move-SL-to-breakeven requires status PARTIAL_CLOSED.</p>';
+        }
+
+        if (active.status === "PARTIAL_CLOSED" || active.status === "SL_MOVED_BREAKEVEN") {
+            html += `
+                <div class="risk-form">
+                    <label>Type exactly: CONFIRM FLASH CLOSE REMAINDER<input type="text" id="tinyFlashConfirm-${accountId}"></label>
+                    <button class="btn btn-danger" onclick="flashCloseTinyTest(${accountId}, ${active.id})" style="align-self:flex-end;">FLASH CLOSE REMAINDER</button>
+                </div>`;
+        } else {
+            html += '<p class="empty">Flash close requires status PARTIAL_CLOSED or SL_MOVED_BREAKEVEN.</p>';
+        }
+    }
+
+    if (allTests && allTests.length) {
+        html += `<table style="margin-top:10px;"><thead><tr><th>ID</th><th>Status</th><th>Qty</th><th>Fill</th><th>When</th></tr></thead><tbody>` +
+            allTests.map(t => `<tr>
+                <td>#${t.id}</td>
+                <td><span class="badge ${t.status === 'FULLY_CLOSED' ? 'badge-ok' : (t.status === 'FAILED' ? 'badge-danger' : 'badge-warn')}">${escapeHtml(t.status)}</span></td>
+                <td>${t.qty ?? "-"}</td><td>${t.fill_price ?? "-"}</td>
+                <td>${t.created_at ? new Date(t.created_at).toLocaleString() : "-"}</td>
+            </tr>`).join("") + `</tbody></table>`;
+    }
+    return html;
+}
+
+async function placeTinyTest(accountId) {
+    const tp_pct = parseFloat(document.getElementById(`tinyTpPct-${accountId}`).value) || 0.01;
+    const sl_pct = parseFloat(document.getElementById(`tinySlPct-${accountId}`).value) || 0.01;
+    const confirm_ = document.getElementById(`tinyPlaceConfirm-${accountId}`).value;
+    const resp = await api(`/api/executor/accounts/${accountId}/tiny-test/place`, { method: "POST", body: JSON.stringify({ confirm: confirm_, tp_pct, sl_pct }) });
+    if (!resp.ok) { alert(resp.error || "failed to place tiny test order"); }
+    loadTinyTestForAccount(accountId, true);
+}
+async function partialCloseTinyTest(accountId, testId) {
+    const pct = (parseFloat(document.getElementById(`tinyPartialPct-${accountId}`).value) || 50) / 100;
+    const confirm_ = document.getElementById(`tinyPartialConfirm-${accountId}`).value;
+    const resp = await api(`/api/executor/accounts/${accountId}/tiny-test/${testId}/partial-close`, { method: "POST", body: JSON.stringify({ confirm: confirm_, pct }) });
+    if (!resp.ok) { alert(resp.error || "failed to partial-close"); }
+    loadTinyTestForAccount(accountId, true);
+}
+async function moveSlBreakevenTinyTest(accountId, testId) {
+    const confirm_ = document.getElementById(`tinySlConfirm-${accountId}`).value;
+    const resp = await api(`/api/executor/accounts/${accountId}/tiny-test/${testId}/move-sl-breakeven`, { method: "POST", body: JSON.stringify({ confirm: confirm_ }) });
+    if (!resp.ok) { alert(resp.error || "failed to move SL to breakeven"); }
+    loadTinyTestForAccount(accountId, true);
+}
+async function flashCloseTinyTest(accountId, testId) {
+    const confirm_ = document.getElementById(`tinyFlashConfirm-${accountId}`).value;
+    const resp = await api(`/api/executor/accounts/${accountId}/tiny-test/${testId}/flash-close`, { method: "POST", body: JSON.stringify({ confirm: confirm_ }) });
+    if (!resp.ok) { alert(resp.error || "failed to flash close"); }
+    loadTinyTestForAccount(accountId, true);
 }
 
 async function engageKillSwitch(id) {
@@ -211,10 +383,12 @@ async function createAccount() {
 async function engageGlobalKillSwitch() {
     const reason = prompt("Reason for engaging the GLOBAL kill switch:", "manual") || "manual";
     await api("/api/executor/global-kill-switch", { method: "POST", body: JSON.stringify({ reason }) });
+    await loadGlobalConfig();
     loadAccounts();
 }
 async function releaseGlobalKillSwitch() {
     await api("/api/executor/global-kill-switch/release", { method: "POST" });
+    await loadGlobalConfig();
     loadAccounts();
 }
 async function saveRiskState(id) {
@@ -282,7 +456,7 @@ async function loadAuditLog() {
         </tr>`).join("") + `</tbody></table>`;
 }
 
-loadAccounts();
+loadGlobalConfig().then(loadAccounts);
 loadOrders();
 loadAuditLog();
 </script>

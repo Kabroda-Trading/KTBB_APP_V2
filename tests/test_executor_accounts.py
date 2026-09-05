@@ -192,3 +192,39 @@ def test_global_kill_switch_defaults_to_not_engaged_with_no_config_row(db):
     # NOT engaged, not fail closed here (Stage 1 is already safe by
     # construction -- no exchange calls regardless of this flag).
     assert ec.is_global_kill_switch_engaged(db) is False
+
+
+# ------------------------------------------------------------------ live orders gate (Stage 2, 2026-09-05)
+# Opposite polarity from the kill switch above: this flag PERMITS
+# real-money order placement only when True, default False.
+
+def test_live_orders_defaults_to_disabled_with_no_config_row(db):
+    assert ec.is_live_orders_enabled(db) is False
+
+
+def test_enable_live_orders_sets_flag_and_metadata(db):
+    ec.enable_live_orders(db, reason="tiny order mechanism test", by="andy@kabroda.com")
+    db.commit()
+    assert ec.is_live_orders_enabled(db) is True
+
+
+def test_disable_live_orders_clears_flag_and_metadata(db):
+    ec.enable_live_orders(db, reason="tiny order mechanism test", by="andy@kabroda.com")
+    db.commit()
+    assert ec.is_live_orders_enabled(db) is True
+
+    ec.disable_live_orders(db, by="andy@kabroda.com")
+    db.commit()
+    assert ec.is_live_orders_enabled(db) is False
+
+
+def test_live_orders_and_kill_switch_are_independent_flags(db):
+    # Enabling live orders does not clear an engaged global kill switch,
+    # and vice versa -- these are two independent gates, both must be
+    # satisfied for a real-money action (kill switch clear AND live
+    # orders enabled), neither implies the other.
+    ec.engage_global_kill_switch(db, reason="emergency stop", by="andy@kabroda.com")
+    ec.enable_live_orders(db, reason="testing", by="andy@kabroda.com")
+    db.commit()
+    assert ec.is_global_kill_switch_engaged(db) is True
+    assert ec.is_live_orders_enabled(db) is True

@@ -268,3 +268,23 @@ def test_kill_switch_account_produces_no_order_but_no_email_or_loop_failure(env)
     orders = env["get_orders"](trade_plan_id=plan.id)
     assert len(orders) == 1
     assert orders[0].decision == "SKIPPED_KILL_SWITCH"
+
+
+def test_maintenance_margin_rate_used_persists_via_the_generic_column_filter(env):
+    # Spot-check for the Stage 2 MMR fix (2026-09-05): proves
+    # executor_engine.py's _ORDER_COLUMNS generic filter picked up the
+    # new ExecutorOrder.maintenance_margin_rate_used column with ZERO
+    # code changes in executor_engine.py itself -- it only needed
+    # executor_plan_builder.py to add the key to its result dict.
+    env["make_account"]()
+    env["make_plan"]()
+    candles = _fueled_5m_candles(100.0, is_long=True)
+    env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    plan = env["get_plan"]()
+    orders = env["get_orders"](trade_plan_id=plan.id)
+    assert len(orders) == 1
+    # No credentials set on this account -- the benign "never connected
+    # yet" fallback applies, which is 0.0 (not the elevated conservative
+    # constant reserved for a real query failure).
+    assert orders[0].maintenance_margin_rate_used == pytest.approx(0.0)

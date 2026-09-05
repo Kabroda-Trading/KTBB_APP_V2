@@ -148,3 +148,84 @@ def test_check_leverage_is_safe_short():
     ok, detail, liq = es.check_leverage_is_safe(100.0, 105.0, "SHORT", 10)
     assert ok is True
     assert liq == pytest.approx(110.0)
+
+
+# ------------------------------------------------------------------ maintenance margin rate (Stage 2, 2026-09-05)
+# Folds a REAL, live-queried maintenance margin rate into the
+# liquidation estimate (get_position_tiers) instead of the old naive
+# "100%-of-margin-lost" bound. Default 0.0 must reproduce every existing
+# number above exactly -- these tests confirm the new param is additive,
+# not a behavior change for existing callers.
+
+def test_estimate_liquidation_default_mmr_matches_naive_formula_exactly():
+    assert es.estimate_liquidation_price(100.0, 10, "LONG") == pytest.approx(90.0)
+    assert es.estimate_liquidation_price(100.0, 10, "SHORT") == pytest.approx(110.0)
+
+
+def test_estimate_liquidation_with_real_mmr_moves_liquidation_closer_to_entry():
+    # Bitunix docs' own BTCUSDT tier-1 example: leverage=125, mmr=0.004.
+    # liq = 100*(1 - 1/125 + 0.004) = 100*0.996 = 99.6 -- closer to entry
+    # than the naive 100*(1-1/125)=99.2 bound would suggest.
+    liq = es.estimate_liquidation_price(100.0, 125, "LONG", maintenance_margin_rate=0.004)
+    assert liq == pytest.approx(99.6)
+    naive = es.estimate_liquidation_price(100.0, 125, "LONG")
+    assert liq > naive  # mmr moves LONG liquidation UP, closer to entry
+
+
+def test_estimate_liquidation_clamps_when_mmr_exceeds_inverse_leverage():
+    # leverage=2 (1/leverage=0.5), mmr=0.6 > 0.5 -- adverse_move_pct
+    # clamps to 0.0, liq pins to entry_price exactly (fails safe).
+    liq_long = es.estimate_liquidation_price(100.0, 2, "LONG", maintenance_margin_rate=0.6)
+    assert liq_long == pytest.approx(100.0)
+    liq_short = es.estimate_liquidation_price(100.0, 2, "SHORT", maintenance_margin_rate=0.6)
+    assert liq_short == pytest.approx(100.0)
+
+
+def test_check_leverage_is_safe_with_real_mmr_can_flip_a_previously_safe_trade_to_unsafe():
+    # entry 100, stop 97.6 (distance 2.4) at 40x: naive liq (mmr=0.0) =
+    # 100*(1-1/40) = 97.5, distance 2.5 > 2.4 -- SAFE under the old naive
+    # formula. With a real mmr of 0.004: liq = 100*(1-1/40+0.004) = 97.9,
+    # distance 2.1 < 2.4 -- UNSAFE. The real mmr is what should govern.
+    ok_naive, _, liq_naive = es.check_leverage_is_safe(100.0, 97.6, "LONG", 40)
+    assert ok_naive is True
+    assert liq_naive == pytest.approx(97.5)
+
+    ok_real, detail_real, liq_real = es.check_leverage_is_safe(100.0, 97.6, "LONG", 40, maintenance_margin_rate=0.004)
+    assert ok_real is False
+    assert liq_real == pytest.approx(97.9)
+    assert "refuse this trade" in detail_real
+
+
+# ------------------------------------------------------------------ precision formatting (Stage 2, 2026-09-05)
+# Bitunix's real order params (qty/price) are string-typed on the wire,
+# bounded by basePrecision/quotePrecision -- these are pure, hand-
+# computed-reference tests, no DB/network, matching this module's style.
+
+def test_round_qty_to_precision_floors_not_rounds():
+    assert es.round_qty_to_precision(0.09876, 3) == "0.098"   # would be "0.099" if rounded
+
+
+def test_round_qty_to_precision_no_scientific_notation_and_no_trailing_float_artifacts():
+    assert es.round_qty_to_precision(0.0001, 4) == "0.0001"
+    assert es.round_qty_to_precision(0.1, 2) == "0.10"
+
+
+def test_round_qty_to_precision_zero_precision_returns_integer_string():
+    assert es.round_qty_to_precision(5.9, 0) == "5"
+
+
+def test_round_qty_to_precision_rejects_negative_precision():
+    with pytest.raises(ValueError, match="precision"):
+        es.round_qty_to_precision(1.0, -1)
+
+
+def test_round_price_to_precision_rounds_half_up():
+    # Contrast with round_qty_to_precision's floor behavior -- a price
+    # has no "never exceed a floor" constraint.
+    assert es.round_price_to_precision(101.5, 0) == "102"
+    assert es.round_price_to_precision(101.4, 0) == "101"
+
+
+def test_round_price_to_precision_rejects_negative_precision():
+    with pytest.raises(ValueError, match="precision"):
+        es.round_price_to_precision(1.0, -1)

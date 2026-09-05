@@ -443,6 +443,31 @@ def init_db():
         except Exception:
             pass
 
+    # --- EXECUTOR STAGE 2 MIGRATIONS (2026-09-05 -- live tiny-order
+    # mechanism test; see ExecutorGlobalConfig/ExecutorOrder/
+    # ExecutorAuditLog's own comments for what each column is) ---
+    for _col in [
+        "live_orders_enabled BOOLEAN DEFAULT 0", "live_orders_enabled_at TIMESTAMP",
+        "live_orders_enabled_by VARCHAR", "live_orders_enabled_reason VARCHAR",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE executor_global_config ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE executor_orders ADD COLUMN maintenance_margin_rate_used FLOAT"))
+    except Exception:
+        pass
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE executor_audit_log ADD COLUMN executor_mechanism_test_id INTEGER"))
+    except Exception:
+        pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -1715,6 +1740,11 @@ class ExecutorOrder(Base):
     liquidation_price_estimate = Column(Float, nullable=True)
     liquidation_check_passed = Column(Boolean, nullable=True)
     liquidation_check_detail = Column(String, nullable=True)
+    # 2026-09-05 -- the real maintenance margin rate queried live from
+    # Bitunix's get_position_tiers at decision time (never a hardcoded
+    # table), folded into liquidation_price_estimate above. See
+    # executor_sizing.py/executor_plan_builder.py's own headers.
+    maintenance_margin_rate_used = Column(Float, nullable=True)
 
     # WOULD_PLACE | REJECTED | SKIPPED_KILL_SWITCH | SKIPPED_ACCOUNT_INACTIVE
     # | SKIPPED_ALREADY_IN_TRADE | ERROR
@@ -1745,14 +1775,24 @@ class ExecutorAuditLog(Base):
     account_id = Column(Integer, nullable=True, index=True)      # executor_accounts.id
     trade_plan_id = Column(Integer, nullable=True)                # trade_plans.id
     executor_order_id = Column(Integer, nullable=True)            # executor_orders.id
+    executor_mechanism_test_id = Column(Integer, nullable=True)   # executor_mechanism_tests.id
 
     # ORDER_WOULD_PLACE | ORDER_PLACED | ORDER_REJECTED | LIQUIDATION_CHECK_FAILED
     # | T1_PARTIAL_DETECTED | SL_MOVED_TO_BREAKEVEN | KILL_SWITCH_ENGAGED
     # | KILL_SWITCH_RELEASED | RISK_STATE_UPDATED | CREDENTIAL_SET
     # | CREDENTIAL_ROTATED | ACCOUNT_CREATED | ACCOUNT_DEACTIVATED
-    # | MODE_CHANGED | ERROR
+    # | MODE_CHANGED | ERROR | LIVE_ORDERS_ENABLED | LIVE_ORDERS_DISABLED
+    # | TEST_MECHANISM_STARTED | TEST_MECHANISM_BLOCKED | TEST_ORDER_PLACED
+    # | TEST_ORDER_FILL_CONFIRMED | TEST_INITIAL_TPSL_SET | TEST_PARTIAL_CLOSED
+    # | TEST_SL_MOVED_TO_BREAKEVEN | TEST_POSITION_FLASH_CLOSED
+    # | TEST_MECHANISM_FAILED | POSITION_CLOSED (reserved, future real Stage 3 close)
     # Stage 1 code only ever writes a subset of these -- the rest exist
     # now for forward schema compatibility with Stage 2/3, not dead weight.
+    # The TEST_* values (2026-09-05) are deliberately distinct from the
+    # real-production placeholders ORDER_PLACED/T1_PARTIAL_DETECTED/
+    # SL_MOVED_TO_BREAKEVEN -- those stay reserved, untouched, for a real
+    # future feature; every event the tiny mechanism test writes is
+    # TEST_-prefixed so it can never be confused with one in this log.
     event_type = Column(String, nullable=False, index=True)
     actor = Column(String, nullable=True)   # "system" for bot-driven rows, an email for human-driven ones
     detail_json = Column(Text, nullable=True)
@@ -1774,7 +1814,85 @@ class ExecutorGlobalConfig(Base):
     global_kill_switch_engaged_by = Column(String, nullable=True)
     global_kill_switch_reason = Column(String, nullable=True)
 
+    # 2026-09-05 -- persistent, default-OFF gate on real order placement
+    # (Stage 2's tiny mechanism test and any future live trading). Same
+    # shape/polarity as the kill switch above but the OPPOSITE meaning:
+    # kill switch blocks trading when ON, this flag PERMITS real-money
+    # order placement only when ON. Both this flag AND the kill switch
+    # must independently allow an action for it to proceed -- see
+    # executor_control.py/executor_mechanism_test.py.
+    live_orders_enabled = Column(Boolean, nullable=False, default=False)
+    live_orders_enabled_at = Column(DateTime, nullable=True)
+    live_orders_enabled_by = Column(String, nullable=True)
+    live_orders_enabled_reason = Column(String, nullable=True)
+
     stage_default_mode = Column(String, nullable=False, default="DRY_RUN")
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class ExecutorMechanismTest(Base):
+    """Isolated lifecycle record for a manually-triggered, REAL-MONEY
+    mechanism test of the order-placing/closing chain (Stage 2,
+    2026-09-05) -- NOT a real trading decision. Deliberately has NO
+    trade_plan_id and no relationship to ExecutorOrder/TradePlan at all
+    (no shared unique constraint, no shared FK) -- structurally
+    impossible for any existing dashboard/report that reads TradePlan/
+    ExecutorOrder to ever pick this up as if it were a real trade.
+    Always BTCUSDT/LONG -- this proves the mechanism, not a trading
+    thesis. See executor_mechanism_test.py for the orchestration logic
+    that writes these rows."""
+    __tablename__ = "executor_mechanism_tests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, nullable=False, index=True)   # executor_accounts.id
+
+    symbol = Column(String, nullable=False, default="BTCUSDT")
+    direction = Column(String, nullable=False, default="LONG")
+
+    # STARTED | ORDER_PLACED | FILL_CONFIRMED | TPSL_SET | PARTIAL_CLOSED
+    # | SL_MOVED_BREAKEVEN | FULLY_CLOSED | FAILED
+    status = Column(String, nullable=False, index=True)
+
+    min_trade_volume = Column(Float, nullable=True)     # snapshot from get_trading_pairs
+    base_precision = Column(Integer, nullable=True)
+    # Captured once at test start, not re-queried per step -- a symbol's
+    # tick size doesn't legitimately drift mid-test the way leverage/
+    # margin-mode/MMR can (those ARE re-queried live every time
+    # elsewhere in this codebase; this is a deliberately different case).
+    quote_precision = Column(Integer, nullable=True)
+    qty = Column(Float, nullable=True)                    # opening qty actually sent
+
+    exchange_order_id = Column(String, nullable=True)
+    exchange_client_id = Column(String, nullable=True)
+    place_order_response_json = Column(Text, nullable=True)
+
+    position_id = Column(String, nullable=True)
+    fill_price = Column(Float, nullable=True)             # real avgOpenPrice read back
+
+    initial_tp_price = Column(Float, nullable=True)
+    initial_sl_price = Column(Float, nullable=True)
+    tpsl_exchange_order_id = Column(String, nullable=True)
+    tpsl_response_json = Column(Text, nullable=True)
+
+    partial_close_pct = Column(Float, nullable=True)
+    partial_close_qty = Column(Float, nullable=True)
+    partial_close_exchange_order_id = Column(String, nullable=True)
+    partial_close_response_json = Column(Text, nullable=True)
+
+    # Deliberately the exact fill price, fee-naive -- correct for
+    # proving the mechanism, not true PnL-neutral breakeven. See
+    # executor_mechanism_test.py's own docstring before reusing this
+    # simplification in a real future feature.
+    breakeven_sl_price = Column(Float, nullable=True)
+    sl_breakeven_exchange_order_id = Column(String, nullable=True)
+    sl_breakeven_response_json = Column(Text, nullable=True)
+
+    flash_close_response_json = Column(Text, nullable=True)
+
+    error_detail = Column(Text, nullable=True)            # last exception message if FAILED
+    started_by = Column(String, nullable=True)             # actor email
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

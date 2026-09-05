@@ -1,10 +1,16 @@
 """
 Unit coverage for executor_bitunix_client.py's signing algorithm and
-request-construction helpers. Pure function tests -- no network calls
-(get_balance/get_position/place_order/set_tpsl all require a real HTTP
-round-trip and are exercised manually against a real account instead,
-not here, per the "verify before automating a real network call" caution
-this module's own header explains).
+request-construction helpers. Pure function tests -- no network calls.
+Every real method (get_balance/get_position/get_leverage_and_margin_mode/
+get_trading_pairs/place_order/close_position/set_position_tpsl/
+modify_position_tp_sl_order/get_position_tiers) is tested here only for
+REQUEST CONSTRUCTION -- BitunixClient._request() itself is monkeypatched
+at the class level so no HTTP round-trip ever happens; the actual live
+signing chain is exercised manually against a real account instead
+(the manually-triggered tiny mechanism test, executor_mechanism_test.py,
+gated behind live_orders_enabled + a confirm phrase), per the "verify
+before automating a real network call" caution this module's own header
+explains.
 
 The expected digest/sign values below were computed INDEPENDENTLY (a
 one-off script, not by importing this module) against Bitunix's own
@@ -18,6 +24,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import pytest
 
 import executor_bitunix_client as ebc
 
@@ -90,28 +98,12 @@ def test_nonce_is_32_chars_and_random():
     assert n1 != n2
 
 
-def test_place_order_and_set_tpsl_still_deliberately_unimplemented():
-    # These must keep failing loudly, not silently succeed, until Andy's
-    # own confirmed sequencing (verify read-only calls first) is done.
-    import asyncio
-    client = ebc.BitunixClient("key", "secret")
-
-    async def _try_place_order():
-        try:
-            await client.place_order("BTCUSDT", "BUY", 1.0, 100.0, 95.0, 110.0, 10)
-            return False
-        except NotImplementedError:
-            return True
-
-    async def _try_set_tpsl():
-        try:
-            await client.set_tpsl("pos1", stop_price=95.0)
-            return False
-        except NotImplementedError:
-            return True
-
-    assert asyncio.run(_try_place_order()) is True
-    assert asyncio.run(_try_set_tpsl()) is True
+def test_change_leverage_method_does_not_exist():
+    # Explicit regression guard: the bot only ever READS leverage/margin-
+    # mode config, never mutates it -- Andy's explicit call, default OFF,
+    # permanently out of scope. Nobody should add this without
+    # re-litigating that decision.
+    assert not hasattr(ebc.BitunixClient, "change_leverage")
 
 
 # ------------------------------------------------------------------ read-only endpoint request construction
@@ -162,3 +154,116 @@ def test_get_trading_pairs_calls_the_right_endpoint(monkeypatch):
     asyncio.run(client.get_trading_pairs("BTCUSDT"))
     assert calls == [{"method": "GET", "path": "/api/v1/futures/market/trading_pairs",
                        "query": {"symbols": "BTCUSDT"}, "body": None}]
+
+
+# ------------------------------------------------------------------ order-placing/closing endpoint request
+# construction (Stage 2, 2026-09-05) -- same _capture_request pattern,
+# no real network call. qty/price/tpPrice/slPrice are always passed as
+# pre-formatted strings, matching what a real caller (executor_sizing.
+# round_qty_to_precision()/round_price_to_precision()) would produce.
+
+def test_place_order_open_builds_correct_body(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.place_order(symbol="BTCUSDT", qty="0.0001", side="BUY",
+                                    trade_side="OPEN", order_type="MARKET"))
+    assert calls == [{
+        "method": "POST", "path": "/api/v1/futures/trade/place_order", "query": None,
+        "body": {"symbol": "BTCUSDT", "qty": "0.0001", "side": "BUY",
+                 "tradeSide": "OPEN", "orderType": "MARKET"},
+    }]
+
+
+def test_place_order_close_with_position_id_and_reduce_only(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.place_order(symbol="BTCUSDT", qty="0.00005", side="SELL",
+                                    trade_side="CLOSE", order_type="MARKET",
+                                    position_id="pos123", reduce_only=True))
+    assert calls == [{
+        "method": "POST", "path": "/api/v1/futures/trade/place_order", "query": None,
+        "body": {"symbol": "BTCUSDT", "qty": "0.00005", "side": "SELL", "tradeSide": "CLOSE",
+                 "orderType": "MARKET", "positionId": "pos123", "reduceOnly": True},
+    }]
+
+
+def test_place_order_includes_bracket_tp_sl_fields_when_provided(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.place_order(symbol="BTCUSDT", qty="0.0001", side="BUY",
+                                    trade_side="OPEN", order_type="LIMIT", price="100.5",
+                                    tp_price="101.0", tp_stop_type="LAST_PRICE",
+                                    sl_price="99.0", sl_stop_type="LAST_PRICE"))
+    assert calls[0]["body"] == {
+        "symbol": "BTCUSDT", "qty": "0.0001", "side": "BUY", "tradeSide": "OPEN",
+        "orderType": "LIMIT", "price": "100.5",
+        "tpPrice": "101.0", "tpStopType": "LAST_PRICE",
+        "slPrice": "99.0", "slStopType": "LAST_PRICE",
+    }
+
+
+def test_close_position_builds_correct_body(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.close_position("pos123"))
+    assert calls == [{"method": "POST", "path": "/api/v1/futures/trade/flash_close_position",
+                       "query": None, "body": {"positionId": "pos123"}}]
+
+
+def test_set_position_tpsl_builds_correct_body_with_tp_and_sl(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.set_position_tpsl(symbol="BTCUSDT", position_id="pos123",
+                                          tp_price="101.0", tp_stop_type="LAST_PRICE",
+                                          sl_price="99.0", sl_stop_type="LAST_PRICE"))
+    assert calls == [{
+        "method": "POST", "path": "/api/v1/futures/tpsl/position/place_order", "query": None,
+        "body": {"symbol": "BTCUSDT", "positionId": "pos123",
+                 "tpPrice": "101.0", "tpStopType": "LAST_PRICE",
+                 "slPrice": "99.0", "slStopType": "LAST_PRICE"},
+    }]
+
+
+def test_set_position_tpsl_raises_valueerror_when_neither_tp_nor_sl_given(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    with pytest.raises(ValueError, match="at least one"):
+        asyncio.run(client.set_position_tpsl(symbol="BTCUSDT", position_id="pos123"))
+    assert calls == []  # no request ever sent
+
+
+def test_modify_position_tp_sl_order_builds_correct_body(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.modify_position_tp_sl_order(symbol="BTCUSDT", position_id="pos123",
+                                                     sl_price="100.0", sl_stop_type="LAST_PRICE"))
+    assert calls == [{
+        "method": "POST", "path": "/api/v1/futures/tpsl/position/modify_order", "query": None,
+        "body": {"symbol": "BTCUSDT", "positionId": "pos123",
+                 "slPrice": "100.0", "slStopType": "LAST_PRICE"},
+    }]
+
+
+def test_modify_position_tp_sl_order_raises_valueerror_when_neither_tp_nor_sl_given(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    with pytest.raises(ValueError, match="at least one"):
+        asyncio.run(client.modify_position_tp_sl_order(symbol="BTCUSDT", position_id="pos123"))
+    assert calls == []
+
+
+def test_get_position_tiers_calls_the_right_endpoint(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.get_position_tiers("BTCUSDT"))
+    assert calls == [{"method": "GET", "path": "/api/v1/futures/position/get_position_tiers",
+                       "query": {"symbol": "BTCUSDT"}, "body": None}]

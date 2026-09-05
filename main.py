@@ -1215,18 +1215,37 @@ async def api_admin_trade_plan_status(request: Request, db: Session = Depends(ge
 
 
 # ==============================================================================
-# EXECUTOR BOT ADMIN API (Stage 1, DRY-RUN only) -- Andy's request, design
-# settled over a multi-day conversation with DeepSeek (Kabroda AI Brain repo
-# AGENT_LOG.md, 2026-09-04). Thin surface: reads DB state, writes control
-# flags. Never imports executor_bitunix_client.py, never calls
-# executor_accounts.get_decrypted_credentials() -- even if this admin UI
-# were compromised, there are no keys reachable from it (Andy's own
-# explicit requirement).
+# EXECUTOR BOT ADMIN API -- Andy's request, design settled over a multi-day
+# conversation with DeepSeek (Kabroda AI Brain repo AGENT_LOG.md,
+# 2026-09-04). Stage 1 (DRY-RUN) routes are a thin surface: read DB state,
+# write control flags, never import executor_bitunix_client.py, never
+# call executor_accounts.get_decrypted_credentials() directly.
+#
+# Stage 2 (2026-09-05) adds the tiny order mechanism test -- REAL MONEY,
+# routed through executor_mechanism_test.py (which DOES call
+# get_decrypted_credentials(), a deliberate, reviewed exception -- see
+# that module's own header). Gated behind BOTH a persistent
+# ExecutorGlobalConfig.live_orders_enabled flag (default OFF, admin-only
+# to enable) AND a per-call typed confirmation phrase on every individual
+# money-moving action -- never one or the other alone.
 # ==============================================================================
 
-from database import ExecutorAccount as _ExecutorAccount, ExecutorOrder as _ExecutorOrder, ExecutorAuditLog as _ExecutorAuditLog
+from database import (
+    ExecutorAccount as _ExecutorAccount, ExecutorOrder as _ExecutorOrder,
+    ExecutorAuditLog as _ExecutorAuditLog, ExecutorGlobalConfig as _ExecutorGlobalConfig,
+    ExecutorMechanismTest as _ExecutorMechanismTest,
+)
 import executor_accounts as _executor_accounts
 import executor_control as _executor_control
+import executor_mechanism_test as _executor_mechanism_test
+
+# Stage 2 (2026-09-05) real-money confirm phrases -- one per action, so a
+# copy-pasted phrase from one action can never authorize a different one.
+_CONFIRM_ENABLE_LIVE_ORDERS = "CONFIRM ENABLE LIVE ORDERS"
+_CONFIRM_TINY_TEST_PLACE = "CONFIRM PLACE TINY LIVE ORDER"
+_CONFIRM_TINY_TEST_PARTIAL_CLOSE = "CONFIRM PARTIAL CLOSE"
+_CONFIRM_TINY_TEST_MOVE_SL = "CONFIRM MOVE SL TO BREAKEVEN"
+_CONFIRM_TINY_TEST_FLASH_CLOSE = "CONFIRM FLASH CLOSE REMAINDER"
 
 
 def _executor_owner_or_admin(ctx: Dict[str, Any], account: Optional["_ExecutorAccount"]) -> bool:
@@ -1256,6 +1275,26 @@ class ExecutorRiskStateUpdateRequest(BaseModel):
     risk_floor_usd: Optional[float] = None
     risk_cap_usd: Optional[float] = None
     compounding_factor: Optional[float] = None
+
+
+class ExecutorLiveOrdersEnableRequest(BaseModel):
+    reason: str
+    confirm: str
+
+
+class TinyTestPlaceRequest(BaseModel):
+    confirm: str
+    tp_pct: float = 0.01
+    sl_pct: float = 0.01
+
+
+class TinyTestPartialCloseRequest(BaseModel):
+    confirm: str
+    pct: float = 0.50
+
+
+class TinyTestConfirmOnlyRequest(BaseModel):
+    confirm: str
 
 
 def _serialize_account(account: "_ExecutorAccount") -> Dict[str, Any]:
@@ -1486,6 +1525,185 @@ async def api_executor_audit_log(request: Request, db: Session = Depends(get_db)
         "account_id": r.account_id, "trade_plan_id": r.trade_plan_id, "executor_order_id": r.executor_order_id,
         "event_type": r.event_type, "actor": r.actor, "message": r.message,
     } for r in rows]})
+
+
+def _serialize_mechanism_test(t: "_ExecutorMechanismTest") -> Dict[str, Any]:
+    # This IS an admin/owner-only, real-money-context page -- full raw
+    # response JSON is included on purpose, it's the single most useful
+    # debugging aid if something ever goes wrong here.
+    return {
+        "id": t.id, "account_id": t.account_id, "symbol": t.symbol, "direction": t.direction,
+        "status": t.status, "qty": t.qty, "min_trade_volume": t.min_trade_volume,
+        "exchange_order_id": t.exchange_order_id, "position_id": t.position_id, "fill_price": t.fill_price,
+        "initial_tp_price": t.initial_tp_price, "initial_sl_price": t.initial_sl_price,
+        "partial_close_pct": t.partial_close_pct, "partial_close_qty": t.partial_close_qty,
+        "breakeven_sl_price": t.breakeven_sl_price, "error_detail": t.error_detail,
+        "started_by": t.started_by, "created_at": t.created_at.isoformat() if t.created_at else None,
+        "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+        "place_order_response_json": t.place_order_response_json, "tpsl_response_json": t.tpsl_response_json,
+        "partial_close_response_json": t.partial_close_response_json,
+        "sl_breakeven_response_json": t.sl_breakeven_response_json,
+        "flash_close_response_json": t.flash_close_response_json,
+    }
+
+
+# ------------------------------------------------------------------ live orders global gate (Stage 2, 2026-09-05)
+
+@app.get("/api/executor/global-config")
+async def api_executor_global_config(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Login required."}, status_code=403)
+    # Read-only -- never creates the singleton row on a GET.
+    cfg = db.query(_ExecutorGlobalConfig).filter_by(config_key="executor_global").first()
+    return JSONResponse({
+        "ok": True,
+        "global_kill_switch_engaged": bool(cfg.global_kill_switch_engaged) if cfg else False,
+        "live_orders_enabled": bool(cfg.live_orders_enabled) if cfg else False,
+    })
+
+
+@app.post("/api/executor/live-orders/enable")
+async def api_executor_enable_live_orders(request: Request, body: ExecutorLiveOrdersEnableRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    if body.confirm != _CONFIRM_ENABLE_LIVE_ORDERS:
+        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_ENABLE_LIVE_ORDERS!r}"}, status_code=400)
+    _executor_control.enable_live_orders(db, reason=body.reason, by=ctx.get("email") or "unknown")
+    _executor_accounts.write_audit(db, "LIVE_ORDERS_ENABLED", f"live orders enabled -- {body.reason}", actor=ctx.get("email"))
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/executor/live-orders/disable")
+async def api_executor_disable_live_orders(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    # No confirm phrase needed to turn this OFF -- matches the existing
+    # release-kill-switch precedent (disabling never needs extra friction).
+    _executor_control.disable_live_orders(db, by=ctx.get("email") or "unknown")
+    _executor_accounts.write_audit(db, "LIVE_ORDERS_DISABLED", "live orders disabled", actor=ctx.get("email"))
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+# ------------------------------------------------------------------ tiny order mechanism test (Stage 2, 2026-09-05)
+# REAL MONEY. Gated behind BOTH the persistent live_orders_enabled flag
+# AND a per-call confirm phrase, on top of the usual owner-or-admin +
+# is_account_tradeable() checks every other executor action already gets.
+
+async def _run_mechanism_action(db: Session, account: "_ExecutorAccount", actor: str, coro) -> JSONResponse:
+    """Shared error-handling shape for every tiny-test action route --
+    see this project's own plan notes on why the exception branch's
+    db.commit() is REQUIRED: get_db()'s finally-block only calls
+    db.close(), which discards uncommitted work. Without this explicit
+    commit, a real exchange-call failure would silently lose its own
+    FAILED status + audit row that the orchestration function already
+    flushed."""
+    try:
+        test_row = await coro
+        db.commit()
+        return JSONResponse({"ok": test_row.status != "FAILED", "test": _serialize_mechanism_test(test_row)})
+    except _executor_mechanism_test.MechanismTestBlocked as e:
+        _executor_accounts.write_audit(db, "TEST_MECHANISM_BLOCKED", str(e), account_id=account.id, actor=actor)
+        db.commit()
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=403)
+    except _executor_mechanism_test.MechanismTestInvalidState as e:
+        db.rollback()
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=409)
+    except Exception as e:
+        db.commit()
+        return JSONResponse({"ok": False, "error": f"mechanism test failed, check the exchange directly: {e}"}, status_code=502)
+
+
+@app.post("/api/executor/accounts/{account_id}/tiny-test/place")
+async def api_executor_tiny_test_place(account_id: int, request: Request, body: TinyTestPlaceRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    if body.confirm != _CONFIRM_TINY_TEST_PLACE:
+        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_PLACE!r}"}, status_code=400)
+    actor = ctx.get("email") or "unknown"
+    return await _run_mechanism_action(
+        db, account, actor,
+        _executor_mechanism_test.place_confirm_and_set_initial_tpsl(db, account, actor, tp_pct=body.tp_pct, sl_pct=body.sl_pct))
+
+
+def _load_owned_test_row(db, ctx, account_id, test_id):
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return None, None, JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return None, None, JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    test_row = db.query(_ExecutorMechanismTest).filter_by(id=test_id, account_id=account_id).first()
+    if test_row is None:
+        return None, None, JSONResponse({"ok": False, "error": "No such mechanism test."}, status_code=404)
+    return account, test_row, None
+
+
+@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/partial-close")
+async def api_executor_tiny_test_partial_close(account_id: int, test_id: int, request: Request, body: TinyTestPartialCloseRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
+    if err is not None:
+        return err
+    if body.confirm != _CONFIRM_TINY_TEST_PARTIAL_CLOSE:
+        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_PARTIAL_CLOSE!r}"}, status_code=400)
+    actor = ctx.get("email") or "unknown"
+    return await _run_mechanism_action(
+        db, account, actor, _executor_mechanism_test.partial_close(db, account, test_row, actor, pct=body.pct))
+
+
+@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/move-sl-breakeven")
+async def api_executor_tiny_test_move_sl_breakeven(account_id: int, test_id: int, request: Request, body: TinyTestConfirmOnlyRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
+    if err is not None:
+        return err
+    if body.confirm != _CONFIRM_TINY_TEST_MOVE_SL:
+        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_MOVE_SL!r}"}, status_code=400)
+    actor = ctx.get("email") or "unknown"
+    return await _run_mechanism_action(
+        db, account, actor, _executor_mechanism_test.move_sl_to_breakeven(db, account, test_row, actor))
+
+
+@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/flash-close")
+async def api_executor_tiny_test_flash_close(account_id: int, test_id: int, request: Request, body: TinyTestConfirmOnlyRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
+    if err is not None:
+        return err
+    if body.confirm != _CONFIRM_TINY_TEST_FLASH_CLOSE:
+        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_FLASH_CLOSE!r}"}, status_code=400)
+    actor = ctx.get("email") or "unknown"
+    return await _run_mechanism_action(
+        db, account, actor, _executor_mechanism_test.flash_close_remainder(db, account, test_row, actor))
+
+
+@app.get("/api/executor/accounts/{account_id}/tiny-test")
+async def api_executor_tiny_test_list(account_id: int, request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    rows = db.query(_ExecutorMechanismTest).filter_by(account_id=account_id).order_by(_ExecutorMechanismTest.id.desc()).all()
+    return JSONResponse({"ok": True, "tests": [_serialize_mechanism_test(t) for t in rows]})
+
+
+@app.get("/api/executor/accounts/{account_id}/tiny-test/{test_id}")
+async def api_executor_tiny_test_detail(account_id: int, test_id: int, request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
+    if err is not None:
+        return err
+    return JSONResponse({"ok": True, "test": _serialize_mechanism_test(test_row)})
 
 
 @app.get("/admin/executor")

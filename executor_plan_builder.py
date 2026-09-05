@@ -36,6 +36,65 @@ import executor_sizing
 from database import ExecutorAccount, ExecutorOrder, ExecutorRiskState, TradePlan
 
 
+_FALLBACK_MMR_UNVERIFIED = 0.01
+# 2026-09-05: deliberately HIGHER than Bitunix's own docs' top-tier
+# BTCUSDT example (0.004-0.005) -- a fallback that's too LOW would make
+# the liquidation estimate falsely OPTIMISTIC, the same class of danger
+# as the 40x-vs-10x leverage incident this whole file's design already
+# learned from. Erring high biases toward REJECTING borderline trades on
+# a get_position_tiers query failure, never toward falsely approving
+# one. This exact constant is a judgment call, flagged explicitly to
+# Andy for sign-off -- not settled just because it's in code.
+
+
+async def _query_real_maintenance_margin_rate(account: ExecutorAccount, symbol: str, notional_value: float) -> Dict[str, Any]:
+    """Returns {"mmr": float, "source": str}. Same never-crash-on-network-
+    hiccup fallback pattern as _query_real_leverage_and_margin_mode() --
+    falls back to _FALLBACK_MMR_UNVERIFIED (clearly labeled unverified)
+    if no credentials are set yet or the query fails. Selects the tier
+    whose notional bracket (startValue <= notional_value < endValue)
+    contains this trade's own notional -- NOT a leverage lookup; a
+    tier's `leverage` field is that bracket's MAXIMUM ALLOWED leverage,
+    not the account's actual configured leverage."""
+    api_key, api_secret = executor_accounts.get_decrypted_credentials(account)
+    if not api_key or not api_secret:
+        # 0.0, not the elevated conservative fallback below -- "never
+        # connected yet" is a benign, expected state (matches
+        # _query_real_leverage_and_margin_mode()'s own no-credentials
+        # branch, which reuses the configured baseline rather than
+        # getting artificially more cautious). The elevated fallback is
+        # reserved for the more alarming case: credentials exist and a
+        # live query was actually attempted and failed.
+        return {
+            "mmr": 0.0,
+            "source": "no credentials set yet -- using unverified 0.0 mmr (no real check attempted)",
+        }
+
+    import executor_bitunix_client
+    client = executor_bitunix_client.BitunixClient(api_key, api_secret)
+    try:
+        resp = await client.get_position_tiers(symbol.replace("/", ""))
+        tiers = resp["data"]
+        tier = next(
+            (t for t in tiers if float(t["startValue"]) <= notional_value < float(t["endValue"])),
+            None,
+        )
+        if tier is None:
+            return {
+                "mmr": _FALLBACK_MMR_UNVERIFIED,
+                "source": "no matching notional tier returned -- using conservative fallback MMR, NOT verified against the exchange",
+            }
+        return {
+            "mmr": float(tier["maintenanceMarginRate"]),
+            "source": "verified against the real exchange position tiers",
+        }
+    except Exception as e:
+        return {
+            "mmr": _FALLBACK_MMR_UNVERIFIED,
+            "source": f"tiers query failed ({e}) -- using conservative fallback MMR, NOT verified against the exchange",
+        }
+
+
 async def _query_real_leverage_and_margin_mode(account: ExecutorAccount, symbol: str) -> Dict[str, Any]:
     """Returns {"leverage": int, "margin_mode": str, "source": str}.
     Falls back to the account's configured baseline (clearly labeled as
@@ -123,8 +182,12 @@ async def build_hypothetical_order(
     leverage = exchange_state["leverage"]
     margin_mode = exchange_state["margin_mode"]
 
-    liq_ok, liq_detail, liq_price = executor_sizing.check_leverage_is_safe(entry_price, stop_price, direction, leverage)
-    margin_required = (entry_price * qty) / leverage
+    notional = entry_price * qty
+    mmr_state = await _query_real_maintenance_margin_rate(account, trade_plan_row.symbol, notional)
+
+    liq_ok, liq_detail, liq_price = executor_sizing.check_leverage_is_safe(
+        entry_price, stop_price, direction, leverage, maintenance_margin_rate=mmr_state["mmr"])
+    margin_required = notional / leverage
 
     result = {
         **base,
@@ -134,6 +197,7 @@ async def build_hypothetical_order(
         "stop_distance": abs(entry_price - stop_price),
         "qty": qty, "leverage_used": leverage,
         "margin_required_usd": margin_required,
+        "maintenance_margin_rate_used": mmr_state["mmr"],
         "liquidation_price_estimate": liq_price,
         "liquidation_check_passed": liq_ok,
         "liquidation_check_detail": liq_detail,
@@ -147,5 +211,14 @@ async def build_hypothetical_order(
             ),
         }
     if not liq_ok:
-        return {**result, "decision": "REJECTED", "decision_reason": f"{liq_detail} ({exchange_state['source']})"}
-    return {**result, "decision": "WOULD_PLACE", "decision_reason": f"leverage {leverage}x, {exchange_state['source']}; {liq_detail}"}
+        return {
+            **result, "decision": "REJECTED",
+            "decision_reason": f"{liq_detail} (leverage {exchange_state['source']}; mmr {mmr_state['source']})",
+        }
+    return {
+        **result, "decision": "WOULD_PLACE",
+        "decision_reason": (
+            f"leverage {leverage}x, {exchange_state['source']}; "
+            f"mmr {mmr_state['mmr']}, {mmr_state['source']}; {liq_detail}"
+        ),
+    }

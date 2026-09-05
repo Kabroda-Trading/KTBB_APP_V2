@@ -62,3 +62,37 @@ def release_global_kill_switch(db: Session, by: str) -> None:
     cfg.global_kill_switch_engaged_at = None
     cfg.global_kill_switch_engaged_by = None
     cfg.global_kill_switch_reason = None
+
+
+def is_live_orders_enabled(db: Session) -> bool:
+    """2026-09-05 -- the persistent gate on real order placement (Stage 2's
+    tiny mechanism test and any future live trading). OPPOSITE polarity
+    from is_global_kill_switch_engaged(): that flag BLOCKS trading when
+    True, this flag PERMITS real-money order placement only when True.
+    Fails CLOSED (returns False = disabled) on any DB error or missing
+    row -- same defensive spirit as the kill switch above, just the
+    other direction: an uncertain state never permits a real-money
+    action to proceed."""
+    try:
+        cfg = db.query(ExecutorGlobalConfig).filter_by(config_key=_CONFIG_KEY).first()
+        if cfg is None:
+            return False
+        return bool(cfg.live_orders_enabled)
+    except Exception:
+        return False
+
+
+def enable_live_orders(db: Session, reason: str, by: str) -> None:
+    cfg = _get_or_init(db)
+    cfg.live_orders_enabled = True
+    cfg.live_orders_enabled_at = datetime.datetime.utcnow()
+    cfg.live_orders_enabled_by = by
+    cfg.live_orders_enabled_reason = reason
+
+
+def disable_live_orders(db: Session, by: str) -> None:
+    cfg = _get_or_init(db)
+    cfg.live_orders_enabled = False
+    cfg.live_orders_enabled_at = None
+    cfg.live_orders_enabled_by = None
+    cfg.live_orders_enabled_reason = None

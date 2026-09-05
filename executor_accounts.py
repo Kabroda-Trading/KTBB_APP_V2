@@ -26,14 +26,16 @@ import executor_crypto
 def write_audit(
     db: Session, event_type: str, message: str,
     account_id: Optional[int] = None, trade_plan_id: Optional[int] = None,
-    executor_order_id: Optional[int] = None, actor: Optional[str] = None,
-    detail: Optional[Dict[str, Any]] = None,
+    executor_order_id: Optional[int] = None, executor_mechanism_test_id: Optional[int] = None,
+    actor: Optional[str] = None, detail: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Public -- the one place any caller (this module, executor_engine.py,
-    or main.py's admin routes) writes an ExecutorAuditLog row, so no
-    caller ever needs to construct one by hand."""
+    executor_mechanism_test.py, or main.py's admin routes) writes an
+    ExecutorAuditLog row, so no caller ever needs to construct one by
+    hand."""
     db.add(ExecutorAuditLog(
         account_id=account_id, trade_plan_id=trade_plan_id, executor_order_id=executor_order_id,
+        executor_mechanism_test_id=executor_mechanism_test_id,
         event_type=event_type, actor=actor or "system", message=message,
         detail_json=json.dumps(detail, default=str) if detail else None,
     ))
@@ -64,9 +66,13 @@ def set_credentials(db: Session, account: ExecutorAccount, api_key: str, api_sec
 
 
 def get_decrypted_credentials(account: ExecutorAccount) -> Tuple[Optional[str], Optional[str]]:
-    """THE ONLY decrypt entry point in this codebase. Caller is
-    executor_engine.py's PAPER/LIVE branch (Stage 2/3) only -- never an
-    admin route, never anything that renders HTML/JSON back to a browser."""
+    """THE ONLY decrypt entry point in this codebase. Permitted callers:
+    executor_engine.py's PAPER/LIVE branch (Stage 2/3), executor_plan_
+    builder.py's real-leverage/real-mmr query helpers, executor_
+    mechanism_test.py's real order-placing orchestration, and main.py's
+    read-only test-connection route -- each a deliberate, reviewed
+    exception, never anything that renders the decrypted value itself
+    back to a browser."""
     if not account.api_key_encrypted or not account.api_secret_encrypted:
         return None, None
     return (

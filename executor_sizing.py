@@ -14,24 +14,35 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from typing import Optional, Tuple
 
-# Ignores Bitunix's real maintenance-margin-rate table (not yet obtained --
-# see AGENT_LOG.md's open-risks list). This is the standard "100%-of-margin-
-# lost" bound: the FARTHEST liquidation could possibly be from entry, since
-# any real maintenance margin requirement only moves liquidation CLOSER to
-# entry (an exchange never lets you lose literally 100% of margin before
-# acting). So a pass on check_liquidation_safety() using this estimate is a
-# NECESSARY, not sufficient, condition -- real liquidation is at least this
-# close to entry, quite possibly closer. Treat this as an honest
-# approximation, not a guarantee, until Bitunix's real maintenance-margin
-# schedule is confirmed and this formula is corrected to include it.
-def estimate_liquidation_price(entry_price: float, leverage: int, direction: str) -> float:
+# 2026-09-05: previously ignored Bitunix's real maintenance-margin-rate
+# table entirely (the naive "100%-of-margin-lost" bound). Now takes an
+# OPTIONAL real maintenance_margin_rate (queried live from Bitunix's
+# get_position_tiers -- see executor_plan_builder.py's own
+# _query_real_maintenance_margin_rate(), never a hardcoded/cached table,
+# same philosophy as never trusting a stored leverage baseline). Default
+# 0.0 reproduces the old naive formula exactly -- every existing caller/
+# test that doesn't pass this param is unaffected.
+#
+# LONG:  liq = entry * (1 - 1/leverage + mmr)
+# SHORT: liq = entry * (1 + 1/leverage - mmr)
+# A higher real mmr moves liquidation CLOSER to entry (the exchange
+# force-closes once maintenance margin, not 100% of margin, is breached).
+def estimate_liquidation_price(
+    entry_price: float, leverage: int, direction: str, maintenance_margin_rate: float = 0.0,
+) -> float:
     if not entry_price or entry_price <= 0:
         raise ValueError("entry_price must be positive")
     if not leverage or leverage <= 0:
         raise ValueError("leverage must be positive")
-    adverse_move_pct = 1.0 / leverage
+    # Clamped at 0 for the (should-never-happen-in-practice) case where
+    # mmr >= 1/leverage: liq pins to entry_price exactly, which then
+    # always fails check_liquidation_safety() (a zero liq distance can
+    # never exceed a positive stop distance) -- fails safe automatically,
+    # no special-case exception needed.
+    adverse_move_pct = max(0.0, 1.0 / leverage - maintenance_margin_rate)
     if direction == "LONG":
         return entry_price * (1.0 - adverse_move_pct)
     if direction == "SHORT":
@@ -120,11 +131,51 @@ def check_liquidation_safety(
 # never fabricate a fix" discipline).
 def check_leverage_is_safe(
     entry_price: float, stop_price: float, direction: str, leverage: int,
+    maintenance_margin_rate: float = 0.0,
 ) -> Tuple[bool, str, float]:
     """Given the REAL, already-queried leverage (executor_bitunix_client.
-    BitunixClient.get_leverage_and_margin_mode()), returns (is_safe,
-    detail, liquidation_price_estimate). Callers must query the real
-    value themselves -- this function never assumes or defaults one."""
-    liq_price = estimate_liquidation_price(entry_price, leverage, direction)
+    BitunixClient.get_leverage_and_margin_mode()) and, ideally, the REAL
+    already-queried maintenance margin rate (get_position_tiers -- see
+    executor_plan_builder.py), returns (is_safe, detail,
+    liquidation_price_estimate). Callers must query real values
+    themselves -- this function never assumes or defaults leverage, and
+    defaults maintenance_margin_rate to 0.0 (the old naive bound) only
+    for backward compatibility with callers that haven't been updated."""
+    liq_price = estimate_liquidation_price(entry_price, leverage, direction, maintenance_margin_rate)
     safe, detail = check_liquidation_safety(entry_price, stop_price, liq_price, direction)
     return safe, detail, liq_price
+
+
+# ------------------------------------------------------------------
+# 2026-09-05, Stage 2: precision formatting for real order params.
+# Bitunix's place_order/tpsl endpoints take qty/price as STRING types on
+# the wire, each bounded by the exchange's own basePrecision/
+# quotePrecision for a symbol (get_trading_pairs). Decimal is used here,
+# and ONLY here in this module, specifically to avoid binary-float
+# artifacts (Decimal(0.1) != Decimal('0.1')) -- it never propagates past
+# these two functions' return boundary, a deliberate, scoped exception
+# to this codebase's otherwise all-float convention.
+# ------------------------------------------------------------------
+
+def round_qty_to_precision(qty: float, precision: int) -> str:
+    """Floors -- NEVER rounds up -- to `precision` decimal places. A
+    qty must never exceed what basePrecision/minTradeVolume represents;
+    rounding up here could send an order the exchange rejects or, worse,
+    an unintended larger size. Returns a plain decimal string (no
+    scientific notation)."""
+    if precision < 0:
+        raise ValueError("precision must be >= 0")
+    quant = Decimal(1).scaleb(-precision)
+    d = Decimal(str(qty)).quantize(quant, rounding=ROUND_DOWN)
+    return format(d, "f")
+
+
+def round_price_to_precision(price: float, precision: int) -> str:
+    """Same Decimal-string approach as round_qty_to_precision(), but
+    ROUND_HALF_UP -- a price has no qty's 'never exceed a floor'
+    constraint, nearest-representable is the correct behavior."""
+    if precision < 0:
+        raise ValueError("precision must be >= 0")
+    quant = Decimal(1).scaleb(-precision)
+    d = Decimal(str(price)).quantize(quant, rounding=ROUND_HALF_UP)
+    return format(d, "f")
