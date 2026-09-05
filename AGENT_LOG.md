@@ -1238,3 +1238,12 @@ Andy ran Verify Auth against his real live account. All three checks passed for 
 **Verified**: 12 tests in `test_executor_plan_builder.py` (4 new, covering the credentialed path directly -- real leverage overriding the baseline, margin-mode mismatch rejection, unsafe-leverage-for-the-stop rejection via a monkeypatched `BitunixClient`, and the exchange-query-failure fallback), full suite 329 passed (same 5 pre-existing unrelated `test_dashboard_fixes.py` errors, unrelated to any of this). `py_compile` + `import main` clean. Committed `c9bec9a`.
 
 **Andy: still need you to manually set your real Bitunix account to 10x leverage** (the query-before-every-trade fix protects against a mismatch either way, but 10x is the number the sizing/compounding math in the original design conversation was actually calibrated against). Once that's done, the next real, justified step is `place_order()`/`set_tpsl()` for the tiny-order test -- same checkpoint as before, now with one more real signal (this leverage drift) confirming the "verify before moving money" sequencing is catching real things, not hypothetical ones.
+
+## 2026-09-05 (Andy's manual 10x change confirmed live on the exchange) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved
+
+Andy manually reset his real Bitunix account leverage to 10x (the last open item from the query-before-every-trade fix, commit `c9bec9a`). Re-ran VERIFY AUTH rather than trust the Bitunix UI at face value -- exactly the discipline this whole fix exists to enforce. Real response confirms it took: `leverage: 10`, `longLeverage: 10`, `shortLeverage: 10`, `marginMode: "ISOLATION"` -- matches both the account's configured value and the sizing/compounding math the original design conversation was calibrated against. Balance unchanged at $726.05 USDT.
+
+Both halves of the 20:05 CT decision (Kabroda AI Brain repo) are now confirmed live: (1) the account is genuinely at 10x, verified, not assumed; (2) the bot's own per-trade query-and-refuse logic stays permanent regardless, so a future drift back to 40x (or anything else) gets caught and refused automatically rather than requiring another manual Verify Auth click to notice.
+
+Next real, justified step (same checkpoint as before): `place_order()`/`set_tpsl()` for the tiny-order test, once Andy's ready to spend the few dollars to prove the signing chain against a real order, not just real reads.
