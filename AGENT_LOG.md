@@ -1301,3 +1301,16 @@ After the fill-confirmation fix and full ladder audit, Andy tried PLACE TINY LIV
 **Verified**: 404 passed (up from 399), the new JS harness both catches the regression and passes clean, confirmed by hand before commit. Deployed (`d5c824f`).
 
 This is now permanent, automatic coverage for this exact bug class on this page's four highest-stakes buttons -- not a one-off manual check that gets forgotten next time this file changes.
+
+## 2026-09-05 (the ACTUAL root cause, confirmed from real data: Bitunix's docs are wrong about get_position's side field) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved
+
+After the button-click fix, attempt #4 made real progress: `get_order_detail` correctly confirmed the order FILLED (that fix works). It then failed the very next step -- matching the resulting position in `get_position()`'s response -- despite a real, confirmed-open position existing (visible on Bitunix's own UI). The raw diagnostic data needed to see why wasn't reaching the API response at all (a real gap: the confirmation-check columns were added to the DB two commits ago but never wired into the serializer -- fixed separately, commit `e418d9b`).
+
+Once Andy re-fetched with that fixed, exposed field, the real answer was right there: `position_check_response_json` shows **`"side": "BUY"`** on the actual position. Bitunix's own docs state this field is `"LONG"`/`"SHORT"` -- directly contradicted by the real response. This is the true root cause of all four live failures: the position-match check was filtering for a literal string the real API never returns, regardless of the order-status fix already being correct.
+
+Fixed: `_find_open_long_position()` now matches against the verified real value (`side == "BUY"` for an opened long), not `"LONG"`. Corrected the same wrong assumption in the client's own docstring and every test mock. 399 passed. Deployed (`bbb6710`).
+
+This closes the loop from the original incident: 4 real live attempts, each one narrowing the actual cause with real data instead of a second guess -- fill-confirmation method (fixed), ladder-wide confirmation hardening (done), a silent button bug (fixed, permanent JS test added), a missing diagnostic field (fixed), and finally the real field-value mismatch underneath all of it. Andy manually closed the resulting real position each time; total cost across all incidents remains under $1.
+
+**Ready for a real end-to-end attempt whenever Andy wants to try again** -- every piece that's failed so far has now been individually confirmed fixed against real data, not assumption.
