@@ -434,16 +434,22 @@ def _make_partial_closed_row(db, account, fill_price=100.0):
 
 def test_move_sl_to_breakeven_happy_path_sets_price_to_exact_fill_price(db, monkeypatch):
     account = _make_ready_account(db)
-    test_row = _make_partial_closed_row(db, account, fill_price=100.0)
+    test_row = _make_partial_closed_row(db, account, fill_price=100.0)  # initial_tp_price=101.0
 
     async def fake_modify(self, **kwargs):
         assert kwargs["position_id"] == "pos1"
         assert kwargs["sl_price"] == "100.0"
+        # 2026-09-05 real incident: modify_position_tp_sl_order does NOT
+        # partially update -- an omitted field gets CLEARED on the real
+        # exchange (confirmed on Andy's own account: sending only
+        # sl_price wiped the existing take-profit entirely). The
+        # existing TP must always be re-sent alongside the new SL.
+        assert kwargs["tp_price"] == "101.0"
         return {"code": 0, "data": {"orderId": "breakeven1"}, "msg": "Success"}
 
     async def fake_get_pending_tp_sl_order(self, symbol=None, position_id=None):
         assert position_id == "pos1"
-        return {"code": 0, "data": [{"id": "breakeven1", "positionId": "pos1", "slPrice": "100.0"}], "msg": "Success"}
+        return {"code": 0, "data": [{"id": "breakeven1", "positionId": "pos1", "slPrice": "100.0", "tpPrice": "101.0"}], "msg": "Success"}
 
     _install(monkeypatch, modify_position_tp_sl_order=fake_modify, get_pending_tp_sl_order=fake_get_pending_tp_sl_order)
 
@@ -467,6 +473,45 @@ def test_move_sl_to_breakeven_not_registered_marks_failed_without_raising(db, mo
     result = asyncio.run(emt.move_sl_to_breakeven(db, account, test_row, actor="test@kabroda.com"))
     assert result.status == "FAILED"
     assert "CHECK THE EXCHANGE" in result.error_detail
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_MECHANISM_FAILED"]
+
+
+def test_move_sl_to_breakeven_detects_tp_wiped_by_the_modify_call(db, monkeypatch):
+    # THE real incident, reproduced: modify reports success, the new SL
+    # registers correctly, but the TP came back null -- the exchange
+    # cleared it because tp_price wasn't included in an earlier draft of
+    # this call. Must be caught as a failure, not a false "success" just
+    # because SOME pending TP/SL entry exists for the position.
+    account = _make_ready_account(db)
+    test_row = _make_partial_closed_row(db, account, fill_price=100.0)  # initial_tp_price=101.0
+
+    _install(monkeypatch, modify_position_tp_sl_order=_async({"code": 0, "data": {"orderId": "breakeven1"}, "msg": "Success"}),
+              get_pending_tp_sl_order=_async({"code": 0, "data": [
+                  {"id": "breakeven1", "positionId": "pos1", "slPrice": "100.0", "tpPrice": None},
+              ], "msg": "Success"}))
+
+    result = asyncio.run(emt.move_sl_to_breakeven(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "FAILED"
+    assert "TP registered as" in result.error_detail
+    assert "cleared" in result.error_detail
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_MECHANISM_FAILED"]
+
+
+def test_move_sl_to_breakeven_detects_sl_registered_at_wrong_price(db, monkeypatch):
+    # Same principle, the other field: SL registers at some price, but
+    # not the one actually requested -- must not be treated as a match
+    # just because an entry with the right positionId exists.
+    account = _make_ready_account(db)
+    test_row = _make_partial_closed_row(db, account, fill_price=100.0)
+
+    _install(monkeypatch, modify_position_tp_sl_order=_async({"code": 0, "data": {"orderId": "breakeven1"}, "msg": "Success"}),
+              get_pending_tp_sl_order=_async({"code": 0, "data": [
+                  {"id": "breakeven1", "positionId": "pos1", "slPrice": "95.0", "tpPrice": "101.0"},
+              ], "msg": "Success"}))
+
+    result = asyncio.run(emt.move_sl_to_breakeven(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "FAILED"
+    assert "SL registered as" in result.error_detail
     assert _get_audit_event_types(db, test_row.id) == ["TEST_MECHANISM_FAILED"]
 
 

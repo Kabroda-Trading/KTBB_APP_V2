@@ -390,14 +390,27 @@ def _patch_happy_path_client(monkeypatch):
     async def fake_get_order_detail(self, order_id=None, client_id=None):
         return {"code": 0, "data": {"orderId": order_id, "status": "FILLED"}, "msg": "Success"}
 
+    # Stateful, not a fixed canned response -- since 2026-09-05 the real
+    # code verifies actual tpPrice/slPrice values after each mutation
+    # (a real incident found modify_position_tp_sl_order clearing the TP
+    # when only slPrice was sent), so this mock must actually reflect
+    # what each call sets, the way the real exchange does.
+    registered_tpsl = {}
+
     async def fake_set_position_tpsl(self, **kwargs):
+        registered_tpsl["tpPrice"] = kwargs.get("tp_price")
+        registered_tpsl["slPrice"] = kwargs.get("sl_price")
         return {"code": 0, "data": {"orderId": "tpsl1"}, "msg": "Success"}
 
     async def fake_modify_tpsl(self, **kwargs):
+        if "tp_price" in kwargs:
+            registered_tpsl["tpPrice"] = kwargs["tp_price"]
+        if "sl_price" in kwargs:
+            registered_tpsl["slPrice"] = kwargs["sl_price"]
         return {"code": 0, "data": {"orderId": "breakeven1"}, "msg": "Success"}
 
     async def fake_get_pending_tp_sl_order(self, symbol=None, position_id=None):
-        return {"code": 0, "data": [{"id": "tpsl1", "positionId": position_id, "tpPrice": "101.0", "slPrice": "99.0"}], "msg": "Success"}
+        return {"code": 0, "data": [{"id": "tpsl1", "positionId": position_id, **registered_tpsl}], "msg": "Success"}
 
     async def fake_close_position(self, position_id):
         return {"code": 0, "data": {"positionId": position_id}, "msg": "Success"}

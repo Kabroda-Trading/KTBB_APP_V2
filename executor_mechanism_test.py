@@ -396,29 +396,53 @@ async def move_sl_to_breakeven(
     # carry this simplification into a real future feature without a
     # deliberate decision then.
     sl_str = executor_sizing.round_price_to_precision(test_row.fill_price, test_row.quote_precision)
+    # 2026-09-05, found live, real money, on Andy's own account: Bitunix's
+    # modify_position_tp_sl_order does NOT behave like a partial update --
+    # an omitted field is CLEARED, not left alone. Sending only sl_price
+    # silently wiped the existing take-profit entirely (confirmed via the
+    # tpsl_check_response_json this same hardening pass added -- without
+    # that check this would have been invisible). The existing TP must be
+    # re-sent alongside the new SL on every modify call.
+    tp_str = executor_sizing.round_price_to_precision(test_row.initial_tp_price, test_row.quote_precision)
     try:
         resp = await client.modify_position_tp_sl_order(
-            symbol=_TEST_SYMBOL, position_id=test_row.position_id, sl_price=sl_str, sl_stop_type="LAST_PRICE")
+            symbol=_TEST_SYMBOL, position_id=test_row.position_id,
+            tp_price=tp_str, tp_stop_type="LAST_PRICE", sl_price=sl_str, sl_stop_type="LAST_PRICE")
         test_row.sl_breakeven_response_json = json.dumps(resp, default=str)
         test_row.breakeven_sl_price = float(sl_str)
         test_row.sl_breakeven_exchange_order_id = resp["data"]["orderId"]
         db.flush()
 
-        # Independent confirmation: verify the moved SL is ACTUALLY
-        # registered at the new price, not just that modify returned
-        # success (same discipline as the initial TP/SL set above).
+        # Independent confirmation: verify BOTH the new SL is registered
+        # AND the TP is still present at its original price -- not just
+        # that modify returned success, and not just that "some" pending
+        # TP/SL entry exists (that alone would NOT have caught the real
+        # TP-wipe bug this comment is describing).
         check_resp = await client.get_pending_tp_sl_order(symbol=_TEST_SYMBOL, position_id=test_row.position_id)
         test_row.tpsl_check_response_json = json.dumps(check_resp, default=str)
         db.flush()
         registered = _find_pending_tpsl_for_position(check_resp, test_row.position_id)
 
+        def _prices_match(actual: Optional[str], expected: str) -> bool:
+            try:
+                return actual is not None and abs(float(actual) - float(expected)) < 1e-9
+            except (TypeError, ValueError):
+                return False
+
+        problem = None
         if registered is None:
-            test_row.status = "FAILED"
-            test_row.error_detail = (
+            problem = (
                 f"modify_position_tp_sl_order reported success (orderId={test_row.sl_breakeven_exchange_order_id}) "
-                f"but no pending TP/SL found for positionId={test_row.position_id} on the very next check -- "
-                f"CHECK THE EXCHANGE DIRECTLY. Raw response saved (tpsl_check_response_json)."
+                f"but no pending TP/SL found for positionId={test_row.position_id} on the very next check"
             )
+        elif not _prices_match(registered.get("slPrice"), sl_str):
+            problem = f"SL registered as {registered.get('slPrice')!r}, expected {sl_str!r}"
+        elif not _prices_match(registered.get("tpPrice"), tp_str):
+            problem = f"TP registered as {registered.get('tpPrice')!r}, expected {tp_str!r} -- it may have been cleared by the modify call"
+
+        if problem is not None:
+            test_row.status = "FAILED"
+            test_row.error_detail = f"{problem} -- CHECK THE EXCHANGE DIRECTLY. Raw response saved (tpsl_check_response_json)."
             db.flush()
             executor_accounts.write_audit(
                 db, "TEST_MECHANISM_FAILED", test_row.error_detail,
