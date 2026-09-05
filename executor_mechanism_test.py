@@ -75,7 +75,11 @@ async def _require_gates_open(db: Session, account: ExecutorAccount) -> Tuple[st
 
 def _extract_pair(pairs_resp: Dict[str, Any], symbol: str) -> Dict[str, Any]:
     """get_trading_pairs()'s data is a LIST -- find the matching entry
-    or raise a clear error, never silently guess."""
+    or raise a clear error, never silently guess. Same non-zero-code
+    check as every other response parser in this module -- a real API
+    error must never look like "symbol not found.\""""
+    if pairs_resp.get("code") not in (0, None):
+        raise ValueError(f"get_trading_pairs returned a real API error: code={pairs_resp.get('code')} msg={pairs_resp.get('msg')!r}")
     pairs = pairs_resp.get("data") or []
     for pair in pairs:
         if pair.get("symbol") == symbol:
@@ -105,6 +109,22 @@ def _find_open_long_position(pos_resp: Dict[str, Any]) -> Optional[Dict[str, Any
     return matches[0] if matches else None
 
 
+def _find_pending_tpsl_for_position(tpsl_resp: Dict[str, Any], position_id: str) -> Optional[Dict[str, Any]]:
+    """get_pending_tp_sl_order()'s data is a LIST -- find the entry for
+    this position_id, confirming a TP/SL mutation actually registered on
+    the exchange rather than trusting the mutation call's own response
+    (same "REST response success != operation success" caution Bitunix's
+    own docs give). Same non-zero-code error handling as
+    _find_open_long_position()."""
+    if tpsl_resp.get("code") not in (0, None):
+        raise ValueError(f"get_pending_tp_sl_order returned a real API error: code={tpsl_resp.get('code')} msg={tpsl_resp.get('msg')!r}")
+    entries = tpsl_resp.get("data") or []
+    for e in entries:
+        if e.get("positionId") == position_id:
+            return e
+    return None
+
+
 async def _poll_order_until_filled(client: "executor_bitunix_client.BitunixClient", order_id: str) -> Dict[str, Any]:
     """Polls get_order_detail(order_id) -- the authoritative, ID-based
     status of THIS specific order -- up to _FILL_POLL_MAX_ATTEMPTS times.
@@ -119,6 +139,8 @@ async def _poll_order_until_filled(client: "executor_bitunix_client.BitunixClien
     for _ in range(_FILL_POLL_MAX_ATTEMPTS):
         await asyncio.sleep(_FILL_POLL_INTERVAL_SEC)
         last_resp = await client.get_order_detail(order_id=order_id)
+        if last_resp.get("code") not in (0, None):
+            break  # a real API error -- no point retrying the same bad call 10 times
         data = last_resp.get("data") or {}
         status = data.get("status")
         if status == "FILLED":
@@ -247,10 +269,35 @@ async def place_confirm_and_set_initial_tpsl(
         test_row.initial_tp_price = float(tp_str)
         test_row.initial_sl_price = float(sl_str)
         test_row.tpsl_exchange_order_id = tpsl_resp["data"]["orderId"]
+        db.flush()
+
+        # Independent confirmation: verify the TP/SL is ACTUALLY
+        # registered on the exchange, not just that the mutation call
+        # returned success -- same discipline as the order-fill check
+        # above, and for the same reason (a real incident already proved
+        # a successful-looking response isn't proof of anything here).
+        check_resp = await client.get_pending_tp_sl_order(symbol=_TEST_SYMBOL, position_id=test_row.position_id)
+        test_row.tpsl_check_response_json = json.dumps(check_resp, default=str)
+        db.flush()
+        registered = _find_pending_tpsl_for_position(check_resp, test_row.position_id)
+
+        if registered is None:
+            test_row.status = "FAILED"
+            test_row.error_detail = (
+                f"set_position_tpsl reported success (orderId={test_row.tpsl_exchange_order_id}) but no "
+                f"pending TP/SL found for positionId={test_row.position_id} on the very next check -- "
+                f"CHECK THE EXCHANGE DIRECTLY. Raw response saved (tpsl_check_response_json)."
+            )
+            db.flush()
+            executor_accounts.write_audit(
+                db, "TEST_MECHANISM_FAILED", test_row.error_detail,
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=check_resp)
+            return test_row
+
         test_row.status = "TPSL_SET"
         db.flush()
         executor_accounts.write_audit(
-            db, "TEST_INITIAL_TPSL_SET", f"initial TP={tp_str} SL={sl_str} set on positionId={test_row.position_id}",
+            db, "TEST_INITIAL_TPSL_SET", f"initial TP={tp_str} SL={sl_str} set and confirmed registered on positionId={test_row.position_id}",
             account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=tpsl_resp)
         return test_row
 
@@ -285,10 +332,33 @@ async def partial_close(
         test_row.partial_close_pct = pct
         test_row.partial_close_qty = float(qty_str)
         test_row.partial_close_exchange_order_id = resp["data"]["orderId"]
+        db.flush()
+
+        # Independent confirmation: this is a real order too, same as
+        # the opening one -- confirm it actually filled by its own ID
+        # rather than trusting place_order's response alone.
+        order_detail_resp = await _poll_order_until_filled(client, test_row.partial_close_exchange_order_id)
+        test_row.order_detail_response_json = json.dumps(order_detail_resp, default=str)
+        db.flush()
+        order_status = (order_detail_resp.get("data") or {}).get("status")
+
+        if order_status != "FILLED":
+            test_row.status = "FAILED"
+            test_row.error_detail = (
+                f"partial-close order placed (orderId={test_row.partial_close_exchange_order_id}) but "
+                f"get_order_detail reports status={order_status!r} after {_FILL_POLL_MAX_ATTEMPTS} "
+                f"attempts -- CHECK THE EXCHANGE DIRECTLY. Raw response saved (order_detail_response_json)."
+            )
+            db.flush()
+            executor_accounts.write_audit(
+                db, "TEST_MECHANISM_FAILED", test_row.error_detail,
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=order_detail_resp)
+            return test_row
+
         test_row.status = "PARTIAL_CLOSED"
         db.flush()
         executor_accounts.write_audit(
-            db, "TEST_PARTIAL_CLOSED", f"partial close of {qty_str} executed",
+            db, "TEST_PARTIAL_CLOSED", f"partial close of {qty_str} executed and confirmed filled",
             account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=resp)
         return test_row
     except Exception as e:
@@ -319,10 +389,33 @@ async def move_sl_to_breakeven(
         test_row.sl_breakeven_response_json = json.dumps(resp, default=str)
         test_row.breakeven_sl_price = float(sl_str)
         test_row.sl_breakeven_exchange_order_id = resp["data"]["orderId"]
+        db.flush()
+
+        # Independent confirmation: verify the moved SL is ACTUALLY
+        # registered at the new price, not just that modify returned
+        # success (same discipline as the initial TP/SL set above).
+        check_resp = await client.get_pending_tp_sl_order(symbol=_TEST_SYMBOL, position_id=test_row.position_id)
+        test_row.tpsl_check_response_json = json.dumps(check_resp, default=str)
+        db.flush()
+        registered = _find_pending_tpsl_for_position(check_resp, test_row.position_id)
+
+        if registered is None:
+            test_row.status = "FAILED"
+            test_row.error_detail = (
+                f"modify_position_tp_sl_order reported success (orderId={test_row.sl_breakeven_exchange_order_id}) "
+                f"but no pending TP/SL found for positionId={test_row.position_id} on the very next check -- "
+                f"CHECK THE EXCHANGE DIRECTLY. Raw response saved (tpsl_check_response_json)."
+            )
+            db.flush()
+            executor_accounts.write_audit(
+                db, "TEST_MECHANISM_FAILED", test_row.error_detail,
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=check_resp)
+            return test_row
+
         test_row.status = "SL_MOVED_BREAKEVEN"
         db.flush()
         executor_accounts.write_audit(
-            db, "TEST_SL_MOVED_TO_BREAKEVEN", f"SL moved to breakeven ({sl_str})",
+            db, "TEST_SL_MOVED_TO_BREAKEVEN", f"SL moved to breakeven ({sl_str}) and confirmed registered",
             account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=resp)
         return test_row
     except Exception as e:
@@ -346,10 +439,40 @@ async def flash_close_remainder(
     try:
         resp = await client.close_position(test_row.position_id)
         test_row.flash_close_response_json = json.dumps(resp, default=str)
+        db.flush()
+
+        # Independent confirmation: verify the position is ACTUALLY gone,
+        # not just that flash_close_position returned success. Re-checks
+        # a few times in case the exchange takes a moment to reflect the
+        # close, same pattern as the fill-confirmation polls above.
+        pos_resp: Dict[str, Any] = {}
+        still_open: Optional[Dict[str, Any]] = None
+        for _ in range(_FILL_POLL_MAX_ATTEMPTS):
+            await asyncio.sleep(_FILL_POLL_INTERVAL_SEC)
+            pos_resp = await client.get_position(_TEST_SYMBOL)
+            still_open = _find_open_long_position(pos_resp)
+            if still_open is None:
+                break
+        test_row.position_check_response_json = json.dumps(pos_resp, default=str)
+        db.flush()
+
+        if still_open is not None:
+            test_row.status = "FAILED"
+            test_row.error_detail = (
+                f"close_position reported success but a matching open LONG {_TEST_SYMBOL} position "
+                f"still exists after {_FILL_POLL_MAX_ATTEMPTS} checks -- CHECK THE EXCHANGE DIRECTLY. "
+                f"Raw response saved (position_check_response_json)."
+            )
+            db.flush()
+            executor_accounts.write_audit(
+                db, "TEST_MECHANISM_FAILED", test_row.error_detail,
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=pos_resp)
+            return test_row
+
         test_row.status = "FULLY_CLOSED"
         db.flush()
         executor_accounts.write_audit(
-            db, "TEST_POSITION_FLASH_CLOSED", "remainder flash-closed",
+            db, "TEST_POSITION_FLASH_CLOSED", "remainder flash-closed and confirmed no longer open",
             account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=resp)
         return test_row
     except Exception as e:

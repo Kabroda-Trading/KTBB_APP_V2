@@ -315,6 +315,21 @@ class BitunixClient:
                 body[key] = val
         return await self._request("POST", "/api/v1/futures/tpsl/position/modify_order", body=body)
 
+    async def get_pending_tp_sl_order(self, symbol: Optional[str] = None, position_id: Optional[str] = None) -> Dict[str, Any]:
+        """GET /api/v1/futures/tpsl/get_pending_orders -- verified against
+        bitunix.com/api-docs, 2026-09-05. Returns the position-level TP/SL
+        orders ACTUALLY REGISTERED on the exchange (tpPrice/slPrice
+        fields) -- used to independently confirm a set_position_tpsl()/
+        modify_position_tp_sl_order() call really took effect, per
+        Bitunix's own guidance that a successful REST response doesn't
+        guarantee the operation succeeded."""
+        query: Dict[str, Any] = {}
+        if symbol:
+            query["symbol"] = symbol
+        if position_id:
+            query["positionId"] = position_id
+        return await self._request("GET", "/api/v1/futures/tpsl/get_pending_orders", query=query or None)
+
     async def get_position_tiers(self, symbol: str) -> Dict[str, Any]:
         """GET /api/v1/futures/position/get_position_tiers -- verified
         against bitunix.com/api-docs, 2026-09-05. Returns tiered notional

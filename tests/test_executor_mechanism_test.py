@@ -109,7 +109,8 @@ def _install(monkeypatch, **fakes):
     proves a gate blocked BEFORE any exchange call, or that a step
     never reaches a call it shouldn't."""
     for name in ("get_position", "get_trading_pairs", "place_order", "get_order_detail",
-                 "set_position_tpsl", "modify_position_tp_sl_order", "close_position"):
+                 "set_position_tpsl", "modify_position_tp_sl_order", "close_position",
+                 "get_pending_tp_sl_order"):
         fake = fakes.get(name)
         if fake is None:
             async def _unexpected(self, *a, __name=name, **kw):
@@ -219,6 +220,10 @@ def test_happy_path_place_confirm_and_set_initial_tpsl(db, monkeypatch):
         assert kwargs["position_id"] == "pos1"
         return {"code": 0, "data": {"orderId": "tpsl1"}, "msg": "Success"}
 
+    async def fake_get_pending_tp_sl_order(self, symbol=None, position_id=None):
+        assert position_id == "pos1"
+        return {"code": 0, "data": [{"id": "tpsl1", "positionId": "pos1", "tpPrice": "101.0", "slPrice": "99.0"}], "msg": "Success"}
+
     call_state = {"get_position_calls": 0}
 
     async def fake_get_position_dispatch(self, symbol):
@@ -229,7 +234,7 @@ def test_happy_path_place_confirm_and_set_initial_tpsl(db, monkeypatch):
 
     _install(monkeypatch, get_position=fake_get_position_dispatch, get_trading_pairs=fake_get_trading_pairs,
               place_order=fake_place_order, get_order_detail=fake_get_order_detail,
-              set_position_tpsl=fake_set_position_tpsl)
+              set_position_tpsl=fake_set_position_tpsl, get_pending_tp_sl_order=fake_get_pending_tp_sl_order)
 
     test_row = asyncio.run(emt.place_confirm_and_set_initial_tpsl(db, account, actor="test@kabroda.com"))
 
@@ -346,7 +351,11 @@ def test_partial_close_happy_path_and_qty_math(db, monkeypatch):
         assert kwargs["position_id"] == "pos1"
         return {"code": 0, "data": {"orderId": "partial1"}, "msg": "Success"}
 
-    _install(monkeypatch, place_order=fake_place_order)
+    async def fake_get_order_detail(self, order_id=None, client_id=None):
+        assert order_id == "partial1"
+        return _order_detail_response(status="FILLED", order_id="partial1")
+
+    _install(monkeypatch, place_order=fake_place_order, get_order_detail=fake_get_order_detail)
 
     result = asyncio.run(emt.partial_close(db, account, test_row, actor="test@kabroda.com"))
     assert result.status == "PARTIAL_CLOSED"
@@ -354,6 +363,23 @@ def test_partial_close_happy_path_and_qty_math(db, monkeypatch):
     assert result.partial_close_pct == pytest.approx(0.50)
     assert result.partial_close_exchange_order_id == "partial1"
     assert _get_audit_event_types(db, test_row.id) == ["TEST_PARTIAL_CLOSED"]
+
+
+def test_partial_close_order_not_confirmed_filled_marks_failed_without_raising(db, monkeypatch):
+    # The partial-close order is a real order too -- if its own status
+    # never reaches FILLED, this must fail clearly, not silently mark
+    # PARTIAL_CLOSED on the strength of place_order's response alone.
+    account = _make_ready_account(db)
+    test_row = _make_tpsl_set_row(db, account, qty=0.0002)
+
+    _install(monkeypatch, place_order=_async({"code": 0, "data": {"orderId": "partial1"}, "msg": "Success"}),
+              get_order_detail=_async(_order_detail_response(status="NEW")))
+
+    result = asyncio.run(emt.partial_close(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "FAILED"
+    assert "CHECK THE EXCHANGE" in result.error_detail
+    assert "NEW" in result.order_detail_response_json
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_MECHANISM_FAILED"]
 
 
 def test_partial_close_refuses_zero_qty_underflow_without_sending_an_order(db, monkeypatch):
@@ -412,13 +438,33 @@ def test_move_sl_to_breakeven_happy_path_sets_price_to_exact_fill_price(db, monk
         assert kwargs["sl_price"] == "100.0"
         return {"code": 0, "data": {"orderId": "breakeven1"}, "msg": "Success"}
 
-    _install(monkeypatch, modify_position_tp_sl_order=fake_modify)
+    async def fake_get_pending_tp_sl_order(self, symbol=None, position_id=None):
+        assert position_id == "pos1"
+        return {"code": 0, "data": [{"id": "breakeven1", "positionId": "pos1", "slPrice": "100.0"}], "msg": "Success"}
+
+    _install(monkeypatch, modify_position_tp_sl_order=fake_modify, get_pending_tp_sl_order=fake_get_pending_tp_sl_order)
 
     result = asyncio.run(emt.move_sl_to_breakeven(db, account, test_row, actor="test@kabroda.com"))
     assert result.status == "SL_MOVED_BREAKEVEN"
     assert result.breakeven_sl_price == pytest.approx(100.0)
     assert result.sl_breakeven_exchange_order_id == "breakeven1"
     assert _get_audit_event_types(db, test_row.id) == ["TEST_SL_MOVED_TO_BREAKEVEN"]
+
+
+def test_move_sl_to_breakeven_not_registered_marks_failed_without_raising(db, monkeypatch):
+    # modify_position_tp_sl_order reports success, but the follow-up
+    # get_pending_tp_sl_order check finds nothing registered for this
+    # position -- must fail clearly rather than trust the mutation alone.
+    account = _make_ready_account(db)
+    test_row = _make_partial_closed_row(db, account, fill_price=100.0)
+
+    _install(monkeypatch, modify_position_tp_sl_order=_async({"code": 0, "data": {"orderId": "breakeven1"}, "msg": "Success"}),
+              get_pending_tp_sl_order=_async({"code": 0, "data": [], "msg": "Success"}))
+
+    result = asyncio.run(emt.move_sl_to_breakeven(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "FAILED"
+    assert "CHECK THE EXCHANGE" in result.error_detail
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_MECHANISM_FAILED"]
 
 
 def test_move_sl_to_breakeven_rejects_wrong_prior_status(db):
@@ -439,7 +485,7 @@ def test_flash_close_happy_path_from_partial_closed(db, monkeypatch):
         assert position_id == "pos1"
         return {"code": 0, "data": {"positionId": "pos1"}, "msg": "Success"}
 
-    _install(monkeypatch, close_position=fake_close)
+    _install(monkeypatch, close_position=fake_close, get_position=_async(_no_position_response()))
 
     result = asyncio.run(emt.flash_close_remainder(db, account, test_row, actor="test@kabroda.com"))
     assert result.status == "FULLY_CLOSED"
@@ -453,10 +499,27 @@ def test_flash_close_happy_path_from_sl_moved_breakeven(db, monkeypatch):
     test_row.breakeven_sl_price = 100.0
     db.commit()
 
-    _install(monkeypatch, close_position=_async({"code": 0, "data": {"positionId": "pos1"}, "msg": "Success"}))
+    _install(monkeypatch, close_position=_async({"code": 0, "data": {"positionId": "pos1"}, "msg": "Success"}),
+              get_position=_async(_no_position_response()))
 
     result = asyncio.run(emt.flash_close_remainder(db, account, test_row, actor="test@kabroda.com"))
     assert result.status == "FULLY_CLOSED"
+
+
+def test_flash_close_position_still_open_marks_failed_without_raising(db, monkeypatch):
+    # close_position reports success, but a follow-up get_position check
+    # still finds the position open -- must fail clearly, never assume
+    # the close worked just because the API said so.
+    account = _make_ready_account(db)
+    test_row = _make_partial_closed_row(db, account)
+
+    _install(monkeypatch, close_position=_async({"code": 0, "data": {"positionId": "pos1"}, "msg": "Success"}),
+              get_position=_async(_one_long_position_response(position_id="pos1", avg_open_price=100.0)))
+
+    result = asyncio.run(emt.flash_close_remainder(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "FAILED"
+    assert "CHECK THE EXCHANGE" in result.error_detail
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_MECHANISM_FAILED"]
 
 
 def test_flash_close_rejects_before_partial_close(db):

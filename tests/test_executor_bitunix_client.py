@@ -287,6 +287,24 @@ def test_get_order_detail_raises_when_neither_id_given(monkeypatch):
     assert calls == []
 
 
+def test_get_pending_tp_sl_order_calls_the_right_endpoint(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.get_pending_tp_sl_order(symbol="BTCUSDT", position_id="pos1"))
+    assert calls == [{"method": "GET", "path": "/api/v1/futures/tpsl/get_pending_orders",
+                       "query": {"symbol": "BTCUSDT", "positionId": "pos1"}, "body": None}]
+
+
+def test_get_pending_tp_sl_order_with_no_filters(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.get_pending_tp_sl_order())
+    assert calls == [{"method": "GET", "path": "/api/v1/futures/tpsl/get_pending_orders",
+                       "query": None, "body": None}]
+
+
 def test_get_position_tiers_calls_the_right_endpoint(monkeypatch):
     import asyncio
     client = ebc.BitunixClient("key", "secret")

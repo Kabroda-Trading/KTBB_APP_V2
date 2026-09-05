@@ -471,7 +471,8 @@ def init_db():
     # --- EXECUTOR STAGE 2 FIX (2026-09-05 -- real diagnostic gap found
     # live: the first three real runs never saved the fill-confirmation
     # check's own raw response, only place_order's) ---
-    for _col in ["order_detail_response_json TEXT", "position_check_response_json TEXT"]:
+    for _col in ["order_detail_response_json TEXT", "position_check_response_json TEXT",
+                 "tpsl_check_response_json TEXT"]:
         try:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE executor_mechanism_tests ADD COLUMN {_col}"))
@@ -1887,6 +1888,10 @@ class ExecutorMechanismTest(Base):
     # real mismatch is diagnosable from this table directly next time.
     order_detail_response_json = Column(Text, nullable=True)
     position_check_response_json = Column(Text, nullable=True)
+    # Independent confirmation read for any TP/SL mutation (initial set
+    # AND the breakeven move) -- overwritten by whichever ran most
+    # recently, same "last diagnostic snapshot" spirit as the two above.
+    tpsl_check_response_json = Column(Text, nullable=True)
 
     position_id = Column(String, nullable=True)
     fill_price = Column(Float, nullable=True)             # real avgOpenPrice read back

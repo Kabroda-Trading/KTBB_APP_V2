@@ -371,7 +371,10 @@ def _patch_happy_path_client(monkeypatch):
 
     async def fake_get_position(self, symbol):
         call_state["get_position_calls"] += 1
-        if call_state["get_position_calls"] == 1:
+        # #1: pre-flight (nothing open yet). #2: post-fill lookup (found).
+        # #3+: flash-close's own confirmation check -- the position is
+        # gone by then.
+        if call_state["get_position_calls"] in (1, 3):
             return {"code": 0, "data": [], "msg": "Success"}
         return {"code": 0, "data": [{"positionId": "pos1", "symbol": "BTCUSDT", "side": "LONG", "avgOpenPrice": "100.0", "qty": "0.0002"}], "msg": "Success"}
 
@@ -390,6 +393,9 @@ def _patch_happy_path_client(monkeypatch):
     async def fake_modify_tpsl(self, **kwargs):
         return {"code": 0, "data": {"orderId": "breakeven1"}, "msg": "Success"}
 
+    async def fake_get_pending_tp_sl_order(self, symbol=None, position_id=None):
+        return {"code": 0, "data": [{"id": "tpsl1", "positionId": position_id, "tpPrice": "101.0", "slPrice": "99.0"}], "msg": "Success"}
+
     async def fake_close_position(self, position_id):
         return {"code": 0, "data": {"positionId": position_id}, "msg": "Success"}
 
@@ -397,6 +403,7 @@ def _patch_happy_path_client(monkeypatch):
     monkeypatch.setattr(ebc.BitunixClient, "get_trading_pairs", fake_get_trading_pairs)
     monkeypatch.setattr(ebc.BitunixClient, "place_order", fake_place_order)
     monkeypatch.setattr(ebc.BitunixClient, "get_order_detail", fake_get_order_detail)
+    monkeypatch.setattr(ebc.BitunixClient, "get_pending_tp_sl_order", fake_get_pending_tp_sl_order)
     monkeypatch.setattr(ebc.BitunixClient, "set_position_tpsl", fake_set_position_tpsl)
     monkeypatch.setattr(ebc.BitunixClient, "modify_position_tp_sl_order", fake_modify_tpsl)
     monkeypatch.setattr(ebc.BitunixClient, "close_position", fake_close_position)
