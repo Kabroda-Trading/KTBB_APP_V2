@@ -168,6 +168,27 @@ class BitunixClient:
         page's documented response shape."""
         return await self._request("GET", "/api/v1/futures/account", query={"marginCoin": margin_coin})
 
+    async def get_order_detail(self, order_id: Optional[str] = None, client_id: Optional[str] = None) -> Dict[str, Any]:
+        """GET /api/v1/futures/trade/get_order_detail -- verified against
+        bitunix.com/api-docs, 2026-09-05. At least one of order_id/client_id
+        required. Response `status` values: INIT (prepare) | NEW (pending)
+        | PART_FILLED | CANCELED | FILLED. THIS, not a positions-list scan,
+        is the authoritative way to confirm a specific order actually
+        filled -- added after a real incident (2026-09-05) where polling
+        get_position() and matching on symbol+side never found real,
+        confirmed-filled positions in 10 attempts; querying the order's
+        own status by orderId is direct and unambiguous, immune to
+        whatever the positions list's side/symbol fields actually look
+        like in practice."""
+        if not order_id and not client_id:
+            raise ValueError("get_order_detail requires order_id or client_id")
+        query: Dict[str, Any] = {}
+        if order_id:
+            query["orderId"] = order_id
+        if client_id:
+            query["clientId"] = client_id
+        return await self._request("GET", "/api/v1/futures/trade/get_order_detail", query=query)
+
     async def get_position(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         """GET /api/v1/futures/position/get_pending_positions -- verified
         against bitunix.com/api-docs/futures/position/get_pending_positions.html.

@@ -83,6 +83,10 @@ def _one_long_position_response(position_id="pos1", avg_open_price=100.0):
     }], "msg": "Success"}
 
 
+def _order_detail_response(status="FILLED", order_id="order1"):
+    return {"code": 0, "data": {"orderId": order_id, "status": status}, "msg": "Success"}
+
+
 def _trading_pairs_response(min_trade_volume="0.0001", base_precision=4, quote_precision=1):
     return {"code": 0, "data": [{
         "symbol": "BTCUSDT", "minTradeVolume": min_trade_volume,
@@ -104,7 +108,7 @@ def _install(monkeypatch, **fakes):
     BitunixClient method not passed raises AssertionError if called --
     proves a gate blocked BEFORE any exchange call, or that a step
     never reaches a call it shouldn't."""
-    for name in ("get_position", "get_trading_pairs", "place_order",
+    for name in ("get_position", "get_trading_pairs", "place_order", "get_order_detail",
                  "set_position_tpsl", "modify_position_tp_sl_order", "close_position"):
         fake = fakes.get(name)
         if fake is None:
@@ -184,13 +188,11 @@ def test_pre_flight_refuses_if_an_open_long_position_already_exists(db, monkeypa
 def test_happy_path_place_confirm_and_set_initial_tpsl(db, monkeypatch):
     account = _make_ready_account(db)
 
-    call_state = {"get_position_calls": 0}
-
     async def fake_get_position(self, symbol):
-        call_state["get_position_calls"] += 1
-        if call_state["get_position_calls"] == 1:
-            return _no_position_response()  # pre-flight: nothing open yet
-        return _one_long_position_response(position_id="pos1", avg_open_price=100.0)  # poll: filled
+        return _no_position_response()  # pre-flight only, nothing open yet -- and the
+        # subsequent post-fill lookup, since this mock is symmetric (matches
+        # neither call needs to distinguish anymore now that fill confirmation
+        # itself no longer goes through get_position).
 
     async def fake_get_trading_pairs(self, symbol):
         return _trading_pairs_response()
@@ -206,12 +208,28 @@ def test_happy_path_place_confirm_and_set_initial_tpsl(db, monkeypatch):
         assert kwargs["order_type"] == "MARKET"
         return {"code": 0, "data": {"orderId": "order1", "clientId": "client1"}, "msg": "Success"}
 
+    async def fake_get_order_detail(self, order_id=None, client_id=None):
+        assert order_id == "order1"
+        return _order_detail_response(status="FILLED", order_id="order1")
+
+    async def fake_get_position_after_fill(self, symbol):
+        return _one_long_position_response(position_id="pos1", avg_open_price=100.0)
+
     async def fake_set_position_tpsl(self, **kwargs):
         assert kwargs["position_id"] == "pos1"
         return {"code": 0, "data": {"orderId": "tpsl1"}, "msg": "Success"}
 
-    _install(monkeypatch, get_position=fake_get_position, get_trading_pairs=fake_get_trading_pairs,
-              place_order=fake_place_order, set_position_tpsl=fake_set_position_tpsl)
+    call_state = {"get_position_calls": 0}
+
+    async def fake_get_position_dispatch(self, symbol):
+        call_state["get_position_calls"] += 1
+        if call_state["get_position_calls"] == 1:
+            return await fake_get_position(self, symbol)  # pre-flight
+        return await fake_get_position_after_fill(self, symbol)  # post-fill lookup
+
+    _install(monkeypatch, get_position=fake_get_position_dispatch, get_trading_pairs=fake_get_trading_pairs,
+              place_order=fake_place_order, get_order_detail=fake_get_order_detail,
+              set_position_tpsl=fake_set_position_tpsl)
 
     test_row = asyncio.run(emt.place_confirm_and_set_initial_tpsl(db, account, actor="test@kabroda.com"))
 
@@ -223,6 +241,8 @@ def test_happy_path_place_confirm_and_set_initial_tpsl(db, monkeypatch):
     assert test_row.initial_tp_price == pytest.approx(101.0)   # +1% of 100
     assert test_row.initial_sl_price == pytest.approx(99.0)    # -1% of 100
     assert test_row.tpsl_exchange_order_id == "tpsl1"
+    assert "FILLED" in test_row.order_detail_response_json
+    assert "pos1" in test_row.position_check_response_json
 
     events = _get_audit_event_types(db, test_row.id)
     assert events == [
@@ -234,15 +254,35 @@ def test_happy_path_place_confirm_and_set_initial_tpsl(db, monkeypatch):
 def test_fill_poll_timeout_marks_failed_without_raising(db, monkeypatch):
     account = _make_ready_account(db)
 
-    async def fake_get_position(self, symbol):
-        return _no_position_response()  # never fills
-
-    _install(monkeypatch, get_position=fake_get_position, get_trading_pairs=_async(_trading_pairs_response()),
-              place_order=_async({"code": 0, "data": {"orderId": "order1"}, "msg": "Success"}))
+    _install(monkeypatch, get_position=_async(_no_position_response()),
+              get_trading_pairs=_async(_trading_pairs_response()),
+              place_order=_async({"code": 0, "data": {"orderId": "order1"}, "msg": "Success"}),
+              get_order_detail=_async(_order_detail_response(status="NEW")))  # never reaches FILLED
 
     test_row = asyncio.run(emt.place_confirm_and_set_initial_tpsl(db, account, actor="test@kabroda.com"))
     assert test_row.status == "FAILED"
     assert "CHECK THE EXCHANGE" in test_row.error_detail
+    assert "NEW" in test_row.order_detail_response_json
+    events = _get_audit_event_types(db, test_row.id)
+    assert events == ["TEST_MECHANISM_STARTED", "TEST_ORDER_PLACED", "TEST_MECHANISM_FAILED"]
+
+
+def test_fill_confirmed_but_no_matching_position_marks_failed_without_raising(db, monkeypatch):
+    # A genuinely surprising edge case now that fill confirmation is
+    # ID-based: the order says FILLED, but the very next position lookup
+    # still doesn't find a match. Must fail clearly, not crash, and must
+    # save the raw position-check response for diagnosis.
+    account = _make_ready_account(db)
+
+    _install(monkeypatch, get_position=_async(_no_position_response()),
+              get_trading_pairs=_async(_trading_pairs_response()),
+              place_order=_async({"code": 0, "data": {"orderId": "order1"}, "msg": "Success"}),
+              get_order_detail=_async(_order_detail_response(status="FILLED")))
+
+    test_row = asyncio.run(emt.place_confirm_and_set_initial_tpsl(db, account, actor="test@kabroda.com"))
+    assert test_row.status == "FAILED"
+    assert "CHECK THE EXCHANGE" in test_row.error_detail
+    assert test_row.position_check_response_json is not None
     events = _get_audit_event_types(db, test_row.id)
     assert events == ["TEST_MECHANISM_STARTED", "TEST_ORDER_PLACED", "TEST_MECHANISM_FAILED"]
 
@@ -264,6 +304,7 @@ def test_exception_mid_sequence_marks_failed_reraises_and_preserves_prior_progre
     _install(monkeypatch, get_position=fake_get_position,
               get_trading_pairs=_async(_trading_pairs_response()),
               place_order=_async({"code": 0, "data": {"orderId": "order1"}, "msg": "Success"}),
+              get_order_detail=_async(_order_detail_response(status="FILLED")),
               set_position_tpsl=fake_set_position_tpsl_raises)
 
     with pytest.raises(RuntimeError, match="simulated exchange error"):

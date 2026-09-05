@@ -381,6 +381,9 @@ def _patch_happy_path_client(monkeypatch):
     async def fake_place_order(self, **kwargs):
         return {"code": 0, "data": {"orderId": "order1", "clientId": "client1"}, "msg": "Success"}
 
+    async def fake_get_order_detail(self, order_id=None, client_id=None):
+        return {"code": 0, "data": {"orderId": order_id, "status": "FILLED"}, "msg": "Success"}
+
     async def fake_set_position_tpsl(self, **kwargs):
         return {"code": 0, "data": {"orderId": "tpsl1"}, "msg": "Success"}
 
@@ -393,6 +396,7 @@ def _patch_happy_path_client(monkeypatch):
     monkeypatch.setattr(ebc.BitunixClient, "get_position", fake_get_position)
     monkeypatch.setattr(ebc.BitunixClient, "get_trading_pairs", fake_get_trading_pairs)
     monkeypatch.setattr(ebc.BitunixClient, "place_order", fake_place_order)
+    monkeypatch.setattr(ebc.BitunixClient, "get_order_detail", fake_get_order_detail)
     monkeypatch.setattr(ebc.BitunixClient, "set_position_tpsl", fake_set_position_tpsl)
     monkeypatch.setattr(ebc.BitunixClient, "modify_position_tp_sl_order", fake_modify_tpsl)
     monkeypatch.setattr(ebc.BitunixClient, "close_position", fake_close_position)

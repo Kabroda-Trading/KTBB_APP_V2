@@ -87,7 +87,15 @@ def _find_open_long_position(pos_resp: Dict[str, Any]) -> Optional[Dict[str, Any
     """get_position()'s data is a LIST -- filter for an open LONG BTCUSDT
     position. Returns the single match, None if there isn't one, or
     raises a clear error if there's more than one -- an ambiguous state
-    this module refuses to guess through rather than silently picking one."""
+    this module refuses to guess through rather than silently picking one.
+
+    2026-09-05 fix: a real Bitunix API-level error (non-zero `code`) was
+    being silently treated as "zero positions" because `pos_resp.get(
+    "data") or []` can't distinguish `data: null` (a real error response)
+    from `data: []` (a genuinely empty, successful one) -- this is now
+    checked explicitly and raised, never swallowed."""
+    if pos_resp.get("code") not in (0, None):
+        raise ValueError(f"get_position returned a real API error: code={pos_resp.get('code')} msg={pos_resp.get('msg')!r}")
     positions: List[Dict[str, Any]] = pos_resp.get("data") or []
     matches = [p for p in positions if p.get("symbol") == _TEST_SYMBOL and p.get("side") == _TEST_DIRECTION]
     if len(matches) > 1:
@@ -95,6 +103,29 @@ def _find_open_long_position(pos_resp: Dict[str, Any]) -> Optional[Dict[str, Any
             f"found {len(matches)} open {_TEST_DIRECTION} {_TEST_SYMBOL} positions -- "
             f"ambiguous, refusing to guess which one belongs to this test")
     return matches[0] if matches else None
+
+
+async def _poll_order_until_filled(client: "executor_bitunix_client.BitunixClient", order_id: str) -> Dict[str, Any]:
+    """Polls get_order_detail(order_id) -- the authoritative, ID-based
+    status of THIS specific order -- up to _FILL_POLL_MAX_ATTEMPTS times.
+    Returns the LAST raw response regardless of outcome (caller decides
+    what to do with `status`). This replaces scanning get_position() for
+    a symbol+side match as the fill-confirmation gate: a real incident
+    (2026-09-05) showed 3 orders that genuinely filled (confirmed on
+    Bitunix's own UI) never matched via that scan in 10 attempts each --
+    querying the order's own status by ID is direct and can't suffer
+    from whatever the positions list's fields actually look like."""
+    last_resp: Dict[str, Any] = {}
+    for _ in range(_FILL_POLL_MAX_ATTEMPTS):
+        await asyncio.sleep(_FILL_POLL_INTERVAL_SEC)
+        last_resp = await client.get_order_detail(order_id=order_id)
+        data = last_resp.get("data") or {}
+        status = data.get("status")
+        if status == "FILLED":
+            break
+        if status == "CANCELED":
+            break  # definitive terminal state -- no point polling further
+    return last_resp
 
 
 async def place_confirm_and_set_initial_tpsl(
@@ -152,25 +183,48 @@ async def place_confirm_and_set_initial_tpsl(
             db, "TEST_ORDER_PLACED", f"tiny order placed, exchange orderId={test_row.exchange_order_id}",
             account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=place_resp)
 
-        position = None
-        for _ in range(_FILL_POLL_MAX_ATTEMPTS):
-            await asyncio.sleep(_FILL_POLL_INTERVAL_SEC)
-            pos_resp = await client.get_position(_TEST_SYMBOL)
-            position = _find_open_long_position(pos_resp)
-            if position is not None:
-                break
+        # Step 1: confirm the ORDER itself filled, by its own ID -- the
+        # authoritative check (see _poll_order_until_filled's docstring
+        # for why this replaced a positions-list scan).
+        order_detail_resp = await _poll_order_until_filled(client, test_row.exchange_order_id)
+        test_row.order_detail_response_json = json.dumps(order_detail_resp, default=str)
+        db.flush()
+        order_status = (order_detail_resp.get("data") or {}).get("status")
+
+        if order_status != "FILLED":
+            test_row.status = "FAILED"
+            test_row.error_detail = (
+                f"order placed (orderId={test_row.exchange_order_id}) but get_order_detail "
+                f"reports status={order_status!r} after {_FILL_POLL_MAX_ATTEMPTS} attempts -- "
+                f"CHECK THE EXCHANGE DIRECTLY before taking any further action on this account. "
+                f"Raw response saved on this row (order_detail_response_json)."
+            )
+            db.flush()
+            executor_accounts.write_audit(
+                db, "TEST_MECHANISM_FAILED", test_row.error_detail,
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=order_detail_resp)
+            return test_row  # does NOT raise -- "go look at the exchange," not a code bug
+
+        # Step 2: the order is confirmed FILLED -- now find the resulting
+        # position (for positionId/avgOpenPrice, needed by every later
+        # step). Always save the raw response, filled-match or not.
+        pos_resp = await client.get_position(_TEST_SYMBOL)
+        test_row.position_check_response_json = json.dumps(pos_resp, default=str)
+        db.flush()
+        position = _find_open_long_position(pos_resp)
 
         if position is None:
             test_row.status = "FAILED"
             test_row.error_detail = (
-                f"order placed (orderId={test_row.exchange_order_id}) but no matching open "
-                f"position found after {_FILL_POLL_MAX_ATTEMPTS} attempts -- CHECK THE EXCHANGE "
-                f"DIRECTLY before taking any further action on this account")
+                f"order confirmed FILLED (orderId={test_row.exchange_order_id}) but no matching "
+                f"open position found on the very next get_position call -- CHECK THE EXCHANGE "
+                f"DIRECTLY. Raw response saved on this row (position_check_response_json)."
+            )
             db.flush()
             executor_accounts.write_audit(
                 db, "TEST_MECHANISM_FAILED", test_row.error_detail,
-                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor)
-            return test_row  # does NOT raise -- "go look at the exchange," not a code bug
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=pos_resp)
+            return test_row
 
         test_row.position_id = position["positionId"]
         test_row.fill_price = float(position["avgOpenPrice"])

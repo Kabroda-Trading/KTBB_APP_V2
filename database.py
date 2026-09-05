@@ -468,6 +468,16 @@ def init_db():
     except Exception:
         pass
 
+    # --- EXECUTOR STAGE 2 FIX (2026-09-05 -- real diagnostic gap found
+    # live: the first three real runs never saved the fill-confirmation
+    # check's own raw response, only place_order's) ---
+    for _col in ["order_detail_response_json TEXT", "position_check_response_json TEXT"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE executor_mechanism_tests ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -1867,6 +1877,16 @@ class ExecutorMechanismTest(Base):
     exchange_order_id = Column(String, nullable=True)
     exchange_client_id = Column(String, nullable=True)
     place_order_response_json = Column(Text, nullable=True)
+
+    # 2026-09-05, added after a real incident: the first three live runs
+    # all reported FAILED ("no matching position found") despite the
+    # orders genuinely filling on the exchange (confirmed via Bitunix's
+    # own UI) -- because the ONLY response ever saved was place_order's,
+    # not the fill-confirmation checks that actually failed to match.
+    # These two always get the last raw response, filled or not, so a
+    # real mismatch is diagnosable from this table directly next time.
+    order_detail_response_json = Column(Text, nullable=True)
+    position_check_response_json = Column(Text, nullable=True)
 
     position_id = Column(String, nullable=True)
     fill_price = Column(Float, nullable=True)             # real avgOpenPrice read back
