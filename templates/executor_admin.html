@@ -214,13 +214,49 @@ async function loadAccounts() {
                 <div class="danger-zone-title">Real Money -- Live Mechanism Test (BTCUSDT LONG only)</div>
                 <p class="empty">Loading...</p>
             </div>
-            <div class="risk-form" id="riskForm-${a.id}">
-                <label>Risk last ($)<input type="number" step="0.01" id="riskLast-${a.id}"></label>
-                <label>Floor ($)<input type="number" step="0.01" id="riskFloor-${a.id}"></label>
-                <label>Cap ($)<input type="number" step="0.01" id="riskCap-${a.id}"></label>
-                <label>Compounding factor<input type="number" step="0.01" id="riskFactor-${a.id}"></label>
-                <button class="btn" onclick="saveRiskState(${a.id})" style="align-self:flex-end;">SAVE</button>
+            <div class="danger-zone" id="sizingPolicy-${a.id}" style="border-color:#1e3a5f; background:rgba(30,58,95,0.08);">
+                <div class="danger-zone-title" style="color:#93c5fd;">Sizing Policy</div>
+                <div class="risk-form">
+                    <button class="btn" onclick="applyPreset(${a.id}, 'conservative')">CONSERVATIVE -- START SMALL</button>
+                    <button class="btn" onclick="applyPreset(${a.id}, 'steady_grow')">STEADY GROW -- ROLL THE PROFITS</button>
+                    <button class="btn" onclick="applyPreset(${a.id}, 'scale_with_account')">SCALE WITH ACCOUNT</button>
+                </div>
+                <details style="margin-top:10px;">
+                    <summary style="cursor:pointer; font-size:11px; color:#94a3b8;">Custom -- edit fields directly</summary>
+                    <div class="risk-form">
+                        <label>Base $<input type="number" step="0.01" id="sizeBaseUsd-${a.id}" style="width:90px;"></label>
+                        <label>Base % of balance<input type="number" step="0.001" id="sizeBasePct-${a.id}" style="width:90px;"></label>
+                        <label>Roll-in %<input type="number" step="0.001" id="sizeRollPct-${a.id}" style="width:90px;"></label>
+                        <label>Cap $<input type="number" step="0.01" id="sizeCapUsd-${a.id}" style="width:90px;"></label>
+                        <label>Cap %<input type="number" step="0.001" id="sizeCapPct-${a.id}" style="width:90px;"></label>
+                        <label>Tier threshold $<input type="number" step="0.01" id="sizeTierThreshold-${a.id}" style="width:90px;"></label>
+                        <label>Tier flat $<input type="number" step="0.01" id="sizeTierFlat-${a.id}" style="width:90px;"></label>
+                        <label>Derisk after N losses<input type="number" step="1" id="sizeDeriskN-${a.id}" style="width:70px;"></label>
+                        <label>Derisk factor<input type="number" step="0.01" id="sizeDeriskFactor-${a.id}" style="width:70px;"></label>
+                    </div>
+                </details>
+                <div class="risk-form" style="margin-top:8px;">
+                    <button class="btn" onclick="previewSizingPolicy(${a.id})">PREVIEW (does not save)</button>
+                    <button class="btn btn-ok" onclick="saveSizingPolicy(${a.id})">SAVE SIZING POLICY</button>
+                </div>
+                <div id="sizingPreview-${a.id}" class="empty" style="margin-top:8px; white-space:pre-wrap;"></div>
+                <div class="risk-form" style="margin-top:10px; border-top:1px solid #1e293b; padding-top:10px;">
+                    <label>Trade result P&amp;L ($)<input type="number" step="0.01" id="tradeResultPnl-${a.id}" style="width:110px;"></label>
+                    <label>Trade plan ID (optional)<input type="number" step="1" id="tradeResultPlanId-${a.id}" style="width:90px;"></label>
+                    <button class="btn" onclick="recordTradeResult(${a.id})" style="align-self:flex-end;">RECORD TRADE RESULT</button>
+                </div>
+                <p class="empty" style="margin-top:6px;">Manual entry -- until the trade-management monitor can detect a closed position automatically, a human reports the result here.</p>
             </div>
+            <details style="margin-top:10px;">
+                <summary style="cursor:pointer; font-size:11px; color:#94a3b8;">Advanced / Legacy Risk State</summary>
+                <div class="risk-form" id="riskForm-${a.id}">
+                    <label>Risk last ($)<input type="number" step="0.01" id="riskLast-${a.id}"></label>
+                    <label>Floor ($)<input type="number" step="0.01" id="riskFloor-${a.id}"></label>
+                    <label>Cap ($)<input type="number" step="0.01" id="riskCap-${a.id}"></label>
+                    <label>Compounding factor<input type="number" step="0.01" id="riskFactor-${a.id}"></label>
+                    <button class="btn" onclick="saveRiskState(${a.id})" style="align-self:flex-end;">SAVE</button>
+                </div>
+            </details>
             <details style="margin-top:10px;">
                 <summary style="cursor:pointer; font-size:11px; color:#94a3b8;">Set / rotate exchange credentials</summary>
                 <div class="risk-form">
@@ -242,7 +278,113 @@ async function loadAccounts() {
             document.getElementById(`riskFactor-${a.id}`).value = rs.risk_state.compounding_factor ?? "";
         }
         loadTinyTestForAccount(a.id, a.has_credentials);
+        loadSizingPolicy(a.id);
     }
+}
+
+// ------------------------------------------------------------------ sizing policy wizard (2026-09-05)
+// Every preset button just fills the (always-present, Custom-details-
+// hidden) fields with canned numbers and fires a preview -- nothing is
+// persisted until SAVE SIZING POLICY is clicked. The preview panel is
+// rendered from server-computed JSON only (POST .../sizing-policy/
+// preview calls the same compute_stake() the real sizing call site
+// uses) -- no math is ever duplicated into this JS, matching this
+// page's own verify-auth/tiny-test precedent.
+
+const SIZING_PRESETS = {
+    conservative: {
+        preset_name: "conservative", base_risk_usd: 100, base_risk_pct: null, roll_in_pct: null,
+        cap_abs_usd: null, cap_pct: null, tier_threshold_usd: null, tier_flat_usd: null,
+        derisk_n: null, derisk_factor: null,
+    },
+    steady_grow: {
+        preset_name: "steady_grow", base_risk_usd: 100, base_risk_pct: null, roll_in_pct: 0.10,
+        cap_abs_usd: 1000, cap_pct: null, tier_threshold_usd: null, tier_flat_usd: null,
+        derisk_n: null, derisk_factor: null,
+    },
+    scale_with_account: {
+        preset_name: "scale_with_account", base_risk_usd: null, base_risk_pct: 0.10, roll_in_pct: null,
+        cap_abs_usd: null, cap_pct: null, tier_threshold_usd: 10000, tier_flat_usd: 1000,
+        derisk_n: null, derisk_factor: null,
+    },
+};
+
+function _fillSizingPolicyFields(accountId, policy) {
+    document.getElementById(`sizeBaseUsd-${accountId}`).value = policy.base_risk_usd ?? "";
+    document.getElementById(`sizeBasePct-${accountId}`).value = policy.base_risk_pct ?? "";
+    document.getElementById(`sizeRollPct-${accountId}`).value = policy.roll_in_pct ?? "";
+    document.getElementById(`sizeCapUsd-${accountId}`).value = policy.cap_abs_usd ?? "";
+    document.getElementById(`sizeCapPct-${accountId}`).value = policy.cap_pct ?? "";
+    document.getElementById(`sizeTierThreshold-${accountId}`).value = policy.tier_threshold_usd ?? "";
+    document.getElementById(`sizeTierFlat-${accountId}`).value = policy.tier_flat_usd ?? "";
+    document.getElementById(`sizeDeriskN-${accountId}`).value = policy.derisk_n ?? "";
+    document.getElementById(`sizeDeriskFactor-${accountId}`).value = policy.derisk_factor ?? "";
+}
+
+function _readSizingPolicyFields(accountId) {
+    const num = (id) => {
+        const v = document.getElementById(id).value;
+        return v === "" ? null : parseFloat(v);
+    };
+    return {
+        base_risk_usd: num(`sizeBaseUsd-${accountId}`), base_risk_pct: num(`sizeBasePct-${accountId}`),
+        roll_in_pct: num(`sizeRollPct-${accountId}`),
+        cap_abs_usd: num(`sizeCapUsd-${accountId}`), cap_pct: num(`sizeCapPct-${accountId}`),
+        tier_threshold_usd: num(`sizeTierThreshold-${accountId}`), tier_flat_usd: num(`sizeTierFlat-${accountId}`),
+        derisk_n: num(`sizeDeriskN-${accountId}`), derisk_factor: num(`sizeDeriskFactor-${accountId}`),
+    };
+}
+
+async function loadSizingPolicy(accountId) {
+    const data = await api(`/api/executor/accounts/${accountId}/sizing-policy`);
+    if (data.ok) _fillSizingPolicyFields(accountId, data.sizing_policy);
+}
+
+async function applyPreset(accountId, name) {
+    _fillSizingPolicyFields(accountId, SIZING_PRESETS[name]);
+    await previewSizingPolicy(accountId);
+}
+
+function _formatStakeLine(label, d) {
+    return `${label}: $${d.stake_usd.toFixed(2)}  (base $${d.base.toFixed(2)}, tier ${d.tier_applied ? "APPLIED" : "no"}, `
+        + `derisk ${d.derisk_applied ? "APPLIED" : "no"}, cap binding: ${d.cap_binding})`;
+}
+
+async function previewSizingPolicy(accountId) {
+    const box = document.getElementById(`sizingPreview-${accountId}`);
+    box.textContent = "Calculating...";
+    const resp = await api(`/api/executor/accounts/${accountId}/sizing-policy/preview`,
+        { method: "POST", body: JSON.stringify(_readSizingPolicyFields(accountId)) });
+    if (!resp.ok) { box.textContent = "Preview failed: " + (resp.error || "unknown error"); return; }
+    const p = resp.preview;
+    box.textContent = [
+        _formatStakeLine("Current", p.current),
+        _formatStakeLine("After a +2R win", p.after_2r_win),
+        _formatStakeLine("After a -1R loss", p.after_1r_loss),
+        `Balance source: ${p.current.balance_source}`,
+    ].join("\n");
+}
+
+async function saveSizingPolicy(accountId) {
+    const resp = await api(`/api/executor/accounts/${accountId}/sizing-policy`,
+        { method: "POST", body: JSON.stringify(_readSizingPolicyFields(accountId)) });
+    if (!resp.ok) { alert(resp.error || "failed to save sizing policy"); return; }
+    _fillSizingPolicyFields(accountId, resp.sizing_policy);
+    await previewSizingPolicy(accountId);
+}
+
+async function recordTradeResult(accountId) {
+    const pnlEl = document.getElementById(`tradeResultPnl-${accountId}`);
+    const pnl_usd = parseFloat(pnlEl.value);
+    if (isNaN(pnl_usd)) { alert("Enter the trade's realized P&L in dollars (negative for a loss)."); return; }
+    const planIdRaw = document.getElementById(`tradeResultPlanId-${accountId}`).value;
+    const trade_plan_id = planIdRaw === "" ? null : parseInt(planIdRaw, 10);
+    const resp = await api(`/api/executor/accounts/${accountId}/record-trade-result`,
+        { method: "POST", body: JSON.stringify({ pnl_usd, trade_plan_id }) });
+    if (!resp.ok) { alert(resp.error || "failed to record trade result"); return; }
+    pnlEl.value = "";
+    document.getElementById(`tradeResultPlanId-${accountId}`).value = "";
+    alert(`Recorded. risk_last_usd now $${resp.risk_state.risk_last_usd.toFixed(2)}, consecutive_losses=${resp.risk_state.consecutive_losses}.`);
 }
 
 // ------------------------------------------------------------------ tiny order mechanism test (Stage 2, 2026-09-05)
