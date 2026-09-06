@@ -70,7 +70,7 @@ function buildSandbox(fetchCalls) {
     fetch: async (requestPath, opts) => {
       fetchCalls.push({ path: requestPath, opts });
       let body = { ok: true };
-      if (/\/tiny-test\/(place|\d+\/(partial-close|move-sl-breakeven|flash-close))$/.test(requestPath)) {
+      if (/\/tiny-test\/(place|\d+\/(partial-close|move-sl-breakeven|flash-close|place-resting-t1-limit|check-resting-t1-limit-status|cancel-resting-t1-limit))$/.test(requestPath)) {
         body = { ok: true, test: { id: 1, status: 'TPSL_SET' } };
       } else if (/\/tiny-test$/.test(requestPath)) {
         body = { ok: true, tests: [] };
@@ -119,6 +119,11 @@ async function main() {
     { label: 'partialCloseTinyTest', expectPath: /\/tiny-test\/5\/partial-close$/ },
     { label: 'moveSlBreakevenTinyTest', expectPath: /\/tiny-test\/5\/move-sl-breakeven$/ },
     { label: 'flashCloseTinyTest', expectPath: /\/tiny-test\/5\/flash-close$/ },
+    // 2026-09-06, ladder-test completion build -- same bug class this
+    // harness exists to catch, new surface area of it.
+    { label: 'placeRestingT1Limit', expectPath: /\/tiny-test\/5\/place-resting-t1-limit$/ },
+    { label: 'checkRestingT1LimitStatus', expectPath: /\/tiny-test\/5\/check-resting-t1-limit-status$/ },
+    { label: 'cancelRestingT1Limit', expectPath: /\/tiny-test\/5\/cancel-resting-t1-limit$/ },
   ];
 
   const results = [];

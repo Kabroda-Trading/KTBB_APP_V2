@@ -392,7 +392,7 @@ async function recordTradeResult(accountId) {
 // a JS prompt() -- a second, visible layer of friction on top of the
 // server's own gating.
 
-const _TINY_TEST_ACTIVE_STATUSES = ["STARTED", "ORDER_PLACED", "FILL_CONFIRMED", "TPSL_SET", "PARTIAL_CLOSED", "SL_MOVED_BREAKEVEN"];
+const _TINY_TEST_ACTIVE_STATUSES = ["STARTED", "ORDER_PLACED", "FILL_CONFIRMED", "TPSL_SET", "T1_LIMIT_PLACED", "PARTIAL_CLOSED", "SL_MOVED_BREAKEVEN"];
 
 async function loadTinyTestForAccount(accountId, hasCredentials) {
     const box = document.getElementById(`tinyTest-${accountId}`);
@@ -434,9 +434,29 @@ function renderTinyTestSection(accountId, hasCredentials, active, allTests) {
                     <label>Partial close %<input type="number" step="1" id="tinyPartialPct-${accountId}" value="50" style="width:70px;"></label>
                     <label>Type exactly: CONFIRM PARTIAL CLOSE<input type="text" id="tinyPartialConfirm-${accountId}"></label>
                     <button class="btn btn-danger" onclick="partialCloseTinyTest(${accountId}, ${active.id}, this)" style="align-self:flex-end;">PARTIAL CLOSE</button>
+                </div>
+                <div class="risk-form" style="margin-top:6px; border-top:1px solid #1e293b; padding-top:6px;">
+                    <label>Alt: resting T1 LIMIT -- T1 %<input type="number" step="0.0001" id="t1LimitPct-${accountId}" value="0.01" style="width:80px;"></label>
+                    <label>Qty %<input type="number" step="1" id="t1LimitQtyPct-${accountId}" value="50" style="width:70px;"></label>
+                    <label>Type exactly: CONFIRM PLACE RESTING T1 LIMIT<input type="text" id="t1LimitPlaceConfirm-${accountId}"></label>
+                    <button class="btn btn-danger" onclick="placeRestingT1Limit(${accountId}, ${active.id}, this)" style="align-self:flex-end;">PLACE RESTING T1 LIMIT</button>
+                </div>
+                <p class="empty" style="margin-top:4px;">A plain resting reduce-only LIMIT order sitting on the book -- the mechanism Component B's management policy actually depends on, distinct from the TP/SL bracket above. May sit unfilled for a while; check back with the status button once placed. Use a small T1 % for a real live test session so it actually touches.</p>`;
+        } else if (active.status === "T1_LIMIT_PLACED") {
+            html += `
+                <div style="font-family:'JetBrains Mono'; font-size:11px; margin-bottom:8px;">
+                    resting T1 limit: target=${active.t1_limit_target_price ?? "-"} &middot; qty=${active.t1_limit_qty ?? "-"} &middot;
+                    orderId=${escapeHtml(active.t1_limit_exchange_order_id) || "-"}
+                </div>
+                <div class="risk-form">
+                    <button class="btn" onclick="checkRestingT1LimitStatus(${accountId}, ${active.id}, this)">CHECK STATUS</button>
+                </div>
+                <div class="risk-form" style="margin-top:6px;">
+                    <label>Type exactly: CONFIRM CANCEL RESTING T1 LIMIT<input type="text" id="t1LimitCancelConfirm-${accountId}"></label>
+                    <button class="btn btn-danger" onclick="cancelRestingT1Limit(${accountId}, ${active.id}, this)" style="align-self:flex-end;">CANCEL</button>
                 </div>`;
         } else {
-            html += '<p class="empty">Partial close requires status TPSL_SET.</p>';
+            html += '<p class="empty">Partial close (or the alt resting T1 limit) requires status TPSL_SET.</p>';
         }
 
         if (active.status === "PARTIAL_CLOSED") {
@@ -527,6 +547,29 @@ async function flashCloseTinyTest(accountId, testId, btn) {
     await _runTinyTestAction(`flash-${accountId}`, btn,
         `/api/executor/accounts/${accountId}/tiny-test/${testId}/flash-close`,
         { confirm: confirm_ }, "failed to flash close", accountId);
+}
+
+// ------------------------------------------------------------------ resting reduce-only LIMIT at T1 (2026-09-06)
+
+async function placeRestingT1Limit(accountId, testId, btn) {
+    const t1_pct = parseFloat(document.getElementById(`t1LimitPct-${accountId}`).value) || 0.01;
+    const qty_pct = (parseFloat(document.getElementById(`t1LimitQtyPct-${accountId}`).value) || 50) / 100;
+    const confirm_ = document.getElementById(`t1LimitPlaceConfirm-${accountId}`).value;
+    await _runTinyTestAction(`t1limit-place-${accountId}`, btn,
+        `/api/executor/accounts/${accountId}/tiny-test/${testId}/place-resting-t1-limit`,
+        { confirm: confirm_, t1_pct, qty_pct }, "failed to place resting T1 limit", accountId);
+}
+async function checkRestingT1LimitStatus(accountId, testId, btn) {
+    // No confirm phrase -- read-only exchange call.
+    await _runTinyTestAction(`t1limit-check-${accountId}`, btn,
+        `/api/executor/accounts/${accountId}/tiny-test/${testId}/check-resting-t1-limit-status`,
+        {}, "failed to check resting T1 limit status", accountId);
+}
+async function cancelRestingT1Limit(accountId, testId, btn) {
+    const confirm_ = document.getElementById(`t1LimitCancelConfirm-${accountId}`).value;
+    await _runTinyTestAction(`t1limit-cancel-${accountId}`, btn,
+        `/api/executor/accounts/${accountId}/tiny-test/${testId}/cancel-resting-t1-limit`,
+        { confirm: confirm_ }, "failed to cancel resting T1 limit", accountId);
 }
 
 async function engageKillSwitch(id) {

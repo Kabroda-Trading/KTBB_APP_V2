@@ -75,3 +75,28 @@ def test_flash_close_calls_the_right_endpoint():
     flash = next(s for s in scenarios if s["label"] == "flashCloseTinyTest")
     assert flash["ok"] is True
     assert any(p.endswith("/tiny-test/5/flash-close") for p in flash["fetchCalls"])
+
+
+# ------------------------------------------------------------------ resting reduce-only LIMIT at T1 (2026-09-06)
+# Same bug class this harness exists to catch (dropped/mismatched
+# onclick arguments), new surface area of it.
+
+def test_place_resting_t1_limit_calls_the_right_endpoint():
+    scenarios, _ = _run_harness()
+    place = next(s for s in scenarios if s["label"] == "placeRestingT1Limit")
+    assert place["ok"] is True
+    assert any(p.endswith("/tiny-test/5/place-resting-t1-limit") for p in place["fetchCalls"])
+
+
+def test_check_resting_t1_limit_status_calls_the_right_endpoint():
+    scenarios, _ = _run_harness()
+    check = next(s for s in scenarios if s["label"] == "checkRestingT1LimitStatus")
+    assert check["ok"] is True
+    assert any(p.endswith("/tiny-test/5/check-resting-t1-limit-status") for p in check["fetchCalls"])
+
+
+def test_cancel_resting_t1_limit_calls_the_right_endpoint():
+    scenarios, _ = _run_harness()
+    cancel = next(s for s in scenarios if s["label"] == "cancelRestingT1Limit")
+    assert cancel["ok"] is True
+    assert any(p.endswith("/tiny-test/5/cancel-resting-t1-limit") for p in cancel["fetchCalls"])
