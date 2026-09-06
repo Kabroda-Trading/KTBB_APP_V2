@@ -1249,6 +1249,9 @@ _CONFIRM_TINY_TEST_PLACE = "CONFIRM PLACE TINY LIVE ORDER"
 _CONFIRM_TINY_TEST_PARTIAL_CLOSE = "CONFIRM PARTIAL CLOSE"
 _CONFIRM_TINY_TEST_MOVE_SL = "CONFIRM MOVE SL TO BREAKEVEN"
 _CONFIRM_TINY_TEST_FLASH_CLOSE = "CONFIRM FLASH CLOSE REMAINDER"
+# 2026-09-06, ladder-test completion build:
+_CONFIRM_TINY_TEST_PLACE_T1_LIMIT = "CONFIRM PLACE RESTING T1 LIMIT"
+_CONFIRM_TINY_TEST_CANCEL_T1_LIMIT = "CONFIRM CANCEL RESTING T1 LIMIT"
 
 
 def _executor_owner_or_admin(ctx: Dict[str, Any], account: Optional["_ExecutorAccount"]) -> bool:
@@ -1322,6 +1325,12 @@ class TinyTestPartialCloseRequest(BaseModel):
 
 class TinyTestConfirmOnlyRequest(BaseModel):
     confirm: str
+
+
+class TinyTestPlaceT1LimitRequest(BaseModel):
+    confirm: str
+    t1_pct: float = 0.01
+    qty_pct: float = 0.50
 
 
 def _serialize_account(account: "_ExecutorAccount") -> Dict[str, Any]:
@@ -1751,6 +1760,19 @@ def _serialize_mechanism_test(t: "_ExecutorMechanismTest") -> Dict[str, Any]:
         "order_detail_response_json": t.order_detail_response_json,
         "position_check_response_json": t.position_check_response_json,
         "tpsl_check_response_json": t.tpsl_check_response_json,
+        # 2026-09-06, ladder-test completion build -- learned from the
+        # exact same real gap once before (new DB columns added but
+        # never wired into this serializer, hiding the diagnostic data
+        # needed to see why a confirmation check failed).
+        "position_id_after_partial_close": t.position_id_after_partial_close,
+        "qty_after_partial_close": t.qty_after_partial_close,
+        "partial_close_position_check_response_json": t.partial_close_position_check_response_json,
+        "t1_limit_target_price": t.t1_limit_target_price,
+        "t1_limit_qty": t.t1_limit_qty,
+        "t1_limit_exchange_order_id": t.t1_limit_exchange_order_id,
+        "t1_limit_place_response_json": t.t1_limit_place_response_json,
+        "t1_limit_check_response_json": t.t1_limit_check_response_json,
+        "t1_limit_cancel_response_json": t.t1_limit_cancel_response_json,
     }
 
 
@@ -1890,6 +1912,46 @@ async def api_executor_tiny_test_flash_close(account_id: int, test_id: int, requ
     actor = ctx.get("email") or "unknown"
     return await _run_mechanism_action(
         db, account, actor, _executor_mechanism_test.flash_close_remainder(db, account, test_row, actor))
+
+
+@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/place-resting-t1-limit")
+async def api_executor_tiny_test_place_resting_t1_limit(account_id: int, test_id: int, request: Request, body: TinyTestPlaceT1LimitRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
+    if err is not None:
+        return err
+    if body.confirm != _CONFIRM_TINY_TEST_PLACE_T1_LIMIT:
+        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_PLACE_T1_LIMIT!r}"}, status_code=400)
+    actor = ctx.get("email") or "unknown"
+    return await _run_mechanism_action(
+        db, account, actor,
+        _executor_mechanism_test.place_resting_t1_limit(db, account, test_row, actor, t1_pct=body.t1_pct, qty_pct=body.qty_pct))
+
+
+@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/check-resting-t1-limit-status")
+async def api_executor_tiny_test_check_resting_t1_limit_status(account_id: int, test_id: int, request: Request, db: Session = Depends(get_db)):
+    # No confirm phrase -- read-only exchange call (one get_order_detail
+    # check), same reasoning as VERIFY AUTH needing none.
+    ctx = get_user_context(request, db)
+    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
+    if err is not None:
+        return err
+    actor = ctx.get("email") or "unknown"
+    return await _run_mechanism_action(
+        db, account, actor, _executor_mechanism_test.check_resting_t1_limit_status(db, account, test_row, actor))
+
+
+@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/cancel-resting-t1-limit")
+async def api_executor_tiny_test_cancel_resting_t1_limit(account_id: int, test_id: int, request: Request, body: TinyTestConfirmOnlyRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
+    if err is not None:
+        return err
+    if body.confirm != _CONFIRM_TINY_TEST_CANCEL_T1_LIMIT:
+        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_CANCEL_T1_LIMIT!r}"}, status_code=400)
+    actor = ctx.get("email") or "unknown"
+    return await _run_mechanism_action(
+        db, account, actor, _executor_mechanism_test.cancel_resting_t1_limit(db, account, test_row, actor))
 
 
 @app.get("/api/executor/accounts/{account_id}/tiny-test")

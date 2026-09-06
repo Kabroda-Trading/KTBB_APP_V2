@@ -33,6 +33,7 @@ import executor_bitunix_client as ebc
 from main import (
     app, _CONFIRM_ENABLE_LIVE_ORDERS, _CONFIRM_TINY_TEST_PLACE,
     _CONFIRM_TINY_TEST_PARTIAL_CLOSE, _CONFIRM_TINY_TEST_MOVE_SL, _CONFIRM_TINY_TEST_FLASH_CLOSE,
+    _CONFIRM_TINY_TEST_PLACE_T1_LIMIT, _CONFIRM_TINY_TEST_CANCEL_T1_LIMIT,
 )
 
 
@@ -666,6 +667,120 @@ def test_tiny_test_full_ladder_happy_path_via_routes(env, monkeypatch):
     for expected in ("TEST_MECHANISM_STARTED", "TEST_ORDER_PLACED", "TEST_ORDER_FILL_CONFIRMED",
                      "TEST_INITIAL_TPSL_SET", "TEST_PARTIAL_CLOSED", "TEST_SL_MOVED_TO_BREAKEVEN",
                      "TEST_POSITION_FLASH_CLOSED"):
+        assert expected in audit_events
+
+
+# ------------------------------------------------------------------ resting reduce-only LIMIT at T1 routes (2026-09-06)
+
+def test_place_resting_t1_limit_route_requires_confirm_phrase(env, monkeypatch):
+    client_admin = _login("exec_admin@kabroda.com", "adminpass123")
+    _enable_live_orders_and_credentials(env, client_admin)
+    _patch_happy_path_client(monkeypatch)
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    account_id = env["account_id"]
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/place", json={"confirm": _CONFIRM_TINY_TEST_PLACE})
+    test_id = resp.json()["test"]["id"]
+
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/place-resting-t1-limit",
+                        json={"confirm": "wrong phrase"})
+    assert resp.status_code == 400
+
+
+def test_place_resting_t1_limit_route_non_owner_non_admin_returns_403(env, monkeypatch):
+    client_admin = _login("exec_admin@kabroda.com", "adminpass123")
+    _enable_live_orders_and_credentials(env, client_admin)
+    _patch_happy_path_client(monkeypatch)
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    account_id = env["account_id"]
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/place", json={"confirm": _CONFIRM_TINY_TEST_PLACE})
+    test_id = resp.json()["test"]["id"]
+
+    other_client = _login("exec_other@kabroda.com", "otherpass123")
+    resp = other_client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/place-resting-t1-limit",
+                              json={"confirm": _CONFIRM_TINY_TEST_PLACE_T1_LIMIT})
+    assert resp.status_code == 403
+
+
+def test_check_resting_t1_limit_status_route_needs_no_confirm_phrase(env, monkeypatch):
+    # Read-only exchange call -- same reasoning as VERIFY AUTH needing none.
+    client_admin = _login("exec_admin@kabroda.com", "adminpass123")
+    _enable_live_orders_and_credentials(env, client_admin)
+    _patch_happy_path_client(monkeypatch)
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    account_id = env["account_id"]
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/place", json={"confirm": _CONFIRM_TINY_TEST_PLACE})
+    test_id = resp.json()["test"]["id"]
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/place-resting-t1-limit",
+                        json={"confirm": _CONFIRM_TINY_TEST_PLACE_T1_LIMIT})
+    assert resp.json()["test"]["status"] == "T1_LIMIT_PLACED"
+
+    # No "confirm" field in the body at all, and it still works.
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/check-resting-t1-limit-status")
+    assert resp.status_code == 200
+
+
+def test_cancel_resting_t1_limit_route_requires_confirm_phrase(env, monkeypatch):
+    client_admin = _login("exec_admin@kabroda.com", "adminpass123")
+    _enable_live_orders_and_credentials(env, client_admin)
+    _patch_happy_path_client(monkeypatch)
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    account_id = env["account_id"]
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/place", json={"confirm": _CONFIRM_TINY_TEST_PLACE})
+    test_id = resp.json()["test"]["id"]
+    client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/place-resting-t1-limit",
+                json={"confirm": _CONFIRM_TINY_TEST_PLACE_T1_LIMIT})
+
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/cancel-resting-t1-limit",
+                        json={"confirm": "wrong phrase"})
+    assert resp.status_code == 400
+
+
+def test_full_ladder_via_resting_t1_limit_happy_path(env, monkeypatch):
+    # Proves the ALTERNATE path to PARTIAL_CLOSED end to end via routes
+    # -- place -> set TPSL -> place resting T1 limit -> check status
+    # (FILLED) -> move SL to breakeven -> flash close. Reuses
+    # _patch_happy_path_client()'s get_position call sequence, which is
+    # identical whether the reduction comes from the MARKET partial-
+    # close or the resting-limit fill (both call
+    # _verify_position_after_reduction() at the same point in the
+    # sequence: #1 pre-flight, #2 post-fill, #3 post-reduction, #4
+    # flash-close confirmation).
+    client_admin = _login("exec_admin@kabroda.com", "adminpass123")
+    _enable_live_orders_and_credentials(env, client_admin)
+    _patch_happy_path_client(monkeypatch)
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    account_id = env["account_id"]
+
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/place", json={"confirm": _CONFIRM_TINY_TEST_PLACE})
+    assert resp.json()["test"]["status"] == "TPSL_SET"
+    test_id = resp.json()["test"]["id"]
+
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/place-resting-t1-limit",
+                        json={"confirm": _CONFIRM_TINY_TEST_PLACE_T1_LIMIT, "t1_pct": 0.0005, "qty_pct": 0.50})
+    assert resp.status_code == 200
+    assert resp.json()["test"]["status"] == "T1_LIMIT_PLACED"
+
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/check-resting-t1-limit-status")
+    assert resp.status_code == 200
+    assert resp.json()["test"]["status"] == "PARTIAL_CLOSED"
+
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/move-sl-breakeven",
+                        json={"confirm": _CONFIRM_TINY_TEST_MOVE_SL})
+    assert resp.status_code == 200
+    assert resp.json()["test"]["status"] == "SL_MOVED_BREAKEVEN"
+
+    resp = client.post(f"/api/executor/accounts/{account_id}/tiny-test/{test_id}/flash-close",
+                        json={"confirm": _CONFIRM_TINY_TEST_FLASH_CLOSE})
+    assert resp.status_code == 200
+    assert resp.json()["test"]["status"] == "FULLY_CLOSED"
+
+    audit_events = [r["event_type"] for r in client.get("/api/executor/audit-log").json()["audit_log"]]
+    for expected in ("TEST_T1_LIMIT_PLACED", "TEST_T1_LIMIT_FILLED", "TEST_SL_MOVED_TO_BREAKEVEN", "TEST_POSITION_FLASH_CLOSED"):
         assert expected in audit_events
 
 
