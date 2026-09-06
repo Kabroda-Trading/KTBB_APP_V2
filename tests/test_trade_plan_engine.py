@@ -315,7 +315,7 @@ def test_waiting_fueled_cross_armed_email_carries_the_locked_alignment_reading(p
     assert len(sent) == 1
     subject, body = sent[0]
     assert subject.startswith("KABRODA ARMED")
-    assert "FULLY ALIGNED / fuel FUELED" in body
+    assert "Fuel FUELED -> FULLY ALIGNED" in body
 
 
 def test_waiting_unfueled_cross_sends_vetoed_email_via_loop(poll_env, monkeypatch):

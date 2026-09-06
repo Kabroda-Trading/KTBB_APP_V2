@@ -225,6 +225,51 @@ def test_classify_alignment_none_when_either_input_missing():
     assert tp.classify_alignment(None, None) is None
 
 
+# ------------------------------------------------------------------ build_alignment_email_line() (Andy's wording spec, 2026-09-06 15:30 CT)
+
+def test_alignment_email_line_fully_aligned_shows_lead_and_trends():
+    plan = {"fuel_verdict": "FUELED", "htf_aligned": 2, "trend_1h": "BULLISH", "trend_4h": "BULLISH"}
+    line = tp.build_alignment_email_line(plan)
+    assert "as of session lock" in line
+    assert "Fuel FUELED | 1H trend BULLISH | 4H trend BULLISH -> FULLY ALIGNED" in line
+    assert f"{tp._T3_RATE_FULLY_ALIGNED_PCT}%" in line
+    assert f"{tp._T3_RATE_PARTIAL_ALIGNED_PCT}%" in line
+    assert "how far the trade can run, not whether it wins" in line
+    # (4) no sizing/gate language anywhere near it
+    assert "sizing" not in line.lower()
+    assert "gate" not in line.lower()
+
+
+def test_alignment_email_line_partial_uses_partial_stat_wording():
+    plan = {"fuel_verdict": "FUELED", "htf_aligned": 1}
+    line = tp.build_alignment_email_line(plan)
+    assert "-> PARTIAL" in line
+    assert "Partially-aligned setups reached T3" in line
+
+
+def test_alignment_email_line_conflicted_uses_conflicted_wording():
+    plan = {"fuel_verdict": "CONFLICTED", "htf_aligned": 0}
+    line = tp.build_alignment_email_line(plan)
+    assert "-> CONFLICTED" in line
+    assert "Conflicted setups have historically run less far" in line
+
+
+def test_alignment_email_line_omits_trend_bits_when_unavailable():
+    # No trend_1h/trend_4h on the plan at all (e.g. a real row from before
+    # these columns existed) -- must not print "1H trend None".
+    plan = {"fuel_verdict": "FUELED", "htf_aligned": 2}
+    line = tp.build_alignment_email_line(plan)
+    assert "1H trend" not in line
+    assert "4H trend" not in line
+    assert "Fuel FUELED -> FULLY ALIGNED" in line
+
+
+def test_alignment_email_line_none_when_unavailable():
+    assert tp.build_alignment_email_line({}) is None
+    assert tp.build_alignment_email_line({"fuel_verdict": "FUELED"}) is None
+    assert tp.build_alignment_email_line({"htf_aligned": 2}) is None
+
+
 def test_render_brief_includes_alignment_line_when_available():
     plan = {
         "date_key": "2026-08-31", "symbol": "BTC/USDT", "status": "WAITING",
@@ -233,11 +278,12 @@ def test_render_brief_includes_alignment_line_when_available():
         "t1": 79650.0, "t2": 80100.0, "t3": 80800.0,
         "commit_after": ANCHOR + datetime.timedelta(minutes=45),
         "fuel_requirement": tp.FUEL_REQUIREMENT_TEXT, "management": tp.MANAGEMENT_TEXT,
-        "fuel_verdict": "FUELED", "htf_aligned": 2,
+        "fuel_verdict": "FUELED", "htf_aligned": 2, "trend_1h": "BULLISH", "trend_4h": "BULLISH",
     }
     text = tp.render_brief(plan)
-    assert "FULLY ALIGNED / fuel FUELED" in text
-    assert "informational only" in text
+    assert "as of session lock" in text
+    assert "Fuel FUELED | 1H trend BULLISH | 4H trend BULLISH -> FULLY ALIGNED" in text
+    assert "how far the trade can run, not whether it wins" in text
 
 
 def test_render_brief_omits_alignment_line_when_unavailable():

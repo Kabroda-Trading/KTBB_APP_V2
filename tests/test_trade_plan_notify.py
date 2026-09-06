@@ -107,8 +107,9 @@ def test_armed_email_falls_back_to_standard_when_tier_missing():
 # correlation numbers were computed against, not a fresh cross-time one.
 
 def test_armed_email_shows_alignment_line_when_present():
-    subject, body = tpn.build_armed_email(_plan("FILLED", fuel_verdict="FUELED", htf_aligned=2))
-    assert "FULLY ALIGNED / fuel FUELED" in body
+    subject, body = tpn.build_armed_email(_plan("FILLED", fuel_verdict="FUELED", htf_aligned=2, trend_1h="BULLISH", trend_4h="BULLISH"))
+    assert "as of session lock" in body
+    assert "Fuel FUELED | 1H trend BULLISH | 4H trend BULLISH -> FULLY ALIGNED" in body
 
 
 def test_armed_email_omits_alignment_line_when_absent():
@@ -122,7 +123,7 @@ def test_armed_email_omits_alignment_line_when_absent():
 def test_lock_email_waiting_shows_alignment_line_when_present():
     mail = tpn.build_lock_email(_plan("WAITING", fuel_verdict="CONFLICTED", htf_aligned=1))
     _, body = mail
-    assert "PARTIAL / fuel CONFLICTED" in body
+    assert "Fuel CONFLICTED -> PARTIAL" in body
 
 
 # ------------------------------------------------------------------ build_vetoed_email

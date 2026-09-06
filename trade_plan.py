@@ -48,7 +48,7 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import fuel_gate
 
@@ -310,6 +310,8 @@ def build_trade_plan(
         # or the gate itself.
         "fuel_verdict": decision_dict.get("fuel_verdict"),
         "htf_aligned": decision_dict.get("htf_aligned"),
+        "trend_1h": decision_dict.get("trend_1h"),
+        "trend_4h": decision_dict.get("trend_4h"),
     }
 
     if decision_dict.get("side") is None and state == "PASS":
@@ -482,30 +484,92 @@ def advance_no_plan(
     }
 
 
-def classify_alignment(fuel_verdict: Optional[str], htf_aligned: Optional[int]) -> Optional[str]:
-    """Plain-words alignment tier for the email headline (DeepSeek's
-    queued request, Kabroda AI Brain repo AGENT_LOG.md, 2026-09-06 12:45
-    CT): "the email should say how strong the setup is." Built ONLY from
-    real fields the gate already computes and GateLog already stores
-    (fuel_verdict, htf_aligned -- the count of {1H, 4H} trends agreeing
-    with the trade direction, 0-2) -- no new decision input, no effect
-    on sizing or the gate. MEXC-corpus reference (58 trades, per that
-    same log entry): fully-aligned (htf=2) 36.4% T3 rate vs partial
-    (htf=1) 20.8%; FUELED 33.3% vs CONFLICTED 24.0% -- direction
-    confirmed, sample small, informational only.
+# Backtest reference for the alignment-tier email copy (Kabroda AI Brain
+# repo AGENT_LOG.md -- DeepSeek's 2026-09-06 12:45 CT initial study,
+# confirmed still holding at-break in the 15:25 CT lock-vs-break
+# validation study: lock/break readings agree 77.6% of the time, and the
+# T3 gradient is stable either way, though the at-break RECOMPUTE only
+# matched the gate's own pipeline 44.8% of the time -- exactly why the
+# LOCK-time reading, not a fresh at-break one, is what's shown). 58-trade
+# MEXC real-lock corpus. Revisit as the corpus grows -- DeepSeek's own
+# caveat, not a permanent constant.
+_T3_RATE_FULLY_ALIGNED_PCT = 36
+_T3_RATE_PARTIAL_ALIGNED_PCT = 21
 
-    Returns None when either input is unavailable (e.g. a NO_PLAN
-    morning before any real cross) rather than guessing a tier."""
+
+def _alignment_words(fuel_verdict: Optional[str], htf_aligned: Optional[int]) -> Tuple[Optional[str], Optional[str]]:
+    """Shared word-mapping core for classify_alignment() and
+    build_alignment_email_line() -- one place decides what counts as
+    FULLY ALIGNED/PARTIAL/CONFLICTED and FUELED/CONFLICTED/NEUTRAL.
+    Returns (tier_word, fuel_word), or (None, None) if either input is
+    unavailable (e.g. a NO_PLAN morning before any real cross) rather
+    than guessing a tier."""
     if fuel_verdict is None or htf_aligned is None:
-        return None
+        return None, None
     fuel_word = fuel_verdict if fuel_verdict in ("FUELED", "CONFLICTED") else "NEUTRAL"
     if htf_aligned >= 2:
-        htf_word = "FULLY ALIGNED"
+        tier_word = "FULLY ALIGNED"
     elif htf_aligned == 1:
-        htf_word = "PARTIAL"
+        tier_word = "PARTIAL"
     else:
-        htf_word = "CONFLICTED"
-    return f"{htf_word} / fuel {fuel_word}"
+        tier_word = "CONFLICTED"
+    return tier_word, fuel_word
+
+
+def classify_alignment(fuel_verdict: Optional[str], htf_aligned: Optional[int]) -> Optional[str]:
+    """Plain-words alignment tag, e.g. "FULLY ALIGNED / fuel FUELED" --
+    built ONLY from real fields the gate already computes and GateLog
+    already stores (fuel_verdict, htf_aligned -- the count of {1H, 4H}
+    trends agreeing with the trade direction, 0-2), no new decision
+    input, no effect on sizing or the gate. See build_alignment_email_
+    line() for the full email copy this feeds into."""
+    tier_word, fuel_word = _alignment_words(fuel_verdict, htf_aligned)
+    if tier_word is None:
+        return None
+    return f"{tier_word} / fuel {fuel_word}"
+
+
+def build_alignment_email_line(plan: Dict[str, Any]) -> Optional[str]:
+    """Full email copy for the alignment tier -- Andy's exact wording
+    spec (DeepSeek relay, Kabroda AI Brain repo AGENT_LOG.md, 2026-09-06
+    15:30 CT): (1) label the moment ("as of session lock") so it's never
+    misread as a live-at-the-break reading; (2) show the real fuel +
+    1H/4H trend reads, not just the collapsed tier word; (3) frame
+    alignment as CARRY (how far a winner runs), never as entry win rate
+    -- htf_fuel.py's own docstring: HTF alignment changes MFE (1.72R ->
+    2.57R at 0 -> 2 aligned), NOT T1 win rate (~60% either way per
+    CALIBRATION.md section 12, 1,913 breaks); (4) no sizing/gate language
+    anywhere near it.
+
+    Returns None when the inputs can't be classified (same rule as
+    classify_alignment())."""
+    tier_word, fuel_word = _alignment_words(plan.get("fuel_verdict"), plan.get("htf_aligned"))
+    if tier_word is None:
+        return None
+
+    trend_bits = [f"1H trend {plan['trend_1h']}"] if plan.get("trend_1h") else []
+    if plan.get("trend_4h"):
+        trend_bits.append(f"4H trend {plan['trend_4h']}")
+    lead = f"Fuel {fuel_word}" + ("".join(f" | {b}" for b in trend_bits)) + f" -> {tier_word}"
+
+    if tier_word == "FULLY ALIGNED":
+        stat = (
+            f"Fully-aligned setups like this reached T3 about {_T3_RATE_FULLY_ALIGNED_PCT}% of the time "
+            f"in our 58-trade live-lock study, vs ~{_T3_RATE_PARTIAL_ALIGNED_PCT}% for partial alignment"
+        )
+    elif tier_word == "PARTIAL":
+        stat = (
+            f"Partially-aligned setups reached T3 about {_T3_RATE_PARTIAL_ALIGNED_PCT}% of the time "
+            f"in our 58-trade live-lock study, vs ~{_T3_RATE_FULLY_ALIGNED_PCT}% when fully aligned"
+        )
+    else:
+        stat = "Conflicted setups have historically run less far after entry in the same study"
+
+    return (
+        f"Setup strength (as of session lock): {lead}. {stat} -- alignment is about how far the "
+        f"trade can run, not whether it wins. (Exact numbers may be refreshed as the corpus grows; "
+        f"the 30-day live review is the referee.)"
+    )
 
 
 def render_brief(plan: Dict[str, Any]) -> str:
@@ -548,12 +612,7 @@ def render_brief(plan: Dict[str, Any]) -> str:
     else:
         tier_line = f"Tier: {tier} ({'runner management active' if tier == 'PREMIUM' else 'standard sizing'})"
 
-    alignment = classify_alignment(plan.get("fuel_verdict"), plan.get("htf_aligned"))
-    alignment_line = (
-        f"Setup strength: {alignment} — more alignment has historically meant a better shot at T3 "
-        f"(informational only, does not change sizing or the gate)"
-        if alignment else None
-    )
+    alignment_line = build_alignment_email_line(plan)
 
     lines = [
         f"TRADE PLAN — {date_key} — {symbol} — STATUS: {plan.get('status')}",

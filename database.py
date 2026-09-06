@@ -512,7 +512,7 @@ def init_db():
     # fuel/HTF reading (previously transient-only in trade_plan.py's
     # build_trade_plan()) so it survives on the same TradePlan row from
     # the LOCK email through to the later ARMED email. ---
-    for _col in ["fuel_verdict VARCHAR", "htf_aligned INTEGER"]:
+    for _col in ["fuel_verdict VARCHAR", "htf_aligned INTEGER", "trend_1h VARCHAR", "trend_4h VARCHAR"]:
         try:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE trade_plans ADD COLUMN {_col}"))
@@ -833,6 +833,11 @@ class TradePlan(Base):
     # relationship to T3 outcomes has never actually been validated.
     fuel_verdict = Column(String, nullable=True)   # FUELED | CONFLICTED | NO_FUEL | NO_PUSH | UNKNOWN | None
     htf_aligned = Column(Integer, nullable=True)   # 0-2, count of {1H, 4H} trends agreeing with direction
+    # Same lock-time snapshot, same reasoning -- Andy's wording spec for
+    # the email (DeepSeek relay, 2026-09-06 15:30 CT) shows the actual
+    # trend reads, not just the aligned count.
+    trend_1h = Column(String, nullable=True)       # BULLISH | BEARISH | None
+    trend_4h = Column(String, nullable=True)
 
     entry_mode = Column(String, nullable=True)     # TRIGGER_AT_LEVEL | RETEST_LIMIT_AT_LINE, set at commit
     trigger_price = Column(Float, nullable=True)
