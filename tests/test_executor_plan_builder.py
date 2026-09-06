@@ -378,6 +378,109 @@ def test_mmr_query_failure_falls_back_to_conservative_constant_not_zero(db, monk
     assert "NOT verified against the exchange" in order["decision_reason"]
 
 
+def _patch_balance_query(monkeypatch, available, margin=0, isolation_unrealized_pnl=0):
+    import executor_bitunix_client
+
+    async def fake_get_balance(self, margin_coin="USDT"):
+        return {"code": 0, "data": {
+            "available": str(available), "margin": str(margin),
+            "isolationUnrealizedPNL": str(isolation_unrealized_pnl),
+        }, "msg": "Success"}
+
+    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_balance", fake_get_balance)
+
+
+# ------------------------------------------------------------------ Sizing Policy Wizard wiring (2026-09-05)
+# get_or_init_sizing_policy() lazily seeds base_risk_usd=risk_last_usd,
+# roll_in_pct=compounding_factor, cap_abs_usd=risk_cap_usd on first touch
+# -- every test ABOVE this section never sets a policy explicitly, so
+# they exercise that seeded-default path and (confirmed above) keep
+# producing byte-identical qty/decision values to before this wiring.
+
+def test_would_place_uses_percent_of_balance_stake_with_live_balance(db, monkeypatch):
+    # Andy's own worked example: 10% of a real $2,000 balance -> $200
+    # stake. stop_distance=10 -> qty = 200/10 = 20.0.
+    plan = _make_filled_plan(db, entry=100.0, stop=95.0)   # stop_distance=5, safe at 10x baseline (liq=90)
+    account, state = _make_account(db, assumed_balance_usd=999999.0)  # must NOT be used -- real balance wins
+    _set_fake_credentials(db, account)
+    _patch_leverage_query(monkeypatch, leverage=account.leverage_baseline, margin_mode=account.margin_mode)
+    _patch_mmr_query(monkeypatch)
+    _patch_balance_query(monkeypatch, available=2000.0)
+
+    ea.update_sizing_policy(db, account, {"base_risk_usd": None, "base_risk_pct": 0.10, "roll_in_pct": None}, updated_by="test@kabroda.com")
+    db.commit()
+
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
+    assert order["decision"] == "WOULD_PLACE"
+    assert order["risk_dollars_used"] == pytest.approx(200.0)
+    assert order["qty"] == pytest.approx(40.0)  # 200/5
+    assert order["stake_calculation_detail"]["base"] == pytest.approx(200.0)
+    assert "verified against the real exchange account" in order["stake_calculation_detail"]["balance_source"]
+
+
+def test_would_place_falls_back_to_assumed_balance_when_no_credentials(db):
+    # Percent-of-balance policy but NO credentials set -- must fall back
+    # to assumed_balance_usd, same honesty pattern as the leverage/mmr
+    # fallbacks, not silently skip sizing.
+    plan = _make_filled_plan(db, entry=100.0, stop=95.0)   # stop_distance=5, safe at 10x baseline (liq=90)
+    account, state = _make_account(db, assumed_balance_usd=5000.0)
+    ea.update_sizing_policy(db, account, {"base_risk_usd": None, "base_risk_pct": 0.10, "roll_in_pct": None}, updated_by="test@kabroda.com")
+    db.commit()
+
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
+    assert order["decision"] == "WOULD_PLACE"
+    assert order["risk_dollars_used"] == pytest.approx(500.0)  # 10% of assumed 5000
+    assert order["qty"] == pytest.approx(100.0)  # 500/5
+    assert "assumed_balance_usd" in order["stake_calculation_detail"]["balance_source"]
+
+
+def test_balance_not_queried_when_policy_does_not_need_it(db, monkeypatch):
+    # FIXED-mode policy (no base_risk_pct/cap_pct/tier_threshold_usd) must
+    # never pay for the extra get_balance() call -- confirms the
+    # conditional-query optimization the plan calls for.
+    import executor_bitunix_client
+
+    async def fail_if_called(self, margin_coin="USDT"):
+        raise AssertionError("get_balance() must not be called for a FIXED-mode policy")
+
+    monkeypatch.setattr(executor_bitunix_client.BitunixClient, "get_balance", fail_if_called)
+
+    plan = _make_filled_plan(db, entry=100.0, stop=95.0)
+    account, state = _make_account(db, assumed_balance_usd=100000.0)
+    _set_fake_credentials(db, account)
+    _patch_leverage_query(monkeypatch, leverage=account.leverage_baseline, margin_mode=account.margin_mode)
+    _patch_mmr_query(monkeypatch)
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "roll_in_pct": None}, updated_by="test@kabroda.com")
+    db.commit()
+
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
+    assert order["decision"] == "WOULD_PLACE"
+    assert order["stake_calculation_detail"]["balance_source"] == "not queried -- policy does not use account balance"
+
+
+def test_stake_calculation_detail_present_and_cap_binds(db):
+    # Andy's own tier example: $12,000 balance, 10%/$10k-threshold/$1k-
+    # flat policy -> stake capped at $1,000, not $1,200. stop_distance=10
+    # -> qty = 1000/10 = 100.0.
+    plan = _make_filled_plan(db, entry=100.0, stop=95.0)   # stop_distance=5, safe at 10x baseline (liq=90)
+    account, state = _make_account(db, assumed_balance_usd=12000.0)
+    ea.update_sizing_policy(
+        db, account,
+        {"base_risk_usd": None, "base_risk_pct": 0.10, "roll_in_pct": None,
+         "tier_threshold_usd": 10000.0, "tier_flat_usd": 1000.0},
+        updated_by="test@kabroda.com",
+    )
+    db.commit()
+
+    order = asyncio.run(epb.build_hypothetical_order(db, plan, account, state))
+    assert order["decision"] == "WOULD_PLACE"
+    assert order["risk_dollars_used"] == pytest.approx(1000.0)
+    assert order["qty"] == pytest.approx(200.0)  # 1000/5
+    detail = order["stake_calculation_detail"]
+    assert detail["tier_applied"] is True
+    assert detail["final_stake"] == pytest.approx(1000.0)
+
+
 def test_no_credentials_uses_zero_mmr_not_the_conservative_fallback(db):
     # The benign "never connected yet" case -- matches
     # _query_real_leverage_and_margin_mode()'s own no-credentials

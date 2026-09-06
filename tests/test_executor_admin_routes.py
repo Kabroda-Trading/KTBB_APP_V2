@@ -300,6 +300,11 @@ def test_kill_switch_toggle_reflected_in_next_plan_build(env):
 
     before = asyncio.run(executor_plan_builder.build_hypothetical_order(db, plan, account, state))
     assert before["decision"] == "WOULD_PLACE"
+    db.commit()  # build_hypothetical_order() now also lazy-inits an
+    # ExecutorSizingPolicy row (flush(), not commit()) -- same open-write-
+    # transaction/SQLite-single-writer-lock hazard the comment above
+    # already documents, must be closed before the TestClient's own
+    # session writes below.
 
     client = _login("exec_owner@kabroda.com", "ownerpass123")
     resp = client.post(f"/api/executor/accounts/{env['account_id']}/kill-switch", json={"reason": "toggle test"})

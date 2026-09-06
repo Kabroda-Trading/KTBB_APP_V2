@@ -124,6 +124,47 @@ async def _query_real_leverage_and_margin_mode(account: ExecutorAccount, symbol:
         }
 
 
+async def _query_real_balance(account: ExecutorAccount) -> Dict[str, Any]:
+    """Returns {"balance_usd": float, "source": str}. Same never-crash-on-
+    network-hiccup fallback pattern as the leverage/mmr queries above --
+    falls back to account.assumed_balance_usd (clearly labeled unverified)
+    if no credentials are set yet or the query fails.
+
+    equity = available + margin + isolationUnrealizedPNL -- confirmed
+    against Andy's real Verify Auth response (2026-09-05) for the
+    no-open-position case (available="726.0451...", margin="0",
+    isolationUnrealizedPNL="0", no open position): available + margin
+    correctly reproduces total account equity there. The
+    isolationUnrealizedPNL term is the correct generalization for when a
+    position IS open (his account runs ISOLATION margin mode, so margin
+    alone would not include that position's own live unrealized P&L) --
+    but this has NOT yet been tested against a response carrying a
+    nonzero unrealized P&L. Flagged as the one remaining unverified edge,
+    not the whole formula."""
+    api_key, api_secret = executor_accounts.get_decrypted_credentials(account)
+    if not api_key or not api_secret:
+        return {
+            "balance_usd": account.assumed_balance_usd,
+            "source": "no credentials set yet -- using assumed_balance_usd, NOT verified against the exchange",
+        }
+
+    import executor_bitunix_client
+    client = executor_bitunix_client.BitunixClient(api_key, api_secret)
+    try:
+        resp = await client.get_balance()
+        data = resp["data"]
+        equity = float(data["available"]) + float(data["margin"]) + float(data.get("isolationUnrealizedPNL", 0))
+        return {
+            "balance_usd": equity,
+            "source": "verified against the real exchange account (available + margin + isolationUnrealizedPNL)",
+        }
+    except Exception as e:
+        return {
+            "balance_usd": account.assumed_balance_usd,
+            "source": f"balance query failed ({e}) -- using assumed_balance_usd, NOT verified against the exchange",
+        }
+
+
 async def build_hypothetical_order(
     db: Session, trade_plan_row: TradePlan, account: ExecutorAccount, risk_state: ExecutorRiskState,
 ) -> Dict[str, Any]:
@@ -173,8 +214,36 @@ async def build_hypothetical_order(
     if not entry_price or not stop_price or not direction:
         return {**base, "decision": "ERROR", "decision_reason": "trade plan is missing entry/stop/direction -- cannot size"}
 
+    policy = executor_accounts.get_or_init_sizing_policy(db, account)
+
+    # Only pay for the extra exchange call when the policy actually needs
+    # the live balance -- FIXED/ROLLING-only accounts (no percent-of-
+    # balance base, no percent cap, no balance-tiered switch) never query
+    # it. compute_stake() itself still runs unconditionally; it degrades
+    # to the existing risk_last_usd-based math when none of those
+    # optional params are set.
+    balance_usd: Optional[float] = None
+    balance_source = "not queried -- policy does not use account balance"
+    if policy.base_risk_pct is not None or policy.cap_pct is not None or policy.tier_threshold_usd is not None:
+        balance_state = await _query_real_balance(account)
+        balance_usd = balance_state["balance_usd"]
+        balance_source = balance_state["source"]
+
     try:
-        qty = executor_sizing.compute_qty(risk_state.risk_last_usd, entry_price, stop_price)
+        stake_usd, stake_detail = executor_sizing.compute_stake(
+            risk_last_usd=risk_state.risk_last_usd,
+            base_risk_pct=policy.base_risk_pct,
+            account_balance_usd=balance_usd,
+            tier_threshold_usd=policy.tier_threshold_usd,
+            tier_flat_usd=policy.tier_flat_usd,
+            cap_abs_usd=policy.cap_abs_usd,
+            cap_pct=policy.cap_pct,
+            consecutive_losses=risk_state.consecutive_losses,
+            derisk_n=policy.derisk_n,
+            derisk_factor=policy.derisk_factor,
+        )
+        stake_detail = {**stake_detail, "balance_source": balance_source}
+        qty = executor_sizing.compute_qty(stake_usd, entry_price, stop_price)
     except ValueError as e:
         return {**base, "decision": "ERROR", "decision_reason": f"sizing failed: {e}"}
 
@@ -193,7 +262,8 @@ async def build_hypothetical_order(
         **base,
         "entry_price": entry_price, "stop_price": stop_price,
         "t1_price": trade_plan_row.t1, "t2_price": trade_plan_row.t2, "t3_price": trade_plan_row.t3,
-        "risk_dollars_used": risk_state.risk_last_usd,
+        "risk_dollars_used": stake_usd,
+        "stake_calculation_detail": stake_detail,
         "stop_distance": abs(entry_price - stop_price),
         "qty": qty, "leverage_used": leverage,
         "margin_required_usd": margin_required,
