@@ -13,7 +13,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 import database
-from database import SessionLocal, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig
+from database import SessionLocal, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig, ExecutorSizingPolicy
 import executor_accounts as ea
 import executor_control as ec
 
@@ -37,7 +37,7 @@ def _clean_rows(session):
     # here too -- a leftover audit row from another file with the same
     # account_id (autoincrement restarts at 1 per fresh table) breaks
     # exact-count assertions like len(rows) == 1.
-    for model in (ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorAccount, ExecutorGlobalConfig):
+    for model in (ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorSizingPolicy, ExecutorAccount, ExecutorGlobalConfig):
         session.query(model).delete()
     session.commit()
 
@@ -228,3 +228,178 @@ def test_live_orders_and_kill_switch_are_independent_flags(db):
     db.commit()
     assert ec.is_global_kill_switch_engaged(db) is True
     assert ec.is_live_orders_enabled(db) is True
+
+
+# ------------------------------------------------------------------ get_or_init_sizing_policy / update_sizing_policy / record_trade_result (Sizing Policy Wizard, 2026-09-05)
+
+def test_get_or_init_sizing_policy_seeds_from_existing_risk_state(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    # Simulate an account already running the old fixed/rolling risk
+    # state before the wizard existed -- non-default values, so a lazy
+    # copy-vs-default bug would be caught.
+    state = ea.get_or_init_risk_state(db, account)
+    state.risk_last_usd = 150.0
+    state.risk_cap_usd = 2000.0
+    state.compounding_factor = 0.15
+    db.commit()
+
+    policy = ea.get_or_init_sizing_policy(db, account)
+    db.commit()
+    assert policy.preset_name == "steady_grow"  # compounding_factor > 0
+    assert policy.base_risk_usd == 150.0
+    assert policy.roll_in_pct == 0.15
+    assert policy.cap_abs_usd == 2000.0
+    assert policy.base_risk_pct is None
+
+    # idempotent -- a second call returns the SAME row, doesn't create a duplicate
+    policy2 = ea.get_or_init_sizing_policy(db, account)
+    assert policy2.id == policy.id
+
+
+def test_get_or_init_sizing_policy_labels_conservative_when_no_roll_in(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    state = ea.get_or_init_risk_state(db, account)
+    state.compounding_factor = 0.0
+    db.commit()
+
+    policy = ea.get_or_init_sizing_policy(db, account)
+    assert policy.preset_name == "conservative"
+
+
+def test_update_sizing_policy_rejects_both_base_fields_set(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    with pytest.raises(ValueError, match="exactly one"):
+        ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "base_risk_pct": 0.10}, updated_by="andy@kabroda.com")
+
+
+def test_update_sizing_policy_rejects_neither_base_field_set(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    # Force the seeded lazy-init base_risk_usd off, then try to clear it
+    # with no replacement -- the merged view has neither set.
+    with pytest.raises(ValueError, match="exactly one"):
+        ea.update_sizing_policy(db, account, {"base_risk_usd": None}, updated_by="andy@kabroda.com")
+
+
+def test_update_sizing_policy_rejects_tier_fields_set_alone(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    with pytest.raises(ValueError, match="tier_threshold_usd and tier_flat_usd"):
+        ea.update_sizing_policy(db, account, {"tier_threshold_usd": 10000.0}, updated_by="andy@kabroda.com")
+
+
+def test_update_sizing_policy_rejects_derisk_fields_set_alone(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    with pytest.raises(ValueError, match="derisk_n and derisk_factor"):
+        ea.update_sizing_policy(db, account, {"derisk_n": 3}, updated_by="andy@kabroda.com")
+
+
+def test_update_sizing_policy_switching_to_percent_mode_clears_fixed_field(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    ea.get_or_init_sizing_policy(db, account)  # seeds base_risk_usd
+    db.commit()
+
+    policy = ea.update_sizing_policy(db, account, {"base_risk_pct": 0.10}, updated_by="andy@kabroda.com")
+    db.commit()
+    assert policy.base_risk_pct == 0.10
+    assert policy.base_risk_usd is None
+
+
+def test_update_sizing_policy_persists_and_writes_audit(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    ea.update_sizing_policy(
+        db, account,
+        {"preset_name": "scale_with_account", "base_risk_pct": 0.10, "base_risk_usd": None,
+         "tier_threshold_usd": 10000.0, "tier_flat_usd": 1000.0},
+        updated_by="andy@kabroda.com",
+    )
+    db.commit()
+
+    policy = db.query(ExecutorSizingPolicy).filter_by(account_id=account.id).one()
+    assert policy.base_risk_pct == 0.10
+    assert policy.tier_threshold_usd == 10000.0
+    assert policy.tier_flat_usd == 1000.0
+
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="SIZING_POLICY_UPDATED").all()
+    assert len(rows) == 1
+
+
+def test_record_trade_result_rolls_risk_last_usd_when_roll_in_pct_set(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "roll_in_pct": 0.10}, updated_by="andy@kabroda.com")
+    db.commit()
+
+    state = ea.record_trade_result(db, account, pnl_usd=50.0, trade_plan_id=42, recorded_by="andy@kabroda.com")
+    db.commit()
+    # risk_last (100) + factor(0.10)*pnl(50) = 105, within [floor,cap]
+    assert state.risk_last_usd == pytest.approx(105.0)
+    assert state.last_trade_pnl_usd == 50.0
+    assert state.last_updated_from_trade_plan_id == 42
+
+
+def test_record_trade_result_does_not_roll_when_roll_in_pct_unset(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    # Explicit fixed-mode policy: no roll-in, unlike the lazy-init default
+    # (which seeds roll_in_pct from ExecutorRiskState.compounding_factor).
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "roll_in_pct": None}, updated_by="andy@kabroda.com")
+    db.commit()
+    original = ea.get_or_init_risk_state(db, account).risk_last_usd
+
+    state = ea.record_trade_result(db, account, pnl_usd=50.0, recorded_by="andy@kabroda.com")
+    db.commit()
+    assert state.risk_last_usd == original
+
+
+def test_record_trade_result_resets_consecutive_losses_on_win(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    state = ea.get_or_init_risk_state(db, account)
+    state.consecutive_losses = 2
+    db.commit()
+
+    state = ea.record_trade_result(db, account, pnl_usd=25.0, recorded_by="andy@kabroda.com")
+    db.commit()
+    assert state.consecutive_losses == 0
+
+
+def test_record_trade_result_increments_consecutive_losses_on_loss(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+
+    state = ea.record_trade_result(db, account, pnl_usd=-30.0, recorded_by="andy@kabroda.com")
+    db.commit()
+    assert state.consecutive_losses == 1
+
+    state = ea.record_trade_result(db, account, pnl_usd=-15.0, recorded_by="andy@kabroda.com")
+    db.commit()
+    assert state.consecutive_losses == 2
+
+
+def test_record_trade_result_zero_pnl_counts_as_a_loss_not_a_win(db):
+    # pnl_usd > 0 is the ONLY win condition -- a scratch/breakeven trade
+    # (0.0) must not reset the streak, matching compute_stake()'s own
+    # >= derisk_n threshold semantics (a streak of exact scratches should
+    # still be able to trip the derisk modifier).
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    state = ea.record_trade_result(db, account, pnl_usd=0.0, recorded_by="andy@kabroda.com")
+    db.commit()
+    assert state.consecutive_losses == 1
+
+
+def test_record_trade_result_writes_audit(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    ea.record_trade_result(db, account, pnl_usd=10.0, trade_plan_id=7, recorded_by="andy@kabroda.com")
+    db.commit()
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="TRADE_RESULT_RECORDED").all()
+    assert len(rows) == 1
+    assert rows[0].trade_plan_id == 7

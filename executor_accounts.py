@@ -19,8 +19,9 @@ from typing import Any, Dict, Optional, Tuple
 from sqlalchemy.orm import Session
 
 import executor_control
-from database import ExecutorAccount, ExecutorAuditLog, ExecutorRiskState
+from database import ExecutorAccount, ExecutorAuditLog, ExecutorRiskState, ExecutorSizingPolicy
 import executor_crypto
+import executor_sizing
 
 
 def write_audit(
@@ -119,6 +120,132 @@ def update_risk_state(db: Session, account: ExecutorAccount, changes: Dict[str, 
             db, "RISK_STATE_UPDATED", f"risk state updated for account {account.id}: {changes}",
             account_id=account.id, actor=updated_by, detail=changes,
         )
+    return state
+
+
+def get_or_init_sizing_policy(db: Session, account: ExecutorAccount) -> ExecutorSizingPolicy:
+    """Lazy-init, same idiom as get_or_init_risk_state() -- no bulk data
+    migration needed for the new table. On first touch, seeds the policy
+    FROM the account's existing (real, production) ExecutorRiskState so an
+    account already running the old fixed/rolling risk-state fields keeps
+    behaving identically the moment the wizard is introduced -- nothing
+    silently changes size on an account that hasn't opted into a preset."""
+    policy = db.query(ExecutorSizingPolicy).filter_by(account_id=account.id).first()
+    if policy is None:
+        risk_state = get_or_init_risk_state(db, account)
+        policy = ExecutorSizingPolicy(
+            account_id=account.id,
+            preset_name="steady_grow" if risk_state.compounding_factor > 0 else "conservative",
+            base_risk_usd=risk_state.risk_last_usd,
+            roll_in_pct=risk_state.compounding_factor,
+            cap_abs_usd=risk_state.risk_cap_usd,
+        )
+        db.add(policy)
+        db.flush()
+    return policy
+
+
+def _validate_sizing_policy(changes: Dict[str, Any]) -> None:
+    """Raises ValueError on an internally-inconsistent policy. Called with
+    the FULL merged view (existing fields + the incoming changes), never
+    just the incoming partial dict, so a partial update can't leave the
+    row in a state that would have been rejected outright."""
+    base_usd = changes.get("base_risk_usd")
+    base_pct = changes.get("base_risk_pct")
+    if base_usd is not None and base_pct is not None:
+        raise ValueError("set exactly one of base_risk_usd / base_risk_pct, not both")
+    if base_usd is None and base_pct is None:
+        raise ValueError("set exactly one of base_risk_usd / base_risk_pct")
+
+    tier_threshold = changes.get("tier_threshold_usd")
+    tier_flat = changes.get("tier_flat_usd")
+    if (tier_threshold is None) != (tier_flat is None):
+        raise ValueError("tier_threshold_usd and tier_flat_usd must be set together or not at all")
+
+    derisk_n = changes.get("derisk_n")
+    derisk_factor = changes.get("derisk_factor")
+    if (derisk_n is None) != (derisk_factor is None):
+        raise ValueError("derisk_n and derisk_factor must be set together or not at all")
+
+
+def update_sizing_policy(db: Session, account: ExecutorAccount, changes: Dict[str, Any], updated_by: str) -> ExecutorSizingPolicy:
+    """Applies an owner/admin edit to the sizing policy. Validates the
+    FULL resulting row (existing fields overlaid with `changes`), not just
+    the incoming partial dict -- raises ValueError on 400 up in main.py.
+    Same audit-then-return pattern as update_risk_state()."""
+    policy = get_or_init_sizing_policy(db, account)
+    merged = {
+        "preset_name": policy.preset_name, "base_risk_usd": policy.base_risk_usd, "base_risk_pct": policy.base_risk_pct,
+        "roll_in_pct": policy.roll_in_pct, "cap_abs_usd": policy.cap_abs_usd, "cap_pct": policy.cap_pct,
+        "tier_threshold_usd": policy.tier_threshold_usd, "tier_flat_usd": policy.tier_flat_usd,
+        "derisk_n": policy.derisk_n, "derisk_factor": policy.derisk_factor,
+    }
+    merged.update(changes)
+
+    # Setting ONLY one of base_risk_usd/base_risk_pct in this call
+    # implicitly clears the other -- applied to the validation view
+    # BEFORE _validate_sizing_policy() runs, so a caller switching from
+    # fixed-mode to percent-mode only needs to pass the new field, not
+    # also explicitly null out the stale one. If the caller explicitly
+    # passed BOTH in this same call, that's a genuine conflict -- leave
+    # it alone so _validate_sizing_policy() still rejects it.
+    switching_base = ("base_risk_usd" in changes) != ("base_risk_pct" in changes)
+    if switching_base:
+        if changes.get("base_risk_usd") is not None:
+            merged["base_risk_pct"] = None
+        elif changes.get("base_risk_pct") is not None:
+            merged["base_risk_usd"] = None
+
+    _validate_sizing_policy(merged)
+
+    for field, value in changes.items():
+        setattr(policy, field, value)
+    if switching_base:
+        if changes.get("base_risk_usd") is not None:
+            policy.base_risk_pct = None
+        elif changes.get("base_risk_pct") is not None:
+            policy.base_risk_usd = None
+
+    write_audit(
+        db, "SIZING_POLICY_UPDATED", f"sizing policy updated for account {account.id}: {changes}",
+        account_id=account.id, actor=updated_by, detail=changes,
+    )
+    return policy
+
+
+def record_trade_result(
+    db: Session, account: ExecutorAccount, pnl_usd: float,
+    trade_plan_id: Optional[int] = None, recorded_by: Optional[str] = None,
+) -> ExecutorRiskState:
+    """MANUAL STOPGAP -- confirmed by direct grep that TradePlan (what the
+    executor hooks into) and CampaignLog (the only table with a real R-
+    multiple outcome) have NO link to each other today. There is no
+    automatic way yet for the executor to know a real trade won or lost,
+    so this is, today, the ONLY write path to
+    ExecutorRiskState.last_trade_pnl_usd (otherwise permanently NULL) and
+    to consecutive_losses. A future closed-position monitor becomes a new
+    CALLER of this exact function -- same schema, zero migration -- it
+    does not replace it."""
+    state = get_or_init_risk_state(db, account)
+    policy = get_or_init_sizing_policy(db, account)
+
+    state.last_trade_pnl_usd = pnl_usd
+    state.last_updated_from_trade_plan_id = trade_plan_id
+
+    if policy.roll_in_pct is not None:
+        state.risk_last_usd = executor_sizing.compute_next_risk(
+            risk_last=state.risk_last_usd, last_trade_pnl=pnl_usd,
+            floor=state.risk_floor_usd, cap=policy.cap_abs_usd or state.risk_cap_usd,
+            factor=policy.roll_in_pct,
+        )
+
+    state.consecutive_losses = 0 if pnl_usd > 0 else state.consecutive_losses + 1
+
+    write_audit(
+        db, "TRADE_RESULT_RECORDED", f"trade result recorded for account {account.id}: pnl_usd={pnl_usd}",
+        account_id=account.id, trade_plan_id=trade_plan_id, actor=recorded_by,
+        detail={"pnl_usd": pnl_usd, "trade_plan_id": trade_plan_id, "risk_last_usd_after": state.risk_last_usd, "consecutive_losses_after": state.consecutive_losses},
+    )
     return state
 
 
