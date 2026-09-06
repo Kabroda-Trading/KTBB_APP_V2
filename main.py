@@ -1234,11 +1234,13 @@ async def api_admin_trade_plan_status(request: Request, db: Session = Depends(ge
 from database import (
     ExecutorAccount as _ExecutorAccount, ExecutorOrder as _ExecutorOrder,
     ExecutorAuditLog as _ExecutorAuditLog, ExecutorGlobalConfig as _ExecutorGlobalConfig,
-    ExecutorMechanismTest as _ExecutorMechanismTest,
+    ExecutorMechanismTest as _ExecutorMechanismTest, ExecutorSizingPolicy as _ExecutorSizingPolicy,
 )
 import executor_accounts as _executor_accounts
 import executor_control as _executor_control
 import executor_mechanism_test as _executor_mechanism_test
+import executor_plan_builder as _executor_plan_builder
+import executor_sizing as _executor_sizing
 
 # Stage 2 (2026-09-05) real-money confirm phrases -- one per action, so a
 # copy-pasted phrase from one action can never authorize a different one.
@@ -1276,6 +1278,30 @@ class ExecutorRiskStateUpdateRequest(BaseModel):
     risk_floor_usd: Optional[float] = None
     risk_cap_usd: Optional[float] = None
     compounding_factor: Optional[float] = None
+
+
+class ExecutorSizingPolicyUpdateRequest(BaseModel):
+    """All fields optional -- this is a PARTIAL update. A field must be
+    explicitly present in the JSON body (even as `null`, to clear it) to
+    take effect; an omitted field is left untouched on the existing row.
+    Routes below use body.model_dump(exclude_unset=True) specifically to
+    preserve that distinction (an omitted field is NOT the same as an
+    explicit null here, unlike ExecutorRiskStateUpdateRequest above)."""
+    preset_name: Optional[str] = None
+    base_risk_usd: Optional[float] = None
+    base_risk_pct: Optional[float] = None
+    roll_in_pct: Optional[float] = None
+    cap_abs_usd: Optional[float] = None
+    cap_pct: Optional[float] = None
+    tier_threshold_usd: Optional[float] = None
+    tier_flat_usd: Optional[float] = None
+    derisk_n: Optional[int] = None
+    derisk_factor: Optional[float] = None
+
+
+class ExecutorTradeResultRequest(BaseModel):
+    pnl_usd: float
+    trade_plan_id: Optional[int] = None
 
 
 class ExecutorLiveOrdersEnableRequest(BaseModel):
@@ -1485,6 +1511,158 @@ async def api_executor_update_risk_state(account_id: int, request: Request, body
     return JSONResponse({"ok": True, "risk_state": {
         "risk_last_usd": state.risk_last_usd, "risk_floor_usd": state.risk_floor_usd,
         "risk_cap_usd": state.risk_cap_usd, "compounding_factor": state.compounding_factor,
+    }})
+
+
+def _serialize_sizing_policy(policy: "_ExecutorSizingPolicy") -> Dict[str, Any]:
+    return {
+        "preset_name": policy.preset_name,
+        "base_risk_usd": policy.base_risk_usd, "base_risk_pct": policy.base_risk_pct,
+        "roll_in_pct": policy.roll_in_pct,
+        "cap_abs_usd": policy.cap_abs_usd, "cap_pct": policy.cap_pct,
+        "tier_threshold_usd": policy.tier_threshold_usd, "tier_flat_usd": policy.tier_flat_usd,
+        "derisk_n": policy.derisk_n, "derisk_factor": policy.derisk_factor,
+    }
+
+
+@app.get("/api/executor/accounts/{account_id}/sizing-policy")
+async def api_executor_get_sizing_policy(account_id: int, request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    policy = _executor_accounts.get_or_init_sizing_policy(db, account)
+    db.commit()
+    return JSONResponse({"ok": True, "sizing_policy": _serialize_sizing_policy(policy)})
+
+
+@app.post("/api/executor/accounts/{account_id}/sizing-policy")
+async def api_executor_update_sizing_policy(account_id: int, request: Request, body: ExecutorSizingPolicyUpdateRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    changes = body.model_dump(exclude_unset=True)
+    try:
+        policy = _executor_accounts.update_sizing_policy(db, account, changes, updated_by=ctx.get("email") or "unknown")
+    except ValueError as e:
+        db.rollback()
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    db.commit()
+    return JSONResponse({"ok": True, "sizing_policy": _serialize_sizing_policy(policy)})
+
+
+@app.post("/api/executor/accounts/{account_id}/sizing-policy/preview")
+async def api_executor_preview_sizing_policy(account_id: int, request: Request, body: ExecutorSizingPolicyUpdateRequest, db: Session = Depends(get_db)):
+    """NEVER persists -- computes what compute_stake() would return for
+    the candidate policy (existing row overlaid with this request's
+    explicitly-set fields, same merge semantics as the real update route)
+    under three scenarios: the account's CURRENT state, and what it would
+    look like immediately after a +2R win or a -1R loss got rolled in.
+    Server-side only, same compute_stake() the real sizing call site
+    uses -- this codebase's own precedent (verify-auth, the liquidation
+    check, MMR tiers) never duplicates math into JS."""
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+
+    policy = _executor_accounts.get_or_init_sizing_policy(db, account)
+    changes = body.model_dump(exclude_unset=True)
+    merged = {
+        "base_risk_usd": policy.base_risk_usd, "base_risk_pct": policy.base_risk_pct,
+        "roll_in_pct": policy.roll_in_pct, "cap_abs_usd": policy.cap_abs_usd, "cap_pct": policy.cap_pct,
+        "tier_threshold_usd": policy.tier_threshold_usd, "tier_flat_usd": policy.tier_flat_usd,
+        "derisk_n": policy.derisk_n, "derisk_factor": policy.derisk_factor,
+    }
+    merged.update(changes)
+    # Same "setting only one of base_risk_usd/base_risk_pct clears the
+    # other" rule update_sizing_policy() applies -- see that function's
+    # own comment for why the "both explicitly set" case is left alone.
+    switching_base = ("base_risk_usd" in changes) != ("base_risk_pct" in changes)
+    if switching_base:
+        if changes.get("base_risk_usd") is not None:
+            merged["base_risk_pct"] = None
+        elif changes.get("base_risk_pct") is not None:
+            merged["base_risk_usd"] = None
+    try:
+        _executor_accounts._validate_sizing_policy(merged)
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    risk_state = _executor_accounts.get_or_init_risk_state(db, account)
+    db.commit()
+
+    balance_usd: Optional[float] = None
+    balance_source = "not queried -- policy does not use account balance"
+    if merged["base_risk_pct"] is not None or merged["cap_pct"] is not None or merged["tier_threshold_usd"] is not None:
+        balance_state = await _executor_plan_builder._query_real_balance(account)
+        balance_usd = balance_state["balance_usd"]
+        balance_source = balance_state["source"]
+
+    def _stake(risk_last_usd: float, consecutive_losses: int) -> Dict[str, Any]:
+        stake, detail = _executor_sizing.compute_stake(
+            risk_last_usd=risk_last_usd, base_risk_pct=merged["base_risk_pct"], account_balance_usd=balance_usd,
+            tier_threshold_usd=merged["tier_threshold_usd"], tier_flat_usd=merged["tier_flat_usd"],
+            cap_abs_usd=merged["cap_abs_usd"], cap_pct=merged["cap_pct"],
+            consecutive_losses=consecutive_losses, derisk_n=merged["derisk_n"], derisk_factor=merged["derisk_factor"],
+        )
+        return {**detail, "stake_usd": stake, "balance_source": balance_source}
+
+    try:
+        current = _stake(risk_state.risk_last_usd, risk_state.consecutive_losses)
+
+        # +2R win: pnl = 2x the CURRENT stake, rolled in via compute_next_risk
+        # when roll_in_pct is set; a win always resets the loss streak.
+        win_pnl = 2.0 * current["stake_usd"]
+        risk_last_after_win = risk_state.risk_last_usd
+        if merged["roll_in_pct"] is not None:
+            risk_last_after_win = _executor_sizing.compute_next_risk(
+                risk_last=risk_state.risk_last_usd, last_trade_pnl=win_pnl,
+                floor=risk_state.risk_floor_usd, cap=merged["cap_abs_usd"] or risk_state.risk_cap_usd,
+                factor=merged["roll_in_pct"],
+            )
+        after_2r_win = _stake(risk_last_after_win, 0)
+
+        # -1R loss: pnl = -1x the CURRENT stake, rolled in the same way;
+        # a loss always increments the streak.
+        loss_pnl = -1.0 * current["stake_usd"]
+        risk_last_after_loss = risk_state.risk_last_usd
+        if merged["roll_in_pct"] is not None:
+            risk_last_after_loss = _executor_sizing.compute_next_risk(
+                risk_last=risk_state.risk_last_usd, last_trade_pnl=loss_pnl,
+                floor=risk_state.risk_floor_usd, cap=merged["cap_abs_usd"] or risk_state.risk_cap_usd,
+                factor=merged["roll_in_pct"],
+            )
+        after_1r_loss = _stake(risk_last_after_loss, risk_state.consecutive_losses + 1)
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": f"preview calculation failed: {e}"}, status_code=400)
+
+    return JSONResponse({"ok": True, "preview": {
+        "current": current, "after_2r_win": after_2r_win, "after_1r_loss": after_1r_loss,
+    }})
+
+
+@app.post("/api/executor/accounts/{account_id}/record-trade-result")
+async def api_executor_record_trade_result(account_id: int, request: Request, body: ExecutorTradeResultRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    state = _executor_accounts.record_trade_result(
+        db, account, pnl_usd=body.pnl_usd, trade_plan_id=body.trade_plan_id, recorded_by=ctx.get("email") or "unknown")
+    db.commit()
+    return JSONResponse({"ok": True, "risk_state": {
+        "risk_last_usd": state.risk_last_usd, "consecutive_losses": state.consecutive_losses,
+        "last_trade_pnl_usd": state.last_trade_pnl_usd,
     }})
 
 

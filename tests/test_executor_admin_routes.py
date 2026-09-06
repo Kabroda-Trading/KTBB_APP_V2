@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 import database
 from database import (
     SessionLocal, UserModel, ExecutorAccount, ExecutorRiskState, ExecutorOrder,
-    ExecutorAuditLog, ExecutorGlobalConfig, ExecutorMechanismTest,
+    ExecutorAuditLog, ExecutorGlobalConfig, ExecutorMechanismTest, ExecutorSizingPolicy,
 )
 import auth
 import executor_accounts as ea
@@ -52,7 +52,7 @@ def env(monkeypatch):
     _clean_db_files()
     database.init_db()
     db = SessionLocal()
-    for model in (ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorAccount, ExecutorGlobalConfig, ExecutorMechanismTest):
+    for model in (ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorSizingPolicy, ExecutorAccount, ExecutorGlobalConfig, ExecutorMechanismTest):
         db.query(model).delete()
     db.query(UserModel).filter(UserModel.email.in_([
         "exec_admin@kabroda.com", "exec_owner@kabroda.com", "exec_other@kabroda.com",
@@ -326,6 +326,115 @@ def test_owner_can_edit_risk_state(env):
 
     get_resp = client.get(f"/api/executor/accounts/{env['account_id']}/risk-state")
     assert get_resp.json()["risk_state"]["risk_last_usd"] == 250.0
+
+
+# ------------------------------------------------------------------ sizing policy wizard (2026-09-05)
+
+def test_sizing_policy_get_requires_owner_or_admin(env):
+    other_client = _login("exec_other@kabroda.com", "otherpass123")
+    resp = other_client.get(f"/api/executor/accounts/{env['account_id']}/sizing-policy")
+    assert resp.status_code == 403
+
+    owner_client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = owner_client.get(f"/api/executor/accounts/{env['account_id']}/sizing-policy")
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    # lazy-init seed from the default ExecutorRiskState
+    assert resp.json()["sizing_policy"]["base_risk_usd"] == 100.0
+
+
+def test_sizing_policy_post_persists_and_writes_audit(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post(
+        f"/api/executor/accounts/{env['account_id']}/sizing-policy",
+        json={"preset_name": "scale_with_account", "base_risk_usd": None, "base_risk_pct": 0.10,
+              "tier_threshold_usd": 10000.0, "tier_flat_usd": 1000.0},
+    )
+    assert resp.status_code == 200
+    policy = resp.json()["sizing_policy"]
+    assert policy["base_risk_pct"] == 0.10
+    assert policy["base_risk_usd"] is None
+    assert policy["tier_threshold_usd"] == 10000.0
+
+    get_resp = client.get(f"/api/executor/accounts/{env['account_id']}/sizing-policy")
+    assert get_resp.json()["sizing_policy"]["base_risk_pct"] == 0.10
+
+    db = env["db"]
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=env["account_id"], event_type="SIZING_POLICY_UPDATED").all()
+    assert len(rows) == 1
+
+
+def test_sizing_policy_post_rejects_invalid_combination_with_400(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post(
+        f"/api/executor/accounts/{env['account_id']}/sizing-policy",
+        json={"tier_threshold_usd": 10000.0},   # tier_flat_usd missing
+    )
+    assert resp.status_code == 400
+    assert "tier_threshold_usd" in resp.json()["error"]
+
+
+def test_sizing_policy_non_owner_non_admin_gets_403(env):
+    client = _login("exec_other@kabroda.com", "otherpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/sizing-policy", json={"base_risk_usd": 200.0})
+    assert resp.status_code == 403
+
+
+def test_sizing_policy_preview_does_not_persist_or_mutate_state(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post(
+        f"/api/executor/accounts/{env['account_id']}/sizing-policy/preview",
+        json={"base_risk_usd": 100.0, "roll_in_pct": 0.10},
+    )
+    assert resp.status_code == 200
+    preview = resp.json()["preview"]
+    assert preview["current"]["stake_usd"] == pytest.approx(100.0)
+    # +2R win off a 100 stake -> pnl 200, rolled at 10% -> 100 + 0.10*200 = 120
+    assert preview["after_2r_win"]["stake_usd"] == pytest.approx(120.0)
+    # -1R loss off a 100 stake -> pnl -100, rolled at 10% -> 100 - 10 = 90,
+    # but the default risk_floor_usd is 100 -- floored back up to 100.
+    assert preview["after_1r_loss"]["stake_usd"] == pytest.approx(100.0)
+
+    # Nothing persisted -- the real policy/risk-state must be untouched.
+    get_resp = client.get(f"/api/executor/accounts/{env['account_id']}/sizing-policy")
+    assert get_resp.json()["sizing_policy"]["base_risk_usd"] == 100.0  # seeded default, not overwritten
+    risk_resp = client.get(f"/api/executor/accounts/{env['account_id']}/risk-state")
+    assert risk_resp.json()["risk_state"]["risk_last_usd"] == 100.0
+
+
+def test_sizing_policy_preview_percent_of_balance_uses_assumed_balance_with_no_credentials(env):
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.assumed_balance_usd = 2000.0
+    db.commit()
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post(
+        f"/api/executor/accounts/{env['account_id']}/sizing-policy/preview",
+        json={"base_risk_usd": None, "base_risk_pct": 0.10, "roll_in_pct": None},
+    )
+    assert resp.status_code == 200
+    current = resp.json()["preview"]["current"]
+    assert current["stake_usd"] == pytest.approx(200.0)  # Andy's own example: 10% of $2,000
+    assert "assumed_balance_usd" in current["balance_source"]
+
+
+def test_record_trade_result_route_owner_or_admin(env):
+    other_client = _login("exec_other@kabroda.com", "otherpass123")
+    resp = other_client.post(f"/api/executor/accounts/{env['account_id']}/record-trade-result", json={"pnl_usd": 50.0})
+    assert resp.status_code == 403
+
+    owner_client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = owner_client.post(f"/api/executor/accounts/{env['account_id']}/record-trade-result", json={"pnl_usd": 50.0, "trade_plan_id": 9})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["risk_state"]["last_trade_pnl_usd"] == 50.0
+    assert body["risk_state"]["consecutive_losses"] == 0
+
+    db = env["db"]
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=env["account_id"], event_type="TRADE_RESULT_RECORDED").all()
+    assert len(rows) == 1
+    assert rows[0].trade_plan_id == 9
 
 
 # ------------------------------------------------------------------ page rendering (the create-account form)
