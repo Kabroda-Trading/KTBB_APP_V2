@@ -358,14 +358,86 @@ def test_partial_close_happy_path_and_qty_math(db, monkeypatch):
         assert order_id == "partial1"
         return _order_detail_response(status="FILLED", order_id="partial1")
 
-    _install(monkeypatch, place_order=fake_place_order, get_order_detail=fake_get_order_detail)
+    # Remaining position after the 50% close: 0.0002 - 0.0001 = 0.0001,
+    # same positionId -- the "nothing surprising happened" case.
+    _install(monkeypatch, place_order=fake_place_order, get_order_detail=fake_get_order_detail,
+              get_position=_async(_one_long_position_response(position_id="pos1")))
 
     result = asyncio.run(emt.partial_close(db, account, test_row, actor="test@kabroda.com"))
     assert result.status == "PARTIAL_CLOSED"
     assert result.partial_close_qty == pytest.approx(0.0001)
     assert result.partial_close_pct == pytest.approx(0.50)
     assert result.partial_close_exchange_order_id == "partial1"
+    # Position-lifecycle verification (2026-09-06) -- confirmed, not assumed.
+    assert result.position_id_after_partial_close == "pos1"
+    assert result.qty_after_partial_close == pytest.approx(0.0001)
+    assert result.position_id == "pos1"
+    assert result.partial_close_position_check_response_json is not None
     assert _get_audit_event_types(db, test_row.id) == ["TEST_PARTIAL_CLOSED"]
+
+
+def test_partial_close_updates_position_id_when_exchange_returns_a_different_one(db, monkeypatch):
+    # The actual open question this whole feature exists to answer:
+    # does Bitunix keep the SAME positionId for the reduced remainder?
+    # Whichever way the real answer goes, test_row.position_id must end
+    # up CURRENT so move_sl_to_breakeven()/flash_close_remainder() never
+    # target a stale ID.
+    account = _make_ready_account(db)
+    test_row = _make_tpsl_set_row(db, account, qty=0.0002)
+
+    _install(
+        monkeypatch,
+        place_order=_async({"code": 0, "data": {"orderId": "partial1"}, "msg": "Success"}),
+        get_order_detail=_async(_order_detail_response(status="FILLED", order_id="partial1")),
+        get_position=_async(_one_long_position_response(position_id="pos2-different")),
+    )
+
+    result = asyncio.run(emt.partial_close(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "PARTIAL_CLOSED"
+    assert result.position_id_after_partial_close == "pos2-different"
+    assert result.position_id == "pos2-different"   # NOT the stale "pos1"
+
+
+def test_partial_close_fails_when_no_remaining_position_found(db, monkeypatch):
+    # Something genuinely broke -- the closing order filled but there's
+    # no matching open position at all afterward.
+    account = _make_ready_account(db)
+    test_row = _make_tpsl_set_row(db, account, qty=0.0002)
+
+    _install(
+        monkeypatch,
+        place_order=_async({"code": 0, "data": {"orderId": "partial1"}, "msg": "Success"}),
+        get_order_detail=_async(_order_detail_response(status="FILLED", order_id="partial1")),
+        get_position=_async(_no_position_response()),
+    )
+
+    result = asyncio.run(emt.partial_close(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "FAILED"
+    assert "no matching open position was found at all" in result.error_detail
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_MECHANISM_FAILED"]
+
+
+def test_partial_close_fails_when_remaining_qty_does_not_match_expected(db, monkeypatch):
+    account = _make_ready_account(db)
+    test_row = _make_tpsl_set_row(db, account, qty=0.0002)
+
+    # Expected remainder is 0.0001 -- the exchange reports something
+    # wildly different, a real functional break.
+    _install(
+        monkeypatch,
+        place_order=_async({"code": 0, "data": {"orderId": "partial1"}, "msg": "Success"}),
+        get_order_detail=_async(_order_detail_response(status="FILLED", order_id="partial1")),
+        get_position=_async(_one_long_position_response(position_id="pos1")),
+    )
+    monkeypatch.setattr(
+        emt, "_find_open_long_position",
+        lambda pos_resp: {"positionId": "pos1", "symbol": "BTCUSDT", "side": "BUY", "avgOpenPrice": "100.0", "qty": "0.0005"},
+    )
+
+    result = asyncio.run(emt.partial_close(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "FAILED"
+    assert "does not match the expected remainder" in result.error_detail
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_MECHANISM_FAILED"]
 
 
 def test_partial_close_order_not_confirmed_filled_marks_failed_without_raising(db, monkeypatch):

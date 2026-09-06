@@ -518,15 +518,19 @@ def _patch_happy_path_client(monkeypatch):
 
     async def fake_get_position(self, symbol):
         call_state["get_position_calls"] += 1
-        # #1: pre-flight (nothing open yet). #2: post-fill lookup (found).
-        # #3+: flash-close's own confirmation check -- the position is
-        # gone by then.
-        if call_state["get_position_calls"] in (1, 3):
+        n = call_state["get_position_calls"]
+        # #1: pre-flight (nothing open yet). #2: post-fill lookup (found,
+        # full qty). #3 (2026-09-06): partial_close()'s own post-
+        # reduction position-lifecycle verification (found, reduced
+        # qty). #4+: flash-close's own confirmation check -- the
+        # position is gone by then.
+        if n in (1, 4):
             return {"code": 0, "data": [], "msg": "Success"}
         # side="BUY", not "LONG" -- verified against a real account
         # response (2026-09-05); Bitunix's docs claim LONG/SHORT but the
         # real API returns BUY/SELL.
-        return {"code": 0, "data": [{"positionId": "pos1", "symbol": "BTCUSDT", "side": "BUY", "avgOpenPrice": "100.0", "qty": "0.0002"}], "msg": "Success"}
+        qty = "0.0002" if n == 2 else "0.0001"   # 0.0002 opened, 50% (0.0001) partial-closed
+        return {"code": 0, "data": [{"positionId": "pos1", "symbol": "BTCUSDT", "side": "BUY", "avgOpenPrice": "100.0", "qty": qty}], "msg": "Success"}
 
     async def fake_get_trading_pairs(self, symbol):
         return {"code": 0, "data": [{"symbol": "BTCUSDT", "minTradeVolume": "0.0001", "basePrecision": 4, "quotePrecision": 1}], "msg": "Success"}

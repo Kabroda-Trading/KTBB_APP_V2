@@ -324,6 +324,63 @@ async def place_confirm_and_set_initial_tpsl(
         raise
 
 
+async def _verify_position_after_reduction(
+    client: "executor_bitunix_client.BitunixClient",
+    test_row: ExecutorMechanismTest,
+    expected_remaining_qty: float,
+) -> Optional[str]:
+    """Re-queries get_position() after ANY reduction of the test
+    position (a MARKET partial-close, or a filled/partially-filled
+    resting T1 LIMIT) to verify the remaining position's actual
+    positionId and qty match expectations -- never assumed. This is
+    exactly the open question Andy/DeepSeek's own ladder checklist
+    flagged: does Bitunix keep the SAME positionId for the reduced
+    remainder, or assign a new one? Whichever the real answer turns out
+    to be, test_row.position_id is kept CURRENT here so every later
+    ladder step (move_sl_to_breakeven, flash_close_remainder) always
+    targets the exchange's real position, never a potentially-stale
+    cached ID -- the same "assumption stood in for verification" class
+    of gap that caused the real TP-wipe incident.
+
+    Always writes test_row.position_id_after_partial_close/
+    qty_after_partial_close/partial_close_position_check_response_json
+    -- a DEDICATED response column, not the shared
+    position_check_response_json, which gets overwritten again by
+    flash_close_remainder()'s own confirmation check and would
+    otherwise erase this specific checkpoint's evidence.
+
+    Returns None on success, or a problem-detail string on a real
+    functional break (no matching position at all, or the qty doesn't
+    match within a half-unit-at-base_precision tolerance) -- the caller
+    decides how to fail the test_row from there, same pattern as every
+    other check in this module. A CHANGED positionId is NOT by itself a
+    failure -- that's the open question this exists to answer, not a
+    break -- it's simply recorded and carried forward."""
+    pos_resp = await client.get_position(_TEST_SYMBOL)
+    test_row.partial_close_position_check_response_json = json.dumps(pos_resp, default=str)
+    remaining = _find_open_long_position(pos_resp)  # raises on a real API error, same as everywhere else
+
+    if remaining is None:
+        return (
+            f"expected an open {_TEST_SYMBOL} position with ~{expected_remaining_qty} remaining after "
+            f"the reduction, but no matching open position was found at all"
+        )
+
+    new_position_id = remaining.get("positionId")
+    actual_qty = float(remaining.get("qty") or 0)
+    test_row.position_id_after_partial_close = new_position_id
+    test_row.qty_after_partial_close = actual_qty
+    test_row.position_id = new_position_id  # kept current regardless of whether it changed -- see docstring
+
+    tolerance = 0.5 * (10 ** -test_row.base_precision)
+    if abs(actual_qty - expected_remaining_qty) > tolerance:
+        return (
+            f"remaining position qty={actual_qty} does not match the expected remainder "
+            f"{expected_remaining_qty} (tolerance {tolerance}) after the reduction"
+        )
+    return None
+
+
 async def partial_close(
     db: Session, account: ExecutorAccount, test_row: ExecutorMechanismTest, actor: str,
     pct: float = _DEFAULT_PARTIAL_CLOSE_PCT,
@@ -368,10 +425,29 @@ async def partial_close(
                 account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=order_detail_resp)
             return test_row
 
+        # Independent confirmation of what remains, not an assumption:
+        # this is the position-lifecycle verification Andy/DeepSeek's
+        # own ladder checklist flagged as an open question -- see
+        # _verify_position_after_reduction()'s own docstring.
+        expected_remaining_qty = test_row.qty - float(qty_str)
+        problem = await _verify_position_after_reduction(client, test_row, expected_remaining_qty)
+        db.flush()
+
+        if problem is not None:
+            test_row.status = "FAILED"
+            test_row.error_detail = f"{problem} -- CHECK THE EXCHANGE DIRECTLY. Raw response saved (partial_close_position_check_response_json)."
+            db.flush()
+            executor_accounts.write_audit(
+                db, "TEST_MECHANISM_FAILED", test_row.error_detail,
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor)
+            return test_row
+
         test_row.status = "PARTIAL_CLOSED"
         db.flush()
         executor_accounts.write_audit(
-            db, "TEST_PARTIAL_CLOSED", f"partial close of {qty_str} executed and confirmed filled",
+            db, "TEST_PARTIAL_CLOSED",
+            f"partial close of {qty_str} executed and confirmed filled, remaining position verified "
+            f"(positionId={test_row.position_id}, qty={test_row.qty_after_partial_close})",
             account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=resp)
         return test_row
     except Exception as e:
