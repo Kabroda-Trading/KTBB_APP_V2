@@ -86,8 +86,11 @@ def _one_long_position_response(position_id="pos1", avg_open_price=100.0):
     }], "msg": "Success"}
 
 
-def _order_detail_response(status="FILLED", order_id="order1"):
-    return {"code": 0, "data": {"orderId": order_id, "status": status}, "msg": "Success"}
+def _order_detail_response(status="FILLED", order_id="order1", trade_qty=None):
+    data = {"orderId": order_id, "status": status}
+    if trade_qty is not None:
+        data["tradeQty"] = str(trade_qty)
+    return {"code": 0, "data": data, "msg": "Success"}
 
 
 def _trading_pairs_response(min_trade_volume="0.0001", base_precision=4, quote_precision=1):
@@ -113,7 +116,7 @@ def _install(monkeypatch, **fakes):
     never reaches a call it shouldn't."""
     for name in ("get_position", "get_trading_pairs", "place_order", "get_order_detail",
                  "set_position_tpsl", "modify_position_tp_sl_order", "close_position",
-                 "get_pending_tp_sl_order"):
+                 "get_pending_tp_sl_order", "cancel_orders"):
         fake = fakes.get(name)
         if fake is None:
             async def _unexpected(self, *a, __name=name, **kw):
@@ -490,6 +493,220 @@ def test_partial_close_blocked_by_kill_switch_even_with_correct_prior_status(db)
 
     with pytest.raises(emt.MechanismTestBlocked, match="kill switch"):
         asyncio.run(emt.partial_close(db, account, test_row, actor="test@kabroda.com"))
+
+
+# ------------------------------------------------------------------ resting reduce-only LIMIT at T1 (2026-09-06)
+
+def test_place_resting_t1_limit_requires_tpsl_set_status(db):
+    account = _make_ready_account(db)
+    test_row = ExecutorMechanismTest(account_id=account.id, symbol="BTCUSDT", direction="LONG", status="STARTED")
+    db.add(test_row)
+    db.commit()
+
+    with pytest.raises(emt.MechanismTestInvalidState, match="TPSL_SET"):
+        asyncio.run(emt.place_resting_t1_limit(db, account, test_row, actor="test@kabroda.com"))
+
+
+def test_place_resting_t1_limit_computes_correct_price_and_qty(db, monkeypatch):
+    account = _make_ready_account(db)
+    test_row = _make_tpsl_set_row(db, account, fill_price=100.0, qty=0.0002, quote_precision=1)
+
+    async def fake_place_order(self, **kwargs):
+        assert kwargs["price"] == "101.0"     # 100 * 1.01, 1dp
+        assert kwargs["qty"] == "0.0001"       # 50% of 0.0002
+        assert kwargs["order_type"] == "LIMIT"
+        assert kwargs["side"] == "SELL"
+        assert kwargs["trade_side"] == "CLOSE"
+        assert kwargs["reduce_only"] is True
+        assert kwargs["position_id"] == "pos1"
+        return {"code": 0, "data": {"orderId": "t1limit1"}, "msg": "Success"}
+
+    _install(monkeypatch, place_order=fake_place_order)
+
+    result = asyncio.run(emt.place_resting_t1_limit(db, account, test_row, actor="test@kabroda.com", t1_pct=0.01, qty_pct=0.50))
+    assert result.status == "T1_LIMIT_PLACED"
+    assert result.t1_limit_target_price == pytest.approx(101.0)
+    assert result.t1_limit_qty == pytest.approx(0.0001)
+    assert result.t1_limit_exchange_order_id == "t1limit1"
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_T1_LIMIT_PLACED"]
+
+
+def test_place_resting_t1_limit_refuses_zero_qty_underflow(db, monkeypatch):
+    account = _make_ready_account(db)
+    test_row = _make_tpsl_set_row(db, account, qty=0.0001, base_precision=4)
+    _install(monkeypatch)  # place_order must never be called
+
+    with pytest.raises(ValueError, match="unrepresentable"):
+        asyncio.run(emt.place_resting_t1_limit(db, account, test_row, actor="test@kabroda.com", qty_pct=0.50))
+    assert test_row.status == "FAILED"
+
+
+def _make_t1_limit_placed_row(db, account, fill_price=100.0, qty=0.0002, t1_qty=0.0001, base_precision=4, quote_precision=1):
+    row = _make_tpsl_set_row(db, account, fill_price=fill_price, qty=qty, base_precision=base_precision, quote_precision=quote_precision)
+    row.status = "T1_LIMIT_PLACED"
+    row.t1_limit_target_price = fill_price * 1.01
+    row.t1_limit_qty = t1_qty
+    row.t1_limit_exchange_order_id = "t1limit1"
+    db.commit()
+    return row
+
+
+def test_check_resting_t1_limit_status_still_pending_leaves_status_unchanged(db, monkeypatch):
+    for pending_status in ("NEW", "PART_FILLED", "INIT"):
+        account = _make_ready_account(db, label=f"acct_{pending_status}")
+        test_row = _make_t1_limit_placed_row(db, account)
+        _install(monkeypatch, get_order_detail=_async(_order_detail_response(status=pending_status, order_id="t1limit1")))
+
+        result = asyncio.run(emt.check_resting_t1_limit_status(db, account, test_row, actor="test@kabroda.com"))
+        assert result.status == "T1_LIMIT_PLACED"
+        assert _get_audit_event_types(db, test_row.id) == ["TEST_T1_LIMIT_STATUS_CHECKED"]
+
+
+def test_check_resting_t1_limit_status_filled_transitions_to_partial_closed_via_shared_verification(db, monkeypatch):
+    account = _make_ready_account(db)
+    test_row = _make_t1_limit_placed_row(db, account, qty=0.0002, t1_qty=0.0001)
+
+    _install(
+        monkeypatch,
+        get_order_detail=_async(_order_detail_response(status="FILLED", order_id="t1limit1")),
+        get_position=_async(_one_long_position_response(position_id="pos1")),   # qty "0.0001" -- matches 0.0002 - 0.0001
+    )
+
+    result = asyncio.run(emt.check_resting_t1_limit_status(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "PARTIAL_CLOSED"
+    assert result.position_id_after_partial_close == "pos1"
+    assert result.qty_after_partial_close == pytest.approx(0.0001)
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_T1_LIMIT_FILLED"]
+
+
+def test_check_resting_t1_limit_status_canceled_fails(db, monkeypatch):
+    account = _make_ready_account(db)
+    test_row = _make_t1_limit_placed_row(db, account)
+    _install(monkeypatch, get_order_detail=_async(_order_detail_response(status="CANCELED", order_id="t1limit1")))
+
+    result = asyncio.run(emt.check_resting_t1_limit_status(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "FAILED"
+    assert "unexpected status" in result.error_detail
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_MECHANISM_FAILED"]
+
+
+def test_check_resting_t1_limit_status_unrecognized_status_fails_closed(db, monkeypatch):
+    # DeepSeek amendment #2: an undocumented/unexpected status value
+    # (not one of the 5 Bitunix documents, e.g. a hypothetical EXPIRED
+    # or REJECTED) must fail rather than be silently treated as
+    # still-pending.
+    account = _make_ready_account(db)
+    test_row = _make_t1_limit_placed_row(db, account)
+    _install(monkeypatch, get_order_detail=_async(_order_detail_response(status="EXPIRED", order_id="t1limit1")))
+
+    result = asyncio.run(emt.check_resting_t1_limit_status(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "FAILED"
+    assert "EXPIRED" in result.error_detail
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_MECHANISM_FAILED"]
+
+
+def test_check_resting_t1_limit_status_rejects_wrong_prior_status(db):
+    account = _make_ready_account(db)
+    test_row = _make_tpsl_set_row(db, account)   # TPSL_SET, not T1_LIMIT_PLACED
+
+    with pytest.raises(emt.MechanismTestInvalidState, match="T1_LIMIT_PLACED"):
+        asyncio.run(emt.check_resting_t1_limit_status(db, account, test_row, actor="test@kabroda.com"))
+
+
+def test_cancel_resting_t1_limit_reverts_to_tpsl_set_when_nothing_filled(db, monkeypatch):
+    account = _make_ready_account(db)
+    test_row = _make_t1_limit_placed_row(db, account, qty=0.0002, t1_qty=0.0001)
+
+    _install(
+        monkeypatch,
+        cancel_orders=_async({"code": 0, "data": {"successList": [{"orderId": "t1limit1"}], "failureList": []}, "msg": "Success"}),
+        get_order_detail=_async(_order_detail_response(status="CANCELED", order_id="t1limit1", trade_qty=0)),
+    )
+
+    result = asyncio.run(emt.cancel_resting_t1_limit(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "TPSL_SET"
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_T1_LIMIT_CANCELED"]
+
+
+def test_cancel_resting_t1_limit_transitions_to_partial_closed_when_tradeQty_is_nonzero(db, monkeypatch):
+    # DeepSeek amendment #1: a partial fill before the cancel landed
+    # must be verified and carried forward, not silently discarded.
+    account = _make_ready_account(db)
+    test_row = _make_t1_limit_placed_row(db, account, qty=0.0002, t1_qty=0.0001)
+
+    # tradeQty=0.0001 -- clearly above the half-unit-at-4dp tolerance
+    # (0.00005), not a boundary-exact edge case.
+    _install(
+        monkeypatch,
+        cancel_orders=_async({"code": 0, "data": {"successList": [{"orderId": "t1limit1"}], "failureList": []}, "msg": "Success"}),
+        get_order_detail=_async(_order_detail_response(status="CANCELED", order_id="t1limit1", trade_qty=0.0001)),
+        get_position=_async(_one_long_position_response(position_id="pos1", avg_open_price=100.0)),
+    )
+    # Expected remainder = 0.0002 - 0.0001 = 0.0001 -- override the
+    # canned mock's response via a direct patch so this test asserts
+    # the REAL arithmetic, not a coincidental match with the fixture's
+    # own default "0.0001" qty.
+    monkeypatch.setattr(
+        emt, "_find_open_long_position",
+        lambda pos_resp: {"positionId": "pos1", "symbol": "BTCUSDT", "side": "BUY", "avgOpenPrice": "100.0", "qty": "0.0001"},
+    )
+
+    result = asyncio.run(emt.cancel_resting_t1_limit(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "PARTIAL_CLOSED"
+    assert result.t1_limit_qty == pytest.approx(0.0001)   # the ACTUAL filled amount
+    assert result.qty_after_partial_close == pytest.approx(0.0001)
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_T1_LIMIT_CANCELED_AFTER_PARTIAL_FILL"]
+
+
+def test_cancel_resting_t1_limit_fails_when_order_id_not_in_success_list(db, monkeypatch):
+    account = _make_ready_account(db)
+    test_row = _make_t1_limit_placed_row(db, account)
+
+    _install(
+        monkeypatch,
+        cancel_orders=_async({"code": 0, "data": {
+            "successList": [], "failureList": [{"orderId": "t1limit1", "errorCode": "10001", "errorMsg": "order not found"}],
+        }, "msg": "Success"}),
+    )
+
+    result = asyncio.run(emt.cancel_resting_t1_limit(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "FAILED"
+    assert "successList" in result.error_detail
+    assert _get_audit_event_types(db, test_row.id) == ["TEST_MECHANISM_FAILED"]
+
+
+def test_cancel_resting_t1_limit_rejects_wrong_prior_status(db):
+    account = _make_ready_account(db)
+    test_row = _make_tpsl_set_row(db, account)   # TPSL_SET, not T1_LIMIT_PLACED
+
+    with pytest.raises(emt.MechanismTestInvalidState, match="T1_LIMIT_PLACED"):
+        asyncio.run(emt.cancel_resting_t1_limit(db, account, test_row, actor="test@kabroda.com"))
+
+
+def test_move_sl_to_breakeven_after_resting_t1_limit_fill_uses_the_ladder_shared_flow(db, monkeypatch):
+    # Proves the two paths to PARTIAL_CLOSED (MARKET partial_close() vs.
+    # a filled resting T1 limit) converge cleanly -- move_sl_to_
+    # breakeven() doesn't need to know or care which one got here.
+    account = _make_ready_account(db)
+    test_row = _make_t1_limit_placed_row(db, account, fill_price=100.0, qty=0.0002, t1_qty=0.0001)
+    _install(
+        monkeypatch,
+        get_order_detail=_async(_order_detail_response(status="FILLED", order_id="t1limit1")),
+        get_position=_async(_one_long_position_response(position_id="pos1")),
+    )
+    checked = asyncio.run(emt.check_resting_t1_limit_status(db, account, test_row, actor="test@kabroda.com"))
+    assert checked.status == "PARTIAL_CLOSED"
+
+    async def fake_modify_tpsl(self, **kwargs):
+        return {"code": 0, "data": {"orderId": "breakeven1"}, "msg": "Success"}
+
+    async def fake_get_pending_tp_sl_order(self, symbol=None, position_id=None):
+        return {"code": 0, "data": [{"id": "breakeven1", "positionId": position_id, "slPrice": "100.0", "tpPrice": "101.0"}], "msg": "Success"}
+
+    _install(monkeypatch, modify_position_tp_sl_order=fake_modify_tpsl, get_pending_tp_sl_order=fake_get_pending_tp_sl_order)
+
+    result = asyncio.run(emt.move_sl_to_breakeven(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "SL_MOVED_BREAKEVEN"
 
 
 # ------------------------------------------------------------------ move SL to breakeven

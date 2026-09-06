@@ -460,6 +460,236 @@ async def partial_close(
         raise
 
 
+# 2026-09-06 -- the resting reduce-only LIMIT-at-T1 test. DeepSeek's
+# design review flagged this as the one open technical gap before
+# Component B: the aligned rerun's new default management policy
+# (50/origstop) depends on a plain resting LIMIT order for the T1 leg,
+# NOT Bitunix's separate TP/SL trigger-order system (set_position_tpsl/
+# modify_position_tp_sl_order, already covered by TPSL_SET above) --
+# and that mechanism has never been tested against the real exchange.
+# A second, alternate way to reach PARTIAL_CLOSED from TPSL_SET; the
+# rest of the ladder (move_sl_to_breakeven, flash_close_remainder)
+# doesn't need to know or care which path got there.
+_T1_LIMIT_STILL_PENDING_STATUSES = ("NEW", "PART_FILLED", "INIT")
+
+
+async def place_resting_t1_limit(
+    db: Session, account: ExecutorAccount, test_row: ExecutorMechanismTest, actor: str,
+    t1_pct: float = _DEFAULT_TP_SL_PCT, qty_pct: float = _DEFAULT_PARTIAL_CLOSE_PCT,
+) -> ExecutorMechanismTest:
+    """Places a plain resting reduce-only LIMIT order at a target price
+    above the fill price. Fire-and-return: unlike every other action in
+    this ladder, this does NOT poll for a fill -- the order may sit
+    unfilled for a long time (this is deliberately the "unattended"
+    test), so the caller checks back later via
+    check_resting_t1_limit_status(). Andy's own live-firing note: the
+    default t1_pct is small enough to matter as a real percentage move,
+    but for an actual test session use something tiny (~0.0005-0.001)
+    so the order actually touches during the session -- both callers
+    (the route, the UI) accept this per-call, nothing hardcoded here
+    forces a slow test."""
+    if test_row.status != "TPSL_SET":
+        raise MechanismTestInvalidState(f"cannot place a resting T1 limit from status {test_row.status!r} -- expected TPSL_SET")
+    api_key, api_secret = await _require_gates_open(db, account)
+    client = executor_bitunix_client.BitunixClient(api_key, api_secret)
+
+    target_price = test_row.fill_price * (1 + t1_pct)
+    price_str = executor_sizing.round_price_to_precision(target_price, test_row.quote_precision)
+    qty_str = executor_sizing.round_qty_to_precision(test_row.qty * qty_pct, test_row.base_precision)
+    try:
+        if float(qty_str) <= 0:
+            raise ValueError(
+                f"resting T1 limit qty of {qty_pct:.0%} of qty={test_row.qty} floors to {qty_str} at "
+                f"{test_row.base_precision} decimals -- unrepresentable, refusing to send a zero-qty order")
+        resp = await client.place_order(
+            symbol=_TEST_SYMBOL, qty=qty_str, price=price_str, side="SELL", trade_side="CLOSE",
+            order_type="LIMIT", position_id=test_row.position_id, reduce_only=True)
+        test_row.t1_limit_place_response_json = json.dumps(resp, default=str)
+        test_row.t1_limit_target_price = float(price_str)
+        test_row.t1_limit_qty = float(qty_str)
+        test_row.t1_limit_exchange_order_id = resp["data"]["orderId"]
+        test_row.status = "T1_LIMIT_PLACED"
+        db.flush()
+        executor_accounts.write_audit(
+            db, "TEST_T1_LIMIT_PLACED",
+            f"resting reduce-only LIMIT placed at {price_str} for qty={qty_str} (orderId={test_row.t1_limit_exchange_order_id})",
+            account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=resp)
+        return test_row
+    except Exception as e:
+        test_row.status = "FAILED"
+        test_row.error_detail = str(e)
+        db.flush()
+        executor_accounts.write_audit(
+            db, "TEST_MECHANISM_FAILED", f"place resting T1 limit failed: {e}",
+            account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor)
+        raise
+
+
+async def check_resting_t1_limit_status(
+    db: Session, account: ExecutorAccount, test_row: ExecutorMechanismTest, actor: str,
+) -> ExecutorMechanismTest:
+    """ONE on-demand check of the resting T1 limit's real order status --
+    never a poll loop, since the order may sit unfilled for a long time
+    (see place_resting_t1_limit()'s own docstring). DeepSeek design
+    review amendment: fails CLOSED on anything outside the known still-
+    pending/FILLED set, rather than enumerating only the 5 documented
+    status values -- a CANCELED order nobody asked to cancel (e.g. the
+    position closed via its own SL before the limit ever touched), or
+    any undocumented status Bitunix's docs don't list (the same class
+    of doc-vs-reality gap already found once with the `side` field),
+    must never leave this test stuck in an unhandled state."""
+    if test_row.status != "T1_LIMIT_PLACED":
+        raise MechanismTestInvalidState(f"cannot check resting T1 limit status from status {test_row.status!r} -- expected T1_LIMIT_PLACED")
+    api_key, api_secret = await _require_gates_open(db, account)
+    client = executor_bitunix_client.BitunixClient(api_key, api_secret)
+    try:
+        resp = await client.get_order_detail(order_id=test_row.t1_limit_exchange_order_id)
+        test_row.t1_limit_check_response_json = json.dumps(resp, default=str)
+        db.flush()
+        if resp.get("code") not in (0, None):
+            raise ValueError(f"get_order_detail returned a real API error: code={resp.get('code')} msg={resp.get('msg')!r}")
+        status = (resp.get("data") or {}).get("status")
+
+        if status in _T1_LIMIT_STILL_PENDING_STATUSES:
+            executor_accounts.write_audit(
+                db, "TEST_T1_LIMIT_STATUS_CHECKED", f"resting T1 limit still {status} -- not yet filled",
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=resp)
+            return test_row
+
+        if status == "FILLED":
+            expected_remaining_qty = test_row.qty - test_row.t1_limit_qty
+            problem = await _verify_position_after_reduction(client, test_row, expected_remaining_qty)
+            db.flush()
+            if problem is not None:
+                test_row.status = "FAILED"
+                test_row.error_detail = f"{problem} -- CHECK THE EXCHANGE DIRECTLY. Raw response saved (partial_close_position_check_response_json)."
+                db.flush()
+                executor_accounts.write_audit(
+                    db, "TEST_MECHANISM_FAILED", test_row.error_detail,
+                    account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor)
+                return test_row
+            test_row.status = "PARTIAL_CLOSED"
+            db.flush()
+            executor_accounts.write_audit(
+                db, "TEST_T1_LIMIT_FILLED",
+                f"resting T1 limit filled and confirmed, remaining position verified "
+                f"(positionId={test_row.position_id}, qty={test_row.qty_after_partial_close})",
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=resp)
+            return test_row
+
+        # Anything else at all -- CANCELED, or any undocumented value --
+        # fail closed rather than get stuck in an unhandled UI state.
+        test_row.status = "FAILED"
+        test_row.error_detail = (
+            f"resting T1 limit order (orderId={test_row.t1_limit_exchange_order_id}) reports unexpected "
+            f"status={status!r} -- CHECK THE EXCHANGE DIRECTLY. Raw response saved (t1_limit_check_response_json)."
+        )
+        db.flush()
+        executor_accounts.write_audit(
+            db, "TEST_MECHANISM_FAILED", test_row.error_detail,
+            account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=resp)
+        return test_row
+    except Exception as e:
+        test_row.status = "FAILED"
+        test_row.error_detail = str(e)
+        db.flush()
+        executor_accounts.write_audit(
+            db, "TEST_MECHANISM_FAILED", f"check resting T1 limit status failed: {e}",
+            account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor)
+        raise
+
+
+async def cancel_resting_t1_limit(
+    db: Session, account: ExecutorAccount, test_row: ExecutorMechanismTest, actor: str,
+) -> ExecutorMechanismTest:
+    """Cancels the resting T1 limit order and reverts to TPSL_SET --
+    UNLESS the order partially (or fully) filled before the cancel
+    request landed (DeepSeek design review amendment): reverting
+    straight to TPSL_SET in that case would leave test_row.qty stale
+    and make a later MARKET partial-close compute the wrong size, the
+    same "assumption stood in for verification" class of bug that
+    caused the real TP-wipe incident. Checks the real `tradeQty` field
+    (confirmed via Bitunix's own docs: "Fill amount (base coin),
+    distinct from the original qty requested") on the post-cancel
+    get_order_detail() call -- already needed to confirm the cancel's
+    final state -- and if it's meaningfully above zero, treats this
+    exactly like a fill: the shared position-lifecycle verification
+    runs and the row moves to PARTIAL_CLOSED instead of reverting."""
+    if test_row.status != "T1_LIMIT_PLACED":
+        raise MechanismTestInvalidState(f"cannot cancel resting T1 limit from status {test_row.status!r} -- expected T1_LIMIT_PLACED")
+    api_key, api_secret = await _require_gates_open(db, account)
+    client = executor_bitunix_client.BitunixClient(api_key, api_secret)
+    try:
+        cancel_resp = await client.cancel_orders(_TEST_SYMBOL, [test_row.t1_limit_exchange_order_id])
+        test_row.t1_limit_cancel_response_json = json.dumps(cancel_resp, default=str)
+        db.flush()
+
+        # Never trust a bare "ok" -- confirm the specific orderId is
+        # actually in successList, same discipline as every other
+        # mutation in this module.
+        success_ids = {e.get("orderId") for e in (cancel_resp.get("data") or {}).get("successList") or []}
+        if test_row.t1_limit_exchange_order_id not in success_ids:
+            test_row.status = "FAILED"
+            test_row.error_detail = (
+                f"cancel_orders did not report orderId={test_row.t1_limit_exchange_order_id} in successList "
+                f"-- CHECK THE EXCHANGE DIRECTLY. Raw response saved (t1_limit_cancel_response_json)."
+            )
+            db.flush()
+            executor_accounts.write_audit(
+                db, "TEST_MECHANISM_FAILED", test_row.error_detail,
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=cancel_resp)
+            return test_row
+
+        # Independent confirmation of the ACTUAL final state, including
+        # whether anything filled before the cancel landed -- never
+        # trust cancel_orders' own successList alone for that.
+        detail_resp = await client.get_order_detail(order_id=test_row.t1_limit_exchange_order_id)
+        test_row.t1_limit_check_response_json = json.dumps(detail_resp, default=str)
+        db.flush()
+        if detail_resp.get("code") not in (0, None):
+            raise ValueError(f"get_order_detail returned a real API error: code={detail_resp.get('code')} msg={detail_resp.get('msg')!r}")
+        traded_qty = float((detail_resp.get("data") or {}).get("tradeQty") or 0)
+
+        tolerance = 0.5 * (10 ** -test_row.base_precision)
+        if traded_qty > tolerance:
+            test_row.t1_limit_qty = traded_qty   # the ACTUAL filled amount, not the originally requested qty
+            expected_remaining_qty = test_row.qty - traded_qty
+            problem = await _verify_position_after_reduction(client, test_row, expected_remaining_qty)
+            db.flush()
+            if problem is not None:
+                test_row.status = "FAILED"
+                test_row.error_detail = f"{problem} -- CHECK THE EXCHANGE DIRECTLY. Raw response saved (partial_close_position_check_response_json)."
+                db.flush()
+                executor_accounts.write_audit(
+                    db, "TEST_MECHANISM_FAILED", test_row.error_detail,
+                    account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor)
+                return test_row
+            test_row.status = "PARTIAL_CLOSED"
+            db.flush()
+            executor_accounts.write_audit(
+                db, "TEST_T1_LIMIT_CANCELED_AFTER_PARTIAL_FILL",
+                f"resting T1 limit canceled but had already filled {traded_qty} before the cancel landed -- "
+                f"treated as a partial close, remaining position verified "
+                f"(positionId={test_row.position_id}, qty={test_row.qty_after_partial_close})",
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=detail_resp)
+            return test_row
+
+        test_row.status = "TPSL_SET"
+        db.flush()
+        executor_accounts.write_audit(
+            db, "TEST_T1_LIMIT_CANCELED", "resting T1 limit canceled, confirmed nothing filled, position unchanged",
+            account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=cancel_resp)
+        return test_row
+    except Exception as e:
+        test_row.status = "FAILED"
+        test_row.error_detail = str(e)
+        db.flush()
+        executor_accounts.write_audit(
+            db, "TEST_MECHANISM_FAILED", f"cancel resting T1 limit failed: {e}",
+            account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor)
+        raise
+
+
 async def move_sl_to_breakeven(
     db: Session, account: ExecutorAccount, test_row: ExecutorMechanismTest, actor: str,
 ) -> ExecutorMechanismTest:
