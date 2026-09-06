@@ -146,6 +146,23 @@ function escapeHtml(s) {
     return (s === null || s === undefined) ? "" : String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 
+// 2026-09-06, real bug caught live by Andy: every timestamp this page
+// renders comes from a naive datetime.utcnow()-based DB column,
+// serialized server-side via Python's .isoformat() -- which omits any
+// timezone marker (e.g. "2026-09-06T18:18:07.123456", not "...Z"). Per
+// the JS Date spec, a date-time string with NO timezone designator is
+// parsed as LOCAL time, not UTC -- so a server timestamp of 18:18 UTC
+// displayed as if it were already 18:18 in the viewer's own timezone
+// (confirmed live: showed "6:18 PM" when it was actually ~1:18 PM
+// Andy's local Central time, a 5-hour gap matching UTC-5). Every
+// timestamp on this page is confirmed UTC at the source, so appending
+// "Z" when no zone marker is already present is always correct here.
+function _parseServerTimestamp(isoStr) {
+    if (!isoStr) return null;
+    const hasZone = /[Zz]$/.test(isoStr) || /[+-]\d{2}:?\d{2}$/.test(isoStr);
+    return new Date(hasZone ? isoStr : isoStr + "Z");
+}
+
 // ------------------------------------------------------------------ live orders global gate (Stage 2, 2026-09-05)
 
 let globalConfig = { global_kill_switch_engaged: false, live_orders_enabled: false };
@@ -486,7 +503,7 @@ function renderTinyTestSection(accountId, hasCredentials, active, allTests) {
                 <td>#${t.id}</td>
                 <td><span class="badge ${t.status === 'FULLY_CLOSED' ? 'badge-ok' : (t.status === 'FAILED' ? 'badge-danger' : 'badge-warn')}">${escapeHtml(t.status)}</span></td>
                 <td>${t.qty ?? "-"}</td><td>${t.fill_price ?? "-"}</td>
-                <td>${t.created_at ? new Date(t.created_at).toLocaleString() : "-"}</td>
+                <td>${t.created_at ? _parseServerTimestamp(t.created_at).toLocaleString() : "-"}</td>
             </tr>`).join("") + `</tbody></table>`;
     }
     return html;
@@ -652,7 +669,7 @@ async function loadOrders() {
             <td>${o.qty !== null ? o.qty.toFixed(4) : "-"}</td><td>${o.leverage_used ?? "-"}</td>
             <td><span class="badge ${o.decision === 'WOULD_PLACE' ? 'badge-ok' : (o.decision === 'REJECTED' ? 'badge-danger' : 'badge-neutral')}">${escapeHtml(o.decision)}</span></td>
             <td style="max-width:320px; white-space:normal;">${escapeHtml(o.decision_reason)}</td>
-            <td>${o.created_at ? new Date(o.created_at).toLocaleString() : "-"}</td>
+            <td>${o.created_at ? _parseServerTimestamp(o.created_at).toLocaleString() : "-"}</td>
         </tr>`).join("") + `</tbody></table>`;
 }
 
@@ -663,7 +680,7 @@ async function loadAuditLog() {
     if (!data.audit_log.length) { body.innerHTML = '<p class="empty">No audit entries yet.</p>'; return; }
     body.innerHTML = `<table><thead><tr><th>When</th><th>Event</th><th>Actor</th><th>Message</th></tr></thead><tbody>` +
         data.audit_log.map(r => `<tr>
-            <td>${r.occurred_at ? new Date(r.occurred_at).toLocaleString() : "-"}</td>
+            <td>${r.occurred_at ? _parseServerTimestamp(r.occurred_at).toLocaleString() : "-"}</td>
             <td><span class="badge badge-neutral">${escapeHtml(r.event_type)}</span></td>
             <td>${escapeHtml(r.actor)}</td>
             <td style="max-width:420px; white-space:normal;">${escapeHtml(r.message)}</td>

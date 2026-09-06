@@ -114,6 +114,31 @@ async function main() {
   // loadOrders()/loadAuditLog() calls settle before clicking anything.
   await new Promise((r) => setTimeout(r, 50));
 
+  // _parseServerTimestamp() unit check (2026-09-06, real bug caught
+  // live by Andy) -- direct function-level assertions, not just "the
+  // page didn't throw." Naive-UTC strings (no zone marker, exactly what
+  // Python's .isoformat() on a datetime.utcnow()-based column produces)
+  // must get "Z" appended; already-tagged strings must be left alone.
+  const timestampResults = [];
+  try {
+    const fn = sandbox._parseServerTimestamp;
+    const cases = [
+      { input: '2026-09-06T18:18:07.123456', expected: '2026-09-06T18:18:07.123Z', label: 'naive UTC string gets Z appended' },
+      { input: '2026-09-06T18:18:07Z', expected: '2026-09-06T18:18:07.000Z', label: 'already-Z string not double-appended' },
+      { input: '2026-09-06T18:18:07+00:00', expected: '2026-09-06T18:18:07.000Z', label: 'explicit-offset string not double-appended' },
+    ];
+    for (const c of cases) {
+      const actual = fn(c.input).toISOString();
+      timestampResults.push({
+        label: `_parseServerTimestamp: ${c.label}`, ok: actual === c.expected,
+        error: actual === c.expected ? undefined : `expected ${c.expected}, got ${actual}`,
+      });
+    }
+    timestampResults.push({ label: '_parseServerTimestamp: null input', ok: fn(null) === null });
+  } catch (e) {
+    timestampResults.push({ label: '_parseServerTimestamp', ok: false, error: e.message });
+  }
+
   const SCENARIOS = [
     { label: 'placeTinyTest', expectPath: /\/tiny-test\/place$/ },
     { label: 'partialCloseTinyTest', expectPath: /\/tiny-test\/5\/partial-close$/ },
@@ -175,8 +200,9 @@ async function main() {
     }
   }
 
-  console.log(JSON.stringify(results, null, 2));
-  process.exit(results.some((r) => !r.ok) ? 1 : 0);
+  const allResults = timestampResults.concat(results);
+  console.log(JSON.stringify(allResults, null, 2));
+  process.exit(allResults.some((r) => !r.ok) ? 1 : 0);
 }
 
 main();

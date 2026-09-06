@@ -100,3 +100,29 @@ def test_cancel_resting_t1_limit_calls_the_right_endpoint():
     cancel = next(s for s in scenarios if s["label"] == "cancelRestingT1Limit")
     assert cancel["ok"] is True
     assert any(p.endswith("/tiny-test/5/cancel-resting-t1-limit") for p in cancel["fetchCalls"])
+
+
+# ------------------------------------------------------------------ _parseServerTimestamp (2026-09-06)
+# Real bug Andy caught live: naive-UTC timestamps (Python's .isoformat()
+# on a datetime.utcnow()-based column, no "Z"/offset) were displayed as
+# if already in the viewer's local timezone.
+
+def test_parse_server_timestamp_appends_z_to_naive_utc_strings():
+    scenarios, returncode = _run_harness()
+    naive = next(s for s in scenarios if s["label"] == "_parseServerTimestamp: naive UTC string gets Z appended")
+    assert naive["ok"] is True
+    assert returncode == 0
+
+
+def test_parse_server_timestamp_does_not_double_append_an_existing_zone():
+    scenarios, _ = _run_harness()
+    already_z = next(s for s in scenarios if s["label"] == "_parseServerTimestamp: already-Z string not double-appended")
+    with_offset = next(s for s in scenarios if s["label"] == "_parseServerTimestamp: explicit-offset string not double-appended")
+    assert already_z["ok"] is True
+    assert with_offset["ok"] is True
+
+
+def test_parse_server_timestamp_handles_null():
+    scenarios, _ = _run_harness()
+    null_case = next(s for s in scenarios if s["label"] == "_parseServerTimestamp: null input")
+    assert null_case["ok"] is True
