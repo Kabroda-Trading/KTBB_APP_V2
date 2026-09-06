@@ -229,3 +229,95 @@ def test_round_price_to_precision_rounds_half_up():
 def test_round_price_to_precision_rejects_negative_precision():
     with pytest.raises(ValueError, match="precision"):
         es.round_price_to_precision(1.0, -1)
+
+
+# ------------------------------------------------------------------ compute_stake (Sizing Policy Wizard, 2026-09-05)
+# Every preset is just which optional params are set -- deliberately
+# one primitive, no separate code path per preset. Numbers below are
+# Andy's own worked examples, not invented.
+
+def test_compute_stake_fixed_mode_uses_risk_last_usd():
+    stake, detail = es.compute_stake(risk_last_usd=100.0)
+    assert stake == pytest.approx(100.0)
+    assert detail["base"] == pytest.approx(100.0)
+    assert detail["tier_applied"] is False
+    assert detail["cap_binding"] == "none"
+
+
+def test_compute_stake_percent_of_balance_base():
+    # Andy's own example: $1,000 account -> $100 stake; $2,000 -> $200.
+    stake1, _ = es.compute_stake(risk_last_usd=100.0, base_risk_pct=0.10, account_balance_usd=1000.0)
+    assert stake1 == pytest.approx(100.0)
+    stake2, _ = es.compute_stake(risk_last_usd=100.0, base_risk_pct=0.10, account_balance_usd=2000.0)
+    assert stake2 == pytest.approx(200.0)
+
+
+def test_compute_stake_raises_when_pct_base_missing_balance():
+    with pytest.raises(ValueError, match="account_balance_usd"):
+        es.compute_stake(risk_last_usd=100.0, base_risk_pct=0.10)
+
+
+def test_compute_stake_tier_switch_applies_above_threshold_and_reverts_below_it():
+    # Andy's own example: 10% of account, capped at $1,000 flat once the
+    # account reaches $10,000 -- a $12,000 account does NOT get $1,200,
+    # it gets $1,000. A $9,000 account (below threshold) reverts to 10%.
+    above, detail_above = es.compute_stake(
+        risk_last_usd=100.0, base_risk_pct=0.10, account_balance_usd=12000.0,
+        tier_threshold_usd=10000.0, tier_flat_usd=1000.0)
+    assert above == pytest.approx(1000.0)
+    assert detail_above["tier_applied"] is True
+
+    below, detail_below = es.compute_stake(
+        risk_last_usd=100.0, base_risk_pct=0.10, account_balance_usd=9000.0,
+        tier_threshold_usd=10000.0, tier_flat_usd=1000.0)
+    assert below == pytest.approx(900.0)
+    assert detail_below["tier_applied"] is False
+
+
+def test_compute_stake_tier_switch_requires_balance():
+    with pytest.raises(ValueError, match="account_balance_usd"):
+        es.compute_stake(risk_last_usd=100.0, tier_threshold_usd=10000.0, tier_flat_usd=1000.0)
+
+
+def test_compute_stake_abs_and_pct_caps_take_the_minimum():
+    # $500 stake, but capped at the LOWER of $200 flat or 5% of a
+    # $10,000 account ($500) -- the abs cap is tighter here.
+    stake, detail = es.compute_stake(risk_last_usd=500.0, cap_abs_usd=200.0, cap_pct=0.05, account_balance_usd=10000.0)
+    assert stake == pytest.approx(200.0)
+    assert detail["cap_binding"] == "abs"
+
+    # Now the pct cap is tighter (2% of $10,000 = $200 vs abs $400).
+    stake2, detail2 = es.compute_stake(risk_last_usd=500.0, cap_abs_usd=400.0, cap_pct=0.02, account_balance_usd=10000.0)
+    assert stake2 == pytest.approx(200.0)
+    assert detail2["cap_binding"] == "pct"
+
+
+def test_compute_stake_no_cap_binding_when_stake_already_under_both():
+    stake, detail = es.compute_stake(risk_last_usd=50.0, cap_abs_usd=1000.0, cap_pct=0.10, account_balance_usd=10000.0)
+    assert stake == pytest.approx(50.0)
+    assert detail["cap_binding"] == "none"
+
+
+def test_compute_stake_derisk_shrinks_after_n_losses():
+    # Below the threshold: no shrink.
+    stake_before, detail_before = es.compute_stake(risk_last_usd=500.0, derisk_n=3, derisk_factor=0.5, consecutive_losses=2)
+    assert stake_before == pytest.approx(500.0)
+    assert detail_before["derisk_applied"] is False
+
+    # At the threshold: single-step shrink, not compounding.
+    stake_at, detail_at = es.compute_stake(risk_last_usd=500.0, derisk_n=3, derisk_factor=0.5, consecutive_losses=3)
+    assert stake_at == pytest.approx(250.0)
+    assert detail_at["derisk_applied"] is True
+
+    # Beyond the threshold: still a single 0.5x, not 0.5^2.
+    stake_beyond, _ = es.compute_stake(risk_last_usd=500.0, derisk_n=3, derisk_factor=0.5, consecutive_losses=5)
+    assert stake_beyond == pytest.approx(250.0)
+
+
+def test_compute_stake_derisk_and_cap_compose():
+    # Derisk shrinks the stake, THEN the cap still applies to the result.
+    stake, detail = es.compute_stake(
+        risk_last_usd=500.0, derisk_n=1, derisk_factor=0.5, consecutive_losses=1, cap_abs_usd=100.0)
+    assert stake == pytest.approx(100.0)
+    assert detail["derisk_applied"] is True
+    assert detail["cap_binding"] == "abs"

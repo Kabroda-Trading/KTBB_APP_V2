@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 # 2026-09-05: previously ignored Bitunix's real maintenance-margin-rate
 # table entirely (the naive "100%-of-margin-lost" bound). Now takes an
@@ -179,3 +179,88 @@ def round_price_to_precision(price: float, precision: int) -> str:
     quant = Decimal(1).scaleb(-precision)
     d = Decimal(str(price)).quantize(quant, rounding=ROUND_HALF_UP)
     return format(d, "f")
+
+
+# ------------------------------------------------------------------
+# 2026-09-05, Sizing Policy Wizard: the ONE stake-sizing primitive.
+# Every preset (Conservative/Steady Grow/Scale With Account/Custom) is
+# just which of these optional parameters is non-None -- deliberately
+# never a separate code path per preset, per the design partner's own
+# explicit requirement. "Stake" here means the same thing risk_last_usd
+# already means throughout this module: a risk-DOLLAR amount (what's
+# lost if the stop is hit), not notional or margin -- confirmed directly
+# against Andy's own worked example for the percent-of-balance case
+# ($1,000 account -> $100 stake -> $2,000 account -> $200 stake, i.e.
+# 10% of balance IS the risk amount, not a position-value allocation).
+# ------------------------------------------------------------------
+
+def compute_stake(
+    *,
+    risk_last_usd: float,
+    base_risk_pct: Optional[float] = None,
+    account_balance_usd: Optional[float] = None,
+    tier_threshold_usd: Optional[float] = None,
+    tier_flat_usd: Optional[float] = None,
+    cap_abs_usd: Optional[float] = None,
+    cap_pct: Optional[float] = None,
+    consecutive_losses: int = 0,
+    derisk_n: Optional[int] = None,
+    derisk_factor: Optional[float] = None,
+) -> Tuple[float, Dict[str, Any]]:
+    """Returns (stake_usd, detail) -- detail is both the audit payload
+    and exactly what the wizard's preview panel renders, so it records
+    every stage rather than just the final number.
+
+    Order of operations:
+      1. base: base_risk_pct*account_balance_usd (percent-of-balance
+         modes) or risk_last_usd (FIXED/ROLLING modes -- the rolled
+         current baseline, advanced elsewhere by
+         executor_accounts.record_trade_result() via compute_next_risk()).
+      2. tier switch: REPLACES the base with tier_flat_usd once
+         account_balance_usd >= tier_threshold_usd, evaluated fresh
+         against the live balance every call -- reverting below the
+         threshold falls out for free, no stored "am I tiered" flag.
+      3. derisk (optional): once consecutive_losses >= derisk_n,
+         multiplies the stake by derisk_factor -- a single-step shrink,
+         not compounding per additional loss beyond N (the simplest
+         defensible reading of an explicitly under-specified rule).
+      4. dual caps: takes the MINIMUM of whichever of cap_abs_usd /
+         cap_pct*account_balance_usd are set.
+    """
+    if base_risk_pct is not None:
+        if account_balance_usd is None:
+            raise ValueError("base_risk_pct requires account_balance_usd")
+        base = account_balance_usd * base_risk_pct
+    else:
+        base = risk_last_usd
+
+    detail: Dict[str, Any] = {"base": base, "tier_applied": False, "derisk_applied": False, "cap_binding": "none"}
+    stake = base
+
+    if tier_threshold_usd is not None and tier_flat_usd is not None:
+        if account_balance_usd is None:
+            raise ValueError("tier_threshold_usd/tier_flat_usd require account_balance_usd")
+        if account_balance_usd >= tier_threshold_usd:
+            stake = tier_flat_usd
+            detail["tier_applied"] = True
+
+    if derisk_n is not None and derisk_factor is not None and consecutive_losses >= derisk_n:
+        stake = stake * derisk_factor
+        detail["derisk_applied"] = True
+
+    candidates = [stake]
+    if cap_abs_usd is not None:
+        candidates.append(cap_abs_usd)
+    if cap_pct is not None and account_balance_usd is not None:
+        candidates.append(cap_pct * account_balance_usd)
+
+    final = min(candidates)
+    if final < stake:
+        if cap_abs_usd is not None and final == cap_abs_usd and (cap_pct is None or cap_abs_usd <= cap_pct * account_balance_usd):
+            detail["cap_binding"] = "abs"
+        elif cap_pct is not None:
+            detail["cap_binding"] = "pct"
+
+    detail["stake_before_cap"] = stake
+    detail["final_stake"] = final
+    return final, detail

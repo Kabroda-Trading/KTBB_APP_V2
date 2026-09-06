@@ -479,6 +479,18 @@ def init_db():
         except Exception:
             pass
 
+    # --- SIZING POLICY WIZARD (2026-09-05) -- ExecutorSizingPolicy itself
+    # is a brand-new table, created by create_all() above with zero
+    # ALTER TABLE risk. This is the one new column on the EXISTING
+    # ExecutorRiskState table. INTEGER, not BOOLEAN -- the earlier
+    # `BOOLEAN DEFAULT 0` incident this session doesn't apply here, but
+    # Postgres-safe syntax throughout is the standing practice regardless. ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE executor_risk_state ADD COLUMN consecutive_losses INTEGER DEFAULT 0"))
+    except Exception:
+        pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -1717,7 +1729,69 @@ class ExecutorRiskState(Base):
     compounding_factor = Column(Float, nullable=False, default=0.10)
     last_trade_pnl_usd = Column(Float, nullable=True)
     last_updated_from_trade_plan_id = Column(Integer, nullable=True)  # trade_plans.id, traceability only
+    # 2026-09-05 -- Sizing Policy Wizard: tracks a losing streak for the
+    # optional derisk-on-loss modifier. Reset to 0 on a win, incremented
+    # on a loss, both via executor_accounts.record_trade_result() (the
+    # ONLY write path -- see that function's own docstring for why this
+    # is a manual stopgap today, not yet fed by a real closed-position
+    # detector).
+    consecutive_losses = Column(Integer, nullable=False, default=0)
 
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class ExecutorSizingPolicy(Base):
+    """The Sizing Policy Wizard's CONFIG layer (2026-09-05) -- one row per
+    account, paired with ExecutorRiskState's STATE layer (risk_last_usd,
+    consecutive_losses) above. This table answers "what rule did the
+    trader choose"; ExecutorRiskState answers "what does that rule
+    currently compute to, given what's happened so far." Deliberately
+    ONE table for every preset (FIXED/ROLLING/TIERED + the optional
+    derisk modifier) rather than a table-per-mode -- see executor_sizing.
+    compute_stake()'s own header for why: every preset is just which of
+    these fields is non-NULL, never a separate code path."""
+    __tablename__ = "executor_sizing_policies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, nullable=False, unique=True, index=True)  # executor_accounts.id
+
+    # Display-only label for which wizard preset produced this config --
+    # "conservative" | "steady_grow" | "scale_with_account" | "custom".
+    # Never read by compute_stake() itself; the actual behavior is
+    # entirely determined by the fields below.
+    preset_name = Column(String, nullable=True)
+
+    # Q1 -- exactly one of these two should be set (enforced in
+    # executor_accounts._validate_sizing_policy(), not at the DB level).
+    base_risk_usd = Column(Float, nullable=True)   # fixed-dollar stake
+    base_risk_pct = Column(Float, nullable=True)   # % of live account balance
+
+    # Q2 -- Andy's rolling model. When set, record_trade_result() rolls
+    # risk_last_usd forward via the existing, previously-orphaned
+    # executor_sizing.compute_next_risk().
+    roll_in_pct = Column(Float, nullable=True)
+
+    # Q3 -- dual caps (the real-world slippage-ceiling constraint Andy
+    # added this session). compute_stake() takes the minimum of whichever
+    # are set.
+    cap_abs_usd = Column(Float, nullable=True)
+    cap_pct = Column(Float, nullable=True)
+
+    # Q4 -- the tiered "friend's rule": flat tier_flat_usd once the live
+    # balance reaches tier_threshold_usd, reverting to the base rule
+    # below it. Evaluated fresh against the live balance every call --
+    # no stored "am I currently tiered" flag exists or is needed.
+    tier_threshold_usd = Column(Float, nullable=True)
+    tier_flat_usd = Column(Float, nullable=True)
+
+    # Q5 -- optional, explicitly under-specified by design (needs
+    # confirming before real use): once consecutive_losses >= derisk_n,
+    # multiply the stake by derisk_factor (a single-step shrink, not
+    # compounding per additional loss beyond N).
+    derisk_n = Column(Integer, nullable=True)
+    derisk_factor = Column(Float, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 
