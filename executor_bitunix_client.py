@@ -71,7 +71,7 @@ import random
 import string
 import time
 import weakref
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 
@@ -351,3 +351,20 @@ class BitunixClient:
         the liquidation safety check."""
         return await self._request("GET", "/api/v1/futures/position/get_position_tiers",
                                     query={"symbol": symbol})
+
+    async def cancel_orders(self, symbol: str, order_ids: List[str]) -> Dict[str, Any]:
+        """POST /api/v1/futures/trade/cancel_orders -- verified against
+        bitunix.com/api-docs, 2026-09-06. Batch endpoint (also used for a
+        single cancel by passing one id) -- request body is
+        {"symbol": symbol, "orderList": [{"orderId": oid}, ...]}. Response
+        carries `successList`/`failureList`, each entry keyed by
+        orderId/clientId (failureList entries also carry errorCode/
+        errorMsg) -- a STRUCTURED per-order confirmation, not a bare
+        top-level "ok" -- so a caller must check the specific orderId is
+        present in successList, never just this call's own top-level
+        `code`, same "REST response success != operation success"
+        caution as every other mutation in this file."""
+        return await self._request("POST", "/api/v1/futures/trade/cancel_orders", body={
+            "symbol": symbol,
+            "orderList": [{"orderId": oid} for oid in order_ids],
+        })

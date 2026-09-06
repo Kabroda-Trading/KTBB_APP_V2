@@ -312,3 +312,54 @@ def test_get_position_tiers_calls_the_right_endpoint(monkeypatch):
     asyncio.run(client.get_position_tiers("BTCUSDT"))
     assert calls == [{"method": "GET", "path": "/api/v1/futures/position/get_position_tiers",
                        "query": {"symbol": "BTCUSDT"}, "body": None}]
+
+
+# ------------------------------------------------------------------ cancel_orders (2026-09-06, ladder-test completion build)
+
+def test_cancel_orders_sends_correct_body_for_a_single_order(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.cancel_orders("BTCUSDT", ["order1"]))
+    assert calls == [{"method": "POST", "path": "/api/v1/futures/trade/cancel_orders",
+                       "query": None, "body": {"symbol": "BTCUSDT", "orderList": [{"orderId": "order1"}]}}]
+
+
+def test_cancel_orders_sends_correct_body_for_multiple_orders(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.cancel_orders("BTCUSDT", ["order1", "order2"]))
+    assert calls[0]["body"]["orderList"] == [{"orderId": "order1"}, {"orderId": "order2"}]
+
+
+def test_cancel_orders_parses_success_list(monkeypatch):
+    import asyncio
+
+    async def fake_request(self, method, path, query=None, body=None):
+        return {"code": 0, "data": {
+            "successList": [{"orderId": "order1", "clientId": ""}],
+            "failureList": [],
+        }, "msg": "Success"}
+
+    monkeypatch.setattr(ebc.BitunixClient, "_request", fake_request)
+    client = ebc.BitunixClient("key", "secret")
+    resp = asyncio.run(client.cancel_orders("BTCUSDT", ["order1"]))
+    assert resp["data"]["successList"] == [{"orderId": "order1", "clientId": ""}]
+    assert resp["data"]["failureList"] == []
+
+
+def test_cancel_orders_parses_failure_list_with_error_detail(monkeypatch):
+    import asyncio
+
+    async def fake_request(self, method, path, query=None, body=None):
+        return {"code": 0, "data": {
+            "successList": [],
+            "failureList": [{"orderId": "order1", "clientId": "", "errorCode": "10001", "errorMsg": "order not found"}],
+        }, "msg": "Success"}
+
+    monkeypatch.setattr(ebc.BitunixClient, "_request", fake_request)
+    client = ebc.BitunixClient("key", "secret")
+    resp = asyncio.run(client.cancel_orders("BTCUSDT", ["order1"]))
+    assert resp["data"]["successList"] == []
+    assert resp["data"]["failureList"][0]["errorMsg"] == "order not found"

@@ -491,6 +491,23 @@ def init_db():
     except Exception:
         pass
 
+    # --- LADDER-TEST COMPLETION (2026-09-06) -- position-lifecycle
+    # verification (shared by MARKET partial_close() and the new
+    # resting-T1-limit path) + the resting reduce-only LIMIT-at-T1 test
+    # itself. All nullable, no default-value Postgres traps. ---
+    for _col in [
+        "position_id_after_partial_close VARCHAR", "qty_after_partial_close FLOAT",
+        "partial_close_position_check_response_json TEXT",
+        "t1_limit_target_price FLOAT", "t1_limit_qty FLOAT",
+        "t1_limit_exchange_order_id VARCHAR", "t1_limit_place_response_json TEXT",
+        "t1_limit_check_response_json TEXT", "t1_limit_cancel_response_json TEXT",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE executor_mechanism_tests ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -1936,8 +1953,16 @@ class ExecutorMechanismTest(Base):
     symbol = Column(String, nullable=False, default="BTCUSDT")
     direction = Column(String, nullable=False, default="LONG")
 
-    # STARTED | ORDER_PLACED | FILL_CONFIRMED | TPSL_SET | PARTIAL_CLOSED
-    # | SL_MOVED_BREAKEVEN | FULLY_CLOSED | FAILED
+    # STARTED | ORDER_PLACED | FILL_CONFIRMED | TPSL_SET | T1_LIMIT_PLACED
+    # | PARTIAL_CLOSED | SL_MOVED_BREAKEVEN | FULLY_CLOSED | FAILED
+    # T1_LIMIT_PLACED (2026-09-06) is an interim status only reachable
+    # from TPSL_SET via place_resting_t1_limit() -- a resting reduce-
+    # only LIMIT order may sit unfilled for a long time, so unlike every
+    # other step in this ladder this one does NOT poll to a terminal
+    # status before returning. It resolves to PARTIAL_CLOSED (via
+    # check_resting_t1_limit_status() or cancel_resting_t1_limit()
+    # detecting a fill) or back to TPSL_SET (cancel with nothing
+    # filled) -- see executor_mechanism_test.py.
     status = Column(String, nullable=False, index=True)
 
     min_trade_volume = Column(Float, nullable=True)     # snapshot from get_trading_pairs
@@ -1979,6 +2004,34 @@ class ExecutorMechanismTest(Base):
     partial_close_qty = Column(Float, nullable=True)
     partial_close_exchange_order_id = Column(String, nullable=True)
     partial_close_response_json = Column(Text, nullable=True)
+
+    # 2026-09-06, ladder-test completion build -- shared by BOTH the
+    # MARKET partial_close() above and the resting-T1-limit path below.
+    # Confirms what the exchange ACTUALLY reports for the remaining
+    # position after any reduction, rather than assuming position_id
+    # stays the same -- see executor_mechanism_test.py's own
+    # _verify_position_after_reduction() for why this exists (the same
+    # "assumption stood in for verification" class of gap that caused
+    # the real TP-wipe incident). A DEDICATED response column, not a
+    # reuse of position_check_response_json above -- that one gets
+    # overwritten again by flash_close_remainder()'s own confirmation
+    # check, which would otherwise erase this specific checkpoint.
+    position_id_after_partial_close = Column(String, nullable=True)
+    qty_after_partial_close = Column(Float, nullable=True)
+    partial_close_position_check_response_json = Column(Text, nullable=True)
+
+    # 2026-09-06 -- the resting reduce-only LIMIT-at-T1 test (DeepSeek
+    # design-review finding: the exact mechanism the aligned rerun's new
+    # default management policy, 50/origstop, depends on for Component
+    # B, never tested against the real exchange until now). A plain
+    # resting LIMIT order, NOT Bitunix's separate TP/SL trigger-order
+    # system (tpsl_* columns above cover that).
+    t1_limit_target_price = Column(Float, nullable=True)
+    t1_limit_qty = Column(Float, nullable=True)               # requested qty; may be revised down to the actual filled amount if a cancel finds a partial fill (see cancel_resting_t1_limit())
+    t1_limit_exchange_order_id = Column(String, nullable=True)
+    t1_limit_place_response_json = Column(Text, nullable=True)
+    t1_limit_check_response_json = Column(Text, nullable=True)   # overwritten each check -- "last snapshot" pattern, same as position_check_response_json above
+    t1_limit_cancel_response_json = Column(Text, nullable=True)
 
     # Deliberately the exact fill price, fee-naive -- correct for
     # proving the mechanism, not true PnL-neutral breakeven. See
