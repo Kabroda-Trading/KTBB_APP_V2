@@ -297,6 +297,27 @@ def test_waiting_fueled_cross_sends_armed_email_via_loop(poll_env, monkeypatch):
     assert sent[0][0].startswith("KABRODA ARMED")
 
 
+def test_waiting_fueled_cross_armed_email_carries_the_locked_alignment_reading(poll_env, monkeypatch):
+    # 2026-09-06 -- fuel_verdict/htf_aligned are real, persisted TradePlan
+    # columns now (set once at lock, never recomputed at the cross). This
+    # confirms they actually survive the real WAITING->FILLED transition
+    # through the loop's own update path and reach the sent ARMED email --
+    # not just that render_brief() can format them in isolation.
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_plan"](
+        status="WAITING", direction="LONG", trigger_price=100.0,
+        stop_price=90.0, stop_basis="beyond sweep wick low", t1=112.0, t2=120.0, t3=132.0,
+        fuel_verdict="FUELED", htf_aligned=2,
+    )
+    candles = _fueled_5m_candles(100.0, is_long=True)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    assert len(sent) == 1
+    subject, body = sent[0]
+    assert subject.startswith("KABRODA ARMED")
+    assert "FULLY ALIGNED / fuel FUELED" in body
+
+
 def test_waiting_unfueled_cross_sends_vetoed_email_via_loop(poll_env, monkeypatch):
     sent = _capture_emails(monkeypatch)
     poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0)

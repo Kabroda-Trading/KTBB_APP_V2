@@ -508,6 +508,17 @@ def init_db():
         except Exception:
             pass
 
+    # --- EMAIL ALIGNMENT TIER (2026-09-06) -- persists the lock-time
+    # fuel/HTF reading (previously transient-only in trade_plan.py's
+    # build_trade_plan()) so it survives on the same TradePlan row from
+    # the LOCK email through to the later ARMED email. ---
+    for _col in ["fuel_verdict VARCHAR", "htf_aligned INTEGER"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE trade_plans ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -805,6 +816,23 @@ class TradePlan(Base):
     status = Column(String, default="NO_PLAN", nullable=False)
     direction = Column(String, nullable=True)     # LONG | SHORT | None (NO_PLAN)
     tier = Column(String, nullable=True)           # PREMIUM | STANDARD | None
+
+    # 2026-09-06 (DeepSeek's queued ask, Kabroda AI Brain repo AGENT_LOG.md,
+    # 12:45 CT): persists the SAME lock-time gate reading GateLog.fuel_state/
+    # htf_aligned already capture (decision_dict["fuel_verdict"]/
+    # ["htf_aligned"], set once at session lock by run_mas_analysis() --
+    # NOT recomputed at the later real cross, which is a genuinely
+    # different moment handled separately by fuel_at_cross above).
+    # Persisting these (previously transient-only, see trade_plan.py's
+    # build_trade_plan()) is what lets classify_alignment()'s email line
+    # survive from the LOCK email through to the ARMED email via the same
+    # TradePlan row -- deliberately the LOCK-time value, not a fresh cross-
+    # time one, because DeepSeek's own T3-correlation numbers (36.4% fully-
+    # aligned vs 20.8% partial) were computed against this exact lock-time
+    # field; a fresher cross-time reading would show a number whose
+    # relationship to T3 outcomes has never actually been validated.
+    fuel_verdict = Column(String, nullable=True)   # FUELED | CONFLICTED | NO_FUEL | NO_PUSH | UNKNOWN | None
+    htf_aligned = Column(Integer, nullable=True)   # 0-2, count of {1H, 4H} trends agreeing with direction
 
     entry_mode = Column(String, nullable=True)     # TRIGGER_AT_LEVEL | RETEST_LIMIT_AT_LINE, set at commit
     trigger_price = Column(Float, nullable=True)

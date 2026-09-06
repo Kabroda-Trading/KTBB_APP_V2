@@ -194,6 +194,82 @@ def test_render_brief_tbd_tier_before_the_cross():
     assert "TBD" in text
 
 
+# ------------------------------------------------------------------ classify_alignment() / the email alignment-tier line (2026-09-06)
+
+def test_classify_alignment_fully_aligned_and_fueled():
+    assert tp.classify_alignment("FUELED", 2) == "FULLY ALIGNED / fuel FUELED"
+
+
+def test_classify_alignment_partial():
+    assert tp.classify_alignment("FUELED", 1) == "PARTIAL / fuel FUELED"
+
+
+def test_classify_alignment_conflicted_htf():
+    assert tp.classify_alignment("FUELED", 0) == "CONFLICTED / fuel FUELED"
+
+
+def test_classify_alignment_conflicted_fuel():
+    assert tp.classify_alignment("CONFLICTED", 2) == "FULLY ALIGNED / fuel CONFLICTED"
+
+
+def test_classify_alignment_unlisted_fuel_states_map_to_neutral():
+    # fuel_verdict can be NO_FUEL/NO_PUSH/UNKNOWN per GateLog's own column
+    # comment -- DeepSeek's plain-word scheme only wants three buckets.
+    for raw in ("NO_FUEL", "NO_PUSH", "UNKNOWN", "something-undocumented"):
+        assert tp.classify_alignment(raw, 2) == "FULLY ALIGNED / fuel NEUTRAL"
+
+
+def test_classify_alignment_none_when_either_input_missing():
+    assert tp.classify_alignment(None, 2) is None
+    assert tp.classify_alignment("FUELED", None) is None
+    assert tp.classify_alignment(None, None) is None
+
+
+def test_render_brief_includes_alignment_line_when_available():
+    plan = {
+        "date_key": "2026-08-31", "symbol": "BTC/USDT", "status": "WAITING",
+        "direction": "LONG", "tier": "PREMIUM",
+        "trigger_price": 79062.43, "stop_price": 78573.37, "stop_basis": "beyond sweep wick low",
+        "t1": 79650.0, "t2": 80100.0, "t3": 80800.0,
+        "commit_after": ANCHOR + datetime.timedelta(minutes=45),
+        "fuel_requirement": tp.FUEL_REQUIREMENT_TEXT, "management": tp.MANAGEMENT_TEXT,
+        "fuel_verdict": "FUELED", "htf_aligned": 2,
+    }
+    text = tp.render_brief(plan)
+    assert "FULLY ALIGNED / fuel FUELED" in text
+    assert "informational only" in text
+
+
+def test_render_brief_omits_alignment_line_when_unavailable():
+    # No fuel_verdict/htf_aligned on the plan dict at all (e.g. a plan
+    # dict built before this feature existed, or a TradePlan row's own
+    # __dict__, which never carries these transient-only keys) -- must
+    # not print "Setup strength: None" or crash.
+    plan = {
+        "date_key": "2026-08-31", "symbol": "BTC/USDT", "status": "WAITING",
+        "direction": "LONG", "tier": "PREMIUM",
+        "trigger_price": 100.0, "stop_price": 95.0, "stop_basis": "beyond sweep wick low",
+        "t1": 110.0, "t2": 120.0, "t3": 130.0,
+        "commit_after": ANCHOR + datetime.timedelta(minutes=45),
+        "fuel_requirement": tp.FUEL_REQUIREMENT_TEXT, "management": tp.MANAGEMENT_TEXT,
+    }
+    text = tp.render_brief(plan)
+    assert "Setup strength" not in text
+
+
+def test_build_trade_plan_carries_fuel_verdict_and_htf_aligned_transiently():
+    decision = _take_decision(side="LONG", tier="PREMIUM")
+    decision["fuel_verdict"] = "FUELED"
+    decision["htf_aligned"] = 2
+    plan = tp.build_trade_plan(
+        symbol="BTC/USDT", date_key="2026-08-31", session_id="us_ny_futures",
+        decision_dict=decision, anchor_time=ANCHOR, candles_24h=_flat_candles(),
+        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
+    )
+    assert plan["fuel_verdict"] == "FUELED"
+    assert plan["htf_aligned"] == 2
+
+
 # ------------------------------------------------------------------ build_trade_plan(): pre-cross path
 # (2026-08-31, WAITING-visibility fix -- Andy found via the live site,
 # Kabroda AI Brain AGENT_LOG.md. anticipate_setup() itself is covered in

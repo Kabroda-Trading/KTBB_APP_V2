@@ -300,6 +300,16 @@ def build_trade_plan(
         "breakdown_trigger": breakdown_trigger,
         "r30_high": r30_high,
         "r30_low": r30_low,
+        # 2026-09-06 (DeepSeek's queued ask, Kabroda AI Brain repo
+        # AGENT_LOG.md, 12:45 CT): also transient, not TradePlan columns
+        # -- carries the gate's own already-computed alignment reads
+        # through to render_brief() for the email headline (see
+        # classify_alignment() below). Same real fields GateLog stores
+        # (decision_dict["fuel_verdict"]/["htf_aligned"]), nothing new
+        # computed here, purely informational -- does not affect sizing
+        # or the gate itself.
+        "fuel_verdict": decision_dict.get("fuel_verdict"),
+        "htf_aligned": decision_dict.get("htf_aligned"),
     }
 
     if decision_dict.get("side") is None and state == "PASS":
@@ -472,6 +482,32 @@ def advance_no_plan(
     }
 
 
+def classify_alignment(fuel_verdict: Optional[str], htf_aligned: Optional[int]) -> Optional[str]:
+    """Plain-words alignment tier for the email headline (DeepSeek's
+    queued request, Kabroda AI Brain repo AGENT_LOG.md, 2026-09-06 12:45
+    CT): "the email should say how strong the setup is." Built ONLY from
+    real fields the gate already computes and GateLog already stores
+    (fuel_verdict, htf_aligned -- the count of {1H, 4H} trends agreeing
+    with the trade direction, 0-2) -- no new decision input, no effect
+    on sizing or the gate. MEXC-corpus reference (58 trades, per that
+    same log entry): fully-aligned (htf=2) 36.4% T3 rate vs partial
+    (htf=1) 20.8%; FUELED 33.3% vs CONFLICTED 24.0% -- direction
+    confirmed, sample small, informational only.
+
+    Returns None when either input is unavailable (e.g. a NO_PLAN
+    morning before any real cross) rather than guessing a tier."""
+    if fuel_verdict is None or htf_aligned is None:
+        return None
+    fuel_word = fuel_verdict if fuel_verdict in ("FUELED", "CONFLICTED") else "NEUTRAL"
+    if htf_aligned >= 2:
+        htf_word = "FULLY ALIGNED"
+    elif htf_aligned == 1:
+        htf_word = "PARTIAL"
+    else:
+        htf_word = "CONFLICTED"
+    return f"{htf_word} / fuel {fuel_word}"
+
+
 def render_brief(plan: Dict[str, Any]) -> str:
     """Renders the pre-commit brief (SS4) from a built plan dict (as
     returned by build_trade_plan(), or a TradePlan row's __dict__). Every
@@ -512,9 +548,20 @@ def render_brief(plan: Dict[str, Any]) -> str:
     else:
         tier_line = f"Tier: {tier} ({'runner management active' if tier == 'PREMIUM' else 'standard sizing'})"
 
+    alignment = classify_alignment(plan.get("fuel_verdict"), plan.get("htf_aligned"))
+    alignment_line = (
+        f"Setup strength: {alignment} — more alignment has historically meant a better shot at T3 "
+        f"(informational only, does not change sizing or the gate)"
+        if alignment else None
+    )
+
     lines = [
         f"TRADE PLAN — {date_key} — {symbol} — STATUS: {plan.get('status')}",
         tier_line,
+    ]
+    if alignment_line:
+        lines.append(alignment_line)
+    lines += [
         "",
         f"  WAIT UNTIL {commit_str} to commit (post-open-window rule — the "
         f"first ~1h after equity open degrades every trigger; commit_after "

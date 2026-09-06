@@ -99,6 +99,32 @@ def test_armed_email_falls_back_to_standard_when_tier_missing():
     assert "STANDARD" in subject
 
 
+# ------------------------------------------------------------------ alignment tier line (2026-09-06)
+# DeepSeek's queued ask: "when the system says put a trade on, the email
+# should say how strong the setup is." fuel_verdict/htf_aligned are real
+# TradePlan columns now (persisted at lock, survive to the ARMED email via
+# the same row) -- deliberately the LOCK-time reading DeepSeek's own T3-
+# correlation numbers were computed against, not a fresh cross-time one.
+
+def test_armed_email_shows_alignment_line_when_present():
+    subject, body = tpn.build_armed_email(_plan("FILLED", fuel_verdict="FUELED", htf_aligned=2))
+    assert "FULLY ALIGNED / fuel FUELED" in body
+
+
+def test_armed_email_omits_alignment_line_when_absent():
+    # A TradePlan row from before this feature existed (or a NO_PLAN ->
+    # FILLED promotion path that never set these) -- must not crash or
+    # print "Setup strength: None".
+    subject, body = tpn.build_armed_email(_plan("FILLED"))
+    assert "Setup strength" not in body
+
+
+def test_lock_email_waiting_shows_alignment_line_when_present():
+    mail = tpn.build_lock_email(_plan("WAITING", fuel_verdict="CONFLICTED", htf_aligned=1))
+    _, body = mail
+    assert "PARTIAL / fuel CONFLICTED" in body
+
+
 # ------------------------------------------------------------------ build_vetoed_email
 
 def test_vetoed_email_format():
