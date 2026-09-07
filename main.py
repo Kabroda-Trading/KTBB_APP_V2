@@ -1654,6 +1654,18 @@ async def api_executor_preview_sizing_policy(account_id: int, request: Request, 
         balance_usd = balance_state["balance_usd"]
         balance_source = balance_state["source"]
 
+    # 2026-09-07: mirrors update_sizing_policy()'s own fix -- if this
+    # preview is for a NEW base_risk_usd (different from what's already
+    # saved), "Current" must show what saving would actually produce
+    # (risk_last_usd reset to the new base), not the stale saved value.
+    # Never persisted here (this route never commits the reset) -- purely
+    # what the number WOULD be.
+    new_base_risk_usd = changes.get("base_risk_usd")
+    effective_risk_last_usd = (
+        new_base_risk_usd if (new_base_risk_usd is not None and new_base_risk_usd != policy.base_risk_usd)
+        else risk_state.risk_last_usd
+    )
+
     def _stake(risk_last_usd: float, consecutive_losses: int) -> Dict[str, Any]:
         stake, detail = _executor_sizing.compute_stake(
             risk_last_usd=risk_last_usd, base_risk_pct=merged["base_risk_pct"], account_balance_usd=balance_usd,
@@ -1664,15 +1676,15 @@ async def api_executor_preview_sizing_policy(account_id: int, request: Request, 
         return {**detail, "stake_usd": stake, "balance_source": balance_source}
 
     try:
-        current = _stake(risk_state.risk_last_usd, risk_state.consecutive_losses)
+        current = _stake(effective_risk_last_usd, risk_state.consecutive_losses)
 
         # +2R win: pnl = 2x the CURRENT stake, rolled in via compute_next_risk
         # when roll_in_pct is set; a win always resets the loss streak.
         win_pnl = 2.0 * current["stake_usd"]
-        risk_last_after_win = risk_state.risk_last_usd
+        risk_last_after_win = effective_risk_last_usd
         if merged["roll_in_pct"] is not None:
             risk_last_after_win = _executor_sizing.compute_next_risk(
-                risk_last=risk_state.risk_last_usd, last_trade_pnl=win_pnl,
+                risk_last=effective_risk_last_usd, last_trade_pnl=win_pnl,
                 floor=risk_state.risk_floor_usd, cap=merged["cap_abs_usd"] or risk_state.risk_cap_usd,
                 factor=merged["roll_in_pct"],
             )
@@ -1681,10 +1693,10 @@ async def api_executor_preview_sizing_policy(account_id: int, request: Request, 
         # -1R loss: pnl = -1x the CURRENT stake, rolled in the same way;
         # a loss always increments the streak.
         loss_pnl = -1.0 * current["stake_usd"]
-        risk_last_after_loss = risk_state.risk_last_usd
+        risk_last_after_loss = effective_risk_last_usd
         if merged["roll_in_pct"] is not None:
             risk_last_after_loss = _executor_sizing.compute_next_risk(
-                risk_last=risk_state.risk_last_usd, last_trade_pnl=loss_pnl,
+                risk_last=effective_risk_last_usd, last_trade_pnl=loss_pnl,
                 floor=risk_state.risk_floor_usd, cap=merged["cap_abs_usd"] or risk_state.risk_cap_usd,
                 factor=merged["roll_in_pct"],
             )

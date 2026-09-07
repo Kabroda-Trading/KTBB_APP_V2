@@ -213,6 +213,7 @@ def update_sizing_policy(db: Session, account: ExecutorAccount, changes: Dict[st
     the incoming partial dict -- raises ValueError on 400 up in main.py.
     Same audit-then-return pattern as update_risk_state()."""
     policy = get_or_init_sizing_policy(db, account)
+    old_base_risk_usd = policy.base_risk_usd
     merged = {
         "preset_name": policy.preset_name, "base_risk_usd": policy.base_risk_usd, "base_risk_pct": policy.base_risk_pct,
         "roll_in_pct": policy.roll_in_pct, "cap_abs_usd": policy.cap_abs_usd, "cap_pct": policy.cap_pct,
@@ -244,6 +245,22 @@ def update_sizing_policy(db: Session, account: ExecutorAccount, changes: Dict[st
             policy.base_risk_pct = None
         elif changes.get("base_risk_pct") is not None:
             policy.base_risk_usd = None
+
+    # 2026-09-07 real bug found while confirming Andy's compounding
+    # question: compute_stake() (and this preview route's own math) never
+    # read policy.base_risk_usd at all -- the FIXED/ROLLING stake always
+    # came from ExecutorRiskState.risk_last_usd directly, which nothing
+    # ever synced FROM the wizard's "Base $" field except once, at
+    # get_or_init_sizing_policy()'s own first-touch seed (the OTHER
+    # direction). Setting "Base $100" and saving silently did nothing to
+    # the real stake used at trade time. Only reset when the value
+    # actually CHANGES (not on every save -- the JS always resends every
+    # field, so "in changes" alone would wipe real compounding progress
+    # on every unrelated edit, e.g. adjusting the cap).
+    new_base_risk_usd = changes.get("base_risk_usd")
+    if new_base_risk_usd is not None and new_base_risk_usd != old_base_risk_usd:
+        risk_state = get_or_init_risk_state(db, account)
+        risk_state.risk_last_usd = new_base_risk_usd
 
     write_audit(
         db, "SIZING_POLICY_UPDATED", f"sizing policy updated for account {account.id}: {changes}",

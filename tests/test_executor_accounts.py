@@ -330,6 +330,69 @@ def test_update_sizing_policy_persists_and_writes_audit(db):
     assert len(rows) == 1
 
 
+# ------------------------------------------------------------------ base_risk_usd -> risk_last_usd sync (2026-09-07)
+# Real bug found while confirming Andy's compounding question directly:
+# compute_stake() (and the preview route) never read policy.base_risk_usd
+# at all -- the FIXED/ROLLING stake always came from ExecutorRiskState.
+# risk_last_usd, which nothing synced FROM the wizard's "Base $" field.
+# Setting "Base $100" and saving silently did nothing to the real stake.
+
+def test_setting_a_new_base_risk_usd_resets_the_real_risk_last_usd(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    state = ea.get_or_init_risk_state(db, account)
+    state.risk_last_usd = 999.0   # simulate drift from unrelated prior activity
+    db.commit()
+
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "roll_in_pct": 0.10}, updated_by="andy@kabroda.com")
+    db.commit()
+
+    state2 = ea.get_or_init_risk_state(db, account)
+    assert state2.risk_last_usd == 100.0   # the real stake basis, not left at the stale 999
+
+
+def test_resaving_the_same_base_risk_usd_does_not_erase_real_compounding_progress(db):
+    # The JS always resends every field on every save (not a sparse
+    # diff), so "base_risk_usd present in the request" alone is NOT
+    # enough to trigger a reset -- only an ACTUAL change should. Confirms
+    # adjusting one unrelated field (the cap) never silently wipes real
+    # compounding progress just because base_risk_usd rode along in the
+    # same request, unchanged.
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "roll_in_pct": 0.10}, updated_by="andy@kabroda.com")
+    db.commit()
+
+    # Real compounding happened since then -- two wins rolled in.
+    ea.record_trade_result(db, account, pnl_usd=100.0, recorded_by="andy@kabroda.com")  # -> 110
+    ea.record_trade_result(db, account, pnl_usd=100.0, recorded_by="andy@kabroda.com")  # -> 120
+    db.commit()
+    state = ea.get_or_init_risk_state(db, account)
+    assert state.risk_last_usd == 120.0   # Andy's own worked example, confirmed exact
+
+    # Re-save with the SAME base_risk_usd (100.0) while only touching cap_abs_usd.
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "cap_abs_usd": 500.0}, updated_by="andy@kabroda.com")
+    db.commit()
+
+    state2 = ea.get_or_init_risk_state(db, account)
+    assert state2.risk_last_usd == 120.0   # untouched -- real progress preserved
+
+
+def test_the_real_stake_computation_actually_reflects_the_saved_base(db):
+    # End-to-end proof, not just that risk_last_usd changed: compute_stake()
+    # itself -- the function build_hypothetical_order() actually calls at
+    # trade time -- now returns the number the wizard says it will.
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0}, updated_by="andy@kabroda.com")
+    db.commit()
+
+    from executor_sizing import compute_stake
+    state = ea.get_or_init_risk_state(db, account)
+    stake, _ = compute_stake(risk_last_usd=state.risk_last_usd)
+    assert stake == 100.0
+
+
 def test_record_trade_result_rolls_risk_last_usd_when_roll_in_pct_set(db):
     account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
     db.commit()
