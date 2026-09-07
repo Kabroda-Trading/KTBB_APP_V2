@@ -50,6 +50,45 @@ def create_account(db: Session, user_id: int, label: str, exchange: str = "bitun
     return account
 
 
+_VALID_MODES = ("DRY_RUN", "LIVE")   # PAPER excluded -- unimplemented in executor_engine.py, no PAPER accounts exist
+
+
+def set_account_mode(db: Session, account: ExecutorAccount, new_mode: str, by: str, confirm: Optional[str] = None) -> ExecutorAccount:
+    """2026-09-07 -- until this function existed, NOTHING in this codebase
+    could ever set an account's mode to LIVE (grepped: create_account()
+    hardcodes DRY_RUN, nothing else ever assigns .mode), which made
+    executor_engine.py's entire LIVE branch unreachable in production
+    regardless of how well-tested it was. The real gate this function
+    enforces: DRY_RUN -> LIVE requires credentials already set (refuses
+    otherwise -- there's no point going live with nothing to authenticate
+    with) AND the exact confirm phrase (checked here, not just at the
+    route layer, so no caller can accidentally skip it). LIVE -> DRY_RUN
+    is unconditional -- the safety-DECREASING direction never needs a
+    confirm phrase, matching this file's own kill-switch asymmetry
+    (engage vs release). Every transition is audited via the MODE_CHANGED
+    event type -- reserved in ExecutorAuditLog's own docstring since
+    2026-09-05, never used until now."""
+    if new_mode not in _VALID_MODES:
+        raise ValueError(f"mode must be one of {_VALID_MODES}, got {new_mode!r}")
+    old_mode = account.mode
+    if new_mode == old_mode:
+        return account
+
+    if new_mode == "LIVE":
+        if not account.api_key_encrypted or not account.api_secret_encrypted:
+            raise ValueError("cannot go LIVE -- no credentials set on this account yet")
+        required = "CONFIRM ENABLE LIVE TRADING"
+        if confirm != required:
+            raise ValueError(f"confirm phrase must be exactly {required!r}")
+
+    account.mode = new_mode
+    write_audit(
+        db, "MODE_CHANGED", f"account {account.id} mode changed {old_mode} -> {new_mode}",
+        account_id=account.id, actor=by, detail={"old_mode": old_mode, "new_mode": new_mode},
+    )
+    return account
+
+
 def set_credentials(db: Session, account: ExecutorAccount, api_key: str, api_secret: str, set_by: str) -> None:
     """Encrypts and stores the exchange credentials. Never stores or logs
     plaintext anywhere -- the audit row records THAT a credential was set/

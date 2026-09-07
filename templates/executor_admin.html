@@ -35,6 +35,8 @@
         .btn-danger:hover { background: #450a0a; color: #fff; }
         .btn-ok { border-color: #065f46; color: #6ee7b7; }
         .btn-ok:hover { background: #064e3b; color: #fff; }
+        .btn[disabled] { opacity: 0.4; cursor: not-allowed; }
+        .btn[disabled]:hover { background: transparent; color: #cbd5e1; }
 
         input[type=text], input[type=number], input[type=password] { background: #020617; border: 1px solid #475569; color: #fff; padding: 8px 10px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 12px; }
 
@@ -48,6 +50,15 @@
         .danger-zone { border: 1px solid #7f1d1d; background: rgba(127,29,29,0.06); border-radius: 6px; padding: 12px; margin-top: 10px; }
         .danger-zone-title { font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 800; color: #fca5a5; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
         .danger-zone input[type=text] { width: 260px; }
+
+        .setup-step { border: 1px solid #1e293b; border-radius: 6px; padding: 12px; margin-top: 10px; }
+        .setup-step-title { font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+        .setup-step-num { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: #334155; color: #cbd5e1; font-size: 10px; }
+        .setup-step-done .setup-step-num { background: #065f46; color: #6ee7b7; }
+        .go-live-step { border-color: #78350f; background: rgba(120,53,15,0.06); }
+
+        details > summary { cursor: pointer; font-size: 11px; color: #94a3b8; }
+        details.collapsed-section { margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -56,33 +67,35 @@
 
     <div class="exec-header">
         <span class="exec-title">Executor Bot -- Bitunix Futures</span>
-        <span class="stage-badge">STAGE 1 DRY-RUN LIVE -- STAGE 2 REAL-MONEY TEST GATED OFF BY DEFAULT</span>
+        <span class="stage-badge">DOMAIN 2 PRODUCTION-TRUSTED -- LIVE ORDERS OFF BY DEFAULT, ENABLED HERE</span>
     </div>
 
     <div class="card" id="globalStatus">
-        <div class="card-header">
-            <span class="card-title">Global Kill Switch <span id="killSwitchStatusBadge"></span></span>
-            {% if is_admin %}
-            <div>
-                <button class="btn btn-danger" onclick="engageGlobalKillSwitch()">ENGAGE GLOBAL STOP</button>
-                <button class="btn btn-ok" onclick="releaseGlobalKillSwitch()">RELEASE</button>
+        <div class="card-header"><span class="card-title">Safety Controls</span></div>
+        <div class="card-body">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:10px; border-bottom:1px solid #1e293b;">
+                <div>
+                    <strong style="font-family:'JetBrains Mono'; font-size:12px;">Global Kill Switch</strong>
+                    <span id="killSwitchStatusBadge" style="margin-left:8px;"></span>
+                    <p class="empty" style="padding:4px 0 0;">Blocks EVERY account regardless of its own mode or kill switch. Stops real-money actions and Stage 1 dry-run recording alike.</p>
+                </div>
+                {% if is_admin %}
+                <div>
+                    <button class="btn btn-danger" onclick="engageGlobalKillSwitch()">ENGAGE GLOBAL STOP</button>
+                    <button class="btn btn-ok" onclick="releaseGlobalKillSwitch()">RELEASE</button>
+                </div>
+                {% endif %}
             </div>
-            {% endif %}
-        </div>
-        <div class="card-body">
-            <p class="empty">Both the global switch and each account's own kill switch must be clear for that account to trade. Stage 1 never places a real order regardless -- this controls whether a dry-run "would-place" record gets written at all. It also blocks Stage 2's real-money tiny order test below, same as a real trade.</p>
-        </div>
-    </div>
-
-    <div class="card" id="liveOrdersStatus">
-        <div class="card-header">
-            <span class="card-title">Live Orders -- Global Switch <span id="liveOrdersStatusBadge"></span></span>
-        </div>
-        <div class="card-body">
-            <p class="empty">Both this GLOBAL switch and each account's own kill switch must be clear for ANY real-money action below to succeed. This does NOT affect Stage 1's dry-run pipeline, which never calls the exchange regardless.</p>
+            <div style="display:flex; justify-content:space-between; align-items:center; padding-top:10px;">
+                <div>
+                    <strong style="font-family:'JetBrains Mono'; font-size:12px;">Live Orders -- Global Switch</strong>
+                    <span id="liveOrdersStatusBadge" style="margin-left:8px;"></span>
+                    <p class="empty" style="padding:4px 0 0;">Must be ON, together with an account's own mode being LIVE and its kill switch clear, before that account's real orders can ever be placed. OFF by default.</p>
+                </div>
+            </div>
             {% if is_admin %}
             <div class="risk-form">
-                <label>Reason<input type="text" id="liveOrdersReason" placeholder="e.g. tiny order mechanism test"></label>
+                <label>Reason<input type="text" id="liveOrdersReason" placeholder="e.g. going live for real trading"></label>
                 <label>Type exactly: CONFIRM ENABLE LIVE ORDERS<input type="text" id="liveOrdersConfirm" placeholder="CONFIRM ENABLE LIVE ORDERS"></label>
                 <button class="btn btn-danger" onclick="enableLiveOrders()" style="align-self:flex-end;">ENABLE LIVE ORDERS</button>
                 <button class="btn btn-ok" onclick="disableLiveOrders()" style="align-self:flex-end;">DISABLE LIVE ORDERS</button>
@@ -107,7 +120,7 @@
                 <label>Exchange<input type="text" id="newAccountExchange" value="bitunix"></label>
                 <button class="btn btn-ok" onclick="createAccount()" style="align-self:flex-end;">CREATE ACCOUNT</button>
             </div>
-            <p class="empty" style="margin-top:8px;">Creates a new account in DRY_RUN mode, active immediately -- it will start producing dry-run "would-place" rows on the next real ARMED signal even before credentials are set (Stage 1 never calls the exchange regardless of mode, so this is safe). Engage its kill switch below if you want to create it without it acting yet.</p>
+            <p class="empty" style="margin-top:8px;">Creates a new account in DRY_RUN mode. It stays DRY_RUN (never places a real order) until you complete the setup steps below and explicitly go LIVE.</p>
         </div>
     </div>
     {% endif %}
@@ -123,16 +136,29 @@
     </div>
 
     <div class="card">
-        <div class="card-header"><span class="card-title">Recent Orders (Dry-Run + Real Domain 2 Positions)</span></div>
-        <div class="card-body" id="ordersBody">
+        <div class="card-header"><span class="card-title">Live Positions -- Real Money</span></div>
+        <div class="card-body" id="livePositionsBody">
             <p class="empty">Loading...</p>
         </div>
     </div>
 
     <div class="card">
+        <div class="card-header"><span class="card-title">Dry-Run History</span></div>
+        <div class="card-body">
+            <details class="collapsed-section">
+                <summary>Would-place records (Stage 1 audit trail, never real orders) -- click to expand</summary>
+                <div id="dryRunBody" style="margin-top:10px;"><p class="empty">Loading...</p></div>
+            </details>
+        </div>
+    </div>
+
+    <div class="card">
         <div class="card-header"><span class="card-title">Audit Log</span></div>
-        <div class="card-body" id="auditBody">
-            <p class="empty">Loading...</p>
+        <div class="card-body">
+            <details class="collapsed-section">
+                <summary>Every account/global event, chronological -- click to expand</summary>
+                <div id="auditBody" style="margin-top:10px;"><p class="empty">Loading...</p></div>
+            </details>
         </div>
     </div>
 
@@ -208,7 +234,7 @@ async function loadAccounts() {
                 <div>
                     <strong style="font-family:'JetBrains Mono'; font-size:13px;">${escapeHtml(a.label)}</strong>
                     <span class="badge badge-neutral" style="margin-left:8px;">${escapeHtml(a.exchange)}</span>
-                    <span class="badge ${a.mode === 'DRY_RUN' ? 'badge-ok' : 'badge-warn'}" style="margin-left:4px;">${escapeHtml(a.mode)}</span>
+                    <span class="badge ${a.mode === 'LIVE' ? 'badge-danger' : 'badge-ok'}" style="margin-left:4px;">${escapeHtml(a.mode)}</span>
                     ${a.kill_switch_engaged ? '<span class="badge badge-danger" style="margin-left:4px;">KILL SWITCH ENGAGED</span>' : '<span class="badge badge-ok" style="margin-left:4px;">ACTIVE</span>'}
                     ${a.has_credentials ? '' : '<span class="badge badge-warn" style="margin-left:4px;">NO CREDENTIALS SET</span>'}
                 </div>
@@ -222,24 +248,40 @@ async function loadAccounts() {
                 margin: ${escapeHtml(a.margin_mode)} @ ${a.leverage_baseline}x baseline
                 &middot; assumed balance: ${a.assumed_balance_usd !== null ? '$' + a.assumed_balance_usd : 'not set'}
             </div>
-            <div style="margin-top:10px; padding:10px; border:1px solid ${a.has_credentials ? '#065f46' : '#334155'}; border-radius:6px; background:${a.has_credentials ? 'rgba(16,185,129,0.06)' : 'transparent'};">
+
+            <div class="setup-step ${a.has_credentials ? 'setup-step-done' : ''}">
+                <div class="setup-step-title"><span class="setup-step-num">1</span> Credentials</div>
+                ${a.has_credentials
+                    ? `<p class="empty" style="padding:0;">Set${a.credential_set_at ? ' ' + _parseServerTimestamp(a.credential_set_at).toLocaleString() : ''}.
+                       <a href="#" onclick="event.preventDefault(); document.getElementById('credRotate-${a.id}').style.display='flex';" style="color:#93c5fd;">Rotate credentials</a></p>
+                       <div class="risk-form" id="credRotate-${a.id}" style="display:none;">
+                           <label>API key<input type="password" id="apiKey-${a.id}"></label>
+                           <label>API secret<input type="password" id="apiSecret-${a.id}"></label>
+                           <button class="btn" onclick="setCredentials(${a.id})" style="align-self:flex-end;">SAVE CREDENTIALS</button>
+                       </div>`
+                    : `<div class="risk-form">
+                           <label>API key<input type="password" id="apiKey-${a.id}"></label>
+                           <label>API secret<input type="password" id="apiSecret-${a.id}"></label>
+                           <button class="btn btn-ok" onclick="setCredentials(${a.id})" style="align-self:flex-end;">SAVE CREDENTIALS</button>
+                       </div>`}
+            </div>
+
+            <div class="setup-step">
+                <div class="setup-step-title"><span class="setup-step-num">2</span> Verify Auth</div>
                 <button class="btn ${a.has_credentials ? 'btn-ok' : ''}" onclick="testConnection(${a.id})" ${a.has_credentials ? '' : 'disabled'}>VERIFY AUTH (read-only, no order placed)</button>
-                ${a.has_credentials ? '' : '<span class="empty" style="margin-left:8px;">set credentials below first</span>'}
+                ${a.has_credentials ? '' : '<span class="empty" style="margin-left:8px;">set credentials first</span>'}
                 <div id="testResult-${a.id}" class="empty" style="margin-top:8px; display:none; white-space:pre-wrap;"></div>
             </div>
-            <div class="danger-zone" id="tinyTest-${a.id}">
-                <div class="danger-zone-title">Real Money -- Live Mechanism Test (BTCUSDT LONG only)</div>
-                <p class="empty">Loading...</p>
-            </div>
-            <div class="danger-zone" id="sizingPolicy-${a.id}" style="border-color:#1e3a5f; background:rgba(30,58,95,0.08);">
-                <div class="danger-zone-title" style="color:#93c5fd;">Sizing Policy</div>
+
+            <div class="setup-step" id="sizingPolicy-${a.id}" style="border-color:#1e3a5f; background:rgba(30,58,95,0.08);">
+                <div class="setup-step-title" style="color:#93c5fd;"><span class="setup-step-num">3</span> Sizing Policy</div>
                 <div class="risk-form">
                     <button class="btn" onclick="applyPreset(${a.id}, 'conservative')">CONSERVATIVE -- START SMALL</button>
                     <button class="btn" onclick="applyPreset(${a.id}, 'steady_grow')">STEADY GROW -- ROLL THE PROFITS</button>
                     <button class="btn" onclick="applyPreset(${a.id}, 'scale_with_account')">SCALE WITH ACCOUNT</button>
                 </div>
                 <details style="margin-top:10px;">
-                    <summary style="cursor:pointer; font-size:11px; color:#94a3b8;">Custom -- edit fields directly</summary>
+                    <summary>Custom -- edit fields directly</summary>
                     <div class="risk-form">
                         <label>Base $<input type="number" step="0.01" id="sizeBaseUsd-${a.id}" style="width:90px;"></label>
                         <label>Base % of balance<input type="number" step="0.001" id="sizeBasePct-${a.id}" style="width:90px;"></label>
@@ -262,10 +304,16 @@ async function loadAccounts() {
                     <label>Trade plan ID (optional)<input type="number" step="1" id="tradeResultPlanId-${a.id}" style="width:90px;"></label>
                     <button class="btn" onclick="recordTradeResult(${a.id})" style="align-self:flex-end;">RECORD TRADE RESULT</button>
                 </div>
-                <p class="empty" style="margin-top:6px;">Manual entry -- until the trade-management monitor can detect a closed position automatically, a human reports the result here.</p>
+                <p class="empty" style="margin-top:6px;">Manual entry for OUT-OF-BAND trades only -- real Executor-managed trades (Domain 2) record this automatically on close.</p>
             </div>
+
+            <div class="setup-step go-live-step" id="goLive-${a.id}">
+                <div class="setup-step-title" style="color:#fbbf24;"><span class="setup-step-num">4</span> Go Live</div>
+                <div id="goLiveBody-${a.id}"><p class="empty">Loading...</p></div>
+            </div>
+
             <details style="margin-top:10px;">
-                <summary style="cursor:pointer; font-size:11px; color:#94a3b8;">Advanced / Legacy Risk State</summary>
+                <summary>Advanced / Legacy Risk State</summary>
                 <div class="risk-form" id="riskForm-${a.id}">
                     <label>Risk last ($)<input type="number" step="0.01" id="riskLast-${a.id}"></label>
                     <label>Floor ($)<input type="number" step="0.01" id="riskFloor-${a.id}"></label>
@@ -274,12 +322,11 @@ async function loadAccounts() {
                     <button class="btn" onclick="saveRiskState(${a.id})" style="align-self:flex-end;">SAVE</button>
                 </div>
             </details>
+
             <details style="margin-top:10px;">
-                <summary style="cursor:pointer; font-size:11px; color:#94a3b8;">Set / rotate exchange credentials</summary>
-                <div class="risk-form">
-                    <label>API key<input type="password" id="apiKey-${a.id}"></label>
-                    <label>API secret<input type="password" id="apiSecret-${a.id}"></label>
-                    <button class="btn" onclick="setCredentials(${a.id})" style="align-self:flex-end;">SAVE CREDENTIALS</button>
+                <summary>One-Time Verification Tools (already proven live 2026-09-05 through 2026-09-07 -- re-run only to re-verify the exchange mechanism)</summary>
+                <div class="danger-zone" id="tinyTest-${a.id}" style="margin-top:10px;">
+                    <p class="empty">Loading...</p>
                 </div>
             </details>
         </div>
@@ -296,7 +343,51 @@ async function loadAccounts() {
         }
         loadTinyTestForAccount(a.id, a.has_credentials);
         loadSizingPolicy(a.id);
+        renderGoLiveSection(a.id, a);
     }
+}
+
+// ------------------------------------------------------------------ Go Live (2026-09-07)
+// Until set_account_mode() + this route existed, NOTHING could ever set
+// an account's mode to LIVE -- the entire real executor path was
+// unreachable in production. Both this AND the global Live Orders switch
+// above must be on before a real order is ever placed
+// (executor_engine.py's own two-layer gate).
+
+function renderGoLiveSection(accountId, account) {
+    const box = document.getElementById(`goLiveBody-${accountId}`);
+    if (!box) return;
+    const liveOrdersOn = globalConfig.live_orders_enabled;
+
+    if (account.mode === "LIVE") {
+        box.innerHTML = `
+            <p style="font-family:'JetBrains Mono'; font-size:12px; color:#fca5a5; margin:0 0 8px;">
+                LIVE -- real ARMED signals will place real orders on this account
+                ${liveOrdersOn ? '' : ' (currently held back: the global Live Orders switch above is OFF)'}.
+            </p>
+            <button class="btn" onclick="setAccountMode(${accountId}, 'DRY_RUN')">REVERT TO DRY_RUN</button>`;
+        return;
+    }
+
+    if (!account.has_credentials) {
+        box.innerHTML = '<p class="empty" style="padding:0;">Set credentials (step 1) before going live.</p>';
+        return;
+    }
+    box.innerHTML = `
+        <p class="empty" style="padding:0 0 8px;">DRY_RUN -- this account only records what it WOULD have done. Going LIVE means the next real ARMED signal places a real order automatically, unattended.</p>
+        <div class="risk-form">
+            <label>Type exactly: CONFIRM ENABLE LIVE TRADING<input type="text" id="goLiveConfirm-${accountId}"></label>
+            <button class="btn btn-danger" onclick="setAccountMode(${accountId}, 'LIVE')" style="align-self:flex-end;">GO LIVE</button>
+        </div>
+        ${liveOrdersOn ? '' : '<p class="empty" style="margin-top:6px;">Note: the global Live Orders switch above is still OFF -- going live here alone will not place real orders until that switch is also on.</p>'}`;
+}
+
+async function setAccountMode(accountId, mode) {
+    const confirmEl = document.getElementById(`goLiveConfirm-${accountId}`);
+    const confirm_ = confirmEl ? confirmEl.value : undefined;
+    const resp = await api(`/api/executor/accounts/${accountId}/mode`, { method: "POST", body: JSON.stringify({ mode, confirm: confirm_ }) });
+    if (!resp.ok) { alert(resp.error || "failed to change account mode"); return; }
+    loadAccounts();
 }
 
 // ------------------------------------------------------------------ sizing policy wizard (2026-09-05)
@@ -407,7 +498,8 @@ async function recordTradeResult(accountId) {
 // ------------------------------------------------------------------ tiny order mechanism test (Stage 2, 2026-09-05)
 // REAL MONEY. Confirm phrases are read from real <input> fields, never
 // a JS prompt() -- a second, visible layer of friction on top of the
-// server's own gating.
+// server's own gating. Already proven live -- see the collapsed section
+// this renders into. Kept exactly as built; only its location moved.
 
 const _TINY_TEST_ACTIVE_STATUSES = ["STARTED", "ORDER_PLACED", "FILL_CONFIRMED", "TPSL_SET", "T1_LIMIT_PLACED", "T1_AND_T3_LIMITS_PLACED", "PARTIAL_CLOSED", "SL_MOVED_BREAKEVEN"];
 
@@ -425,9 +517,9 @@ function renderTinyTestSection(accountId, hasCredentials, active, allTests) {
     let html = '<div class="danger-zone-title">Real Money -- Live Mechanism Test (BTCUSDT LONG only)</div>';
 
     if (!enabled) {
-        html += '<p class="empty">Live orders are DISABLED globally -- enable them in the card above first.</p>';
+        html += '<p class="empty">Live orders are DISABLED globally -- enable them in Safety Controls above first.</p>';
     } else if (!hasCredentials) {
-        html += '<p class="empty">Set credentials below first.</p>';
+        html += '<p class="empty">Set credentials (step 1) first.</p>';
     } else if (!active) {
         html += `
             <div class="risk-form">
@@ -466,7 +558,7 @@ function renderTinyTestSection(accountId, hasCredentials, active, allTests) {
                     <label>Type exactly: CONFIRM PLACE CONCURRENT T1 T3 LIMITS<input type="text" id="t1t3LimitPlaceConfirm-${accountId}"></label>
                     <button class="btn btn-danger" onclick="placeConcurrentT1T3Limits(${accountId}, ${active.id}, this)" style="align-self:flex-end;">PLACE CONCURRENT T1+T3</button>
                 </div>
-                <p class="empty" style="margin-top:4px;">REQUIRED before executor_live_engine.py is trusted with a real trade: places the stop + T1 + T3 resting limits all at once, exactly like the real engine will, and captures whether the stop's covered qty auto-tracks once a leg fills.</p>`;
+                <p class="empty" style="margin-top:4px;">Already proven live (2026-09-07): stop + T1 + T3 resting limits all at once, exactly like the real engine does. Re-run only to re-verify after an exchange API change.</p>`;
         } else if (active.status === "T1_LIMIT_PLACED") {
             html += `
                 <div style="font-family:'JetBrains Mono'; font-size:11px; margin-bottom:8px;">
@@ -612,9 +704,8 @@ async function cancelRestingT1Limit(accountId, testId, btn) {
 }
 
 // ------------------------------------------------------------------ Domain 2 required live pre-flight: concurrent T1+T3 (2026-09-07)
-// The exact combination executor_live_engine.py needs (stop + T1 + T3
-// all resting at once) -- never tested live before this. Must pass here
-// first.
+// Already proven live -- the exact combination executor_live_engine.py
+// needs (stop + T1 + T3 all resting at once).
 
 async function placeConcurrentT1T3Limits(accountId, testId, btn) {
     const t1_pct = parseFloat(document.getElementById(`t1t3LimitT1Pct-${accountId}`).value) || 0.01;
@@ -708,9 +799,8 @@ async function testConnection(id) {
 }
 
 // 2026-09-07, Domain 2 (executor_live_engine.py) -- real managed-trade
-// state for mode=LIVE rows. Read-only, mirrors the same table as the
-// original DRY_RUN-only card -- this system runs itself, no controls
-// here beyond the existing kill switches elsewhere on this page.
+// state for mode=LIVE rows. Read-only, this system runs itself -- no
+// controls here beyond the existing kill switches / Go Live section.
 function _orderStateBadge(o) {
     if (o.mode !== "LIVE" || !o.management_state) return "";
     const closed = (o.management_state || "").startsWith("CLOSED_");
@@ -718,13 +808,10 @@ function _orderStateBadge(o) {
     return `<span class="badge ${color}">${escapeHtml(o.management_state)}</span>`;
 }
 
-async function loadOrders() {
-    const data = await api("/api/executor/orders?limit=50");
-    const body = document.getElementById("ordersBody");
-    if (!data.ok) { body.innerHTML = `<p class="empty">${escapeHtml(data.error || "failed to load")}</p>`; return; }
-    if (!data.orders.length) { body.innerHTML = '<p class="empty">No orders yet.</p>'; return; }
-    body.innerHTML = `<table><thead><tr><th>ID</th><th>Symbol</th><th>Dir</th><th>Tier</th><th>Qty</th><th>Lev</th><th>Decision</th><th>Domain 2 State</th><th>Realized R</th><th>Reason</th><th>When</th></tr></thead><tbody>` +
-        data.orders.map(o => `<tr>
+function _renderOrdersTable(orders, emptyMsg) {
+    if (!orders.length) return `<p class="empty">${emptyMsg}</p>`;
+    return `<table><thead><tr><th>ID</th><th>Symbol</th><th>Dir</th><th>Tier</th><th>Qty</th><th>Lev</th><th>Decision</th><th>Domain 2 State</th><th>Realized R</th><th>Reason</th><th>When</th></tr></thead><tbody>` +
+        orders.map(o => `<tr>
             <td>#${o.id}</td><td>${escapeHtml(o.symbol)}</td><td>${escapeHtml(o.direction)}</td>
             <td>${o.tier ? escapeHtml(o.tier) : "-"}</td>
             <td>${o.qty !== null ? o.qty.toFixed(4) : "-"}</td><td>${o.leverage_used ?? "-"}</td>
@@ -736,8 +823,23 @@ async function loadOrders() {
         </tr>`).join("") + `</tbody></table>`;
 }
 
+async function loadOrders() {
+    const data = await api("/api/executor/orders?limit=100");
+    const liveBody = document.getElementById("livePositionsBody");
+    const dryRunBody = document.getElementById("dryRunBody");
+    if (!data.ok) {
+        const msg = `<p class="empty">${escapeHtml(data.error || "failed to load")}</p>`;
+        liveBody.innerHTML = msg; dryRunBody.innerHTML = msg;
+        return;
+    }
+    const liveOrders = data.orders.filter(o => o.mode === "LIVE");
+    const dryRunOrders = data.orders.filter(o => o.mode !== "LIVE");
+    liveBody.innerHTML = _renderOrdersTable(liveOrders, "No real Domain 2 positions yet -- once an account is LIVE, its real trades appear here.");
+    dryRunBody.innerHTML = _renderOrdersTable(dryRunOrders, "No dry-run records yet.");
+}
+
 async function loadAuditLog() {
-    const data = await api("/api/executor/audit-log?limit=100");
+    const data = await api("/api/executor/audit-log?limit=200");
     const body = document.getElementById("auditBody");
     if (!data.ok) { body.innerHTML = `<p class="empty">${escapeHtml(data.error || "failed to load")}</p>`; return; }
     if (!data.audit_log.length) { body.innerHTML = '<p class="empty">No audit entries yet.</p>'; return; }

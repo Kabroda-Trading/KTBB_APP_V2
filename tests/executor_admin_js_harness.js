@@ -58,6 +58,22 @@ function findOnclickAttr(html, fnName) {
     .replace(/\$\{active\.id\}/g, '5');
 }
 
+// setAccountMode(2026-09-07) has TWO literal onclick call sites for the
+// same function name (Go Live's DRY_RUN->LIVE button vs. its Revert-to-
+// DRY_RUN button) -- mutually exclusive at render time (renderGoLiveSection()
+// branches on account.mode), both present in the static template source.
+// findOnclickAttr() above deliberately fails loud on >1 match for every
+// OTHER button (a real duplicate would be a bug there); this one needs
+// its own extraction that disambiguates by the literal mode argument.
+function findOnclickAttrForLiteralArg(html, fnName, literalArgSubstring) {
+  const re = new RegExp(`onclick="(${fnName}\\([^)]*${literalArgSubstring}[^)]*\\))"`, 'g');
+  const found = [];
+  let m;
+  while ((m = re.exec(html)) !== null) found.push(m[1]);
+  if (found.length !== 1) throw new Error(`Expected exactly one onclick="${fnName}(...${literalArgSubstring}...)" attribute, found ${found.length}`);
+  return found[0].replace(/\$\{accountId\}/g, '1');
+}
+
 function buildSandbox(fetchCalls) {
   const elements = new Map();
   function makeEl(id) {
@@ -84,6 +100,8 @@ function buildSandbox(fetchCalls) {
         body = { ok: true, orders: [] };
       } else if (/\/audit-log/.test(requestPath)) {
         body = { ok: true, audit_log: [] };
+      } else if (/\/mode$/.test(requestPath)) {
+        body = { ok: true, account: { id: 1, mode: 'LIVE' } };
       }
       return { json: async () => body };
     },
@@ -191,6 +209,47 @@ async function main() {
       results.push({
         label: scenario.label, ok: matched, onclickAttr,
         error: matched ? undefined : `expected a fetch matching ${scenario.expectPath}, got: ${fetchCalls.map(c => c.path).join(', ') || '(none)'}`,
+        fetchCalls: fetchCalls.map((c) => c.path),
+      });
+    } catch (e) {
+      results.push({ label: scenario.label, ok: false, onclickAttr, error: e.message });
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+  }
+
+  // setAccountMode (2026-09-07) -- Go Live's two mutually-exclusive
+  // onclick call sites, extracted/run separately (see
+  // findOnclickAttrForLiteralArg's own comment for why the shared loop
+  // above can't handle this one).
+  const modeScenarios = [
+    { label: 'setAccountMode(LIVE)', literalArg: "'LIVE'", expectPath: /\/accounts\/1\/mode$/, expectBody: /"mode":"LIVE"/ },
+    { label: 'setAccountMode(DRY_RUN)', literalArg: "'DRY_RUN'", expectPath: /\/accounts\/1\/mode$/, expectBody: /"mode":"DRY_RUN"/ },
+  ];
+  for (const scenario of modeScenarios) {
+    fetchCalls.length = 0;
+    let onclickAttr;
+    try {
+      onclickAttr = findOnclickAttrForLiteralArg(html, 'setAccountMode', scenario.literalArg);
+    } catch (e) {
+      results.push({ label: scenario.label, ok: false, error: e.message });
+      continue;
+    }
+    const btn = makeEl(`__fake_btn_${scenario.label}__`);
+    let capturedRejection = null;
+    const onRejection = (reason) => { capturedRejection = reason; };
+    process.on('unhandledRejection', onRejection);
+    try {
+      const handler = vm.runInContext(`(function () { ${onclickAttr} })`, sandbox);
+      handler.call(btn);
+      await new Promise((r) => setTimeout(r, 20));
+      if (capturedRejection) throw capturedRejection instanceof Error ? capturedRejection : new Error(String(capturedRejection));
+      const call = fetchCalls.find((c) => scenario.expectPath.test(c.path));
+      const bodyStr = call && call.opts && call.opts.body;
+      const matched = !!call && scenario.expectBody.test(bodyStr || '');
+      results.push({
+        label: scenario.label, ok: matched, onclickAttr,
+        error: matched ? undefined : `expected a fetch to ${scenario.expectPath} with body matching ${scenario.expectBody}, got: ${JSON.stringify(fetchCalls.map(c => ({ path: c.path, body: c.opts && c.opts.body })))}`,
         fetchCalls: fetchCalls.map((c) => c.path),
       });
     } catch (e) {

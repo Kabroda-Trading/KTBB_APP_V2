@@ -1282,6 +1282,11 @@ class ExecutorKillSwitchRequest(BaseModel):
     reason: Optional[str] = None
 
 
+class ExecutorModeChangeRequest(BaseModel):
+    mode: str
+    confirm: Optional[str] = None
+
+
 class ExecutorRiskStateUpdateRequest(BaseModel):
     risk_last_usd: Optional[float] = None
     risk_floor_usd: Optional[float] = None
@@ -1452,6 +1457,27 @@ async def api_executor_test_connection(account_id: int, request: Request, db: Se
     )
     db.commit()
     return JSONResponse({"ok": all_ok, "checks": checks})
+
+
+@app.post("/api/executor/accounts/{account_id}/mode")
+async def api_executor_set_account_mode(account_id: int, request: Request, body: ExecutorModeChangeRequest, db: Session = Depends(get_db)):
+    # 2026-09-07 -- until this route existed, NOTHING could ever set an
+    # account's mode to LIVE (see executor_accounts.set_account_mode()'s
+    # own docstring). The confirm-phrase check for DRY_RUN->LIVE lives in
+    # that function, not duplicated here -- one place owns the phrase.
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    try:
+        _executor_accounts.set_account_mode(db, account, body.mode, by=ctx.get("email") or "unknown", confirm=body.confirm)
+    except ValueError as e:
+        db.rollback()
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    db.commit()
+    return JSONResponse({"ok": True, "account": _serialize_account(account)})
 
 
 @app.post("/api/executor/accounts/{account_id}/kill-switch")

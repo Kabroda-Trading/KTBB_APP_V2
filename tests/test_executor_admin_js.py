@@ -102,6 +102,26 @@ def test_cancel_resting_t1_limit_calls_the_right_endpoint():
     assert any(p.endswith("/tiny-test/5/cancel-resting-t1-limit") for p in cancel["fetchCalls"])
 
 
+# ------------------------------------------------------------------ Go Live mode switch (2026-09-07)
+# Two mutually-exclusive onclick call sites for the same function name --
+# the harness's findOnclickAttrForLiteralArg() disambiguates by the
+# literal 'LIVE'/'DRY_RUN' argument. Confirms both wire to the real route
+# with the right mode in the request body, not just that they don't throw.
+
+def test_go_live_button_calls_the_mode_endpoint_with_live():
+    scenarios, returncode = _run_harness()
+    go_live = next(s for s in scenarios if s["label"] == "setAccountMode(LIVE)")
+    assert go_live["ok"] is True, go_live.get("error")
+    assert any(p.endswith("/accounts/1/mode") for p in go_live["fetchCalls"])
+
+
+def test_revert_to_dry_run_button_calls_the_mode_endpoint_with_dry_run():
+    scenarios, _ = _run_harness()
+    revert = next(s for s in scenarios if s["label"] == "setAccountMode(DRY_RUN)")
+    assert revert["ok"] is True, revert.get("error")
+    assert any(p.endswith("/accounts/1/mode") for p in revert["fetchCalls"])
+
+
 # ------------------------------------------------------------------ _parseServerTimestamp (2026-09-06)
 # Real bug Andy caught live: naive-UTC timestamps (Python's .isoformat()
 # on a datetime.utcnow()-based column, no "Z"/offset) were displayed as

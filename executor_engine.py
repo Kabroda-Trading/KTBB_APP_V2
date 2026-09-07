@@ -36,6 +36,7 @@ from typing import Any, Dict
 from sqlalchemy.orm import Session
 
 import executor_accounts
+import executor_control
 import executor_plan_builder
 from database import ExecutorAccount, ExecutorAuditLog, ExecutorOrder, TradePlan
 
@@ -83,6 +84,25 @@ async def _process_account(db: Session, trade_plan_row: TradePlan, account: Exec
     ))
 
     if account.mode == "LIVE" and order_dict.get("decision") == "WOULD_PLACE":
+        # 2026-09-07 real safety-gate gap found while planning the missing
+        # LIVE-mode switch: this was the ONLY place in the entire real
+        # executor path (executor_live_engine.py/executor_engine.py/
+        # executor_plan_builder.py -- grepped all three) that could ever
+        # place a real order, and it never checked the global "Live
+        # Orders" switch at all -- only executor_mechanism_test.py's tiny
+        # test respected it. Andy has been treating that switch as a
+        # master safety gate all session ("both the global switch AND
+        # each account's own kill switch must be clear" -- this file's
+        # own module header repeats the same two-layer pattern). Without
+        # this check, the moment an account reaches LIVE mode it would
+        # place real orders regardless of that switch's state. Restored.
+        if not executor_control.is_live_orders_enabled(db):
+            executor_accounts.write_audit(
+                db, "ERROR",
+                f"LIVE-mode account {account.id} skipped real order placement -- "
+                f"global Live Orders switch is OFF (trade_plan_id={trade_plan_row.id})",
+                account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order.id, actor="system")
+            return
         db.flush()
         import executor_live_engine
         await executor_live_engine.place_entry_order(db, account, trade_plan_row, order)

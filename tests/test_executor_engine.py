@@ -27,6 +27,7 @@ from database import SessionLocal, TradePlan, ExecutorAccount, ExecutorRiskState
 import trade_plan_engine as tpe
 import executor_plan_builder
 import executor_accounts as ea
+import executor_control as ec
 
 
 def _clean_db_files():
@@ -210,6 +211,67 @@ def test_dry_run_order_and_audit_row_written_for_active_account(env):
 
     audit_rows = env["get_audit_rows"](trade_plan_id=plan.id)
     assert any(r.event_type == "ORDER_WOULD_PLACE" for r in audit_rows)
+
+
+# 2026-09-07 -- the real safety-gate gap found while planning the missing
+# LIVE-mode switch: the global "Live Orders" switch was never checked
+# anywhere in the real executor path (only executor_mechanism_test.py's
+# tiny test respected it). Restored in executor_engine.py's LIVE branch.
+
+def _make_live_account(db_id_getter, **kwargs):
+    """Same shape as env['make_account'](), but flips mode to LIVE
+    directly -- this test is for executor_engine.py's OWN gating logic,
+    independent of (and written before) the separate set_account_mode()
+    feature that will be the real UI path for this."""
+    account_id = db_id_getter(**kwargs)
+    db = SessionLocal()
+    account = db.query(ExecutorAccount).filter_by(id=account_id).first()
+    account.mode = "LIVE"
+    db.commit()
+    db.close()
+    return account_id
+
+
+def test_live_mode_account_skipped_when_live_orders_globally_disabled(env, monkeypatch):
+    called = {"n": 0}
+    async def _fake_place_entry_order(*a, **kw):
+        called["n"] += 1
+    import executor_live_engine
+    monkeypatch.setattr(executor_live_engine, "place_entry_order", _fake_place_entry_order)
+
+    account_id = _make_live_account(env["make_account"])
+    env["make_plan"]()
+    candles = _fueled_5m_candles(100.0, is_long=True)
+    env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)  # live orders NOT enabled (default)
+
+    assert called["n"] == 0   # never reached -- the whole point of this gate
+    plan = env["get_plan"]()
+    orders = env["get_orders"](trade_plan_id=plan.id)
+    assert len(orders) == 1 and orders[0].mode == "LIVE" and orders[0].decision == "WOULD_PLACE"
+    assert orders[0].exchange_order_id is None   # WOULD_PLACE recorded, but nothing real was attempted
+
+    audit_rows = env["get_audit_rows"](trade_plan_id=plan.id)
+    assert any("Live Orders switch is OFF" in (r.message or "") for r in audit_rows)
+
+
+def test_live_mode_account_places_real_order_when_live_orders_enabled(env, monkeypatch):
+    called = {"n": 0}
+    async def _fake_place_entry_order(*a, **kw):
+        called["n"] += 1
+    import executor_live_engine
+    monkeypatch.setattr(executor_live_engine, "place_entry_order", _fake_place_entry_order)
+
+    account_id = _make_live_account(env["make_account"])
+    db = SessionLocal()
+    ec.enable_live_orders(db, reason="test", by="test@kabroda.com")
+    db.commit()
+    db.close()
+
+    env["make_plan"]()
+    candles = _fueled_5m_candles(100.0, is_long=True)
+    env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    assert called["n"] == 1   # both gates open -- the real placement path is reached
 
 
 def test_inactive_account_produces_no_order(env):

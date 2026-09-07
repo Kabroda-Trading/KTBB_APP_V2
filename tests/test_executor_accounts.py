@@ -403,3 +403,78 @@ def test_record_trade_result_writes_audit(db):
     rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="TRADE_RESULT_RECORDED").all()
     assert len(rows) == 1
     assert rows[0].trade_plan_id == 7
+
+
+# ------------------------------------------------------------------ set_account_mode (2026-09-07)
+# Before this existed, NOTHING in the codebase could ever set an account's
+# mode to LIVE -- create_account() hardcodes DRY_RUN and nothing else ever
+# assigned .mode, making executor_engine.py's whole LIVE branch
+# unreachable in production regardless of how well-tested it was.
+
+def test_set_account_mode_refuses_live_without_credentials(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    with pytest.raises(ValueError, match="no credentials set"):
+        ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
+    assert account.mode == "DRY_RUN"
+
+
+def test_set_account_mode_refuses_live_without_correct_confirm_phrase(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    ea.set_credentials(db, account, "key1", "secret1", set_by="andy@kabroda.com")
+    db.commit()
+    with pytest.raises(ValueError, match="confirm phrase"):
+        ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="wrong phrase")
+    assert account.mode == "DRY_RUN"
+
+    with pytest.raises(ValueError, match="confirm phrase"):
+        ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm=None)
+    assert account.mode == "DRY_RUN"
+
+
+def test_set_account_mode_live_succeeds_with_credentials_and_confirm(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    ea.set_credentials(db, account, "key1", "secret1", set_by="andy@kabroda.com")
+    db.commit()
+    result = ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
+    db.commit()
+    assert result.mode == "LIVE"
+    assert account.mode == "LIVE"
+
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="MODE_CHANGED").all()
+    assert len(rows) == 1
+    assert "DRY_RUN -> LIVE" in rows[0].message
+
+
+def test_set_account_mode_live_to_dry_run_needs_no_confirm_phrase(db):
+    # Safety-DECREASING direction -- matches this file's own kill-switch
+    # asymmetry (engage requires nothing special either, release doesn't
+    # need extra friction).
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    ea.set_credentials(db, account, "key1", "secret1", set_by="andy@kabroda.com")
+    ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
+    db.commit()
+
+    ea.set_account_mode(db, account, "DRY_RUN", by="andy@kabroda.com")
+    db.commit()
+    assert account.mode == "DRY_RUN"
+
+    events = [r.event_type for r in db.query(ExecutorAuditLog).filter_by(account_id=account.id).order_by(ExecutorAuditLog.id).all()]
+    assert events.count("MODE_CHANGED") == 2
+
+
+def test_set_account_mode_rejects_unknown_mode(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    with pytest.raises(ValueError, match="mode must be one of"):
+        ea.set_account_mode(db, account, "PAPER", by="andy@kabroda.com")
+
+
+def test_set_account_mode_same_mode_is_a_harmless_noop(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    ea.set_account_mode(db, account, "DRY_RUN", by="andy@kabroda.com")
+    db.commit()
+    # No spurious MODE_CHANGED row for a no-op transition.
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="MODE_CHANGED").all()
+    assert len(rows) == 0
