@@ -80,7 +80,7 @@ def _get_tf_system_verdicts(symbol_norm: str) -> dict:
             if c15m:
                 result["15M"] = {
                     "status":   c15m.mas_approval_status or "PENDING",
-                    "state":    c15m.conviction,    # TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS
+                    "state":    c15m.conviction,    # TAKE_PREMIUM/TAKE_STANDARD/PASS
                     "tier":     c15m.tier,          # PREMIUM/STANDARD/None
                     "headline": c15m.mas_executive_brief,  # the real reason, plain English
                     "bias":     c15m.bias,
@@ -206,11 +206,10 @@ def _make_indicator_string(levels):
 # lands (KABRODA_REBUILD_SPEC.md) -- score_pct/grade/color_code are explicitly
 # on the CUT list (§11.1: "0-100 score_pct as the verdict -- non-monotonic
 # with outcome"), not a real signal. They're mapped here so the current
-# frontend doesn't break while the new four-outcome headline card (TAKE
-# PREMIUM/TAKE STANDARD/ALMOST/PASS) is still being built.
+# frontend doesn't break while the new three-outcome headline card (TAKE
+# PREMIUM/TAKE STANDARD/PASS) is still being built.
 _STATE_COLOR = {
-    "TAKE_PREMIUM": "GREEN", "TAKE_STANDARD": "GREEN",
-    "ALMOST": "YELLOW", "PASS": "GRAY",
+    "TAKE_PREMIUM": "GREEN", "TAKE_STANDARD": "GREEN", "PASS": "GRAY",
 }
 
 
@@ -219,8 +218,6 @@ def _legacy_briefing(state: str, side: Optional[str], headline: str) -> str:
         return f"🟢🟢 TAKE — PREMIUM ({side}) — {headline}"
     if state == "TAKE_STANDARD":
         return f"🟢 TAKE — STANDARD ({side}) — {headline}"
-    if state == "ALMOST":
-        return f"🟡 ALMOST — {headline}"
     return f"⚪ PASS — {headline}"
 
 
@@ -233,8 +230,6 @@ async def _build_dossier(symbol: str, price: float, levels: dict, context: dict)
     (KABRODA_REBUILD_SPEC.md §2-3, 2026-08-30 rebuild)."""
     bo = float(levels.get("breakout_trigger", 0) or 0)
     bd = float(levels.get("breakdown_trigger", 0) or 0)
-
-    confluence_scan = context.get("confluence_scan", {})
 
     if bo == 0 or bd == 0:
         decision = {"verdict_state": "PASS", "side": None, "tier": None,
@@ -259,7 +254,6 @@ async def _build_dossier(symbol: str, price: float, levels: dict, context: dict)
         gate_levels["price"] = float(candles_5m[-1]["close"]) if candles_5m else price
         decision, _gauges = decision_engine.evaluate_15m_decision(
             levels=gate_levels,
-            confluence_15m=confluence_scan.get("15M"),
             candles_5m=candles_5m, candles_15m=candles_15m,
             candles_1h=candles_1h, candles_4h=candles_4h, candles_1d=candles_1d,
             session_hour_utc=datetime.datetime.now(datetime.timezone.utc).hour,
@@ -286,9 +280,9 @@ async def _build_dossier(symbol: str, price: float, levels: dict, context: dict)
 
     return {
         "favored": favored,
-        "verdict_state": state,          # TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS -- the real answer
+        "verdict_state": state,          # TAKE_PREMIUM/TAKE_STANDARD/PASS -- the real answer
         "grade": state,                  # legacy field name, same value -- see module note above
-        "score_pct": 100 if state == "TAKE_PREMIUM" else (75 if state == "TAKE_STANDARD" else (40 if state == "ALMOST" else 0)),
+        "score_pct": 100 if state == "TAKE_PREMIUM" else (75 if state == "TAKE_STANDARD" else 0),
         "color_code": _STATE_COLOR.get(state, "GRAY"),
         "briefing": _legacy_briefing(state, side, decision["tactical_brief"]),
         "checks": [], "diagnostic_ledger": {"reason": decision["tactical_brief"], "gate": decision.get("gate")},
@@ -407,8 +401,8 @@ async def scan_sector():
         # gate state, levels, briefing, full context) is untouched.
         try:
             # dossier["grade"] is the real calibrated-gate state from
-            # decision_engine.py (TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS,
-            # 2026-08-30 rebuild) -- written as-is, no remapping needed.
+            # decision_engine.py (TAKE_PREMIUM/TAKE_STANDARD/PASS,
+            # 2026-09-06 three-outcome rebuild) -- written as-is, no remapping needed.
             decision_type = dossier.get("grade", "PASS")
 
             with SessionLocal() as db:

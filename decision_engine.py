@@ -30,21 +30,38 @@
 #     Deploying the gate behind the old 2-close requirement would mean
 #     running something that was never actually backtested.
 #
-# THE CORE GATE (all four required for TAKE; §2):
+# THE CORE GATE (§2):
 #   1. reachability -- box <= 0.55x daily ATR(14)          (reachability.py)
-#   2. fuel         -- 5M push volume FUELED                (fuel_gate.py)
-#   3. HTF carry    -- >=1 of {1H, 4H} trend backs the side  (htf_fuel.py)
+#   2. fuel         -- 5M push volume FUELED or CONFLICTED  (fuel_gate.py)
+#   3. HTF carry    -- >=1 of {1H, 4H} trend backs the side, but ONLY required
+#                      on the FUELED path. Rebuilt 2026-09-06 per
+#                      GATE_REBUILD_SPEC.md §1 (Kabroda AI Brain repo):
+#                      STANDARD's fuel-CONFLICTED path carries no HTF
+#                      qualifier -- verified against the real 80-row
+#                      CONFLICTED corpus (calibration_data/replay_verdict.csv),
+#                      profitable at HTF=0/1/2 alike, majority at HTF=1.
+#                      Gating it on carry would have thrown out real,
+#                      validated performance.                (htf_fuel.py)
 #   4. session hour -- not a dead-tape hour                  (DEAD_HOURS below)
 #
-# HARD VETOES (§5) cap the result below TAKE even if the gate passes:
+# HARD VETOES cap the result below TAKE even if the gate passes:
 #   - ghost push (NO_FUEL)
 #   - DEAD 15m regime (no participation)                     (micro_regime.py)
 #   - counter-trend on a GOOD daily table                    (market_regime.py)
-#   - 15M momentum divergence against the side (weak evidence, spec's own
-#     caveat -- kept as specified, flagged, not upgraded to 4H/daily yet)
 #
-# FOUR OUTCOMES ONLY (§8.1) -- no grades, no score, no "HOLD FIRE":
-#   TAKE_PREMIUM / TAKE_STANDARD / ALMOST / PASS
+# The old 4th hard veto -- 15M momentum divergence against the side, sourced
+# from mtf_confluence_scanner.py -- was REMOVED 2026-09-06 per
+# GATE_REBUILD_SPEC.md §2 / Andy's explicit call: it predates the 2026-08-30
+# rebuild, never validated against backtest data, and couldn't even fire on
+# real fills (trade_plan_engine.py, the only call site that places real
+# orders, already passed confluence_15m=None). mtf_confluence_scanner.py
+# itself is untouched -- it keeps running for its other, non-decision uses
+# (the Gravity Map treatment: real tool, just not a decision input).
+#
+# THREE OUTCOMES ONLY -- no grades, no score, no "HOLD FIRE", no
+# ALMOST/NEEDS-CONFIRMATION limbo (removed 2026-09-06, same spec: the real
+# corpus showed that population outperforming what the gate already took):
+#   TAKE_PREMIUM / TAKE_STANDARD / PASS
 #
 # No LLM call anywhere in this file. No prose generation beyond a plain-
 # English headline built from the same booleans that decided the outcome.
@@ -75,9 +92,6 @@ DEAD_HOURS = set(range(0, 12)) | {18, 19, 20}
 T1_BOX, T2_BOX, T3_BOX = 0.618, 1.0, 1.618
 STOP_BUFFER_BOX = 0.12      # swept 2026-08-29, robust train/test (Brain repo)
 SUBTRIG_BOX = 0.15          # runner stop after T1
-
-_BULLISH_DIVERGENCE = {"BULLISH", "HIDDEN_BULLISH"}
-_BEARISH_DIVERGENCE = {"BEARISH", "HIDDEN_BEARISH"}
 
 
 def _plan_for_side(side: str, bo: float, bd: float, r30_high: float, r30_low: float) -> Dict[str, Any]:
@@ -112,17 +126,26 @@ def _plan_for_side(side: str, bo: float, bd: float, r30_high: float, r30_low: fl
 def _core_gate(*, box: float, atr: float, fuel: Dict[str, Any],
                 htf: Dict[str, Any], session_hour: Optional[int]) -> Dict[str, Any]:
     reach = _reachability.reachability(box, atr)
-    fueled = fuel.get("verdict") == "FUELED"
+    fuel_verdict = fuel.get("verdict")
+    fueled = fuel_verdict == "FUELED"
+    conflicted = fuel_verdict == "CONFLICTED"
+    fuel_ok = fueled or conflicted
     aligned = htf.get("aligned") or 0
-    htf_ok = aligned >= 1
+    # HTF carry is required on the FUELED path only. GATE_REBUILD_SPEC.md §1's
+    # STANDARD definition lists no HTF qualifier for the fuel-CONFLICTED case,
+    # and the real 80-row CONFLICTED corpus backs that exactly: all three HTF
+    # buckets are profitable (avg R +0.44/+0.24/+1.41 at HTF=0/1/2), majority
+    # at HTF=1 -- gating CONFLICTED on carry would exclude the majority of
+    # real, validated performance for no reason the data supports.
+    htf_ok = True if conflicted else (aligned >= 1)
     hour_ok = session_hour is None or session_hour not in DEAD_HOURS
 
-    checks = {"reachability": reach["ok"], "fuel": fueled, "htf_carry": htf_ok, "session_hour": hour_ok}
+    checks = {"reachability": reach["ok"], "fuel": fuel_ok, "htf_carry": htf_ok, "session_hour": hour_ok}
     misses: List[str] = []
     if not reach["ok"]:
         misses.append(reach["note"])
-    if not fueled:
-        misses.append(f"5M push volume not FUELED (fuel = {fuel.get('verdict', 'unknown')})")
+    if not fuel_ok:
+        misses.append(f"5M push volume not FUELED or CONFLICTED (fuel = {fuel_verdict or 'unknown'})")
     if not htf_ok:
         misses.append("neither 1H nor 4H backs the direction (no carry fuel)")
     if not hour_ok:
@@ -130,7 +153,10 @@ def _core_gate(*, box: float, atr: float, fuel: Dict[str, Any],
 
     passed = not misses
     ratio = reach.get("ratio")
-    premium = bool(passed and aligned == 2 and ratio is not None and ratio <= _reachability.PREMIUM_BOX_ATR)
+    # PREMIUM still requires FUELED specifically (not just fuel-condition-
+    # passing) plus both HTF timeframes plus a tight box -- unchanged from
+    # before this rebuild. CONFLICTED can only ever earn STANDARD.
+    premium = bool(passed and fueled and aligned == 2 and ratio is not None and ratio <= _reachability.PREMIUM_BOX_ATR)
     tier = "PREMIUM" if premium else ("STANDARD" if passed else None)
     return {"pass": passed, "tier": tier, "checks": checks, "misses": misses, "reach": reach, "htf_aligned": aligned}
 
@@ -138,7 +164,6 @@ def _core_gate(*, box: float, atr: float, fuel: Dict[str, Any],
 def evaluate_15m_decision(
     *,
     levels: Dict[str, Any],
-    confluence_15m: Optional[Dict[str, Any]],
     candles_5m: List[Dict[str, Any]],
     candles_15m: List[Dict[str, Any]],
     candles_1h: List[Dict[str, Any]],
@@ -148,7 +173,7 @@ def evaluate_15m_decision(
 ) -> Tuple[Dict[str, Any], List[GaugeTuple]]:
     """Returns (decision_dict, gauge_readings). decision_dict has the
     ExecutiveBrief field names plus `verdict_state` (TAKE_PREMIUM/
-    TAKE_STANDARD/ALMOST/PASS), `side`, `tier`, `gate` (full detail dict for
+    TAKE_STANDARD/PASS), `side`, `tier`, `gate` (full detail dict for
     the DB log). Callers do
     ExecutiveBrief(**{k: v for k, v in decision_dict.items() if k in ExecutiveBrief.__fields__})."""
 
@@ -233,10 +258,9 @@ def evaluate_15m_decision(
     daily = _market_regime.classify_market_regime(candles_1d)
     htf = _htf_fuel.htf_fuel(candles_1h, candles_4h, side)
     trigger_price = bo if side == _LONG else bd
-    div = (confluence_15m or {}).get("divergence", "NONE")
     fuel = _fuel_gate.evaluate_fuel_gate(
         candles_5m, trigger_price, side,
-        divergence=div, fuel_1h=htf.get("trend_1h"), fuel_4h=htf.get("trend_4h"),
+        fuel_1h=htf.get("trend_1h"), fuel_4h=htf.get("trend_4h"),
     )
 
     plan = _plan_for_side(side, bo, bd, r30_high, r30_low) if box > 0 else None
@@ -248,29 +272,29 @@ def evaluate_15m_decision(
         _gauge("1D", "market_quality", daily.get("quality")),
         _gauge("1H", "trend", htf.get("trend_1h")),
         _gauge("4H", "trend", htf.get("trend_4h")),
-        _gauge("15M", "divergence", div),
         _gauge("15M", "fuel_verdict", fuel.get("verdict")),
         _gauge("15M", "fuel_push_ratio", (fuel.get("checks", {}).get("push_volume", {}) or {}).get("ratio")),
     ] if g]
 
-    # --- hard vetoes (§5) -- cap below TAKE regardless of the gate ---
-    div_against = (div in _BEARISH_DIVERGENCE) if side == _LONG else (div in _BULLISH_DIVERGENCE)
+    # --- hard vetoes -- cap below TAKE regardless of the gate ---
     daily_bias = (daily.get("policy") or {}).get("bias")
     counter_trend = bool(
         daily.get("quality") == "GOOD" and daily_bias and
         ((daily_bias == "UP" and side == _SHORT) or (daily_bias == "DOWN" and side == _LONG))
     )
     dead_tape = micro.get("regime") == "DEAD"
-    no_fuel = fuel.get("verdict") == "NO_FUEL"
+    fuel_verdict = fuel.get("verdict")
+    no_fuel = fuel_verdict == "NO_FUEL"
 
     def _veto_gate(veto_reason: str) -> Dict[str, Any]:
         # Same shape as _core_gate()'s return, even though a veto short-
         # circuits before the 4-condition check -- KABRODA_REBUILD_SPEC.md §9
         # ("log every detail"): reachability/fuel/htf are still knowable here
         # and must not go missing from the record just because a veto fired.
+        conflicted = fuel_verdict == "CONFLICTED"
         return {"pass": False, "tier": None, "reach": reach, "htf_aligned": htf.get("aligned"),
-                "checks": {"reachability": reach["ok"], "fuel": fuel.get("verdict") == "FUELED",
-                           "htf_carry": (htf.get("aligned") or 0) >= 1,
+                "checks": {"reachability": reach["ok"], "fuel": fuel_verdict in ("FUELED", "CONFLICTED"),
+                           "htf_carry": True if conflicted else (htf.get("aligned") or 0) >= 1,
                            "session_hour": session_hour_utc is None or session_hour_utc not in DEAD_HOURS},
                 "misses": [veto_reason]}
 
@@ -284,9 +308,6 @@ def evaluate_15m_decision(
     if no_fuel:
         return _result("PASS", side, f"{side}: ghost push -- no real volume behind the move. Stand down.",
                         _veto_gate("ghost push (NO_FUEL)"), plan, gauges)
-    if div_against:
-        return _result("PASS", side, f"{side}: 15M momentum divergence points against the side. Stand down.",
-                        _veto_gate("15M divergence against the side"), plan, gauges)
 
     gate = _core_gate(box=box, atr=atr, fuel=fuel, htf=htf, session_hour=session_hour_utc)
     gauges = gauges + [g for g in [
@@ -306,12 +327,6 @@ def evaluate_15m_decision(
         headline = (f"{side}: box in reach, fuel live, a higher timeframe backs it. "
                     "Standard trade -- take it, normal size, runner to T3.")
         return _result("TAKE_STANDARD", side, headline, gate, plan, gauges)
-
-    soft_misses = [m for m, ok in gate["checks"].items() if not ok and m != "reachability"]
-    one_gap = gate["checks"]["reachability"] and len(soft_misses) == 1
-    if one_gap:
-        headline = f"{side}: one thing still needed -- {gate['misses'][0]}."
-        return _result("ALMOST", side, headline, gate, plan, gauges)
 
     headline = f"{side}: PASS -- " + "; ".join(gate["misses"])
     return _result("PASS", side, headline, gate, plan, gauges)

@@ -457,7 +457,7 @@ def test_waiting_own_cross_syncs_gate_log_via_loop(poll_env, monkeypatch):
 
     gate_row = poll_env["get_gate_log"]()
     assert gate_row.side == "LONG"
-    assert gate_row.state in ("TAKE_PREMIUM", "TAKE_STANDARD", "ALMOST", "PASS")
+    assert gate_row.state in ("TAKE_PREMIUM", "TAKE_STANDARD", "PASS")
     assert gate_row.daily_regime_table == "TRENDING_UP"
 
 

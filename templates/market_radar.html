@@ -978,14 +978,13 @@
         function _buildRow(sym, price, bo, bd, rowClass, cockpitEnabled, masStatus) {
             const base        = (sym || '').replace('USDT', '');
 
-            // 2026-08-30 rebuild: masStatus is either the official CampaignLog
+            // 2026-09-06 rebuild: masStatus is either the official CampaignLog
             // verdict (APPROVED/STAND_DOWN) or, in the full-grid path where no
             // CampaignLog row exists yet, the live calibrated-gate state
             // straight from decision_engine.py (TAKE_PREMIUM/TAKE_STANDARD/
-            // ALMOST/PASS) -- same source of truth, shown as text either way,
-            // not just a border color.
+            // PASS) -- same source of truth, shown as text either way, not
+            // just a border color.
             const masColor  = masStatus === 'APPROVED' || masStatus === 'TAKE_PREMIUM' || masStatus === 'TAKE_STANDARD' ? '#22c55e'
-                            : masStatus === 'ALMOST' ? '#eab308'
                             : masStatus === 'STAND_DOWN' || masStatus === 'PASS' ? '#94a3b8'
                             : '#64748b';
             const masBadge  = masStatus
@@ -1021,16 +1020,14 @@
             dailyRegime = dailyRegime || '—';  // guard .startsWith() below against null/undefined
 
             function mas15mRow(data) {
-                const state = data.state;  // TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS
+                const state = data.state;  // TAKE_PREMIUM/TAKE_STANDARD/PASS
                 const isTake = state === 'TAKE_PREMIUM' || state === 'TAKE_STANDARD';
                 const color = state === 'TAKE_PREMIUM' ? '#22c55e'
                             : state === 'TAKE_STANDARD' ? '#22c55e'
-                            : state === 'ALMOST'        ? '#eab308'
                             : state === 'PASS'          ? '#64748b'
                             : '#334155';
                 const stampText = state === 'TAKE_PREMIUM' ? '🟢🟢 TAKE — PREMIUM'
                                  : state === 'TAKE_STANDARD' ? '🟢 TAKE — STANDARD'
-                                 : state === 'ALMOST'        ? '🟡 ALMOST'
                                  : state === 'PASS'          ? '⚪ PASS'
                                  : (data.status || 'PENDING');
                 const badge = `<span class="tf-label" style="border-color:${color}; color:${color}; font-weight:800;">${stampText}</span>`;

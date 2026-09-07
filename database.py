@@ -619,8 +619,8 @@ class CampaignLog(Base):
     # --- MAS UPGRADE COLUMNS ---
     mas_executive_brief = Column(String, nullable=True)
     mas_approval_status = Column(String, default="PENDING", nullable=False)
-    # conviction: TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS -- the calibrated
-    # gate's real state (2026-08-30 rebuild, decision_engine.py). mas_approval_
+    # conviction: TAKE_PREMIUM/TAKE_STANDARD/PASS -- the calibrated
+    # gate's real state (decision_engine.py). mas_approval_
     # status alone (APPROVED/STAND_DOWN) collapses TAKE_PREMIUM and
     # TAKE_STANDARD into the same value; this is the finer read, needed by
     # anything (the Brain project's read API) that wants the real state, not
@@ -1633,7 +1633,7 @@ class GateLog(Base):
     veto = Column(String, nullable=True)           # which hard veto fired, if any
     gate_pass = Column(Boolean, nullable=True)
     gate_tier = Column(String, nullable=True)       # PREMIUM | STANDARD | None
-    state = Column(String, nullable=False)          # TAKE_PREMIUM | TAKE_STANDARD | ALMOST | PASS
+    state = Column(String, nullable=False)          # TAKE_PREMIUM | TAKE_STANDARD | PASS
     headline = Column(String, nullable=True)
     entry = Column(Float, nullable=True)
     stop = Column(Float, nullable=True)

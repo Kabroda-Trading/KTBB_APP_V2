@@ -399,13 +399,6 @@ def advance_no_plan(
     - No cross yet (`side` is None -- price still inside the box): returns
       None, silently. Matches every other "still waiting" poll outcome in
       this module.
-    - `ALMOST` (one soft gate condition still open -- fuel/HTF/hour, NOT a
-      hard veto, those always resolve to PASS): also returns None. This is
-      deliberately NOT treated as a fail -- it can still resolve to a real
-      TAKE on a later poll (e.g. fuel confirms next candle), and forcing a
-      verdict here would be exactly the premature-negative call the whole
-      gate design (CLAUDE.md rule 3: evaluate on the qualifying close, not
-      a count) exists to avoid.
     - A real TAKE: promotes straight to FILLED -- the SAME FUELED-
       collapses-ARMED+FILLED convention advance_waiting_plan() already
       uses for the anticipated-side path, since a TAKE verdict already
@@ -413,8 +406,7 @@ def advance_no_plan(
       NO_PLAN, keep watching) if a stop can't be safely planned (ATR
       unavailable / R:R floor fails) -- same NO_PLAN-preserving philosophy
       build_trade_plan() itself uses: never guess a stop to force a
-      promotion; matches the ALMOST case's philosophy too, since a bad
-      stop this poll doesn't mean it stays bad next poll.
+      promotion, a bad stop this poll doesn't mean it stays bad next poll.
     - A real fail (`side` is set, state is PASS -- either a hard veto or
       multiple soft misses): resolves to DONE, carrying `vetoed_cross_
       side`/`vetoed_cross_trigger` so trade_plan_notify.py's build_done_
@@ -430,9 +422,6 @@ def advance_no_plan(
 
     if side is None:
         return None  # still inside the box -- no cross yet
-
-    if state == "ALMOST":
-        return None  # one soft condition still open -- could still resolve later, not a verdict yet
 
     if state not in _TAKE_STATES:
         headline = decision_dict.get("tactical_brief") or f"{side}: gate declined"

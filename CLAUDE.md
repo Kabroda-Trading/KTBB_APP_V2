@@ -60,20 +60,20 @@ After 30 minutes, `sse_engine.py` computes two permanent levels for the session:
 
 These two triggers are the **Single Source of Truth (SSOT)** for the entire session. They are frozen into a `SessionLock` database record and never recomputed. Every downstream calculation — targets, stops, the calibrated gate — derives from them.
 
-### The Calibrated Gate (rebuilt 2026-08-30 — supersedes the old Measured Move Rule)
+### The Calibrated Gate (rebuilt 2026-08-30, tier logic rebuilt again 2026-09-06 — supersedes the old Measured Move Rule)
 
 The site's original target formula (1×/1.618×/2.618× of the bo–bd distance, "Measured Move") was never backtested against real outcomes at scale, and when it finally was — a 1,913-trigger-break backtest, 2021–2026, `Kabroda AI Brain` repo — it lost money on kabroda.com's own real filled trades (71 trades, 29.8% win, −0.30R avg, −21.4R total). Andy authorized a full replacement, not a patch. Source of truth: `KABRODA_REBUILD_SPEC.md` + `CALIBRATION.md` in the `Kabroda AI Brain` repo. Live implementation: `decision_engine.py`, `reachability.py`, `htf_fuel.py`, `fuel_gate.py`, `market_regime.py`, `micro_regime.py`.
 
-**The gate.** Evaluated once, on the first 5m close beyond BO or BD — not the old 2-consecutive-close acceptance count (that's what the backtest actually measured; the gate below, which includes real volume confirmation, is the false-breakout filter now). All four required for a TAKE:
+**The gate.** Evaluated once, on the first 5m close beyond BO or BD — not the old 2-consecutive-close acceptance count (that's what the backtest actually measured; the gate below, which includes real volume confirmation, is the false-breakout filter now). Required for a TAKE:
 
 1. **Reachability** — `box / dailyATR14 ≤ 0.55` (`box = bo − bd`). A wide box puts T1 out of reach; this is the single strongest signal in the backtest.
-2. **5M fuel** — real push volume at the trigger cross, median push ≥ 0.8× the prior-24h baseline (`fuel_gate.py`).
-3. **HTF carry** — ≥1 of {1H, 4H} trend (fresh 9/21 EMA read, `htf_fuel.py`) backs the side. This doesn't change whether T1 gets hit — it changes how far the winner runs (the runner's fuel).
+2. **5M fuel** — real push volume at the trigger cross, median push ≥ 0.8× the prior-24h baseline (`fuel_gate.py`). Passes on **FUELED or CONFLICTED** (rebuilt 2026-09-06, `GATE_REBUILD_SPEC.md` §1 — see below); `NO_FUEL` stays a hard veto.
+3. **HTF carry** — ≥1 of {1H, 4H} trend (fresh 9/21 EMA read, `htf_fuel.py`) backs the side, but **only required when fuel is FUELED**. Rebuilt 2026-09-06: the fuel-CONFLICTED path carries no HTF qualifier at all, verified against the real 80-row CONFLICTED corpus (`calibration_data/replay_verdict.csv`, Kabroda AI Brain repo) — profitable at HTF=0/1/2 alike (avg R +0.44/+0.24/+1.41), majority at HTF=1. Gating CONFLICTED on carry would have thrown out real, validated performance; this was caught and corrected before it shipped (see `decision_engine.py`'s own header comment for the full reasoning).
 4. **Live hour** — trigger hour not in the dead-tape set (`<12 UTC` or `18–21 UTC`).
 
-**Tier.** `PREMIUM` when both HTF timeframes align AND box/ATR ≤ 0.40 (tighter, both timeframes carrying — size up, hold the runner to T3). `STANDARD` otherwise. Both are real TAKE signals; the difference is size, not management.
+**Tier.** `PREMIUM` requires fuel **FUELED specifically** (not just CONFLICTED) AND both HTF timeframes align AND box/ATR ≤ 0.40 (tighter, both timeframes carrying — size up, hold the runner to T3). `STANDARD` covers everything else that passes the gate — the FUELED-but-not-premium population (HTF=1, or wide box) and, as of the 2026-09-06 rebuild, the fuel-CONFLICTED-but-otherwise-valid population that used to be trapped in the now-removed ALMOST state. Both are real TAKE signals; the difference is size, not management.
 
-**Hard vetoes** (cap the result below TAKE even if the gate passes): ghost push (no real volume — ≥`NO_FUEL`), DEAD 15m regime (no participation), counter-trend on a GOOD daily table (don't fight a strong trend), 15M divergence against the side (spec's own caveat: weak evidence at 15M, kept as specified pending a 4H/daily upgrade).
+**Hard vetoes** (cap the result below TAKE even if the gate passes): ghost push (no real volume — `NO_FUEL`), DEAD 15m regime (no participation), counter-trend on a GOOD daily table (don't fight a strong trend). The 15M momentum-divergence veto (`mtf_confluence_scanner.py`-sourced) was **removed 2026-09-06** per `GATE_REBUILD_SPEC.md` §2 / Andy's explicit call: it predated the 2026-08-30 rebuild, was never validated against backtest data, and couldn't even fire on real fills (`trade_plan_engine.py`, the only call site that places real orders, already passed `confluence_15m=None`). `mtf_confluence_scanner.py` itself is untouched — same treatment as the Gravity Map, a real tool kept for its other uses, just not a decision input.
 
 **Targets and stop** — box multiples, no gravity dependency (gravity is a separate reference page now, not a decision input):
 
@@ -90,7 +90,7 @@ Runner stop (after T1) = trigger ∓ 0.15×box
 
 **Management, identical for both tiers**: 30% off at T1, stop moves to the runner-stop level, 70% rides to T3. Tested against alternatives (50/50 at T1/T2, 100%-at-T1) — this beat both.
 
-**Four outcomes only, no grades, no score**: `TAKE_PREMIUM` / `TAKE_STANDARD` / `ALMOST` (one gate condition still missing) / `PASS` (always with a specific, stated reason). This is what `decision_engine.evaluate_15m_decision()` returns, and it's the same function `run_mas_analysis()` and the live radar (`market_radar.py`'s `_build_dossier()`) both call — they can never silently disagree.
+**Three outcomes only, no grades, no score**: `TAKE_PREMIUM` / `TAKE_STANDARD` / `PASS` (always with a specific, stated reason). The `ALMOST`/NEEDS-CONFIRMATION limbo state was **removed 2026-09-06** (`GATE_REBUILD_SPEC.md`) — the real backtest corpus showed that population outperforming what the gate already took (66.7% T1-hit / +0.285R avg vs TAKE's 61.3% / +0.123R), so it's folded into STANDARD's widened eligibility instead of held in limbo. The gate commits on every cross now — no "might still resolve later" state. This is what `decision_engine.evaluate_15m_decision()` returns, and it's the same function `run_mas_analysis()` and the live radar (`market_radar.py`'s `_build_dossier()`) both call — they can never silently disagree.
 
 Every gate evaluation, TAKE or PASS alike, is logged to the `gate_log` table (`database.py`) — this is the forward-incubation record the Kabroda AI Brain reads to confirm live results track the backtest.
 

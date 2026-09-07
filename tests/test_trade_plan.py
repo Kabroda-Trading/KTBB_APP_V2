@@ -421,9 +421,12 @@ def test_stamp_tier_at_cross_standard_when_box_too_wide_for_premium(monkeypatch)
 
 # ------------------------------------------------------------------ advance_no_plan (2026-09-02, Andy's poll-routing decision)
 # Exact contract (Kabroda AI Brain repo AGENT_LOG.md, 15:45/15:50 CT): no
-# cross -> silence; ALMOST -> silence (not yet a verdict); real TAKE ->
-# FILLED; real fail (a cross happened, gate declined) -> DONE with a
-# VETOED-framed email, "no repeated attempts."
+# cross -> silence; real TAKE -> FILLED; real fail (a cross happened, gate
+# declined) -> DONE with a VETOED-framed email, "no repeated attempts."
+# (The original contract also carved out ALMOST as a third, deferred
+# outcome -- retired 2026-09-06 along with the verdict_state itself, see
+# GATE_REBUILD_SPEC.md: the gate commits on every cross now, no more
+# "might still resolve later" limbo.)
 
 NOW = datetime.datetime(2026, 9, 2, 15, 0, 0, tzinfo=datetime.timezone.utc)
 
@@ -464,19 +467,6 @@ def test_advance_no_plan_on_real_take_goes_to_filled():
 def test_advance_no_plan_returns_none_when_no_cross_yet():
     # _pass_decision()'s side=None IS the "still inside the box" case.
     decision = _pass_decision("Price is inside the box -- no trigger crossed yet.")
-    updates = tp.advance_no_plan(
-        decision, candles_24h=_flat_candles(),
-        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
-        now_utc=NOW,
-    )
-    assert updates is None
-
-
-def test_advance_no_plan_returns_none_on_almost():
-    # A real cross (side set), but only one soft condition still open --
-    # NOT a verdict yet, must NOT resolve to DONE prematurely.
-    decision = _declined_decision(side="LONG", reason="one thing still needed")
-    decision["verdict_state"] = "ALMOST"
     updates = tp.advance_no_plan(
         decision, candles_24h=_flat_candles(),
         r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,

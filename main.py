@@ -1016,7 +1016,7 @@ async def api_radar_snapshot(db: Session = Depends(get_db)):
         "mtf_cached":            mtf_cached,
         "jewel_gate_open":       jewel_gate_open,
         "mas_status":            mas_status,
-        "conviction":            conviction,  # TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS (2026-08-30 calibrated gate)
+        "conviction":            conviction,  # TAKE_PREMIUM/TAKE_STANDARD/PASS (calibrated gate)
         "plan":                  plan,
         "tf_verdicts":           tf_verdicts,
         "tf_today":              tf_today,

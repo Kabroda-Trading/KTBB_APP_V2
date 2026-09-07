@@ -55,7 +55,7 @@ class ExecutiveBrief(BaseModel):
     graded coded decision layer (2026-08-27) and the calibrated-gate rebuild
     (2026-08-30, KABRODA_REBUILD_SPEC.md) that replaced it."""
     approval_status: str = Field(description="'APPROVED' or 'STAND_DOWN' (REJECTED/WAITING_FOR_15M are legacy LLM-era values, no longer produced)")
-    conviction: str = Field(default="PASS", description="TAKE_PREMIUM/TAKE_STANDARD/ALMOST/PASS — the calibrated gate's four-outcome verdict (2026-08-30 rebuild). approval_status is derived from this (TAKE_* -> APPROVED, ALMOST/PASS -> STAND_DOWN).")
+    conviction: str = Field(default="PASS", description="TAKE_PREMIUM/TAKE_STANDARD/PASS — the calibrated gate's three-outcome verdict (2026-09-06 rebuild). approval_status is derived from this (TAKE_* -> APPROVED, PASS -> STAND_DOWN).")
     tactical_brief: str = Field(description="Short, deterministic reason string (the matched confirmation legs, or the stand-down reason). No LLM prose generated here anymore.")
     bias: str = Field(description="'LONG', 'SHORT', or 'NEUTRAL'")
     entry_price: float = Field(description="The exact trigger entry price.")
@@ -125,7 +125,6 @@ def run_mas_analysis(
 
     levels = dict(battlebox_payload.get("levels", {}))
     context = battlebox_payload.get("context", {})
-    confluence_scan = context.get("confluence_scan", {})
 
     # The gate needs candles this packet doesn't carry (5m/15m/1h/4h/1d for
     # fuel/HTF/regime/daily-ATR reads) -- fetched fresh here rather than
@@ -179,7 +178,6 @@ def run_mas_analysis(
 
     decision_dict, decision_gauges = decision_engine.evaluate_15m_decision(
         levels=levels,
-        confluence_15m=confluence_scan.get("15M"),
         candles_5m=candles_5m,
         candles_15m=candles_15m,
         candles_1h=candles_1h,
@@ -675,7 +673,7 @@ def _inject_gate_log(
             box_atr_ratio=reach.get("ratio"),
             trigger_hour_utc=evaluated_at.hour,
             hour_ok=checks.get("session_hour"),
-            veto=None if decision_dict.get("verdict_state") in ("TAKE_PREMIUM", "TAKE_STANDARD", "ALMOST") else (
+            veto=None if decision_dict.get("verdict_state") in ("TAKE_PREMIUM", "TAKE_STANDARD") else (
                 (decision_dict.get("tactical_brief") or "")[:200] if gate.get("tier") is None and gate.get("misses") else None
             ),
             gate_pass=gate.get("pass"),

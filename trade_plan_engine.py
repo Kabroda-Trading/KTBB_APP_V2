@@ -28,8 +28,7 @@
 #                        _run_full_gate(), same as the opposite-break/own-
 #                        cross paths below -- NOT the pre-cross anticipate_
 #                        setup() heuristic build_trade_plan() used at lock).
-#                        No cross yet -> silent. ALMOST (one soft condition
-#                        still open) -> silent, not yet a verdict. A genuine
+#                        No cross yet -> silent. A genuine
 #                        TAKE -> promotes straight to FILLED (FUELED
 #                        collapses ARMED+FILLED, same as the anticipated-
 #                        side path). A real cross the gate DECLINES (hard
@@ -135,7 +134,7 @@ async def _run_full_gate(db, row: TradePlan) -> Optional[dict]:
 
     import decision_engine
     decision, _gauges = decision_engine.evaluate_15m_decision(
-        levels=levels, confluence_15m=None,
+        levels=levels,
         candles_5m=candles_5m, candles_15m=candles_15m,
         candles_1h=candles_1h, candles_4h=candles_4h, candles_1d=candles_1d,
         session_hour_utc=datetime.now(timezone.utc).hour,
