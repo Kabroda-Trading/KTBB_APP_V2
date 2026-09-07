@@ -152,8 +152,29 @@ def update_risk_state(db: Session, account: ExecutorAccount, changes: Dict[str, 
     place this happens, so callers (main.py's admin route) never touch
     ExecutorAuditLog directly."""
     state = get_or_init_risk_state(db, account)
+    old_compounding_factor = state.compounding_factor
     for field, value in changes.items():
         setattr(state, field, value)
+    # 2026-09-07 stagnant-sweep fix (the "Base $ class" of bug, found by
+    # auditing every ExecutorRiskState/ExecutorSizingPolicy field for a
+    # real consumer, per STAGNANT_SWEEP.md item 6): record_trade_result()
+    # -- the ONLY thing that actually compounds a stake -- reads
+    # policy.roll_in_pct, never state.compounding_factor. This "Legacy
+    # Risk State" field only ever feeds compounding_factor -> roll_in_pct
+    # as a ONE-TIME seed inside get_or_init_sizing_policy()'s first-touch
+    # branch (same shape as the original Base $ bug). Once a sizing
+    # policy row exists for the account -- which is every account that
+    # has ever built a live plan even once, since executor_plan_builder.py
+    # calls get_or_init_sizing_policy() unconditionally -- editing this
+    # legacy field here was a real, silent no-op: the UI input looked and
+    # behaved like any other saveable field with zero indication it no
+    # longer did anything. Same fix shape as the Base $ bug: only
+    # propagate when the value actually changes to a NEW one (never
+    # clobber a value someone set intentionally via the real Sizing
+    # Policy Wizard through an unrelated legacy-panel save).
+    if "compounding_factor" in changes and changes["compounding_factor"] != old_compounding_factor:
+        policy = get_or_init_sizing_policy(db, account)
+        policy.roll_in_pct = changes["compounding_factor"]
     if changes:
         write_audit(
             db, "RISK_STATE_UPDATED", f"risk state updated for account {account.id}: {changes}",

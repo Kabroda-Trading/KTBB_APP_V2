@@ -393,6 +393,62 @@ def test_the_real_stake_computation_actually_reflects_the_saved_base(db):
     assert stake == 100.0
 
 
+def test_setting_a_new_compounding_factor_via_legacy_risk_state_resyncs_roll_in_pct(db):
+    # 2026-09-07 stagnant-sweep fix, "Base $ class" bug found by auditing
+    # every ExecutorRiskState/ExecutorSizingPolicy field for a real
+    # consumer (STAGNANT_SWEEP.md item 6): record_trade_result() only ever
+    # reads policy.roll_in_pct, never state.compounding_factor, once a
+    # sizing policy row exists -- which is every account that has ever
+    # built a live plan even once. Before the fix, saving the "Compounding
+    # factor" field in the Advanced/Legacy Risk State panel was a silent
+    # no-op on real compounding behavior.
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    # Touch the sizing policy once (as executor_plan_builder.py's
+    # get_or_init_sizing_policy() call does on the very first live plan
+    # build) so the policy row already exists, seeded with the default
+    # roll_in_pct=0.10 from ExecutorRiskState's own default.
+    ea.get_or_init_sizing_policy(db, account)
+    db.commit()
+
+    ea.update_risk_state(db, account, {"compounding_factor": 0.25}, updated_by="andy@kabroda.com")
+    db.commit()
+
+    policy = ea.get_or_init_sizing_policy(db, account)
+    assert policy.roll_in_pct == 0.25   # the field record_trade_result() actually reads
+
+    # End-to-end proof, not just that the field changed: record_trade_result()
+    # now actually compounds at the NEW factor, not the stale seeded one.
+    state = ea.record_trade_result(db, account, pnl_usd=100.0, recorded_by="andy@kabroda.com")
+    db.commit()
+    # risk_last(100) + factor(0.25)*pnl(100) = 125
+    assert state.risk_last_usd == pytest.approx(125.0)
+
+
+def test_resaving_the_same_compounding_factor_does_not_erase_real_progress(db):
+    # Same "only an ACTUAL change should reset/resync" guard as the
+    # base_risk_usd fix -- the JS resends every field on every save.
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    ea.get_or_init_sizing_policy(db, account)
+    db.commit()
+    ea.update_risk_state(db, account, {"compounding_factor": 0.25}, updated_by="andy@kabroda.com")
+    db.commit()
+
+    # Someone later sets a DIFFERENT roll_in_pct via the real Sizing Policy
+    # Wizard (the primary, non-legacy path).
+    ea.update_sizing_policy(db, account, {"roll_in_pct": 0.40}, updated_by="andy@kabroda.com")
+    db.commit()
+
+    # Re-saving the legacy panel with the SAME compounding_factor (0.25,
+    # unchanged) must NOT clobber the wizard's newer 0.40.
+    ea.update_risk_state(db, account, {"compounding_factor": 0.25, "risk_floor_usd": 50.0}, updated_by="andy@kabroda.com")
+    db.commit()
+
+    policy = ea.get_or_init_sizing_policy(db, account)
+    assert policy.roll_in_pct == 0.40   # untouched -- the wizard's real value preserved
+
+
 def test_record_trade_result_rolls_risk_last_usd_when_roll_in_pct_set(db):
     account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
     db.commit()

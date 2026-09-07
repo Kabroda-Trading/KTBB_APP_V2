@@ -13,7 +13,9 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 import subprocess
 
-from database import SessionLocal, GravityMemory, DecisionJournal, CampaignLog
+from database import SessionLocal, GravityMemory, DecisionJournal
+# CampaignLog import removed 2026-09-07 (stagnant sweep) -- never actually
+# used in this file (only mentioned in comments, see line 530 below).
 import battlebox_pipeline  # <-- SINGLE SOURCE OF TRUTH ENFORCED
 import notify
 

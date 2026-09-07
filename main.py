@@ -30,7 +30,11 @@ import gravity_math
 import kabroda_mas_flow
 import ledger_closing_engine
 import trade_plan_engine
-import mtf_confluence_scanner
+# mtf_confluence_scanner import removed 2026-09-07 (stagnant sweep) -- never
+# actually called in this file; the "mtf_confluence_scanner" string at the
+# dependency-graph metadata route below is a plain literal, not a reference
+# to this module. Real usage lives only in market_radar.py (dossier display,
+# not a decision input -- see decision_engine.py's own removal-note comment).
 import session_monitor
 import agent_core
 import session_manager
