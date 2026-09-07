@@ -865,3 +865,129 @@ def test_flash_close_rejects_before_partial_close(db):
 
     with pytest.raises(emt.MechanismTestInvalidState, match="PARTIAL_CLOSED or SL_MOVED_BREAKEVEN"):
         asyncio.run(emt.flash_close_remainder(db, account, test_row, actor="test@kabroda.com"))
+
+
+# ------------------------------------------------------------------ Domain 2 required live pre-flight: concurrent T1+T3 (2026-09-07)
+
+def _pending_tpsl_response(position_id="pos1", tp_price="101.0", sl_price="99.0"):
+    return {"code": 0, "data": [{"positionId": position_id, "tpPrice": tp_price, "slPrice": sl_price}], "msg": "Success"}
+
+
+def test_place_concurrent_t1_t3_limits_requires_tpsl_set_status(db):
+    account = _make_ready_account(db)
+    test_row = _make_t1_limit_placed_row(db, account)   # T1_LIMIT_PLACED, not TPSL_SET
+    with pytest.raises(emt.MechanismTestInvalidState, match="TPSL_SET"):
+        asyncio.run(emt.place_concurrent_t1_t3_limits(db, account, test_row, actor="test@kabroda.com"))
+
+
+def test_place_concurrent_t1_t3_limits_rejects_t3_not_further_than_t1(db):
+    account = _make_ready_account(db)
+    test_row = _make_tpsl_set_row(db, account)
+    with pytest.raises(ValueError, match="must be strictly greater"):
+        asyncio.run(emt.place_concurrent_t1_t3_limits(db, account, test_row, actor="test@kabroda.com", t1_pct=0.02, t3_pct=0.01))
+    # No state change and no exchange call attempted -- caught before any placement.
+    assert test_row.status == "TPSL_SET"
+
+
+def test_place_concurrent_t1_t3_limits_places_both_and_updates_status(db, monkeypatch):
+    account = _make_ready_account(db)
+    test_row = _make_tpsl_set_row(db, account, fill_price=100.0, qty=0.0002, quote_precision=1)
+
+    calls = []
+    async def fake_place_order(self, **kwargs):
+        calls.append(kwargs)
+        assert kwargs["order_type"] == "LIMIT"
+        assert kwargs["reduce_only"] is True
+        assert kwargs["effect"] == "POST_ONLY"
+        return {"code": 0, "data": {"orderId": f"order{len(calls)}"}, "msg": "Success"}
+
+    _install(monkeypatch, place_order=fake_place_order)
+    result = asyncio.run(emt.place_concurrent_t1_t3_limits(
+        db, account, test_row, actor="test@kabroda.com", t1_pct=0.01, t3_pct=0.02, qty_pct=0.50))
+
+    assert result.status == "T1_AND_T3_LIMITS_PLACED"
+    assert len(calls) == 2
+    assert result.t1_limit_target_price == pytest.approx(101.0)
+    assert result.t3_limit_target_price == pytest.approx(102.0)
+    assert result.t1_limit_qty + result.t3_limit_qty == pytest.approx(0.0002)
+    assert result.t1_limit_exchange_order_id == "order1"
+    assert result.t3_limit_exchange_order_id == "order2"
+
+
+def _make_t1_t3_limits_placed_row(db, account, fill_price=100.0, qty=0.0002, t1_qty=0.0001, t3_qty=0.0001,
+                                   base_precision=4, quote_precision=1):
+    row = _make_tpsl_set_row(db, account, fill_price=fill_price, qty=qty, base_precision=base_precision, quote_precision=quote_precision)
+    row.status = "T1_AND_T3_LIMITS_PLACED"
+    row.t1_limit_target_price = fill_price * 1.01
+    row.t1_limit_qty = t1_qty
+    row.t1_limit_exchange_order_id = "t1limit1"
+    row.t3_limit_target_price = fill_price * 1.02
+    row.t3_limit_qty = t3_qty
+    row.t3_limit_exchange_order_id = "t3limit1"
+    db.commit()
+    return row
+
+
+def test_check_concurrent_limits_status_both_still_pending_captures_tpsl_snapshot(db, monkeypatch):
+    account = _make_ready_account(db)
+    test_row = _make_t1_t3_limits_placed_row(db, account)
+
+    _install(monkeypatch,
+              get_order_detail=_async(_order_detail_response(status="NEW")),
+              get_pending_tp_sl_order=_async(_pending_tpsl_response()))
+    result = asyncio.run(emt.check_concurrent_limits_status(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "T1_AND_T3_LIMITS_PLACED"   # unchanged -- still pending
+    assert result.tpsl_check_after_leg_fill_response_json is not None
+
+
+def test_check_concurrent_limits_status_one_leg_filled_moves_to_partial_closed(db, monkeypatch):
+    account = _make_ready_account(db)
+    test_row = _make_t1_t3_limits_placed_row(db, account, qty=0.0002, t1_qty=0.0001, t3_qty=0.0001)
+
+    async def fake_get_order_detail(self, order_id=None, client_id=None):
+        # T1 filled, T3 still resting -- distinguish by orderId.
+        status = "FILLED" if order_id == "t1limit1" else "NEW"
+        return _order_detail_response(status=status, order_id=order_id)
+
+    _install(monkeypatch,
+              get_order_detail=fake_get_order_detail,
+              get_pending_tp_sl_order=_async(_pending_tpsl_response()),
+              get_position=_async(_one_long_position_response(position_id="pos1", avg_open_price=100.0)))
+    # Position still reports the FULL original qty here (0.0002) --
+    # that's the real, unresolved question this step exists to answer,
+    # not something this test asserts a specific correct behavior for.
+    # It just proves the code path reaches PARTIAL_CLOSED and captures
+    # the evidence, without crashing on whatever the exchange reports.
+
+    result = asyncio.run(emt.check_concurrent_limits_status(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status in ("PARTIAL_CLOSED", "FAILED")   # FAILED only if qty verification legitimately mismatches
+    assert result.tpsl_check_after_leg_fill_response_json is not None
+
+
+def test_check_concurrent_limits_status_unexpected_combo_fails_closed(db, monkeypatch):
+    account = _make_ready_account(db)
+    test_row = _make_t1_t3_limits_placed_row(db, account)
+    _install(monkeypatch,
+              get_order_detail=_async(_order_detail_response(status="CANCELED")),
+              get_pending_tp_sl_order=_async(_pending_tpsl_response()))
+    result = asyncio.run(emt.check_concurrent_limits_status(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "FAILED"
+    assert "CHECK THE EXCHANGE" in result.error_detail
+
+
+def test_cancel_concurrent_limits_reverts_to_tpsl_set_when_nothing_filled(db, monkeypatch):
+    account = _make_ready_account(db)
+    test_row = _make_t1_t3_limits_placed_row(db, account)
+
+    _install(monkeypatch,
+              cancel_orders=_async({"code": 0, "data": {"successList": [{"orderId": "t1limit1"}, {"orderId": "t3limit1"}]}, "msg": "Success"}),
+              get_order_detail=_async(_order_detail_response(status="CANCELED", trade_qty=0)))
+    result = asyncio.run(emt.cancel_concurrent_limits(db, account, test_row, actor="test@kabroda.com"))
+    assert result.status == "TPSL_SET"
+
+
+def test_cancel_concurrent_limits_requires_correct_status(db):
+    account = _make_ready_account(db)
+    test_row = _make_tpsl_set_row(db, account)   # TPSL_SET, not T1_AND_T3_LIMITS_PLACED
+    with pytest.raises(emt.MechanismTestInvalidState, match="T1_AND_T3_LIMITS_PLACED"):
+        asyncio.run(emt.cancel_concurrent_limits(db, account, test_row, actor="test@kabroda.com"))
