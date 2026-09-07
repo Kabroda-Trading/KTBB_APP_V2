@@ -1402,3 +1402,21 @@ TESTS: 9 new hand-computed tests in `tests/test_decision_engine.py`, including o
 CLAUDE.md's "Calibrated Gate" section updated to match (hard-veto list, three-not-four outcomes, the fuel-conditional HTF language).
 
 NOT part of this build (per GATE_REBUILD_SPEC.md §5, planned next): Domain 2 (Executor -- limit-order-native, tier-aware management, post-T2 live eval for premium), the live audit loop, `aligned_rerun.py`'s scorer fix.
+
+## 2026-09-07 (BUILD COMPLETE: Domain 2 Executor -- executor_live_engine.py, real Bitunix order placement) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open (blocked on Andy's live pre-flight run before production trust)
+
+`GATE_REBUILD_SPEC.md` build-order item 3 (Executor) is coded, tested, and pushed (`5bef3b7`..`2f35fdf`, main). NOT yet trusted for a real TradePlan fill -- see the blocker below.
+
+WHAT SHIPPED:
+- `executor_live_engine.py` -- generalizes the proven mechanism-test order mechanics into real, TradePlan-linked functions: resting LIMIT entry, on-fill atomic placement of the protective stop + T1 (50%) + T3 (50%) resting reduce-only limits, a 30s background watcher (`run_executor_position_loop()`, registered in `main.py`'s `lifespan()`) that detects T1 fills, PREMIUM's mechanical unconditional stop-to-breakeven move at the real T2 touch, and closure (classifying STOP_BEFORE_T1/RUNNER_STOP/T3 from T1/T3 fill evidence). Real R closes the loop into `executor_accounts.record_trade_result()` automatically for Executor-managed trades.
+- **Maker-only is now mechanically enforced, not just discipline**: every LIMIT order passes `effect="POST_ONLY"` -- verified live against bitunix.com/api-docs that this is a real enum value (IOC/FOK/GTC/POST_ONLY). Confirmed via grep that zero callers anywhere in this codebase used it before, including the proven T1 ladder test (defaulted to GTC).
+- Post-T2 handling: built exactly the mechanical, verified rule (checked against the real 31-trade premium corpus myself before building: 13 touched T2, 10 rode to T3 at zero cost, 3 stopped after T2 for +1.50R saved -- matches DeepSeek's own numbers exactly when I re-derived them). The "smart re-eval, pull early if dead" idea from the spec's literal wording has no validated criteria behind it, so it's logged as an observation only (`t2_reval_fuel_verdict`/`t2_reval_micro_regime` at the real T2 touch) for the live audit loop to eventually validate against -- never read back into the mechanical action, per your own answer when I asked.
+- Found and fixed before shipping: `get_order_detail` has no avg-fill-price field at all (verified against the real docs) -- uses the resting LIMIT's own known price directly, not a fabricated field name.
+- Found a real staleness bug while researching this: `ledger_closing_engine.py` (the CampaignLog P&L simulator) still runs the pre-audit 30/70 rule, never updated to the audited 50/50 tier-differentiated one. Per your answer: `CLAUDE.md` corrected, `ledger_closing_engine.py` marked deprecated with a pointer, removal deferred to a later cleanup pass.
+
+THE REQUIRED BLOCKER, not yet done: a live pre-flight step extending `executor_mechanism_test.py` (concurrent stop + T1 + T3 resting limits on the same real position) needs Andy to actually run it against his account and confirm it passes -- this exact combination (three concurrent order types on one position) has never been tested live, only the single-resting-T1-limit case has. Until that passes, `executor_live_engine.py` should not be wired to a real LIVE-mode account's actual TradePlan fill.
+
+523 tests passing, same 5 pre-existing unrelated `test_dashboard_fixes.py` fixture errors. Live boot check passed.
+
+NOT part of this build: the live audit loop's actual monthly drift analysis (Brain-side per the existing division of labor), `aligned_rerun.py`'s scorer fix, PAPER mode (no PAPER accounts exist).
