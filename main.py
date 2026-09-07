@@ -611,6 +611,8 @@ async def lifespan(app: FastAPI):
     app.state.gravity_task          = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
     app.state.ledger_task           = asyncio.create_task(ledger_closing_engine.run_ledger_audit_loop())
     app.state.trade_plan_task       = asyncio.create_task(trade_plan_engine.run_trade_plan_loop())
+    import executor_live_engine
+    app.state.executor_live_task    = asyncio.create_task(executor_live_engine.run_executor_position_loop())
     app.state.senior_analyst_task   = asyncio.create_task(run_senior_analyst_scheduler())
     # jewel_task (run_jewel_scheduler) removed 2026-08-30 -- see that
     # function's old location for the removal note.
@@ -633,6 +635,7 @@ async def lifespan(app: FastAPI):
     app.state.gravity_task.cancel()
     app.state.ledger_task.cancel()
     app.state.trade_plan_task.cancel()
+    app.state.executor_live_task.cancel()
     app.state.senior_analyst_task.cancel()
     app.state.weekly_task.cancel()
     app.state.outcome_tracker_task.cancel()
@@ -1253,6 +1256,9 @@ _CONFIRM_TINY_TEST_FLASH_CLOSE = "CONFIRM FLASH CLOSE REMAINDER"
 _CONFIRM_TINY_TEST_PLACE_T1_LIMIT = "CONFIRM PLACE RESTING T1 LIMIT"
 _CONFIRM_TINY_TEST_CANCEL_T1_LIMIT = "CONFIRM CANCEL RESTING T1 LIMIT"
 
+_CONFIRM_TINY_TEST_PLACE_T1_T3_LIMITS = "CONFIRM PLACE CONCURRENT T1 T3 LIMITS"
+_CONFIRM_TINY_TEST_CANCEL_T1_T3_LIMITS = "CONFIRM CANCEL CONCURRENT T1 T3 LIMITS"
+
 
 def _executor_owner_or_admin(ctx: Dict[str, Any], account: Optional["_ExecutorAccount"]) -> bool:
     if ctx.get("is_admin"):
@@ -1330,6 +1336,13 @@ class TinyTestConfirmOnlyRequest(BaseModel):
 class TinyTestPlaceT1LimitRequest(BaseModel):
     confirm: str
     t1_pct: float = 0.01
+    qty_pct: float = 0.50
+
+
+class TinyTestPlaceT1T3LimitsRequest(BaseModel):
+    confirm: str
+    t1_pct: float = 0.01
+    t3_pct: float = 0.02
     qty_pct: float = 0.50
 
 
@@ -1701,6 +1714,17 @@ async def api_executor_list_orders(request: Request, db: Session = Depends(get_d
         "margin_required_usd": o.margin_required_usd, "liquidation_price_estimate": o.liquidation_price_estimate,
         "liquidation_check_passed": o.liquidation_check_passed, "decision": o.decision,
         "decision_reason": o.decision_reason, "created_at": o.created_at.isoformat() if o.created_at else None,
+        # 2026-09-07, Domain 2 (executor_live_engine.py) -- real managed-
+        # trade fields, populated only for mode=LIVE rows that actually
+        # placed a real order. Read-only here; this system runs itself,
+        # no admin override controls beyond the existing kill switches.
+        "tier": o.tier, "management_state": o.management_state, "position_id": o.position_id,
+        "entry_status": o.entry_status, "entry_fill_price": o.entry_fill_price,
+        "t1_status": o.t1_status, "t1_fill_price": o.t1_fill_price, "t1_leg_r": o.t1_leg_r,
+        "t3_status": o.t3_status, "t3_fill_price": o.t3_fill_price, "runner_r": o.runner_r,
+        "sl_price_current": o.sl_price_current, "sl_moved_to_be_at": o.sl_moved_to_be_at.isoformat() if o.sl_moved_to_be_at else None,
+        "realized_pnl_r": o.realized_pnl_r, "close_reason": o.close_reason,
+        "closed_at": o.closed_at.isoformat() if o.closed_at else None,
     } for o in orders]})
 
 
@@ -1773,6 +1797,17 @@ def _serialize_mechanism_test(t: "_ExecutorMechanismTest") -> Dict[str, Any]:
         "t1_limit_place_response_json": t.t1_limit_place_response_json,
         "t1_limit_check_response_json": t.t1_limit_check_response_json,
         "t1_limit_cancel_response_json": t.t1_limit_cancel_response_json,
+        # 2026-09-07, Domain 2 pre-flight (concurrent T1+T3) -- same
+        # "wire it into the serializer the moment the column exists"
+        # discipline as the two notes above, learned from the same class
+        # of gap twice already.
+        "t3_limit_target_price": t.t3_limit_target_price,
+        "t3_limit_qty": t.t3_limit_qty,
+        "t3_limit_exchange_order_id": t.t3_limit_exchange_order_id,
+        "t3_limit_place_response_json": t.t3_limit_place_response_json,
+        "t3_limit_check_response_json": t.t3_limit_check_response_json,
+        "t3_limit_cancel_response_json": t.t3_limit_cancel_response_json,
+        "tpsl_check_after_leg_fill_response_json": t.tpsl_check_after_leg_fill_response_json,
     }
 
 
@@ -1952,6 +1987,52 @@ async def api_executor_tiny_test_cancel_resting_t1_limit(account_id: int, test_i
     actor = ctx.get("email") or "unknown"
     return await _run_mechanism_action(
         db, account, actor, _executor_mechanism_test.cancel_resting_t1_limit(db, account, test_row, actor))
+
+
+# 2026-09-07 -- Domain 2 required live pre-flight (executor_live_engine.py's
+# approved plan): places a stop + resting T1 + resting T3 CONCURRENTLY,
+# the exact combination that engine needs and which has never been
+# tested live before. Andy must run this and confirm it passes before
+# executor_live_engine.py is trusted with a real TradePlan fill.
+@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/place-concurrent-t1-t3-limits")
+async def api_executor_tiny_test_place_concurrent_t1_t3_limits(account_id: int, test_id: int, request: Request, body: TinyTestPlaceT1T3LimitsRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
+    if err is not None:
+        return err
+    if body.confirm != _CONFIRM_TINY_TEST_PLACE_T1_T3_LIMITS:
+        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_PLACE_T1_T3_LIMITS!r}"}, status_code=400)
+    actor = ctx.get("email") or "unknown"
+    return await _run_mechanism_action(
+        db, account, actor,
+        _executor_mechanism_test.place_concurrent_t1_t3_limits(
+            db, account, test_row, actor, t1_pct=body.t1_pct, t3_pct=body.t3_pct, qty_pct=body.qty_pct))
+
+
+@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/check-concurrent-limits-status")
+async def api_executor_tiny_test_check_concurrent_limits_status(account_id: int, test_id: int, request: Request, db: Session = Depends(get_db)):
+    # No confirm phrase -- read-only exchange calls only (get_order_detail
+    # x2 + get_pending_tp_sl_order), same reasoning as the T1-only check.
+    ctx = get_user_context(request, db)
+    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
+    if err is not None:
+        return err
+    actor = ctx.get("email") or "unknown"
+    return await _run_mechanism_action(
+        db, account, actor, _executor_mechanism_test.check_concurrent_limits_status(db, account, test_row, actor))
+
+
+@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/cancel-concurrent-limits")
+async def api_executor_tiny_test_cancel_concurrent_limits(account_id: int, test_id: int, request: Request, body: TinyTestConfirmOnlyRequest, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
+    if err is not None:
+        return err
+    if body.confirm != _CONFIRM_TINY_TEST_CANCEL_T1_T3_LIMITS:
+        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_CANCEL_T1_T3_LIMITS!r}"}, status_code=400)
+    actor = ctx.get("email") or "unknown"
+    return await _run_mechanism_action(
+        db, account, actor, _executor_mechanism_test.cancel_concurrent_limits(db, account, test_row, actor))
 
 
 @app.get("/api/executor/accounts/{account_id}/tiny-test")

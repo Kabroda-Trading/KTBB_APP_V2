@@ -1,8 +1,7 @@
 # executor_engine.py
 # ==============================================================================
 # EXECUTOR ENGINE -- orchestration, called from trade_plan_engine.py's
-# _apply() hook on the exact ARMED/FILLED transition. Stage 1 of the
-# Bitunix executor bot.
+# _apply() hook on the exact ARMED/FILLED transition.
 #
 # process_fill() iterates every active ExecutorAccount, each in its OWN
 # try/except -- one account's failure must never affect another's, and
@@ -18,9 +17,15 @@
 # before any db.add() gets the same "a bug never leaves partial dirty
 # state" property without a new, unproven transaction pattern.
 #
-# No new asyncio loop. Stage 1 needs none -- see database.py's
-# ExecutorOrder/ExecutorAuditLog docstrings for what Stage 1 does and
-# does not track.
+# 2026-09-07 (Domain 2 build): DRY_RUN and LIVE now compute/persist/audit
+# identically -- sizing and safety checks never differ by mode. LIVE goes
+# one step further and places a real resting-LIMIT entry order via
+# executor_live_engine.place_entry_order() once build_hypothetical_order()
+# says WOULD_PLACE. This function itself still starts no new asyncio loop
+# -- the ongoing position WATCH (fill detection, exits, the T2 breakeven
+# move, closure) runs in executor_live_engine.run_executor_position_loop(),
+# a separate background task registered in main.py's lifespan(), not
+# started from here. PAPER stays unimplemented (no PAPER accounts exist).
 # ==============================================================================
 
 from __future__ import annotations
@@ -55,17 +60,16 @@ async def _process_account(db: Session, trade_plan_row: TradePlan, account: Exec
     # own header for why.
     order_dict = await executor_plan_builder.build_hypothetical_order(db, trade_plan_row, account, risk_state)
 
-    if account.mode in ("PAPER", "LIVE"):
-        # Stage 2/3 -- no such account exists yet in Stage 1 (every
-        # account created so far defaults to DRY_RUN), so this branch is
-        # structurally present but dead code today. Deliberately not
-        # implemented further here -- see executor_bitunix_client.py's
-        # own header for why.
-        import executor_bitunix_client  # noqa: F401 -- imported to confirm the module exists, not called
-        raise NotImplementedError("PAPER/LIVE execution is Stage 2/3 -- not built yet")
+    if account.mode == "PAPER":
+        # No PAPER accounts exist yet -- structurally present but dead
+        # code today, out of scope for the Domain 2 (LIVE) build. See
+        # executor_live_engine.py's own header for what LIVE now does.
+        raise NotImplementedError("PAPER execution is not built yet")
 
-    # DRY_RUN -- Stage 1's entire story: compute, persist, audit. Only
-    # NOW, after computation has already fully succeeded, do we db.add().
+    # DRY_RUN and LIVE both compute, persist, audit identically -- sizing
+    # and safety checks never differ by mode ("no AI improvisation").
+    # Only LIVE goes on to place a real order below.
+    order_dict["tier"] = trade_plan_row.tier
     filtered = {k: v for k, v in order_dict.items() if k in _ORDER_COLUMNS}
     order = ExecutorOrder(**filtered)
     db.add(order)
@@ -77,6 +81,11 @@ async def _process_account(db: Session, trade_plan_row: TradePlan, account: Exec
         message=f"{order_dict.get('decision')}: {order_dict.get('decision_reason')}",
         detail_json=json.dumps(order_dict, default=str),
     ))
+
+    if account.mode == "LIVE" and order_dict.get("decision") == "WOULD_PLACE":
+        db.flush()
+        import executor_live_engine
+        await executor_live_engine.place_entry_order(db, account, trade_plan_row, order)
 
 
 async def process_fill(db: Session, trade_plan_row: TradePlan) -> None:
