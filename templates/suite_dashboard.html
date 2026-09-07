@@ -123,9 +123,13 @@
                 <div class="kpi-val" id="k-winrate">—</div>
                 <div class="kpi-lbl">Win Rate</div>
             </div>
-            <div class="kpi-card kpi-gold">
+            <div class="kpi-card kpi-gold" title="DEPRECATED SIMULATION -- NOT real trading P&amp;L. This is CampaignLog's session-lock backtest-tracking number, still run under the retired 30/70 management rule. Kept for radar-vs-backtest drift comparison only. See Real Executor P&amp;L for what actually happened to real money.">
                 <div class="kpi-val" id="k-netr">—</div>
-                <div class="kpi-lbl">Net R Lifetime</div>
+                <div class="kpi-lbl">Net R (Radar Sim, Deprecated)</div>
+            </div>
+            <div class="kpi-card kpi-green" title="The one real number: sum of realized_pnl_r across every position executor_live_engine.py has actually closed on the real exchange, under the audited 50/50 tier-differentiated management rule.">
+                <div class="kpi-val" id="k-executor-pnl">—</div>
+                <div class="kpi-lbl">Real Executor P&amp;L (<span id="k-executor-trades">0</span> closed)</div>
             </div>
             <div class="kpi-card kpi-red">
                 <div class="kpi-val" id="k-spend">—</div>
@@ -140,8 +144,8 @@
         <!-- ── ROW 2: PnL + Approval ─────────────────────── -->
         <div class="chart-row row-2-1">
             <div class="chart-card">
-                <div class="chart-title">Cumulative Performance</div>
-                <div class="chart-sub">Net realized R — closed approved trades only, chronological</div>
+                <div class="chart-title">Cumulative Performance (Radar Sim, Deprecated)</div>
+                <div class="chart-sub">CampaignLog's session-lock backtest-tracking sim (30/70 rule, retired) — NOT real trading P&amp;L. See the Real Executor P&amp;L KPI above for actual results.</div>
                 <canvas id="chartPnL" height="90"></canvas>
             </div>
             <div class="chart-card">
@@ -685,6 +689,15 @@
             const netrEl = document.getElementById('k-netr');
             netrEl.textContent = (d.net_r >= 0 ? '+' : '') + d.net_r + 'R';
             netrEl.style.color = d.net_r > 0 ? C.green : (d.net_r < 0 ? C.red : C.cream);
+
+            // 2026-09-07, PRODUCTION_READINESS.md Adjustment 2: the one
+            // real performance number -- ExecutorOrder.realized_pnl_r,
+            // never merged with the deprecated CampaignLog sim above.
+            const execPnlEl = document.getElementById('k-executor-pnl');
+            const execR = d.executor_realized_pnl_r ?? 0;
+            execPnlEl.textContent = (execR >= 0 ? '+' : '') + execR + 'R';
+            execPnlEl.style.color = execR > 0 ? C.green : (execR < 0 ? C.red : C.cream);
+            document.getElementById('k-executor-trades').textContent = d.executor_closed_trades ?? 0;
 
             document.getElementById('k-spend').textContent = '$' + d.spend_7d;
             document.getElementById('k-cache').textContent = d.cache_hit_rate + '%';

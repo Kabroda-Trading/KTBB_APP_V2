@@ -2664,6 +2664,24 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
             CampaignLog.realized_pnl.isnot(None),
         ).scalar()
         net_r = round(float(net_r_raw or 0.0), 4)
+        # 2026-09-07, PRODUCTION_READINESS.md Adjustment 2 (Kabroda AI
+        # Brain repo): net_r above is CampaignLog's own session-lock
+        # simulation -- still legitimate for radar-vs-backtest drift
+        # tracking (kept, relabeled below), but it runs under the
+        # deprecated 30/70 rule (ledger_closing_engine.py) and is NOT
+        # what real money actually does under the live executor. This is
+        # the one, real source of truth for that: ExecutorOrder.
+        # realized_pnl_r, summed across every real closed position
+        # (CLOSED_* management_state, per executor_live_engine.py). "No
+        # two disagreeing performance numbers visible anywhere" -- both
+        # are shown, clearly and separately labeled, never merged.
+        executor_r_raw = db.query(func.sum(_ExecutorOrder.realized_pnl_r)).filter(
+            _ExecutorOrder.realized_pnl_r.isnot(None),
+        ).scalar()
+        executor_realized_pnl_r = round(float(executor_r_raw or 0.0), 4)
+        executor_closed_trades = db.query(func.count(_ExecutorOrder.id)).filter(
+            _ExecutorOrder.realized_pnl_r.isnot(None),
+        ).scalar() or 0
         since_7d = (datetime.now(timezone.utc) - timedelta(days=7)).replace(tzinfo=None)
         spend_raw = db.query(func.sum(AgentRunLog.estimated_cost_usd)).filter(
             AgentRunLog.created_at >= since_7d).scalar()
@@ -2676,7 +2694,8 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
         # publisher_crew.py was archived; also never read by the frontend.
         return JSONResponse({"ok": True, "total_sessions": total, "approved_rate": approved_rate,
             "win_rate": win_rate, "net_r": net_r, "spend_7d": spend_7d,
-            "cache_hit_rate": cache_hit_rate})
+            "cache_hit_rate": cache_hit_rate,
+            "executor_realized_pnl_r": executor_realized_pnl_r, "executor_closed_trades": executor_closed_trades})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
