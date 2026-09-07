@@ -450,6 +450,31 @@ def init_db():
         except Exception:
             pass
 
+    # 2026-09-07, URGENT same-day fix: removing max_margin_pct_of_balance
+    # from the ExecutorAccount CLASS (Andy's explicit call, stagnant sweep
+    # item 6) without ALSO dropping the real column broke EVERY new
+    # account creation in production. Root cause: this column's original
+    # definition was `Column(Float, nullable=False, default=0.80)` --
+    # `default=` is a Python/ORM-side value SQLAlchemy fills in at INSERT
+    # time, NOT a database-level DEFAULT clause (that requires
+    # `server_default=`, never set here). So the real Postgres column has
+    # always been NOT NULL with NO database default. As long as the
+    # column stayed on the class, every INSERT went through the ORM and
+    # always supplied 0.80 automatically -- the instant the column was
+    # removed from the class, the ORM stopped supplying ANYTHING for it,
+    # and every new row violated the NOT NULL constraint (a hard
+    # IntegrityError on every single account-creation attempt, live,
+    # caught the same day by Andy/Dawson's own attempts). This is the
+    # first DROP in this codebase's migration history -- same raw-SQL-in-
+    # try/except pattern as every ADD above, just the opposite direction,
+    # which fully honors Andy's original "drop it" decision instead of
+    # leaving an orphaned, now-broken column behind.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE executor_accounts DROP COLUMN max_margin_pct_of_balance"))
+    except Exception:
+        pass
+
     # --- GATE_LOG SS9a MIGRATIONS (2026-08-31 -- see the GateLog class
     # docstring above for what each column is and why) ---
     for _col in [
