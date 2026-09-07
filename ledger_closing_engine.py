@@ -7,6 +7,19 @@
 # Phase 4B shadow runner tracking (4H/1H, zone-based) — 2026-07-07
 # Real 30/70 runner mechanic (15M, fixed runner-stop) — 2026-08-30, LIVE
 #
+# DEPRECATED (2026-09-07): the 30%-at-T1/70%-runner rule below predates
+# the real audit (CLEAN_REPORT.md, Kabroda AI Brain repo) and was never
+# updated to match it. The actually audited management rule -- 50/50
+# split, tier-differentiated T2 breakeven for PREMIUM only, verified
+# against the real 128-trade corpus -- is now live in
+# executor_live_engine.py (Domain 2), which manages real Bitunix orders
+# for real TradePlan fills. This module keeps running (it manages the
+# OLDER CampaignLog/kabroda_mas_flow.py path, not TradePlan), but it is
+# the pre-audit shadow simulation, not the source of truth for the
+# management rule anymore -- see CLAUDE.md's "CampaignLog Lifecycle"
+# section. Removal is a later cleanup pass once nothing references
+# CampaignLog (Andy's call), not part of any build to date.
+#
 # PHASE 1 — Pre-entry
 #   Watches APPROVED records where entry_filled_at IS NULL.
 #   Entry trigger not crossed before session_expires_at → EXPIRED / pnl=null.
