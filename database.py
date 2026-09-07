@@ -519,6 +519,47 @@ def init_db():
         except Exception:
             pass
 
+    # --- DOMAIN 2 EXECUTOR (2026-09-07) -- executor_live_engine.py's real,
+    # TradePlan-linked managed-trade tracking. See ExecutorOrder's own
+    # comments above for what each column is. All nullable/Postgres-safe
+    # defaults, no 0/1 booleans. ---
+    for _col in [
+        "tier VARCHAR", "management_state VARCHAR DEFAULT 'PENDING_ENTRY'",
+        "position_id VARCHAR",
+        "entry_exchange_order_id VARCHAR", "entry_status VARCHAR",
+        "entry_fill_price FLOAT", "entry_fill_time TIMESTAMP",
+        "sl_exchange_order_id VARCHAR",
+        "sl_price_current FLOAT", "sl_set_at TIMESTAMP", "sl_moved_to_be_at TIMESTAMP",
+        "t1_exchange_order_id VARCHAR", "t1_status VARCHAR",
+        "t1_fill_price FLOAT", "t1_fill_time TIMESTAMP",
+        "t3_exchange_order_id VARCHAR", "t3_status VARCHAR",
+        "t3_fill_price FLOAT", "t3_fill_time TIMESTAMP",
+        "t1_leg_r FLOAT", "runner_r FLOAT", "realized_pnl_r FLOAT",
+        "closed_at TIMESTAMP", "close_reason VARCHAR",
+        "t2_touch_time TIMESTAMP", "t2_reval_fuel_verdict VARCHAR", "t2_reval_micro_regime VARCHAR",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE executor_orders ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
+    # --- DOMAIN 2 PRE-FLIGHT (2026-09-07) -- the concurrent T1+T3 resting-
+    # limit verification step, see ExecutorMechanismTest's own comments
+    # above and place_concurrent_t1_t3_limits()'s docstring. ---
+    for _col in [
+        "t3_limit_target_price FLOAT", "t3_limit_qty FLOAT",
+        "t3_limit_exchange_order_id VARCHAR",
+        "t3_limit_place_response_json TEXT", "t3_limit_check_response_json TEXT",
+        "t3_limit_cancel_response_json TEXT",
+        "tpsl_check_after_leg_fill_response_json TEXT",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE executor_mechanism_tests ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -1892,6 +1933,59 @@ class ExecutorOrder(Base):
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
+    # --- STAGE 2/3 REAL EXECUTION (2026-09-07) -- executor_live_engine.py.
+    # tier/management_state didn't exist before this: Stage 1 never needed
+    # to track a real managed trade end-to-end. GATE_REBUILD_SPEC.md §1's
+    # tier (PREMIUM/STANDARD), copied off TradePlan.tier at entry placement
+    # (TradePlan stays authoritative -- see class docstring above).
+    tier = Column(String, nullable=True)
+    # PENDING_ENTRY | ENTRY_FILLED_ORDERS_PLACED | T1_FILLED |
+    # T1_FILLED_BE_PENDING | BE_MOVED | CLOSED_STOP_BEFORE_T1 |
+    # CLOSED_RUNNER_STOP | CLOSED_T3 | CLOSED_ERROR
+    management_state = Column(String, nullable=True, default="PENDING_ENTRY")
+    position_id = Column(String, nullable=True)   # Bitunix position id, read off get_position after entry fill
+
+    entry_exchange_order_id = Column(String, nullable=True)
+    entry_status = Column(String, nullable=True)
+    entry_fill_price = Column(Float, nullable=True)
+    entry_fill_time = Column(DateTime, nullable=True)
+
+    sl_exchange_order_id = Column(String, nullable=True)   # set_position_tpsl's own orderId; re-set on the BE move
+    sl_price_current = Column(Float, nullable=True)
+    sl_set_at = Column(DateTime, nullable=True)
+    sl_moved_to_be_at = Column(DateTime, nullable=True)   # non-null only for PREMIUM once T2 is touched
+
+    t1_exchange_order_id = Column(String, nullable=True)
+    t1_status = Column(String, nullable=True)
+    t1_fill_price = Column(Float, nullable=True)
+    t1_fill_time = Column(DateTime, nullable=True)
+
+    t3_exchange_order_id = Column(String, nullable=True)
+    t3_status = Column(String, nullable=True)
+    t3_fill_price = Column(Float, nullable=True)
+    t3_fill_time = Column(DateTime, nullable=True)
+
+    # Same blended-R vocabulary as CampaignLog's own t1_leg_r/realized_pnl,
+    # recomputed for the audited 50/50 split (not CampaignLog's stale 30/70
+    # -- see ledger_closing_engine.py's own deprecated-marker comment).
+    t1_leg_r = Column(Float, nullable=True)
+    runner_r = Column(Float, nullable=True)
+    realized_pnl_r = Column(Float, nullable=True)
+
+    closed_at = Column(DateTime, nullable=True)
+    close_reason = Column(String, nullable=True)   # STOP_BEFORE_T1 | RUNNER_STOP | T3 | MANUAL
+
+    # Live-audit-loop OBSERVATION ONLY (GATE_REBUILD_SPEC.md §3 item 3 /
+    # AskUserQuestion resolution, 2026-09-06): logged at the real T2 touch
+    # for PREMIUM trades so the Brain repo can eventually validate a real
+    # "pull early if dead" rule against real outcomes -- never read by any
+    # decision logic in this build. The mechanical BE move at T2 (verified
+    # against the real 31-trade premium corpus: +1.50R, zero cost on
+    # T3-bound trades) is unconditional and does not depend on these.
+    t2_touch_time = Column(DateTime, nullable=True)
+    t2_reval_fuel_verdict = Column(String, nullable=True)
+    t2_reval_micro_regime = Column(String, nullable=True)
+
     __table_args__ = (
         UniqueConstraint("trade_plan_id", "account_id", name="uq_executor_order_plan_account"),
     )
@@ -2065,6 +2159,23 @@ class ExecutorMechanismTest(Base):
     t1_limit_place_response_json = Column(Text, nullable=True)
     t1_limit_check_response_json = Column(Text, nullable=True)   # overwritten each check -- "last snapshot" pattern, same as position_check_response_json above
     t1_limit_cancel_response_json = Column(Text, nullable=True)
+
+    # 2026-09-07 (Domain 2 pre-flight): places a SECOND resting reduce-
+    # only LIMIT concurrently alongside the T1 one above, plus the
+    # existing TP/SL stop -- the exact three-way concurrency
+    # executor_live_engine.py needs, never tested live before this. See
+    # place_concurrent_t1_t3_limits()'s own docstring.
+    t3_limit_target_price = Column(Float, nullable=True)
+    t3_limit_qty = Column(Float, nullable=True)
+    t3_limit_exchange_order_id = Column(String, nullable=True)
+    t3_limit_place_response_json = Column(Text, nullable=True)
+    t3_limit_check_response_json = Column(Text, nullable=True)
+    t3_limit_cancel_response_json = Column(Text, nullable=True)
+    # Raw get_pending_tp_sl_order snapshot taken AFTER one leg fills --
+    # the actual evidence for whether Bitunix's TP/SL auto-tracks the
+    # remaining position qty or needs a manual resize. Never enforced by
+    # code, just captured for Andy/DeepSeek to read directly.
+    tpsl_check_after_leg_fill_response_json = Column(Text, nullable=True)
 
     # Deliberately the exact fill price, fee-naive -- correct for
     # proving the mechanism, not true PnL-neutral breakeven. See
