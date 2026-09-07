@@ -59,6 +59,24 @@
 
         details > summary { cursor: pointer; font-size: 11px; color: #94a3b8; }
         details.collapsed-section { margin-top: 10px; }
+
+        /* Sizing Wizard option cards (SIZING_AND_ISOLATION.md Part 1, 2026-09-07) */
+        .sizing-balance-line { font-family: 'JetBrains Mono'; font-size: 12px; color: #cbd5e1; margin-bottom: 10px; }
+        .sizing-balance-line strong { color: #f2e3cf; }
+        .sizing-options { display: flex; flex-direction: column; gap: 8px; }
+        .sizing-option { border: 1px solid #1e293b; border-radius: 6px; padding: 10px 12px; cursor: pointer; background: rgba(255,255,255,0.01); }
+        .sizing-option:hover { border-color: #475569; }
+        .sizing-option.selected { border-color: #38bdf8; background: rgba(56,189,248,0.06); }
+        .sizing-option-head { display: flex; align-items: center; gap: 8px; }
+        .sizing-option-head input[type=radio] { margin: 0; }
+        .sizing-option-name { font-family: 'JetBrains Mono'; font-size: 12px; font-weight: 800; color: #f2e3cf; }
+        .sizing-option-desc { font-size: 11px; color: #94a3b8; margin: 4px 0 0 24px; }
+        .sizing-option-fields { margin: 8px 0 0 24px; display: none; }
+        .sizing-option.selected .sizing-option-fields { display: flex; }
+        .tag-validated { background: rgba(250,204,21,0.12); color: #facc15; border: 1px solid rgba(250,204,21,0.35); }
+        .tag-honesty { background: rgba(148,163,184,0.1); color: #94a3b8; border: 1px solid rgba(148,163,184,0.3); }
+        .tag-advanced { background: rgba(96,165,250,0.1); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); }
+        .sizing-worked-example { border: 1px solid #1e3a5f; background: rgba(30,58,95,0.12); border-radius: 6px; padding: 10px 12px; margin-top: 10px; font-family: 'JetBrains Mono'; font-size: 12px; color: #e2e8f0; white-space: pre-wrap; line-height: 1.6; }
     </style>
 </head>
 <body>
@@ -280,30 +298,102 @@ async function loadAccounts() {
 
             <div class="setup-step" id="sizingPolicy-${a.id}" style="border-color:#1e3a5f; background:rgba(30,58,95,0.08);">
                 <div class="setup-step-title" style="color:#93c5fd;"><span class="setup-step-num">3</span> Sizing Policy</div>
-                <div class="risk-form">
-                    <button class="btn" onclick="applyPreset(${a.id}, 'conservative')">CONSERVATIVE -- START SMALL</button>
-                    <button class="btn" onclick="applyPreset(${a.id}, 'steady_grow')">STEADY GROW -- ROLL THE PROFITS</button>
-                    <button class="btn" onclick="applyPreset(${a.id}, 'scale_with_account')">SCALE WITH ACCOUNT</button>
+                <div class="sizing-balance-line" id="sizingBalance-${a.id}">Current balance: loading...</div>
+                <div class="sizing-options" id="sizingOptions-${a.id}">
+
+                    <div class="sizing-option" id="sizeOpt-A-${a.id}" onclick="selectSizingOption(${a.id},'A')">
+                        <div class="sizing-option-head">
+                            <input type="radio" name="sizeOption-${a.id}" id="sizeRadio-A-${a.id}">
+                            <span class="sizing-option-name">A. Fixed Dollar -- same amount every trade</span>
+                        </div>
+                        <p class="sizing-option-desc">Every trade stakes the same dollar amount. Flat -- wins and losses never change the next stake. Best for testing live with small, predictable risk.</p>
+                        <div class="sizing-option-fields risk-form">
+                            <label>Stake per trade ($)<input type="number" step="0.01" id="sizeA_amount-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'A')"></label>
+                        </div>
+                    </div>
+
+                    <div class="sizing-option" id="sizeOpt-B-${a.id}" onclick="selectSizingOption(${a.id},'B')">
+                        <div class="sizing-option-head">
+                            <input type="radio" name="sizeOption-${a.id}" id="sizeRadio-B-${a.id}">
+                            <span class="sizing-option-name">B. Percent of Balance, Capped</span>
+                            <span class="badge tag-validated">&#9733; VALIDATED</span>
+                        </div>
+                        <p class="sizing-option-desc">Stake = a percent of your current balance, but never more than a dollar ceiling. Grows with the account until the cap, then flat. Backtest-validated across the full 2021-2026 corpus (2,056 reconstructed session locks, 633 fuel-gated trades, +320.1R, 6 of 6 years positive, edge stable across fuel-threshold stress tests) -- ~95% edge-direction certainty, +/-20-25% on exact R totals from reconstruction margin. The default recommendation.</p>
+                        <div class="sizing-option-fields risk-form">
+                            <label>Percent of balance (%)<input type="number" step="0.1" id="sizeB_pct-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'B')"></label>
+                            <label>Cap ($)<input type="number" step="0.01" id="sizeB_cap-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'B')"></label>
+                            <p class="empty" style="width:100%; margin:2px 0 0;">Cap ladder guidance (Andy's agreed rule of thumb): raise the cap once your balance reaches about 10x the cap, so the worst observed losing streak never costs more than ~50% of the account -- $2,500 cap until ~$25k balance, $5,000 until ~$50k, $10,000 until ~$100k, and so on. Nothing here raises it for you automatically; edit the Cap field yourself when you cross a rung.</p>
+                        </div>
+                    </div>
+
+                    <div class="sizing-option" id="sizeOpt-C-${a.id}" onclick="selectSizingOption(${a.id},'C')">
+                        <div class="sizing-option-head">
+                            <input type="radio" name="sizeOption-${a.id}" id="sizeRadio-C-${a.id}">
+                            <span class="sizing-option-name">C. Roll the Profits -- start small, compound your wins</span>
+                            <span class="badge tag-honesty">not backtested</span>
+                        </div>
+                        <p class="sizing-option-desc">A fixed base stake; after each win, roll a percent of the profit into the next stake ($100 &#8594; win &#8594; $110 &#8594; win &#8594; $120). Grows faster than B during a winning streak, but stakes are bigger right after wins, so a loss right after a streak costs more. Same edge in R as the backtest -- a different dollar curve, not the validated rule.</p>
+                        <div class="sizing-option-fields risk-form">
+                            <label>Starting stake ($)<input type="number" step="0.01" id="sizeC_base-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'C')"></label>
+                            <label>Roll in % of profit<input type="number" step="1" id="sizeC_roll-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'C')"></label>
+                            <label>Cap ($, optional)<input type="number" step="0.01" id="sizeC_cap-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'C')"></label>
+                        </div>
+                    </div>
+
+                    <div class="sizing-option" id="sizeOpt-D-${a.id}" onclick="selectSizingOption(${a.id},'D')">
+                        <div class="sizing-option-head">
+                            <input type="radio" name="sizeOption-${a.id}" id="sizeRadio-D-${a.id}">
+                            <span class="sizing-option-name">D. Percent of Balance, Uncapped</span>
+                            <span class="badge tag-honesty">not backtested -- aggressive</span>
+                        </div>
+                        <p class="sizing-option-desc">Same as B, but the cap never kicks in -- keeps scaling forever (at $100k balance, stakes are $10k/trade). Single-trade risk grows without bound as the account grows. Same edge in R as the backtest, no ceiling on the dollar amount.</p>
+                        <div class="sizing-option-fields risk-form">
+                            <label>Percent of balance (%)<input type="number" step="0.1" id="sizeD_pct-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'D')"></label>
+                        </div>
+                    </div>
+
+                    <div class="sizing-option" id="sizeOpt-E-${a.id}" onclick="selectSizingOption(${a.id},'E')">
+                        <div class="sizing-option-head">
+                            <input type="radio" name="sizeOption-${a.id}" id="sizeRadio-E-${a.id}">
+                            <span class="sizing-option-name">E. Risk-Based -- decide what one loss can cost</span>
+                            <span class="badge tag-advanced">advanced</span>
+                        </div>
+                        <p class="sizing-option-desc">You set the max you're willing to lose on a single trade as a percent of balance; position size is computed from that trade's actual stop distance so a stop-out costs exactly that. The pro-standard (risk-per-trade) approach -- but it changes what "R" means compared to the backtest, which used stake-based sizing. Mechanically the same dollar-risk math as B/D in this system, framed around risk instead of a flat stake percent.</p>
+                        <div class="sizing-option-fields risk-form">
+                            <label>Max loss per trade (% of balance)<input type="number" step="0.1" id="sizeE_pct-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'E')"></label>
+                        </div>
+                    </div>
+
                 </div>
-                <details style="margin-top:10px;">
-                    <summary>Custom -- edit fields directly</summary>
+
+                <details style="margin-top:10px;" id="sizingCustomDetails-${a.id}">
+                    <summary>Advanced / raw fields -- for a configuration that doesn't fit one of the 5 options above</summary>
+                    <p class="empty" id="sizingCustomNote-${a.id}" style="display:none;"></p>
                     <div class="risk-form">
-                        <label>Base $<input type="number" step="0.01" id="sizeBaseUsd-${a.id}" style="width:90px;"></label>
-                        <label>Base % of balance<input type="number" step="0.001" id="sizeBasePct-${a.id}" style="width:90px;"></label>
-                        <label>Roll-in %<input type="number" step="0.001" id="sizeRollPct-${a.id}" style="width:90px;"></label>
-                        <label>Cap $<input type="number" step="0.01" id="sizeCapUsd-${a.id}" style="width:90px;"></label>
-                        <label>Cap %<input type="number" step="0.001" id="sizeCapPct-${a.id}" style="width:90px;"></label>
-                        <label>Tier threshold $<input type="number" step="0.01" id="sizeTierThreshold-${a.id}" style="width:90px;"></label>
-                        <label>Tier flat $<input type="number" step="0.01" id="sizeTierFlat-${a.id}" style="width:90px;"></label>
-                        <label>Derisk after N losses<input type="number" step="1" id="sizeDeriskN-${a.id}" style="width:70px;"></label>
-                        <label>Derisk factor<input type="number" step="0.01" id="sizeDeriskFactor-${a.id}" style="width:70px;"></label>
+                        <label>Base $<input type="number" step="0.01" id="sizeBaseUsd-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
+                        <label>Base % of balance<input type="number" step="0.001" id="sizeBasePct-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
+                        <label>Roll-in %<input type="number" step="0.001" id="sizeRollPct-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
+                        <label>Cap $<input type="number" step="0.01" id="sizeCapUsd-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
+                        <label>Cap %<input type="number" step="0.001" id="sizeCapPct-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
+                        <label>Tier threshold $<input type="number" step="0.01" id="sizeTierThreshold-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
+                        <label>Tier flat $<input type="number" step="0.01" id="sizeTierFlat-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
                     </div>
                 </details>
+
+                <details style="margin-top:10px;">
+                    <summary>Advanced: reduce size after a losing streak (applies on top of whichever option is selected above)</summary>
+                    <div class="risk-form">
+                        <label>Derisk after N losses<input type="number" step="1" id="sizeDeriskN-${a.id}" oninput="onSizingOptionFieldChange(${a.id}, _currentSizingOption[${a.id}])" style="width:70px;"></label>
+                        <label>Derisk factor (e.g. 0.5 = half size)<input type="number" step="0.01" id="sizeDeriskFactor-${a.id}" oninput="onSizingOptionFieldChange(${a.id}, _currentSizingOption[${a.id}])" style="width:70px;"></label>
+                    </div>
+                </details>
+
                 <div class="risk-form" style="margin-top:8px;">
-                    <button class="btn" onclick="previewSizingPolicy(${a.id})">PREVIEW (does not save)</button>
+                    <button class="btn" onclick="previewSizingPolicy(${a.id})">REFRESH WORKED EXAMPLE</button>
                     <button class="btn btn-ok" onclick="saveSizingPolicy(${a.id})">SAVE SIZING POLICY</button>
                 </div>
-                <div id="sizingPreview-${a.id}" class="empty" style="margin-top:8px; white-space:pre-wrap;"></div>
+                <div class="sizing-worked-example" id="sizingPreview-${a.id}">Pick an option above to see a live worked example on your own balance.</div>
+
                 <div class="risk-form" style="margin-top:10px; border-top:1px solid #1e293b; padding-top:10px;">
                     <label>Trade result P&amp;L ($)<input type="number" step="0.01" id="tradeResultPnl-${a.id}" style="width:110px;"></label>
                     <label>Trade plan ID (optional)<input type="number" step="1" id="tradeResultPlanId-${a.id}" style="width:90px;"></label>
@@ -395,32 +485,165 @@ async function setAccountMode(accountId, mode) {
     loadAccounts();
 }
 
-// ------------------------------------------------------------------ sizing policy wizard (2026-09-05)
-// Every preset button just fills the (always-present, Custom-details-
-// hidden) fields with canned numbers and fires a preview -- nothing is
-// persisted until SAVE SIZING POLICY is clicked. The preview panel is
-// rendered from server-computed JSON only (POST .../sizing-policy/
-// preview calls the same compute_stake() the real sizing call site
-// uses) -- no math is ever duplicated into this JS, matching this
-// page's own verify-auth/tiny-test precedent.
+// ------------------------------------------------------------------ sizing policy wizard (rebuilt 2026-09-07, SIZING_AND_ISOLATION.md Part 1)
+// Five plain-language options (A-E) replace the old vague "Conservative/
+// Steady Growth/Scale with Account" preset buttons -- Andy's ask: he
+// should know exactly what he's clicking and why, with a live worked
+// example on HIS OWN balance before he saves anything. Nothing here
+// duplicates compute_stake()'s math into JS (same precedent as verify-
+// auth/tiny-test) -- every option card just fills the SAME underlying
+// canonical fields (sizeBaseUsd/sizeBasePct/etc., unchanged since
+// 2026-09-05) that _readSizingPolicyFields()/saveSizingPolicy() already
+// round-trip through the real preview/save endpoints. The option cards
+// are a friendlier VIEW onto exactly those fields, not a new data model.
+//
+// Options B, D, and E all set base_risk_pct -- confirmed directly against
+// executor_sizing.compute_stake()'s own header comment that "stake" for
+// the percent-of-balance case already IS a risk-dollar amount (what's
+// lost if the stop is hit), not a position-value allocation -- so E's
+// "risk-based" framing and B/D's "percent of balance" framing are the
+// same real math in this codebase, just different labels/defaults for a
+// different kind of trader. Only the cap fields (B has one, D and E don't)
+// actually differ in the saved policy shape.
 
-const SIZING_PRESETS = {
-    conservative: {
-        preset_name: "conservative", base_risk_usd: 100, base_risk_pct: null, roll_in_pct: null,
-        cap_abs_usd: null, cap_pct: null, tier_threshold_usd: null, tier_flat_usd: null,
-        derisk_n: null, derisk_factor: null,
-    },
-    steady_grow: {
-        preset_name: "steady_grow", base_risk_usd: 100, base_risk_pct: null, roll_in_pct: 0.10,
-        cap_abs_usd: 1000, cap_pct: null, tier_threshold_usd: null, tier_flat_usd: null,
-        derisk_n: null, derisk_factor: null,
-    },
-    scale_with_account: {
-        preset_name: "scale_with_account", base_risk_usd: null, base_risk_pct: 0.10, roll_in_pct: null,
-        cap_abs_usd: null, cap_pct: null, tier_threshold_usd: 10000, tier_flat_usd: 1000,
-        derisk_n: null, derisk_factor: null,
-    },
+const SIZING_OPTION_DEFAULTS = {
+    // Doc's own worked examples (SIZING_AND_ISOLATION.md) are the defaults
+    // shown the first time a card is picked -- editable immediately after.
+    A: { amount: 100 },
+    B: { pct: 10, cap: 2500 },      // 10% of balance, capped at $2,500 -- the validated rule
+    C: { base: 100, roll: 100, cap: "" },  // 100% roll-in matches Andy's own $100->$110->$120 example exactly
+    D: { pct: 10 },
+    E: { pct: 1 },                  // 1% max loss per trade -- doc's own worked example
 };
+
+let _currentSizingOption = {};   // accountId -> "A".."E", or undefined/null if a raw/custom config is active
+let _sizingPreviewDebounce = {}; // accountId -> setTimeout handle
+
+function _setSizingOptionSelected(accountId, code) {
+    for (const c of ["A", "B", "C", "D", "E"]) {
+        const card = document.getElementById(`sizeOpt-${c}-${accountId}`);
+        const radio = document.getElementById(`sizeRadio-${c}-${accountId}`);
+        const selected = c === code;
+        card.classList.toggle("selected", selected);
+        radio.checked = selected;
+    }
+}
+
+function selectSizingOption(accountId, code) {
+    const proxyHasAnyValue = {
+        A: () => document.getElementById(`sizeA_amount-${accountId}`).value !== "",
+        B: () => document.getElementById(`sizeB_pct-${accountId}`).value !== "" || document.getElementById(`sizeB_cap-${accountId}`).value !== "",
+        C: () => document.getElementById(`sizeC_base-${accountId}`).value !== "" || document.getElementById(`sizeC_roll-${accountId}`).value !== "",
+        D: () => document.getElementById(`sizeD_pct-${accountId}`).value !== "",
+        E: () => document.getElementById(`sizeE_pct-${accountId}`).value !== "",
+    }[code]();
+    if (!proxyHasAnyValue) _fillOptionProxies(accountId, code, SIZING_OPTION_DEFAULTS[code]);
+    _currentSizingOption[accountId] = code;
+    _setSizingOptionSelected(accountId, code);
+    _syncCanonicalFromOption(accountId, code);
+    previewSizingPolicy(accountId);
+}
+
+function _fillOptionProxies(accountId, code, v) {
+    if (code === "A") document.getElementById(`sizeA_amount-${accountId}`).value = v.amount;
+    if (code === "B") { document.getElementById(`sizeB_pct-${accountId}`).value = v.pct; document.getElementById(`sizeB_cap-${accountId}`).value = v.cap; }
+    if (code === "C") { document.getElementById(`sizeC_base-${accountId}`).value = v.base; document.getElementById(`sizeC_roll-${accountId}`).value = v.roll; document.getElementById(`sizeC_cap-${accountId}`).value = v.cap; }
+    if (code === "D") document.getElementById(`sizeD_pct-${accountId}`).value = v.pct;
+    if (code === "E") document.getElementById(`sizeE_pct-${accountId}`).value = v.pct;
+}
+
+function _syncCanonicalFromOption(accountId, code) {
+    const num = (id) => { const v = document.getElementById(id).value; return v === "" ? null : parseFloat(v); };
+    const set = (id, v) => { document.getElementById(id).value = (v === null || v === undefined) ? "" : v; };
+    // Every guided option replaces the WHOLE base/cap shape -- none of the
+    // 5 use the old tier_threshold/tier_flat mechanic (that was specific
+    // to the retired "scale_with_account" preset), so those two always
+    // clear here. derisk_n/derisk_factor are untouched -- an independent
+    // modifier layered on top of whichever option is active.
+    set(`sizeTierThreshold-${accountId}`, null);
+    set(`sizeTierFlat-${accountId}`, null);
+    if (code === "A") {
+        set(`sizeBaseUsd-${accountId}`, num(`sizeA_amount-${accountId}`));
+        set(`sizeBasePct-${accountId}`, null); set(`sizeRollPct-${accountId}`, null);
+        set(`sizeCapUsd-${accountId}`, null); set(`sizeCapPct-${accountId}`, null);
+    } else if (code === "B") {
+        const pct = num(`sizeB_pct-${accountId}`);
+        set(`sizeBasePct-${accountId}`, pct === null ? null : pct / 100);
+        set(`sizeCapUsd-${accountId}`, num(`sizeB_cap-${accountId}`));
+        set(`sizeBaseUsd-${accountId}`, null); set(`sizeRollPct-${accountId}`, null); set(`sizeCapPct-${accountId}`, null);
+    } else if (code === "C") {
+        const roll = num(`sizeC_roll-${accountId}`);
+        set(`sizeBaseUsd-${accountId}`, num(`sizeC_base-${accountId}`));
+        set(`sizeRollPct-${accountId}`, roll === null ? null : roll / 100);
+        set(`sizeCapUsd-${accountId}`, num(`sizeC_cap-${accountId}`));
+        set(`sizeBasePct-${accountId}`, null); set(`sizeCapPct-${accountId}`, null);
+    } else if (code === "D") {
+        const pct = num(`sizeD_pct-${accountId}`);
+        set(`sizeBasePct-${accountId}`, pct === null ? null : pct / 100);
+        set(`sizeBaseUsd-${accountId}`, null); set(`sizeRollPct-${accountId}`, null);
+        set(`sizeCapUsd-${accountId}`, null); set(`sizeCapPct-${accountId}`, null);
+    } else if (code === "E") {
+        const pct = num(`sizeE_pct-${accountId}`);
+        set(`sizeBasePct-${accountId}`, pct === null ? null : pct / 100);
+        set(`sizeBaseUsd-${accountId}`, null); set(`sizeRollPct-${accountId}`, null);
+        set(`sizeCapUsd-${accountId}`, null); set(`sizeCapPct-${accountId}`, null);
+    }
+}
+
+function onSizingOptionFieldChange(accountId, code) {
+    if (!code) return;   // derisk fields fire this before any option is ever selected -- no-op
+    _syncCanonicalFromOption(accountId, code);
+    clearTimeout(_sizingPreviewDebounce[accountId]);
+    _sizingPreviewDebounce[accountId] = setTimeout(() => previewSizingPolicy(accountId), 400);
+}
+
+function onRawFieldChange(accountId) {
+    // Editing a raw field directly means whatever's configured no longer
+    // necessarily matches any of the 5 guided cards -- deselect them
+    // rather than leave a stale, now-inaccurate one highlighted.
+    _currentSizingOption[accountId] = null;
+    _setSizingOptionSelected(accountId, null);
+    clearTimeout(_sizingPreviewDebounce[accountId]);
+    _sizingPreviewDebounce[accountId] = setTimeout(() => previewSizingPolicy(accountId), 400);
+}
+
+function _inferAndSelectSizingOption(accountId, policy) {
+    const note = document.getElementById(`sizingCustomNote-${accountId}`);
+    const details = document.getElementById(`sizingCustomDetails-${accountId}`);
+    const has = (v) => v !== null && v !== undefined;
+    let code = null;
+    if (has(policy.tier_threshold_usd) || has(policy.tier_flat_usd)) {
+        code = null;   // the old "scale_with_account" shape -- doesn't map to any of the 5
+    } else if (has(policy.base_risk_usd) && has(policy.roll_in_pct) && policy.roll_in_pct > 0) {
+        code = "C";
+        _fillOptionProxies(accountId, "C", { base: policy.base_risk_usd, roll: policy.roll_in_pct * 100, cap: policy.cap_abs_usd ?? "" });
+    } else if (has(policy.base_risk_usd) && !has(policy.cap_abs_usd) && !has(policy.roll_in_pct)) {
+        code = "A";
+        _fillOptionProxies(accountId, "A", { amount: policy.base_risk_usd });
+    } else if (has(policy.base_risk_pct) && has(policy.cap_abs_usd)) {
+        code = "B";
+        _fillOptionProxies(accountId, "B", { pct: policy.base_risk_pct * 100, cap: policy.cap_abs_usd });
+    } else if (has(policy.base_risk_pct) && !has(policy.cap_abs_usd) && !has(policy.cap_pct)) {
+        // D and E are the SAME saved shape (base_risk_pct, no cap) --
+        // distinguish only by a size heuristic: E's whole point is a
+        // small, precise risk-per-trade percent (doc's own example: 1%),
+        // D's is a large, aggressive scaling percent (doc's example: 10%).
+        code = policy.base_risk_pct <= 0.03 ? "E" : "D";
+        _fillOptionProxies(accountId, code, { pct: policy.base_risk_pct * 100 });
+    }
+    if (code) {
+        _currentSizingOption[accountId] = code;
+        _setSizingOptionSelected(accountId, code);
+        note.style.display = "none";
+        details.open = false;
+    } else {
+        _currentSizingOption[accountId] = null;
+        _setSizingOptionSelected(accountId, null);
+        note.textContent = "Your saved configuration doesn't match one of the 5 standard options above -- shown here for editing directly.";
+        note.style.display = "block";
+        details.open = true;
+    }
+}
 
 function _fillSizingPolicyFields(accountId, policy) {
     document.getElementById(`sizeBaseUsd-${accountId}`).value = policy.base_risk_usd ?? "";
@@ -450,11 +673,10 @@ function _readSizingPolicyFields(accountId) {
 
 async function loadSizingPolicy(accountId) {
     const data = await api(`/api/executor/accounts/${accountId}/sizing-policy`);
-    if (data.ok) _fillSizingPolicyFields(accountId, data.sizing_policy);
-}
-
-async function applyPreset(accountId, name) {
-    _fillSizingPolicyFields(accountId, SIZING_PRESETS[name]);
+    if (data.ok) {
+        _fillSizingPolicyFields(accountId, data.sizing_policy);
+        _inferAndSelectSizingOption(accountId, data.sizing_policy);
+    }
     await previewSizingPolicy(accountId);
 }
 
@@ -463,14 +685,39 @@ function _formatStakeLine(label, d) {
         + `derisk ${d.derisk_applied ? "APPLIED" : "no"}, cap binding: ${d.cap_binding})`;
 }
 
-async function previewSizingPolicy(accountId) {
-    const box = document.getElementById(`sizingPreview-${accountId}`);
-    box.textContent = "Calculating...";
-    const resp = await api(`/api/executor/accounts/${accountId}/sizing-policy/preview`,
-        { method: "POST", body: JSON.stringify(_readSizingPolicyFields(accountId)) });
-    if (!resp.ok) { box.textContent = "Preview failed: " + (resp.error || "unknown error"); return; }
-    const p = resp.preview;
-    box.textContent = [
+// Plain-language worked example per selected option, using ONLY real
+// server-computed numbers (p.current/after_2r_win/after_1r_loss/
+// balance_usd) -- the prose is formatting, never new math (same
+// precedent as this page's other server-computed panels).
+function _renderWorkedExample(accountId, code, p) {
+    const cur = p.current.stake_usd, win = p.after_2r_win.stake_usd, loss = p.after_1r_loss.stake_usd;
+    const bal = p.balance_usd;
+    const balLine = bal !== null && bal !== undefined ? `On your current balance of $${bal.toFixed(2)}:\n` : "";
+    if (code === "A") {
+        return `${balLine}Every trade: $${cur.toFixed(2)}, no matter what.\nAfter a win: still $${win.toFixed(2)}. After a loss: still $${loss.toFixed(2)}.`;
+    }
+    if (code === "B") {
+        return `${balLine}Stake per trade: $${cur.toFixed(2)}` + (p.current.cap_binding === "abs" ? " (cap reached)" : "") + `.\n`
+            + `After a +2R win: $${win.toFixed(2)}${p.after_2r_win.cap_binding === "abs" ? " (cap reached)" : ""}. `
+            + `After a -1R loss: $${loss.toFixed(2)}${p.after_1r_loss.cap_binding === "abs" ? " (cap reached)" : ""}.`;
+    }
+    if (code === "C") {
+        return `${balLine}Right now: $${cur.toFixed(2)} per trade.\n`
+            + `After a win (+2R, +$${(2 * cur).toFixed(2)}): rolls up to $${win.toFixed(2)}.\n`
+            + `After a loss (-1R, -$${cur.toFixed(2)}): rolls down to $${loss.toFixed(2)}.`;
+    }
+    if (code === "D") {
+        return `${balLine}Stake per trade: $${cur.toFixed(2)}, no ceiling.\n`
+            + `After a +2R win: $${win.toFixed(2)}. After a -1R loss: $${loss.toFixed(2)}.\n`
+            + `This keeps growing with your balance forever -- there is no cap set.`;
+    }
+    if (code === "E") {
+        return `${balLine}If your stop is hit on this trade, you lose exactly $${cur.toFixed(2)}.\n`
+            + `Position size is computed automatically from the trade's real stop distance (not shown here -- see the live plan at trade time).`;
+    }
+    // No option matched (raw/custom fields) -- fall back to the original,
+    // fully transparent raw dump so nothing is hidden from a power user.
+    return [
         _formatStakeLine("Current", p.current),
         _formatStakeLine("After a +2R win", p.after_2r_win),
         _formatStakeLine("After a -1R loss", p.after_1r_loss),
@@ -478,9 +725,32 @@ async function previewSizingPolicy(accountId) {
     ].join("\n");
 }
 
-async function saveSizingPolicy(accountId) {
-    const resp = await api(`/api/executor/accounts/${accountId}/sizing-policy`,
+async function previewSizingPolicy(accountId) {
+    const box = document.getElementById(`sizingPreview-${accountId}`);
+    const balLine = document.getElementById(`sizingBalance-${accountId}`);
+    box.textContent = "Calculating...";
+    const resp = await api(`/api/executor/accounts/${accountId}/sizing-policy/preview`,
         { method: "POST", body: JSON.stringify(_readSizingPolicyFields(accountId)) });
+    if (!resp.ok) { box.textContent = "Preview failed: " + (resp.error || "unknown error"); return; }
+    const p = resp.preview;
+    balLine.innerHTML = (p.balance_usd !== null && p.balance_usd !== undefined)
+        ? `Current balance: <strong>$${p.balance_usd.toFixed(2)}</strong> <span style="color:#64748b;">(${p.current.balance_source})</span>`
+        : `Current balance: <span style="color:#64748b;">not needed for this option</span>`;
+    box.textContent = _renderWorkedExample(accountId, _currentSizingOption[accountId], p);
+}
+
+async function saveSizingPolicy(accountId) {
+    const code = _currentSizingOption[accountId];
+    const payload = _readSizingPolicyFields(accountId);
+    // preset_name is display-only (never read by compute_stake() itself,
+    // per executor_sizing.py's own docstring) -- record which of the 5
+    // guided options produced this save, purely for an admin glancing at
+    // the raw row later. New vocabulary, replacing the old conservative/
+    // steady_grow/scale_with_account labels.
+    const PRESET_NAMES = { A: "fixed_dollar", B: "percent_capped", C: "roll_profits", D: "percent_uncapped", E: "risk_based" };
+    payload.preset_name = PRESET_NAMES[code] || "custom";
+    const resp = await api(`/api/executor/accounts/${accountId}/sizing-policy`,
+        { method: "POST", body: JSON.stringify(payload) });
     if (!resp.ok) { alert(resp.error || "failed to save sizing policy"); return; }
     _fillSizingPolicyFields(accountId, resp.sizing_policy);
     await previewSizingPolicy(accountId);

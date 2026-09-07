@@ -76,8 +76,26 @@ function findOnclickAttrForLiteralArg(html, fnName, literalArgSubstring) {
 
 function buildSandbox(fetchCalls) {
   const elements = new Map();
+  // 2026-09-07, Sizing Wizard rebuild: real elements have a `classList`
+  // (add/remove/toggle/contains) -- a minimal, genuinely stateful
+  // implementation here (not a no-op stub) so a test can assert on
+  // which option card ends up selected, the same way the real browser's
+  // .selected CSS class does.
+  function makeClassList(el) {
+    const classes = new Set();
+    return {
+      add: (c) => classes.add(c),
+      remove: (c) => classes.delete(c),
+      toggle: (c, force) => { const on = force === undefined ? !classes.has(c) : force; on ? classes.add(c) : classes.delete(c); return on; },
+      contains: (c) => classes.has(c),
+    };
+  }
   function makeEl(id) {
-    if (!elements.has(id)) elements.set(id, { id, value: '', textContent: '', disabled: false, innerHTML: '', style: {} });
+    if (!elements.has(id)) {
+      const el = { id, value: '', textContent: '', disabled: false, innerHTML: '', style: {}, checked: false };
+      el.classList = makeClassList(el);
+      elements.set(id, el);
+    }
     return elements.get(id);
   }
   const sandbox = {
@@ -88,6 +106,15 @@ function buildSandbox(fetchCalls) {
       let body = { ok: true };
       if (/\/tiny-test\/(place|\d+\/(partial-close|move-sl-breakeven|flash-close|place-resting-t1-limit|check-resting-t1-limit-status|cancel-resting-t1-limit))$/.test(requestPath)) {
         body = { ok: true, test: { id: 1, status: 'TPSL_SET' } };
+      } else if (/\/sizing-policy\/preview$/.test(requestPath)) {
+        // Real shape from main.py's api_executor_preview_sizing_policy():
+        // each of current/after_2r_win/after_1r_loss carries compute_stake()'s
+        // full detail dict plus stake_usd/balance_source; balance_usd sits
+        // alongside them (2026-09-07 addition for the wizard's balance line).
+        const leg = (stake) => ({ base: stake, tier_applied: false, derisk_applied: false, cap_binding: 'none', stake_before_cap: stake, final_stake: stake, stake_usd: stake, balance_source: 'verified against the real exchange account' });
+        body = { ok: true, preview: { current: leg(250), after_2r_win: leg(275), after_1r_loss: leg(225), balance_usd: 2500 } };
+      } else if (/\/sizing-policy$/.test(requestPath)) {
+        body = { ok: true, sizing_policy: { preset_name: null, base_risk_usd: null, base_risk_pct: null, roll_in_pct: null, cap_abs_usd: null, cap_pct: null, tier_threshold_usd: null, tier_flat_usd: null, derisk_n: null, derisk_factor: null } };
       } else if (/\/tiny-test$/.test(requestPath)) {
         body = { ok: true, tests: [] };
       } else if (/\/accounts$/.test(requestPath)) {
@@ -106,7 +133,7 @@ function buildSandbox(fetchCalls) {
       return { json: async () => body };
     },
     alert: () => {},
-    Object, JSON, Date, parseFloat, isNaN,
+    Object, JSON, Date, parseFloat, isNaN, setTimeout, clearTimeout,
   };
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
@@ -259,7 +286,72 @@ async function main() {
     }
   }
 
-  const allResults = timestampResults.concat(results);
+  // Sizing Wizard option cards (2026-09-07, SIZING_AND_ISOLATION.md Part 1)
+  // -- these are plain globals in the script (no onclick-string extraction
+  // needed, unlike the tiny-test buttons above, since they're always
+  // called with a literal accountId/code pair, not built from a template
+  // loop's ${...} placeholders at multiple call sites).
+  const sizingResults = [];
+  const num = (id) => { const v = sandbox.document.getElementById(id).value; return v === '' ? null : parseFloat(v); };
+  try {
+    // A. Fixed Dollar -- picking the card with no prior value seeds the
+    // doc's own $100 default and clears every other canonical field.
+    sandbox.selectSizingOption(1, 'A');
+    await new Promise((r) => setTimeout(r, 10));
+    sizingResults.push({ label: 'selectSizingOption A seeds base_risk_usd=100', ok: num('sizeBaseUsd-1') === 100 && num('sizeBasePct-1') === null });
+
+    // B. Percent of Balance, Capped -- the validated rule's own defaults
+    // (10%, $2,500 cap), and editing the field re-syncs + re-previews.
+    sandbox.selectSizingOption(1, 'B');
+    await new Promise((r) => setTimeout(r, 10));
+    let ok = num('sizeBasePct-1') === 0.10 && num('sizeCapUsd-1') === 2500 && num('sizeBaseUsd-1') === null;
+    sandbox.document.getElementById('sizeB_pct-1').value = '25';
+    sandbox.onSizingOptionFieldChange(1, 'B');
+    await new Promise((r) => setTimeout(r, 500));   // clears the 400ms debounce
+    ok = ok && num('sizeBasePct-1') === 0.25;
+    sizingResults.push({ label: 'selectSizingOption B seeds+resyncs base_risk_pct/cap_abs_usd', ok });
+
+    // C. Roll the Profits -- Andy's own $100/100% example, roll_in_pct
+    // stored as a fraction (1.0), not the raw "100" the field shows.
+    sandbox.selectSizingOption(1, 'C');
+    await new Promise((r) => setTimeout(r, 10));
+    sizingResults.push({ label: 'selectSizingOption C seeds roll_in_pct as a fraction', ok: num('sizeBaseUsd-1') === 100 && num('sizeRollPct-1') === 1.0 });
+
+    // D vs E -- same underlying shape (base_risk_pct, no cap), different
+    // labels/defaults; confirms both write the SAME canonical field.
+    sandbox.selectSizingOption(1, 'D');
+    await new Promise((r) => setTimeout(r, 10));
+    const dPct = num('sizeBasePct-1');
+    sandbox.selectSizingOption(1, 'E');
+    await new Promise((r) => setTimeout(r, 10));
+    const ePct = num('sizeBasePct-1');
+    sizingResults.push({ label: 'D and E both drive base_risk_pct with no cap, different defaults', ok: dPct === 0.10 && ePct === 0.01 && num('sizeCapUsd-1') === null });
+
+    // Editing a raw/advanced field directly deselects all 5 guided cards.
+    sandbox.selectSizingOption(1, 'A');
+    await new Promise((r) => setTimeout(r, 10));
+    sandbox.document.getElementById('sizeBaseUsd-1').value = '250';
+    sandbox.onRawFieldChange(1);
+    await new Promise((r) => setTimeout(r, 500));
+    const cardA = sandbox.document.getElementById('sizeOpt-A-1');
+    sizingResults.push({ label: 'onRawFieldChange deselects the guided cards', ok: cardA.classList.contains('selected') === false });
+
+    // _inferAndSelectSizingOption round-trip: a saved B-shaped policy is
+    // correctly re-selected on load, an unrecognized (old scale_with_
+    // account) shape correctly falls back to "no option matches."
+    sandbox._inferAndSelectSizingOption(1, { base_risk_usd: null, base_risk_pct: 0.10, roll_in_pct: null, cap_abs_usd: 2500, cap_pct: null, tier_threshold_usd: null, tier_flat_usd: null });
+    const cardB = sandbox.document.getElementById('sizeOpt-B-1');
+    sizingResults.push({ label: '_inferAndSelectSizingOption recognizes a saved Option B policy', ok: cardB.classList.contains('selected') === true });
+
+    sandbox._inferAndSelectSizingOption(1, { base_risk_usd: null, base_risk_pct: 0.10, roll_in_pct: null, cap_abs_usd: null, cap_pct: null, tier_threshold_usd: 10000, tier_flat_usd: 1000 });
+    const noteEl = sandbox.document.getElementById('sizingCustomNote-1');
+    const anySelected = ['A', 'B', 'C', 'D', 'E'].some((c) => sandbox.document.getElementById(`sizeOpt-${c}-1`).classList.contains('selected'));
+    sizingResults.push({ label: '_inferAndSelectSizingOption falls back to custom for an old scale_with_account-shaped policy', ok: !anySelected && noteEl.style.display === 'block' });
+  } catch (e) {
+    sizingResults.push({ label: 'sizing option wizard', ok: false, error: e.message });
+  }
+
+  const allResults = timestampResults.concat(results).concat(sizingResults);
   console.log(JSON.stringify(allResults, null, 2));
   process.exit(allResults.some((r) => !r.ok) ? 1 : 0);
 }

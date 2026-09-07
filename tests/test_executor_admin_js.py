@@ -146,3 +146,60 @@ def test_parse_server_timestamp_handles_null():
     scenarios, _ = _run_harness()
     null_case = next(s for s in scenarios if s["label"] == "_parseServerTimestamp: null input")
     assert null_case["ok"] is True
+
+
+# ------------------------------------------------------------------ Sizing Wizard option cards (2026-09-07, SIZING_AND_ISOLATION.md Part 1)
+# Five plain-language options replace the old vague preset buttons. Each
+# card writes into the SAME canonical fields the real preview/save routes
+# already round-trip through -- these confirm that mapping is actually
+# correct (a UI bug here would silently save the wrong policy shape, the
+# exact "Base $ class" of bug this whole engagement keeps hunting).
+
+def test_selecting_fixed_dollar_option_seeds_the_docs_own_default():
+    scenarios, returncode = _run_harness()
+    case = next(s for s in scenarios if s["label"] == "selectSizingOption A seeds base_risk_usd=100")
+    assert case["ok"] is True, case.get("error")
+    assert returncode == 0
+
+
+def test_selecting_percent_capped_option_seeds_the_validated_rule_and_resyncs_on_edit():
+    scenarios, _ = _run_harness()
+    case = next(s for s in scenarios if s["label"] == "selectSizingOption B seeds+resyncs base_risk_pct/cap_abs_usd")
+    assert case["ok"] is True, case.get("error")
+
+
+def test_selecting_roll_the_profits_option_matches_andys_worked_example():
+    scenarios, _ = _run_harness()
+    case = next(s for s in scenarios if s["label"] == "selectSizingOption C seeds roll_in_pct as a fraction")
+    assert case["ok"] is True, case.get("error")
+
+
+def test_percent_uncapped_and_risk_based_options_share_the_same_underlying_math():
+    # Confirms D and E are deliberately the same compute_stake() shape
+    # (base_risk_pct, no cap) with different default percents/labels --
+    # not a divergence bug if they ever look "the same" in the saved row.
+    scenarios, _ = _run_harness()
+    case = next(s for s in scenarios if s["label"] == "D and E both drive base_risk_pct with no cap, different defaults")
+    assert case["ok"] is True, case.get("error")
+
+
+def test_editing_a_raw_field_directly_deselects_the_guided_option_cards():
+    scenarios, _ = _run_harness()
+    case = next(s for s in scenarios if s["label"] == "onRawFieldChange deselects the guided cards")
+    assert case["ok"] is True, case.get("error")
+
+
+def test_loading_a_saved_percent_capped_policy_reselects_the_right_card():
+    scenarios, _ = _run_harness()
+    case = next(s for s in scenarios if s["label"] == "_inferAndSelectSizingOption recognizes a saved Option B policy")
+    assert case["ok"] is True, case.get("error")
+
+
+def test_loading_an_old_scale_with_account_policy_falls_back_to_custom_not_a_wrong_guess():
+    # The retired "scale_with_account" preset (tier_threshold_usd/
+    # tier_flat_usd) doesn't map to any of the 5 new options -- must fall
+    # back to the raw/custom view rather than silently misclassify it as
+    # one of the 5 and show a worked example that doesn't match reality.
+    scenarios, _ = _run_harness()
+    case = next(s for s in scenarios if s["label"] == "_inferAndSelectSizingOption falls back to custom for an old scale_with_account-shaped policy")
+    assert case["ok"] is True, case.get("error")

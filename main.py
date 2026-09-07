@@ -1737,6 +1737,11 @@ async def api_executor_preview_sizing_policy(account_id: int, request: Request, 
 
     return JSONResponse({"ok": True, "preview": {
         "current": current, "after_2r_win": after_2r_win, "after_1r_loss": after_1r_loss,
+        # 2026-09-07, SIZING_AND_ISOLATION.md Part 1 -- the wizard's "current
+        # balance shown at top" requirement needs the actual number, not
+        # just the human-readable balance_source string each _stake() dict
+        # already carries.
+        "balance_usd": balance_usd,
     }})
 
 
