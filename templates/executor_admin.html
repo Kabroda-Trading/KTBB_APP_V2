@@ -130,9 +130,8 @@
             <div class="risk-form">
                 {% if is_admin %}
                 <label>User (defaults to you -- pick someone else only to set an account up on their behalf)<select id="newAccountUserId">
-                    <option value="">-- myself --</option>
                     {% for u in all_users %}
-                    <option value="{{ u.id }}">#{{ u.id }} -- {{ u.email }}</option>
+                    <option value="{{ u.id }}" data-is-you="{{ 'true' if u.id == user.id else 'false' }}" {% if u.id == user.id %}selected{% endif %}>#{{ u.id }} -- {{ u.email }}{% if u.id == user.id %} (you){% endif %}</option>
                     {% endfor %}
                 </select></label>
                 {% endif %}
@@ -1026,6 +1025,21 @@ async function createAccount() {
     if (!body.label) { alert("Enter a label for the account (e.g. andy_bitunix_main)."); return; }
     const resp = await api("/api/executor/accounts", { method: "POST", body: JSON.stringify(body) });
     if (resp.ok) {
+        // 2026-09-07: creating an account for someone ELSE used to give
+        // zero visible confirmation -- the new account correctly does NOT
+        // appear in the CREATOR's own list below (full isolation, by
+        // design), which looked exactly like "nothing happened" and
+        // caused real confusion/alarm live. Say explicitly what happened
+        // and where it actually lives now.
+        const pickedOption = userSelect && userSelect.selectedIndex >= 0 ? userSelect.options[userSelect.selectedIndex] : null;
+        const createdForSelf = !pickedOption || pickedOption.dataset.isYou === "true";
+        if (createdForSelf) {
+            alert(`Account "${resp.account.label}" created. It's in your list below.`);
+        } else {
+            alert(`Account "${resp.account.label}" created for ${pickedOption.textContent} (user_id=${resp.account.user_id}).\n\n` +
+                  `It will NOT appear in your own list below -- that's the isolation working correctly, not a failure. ` +
+                  `They need to log in themselves to see it, set their own credentials, and go live.`);
+        }
         document.getElementById("newAccountLabel").value = "";
         loadAccounts();
     } else {

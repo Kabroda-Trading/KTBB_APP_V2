@@ -74,7 +74,7 @@ function findOnclickAttrForLiteralArg(html, fnName, literalArgSubstring) {
   return found[0].replace(/\$\{accountId\}/g, '1');
 }
 
-function buildSandbox(fetchCalls) {
+function buildSandbox(fetchCalls, alertCalls) {
   const elements = new Map();
   // 2026-09-07, Sizing Wizard rebuild: real elements have a `classList`
   // (add/remove/toggle/contains) -- a minimal, genuinely stateful
@@ -117,6 +117,13 @@ function buildSandbox(fetchCalls) {
         body = { ok: true, sizing_policy: { preset_name: null, base_risk_usd: null, base_risk_pct: null, roll_in_pct: null, cap_abs_usd: null, cap_pct: null, tier_threshold_usd: null, tier_flat_usd: null, derisk_n: null, derisk_factor: null } };
       } else if (/\/tiny-test$/.test(requestPath)) {
         body = { ok: true, tests: [] };
+      } else if (/\/accounts$/.test(requestPath) && opts && opts.method === 'POST') {
+        // Real shape from main.py's api_executor_create_account(): echoes
+        // back whatever label/user_id was actually posted, same as the
+        // real route does -- needed so a test can assert on the exact
+        // wording createAccount()'s success alert renders from this.
+        const posted = JSON.parse((opts && opts.body) || '{}');
+        body = { ok: true, account: { id: 99, label: posted.label, user_id: posted.user_id !== undefined ? posted.user_id : 1, exchange: posted.exchange || 'bitunix', mode: 'DRY_RUN' } };
       } else if (/\/accounts$/.test(requestPath)) {
         body = { ok: true, accounts: [] };
       } else if (/\/risk-state$/.test(requestPath)) {
@@ -132,7 +139,7 @@ function buildSandbox(fetchCalls) {
       }
       return { json: async () => body };
     },
-    alert: () => {},
+    alert: (msg) => alertCalls.push(msg),
     Object, JSON, Date, parseFloat, isNaN, setTimeout, clearTimeout,
   };
   sandbox.window = sandbox;
@@ -145,7 +152,8 @@ async function main() {
   const script = extractScript(html);
 
   const fetchCalls = [];
-  const { sandbox, makeEl } = buildSandbox(fetchCalls);
+  const alertCalls = [];
+  const { sandbox, makeEl } = buildSandbox(fetchCalls, alertCalls);
   vm.createContext(sandbox);
 
   try {
@@ -351,7 +359,64 @@ async function main() {
     sizingResults.push({ label: 'sizing option wizard', ok: false, error: e.message });
   }
 
-  const allResults = timestampResults.concat(results).concat(sizingResults);
+  // createAccount() (2026-09-07) -- real incident this session: an admin
+  // creating an account for someone else got ZERO visible confirmation
+  // (the new account correctly does not appear in the CREATOR's own list
+  // -- full isolation, by design -- which looked exactly like "nothing
+  // happened" and caused real live confusion/alarm). Confirms the fix:
+  // an explicit alert naming who it was created for, using the <option>'s
+  // own data-is-you attribute (set server-side by the Jinja template) --
+  // not a raw Jinja-injected JS constant, which would have broken this
+  // very harness (it executes the RAW un-rendered template source).
+  const createAccountResults = [];
+  function makeSelectWithOptions(selectId, options, selectedIndex) {
+    const el = sandbox.document.getElementById(selectId);
+    el.options = options.map((o) => ({ value: o.value, textContent: o.textContent, dataset: { isYou: o.isYou ? 'true' : 'false' } }));
+    el.selectedIndex = selectedIndex;
+    el.value = el.options[selectedIndex].value;
+    return el;
+  }
+  try {
+    // Admin picks THEMSELVES (their own row carries data-is-you="true",
+    // and is also the pre-selected default -- no more ambiguous "--
+    // myself --" placeholder, the real incident that started this).
+    makeSelectWithOptions('newAccountUserId', [
+      { value: '1', textContent: '#1 -- andy@kabroda.com (you)', isYou: true },
+      { value: '2', textContent: '#2 -- grossmonkeytrader@protonmail.com', isYou: false },
+    ], 0);
+    sandbox.document.getElementById('newAccountLabel').value = 'andy_bitunix_main';
+    sandbox.document.getElementById('newAccountExchange').value = 'bitunix';
+    alertCalls.length = 0;
+    await sandbox.createAccount();
+    await new Promise((r) => setTimeout(r, 10));
+    createAccountResults.push({
+      label: 'createAccount success alert for yourself says "your list", not who it was created for',
+      ok: alertCalls.length === 1 && /your list below/.test(alertCalls[0]) && !/created for/.test(alertCalls[0]),
+      error: alertCalls[0],
+    });
+
+    // Admin picks SOMEONE ELSE -- this is the exact scenario that looked
+    // like "nothing happened" live. Confirms the alert names them AND
+    // says explicitly it won't show in the creator's own list.
+    makeSelectWithOptions('newAccountUserId', [
+      { value: '1', textContent: '#1 -- andy@kabroda.com (you)', isYou: true },
+      { value: '2', textContent: '#2 -- grossmonkeytrader@protonmail.com', isYou: false },
+    ], 1);
+    sandbox.document.getElementById('newAccountLabel').value = 'dawson_bitunix_main';
+    alertCalls.length = 0;
+    await sandbox.createAccount();
+    await new Promise((r) => setTimeout(r, 10));
+    const msg = alertCalls[0] || '';
+    createAccountResults.push({
+      label: 'createAccount success alert for someone else names them and explains the isolation',
+      ok: alertCalls.length === 1 && msg.includes('grossmonkeytrader@protonmail.com') && /will NOT appear in your own list/.test(msg),
+      error: msg,
+    });
+  } catch (e) {
+    createAccountResults.push({ label: 'createAccount success messaging', ok: false, error: e.message });
+  }
+
+  const allResults = timestampResults.concat(results).concat(sizingResults).concat(createAccountResults);
   console.log(JSON.stringify(allResults, null, 2));
   process.exit(allResults.some((r) => !r.ok) ? 1 : 0);
 }
