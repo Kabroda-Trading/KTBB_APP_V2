@@ -76,7 +76,12 @@ import market_data
 from database import ExecutorAccount, ExecutorOrder, TradePlan
 
 _LONG, _SHORT = "LONG", "SHORT"
-_TERMINAL_STATES = ("CLOSED_STOP_BEFORE_T1", "CLOSED_RUNNER_STOP", "CLOSED_T3", "CLOSED_ERROR")
+# ENTRY_FILLED_UNPROTECTED is deliberately terminal (loop-side) even
+# though the real position is still open -- "no AI improvisation" means
+# a partial-protection failure gets a loud alert and stops here, not a
+# repeated automatic retry every 30s. See check_entry_fill_and_place_
+# exits()'s own comment on this.
+_TERMINAL_STATES = ("CLOSED_STOP_BEFORE_T1", "CLOSED_RUNNER_STOP", "CLOSED_T3", "CLOSED_ERROR", "ENTRY_FILLED_UNPROTECTED")
 # 2026-09-05 real doc-vs-reality gap (executor_mechanism_test.py's own
 # comment): get_position's real `side` field is "BUY"/"SELL", not
 # "LONG"/"SHORT" as Bitunix's docs claim.
@@ -135,7 +140,37 @@ async def place_entry_order(db: Session, account: ExecutorAccount, trade_plan_ro
         order_type="LIMIT", effect="POST_ONLY",
     )
     order_row.exchange_response_json = json.dumps(resp, default=str)
-    order_row.entry_exchange_order_id = resp["data"]["orderId"]
+    order_id = (resp.get("data") or {}).get("orderId")
+    if resp.get("code") not in (0, None) or not order_id:
+        # 2026-09-07 END_TO_END_AUDIT.md fix: a real, expected outcome --
+        # POST_ONLY's whole mechanism is "reject rather than cross the
+        # spread" (verified live against bitunix.com/api-docs). Before
+        # this fix, resp["data"]["orderId"] on a rejection response
+        # (data often null) raised an unhandled TypeError, caught only by
+        # process_fill()'s outer try/except as a console print -- the
+        # ExecutorOrder row silently stuck at management_state's DB
+        # default (PENDING_ENTRY) with no exchange_order_id, invisible to
+        # the background loop's own query filter, no audit row, no alert.
+        # No real money is at risk here specifically (nothing filled),
+        # but Andy would never have found out a live entry silently
+        # failed to place at all.
+        order_row.management_state = "CLOSED_ERROR"
+        executor_accounts.write_audit(
+            db, "ERROR",
+            f"entry order placement FAILED (code={resp.get('code')} msg={resp.get('msg')!r}) -- "
+            f"no real order exists on the exchange for this trade_plan",
+            account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order_row.id, actor="system", detail=resp)
+        import notify
+        notify.send_admin_email(
+            f"KABRODA EXECUTOR ERROR -- entry placement failed ({order_row.symbol})",
+            f"Real entry order placement failed for trade_plan_id={trade_plan_row.id}, account={account.id}.\n"
+            f"Exchange response: code={resp.get('code')} msg={resp.get('msg')!r}\n\n"
+            f"No real order exists for this trade -- likely a POST_ONLY rejection (price moved past "
+            f"the entry level before the order reached the exchange). No automatic retry is attempted; "
+            f"nothing to undo since nothing filled.",
+        )
+        return
+    order_row.entry_exchange_order_id = order_id
     order_row.entry_status = "NEW"
     order_row.management_state = "PENDING_ENTRY"
     executor_accounts.write_audit(
@@ -188,40 +223,96 @@ async def check_entry_fill_and_place_exits(db: Session, account: ExecutorAccount
     half_qty_str = executor_sizing.round_qty_to_precision(order_row.qty * 0.5, pair["base_precision"])
     exit_side = _EXIT_SIDE_FOR_DIRECTION[order_row.direction]
 
-    # (a) protective stop, exactly as the mechanism test proved live.
+    # 2026-09-07 END_TO_END_AUDIT.md fix: a REAL position now exists (real
+    # money, unprotected until all three of the below succeed). Before
+    # this fix, any one of these three calls returning an error response
+    # (order_id missing/null -- the same POST_ONLY-rejection class fixed
+    # in place_entry_order() above, but here AFTER a real fill) raised an
+    # unhandled exception straight into process_fill()'s outer try/except
+    # -- a console print, nothing else. management_state never advanced
+    # past PENDING_ENTRY even though a real, open position existed, so
+    # the next tick would try this whole function again from scratch
+    # (re-reading get_order_detail/get_position, harmless) rather than
+    # ever surfacing that some real position sits there with only
+    # PARTIAL or NO protection. Each leg is now attempted independently
+    # (one failing must never prevent the others from at least trying to
+    # protect the position) and any failure is loud: a distinct
+    # management_state that the background loop stops touching (no
+    # further automatic action on a state this failure-prone), a full
+    # audit row naming exactly what succeeded and what didn't, and an
+    # immediate email -- this is exactly the situation "no AI
+    # improvisation" means Andy decides the recovery, not the bot.
+    failures: List[str] = []
+
     sl_str = executor_sizing.round_price_to_precision(order_row.stop_price, pair["quote_precision"])
-    sl_resp = await client.set_position_tpsl(
-        symbol=symbol, position_id=order_row.position_id, sl_price=sl_str, sl_stop_type="LAST_PRICE")
-    order_row.sl_exchange_order_id = sl_resp["data"]["orderId"]
-    order_row.sl_price_current = float(sl_str)
-    order_row.sl_set_at = datetime.datetime.utcnow()
+    try:
+        sl_resp = await client.set_position_tpsl(
+            symbol=symbol, position_id=order_row.position_id, sl_price=sl_str, sl_stop_type="LAST_PRICE")
+        sl_order_id = (sl_resp.get("data") or {}).get("orderId")
+        if sl_resp.get("code") not in (0, None) or not sl_order_id:
+            failures.append(f"STOP at {sl_str}: FAILED (code={sl_resp.get('code')} msg={sl_resp.get('msg')!r})")
+        else:
+            order_row.sl_exchange_order_id = sl_order_id
+            order_row.sl_price_current = float(sl_str)
+            order_row.sl_set_at = datetime.datetime.utcnow()
+    except Exception as e:
+        failures.append(f"STOP at {sl_str}: FAILED (exception: {e})")
 
-    # (b) T1 resting reduce-only LIMIT, 50% qty, POST_ONLY.
     t1_price_str = executor_sizing.round_price_to_precision(order_row.t1_price, pair["quote_precision"])
-    t1_resp = await client.place_order(
-        symbol=symbol, qty=half_qty_str, price=t1_price_str, side=exit_side, trade_side="CLOSE",
-        order_type="LIMIT", position_id=order_row.position_id, reduce_only=True, effect="POST_ONLY",
-    )
-    order_row.t1_exchange_order_id = t1_resp["data"]["orderId"]
-    order_row.t1_status = "NEW"
+    try:
+        t1_resp = await client.place_order(
+            symbol=symbol, qty=half_qty_str, price=t1_price_str, side=exit_side, trade_side="CLOSE",
+            order_type="LIMIT", position_id=order_row.position_id, reduce_only=True, effect="POST_ONLY",
+        )
+        t1_order_id = (t1_resp.get("data") or {}).get("orderId")
+        if t1_resp.get("code") not in (0, None) or not t1_order_id:
+            failures.append(f"T1 at {t1_price_str} qty={half_qty_str}: FAILED (code={t1_resp.get('code')} msg={t1_resp.get('msg')!r})")
+        else:
+            order_row.t1_exchange_order_id = t1_order_id
+            order_row.t1_status = "NEW"
+    except Exception as e:
+        failures.append(f"T1 at {t1_price_str} qty={half_qty_str}: FAILED (exception: {e})")
 
-    # (c) T3 resting reduce-only LIMIT, remaining 50% qty, POST_ONLY.
     remaining_qty_str = executor_sizing.round_qty_to_precision(order_row.qty - float(half_qty_str), pair["base_precision"])
     t3_price_str = executor_sizing.round_price_to_precision(order_row.t3_price, pair["quote_precision"])
-    t3_resp = await client.place_order(
-        symbol=symbol, qty=remaining_qty_str, price=t3_price_str, side=exit_side, trade_side="CLOSE",
-        order_type="LIMIT", position_id=order_row.position_id, reduce_only=True, effect="POST_ONLY",
-    )
-    order_row.t3_exchange_order_id = t3_resp["data"]["orderId"]
-    order_row.t3_status = "NEW"
+    try:
+        t3_resp = await client.place_order(
+            symbol=symbol, qty=remaining_qty_str, price=t3_price_str, side=exit_side, trade_side="CLOSE",
+            order_type="LIMIT", position_id=order_row.position_id, reduce_only=True, effect="POST_ONLY",
+        )
+        t3_order_id = (t3_resp.get("data") or {}).get("orderId")
+        if t3_resp.get("code") not in (0, None) or not t3_order_id:
+            failures.append(f"T3 at {t3_price_str} qty={remaining_qty_str}: FAILED (code={t3_resp.get('code')} msg={t3_resp.get('msg')!r})")
+        else:
+            order_row.t3_exchange_order_id = t3_order_id
+            order_row.t3_status = "NEW"
+    except Exception as e:
+        failures.append(f"T3 at {t3_price_str} qty={remaining_qty_str}: FAILED (exception: {e})")
+
+    if failures:
+        order_row.management_state = "ENTRY_FILLED_UNPROTECTED"
+        detail_msg = (
+            f"REAL OPEN POSITION (positionId={order_row.position_id}) with INCOMPLETE protection -- "
+            f"{'; '.join(failures)}. Manual intervention required, no automatic retry."
+        )
+        executor_accounts.write_audit(
+            db, "ERROR", detail_msg,
+            account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order_row.id, actor="system")
+        import notify
+        notify.send_admin_email(
+            f"KABRODA EXECUTOR ALERT -- unprotected open position ({order_row.symbol})",
+            f"trade_plan_id={trade_plan_row.id}, account={account.id}, positionId={order_row.position_id}\n\n"
+            f"{detail_msg}\n\nCHECK THE EXCHANGE DIRECTLY NOW and manually place whatever's missing "
+            f"or close the position -- this bot will not act on it further.",
+        )
+        return
 
     order_row.management_state = "ENTRY_FILLED_ORDERS_PLACED"
     executor_accounts.write_audit(
         db, "ORDER_PLACED",
         f"entry filled at {order_row.entry_fill_price} (positionId={order_row.position_id}) -- "
         f"stop {sl_str}, T1 {t1_price_str} ({half_qty_str}), T3 {t3_price_str} ({remaining_qty_str}) all placed",
-        account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order_row.id, actor="system",
-        detail={"sl": sl_resp, "t1": t1_resp, "t3": t3_resp})
+        account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order_row.id, actor="system")
 
 
 def _r_multiple(price: float, entry: float, stop: float) -> float:
@@ -293,10 +384,25 @@ async def poll_open_position(db: Session, account: ExecutorAccount, trade_plan_r
         if touched_t2:
             order_row.t2_touch_time = datetime.datetime.utcnow()
             try:
-                import fuel_gate, micro_regime
+                import fuel_gate, htf_fuel, micro_regime
                 candles_5m = await market_data.fetch_live_5m(order_row.symbol, limit=300)
                 candles_15m = await market_data.fetch_live_15m(order_row.symbol, limit=300)
-                fuel = fuel_gate.evaluate_fuel_gate(candles_5m, order_row.entry_price, order_row.direction)
+                # 2026-09-07 END_TO_END_AUDIT.md Seam C fix: this is the same
+                # missing-HTF-argument bug class caught in trade_plan.py
+                # (commit 7a4ae95) -- without fuel_1h/fuel_4h,
+                # evaluate_fuel_gate() can never return NO_FUEL, which would
+                # silently bias this OBSERVATION field (the whole point of
+                # which is an honest record of what the reval would have
+                # said) away from ever showing a ghost push. Still never
+                # read back into the mechanical BE decision -- observation
+                # only, per the module header.
+                candles_1h = await market_data.fetch_live_1h(order_row.symbol, limit=100)
+                candles_4h = await market_data.fetch_live_4h(order_row.symbol, limit=100)
+                htf = htf_fuel.htf_fuel(candles_1h, candles_4h, order_row.direction)
+                fuel = fuel_gate.evaluate_fuel_gate(
+                    candles_5m, order_row.entry_price, order_row.direction,
+                    fuel_1h=htf.get("trend_1h"), fuel_4h=htf.get("trend_4h"),
+                )
                 order_row.t2_reval_fuel_verdict = fuel.get("verdict")
                 order_row.t2_reval_micro_regime = micro_regime.classify_regime(candles_15m).get("regime")
             except Exception as e:

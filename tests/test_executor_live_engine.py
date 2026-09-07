@@ -196,6 +196,28 @@ def test_place_entry_order_short_uses_sell_side(db, monkeypatch):
     assert captured["side"] == "SELL"
 
 
+def test_place_entry_order_post_only_rejection_is_handled_not_crashed(db, monkeypatch):
+    # 2026-09-07 END_TO_END_AUDIT.md fix: a POST_ONLY rejection (data:
+    # null, a real, documented possible response) used to raise an
+    # unhandled TypeError reading resp["data"]["orderId"]. Must now be
+    # caught, recorded, and alerted -- not crash up into process_fill().
+    account = _ready_account(db)
+    plan = _trade_plan(db)
+    order = _order_row(db, account, plan)
+
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    rejection = {"code": 10007, "msg": "order would cross the spread", "data": None}
+    _install(monkeypatch, get_trading_pairs=_async(_trading_pairs_response()), place_order=_async(rejection))
+
+    _run(ele.place_entry_order(db, account, plan, order))  # must not raise
+
+    assert order.management_state == "CLOSED_ERROR"
+    assert order.entry_exchange_order_id is None
+    assert len(sent) == 1
+    assert "entry placement failed" in sent[0][0].lower()
+
+
 # ------------------------------------------------------------------ check_entry_fill_and_place_exits
 
 def test_entry_fill_places_all_three_orders_atomically(db, monkeypatch):
@@ -232,6 +254,57 @@ def test_entry_fill_places_all_three_orders_atomically(db, monkeypatch):
     assert all(c["reduce_only"] is True and c["effect"] == "POST_ONLY" for c in place_order_calls)
     assert order.t1_exchange_order_id is not None
     assert order.t3_exchange_order_id is not None
+
+
+def test_partial_exit_placement_failure_alerts_and_stops_not_crashes(db, monkeypatch):
+    # 2026-09-07 END_TO_END_AUDIT.md fix -- the serious one: entry has
+    # ALREADY FILLED (real money, real open position) when the T1 leg
+    # fails to place (POST_ONLY rejection). Before this fix: unhandled
+    # exception, caught only by process_fill()'s outer try/except as a
+    # console print, management_state stuck at PENDING_ENTRY forever even
+    # though a real position sits there -- the stop DID place correctly
+    # (real protection exists) but nothing ever recorded or alerted that
+    # T3 was also never attempted and the layout is incomplete.
+    account = _ready_account(db)
+    plan = _trade_plan(db, direction="LONG")
+    order = _order_row(db, account, plan, direction="LONG", entry_exchange_order_id="entry-order-1")
+
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+
+    call_count = {"n": 0}
+    async def _fake_place_order(self, **kw):
+        call_count["n"] += 1
+        if call_count["n"] == 1:   # T1
+            return {"code": 10007, "msg": "order would cross the spread", "data": None}
+        return _place_order_response("t3-order")   # T3 succeeds
+
+    _install(monkeypatch,
+              get_order_detail=_async(_order_detail_response(status="FILLED")),
+              get_position=_async(_one_position_response()),
+              get_trading_pairs=_async(_trading_pairs_response()),
+              set_position_tpsl=_async(_tpsl_response()),   # stop succeeds
+              place_order=_fake_place_order)
+
+    _run(ele.check_entry_fill_and_place_exits(db, account, plan, order))  # must not raise
+
+    assert order.management_state == "ENTRY_FILLED_UNPROTECTED"
+    # The stop and T3 that DID succeed must still be recorded -- partial
+    # protection is real protection, not thrown away because one leg failed.
+    assert order.sl_exchange_order_id is not None
+    assert order.t3_exchange_order_id is not None
+    assert order.t1_exchange_order_id is None   # the one that failed
+    assert len(sent) == 1
+    assert "unprotected" in sent[0][0].lower()
+    assert "T1" in sent[0][1]
+
+
+def test_entry_filled_unprotected_is_terminal_loop_stops_touching_it(db):
+    account = _ready_account(db)
+    plan = _trade_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_UNPROTECTED")
+    _run(ele.poll_open_position(db, account, plan, order))   # must not raise, must not act
+    assert order.management_state == "ENTRY_FILLED_UNPROTECTED"
 
 
 def test_entry_not_yet_filled_makes_no_state_change(db, monkeypatch):
