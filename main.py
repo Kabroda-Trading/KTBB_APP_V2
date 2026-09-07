@@ -1389,11 +1389,13 @@ async def api_executor_list_accounts(request: Request, db: Session = Depends(get
     # request -- each real user (his own account, "Gross Monkey"'s own
     # separate account) runs an independent real exchange account, and
     # seeing everyone's mixed together by default is a real risk of
-    # confusing/misclicking on the wrong one's real money. Admin retains
-    # the ability to ACT on a specific known account id via
-    # _executor_owner_or_admin() on every individual account-scoped route
-    # (unchanged) -- what's removed here is only the default LISTING
-    # bypass, not the emergency-intervention permission.
+    # confusing/misclicking on the wrong one's real money.
+    # UPDATE 2026-09-07: the emergency-intervention exception this comment
+    # used to describe is GONE -- _executor_owner_or_admin() no longer has
+    # an is_admin bypass at all (see that function's own comment). Full
+    # mutual isolation now applies at BOTH the list level (here) and every
+    # individual account-scoped route. is_admin grants zero visibility or
+    # action on another user's executor account, even between two admins.
     ctx = get_user_context(request, db)
     if not ctx.get("is_logged_in"):
         return JSONResponse({"ok": False, "error": "Login required."}, status_code=403)
