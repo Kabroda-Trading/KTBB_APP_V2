@@ -298,6 +298,32 @@ def test_compute_stake_no_cap_binding_when_stake_already_under_both():
     assert detail["cap_binding"] == "none"
 
 
+# 2026-09-07, DeepSeek's Domain 2 review (Kabroda AI Brain repo
+# AGENT_LOG.md 09:50 CT): Andy's real real-money rule (verified live,
+# ad-hoc, during the Sizing Wizard build -- never locked in as a
+# permanent test until now). "10% of balance, $2,500 cap at $25k" is
+# `base_risk_pct=0.10` + `cap_abs_usd=2500.0` -- a plain percent-of-
+# balance base with an unconditional absolute cap that happens to bind
+# exactly where 10% of balance crosses $2,500 (balance == $25,000). NOT
+# the tier_threshold_usd/tier_flat_usd mechanism (that REPLACES the base
+# entirely at a threshold -- a different shape, for a different rule).
+# This is also the config surface Andy's own Sizing Wizard already
+# exposes via ExecutorSizingPolicy.base_risk_pct/cap_abs_usd -- user-
+# configurable, not a hardcoded constant; 10%/$2,500 is the validated
+# DEFAULT choice, not the only one the wizard allows.
+def test_compute_stake_andys_real_rule_10pct_2500_cap_at_25k():
+    stake_20k, detail_20k = es.compute_stake(risk_last_usd=100.0, base_risk_pct=0.10, account_balance_usd=20000.0, cap_abs_usd=2500.0)
+    assert stake_20k == pytest.approx(2000.0)
+    assert detail_20k["cap_binding"] == "none"   # 10% of 20k = $2,000, under the cap
+
+    stake_25k, detail_25k = es.compute_stake(risk_last_usd=100.0, base_risk_pct=0.10, account_balance_usd=25000.0, cap_abs_usd=2500.0)
+    assert stake_25k == pytest.approx(2500.0)    # exactly at the cap boundary
+
+    stake_30k, detail_30k = es.compute_stake(risk_last_usd=100.0, base_risk_pct=0.10, account_balance_usd=30000.0, cap_abs_usd=2500.0)
+    assert stake_30k == pytest.approx(2500.0)    # 10% of 30k = $3,000, cap binds
+    assert detail_30k["cap_binding"] == "abs"
+
+
 def test_compute_stake_derisk_shrinks_after_n_losses():
     # Below the threshold: no shrink.
     stake_before, detail_before = es.compute_stake(risk_last_usd=500.0, derisk_n=3, derisk_factor=0.5, consecutive_losses=2)

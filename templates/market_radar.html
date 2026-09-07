@@ -957,8 +957,13 @@
                     const psEl = document.getElementById('valPosSize');
                     if (psEl) psEl.innerText = totalContracts.toFixed(4);
 
-                    const scalePct = 0.40;  // sell 40% at T1 — matches Senior Analyst brief
-                    const runPct   = 0.60;  // runner 60% to T2/T3
+                    // 2026-09-07 fix: was 0.40/0.60, a third stale split predating
+                    // the audit (CLEAN_REPORT.md/GATE_REBUILD_SPEC.md), matching
+                    // neither the old 30/70 rule nor anything else. The audited
+                    // rule (executor_live_engine.py, Domain 2) is 50/50 for both
+                    // tiers -- T1 takes 50%, the runner is the other 50%.
+                    const scalePct = 0.50;  // sell 50% at T1
+                    const runPct   = 0.50;  // runner 50% to T3 (or its stop)
 
                     document.getElementById('pT1Vol').innerText = (totalContracts * scalePct).toFixed(4);
                     document.getElementById('pRunVol').innerText = (totalContracts * runPct).toFixed(4);

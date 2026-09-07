@@ -318,14 +318,51 @@ def test_waiting_fueled_cross_armed_email_carries_the_locked_alignment_reading(p
     assert "Fuel FUELED -> FULLY ALIGNED" in body
 
 
-def test_waiting_unfueled_cross_sends_vetoed_email_via_loop(poll_env, monkeypatch):
+def test_waiting_conflicted_cross_sends_armed_email_via_loop(poll_env, monkeypatch):
+    # 2026-09-07 fix (Kabroda AI Brain repo AGENT_LOG.md, DeepSeek's live-
+    # email review): thin volume with no HTF opposition is CONFLICTED,
+    # not NO_FUEL -- the live gate admits it as a real STANDARD trade, so
+    # this must ARM through the real loop, not VETO. This exact scenario
+    # used to (wrongly) send a VETOED email before the fix.
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_plan"](
+        status="WAITING", direction="LONG", trigger_price=100.0,
+        stop_price=90.0, stop_basis="beyond sweep wick low", t1=112.0, t2=120.0, t3=132.0,
+    )
+    candles = _thin_5m_candles(100.0, is_long=True)
+    # daily_atr14 must be real/nonzero for _stamp_tier_at_cross() to run
+    # at all (advance_waiting_plan()'s own guard) -- box=20 (t2-trigger),
+    # atr=25 -> ratio=0.8, not premium-eligible on box alone either, but
+    # the real point is CONFLICTED can never earn PREMIUM regardless.
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=25.0)
+
+    assert len(sent) == 1
+    assert sent[0][0].startswith("KABRODA ARMED")
+    plan = poll_env["get_plan"]()
+    assert plan.status == "FILLED"
+    assert plan.tier == "STANDARD"   # CONFLICTED can never earn PREMIUM
+
+
+def test_waiting_real_no_fuel_ghost_push_sends_vetoed_email_via_loop(poll_env, monkeypatch):
+    # A genuine ghost push -- thin volume AND real HTF opposition -- is
+    # the one fuel state that still VETOES. Monotonically declining 1H/4H
+    # candles produce a real BEARISH read (htf_fuel.py's 9/21 EMA stack),
+    # opposing a LONG cross.
     sent = _capture_emails(monkeypatch)
     poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0)
     candles = _thin_5m_candles(100.0, is_long=True)
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+    bearish_htf = [{"close": 200.0 - i} for i in range(40)]  # steadily declining -> BEARISH
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": candles},
+        candles_1h_by_symbol={"BTC/USDT": bearish_htf},
+        candles_4h_by_symbol={"BTC/USDT": bearish_htf},
+        polls=1,
+    )
 
     assert len(sent) == 1
     assert sent[0][0].startswith("KABRODA VETOED")
+    plan = poll_env["get_plan"]()
+    assert plan.status == "VETOED"
 
 
 def test_waiting_session_expiry_sends_done_email_via_loop(poll_env, monkeypatch):

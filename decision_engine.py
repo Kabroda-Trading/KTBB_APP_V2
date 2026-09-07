@@ -112,13 +112,28 @@ def _plan_for_side(side: str, bo: float, bd: float, r30_high: float, r30_low: fl
     return {
         "entry": entry, "stop": round(float(stop), 2),
         "t1": round(float(t1), 2), "t2": round(float(t2), 2), "t3": round(float(t3), 2),
+        # subtrig_stop: a GateLog-only diagnostic value (logged via
+        # kabroda_mas_flow.py/trade_plan_engine.py for the forward-
+        # incubation record) -- NOT the real management rule anymore.
+        # It traces to the pre-audit fixed-runner-stop concept
+        # (superseded 2026-09-07: the audited rule keeps the ORIGINAL
+        # stop through T1, moves to breakeven at T2 for PREMIUM only --
+        # see executor_live_engine.py). Kept computed/logged so GateLog
+        # rows don't silently lose a column the Brain repo may still
+        # read, but nothing in the live management path acts on it.
         "subtrig_stop": round(float(subtrig_stop), 2),
         "box": round(box, 2),
+        # Tier isn't known yet at this call (computed downstream by
+        # _core_gate()) -- kept tier-neutral and accurate rather than
+        # guessing. See MANAGEMENT_TEXT in trade_plan.py / CLAUDE.md's
+        # "Calibrated Gate" section for the full, tier-specific rule this
+        # describes; TradePlan.management is the authoritative text
+        # actually emailed, not this field.
         "management": (
-            f"Take 30% off at T1 {round(t1, 2):,.0f}. Move the stop to "
-            f"{round(subtrig_stop, 2):,.2f} (trigger +/- 0.15x box) and let 70% run "
-            f"toward T2 {round(t2, 2):,.0f} / T3 {round(t3, 2):,.0f}. "
-            "The runner earns most when 1H+4H both back the side."
+            f"Take 50% off at T1 {round(t1, 2):,.0f}, stop stays at the original "
+            f"level. PREMIUM only: stop moves to breakeven at T2 {round(t2, 2):,.0f}. "
+            f"STANDARD: stop stays original through T3 {round(t3, 2):,.0f}. Either "
+            "way, the runner (50%) exits at T3 or its stop."
         ),
     }
 

@@ -70,8 +70,11 @@ def test_waiting_plan_on_take_long_with_good_rr():
     assert plan["rr_floor_ok"] is True
     assert plan["rr_ratio"] > 1.0
     assert plan["t1"] == 112.0 and plan["t2"] == 120.0 and plan["t3"] == 132.0
-    assert "30%" in plan["management"] and "runner-stop" in plan["management"]
-    assert "not tier-dependent" in plan["management"].lower()
+    # 2026-09-07 correction: MANAGEMENT_TEXT now describes the audited
+    # rule (50/50, tier-differentiated T2 breakeven for PREMIUM only) --
+    # see trade_plan.py's own comment on why the old 30/70 text was stale.
+    assert "50%" in plan["management"] and "breakeven" in plan["management"].lower()
+    assert "PREMIUM" in plan["management"] and "STANDARD" in plan["management"]
 
 
 def test_no_plan_when_core_zone_stop_kills_rr():

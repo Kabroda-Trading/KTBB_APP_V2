@@ -176,13 +176,60 @@ def test_advance_waiting_fueled_cross_already_broken_out_uses_retest_mode():
     assert result["entry_mode"] == "RETEST_LIMIT_AT_LINE"
 
 
-def test_advance_waiting_unfueled_cross_vetoes():
+def test_advance_waiting_thin_volume_no_opposition_is_conflicted_and_fills():
+    # 2026-09-07 fix (Kabroda AI Brain repo AGENT_LOG.md, DeepSeek's live-
+    # email review): thin volume ALONE (no HTF opposition, no HTF data
+    # even supplied) produces CONFLICTED, not NO_FUEL -- fuel_gate.py's
+    # own verdict formula requires opposition or divergence for NO_FUEL,
+    # neither of which this call can produce without HTF candles. The
+    # live gate (decision_engine.py) admits CONFLICTED as a real STANDARD
+    # trade -- this path must agree, not silently veto a tradeable cross.
     plan = _plan(direction="LONG", trigger=100.0)
     candles = _candles(side="LONG", baseline_vol=10.0, push_vol=2.0, touched=True)  # ratio 0.2 -> thin
     result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=100.0)
     assert result is not None
+    assert result["status"] == "FILLED"
+    assert result["fuel_at_cross"] == "CONFLICTED"
+    assert result["entry_mode"] is not None
+
+
+def test_advance_waiting_conflicted_cross_stamps_standard_never_premium(monkeypatch):
+    # CONFLICTED can never earn PREMIUM, even with both HTFs carrying and
+    # a tight box -- only FUELED can (decision_engine.py's own boundary,
+    # _stamp_tier_at_cross() must agree).
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
+    })
+    plan = _plan(direction="LONG", trigger=100.0, tier=None, t2=110.0)  # box=10, atr=25 -> ratio=0.4 -> would be PREMIUM if FUELED
+    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=2.0, touched=True)  # thin -> CONFLICTED
+    result = tp.advance_waiting_plan(
+        plan, NOW, SESSION_EXPIRES, candles, live_price=100.0,
+        candles_1h=[{}], candles_4h=[{}], daily_atr14=25.0,
+    )
+    assert result["status"] == "FILLED"
+    assert result["fuel_at_cross"] == "CONFLICTED"
+    assert result["tier"] == "STANDARD"
+
+
+def test_advance_waiting_real_no_fuel_ghost_push_still_vetoes(monkeypatch):
+    # A genuine ghost push -- thin volume AND HTF opposition -- is the
+    # one fuel state that still VETOES. Requires real HTF candles/data to
+    # even be detectable (see the 2026-09-07 fix comment in trade_plan.py
+    # on why the plain thin-volume-only case above no longer does).
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BEARISH", "trend_4h": "BEARISH", "aligned": 0, "opposed": 2,
+    })
+    plan = _plan(direction="LONG", trigger=100.0)
+    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=2.0, touched=True)  # thin + opposed -> NO_FUEL
+    result = tp.advance_waiting_plan(
+        plan, NOW, SESSION_EXPIRES, candles, live_price=100.0,
+        candles_1h=[{}], candles_4h=[{}], daily_atr14=25.0,
+    )
+    assert result is not None
     assert result["status"] == "VETOED"
-    assert result["fuel_at_cross"] in ("CONFLICTED", "NO_FUEL")
+    assert result["fuel_at_cross"] == "NO_FUEL"
     assert result["entry_mode"] is not None
 
 
@@ -197,10 +244,17 @@ def test_advance_vetoed_second_cross_fueled_fills():
     assert "entry_mode" not in result
 
 
-def test_advance_vetoed_second_cross_still_unfueled_done():
+def test_advance_vetoed_second_cross_still_no_fuel_done(monkeypatch):
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BEARISH", "trend_4h": "BEARISH", "aligned": 0, "opposed": 2,
+    })
     plan = _plan(status="VETOED", direction="LONG", trigger=100.0, entry_mode="TRIGGER_AT_LEVEL")
     candles = _candles(side="LONG", baseline_vol=10.0, push_vol=2.0, touched=True)
-    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=100.0)
+    result = tp.advance_waiting_plan(
+        plan, NOW, SESSION_EXPIRES, candles, live_price=100.0,
+        candles_1h=[{}], candles_4h=[{}], daily_atr14=25.0,
+    )
     assert result["status"] == "DONE"
     assert "no energy" in result["last_transition_reason"]
 

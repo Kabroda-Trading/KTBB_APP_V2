@@ -13,13 +13,14 @@
 # engine.py's r30-based stop_loss anywhere), and fuel_gate.py (already
 # ported from Brain, SS7).
 #
-# management text: the VALIDATED rule (30% off at T1, 70% runner, stop to
-# the fixed runner-stop level, T3 -- same for BOTH tiers), matching what
-# ledger_closing_engine.py actually runs. The spec's first draft described
-# something different (tier-dependent, stop-to-breakeven) -- a real spec/
-# code mismatch, caught and corrected in the Brain repo (commit d8a33ce)
-# rather than silently picked one way. Do not let this drift from
-# ledger_closing_engine.py's real behavior again without the same check.
+# management text: the AUDITED rule (2026-09-07 correction -- see
+# MANAGEMENT_TEXT's own comment below): 50% off at T1, stop stays
+# original, 50% runner to T3; PREMIUM only moves the stop to breakeven,
+# mechanically, at T2. This is what executor_live_engine.py (Domain 2)
+# implements for real money -- ledger_closing_engine.py's OLDER 30/70
+# rule is deprecated, not the reference anymore. Do not let this text
+# drift from executor_live_engine.py's real behavior without the same
+# check that caught this drift in the first place.
 #
 # Intraday state machine design (2026-08-31): TradePlan's own monitoring
 # only covers the PRE-FILL, fuel-gated entry logic (WAITING/VETOED/FILLED)
@@ -55,17 +56,27 @@ import fuel_gate
 import stop_planner as sp
 
 FUEL_REQUIREMENT_TEXT = (
-    "push must read FUELED at the cross (median-based push-volume ratio "
-    ">= 0.8x prior-24h baseline)"
+    "push must read FUELED or CONFLICTED at the cross (median-based push-"
+    "volume ratio >= 0.8x prior-24h baseline, or a real-but-conflicted "
+    "push) -- FUELED earns PREMIUM sizing if HTF/box also qualify, "
+    "CONFLICTED still fills as a real STANDARD trade. NO_FUEL (a ghost "
+    "push, no real volume) is the only fuel-based veto."
 )
 
-# Same for both tiers -- KABRODA_COM_TRADE_PLAN_SPEC.md SS3 (corrected,
-# commit d8a33ce), matching ledger_closing_engine.py's real Phase 2 logic.
+# 2026-09-07 (Domain 2 build, DeepSeek's live-email review, Kabroda AI
+# Brain repo AGENT_LOG.md 09:30/09:50 CT): CORRECTED. This constant used
+# to describe the pre-audit 30%-at-T1/70%-runner rule ("not tier-
+# dependent, not stop-to-breakeven") -- stale the moment GATE_REBUILD_
+# SPEC.md/CLEAN_REPORT.md validated the real, tier-differentiated 50/50
+# rule that executor_live_engine.py now implements for real money. Do
+# not let this drift from that rule again -- it's the one thing every
+# component (executor, this text, the old ledger_closing_engine.py which
+# is now itself marked deprecated) must agree on.
 MANAGEMENT_TEXT = (
-    "30% off at T1, stop moves to a fixed runner-stop level "
-    "(trigger -+ 0.15x box, ~0.25R loss if hit), 70% rides to T3. "
-    "Same rule for PREMIUM and STANDARD -- validated best-or-tied in every "
-    "regime (n=165); not tier-dependent, not stop-to-breakeven."
+    "50% off at T1, stop stays at the original level, 50% rides toward "
+    "T3. PREMIUM only: at T2, the stop moves to breakeven (mechanical, "
+    "unconditional -- not a judgment call). STANDARD: the stop never "
+    "moves before T3 or the original stop."
 )
 
 COMMIT_OFFSET_MINUTES = 45  # anchor_time + 45min = 08:45 CT / 09:45 ET (the open-window rule)
@@ -597,9 +608,9 @@ def render_brief(plan: Dict[str, Any]) -> str:
     verb = "BUY" if direction == "LONG" else "SELL"
 
     if tier is None:
-        tier_line = "Tier: TBD — stamped at the cross once the fuel check confirms (size, not the entry itself)"
+        tier_line = "Tier: TBD — stamped at the cross once the fuel check confirms (size and T2 handling, not the entry itself)"
     else:
-        tier_line = f"Tier: {tier} ({'runner management active' if tier == 'PREMIUM' else 'standard sizing'})"
+        tier_line = f"Tier: {tier} ({'stop moves to breakeven at T2' if tier == 'PREMIUM' else 'stop stays at the original level throughout'})"
 
     alignment_line = build_alignment_email_line(plan)
 
@@ -617,15 +628,17 @@ def render_brief(plan: Dict[str, Any]) -> str:
         "",
         f"  ORDER 1 (trigger/stop-entry): {verb} {trigger:,.2f}",
         f"  STOP: {stop:,.2f} — {stop_basis}",
-        f"  T1: {t1:,.2f} (take 30%, runner stop to the fixed level below)   "
-        f"T2: {t2:,.2f}   T3: {t3:,.2f} (open runner)",
+        f"  T1: {t1:,.2f} (take 50%, stop stays at the original level)   "
+        f"T2: {t2:,.2f}{' (PREMIUM: stop to breakeven here)' if tier == 'PREMIUM' else ''}   "
+        f"T3: {t3:,.2f} (runner exits here or at the stop)",
         "",
         f"  IF ALREADY BROKEN OUT AT COMMIT TIME: do not chase. Switch to "
         f"ORDER 2 — a limit at the line ({trigger:,.2f}); most breaks retest "
         f"the line before continuing.",
         "",
-        f"  FUEL RULE: {plan.get('fuel_requirement')}. If unfueled at the "
-        f"cross, the plan VETOES — stand down, wait for the retest.",
+        f"  FUEL RULE: {plan.get('fuel_requirement')}. A ghost push (NO_FUEL, "
+        f"no real volume) VETOES — stand down, wait for the retest. A "
+        f"CONFLICTED push still fills, as a real STANDARD trade.",
         "",
         f"  MANAGEMENT: {plan.get('management')}",
         "",
@@ -644,13 +657,23 @@ def _stamp_tier_at_cross(
     candles_1h: List[Dict[str, Any]],
     candles_4h: List[Dict[str, Any]],
     daily_atr14: float,
+    fuel_verdict: Optional[str] = None,
 ) -> str:
-    """PREMIUM if both HTF timeframes back the side AND box/ATR <= 0.40 at
-    the cross, else STANDARD -- decision_engine.py's own _core_gate() tier
-    formula, recomputed here (not reimplemented differently), for a plan
-    whose tier was left None at generation (the anticipate_setup() pre-
-    cross path -- see build_trade_plan()'s docstring) because it genuinely
-    couldn't be known until now.
+    """PREMIUM requires fuel FUELED specifically (not just fuel-condition-
+    passing) AND both HTF timeframes AND box/ATR <= 0.40 at the cross,
+    else STANDARD -- decision_engine.py's own _core_gate() tier formula
+    (2026-09-06 three-outcome rebuild), recomputed here (not reimplemented
+    differently), for a plan whose tier was left None at generation (the
+    anticipate_setup() pre-cross path -- see build_trade_plan()'s
+    docstring) because it genuinely couldn't be known until now.
+
+    fuel_verdict is optional ONLY for backward compatibility with any
+    caller that hasn't been updated yet -- omitting it means "assume
+    FUELED," which is safe for every existing call site (all of them
+    only ever call this from inside an `if verdict == "FUELED":` branch
+    today). New callers that also admit CONFLICTED crosses (2026-09-07,
+    DeepSeek's live-email review) MUST pass the real verdict, since
+    CONFLICTED can never earn PREMIUM -- only FUELED can.
     """
     import htf_fuel as _htf_fuel
     import reachability as _reachability
@@ -664,7 +687,8 @@ def _stamp_tier_at_cross(
     reach = _reachability.reachability(box, daily_atr14)
     ratio = reach.get("ratio")
 
-    premium = aligned == 2 and ratio is not None and ratio <= _reachability.PREMIUM_BOX_ATR
+    fueled = fuel_verdict is None or fuel_verdict == "FUELED"
+    premium = fueled and aligned == 2 and ratio is not None and ratio <= _reachability.PREMIUM_BOX_ATR
     return "PREMIUM" if premium else "STANDARD"
 
 
@@ -719,7 +743,23 @@ def advance_waiting_plan(
     side = "LONG" if is_long else "SHORT"
     trigger = plan.get("trigger_price")
 
-    fuel = fuel_gate.evaluate_fuel_gate(candles_5m, trigger, side)
+    # 2026-09-07 fix (same review that caught the CONFLICTED-veto bug
+    # below): without fuel_1h/fuel_4h, evaluate_fuel_gate() can only ever
+    # return FUELED or CONFLICTED here -- NO_FUEL specifically requires
+    # HTF opposition or divergence (fuel_gate.py's own verdict formula),
+    # neither of which this call could ever supply. That silently made
+    # the VETOED-for-NO_FUEL branch below unreachable from this path.
+    # Pass real HTF data through when it's available (same optional
+    # candles_1h/candles_4h already used for tier stamping) so a genuine
+    # ghost push can actually be detected here too, matching
+    # decision_engine.py's own call.
+    fuel_1h = fuel_4h = None
+    if candles_1h is not None and candles_4h is not None:
+        import htf_fuel as _htf_fuel
+        htf_for_fuel = _htf_fuel.htf_fuel(candles_1h, candles_4h, side)
+        fuel_1h, fuel_4h = htf_for_fuel.get("trend_1h"), htf_for_fuel.get("trend_4h")
+
+    fuel = fuel_gate.evaluate_fuel_gate(candles_5m, trigger, side, fuel_1h=fuel_1h, fuel_4h=fuel_4h)
     verdict = fuel.get("verdict")
 
     if verdict == "NO_PUSH":
@@ -760,32 +800,42 @@ def advance_waiting_plan(
         already_broken_out = (live_price > trigger) if is_long else (live_price < trigger)
         updates["entry_mode"] = "RETEST_LIMIT_AT_LINE" if already_broken_out else "TRIGGER_AT_LEVEL"
 
-    if verdict == "FUELED":
+    # 2026-09-07 fix (DeepSeek's live-email review, Kabroda AI Brain repo
+    # AGENT_LOG.md 09:30/09:50 CT): this used to require verdict == "FUELED"
+    # exactly, which VETOED a real, tradeable CONFLICTED-STANDARD cross --
+    # a genuine regression relative to the shipped Domain 1 rebuild
+    # (decision_engine.py's own gate has admitted FUELED-or-CONFLICTED
+    # since that rebuild; NO_FUEL is the only fuel-based veto). Widened to
+    # match. _stamp_tier_at_cross() is told the real verdict so a
+    # CONFLICTED cross can never accidentally earn PREMIUM (only FUELED
+    # can, per that function's own gate).
+    if verdict in ("FUELED", "CONFLICTED"):
         updates["status"] = "FILLED"
         updates["fill_time"] = now_utc
         updates["fill_price"] = trigger
         # faked_first (SS9a): did the FIRST cross wick back before
         # acceptance? True only when this fill is the retest after an
-        # earlier unfueled cross (status was already VETOED coming in) --
+        # earlier NO_FUEL cross (status was already VETOED coming in) --
         # a direct first-cross fill is a clean acceptance, not a fake.
         updates["faked_first"] = (status == "VETOED")
         push_ratio = (fuel.get("checks") or {}).get("push_volume", {}).get("ratio")
         prefix = "second " if status == "VETOED" else ""
-        updates["last_transition_reason"] = f"{prefix}cross fueled ({push_ratio}x baseline) -- filled"
+        updates["last_transition_reason"] = f"{prefix}cross {verdict.lower()} ({push_ratio}x baseline) -- filled"
         if plan.get("tier") is None and candles_1h is not None and candles_4h is not None and daily_atr14:
-            updates["tier"] = _stamp_tier_at_cross(plan, candles_1h, candles_4h, daily_atr14)
+            updates["tier"] = _stamp_tier_at_cross(plan, candles_1h, candles_4h, daily_atr14, fuel_verdict=verdict)
         return updates
 
-    # NO_FUEL / CONFLICTED
+    # Only NO_FUEL (a ghost push, no real volume) reaches here -- FUELED
+    # and CONFLICTED are both handled above, NO_PUSH is handled earlier.
     if status == "VETOED":
         # This is already the second cross (VETOED can only be reached after
-        # exactly one unfueled cross -- no counter column needed).
+        # exactly one NO_FUEL cross -- no counter column needed).
         updates["status"] = "DONE"
-        updates["last_transition_reason"] = f"second cross also unfueled ({verdict}) -- no energy, done for the day"
+        updates["last_transition_reason"] = f"second cross also {verdict} -- no energy, done for the day"
         return updates
 
     updates["status"] = "VETOED"
-    updates["last_transition_reason"] = f"cross unfueled ({verdict}) -- waiting for the retest"
+    updates["last_transition_reason"] = f"cross {verdict} (ghost push) -- waiting for the retest"
     return updates
 
 

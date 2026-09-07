@@ -298,9 +298,17 @@ def init_db():
         except Exception:
             pass
 
-    # --- RUNNER MECHANIC (LIVE) — 15M-only, the validated 30%-at-T1 /
-    # fixed-runner-stop / 70%-to-T3 rule (KABRODA_REBUILD_SPEC.md SS6),
-    # authoritative as of 2026-08-30 -- see the CampaignLog model comment.
+    # --- RUNNER MECHANIC (LIVE) — 15M-only, the 30%-at-T1 / fixed-
+    # runner-stop / 70%-to-T3 rule (KABRODA_REBUILD_SPEC.md SS6),
+    # authoritative 2026-08-30 through 2026-09-06. DEPRECATED as of
+    # 2026-09-07 -- the real audit (CLEAN_REPORT.md, Kabroda AI Brain
+    # repo) validated a different, tier-differentiated 50/50 rule
+    # instead (see ExecutorOrder's t1_leg_r/runner_r comment and
+    # executor_live_engine.py, which implements it for real money).
+    # These CampaignLog columns still exist and are still written by
+    # ledger_closing_engine.py (now marked deprecated in its own module
+    # header) -- kept for schema/history continuity, not the source of
+    # truth for the management rule anymore.
     for _col in [
         "runner_active BOOLEAN DEFAULT FALSE",
         "runner_stop FLOAT",
@@ -777,7 +785,12 @@ class CampaignLog(Base):
     shadow_runner_leg2_r = Column(Float, nullable=True)
     shadow_runner_blended_r = Column(Float, nullable=True)
 
-    # --- RUNNER MECHANIC (LIVE, 2026-08-30) -- 15M ONLY, AUTHORITATIVE ---
+    # --- RUNNER MECHANIC (LIVE, 2026-08-30) -- 15M ONLY. SUPERSEDED
+    # 2026-09-07 -- see the DEPRECATED note at this migration's ALTER
+    # TABLE block above; CLEAN_REPORT.md's later, real audit validated a
+    # different, tier-differentiated 50/50 rule instead, now the source
+    # of truth (executor_live_engine.py). Historical record below is
+    # accurate for what WAS validated at the time, kept for context. ---
     # The shadow_runner_* columns above modeled "close 50% at T1, run the
     # rest" (2026-07-06) as a record-only comparison against a real ledger
     # that closed 100% at T1 -- KABRODA_REBUILD_SPEC.md SS6 later validated a
