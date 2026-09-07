@@ -123,7 +123,7 @@
     </div>
 
     <div class="card">
-        <div class="card-header"><span class="card-title">Recent Dry-Run Orders</span></div>
+        <div class="card-header"><span class="card-title">Recent Orders (Dry-Run + Real Domain 2 Positions)</span></div>
         <div class="card-body" id="ordersBody">
             <p class="empty">Loading...</p>
         </div>
@@ -409,7 +409,7 @@ async function recordTradeResult(accountId) {
 // a JS prompt() -- a second, visible layer of friction on top of the
 // server's own gating.
 
-const _TINY_TEST_ACTIVE_STATUSES = ["STARTED", "ORDER_PLACED", "FILL_CONFIRMED", "TPSL_SET", "T1_LIMIT_PLACED", "PARTIAL_CLOSED", "SL_MOVED_BREAKEVEN"];
+const _TINY_TEST_ACTIVE_STATUSES = ["STARTED", "ORDER_PLACED", "FILL_CONFIRMED", "TPSL_SET", "T1_LIMIT_PLACED", "T1_AND_T3_LIMITS_PLACED", "PARTIAL_CLOSED", "SL_MOVED_BREAKEVEN"];
 
 async function loadTinyTestForAccount(accountId, hasCredentials) {
     const box = document.getElementById(`tinyTest-${accountId}`);
@@ -458,7 +458,15 @@ function renderTinyTestSection(accountId, hasCredentials, active, allTests) {
                     <label>Type exactly: CONFIRM PLACE RESTING T1 LIMIT<input type="text" id="t1LimitPlaceConfirm-${accountId}"></label>
                     <button class="btn btn-danger" onclick="placeRestingT1Limit(${accountId}, ${active.id}, this)" style="align-self:flex-end;">PLACE RESTING T1 LIMIT</button>
                 </div>
-                <p class="empty" style="margin-top:4px;">A plain resting reduce-only LIMIT order sitting on the book -- the mechanism Component B's management policy actually depends on, distinct from the TP/SL bracket above. May sit unfilled for a while; check back with the status button once placed. Use a small T1 % for a real live test session so it actually touches.</p>`;
+                <p class="empty" style="margin-top:4px;">A plain resting reduce-only LIMIT order sitting on the book -- the mechanism Component B's management policy actually depends on, distinct from the TP/SL bracket above. May sit unfilled for a while; check back with the status button once placed. Use a small T1 % for a real live test session so it actually touches.</p>
+                <div class="risk-form" style="margin-top:6px; border-top:1px solid #1e293b; padding-top:6px;">
+                    <label>Domain 2 pre-flight: T1 %<input type="number" step="0.0001" id="t1t3LimitT1Pct-${accountId}" value="0.01" style="width:80px;"></label>
+                    <label>T3 %<input type="number" step="0.0001" id="t1t3LimitT3Pct-${accountId}" value="0.02" style="width:80px;"></label>
+                    <label>Qty %<input type="number" step="1" id="t1t3LimitQtyPct-${accountId}" value="50" style="width:70px;"></label>
+                    <label>Type exactly: CONFIRM PLACE CONCURRENT T1 T3 LIMITS<input type="text" id="t1t3LimitPlaceConfirm-${accountId}"></label>
+                    <button class="btn btn-danger" onclick="placeConcurrentT1T3Limits(${accountId}, ${active.id}, this)" style="align-self:flex-end;">PLACE CONCURRENT T1+T3</button>
+                </div>
+                <p class="empty" style="margin-top:4px;">REQUIRED before executor_live_engine.py is trusted with a real trade: places the stop + T1 + T3 resting limits all at once, exactly like the real engine will, and captures whether the stop's covered qty auto-tracks once a leg fills.</p>`;
         } else if (active.status === "T1_LIMIT_PLACED") {
             html += `
                 <div style="font-family:'JetBrains Mono'; font-size:11px; margin-bottom:8px;">
@@ -472,8 +480,22 @@ function renderTinyTestSection(accountId, hasCredentials, active, allTests) {
                     <label>Type exactly: CONFIRM CANCEL RESTING T1 LIMIT<input type="text" id="t1LimitCancelConfirm-${accountId}"></label>
                     <button class="btn btn-danger" onclick="cancelRestingT1Limit(${accountId}, ${active.id}, this)" style="align-self:flex-end;">CANCEL</button>
                 </div>`;
+        } else if (active.status === "T1_AND_T3_LIMITS_PLACED") {
+            html += `
+                <div style="font-family:'JetBrains Mono'; font-size:11px; margin-bottom:8px;">
+                    T1: target=${active.t1_limit_target_price ?? "-"} qty=${active.t1_limit_qty ?? "-"} order=${escapeHtml(active.t1_limit_exchange_order_id) || "-"}<br>
+                    T3: target=${active.t3_limit_target_price ?? "-"} qty=${active.t3_limit_qty ?? "-"} order=${escapeHtml(active.t3_limit_exchange_order_id) || "-"}
+                </div>
+                <div class="risk-form">
+                    <button class="btn" onclick="checkConcurrentLimitsStatus(${accountId}, ${active.id}, this)">CHECK STATUS (+ TP/SL SNAPSHOT)</button>
+                </div>
+                <div class="risk-form" style="margin-top:6px;">
+                    <label>Type exactly: CONFIRM CANCEL CONCURRENT T1 T3 LIMITS<input type="text" id="t1t3LimitCancelConfirm-${accountId}"></label>
+                    <button class="btn btn-danger" onclick="cancelConcurrentLimits(${accountId}, ${active.id}, this)" style="align-self:flex-end;">CANCEL BOTH</button>
+                </div>
+                ${active.tpsl_check_after_leg_fill_response_json ? `<pre style="font-size:10px; overflow-x:auto; background:#0f172a; padding:6px; border-radius:4px;">${escapeHtml(active.tpsl_check_after_leg_fill_response_json)}</pre>` : ""}`;
         } else {
-            html += '<p class="empty">Partial close (or the alt resting T1 limit) requires status TPSL_SET.</p>';
+            html += '<p class="empty">Partial close (or the alt resting limits) requires status TPSL_SET.</p>';
         }
 
         if (active.status === "PARTIAL_CLOSED") {
@@ -589,6 +611,33 @@ async function cancelRestingT1Limit(accountId, testId, btn) {
         { confirm: confirm_ }, "failed to cancel resting T1 limit", accountId);
 }
 
+// ------------------------------------------------------------------ Domain 2 required live pre-flight: concurrent T1+T3 (2026-09-07)
+// The exact combination executor_live_engine.py needs (stop + T1 + T3
+// all resting at once) -- never tested live before this. Must pass here
+// first.
+
+async function placeConcurrentT1T3Limits(accountId, testId, btn) {
+    const t1_pct = parseFloat(document.getElementById(`t1t3LimitT1Pct-${accountId}`).value) || 0.01;
+    const t3_pct = parseFloat(document.getElementById(`t1t3LimitT3Pct-${accountId}`).value) || 0.02;
+    const qty_pct = (parseFloat(document.getElementById(`t1t3LimitQtyPct-${accountId}`).value) || 50) / 100;
+    const confirm_ = document.getElementById(`t1t3LimitPlaceConfirm-${accountId}`).value;
+    await _runTinyTestAction(`t1t3limit-place-${accountId}`, btn,
+        `/api/executor/accounts/${accountId}/tiny-test/${testId}/place-concurrent-t1-t3-limits`,
+        { confirm: confirm_, t1_pct, t3_pct, qty_pct }, "failed to place concurrent T1+T3 limits", accountId);
+}
+async function checkConcurrentLimitsStatus(accountId, testId, btn) {
+    // No confirm phrase -- read-only exchange calls only.
+    await _runTinyTestAction(`t1t3limit-check-${accountId}`, btn,
+        `/api/executor/accounts/${accountId}/tiny-test/${testId}/check-concurrent-limits-status`,
+        {}, "failed to check concurrent limits status", accountId);
+}
+async function cancelConcurrentLimits(accountId, testId, btn) {
+    const confirm_ = document.getElementById(`t1t3LimitCancelConfirm-${accountId}`).value;
+    await _runTinyTestAction(`t1t3limit-cancel-${accountId}`, btn,
+        `/api/executor/accounts/${accountId}/tiny-test/${testId}/cancel-concurrent-limits`,
+        { confirm: confirm_ }, "failed to cancel concurrent limits", accountId);
+}
+
 async function engageKillSwitch(id) {
     const reason = prompt("Reason for engaging this account's kill switch:", "manual") || "manual";
     await api(`/api/executor/accounts/${id}/kill-switch`, { method: "POST", body: JSON.stringify({ reason }) });
@@ -658,17 +707,31 @@ async function testConnection(id) {
     box.textContent = (resp.ok ? "VERIFY-AUTH: ALL CHECKS PASSED\n\n" : "VERIFY-AUTH: ONE OR MORE CHECKS FAILED\n\n") + lines.join("\n\n");
 }
 
+// 2026-09-07, Domain 2 (executor_live_engine.py) -- real managed-trade
+// state for mode=LIVE rows. Read-only, mirrors the same table as the
+// original DRY_RUN-only card -- this system runs itself, no controls
+// here beyond the existing kill switches elsewhere on this page.
+function _orderStateBadge(o) {
+    if (o.mode !== "LIVE" || !o.management_state) return "";
+    const closed = (o.management_state || "").startsWith("CLOSED_");
+    const color = closed ? (o.close_reason === "T3" || (o.realized_pnl_r ?? 0) > 0 ? "badge-ok" : "badge-danger") : "badge-neutral";
+    return `<span class="badge ${color}">${escapeHtml(o.management_state)}</span>`;
+}
+
 async function loadOrders() {
     const data = await api("/api/executor/orders?limit=50");
     const body = document.getElementById("ordersBody");
     if (!data.ok) { body.innerHTML = `<p class="empty">${escapeHtml(data.error || "failed to load")}</p>`; return; }
-    if (!data.orders.length) { body.innerHTML = '<p class="empty">No dry-run orders yet.</p>'; return; }
-    body.innerHTML = `<table><thead><tr><th>ID</th><th>Symbol</th><th>Dir</th><th>Qty</th><th>Lev</th><th>Decision</th><th>Reason</th><th>When</th></tr></thead><tbody>` +
+    if (!data.orders.length) { body.innerHTML = '<p class="empty">No orders yet.</p>'; return; }
+    body.innerHTML = `<table><thead><tr><th>ID</th><th>Symbol</th><th>Dir</th><th>Tier</th><th>Qty</th><th>Lev</th><th>Decision</th><th>Domain 2 State</th><th>Realized R</th><th>Reason</th><th>When</th></tr></thead><tbody>` +
         data.orders.map(o => `<tr>
             <td>#${o.id}</td><td>${escapeHtml(o.symbol)}</td><td>${escapeHtml(o.direction)}</td>
+            <td>${o.tier ? escapeHtml(o.tier) : "-"}</td>
             <td>${o.qty !== null ? o.qty.toFixed(4) : "-"}</td><td>${o.leverage_used ?? "-"}</td>
             <td><span class="badge ${o.decision === 'WOULD_PLACE' ? 'badge-ok' : (o.decision === 'REJECTED' ? 'badge-danger' : 'badge-neutral')}">${escapeHtml(o.decision)}</span></td>
-            <td style="max-width:320px; white-space:normal;">${escapeHtml(o.decision_reason)}</td>
+            <td>${_orderStateBadge(o)}</td>
+            <td>${o.realized_pnl_r !== null && o.realized_pnl_r !== undefined ? o.realized_pnl_r.toFixed(3) : "-"}</td>
+            <td style="max-width:280px; white-space:normal;">${escapeHtml(o.mode === "LIVE" && o.management_state ? (o.close_reason || "") : o.decision_reason)}</td>
             <td>${o.created_at ? _parseServerTimestamp(o.created_at).toLocaleString() : "-"}</td>
         </tr>`).join("") + `</tbody></table>`;
 }

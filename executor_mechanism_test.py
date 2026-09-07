@@ -690,6 +690,253 @@ async def cancel_resting_t1_limit(
         raise
 
 
+# 2026-09-07 -- Domain 2 REQUIRED LIVE PRE-FLIGHT (executor_live_engine.py's
+# approved plan): the real engine places a protective stop (TP/SL) + a
+# resting T1 reduce-only LIMIT + a resting T3 reduce-only LIMIT all
+# CONCURRENTLY on the same position, right after entry fill. Only the
+# single-resting-T1-limit case (above) has ever been tested live -- this
+# is the one open technical question before that engine is trusted with
+# a real TradePlan fill: do all three coexist without the exchange
+# rejecting anything, and does the TP/SL's effective covered qty auto-
+# track the remaining position once one leg fills, or does it silently
+# over/under-cover? This step answers that empirically, on a real
+# account, with a few dollars of exposure -- same discipline as every
+# other step in this ladder. Starts from TPSL_SET, same as
+# place_resting_t1_limit() -- a second, alternate way to reach
+# PARTIAL_CLOSED, this time via two concurrent resting limits instead of
+# one.
+_T3_LIMIT_STILL_PENDING_STATUSES = _T1_LIMIT_STILL_PENDING_STATUSES
+
+
+async def place_concurrent_t1_t3_limits(
+    db: Session, account: ExecutorAccount, test_row: ExecutorMechanismTest, actor: str,
+    t1_pct: float = _DEFAULT_TP_SL_PCT, t3_pct: float = 0.02, qty_pct: float = _DEFAULT_PARTIAL_CLOSE_PCT,
+) -> ExecutorMechanismTest:
+    """Places T1 (qty_pct of qty, above fill) AND T3 (the remaining qty,
+    further above fill) as two SEPARATE resting reduce-only LIMIT orders,
+    both alongside the TP/SL stop already set by
+    place_confirm_and_set_initial_tpsl(). Fire-and-return, same as
+    place_resting_t1_limit() -- check_concurrent_limits_status() checks
+    back later. t3_pct must be strictly greater than t1_pct (T3 sits
+    further out) -- checked here, not assumed, since a caller typo could
+    otherwise produce two crossed resting limits."""
+    if test_row.status != "TPSL_SET":
+        raise MechanismTestInvalidState(f"cannot place concurrent T1+T3 limits from status {test_row.status!r} -- expected TPSL_SET")
+    if t3_pct <= t1_pct:
+        raise ValueError(f"t3_pct ({t3_pct}) must be strictly greater than t1_pct ({t1_pct}) -- T3 sits further from fill than T1")
+    api_key, api_secret = await _require_gates_open(db, account)
+    client = executor_bitunix_client.BitunixClient(api_key, api_secret)
+
+    t1_target_price = test_row.fill_price * (1 + t1_pct)
+    t3_target_price = test_row.fill_price * (1 + t3_pct)
+    t1_price_str = executor_sizing.round_price_to_precision(t1_target_price, test_row.quote_precision)
+    t3_price_str = executor_sizing.round_price_to_precision(t3_target_price, test_row.quote_precision)
+    t1_qty_str = executor_sizing.round_qty_to_precision(test_row.qty * qty_pct, test_row.base_precision)
+    t3_qty_str = executor_sizing.round_qty_to_precision(test_row.qty - float(t1_qty_str), test_row.base_precision)
+    try:
+        if float(t1_qty_str) <= 0 or float(t3_qty_str) <= 0:
+            raise ValueError(
+                f"T1/T3 qty split of qty={test_row.qty} at qty_pct={qty_pct:.0%} floors to T1={t1_qty_str}/T3={t3_qty_str} "
+                f"at {test_row.base_precision} decimals -- unrepresentable, refusing to send a zero-qty order")
+
+        t1_resp = await client.place_order(
+            symbol=_TEST_SYMBOL, qty=t1_qty_str, price=t1_price_str, side="SELL", trade_side="CLOSE",
+            order_type="LIMIT", position_id=test_row.position_id, reduce_only=True, effect="POST_ONLY")
+        test_row.t1_limit_place_response_json = json.dumps(t1_resp, default=str)
+        test_row.t1_limit_target_price = float(t1_price_str)
+        test_row.t1_limit_qty = float(t1_qty_str)
+        test_row.t1_limit_exchange_order_id = t1_resp["data"]["orderId"]
+        db.flush()
+        executor_accounts.write_audit(
+            db, "TEST_T1_LIMIT_PLACED", f"[concurrent pre-flight] T1 resting reduce-only LIMIT placed at {t1_price_str} for qty={t1_qty_str}",
+            account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=t1_resp)
+
+        t3_resp = await client.place_order(
+            symbol=_TEST_SYMBOL, qty=t3_qty_str, price=t3_price_str, side="SELL", trade_side="CLOSE",
+            order_type="LIMIT", position_id=test_row.position_id, reduce_only=True, effect="POST_ONLY")
+        test_row.t3_limit_place_response_json = json.dumps(t3_resp, default=str)
+        test_row.t3_limit_target_price = float(t3_price_str)
+        test_row.t3_limit_qty = float(t3_qty_str)
+        test_row.t3_limit_exchange_order_id = t3_resp["data"]["orderId"]
+        test_row.status = "T1_AND_T3_LIMITS_PLACED"
+        db.flush()
+        executor_accounts.write_audit(
+            db, "TEST_T1_LIMIT_PLACED",
+            f"[concurrent pre-flight] T3 resting reduce-only LIMIT ALSO placed at {t3_price_str} for qty={t3_qty_str} -- "
+            f"both now resting concurrently alongside the existing TP/SL stop (positionId={test_row.position_id})",
+            account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=t3_resp)
+        return test_row
+    except Exception as e:
+        test_row.status = "FAILED"
+        test_row.error_detail = str(e)
+        db.flush()
+        executor_accounts.write_audit(
+            db, "TEST_MECHANISM_FAILED", f"place concurrent T1+T3 limits failed: {e}",
+            account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor)
+        raise
+
+
+async def check_concurrent_limits_status(
+    db: Session, account: ExecutorAccount, test_row: ExecutorMechanismTest, actor: str,
+) -> ExecutorMechanismTest:
+    """ONE on-demand check of BOTH resting limits' order status, PLUS an
+    unconditional get_pending_tp_sl_order snapshot -- the actual evidence
+    for the open question this whole step exists to answer (does the
+    stop's effective covered qty auto-track after a leg fills, or does it
+    silently over/under-cover). That snapshot is captured every time this
+    is called, filled-or-not, and never interpreted/enforced by code --
+    it's for Andy/DeepSeek to read directly (tpsl_check_after_leg_fill_
+    response_json). Moves to PARTIAL_CLOSED once EITHER leg fills (same
+    "fails closed on anything unexpected" discipline as
+    check_resting_t1_limit_status())."""
+    if test_row.status != "T1_AND_T3_LIMITS_PLACED":
+        raise MechanismTestInvalidState(f"cannot check concurrent limits status from status {test_row.status!r} -- expected T1_AND_T3_LIMITS_PLACED")
+    api_key, api_secret = await _require_gates_open(db, account)
+    client = executor_bitunix_client.BitunixClient(api_key, api_secret)
+    try:
+        t1_resp = await client.get_order_detail(order_id=test_row.t1_limit_exchange_order_id)
+        test_row.t1_limit_check_response_json = json.dumps(t1_resp, default=str)
+        t3_resp = await client.get_order_detail(order_id=test_row.t3_limit_exchange_order_id)
+        test_row.t3_limit_check_response_json = json.dumps(t3_resp, default=str)
+        db.flush()
+        if t1_resp.get("code") not in (0, None):
+            raise ValueError(f"get_order_detail(T1) returned a real API error: code={t1_resp.get('code')} msg={t1_resp.get('msg')!r}")
+        if t3_resp.get("code") not in (0, None):
+            raise ValueError(f"get_order_detail(T3) returned a real API error: code={t3_resp.get('code')} msg={t3_resp.get('msg')!r}")
+        t1_status = (t1_resp.get("data") or {}).get("status")
+        t3_status = (t3_resp.get("data") or {}).get("status")
+
+        # The evidence this step exists to capture -- taken regardless of
+        # either leg's status, so a "still pending" check still shows the
+        # baseline TP/SL state for comparison against the post-fill one.
+        tpsl_snapshot = await client.get_pending_tp_sl_order(symbol=_TEST_SYMBOL, position_id=test_row.position_id)
+        test_row.tpsl_check_after_leg_fill_response_json = json.dumps(tpsl_snapshot, default=str)
+        db.flush()
+
+        any_filled = t1_status == "FILLED" or t3_status == "FILLED"
+        both_pending = t1_status in _T1_LIMIT_STILL_PENDING_STATUSES and t3_status in _T3_LIMIT_STILL_PENDING_STATUSES
+
+        if not any_filled and not both_pending:
+            test_row.status = "FAILED"
+            test_row.error_detail = (
+                f"concurrent T1/T3 limits report unexpected statuses (T1={t1_status!r}, T3={t3_status!r}) -- "
+                f"CHECK THE EXCHANGE DIRECTLY. Raw responses saved (t1_limit_check_response_json/t3_limit_check_response_json)."
+            )
+            db.flush()
+            executor_accounts.write_audit(
+                db, "TEST_MECHANISM_FAILED", test_row.error_detail,
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail={"t1": t1_resp, "t3": t3_resp})
+            return test_row
+
+        if both_pending:
+            executor_accounts.write_audit(
+                db, "TEST_T1_LIMIT_STATUS_CHECKED",
+                f"[concurrent pre-flight] both T1 ({t1_status}) and T3 ({t3_status}) still pending -- TP/SL snapshot captured",
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=tpsl_snapshot)
+            return test_row
+
+        filled_leg = "T1" if t1_status == "FILLED" else "T3"
+        filled_qty = test_row.t1_limit_qty if filled_leg == "T1" else test_row.t3_limit_qty
+        expected_remaining_qty = test_row.qty - filled_qty
+        problem = await _verify_position_after_reduction(client, test_row, expected_remaining_qty)
+        db.flush()
+        if problem is not None:
+            test_row.status = "FAILED"
+            test_row.error_detail = f"{problem} -- CHECK THE EXCHANGE DIRECTLY. Raw response saved (partial_close_position_check_response_json)."
+            db.flush()
+            executor_accounts.write_audit(
+                db, "TEST_MECHANISM_FAILED", test_row.error_detail,
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor)
+            return test_row
+
+        test_row.status = "PARTIAL_CLOSED"
+        db.flush()
+        executor_accounts.write_audit(
+            db, "TEST_T1_LIMIT_FILLED",
+            f"[concurrent pre-flight] {filled_leg} leg filled while the other rested unfilled alongside the TP/SL stop -- "
+            f"remaining position verified (positionId={test_row.position_id}, qty={test_row.qty_after_partial_close}). "
+            f"See tpsl_check_after_leg_fill_response_json for whether the stop's covered qty auto-tracked.",
+            account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=tpsl_snapshot)
+        return test_row
+    except Exception as e:
+        test_row.status = "FAILED"
+        test_row.error_detail = str(e)
+        db.flush()
+        executor_accounts.write_audit(
+            db, "TEST_MECHANISM_FAILED", f"check concurrent limits status failed: {e}",
+            account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor)
+        raise
+
+
+async def cancel_concurrent_limits(
+    db: Session, account: ExecutorAccount, test_row: ExecutorMechanismTest, actor: str,
+) -> ExecutorMechanismTest:
+    """Cancels BOTH resting limits (whichever are still live) via one
+    batch cancel_orders call, then confirms via get_order_detail exactly
+    like cancel_resting_t1_limit() -- reverts to TPSL_SET only if NEITHER
+    leg filled before the cancel landed; treats any real fill found on
+    either leg as a partial close instead, same "never assume, always
+    verify" discipline."""
+    if test_row.status != "T1_AND_T3_LIMITS_PLACED":
+        raise MechanismTestInvalidState(f"cannot cancel concurrent limits from status {test_row.status!r} -- expected T1_AND_T3_LIMITS_PLACED")
+    api_key, api_secret = await _require_gates_open(db, account)
+    client = executor_bitunix_client.BitunixClient(api_key, api_secret)
+    try:
+        order_ids = [test_row.t1_limit_exchange_order_id, test_row.t3_limit_exchange_order_id]
+        cancel_resp = await client.cancel_orders(_TEST_SYMBOL, order_ids)
+        test_row.t1_limit_cancel_response_json = json.dumps(cancel_resp, default=str)
+        test_row.t3_limit_cancel_response_json = test_row.t1_limit_cancel_response_json
+        db.flush()
+
+        t1_detail = await client.get_order_detail(order_id=test_row.t1_limit_exchange_order_id)
+        t3_detail = await client.get_order_detail(order_id=test_row.t3_limit_exchange_order_id)
+        test_row.t1_limit_check_response_json = json.dumps(t1_detail, default=str)
+        test_row.t3_limit_check_response_json = json.dumps(t3_detail, default=str)
+        db.flush()
+        if t1_detail.get("code") not in (0, None) or t3_detail.get("code") not in (0, None):
+            raise ValueError(f"get_order_detail returned a real API error after cancel: T1 code={t1_detail.get('code')}, T3 code={t3_detail.get('code')}")
+
+        t1_traded = float((t1_detail.get("data") or {}).get("tradeQty") or 0)
+        t3_traded = float((t3_detail.get("data") or {}).get("tradeQty") or 0)
+        tolerance = 0.5 * (10 ** -test_row.base_precision)
+
+        if t1_traded > tolerance or t3_traded > tolerance:
+            filled_qty = t1_traded if t1_traded > tolerance else t3_traded
+            expected_remaining_qty = test_row.qty - filled_qty
+            problem = await _verify_position_after_reduction(client, test_row, expected_remaining_qty)
+            db.flush()
+            if problem is not None:
+                test_row.status = "FAILED"
+                test_row.error_detail = f"{problem} -- CHECK THE EXCHANGE DIRECTLY."
+                db.flush()
+                executor_accounts.write_audit(
+                    db, "TEST_MECHANISM_FAILED", test_row.error_detail,
+                    account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor)
+                return test_row
+            test_row.status = "PARTIAL_CLOSED"
+            db.flush()
+            executor_accounts.write_audit(
+                db, "TEST_T1_LIMIT_CANCELED_AFTER_PARTIAL_FILL",
+                f"[concurrent pre-flight] canceled but a leg had already filled (T1={t1_traded}, T3={t3_traded}) before the cancel landed",
+                account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail={"t1": t1_detail, "t3": t3_detail})
+            return test_row
+
+        test_row.status = "TPSL_SET"
+        db.flush()
+        executor_accounts.write_audit(
+            db, "TEST_T1_LIMIT_CANCELED", "[concurrent pre-flight] both resting limits canceled, confirmed nothing filled, position unchanged",
+            account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor, detail=cancel_resp)
+        return test_row
+    except Exception as e:
+        test_row.status = "FAILED"
+        test_row.error_detail = str(e)
+        db.flush()
+        executor_accounts.write_audit(
+            db, "TEST_MECHANISM_FAILED", f"cancel concurrent limits failed: {e}",
+            account_id=account.id, executor_mechanism_test_id=test_row.id, actor=actor)
+        raise
+
+
 async def move_sl_to_breakeven(
     db: Session, account: ExecutorAccount, test_row: ExecutorMechanismTest, actor: str,
 ) -> ExecutorMechanismTest:
