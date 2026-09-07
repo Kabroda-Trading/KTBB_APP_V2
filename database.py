@@ -433,6 +433,23 @@ def init_db():
         except Exception:
             pass
 
+    # 2026-09-07 stagnant-sweep fix: is_admin/operator_flex were added to
+    # the UserModel class directly with no corresponding ALTER TABLE
+    # entry, violating this file's own documented convention ("Schema
+    # changes are raw ALTER TABLE statements wrapped in try/except inside
+    # init_db()"). Only worked on databases created fresh (via
+    # Base.metadata.create_all()) AFTER these columns already existed on
+    # the class -- any older/existing database (confirmed: this repo's
+    # own local dev kabroda.db) crashes on the first admin-gated request
+    # with "no such column: users.is_admin". Postgres-safe: BOOLEAN
+    # DEFAULT FALSE, never 0/1.
+    for _col in ["is_admin BOOLEAN DEFAULT FALSE", "operator_flex BOOLEAN DEFAULT FALSE"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- GATE_LOG SS9a MIGRATIONS (2026-08-31 -- see the GateLog class
     # docstring above for what each column is and why) ---
     for _col in [

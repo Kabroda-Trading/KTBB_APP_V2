@@ -1261,14 +1261,27 @@ _CONFIRM_TINY_TEST_CANCEL_T1_T3_LIMITS = "CONFIRM CANCEL CONCURRENT T1 T3 LIMITS
 
 
 def _executor_owner_or_admin(ctx: Dict[str, Any], account: Optional["_ExecutorAccount"]) -> bool:
-    if ctx.get("is_admin"):
-        return True
+    # 2026-09-07, Andy's explicit instruction (stagnant-surface sweep):
+    # full mutual isolation between users on the executor domain -- "I
+    # don't wanna be able to see his stuff, he doesn't care about mine."
+    # The account LIST route already had zero admin bypass (2026-09-05,
+    # same reasoning) -- this brought every individual account's detail/
+    # action routes (credentials, mode, sizing, kill switch, mechanism
+    # test) into agreement with that, rather than leaving an inconsistent
+    # back door on one side and not the other. `is_admin` still governs
+    # everything ELSE on the site (account creation's user picker, other
+    # admin-only pages) -- this function is executor-account-ownership
+    # specific, not a general admin check.
     user = ctx.get("user")
     return bool(account and user and account.user_id == getattr(user, "id", None))
 
 
 class ExecutorCreateAccountRequest(BaseModel):
-    user_id: int
+    # 2026-09-07: user_id now optional. Self-service creators (see the
+    # route) never need to send it -- it's forced to their own id
+    # server-side. Only an admin using the "create for someone else"
+    # picker needs to pass a different id.
+    user_id: Optional[int] = None
     label: str
     exchange: str = "bitunix"
 
@@ -1389,10 +1402,24 @@ async def api_executor_list_accounts(request: Request, db: Session = Depends(get
 
 @app.post("/api/executor/accounts")
 async def api_executor_create_account(request: Request, body: ExecutorCreateAccountRequest, db: Session = Depends(get_db)):
+    # 2026-09-07: self-service creation, per Andy's explicit ask -- each
+    # user ("Gross Monkey" included) should be able to walk in and link
+    # up their OWN exchange account without needing an admin to do it
+    # for them, the same way Andy set his own up. Any logged-in user may
+    # create an account for THEMSELVES (user_id forced to their own id,
+    # ignoring whatever the client sent, if anything). An admin may still
+    # create one on behalf of a specific other user (the roster picker in
+    # executor_admin.html) by passing a different user_id -- kept for
+    # onboarding help, not required for a user to get started.
     ctx = get_user_context(request, db)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
-    account = _executor_accounts.create_account(db, user_id=body.user_id, label=body.label, exchange=body.exchange, created_by=ctx.get("email"))
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Login required."}, status_code=403)
+    target_user_id = ctx["user"].id
+    if body.user_id is not None and body.user_id != ctx["user"].id:
+        if not ctx.get("is_admin"):
+            return JSONResponse({"ok": False, "error": "Only an admin can create an account for another user."}, status_code=403)
+        target_user_id = body.user_id
+    account = _executor_accounts.create_account(db, user_id=target_user_id, label=body.label, exchange=body.exchange, created_by=ctx.get("email"))
     db.commit()
     return JSONResponse({"ok": True, "account": _serialize_account(account)})
 

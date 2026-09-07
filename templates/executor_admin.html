@@ -106,24 +106,29 @@
         </div>
     </div>
 
-    {% if is_admin %}
     <div class="card">
         <div class="card-header"><span class="card-title">Create Account</span></div>
         <div class="card-body">
             <div class="risk-form">
-                <label>User<select id="newAccountUserId">
+                {% if is_admin %}
+                <label>User (defaults to you -- pick someone else only to set an account up on their behalf)<select id="newAccountUserId">
+                    <option value="">-- myself --</option>
                     {% for u in all_users %}
                     <option value="{{ u.id }}">#{{ u.id }} -- {{ u.email }}</option>
                     {% endfor %}
                 </select></label>
+                {% endif %}
                 <label>Label<input type="text" id="newAccountLabel" placeholder="e.g. andy_bitunix_main"></label>
                 <label>Exchange<input type="text" id="newAccountExchange" value="bitunix"></label>
                 <button class="btn btn-ok" onclick="createAccount()" style="align-self:flex-end;">CREATE ACCOUNT</button>
             </div>
-            <p class="empty" style="margin-top:8px;">Creates a new account in DRY_RUN mode. It stays DRY_RUN (never places a real order) until you complete the setup steps below and explicitly go LIVE.</p>
+            <p class="empty" style="margin-top:8px;">
+                Creates a new account, owned by you (unless you picked someone else above), in DRY_RUN mode.
+                It stays DRY_RUN -- never places a real order -- until you complete the setup steps below and explicitly go LIVE.
+                This is your own private setup: nobody else's accounts, credentials, or trades appear anywhere on this page for you, and yours won't appear on theirs.
+            </p>
         </div>
     </div>
-    {% endif %}
 
     <div class="card">
         <div class="card-header">
@@ -739,11 +744,17 @@ async function releaseKillSwitch(id) {
     loadAccounts();
 }
 async function createAccount() {
-    const user_id = parseInt(document.getElementById("newAccountUserId").value, 10);
-    const label = document.getElementById("newAccountLabel").value.trim();
-    const exchange = document.getElementById("newAccountExchange").value.trim() || "bitunix";
-    if (!label) { alert("Enter a label for the account (e.g. andy_bitunix_main)."); return; }
-    const resp = await api("/api/executor/accounts", { method: "POST", body: JSON.stringify({ user_id, label, exchange }) });
+    // 2026-09-07: the user picker only exists for admins, and even then
+    // an empty selection means "myself" -- omit user_id entirely in that
+    // case so the server does its own default-to-me logic (main.py's
+    // api_executor_create_account) rather than sending a stray null/NaN.
+    const userSelect = document.getElementById("newAccountUserId");
+    const body = {};
+    if (userSelect && userSelect.value) body.user_id = parseInt(userSelect.value, 10);
+    body.label = document.getElementById("newAccountLabel").value.trim();
+    body.exchange = document.getElementById("newAccountExchange").value.trim() || "bitunix";
+    if (!body.label) { alert("Enter a label for the account (e.g. andy_bitunix_main)."); return; }
+    const resp = await api("/api/executor/accounts", { method: "POST", body: JSON.stringify(body) });
     if (resp.ok) {
         document.getElementById("newAccountLabel").value = "";
         loadAccounts();

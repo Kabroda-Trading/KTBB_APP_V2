@@ -123,20 +123,24 @@ def test_admin_no_longer_sees_other_users_orders_or_audit_log_without_explicit_a
     assert all(r["account_id"] != env["account_id"] for r in audit_resp.json()["audit_log"])
 
 
-def test_admin_can_still_act_on_a_specific_known_account_id(env):
-    # The emergency-intervention path stays intact -- admin can't SEE the
-    # account in a default listing anymore, but _executor_owner_or_admin()
-    # still lets them act on it directly by id if they already know it.
+def test_admin_cannot_act_on_another_users_account_by_id(env):
+    # 2026-09-07: Andy's explicit instruction (full mutual isolation between
+    # real users running real money on this system, e.g. himself and
+    # "Gross Monkey") -- "I don't care about his stuff... he doesn't care
+    # about mine." This replaces the old emergency-intervention bypass:
+    # _executor_owner_or_admin() no longer has an unconditional is_admin
+    # branch, so admin gets 403 here exactly like any other non-owner would.
     client = _login("exec_admin@kabroda.com", "adminpass123")
     resp = client.post(f"/api/executor/accounts/{env['account_id']}/kill-switch", json={"reason": "admin intervention test"})
-    assert resp.status_code == 200
+    assert resp.status_code == 403
 
     resp = client.get(f"/api/executor/accounts/{env['account_id']}/risk-state")
-    assert resp.status_code == 200
+    assert resp.status_code == 403
 
-    # And admin CAN still see it when explicitly scoped by account_id.
+    # Explicitly scoping /api/executor/orders by account_id is likewise
+    # refused for a non-owning admin now -- ownership is the only path in.
     orders_resp = client.get(f"/api/executor/orders?account_id={env['account_id']}")
-    assert orders_resp.status_code == 200
+    assert orders_resp.status_code == 403
 
 
 def test_non_owner_non_admin_gets_403_on_credentials(env):
@@ -242,14 +246,27 @@ def test_owner_can_engage_their_own_kill_switch(env):
     assert resp.json()["account"]["kill_switch_engaged"] is True
 
 
-def test_only_admin_can_create_accounts(env):
+def test_any_logged_in_user_can_self_service_create_their_own_account(env):
+    # 2026-09-07, Andy's explicit ask -- "Gross Monkey" should be able to
+    # walk in and link up his own exchange account the same way Andy did,
+    # without needing an admin to create it for him first.
     client = _login("exec_owner@kabroda.com", "ownerpass123")
-    resp = client.post("/api/executor/accounts", json={"user_id": env["owner_id"], "label": "second_account"})
+    resp = client.post("/api/executor/accounts", json={"label": "second_account"})
+    assert resp.status_code == 200
+    assert resp.json()["account"]["user_id"] == env["owner_id"]
+
+
+def test_non_admin_cannot_create_an_account_for_someone_else(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post("/api/executor/accounts", json={"user_id": env["other_id"], "label": "not yours"})
     assert resp.status_code == 403
 
+
+def test_admin_can_still_create_an_account_on_behalf_of_another_user(env):
     admin_client = _login("exec_admin@kabroda.com", "adminpass123")
-    resp2 = admin_client.post("/api/executor/accounts", json={"user_id": env["owner_id"], "label": "second_account"})
-    assert resp2.status_code == 200
+    resp = admin_client.post("/api/executor/accounts", json={"user_id": env["owner_id"], "label": "second_account"})
+    assert resp.status_code == 200
+    assert resp.json()["account"]["user_id"] == env["owner_id"]
 
 
 def test_only_admin_can_engage_global_kill_switch(env):
@@ -453,14 +470,21 @@ def test_admin_page_renders_create_account_form_with_user_picker(env):
     assert f"#{env['owner_id']}" in resp.text  # the owner user appears in the picker
 
 
-def test_owner_page_renders_without_create_account_form(env):
-    # A non-admin owner can still see the page (their own account, kill
-    # switch, etc.) but must NOT see the admin-only create-account form
-    # (creation itself is admin-only at the route level too).
+def test_owner_page_renders_create_account_form_without_a_user_picker(env):
+    # 2026-09-07: the create-account form is now self-service and visible
+    # to every logged-in user (a non-admin owner needs it too, to set up
+    # their own account) -- but only an admin sees the "pick a user"
+    # dropdown, since a non-admin can only ever create for themselves.
     client = _login("exec_owner@kabroda.com", "ownerpass123")
     resp = client.get("/admin/executor")
     assert resp.status_code == 200
-    assert "CREATE ACCOUNT" not in resp.text
+    assert "CREATE ACCOUNT" in resp.text
+    assert 'id="newAccountUserId"' not in resp.text
+
+    admin_client = _login("exec_admin@kabroda.com", "adminpass123")
+    admin_resp = admin_client.get("/admin/executor")
+    assert admin_resp.status_code == 200
+    assert 'id="newAccountUserId"' in admin_resp.text
 
 
 # ------------------------------------------------------------------ live orders global gate (Stage 2, 2026-09-05)
