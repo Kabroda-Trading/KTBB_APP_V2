@@ -1377,7 +1377,6 @@ def _serialize_account(account: "_ExecutorAccount") -> Dict[str, Any]:
         "kill_switch_engaged": account.kill_switch_engaged,
         "kill_switch_reason": account.kill_switch_reason,
         "margin_mode": account.margin_mode, "leverage_baseline": account.leverage_baseline,
-        "max_margin_pct_of_balance": account.max_margin_pct_of_balance,
         "assumed_balance_usd": account.assumed_balance_usd,
         "has_credentials": bool(account.api_key_encrypted),
         "credential_set_at": account.credential_set_at.isoformat() if account.credential_set_at else None,

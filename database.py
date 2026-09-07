@@ -1824,7 +1824,18 @@ class ExecutorAccount(Base):
     # check falsely reject every real trade.
     margin_mode = Column(String, nullable=False, default="ISOLATION")
     leverage_baseline = Column(Integer, nullable=False, default=10)
-    max_margin_pct_of_balance = Column(Float, nullable=False, default=0.80)
+    # max_margin_pct_of_balance removed 2026-09-07 (stagnant sweep item 6,
+    # Andy's explicit call): no route anywhere ever let anyone set it, and
+    # no consumer in the real margin/liquidation-safety path ever read it
+    # -- it just sat at its hardcoded 0.80 default forever, display-only
+    # in the accounts API response and not even rendered in the admin UI.
+    # Dropped rather than wired into a real check -- if a real margin-
+    # usage cap is wanted later, it can be added fresh alongside an actual
+    # UI control and a real consumer, not resurrected from here. Any
+    # existing database keeps the orphaned column physically (this
+    # codebase has no DROP COLUMN migration precedent, and an unused
+    # extra column is harmless) -- this just stops the ORM from ever
+    # reading/writing it again.
     # Stage 1 placeholder -- there is no real balance query yet (no
     # exchange calls at all in Stage 1). Admin-edited so the leverage-
     # reduction math (executor_sizing.suggest_leverage()) can be built
