@@ -75,20 +75,24 @@ The site's original target formula (1×/1.618×/2.618× of the bo–bd distance,
 
 **Hard vetoes** (cap the result below TAKE even if the gate passes): ghost push (no real volume — `NO_FUEL`), DEAD 15m regime (no participation), counter-trend on a GOOD daily table (don't fight a strong trend). The 15M momentum-divergence veto (`mtf_confluence_scanner.py`-sourced) was **removed 2026-09-06** per `GATE_REBUILD_SPEC.md` §2 / Andy's explicit call: it predated the 2026-08-30 rebuild, was never validated against backtest data, and couldn't even fire on real fills (`trade_plan_engine.py`, the only call site that places real orders, already passed `confluence_15m=None`). `mtf_confluence_scanner.py` itself is untouched — same treatment as the Gravity Map, a real tool kept for its other uses, just not a decision input.
 
-**Targets and stop** — box multiples, no gravity dependency (gravity is a separate reference page now, not a decision input):
+**Targets** — box multiples, no gravity dependency (gravity is a separate reference page now, not a decision input):
 
 ```
 box = breakout_trigger − breakdown_trigger
 
 Entry = the trigger itself (bo for long, bd for short)
-Stop  = r30_low − 0.12×box (long)  /  r30_high + 0.12×box (short)
 T1 = trigger ± 0.618×box
 T2 = trigger ± 1.0×box   (the measured move)
 T3 = trigger ± 1.618×box
-Runner stop (after T1) = trigger ∓ 0.15×box
 ```
 
-**Management, identical for both tiers**: 30% off at T1, stop moves to the runner-stop level, 70% rides to T3. Tested against alternatives (50/50 at T1/T2, 100%-at-T1) — this beat both.
+**Stop — THREE distinct roles for the r30/zone formulas, not one.** This has confused both agents at points (see `TRADE_RULES_AUDIT.md`, Kabroda AI Brain repo, for the full walkthrough) — precise here on purpose:
+
+1. **Risk-basis stop (bookkeeping only, both tiers, never sent to the exchange):** `r30_low − 0.12×box` (long) / `r30_high + 0.12×box` (short) (`decision_engine.py`, `STOP_BUFFER_BOX`). Every R-multiple, `GateLog`/`CampaignLog` row, and backtest label uses this — it's what makes "how many R did this trade make" mean the same thing across every trade ever logged.
+2. **PREMIUM's real execution stop:** `stop_planner.py`'s 24h core-zone stop (nearest real 24h swing/value-area/30m-range/sweep-wick zone beyond entry, plus a `0.125×ATR` buffer, `1.5×ATR` fallback). Unchanged since 2026-08-31.
+3. **STANDARD's real execution stop, as of 2026-09-08:** the SAME formula as #1 (`r30 ∓ 0.12×box`) — but now used as the actual order stop for this tier, not just its R-bookkeeping basis. Backtest finding (`brain/calibration/tier_specific_stop_variants.py`, full 2021-2026 corpus, 840 trades, Andy's explicit decision to ship directly): STANDARD's lower-conviction setups do better with this wider stop's extra room (T1-reach rate 56.5% → 62.0%) than with the tighter zone stop PREMIUM uses; PREMIUM does better staying tight. Combined edge: +185.2R vs +168.4R for either stop applied uniformly, positive in 5 of 6 years tested (2024 is the one exception, favoring the zone stop by a wide margin — a real, known tradeoff, not resolved, just accepted). `TradePlan.stop_price_r30` stores this candidate on every plan (both tiers) for audit; `TradePlan.stop_price` is whichever one is actually active for that plan's tier. See `trade_plan.py`'s `_build_waiting_plan()`/`advance_waiting_plan()` for the pre-cross tier-unknown case (both candidates computed at generation, the correct one swapped in — with a fresh R:R floor re-check — the moment tier is actually confirmed at the real cross).
+
+**Management, real and current for both tiers:** 50% off at T1, stop stays at the original (tier-appropriate) level — for BOTH tiers, nothing moves yet. At T2, **PREMIUM only** moves the stop to breakeven, mechanically and unconditionally (never a judgment call); STANDARD's stop never moves before T3 or its own stop. The runner (50%) exits at T3 or its stop, either tier. This replaced an earlier 30%-at-T1/fixed-runner-stop rule (tested against 50/50 and 100%-at-T1 in the original calibration; the audited 50/50 + premium-BE rule is what's validated against the real 128-trade corpus and is what `executor_live_engine.py` implements for real money — see `TRADE_RULES_AUDIT.md` section 6 for the full mechanism). `ledger_closing_engine.py`/`CampaignLog` still runs the OLD 30/70 rule as a labeled-deprecated shadow simulation only (radar-vs-backtest drift tracking) — never the real rule, see that file's own header.
 
 **Three outcomes only, no grades, no score**: `TAKE_PREMIUM` / `TAKE_STANDARD` / `PASS` (always with a specific, stated reason). The `ALMOST`/NEEDS-CONFIRMATION limbo state was **removed 2026-09-06** (`GATE_REBUILD_SPEC.md`) — the real backtest corpus showed that population outperforming what the gate already took (66.7% T1-hit / +0.285R avg vs TAKE's 61.3% / +0.123R), so it's folded into STANDARD's widened eligibility instead of held in limbo. The gate commits on every cross now — no "might still resolve later" state. This is what `decision_engine.evaluate_15m_decision()` returns, and it's the same function `run_mas_analysis()` and the live radar (`market_radar.py`'s `_build_dossier()`) both call — they can never silently disagree.
 
@@ -166,7 +170,7 @@ The `gravity_memory` table is an exception: `kabroda_macro_engine.py` stores sym
 
 4. **Class 0 KDE weighting.** `permanence_class=0` levels receive `+15.0` kinetic friction in the KDE calculation. Gravity is decoupled from the trade decision (2026-08-30) but this weighting still governs the gravity map itself, which stays as its own reference page. Do not reduce this multiplier.
 
-5. **The stop loss has no gravity dependency anymore.** As of 2026-08-30, stop = `r30 ∓ 0.12×box` (see rule 1) — no ATR, no gravity-wall snapping. `trade_structure_analyst.py` (the old ATR+gravity-wall stop) is archived, not a reference implementation to fall back to.
+5. **The stop loss has no gravity dependency anymore.** As of 2026-08-30, `r30 ∓ 0.12×box` — no ATR, no gravity-wall snapping. `trade_structure_analyst.py` (the old ATR+gravity-wall stop) is archived, not a reference implementation to fall back to. This formula is the risk-basis stop for both tiers AND (as of 2026-09-08) STANDARD's real execution stop — see "Targets and stop" above for the full three-role breakdown; PREMIUM's real execution stop is the separate, ATR-buffered `stop_planner.py` zone stop, which this rule does not cover.
 
 6. **`_inject_brief_to_database` as an upsert.** It must create a new `CampaignLog` if one doesn't exist. If you change it back to update-only, decision output is silently discarded.
 
