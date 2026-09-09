@@ -569,6 +569,16 @@ def init_db():
         except Exception:
             pass
 
+    # --- TIER-SPECIFIC STOP (2026-09-08) -- see TradePlan.stop_price_r30's
+    # own comment for the full mechanism (Andy's explicit decision to ship
+    # the backtest finding directly). ---
+    for _col in ["stop_price_r30 FLOAT"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE trade_plans ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- DOMAIN 2 EXECUTOR (2026-09-07) -- executor_live_engine.py's real,
     # TradePlan-linked managed-trade tracking. See ExecutorOrder's own
     # comments above for what each column is. All nullable/Postgres-safe
@@ -939,11 +949,28 @@ class TradePlan(Base):
     trigger_price = Column(Float, nullable=True)
     commit_after = Column(DateTime, nullable=True)  # anchor_time + 45min (08:45 CT / 09:45 ET open-window rule)
 
-    # Execution stop from stop_planner.py -- the 24h core-zone stop. NOT
-    # CampaignLog.stop_loss (r30-based); see the table docstring above.
+    # Execution stop -- as of 2026-09-08, TIER-SPECIFIC (Andy's explicit,
+    # informed decision to ship the backtest finding directly -- Kabroda AI
+    # Brain repo AGENT_LOG.md, same date, includes the honest caveat this
+    # went live without the out-of-sample check normally required first).
+    # PREMIUM: still stop_planner.py's 24h core-zone stop, unchanged.
+    # STANDARD: decision_engine.py's own r30-based formula, now used as a
+    # REAL execution stop for this tier specifically (previously that
+    # formula was ONLY the risk-bookkeeping stop, never sent to the
+    # exchange -- see stop_price_r30 immediately below and trade_plan.py's
+    # _build_waiting_plan()/advance_waiting_plan() for the full mechanism).
+    # NOT CampaignLog.stop_loss (a third, separate, unchanged r30-based
+    # field -- see the table docstring above).
     stop_price = Column(Float, nullable=True)
     stop_basis = Column(String, nullable=True)
     stop_dist_atr = Column(Float, nullable=True)
+    # The r30-based candidate, computed and stored on EVERY plan regardless
+    # of tier (cheap, pure formula) -- when tier isn't known yet at
+    # generation (the pre-cross anticipate_setup() path), this is what
+    # advance_waiting_plan() reads back and swaps into stop_price if the
+    # real cross confirms STANDARD. For an already-PREMIUM plan this is
+    # just a stored-for-audit alternative, never used as the real stop.
+    stop_price_r30 = Column(Float, nullable=True)
 
     t1 = Column(Float, nullable=True)
     t2 = Column(Float, nullable=True)

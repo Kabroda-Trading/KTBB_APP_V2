@@ -197,8 +197,44 @@ def _build_waiting_plan(
     """Shared by both build_trade_plan() paths (an already-crossed TAKE
     decision, and the pre-cross anticipate_setup() path) -- the stop-
     planning/R:R-floor logic is identical either way; only the source of
-    side/entry/t1/t2/t3/tier differs."""
+    side/entry/t1/t2/t3/tier differs.
+
+    2026-09-08 TIER-SPECIFIC STOP (Andy's explicit, informed decision --
+    Kabroda AI Brain repo AGENT_LOG.md, same date -- to implement this
+    directly rather than wait for the out-of-sample check and DeepSeek's
+    independent review Claude Code recommended first; see that log entry
+    for the full context and the honest caveat on what has NOT yet been
+    verified). Backtest finding (brain/calibration/tier_specific_stop_
+    variants.py, full 2021-2026 corpus, 840 trades): PREMIUM performs
+    better on the tight, 24h-core-zone stop (its setups are already the
+    cleanest/highest-conviction -- no need for extra room); STANDARD
+    performs better on the wider r30-based stop (its setups are lower-
+    conviction/fuel-conflicted, and the extra room lets more of them
+    survive to actually develop instead of getting shaken out by normal
+    noise -- T1-reach rate 56.5% -> 62.0% in the same backtest). Combined:
+    +185.2R vs +168.4R for either stop applied uniformly to both tiers,
+    positive in 5 of 6 years tested.
+
+    STANDARD now uses decision_engine.py's own r30-based formula (r30 -+
+    STOP_BUFFER_BOX*box) as its REAL execution stop -- previously this
+    formula was ONLY the risk-bookkeeping stop (never sent to the
+    exchange, see TRADE_RULES_AUDIT.md section 4's original "two stops"
+    explanation, now tier-dependent for the execution stop specifically).
+    PREMIUM is completely unchanged -- still the 24h-core-zone stop,
+    identical code path to before this change.
+
+    The r30-based candidate is computed and stored (stop_price_r30) on
+    EVERY plan, tier known or not -- when tier isn't known yet (the pre-
+    cross anticipate_setup() path), advance_waiting_plan() reads this
+    field back and swaps it in if the real cross confirms STANDARD (see
+    that function's own comment for the R:R re-check this requires)."""
+    import decision_engine as _decision_engine
     is_long = side == "LONG"
+    box = abs(t2 - entry_price)
+    r30_stop_raw = (r30_low - _decision_engine.STOP_BUFFER_BOX * box) if is_long \
+        else (r30_high + _decision_engine.STOP_BUFFER_BOX * box)
+    stop_price_r30 = round(float(r30_stop_raw), 2)
+
     stop_plan = sp.plan_stop(
         candles_24h=candles_24h,
         entry_price=entry_price, is_long=is_long,
@@ -216,7 +252,18 @@ def _build_waiting_plan(
             "no_plan_reason": f"stop planner unavailable ({stop_plan['stop_basis']})",
         }
 
-    rr = sp.rr_floor_ok(entry_price, stop_plan["stop_price"], t1, is_long=is_long)
+    if tier == "STANDARD":
+        active_stop_price = stop_price_r30
+        active_stop_basis = f"r30 edge {'-' if is_long else '+'} {_decision_engine.STOP_BUFFER_BOX:.3f}xbox (STANDARD tier's own execution stop, not just the R-bookkeeping basis)"
+        active_stop_dist_atr = round(abs(entry_price - stop_price_r30) / daily_atr14, 4) if daily_atr14 else None
+    else:
+        # PREMIUM or tier not yet known (pre-cross) -- completely unchanged
+        # from before this change: the 24h-core-zone stop.
+        active_stop_price = stop_plan["stop_price"]
+        active_stop_basis = stop_plan["stop_basis"]
+        active_stop_dist_atr = stop_plan["stop_dist_atr"]
+
+    rr = sp.rr_floor_ok(entry_price, active_stop_price, t1, is_long=is_long)
 
     if not rr["ok"]:
         # SS6 point 5: a wide-enough core zone can push R:R below 1:1 even
@@ -233,9 +280,10 @@ def _build_waiting_plan(
             **base,
             "status": "NO_PLAN",
             "direction": side, "tier": tier,
+            "stop_price_r30": stop_price_r30,
             "no_plan_reason": (
-                f"core-zone stop too wide for T1 -- R:R {rr['ratio']:.2f} "
-                f"< 1:1 floor ({stop_plan['stop_basis']})"
+                f"{'r30' if tier == 'STANDARD' else 'core-zone'} stop too wide for T1 -- R:R {rr['ratio']:.2f} "
+                f"< 1:1 floor ({active_stop_basis})"
             ),
         }
 
@@ -246,9 +294,10 @@ def _build_waiting_plan(
         "tier": tier,
         "entry_mode": None,  # decided at commit_after, when live price is known (SS2)
         "trigger_price": entry_price,
-        "stop_price": stop_plan["stop_price"],
-        "stop_basis": stop_plan["stop_basis"],
-        "stop_dist_atr": stop_plan["stop_dist_atr"],
+        "stop_price": active_stop_price,
+        "stop_basis": active_stop_basis,
+        "stop_dist_atr": active_stop_dist_atr,
+        "stop_price_r30": stop_price_r30,
         "t1": t1, "t2": t2, "t3": t3,
         "rr_floor_ok": True,
         "rr_ratio": rr["ratio"],
@@ -822,7 +871,41 @@ def advance_waiting_plan(
         prefix = "second " if status == "VETOED" else ""
         updates["last_transition_reason"] = f"{prefix}cross {verdict.lower()} ({push_ratio}x baseline) -- filled"
         if plan.get("tier") is None and candles_1h is not None and candles_4h is not None and daily_atr14:
-            updates["tier"] = _stamp_tier_at_cross(plan, candles_1h, candles_4h, daily_atr14, fuel_verdict=verdict)
+            new_tier = _stamp_tier_at_cross(plan, candles_1h, candles_4h, daily_atr14, fuel_verdict=verdict)
+            updates["tier"] = new_tier
+            # 2026-09-08 TIER-SPECIFIC STOP (see _build_waiting_plan()'s own
+            # comment for the full backtest rationale and Andy's explicit
+            # decision to ship it directly): the pre-cross anticipate_setup()
+            # path generates its plan before tier is known, so
+            # _build_waiting_plan() defaulted stop_price to the 24h-zone
+            # value (PREMIUM's stop) and separately stored the r30 candidate
+            # in stop_price_r30. Only now, with the real tier finally known,
+            # do we find out this plan should have been using STANDARD's
+            # wider r30 stop instead -- swap it in, and re-run the SAME R:R
+            # floor check _build_waiting_plan() ran at generation (a wider
+            # stop can fail 1:1 where the tighter one passed; never place a
+            # real order the floor rule would have rejected just because the
+            # tier wasn't known yet when the plan was first built).
+            if new_tier == "STANDARD" and plan.get("stop_price_r30") is not None:
+                import decision_engine as _decision_engine
+                r30_stop = plan["stop_price_r30"]
+                rr = sp.rr_floor_ok(trigger, r30_stop, plan.get("t1"), is_long=is_long)
+                if not rr["ok"]:
+                    return {
+                        "status": "DONE",
+                        "tier": new_tier,
+                        "last_transition_reason": (
+                            f"cross confirmed STANDARD, but its own execution stop (r30-based) "
+                            f"fails the 1:1 R:R floor for T1 (R:R {rr['ratio']:.2f}) -- no trade"
+                        ),
+                    }
+                updates["stop_price"] = r30_stop
+                updates["stop_basis"] = (
+                    f"r30 edge {'-' if is_long else '+'} {_decision_engine.STOP_BUFFER_BOX:.3f}xbox "
+                    f"(STANDARD tier's own execution stop, swapped in at the real cross)"
+                )
+                updates["stop_dist_atr"] = round(abs(trigger - r30_stop) / daily_atr14, 4) if daily_atr14 else None
+                updates["rr_ratio"] = rr["ratio"]
         return updates
 
     # Only NO_FUEL (a ghost push, no real volume) reaches here -- FUELED

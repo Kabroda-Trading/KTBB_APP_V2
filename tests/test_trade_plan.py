@@ -55,7 +55,15 @@ def test_waiting_plan_on_take_long_with_good_rr():
     # Entry 100, wide flat candles below entry give a fallback stop at
     # 1.5xATR = 3.0 below entry -> stop=97. T1=112 -> risk=3, reward=12,
     # ratio=4.0 -- comfortably passes the 1:1 floor.
-    decision = _take_decision(side="LONG", tier="STANDARD", entry=100.0, t1=112.0, t2=120.0, t3=132.0)
+    # Tier is PREMIUM specifically (2026-09-08 tier-specific-stop change):
+    # this test is about stop_planner.py's own fallback mechanism, which is
+    # PREMIUM's unchanged real stop -- STANDARD now uses a different
+    # (r30-based) formula entirely, and this test's deliberately unrealistic
+    # r30/value-area fixture (155-170, nowhere near the flat 100-price
+    # candles) exists specifically to force stop_planner's fallback path,
+    # not to exercise STANDARD's own stop. See test_tier_specific_stop.py
+    # for STANDARD's real stop behavior.
+    decision = _take_decision(side="LONG", tier="PREMIUM", entry=100.0, t1=112.0, t2=120.0, t3=132.0)
     plan = tp.build_trade_plan(
         symbol="BTC/USDT", date_key="2026-08-31", session_id="us_ny_futures",
         decision_dict=decision, anchor_time=ANCHOR, candles_24h=_flat_candles(price=150.0),
@@ -63,7 +71,7 @@ def test_waiting_plan_on_take_long_with_good_rr():
     )
     assert plan["status"] == "WAITING"
     assert plan["direction"] == "LONG"
-    assert plan["tier"] == "STANDARD"
+    assert plan["tier"] == "PREMIUM"
     assert plan["trigger_price"] == 100.0
     assert plan["stop_price"] == pytest.approx(97.0)  # 100 - 1.5*2.0
     assert plan["entry_mode"] is None  # decided at commit, not at generation
