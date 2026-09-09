@@ -384,7 +384,7 @@ def test_the_real_stake_computation_actually_reflects_the_saved_base(db):
     # trade time -- now returns the number the wizard says it will.
     account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
     db.commit()
-    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0}, updated_by="andy@kabroda.com")
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "preset_name": "fixed_dollar"}, updated_by="andy@kabroda.com")
     db.commit()
 
     from executor_sizing import compute_stake
@@ -538,9 +538,40 @@ def test_set_account_mode_refuses_live_without_credentials(db):
     assert account.mode == "DRY_RUN"
 
 
+def test_set_account_mode_refuses_live_without_ever_saving_a_sizing_choice(db):
+    # 2026-09-08 real incident: Dawson picked 10%-of-balance in the wizard,
+    # saw $250 in the live preview, went LIVE -- and his real trade filled
+    # at $100, the untouched ExecutorRiskState default, because the sizing
+    # choice was never actually saved (preview/save/go-live are three
+    # separate clicks). get_or_init_sizing_policy()'s first-touch seed
+    # stamps preset_name "steady_grow"/"conservative" (the OLD, pre-wizard
+    # vocabulary) specifically so this exact state -- credentials set, but
+    # sizing never explicitly confirmed -- is detectable and refused here,
+    # the same way missing credentials already are.
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    ea.set_credentials(db, account, "key1", "secret1", set_by="andy@kabroda.com")
+    db.commit()
+    # Merely TOUCHING the policy (as executor_plan_builder.py does on every
+    # plan build) must NOT count as an explicit save -- it only seeds the
+    # old vocabulary, exactly the state this check exists to catch.
+    ea.get_or_init_sizing_policy(db, account)
+    db.commit()
+    with pytest.raises(ValueError, match="no sizing choice has ever been explicitly saved"):
+        ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
+    assert account.mode == "DRY_RUN"
+
+    # Once a real choice is explicitly saved (any of the new wizard's
+    # preset_name values), going live succeeds normally.
+    ea.update_sizing_policy(db, account, {"base_risk_pct": 0.10, "cap_abs_usd": 2500.0, "preset_name": "percent_capped"}, updated_by="andy@kabroda.com")
+    db.commit()
+    result = ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
+    assert result.mode == "LIVE"
+
+
 def test_set_account_mode_refuses_live_without_correct_confirm_phrase(db):
     account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
     ea.set_credentials(db, account, "key1", "secret1", set_by="andy@kabroda.com")
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "preset_name": "fixed_dollar"}, updated_by="andy@kabroda.com")
     db.commit()
     with pytest.raises(ValueError, match="confirm phrase"):
         ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="wrong phrase")
@@ -554,6 +585,7 @@ def test_set_account_mode_refuses_live_without_correct_confirm_phrase(db):
 def test_set_account_mode_live_succeeds_with_credentials_and_confirm(db):
     account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
     ea.set_credentials(db, account, "key1", "secret1", set_by="andy@kabroda.com")
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "preset_name": "fixed_dollar"}, updated_by="andy@kabroda.com")
     db.commit()
     result = ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
     db.commit()
@@ -571,6 +603,7 @@ def test_set_account_mode_live_to_dry_run_needs_no_confirm_phrase(db):
     # need extra friction).
     account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
     ea.set_credentials(db, account, "key1", "secret1", set_by="andy@kabroda.com")
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "preset_name": "fixed_dollar"}, updated_by="andy@kabroda.com")
     ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
     db.commit()
 

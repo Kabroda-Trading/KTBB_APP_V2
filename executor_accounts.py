@@ -77,6 +77,28 @@ def set_account_mode(db: Session, account: ExecutorAccount, new_mode: str, by: s
     if new_mode == "LIVE":
         if not account.api_key_encrypted or not account.api_secret_encrypted:
             raise ValueError("cannot go LIVE -- no credentials set on this account yet")
+        # 2026-09-08 real incident: Dawson selected 10%-of-balance in the
+        # Sizing Wizard, saw the correct $250 in the live preview, then went
+        # LIVE -- but "preview"/"save sizing" and "go live" are three
+        # separate clicks, and nothing ever checked whether the middle one
+        # actually happened. His real trade filled at $100 -- the exact,
+        # untouched ExecutorRiskState.risk_last_usd default every brand-new
+        # account starts at, confirming the sizing choice was never
+        # persisted. get_or_init_sizing_policy()'s own first-touch seed
+        # stamps preset_name as "steady_grow"/"conservative" (the OLD,
+        # pre-wizard vocabulary) specifically so this state is
+        # distinguishable from an explicit save -- the new wizard always
+        # writes one of fixed_dollar/percent_capped/roll_profits/
+        # percent_uncapped/risk_based/custom (see saveSizingPolicy() in
+        # executor_admin.html). Refuse to go live until a real choice has
+        # actually been saved, the same way credentials are required first.
+        policy = get_or_init_sizing_policy(db, account)
+        if policy.preset_name in (None, "steady_grow", "conservative"):
+            raise ValueError(
+                "cannot go LIVE -- no sizing choice has ever been explicitly saved on this account "
+                "(it's still running the untouched default). Go to step 3, pick an option, and click "
+                "SAVE SIZING POLICY first -- selecting an option and previewing it is not the same as saving it."
+            )
         required = "CONFIRM ENABLE LIVE TRADING"
         if confirm != required:
             raise ValueError(f"confirm phrase must be exactly {required!r}")
