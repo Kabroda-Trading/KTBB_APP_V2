@@ -23,7 +23,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 import database
-from database import SessionLocal, TradePlan, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig
+from database import SessionLocal, TradePlan, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig, ExecutorSizingPolicy
 import trade_plan_engine as tpe
 import executor_plan_builder
 import executor_accounts as ea
@@ -60,7 +60,7 @@ def env(monkeypatch):
     _clean_db_files()
     database.init_db()
     db = SessionLocal()
-    for model in (TradePlan, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig):
+    for model in (TradePlan, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig, ExecutorSizingPolicy):
         db.query(model).delete()
     db.commit()
     db.close()
@@ -168,7 +168,7 @@ def env(monkeypatch):
     }
 
     db = SessionLocal()
-    for model in (TradePlan, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig):
+    for model in (TradePlan, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig, ExecutorSizingPolicy):
         db.query(model).delete()
     db.commit()
     db.close()
@@ -227,6 +227,12 @@ def _make_live_account(db_id_getter, **kwargs):
     db = SessionLocal()
     account = db.query(ExecutorAccount).filter_by(id=account_id).first()
     account.mode = "LIVE"
+    # 2026-09-08: this test is about the Live Orders global switch, not
+    # sizing -- explicitly save a real preset so it doesn't trip the
+    # separate, orthogonal "sizing was never explicitly confirmed" gate
+    # (executor_engine.py, same real incident as executor_accounts.py's
+    # set_account_mode() check).
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "preset_name": "fixed_dollar"}, updated_by="test")
     db.commit()
     db.close()
     return account_id
@@ -272,6 +278,43 @@ def test_live_mode_account_places_real_order_when_live_orders_enabled(env, monke
     env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
 
     assert called["n"] == 1   # both gates open -- the real placement path is reached
+
+
+def test_live_mode_account_skipped_when_sizing_was_never_explicitly_saved(env, monkeypatch):
+    # 2026-09-08 real incident: Dawson's account was already LIVE with a
+    # sizing policy that was never explicitly confirmed (still the
+    # untouched default) -- this is the second, ongoing layer that stops
+    # ANY further real order on such an account, not just the one-time
+    # go-live gate in executor_accounts.py's set_account_mode().
+    called = {"n": 0}
+    async def _fake_place_entry_order(*a, **kw):
+        called["n"] += 1
+    import executor_live_engine
+    monkeypatch.setattr(executor_live_engine, "place_entry_order", _fake_place_entry_order)
+
+    # Deliberately do NOT save a sizing policy -- account_id created and
+    # flipped LIVE directly, exactly reproducing the real incident (a
+    # policy that only ever went through get_or_init_sizing_policy()'s
+    # lazy auto-seed, never an explicit save).
+    account_id = env["make_account"]()
+    db = SessionLocal()
+    account = db.query(ExecutorAccount).filter_by(id=account_id).first()
+    account.mode = "LIVE"
+    db.commit()
+    ec.enable_live_orders(db, reason="test", by="test@kabroda.com")
+    db.commit()
+    db.close()
+
+    env["make_plan"]()
+    candles = _fueled_5m_candles(100.0, is_long=True)
+    env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    assert called["n"] == 0   # real order placement never reached
+
+    db = SessionLocal()
+    audit = db.query(ExecutorAuditLog).filter_by(account_id=account_id, event_type="ERROR").all()
+    assert any("no sizing choice has ever been explicitly saved" in a.message for a in audit)
+    db.close()
 
 
 def test_inactive_account_produces_no_order(env):

@@ -103,6 +103,28 @@ async def _process_account(db: Session, trade_plan_row: TradePlan, account: Exec
                 f"global Live Orders switch is OFF (trade_plan_id={trade_plan_row.id})",
                 account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order.id, actor="system")
             return
+        # 2026-09-08 real incident, second layer: set_account_mode()'s own
+        # DRY_RUN->LIVE gate now refuses to go live without an explicit
+        # sizing save (executor_accounts.py) -- but that only protects a
+        # FUTURE transition. An account that reached LIVE before that fix
+        # existed (Dawson's real one, confirmed still live when this was
+        # found) keeps trading on whatever sizing is actually saved,
+        # unconfirmed or not, until someone manually re-saves it. This
+        # checks the SAME condition on every real order attempt, not just
+        # at the moment of going live, so the system itself stops placing
+        # further real orders on an account whose sizing was never
+        # explicitly confirmed -- it doesn't depend on a human remembering
+        # to go fix it after being told.
+        policy = executor_accounts.get_or_init_sizing_policy(db, account)
+        if policy.preset_name in (None, "steady_grow", "conservative"):
+            executor_accounts.write_audit(
+                db, "ERROR",
+                f"LIVE-mode account {account.id} skipped real order placement -- "
+                f"no sizing choice has ever been explicitly saved (still the untouched default) -- "
+                f"go to Sizing Policy and click SAVE before this account can trade again "
+                f"(trade_plan_id={trade_plan_row.id})",
+                account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order.id, actor="system")
+            return
         db.flush()
         import executor_live_engine
         await executor_live_engine.place_entry_order(db, account, trade_plan_row, order)
