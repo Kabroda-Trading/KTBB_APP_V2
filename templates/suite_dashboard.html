@@ -1511,6 +1511,18 @@
     // PHASE 2: ADAPTIVE SIGNAL TUNING LOOP — Dashboard Functions
     // =========================================================================
 
+    // 2026-09-09, root-cause fix (same class as executor_admin.html's
+    // 2026-09-06 fix, market_radar.html's Trade Plan panel): server
+    // timestamps here are naive datetime.isoformat() (no "Z"), which JS
+    // parses as LOCAL time, not UTC -- understating real local time by the
+    // viewer's UTC offset. Every timestamp this page renders is confirmed
+    // UTC at the source.
+    function _parseServerTimestamp(isoStr) {
+        if (!isoStr) return null;
+        const hasZone = /[Zz]$/.test(isoStr) || /[+-]\d{2}:?\d{2}$/.test(isoStr);
+        return new Date(hasZone ? isoStr : isoStr + "Z");
+    }
+
     async function loadSignalAlerts() {
         const container = document.getElementById('signalAlertsContainer');
         try {
@@ -1529,7 +1541,7 @@
                 return `<div style="border-left:3px solid ${severityColor}; padding:8px 12px; margin-bottom:8px; background:#1a120e; border-radius:4px;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <span style="color:${severityColor}; font-weight:700;">${a.alert_type}</span>
-                        <span style="color:#6b5345; font-size:10px;">${a.created_at ? new Date(a.created_at).toLocaleString() : ''}</span>
+                        <span style="color:#6b5345; font-size:10px;">${a.created_at ? _parseServerTimestamp(a.created_at).toLocaleString() : ''}</span>
                     </div>
                     <div style="color:#c9a880; margin-top:4px;">${a.message}</div>
                     <div style="display:flex; gap:12px; margin-top:4px; font-size:10px; color:#6b5345;">
