@@ -2158,3 +2158,17 @@ suite 605 passed, boot clean.
 
 Queue: email copy cleanup (needs Andy's wording sign-off), then the full
 Domain 1/2/3 audit.
+
+## 2026-09-10 — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: lock-email redesign (site commit 945ed72)
+STATUS: resolved
+
+`trade_plan.lock_disposition()` is now the single source of truth for the lock
+email, the radar's Trade Plan panel, and `render_brief()` -- four dispositions
+(A "no trade today" / B "standing by" / C "plan set" / C_WEAK "watching one
+side"). The stale render_brief line ("does not become a plan later in the day")
+is gone. `anticipate_setup()` returns a structured `category` + `htf_backs_side`.
+
+Full trail: Kabroda AI Brain repo `AGENT_LOG.md` 2026-09-10 + `LIVE_SYSTEM_STATE.md`
+§1 (Email section) + CHANGELOG. Full suite 612 passed, boot clean.
+
+Queue: the full clean Domain 1/2/3 audit (the last item).
