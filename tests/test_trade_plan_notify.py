@@ -70,13 +70,46 @@ def test_lock_email_no_plan_mentions_possible_followup():
 
 
 def test_lock_email_waiting_has_full_brief_and_plan_id():
-    mail = tpn.build_lock_email(_plan("WAITING"))
+    # WAITING with HTF backing (default) -> disposition code C ("plan set").
+    mail = tpn.build_lock_email(_plan("WAITING", htf_backs_side_at_lock=True))
     assert mail is not None
     subject, body = mail
     assert "BTCUSDT" in subject and "LONG" in subject
+    assert "plan set" in subject.lower()
     assert "79062" in subject
     assert "79,062.43" in body  # the full rendered brief
     assert "Plan ID: 42" in body
+
+
+def test_lock_email_waiting_no_htf_carry_is_the_watching_one_side_variant():
+    # WAITING whose side came off the daily table with no 1H/4H backing yet
+    # (htf_backs_side_at_lock False) -> disposition code C_WEAK.
+    subject, body = tpn.build_lock_email(_plan("WAITING", htf_backs_side_at_lock=False))
+    assert "watching one side" in subject.lower()
+    assert "needs HTF" in subject
+    assert "neither 1H nor 4H backs it yet" in body
+    assert "79,062.43" in body  # the plan detail is still there under the lead
+
+
+def test_lock_email_wide_box_is_the_genuine_stand_down():
+    subject, body = tpn.build_lock_email(_plan(
+        "NO_PLAN", direction=None, no_plan_category="WIDE_BOX", box_atr_ratio=0.89,
+        breakout_trigger=65500.0, breakdown_trigger=64200.0,
+    ))
+    assert "no trade today" in subject.lower()
+    assert "box too wide" in subject.lower()
+    assert "No ARMED email is possible today" in body
+    assert "0.89x daily ATR" in body
+
+
+def test_lock_email_no_direction_is_the_standing_by_variant():
+    subject, body = tpn.build_lock_email(_plan(
+        "NO_PLAN", direction=None, no_plan_category="NO_DIRECTION", box_atr_ratio=0.41,
+        breakout_trigger=65500.0, breakdown_trigger=64200.0,
+    ))
+    assert "standing by" in subject.lower()
+    assert "one ARMED email" in body
+    assert "strong-volume push" in body
 
 
 # ------------------------------------------------------------------ build_armed_email

@@ -61,47 +61,39 @@ def _symbol_compact(symbol: str) -> str:
 
 def build_lock_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     """Fires once per session lock, for every outcome (see module header --
-    this used to be WAITING-only). `render_brief()` is the single source
-    of truth for the body either way (SS4's own rule: never recompute a
-    number the plan object already has); this function only decides the
-    subject line and appends the anti-spam/plan-ID footer."""
+    this used to be WAITING-only). Subject + body BOTH come from
+    trade_plan.lock_disposition() -- the single source of truth Andy asked
+    for so the lock email, the radar's Trade Plan panel, and render_brief()
+    all say the same words (radar/email parity, 2026-09-10). Four codes:
+      A  no trade today       -- box frozen too wide, no ARMED email possible
+      B  standing by          -- reachable, no side yet; a strong break can ARM
+      C  plan set             -- a real WAITING plan
+      C_WEAK  watching one side -- WAITING plan, daily-table side, no HTF carry yet
+    render_brief() supplies the levels/plan detail under the disposition lead."""
     symbol = _symbol_compact(plan.get("symbol", ""))
-    if plan.get("status") == "WAITING":
-        direction = plan.get("direction") or "?"
-        trigger = plan.get("trigger_price")
-        subject = f"KABRODA PLAN - {symbol} {direction} @ {trigger:.0f}" if trigger else f"KABRODA PLAN - {symbol} {direction}"
-        body = tp.render_brief(plan) + f"\n\n  Plan ID: {plan.get('id')}"
+    disp = tp.lock_disposition(plan)
+
+    if disp is None:
+        # A NO_PLAN the pre-cross heuristic couldn't classify (e.g. no candles
+        # supplied, or a NO_PLAN written after a real cross the gate declined)
+        # -- fall back to the plain stand-down, same as before this split.
+        subject = f"KABRODA STAND DOWN - {symbol} - do not watch"
+        body = (
+            "Nothing to watch this morning -- do not wait by the computer. "
+            "If a later cross clears the full gate on a strong-volume push, you'll get an "
+            "ARMED email with the real plan; otherwise silence means this held for the session.\n\n"
+            + tp.render_brief(plan)
+            + f"\n\n  Plan ID: {plan.get('id')}"
+        )
         return subject, body
 
-    # Two-tier disposition (STAND DOWN vs LIVE), per DeepSeek's corpus
-    # validation (Kabroda AI Brain repo AGENT_LOG.md, 2026-09-02 13:00 CT):
-    # individual gate-miss reasons don't separate paying from dead
-    # stand-asides in the backtest (all flat, ~0R either way) -- the
-    # disposition is only justified in aggregate, so this stays a plain
-    # STAND DOWN, not a graded WATCH tier (that would need the separate,
-    # not-yet-built NC-follow-up confirmation logic to be honest).
-    #
-    # 2026-09-02, Andy's poll-routing decision: NO_PLAN rows are now polled
-    # too (trade_plan_engine.py), and a later real cross that clears the
-    # FULL gate (including the counter-trend veto) promotes straight to
-    # FILLED and sends the normal ARMED email -- see trade_plan.py's
-    # advance_no_plan(). So this copy must NOT claim silence
-    # is guaranteed (that was true, and tested, before this decision -- see
-    # the AGENT_LOG.md entry this replaces). If nothing ever crosses, the
-    # session ends with NO further email (notification_for_transition()
-    # below suppresses the DONE transition specifically for a plan that
-    # started NO_PLAN, since "no trade happened" was already communicated
-    # here) -- but a real cross CAN still email.
-    subject = f"KABRODA STAND DOWN - {symbol} - do not watch"
-    body = (
-        "Nothing to watch this morning -- do not wait by the computer. "
-        "If a later cross clears the full gate, you'll get an ARMED email "
-        "with the real plan; otherwise, silence means this stand-down "
-        "held for the rest of the session.\n\n"
-        + tp.render_brief(plan)
-        + f"\n\n  Plan ID: {plan.get('id')}"
-    )
-    return subject, body
+    if disp["code"] == "C":
+        # A real plan -- render_brief() IS the body, the disposition adds nothing.
+        body = tp.render_brief(plan) + f"\n\n  Plan ID: {plan.get('id')}"
+    else:
+        # A / B / C_WEAK -- the disposition lead, then the levels/plan detail.
+        body = disp["body"] + "\n\n" + tp.render_brief(plan) + f"\n\n  Plan ID: {plan.get('id')}"
+    return disp["subject"], body
 
 
 def build_armed_email(plan: Dict[str, Any]) -> Tuple[str, str]:

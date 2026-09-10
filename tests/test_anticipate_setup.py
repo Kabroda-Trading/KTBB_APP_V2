@@ -43,8 +43,42 @@ def _patch_regimes(monkeypatch, daily_quality="GOOD", daily_bias="UP",
 def test_viable_via_daily_bias_alignment_long(monkeypatch):
     _patch_regimes(monkeypatch, daily_quality="GOOD", daily_bias="UP")
     result = tp.anticipate_setup(BO, BD, ATR, [{}], [{}], [{}], [{}], LIVE_HOUR)
-    assert result == {"viable": True, "side": "LONG",
-                       "reason": "anticipating LONG -- aligned with a UP daily trend on a GOOD table"}
+    assert result["viable"] is True
+    assert result["side"] == "LONG"
+    assert result["reason"] == "anticipating LONG -- aligned with a UP daily trend on a GOOD table"
+    # 2026-09-10: the structured fields lock_disposition() keys off.
+    assert result["category"] == "VIABLE"
+    assert result["box_atr_ratio"] == 0.4
+    assert result["htf_backs_side"] is True   # both HTF timeframes BULLISH, side LONG
+
+
+def test_viable_via_daily_bias_with_no_htf_backing_is_flagged(monkeypatch):
+    # Side comes off a GOOD UP daily table, but neither 1H nor 4H is BULLISH
+    # -> htf_backs_side False (the C_WEAK "watching one side" case).
+    _patch_regimes(monkeypatch, daily_quality="GOOD", daily_bias="UP",
+                    trend_1h="NEUTRAL", trend_4h="NEUTRAL")
+    result = tp.anticipate_setup(BO, BD, ATR, [{}], [{}], [{}], [{}], LIVE_HOUR)
+    assert result["viable"] is True and result["side"] == "LONG"
+    assert result["htf_backs_side"] is False
+
+
+def test_not_viable_categories_are_labeled(monkeypatch):
+    _patch_regimes(monkeypatch)
+    wide = tp.anticipate_setup(100.0, 0.0, 1.0, [{}], [{}], [{}], [{}], LIVE_HOUR)
+    assert wide["category"] == "WIDE_BOX"
+
+    _patch_regimes(monkeypatch)
+    dead_hr = tp.anticipate_setup(BO, BD, ATR, [{}], [{}], [{}], [{}], session_hour_utc=19)
+    assert dead_hr["category"] == "DEAD_HOUR"
+
+    _patch_regimes(monkeypatch, micro_regime_value="DEAD")
+    dead_tape = tp.anticipate_setup(BO, BD, ATR, [{}], [{}], [{}], [{}], LIVE_HOUR)
+    assert dead_tape["category"] == "DEAD_TAPE"
+
+    _patch_regimes(monkeypatch, daily_quality="MARGINAL", daily_bias=None,
+                    trend_1h="BULLISH", trend_4h="BEARISH")
+    no_dir = tp.anticipate_setup(BO, BD, ATR, [{}], [{}], [{}], [{}], LIVE_HOUR)
+    assert no_dir["category"] == "NO_DIRECTION"
 
 
 def test_viable_via_daily_bias_alignment_short(monkeypatch):

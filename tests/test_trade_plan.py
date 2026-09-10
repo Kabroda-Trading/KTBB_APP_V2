@@ -134,6 +134,9 @@ def test_short_side_waiting_plan():
 
 
 def test_render_brief_no_plan():
+    # An unclassified NO_PLAN (no no_plan_category) -- lock_disposition()
+    # returns None, so render_brief falls back to no_plan_reason verbatim and
+    # makes no claim about whether it can ARM later.
     plan = {
         "date_key": "2026-08-31", "symbol": "BTC/USDT",
         "status": "NO_PLAN", "no_plan_reason": "box 7.2x ATR -- T1 unreachable",
@@ -141,7 +144,31 @@ def test_render_brief_no_plan():
     text = tp.render_brief(plan)
     assert "NO_PLAN" in text
     assert "box 7.2x ATR" in text
-    assert "does not become a plan later" in text.lower() or "does not become a" in text
+    assert "NO_PLAN is a valid, common outcome." in text
+    assert "does not become a plan later" not in text.lower()  # the stale line is gone
+
+
+def test_render_brief_no_plan_wide_box_says_final():
+    plan = {
+        "date_key": "2026-08-31", "symbol": "BTC/USDT", "status": "NO_PLAN",
+        "no_plan_category": "WIDE_BOX", "box_atr_ratio": 0.89,
+        "breakout_trigger": 112340.0, "breakdown_trigger": 108900.0,
+    }
+    text = tp.render_brief(plan)
+    assert "0.89x daily ATR" in text
+    assert "cannot become a plan later today" in text
+    assert "No ARMED email" in text
+
+
+def test_render_brief_no_plan_standing_by_says_can_still_arm():
+    plan = {
+        "date_key": "2026-08-31", "symbol": "BTC/USDT", "status": "NO_PLAN",
+        "no_plan_category": "NO_DIRECTION", "box_atr_ratio": 0.41,
+        "breakout_trigger": 112340.0, "breakdown_trigger": 108900.0,
+    }
+    text = tp.render_brief(plan)
+    assert "can still ARM later" in text
+    assert "strong-volume push" in text
 
 
 def test_no_plan_carries_locked_levels_for_the_lock_email():
@@ -353,13 +380,17 @@ def _precross_kwargs(candles_24h=None):
 def test_precross_viable_produces_waiting_plan_with_tier_none(monkeypatch):
     monkeypatch.setattr(tp, "anticipate_setup", lambda *a, **k: {
         "viable": True, "side": "LONG", "reason": "anticipating LONG -- test",
+        "category": "VIABLE", "box_atr_ratio": 0.41, "htf_backs_side": True,
     })
     plan = tp.build_trade_plan(**_precross_kwargs())
     assert plan["status"] == "WAITING"
     assert plan["direction"] == "LONG"
     assert plan["tier"] is None
     assert plan["trigger_price"] == 100.0  # breakout_trigger, via decision_engine._plan_for_side
-    assert plan["last_transition_reason"] == "anticipating LONG -- test"
+    # last_transition_reason now carries the lock_disposition() headline (the
+    # SAME text the radar's Trade Plan panel and the lock email show).
+    assert "Plan set" in plan["last_transition_reason"]
+    assert "LONG" in plan["last_transition_reason"]
     assert plan["t1"] > plan["trigger_price"]  # box-multiple targets computed for real
 
 

@@ -140,15 +140,23 @@ def anticipate_setup(
     box = (bo - bd) if (bo and bd and bo > bd) else 0.0
 
     reach = _reachability.reachability(box, atr)
+    box_atr_ratio = reach.get("ratio")
     if not reach["ok"]:
-        return {"viable": False, "reason": reach["note"]}
+        # WIDE_BOX is the one lock-time no-plan reason that is truly final:
+        # box and ATR are both frozen at lock, so no later cross can ever
+        # pass the gate's reachability check. Every other category below can
+        # still resolve to a real trade intraday.
+        return {"viable": False, "reason": reach["note"],
+                "category": "WIDE_BOX", "box_atr_ratio": box_atr_ratio}
 
     if session_hour_utc is not None and session_hour_utc in _decision_engine.DEAD_HOURS:
-        return {"viable": False, "reason": f"{session_hour_utc:02d}:00 UTC is a dead-tape hour"}
+        return {"viable": False, "reason": f"{session_hour_utc:02d}:00 UTC is a dead-tape hour",
+                "category": "DEAD_HOUR", "box_atr_ratio": box_atr_ratio}
 
     micro = _micro_regime.classify_regime(candles_15m)
     if micro.get("regime") == "DEAD":
-        return {"viable": False, "reason": "15M regime is DEAD -- no participation"}
+        return {"viable": False, "reason": "15M regime is DEAD -- no participation",
+                "category": "DEAD_TAPE", "box_atr_ratio": box_atr_ratio}
 
     daily = _market_regime.classify_market_regime(candles_1d)
     daily_bias = (daily.get("policy") or {}).get("bias")
@@ -174,8 +182,19 @@ def anticipate_setup(
         side, reason = "SHORT", f"anticipating SHORT -- {short_aligned}/2 HTF timeframes bearish"
 
     if side is None:
-        return {"viable": False, "reason": "no clear directional bias yet -- awaiting a cross to determine side"}
-    return {"viable": True, "side": side, "reason": reason}
+        return {"viable": False, "reason": "no clear directional bias yet -- awaiting a cross to determine side",
+                "category": "NO_DIRECTION", "box_atr_ratio": box_atr_ratio}
+
+    # htf_backs_side: does at least one of {1H, 4H} agree with the anticipated
+    # direction? A side picked purely off a GOOD daily table can have neither
+    # -- and the gate's aligned>=1 cut (shipped 2026-09-10) means that plan
+    # can only fill if HTF turns by the real cross. The lock email says so
+    # honestly ("watching one side, needs HTF") rather than a confident "PLAN".
+    want = "BULLISH" if side == "LONG" else "BEARISH"
+    htf_backs_side = (trend_1h == want) or (trend_4h == want)
+    return {"viable": True, "side": side, "reason": reason,
+            "category": "VIABLE", "box_atr_ratio": box_atr_ratio,
+            "htf_backs_side": htf_backs_side}
 
 
 def _build_waiting_plan(
@@ -287,7 +306,7 @@ def _build_waiting_plan(
             ),
         }
 
-    return {
+    waiting = {
         **base,
         "status": "WAITING",
         "direction": side,
@@ -303,6 +322,14 @@ def _build_waiting_plan(
         "rr_ratio": rr["ratio"],
         "last_transition_reason": generation_reason,
     }
+    # Persist the disposition headline as the transition reason so the radar's
+    # Trade Plan panel (which renders last_transition_reason) shows the SAME
+    # text the lock email does -- the transient category/ratio fields don't
+    # survive to the DB, but this string does.
+    _disp = lock_disposition(waiting)
+    if _disp:
+        waiting["last_transition_reason"] = _disp["headline"]
+    return waiting
 
 
 def build_trade_plan(
@@ -386,8 +413,18 @@ def build_trade_plan(
                 candles_15m, candles_1d, candles_1h or [], candles_4h or [],
                 session_hour_utc,
             )
+            # Transient (not TradePlan columns) -- carried so the lock email,
+            # the radar Trade Plan panel, and render_brief() all render the
+            # SAME disposition text via lock_disposition() below.
+            base["no_plan_category"] = anticipated.get("category")
+            base["box_atr_ratio"] = anticipated.get("box_atr_ratio")
+            base["htf_backs_side_at_lock"] = anticipated.get("htf_backs_side")
             if not anticipated["viable"]:
-                return {**base, "status": "NO_PLAN", "no_plan_reason": anticipated["reason"]}
+                np = {**base, "status": "NO_PLAN", "no_plan_reason": anticipated["reason"]}
+                _disp = lock_disposition(np)
+                if _disp:
+                    np["last_transition_reason"] = _disp["headline"]
+                return np
             plan = _decision_engine._plan_for_side(
                 anticipated["side"], breakout_trigger, breakdown_trigger, r30_high, r30_low,
             )
@@ -646,6 +683,96 @@ def build_alignment_email_line(plan: Dict[str, Any]) -> Optional[str]:
     )
 
 
+def lock_disposition(plan: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """THE single source of truth for the lock-time disposition text --
+    the same words the lock email, the radar's Trade Plan panel, and
+    render_brief() all render (Andy's radar/email-parity requirement,
+    2026-09-10). Returns None once a real cross has moved the plan past
+    its lock-time state (FILLED/DONE/VETOED/STOPPED/etc) -- those have
+    their own transition reasons and are not a "disposition."
+
+    Four codes, keyed off fields anticipate_setup() already computed:
+      A  no trade today       -- WIDE_BOX: box/ATR frozen too wide, no
+                                 later cross can ever pass the gate. The
+                                 only genuinely final stand-down.
+      B  standing by          -- box is reachable but no side to anticipate
+                                 yet (no direction / dead hour / dead 15m
+                                 tape). A strong-volume break can still ARM.
+      C  plan set             -- a real WAITING plan, >=1 HTF backs the side.
+      C_WEAK  watching one side -- WAITING plan whose side came off a GOOD
+                                 daily table but neither 1H nor 4H backs it
+                                 yet; only fills if HTF turns by the cross.
+
+    `code` is stable; `subject`/`headline`/`body` are the rendered strings.
+    """
+    status = plan.get("status")
+    sym = (plan.get("symbol") or "").replace("/", "")
+    bo, bd = plan.get("breakout_trigger"), plan.get("breakdown_trigger")
+    ratio = plan.get("box_atr_ratio")
+    ratio_txt = f"{ratio:.2f}x daily ATR" if isinstance(ratio, (int, float)) else "wider than the 0.55 ceiling"
+    lvl = (f"{bo:,.0f}" if bo else "the breakout"), (f"{bd:,.0f}" if bd else "the breakdown")
+
+    if status == "WAITING":
+        direction = plan.get("direction") or "?"
+        trig = plan.get("trigger_price")
+        trig_txt = f" @ {trig:.0f}" if trig else ""  # no comma -- matches the ARMED subject convention
+        tier = plan.get("tier")
+        # htf_backs_side_at_lock: True / False / None(legacy) -- only an
+        # explicit False downgrades to C_WEAK.
+        if plan.get("htf_backs_side_at_lock") is False:
+            return {
+                "code": "C_WEAK",
+                "subject": f"KABRODA - watching one side - {sym} {direction}{trig_txt} - needs HTF",
+                "headline": f"Watching {direction} only - the daily table favors it but neither 1H nor 4H backs it yet.",
+                "body": (
+                    f"The daily table favors {direction}, but neither 1H nor 4H backs it yet -- this only "
+                    f"becomes a real trade if a higher timeframe turns before price crosses. Lower confidence "
+                    f"than a normal plan. Full plan below."
+                ),
+            }
+        tier_txt = f" ({tier} likely)" if tier else ""
+        return {
+            "code": "C",
+            "subject": f"KABRODA - plan set - {sym} {direction}{trig_txt}{tier_txt}",
+            "headline": f"Plan set: {direction}{trig_txt}{tier_txt}.",
+            "body": "",  # render_brief()'s full plan output is the body for C
+        }
+
+    if status != "NO_PLAN":
+        return None  # FILLED / DONE / VETOED / etc -- not a lock-time disposition
+
+    # A NO_PLAN row only has a disposition if anticipate_setup() classified it
+    # at lock. A NO_PLAN written by the cross-declined path (a real cross the
+    # gate turned down) has a `no_plan_reason` but no category -- that's a
+    # VETOED-style outcome, not "standing by"; leave it to its own reason text.
+    category = plan.get("no_plan_category")
+    if category == "WIDE_BOX":
+        return {
+            "code": "A",
+            "subject": f"KABRODA - no trade today - {sym} (box too wide)",
+            "headline": f"No trade today: box is {ratio_txt}, T1 out of reach. No ARMED email possible.",
+            "body": (
+                f"Genuine stand-down. The box is {ratio_txt} against the 0.55 ceiling -- T1 is out of "
+                f"reach even if price breaks a trigger. No ARMED email is possible today. Ignore the "
+                f"charts; next check is tomorrow at the session open."
+            ),
+        }
+    if category in ("DEAD_HOUR", "DEAD_TAPE", "NO_DIRECTION"):
+        return {
+            "code": "B",
+            "subject": f"KABRODA - standing by - {sym} (no clear side yet)",
+            "headline": "Standing by: box is reachable but no side to anticipate yet. ARMED only on a strong-volume break.",
+            "body": (
+                f"The box is reachable ({ratio_txt}), but neither the daily table nor the 1H/4H gives a "
+                f"direction to anticipate yet. Not watching.\n\n"
+                f"If price breaks {lvl[0]} or {lvl[1]} on a strong-volume push with a higher-timeframe "
+                f"backing it, you'll get one ARMED email at that moment. Silence the rest of the session "
+                f"means it never set up."
+            ),
+        }
+    return None
+
+
 def render_brief(plan: Dict[str, Any]) -> str:
     """Renders the pre-commit brief (SS4) from a built plan dict (as
     returned by build_trade_plan(), or a TradePlan row's __dict__). Every
@@ -655,7 +782,11 @@ def render_brief(plan: Dict[str, Any]) -> str:
     symbol = plan.get("symbol", "")
 
     if plan.get("status") == "NO_PLAN":
-        reason = plan.get("no_plan_reason") or "gate did not approve a setup"
+        disp = lock_disposition(plan)
+        # The one-line headline here, not the full body -- the lock email
+        # prepends the body already, and a standalone brief / the radar
+        # panel want the terse version.
+        reason = (disp["headline"] if disp else None) or plan.get("no_plan_reason") or "gate did not approve a setup"
         bo, bd = plan.get("breakout_trigger"), plan.get("breakdown_trigger")
         levels_line = (
             f"\n  Breakout trigger (BO): {bo:.0f}\n  Breakdown trigger (BD): {bd:.0f}\n"
@@ -663,12 +794,24 @@ def render_brief(plan: Dict[str, Any]) -> str:
         )
         direction = plan.get("direction")
         watching_line = f"\n  Anticipated side, if either crosses: {direction}\n" if direction else ""
+        # WIDE_BOX (code A) is the one genuinely-final stand-down; a B disposition
+        # can still ARM on a later strong-volume cross (poll-NO_PLAN +
+        # PROMOTED_PUSH_FLOOR). No claim either way when we couldn't classify it.
+        code = disp.get("code") if disp else None
+        if code == "A":
+            closer = ("  NO_PLAN is a valid, common outcome. Box and ATR are frozen at lock, "
+                      "so this one cannot become a plan later today.")
+        elif code == "B":
+            closer = ("  NO_PLAN is a valid, common outcome. It can still ARM later if price breaks a "
+                      "trigger on a strong-volume push with a higher-timeframe backing it -- otherwise "
+                      "silence means it held for the session.")
+        else:
+            closer = "  NO_PLAN is a valid, common outcome."
         return (
             f"TRADE PLAN — {date_key} — {symbol} — STATUS: NO_PLAN\n\n"
             f"  NO PLAN TODAY — {reason}\n"
             f"{levels_line}{watching_line}\n"
-            f"  NO_PLAN is a valid, common outcome. This does not become a "
-            f"plan later in the day."
+            f"{closer}"
         )
 
     direction = plan.get("direction")
