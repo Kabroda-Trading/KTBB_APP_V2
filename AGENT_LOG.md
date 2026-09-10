@@ -2172,3 +2172,31 @@ Full trail: Kabroda AI Brain repo `AGENT_LOG.md` 2026-09-10 + `LIVE_SYSTEM_STATE
 §1 (Email section) + CHANGELOG. Full suite 612 passed, boot clean.
 
 Queue: the full clean Domain 1/2/3 audit (the last item).
+
+## 2026-09-10 — FROM: Claude Code — FOR: DeepSeek + Andy — FULL DOMAIN 1/2/3 CLEAN AUDIT (site commit d638a14)
+STATUS: resolved
+
+Thorough end-to-end pass over Domain 1/2/3 after the four 2026-09-10 changes.
+Two real inconsistencies found and fixed; everything else verified clean.
+
+FIXED:
+1. `decision_engine.py::_veto_gate()` -- diagnostic `checks` dict still had the
+   pre-2026-09-10 htf_carry waiver ("True if conflicted else aligned>=1").
+   Diagnostic only (veto forces pass=False), but logged a misleading
+   htf_carry=True for CONFLICTED aligned=0 veto rows. Now mirrors _core_gate.
+2. `trade_plan.py::advance_no_plan()` -- the poll-NO_PLAN promotion path used
+   PREMIUM's 24h-zone stop for STANDARD too, missing the 2026-09-08 tier-
+   specific-stop rule the other two fill paths apply. ~19 promoted STANDARD
+   trades/year got the wrong stop. Fixed to match _build_waiting_plan exactly.
+
+VERIFIED CLEAN: gate has one implementation (3 callers, no divergence);
+constants match; the 2nd tier path (_stamp_tier_at_cross) is consistent;
+the real-order safety stack is 5 layers deep and intact; Domain 3 management
+matches the audited 50/50 + PREMIUM-BE rule; POST_ONLY on all 3 LIMIT legs;
+re-entry rule matches spec; the naive-UTC timestamp bug is fully fixed across
+all 3 templates; NO_PLAN promotions persist the real GateLog verdict; no site
+page quotes the retired -0.20R WEEX haircut (site only shows raw R).
+
+Full trail + Andy's-thesis measurement (65% reach T1 / 2% go nowhere) in the
+Kabroda AI Brain repo `AGENT_LOG.md` 2026-09-10 audit entry. Full suite 613
+passed, boot clean.
