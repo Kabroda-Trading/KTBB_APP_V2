@@ -476,6 +476,16 @@ def advance_no_plan(
       VETOED path (which held a resting order and gets one retest), a
       NO_PLAN promotion never had a resting order, so there's no retest to
       wait for; one real cross resolves the session outright.
+    - A real TAKE whose push is below PROMOTED_PUSH_FLOOR (2026-09-10,
+      Andy-approved): resolves to DONE, same VETOED framing. A NO_PLAN
+      morning had no anticipated direction at lock -- the 5-year forensic
+      (Kabroda AI Brain repo, anticipate_replay.py) showed those promotions
+      are only a real edge on a genuinely strong push (>= 1.8x baseline);
+      below that they are a coin flip that nets ~0R. This bar is STRICTER
+      than, and additional to, the normal STANDARD_FUEL_RATIO_FLOOR (1.1),
+      and it applies ONLY here -- a WAITING plan that had a direction at
+      lock is not subject to it. See decision_engine.PROMOTED_PUSH_FLOOR's
+      own comment for the full evidence.
     """
     state = decision_dict.get("verdict_state")
     side = decision_dict.get("side")
@@ -491,6 +501,21 @@ def advance_no_plan(
             "vetoed_cross_side": side,
             "vetoed_cross_trigger": decision_dict.get("entry_price"),
             "last_transition_reason": f"cross confirmed, full gate declined -- {headline}",
+        }
+
+    import decision_engine as _decision_engine
+    push_ratio = decision_dict.get("fuel_push_ratio")
+    if push_ratio is not None and push_ratio < _decision_engine.PROMOTED_PUSH_FLOOR:
+        return {
+            "status": "DONE",
+            "cross_time": now_utc,
+            "vetoed_cross_side": side,
+            "vetoed_cross_trigger": decision_dict.get("entry_price"),
+            "last_transition_reason": (
+                f"cross cleared the gate ({push_ratio}x baseline push) but a no-plan "
+                f"morning promotes only on a strong push -- below the "
+                f"{_decision_engine.PROMOTED_PUSH_FLOOR}x floor, no trade"
+            ),
         }
 
     entry_price = float(decision_dict["entry_price"])

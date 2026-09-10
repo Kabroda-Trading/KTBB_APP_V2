@@ -21,12 +21,17 @@ def _flat_candles(price=100.0, n=10):
     return [{"open": price, "high": price + 1, "low": price - 1, "close": price} for _ in range(n)]
 
 
-def _take_decision(side="LONG", tier="STANDARD", entry=100.0, t1=112.0, t2=120.0, t3=132.0):
+def _take_decision(side="LONG", tier="STANDARD", entry=100.0, t1=112.0, t2=120.0, t3=132.0,
+                    fuel_push_ratio=2.0):
+    # fuel_push_ratio default 2.0 -> clears both STANDARD_FUEL_RATIO_FLOOR (1.1)
+    # and PROMOTED_PUSH_FLOOR (1.8); tests exercising the promoted floor pass an
+    # explicit value.
     return {
         "verdict_state": "TAKE_PREMIUM" if tier == "PREMIUM" else "TAKE_STANDARD",
         "side": side, "tier": tier,
         "entry_price": entry, "stop_loss": entry - 20.0 if side == "LONG" else entry + 20.0,
         "t1": t1, "t2": t2, "t3": t3,
+        "fuel_push_ratio": fuel_push_ratio,
         "tactical_brief": "gate approved",
     }
 
@@ -545,6 +550,55 @@ def test_advance_no_plan_returns_none_when_rr_floor_fails():
         now_utc=NOW,
     )
     assert updates is None
+
+
+# --- PROMOTED_PUSH_FLOOR (2026-09-10, Andy-approved): a NO_PLAN morning promotes
+#     only on a strong push. Stricter than, and additional to, the 1.1 STANDARD
+#     floor; applies ONLY to advance_no_plan(), never to a WAITING plan.
+
+def test_advance_no_plan_take_below_promoted_push_floor_goes_to_done_not_filled():
+    import decision_engine as de
+    assert de.PROMOTED_PUSH_FLOOR == 1.8
+    # A clean TAKE in every other respect (good R:R, stop plannable) -- only the
+    # push is weak (1.5x, clears the 1.1 STANDARD floor but not the 1.8 promoted floor).
+    decision = _take_decision(side="LONG", tier="STANDARD", entry=100.0, t1=112.0, t2=120.0, t3=132.0,
+                              fuel_push_ratio=1.5)
+    updates = tp.advance_no_plan(
+        decision, candles_24h=_flat_candles(price=150.0),
+        r30_high=160.0, r30_low=155.0, f24_vah=170.0, f24_val=165.0, daily_atr14=2.0,
+        now_utc=NOW,
+    )
+    assert updates is not None
+    assert updates["status"] == "DONE"          # not FILLED
+    assert updates["vetoed_cross_side"] == "LONG"
+    assert updates["vetoed_cross_trigger"] == 100.0
+    assert "1.8" in updates["last_transition_reason"]
+    assert "1.5" in updates["last_transition_reason"]
+
+
+def test_advance_no_plan_take_at_promoted_push_floor_boundary_fills():
+    # >= is inclusive -- exactly 1.8 promotes.
+    decision = _take_decision(side="LONG", tier="STANDARD", fuel_push_ratio=1.8)
+    updates = tp.advance_no_plan(
+        decision, candles_24h=_flat_candles(price=150.0),
+        r30_high=160.0, r30_low=155.0, f24_vah=170.0, f24_val=165.0, daily_atr14=2.0,
+        now_utc=NOW,
+    )
+    assert updates is not None
+    assert updates["status"] == "FILLED"
+
+
+def test_advance_no_plan_missing_push_ratio_does_not_block_promotion():
+    # push_ratio None (older decision_dict / not measured) -> fail-open, same
+    # backward-compatible stance as _stamp_tier_at_cross's push_ratio handling.
+    decision = _take_decision(side="LONG", tier="STANDARD", fuel_push_ratio=None)
+    updates = tp.advance_no_plan(
+        decision, candles_24h=_flat_candles(price=150.0),
+        r30_high=160.0, r30_low=155.0, f24_vah=170.0, f24_val=165.0, daily_atr14=2.0,
+        now_utc=NOW,
+    )
+    assert updates is not None
+    assert updates["status"] == "FILLED"
 
 
 def test_stamp_tier_at_cross_returns_none_when_push_ratio_below_floor(monkeypatch):

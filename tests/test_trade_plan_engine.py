@@ -540,7 +540,11 @@ def test_waiting_own_cross_syncs_gate_log_via_loop(poll_env, monkeypatch):
     assert gate_row.daily_regime_table == "TRENDING_UP"
 
 
-def _fueled_5m_ohlc_candles(trigger, is_long, baseline_vol=10.0, push_vol=16.0, baseline_n=250, push_n=6, near_offset=2.0):
+def _fueled_5m_ohlc_candles(trigger, is_long, baseline_vol=10.0, push_vol=20.0, baseline_n=250, push_n=6, near_offset=2.0):
+    # push_vol 20 -> ratio ~2.0: clears STANDARD_FUEL_RATIO_FLOOR (1.1) AND
+    # PROMOTED_PUSH_FLOOR (1.8, the NO_PLAN-promotion-only bar shipped
+    # 2026-09-10). Both NO_PLAN-promotion callers of this helper need a push
+    # that promotes; a fuel-quality-boundary test would set its own value.
     # push_vol default bumped 10.0 -> 16.0 2026-09-09 (ratio ~1.0 -> ~1.6):
     # this name means "unambiguously fueled," and ~1.0 now sits right at
     # STANDARD_FUEL_RATIO_FLOOR's (1.1) boundary -- callers that want to
@@ -630,6 +634,39 @@ def test_no_plan_stays_no_plan_when_gate_still_says_no(poll_env, monkeypatch):
     assert sent == []  # no email for a non-event
 
 
+def test_no_plan_weak_push_cross_does_not_promote_and_sends_done(poll_env, monkeypatch):
+    # PROMOTED_PUSH_FLOOR (1.8, shipped 2026-09-10): a NO_PLAN morning re-
+    # evaluated on a real cross that clears the full gate but with only a
+    # moderate push (ratio ~1.5 here -- clears the 1.1 STANDARD floor, not the
+    # 1.8 promoted floor) resolves to DONE, not FILLED. The 5-year forensic
+    # showed these weak-push promotions are a coin flip that nets ~0R.
+    import decision_engine
+    monkeypatch.setattr(decision_engine, "DEAD_HOURS", set())
+    sent = _capture_emails(monkeypatch)
+    monkeypatch.setattr(market_regime, "classify_market_regime", lambda candles: {
+        "table": "TRENDING_UP", "quality": "GOOD", "policy": {"bias": "UP"},
+    })
+    monkeypatch.setattr(micro_regime, "classify_regime", lambda candles: {"regime": "TRENDING"})
+    monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BULLISH", "trend_4h": "NEUTRAL", "aligned": 1, "opposed": 0,
+    })
+    poll_env["make_lock"](levels={
+        "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
+        "range30m_high": 100.0, "range30m_low": 90.0,
+        "f24_vah": 105.0, "f24_val": 85.0,
+    })
+    poll_env["make_gate_log"](state="PASS")
+    poll_env["make_plan"](status="NO_PLAN", direction=None, trigger_price=None)
+    candles = _fueled_5m_ohlc_candles(100.0, is_long=True, push_vol=15.0)  # ratio ~1.5: gate yes, promote no
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=20.0)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "DONE"
+    assert "1.8" in row.last_transition_reason
+    assert len(sent) == 1
+    assert sent[0][0].startswith("KABRODA VETOED")  # vetoed-framed DONE, not ARMED
+
+
 def test_no_plan_wick_through_still_forming_candle_does_not_trigger_evaluation(poll_env, monkeypatch):
     # THE exact 2026-09-04 P0 incident (Kabroda AI Brain repo AGENT_LOG.md,
     # DeepSeek + Andy), reproduced end to end through the REAL poll loop --
@@ -691,12 +728,11 @@ def test_no_plan_confirmed_close_through_trigger_does_trigger_evaluation(poll_en
         return {"time": int(open_ts), "open": close, "high": close + 0.5, "low": close - 0.5, "close": close, "volume": vol}
     candles = (
         [c(now - 300 * (i + 8), 92.0) for i in range(250)][::-1]  # baseline, near BD
-        # 2026-09-09: vol bumped 10.0 -> 16.0 (ratio ~1.0 -> ~1.6) to clear
-        # STANDARD_FUEL_RATIO_FLOOR (1.1) -- this test is about confirmed-
-        # close detection timing, not fuel quality, so it needs an
-        # unambiguously-fueled push, not one that now sits right at the
-        # new floor's boundary.
-        + [c(now - 300 * (i + 2), 85.0, vol=16.0) for i in range(6)][::-1]  # fueled push through BD, CONFIRMED closes
+        # vol 20.0 -> ratio ~2.0: clears STANDARD_FUEL_RATIO_FLOOR (1.1) AND
+        # PROMOTED_PUSH_FLOOR (1.8, NO_PLAN-promotion-only, shipped 2026-09-10).
+        # This test is about confirmed-close detection timing, not fuel quality,
+        # so it needs an unambiguously-strong push that actually promotes.
+        + [c(now - 300 * (i + 2), 85.0, vol=20.0) for i in range(6)][::-1]  # fueled push through BD, CONFIRMED closes
     )
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=20.0)
 

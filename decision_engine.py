@@ -113,6 +113,30 @@ DEAD_HOURS = set(range(0, 12)) | {18, 19, 20}
 # AGENT_LOG.md, 2026-09-09 19:55 CT and the correction that follows it.
 STANDARD_FUEL_RATIO_FLOOR = 1.1
 
+# PROMOTED_PUSH_FLOOR -- a STRICTER push-ratio bar that applies ONLY when a
+# NO_PLAN morning (no anticipated direction at lock) is re-evaluated on a
+# later real cross and would otherwise promote to a live trade
+# (trade_plan.py::advance_no_plan, the poll-NO_PLAN path). It does NOT touch
+# the normal gate, WAITING plans, the radar, or lock-time evaluation.
+#
+# Why a separate, higher floor here: the 5-year forensic
+# (Kabroda AI Brain repo, brain/calibration/anticipate_replay.py +
+# anticipate_replay_real.py, 2026-09-10) found the 122 "promoted" trades net
+# +0.39R and are positive every year -- BUT bimodal on push strength. Below
+# ~1.8x baseline they are a coin flip that nets ~0R over the whole corpus
+# (real-classifier run: ratio<1.8 = 47 trades, +0.7R total, ~37% win); at
+# 1.8x+ they are a real edge (71 trades, +45.9R, ~74% win). "No direction at
+# lock" is a mild negative signal that a strong push overrides and a weak one
+# does not. Account sim (banded_promoted_floor.py): drawdown-in-R is identical
+# with or without this floor (5.9R either way -- it is NOT a risk cut); the
+# effect is +0.386 -> +0.42 average R per trade at account maturity, i.e.
+# fewer, higher-probability promotions and a quieter "surprise ARMED" email
+# stream. Andy-approved 2026-09-10 (1.8, not 2.0: 2.0 gives back a small
+# positive sub-population for no drawdown benefit). Independently reproduced
+# by DeepSeek (AGENT_LOG.md 2026-09-10 11:10 CT) incl. under the real
+# market_regime/micro_regime BBWP classifiers.
+PROMOTED_PUSH_FLOOR = 1.8
+
 # §6 management rule -- Andy's fib convention: anchor 0 = BD, 1.0 = BO.
 T1_BOX, T2_BOX, T3_BOX = 0.618, 1.0, 1.618
 STOP_BUFFER_BOX = 0.12      # swept 2026-08-29, robust train/test (Brain repo)
