@@ -107,14 +107,15 @@ def test_diagnostics_safe_and_none_when_no_signal_yet():
         assert decision_dict[key] is None
 
 
-def test_take_standard_now_covers_fuel_conflicted_when_otherwise_valid(monkeypatch):
-    # GATE_REBUILD_SPEC.md §1: fuel-CONFLICTED-but-valid is a real STANDARD
-    # trade now, with NO HTF qualifier -- verified against the real 80-row
-    # CONFLICTED corpus (all three HTF buckets profitable). aligned=0 here
-    # (no carry at all) to prove the HTF check is genuinely skipped, not just
-    # satisfied by coincidence.
+def test_take_standard_covers_fuel_conflicted_when_it_has_htf_carry(monkeypatch):
+    # GATE_REBUILD_SPEC.md §1: fuel-CONFLICTED (not FUELED specifically) can
+    # earn STANDARD -- that part still holds. aligned=1 here: as of 2026-09-10
+    # CONFLICTED needs >= 1 HTF timeframe backing the direction too (the
+    # aligned=0 cut, Andy-approved -- see decision_engine.py::_core_gate's
+    # comment). The point of this test is the FUELED-vs-CONFLICTED axis, not
+    # the carry axis.
     _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=0)
+    _patch_htf(monkeypatch, aligned=1)
     _patch_fuel(monkeypatch, "CONFLICTED")
 
     decision_dict, _ = _evaluate()
@@ -124,15 +125,25 @@ def test_take_standard_now_covers_fuel_conflicted_when_otherwise_valid(monkeypat
     assert decision_dict["gate"]["checks"]["htf_carry"] is True
 
 
-def test_take_standard_conflicted_eligible_across_all_real_htf_buckets(monkeypatch):
-    # The real corpus splits CONFLICTED profitability across HTF=0/1/2
-    # (avg R +0.44/+0.24/+1.41) -- none of the three buckets should be
-    # excluded by the gate.
-    for aligned in (0, 1, 2):
+def test_conflicted_now_requires_htf_carry_same_as_fueled(monkeypatch):
+    # 2026-09-10 aligned=0 cut (Andy-approved -- LIVE_SYSTEM_STATE.md +
+    # Kabroda AI Brain AGENT_LOG.md): CONFLICTED used to waive the HTF-carry
+    # check entirely, so a STANDARD trade could fill with neither 1H nor 4H
+    # backing the direction. The full corrected 5-year corpus (154 such
+    # trades, +0.08R avg, 51% win) plus a walk-forward (held-out window
+    # -7.9R / 37% win) said cut it. Now both fuel states need >= 1 carry.
+    _patch_neutral_regime(monkeypatch)
+    _patch_htf(monkeypatch, aligned=0)
+    _patch_fuel(monkeypatch, "CONFLICTED")
+    decision_dict, _ = _evaluate()
+    assert decision_dict["verdict_state"] == "PASS"
+    assert "no carry fuel" in decision_dict["gate"]["misses"][0]
+
+    # aligned 1 and 2 still take it -- the cut is specifically the zero bucket
+    for aligned in (1, 2):
         _patch_neutral_regime(monkeypatch)
         _patch_htf(monkeypatch, aligned=aligned)
         _patch_fuel(monkeypatch, "CONFLICTED")
-
         decision_dict, _ = _evaluate()
         assert decision_dict["verdict_state"] == "TAKE_STANDARD", f"failed at aligned={aligned}"
 
@@ -251,11 +262,12 @@ def test_standard_fuel_ratio_floor_boundary_just_under_1_1_rejects_it(monkeypatc
 
 
 def test_standard_fuel_ratio_floor_applies_to_conflicted_too(monkeypatch):
-    # CONFLICTED needs no HTF carry, but it still needs to clear the same
-    # STANDARD floor -- the floor is a fuel-quality gate, not a FUELED-only
-    # add-on.
+    # CONFLICTED with carry present (aligned=1) still needs to clear the same
+    # STANDARD floor -- the floor is a fuel-quality gate that applies to both
+    # fuel states, not a FUELED-only add-on. (aligned=1, not 0, so this
+    # isolates the floor from the 2026-09-10 HTF-carry cut.)
     _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=0)
+    _patch_htf(monkeypatch, aligned=1)
     _patch_fuel(monkeypatch, "CONFLICTED", ratio=0.5)
     decision_dict, _ = _evaluate()
     assert decision_dict["verdict_state"] == "PASS"
@@ -298,3 +310,26 @@ def test_standard_fuel_ratio_floor_reason_names_the_real_ratio():
     assert gate["pass"] is False
     assert gate["tier"] is None
     assert "1.1" in gate["misses"][0]
+
+
+def test_htf_carry_cut_blocks_aligned_zero_for_both_fuel_states():
+    # 2026-09-10 aligned=0 cut, pinned at _core_gate() directly (no
+    # monkeypatching) -- htf_carry is folded into core_passed, so a failed
+    # carry check must yield pass=False / tier=None / a named miss, for a
+    # push that would otherwise clear everything (ratio 1.5, tight box,
+    # live hour). Both FUELED and CONFLICTED.
+    for verdict in ("FUELED", "CONFLICTED"):
+        fuel = {"verdict": verdict, "checks": {"push_volume": {"ratio": 1.5}}}
+        gate = de._core_gate(box=10.0, atr=25.0, fuel=fuel, htf={"aligned": 0}, session_hour=15)
+        assert gate["pass"] is False, verdict
+        assert gate["tier"] is None, verdict
+        assert gate["checks"]["htf_carry"] is False, verdict
+        assert "no carry fuel" in gate["misses"][0], verdict
+
+    # aligned=1 with the same push is a clean STANDARD (proves the cut is
+    # specifically the zero bucket, not a blanket tightening).
+    for verdict in ("FUELED", "CONFLICTED"):
+        fuel = {"verdict": verdict, "checks": {"push_volume": {"ratio": 1.5}}}
+        gate = de._core_gate(box=10.0, atr=25.0, fuel=fuel, htf={"aligned": 1}, session_hour=15)
+        assert gate["pass"] is True, verdict
+        assert gate["tier"] == "STANDARD", verdict

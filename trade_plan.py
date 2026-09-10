@@ -751,6 +751,16 @@ def _stamp_tier_at_cross(
     premium = fueled and aligned == 2 and ratio is not None and ratio <= _reachability.PREMIUM_BOX_ATR
     if premium:
         return "PREMIUM"
+
+    # HTF carry (2026-09-10, Andy-approved -- see decision_engine.py::_core_gate's
+    # own comment for the full evidence trail): at least one of {1H, 4H} must
+    # back the direction, for BOTH fuel states. Previously CONFLICTED fuel
+    # waived this entirely, so a STANDARD trade could fill with aligned == 0.
+    # _core_gate() folds this into `core_passed` (a failed htf_carry check ->
+    # pass=False, tier=None); this parallel path must reach the same verdict.
+    if aligned == 0:
+        return None
+
     standard_ok = push_ratio is None or push_ratio >= _decision_engine.STANDARD_FUEL_RATIO_FLOOR
     return "STANDARD" if standard_ok else None
 
@@ -889,19 +899,28 @@ def advance_waiting_plan(
                 plan, candles_1h, candles_4h, daily_atr14, fuel_verdict=verdict, push_ratio=push_ratio,
             )
             if new_tier is None:
-                # 2026-09-09: cleared the 4-condition gate but not STANDARD's
-                # fuel-quality floor, and PREMIUM doesn't apply either -- the
-                # real-cross path (decision_engine.py's _core_gate()) would
-                # return pass=False/tier=None here too. Must not fall through
-                # to FILLED (there is no tier to manage this trade under).
+                # Cleared the fuel-condition check but not a stricter gate
+                # requirement, and PREMIUM doesn't apply either -- the real-
+                # cross path (decision_engine.py's _core_gate()) would return
+                # pass=False/tier=None here too. Must not fall through to
+                # FILLED (there is no tier to manage this trade under). Two
+                # distinct causes, named separately per KABRODA_REBUILD_SPEC.md
+                # §9: the HTF-carry cut (2026-09-10) is the more fundamental
+                # one (_core_gate folds it into core_passed), checked first.
                 import decision_engine as _decision_engine
-                return {
-                    "status": "DONE",
-                    "last_transition_reason": (
+                import htf_fuel as _htf_fuel
+                _aligned = _htf_fuel.htf_fuel(candles_1h, candles_4h, side).get("aligned") or 0
+                if _aligned == 0:
+                    reason = (
+                        "cross confirmed but neither 1H nor 4H backs the direction "
+                        "(no carry fuel) -- no trade"
+                    )
+                else:
+                    reason = (
                         f"cross confirmed but push volume ({push_ratio}x baseline) is below the "
                         f"{_decision_engine.STANDARD_FUEL_RATIO_FLOOR}x floor for standard tier -- no trade"
-                    ),
-                }
+                    )
+                return {"status": "DONE", "last_transition_reason": reason}
             updates["tier"] = new_tier
             # 2026-09-08 TIER-SPECIFIC STOP (see _build_waiting_plan()'s own
             # comment for the full backtest rationale and Andy's explicit

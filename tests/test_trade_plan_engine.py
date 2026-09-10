@@ -330,13 +330,24 @@ def test_waiting_thin_conflicted_cross_now_sends_done_email_not_armed(poll_env, 
     # This exact scenario now correctly sends a DONE email, not ARMED --
     # the opposite of what this test asserted before the floor shipped,
     # and that reversal is the point of the floor.
+    #
+    # 2026-09-10: rising 1H/4H candles supplied so aligned >= 1 (BULLISH
+    # backing a LONG cross) -- this keeps the test isolated to the FUEL
+    # FLOOR after the aligned=0 cut shipped. Without HTF carry the plan
+    # would now DONE for "no carry fuel" instead, a different rule.
     sent = _capture_emails(monkeypatch)
     poll_env["make_plan"](
         status="WAITING", direction="LONG", trigger_price=100.0,
         stop_price=90.0, stop_basis="beyond sweep wick low", t1=112.0, t2=120.0, t3=132.0,
     )
     candles = _thin_5m_candles(100.0, is_long=True)
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=25.0)
+    bullish_htf = [{"close": 100.0 + i} for i in range(40)]  # steadily rising -> BULLISH
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": candles},
+        candles_1h_by_symbol={"BTC/USDT": bullish_htf},
+        candles_4h_by_symbol={"BTC/USDT": bullish_htf},
+        polls=1, daily_atr14=25.0,
+    )
 
     assert len(sent) == 1
     assert sent[0][0].startswith("KABRODA DONE")
@@ -344,6 +355,34 @@ def test_waiting_thin_conflicted_cross_now_sends_done_email_not_armed(poll_env, 
     assert plan.status == "DONE"
     assert plan.tier is None   # never qualified for a tier at all
     assert "1.1" in plan.last_transition_reason
+
+
+def test_waiting_fueled_cross_with_no_htf_carry_sends_done_not_armed(poll_env, monkeypatch):
+    # 2026-09-10 aligned=0 cut, end-to-end through the loop: a clean FUELED
+    # push that clears the 1.1 STANDARD floor (ratio ~1.6 here) but with
+    # neither 1H nor 4H backing the LONG cross (flat HTF candles -> aligned
+    # 0) must DONE for "no carry fuel", not FILL. This is the WAITING->cross
+    # path (_stamp_tier_at_cross), the parallel to decision_engine's gate.
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_plan"](
+        status="WAITING", direction="LONG", trigger_price=100.0,
+        stop_price=90.0, stop_basis="beyond sweep wick low", t1=112.0, t2=120.0, t3=132.0,
+    )
+    candles = _fueled_5m_candles(100.0, is_long=True, push_vol=16.0)  # ratio 1.6, clears the floor
+    flat_htf = [{"close": 100.0} for _ in range(40)]  # no trend -> aligned 0
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": candles},
+        candles_1h_by_symbol={"BTC/USDT": flat_htf},
+        candles_4h_by_symbol={"BTC/USDT": flat_htf},
+        polls=1, daily_atr14=25.0,
+    )
+
+    assert len(sent) == 1
+    assert sent[0][0].startswith("KABRODA DONE")
+    plan = poll_env["get_plan"]()
+    assert plan.status == "DONE"
+    assert plan.tier is None
+    assert "carry fuel" in plan.last_transition_reason
 
 
 def test_waiting_real_no_fuel_ghost_push_sends_vetoed_email_via_loop(poll_env, monkeypatch):

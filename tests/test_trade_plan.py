@@ -430,6 +430,23 @@ def test_stamp_tier_at_cross_standard_when_box_too_wide_for_premium(monkeypatch)
     assert tier == "STANDARD"
 
 
+def test_stamp_tier_at_cross_returns_none_when_no_htf_carry(monkeypatch):
+    # 2026-09-10 aligned=0 cut (Andy-approved): this parallel tier path must
+    # reach the same verdict as decision_engine.py::_core_gate -- neither 1H
+    # nor 4H backing the direction is no tier at all, for both fuel states,
+    # even with a push that clears the STANDARD floor.
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "NEUTRAL", "trend_4h": "NEUTRAL", "aligned": 0, "opposed": 0,
+    })
+    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0}
+    for verdict in ("FUELED", "CONFLICTED"):
+        tier = tp._stamp_tier_at_cross(
+            plan, [{}], [{}], daily_atr14=25.0, fuel_verdict=verdict, push_ratio=1.5,
+        )
+        assert tier is None, verdict
+
+
 # ------------------------------------------------------------------ advance_no_plan (2026-09-02, Andy's poll-routing decision)
 # Exact contract (Kabroda AI Brain repo AGENT_LOG.md, 15:45/15:50 CT): no
 # cross -> silence; real TAKE -> FILLED; real fail (a cross happened, gate

@@ -171,13 +171,22 @@ def _core_gate(*, box: float, atr: float, fuel: Dict[str, Any],
     conflicted = fuel_verdict == "CONFLICTED"
     fuel_ok = fueled or conflicted
     aligned = htf.get("aligned") or 0
-    # HTF carry is required on the FUELED path only. GATE_REBUILD_SPEC.md §1's
-    # STANDARD definition lists no HTF qualifier for the fuel-CONFLICTED case,
-    # and the real 80-row CONFLICTED corpus backs that exactly: all three HTF
-    # buckets are profitable (avg R +0.44/+0.24/+1.41 at HTF=0/1/2), majority
-    # at HTF=1 -- gating CONFLICTED on carry would exclude the majority of
-    # real, validated performance for no reason the data supports.
-    htf_ok = True if conflicted else (aligned >= 1)
+    # HTF carry: at least one of {1H, 4H} must back the direction, for BOTH
+    # fuel states.
+    #
+    # 2026-09-06 -> 2026-09-10: this used to waive the carry check entirely
+    # for CONFLICTED fuel ("htf_ok = True if conflicted else aligned >= 1"),
+    # on an 80-row sample showing HTF=0 CONFLICTED at +0.44R avg. The full
+    # corrected 5-year corpus does not hold that up: the aligned=0
+    # population is 154 trades, +0.08R avg, 51% win, 36% full-stop, and a
+    # walk-forward (fit 2021-2023 / verify 2024-2026) exposed it as overfit
+    # -- fit window +20.3R / 66% win, held-out window -7.9R / 37% win. The
+    # winners are the tell: aligned=0 winners average +0.90R vs +1.23R for
+    # aligned>=1 (same loser size) -- without a higher-timeframe trend the
+    # runner has nothing to carry it. Andy-approved cut, 2026-09-10.
+    # Full trail: Kabroda AI Brain repo AGENT_LOG.md 2026-09-10 + the
+    # `aligned=0` section of LIVE_SYSTEM_STATE.md.
+    htf_ok = aligned >= 1
     hour_ok = session_hour is None or session_hour not in DEAD_HOURS
 
     checks = {"reachability": reach["ok"], "fuel": fuel_ok, "htf_carry": htf_ok, "session_hour": hour_ok}
