@@ -175,6 +175,22 @@ def test_take_premium_still_requires_fueled_specifically_not_conflicted(monkeypa
     assert decision_dict["tier"] == "STANDARD"
 
 
+def test_veto_gate_htf_carry_check_mirrors_core_gate_after_the_aligned0_cut(monkeypatch):
+    # A hard veto short-circuits before _core_gate(), but its diagnostic
+    # `checks` dict must not drift from _core_gate's own htf_carry rule
+    # (aligned>=1 for BOTH fuel states since 2026-09-10) -- a CONFLICTED
+    # aligned=0 veto row must log htf_carry=False, not the stale
+    # "True if conflicted" waiver.
+    _patch_neutral_regime(monkeypatch)
+    _patch_htf(monkeypatch, aligned=0)
+    _patch_fuel(monkeypatch, "CONFLICTED")
+    # force a hard veto (dead 15m tape) on top of the aligned=0 CONFLICTED cross
+    monkeypatch.setattr(de._micro_regime, "classify_regime", lambda candles: {"regime": "DEAD"})
+    decision_dict, _ = _evaluate()
+    assert decision_dict["verdict_state"] == "PASS"
+    assert decision_dict["gate"]["checks"]["htf_carry"] is False
+
+
 def test_no_fuel_is_still_a_hard_veto_not_folded_into_standard(monkeypatch):
     _patch_neutral_regime(monkeypatch)
     _patch_htf(monkeypatch, aligned=2)

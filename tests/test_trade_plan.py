@@ -505,11 +505,15 @@ def _declined_decision(side="SHORT", reason="counter-trend on a GOOD daily table
     }
 
 
-def test_advance_no_plan_on_real_take_goes_to_filled():
+def test_advance_no_plan_on_real_take_goes_to_filled_standard_uses_the_r30_stop():
+    # 2026-09-10 audit fix: a NO_PLAN promotion now applies the tier-specific
+    # stop like the other two fill paths -- STANDARD gets the r30-based stop,
+    # not PREMIUM's tighter 24h-zone stop. entry 100, box 20 (t2=120),
+    # r30_low 99 -> stop = 99 - 0.12*20 = 96.6.
     decision = _take_decision(side="LONG", tier="STANDARD", entry=100.0, t1=112.0, t2=120.0, t3=132.0)
     updates = tp.advance_no_plan(
-        decision, candles_24h=_flat_candles(price=150.0),
-        r30_high=160.0, r30_low=155.0, f24_vah=170.0, f24_val=165.0, daily_atr14=2.0,
+        decision, candles_24h=_flat_candles(price=100.0),
+        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
         now_utc=NOW,
     )
     assert updates is not None
@@ -518,7 +522,9 @@ def test_advance_no_plan_on_real_take_goes_to_filled():
     assert updates["tier"] == "STANDARD"
     assert updates["trigger_price"] == 100.0
     assert updates["t1"] == 112.0 and updates["t2"] == 120.0 and updates["t3"] == 132.0
-    assert updates["stop_price"] == pytest.approx(97.0)  # 100 - 1.5*2.0, same fallback math as build_trade_plan()
+    assert updates["stop_price"] == pytest.approx(96.6)   # r30_low - 0.12*box
+    assert updates["stop_price_r30"] == pytest.approx(96.6)
+    assert "r30" in updates["stop_basis"]
     assert updates["cross_time"] == NOW
     assert updates["fuel_at_cross"] == "FUELED"  # a TAKE verdict already implies fuel=FUELED
     assert updates["fill_time"] == NOW
@@ -526,6 +532,23 @@ def test_advance_no_plan_on_real_take_goes_to_filled():
     assert updates["entry_mode"] == "RETEST_LIMIT_AT_LINE"
     assert updates["faked_first"] is False
     assert "real cross" in updates["last_transition_reason"]
+
+
+def test_advance_no_plan_premium_promotion_keeps_the_zone_stop():
+    # PREMIUM is unchanged by the audit fix -- it keeps stop_planner.py's
+    # 24h-zone stop (here it snaps to r30_low 99 with the 0.125xATR buffer
+    # -> 98.75), NOT the r30-formula stop STANDARD now uses (96.6).
+    decision = _take_decision(side="LONG", tier="PREMIUM", entry=100.0, t1=112.0, t2=120.0, t3=132.0)
+    updates = tp.advance_no_plan(
+        decision, candles_24h=_flat_candles(price=100.0),
+        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
+        now_utc=NOW,
+    )
+    assert updates is not None and updates["tier"] == "PREMIUM"
+    assert updates["stop_price"] == pytest.approx(98.75)     # stop_planner zone stop, not the r30 formula
+    assert updates["stop_price"] != pytest.approx(96.6)
+    assert updates["stop_price_r30"] == pytest.approx(96.6)  # r30 candidate still stored for audit
+    assert "r30" not in updates["stop_basis"]
 
 
 def test_advance_no_plan_returns_none_when_no_cross_yet():
@@ -595,8 +618,8 @@ def test_advance_no_plan_take_below_promoted_push_floor_goes_to_done_not_filled(
     decision = _take_decision(side="LONG", tier="STANDARD", entry=100.0, t1=112.0, t2=120.0, t3=132.0,
                               fuel_push_ratio=1.5)
     updates = tp.advance_no_plan(
-        decision, candles_24h=_flat_candles(price=150.0),
-        r30_high=160.0, r30_low=155.0, f24_vah=170.0, f24_val=165.0, daily_atr14=2.0,
+        decision, candles_24h=_flat_candles(price=100.0),
+        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
         now_utc=NOW,
     )
     assert updates is not None
@@ -611,8 +634,8 @@ def test_advance_no_plan_take_at_promoted_push_floor_boundary_fills():
     # >= is inclusive -- exactly 1.8 promotes.
     decision = _take_decision(side="LONG", tier="STANDARD", fuel_push_ratio=1.8)
     updates = tp.advance_no_plan(
-        decision, candles_24h=_flat_candles(price=150.0),
-        r30_high=160.0, r30_low=155.0, f24_vah=170.0, f24_val=165.0, daily_atr14=2.0,
+        decision, candles_24h=_flat_candles(price=100.0),
+        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
         now_utc=NOW,
     )
     assert updates is not None
@@ -624,8 +647,8 @@ def test_advance_no_plan_missing_push_ratio_does_not_block_promotion():
     # backward-compatible stance as _stamp_tier_at_cross's push_ratio handling.
     decision = _take_decision(side="LONG", tier="STANDARD", fuel_push_ratio=None)
     updates = tp.advance_no_plan(
-        decision, candles_24h=_flat_candles(price=150.0),
-        r30_high=160.0, r30_low=155.0, f24_vah=170.0, f24_val=165.0, daily_atr14=2.0,
+        decision, candles_24h=_flat_candles(price=100.0),
+        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
         now_utc=NOW,
     )
     assert updates is not None

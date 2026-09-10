@@ -396,10 +396,13 @@ def evaluate_15m_decision(
         # circuits before the 4-condition check -- KABRODA_REBUILD_SPEC.md §9
         # ("log every detail"): reachability/fuel/htf are still knowable here
         # and must not go missing from the record just because a veto fired.
-        conflicted = fuel_verdict == "CONFLICTED"
+        # htf_carry mirrors _core_gate() exactly (aligned>=1 for BOTH fuel
+        # states since the 2026-09-10 aligned=0 cut) -- this is diagnostic
+        # only (the veto already forced pass=False), but it must not drift
+        # from the real gate's own rule.
         return {"pass": False, "tier": None, "reach": reach, "htf_aligned": htf.get("aligned"),
                 "checks": {"reachability": reach["ok"], "fuel": fuel_verdict in ("FUELED", "CONFLICTED"),
-                           "htf_carry": True if conflicted else (htf.get("aligned") or 0) >= 1,
+                           "htf_carry": (htf.get("aligned") or 0) >= 1,
                            "session_hour": session_hour_utc is None or session_hour_utc not in DEAD_HOURS},
                 "misses": [veto_reason]}
 

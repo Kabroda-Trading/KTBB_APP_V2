@@ -591,7 +591,10 @@ def test_no_plan_real_cross_promotes_to_filled_and_sends_armed_email(poll_env, m
 
     poll_env["make_lock"](levels={
         "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
-        "range30m_high": 100.0, "range30m_low": 90.0,
+        # range30m_low 97 (not 90): a NO_PLAN promotion now applies STANDARD's
+        # r30 stop (100 - box*0.12 off r30_low), and the old 90 put that stop
+        # too far for the 1:1 R:R floor -- the audit-fix behavior, not a bug.
+        "range30m_high": 100.0, "range30m_low": 97.0,
         "f24_vah": 105.0, "f24_val": 85.0,
     })
     poll_env["make_gate_log"](state="PASS")  # the stale lock-time NO_PLAN placeholder, must get overwritten
@@ -717,7 +720,11 @@ def test_no_plan_confirmed_close_through_trigger_does_trigger_evaluation(poll_en
     })
     poll_env["make_lock"](levels={
         "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
-        "range30m_high": 100.0, "range30m_low": 90.0,
+        # range30m_high 94 (not 100): a SHORT NO_PLAN promotion applies
+        # STANDARD's r30 stop (r30_high + 0.12*box above the BD entry); the
+        # old 100 put that stop past the 1:1 R:R floor for T1 -- the
+        # 2026-09-10 audit-fix behavior, consistent with the other fill paths.
+        "range30m_high": 94.0, "range30m_low": 90.0,
         "f24_vah": 105.0, "f24_val": 85.0,
     })
     poll_env["make_gate_log"](state="PASS")

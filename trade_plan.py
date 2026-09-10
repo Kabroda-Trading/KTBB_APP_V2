@@ -555,12 +555,14 @@ def advance_no_plan(
             ),
         }
 
+    import decision_engine as _decision_engine
     entry_price = float(decision_dict["entry_price"])
     t1 = float(decision_dict["t1"])
     t2 = float(decision_dict["t2"])
     t3 = float(decision_dict["t3"])
     tier = decision_dict.get("tier")
     is_long = side == "LONG"
+    box = abs(t2 - entry_price)  # t2 = trigger +/- 1.0*box, so this recovers box
 
     stop_plan = sp.plan_stop(
         candles_24h=candles_24h, entry_price=entry_price, is_long=is_long,
@@ -569,9 +571,34 @@ def advance_no_plan(
     )
     if stop_plan["stop_price"] is None:
         return None
+    zone_stop = float(stop_plan["stop_price"])
 
-    rr = sp.rr_floor_ok(entry_price, stop_plan["stop_price"], t1, is_long=is_long)
+    # TIER-SPECIFIC STOP (2026-09-08, shipped for the other two fill paths in
+    # _build_waiting_plan() / advance_waiting_plan() -- see _build_waiting_plan()'s
+    # own comment for the full backtest rationale). This promotion path was
+    # missing it (found in the 2026-09-10 Domain 1/2/3 audit): STANDARD's real
+    # execution stop is the r30-based formula, not PREMIUM's tighter 24h-zone
+    # stop. PREMIUM (and tier-unknown, which shouldn't reach here) keeps the
+    # zone stop. stop_price_r30 is stored on every plan for audit either way.
+    stop_r30 = (r30_low - _decision_engine.STOP_BUFFER_BOX * box) if is_long \
+        else (r30_high + _decision_engine.STOP_BUFFER_BOX * box)
+    stop_price_r30 = round(float(stop_r30), 2)
+    if tier == "STANDARD":
+        active_stop = stop_price_r30
+        active_basis = (f"r30 edge {'-' if is_long else '+'} {_decision_engine.STOP_BUFFER_BOX:.3f}xbox "
+                        f"(STANDARD tier's own execution stop -- NO_PLAN promotion)")
+        active_dist_atr = round(abs(entry_price - stop_price_r30) / daily_atr14, 4) if daily_atr14 else None
+    else:
+        active_stop = zone_stop
+        active_basis = stop_plan["stop_basis"]
+        active_dist_atr = stop_plan["stop_dist_atr"]
+
+    rr = sp.rr_floor_ok(entry_price, active_stop, t1, is_long=is_long)
     if not rr["ok"]:
+        # A wider r30 stop can fail 1:1 where the tighter zone stop passed --
+        # same NO_PLAN-preserving philosophy as build_trade_plan(): never
+        # place a real order the floor rule would reject; a bad stop this
+        # poll doesn't mean it stays bad next poll.
         return None
 
     headline = decision_dict.get("tactical_brief") or f"{side} real cross confirmed"
@@ -579,8 +606,9 @@ def advance_no_plan(
         "status": "FILLED",
         "direction": side, "tier": tier,
         "trigger_price": entry_price,
-        "stop_price": stop_plan["stop_price"], "stop_basis": stop_plan["stop_basis"],
-        "stop_dist_atr": stop_plan["stop_dist_atr"],
+        "stop_price": active_stop, "stop_basis": active_basis,
+        "stop_dist_atr": active_dist_atr,
+        "stop_price_r30": stop_price_r30,
         "t1": t1, "t2": t2, "t3": t3,
         "management": MANAGEMENT_TEXT,
         # Detected via a 60s poll, always after the fact -- price is
