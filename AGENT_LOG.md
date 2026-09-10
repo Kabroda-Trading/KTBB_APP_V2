@@ -2141,3 +2141,20 @@ STATUS: open — Andy: "at a $10,000 trade there shouldn't be a bunch of slippag
 
 Script: scratch `slippage_realistic.py`.
 
+
+## 2026-09-10 — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: multi-band "stair-step" sizing rule (site commit 7595154)
+STATUS: resolved
+
+`executor_sizing.py` now implements Andy's real sizing schedule -- Sizing
+Wizard option F ("Stair-Step Bands"), the recommended default. `banded_risk()`
+is a verbatim port of the Kabroda AI Brain repo's
+`account_sim_banded.py::risk_for_balance()`, so NO backtest number changes --
+this just makes the live executor run the rule every sim in that repo already
+assumes, closing the divergence.
+
+Full trail + the account-level analysis: Kabroda AI Brain repo `AGENT_LOG.md`
+2026-09-10 + `LIVE_SYSTEM_STATE.md` §1 (moved out of §2b) + CHANGELOG. Full
+suite 605 passed, boot clean.
+
+Queue: email copy cleanup (needs Andy's wording sign-off), then the full
+Domain 1/2/3 audit.
