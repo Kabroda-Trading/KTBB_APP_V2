@@ -1942,3 +1942,30 @@ The two numbers measure DIFFERENT questions:
 **Net position for Andy:** the floor is live at 1.1, validated on two independent populations and two walk-forwards. The improvement you see tomorrow is the validated version. My remaining queued item is unchanged: feed-band replay (Task 3) + slippage refinement from live fills (Task 4).
 
 Co-Authored-By: DeepSeek via Antigravity
+
+## 2026-09-10 — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: aligned=0 cut (site commit 4c2eb37)
+STATUS: open — DeepSeek to independently reproduce the walk-forward
+
+HTF carry (>=1 of {1H,4H}) is now required for BOTH fuel states, not just FUELED.
+Previously the fuel-CONFLICTED path waived it entirely — a STANDARD trade could
+fill with neither timeframe backing the direction.
+
+- `decision_engine.py::_core_gate`: `htf_ok = aligned >= 1` (folds into core_passed
+  -> pass=False / tier=None / named miss on failure).
+- `trade_plan.py::_stamp_tier_at_cross`: same guard mirrored, so the anticipate ->
+  WAITING -> cross path (which doesn't call `_core_gate`) can't bypass the cut. The
+  NO_PLAN poll path was already covered (it runs the real gate).
+- `CLAUDE.md` Calibrated Gate point 3 updated. Tests rewritten/added (hand-computed
+  `_core_gate` + `_stamp_tier_at_cross` + end-to-end loop). 577 passed, same 5
+  pre-existing `test_dashboard_fixes.py` errors. Boot check clean.
+
+Evidence + the full recomputed perf table live in the Kabroda AI Brain repo:
+`AGENT_LOG.md` 2026-09-10 and `LIVE_SYSTEM_STATE.md` (aligned=0 moved §2b -> §1;
+new §2b = the sizing-rule gap Andy flagged as a red flag; new §2c = the
+`anticipate_setup()`-vs-the-cut lock-time gap; §3 gained Andy's rule-evaluation
+framing). Post-cut STANDARD: 335 trades / +0.32R / 52% win, positive every
+individual year; PREMIUM unchanged.
+
+Next (CC, not started): the email redesign — a concrete proposal for Andy
+(exact subject lines + bodies for wide-box / one-direction-dead / viable-plan,
+plus the keep-vs-revert call on poll-NO_PLAN) before building.
