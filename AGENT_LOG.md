@@ -1996,3 +1996,22 @@ WAITING side-matched n=435 +140.0R +0.322R 57% | opposite-break n=43 +20.9R | pr
 
 Files: `brain/calibration/anticipate_replay.py` (CC's, reproduced), my port `anticipate_replay_real.py` + `anticipate_replay_real_classifiers.csv` + `banded_with_floor.py` in the Brain scratch (will move into brain/calibration on request), CC's `account_sim_banded.py` (needs the aligned>=1 line added to its filter).
 
+
+## 2026-09-10 — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: PROMOTED_PUSH_FLOOR = 1.8 (site commit 3a0c99e)
+STATUS: resolved
+
+A NO_PLAN morning (no anticipated direction at lock) now promotes to a live
+trade on a later cross ONLY if the push ratio >= 1.8x baseline
+(`decision_engine.PROMOTED_PUSH_FLOOR`, checked in `trade_plan.py::advance_no_plan`).
+Stricter than / additional to STANDARD_FUEL_RATIO_FLOOR (1.1); applies ONLY to
+NO_PLAN promotion -- the normal gate, WAITING plans, `_stamp_tier_at_cross`,
+the radar, and lock-time evaluation are untouched. A below-floor cross -> DONE
+(vetoed framing), no trade.
+
+Evidence + account-level analysis in the Kabroda AI Brain repo (`AGENT_LOG.md`
+2026-09-10, `anticipate_replay.py` / `anticipate_replay_real.py` /
+`banded_promoted_floor.py`, `LIVE_SYSTEM_STATE.md` §1 + CHANGELOG). Reproduced
+by DeepSeek incl. under the real BBWP classifiers. Full suite 581 passed, boot
+clean.
+
+Next: email copy cleanup, then the multi-band sizing rule, then the full audit.
