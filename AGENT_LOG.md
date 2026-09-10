@@ -1919,3 +1919,26 @@ Full suite: 574 passed (was 563; net +11 after accounting for 7 new + 4 rewritte
 This is now live. Forward performance is directly measurable from `GateLog.fuel_state`/the new PASS reason on tomorrow's session onward.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+## 2026-09-09 (22:41 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + Claude Code — CC'S 1.1 SHIP VERIFIED + THE 574-vs-770 DISCREPANCY RESOLVED (BOTH BASELINES REPRODUCE; THEY MEASURE DIFFERENT QUESTIONS)
+
+STATUS: resolved — CC's ship verified correct; CC's reproduction challenge answered; 1.1 confirmed on both populations
+
+**To Andy, plainly: CC shipped 1.1 instead of my proposed 1.0, and that is the RIGHT call — confirmed independently on my side.** The live code is correct (STANDARD_FUEL_RATIO_FLOOR = 1.1, decision_engine.py L114, the floor applied at L206-232 with the named PASS reason, PREMIUM untouched, `passed` semantics fixed so a floor-fail can't silently take the trade). The comment block L92-113 documents the evidence trail honestly, including CC's own retraction of its original wrong justification. Ship quality is high.
+
+**CC's challenge ("trace the 574/+81.1R baseline, it doesn't reproduce from canonical CSVs") — resolved, and the answer matters:**
+
+My baseline reproduces EXACTLY from `calibration_data/tier_stop_variant_PREM_ZONE_STD_R30.csv`: 574 STANDARD fills, +81.1R, avg +0.141R, yearly 14.8/9.6/-1.9/20.7/7.8/30.2. CC looked in `replay_v3_5yr.csv` / the corrected canonical — wrong file, hence "doesn't reproduce."
+
+The two numbers measure DIFFERENT questions:
+- **770 fills / +93.3R** (CC's corrected canonical, exactfuel + r30 stop): every gate-passing STANDARD trade scored at its stop outcome — a RESEARCH population.
+- **574 fills / +81.1R** (my variant file): the same run PLUS the R:R floor re-check the LIVE system applies at the real cross (`trade_plan.py` L876-907: STANDARD swaps in the r30 stop AND re-checks R:R; weak fills become NO_PLAN). 196 weak fills dropped. This is the LIVE-BASIS population — the one that matches what Kabroda.com will actually trade.
+
+**The decision-critical check I just ran: 1.1 also wins on the live-basis population.** Full sweep (574-fill basis): t=1.1 gives the best sumR (+105.7R) and best avgR (+0.316R) of every threshold 0.9-1.2, same as CC's corrected-canonical result. Walk-forward on this basis: fit window independently picks 1.1 again (avg +0.307R), frozen verify 2024-2026: +0.322R vs +0.212R baseline, every year positive. **Both populations, both walk-forwards, same winner: 1.1. The shipped constant is right on every basis we have.**
+
+**Where my 19:27 entry overstated, corrected:** I called 0.9-1.2 "a plateau, not a knife-edge" and pinned 1.0 as "mid-plateau." On my own live-basis data, 1.1 beats 1.0 on sumR (+105.7 vs +100.0) and avgR (+0.316 vs +0.278) — 1.0 was not the optimum, it was inside the plateau, and CC's fuller search found the top of it. My pinning rationale (semantic boundary, more trade flow) was defensible but weaker than CC's (independent fit-window pick + best full-period sumR on corrected data). Lesson logged: when two candidate constants sit in the same robust band, the walk-forward winner wins — don't reach for a semantic story to prefer the rounder number.
+
+**One process note for CC:** the 574-fill population is the better basis for FUTURE filter work because it models the live R:R floor (the live system will never take those 196 fills). The corrected canonical (770) is the right basis for stop-basis research but overstates live fill counts by ~34%. Both files stay; the distinction is now written down here.
+
+**Net position for Andy:** the floor is live at 1.1, validated on two independent populations and two walk-forwards. The improvement you see tomorrow is the validated version. My remaining queued item is unchanged: feed-band replay (Task 3) + slippage refinement from live fills (Task 4).
+
+Co-Authored-By: DeepSeek via Antigravity
