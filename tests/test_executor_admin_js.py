@@ -155,6 +155,27 @@ def test_parse_server_timestamp_handles_null():
 # correct (a UI bug here would silently save the wrong policy shape, the
 # exact "Base $ class" of bug this whole engagement keeps hunting).
 
+def test_selecting_stair_step_bands_option_seeds_andys_rule_and_clears_base_tier():
+    # F is the recommended default (2026-09-10). Picking it seeds Andy's
+    # stair-step rule into the canonical band_* fields (percent stored as a
+    # fraction) and clears the base/tier fields it replaces.
+    scenarios, _ = _run_harness()
+    case = next(s for s in scenarios if s["label"] == "selectSizingOption F seeds the band schedule and clears base/tier")
+    assert case["ok"] is True, case.get("error")
+
+
+def test_switching_off_stair_step_bands_clears_the_band_fields():
+    scenarios, _ = _run_harness()
+    case = next(s for s in scenarios if s["label"] == "selectSizingOption A after F clears the band fields")
+    assert case["ok"] is True, case.get("error")
+
+
+def test_loading_a_saved_stair_step_bands_policy_reselects_option_F():
+    scenarios, _ = _run_harness()
+    case = next(s for s in scenarios if s["label"] == "_inferAndSelectSizingOption recognizes a saved Option F policy")
+    assert case["ok"] is True, case.get("error")
+
+
 def test_selecting_fixed_dollar_option_seeds_the_docs_own_default():
     scenarios, returncode = _run_harness()
     case = next(s for s in scenarios if s["label"] == "selectSizingOption A seeds base_risk_usd=100")

@@ -347,3 +347,121 @@ def test_compute_stake_derisk_and_cap_compose():
     assert stake == pytest.approx(100.0)
     assert detail["derisk_applied"] is True
     assert detail["cap_binding"] == "abs"
+
+
+# ------------------------------------------------------------------ banded_risk / compute_stake banded mode
+# Andy's multi-band "stair-step" rule (2026-09-10) -- a straight port of the
+# Kabroda AI Brain repo's account_sim_banded.py::risk_for_balance(). Defaults
+# (step 10k, per-step 1k, below 10%, max 10k): $5k->$500, $10k->$1,000,
+# $25k->$2,000, $95k->$9,000, $100k->$10,000 (cap), $250k->$10,000.
+_BAND = dict(step_usd=10_000.0, risk_per_step_usd=1_000.0, below_pct=0.10, max_risk_usd=10_000.0)
+
+
+def test_banded_risk_below_first_step_is_percent_of_balance():
+    assert es.banded_risk(5_000.0, **_BAND) == pytest.approx(500.0)
+    assert es.banded_risk(9_999.0, **_BAND) == pytest.approx(999.9)
+    assert es.banded_risk(0.0, **_BAND) == pytest.approx(0.0)
+
+
+def test_banded_risk_steps_up_one_unit_per_band():
+    assert es.banded_risk(10_000.0, **_BAND) == pytest.approx(1_000.0)   # band 1
+    assert es.banded_risk(19_999.0, **_BAND) == pytest.approx(1_000.0)   # still band 1
+    assert es.banded_risk(25_000.0, **_BAND) == pytest.approx(2_000.0)   # band 2
+    assert es.banded_risk(95_000.0, **_BAND) == pytest.approx(9_000.0)   # band 9
+
+
+def test_banded_risk_holds_flat_at_the_max_from_100k_up():
+    assert es.banded_risk(100_000.0, **_BAND) == pytest.approx(10_000.0)   # band 10 -> $10k, capped
+    assert es.banded_risk(250_000.0, **_BAND) == pytest.approx(10_000.0)   # band 25 would be $25k, held at $10k
+    assert es.banded_risk(1_000_000.0, **_BAND) == pytest.approx(10_000.0)
+
+
+def test_banded_risk_is_not_a_ratchet_steps_back_down_on_a_drawdown():
+    # The band follows the CURRENT balance -- Andy's explicit intent.
+    assert es.banded_risk(34_000.0, **_BAND) == pytest.approx(3_000.0)
+    # account draws back below $30k -> straight back to band 2
+    assert es.banded_risk(28_000.0, **_BAND) == pytest.approx(2_000.0)
+    # ...and below $10k -> back to the 10%-of-balance rule
+    assert es.banded_risk(8_000.0, **_BAND) == pytest.approx(800.0)
+
+
+def test_banded_risk_no_max_means_uncapped():
+    assert es.banded_risk(250_000.0, step_usd=10_000.0, risk_per_step_usd=1_000.0) == pytest.approx(25_000.0)
+
+
+def test_banded_risk_rejects_bad_params():
+    with pytest.raises(ValueError):
+        es.banded_risk(50_000.0, step_usd=0.0, risk_per_step_usd=1_000.0)
+    with pytest.raises(ValueError):
+        es.banded_risk(50_000.0, step_usd=10_000.0, risk_per_step_usd=-1.0)
+
+
+def test_compute_stake_banded_mode_uses_the_schedule_as_the_base():
+    stake, detail = es.compute_stake(
+        risk_last_usd=100.0, account_balance_usd=34_000.0,
+        band_step_usd=10_000.0, band_risk_per_step_usd=1_000.0,
+        band_below_pct=0.10, band_max_risk_usd=10_000.0,
+    )
+    assert stake == pytest.approx(3_000.0)
+    assert detail["base"] == pytest.approx(3_000.0)
+    assert detail["band"] == 3
+
+
+def test_compute_stake_banded_below_first_step_uses_the_percent():
+    stake, detail = es.compute_stake(
+        risk_last_usd=100.0, account_balance_usd=6_000.0,
+        band_step_usd=10_000.0, band_risk_per_step_usd=1_000.0, band_below_pct=0.10,
+    )
+    assert stake == pytest.approx(600.0)
+    assert detail["band"] == 0
+
+
+def test_compute_stake_banded_below_pct_defaults_to_10pct_when_unset():
+    stake, _ = es.compute_stake(
+        risk_last_usd=100.0, account_balance_usd=7_000.0,
+        band_step_usd=10_000.0, band_risk_per_step_usd=1_000.0,
+    )
+    assert stake == pytest.approx(700.0)
+
+
+def test_compute_stake_banded_still_respects_the_dual_caps_on_top():
+    # $9,000 band stake, but a 5%-of-balance cap ($4,750 on a $95k account) binds.
+    stake, detail = es.compute_stake(
+        risk_last_usd=100.0, account_balance_usd=95_000.0,
+        band_step_usd=10_000.0, band_risk_per_step_usd=1_000.0, band_max_risk_usd=10_000.0,
+        cap_pct=0.05,
+    )
+    assert stake == pytest.approx(4_750.0)
+    assert detail["cap_binding"] == "pct"
+
+
+def test_compute_stake_banded_still_respects_derisk_on_top():
+    stake, detail = es.compute_stake(
+        risk_last_usd=100.0, account_balance_usd=34_000.0,
+        band_step_usd=10_000.0, band_risk_per_step_usd=1_000.0,
+        derisk_n=2, derisk_factor=0.5, consecutive_losses=3,
+    )
+    assert stake == pytest.approx(1_500.0)   # $3,000 band -> 0.5x
+    assert detail["derisk_applied"] is True
+
+
+def test_compute_stake_banded_requires_balance():
+    with pytest.raises(ValueError):
+        es.compute_stake(risk_last_usd=100.0, band_step_usd=10_000.0, band_risk_per_step_usd=1_000.0)
+
+
+def test_compute_stake_banded_is_mutually_exclusive_with_the_tier_switch():
+    with pytest.raises(ValueError):
+        es.compute_stake(
+            risk_last_usd=100.0, account_balance_usd=50_000.0,
+            band_step_usd=10_000.0, band_risk_per_step_usd=1_000.0,
+            tier_threshold_usd=25_000.0, tier_flat_usd=2_500.0,
+        )
+
+
+def test_compute_stake_banded_needs_both_band_params_or_it_is_not_banded():
+    # Only band_step_usd set -> NOT banded, falls through to risk_last_usd base.
+    stake, detail = es.compute_stake(
+        risk_last_usd=123.0, account_balance_usd=50_000.0, band_step_usd=10_000.0)
+    assert stake == pytest.approx(123.0)
+    assert "band" not in detail

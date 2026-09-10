@@ -300,6 +300,21 @@ async function loadAccounts() {
                 <div class="sizing-balance-line" id="sizingBalance-${a.id}">Current balance: loading...</div>
                 <div class="sizing-options" id="sizingOptions-${a.id}">
 
+                    <div class="sizing-option" id="sizeOpt-F-${a.id}" onclick="selectSizingOption(${a.id},'F')">
+                        <div class="sizing-option-head">
+                            <input type="radio" name="sizeOption-${a.id}" id="sizeRadio-F-${a.id}">
+                            <span class="sizing-option-name">F. Stair-Step Bands -- size steps up as the account grows</span>
+                            <span class="badge tag-validated">&#9733; RECOMMENDED</span>
+                        </div>
+                        <p class="sizing-option-desc">The rule every Kabroda backtest of this system uses. Below the first step, risk is a flat percent of balance (10%). At and above it, risk steps up one fixed unit ($1,000) per $10,000 of balance -- $10k&#8594;$1,000, $25k&#8594;$2,000, $95k&#8594;$9,000 -- then holds flat at a ceiling ($10,000/trade) once the balance passes $100k. It is <em>not</em> a high-water ratchet: the band follows your current balance, so a drawdown steps the size straight back down. Backtested $750 &#8594; ~$1.5M over 5.5 years, worst peak-to-trough ~5.9R, positive in every one of the 6 years (gross of fees; OKX-feed reconstruction -- read the R figures, not the dollars).</p>
+                        <div class="sizing-option-fields risk-form">
+                            <label>Step size ($)<input type="number" step="100" id="sizeF_step-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'F')"></label>
+                            <label>Risk added per step ($)<input type="number" step="100" id="sizeF_perstep-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'F')"></label>
+                            <label>Percent of balance below the first step (%)<input type="number" step="0.5" id="sizeF_below-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'F')"></label>
+                            <label>Max risk per trade ($)<input type="number" step="100" id="sizeF_max-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'F')"></label>
+                        </div>
+                    </div>
+
                     <div class="sizing-option" id="sizeOpt-A-${a.id}" onclick="selectSizingOption(${a.id},'A')">
                         <div class="sizing-option-head">
                             <input type="radio" name="sizeOption-${a.id}" id="sizeRadio-A-${a.id}">
@@ -315,9 +330,9 @@ async function loadAccounts() {
                         <div class="sizing-option-head">
                             <input type="radio" name="sizeOption-${a.id}" id="sizeRadio-B-${a.id}">
                             <span class="sizing-option-name">B. Percent of Balance, Capped</span>
-                            <span class="badge tag-validated">&#9733; VALIDATED</span>
+                            <span class="badge tag-honesty">backtested -- simpler alternative to F</span>
                         </div>
-                        <p class="sizing-option-desc">Stake = a percent of your current balance, but never more than a dollar ceiling. Grows with the account until the cap, then flat. Backtest-validated across the full 2021-2026 corpus (2,056 reconstructed session locks, 633 fuel-gated trades, +320.1R, 6 of 6 years positive, edge stable across fuel-threshold stress tests) -- ~95% edge-direction certainty, +/-20-25% on exact R totals from reconstruction margin. The default recommendation.</p>
+                        <p class="sizing-option-desc">Stake = a percent of your current balance, but never more than a dollar ceiling. Grows with the account until the cap, then flat. Backtest-validated across the full 2021-2026 corpus (2,056 reconstructed session locks, 633 fuel-gated trades, +320.1R, 6 of 6 years positive, edge stable across fuel-threshold stress tests) -- ~95% edge-direction certainty, +/-20-25% on exact R totals from reconstruction margin. A flatter, one-cap version of F -- fine, but F is the schedule the account sims actually use.</p>
                         <div class="sizing-option-fields risk-form">
                             <label>Percent of balance (%)<input type="number" step="0.1" id="sizeB_pct-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'B')"></label>
                             <label>Cap ($)<input type="number" step="0.01" id="sizeB_cap-${a.id}" oninput="onSizingOptionFieldChange(${a.id},'B')"></label>
@@ -376,6 +391,10 @@ async function loadAccounts() {
                         <label>Cap %<input type="number" step="0.001" id="sizeCapPct-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
                         <label>Tier threshold $<input type="number" step="0.01" id="sizeTierThreshold-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
                         <label>Tier flat $<input type="number" step="0.01" id="sizeTierFlat-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
+                        <label>Band step $<input type="number" step="1" id="sizeBandStep-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
+                        <label>Band $ per step<input type="number" step="1" id="sizeBandPerStep-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
+                        <label>Band below %<input type="number" step="0.001" id="sizeBandBelow-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
+                        <label>Band max $<input type="number" step="1" id="sizeBandMax-${a.id}" oninput="onRawFieldChange(${a.id})" style="width:90px;"></label>
                     </div>
                 </details>
 
@@ -508,8 +527,9 @@ async function setAccountMode(accountId, mode) {
 const SIZING_OPTION_DEFAULTS = {
     // Doc's own worked examples (SIZING_AND_ISOLATION.md) are the defaults
     // shown the first time a card is picked -- editable immediately after.
+    F: { step: 10000, perstep: 1000, below: 10, max: 10000 },  // Andy's stair-step rule (account_sim_banded.py)
     A: { amount: 100 },
-    B: { pct: 10, cap: 2500 },      // 10% of balance, capped at $2,500 -- the validated rule
+    B: { pct: 10, cap: 2500 },      // 10% of balance, capped at $2,500
     C: { base: 100, roll: 100, cap: "" },  // 100% roll-in matches Andy's own $100->$110->$120 example exactly
     D: { pct: 10 },
     E: { pct: 1 },                  // 1% max loss per trade -- doc's own worked example
@@ -519,7 +539,7 @@ let _currentSizingOption = {};   // accountId -> "A".."E", or undefined/null if 
 let _sizingPreviewDebounce = {}; // accountId -> setTimeout handle
 
 function _setSizingOptionSelected(accountId, code) {
-    for (const c of ["A", "B", "C", "D", "E"]) {
+    for (const c of ["F", "A", "B", "C", "D", "E"]) {
         const card = document.getElementById(`sizeOpt-${c}-${accountId}`);
         const radio = document.getElementById(`sizeRadio-${c}-${accountId}`);
         const selected = c === code;
@@ -530,6 +550,7 @@ function _setSizingOptionSelected(accountId, code) {
 
 function selectSizingOption(accountId, code) {
     const proxyHasAnyValue = {
+        F: () => document.getElementById(`sizeF_step-${accountId}`).value !== "" || document.getElementById(`sizeF_perstep-${accountId}`).value !== "",
         A: () => document.getElementById(`sizeA_amount-${accountId}`).value !== "",
         B: () => document.getElementById(`sizeB_pct-${accountId}`).value !== "" || document.getElementById(`sizeB_cap-${accountId}`).value !== "",
         C: () => document.getElementById(`sizeC_base-${accountId}`).value !== "" || document.getElementById(`sizeC_roll-${accountId}`).value !== "",
@@ -544,6 +565,12 @@ function selectSizingOption(accountId, code) {
 }
 
 function _fillOptionProxies(accountId, code, v) {
+    if (code === "F") {
+        document.getElementById(`sizeF_step-${accountId}`).value = v.step;
+        document.getElementById(`sizeF_perstep-${accountId}`).value = v.perstep;
+        document.getElementById(`sizeF_below-${accountId}`).value = v.below;
+        document.getElementById(`sizeF_max-${accountId}`).value = v.max;
+    }
     if (code === "A") document.getElementById(`sizeA_amount-${accountId}`).value = v.amount;
     if (code === "B") { document.getElementById(`sizeB_pct-${accountId}`).value = v.pct; document.getElementById(`sizeB_cap-${accountId}`).value = v.cap; }
     if (code === "C") { document.getElementById(`sizeC_base-${accountId}`).value = v.base; document.getElementById(`sizeC_roll-${accountId}`).value = v.roll; document.getElementById(`sizeC_cap-${accountId}`).value = v.cap; }
@@ -554,14 +581,26 @@ function _fillOptionProxies(accountId, code, v) {
 function _syncCanonicalFromOption(accountId, code) {
     const num = (id) => { const v = document.getElementById(id).value; return v === "" ? null : parseFloat(v); };
     const set = (id, v) => { document.getElementById(id).value = (v === null || v === undefined) ? "" : v; };
-    // Every guided option replaces the WHOLE base/cap shape -- none of the
-    // 5 use the old tier_threshold/tier_flat mechanic (that was specific
-    // to the retired "scale_with_account" preset), so those two always
-    // clear here. derisk_n/derisk_factor are untouched -- an independent
-    // modifier layered on top of whichever option is active.
+    // Every guided option replaces the WHOLE base/cap shape. Only F uses the
+    // band_* fields and only nothing uses tier_threshold/tier_flat (that was
+    // the retired "scale_with_account" preset), so every NON-F option clears
+    // the band fields and every option clears the tier fields. derisk_n/
+    // derisk_factor are untouched -- an independent modifier on top.
     set(`sizeTierThreshold-${accountId}`, null);
     set(`sizeTierFlat-${accountId}`, null);
-    if (code === "A") {
+    if (code !== "F") {
+        set(`sizeBandStep-${accountId}`, null); set(`sizeBandPerStep-${accountId}`, null);
+        set(`sizeBandBelow-${accountId}`, null); set(`sizeBandMax-${accountId}`, null);
+    }
+    if (code === "F") {
+        const below = num(`sizeF_below-${accountId}`);
+        set(`sizeBandStep-${accountId}`, num(`sizeF_step-${accountId}`));
+        set(`sizeBandPerStep-${accountId}`, num(`sizeF_perstep-${accountId}`));
+        set(`sizeBandBelow-${accountId}`, below === null ? null : below / 100);
+        set(`sizeBandMax-${accountId}`, num(`sizeF_max-${accountId}`));
+        set(`sizeBaseUsd-${accountId}`, null); set(`sizeBasePct-${accountId}`, null);
+        set(`sizeRollPct-${accountId}`, null); set(`sizeCapUsd-${accountId}`, null); set(`sizeCapPct-${accountId}`, null);
+    } else if (code === "A") {
         set(`sizeBaseUsd-${accountId}`, num(`sizeA_amount-${accountId}`));
         set(`sizeBasePct-${accountId}`, null); set(`sizeRollPct-${accountId}`, null);
         set(`sizeCapUsd-${accountId}`, null); set(`sizeCapPct-${accountId}`, null);
@@ -611,8 +650,15 @@ function _inferAndSelectSizingOption(accountId, policy) {
     const details = document.getElementById(`sizingCustomDetails-${accountId}`);
     const has = (v) => v !== null && v !== undefined;
     let code = null;
-    if (has(policy.tier_threshold_usd) || has(policy.tier_flat_usd)) {
-        code = null;   // the old "scale_with_account" shape -- doesn't map to any of the 5
+    if (has(policy.band_step_usd) && has(policy.band_risk_per_step_usd)) {
+        code = "F";
+        _fillOptionProxies(accountId, "F", {
+            step: policy.band_step_usd, perstep: policy.band_risk_per_step_usd,
+            below: has(policy.band_below_pct) ? policy.band_below_pct * 100 : 10,
+            max: policy.band_max_risk_usd ?? "",
+        });
+    } else if (has(policy.tier_threshold_usd) || has(policy.tier_flat_usd)) {
+        code = null;   // the old "scale_with_account" shape -- doesn't map to any option
     } else if (has(policy.base_risk_usd) && has(policy.roll_in_pct) && policy.roll_in_pct > 0) {
         code = "C";
         _fillOptionProxies(accountId, "C", { base: policy.base_risk_usd, roll: policy.roll_in_pct * 100, cap: policy.cap_abs_usd ?? "" });
@@ -652,6 +698,10 @@ function _fillSizingPolicyFields(accountId, policy) {
     document.getElementById(`sizeCapPct-${accountId}`).value = policy.cap_pct ?? "";
     document.getElementById(`sizeTierThreshold-${accountId}`).value = policy.tier_threshold_usd ?? "";
     document.getElementById(`sizeTierFlat-${accountId}`).value = policy.tier_flat_usd ?? "";
+    document.getElementById(`sizeBandStep-${accountId}`).value = policy.band_step_usd ?? "";
+    document.getElementById(`sizeBandPerStep-${accountId}`).value = policy.band_risk_per_step_usd ?? "";
+    document.getElementById(`sizeBandBelow-${accountId}`).value = policy.band_below_pct ?? "";
+    document.getElementById(`sizeBandMax-${accountId}`).value = policy.band_max_risk_usd ?? "";
     document.getElementById(`sizeDeriskN-${accountId}`).value = policy.derisk_n ?? "";
     document.getElementById(`sizeDeriskFactor-${accountId}`).value = policy.derisk_factor ?? "";
 }
@@ -666,6 +716,8 @@ function _readSizingPolicyFields(accountId) {
         roll_in_pct: num(`sizeRollPct-${accountId}`),
         cap_abs_usd: num(`sizeCapUsd-${accountId}`), cap_pct: num(`sizeCapPct-${accountId}`),
         tier_threshold_usd: num(`sizeTierThreshold-${accountId}`), tier_flat_usd: num(`sizeTierFlat-${accountId}`),
+        band_step_usd: num(`sizeBandStep-${accountId}`), band_risk_per_step_usd: num(`sizeBandPerStep-${accountId}`),
+        band_below_pct: num(`sizeBandBelow-${accountId}`), band_max_risk_usd: num(`sizeBandMax-${accountId}`),
         derisk_n: num(`sizeDeriskN-${accountId}`), derisk_factor: num(`sizeDeriskFactor-${accountId}`),
     };
 }
@@ -692,6 +744,17 @@ function _renderWorkedExample(accountId, code, p) {
     const cur = p.current.stake_usd, win = p.after_2r_win.stake_usd, loss = p.after_1r_loss.stake_usd;
     const bal = p.balance_usd;
     const balLine = bal !== null && bal !== undefined ? `On your current balance of $${bal.toFixed(2)}:\n` : "";
+    if (code === "F") {
+        const step = parseFloat(document.getElementById(`sizeF_step-${accountId}`).value) || 10000;
+        const perStep = parseFloat(document.getElementById(`sizeF_perstep-${accountId}`).value) || 1000;
+        const band = p.current.band;
+        const bandLine = (band === 0)
+            ? `You're below the first $${step.toLocaleString()} step, so risk is the flat percent of balance: $${cur.toFixed(2)} per trade.`
+            : `You're in band ${band} (balance $${(band * step).toLocaleString()}-$${((band + 1) * step).toLocaleString()}), so risk is $${cur.toFixed(2)} per trade.`;
+        const next = (band + 1) * step;
+        return `${balLine}${bandLine}\n`
+            + `The stake only changes when your balance crosses a $${step.toLocaleString()} line -- at $${next.toLocaleString()} it steps up to $${((band + 1) * perStep).toLocaleString()}; if you draw back below $${(band * step).toLocaleString()} it steps down. Wins and losses don't move it on their own.`;
+    }
     if (code === "A") {
         return `${balLine}Every trade: $${cur.toFixed(2)}, no matter what.\nAfter a win: still $${win.toFixed(2)}. After a loss: still $${loss.toFixed(2)}.`;
     }
@@ -746,7 +809,7 @@ async function saveSizingPolicy(accountId) {
     // guided options produced this save, purely for an admin glancing at
     // the raw row later. New vocabulary, replacing the old conservative/
     // steady_grow/scale_with_account labels.
-    const PRESET_NAMES = { A: "fixed_dollar", B: "percent_capped", C: "roll_profits", D: "percent_uncapped", E: "risk_based" };
+    const PRESET_NAMES = { F: "stair_step_bands", A: "fixed_dollar", B: "percent_capped", C: "roll_profits", D: "percent_uncapped", E: "risk_based" };
     payload.preset_name = PRESET_NAMES[code] || "custom";
     const resp = await api(`/api/executor/accounts/${accountId}/sizing-policy`,
         { method: "POST", body: JSON.stringify(payload) });

@@ -224,7 +224,8 @@ async def build_hypothetical_order(
     # optional params are set.
     balance_usd: Optional[float] = None
     balance_source = "not queried -- policy does not use account balance"
-    if policy.base_risk_pct is not None or policy.cap_pct is not None or policy.tier_threshold_usd is not None:
+    if (policy.base_risk_pct is not None or policy.cap_pct is not None
+            or policy.tier_threshold_usd is not None or policy.band_step_usd is not None):
         balance_state = await _query_real_balance(account)
         balance_usd = balance_state["balance_usd"]
         balance_source = balance_state["source"]
@@ -236,6 +237,10 @@ async def build_hypothetical_order(
             account_balance_usd=balance_usd,
             tier_threshold_usd=policy.tier_threshold_usd,
             tier_flat_usd=policy.tier_flat_usd,
+            band_step_usd=policy.band_step_usd,
+            band_risk_per_step_usd=policy.band_risk_per_step_usd,
+            band_below_pct=policy.band_below_pct,
+            band_max_risk_usd=policy.band_max_risk_usd,
             cap_abs_usd=policy.cap_abs_usd,
             cap_pct=policy.cap_pct,
             consecutive_losses=risk_state.consecutive_losses,

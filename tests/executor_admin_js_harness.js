@@ -111,10 +111,10 @@ function buildSandbox(fetchCalls, alertCalls) {
         // each of current/after_2r_win/after_1r_loss carries compute_stake()'s
         // full detail dict plus stake_usd/balance_source; balance_usd sits
         // alongside them (2026-09-07 addition for the wizard's balance line).
-        const leg = (stake) => ({ base: stake, tier_applied: false, derisk_applied: false, cap_binding: 'none', stake_before_cap: stake, final_stake: stake, stake_usd: stake, balance_source: 'verified against the real exchange account' });
+        const leg = (stake) => ({ base: stake, tier_applied: false, derisk_applied: false, cap_binding: 'none', band: 0, stake_before_cap: stake, final_stake: stake, stake_usd: stake, balance_source: 'verified against the real exchange account' });
         body = { ok: true, preview: { current: leg(250), after_2r_win: leg(275), after_1r_loss: leg(225), balance_usd: 2500 } };
       } else if (/\/sizing-policy$/.test(requestPath)) {
-        body = { ok: true, sizing_policy: { preset_name: null, base_risk_usd: null, base_risk_pct: null, roll_in_pct: null, cap_abs_usd: null, cap_pct: null, tier_threshold_usd: null, tier_flat_usd: null, derisk_n: null, derisk_factor: null } };
+        body = { ok: true, sizing_policy: { preset_name: null, base_risk_usd: null, base_risk_pct: null, roll_in_pct: null, cap_abs_usd: null, cap_pct: null, tier_threshold_usd: null, tier_flat_usd: null, band_step_usd: null, band_risk_per_step_usd: null, band_below_pct: null, band_max_risk_usd: null, derisk_n: null, derisk_factor: null } };
       } else if (/\/tiny-test$/.test(requestPath)) {
         body = { ok: true, tests: [] };
       } else if (/\/accounts$/.test(requestPath) && opts && opts.method === 'POST') {
@@ -302,6 +302,37 @@ async function main() {
   const sizingResults = [];
   const num = (id) => { const v = sandbox.document.getElementById(id).value; return v === '' ? null : parseFloat(v); };
   try {
+    // F. Stair-Step Bands (the recommended default) -- picking the card
+    // seeds Andy's rule (step 10k, $1k/step, 10% below, $10k max) into the
+    // canonical band_* fields as a fraction for the percent, and clears the
+    // base/cap/tier fields it replaces.
+    sandbox.selectSizingOption(1, 'F');
+    await new Promise((r) => setTimeout(r, 10));
+    sizingResults.push({
+      label: 'selectSizingOption F seeds the band schedule and clears base/tier',
+      ok: num('sizeBandStep-1') === 10000 && num('sizeBandPerStep-1') === 1000
+          && num('sizeBandBelow-1') === 0.10 && num('sizeBandMax-1') === 10000
+          && num('sizeBaseUsd-1') === null && num('sizeBasePct-1') === null
+          && num('sizeTierThreshold-1') === null,
+    });
+
+    // Switching F -> A must clear the band fields back out.
+    sandbox.selectSizingOption(1, 'A');
+    await new Promise((r) => setTimeout(r, 10));
+    sizingResults.push({
+      label: 'selectSizingOption A after F clears the band fields',
+      ok: num('sizeBandStep-1') === null && num('sizeBandPerStep-1') === null,
+    });
+
+    // _inferAndSelectSizingOption round-trips a saved F-shaped policy.
+    sandbox._inferAndSelectSizingOption(1, {
+      base_risk_usd: null, base_risk_pct: null, roll_in_pct: null, cap_abs_usd: null, cap_pct: null,
+      tier_threshold_usd: null, tier_flat_usd: null,
+      band_step_usd: 10000, band_risk_per_step_usd: 1000, band_below_pct: 0.10, band_max_risk_usd: 10000,
+    });
+    const cardF = sandbox.document.getElementById('sizeOpt-F-1');
+    sizingResults.push({ label: '_inferAndSelectSizingOption recognizes a saved Option F policy', ok: cardF.classList.contains('selected') === true });
+
     // A. Fixed Dollar -- picking the card with no prior value seeds the
     // doc's own $100 default and clears every other canonical field.
     sandbox.selectSizingOption(1, 'A');
@@ -353,7 +384,7 @@ async function main() {
 
     sandbox._inferAndSelectSizingOption(1, { base_risk_usd: null, base_risk_pct: 0.10, roll_in_pct: null, cap_abs_usd: null, cap_pct: null, tier_threshold_usd: 10000, tier_flat_usd: 1000 });
     const noteEl = sandbox.document.getElementById('sizingCustomNote-1');
-    const anySelected = ['A', 'B', 'C', 'D', 'E'].some((c) => sandbox.document.getElementById(`sizeOpt-${c}-1`).classList.contains('selected'));
+    const anySelected = ['F', 'A', 'B', 'C', 'D', 'E'].some((c) => sandbox.document.getElementById(`sizeOpt-${c}-1`).classList.contains('selected'));
     sizingResults.push({ label: '_inferAndSelectSizingOption falls back to custom for an old scale_with_account-shaped policy', ok: !anySelected && noteEl.style.display === 'block' });
   } catch (e) {
     sizingResults.push({ label: 'sizing option wizard', ok: false, error: e.message });

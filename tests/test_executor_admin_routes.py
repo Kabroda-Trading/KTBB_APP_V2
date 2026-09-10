@@ -437,6 +437,45 @@ def test_sizing_policy_preview_percent_of_balance_uses_assumed_balance_with_no_c
     assert "assumed_balance_usd" in current["balance_source"]
 
 
+def test_sizing_policy_preview_stair_step_bands_steps_with_balance(env):
+    # Option F (2026-09-10): the worked-example preview computes the stake
+    # straight off the banded schedule and reports which band the balance
+    # is in. assumed_balance_usd stands in for a live exchange balance.
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.assumed_balance_usd = 34_000.0
+    db.commit()
+
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post(
+        f"/api/executor/accounts/{env['account_id']}/sizing-policy/preview",
+        json={"band_step_usd": 10_000.0, "band_risk_per_step_usd": 1_000.0,
+              "band_below_pct": 0.10, "band_max_risk_usd": 10_000.0},
+    )
+    assert resp.status_code == 200
+    current = resp.json()["preview"]["current"]
+    assert current["stake_usd"] == pytest.approx(3_000.0)   # $34k -> band 3 -> $3,000
+    assert current["band"] == 3
+
+
+def test_sizing_policy_post_stair_step_bands_persists_and_clears_base(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    # seed a base first so we can confirm switching to F clears it
+    client.post(f"/api/executor/accounts/{env['account_id']}/sizing-policy", json={"base_risk_usd": 100.0})
+    resp = client.post(
+        f"/api/executor/accounts/{env['account_id']}/sizing-policy",
+        json={"band_step_usd": 10_000.0, "band_risk_per_step_usd": 1_000.0,
+              "band_below_pct": 0.10, "band_max_risk_usd": 10_000.0,
+              "preset_name": "stair_step_bands"},
+    )
+    assert resp.status_code == 200
+    pol = resp.json()["sizing_policy"]
+    assert pol["band_step_usd"] == 10_000.0
+    assert pol["band_risk_per_step_usd"] == 1_000.0
+    assert pol["base_risk_usd"] is None
+    assert pol["preset_name"] == "stair_step_bands"
+
+
 def test_record_trade_result_route_owner_or_admin(env):
     other_client = _login("exec_other@kabroda.com", "otherpass123")
     resp = other_client.post(f"/api/executor/accounts/{env['account_id']}/record-trade-result", json={"pnl_usd": 50.0})

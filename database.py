@@ -579,6 +579,19 @@ def init_db():
         except Exception:
             pass
 
+    # --- MULTI-BAND "STAIR-STEP" SIZING (2026-09-10) -- Andy's real sizing
+    # rule (the one every Kabroda AI Brain account sim uses). ExecutorSizing
+    # Policy is create_all()-managed, which does NOT add columns to an
+    # existing prod DB -- these ALTERs do. All nullable FLOAT, no default,
+    # Postgres-safe. See ExecutorSizingPolicy.band_step_usd's own comment. ---
+    for _col in ["band_step_usd FLOAT", "band_risk_per_step_usd FLOAT",
+                 "band_below_pct FLOAT", "band_max_risk_usd FLOAT"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE executor_sizing_policies ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- DOMAIN 2 EXECUTOR (2026-09-07) -- executor_live_engine.py's real,
     # TradePlan-linked managed-trade tracking. See ExecutorOrder's own
     # comments above for what each column is. All nullable/Postgres-safe
@@ -1967,6 +1980,19 @@ class ExecutorSizingPolicy(Base):
     # no stored "am I currently tiered" flag exists or is needed.
     tier_threshold_usd = Column(Float, nullable=True)
     tier_flat_usd = Column(Float, nullable=True)
+
+    # Q6 (2026-09-10) -- Andy's multi-band "stair-step" schedule, the rule
+    # every Kabroda AI Brain account simulation uses (account_sim_banded.py).
+    # When band_step_usd AND band_risk_per_step_usd are both set, the stake
+    # base is executor_sizing.banded_risk(live_balance, ...): below the first
+    # step -> band_below_pct of balance; at/above it -> floor(balance/step) *
+    # risk_per_step, clamped to band_max_risk_usd. Recomputed from the CURRENT
+    # balance every call (steps back down on a drawdown -- not a ratchet).
+    # Mutually exclusive with tier_threshold_usd/tier_flat_usd.
+    band_step_usd = Column(Float, nullable=True)
+    band_risk_per_step_usd = Column(Float, nullable=True)
+    band_below_pct = Column(Float, nullable=True)      # default 0.10 in compute_stake if unset
+    band_max_risk_usd = Column(Float, nullable=True)
 
     # Q5 -- optional, explicitly under-specified by design (needs
     # confirming before real use): once consecutive_losses >= derisk_n,

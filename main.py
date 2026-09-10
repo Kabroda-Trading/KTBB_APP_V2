@@ -1326,6 +1326,10 @@ class ExecutorSizingPolicyUpdateRequest(BaseModel):
     cap_pct: Optional[float] = None
     tier_threshold_usd: Optional[float] = None
     tier_flat_usd: Optional[float] = None
+    band_step_usd: Optional[float] = None
+    band_risk_per_step_usd: Optional[float] = None
+    band_below_pct: Optional[float] = None
+    band_max_risk_usd: Optional[float] = None
     derisk_n: Optional[int] = None
     derisk_factor: Optional[float] = None
 
@@ -1601,6 +1605,8 @@ def _serialize_sizing_policy(policy: "_ExecutorSizingPolicy") -> Dict[str, Any]:
         "roll_in_pct": policy.roll_in_pct,
         "cap_abs_usd": policy.cap_abs_usd, "cap_pct": policy.cap_pct,
         "tier_threshold_usd": policy.tier_threshold_usd, "tier_flat_usd": policy.tier_flat_usd,
+        "band_step_usd": policy.band_step_usd, "band_risk_per_step_usd": policy.band_risk_per_step_usd,
+        "band_below_pct": policy.band_below_pct, "band_max_risk_usd": policy.band_max_risk_usd,
         "derisk_n": policy.derisk_n, "derisk_factor": policy.derisk_factor,
     }
 
@@ -1659,6 +1665,8 @@ async def api_executor_preview_sizing_policy(account_id: int, request: Request, 
         "base_risk_usd": policy.base_risk_usd, "base_risk_pct": policy.base_risk_pct,
         "roll_in_pct": policy.roll_in_pct, "cap_abs_usd": policy.cap_abs_usd, "cap_pct": policy.cap_pct,
         "tier_threshold_usd": policy.tier_threshold_usd, "tier_flat_usd": policy.tier_flat_usd,
+        "band_step_usd": policy.band_step_usd, "band_risk_per_step_usd": policy.band_risk_per_step_usd,
+        "band_below_pct": policy.band_below_pct, "band_max_risk_usd": policy.band_max_risk_usd,
         "derisk_n": policy.derisk_n, "derisk_factor": policy.derisk_factor,
     }
     merged.update(changes)
@@ -1671,6 +1679,14 @@ async def api_executor_preview_sizing_policy(account_id: int, request: Request, 
             merged["base_risk_pct"] = None
         elif changes.get("base_risk_pct") is not None:
             merged["base_risk_usd"] = None
+    # Same "switching TO banded clears the base + tier + standalone caps"
+    # rule as update_sizing_policy() -- so the preview matches what saving
+    # produces (banded_risk carries its own band_max_risk_usd ceiling).
+    if changes.get("band_step_usd") is not None:
+        for _f in ("base_risk_usd", "base_risk_pct", "tier_threshold_usd",
+                   "tier_flat_usd", "cap_abs_usd", "cap_pct"):
+            if _f not in changes:
+                merged[_f] = None
     try:
         _executor_accounts._validate_sizing_policy(merged)
     except ValueError as e:
@@ -1681,7 +1697,8 @@ async def api_executor_preview_sizing_policy(account_id: int, request: Request, 
 
     balance_usd: Optional[float] = None
     balance_source = "not queried -- policy does not use account balance"
-    if merged["base_risk_pct"] is not None or merged["cap_pct"] is not None or merged["tier_threshold_usd"] is not None:
+    if (merged["base_risk_pct"] is not None or merged["cap_pct"] is not None
+            or merged["tier_threshold_usd"] is not None or merged["band_step_usd"] is not None):
         balance_state = await _executor_plan_builder._query_real_balance(account)
         balance_usd = balance_state["balance_usd"]
         balance_source = balance_state["source"]
@@ -1702,6 +1719,8 @@ async def api_executor_preview_sizing_policy(account_id: int, request: Request, 
         stake, detail = _executor_sizing.compute_stake(
             risk_last_usd=risk_last_usd, base_risk_pct=merged["base_risk_pct"], account_balance_usd=balance_usd,
             tier_threshold_usd=merged["tier_threshold_usd"], tier_flat_usd=merged["tier_flat_usd"],
+            band_step_usd=merged["band_step_usd"], band_risk_per_step_usd=merged["band_risk_per_step_usd"],
+            band_below_pct=merged["band_below_pct"], band_max_risk_usd=merged["band_max_risk_usd"],
             cap_abs_usd=merged["cap_abs_usd"], cap_pct=merged["cap_pct"],
             consecutive_losses=consecutive_losses, derisk_n=merged["derisk_n"], derisk_factor=merged["derisk_factor"],
         )

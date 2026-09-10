@@ -298,6 +298,70 @@ def test_update_sizing_policy_rejects_derisk_fields_set_alone(db):
         ea.update_sizing_policy(db, account, {"derisk_n": 3}, updated_by="andy@kabroda.com")
 
 
+# --- banded ("stair-step") sizing (2026-09-10) ---
+
+def test_update_sizing_policy_rejects_one_band_field_without_the_other(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    with pytest.raises(ValueError, match="band_step_usd and band_risk_per_step_usd"):
+        ea.update_sizing_policy(db, account, {"band_step_usd": 10000.0}, updated_by="andy@kabroda.com")
+
+
+def test_update_sizing_policy_banded_is_mutually_exclusive_with_tier(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        ea.update_sizing_policy(db, account, {
+            "band_step_usd": 10000.0, "band_risk_per_step_usd": 1000.0,
+            "tier_threshold_usd": 25000.0, "tier_flat_usd": 2500.0,
+        }, updated_by="andy@kabroda.com")
+
+
+def test_update_sizing_policy_switching_to_banded_clears_base_tier_and_caps(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    ea.get_or_init_sizing_policy(db, account)  # seeds base_risk_usd + cap_abs_usd (from risk_state)
+    db.commit()
+    # Only the band fields sent -- base_risk_usd/tier/standalone-caps must be
+    # cleared (banded_risk carries its own band_max_risk_usd ceiling), and
+    # the policy must validate (banded needs neither base field).
+    policy = ea.update_sizing_policy(db, account, {
+        "band_step_usd": 10000.0, "band_risk_per_step_usd": 1000.0,
+        "band_below_pct": 0.10, "band_max_risk_usd": 10000.0,
+        "preset_name": "stair_step_bands",
+    }, updated_by="andy@kabroda.com")
+    db.commit()
+    assert policy.band_step_usd == 10000.0
+    assert policy.band_risk_per_step_usd == 1000.0
+    assert policy.base_risk_usd is None
+    assert policy.base_risk_pct is None
+    assert policy.tier_threshold_usd is None
+    assert policy.cap_abs_usd is None
+    assert policy.cap_pct is None
+
+
+def test_update_sizing_policy_banded_keeps_an_explicitly_sent_cap(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    policy = ea.update_sizing_policy(db, account, {
+        "band_step_usd": 10000.0, "band_risk_per_step_usd": 1000.0,
+        "cap_pct": 0.05,  # deliberate "bands, but never more than 5% of balance"
+        "preset_name": "stair_step_bands",
+    }, updated_by="andy@kabroda.com")
+    db.commit()
+    assert policy.band_step_usd == 10000.0
+    assert policy.cap_pct == 0.05
+
+
+def test_update_sizing_policy_rejects_bad_band_below_pct(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    with pytest.raises(ValueError, match="band_below_pct"):
+        ea.update_sizing_policy(db, account, {
+            "band_step_usd": 10000.0, "band_risk_per_step_usd": 1000.0, "band_below_pct": 1.5,
+        }, updated_by="andy@kabroda.com")
+
+
 def test_update_sizing_policy_switching_to_percent_mode_clears_fixed_field(db):
     account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
     db.commit()

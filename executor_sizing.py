@@ -62,6 +62,47 @@ def compute_qty(risk_dollars: float, entry_price: float, stop_price: float) -> f
     return risk_dollars / stop_distance
 
 
+def banded_risk(
+    balance_usd: float,
+    *,
+    step_usd: float,
+    risk_per_step_usd: float,
+    below_pct: float = 0.10,
+    max_risk_usd: Optional[float] = None,
+) -> float:
+    """Andy's multi-band ("stair-step") sizing schedule -- a straight port of
+    the Kabroda AI Brain repo's `account_sim_banded.py::risk_for_balance()`,
+    the rule every account simulation in that repo uses:
+
+        balance < step_usd            -> balance * below_pct   (pure %-of-balance)
+        balance >= step_usd           -> floor(balance / step_usd) * risk_per_step_usd,
+                                         clamped to max_risk_usd if set
+
+    So with the defaults (step 10_000, per-step 1_000, below 10%, max 10_000):
+    $5k -> $500 | $10k -> $1,000 | $25k -> $2,000 | $95k -> $9,000 |
+    $100k -> $10,000 | $250k -> $10,000 (held flat by the cap).
+
+    NOT a high-water ratchet -- the band is recomputed from the CURRENT
+    balance every call, so a drawdown back below a threshold steps the size
+    straight back down (Andy's explicit intent). This function is pure; the
+    caller (compute_stake) supplies the live balance and layers derisk/caps
+    on top exactly as it does for every other sizing mode."""
+    if balance_usd is None:
+        raise ValueError("banded_risk requires a balance")
+    if step_usd is None or step_usd <= 0:
+        raise ValueError("step_usd must be positive")
+    if risk_per_step_usd is None or risk_per_step_usd <= 0:
+        raise ValueError("risk_per_step_usd must be positive")
+    bal = max(0.0, float(balance_usd))
+    if bal < step_usd:
+        return bal * below_pct
+    bands = int(bal // step_usd)
+    risk = bands * risk_per_step_usd
+    if max_risk_usd is not None:
+        risk = min(risk, max_risk_usd)
+    return risk
+
+
 def compute_next_risk(
     risk_last: float, last_trade_pnl: float,
     floor: float = 100.0, cap: float = 1000.0, factor: float = 0.10,
@@ -201,6 +242,10 @@ def compute_stake(
     account_balance_usd: Optional[float] = None,
     tier_threshold_usd: Optional[float] = None,
     tier_flat_usd: Optional[float] = None,
+    band_step_usd: Optional[float] = None,
+    band_risk_per_step_usd: Optional[float] = None,
+    band_below_pct: Optional[float] = None,
+    band_max_risk_usd: Optional[float] = None,
     cap_abs_usd: Optional[float] = None,
     cap_pct: Optional[float] = None,
     consecutive_losses: int = 0,
@@ -212,22 +257,39 @@ def compute_stake(
     every stage rather than just the final number.
 
     Order of operations:
-      1. base: base_risk_pct*account_balance_usd (percent-of-balance
-         modes) or risk_last_usd (FIXED/ROLLING modes -- the rolled
-         current baseline, advanced elsewhere by
+      1. base: banded_risk(account_balance_usd, ...) when band_step_usd AND
+         band_risk_per_step_usd are both set (Andy's stair-step schedule --
+         see banded_risk()); else base_risk_pct*account_balance_usd
+         (percent-of-balance modes); else risk_last_usd (FIXED/ROLLING modes
+         -- the rolled current baseline, advanced elsewhere by
          executor_accounts.record_trade_result() via compute_next_risk()).
       2. tier switch: REPLACES the base with tier_flat_usd once
          account_balance_usd >= tier_threshold_usd, evaluated fresh
          against the live balance every call -- reverting below the
          threshold falls out for free, no stored "am I tiered" flag.
+         Mutually exclusive with banded mode (a schedule vs a single step).
       3. derisk (optional): once consecutive_losses >= derisk_n,
          multiplies the stake by derisk_factor -- a single-step shrink,
          not compounding per additional loss beyond N (the simplest
          defensible reading of an explicitly under-specified rule).
       4. dual caps: takes the MINIMUM of whichever of cap_abs_usd /
-         cap_pct*account_balance_usd are set.
+         cap_pct*account_balance_usd are set. (banded mode's own
+         band_max_risk_usd is a separate ceiling INSIDE step 1, applied by
+         banded_risk itself -- the dual caps still layer on top of it.)
     """
-    if base_risk_pct is not None:
+    banded = band_step_usd is not None and band_risk_per_step_usd is not None
+    if banded:
+        if tier_threshold_usd is not None or tier_flat_usd is not None:
+            raise ValueError("banded sizing (band_step_usd/band_risk_per_step_usd) is mutually exclusive with the tier switch")
+        if account_balance_usd is None:
+            raise ValueError("banded sizing requires account_balance_usd")
+        base = banded_risk(
+            account_balance_usd,
+            step_usd=band_step_usd, risk_per_step_usd=band_risk_per_step_usd,
+            below_pct=band_below_pct if band_below_pct is not None else 0.10,
+            max_risk_usd=band_max_risk_usd,
+        )
+    elif base_risk_pct is not None:
         if account_balance_usd is None:
             raise ValueError("base_risk_pct requires account_balance_usd")
         base = account_balance_usd * base_risk_pct
@@ -235,6 +297,9 @@ def compute_stake(
         base = risk_last_usd
 
     detail: Dict[str, Any] = {"base": base, "tier_applied": False, "derisk_applied": False, "cap_binding": "none"}
+    if banded:
+        detail["band"] = (int(account_balance_usd // band_step_usd)
+                          if account_balance_usd >= band_step_usd else 0)
     stake = base
 
     if tier_threshold_usd is not None and tier_flat_usd is not None:

@@ -232,17 +232,37 @@ def _validate_sizing_policy(changes: Dict[str, Any]) -> None:
     the FULL merged view (existing fields + the incoming changes), never
     just the incoming partial dict, so a partial update can't leave the
     row in a state that would have been rejected outright."""
+    band_step = changes.get("band_step_usd")
+    band_per_step = changes.get("band_risk_per_step_usd")
+    if (band_step is None) != (band_per_step is None):
+        raise ValueError("band_step_usd and band_risk_per_step_usd must be set together or not at all")
+    banded = band_step is not None
+    if banded and (band_step <= 0 or band_per_step <= 0):
+        raise ValueError("band_step_usd and band_risk_per_step_usd must be positive")
+
     base_usd = changes.get("base_risk_usd")
     base_pct = changes.get("base_risk_pct")
     if base_usd is not None and base_pct is not None:
         raise ValueError("set exactly one of base_risk_usd / base_risk_pct, not both")
-    if base_usd is None and base_pct is None:
+    # Banded mode (Andy's stair-step schedule) computes the stake base
+    # entirely from the live balance -- it needs neither base_risk_usd nor
+    # base_risk_pct. Only require a base when NOT banded.
+    if not banded and base_usd is None and base_pct is None:
         raise ValueError("set exactly one of base_risk_usd / base_risk_pct")
 
     tier_threshold = changes.get("tier_threshold_usd")
     tier_flat = changes.get("tier_flat_usd")
     if (tier_threshold is None) != (tier_flat is None):
         raise ValueError("tier_threshold_usd and tier_flat_usd must be set together or not at all")
+    if banded and (tier_threshold is not None or tier_flat is not None):
+        raise ValueError("banded sizing is mutually exclusive with the tier switch (a schedule vs a single step)")
+
+    below_pct = changes.get("band_below_pct")
+    if below_pct is not None and not (0.0 < below_pct <= 1.0):
+        raise ValueError("band_below_pct must be between 0 and 1")
+    band_max = changes.get("band_max_risk_usd")
+    if band_max is not None and band_max <= 0:
+        raise ValueError("band_max_risk_usd must be positive when set")
 
     derisk_n = changes.get("derisk_n")
     derisk_factor = changes.get("derisk_factor")
@@ -261,6 +281,8 @@ def update_sizing_policy(db: Session, account: ExecutorAccount, changes: Dict[st
         "preset_name": policy.preset_name, "base_risk_usd": policy.base_risk_usd, "base_risk_pct": policy.base_risk_pct,
         "roll_in_pct": policy.roll_in_pct, "cap_abs_usd": policy.cap_abs_usd, "cap_pct": policy.cap_pct,
         "tier_threshold_usd": policy.tier_threshold_usd, "tier_flat_usd": policy.tier_flat_usd,
+        "band_step_usd": policy.band_step_usd, "band_risk_per_step_usd": policy.band_risk_per_step_usd,
+        "band_below_pct": policy.band_below_pct, "band_max_risk_usd": policy.band_max_risk_usd,
         "derisk_n": policy.derisk_n, "derisk_factor": policy.derisk_factor,
     }
     merged.update(changes)
@@ -279,6 +301,22 @@ def update_sizing_policy(db: Session, account: ExecutorAccount, changes: Dict[st
         elif changes.get("base_risk_pct") is not None:
             merged["base_risk_usd"] = None
 
+    # Switching TO banded mode (Andy's stair-step schedule) makes the base,
+    # the tier switch, AND the standalone dual caps meaningless -- banded_
+    # risk() computes the stake entirely from the live balance and carries
+    # its own band_max_risk_usd ceiling. Clear them in the same call so a
+    # caller only needs to send the band fields, mirroring switching_base
+    # above (and matching the wizard's own F-card behavior). A caller that
+    # explicitly re-sends one of these in the same call keeps it -- e.g. a
+    # deliberate "bands, but never more than 5% of balance" (cap_pct).
+    _BANDED_CLEARS = ("base_risk_usd", "base_risk_pct", "tier_threshold_usd",
+                       "tier_flat_usd", "cap_abs_usd", "cap_pct")
+    switching_to_banded = changes.get("band_step_usd") is not None
+    if switching_to_banded:
+        for _f in _BANDED_CLEARS:
+            if _f not in changes:
+                merged[_f] = None
+
     _validate_sizing_policy(merged)
 
     for field, value in changes.items():
@@ -288,6 +326,10 @@ def update_sizing_policy(db: Session, account: ExecutorAccount, changes: Dict[st
             policy.base_risk_pct = None
         elif changes.get("base_risk_pct") is not None:
             policy.base_risk_usd = None
+    if switching_to_banded:
+        for _f in _BANDED_CLEARS:
+            if _f not in changes:
+                setattr(policy, _f, None)
 
     # 2026-09-07 real bug found while confirming Andy's compounding
     # question: compute_stake() (and this preview route's own math) never
