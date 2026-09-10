@@ -99,13 +99,18 @@ DEAD_HOURS = set(range(0, 12)) | {18, 19, 20}
 #
 # 1.1, not 1.0: a real walk-forward (fit 2021-2023, freeze, verify on
 # 2024-2026 the fit never saw) independently picked 1.1 as the strongest
-# threshold. 1.0 was the first candidate proposed but a direct recheck
-# against the corrected exact-fuel STANDARD population (Kabroda AI Brain
-# repo AGENT_LOG.md, 2026-09-09 19:55 CT) showed 2025 is a real losing year
-# at exactly 1.0 (-1.7R) -- contradicting the "positive every year" case for
-# shipping it. At 1.1, the frozen out-of-sample verify window (2024-2026)
-# is positive in all three years (+34.4 / +1.8 / +22.1). 1.1 is the value
-# both the fit-window scan and the out-of-sample check actually support.
+# threshold, on BOTH the fit window (best avgR of any threshold 0.8-1.3)
+# and the full 2021-2026 period (best absolute sumR of the same range,
+# +118.2R vs +93.3R with no floor at all). CORRECTION 2026-09-09 (later
+# same day): an earlier version of this comment cited "2025 is a real
+# losing year at exactly 1.0" as the specific reason for 1.1 over 1.0 --
+# that check itself had a bug (replay_v3_5yr.py was using PREMIUM's zone
+# stop for STANDARD trades too, not STANDARD's real r30 stop shipped
+# 2026-09-08). Fixed and rechecked: with the correct stop, 2025 is
+# positive even at 1.0. The "1.0 fails" claim is retracted -- 1.1 is kept
+# anyway because it's still the genuine full-period and fit-window
+# optimum, not because 1.0 is broken. Full trail: Kabroda AI Brain repo
+# AGENT_LOG.md, 2026-09-09 19:55 CT and the correction that follows it.
 STANDARD_FUEL_RATIO_FLOOR = 1.1
 
 # §6 management rule -- Andy's fib convention: anchor 0 = BD, 1.0 = BO.
