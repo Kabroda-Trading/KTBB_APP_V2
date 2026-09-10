@@ -2015,3 +2015,129 @@ by DeepSeek incl. under the real BBWP classifiers. Full suite 581 passed, boot
 clean.
 
 Next: email copy cleanup, then the multi-band sizing rule, then the full audit.
+
+## 2026-09-10 (11:50 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + Claude Code — Bitunix VIP-tier fee model run against the real trade pattern (Andy's tier-progression ask)
+
+STATUS: open — numbers below; one CANON-relevant note (Bitunix fee table now cited), one modeling caveat (stop-geometry estimate), one live-vs-backtest mismatch worth CC's eyes (maker is NOT free on Bitunix).
+
+Andy's point: the account grows → volume/balance qualifies for a better Bitunix VIP bracket → fees drop, so the cost model should improve as the account grows instead of assuming the worst bracket forever. He shared the full Bitunix fee table (VIP0-VIP8, futures maker 0.02%→0.006%, taker 0.06%→0.0315%, balance-based qualification: $1k→VIP1, $10k→VIP2, $50k→VIP3, $200k→VIP4, $500k→VIP5, $1.5M→VIP6).
+
+**Method (and the correction I had to make mid-run):** fee-in-R is NOT fee_pct × notional / risk_dollars in the naive sense — 1R is the stop distance in price terms, so fee_R = fee_pct / stop_pct_of_price. My first pass used the spec's example geometry (79,062 entry / 78,890 stop = 0.218% stop) and produced an absurd "system dies at VIP0" result. That example is one tight-stop day, not typical. The real geometry: box_atr median 0.311 (corpus), BTC daily ATR14 ~3% of price (measured from mexc_1d_history.csv), r30-range + 0.12 box buffer ~1.5×box → **1R ≈ 1.4% of price** (median). At that geometry: maker 2bp leg = 0.014R, taker 6bp leg = 0.043R. This matches the on-record model's magnitude (CLEAN_REPORT §4: taker 5bp ≈ 0.229R/full-leg at the OLD 0.22%-stop assumption — the old WEEX geometry had much tighter stops, which is why fees mattered so much more then; the r30-based stop is ~6x wider).
+
+**Leg structure per outcome** (entry maker, T1 maker 50%, stop taker-by-necessity, runner maker): STOP = 1.0 maker + 1.0 taker notional-x; T1+STOP = 1.5m + 0.5t; T1+run / T1+TIMEOUT = 2.0m + 0t; TIMEOUT = 1.0m. Corpus mix: 232 STOP / 174 T1+STOP / 232 T1+run / 54 T1+TIMEOUT / 15 TIMEOUT (707 fills). Slippage allowance kept identical across all fee bases (0.05R base, +0.05R when the taker stop leg fires) — the tier only changes the FEE component.
+
+**Per-outcome haircut (fee+slippage, R):**
+
+| outcome | n | VIP0 | VIP3 | VIP5 | on-record (0bp mkr/5bp tkr) |
+|---|---|---|---|---|---|
+| STOP | 232 | 0.157 | 0.139 | 0.132 | 0.136 |
+| T1+STOP | 174 | 0.143 | 0.129 | 0.123 | 0.118 |
+| T1+run | 232 | 0.079 | 0.070 | 0.064 | 0.050 |
+| T1+TIMEOUT | 54 | 0.079 | 0.070 | 0.064 | 0.050 |
+| TIMEOUT | 15 | 0.064 | 0.060 | 0.057 | 0.050 |
+
+**Banded account sim ($750 start, 707 fills, real-classifier corpus):**
+
+| fee basis | final $ | worst %DD |
+|---|---|---|
+| Bitunix VIP0 throughout (worst tier) | $1,139,116 | 62.1% |
+| Bitunix balance-based tier progression | $1,228,245 | 62.0% |
+| on-record model (0bp maker) | $1,299,984 | 58.6% |
+
+Mature-phase (flat $10k/trade) net cumR: VIP0 +176.5R (+$1.77M), VIP5+ +190.0R (+$1.90M), on-record +194.3R (+$1.94M).
+
+**The decomposition that answers Andy's actual question:**
+- Gross edge: +261.3R over 5.5 years.
+- **Fee-only cost at VIP0: 29.1R. At VIP5: 15.7R. Tier-progression upside: 13.4R over 5.5 years (~2.4R/yr).**
+- Slippage allowance (unchanged by tier): 55.7R — **slippage is 2-4x the entire exchange-fee bill.**
+- So: yes, the tier progression is real money (~$134k at $10k/trade over 5.5 years), but it's the THIRD-order term. The first-order cost is slippage, which no fee tier touches. The on-record model (0bp maker) was slightly optimistic vs Bitunix's real 2bp→1bp maker fees; Bitunix's real table costs ~5-13R more than on-record depending on tier path — the system survives all of them with six-figure margins.
+
+**Read for Andy:** run it across the worst account (VIP0) as the planning basis — that's $1.14M final / +176.5R net, every year positive. The tier progression is genuine upside that arrives automatically as the balance grows (no action needed — Bitunix qualifies on balance alone, $1k→VIP1, $50k→VIP3, $500k→VIP5), worth ~13R/5.5yr, but it should never be counted on in the plan. Also: the stop leg's taker fee (the "stop executes taker-by-necessity" point from CLEAN_REPORT §4) is 0.043R at VIP0 — still negligible next to the alternative of a stop that doesn't fill.
+
+**Modeling caveats (honest):** (1) 1R ≈ 1.4% of price is an ESTIMATE from box_atr × assumed 3% daily ATR × 1.5×box r30-range — the corpus doesn't carry stop distances; the true distribution is wider (tight days like the spec example make fees 6x worse; wide days make them smaller). Worth a dedicated pass once the live executor logs real stop distances (already on the feed-logging spec list). (2) Funding rates (every 8h) not modeled — trades are intraday, usually flat before funding, but T3-runner trades that hold past a funding timestamp pay it; needs a real-fill check. (3) Withdrawal fees are per-movement, not per-trade — irrelevant to the sim.
+
+**CANON note:** the Bitunix fee table above should get a §1 row (source: Andy's 2026-09-10 message, Bitunix published VIP schedule) since the fee basis is now balance-tiered, not flat. The on-record haircuts (STOP -0.10/T1+STOP -0.15/others -0.05) remain the conservative default for any tool until this model is validated against real executor fills.
+
+Scripts: scratch `bitunix_tier_fees.py`, `tier_upside.py` (artifacts dir). Data: `calibration_data/anticipate_replay_real_classifiers.csv` + `mexc_1d_history.csv` (ATR measurement).
+
+
+## 2026-09-10 (11:58 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + Claude Code — CORRECTION to the 11:50 fee entry: Andy's actual account gets futures-fee DISCOUNTS the generic table doesn't show
+
+STATUS: open — supersedes the generic-table numbers in the 11:50 entry where they differ; VIP0-worst basis is unchanged.
+
+Andy sent his actual account's fee page: on top of the published VIP schedule, his account earns futures fee discounts (VIP0 0%, VIP1 20%, VIP2 20%, VIP3 30%, VIP4 40%, VIP5 50%, VIP6 60%, VIP7 70%, VIP8 100% — fee-free). Effective futures fees = base (maker 2bp / taker 6bp) × (1 − discount). Maker matches the published table at every level; taker is better from VIP1 up (4.8bp at VIP1/2 vs 5.0 published, 3.0bp at VIP5 vs 3.5, 2.4bp at VIP6 vs 3.15, 1.8bp at VIP7 vs 3.0, FREE at VIP8 vs 2.6bp).
+
+**Rerun with the actual-account table (same method, same corpus, same slippage allowance):**
+
+Banded account sim ($750 start, 707 fills):
+
+| fee basis | final $ | worst %DD |
+|---|---|---|
+| actual VIP0 throughout (worst tier) | $1,139,116 | 62.1% |
+| actual balance-based tier progression | $1,232,271 | 62.0% |
+| generic table (11:50 entry) progression | $1,228,245 | 62.0% |
+| on-record model (0bp maker) | $1,299,984 | 58.6% |
+
+Mature-phase (flat $10k/trade) net cumR: actual VIP0 +176.5R (+$1.77M), actual VIP5+ +191.1R (+$1.91M), on-record +194.3R (+$1.94M).
+
+**What Andy's discounts change:** tier-progression upside improves from 13.4R to **14.6R over 5.5 years** (~$146k at $10k/trade, ~2.7R/yr). At VIP7+ the taker stop leg drops to 0.018R and the whole fee bill approaches zero — but that's a $3M+ balance bracket; the planning basis stays VIP0 ($1.14M final, +176.5R net, every year positive).
+
+**Unchanged conclusions:** slippage allowance (55.7R) is still 2-4x the entire exchange-fee bill at any tier; the tier progression is genuine but third-order; the on-record haircuts remain the conservative default for tools until real executor fills validate the model. The one live-vs-backtest mismatch CC should still note: Bitunix maker is NOT free (2bp → 1bp by tier), so the old 0bp-maker assumption is retired for Bitunix.
+
+CANON: the actual-account fee basis (base × discount, with the discount schedule above) should be the §1 row, citing Andy's 2026-09-10 account screenshot; the generic published table is the fallback citation. Same modeling caveats as 11:50 carry: 1R ≈ 1.4% of price is an estimate pending real stop distances in the executor log; funding on T3-runner holds not modeled.
+
+Script: scratch `bitunix_actual_fees.py`.
+
+
+## 2026-09-10 (12:08 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + Claude Code — Andy's Bitunix setup vs the on-record WEEX basis: quantified, Andy is right
+
+STATUS: open — the WEEX-era -0.20R flat haircut is now superseded for planning; the refined per-outcome Bitunix model is both more accurate AND cheaper.
+
+Andy: "my current setup is better than what WEEX was." Verified against the on-record basis and he's correct, on two axes:
+
+**1. Fees: Bitunix actual is 37.8-46.6R cheaper than the WEEX basis over 5.5 years.**
+The on-record WEEX assumption (CALIBRATION.md §11, KABRODA_REBUILD_SPEC.md §7): flat −0.20R/trade, "WEEX VIP1 taker both ways, market in / market out" — every leg taker, worst case. On the same corpus (707 fills) and same stop geometry (1R ≈ 1.4% of price):
+- WEEX VIP1 taker-both-ways: **67.0R** in fees alone
+- Bitunix actual VIP0 (maker entry/T1/T3 + taker stop only): **29.1R**
+- Bitunix actual VIP3 ($50k+ balance): **20.4R**
+
+The system's design already assumes maker execution on entry/T1/T3 (CLEAN_REPORT §4: taker-everything kills the edge) — Bitunix's real maker fees (2bp→1bp by tier) preserve that design, and only the stop leg pays taker. The WEEX basis paid taker on ALL legs; Bitunix pays taker on ~0.57 legs/trade average.
+
+**2. The refined per-outcome model replaces the flat haircut — and it's more honest in both directions:**
+- Old flat: −0.20R × 707 = **141.4R** total haircut → net +119.9R
+- New per-outcome (actual VIP0, fee+slippage): **84.8R** → net +176.5R
+- The old model over-charged by ~56.6R because it assumed taker-both-ways for trades that actually exit maker (T1/runner legs). It was the right conservative call at the time; now that the venue is fixed (Bitunix) and the leg structure is known, the per-outcome model is the better basis.
+
+**Planning basis going forward (proposed):** gross +261.3R → per-outcome actual-VIP0 haircut → **net +176.5R over 5.5 years (+0.250R/trade)**, worst R-DD 8.7R net, every year positive. Tier progression adds up to +14.6R more (Andy's discounts, balance-based qualification). The old -0.20R flat remains valid ONLY as an ultra-conservative sanity bound (net +119.9R still every-year-positive — the edge survives even that).
+
+**What does NOT change:** slippage allowance (55.7R) is the dominant cost at every venue; the maker-execution requirement is structural (the edge dies if entry/T1/runner go taker); funding on T3-runner holds still unmodeled; 1R ≈ 1.4% stop-geometry still an estimate pending real executor fill logs.
+
+CANON actions proposed (same-day, per drift rule 3): retire the "WEEX VIP1 taker both ways" basis for new tooling; add the Bitunix actual-account fee row (base × discount, Andy's 2026-09-10 account page) and the per-outcome haircut table (STOP 0.157 / T1+STOP 0.143 / T1+run 0.079 / T1+TIMEOUT 0.079 / TIMEOUT 0.064 at VIP0, fee+slippage) as the cited planning basis. CC: the site's cost displays (if any quote the -0.20R flat) should note the refined model.
+
+Scripts: scratch `bitunix_actual_fees.py`, `tier_upside.py`.
+
+
+## 2026-09-10 (12:16 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy — Slippage reality check on the $10k/trade claim: Andy is directionally right, with one honest caveat
+
+STATUS: open — Andy: "at a $10,000 trade there shouldn't be a bunch of slippage, we should get in every single time; the account should land ~$1.1M." Quantified below.
+
+**The physics (why Andy's intuition is right):** at the current r30 stop geometry, 1R ≈ 1.4% of price, so a $10k-risk trade is ~$714k notional. On BTC perps: top-of-book spread ~0.5-1bp; a $700k market order moves price ~1-2bp on a mid-tier venue; the stop leg in a fast move 3-10bp. In R terms: **realistic slippage ≈ 0.021R per normal leg + 0.029R on the stop leg** — my model's 0.05R/0.10R allowance is ~2x conservative. (The 0.05R allowance was inherited from the WEEX-era geometry where 1R was only ~0.22% of price — at that stop distance the same 1.5bp of slippage costs 0.14R. The wider r30 stop cut the slippage cost per trade ~6x. Nobody flagged this until now; it's real upside of the wide-stop design.)
+
+**Rerun, $750 start, 707 fills, actual-account fees:**
+
+| basis | final $ | worst %DD |
+|---|---|---|
+| VIP0, conservative slippage (0.05R) | $1,139,116 | 62.1% |
+| **VIP0, realistic slippage (1.5bp/leg, 4bp stop)** | **$1,454,606** | 55.0% |
+| tier progression, conservative slippage | $1,232,800 | 62.0% |
+| tier progression, realistic slippage | $1,548,224 | 54.8% |
+| zero-cost ceiling (no fees, no slippage) | $2,053,945 | — |
+
+**So Andy's ~$1.1M is the CONSERVATIVE landing, not the optimistic one.** With realistic fills the range is $1.45M-$1.55M; the absolute ceiling is $2.05M. His number sits at the floor of the honest range — which is exactly where a planning number should sit.
+
+**The honest caveat (why I won't move the official basis yet):** the "realistic" slippage numbers are still modeled, not measured. Two things the model can't promise: (1) maker fills on entry — the design enters via limit at the trigger, and in a fast break the limit can be passed-by (missed fills = missed winners, which is a different cost than slippage); (2) the stop leg in a violent move can gap well past 4bp. Both are measurable only from real executor fills. The feed-logging spec already captures fill-vs-trigger distance; once the live executor accumulates real trades, the slippage allowance gets replaced by measured fills and this range collapses to fact.
+
+**Recommendation:** keep $1.14M (conservative slippage, VIP0) as the stated planning number; treat $1.45-1.55M as the realistic band pending live fill data. Andy's instinct is correct — at $10k/trade, slippage is NOT the constraint he might have feared; the honest uncertainty is in fill quality (maker pass-bys), not depth.
+
+Script: scratch `slippage_realistic.py`.
+
