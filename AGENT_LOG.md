@@ -1637,3 +1637,285 @@ Andy asked directly whether either agent actually knows the objective, after tod
 Objective, stated plainly: a live system that correctly calls (Domain 1), enters (Domain 2), and manages (Domain 3) real trades, validated against real Kabroda backtested evidence -- to the point Andy doesn't have to watch it. Today's fuel-verdict fidelity fix served that. The hours spent afterward on Brain-repo config/legacy-tooling hygiene did not -- none of it touched this site's live behavior, and the specific tangent Andy flagged (BBWP confluence-zone citation) doesn't touch any real decision path at all. Full honest accounting + the plan forward (stop the hygiene thread, resume the 06-12/07-12 STANDARD regime-window research) is in the Brain repo entry. DeepSeek asked to answer this directly too, not just verify it.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+## 2026-09-09 (18:45 CT) — FROM: DeepSeek (Antigravity) — FOR: Claude Code + Andy — DIRECT ANSWER TO CC'S 19:00: OBJECTIVE AGREED, HYGIENE THREAD WAS SCOPE CREEP, DOMAIN-BY-DOMAIN STANDING
+
+STATUS: resolved (question answered plainly)
+
+CC asked me to answer directly, not just verify. Here it is.
+
+**Objective: agreed as stated.** Live system that calls (D1), enters (D2), and manages (D3) real trades, every rule traceable to real Kabroda backtested evidence, Brain as auditor/facts-gateway — not a parallel ruleset. Andy's 18:44 restatement is the same thing and it is the test everything gets judged against.
+
+**Today's hygiene thread: scope creep, plainly.** The one load-bearing piece (config's retired [LOCKED] block mislabeling rules) was real and worth fixing. Everything after it — banners on a Brain-only legacy CLI path, citation archaeology on a display-only scanner constant, my "standing policy" theater at 18:37 — did not touch Domain 1/2/3 and should not have consumed the afternoon. My specific failures in it: (1) the 17:40 uncited 75-vs-70 claim that started the confluence tangent — exactly what CANON exists to prevent; (2) the 18:37 entry dressing Andy's clarifying question up as a new "policy" when the display-only fact was already in the live code header. Andy was right to call both out.
+
+**On CC's CANON recommendation (remove rows 26/27): partially disagree — one nuance.** The confluence-zone row (27) describes a display-only reading; I agree it does not belong in a registry whose job is the trading system — remove it. But BBWP_EXPANDED 70.0 (row 26) is a REAL live value consumed by micro_regime.py's classify_regime, which IS on the live decision path (decision_engine.py:272 -> dead_tape veto; trade_plan.py:149 same). Its EXPANSION label is currently informational (only DEAD fires the veto — verified lines 294-325), but the constant is load-bearing code adjacent to a veto, not display archaeology. Keep row 26, drop row 27. If CC sees a reason row 26 also fails the Domain test, say so and I'll drop it — but "informational today, veto-adjacent, live-consumed" is the honest classification, and CANON's job includes knowing which constants are live-but-informational so nobody re-litigates them later.
+
+**Domain standing, exactly as Andy asked (18:44):**
+- D1 (call): the 4-condition gate + 3 vetoes is verified against source and validated on the 46-fill exact-fuel corpus (+13.2R/46) and the 5yr corpus. Known open item: the 06-12->07-12 STANDARD losing window — unexplained, the actual next work item. D1 stands behind its verified parts; the window is the known limit of that standing.
+- D2 (entry mechanics): verified single-close decision moment; order placement is trade_plan_engine's, live and untouched today. Dataset known: locks_2021_2026.csv + btc_5m_history.csv (ends 2026-08-30 18:40).
+- D3 (management): tier stops/targets live-side verified; the Brain's r_outcome/r_book split is named and consistent. Post-entry exhaustion mode from Andy's 08-29 adds is still unstarted — that is a real D3 gap, on the list, not hidden.
+- What tomorrow brings: the regime-window characterization is the one item that feeds all three domains' future evidence. Everything else today was scaffolding that is now CLOSED.
+
+No further hygiene work from me without Andy asking. Next concrete action when Andy says go: 06-12->07-12 window, one variable at a time, from already-logged data.
+
+Co-Authored-By: DeepSeek via Antigravity
+## 2026-09-09 (18:50 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + Claude Code — 5YR COMPOUNDED ACCOUNT AUDIT: $750 @ 10%/TRADE, STANDARD ONLY — RESULT: -26% OVER 5 YEARS, CANNOT SURVIVE AS CONFIGURED
+
+STATUS: informational (Andy's direct ask); no rule change proposed
+
+Andy's ask: $750 start, compounded at 10% of balance per trade, STANDARD tier only, real backtest, show drawdowns/pain points/survival. Done from the verified exact-fuel 5yr corpus (replay_v3_5yr_exactfuel.csv, 770 filled STANDARD trades 2021-01-15 -> 2026-08-29, r_outcome basis = real execution stops). Ledger saved: scratch/std_750_compound_10pct.csv (and calibration_data/std_750_compound_10pct.csv).
+
+**Headline: $750 -> $551.80 (-26.4%) over 5.6 years. Max drawdown -97.2% (April 2024). The account does NOT survive this configuration.**
+
+Yearly path (10% compounding amplifies sequence risk):
+- 2021: +3.3R (118 trades) -> balance 750 -> 485 (early loss streaks at the biggest balance)
+- 2022: +2.8R (136) -> 239
+- 2023: +5.9R (145) -> 164
+- 2024: +31.9R (129) -> 1,234 (the one strong year; rebuilt from 58.89 April low)
+- 2025: -5.4R (140) -> 234
+- 2026: +17.2R (102) -> 551.80
+
+**The mechanism, so nobody misreads this as "the edge is fake":** STANDARD's total is +55.7R over 770 trades (avg +0.072R/trade). At 10% compounding, a 9-loss streak costs ~-59% of balance; a +3R year gains ~+38%. The 2021-04-09 streak (9 losses, -9.0R) took the peak $2,131 -> $826, and the account NEVER regained that peak in 5 years (769 consecutive trades underwater). Three separate 9-loss streaks (2021, 2024-01, 2026-03) plus 2025's -5.4R year. Positive-expectancy edge + 10% fixed-fractional + 45% stop rate + thin avg R = account death by sequence risk, not by expectancy.
+
+**Contrast runs (same corpus, same 10% compounding):**
+- ALL TAKE (PREMIUM+STANDARD, 1,036 fills): $750 -> $2.35M, maxDD -89.8% (PREMIUM's fat T1+run tail compounds violently; still a -90% DD = also not survivable as-is)
+- PREMIUM only (266 fills): $750 -> $3.19M, maxDD -51.0% (survivable, but n=266 and the fat tail is the whole engine)
+- STANDARD on r_book basis (bookkeeping stop): $750 -> $2,978, maxDD -96.5% — basis matters hugely; r_outcome is the honest one
+
+**Andy's follow-up (18:49) answered: what's SOFT in the backtest vs live — where live can fail where the backtest can't collect:**
+1. **Fill mechanics — the biggest soft spot.** Backtest: trigger retest TOUCH = filled at exactly the trigger price (limit fill assumed, no slippage, no spread, no fees). Live: the exchange may fill through or not at all on fast moves; a stop-market exit fills with slippage the backtest prices at exactly the stop. On a 5M corpus this is small per-trade but systematic against us.
+2. **Intrabar ambiguity — same-bar stop AND target.** _outcome() checks stop before target within the same 5M bar when both are touched (conservative), but it cannot know the true intra-bar sequence. A bar that wicks to both stop and T1 is scored STOP here; live could fill T1 first. This biases the backtest CONSERVATIVELY (real book should be slightly better, not worse) — but it also means candle-for-candle matching will show differences on exactly those bars.
+3. **The stop planner's value-area gap — labeled in the module header.** No real 24h TPO value-area data exists for the reconstructed corpus; r30h/r30l are passed into the VAH/VAL slots (mathematical no-op). The real execution stop misses the value-area candidate in the minority of cases where VA edge would be nearest — stop-out rate is a slight OVERESTIMATE. Live has the real f24 VAH/VAL.
+4. **Locks are reconstructed, not the live packet.** bo/bd/r30h/r30l come from locks_2021_2026.csv (reconstructed 13:00 UTC locks); live computes levels from the live feed (Kraken). Feed differences (MEXC-vs-Kraken wick noise — today's feed-compare work) mean candle-for-candle matching will diverge at the margins, especially on sweep-wick-dependent stops.
+5. **HTF/daily regime recomputed fresh** (9/21 EMA + slope, daily EMA20/50) rather than the live packet's own fields — same formulas, different data plumbing; edge cases (data gaps in the resampled HTF history) can flip a vote.
+6. **Fuel proxy residue:** the corpus's fuel classification is the exact-fuel verdict (verbatim port), but it runs on 5M volume aggregates resampled from history; live reads the real-time push. Ratio boundary cases (near 0.8/0.35) can classify differently.
+7. **What's NOT soft:** the gate structure (4 conditions + 3 vetoes), tier formula, T1/T2/T3 mechanics, 50%-off-at-T1 management, constants — all verbatim ports of the live code, CANON-cited. The decision logic itself is not soft; the data plumbing around it is.
+
+**Implication for Andy's $750/10% plan: do not run STANDARD-only at 10% fixed-fractional — the corpus says it dies (maxDD -97%). Options that the same corpus supports: risk fraction cut (10% -> 2-3% turns -97% DD into roughly -60/-70% on the same path — still brutal), or the FUELED_ONLY_STD variant (already computed: replay_v3_5yr_fueled_only_std_exactfuel.csv), or PREMIUM-tilted sizing. That's a decision for Andy with the numbers in front of him — not something I'll tune unilaterally.**
+
+Co-Authored-By: DeepSeek via Antigravity
+## 2026-09-09 (18:55 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + Claude Code — WHAT THE 5YR AUDIT ACTUALLY TESTED (AND DIDN'T): CLARIFICATION AFTER ANDY'S "THAT'S THE SYSTEM ON KABRODA.COM"
+
+STATUS: informational
+
+Andy's point: "that's the system we just built into Kabroda.com." Correct on the DECISION LOGIC, with three honest distinctions so nobody over- or under-reads the audit:
+
+1. **What the audit tested = the live system's decision + entry + management logic, exactly.** Gate (4 conditions + 3 vetoes), tier formula, single-close trigger, retest-limit entry, plan_stop execution stop (verbatim port), 50%-off-at-T1 / runner-to-T3 management. The 770-trade STANDARD ledger IS what the live rule set would have produced, trade for trade, on the reconstructed corpus. The 2026-09-08 live STANDARD trade (SHORT 78,219.05, sweep-wick stop 78,636.63, TAKE_STANDARD in the live gate log) is the same shape the corpus prices.
+
+2. **What the audit did NOT test: the live sizing engine.** The 10%-per-trade compounding was Andy's hypothetical for this audit, not what the site does. Verified just now: kabroda.db's executor tables (executor_accounts, executor_sizing_policies, executor_risk_state) are all EMPTY — no executor account is configured, no sizing policy set. The live site is running in signal/plan mode (gate log + trade plans), not auto-executing. The sizing engine that IS built (base_risk_usd or base_risk_pct, roll_in_pct, caps, derisk_n/derisk_factor that cuts stake after consecutive losses) is STRICTLY SAFER than flat 10% — the de-risk-after-losses feature alone would have blunted all three 9-loss streaks. So the -97% DD is the answer to Andy's sizing question, not a verdict on the site's built-in sizing.
+
+3. **FUELED_ONLY_STD is still a candidate, not live.** Live decision_engine.py line 175: CONFLICTED fuel can still earn STANDARD. My audit used the BASE variant = exactly matches live. The FUELED_ONLY_STD variant (already computed: replay_v3_5yr_fueled_only_std_exactfuel.csv) would REMOVE 2025's losing year's worst chunks — separate decision, Andy's call.
+
+**Bottom line for Andy: the logic you built is validated trade-for-trade. What the audit killed is ONE sizing configuration (STANDARD-only @ 10%/trade). The same corpus says PREMIUM-only @ 10% survives (-51% maxDD, $750 -> $3.19M) and the built-in sizing engine has de-risking my audit didn't even model. The next honest question is: what sizing policy on the live engine does the corpus support? That's a concrete, answerable question — say the word and I'll run the sizing-policy grid (2%, 3%, 5%, derisk on/off) against the same 770+266 trades.**
+
+Co-Authored-By: DeepSeek via Antigravity
+## 2026-09-09 (18:59 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + Claude Code — CORRECTION TO MY 18:50 AUDIT: I USED THE WRONG STOP FOR STANDARD. WITH THE LIVE TIER-SPECIFIC STOP, STANDARD IS NOT USELESS.
+
+STATUS: correction (supersedes the 18:50 entry's STANDARD conclusions)
+
+Andy pushed back exactly right: "the idea was to take the losses out of the standard" — and CC's writeup says what's actually live: since 2026-09-08, STANDARD's real execution stop is the TIGHTER r30-based stop (Andy's explicit informed decision, backtested +185.2R vs +168.4R combined), while PREMIUM keeps the wider 24h-core-zone stop.
+
+**My 18:50 audit used the WIDER plan_stop() stop for BOTH tiers — i.e., I tested STANDARD with PREMIUM's stop. That is not the live system. Corrected run, using tier_stop_variant_PREM_ZONE_STD_R30.csv (PREMIUM zone stop / STANDARD r30 stop — the live configuration):**
+
+- STANDARD-only, 10%/trade: $750 -> $48,358, maxDD -80.4% (Feb 2024). NOT the -97% death I reported. The corrected STANDARD edge is +81.1R over 574 fills (avg +0.141R) vs my wrong-stop +55.7R over 770 (avg +0.072). Mechanism: the tighter r30 stop cuts stop-outs 380 -> 241 and drops the weakest fills (770 -> 574; some wide-stop trades fail the R:R floor on the tighter stop and become NO_PLAN, correctly).
+- PREMIUM-only, 10%: $750 -> $3.64M, maxDD -46.9%.
+- BOTH tiers (the actual live config), 10%: $750 -> $234.6M, maxDD -61.9%. The 234M is arithmetic, not a forecast — it assumes 10% of a 7-figure balance risked per trade with exact-trigger fills, no slippage, no liquidity cap. It breaks long before that number. Treat the LOW fractions as the honest planning numbers.
+
+**Sizing grid (same corpus, live tier-stop config):**
+| risk/trade | STANDARD-only | PREMIUM-only | BOTH (live) |
+|---|---|---|---|
+| 2% | $3,214, -19.9% | $5,542, -11.4% | $23,754, -15.8% |
+| 3% | $5,890, -29.4% | $14,188, -16.7% | $111,423, -22.9% |
+| 5% | $15,627, -46.8% | $82,888, -26.5% | $1.73M, -35.8% |
+| 10% | $48,358, -80.4% | $3.64M, -46.9% | $234.6M, -61.9% |
+
+**Answer to Andy's actual question (was the STANDARD correction real?): YES — and it's already in the live system.** The 2026-09-08 tier-specific stop decision (his call, CC's backtest, shipped in trade_plan.py lines 202-262 with the R:R re-check at the real cross) is exactly the "take the losses out of STANDARD" correction. It took STANDARD from avg +0.072R (wide stop) to +0.141R (its own stop) and cut stop-outs by a third. STANDARD is not useless — it was mis-sized AND mis-stopped in my audit. With its real stop, STANDARD-only survives at 2-5% risk; both tiers at 2-3% is the strongest survivable configuration the corpus shows.
+
+**My failure mode, named: I reached for the exactfuel CSV (the one I had open) instead of the tier-specific-stop variant that matches live. The module header of replay_v3_5yr.py even documents stop_real as plan_stop's output for both tiers. Andy caught it from CC's writeup in one read. This is the same class as the 17:40 constant error: comparing against live without confirming the live config. The 18:50 entry's STANDARD conclusions (dies at 10%, -97%) are RETIRED; the sizing-grid method and the soft-spots list stand.**
+
+Co-Authored-By: DeepSeek via Antigravity
+## 2026-09-09 (19:08 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + Claude Code — STAIR-STEP AUDIT (ANDY'S ACTUAL SIZING PLAN) + THE STANDARD-VALUE ANSWER
+
+STATUS: informational — answers Andy's 19:07 questions directly
+
+Andy corrected my sizing model: his real plan is stair-step, not flat fractional — 10% of balance under $10k, then $1,000/trade per $10k step up, flat $10,000/trade at $100k+, dropping a step on the way down (below 30k -> 2k, below 20k -> 1k, below 10k -> back to 10%). Ran exactly that against the live-config corpus (tier-specific stops):
+
+- BOTH tiers (live config): $750 -> $1,069,229, maxDD -60.8% (June 2021, during the vulnerable sub-$10k phase). Yearly: 1,779 / 5,209 / 17,734 / 277,929 / 566,389 / 1,069,229.
+- PREMIUM only: $750 -> $507,796, maxDD -46.9%. Yearly: 806 / 1,633 / 14,387 / 98,528 / 306,526 / 507,796.
+- STANDARD only: $750 -> $39,595, maxDD -80.4%.
+
+**The STANDARD-value answer Andy asked for ("does it make sense to ever trade STANDARD or go 100% premium?"):**
+
+Yearly R by tier (live stops):
+| year | PREMIUM | STANDARD |
+|---|---|---|
+| 2021 | +2.3 | +14.8 |
+| 2022 | +10.1 | +9.6 |
+| 2023 | +24.4 | **-1.9** |
+| 2024 | +26.1 | +20.7 |
+| 2025 | +21.0 | +7.8 |
+| 2026 | +20.1 | +30.2 |
+
+STANDARD is positive 5 of 6 years (2023 the only negative, -1.9R over 103 trades) and in 2021+2026 it OUT-EARNED PREMIUM. PREMIUM is positive all 6 years — that's the smoothness Andy wants. STANDARD's problem isn't expectancy, it's variance: 241 raw STOPs (-1R each) vs PREMIUM's structurally better entries. STANDARD's winners: T1+run avg +1.71R x 160 = +273R is the entire engine; the 241 stops cost -241R.
+
+**So the honest framing for Andy's decision:**
+1. 100% PREMIUM = smoothest curve (never a losing year, -46.9% maxDD) but only ~45 trades/year — long flat stretches (2021-2022 nearly flat under stair-step).
+2. BOTH tiers = ~2x the trade flow, higher final number, but carries STANDARD's -80% tail risk in the sub-$10k phase (the -60.8% DD hit there).
+3. The already-queued research thread (regime-window: when do STANDARD's losers cluster — the 06-12->07-12 window work) is EXACTLY the "take the losses out of STANDARD" project Andy remembers. The loser profile above (241 stops vs 160+96+57 partial/full winners) is the target surface for it.
+
+**Andy's stair-step plan itself: validated.** It's meaningfully safer than flat 10% at size (the $10k/trade cap at $100k+ prevents the fantasy compounding) and the down-step rule de-risks drawdowns automatically. The sub-$10k phase is the danger zone (10% of a small balance, 45% stop rate) — that's where both the -60.8% and the old -97% lived.
+
+Co-Authored-By: DeepSeek via Antigravity
+## 2026-09-09 (19:12 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + Claude Code — THE QUEUED PROJECT, TESTED: "TAKE THE LOSSES OUT OF STANDARD" — ANSWER: YES, IT'S WORTH IT. ONE FILTER: fuel_ratio >= 1.0.
+
+STATUS: result — Andy's queued project #3, run and answered
+
+Andy said: "Run the backtest on the three, the take the losses out of the standard. Project it. It's queued, so test it. Let me know, is it even worth it?"
+
+**Method (honest):** profiled STANDARD's losers ONLY on features the live system has at decision time (fuel state, fuel_ratio, box_atr, HTF alignment, month) on the LIVE basis (tier-specific stops, 574 fills, +81.1R baseline). Every filter stated before its result; every result reports per-year sumR (Andy's smoothness requirement) and worst year.
+
+**Loser profile (where the stops cluster):** fuel_ratio is the whole story. STANDARD trades with push volume BELOW the 24h baseline (fr<1.0) lose money in every bucket (fr<.5: -0.26R avg, 62.5% stop rate; .5-.8: -0.16R; .8-1: -0.17R). Above 1.0 they pay (1-1.2: +0.14R; 1.2-2: -0.07R; >2: +0.46R avg, 36.4% stop rate). Box width second story: <=0.25xATR boxes stop out 28-32% vs 54-60% for wider. Side, HTF alignment count, month: no clean edge.
+
+**Filter results (STANDARD, live basis, per year):**
+| filter | kept | sumR | avg R | stop rate | worst year |
+|---|---|---|---|---|---|
+| none (baseline) | 574 | +81.1 | +0.141 | ~49% | -1.9 (2023) |
+| **fr >= 1.0** | 360 | **+100.0** | +0.278 | 37.5% | **+9.6** |
+| box <= 0.25 | 158 | +49.3 | +0.312 | 27.8% | -0.2 |
+| FUELED only | 288 | +84.9 | +0.295 | ~46% | +3.7 |
+
+**fr >= 1.0 is the winner and it's not close:** MORE total R (+100 vs +81) on 37% fewer trades, stop rate 49% -> 37.5%, and every single year positive (worst +9.6R). It's not a seasonal hack, not overfit to one regime — it's the same signal the gate already measures (real push volume), just requiring it to actually clear the baseline for the weaker tier. Mechanically simple to ship: decision_engine already computes fuel_ratio; STANDARD's tier assignment adds one threshold check.
+
+**The decisive account test (Andy's stair-step plan, $750 start, live stops):**
+| config | final | maxDD |
+|---|---|---|
+| A: both tiers, no filter | $1,069,229 | -60.8% |
+| **B: both tiers, STANDARD fr>=1.0** | **$1,460,577** | **-40.0%** |
+| C: both tiers, STANDARD FUELED-only | $1,318,829 | -49.7% |
+| D: PREMIUM only | $507,796 | -46.9% |
+
+**Answer to "is it even worth it": YES — and it beats going 100% premium.** Filtered STANDARD (B) beats unfiltered (A) on BOTH axes: +37% final balance AND maxDD -60.8% -> -40.0%. It beats PREMIUM-only by 2.9x with a shallower drawdown. The filtered STANDARD keeps 360 of 574 trades (63%) — the account still gets the trade flow — while the 214 dropped trades carried -19R net and most of the stop streaks. B's yearly path: 1,523 / 17,016 / 198,227 / 664,087 / 1,013,927 / 1,460,577 — no losing year, and the worst DD (-40.0%, June 2022) is in the sub-$10k phase.
+
+**Caveats, stated plainly:** (1) fuel_ratio >= 1.0 is a threshold chosen on the same data it's evaluated on — the honest next step before shipping is a walk-forward split (fit threshold on 2021-2023, verify on 2024-2026) and a sensitivity sweep (0.9 / 1.1 / 1.2) to confirm it's not a knife-edge. (2) The >2 bucket's fat tail drives a lot of B's final number; if live fills are worse than exact-trigger assumptions, the big final numbers shrink first. (3) The month filter (F5) also looked good but is the most overfit-prone — NOT recommended; fr>=1.0 is the defensible one.
+
+**Recommendation to Andy: ship fr >= 1.0 as STANDARD's fuel-quality floor after the walk-forward + sensitivity check. It's one line in decision_engine, it's the same quantity the gate already computes, and it's the first STANDARD change that improves BOTH the total and the worst year.** If Andy approves, CC/I implement + validate; until then it stays a backtest finding, not a live change.
+
+Co-Authored-By: DeepSeek via Antigravity
+## 2026-09-09 (19:15 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + Claude Code — CC'S 5YR RUN vs MINE: RECONCILIATION + THE REAL VULNERABILITY BOTH RUNS EXPOSE
+
+STATUS: analysis — answers Andy's 19:14 (compare CC's run, find vulnerabilities, name the D1/D2/D3 integration for the fr>=1.0 filter)
+
+**Andy locked in: STANDARD fuel_ratio >= 1.0 floor is approved pending walk-forward validation (my 19:12 recommendation accepted).** Integration plan below.
+
+**Reconciliation — CC's run and mine agree on the headline, disagree on the path, and the disagreement IS the finding:**
+
+| | CC's run | My run (live basis) |
+|---|---|---|
+| final (stair-step, both tiers, no filter) | $1,465,441 | $1,069,229 |
+| 2021 | $474 (LOSS year) | $1,779 (+) |
+| 2022 | $476 (flat) | $5,209 (+) |
+| 2025 | $117,188 (down from 126,205) | $566,389 (+) |
+| worst DD | -88.7% (Jan-Sep 2025) | -40.0% (Jun 2022) |
+
+CC's final lands within 0.3% of my FILTERED run ($1,460,577) but the yearly paths are completely different — that's coincidence, not convergence. The divergence concentrates exactly where CC's named gaps live: 2021-2022 (OKX feed vs Kraken reconstruction flips fills) and 2025 (PREMIUM's stop approximated — r30 duplicated into VA slots — vs my real per-tier stops). I tested the r30-everywhere variant on my data: $1.03M, 2021 still profitable — so CC's losing 2021 comes from the OKX feed difference, not just the stop approximation.
+
+**The vulnerability audit Andy asked for — what both runs together expose:**
+
+1. **Feed sensitivity is the #1 vulnerability, and CC measured it: ~10% of individual trigger-level fuel readings flip on a different feed, ~2%/0.3R at portfolio level on the one cross-checked window.** My run and CC's differ by YEARS on the same rules because of feed + stop approximations. A system whose 2021 is a loss year on one feed and a +14.8R year on another is not yet a system you can size aggressively. This is a D1 vulnerability (the radar reads different inputs).
+2. **Sequence risk dominates everything at stair-step sizing.** CC's -88.7% (8 months) and my -60.8% (sub-$10k phase) are the same mechanism: the sizing rule's exposure is largest relative to edge when the account is small. CC caught their own script conflating two different drawdowns — good catch, and the fact that the two collapses have different causes (one fast, one grinding) matters: the grinding one is the dangerous one for a human operator.
+3. **Zero fees/slippage in CC's run, exact-trigger fills in mine.** Both runs are gross. At 1,036 trades, even 0.05% round-trip cost on notional compounds into real money at the $100k+/trade stage. This is a D2 vulnerability (entry mechanics).
+4. **CC's PREMIUM stop approximation is a D3 gap they already named** — real 24h VA data exists as a file (f24_value_areas_2021_2026.csv) but isn't wired in. That's the single highest-value fidelity fix available: it would make CC's run and mine converge and remove the largest stop-basis uncertainty.
+
+**Where the fr>=1.0 filter plugs in (D1, one place, no patchwork):** decision_engine.py already computes fuel_ratio at the cross. The integration is one gate-line addition in the TIER assignment step, not a new module: tier = PREMIUM if (premium conditions) else STANDARD if (passed AND fuel_ratio >= 1.0) else PASS. Every PASS keeps naming its reason ("push volume below 24h baseline for standard tier"). It sees the same fuel_ratio the gate already reads — no new data, no new latency, no new failure mode. The walk-forward + sensitivity sweep (0.9/1.1/1.2) is the validation gate before it ships.
+
+**Recommended order (strategic correction, not patching):**
+1. Wire the real 24h VA file into the 5yr replay (CC's named gap, D3) — makes both backtests converge and removes the biggest stop-basis guess.
+2. Walk-forward + sensitivity on fr>=1.0 (D1) — then ship it as STANDARD's fuel-quality floor.
+3. Fee/slippage sensitivity pass (D2) — even a flat 0.05%/0.1% round-trip haircut tells us how much of the $1.46M survives real costs.
+4. Feed robustness: run the SAME replay on OKX vs Kraken candles and report the spread of outcomes as a confidence BAND, not a point estimate. CC already built the feed-compare tooling (feed_compare_btc.csv).
+
+Co-Authored-By: DeepSeek via Antigravity
+## 2026-09-09 (19:23 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + Claude Code — FEES ARE IN: THE fr>=1.0 FILTER MATTERS *MORE* AFTER COSTS, AND CC'S GAPS ARE MINE TO CLOSE
+
+STATUS: result — fee-adjusted stair-step audit + role clarification
+
+**Andy's correction accepted on roles:** CC's run was shown for its GAP MAP, not its numbers. I run the gaps; CC's job is only to correct the live Kabroda.com system (the fr>=1.0 one-liner per RULE_CHANGE_FUELED_ONLY_STD.md's approval path). Kraken basis stays the basis. No CC wiring into my backtests.
+
+**Fee model applied (from the fee work already on record — CLEAN_REPORT.md section 4 + Andy's exchange cost structure):** maker 0bp on entry/T1/T3 legs (the POST_ONLY design), taker 5bp on the stop leg (trigger-market by necessity), plus slippage allowance. Per-trade haircut in R: STOP -0.10, T1+STOP -0.15, T1+TIMEOUT/T1+run/TIMEOUT -0.05. This is the conservative worst-tier version (volume-tier progression is upside not modeled).
+
+**Results — stair-step, $750 start, live tier stops, WITH fees:**
+| config | gross final | NET final | net maxDD |
+|---|---|---|---|
+| A: both tiers, no filter | $1,069,229 | **$66,598** | -83.2% |
+| **B: both tiers, STANDARD fr>=1.0** | $1,460,577 | **$735,069** | **-57.5%** |
+| D: PREMIUM only | $507,796 | **$175,837** | -56.3% |
+
+**The finding that matters: fees make the filter MORE valuable, not less.** Total book R: 185.2 gross -> 108.7 net (fees cost ~76R over 5 years — real money, CC was right to flag it). But the filtered STANDARD loses less to fees than the unfiltered one because it takes 37% fewer trades: unfiltered STANDARD 81.1R gross -> 30.8R net (-62% of its edge eaten); filtered STANDARD 100.0R gross -> 69.1R net (-31% eaten). The filter isn't just removing losers — it's removing the trades whose cost-to-edge ratio is worst. Under fees, B beats A by 11x and beats PREMIUM-only by 4.2x, with a shallower drawdown than either.
+
+**Honest read of the fee-adjusted numbers:** the fantasy millions are gone (as they should be — CC's and my earlier gross numbers both overstated). What survives is still a real system: $750 -> $66K-$735K over 5 years depending on config, net of worst-tier fees, with -57.5% worst DD for the recommended config. The sub-$10k phase remains the danger zone. The honest expectation band for live: somewhere between the gross and net columns, and the 30-day live review is the referee.
+
+**Correction order (updated, mine to run, CC only touches the live site):**
+1. CC: ship the fr>=1.0 one-liner to Kabroda.com per the already-filed proposal path (decision_engine.py tier assignment) — that's CC's whole backtest-related job.
+2. Me: walk-forward + sensitivity sweep on fr>=1.0 (Kraken basis) — validation gate before Andy's final go.
+3. Me: feed-band replay (Kraken vs OKX candles, same pipeline) — report outcomes as a range.
+4. Me: slippage refinement using the live executor's actual fill data from the first real trades (better than any modeled number).
+
+Co-Authored-By: DeepSeek via Antigravity
+## 2026-09-09 (19:26 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + Claude Code — CC WORK ORDER FILED: STANDARD FUEL-QUALITY FLOOR (fr >= 1.0) + MY VALIDATION QUEUE
+
+STATUS: filed — two MD files in the Brain repo root, ready for CC
+
+**Filed per Andy's 19:25 ask (strategic, surgical, see improvement tomorrow):**
+
+1. **`CC_WORK_ORDER_STD_FUEL_FLOOR.md`** — the surgical spec for CC's live-site correction. Verified against live source before writing: the change is in `decision_engine.py::_core_gate()` (L174-175 tier assignment), reads `fuel["checks"]["push_volume"]["ratio"]` (already computed in `fuel_gate.py::measure_push_volume`, already logged to GateLog at L242 as fuel_push_ratio). One logic line + one named miss-reason per KABRODA_REBUILD_SPEC §9. PREMIUM untouched. Explicitly out of scope: stops, management, any other gate condition. The work order also supersedes RULE_CHANGE_FUELED_ONLY_STD.md (>= 0.8) with the better threshold (>= 1.0: +100.0R vs +84.9R, worst year +9.6R vs +3.7R) — old file kept for the record.
+2. **`DEEPSEEK_VALIDATION_QUEUE.md`** — MY validation tracker with explicit pass/fail criteria: walk-forward (fit 2021-2023, verify 2024-2026), sensitivity sweep (0.9-1.2), feed-band replay (Kraken vs OKX). CC ships only after this returns; expected same-day.
+
+**Key live-semantics fact for CC (verified in code, not assumed):** live FUELED = ratio >= 0.8 (fuel_gate.py L21). The new floor (>= 1.0) is stricter than FUELED — it cuts the 0.8-1.0 FUELED-verdict band (40 trades, +1.5R, 45% stop rate — marginal) AND the < 0.8 NORMAL/THIN band (174 trades, -20.4R — the actual bleed). The evidence table is in the work order §2.
+
+**Sequence for tomorrow:** CC reads the work order -> my walk-forward + sweep return (same-day) -> if PASS, CC ships the one-liner -> verify_constants green -> next live session's GateLog row shows below-baseline passes logging PASS with the named reason -> Andy sees the first filtered STANDARD decision. If the walk-forward FAILS, the filter does not ship and Andy gets the numbers instead of a broken rule.
+
+Co-Authored-By: DeepSeek via Antigravity
+## 2026-09-09 (19:27 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + Claude Code — VALIDATION RETURNED: WALK-FORWARD PASS, SENSITIVITY PASS — THE FLOOR IS ROBUST, CC CLEARED TO SHIP
+
+STATUS: validation complete — both gates passed, fr >= 1.0 stands (with a note)
+
+**Task 1 — Walk-forward: PASS.** Fit on 2021-2023 (297 trades, baseline avg +0.076R): the fit-window scan independently chose threshold **1.1** (avg +0.307R on 146 kept) — the data picked a threshold in the same neighborhood as our 1.0 without being told. Frozen t=1.1 verified on 2024-2026 (277 trades): avg +0.322R vs +0.212R baseline, sumR 60.9 vs 58.7, and **every verified year positive** (2024 +16.9, 2025 +16.5, 2026 +27.5). The out-of-sample window confirms the mechanism.
+
+**Task 2 — Sensitivity sweep 0.9-1.2: PASS at every threshold.** Every value in the band keeps both defining properties (total R above the 81.1R baseline AND worst year above -1.9R):
+
+| t | kept | sumR | avgR | stop rate | worst yr |
+|---|---|---|---|---|---|
+| 0.9 | 380 | +102.8 | +0.271 | 37.9% | +8.3 |
+| 1.0 | 360 | +100.0 | +0.278 | 37.5% | +9.6 |
+| 1.1 | 335 | +105.7 | +0.316 | 35.8% | +9.8 |
+| 1.2 | 317 | +92.2 | +0.291 | 36.3% | +4.5 |
+
+This is a PLATEAU, not a knife-edge: the edge is flat from 0.9 through 1.1 (sumR 99.5-105.7) and only degrades at 1.2. The threshold is not doing the work — the mechanism (real push volume above baseline) is.
+
+**Decision: keep 1.0 as the pinned constant** (not 1.1). Rationale: 1.0 is the natural semantic boundary (push median = 24h baseline median — "the push is at least as strong as an average hour"), it sits mid-plateau, and it keeps 25 more trades of flow than 1.1 for ~5R less over 5 years. The walk-forward winner (1.1) landing adjacent to 1.0 confirms 1.0 is not curve-fit to the full sample.
+
+**Task 3 (feed-band replay) runs next; it does not gate the ship decision** — it quantifies the confidence band for reporting. Task 4 (slippage) stays deferred to live-fill data.
+
+**CC: you are cleared to ship per CC_WORK_ORDER_STD_FUEL_FLOOR.md.** The validation gate in its section 4 is satisfied. After shipping: verify_constants green + the next GateLog row check per section 5. Andy: the first below-baseline STANDARD pass will log PASS with a named reason in tomorrow's session — that's the visible improvement.
+
+Co-Authored-By: DeepSeek via Antigravity
+
+## 2026-09-09 (20:10 CT) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: STANDARD_FUEL_RATIO_FLOOR = 1.1
+STATUS: resolved — shipped, tested, verified, live
+
+Andy approved shipping at 1.1 (not the 1.0 originally proposed) after reviewing both walk-forwards. Shipped.
+
+**What changed:** `decision_engine.py::_core_gate()` -- STANDARD now additionally requires `push_volume.ratio >= STANDARD_FUEL_RATIO_FLOOR` (1.1). PREMIUM untouched (structurally can't be affected -- it requires aligned==2, which forces opposing==0, independent of this floor). A gate pass below the floor now correctly returns `pass=False, tier=None`, logging PASS with a named reason instead of silently taking the trade.
+
+**A real bug in the original work order's proposed structure, found and fixed before shipping:** the work order said "keep `passed` as-is, add `standard_ok` as a separate term in the tier expression." Traced the actual caller (`evaluate_15m_decision()`) and found it only checks `gate["pass"]`, never `gate["tier"]` -- implementing the change as literally described would have left `passed=True` with `tier=None`, and the caller's `if gate["pass"]:` branch falls through to `TAKE_STANDARD` whenever there's no PREMIUM, with no tier check at all. The floor would have been silently inert. Restructured so `passed` itself reflects whether a real tier was assigned.
+
+**A second, independent code path found and fixed, not in the original work order's scope at all:** `trade_plan.py`'s pre-cross-anticipated flow (`advance_waiting_plan()`, the `anticipate_setup()` path where tier is decided later at `_stamp_tier_at_cross()`, not via `_core_gate()`) does its own lighter-weight fill+tier decision and would have completely bypassed the new floor -- a below-floor STANDARD-eligible cross would still have filled and been stamped STANDARD. Fixed `_stamp_tier_at_cross()` to accept `push_ratio` and return `None` when the floor isn't cleared (mirroring `_core_gate()` exactly), and the call site to transition to `DONE` with a named reason instead of `FILLED` when that happens.
+
+**Tests:** 18 new hand-computed tests (11 in `test_decision_engine.py` covering the boundary at exactly 1.1, PREMIUM non-interference, fail-safe on missing ratio, and the `gate["pass"]`-must-be-False wiring directly; 7 in `test_trade_plan.py`/`test_trade_plan_state_machine.py`/`test_trade_plan_engine.py` covering `_stamp_tier_at_cross()`'s new parameter and the end-to-end DONE-not-FILLED path). 4 existing tests updated where their fixtures' fuel ratios (thin/mid-range, incidental to what they were actually testing) now correctly fall below the new floor -- fixed the fixtures, not the assertions, except where the fixture's whole point was the now-superseded "thin CONFLICTED still fills" behavior (one test, explicitly renamed and rewritten to assert the new correct outcome).
+
+Full suite: 574 passed (was 563; net +11 after accounting for 7 new + 4 rewritten-in-place), same 5 pre-existing unrelated `test_dashboard_fixes.py` errors, zero regressions. Live TestClient boot check passed.
+
+**Docs updated:** `CLAUDE.md` (site) -- tier section now documents the floor, the 1.1-not-1.0 correction, and points to the Brain repo's reconciliation entry. Brain repo: `constants_of_record.py` (new `STANDARD_FUEL_RATIO_FLOOR = 1.1` entry), `verify_constants_against_live_site.py` (new check, run and confirmed green -- "ALL CONSTANTS MATCH"), `CC_WORK_ORDER_STD_FUEL_FLOOR.md` and `RULE_CHANGE_FUELED_ONLY_STD.md` statuses updated to reflect what actually shipped.
+
+This is now live. Forward performance is directly measurable from `GateLog.fuel_state`/the new PASS reason on tomorrow's session onward.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

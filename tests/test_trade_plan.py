@@ -528,3 +528,78 @@ def test_advance_no_plan_returns_none_when_rr_floor_fails():
         now_utc=NOW,
     )
     assert updates is None
+
+
+def test_stamp_tier_at_cross_returns_none_when_push_ratio_below_floor(monkeypatch):
+    # 2026-09-09 STANDARD_FUEL_RATIO_FLOOR (1.1): HTF=1 (never PREMIUM-eligible
+    # here) but push_ratio below the floor -> no tier at all, not STANDARD.
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BULLISH", "trend_4h": "NEUTRAL", "aligned": 1, "opposed": 0,
+    })
+    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0}
+    tier = tp._stamp_tier_at_cross(plan, [{}], [{}], daily_atr14=25.0, fuel_verdict="FUELED", push_ratio=0.95)
+    assert tier is None
+
+
+def test_stamp_tier_at_cross_push_ratio_at_floor_boundary_qualifies(monkeypatch):
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BULLISH", "trend_4h": "NEUTRAL", "aligned": 1, "opposed": 0,
+    })
+    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0}
+    tier = tp._stamp_tier_at_cross(plan, [{}], [{}], daily_atr14=25.0, fuel_verdict="FUELED", push_ratio=1.1)
+    assert tier == "STANDARD"
+
+
+def test_stamp_tier_at_cross_premium_ignores_the_standard_floor(monkeypatch):
+    # A push_ratio below the STANDARD floor must not block PREMIUM -- PREMIUM
+    # only ever needed FUELED (>=0.8), never the stricter 1.1 floor.
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
+    })
+    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0}  # box=10, atr=25 -> PREMIUM boundary
+    tier = tp._stamp_tier_at_cross(plan, [{}], [{}], daily_atr14=25.0, fuel_verdict="FUELED", push_ratio=0.85)
+    assert tier == "PREMIUM"
+
+
+def test_advance_waiting_plan_goes_done_not_filled_when_cross_fails_the_standard_floor(monkeypatch):
+    # End-to-end: the pre-cross anticipate_setup() path (tier=None at
+    # generation) hits a real cross that clears the core gate (FUELED,
+    # counted as a real push) but not the new STANDARD floor, and isn't
+    # PREMIUM-eligible either (HTF=1) -- must land on DONE, never FILLED,
+    # or the whole point of the floor is defeated by this second code path.
+    import fuel_gate as _fuel_gate
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_fuel_gate, "evaluate_fuel_gate", lambda c5m, trig, side, **kw: {
+        "verdict": "FUELED", "checks": {"push_volume": {"ratio": 0.9}},
+    })
+    monkeypatch.setattr(tp, "fuel_gate", _fuel_gate)
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "trend_1h": "BULLISH", "trend_4h": "NEUTRAL", "aligned": 1, "opposed": 0,
+    })
+
+    base = {"symbol": "BTC/USDT", "date_key": "2026-08-31", "session_id": "us_ny_futures",
+            "commit_after": ANCHOR, "fuel_requirement": "", "management": "",
+            "breakout_trigger": 100.0, "breakdown_trigger": 80.0,
+            "r30_high": 105.0, "r30_low": 95.0,
+            "fuel_verdict": None, "htf_aligned": None, "trend_1h": None, "trend_4h": None}
+    plan = tp._build_waiting_plan(
+        base, "LONG", 100.0, 112.0, 120.0, 132.0, 105.0, 95.0, 110.0, 90.0, 2.0,
+        _flat_candles(price=100.0), tier=None, generation_reason="pre-cross anticipated",
+    )
+    assert plan["tier"] is None
+
+    now = ANCHOR + datetime.timedelta(hours=1)
+    updates = tp.advance_waiting_plan(
+        plan, now, session_expires_at=None,
+        candles_5m=[{"close": 101.0, "volume": 1.0} for _ in range(300)], live_price=101.0,
+        candles_1h=_flat_candles(price=100.0, n=30), candles_4h=_flat_candles(price=100.0, n=30),
+        daily_atr14=2.0,
+    )
+    assert updates is not None
+    assert updates["status"] == "DONE"
+    assert "1.1" in updates["last_transition_reason"]
+    assert "0.9" in updates["last_transition_reason"]
+    assert "tier" not in updates  # never got a tier -- confirms it didn't fall through to FILLED

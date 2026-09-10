@@ -196,20 +196,28 @@ def test_advance_waiting_thin_volume_no_opposition_is_conflicted_and_fills():
 def test_advance_waiting_conflicted_cross_stamps_standard_never_premium(monkeypatch):
     # CONFLICTED can never earn PREMIUM, even with both HTFs carrying and
     # a tight box -- only FUELED can (decision_engine.py's own boundary,
-    # _stamp_tier_at_cross() must agree).
+    # _stamp_tier_at_cross() must agree). Updated 2026-09-09 for
+    # STANDARD_FUEL_RATIO_FLOOR (1.1): with aligned=2/opposed=0 here, the
+    # ONLY way fuel_gate.py's real verdict formula reaches CONFLICTED at
+    # all is via a thin/low ratio (vol_ok False or None) -- opposing==0
+    # with ratio>=0.8 always reads FUELED, never CONFLICTED. That thin
+    # ratio now also always fails the STANDARD floor, so this exact
+    # fixture (thin push, perfect HTF) now correctly lands on DONE, not
+    # FILLED -- it never reaches PREMIUM either way, which is still the
+    # thing being proven.
     import htf_fuel as _htf_fuel
     monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
         "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
     })
     plan = _plan(direction="LONG", trigger=100.0, tier=None, t2=110.0)  # box=10, atr=25 -> ratio=0.4 -> would be PREMIUM if FUELED
-    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=2.0, touched=True)  # thin -> CONFLICTED
+    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=2.0, touched=True)  # thin -> CONFLICTED, ratio 0.2 < floor
     result = tp.advance_waiting_plan(
         plan, NOW, SESSION_EXPIRES, candles, live_price=100.0,
         candles_1h=[{}], candles_4h=[{}], daily_atr14=25.0,
     )
-    assert result["status"] == "FILLED"
-    assert result["fuel_at_cross"] == "CONFLICTED"
-    assert result["tier"] == "STANDARD"
+    assert result["status"] == "DONE"
+    assert result.get("tier") != "PREMIUM"
+    assert "1.1" in result["last_transition_reason"]
 
 
 def test_advance_waiting_real_no_fuel_ghost_push_still_vetoes(monkeypatch):

@@ -318,29 +318,32 @@ def test_waiting_fueled_cross_armed_email_carries_the_locked_alignment_reading(p
     assert "Fuel FUELED -> FULLY ALIGNED" in body
 
 
-def test_waiting_conflicted_cross_sends_armed_email_via_loop(poll_env, monkeypatch):
+def test_waiting_thin_conflicted_cross_now_sends_done_email_not_armed(poll_env, monkeypatch):
     # 2026-09-07 fix (Kabroda AI Brain repo AGENT_LOG.md, DeepSeek's live-
-    # email review): thin volume with no HTF opposition is CONFLICTED,
-    # not NO_FUEL -- the live gate admits it as a real STANDARD trade, so
-    # this must ARM through the real loop, not VETO. This exact scenario
-    # used to (wrongly) send a VETOED email before the fix.
+    # email review): thin volume with no HTF opposition is CONFLICTED, not
+    # NO_FUEL. That classification is still correct and still tested here.
+    # SUPERSEDED 2026-09-09 (STANDARD_FUEL_RATIO_FLOOR = 1.1, Andy-approved
+    # after an independent walk-forward -- AGENT_LOG.md, Kabroda AI Brain
+    # repo, 19:55 CT): a thin push (ratio 0.2 here) being CONFLICTED no
+    # longer means it ARMS -- STANDARD now additionally requires the push
+    # to clear 1.1x baseline, which a thin push structurally never can.
+    # This exact scenario now correctly sends a DONE email, not ARMED --
+    # the opposite of what this test asserted before the floor shipped,
+    # and that reversal is the point of the floor.
     sent = _capture_emails(monkeypatch)
     poll_env["make_plan"](
         status="WAITING", direction="LONG", trigger_price=100.0,
         stop_price=90.0, stop_basis="beyond sweep wick low", t1=112.0, t2=120.0, t3=132.0,
     )
     candles = _thin_5m_candles(100.0, is_long=True)
-    # daily_atr14 must be real/nonzero for _stamp_tier_at_cross() to run
-    # at all (advance_waiting_plan()'s own guard) -- box=20 (t2-trigger),
-    # atr=25 -> ratio=0.8, not premium-eligible on box alone either, but
-    # the real point is CONFLICTED can never earn PREMIUM regardless.
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=25.0)
 
     assert len(sent) == 1
-    assert sent[0][0].startswith("KABRODA ARMED")
+    assert sent[0][0].startswith("KABRODA DONE")
     plan = poll_env["get_plan"]()
-    assert plan.status == "FILLED"
-    assert plan.tier == "STANDARD"   # CONFLICTED can never earn PREMIUM
+    assert plan.status == "DONE"
+    assert plan.tier is None   # never qualified for a tier at all
+    assert "1.1" in plan.last_transition_reason
 
 
 def test_waiting_real_no_fuel_ghost_push_sends_vetoed_email_via_loop(poll_env, monkeypatch):
@@ -498,7 +501,12 @@ def test_waiting_own_cross_syncs_gate_log_via_loop(poll_env, monkeypatch):
     assert gate_row.daily_regime_table == "TRENDING_UP"
 
 
-def _fueled_5m_ohlc_candles(trigger, is_long, baseline_vol=10.0, push_vol=10.0, baseline_n=250, push_n=6, near_offset=2.0):
+def _fueled_5m_ohlc_candles(trigger, is_long, baseline_vol=10.0, push_vol=16.0, baseline_n=250, push_n=6, near_offset=2.0):
+    # push_vol default bumped 10.0 -> 16.0 2026-09-09 (ratio ~1.0 -> ~1.6):
+    # this name means "unambiguously fueled," and ~1.0 now sits right at
+    # STANDARD_FUEL_RATIO_FLOOR's (1.1) boundary -- callers that want to
+    # test the floor itself should pass push_vol explicitly, not rely on
+    # this default.
     """Same shape/fuel math as _fueled_5m_candles(), but with full OHLC --
     advance_no_plan() feeds these into stop_planner.py's swing/sweep
     detection (_find_swing_points/_find_sweep_wicks), which needs open/
@@ -644,7 +652,12 @@ def test_no_plan_confirmed_close_through_trigger_does_trigger_evaluation(poll_en
         return {"time": int(open_ts), "open": close, "high": close + 0.5, "low": close - 0.5, "close": close, "volume": vol}
     candles = (
         [c(now - 300 * (i + 8), 92.0) for i in range(250)][::-1]  # baseline, near BD
-        + [c(now - 300 * (i + 2), 85.0, vol=10.0) for i in range(6)][::-1]  # fueled push through BD, CONFIRMED closes
+        # 2026-09-09: vol bumped 10.0 -> 16.0 (ratio ~1.0 -> ~1.6) to clear
+        # STANDARD_FUEL_RATIO_FLOOR (1.1) -- this test is about confirmed-
+        # close detection timing, not fuel quality, so it needs an
+        # unambiguously-fueled push, not one that now sits right at the
+        # new floor's boundary.
+        + [c(now - 300 * (i + 2), 85.0, vol=16.0) for i in range(6)][::-1]  # fueled push through BD, CONFIRMED closes
     )
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=20.0)
 

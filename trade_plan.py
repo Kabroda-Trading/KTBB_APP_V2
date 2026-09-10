@@ -707,14 +707,17 @@ def _stamp_tier_at_cross(
     candles_4h: List[Dict[str, Any]],
     daily_atr14: float,
     fuel_verdict: Optional[str] = None,
-) -> str:
+    push_ratio: Optional[float] = None,
+) -> Optional[str]:
     """PREMIUM requires fuel FUELED specifically (not just fuel-condition-
     passing) AND both HTF timeframes AND box/ATR <= 0.40 at the cross,
-    else STANDARD -- decision_engine.py's own _core_gate() tier formula
-    (2026-09-06 three-outcome rebuild), recomputed here (not reimplemented
-    differently), for a plan whose tier was left None at generation (the
-    anticipate_setup() pre-cross path -- see build_trade_plan()'s
-    docstring) because it genuinely couldn't be known until now.
+    else STANDARD if it clears STANDARD_FUEL_RATIO_FLOOR, else None (no
+    tier -- the caller must not fill) -- decision_engine.py's own
+    _core_gate() tier formula (2026-09-06 three-outcome rebuild, 2026-09-09
+    fuel-quality floor), recomputed here (not reimplemented differently),
+    for a plan whose tier was left None at generation (the anticipate_
+    setup() pre-cross path -- see build_trade_plan()'s docstring) because
+    it genuinely couldn't be known until now.
 
     fuel_verdict is optional ONLY for backward compatibility with any
     caller that hasn't been updated yet -- omitting it means "assume
@@ -723,9 +726,17 @@ def _stamp_tier_at_cross(
     today). New callers that also admit CONFLICTED crosses (2026-09-07,
     DeepSeek's live-email review) MUST pass the real verdict, since
     CONFLICTED can never earn PREMIUM -- only FUELED can.
+
+    push_ratio (2026-09-09): the push_volume.ratio decision_engine.py's
+    _core_gate() also reads, needed here so this second, independent tier
+    site can't silently drift from the live gate's own floor -- omitting
+    it means "assume the floor passes" (same backward-compatibility stance
+    as fuel_verdict), so no existing caller that hasn't been updated
+    changes behavior.
     """
     import htf_fuel as _htf_fuel
     import reachability as _reachability
+    import decision_engine as _decision_engine
 
     side = plan.get("direction")
     htf = _htf_fuel.htf_fuel(candles_1h, candles_4h, side)
@@ -738,7 +749,10 @@ def _stamp_tier_at_cross(
 
     fueled = fuel_verdict is None or fuel_verdict == "FUELED"
     premium = fueled and aligned == 2 and ratio is not None and ratio <= _reachability.PREMIUM_BOX_ATR
-    return "PREMIUM" if premium else "STANDARD"
+    if premium:
+        return "PREMIUM"
+    standard_ok = push_ratio is None or push_ratio >= _decision_engine.STANDARD_FUEL_RATIO_FLOOR
+    return "STANDARD" if standard_ok else None
 
 
 def advance_waiting_plan(
@@ -871,7 +885,23 @@ def advance_waiting_plan(
         prefix = "second " if status == "VETOED" else ""
         updates["last_transition_reason"] = f"{prefix}cross {verdict.lower()} ({push_ratio}x baseline) -- filled"
         if plan.get("tier") is None and candles_1h is not None and candles_4h is not None and daily_atr14:
-            new_tier = _stamp_tier_at_cross(plan, candles_1h, candles_4h, daily_atr14, fuel_verdict=verdict)
+            new_tier = _stamp_tier_at_cross(
+                plan, candles_1h, candles_4h, daily_atr14, fuel_verdict=verdict, push_ratio=push_ratio,
+            )
+            if new_tier is None:
+                # 2026-09-09: cleared the 4-condition gate but not STANDARD's
+                # fuel-quality floor, and PREMIUM doesn't apply either -- the
+                # real-cross path (decision_engine.py's _core_gate()) would
+                # return pass=False/tier=None here too. Must not fall through
+                # to FILLED (there is no tier to manage this trade under).
+                import decision_engine as _decision_engine
+                return {
+                    "status": "DONE",
+                    "last_transition_reason": (
+                        f"cross confirmed but push volume ({push_ratio}x baseline) is below the "
+                        f"{_decision_engine.STANDARD_FUEL_RATIO_FLOOR}x floor for standard tier -- no trade"
+                    ),
+                }
             updates["tier"] = new_tier
             # 2026-09-08 TIER-SPECIFIC STOP (see _build_waiting_plan()'s own
             # comment for the full backtest rationale and Andy's explicit

@@ -53,7 +53,11 @@ def _patch_htf(monkeypatch, aligned: int, opposed: int = 0):
                                                   "aligned": aligned, "opposed": opposed, "carry": "N/A"})
 
 
-def _patch_fuel(monkeypatch, verdict: str, ratio: float = 1.0):
+def _patch_fuel(monkeypatch, verdict: str, ratio: float = 1.5):
+    # 2026-09-09: default raised from 1.0 to 1.5, safely clear of the new
+    # STANDARD_FUEL_RATIO_FLOOR (1.1) -- tests that aren't specifically
+    # exercising the floor shouldn't incidentally trip it. Tests for the
+    # floor itself pass an explicit ratio.
     monkeypatch.setattr(de._fuel_gate, "evaluate_fuel_gate",
                          lambda c5m, trigger, side, **kw: {
                              "verdict": verdict,
@@ -213,3 +217,84 @@ def test_pass_always_names_a_specific_cause(monkeypatch):
     assert gap_decision["verdict_state"] == "PASS"
     assert gap_decision["gate"]["misses"]
     assert gap_decision["gate"]["misses"][0] in gap_decision["tactical_brief"]
+
+
+def test_standard_fuel_ratio_floor_blocks_a_thin_but_technically_fueled_push(monkeypatch):
+    # 2026-09-09 STANDARD_FUEL_RATIO_FLOOR (1.1): a push that clears FUELED's
+    # own 0.8 threshold but not the stricter 1.1 STANDARD floor must PASS,
+    # not TAKE_STANDARD -- this is the exact 0.8-1.0 "marginal zone" the
+    # backtest found barely profitable/high-stop-rate.
+    _patch_neutral_regime(monkeypatch)
+    _patch_htf(monkeypatch, aligned=1)
+    _patch_fuel(monkeypatch, "FUELED", ratio=0.95)
+    decision_dict, _ = _evaluate()
+    assert decision_dict["verdict_state"] == "PASS"
+    assert "1.1" in decision_dict["gate"]["misses"][0]
+    assert "0.95" in decision_dict["gate"]["misses"][0]
+
+
+def test_standard_fuel_ratio_floor_boundary_exactly_at_1_1_takes_it(monkeypatch):
+    # >= is inclusive -- exactly 1.1 must qualify, not just "above" it.
+    _patch_neutral_regime(monkeypatch)
+    _patch_htf(monkeypatch, aligned=1)
+    _patch_fuel(monkeypatch, "FUELED", ratio=1.1)
+    decision_dict, _ = _evaluate()
+    assert decision_dict["verdict_state"] == "TAKE_STANDARD"
+
+
+def test_standard_fuel_ratio_floor_boundary_just_under_1_1_rejects_it(monkeypatch):
+    _patch_neutral_regime(monkeypatch)
+    _patch_htf(monkeypatch, aligned=1)
+    _patch_fuel(monkeypatch, "FUELED", ratio=1.099)
+    decision_dict, _ = _evaluate()
+    assert decision_dict["verdict_state"] == "PASS"
+
+
+def test_standard_fuel_ratio_floor_applies_to_conflicted_too(monkeypatch):
+    # CONFLICTED needs no HTF carry, but it still needs to clear the same
+    # STANDARD floor -- the floor is a fuel-quality gate, not a FUELED-only
+    # add-on.
+    _patch_neutral_regime(monkeypatch)
+    _patch_htf(monkeypatch, aligned=0)
+    _patch_fuel(monkeypatch, "CONFLICTED", ratio=0.5)
+    decision_dict, _ = _evaluate()
+    assert decision_dict["verdict_state"] == "PASS"
+    assert "floor" in decision_dict["gate"]["misses"][0]
+
+
+def test_standard_fuel_ratio_floor_does_not_touch_premium(monkeypatch):
+    # PREMIUM already requires FUELED (ratio >= 0.8) specifically -- a push
+    # between 0.8 and the new 1.1 STANDARD floor must still earn PREMIUM
+    # when aligned==2 and the box is tight. The floor is a STANDARD-only
+    # addition, not a blanket fuel-quality raise.
+    _patch_neutral_regime(monkeypatch)
+    _patch_htf(monkeypatch, aligned=2)
+    _patch_fuel(monkeypatch, "FUELED", ratio=0.85)
+    decision_dict, _ = _evaluate()
+    assert decision_dict["verdict_state"] == "TAKE_PREMIUM"
+
+
+def test_standard_fuel_ratio_floor_fails_safe_when_ratio_unavailable(monkeypatch):
+    # push_ratio=None (couldn't be measured) must not silently pass the
+    # floor -- fail safe to PASS, matching every other "unknown" path in
+    # this gate (e.g. fuel_verdict unknown -> not FUELED/CONFLICTED -> PASS).
+    _patch_neutral_regime(monkeypatch)
+    _patch_htf(monkeypatch, aligned=1)
+    _patch_fuel(monkeypatch, "FUELED", ratio=None)
+    decision_dict, _ = _evaluate()
+    assert decision_dict["verdict_state"] == "PASS"
+
+
+def test_standard_fuel_ratio_floor_reason_names_the_real_ratio():
+    # gate["pass"] must be False (not just tier=None) when the floor blocks
+    # an otherwise-passing setup -- confirms the caller's `if gate["pass"]:`
+    # branch (the ONLY place evaluate_15m_decision() checks this) can't
+    # silently fall through to TAKE_STANDARD. Direct _core_gate() call,
+    # no monkeypatching, to pin this down at the exact function the fix
+    # lives in.
+    fuel = {"verdict": "FUELED", "checks": {"push_volume": {"ratio": 0.9}}}
+    htf = {"aligned": 1}
+    gate = de._core_gate(box=10.0, atr=25.0, fuel=fuel, htf=htf, session_hour=15)
+    assert gate["pass"] is False
+    assert gate["tier"] is None
+    assert "1.1" in gate["misses"][0]

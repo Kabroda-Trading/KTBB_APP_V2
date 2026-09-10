@@ -88,6 +88,26 @@ _LONG, _SHORT = "LONG", "SHORT"
 # 18-21 UTC -> 42%. 12-18 UTC is fine. Andy-locked MEDIUM operating point.
 DEAD_HOURS = set(range(0, 12)) | {18, 19, 20}
 
+# STANDARD fuel-quality floor (2026-09-09, Andy-approved). Backtest finding:
+# STANDARD's fuel-CONFLICTED-or-thin population (push ratio < ~1.0x the 24h
+# baseline) is where the tier's real losses concentrate; above this floor it
+# is solidly profitable. PREMIUM is untouched -- it already requires FUELED
+# (ratio >= VOL_FUELED = 0.8) specifically, a separate, stricter condition.
+# This does NOT replace that -- it's an additional floor on the STANDARD
+# path only, since STANDARD's gate otherwise accepts CONFLICTED (any ratio
+# down to VOL_THIN) as well as sub-PREMIUM FUELED reads.
+#
+# 1.1, not 1.0: a real walk-forward (fit 2021-2023, freeze, verify on
+# 2024-2026 the fit never saw) independently picked 1.1 as the strongest
+# threshold. 1.0 was the first candidate proposed but a direct recheck
+# against the corrected exact-fuel STANDARD population (Kabroda AI Brain
+# repo AGENT_LOG.md, 2026-09-09 19:55 CT) showed 2025 is a real losing year
+# at exactly 1.0 (-1.7R) -- contradicting the "positive every year" case for
+# shipping it. At 1.1, the frozen out-of-sample verify window (2024-2026)
+# is positive in all three years (+34.4 / +1.8 / +22.1). 1.1 is the value
+# both the fit-window scan and the out-of-sample check actually support.
+STANDARD_FUEL_RATIO_FLOOR = 1.1
+
 # §6 management rule -- Andy's fib convention: anchor 0 = BD, 1.0 = BO.
 T1_BOX, T2_BOX, T3_BOX = 0.618, 1.0, 1.618
 STOP_BUFFER_BOX = 0.12      # swept 2026-08-29, robust train/test (Brain repo)
@@ -166,13 +186,45 @@ def _core_gate(*, box: float, atr: float, fuel: Dict[str, Any],
     if not hour_ok:
         misses.append(f"{session_hour:02d}:00 UTC is a dead-tape hour")
 
-    passed = not misses
+    core_passed = not misses  # the original 4-condition gate, unchanged by the floor below
     ratio = reach.get("ratio")
     # PREMIUM still requires FUELED specifically (not just fuel-condition-
     # passing) plus both HTF timeframes plus a tight box -- unchanged from
     # before this rebuild. CONFLICTED can only ever earn STANDARD.
-    premium = bool(passed and fueled and aligned == 2 and ratio is not None and ratio <= _reachability.PREMIUM_BOX_ATR)
-    tier = "PREMIUM" if premium else ("STANDARD" if passed else None)
+    premium = bool(core_passed and fueled and aligned == 2 and ratio is not None and ratio <= _reachability.PREMIUM_BOX_ATR)
+
+    # STANDARD's additional fuel-quality floor -- see STANDARD_FUEL_RATIO_FLOOR's
+    # own comment for the evidence and why 1.1, not the originally-proposed 1.0.
+    # Reads the SAME push_volume.ratio already computed by fuel_gate.py and
+    # already logged to GateLog as fuel_push_ratio (below, via evaluate_15m_
+    # decision()'s own dict) -- no new measurement, no new data, no latency.
+    push_ratio = (fuel.get("checks", {}) or {}).get("push_volume", {}).get("ratio")
+    standard_ok = core_passed and push_ratio is not None and push_ratio >= STANDARD_FUEL_RATIO_FLOOR
+
+    # `passed` (returned as "pass") must reflect whether a REAL tier was
+    # actually assigned, not just the original 4-condition gate -- the only
+    # caller (evaluate_15m_decision()) branches on gate["pass"] alone and
+    # falls through to TAKE_STANDARD whenever it's True, so a core-gate-passed-
+    # but-no-tier-assigned case must report pass=False or it would silently
+    # take the trade anyway, defeating the whole point of this floor.
+    if premium:
+        tier = "PREMIUM"
+        passed = True
+    elif standard_ok:
+        tier = "STANDARD"
+        passed = True
+    else:
+        tier = None
+        passed = False
+        if core_passed:
+            # The 4-condition gate passed but didn't clear the stricter
+            # STANDARD-only floor -- name it, per KABRODA_REBUILD_SPEC.md §9
+            # ("log every detail," every PASS names its specific reason).
+            ratio_text = f"{push_ratio}" if push_ratio is not None else "unavailable"
+            misses.append(
+                f"push volume below the {STANDARD_FUEL_RATIO_FLOOR}x-baseline floor "
+                f"for standard tier (ratio = {ratio_text})"
+            )
     return {"pass": passed, "tier": tier, "checks": checks, "misses": misses, "reach": reach, "htf_aligned": aligned}
 
 
