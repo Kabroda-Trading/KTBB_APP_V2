@@ -2610,3 +2610,51 @@ change until the rebuild is reconciled, per Andy's "shut down all trading until
 we know" call.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-10 — FROM: DeepSeek (Antigravity) — FOR: Claude Code + Andy
+STATUS: open
+Subject: Domain 2/3 measurement night — confirm-entry, poke re-entry, T1-retrace re-entry, corrected post-T1 table, conditional hold. Three bugs found and fixed in-flight; final numbers below are the corrected set.
+
+**Runs tonight (all on the canonical gate corpus, touch-fill, r30+buffer stop, fuel>=2.0, 451 trades / 241 T1 / 210 stopped):**
+
+1. **Confirm-close entry (wait for 5m close beyond edge) — REJECTED.** avgR +0.209 vs touch-fill +0.319. Median confirm lag is 0 bars but the entry price is ~0.2R worse on every fill. Same conclusion as trigger-offset: waiting for confirmation costs more than it saves. Touch-fill stays.
+
+2. **Pre-T1 poke re-entry (skip the poke, re-enter after pullback completes) — NO EDGE.** Pokes re-entered after the pullback score identically to riding from the edge (+0.063R both ways). The pullback adds no information pre-T1.
+
+3. **Corrected post-T1 MFE table (the earlier domain1_htf_multiday.py had a SHORT-side sign bug; domain2_reentry.py §3 is the corrected source):**
+   - +24h: median +3.84R beyond entry, mean +5.20R, 83% >= 2R
+   - +48h: median +4.43R, mean +6.42R, 89% >= 2R, 70% >= 3R
+   - +72h: median +5.60R, mean +7.69R, 93% >= 2R, 76% >= 3R
+   - Rip predictors (MFE48>=2R): box tight 93% / mid 91% / wide 82%; aligned=2 90% vs aligned=1 87%. Weak predictors — the rip is broad-based, not concentrated in one feature.
+
+4. **Conditional hold on clean fills (50% off at T1 + 50% hold-48h capped 3R):** +0.708R vs +0.497R FULL_T1 on the same 266 clean fills (+42% avgR, same win rate). Account sim from $750: cond-hold $149,326 / 61.1% DD vs FULL_T1 $278,571 / 71.5%. Less final equity, less drawdown, more R per trade. This is the leverage trade-off Andy is circling — it's real but it compounds slower at 10% risk.
+
+5. **T1-retrace re-entry (Andy's 22:41 model — first spike off at T1, wait for pullback, re-enter for the second run):** MEASURED, and it's the first post-T1 structure that adds R without flipping the win profile:
+   - Pullback structure after T1: median 0.55 box deep, 30 min after T1; 85% pull back >=0.3 box, 57% >=0.5 box, 29% all the way back to entry.
+   - Re-entry trigger (close back beyond T1 after >=0.3-box pullback): fires on 130/241 T1 trades (54%). 69% of re-entries reach the 2-box target (+1.44R in original R units); 30% stop back at r30 (−2.57R); net second-run avgR +0.23, win 69%.
+   - Combined strategy (cleans: T1 + re-entry; pokes: FULL_T1): +0.385R vs +0.319R baseline. Account sim: $480,955 / 67.0% DD vs $278,571 / 71.5%. **First variant all session that beats FULL_T1 on BOTH final equity and drawdown.**
+   - BUT: 111 of 241 T1 trades (46%) run away with no >=0.3-box pullback and no re-entry — those have mean MFE48 +6.58R that the combined model books only the T1 leg on. The re-entry model trades participation for a better entry; it does not capture the biggest runners.
+
+**Bugs found and fixed in-flight (all in scratch/domain2_t1_reentry.py, now corrected):**
+   - (a) fate-logic inversion when T1 and stop both appeared in the same bar scan;
+   - (b) T1 exit booked as +1.0R instead of box/R (avg +1.47R) — deflated FULL_T1 baseline to +0.069R and made re-entry look artificially good; trade-by-trade agreement with domain3_hold_variants.py confirmed after fix (max diff 1e-14);
+   - (c) re-entry stops booked as +2.57R wins instead of −2.57R losses (sign bug) — inflated combined to +0.649R / $1.86M sim before fix.
+
+**Also this session (earlier entries tonight):** trigger-offset (edge wins), T3-runner analysis (FULL_T1 wins; tier carries no post-T1 signal; fuel top tercile does predict rips), hold-variants (unconditional holds blow up banded sizing), repo synthesis + options menu (synthesis_options.md artifact).
+
+**For CC:** the T1-retrace re-entry is the first Domain 3 structure worth considering for the live site's post-T1 evaluation. Open design questions before anyone builds it: (1) pullback threshold 0.3 vs 0.5 box (0.3 catches 85% of trades but 46% still run away; 0.5 would be stricter), (2) second-run exit: 1-box target vs trail vs time, (3) whether re-entry legs get their own R accounting in the live executor (they're a new position after a closed one, not a modification).
+
+**Scripts:** scratch/domain2_reentry.py, scratch/domain2_t1_reentry.py (corrected), scratch/domain3_hold_variants.py, scratch/domain1_htf_multiday.py (KNOWN BUGGY §B/§C — do not cite; corrected numbers live in domain2_reentry.py §3). CSVs: calibration_data/domain2_reentry.csv, domain2_t1_reentry.csv, domain3_hold_variants.csv.
+
+
+## 2026-09-11 — FROM: DeepSeek (Antigravity) — FOR: Claude Code + Andy
+STATUS: open
+Subject: T1-retrace threshold sweep complete — design question 1 closed.
+
+Ran 0.5 and 0.75 box variants of the T1-retrace re-entry (parametrized threshold, same script). All three thresholds beat FULL_T1 on BOTH equity and DD - the structure is robust to the trigger depth:
+- 0.3 box: 130 re-entries (54%), 69% pay, combined +0.385R, sim \ / 67.0% DD - WINS ON EQUITY
+- 0.5 box: 85 (35%), 71% pay, +0.368R, \ / 63.7% DD - WINS ON DD
+- 0.75 box: 45 (19%), 76% pay, +0.362R, \ / 69.7% DD - dominated, ignore
+Deeper threshold = fewer triggers, better per-leg economics, longer median wait (0.3->30min, 0.5->75min, 0.75->105min). Recommendation recorded in the night report: 0.3 box for max participation; 0.5 box if DD tolerance is binding. Committed 58daf00 (parametrized script in brain/calibration/).
+Remaining open design questions: (2) second-run exit style (fixed 1-box vs trail vs time), (3) executor accounting for re-entry as a fresh position.
+
