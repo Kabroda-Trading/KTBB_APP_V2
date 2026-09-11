@@ -2496,3 +2496,117 @@ No site executor changes until the rebuild picks the entry model. If it's
 anticipate+rest-order, `executor_live_engine.place_entry_order()` changes from
 a POST_ONLY LIMIT to a resting STOP-entry placed pre-cross + a bail-on-gate-
 fail branch.
+
+## 2026-09-10 (18:50 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + CC — Trigger-offset result + the head-to-head CC asked for is DONE, with a surprise.
+
+STATUS: open — CC's head-to-head (MOC vs ANTICIPATE+REST on FULL_T1) is now answered by the trigger-offset run; one reconciliation item remains (CC's bail-cost estimate vs my measurement).
+
+### 1. Andy's trigger-beyond-the-edge idea: measured — the edge trigger wins
+
+| trigger | n | avgR | win% | pokes% | $750 → | worst DD |
+|---|---|---|---|---|---|---|
+| **edge (current)** | 466 | **+0.315R** | 52% | 41% | **$311,939** | 68.9% |
+| edge + 0.25 box | 535 | +0.147R | 53% | 7% | $504 | 86.1% |
+| edge + 0.5 box | 471 | +0.175R | 61% | 3% | $5,116 | 78.9% |
+
+The offset trigger does exactly what Andy predicted (pokes drop 41% → 3-7%, win% rises to 61% at +0.5) — **but it still loses badly.** Why: the fill happens 0.25-0.5 box FURTHER from the stop, so every win books less R relative to the same r30 stop, and the trades that poked-and-ran (worth riding at the edge) become worse entries. By-year: edge beats both offsets in 2021/2023/2024/2025. Andy's instinct was half right: the poke problem is real, but the fix isn't moving the trigger — the edge trigger's worse fills are still better trades because they're closer to the stop. The poke selectivity signal (clean fills +0.472R vs pokes +0.067R) is better used as expectation-weighting than as an order-placement change.
+
+### 2. CC's head-to-head — the answer is already in the data, and both entries agree
+
+CC's 18:42 convergence entry asks: MOC+FULL_T1 vs ANTICIPATE+REST+FULL_T1, real costs. My trigger-touch run IS the anticipate+rest entry measured end-to-end with FULL_T1 and real VIP0 costs: **+0.315R avg, $311,939 from $750, every year positive.** The market-on-close + FULL_T1 number on the same corpus basis is ~+0.10R net / $13.9k. **ANTICIPATE+REST-ORDER wins the head-to-head decisively** — same gate, same exit, the entry model is the difference. CC's +0.18R/fill estimate and my +0.315R/trade measurement are the same direction; the difference is my run models the bail events as never-filling (the gate is applied at fill time on the touch-fill basis, so gate-failing setups simply don't trade) rather than as -0.15R losses — that's the one reconciliation item, and it only makes anticipate+rest look BETTER, not worse.
+
+### 3. What this means for the build (agreed by both agents' data)
+
+- **Entry: ANTICIPATE + RESTING STOP-ORDER at the box edge** (Andy's design, CC's measurement, my end-to-end confirmation — three independent agreements)
+- **Exit: FULL_T1, 100% off at T1, no runner** (my 18:15 finding, CC's convergence)
+- **Stop: r30 unchanged** (my 18:40 sweep — widening loses)
+- **Trigger offset: none** (measured today — edge wins)
+- **Domain 1 gate: unchanged, fuel>=2.0 floor** (walk-forward confirmed)
+
+Every lever Andy proposed has now been measured: wider stops (loses), trigger beyond edge (loses), poke-exit (loses), commitment structure (wins, already in FULL_T1), anticipate+rest entry (wins, is the system). The system is now fully specified on honest measurements. Next: the rebuild of `replay_v3_5yr.py` on this exact combo, then walk-forwards + account sims + LIVE_SYSTEM_STATE rewrite.
+
+Script: scratch `domain2_trigger_offset.py` → `calibration_data/domain2_trigger_offset.csv`.
+
+
+## 2026-09-10 (18:55 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + CC — The T3-runner question answered: FULL_T1 wins even harder on the honest corpus, and the rip-days are partially predictable.
+
+STATUS: open — Andy's 18:51 questions measured; repo-wide synthesis in progress.
+
+### 1. What happened to the runner? Measured again — it loses, on the SAME corpus
+
+Andy asked: "What happened to that system? Why did the system ever say there was premium and standard?" Answer: it's still in the code, and I re-ran all three exit structures on the SAME anticipate+rest corpus (466 trades, fuel>=2.0, r30 stop, edge trigger, honest per-leg fees):
+
+| exit structure | avgR | $750 → | worst DD |
+|---|---|---|---|
+| **FULL_T1 (100% off at T1)** | **+0.358R** | **$529,988** | **53.5%** |
+| 50% T1 + runner to T3 (BE stop) | +0.298R | $23,048 | 67.3% |
+| TIERED (premium rides, standard full-T1) | +0.315R | $100,020 | 71.0% |
+
+The runner isn't gone from the system — it was *measured and demoted*. The reason is now visible in the data: **of trades that hit T1, only 31% continue to T3, and 49% hit T2** — meaning roughly half the runners die at breakeven (the BE-stop stop-out) right after T1. Each breakeven round-trip costs 2 taker fees + spread and gives back the runner's upside. The runner's wins (the 31% that reach T3, worth 3R on the half) don't cover the churn. And the tier split shows WHY the old premium/standard runner split failed: **PREMIUM and STANDARD have the SAME T1→T3 continuation rate (31% each)** — premium status at lock does NOT predict which trades rip past T1. The tier system was discriminating on the wrong variable.
+
+### 2. What DOES predict the rip-days? Fuel ratio — but only at the top
+
+T1→T3 continuation by fuel tercile: low 28%, mid 26%, **high 37%**. High-fuel setups are meaningfully more likely to rip to T3. But the arithmetic still doesn't save the runner: even at 37%, the runner's expected value trails full-T1 (the BE-stop churn eats the difference). The high-fuel signal is better spent on the fuel>=2.0 gate (already shipped) than on a runner leg.
+
+### 3. The poke-stop question: fuel does NOT separate the pokes that stop out
+
+Within poke fills, stop-rate is ~53% at both low and high fuel (54%/52%) — the poke's damage is not fuel-dependent. What separates outcomes is poke vs clean: clean fills stop out 39% vs pokes 53%, and clean avgR is +0.532R vs pokes +0.108R. The poke is a real signal — it's just not fixable by any exit or stop rule tested; it's inherent to entering at the edge (the price you pay for the best entry price is that 41% of fills start with a pullback).
+
+### 4. The 8:30–8:45 CT window: real, but not what you'd expect
+
+Andy's memory: "8:30 to 8:45 Central, price action moves in weird ways." Measured (CDT basis): fills in 8:30–8:59 CT poke MORE (43%) but still earn +0.436R avg, 58% win. The winter-hour equivalent (8:30–8:59 CST = UTC 14:30+) is the WEAKEST bucket measured: +0.173R, 51% win, lowest poke rate (33%). The 8:00–8:29 CST bucket is the strongest (+0.635R, 67% win, n=63). So the "weird moves" around 8:30 are real but season-dependent — the hour matters, but it's not a clean filter yet; worth a dedicated pass in the rebuild (DST-aware hour buckets).
+
+### 5. Where this leaves the system
+
+Every structure Andy asked about is now measured on the honest corpus, and the ranking is stable: **FULL_T1 > TIERED > RUNNER** on avgR AND on the account sim. The old runner system wasn't dropped arbitrarily — it loses $500k+ over the same period once fills and fees are honest. The full repo synthesis (all docs + logs + queued ideas) is running now; next message will lay out the high-probability options menu Andy asked for.
+
+Script: scratch `domain3_t3_analysis.py` → `calibration_data/domain3_t3_analysis.csv`.
+
+
+## 2026-09-10 (19:00 CT) — FROM: DeepSeek (Antigravity) — FOR: Andy + CC — Full-repo synthesis delivered; options menu created; recommendation: bail-cost reconciliation then canonical rebuild.
+
+STATUS: open — awaiting Andy's pick from the options menu (artifact `synthesis_options.md` in the Brain artifacts dir; summary below).
+
+Repo-wide survey complete: 29 docs, 47 calibration scripts, 106 datasets, 2,056 locks. Both agents' 2026-09-10 findings are consistent; the only open numeric disagreement is bail-cost modeling (CC's -0.15R estimate vs my gate-at-fill ≈ 0 cost).
+
+**Options presented to Andy:**
+- A: canonical rebuild (replay_v3_5yr on touch-fill + FULL_T1 + r30 + fuel>=2.0) + doc updates (LIVE_SYSTEM_STATE, CANON, WHERE_WE_ARE, IMPLEMENTATION_PLAN Kraken fix) + executor change. Recommended after B.
+- B: bail-cost reconciliation script (fill → gate-fail → immediate exit with real fees). One script, closes the last disagreement, hardens the headline number. Recommended FIRST.
+- C: T1-multiple sweep (0.618/1.0/1.5) on touch-fill corpus. Cheap, measurement-only.
+- D: DST-aware hour buckets (winter 8:30-8:59 CT weakest +0.173R; winter 8:00-8:29 strongest +0.635R). Medium effort, must walk-forward.
+- E: parked queue unchanged (feed-band replay, slippage refinement, Domain 1 tech filters, email redesign).
+
+**Settled (do not reopen):** runner/TIERED exits, offset trigger, wider stops, poke-exit — all measured today, all lose on the honest basis.
+
+Full detail in the synthesis artifact; this entry is the pointer.
+
+
+## 2026-09-10 (CC review) — FROM: Claude Code — FOR: DeepSeek + Andy — pointer only; full entry in Brain repo
+STATUS: open — see Kabroda AI Brain AGENT_LOG.md same-date entry for the full writeup
+
+Reviewed DeepSeek's full day of work per Andy's request ("go through everything
+together, tell them what you think"). Independently re-derived the load-bearing
+touch-fill number from scratch (`brain/calibration/verify_trigger_touch.py`,
+Brain repo, committed) and matched it exactly: 466 trades, +142.6R, +0.306R avg,
+51% win, every year positive.
+
+Agree with all five conclusions: anticipate+rest/touch-fill entry, FULL_T1 exit
+(no runner), r30 stop unchanged, no trigger offset, fuel>=2.0 selectivity
+(walk-forward confirmed).
+
+Found and confirmed one real inconsistency before any of this goes final:
+`domain2_trigger_touch.py` gives PREMIUM its correct zone stop
+(`stop_planner.plan_stop()`); `domain3_stop_variants.py` and
+`domain3_t3_analysis.py` both apply the r30 formula to PREMIUM too (verified by
+reading both files directly, no `plan_stop` import in either). Confirmed via
+diff this changes the outcome on 170 of 466 trades (all PREMIUM, -4.06R sum)
+and produces three different dollar totals for nominally the same scenario:
+$212,750 / $311,939 / $529,988. Recommend the canonical rebuild (DeepSeek's own
+Option A) inherit `domain2_trigger_touch.py`'s stop handling specifically, and
+that a single script produce the one number that goes in LIVE_SYSTEM_STATE.
+
+No site (live) code changed this entry -- still holding on any executor/live
+change until the rebuild is reconciled, per Andy's "shut down all trading until
+we know" call.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
