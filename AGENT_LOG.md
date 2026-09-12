@@ -4120,3 +4120,23 @@ and never has been since 2026-08-30** -- it's a standalone reference/viz
 system. Nothing in it should show up in any Domain 1/2/3 backtest number.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-11 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — PHASE 1 core gate rewrite shipped (decision_engine.py + htf_fuel.py + RSI-at-lock capture). Downstream ripple into trade_plan.py/anticipate_setup.py is next, not done yet.
+STATUS: open — core gate done and tested in isolation; 24 tests elsewhere now correctly failing on removed v1 behavior, need Phase 2/3 work
+
+Shipped the v2 gate itself:
+- `htf_fuel.py`: new `krown_cross_state()`/`krown_cross_votes()` (21/55 EMA + 6-bar slope, votes==2 required) alongside the existing, unchanged `timeframe_trend()` (9/21 EMA, still used for the aligned>=1 pre-filter -- both pairs stay, they check different things).
+- `battlebox_pipeline.py`: new "RSI AT LOCK" capture block, computes 4H RSI(14) Wilder once at the 13:00 UTC lock and freezes it into `pkt["levels"]["rsi_4h_at_lock"]` -- alongside the existing MTF snapshot capture, same pattern. All three call sites (`kabroda_mas_flow.py`, `market_radar.py`, `trade_plan_engine.py`) already build `levels` from this same frozen packet, so this one change threads through to all three automatically -- no other file needed touching for this specific field.
+- `decision_engine.py`: `_core_gate()` and `evaluate_15m_decision()` rewritten for the 4-condition v2 gate (reachability, HTF aligned>=1, Krown Cross votes==2, 4H RSI-at-lock in zone). Single `TAKE`/`PASS` outcome, no more tier. Dead-hour/dead-tape/counter-trend vetoes removed (per CANON.md §8's measurement, my call, documented and reversible). `fuel_gate` import removed entirely -- confirmed `not hasattr(de, "_fuel_gate")`. T1_BOX/T2_BOX/T3_BOX = 1.0/1.0/1.618. Management text rewritten, no PREMIUM/STANDARD branching.
+- `tests/test_decision_engine.py`: fully rewritten for v2 (15 tests, all passing) -- covers all four gate conditions individually, RSI zone boundaries both sides, confirms the retired vetoes genuinely no longer block a TAKE (not just untested), confirms fuel_gate is gone.
+- App boots clean (`TestClient(main.app)`).
+
+What this does NOT cover yet, confirmed by running the full suite (`pytest tests/`, 24 new failures beyond the pre-existing 5 `test_dashboard_fixes.py` errors): `trade_plan.py` (`advance_no_plan`/`advance_waiting_plan`/`stamp_tier_at_cross` -- all still branch on tier, STANDARD_FUEL_RATIO_FLOOR, PROMOTED_PUSH_FLOOR, which no longer exist on decision_engine), `anticipate_setup.py` (viability logic still reads HTF/daily-bias in a tier-flavored way), `trade_plan_engine.py` (email-flow tests built on the old ARMED/vetoed/tier language). This is real, expected, and exactly Phase 3's scope (stop + management + everything downstream of tier) plus a bit of Phase 1/2 overlap in anticipate_setup.py's own viability read -- not a sign anything above is wrong, just confirmation of how much still depends on the removed tier concept.
+
+Also still open from Phase 0/1, unresolved, not forgotten: CC_PACKAGE.md's system paragraph should name the aligned>=1 pre-filter explicitly (flagged CANON.md §8, not yet edited in CC_PACKAGE.md itself since that's DeepSeek's locked document).
+
+Process note, unrelated to the gate work: found and restored a deleted AGENT_LOG entry earlier in this session (see the entry above this one) -- please only append to this file, never replace a block, even across repos.
+
+Next: trade_plan.py's tier-dependent stop/management logic (Phase 3), unless Andy wants Phase 2 (entry-timing check in executor_live_engine.py) first -- the two don't have a hard ordering dependency on each other, both just depend on Phase 1 being done, which it now is for the core gate.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
