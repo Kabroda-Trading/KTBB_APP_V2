@@ -81,7 +81,11 @@ MANAGEMENT_TEXT = (
 
 COMMIT_OFFSET_MINUTES = 45  # anchor_time + 45min = 08:45 CT / 09:45 ET (the open-window rule)
 
-_TAKE_STATES = ("TAKE_PREMIUM", "TAKE_STANDARD")
+# v2 (2026-09-11): decision_engine.py returns a single "TAKE" verdict_state
+# now, no more TAKE_PREMIUM/TAKE_STANDARD. Kept as a tuple (not a bare
+# string-equality check) so this doesn't need to change again if the shape
+# ever grows back -- but there's only one v2 value.
+_TAKE_STATES = ("TAKE",)
 
 
 def anticipate_setup(
@@ -101,27 +105,25 @@ def anticipate_setup(
     known, which requires the trigger to have ALREADY crossed. That's
     backwards from SS4's own example brief (full levels shown at WAITING,
     before any cross) and the real order mechanics DeepSeek documented:
-    Andy rests a trigger order AT THE LEVEL before the cross -- only the
-    TIER stamp waits for the fuel check at the cross ("cross mechanics
-    clarified for Andy", same log).
+    Andy rests a trigger order AT THE LEVEL before the cross.
 
-    This answers the ONE question decision_engine.py's real gate genuinely
-    can't answer pre-cross: which direction to anticipate. Everything else
-    the gate checks (reachability, daily regime/counter-trend, 15m DEAD
-    tape, HTF trend, session hour) is already knowable at lock -- none of
-    it depends on price having crossed a trigger, only FUEL does (push
-    volume needs the actual crossing candle, unavailable pre-cross). So
-    this reuses decision_engine.py's own collaborator modules directly
-    (reachability.py, market_regime.py, micro_regime.py, htf_fuel.py --
-    never reimplements their logic) to run everything except the fuel
-    check, picking the trend-aligned side using the SAME logic the gate's
-    own counter-trend veto already encodes (a break against a GOOD-quality
-    daily bias gets vetoed anyway, so the aligned side is the only one
-    that could pass).
+    UPDATED 2026-09-11 (v2 rebuild): this answers the ONE question
+    decision_engine.py's real gate genuinely can't answer pre-cross -- which
+    direction to anticipate. Krown Cross votes and the RSI zone check are
+    BOTH side-dependent (you need to know which trigger got crossed to know
+    which side's zone applies), so -- same reasoning as v1's fuel check --
+    they can't be resolved here either; they're evaluated properly, with a
+    real side, at the actual cross. Reachability is the one v2 condition
+    fully knowable at lock (box and ATR are both frozen then); the rest of
+    this function is a heuristic for WHICH side is worth watching and
+    displaying, not a second copy of the real gate. Dead-hour/dead-tape are
+    no longer gate conditions at all in v2 (measured -- see decision_
+    engine.py's own header comment) -- this function no longer treats
+    either as blocking.
 
     Returns {"viable": False, "reason": str} (-> NO_PLAN) or
     {"viable": True, "side": "LONG"|"SHORT", "reason": str} (-> WAITING;
-    tier is stamped later, at the real cross, by advance_waiting_plan()).
+    the real gate re-evaluates fully, with this side, at the actual cross).
 
     A genuinely undetermined direction (no daily bias, no HTF lean) is NOT
     guessed at -- it returns viable=False, deferring to the ORIGINAL
@@ -129,10 +131,8 @@ def anticipate_setup(
     until an actual cross gives decision_engine.py's real gate a side to
     evaluate, same as today's behavior for every case, not just this one.
     """
-    import decision_engine as _decision_engine
     import htf_fuel as _htf_fuel
     import market_regime as _market_regime
-    import micro_regime as _micro_regime
     import reachability as _reachability
 
     bo, bd = float(breakout_trigger or 0), float(breakdown_trigger or 0)
@@ -149,15 +149,15 @@ def anticipate_setup(
         return {"viable": False, "reason": reach["note"],
                 "category": "WIDE_BOX", "box_atr_ratio": box_atr_ratio}
 
-    if session_hour_utc is not None and session_hour_utc in _decision_engine.DEAD_HOURS:
-        return {"viable": False, "reason": f"{session_hour_utc:02d}:00 UTC is a dead-tape hour",
-                "category": "DEAD_HOUR", "box_atr_ratio": box_atr_ratio}
-
-    micro = _micro_regime.classify_regime(candles_15m)
-    if micro.get("regime") == "DEAD":
-        return {"viable": False, "reason": "15M regime is DEAD -- no participation",
-                "category": "DEAD_TAPE", "box_atr_ratio": box_atr_ratio}
-
+    # DEAD_HOUR/DEAD_TAPE early-returns REMOVED 2026-09-11 (v2 rebuild):
+    # decision_engine.py's gate no longer vetoes on either (measured against
+    # the real v2 candidate, brain/audit_evidence/d0_veto_stack_on_candidate.py
+    # -- see CANON.md §8/decision_engine.py's own header comment). Returning
+    # viable=False for either here would report NO_PLAN for a reason that no
+    # longer blocks a real trade at the actual cross. `candles_15m`/
+    # micro_regime.py are no longer read by this function at all -- kept as
+    # a parameter for call-site compatibility (Phase 2/3 cleanup, not yet
+    # done, may drop it from the signature later).
     daily = _market_regime.classify_market_regime(candles_1d)
     daily_bias = (daily.get("policy") or {}).get("bias")
     daily_quality = daily.get("quality")
@@ -216,71 +216,37 @@ def _build_waiting_plan(
     """Shared by both build_trade_plan() paths (an already-crossed TAKE
     decision, and the pre-cross anticipate_setup() path) -- the stop-
     planning/R:R-floor logic is identical either way; only the source of
-    side/entry/t1/t2/t3/tier differs.
+    side/entry/t1/t2/t3 differs.
 
-    2026-09-08 TIER-SPECIFIC STOP (Andy's explicit, informed decision --
-    Kabroda AI Brain repo AGENT_LOG.md, same date -- to implement this
-    directly rather than wait for the out-of-sample check and DeepSeek's
-    independent review Claude Code recommended first; see that log entry
-    for the full context and the honest caveat on what has NOT yet been
-    verified). Backtest finding (brain/calibration/tier_specific_stop_
-    variants.py, full 2021-2026 corpus, 840 trades): PREMIUM performs
-    better on the tight, 24h-core-zone stop (its setups are already the
-    cleanest/highest-conviction -- no need for extra room); STANDARD
-    performs better on the wider r30-based stop (its setups are lower-
-    conviction/fuel-conflicted, and the extra room lets more of them
-    survive to actually develop instead of getting shaken out by normal
-    noise -- T1-reach rate 56.5% -> 62.0% in the same backtest). Combined:
-    +185.2R vs +168.4R for either stop applied uniformly to both tiers,
-    positive in 5 of 6 years tested.
+    v2 (2026-09-11 rebuild, CC_PACKAGE.md §1 / CANON.md §8): ONE stop
+    formula for every trade -- r30 edge -+ STOP_BUFFER_BOX*box, the same
+    formula that used to be STANDARD-only (shipped 2026-09-08) and, before
+    that, was purely the R-bookkeeping basis (never sent to the exchange).
+    There is no more PREMIUM/STANDARD split, so there is no more zone-stop
+    branch -- stop_planner.py's plan_stop() (the 24h-core-zone stop) is no
+    longer called here at all. `tier` is still accepted as a parameter for
+    call-site compatibility (both callers still pass one) but no longer
+    affects anything in this function; kept for a later cleanup pass, not
+    load-bearing.
 
-    STANDARD now uses decision_engine.py's own r30-based formula (r30 -+
-    STOP_BUFFER_BOX*box) as its REAL execution stop -- previously this
-    formula was ONLY the risk-bookkeeping stop (never sent to the
-    exchange, see TRADE_RULES_AUDIT.md section 4's original "two stops"
-    explanation, now tier-dependent for the execution stop specifically).
-    PREMIUM is completely unchanged -- still the 24h-core-zone stop,
-    identical code path to before this change.
-
-    The r30-based candidate is computed and stored (stop_price_r30) on
-    EVERY plan, tier known or not -- when tier isn't known yet (the pre-
-    cross anticipate_setup() path), advance_waiting_plan() reads this
-    field back and swaps it in if the real cross confirms STANDARD (see
-    that function's own comment for the R:R re-check this requires)."""
+    candles_24h/f24_vah/f24_val are accepted for the same call-site-
+    compatibility reason -- unused now that plan_stop() isn't called."""
     import decision_engine as _decision_engine
     is_long = side == "LONG"
     box = abs(t2 - entry_price)
+    if not daily_atr14 or daily_atr14 <= 0:
+        # Can't compute a real stop-distance-in-ATR diagnostic without it,
+        # and a plan with no known ATR shouldn't have passed reachability
+        # in the first place -- NO_PLAN rather than guess.
+        return {**base, "status": "NO_PLAN", "no_plan_reason": "daily ATR14 unavailable"}
     r30_stop_raw = (r30_low - _decision_engine.STOP_BUFFER_BOX * box) if is_long \
         else (r30_high + _decision_engine.STOP_BUFFER_BOX * box)
     stop_price_r30 = round(float(r30_stop_raw), 2)
 
-    stop_plan = sp.plan_stop(
-        candles_24h=candles_24h,
-        entry_price=entry_price, is_long=is_long,
-        r30_high=r30_high, r30_low=r30_low,
-        f24_vah=f24_vah, f24_val=f24_val,
-        daily_atr14=daily_atr14,
-    )
-
-    if stop_plan["stop_price"] is None:
-        # ATR unavailable -- stop_planner.py's own guard. Can't place a real
-        # order without a real stop; NO_PLAN rather than guess.
-        return {
-            **base,
-            "status": "NO_PLAN",
-            "no_plan_reason": f"stop planner unavailable ({stop_plan['stop_basis']})",
-        }
-
-    if tier == "STANDARD":
-        active_stop_price = stop_price_r30
-        active_stop_basis = f"r30 edge {'-' if is_long else '+'} {_decision_engine.STOP_BUFFER_BOX:.3f}xbox (STANDARD tier's own execution stop, not just the R-bookkeeping basis)"
-        active_stop_dist_atr = round(abs(entry_price - stop_price_r30) / daily_atr14, 4) if daily_atr14 else None
-    else:
-        # PREMIUM or tier not yet known (pre-cross) -- completely unchanged
-        # from before this change: the 24h-core-zone stop.
-        active_stop_price = stop_plan["stop_price"]
-        active_stop_basis = stop_plan["stop_basis"]
-        active_stop_dist_atr = stop_plan["stop_dist_atr"]
+    active_stop_price = stop_price_r30
+    active_stop_basis = (f"r30 edge {'-' if is_long else '+'} "
+                          f"{_decision_engine.STOP_BUFFER_BOX:.3f}xbox (v2's one stop, level-anchored)")
+    active_stop_dist_atr = round(abs(entry_price - stop_price_r30) / daily_atr14, 4)
 
     rr = sp.rr_floor_ok(entry_price, active_stop_price, t1, is_long=is_long)
 
@@ -301,7 +267,7 @@ def _build_waiting_plan(
             "direction": side, "tier": tier,
             "stop_price_r30": stop_price_r30,
             "no_plan_reason": (
-                f"{'r30' if tier == 'STANDARD' else 'core-zone'} stop too wide for T1 -- R:R {rr['ratio']:.2f} "
+                f"r30 stop too wide for T1 -- R:R {rr['ratio']:.2f} "
                 f"< 1:1 floor ({active_stop_basis})"
             ),
         }
@@ -351,6 +317,7 @@ def build_trade_plan(
     candles_1h: Optional[list] = None,
     candles_4h: Optional[list] = None,
     session_hour_utc: Optional[int] = None,
+    rsi_4h_at_lock: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Builds the TradePlan fields (a dict, ready for the TradePlan model)
     from an already-computed gate decision (decision_engine.evaluate_15m_
@@ -362,6 +329,14 @@ def build_trade_plan(
     None, verdict_state PASS -- see that function's docstring). Omitting
     them falls back to the original NO_PLAN-until-a-real-cross behavior
     rather than crashing, for any caller that hasn't been updated.
+
+    rsi_4h_at_lock (2026-09-11, v2 gate): the SAME lock-time RSI value
+    battlebox_pipeline.py freezes into levels["rsi_4h_at_lock"] -- passed
+    through here (not recomputed) so it can persist on the TradePlan row
+    (a real DB column, TradePlan.rsi_4h_at_lock) and survive from generation
+    through to the real cross, where advance_waiting_plan() reads it back
+    for the v2 gate's RSI-zone check. Unlike breakout_trigger/r30_high/etc.
+    above, this one IS a real column, not transient-only.
 
     Returns a dict matching database.TradePlan's columns (caller writes it
     to the DB and is responsible for the (symbol, date_key, session_id)
@@ -397,6 +372,7 @@ def build_trade_plan(
         # or the gate itself.
         "fuel_verdict": decision_dict.get("fuel_verdict"),
         "htf_aligned": decision_dict.get("htf_aligned"),
+        "rsi_4h_at_lock": rsi_4h_at_lock,
         "trend_1h": decision_dict.get("trend_1h"),
         "trend_4h": decision_dict.get("trend_4h"),
     }
@@ -513,16 +489,14 @@ def advance_no_plan(
       VETOED path (which held a resting order and gets one retest), a
       NO_PLAN promotion never had a resting order, so there's no retest to
       wait for; one real cross resolves the session outright.
-    - A real TAKE whose push is below PROMOTED_PUSH_FLOOR (2026-09-10,
-      Andy-approved): resolves to DONE, same VETOED framing. A NO_PLAN
-      morning had no anticipated direction at lock -- the 5-year forensic
-      (Kabroda AI Brain repo, anticipate_replay.py) showed those promotions
-      are only a real edge on a genuinely strong push (>= 1.8x baseline);
-      below that they are a coin flip that nets ~0R. This bar is STRICTER
-      than, and additional to, the normal STANDARD_FUEL_RATIO_FLOOR (1.1),
-      and it applies ONLY here -- a WAITING plan that had a direction at
-      lock is not subject to it. See decision_engine.PROMOTED_PUSH_FLOOR's
-      own comment for the full evidence.
+    v2 (2026-09-11): PROMOTED_PUSH_FLOOR is retired along with fuel entirely
+    (decision_engine.py no longer has the constant -- fuel was found to be a
+    post-fill information artifact, not decision-time computable; see that
+    file's own header comment). There is no more fuel-strength re-check on
+    promotion -- a real TAKE at any later cross promotes straight to FILLED,
+    same as any other TAKE. The stop is v2's one formula (r30 edge, no
+    tier branching) -- see _build_waiting_plan()'s own comment for the
+    full rationale.
     """
     state = decision_dict.get("verdict_state")
     side = decision_dict.get("side")
@@ -541,62 +515,27 @@ def advance_no_plan(
         }
 
     import decision_engine as _decision_engine
-    push_ratio = decision_dict.get("fuel_push_ratio")
-    if push_ratio is not None and push_ratio < _decision_engine.PROMOTED_PUSH_FLOOR:
-        return {
-            "status": "DONE",
-            "cross_time": now_utc,
-            "vetoed_cross_side": side,
-            "vetoed_cross_trigger": decision_dict.get("entry_price"),
-            "last_transition_reason": (
-                f"cross cleared the gate ({push_ratio}x baseline push) but a no-plan "
-                f"morning promotes only on a strong push -- below the "
-                f"{_decision_engine.PROMOTED_PUSH_FLOOR}x floor, no trade"
-            ),
-        }
-
-    import decision_engine as _decision_engine
     entry_price = float(decision_dict["entry_price"])
     t1 = float(decision_dict["t1"])
     t2 = float(decision_dict["t2"])
     t3 = float(decision_dict["t3"])
-    tier = decision_dict.get("tier")
     is_long = side == "LONG"
     box = abs(t2 - entry_price)  # t2 = trigger +/- 1.0*box, so this recovers box
 
-    stop_plan = sp.plan_stop(
-        candles_24h=candles_24h, entry_price=entry_price, is_long=is_long,
-        r30_high=r30_high, r30_low=r30_low, f24_vah=f24_vah, f24_val=f24_val,
-        daily_atr14=daily_atr14,
-    )
-    if stop_plan["stop_price"] is None:
-        return None
-    zone_stop = float(stop_plan["stop_price"])
+    if not daily_atr14 or daily_atr14 <= 0:
+        return None  # can't plan a real stop without it -- keep NO_PLAN, retry next poll
 
-    # TIER-SPECIFIC STOP (2026-09-08, shipped for the other two fill paths in
-    # _build_waiting_plan() / advance_waiting_plan() -- see _build_waiting_plan()'s
-    # own comment for the full backtest rationale). This promotion path was
-    # missing it (found in the 2026-09-10 Domain 1/2/3 audit): STANDARD's real
-    # execution stop is the r30-based formula, not PREMIUM's tighter 24h-zone
-    # stop. PREMIUM (and tier-unknown, which shouldn't reach here) keeps the
-    # zone stop. stop_price_r30 is stored on every plan for audit either way.
     stop_r30 = (r30_low - _decision_engine.STOP_BUFFER_BOX * box) if is_long \
         else (r30_high + _decision_engine.STOP_BUFFER_BOX * box)
     stop_price_r30 = round(float(stop_r30), 2)
-    if tier == "STANDARD":
-        active_stop = stop_price_r30
-        active_basis = (f"r30 edge {'-' if is_long else '+'} {_decision_engine.STOP_BUFFER_BOX:.3f}xbox "
-                        f"(STANDARD tier's own execution stop -- NO_PLAN promotion)")
-        active_dist_atr = round(abs(entry_price - stop_price_r30) / daily_atr14, 4) if daily_atr14 else None
-    else:
-        active_stop = zone_stop
-        active_basis = stop_plan["stop_basis"]
-        active_dist_atr = stop_plan["stop_dist_atr"]
+    active_stop = stop_price_r30
+    active_basis = (f"r30 edge {'-' if is_long else '+'} {_decision_engine.STOP_BUFFER_BOX:.3f}xbox "
+                    f"(v2's one stop, level-anchored -- NO_PLAN promotion)")
+    active_dist_atr = round(abs(entry_price - stop_price_r30) / daily_atr14, 4)
 
     rr = sp.rr_floor_ok(entry_price, active_stop, t1, is_long=is_long)
     if not rr["ok"]:
-        # A wider r30 stop can fail 1:1 where the tighter zone stop passed --
-        # same NO_PLAN-preserving philosophy as build_trade_plan(): never
+        # NO_PLAN-preserving philosophy, same as build_trade_plan(): never
         # place a real order the floor rule would reject; a bad stop this
         # poll doesn't mean it stays bad next poll.
         return None
@@ -604,7 +543,7 @@ def advance_no_plan(
     headline = decision_dict.get("tactical_brief") or f"{side} real cross confirmed"
     return {
         "status": "FILLED",
-        "direction": side, "tier": tier,
+        "direction": side, "tier": None,
         "trigger_price": entry_price,
         "stop_price": active_stop, "stop_basis": active_basis,
         "stop_dist_atr": active_dist_atr,
@@ -616,7 +555,10 @@ def advance_no_plan(
         # advance_waiting_plan()'s own "already_broken_out" branch.
         "entry_mode": "RETEST_LIMIT_AT_LINE",
         "rr_floor_ok": True, "rr_ratio": rr["ratio"],
-        "cross_time": now_utc, "fuel_at_cross": "FUELED",
+        # fuel_at_cross: kept as a DB column (database.py) but fuel itself
+        # is retired -- None, not a fabricated "FUELED", now that nothing
+        # computes it.
+        "cross_time": now_utc, "fuel_at_cross": None,
         "fill_time": now_utc, "fill_price": entry_price,
         "faked_first": False,
         "last_transition_reason": f"NO_PLAN morning re-evaluated on a later real cross -- {headline}",
@@ -639,33 +581,38 @@ _T3_RATE_PARTIAL_ALIGNED_PCT = 21
 def _alignment_words(fuel_verdict: Optional[str], htf_aligned: Optional[int]) -> Tuple[Optional[str], Optional[str]]:
     """Shared word-mapping core for classify_alignment() and
     build_alignment_email_line() -- one place decides what counts as
-    FULLY ALIGNED/PARTIAL/CONFLICTED and FUELED/CONFLICTED/NEUTRAL.
-    Returns (tier_word, fuel_word), or (None, None) if either input is
-    unavailable (e.g. a NO_PLAN morning before any real cross) rather
-    than guessing a tier."""
-    if fuel_verdict is None or htf_aligned is None:
+    FULLY ALIGNED/PARTIAL/CONFLICTED. Returns (tier_word, fuel_word), or
+    (None, None) if htf_aligned is unavailable (e.g. a NO_PLAN morning
+    before any real cross) rather than guessing a tier.
+
+    v2 (2026-09-11): `fuel_word`'s second slot is retired along with fuel
+    (decision_dict["fuel_verdict"] is always None now) -- kept as a return
+    slot for the two callers below rather than changing their signature,
+    but always None here. htf_aligned alone still carries real information
+    (same CALIBRATION.md carry-not-win-rate finding this was always about)."""
+    if htf_aligned is None:
         return None, None
-    fuel_word = fuel_verdict if fuel_verdict in ("FUELED", "CONFLICTED") else "NEUTRAL"
     if htf_aligned >= 2:
         tier_word = "FULLY ALIGNED"
     elif htf_aligned == 1:
         tier_word = "PARTIAL"
     else:
         tier_word = "CONFLICTED"
-    return tier_word, fuel_word
+    return tier_word, None
 
 
 def classify_alignment(fuel_verdict: Optional[str], htf_aligned: Optional[int]) -> Optional[str]:
-    """Plain-words alignment tag, e.g. "FULLY ALIGNED / fuel FUELED" --
-    built ONLY from real fields the gate already computes and GateLog
-    already stores (fuel_verdict, htf_aligned -- the count of {1H, 4H}
-    trends agreeing with the trade direction, 0-2), no new decision
-    input, no effect on sizing or the gate. See build_alignment_email_
-    line() for the full email copy this feeds into."""
-    tier_word, fuel_word = _alignment_words(fuel_verdict, htf_aligned)
+    """Plain-words alignment tag, e.g. "FULLY ALIGNED" -- built from
+    htf_aligned (the count of {1H, 4H} trends agreeing with the trade
+    direction, 0-2), no new decision input, no effect on sizing or the
+    gate. `fuel_verdict` is accepted for call-site compatibility but no
+    longer used (v2 has no fuel -- see _alignment_words()'s own comment).
+    See build_alignment_email_line() for the full email copy this feeds
+    into."""
+    tier_word, _ = _alignment_words(fuel_verdict, htf_aligned)
     if tier_word is None:
         return None
-    return f"{tier_word} / fuel {fuel_word}"
+    return tier_word
 
 
 def build_alignment_email_line(plan: Dict[str, Any]) -> Optional[str]:
@@ -681,15 +628,17 @@ def build_alignment_email_line(plan: Dict[str, Any]) -> Optional[str]:
     anywhere near it.
 
     Returns None when the inputs can't be classified (same rule as
-    classify_alignment())."""
-    tier_word, fuel_word = _alignment_words(plan.get("fuel_verdict"), plan.get("htf_aligned"))
+    classify_alignment()). v2 (2026-09-11): the "Fuel <word> |" lead-in is
+    dropped -- fuel is retired, there's nothing real to show there any
+    more (see _alignment_words()'s own comment)."""
+    tier_word, _ = _alignment_words(plan.get("fuel_verdict"), plan.get("htf_aligned"))
     if tier_word is None:
         return None
 
     trend_bits = [f"1H trend {plan['trend_1h']}"] if plan.get("trend_1h") else []
     if plan.get("trend_4h"):
         trend_bits.append(f"4H trend {plan['trend_4h']}")
-    lead = f"Fuel {fuel_word}" + ("".join(f" | {b}" for b in trend_bits)) + f" -> {tier_word}"
+    lead = ("".join(f"{b} | " for b in trend_bits)) + tier_word
 
     if tier_word == "FULLY ALIGNED":
         stat = (
@@ -894,42 +843,31 @@ def render_brief(plan: Dict[str, Any]) -> str:
 
 
 # ==============================================================================
-# INTRADAY STATE MACHINE (SS5) — pre-fill, fuel-gated entry logic
+# INTRADAY STATE MACHINE (SS5) — pre-fill, Krown-Cross+RSI-gated entry logic
 # ==============================================================================
 
-def _stamp_tier_at_cross(
+def _confirm_v2_gate_at_cross(
     plan: Dict[str, Any],
     candles_1h: List[Dict[str, Any]],
     candles_4h: List[Dict[str, Any]],
     daily_atr14: float,
-    fuel_verdict: Optional[str] = None,
-    push_ratio: Optional[float] = None,
-) -> Optional[str]:
-    """PREMIUM requires fuel FUELED specifically (not just fuel-condition-
-    passing) AND both HTF timeframes AND box/ATR <= 0.40 at the cross,
-    else STANDARD if it clears STANDARD_FUEL_RATIO_FLOOR, else None (no
-    tier -- the caller must not fill) -- decision_engine.py's own
-    _core_gate() tier formula (2026-09-06 three-outcome rebuild, 2026-09-09
-    fuel-quality floor), recomputed here (not reimplemented differently),
-    for a plan whose tier was left None at generation (the anticipate_
-    setup() pre-cross path -- see build_trade_plan()'s docstring) because
-    it genuinely couldn't be known until now.
+) -> Dict[str, Any]:
+    """v2 (2026-09-11): replaces _stamp_tier_at_cross() -- there is no more
+    tier to stamp, so this re-checks the SAME 4-condition gate decision_
+    engine.py's _core_gate() implements (reachability, HTF aligned>=1,
+    Krown Cross votes==2, RSI-at-lock in zone), recomputed here (not
+    reimplemented differently) for a plan whose side was anticipated at
+    lock (the anticipate_setup() pre-cross path -- see build_trade_plan()'s
+    docstring) and now has a real cross to confirm against.
 
-    fuel_verdict is optional ONLY for backward compatibility with any
-    caller that hasn't been updated yet -- omitting it means "assume
-    FUELED," which is safe for every existing call site (all of them
-    only ever call this from inside an `if verdict == "FUELED":` branch
-    today). New callers that also admit CONFLICTED crosses (2026-09-07,
-    DeepSeek's live-email review) MUST pass the real verdict, since
-    CONFLICTED can never earn PREMIUM -- only FUELED can.
+    Returns {"pass": bool, "misses": [str, ...]} -- same shape as
+    decision_engine._core_gate()'s own return, so callers can report the
+    real reason a plan didn't fill instead of a bare "no trade."
 
-    push_ratio (2026-09-09): the push_volume.ratio decision_engine.py's
-    _core_gate() also reads, needed here so this second, independent tier
-    site can't silently drift from the live gate's own floor -- omitting
-    it means "assume the floor passes" (same backward-compatibility stance
-    as fuel_verdict), so no existing caller that hasn't been updated
-    changes behavior.
-    """
+    RSI is read from plan["rsi_4h_at_lock"] (frozen at generation, NOT
+    recomputed here) -- see database.py's TradePlan.rsi_4h_at_lock and
+    decision_engine.py's header comment for why RSI is frozen-at-lock
+    while Krown Cross/HTF-aligned are not."""
     import htf_fuel as _htf_fuel
     import reachability as _reachability
     import decision_engine as _decision_engine
@@ -937,28 +875,34 @@ def _stamp_tier_at_cross(
     side = plan.get("direction")
     htf = _htf_fuel.htf_fuel(candles_1h, candles_4h, side)
     aligned = htf.get("aligned") or 0
+    cross = _htf_fuel.krown_cross_votes(candles_1h, candles_4h, side)
+    votes = cross.get("votes") or 0
 
     trigger, t2 = plan.get("trigger_price"), plan.get("t2")
     box = abs(t2 - trigger) if (trigger is not None and t2 is not None) else 0.0
     reach = _reachability.reachability(box, daily_atr14)
-    ratio = reach.get("ratio")
 
-    fueled = fuel_verdict is None or fuel_verdict == "FUELED"
-    premium = fueled and aligned == 2 and ratio is not None and ratio <= _reachability.PREMIUM_BOX_ATR
-    if premium:
-        return "PREMIUM"
+    rsi_4h_at_lock = plan.get("rsi_4h_at_lock")
+    rsi_lo, rsi_hi = _decision_engine.RSI_ZONE_LONG if side == "LONG" else _decision_engine.RSI_ZONE_SHORT
+    if rsi_4h_at_lock is None:
+        rsi_ok = False
+    elif side == "LONG":
+        rsi_ok = rsi_lo <= rsi_4h_at_lock < rsi_hi
+    else:
+        rsi_ok = rsi_lo < rsi_4h_at_lock <= rsi_hi
 
-    # HTF carry (2026-09-10, Andy-approved -- see decision_engine.py::_core_gate's
-    # own comment for the full evidence trail): at least one of {1H, 4H} must
-    # back the direction, for BOTH fuel states. Previously CONFLICTED fuel
-    # waived this entirely, so a STANDARD trade could fill with aligned == 0.
-    # _core_gate() folds this into `core_passed` (a failed htf_carry check ->
-    # pass=False, tier=None); this parallel path must reach the same verdict.
-    if aligned == 0:
-        return None
+    misses: List[str] = []
+    if not reach["ok"]:
+        misses.append(reach["note"])
+    if aligned < 1:
+        misses.append("neither 1H nor 4H backs the direction (no carry)")
+    if votes < 2:
+        misses.append(f"Krown Cross votes={votes}/2 (need both 1H and 4H)")
+    if not rsi_ok:
+        rsi_text = f"{rsi_4h_at_lock:.1f}" if rsi_4h_at_lock is not None else "unavailable"
+        misses.append(f"4H RSI at lock ({rsi_text}) outside the {rsi_lo}-{rsi_hi} control zone")
 
-    standard_ok = push_ratio is None or push_ratio >= _decision_engine.STANDARD_FUEL_RATIO_FLOOR
-    return "STANDARD" if standard_ok else None
+    return {"pass": not misses, "misses": misses}
 
 
 def advance_waiting_plan(
@@ -971,24 +915,31 @@ def advance_waiting_plan(
     candles_4h: Optional[List[Dict[str, Any]]] = None,
     daily_atr14: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Pre-fill transitions ONLY: WAITING/VETOED -> FILLED/VETOED/DONE.
+    """Pre-fill transitions ONLY: WAITING -> FILLED/DONE.
 
     Held until commit_after (the open-window rule) — SS1's "no plan
     generated intraday" rule doesn't mean no MONITORING before commit_after,
-    it means the plan's fixed fields (trigger/stop/targets/tier) never
-    change; whether/when it fires is exactly what this function decides.
+    it means the plan's fixed fields (trigger/stop/targets) never change;
+    whether/when it fires is exactly what this function decides.
 
-    candles_1h/candles_4h/daily_atr14 (all optional) feed _stamp_tier_at_
-    cross() -- ONLY used, and only needed, when plan["tier"] is still None
-    at the FUELED fill (the anticipate_setup() pre-cross generation path
-    defers tier to the cross on purpose). A plan generated with a tier
-    already known (the original, already-crossed TAKE path) is left
-    untouched -- this never re-decides an existing tier.
+    v2 (2026-09-11): there is no more fuel gate, so there is no more NO_PUSH/
+    FUELED/CONFLICTED/NO_FUEL verdict and no more VETOED-then-retest state --
+    once the anticipated side's trigger is actually touched, the v2 gate
+    (reachability, HTF aligned>=1, Krown Cross votes==2, RSI-at-lock in
+    zone -- _confirm_v2_gate_at_cross()) either passes or it doesn't; there
+    is no "ghost push, maybe next time" concept left to retry. A plan still
+    sitting with status=="VETOED" from before this rebuild is treated the
+    same as WAITING here (there is nothing left to distinguish them by).
+
+    candles_1h/candles_4h/daily_atr14 (all optional) feed
+    _confirm_v2_gate_at_cross() -- omitting any of them means "can't
+    re-check the gate," which returns None (stay WAITING, retry next poll)
+    rather than guessing.
 
     ARMED and FILLED collapse into one transition here: a stop/limit order
     sitting exactly at trigger_price fills the instant price touches it --
-    this is advisory tracking (SS1 point 2, never real order placement),
-    so there's no meaningful gap between "fuel confirmed + touched" and
+    this is advisory tracking (SS1 point 2, never real order placement), so
+    there's no meaningful gap between "gate confirmed + touched" and
     "filled" at candle-poll granularity.
 
     Returns a dict of field updates to apply to the TradePlan row, or None
@@ -1012,38 +963,17 @@ def advance_waiting_plan(
     side = "LONG" if is_long else "SHORT"
     trigger = plan.get("trigger_price")
 
-    # 2026-09-07 fix (same review that caught the CONFLICTED-veto bug
-    # below): without fuel_1h/fuel_4h, evaluate_fuel_gate() can only ever
-    # return FUELED or CONFLICTED here -- NO_FUEL specifically requires
-    # HTF opposition or divergence (fuel_gate.py's own verdict formula),
-    # neither of which this call could ever supply. That silently made
-    # the VETOED-for-NO_FUEL branch below unreachable from this path.
-    # Pass real HTF data through when it's available (same optional
-    # candles_1h/candles_4h already used for tier stamping) so a genuine
-    # ghost push can actually be detected here too, matching
-    # decision_engine.py's own call.
-    fuel_1h = fuel_4h = None
-    if candles_1h is not None and candles_4h is not None:
-        import htf_fuel as _htf_fuel
-        htf_for_fuel = _htf_fuel.htf_fuel(candles_1h, candles_4h, side)
-        fuel_1h, fuel_4h = htf_for_fuel.get("trend_1h"), htf_for_fuel.get("trend_4h")
-
-    fuel = fuel_gate.evaluate_fuel_gate(candles_5m, trigger, side, fuel_1h=fuel_1h, fuel_4h=fuel_4h)
-    verdict = fuel.get("verdict")
-
-    if verdict == "NO_PUSH":
+    touched = (live_price >= trigger) if is_long else (live_price <= trigger)
+    if not touched:
         # P0 FIX (2026-09-01, confirmed live -- Kabroda AI Brain repo
         # AGENT_LOG.md "CONFIRMED P0: state machine missed a live cross"):
-        # NO_PUSH on the anticipated side does NOT mean nothing happened --
-        # anticipate_setup() picks ONE direction at lock (e.g. trend-
-        # aligned with a GOOD daily table), but price can break the
-        # OPPOSITE trigger instead (a genuine counter-trend move --
-        # decision_engine.py's own counter-trend veto treats this as a
-        # real, expected scenario, not noise). Without this check the
-        # plan sat WAITING forever while price moved 200+ points through
-        # the other trigger with zero detection, no email, nothing.
-        # box is derivable from already-known fields (t2 = trigger +/-
-        # 1.0*box) -- no new field needed to reconstruct the untaken side.
+        # not touched on the anticipated side does NOT mean nothing
+        # happened -- anticipate_setup() picks ONE direction at lock, but
+        # price can break the OPPOSITE trigger instead (a genuine counter-
+        # trend move). Without this check the plan sat WAITING forever
+        # while price moved 200+ points through the other trigger with
+        # zero detection, no email, nothing. box is derivable from
+        # already-known fields (t2 = trigger +/- 1.0*box).
         trigger_price, t2 = plan.get("trigger_price"), plan.get("t2")
         if trigger_price is not None and t2 is not None:
             box = abs(t2 - trigger_price)
@@ -1061,7 +991,7 @@ def advance_waiting_plan(
                 }
         return None  # not touched on either side yet
 
-    updates: Dict[str, Any] = {"cross_time": now_utc, "fuel_at_cross": verdict}
+    updates: Dict[str, Any] = {"cross_time": now_utc}
 
     # entry_mode decided the first time price actually reaches the trigger
     # at/after commit_after -- SS2's "already broken out at commit time" rule.
@@ -1069,101 +999,19 @@ def advance_waiting_plan(
         already_broken_out = (live_price > trigger) if is_long else (live_price < trigger)
         updates["entry_mode"] = "RETEST_LIMIT_AT_LINE" if already_broken_out else "TRIGGER_AT_LEVEL"
 
-    # 2026-09-07 fix (DeepSeek's live-email review, Kabroda AI Brain repo
-    # AGENT_LOG.md 09:30/09:50 CT): this used to require verdict == "FUELED"
-    # exactly, which VETOED a real, tradeable CONFLICTED-STANDARD cross --
-    # a genuine regression relative to the shipped Domain 1 rebuild
-    # (decision_engine.py's own gate has admitted FUELED-or-CONFLICTED
-    # since that rebuild; NO_FUEL is the only fuel-based veto). Widened to
-    # match. _stamp_tier_at_cross() is told the real verdict so a
-    # CONFLICTED cross can never accidentally earn PREMIUM (only FUELED
-    # can, per that function's own gate).
-    if verdict in ("FUELED", "CONFLICTED"):
-        updates["status"] = "FILLED"
-        updates["fill_time"] = now_utc
-        updates["fill_price"] = trigger
-        # faked_first (SS9a): did the FIRST cross wick back before
-        # acceptance? True only when this fill is the retest after an
-        # earlier NO_FUEL cross (status was already VETOED coming in) --
-        # a direct first-cross fill is a clean acceptance, not a fake.
-        updates["faked_first"] = (status == "VETOED")
-        push_ratio = (fuel.get("checks") or {}).get("push_volume", {}).get("ratio")
-        prefix = "second " if status == "VETOED" else ""
-        updates["last_transition_reason"] = f"{prefix}cross {verdict.lower()} ({push_ratio}x baseline) -- filled"
-        if plan.get("tier") is None and candles_1h is not None and candles_4h is not None and daily_atr14:
-            new_tier = _stamp_tier_at_cross(
-                plan, candles_1h, candles_4h, daily_atr14, fuel_verdict=verdict, push_ratio=push_ratio,
-            )
-            if new_tier is None:
-                # Cleared the fuel-condition check but not a stricter gate
-                # requirement, and PREMIUM doesn't apply either -- the real-
-                # cross path (decision_engine.py's _core_gate()) would return
-                # pass=False/tier=None here too. Must not fall through to
-                # FILLED (there is no tier to manage this trade under). Two
-                # distinct causes, named separately per KABRODA_REBUILD_SPEC.md
-                # §9: the HTF-carry cut (2026-09-10) is the more fundamental
-                # one (_core_gate folds it into core_passed), checked first.
-                import decision_engine as _decision_engine
-                import htf_fuel as _htf_fuel
-                _aligned = _htf_fuel.htf_fuel(candles_1h, candles_4h, side).get("aligned") or 0
-                if _aligned == 0:
-                    reason = (
-                        "cross confirmed but neither 1H nor 4H backs the direction "
-                        "(no carry fuel) -- no trade"
-                    )
-                else:
-                    reason = (
-                        f"cross confirmed but push volume ({push_ratio}x baseline) is below the "
-                        f"{_decision_engine.STANDARD_FUEL_RATIO_FLOOR}x floor for standard tier -- no trade"
-                    )
-                return {"status": "DONE", "last_transition_reason": reason}
-            updates["tier"] = new_tier
-            # 2026-09-08 TIER-SPECIFIC STOP (see _build_waiting_plan()'s own
-            # comment for the full backtest rationale and Andy's explicit
-            # decision to ship it directly): the pre-cross anticipate_setup()
-            # path generates its plan before tier is known, so
-            # _build_waiting_plan() defaulted stop_price to the 24h-zone
-            # value (PREMIUM's stop) and separately stored the r30 candidate
-            # in stop_price_r30. Only now, with the real tier finally known,
-            # do we find out this plan should have been using STANDARD's
-            # wider r30 stop instead -- swap it in, and re-run the SAME R:R
-            # floor check _build_waiting_plan() ran at generation (a wider
-            # stop can fail 1:1 where the tighter one passed; never place a
-            # real order the floor rule would have rejected just because the
-            # tier wasn't known yet when the plan was first built).
-            if new_tier == "STANDARD" and plan.get("stop_price_r30") is not None:
-                import decision_engine as _decision_engine
-                r30_stop = plan["stop_price_r30"]
-                rr = sp.rr_floor_ok(trigger, r30_stop, plan.get("t1"), is_long=is_long)
-                if not rr["ok"]:
-                    return {
-                        "status": "DONE",
-                        "tier": new_tier,
-                        "last_transition_reason": (
-                            f"cross confirmed STANDARD, but its own execution stop (r30-based) "
-                            f"fails the 1:1 R:R floor for T1 (R:R {rr['ratio']:.2f}) -- no trade"
-                        ),
-                    }
-                updates["stop_price"] = r30_stop
-                updates["stop_basis"] = (
-                    f"r30 edge {'-' if is_long else '+'} {_decision_engine.STOP_BUFFER_BOX:.3f}xbox "
-                    f"(STANDARD tier's own execution stop, swapped in at the real cross)"
-                )
-                updates["stop_dist_atr"] = round(abs(trigger - r30_stop) / daily_atr14, 4) if daily_atr14 else None
-                updates["rr_ratio"] = rr["ratio"]
-        return updates
+    if candles_1h is None or candles_4h is None or not daily_atr14:
+        return None  # can't re-check the gate this poll -- try again next time
 
-    # Only NO_FUEL (a ghost push, no real volume) reaches here -- FUELED
-    # and CONFLICTED are both handled above, NO_PUSH is handled earlier.
-    if status == "VETOED":
-        # This is already the second cross (VETOED can only be reached after
-        # exactly one NO_FUEL cross -- no counter column needed).
-        updates["status"] = "DONE"
-        updates["last_transition_reason"] = f"second cross also {verdict} -- no energy, done for the day"
-        return updates
+    gate = _confirm_v2_gate_at_cross(plan, candles_1h, candles_4h, daily_atr14)
+    if not gate["pass"]:
+        reason = "; ".join(gate["misses"]) or "gate declined"
+        return {"status": "DONE", "last_transition_reason": f"cross confirmed but the gate declined -- {reason}"}
 
-    updates["status"] = "VETOED"
-    updates["last_transition_reason"] = f"cross {verdict} (ghost push) -- waiting for the retest"
+    updates["status"] = "FILLED"
+    updates["fill_time"] = now_utc
+    updates["fill_price"] = trigger
+    updates["faked_first"] = False  # no more retest state to have faked out of
+    updates["last_transition_reason"] = "cross confirmed, gate passed -- filled"
     return updates
 
 

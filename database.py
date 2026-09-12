@@ -569,6 +569,15 @@ def init_db():
         except Exception:
             pass
 
+    # --- v2 GATE: RSI AT LOCK (2026-09-11) -- see TradePlan.rsi_4h_at_lock's
+    # own comment. ---
+    for _col in ["rsi_4h_at_lock FLOAT"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE trade_plans ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- TIER-SPECIFIC STOP (2026-09-08) -- see TradePlan.stop_price_r30's
     # own comment for the full mechanism (Andy's explicit decision to ship
     # the backtest finding directly). ---
@@ -957,6 +966,16 @@ class TradePlan(Base):
     # trend reads, not just the aligned count.
     trend_1h = Column(String, nullable=True)       # BULLISH | BEARISH | None
     trend_4h = Column(String, nullable=True)
+    # v2 gate (2026-09-11): the 4H RSI(14) Wilder value frozen at THIS
+    # session's lock (battlebox_pipeline.py's "RSI AT LOCK" capture) --
+    # same lock-time-snapshot reasoning as fuel_verdict/htf_aligned/trend_1h/
+    # trend_4h above, and the same reason it must be persisted here rather
+    # than recomputed later: advance_waiting_plan() needs THIS value, not a
+    # fresh one, when the real cross confirms a side and re-checks the gate
+    # (decision_engine.py's own gate reads it from levels["rsi_4h_at_lock"]
+    # at the moment of the cross for the same reason -- see that file's
+    # header comment on why RSI is frozen-at-lock while Krown Cross is not).
+    rsi_4h_at_lock = Column(Float, nullable=True)
 
     entry_mode = Column(String, nullable=True)     # TRIGGER_AT_LEVEL | RETEST_LIMIT_AT_LINE, set at commit
     trigger_price = Column(Float, nullable=True)

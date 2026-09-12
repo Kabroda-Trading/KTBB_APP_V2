@@ -224,6 +224,11 @@ def run_mas_analysis(
             candles_1h=candles_1h,
             candles_4h=candles_4h,
             session_hour_utc=now_utc.hour,
+            # v2 gate (2026-09-11): the same lock-time RSI value the gate
+            # itself reads (decision_engine.py's header comment) -- persisted
+            # on the TradePlan row so advance_waiting_plan() can re-check the
+            # RSI zone at the real cross without recomputing it fresh.
+            rsi_4h_at_lock=levels.get("rsi_4h_at_lock"),
         )
         _inject_trade_plan_to_database(symbol, session_id, date_key, plan_fields)
     except Exception as _tp_err:

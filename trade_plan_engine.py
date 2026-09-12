@@ -54,14 +54,19 @@
 #                        resolves on its own (win, its own tighter-stop
 #                        loss, or expiry) -- no second T1/runner/T3 scan,
 #                        that stays ledger_closing_engine.py's job.
-#   STOPPED           -> re-checks fuel at the ORIGINAL trigger. A NO_PUSH
-#                        read (price not currently back beyond trigger) is
-#                        NOT a "no fuel" verdict -- it means the re-entry
-#                        question hasn't been asked yet, so the row is left
-#                        untouched to wait for a real cross. Only once
-#                        price actually returns to the trigger does
-#                        check_reentry_eligibility() get a real verdict.
-#                        Session expiry with no qualifying cross -> DONE.
+#   STOPPED           -> v2 (2026-09-11): SS8's fuel-gated re-entry-after-
+#                        wick-fake is RETIRED, same reasoning as DeepSeek's
+#                        "no leg 2" call on the retrace re-entry idea
+#                        (CC_PACKAGE.md §4) -- there is no more fuel signal
+#                        to check "is it still worth re-entering" against,
+#                        and inventing a new v2-consistent re-entry
+#                        condition here would be a real design decision
+#                        nobody has actually made yet. A STOPPED plan
+#                        resolves straight to DONE now; check_reentry_
+#                        eligibility()/advance_reentry_plan() are unreachable
+#                        (kept in trade_plan.py, not deleted, in case a
+#                        future v2.x re-entry design gets built on top of
+#                        the new gate instead of fuel).
 # ==============================================================================
 
 import asyncio
@@ -70,7 +75,6 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from database import SessionLocal, TradePlan, CampaignLog, SessionLock
-import fuel_gate
 import trade_plan as tp
 import market_data
 from ledger_closing_engine import _fetch_1m_since
@@ -285,18 +289,17 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
             "trigger_price": row.trigger_price, "t2": row.t2,
             "commit_after": _as_utc(row.commit_after),
             "entry_mode": row.entry_mode, "tier": row.tier,
+            "rsi_4h_at_lock": row.rsi_4h_at_lock,
         }
-        # Only fetch 1H/4H/daily -- and only when the plan's tier is still
-        # None -- for _stamp_tier_at_cross() (2026-08-31 WAITING-visibility
-        # fix). A plan generated with a real tier already (the original,
-        # already-crossed TAKE path) never needs this extra fetch.
-        candles_1h = candles_4h = None
-        daily_atr14 = None
-        if row.tier is None:
-            candles_1h = await market_data.fetch_live_1h(symbol, limit=100)
-            candles_4h = await market_data.fetch_live_4h(symbol, limit=100)
-            candles_1d = await market_data.fetch_live_daily(symbol, limit=60)
-            daily_atr14 = market_data._calc_daily_atr14(candles_1d)
+        # v2 (2026-09-11): fetch 1H/4H/daily every poll for
+        # _confirm_v2_gate_at_cross() (2026-08-31 WAITING-visibility fix,
+        # updated for the v2 gate) -- there is no more tier to skip this
+        # fetch once known; v2 has no tier at all, so this is unconditional
+        # now, not gated on `row.tier is None` (which is always True).
+        candles_1h = await market_data.fetch_live_1h(symbol, limit=100)
+        candles_4h = await market_data.fetch_live_4h(symbol, limit=100)
+        candles_1d = await market_data.fetch_live_daily(symbol, limit=60)
+        daily_atr14 = market_data._calc_daily_atr14(candles_1d)
         updates = tp.advance_waiting_plan(
             plan_dict, now_utc, session_expires_at, candles_5m, live_price,
             candles_1h=candles_1h, candles_4h=candles_4h, daily_atr14=daily_atr14,
@@ -404,24 +407,13 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
             print(f"|| TRADE PLAN || GateLog persist failed for {row.symbol}: {_persist_err}")
 
     elif row.status == "STOPPED":
-        if now_utc >= session_expires_at:
-            # Routed through _apply() (not a direct setattr+print, unlike
-            # WIDE_STOP_FIRST's -> STOPPED transition above) specifically
-            # so the DONE notification hook fires -- DONE is a required
-            # notify event, STOPPED is not.
-            await _apply(db, row, {"status": "DONE",
-                         "last_transition_reason": "session ended, no qualifying re-entry cross after stop"},
-                   symbol)
-            return
-        candles_5m = market_data.confirmed_5m_closes(await market_data.fetch_live_5m(symbol, limit=310))
-        if not candles_5m:
-            return
-        fuel = fuel_gate.evaluate_fuel_gate(candles_5m, row.trigger_price, side)
-        if fuel.get("verdict") == "NO_PUSH":
-            return  # price hasn't come back to the trigger yet -- not a verdict, keep waiting
-        plan_dict = {"status": row.status, "reentry_used": row.reentry_used}
-        updates = tp.check_reentry_eligibility(plan_dict, fuel_still_fueled=(fuel.get("verdict") == "FUELED"))
-        await _apply(db, row, updates, symbol)
+        # v2 (2026-09-11): re-entry-after-wick-fake retired along with fuel
+        # -- see this file's own header comment. Resolves straight to DONE,
+        # routed through _apply() (not a direct setattr+print) so the DONE
+        # notification hook fires.
+        await _apply(db, row, {"status": "DONE",
+                     "last_transition_reason": "stopped -- re-entry is not part of v2, done for the day"},
+               symbol)
 
 
 async def _apply(db, row: TradePlan, updates, symbol: str) -> None:
