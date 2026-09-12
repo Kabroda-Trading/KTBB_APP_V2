@@ -634,6 +634,28 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                     if "error" in pkt:
                         return {"status": "ERROR", "message": pkt["error"], "battlebox": {"raw_15m": raw_15m, "session": session, "levels": {}, "bias_model": {}, "context": {}}}
 
+                    # ── 4H RSI AT LOCK (v2 gate capture — frozen with the lock, NOT
+                    # recomputed on later gate evaluations) ──
+                    # decision_engine.py's v2 gate (Kabroda AI Brain repo,
+                    # CC_PACKAGE.md 2026-09-11, d1_meas6_combo.py::rsi4_at())
+                    # requires 4H RSI(14) Wilder as of the 13:00 UTC lock
+                    # specifically -- the backtest evaluates Krown Cross at
+                    # cross/touch time but RSI at LOCK time, a deliberate
+                    # asymmetry in the measured system, not an oversight.
+                    # market_radar.py/trade_plan_engine.py/kabroda_mas_flow.py
+                    # all build `levels` from this same frozen SessionLock
+                    # packet (see their own `dict(levels)` reads) -- computing
+                    # it once here, instead of at each of those three call
+                    # sites, is what makes it actually frozen rather than
+                    # silently recomputed fresh (and therefore not "at lock")
+                    # every time the gate re-evaluates intraday.
+                    try:
+                        pkt.setdefault("levels", {})["rsi_4h_at_lock"] = _calc_rsi(
+                            [float(c["close"]) for c in raw_4h]
+                        ) if raw_4h else None
+                    except Exception as _rsi_err:
+                        print(f"[RSI AT LOCK] Capture failed (non-blocking): {_rsi_err}")
+
                     # ── MTF STRUCTURAL SNAPSHOT (Phase 1 capture — frozen with the lock) ──
                     try:
                         _w200sma = _fetch_weekly_200sma(symbol)

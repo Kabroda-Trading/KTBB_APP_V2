@@ -1,28 +1,30 @@
 """
-Regression coverage for decision_engine.py.
+Regression coverage for decision_engine.py -- v2 (Krown Cross + 4H RSI gate).
 
-Originally scoped narrowly to the SS9a diagnostic fields (fuel_verdict,
-fuel_push_ratio, trend_1h, trend_4h, htf_aligned, htf_opposed) added
-2026-08-31 -- purely additive, no gate formula/threshold/verdict logic
-touched. Extended 2026-09-06 with real coverage of the tier/verdict logic
-itself, per the Three-Outcome Gate Rebuild (GATE_REBUILD_SPEC.md, Kabroda AI
-Brain repo): the divergence veto is removed, ALMOST is retired, and STANDARD's
-eligibility widens to admit fuel-CONFLICTED-but-otherwise-valid setups, with
-the HTF-carry check now conditional on fuel state (required only when
-FUELED -- see decision_engine.py's own header comment and _core_gate()'s
-docstring-equivalent inline comment for the real-corpus data behind this).
+Rewritten 2026-09-11 for the v2 rebuild (CC_PACKAGE.md, Kabroda AI Brain
+repo; CANON.md §8). v1's tests (fuel gate, PREMIUM/STANDARD tiers,
+STANDARD_FUEL_RATIO_FLOOR, PROMOTED_PUSH_FLOOR, the dead-tape/counter-trend/
+no-fuel veto stack) all exercised behavior that no longer exists -- fuel was
+found to be a post-fill information artifact (not decision-time computable;
+confirmed in both the calibration scripts and this file's own fuel_gate.py),
+and the veto stack was measured against the real v2 candidate population and
+found not to earn its complexity (brain/audit_evidence/
+d0_veto_stack_on_candidate.py, Kabroda AI Brain repo). See decision_engine.py's
+own header comment for the full v1->v2 rationale.
 
-decision_engine.py is a protected file (CLAUDE.md "What Must Never Be
-Changed" #1/#3) for its gate FORMULAS and evaluation TIMING specifically --
-confirmed by reading those two numbered rules directly. Neither is touched by
-this rebuild; only the tier/outcome logic layered on top of them changed, and
-that logic is exactly what these new tests exercise. market_regime.py/
-micro_regime.py/htf_fuel.py/fuel_gate.py are monkeypatched here rather than
-driven with hand-built multi-timeframe candle data, so this test isolates
-decision_engine.py's own wiring instead of re-deriving four separate
-indicator algorithms' exact numeric thresholds.
+v2's gate has FOUR conditions, all must pass: reachability (box<=0.55xATR,
+unchanged from v1), HTF aligned>=1 (the OLD 9/21 EMA read, unchanged from v1
+-- real and load-bearing, not redundant with Krown Cross), Krown Cross
+votes==2 (NEW 21/55 EMA stack + 6-bar slope, BOTH 1H and 4H), and 4H RSI(14)
+Wilder in the control zone AT LOCK (LONG 62-80, SHORT 20-38, read from
+levels["rsi_4h_at_lock"] -- frozen by battlebox_pipeline.py, not recomputed
+here). One outcome now: TAKE or PASS. No tier, no PREMIUM/STANDARD split.
+
+htf_fuel.py/market_regime.py/micro_regime.py are monkeypatched here rather
+than driven with hand-built multi-timeframe candle data, so this test
+isolates decision_engine.py's own wiring instead of re-deriving indicator
+algorithms' exact numeric thresholds -- same approach the v1 tests used.
 """
-import inspect
 import os
 import sys
 
@@ -33,14 +35,16 @@ import decision_engine as de
 _LEVELS_TIGHT_BOX = {
     "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
     "range30m_high": 100.0, "range30m_low": 90.0,
-    "daily_atr14": 25.0,  # box=10, box/atr=0.40 -> PREMIUM-tier boundary
+    "daily_atr14": 25.0,  # box=10, box/atr=0.40 -> well inside the 0.55 ceiling
     "price": 101.0,       # beyond BO -> LONG
+    "rsi_4h_at_lock": 70.0,  # inside the LONG control zone (62-80)
 }
 
 
 def _patch_neutral_regime(monkeypatch):
-    """Regime/table combo that never trips the dead-tape or counter-trend
-    hard vetoes, so tests can isolate the fuel/HTF gate logic."""
+    """Regime/table combo that would have tripped the old dead-tape/counter-
+    trend vetoes if they still existed -- used to prove v2 no longer checks
+    them, not just to get a clean baseline."""
     monkeypatch.setattr(de._micro_regime, "classify_regime", lambda candles: {"regime": "TRENDING"})
     monkeypatch.setattr(de._market_regime, "classify_market_regime",
                          lambda candles: {"table": "NEUTRAL", "quality": "NEUTRAL", "policy": {"bias": None}})
@@ -53,17 +57,10 @@ def _patch_htf(monkeypatch, aligned: int, opposed: int = 0):
                                                   "aligned": aligned, "opposed": opposed, "carry": "N/A"})
 
 
-def _patch_fuel(monkeypatch, verdict: str, ratio: float = 1.5):
-    # 2026-09-09: default raised from 1.0 to 1.5, safely clear of the new
-    # STANDARD_FUEL_RATIO_FLOOR (1.1) -- tests that aren't specifically
-    # exercising the floor shouldn't incidentally trip it. Tests for the
-    # floor itself pass an explicit ratio.
-    monkeypatch.setattr(de._fuel_gate, "evaluate_fuel_gate",
-                         lambda c5m, trigger, side, **kw: {
-                             "verdict": verdict,
-                             "checks": {"push_volume": {"ratio": ratio}},
-                             "htf_aligned": kw.get("fuel_1h"), "htf_opposed": 0,
-                         })
+def _patch_cross(monkeypatch, votes: int):
+    monkeypatch.setattr(de._htf_fuel, "krown_cross_votes",
+                         lambda c1h, c4h, side: {"votes": votes,
+                                                  "cross_1h": votes >= 1, "cross_4h": votes >= 2})
 
 
 def _evaluate(levels=None, hour=15):
@@ -75,26 +72,36 @@ def _evaluate(levels=None, hour=15):
     )
 
 
-def test_diagnostics_exposed_on_a_real_take_premium_path(monkeypatch):
+def _take(monkeypatch, levels=None):
+    """Every v2 condition passing -- the baseline every negative test
+    flips exactly one condition away from."""
     _patch_neutral_regime(monkeypatch)
     _patch_htf(monkeypatch, aligned=2)
-    _patch_fuel(monkeypatch, "FUELED", ratio=1.23)
+    _patch_cross(monkeypatch, votes=2)
+    return _evaluate(levels=levels)
 
-    decision_dict, _ = _evaluate()
 
-    assert decision_dict["verdict_state"] == "TAKE_PREMIUM"
-    assert decision_dict["fuel_verdict"] == "FUELED"
-    assert decision_dict["fuel_push_ratio"] == 1.23
+def test_all_four_conditions_passing_is_a_take(monkeypatch):
+    decision_dict, _ = _take(monkeypatch)
+    assert decision_dict["verdict_state"] == "TAKE"
+    assert decision_dict["approval_status"] == "APPROVED"
+    assert decision_dict["tier"] is None  # v2 has no tier
+
+
+def test_diagnostics_exposed_on_a_real_take_path(monkeypatch):
+    decision_dict, _ = _take(monkeypatch)
     assert decision_dict["trend_1h"] == "BULLISH"
     assert decision_dict["trend_4h"] == "BULLISH"
     assert decision_dict["htf_aligned"] == 2
     assert decision_dict["htf_opposed"] == 0
+    assert decision_dict["krown_cross_votes"] == 2
+    assert decision_dict["rsi_4h_at_lock"] == 70.0
+    # fuel is fully retired -- keys present, always None
+    assert decision_dict["fuel_verdict"] is None
+    assert decision_dict["fuel_push_ratio"] is None
 
 
 def test_diagnostics_safe_and_none_when_no_signal_yet():
-    # side is None (price inside the box) -- the gate short-circuits before
-    # micro_regime/market_regime/htf_fuel/fuel_gate ever run. The new
-    # fields must be present and None, not a KeyError/AttributeError.
     levels = {
         "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
         "range30m_high": 100.0, "range30m_low": 90.0,
@@ -103,249 +110,136 @@ def test_diagnostics_safe_and_none_when_no_signal_yet():
     decision_dict, _ = _evaluate(levels=levels)
     assert decision_dict["verdict_state"] == "PASS"
     assert decision_dict["side"] is None
-    for key in ("fuel_verdict", "fuel_push_ratio", "trend_1h", "trend_4h", "htf_aligned", "htf_opposed"):
+    for key in ("fuel_verdict", "fuel_push_ratio", "trend_1h", "trend_4h",
+                "htf_aligned", "htf_opposed", "krown_cross_votes", "rsi_4h_at_lock"):
         assert decision_dict[key] is None
 
 
-def test_take_standard_covers_fuel_conflicted_when_it_has_htf_carry(monkeypatch):
-    # GATE_REBUILD_SPEC.md §1: fuel-CONFLICTED (not FUELED specifically) can
-    # earn STANDARD -- that part still holds. aligned=1 here: as of 2026-09-10
-    # CONFLICTED needs >= 1 HTF timeframe backing the direction too (the
-    # aligned=0 cut, Andy-approved -- see decision_engine.py::_core_gate's
-    # comment). The point of this test is the FUELED-vs-CONFLICTED axis, not
-    # the carry axis.
-    _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=1)
-    _patch_fuel(monkeypatch, "CONFLICTED")
-
-    decision_dict, _ = _evaluate()
-
-    assert decision_dict["verdict_state"] == "TAKE_STANDARD"
-    assert decision_dict["tier"] == "STANDARD"
-    assert decision_dict["gate"]["checks"]["htf_carry"] is True
+def test_reachability_failure_blocks_take(monkeypatch):
+    levels = dict(_LEVELS_TIGHT_BOX)
+    levels["daily_atr14"] = 10.0  # box=10, box/atr=1.0 -> way past the 0.55 ceiling
+    decision_dict, _ = _take(monkeypatch, levels=levels)
+    assert decision_dict["verdict_state"] == "PASS"
+    assert not decision_dict["gate"]["checks"]["reachability"]
 
 
-def test_conflicted_now_requires_htf_carry_same_as_fueled(monkeypatch):
-    # 2026-09-10 aligned=0 cut (Andy-approved -- LIVE_SYSTEM_STATE.md +
-    # Kabroda AI Brain AGENT_LOG.md): CONFLICTED used to waive the HTF-carry
-    # check entirely, so a STANDARD trade could fill with neither 1H nor 4H
-    # backing the direction. The full corrected 5-year corpus (154 such
-    # trades, +0.08R avg, 51% win) plus a walk-forward (held-out window
-    # -7.9R / 37% win) said cut it. Now both fuel states need >= 1 carry.
+def test_htf_aligned_zero_blocks_take(monkeypatch):
     _patch_neutral_regime(monkeypatch)
     _patch_htf(monkeypatch, aligned=0)
-    _patch_fuel(monkeypatch, "CONFLICTED")
+    _patch_cross(monkeypatch, votes=2)
     decision_dict, _ = _evaluate()
     assert decision_dict["verdict_state"] == "PASS"
-    assert "no carry fuel" in decision_dict["gate"]["misses"][0]
-
-    # aligned 1 and 2 still take it -- the cut is specifically the zero bucket
-    for aligned in (1, 2):
-        _patch_neutral_regime(monkeypatch)
-        _patch_htf(monkeypatch, aligned=aligned)
-        _patch_fuel(monkeypatch, "CONFLICTED")
-        decision_dict, _ = _evaluate()
-        assert decision_dict["verdict_state"] == "TAKE_STANDARD", f"failed at aligned={aligned}"
+    assert not decision_dict["gate"]["checks"]["htf_aligned"]
+    assert any("carry" in m for m in decision_dict["gate"]["misses"])
 
 
-def test_take_standard_still_covers_fueled_not_premium(monkeypatch):
-    # The pre-existing FUELED-but-not-premium population (HTF=1, not 2) --
-    # confirms it isn't lost in the rebuild, just merged into the same
-    # STANDARD label per the spec's naming resolution.
-    _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=1)
-    _patch_fuel(monkeypatch, "FUELED")
-
-    decision_dict, _ = _evaluate()
-
-    assert decision_dict["verdict_state"] == "TAKE_STANDARD"
-    assert decision_dict["tier"] == "STANDARD"
-
-
-def test_take_premium_still_requires_fueled_specifically_not_conflicted(monkeypatch):
-    # CONFLICTED can never earn PREMIUM, even with both HTFs carrying and a
-    # tight box -- only FUELED does. Real boundary, worth locking down.
+def test_krown_cross_one_vote_is_not_enough(monkeypatch):
+    """votes==1 (only one of 1H/4H) must NOT take -- votes==2 is required,
+    and this is deliberately not the same check as htf_aligned>=1 (the two
+    EMA pairs, 9/21 vs 21/55, can and do disagree)."""
     _patch_neutral_regime(monkeypatch)
     _patch_htf(monkeypatch, aligned=2)
-    _patch_fuel(monkeypatch, "CONFLICTED")
-
-    decision_dict, _ = _evaluate()
-
-    assert decision_dict["verdict_state"] == "TAKE_STANDARD"
-    assert decision_dict["tier"] == "STANDARD"
-
-
-def test_veto_gate_htf_carry_check_mirrors_core_gate_after_the_aligned0_cut(monkeypatch):
-    # A hard veto short-circuits before _core_gate(), but its diagnostic
-    # `checks` dict must not drift from _core_gate's own htf_carry rule
-    # (aligned>=1 for BOTH fuel states since 2026-09-10) -- a CONFLICTED
-    # aligned=0 veto row must log htf_carry=False, not the stale
-    # "True if conflicted" waiver.
-    _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=0)
-    _patch_fuel(monkeypatch, "CONFLICTED")
-    # force a hard veto (dead 15m tape) on top of the aligned=0 CONFLICTED cross
-    monkeypatch.setattr(de._micro_regime, "classify_regime", lambda candles: {"regime": "DEAD"})
+    _patch_cross(monkeypatch, votes=1)
     decision_dict, _ = _evaluate()
     assert decision_dict["verdict_state"] == "PASS"
-    assert decision_dict["gate"]["checks"]["htf_carry"] is False
+    assert not decision_dict["gate"]["checks"]["krown_cross"]
+    assert any("Krown Cross" in m for m in decision_dict["gate"]["misses"])
 
 
-def test_no_fuel_is_still_a_hard_veto_not_folded_into_standard(monkeypatch):
-    _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=2)
-    _patch_fuel(monkeypatch, "NO_FUEL")
-
-    decision_dict, _ = _evaluate()
-
+def test_rsi_outside_zone_blocks_take(monkeypatch):
+    levels = dict(_LEVELS_TIGHT_BOX)
+    levels["rsi_4h_at_lock"] = 50.0  # dead center, well outside 62-80
+    decision_dict, _ = _take(monkeypatch, levels=levels)
     assert decision_dict["verdict_state"] == "PASS"
-    assert decision_dict["gate"]["misses"] == ["ghost push (NO_FUEL)"]
-    assert "ghost push" in decision_dict["tactical_brief"]
+    assert not decision_dict["gate"]["checks"]["rsi_4h_zone"]
 
 
-def test_almost_state_no_longer_reachable(monkeypatch):
-    # This exact scenario (FUELED, reachability ok, hour ok, only HTF carry
-    # missing) used to be ALMOST via the old one_gap branch. That branch is
-    # gone -- it now falls straight through to PASS, naming the same cause.
-    _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=0)
-    _patch_fuel(monkeypatch, "FUELED")
-
-    decision_dict, _ = _evaluate()
-
+def test_rsi_missing_fails_safe_not_open(monkeypatch):
+    """No rsi_4h_at_lock in levels (e.g. a lock persisted before this
+    field existed) must PASS, not silently take on unknown momentum."""
+    levels = dict(_LEVELS_TIGHT_BOX)
+    del levels["rsi_4h_at_lock"]
+    decision_dict, _ = _take(monkeypatch, levels=levels)
     assert decision_dict["verdict_state"] == "PASS"
-    assert decision_dict["verdict_state"] != "ALMOST"
-    assert "no carry fuel" in decision_dict["gate"]["misses"][0]
+    assert not decision_dict["gate"]["checks"]["rsi_4h_zone"]
 
 
-def test_divergence_argument_removed_from_signature():
-    params = inspect.signature(de.evaluate_15m_decision).parameters
-    assert "confluence_15m" not in params
-
-
-def test_pass_always_names_a_specific_cause(monkeypatch):
-    # Hard-veto path: the headline is hand-crafted per veto, but must still
-    # name the specific cause, not a generic stand-down string
-    # (GATE_REBUILD_SPEC.md §1's transparency requirement).
-    _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=2)
-    _patch_fuel(monkeypatch, "NO_FUEL")
-    veto_decision, _ = _evaluate()
-    assert veto_decision["verdict_state"] == "PASS"
-    assert veto_decision["gate"]["misses"] == ["ghost push (NO_FUEL)"]
-    assert "ghost push" in veto_decision["tactical_brief"]
-
-    # Core-gate-miss path: the headline is built directly from gate["misses"],
-    # so the exact named cause must appear verbatim.
-    _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=0)
-    _patch_fuel(monkeypatch, "FUELED")
-    gap_decision, _ = _evaluate()
-    assert gap_decision["verdict_state"] == "PASS"
-    assert gap_decision["gate"]["misses"]
-    assert gap_decision["gate"]["misses"][0] in gap_decision["tactical_brief"]
-
-
-def test_standard_fuel_ratio_floor_blocks_a_thin_but_technically_fueled_push(monkeypatch):
-    # 2026-09-09 STANDARD_FUEL_RATIO_FLOOR (1.1): a push that clears FUELED's
-    # own 0.8 threshold but not the stricter 1.1 STANDARD floor must PASS,
-    # not TAKE_STANDARD -- this is the exact 0.8-1.0 "marginal zone" the
-    # backtest found barely profitable/high-stop-rate.
-    _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=1)
-    _patch_fuel(monkeypatch, "FUELED", ratio=0.95)
-    decision_dict, _ = _evaluate()
-    assert decision_dict["verdict_state"] == "PASS"
-    assert "1.1" in decision_dict["gate"]["misses"][0]
-    assert "0.95" in decision_dict["gate"]["misses"][0]
-
-
-def test_standard_fuel_ratio_floor_boundary_exactly_at_1_1_takes_it(monkeypatch):
-    # >= is inclusive -- exactly 1.1 must qualify, not just "above" it.
-    _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=1)
-    _patch_fuel(monkeypatch, "FUELED", ratio=1.1)
-    decision_dict, _ = _evaluate()
-    assert decision_dict["verdict_state"] == "TAKE_STANDARD"
-
-
-def test_standard_fuel_ratio_floor_boundary_just_under_1_1_rejects_it(monkeypatch):
-    _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=1)
-    _patch_fuel(monkeypatch, "FUELED", ratio=1.099)
-    decision_dict, _ = _evaluate()
-    assert decision_dict["verdict_state"] == "PASS"
-
-
-def test_standard_fuel_ratio_floor_applies_to_conflicted_too(monkeypatch):
-    # CONFLICTED with carry present (aligned=1) still needs to clear the same
-    # STANDARD floor -- the floor is a fuel-quality gate that applies to both
-    # fuel states, not a FUELED-only add-on. (aligned=1, not 0, so this
-    # isolates the floor from the 2026-09-10 HTF-carry cut.)
-    _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=1)
-    _patch_fuel(monkeypatch, "CONFLICTED", ratio=0.5)
-    decision_dict, _ = _evaluate()
-    assert decision_dict["verdict_state"] == "PASS"
-    assert "floor" in decision_dict["gate"]["misses"][0]
-
-
-def test_standard_fuel_ratio_floor_does_not_touch_premium(monkeypatch):
-    # PREMIUM already requires FUELED (ratio >= 0.8) specifically -- a push
-    # between 0.8 and the new 1.1 STANDARD floor must still earn PREMIUM
-    # when aligned==2 and the box is tight. The floor is a STANDARD-only
-    # addition, not a blanket fuel-quality raise.
-    _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=2)
-    _patch_fuel(monkeypatch, "FUELED", ratio=0.85)
-    decision_dict, _ = _evaluate()
-    assert decision_dict["verdict_state"] == "TAKE_PREMIUM"
-
-
-def test_standard_fuel_ratio_floor_fails_safe_when_ratio_unavailable(monkeypatch):
-    # push_ratio=None (couldn't be measured) must not silently pass the
-    # floor -- fail safe to PASS, matching every other "unknown" path in
-    # this gate (e.g. fuel_verdict unknown -> not FUELED/CONFLICTED -> PASS).
-    _patch_neutral_regime(monkeypatch)
-    _patch_htf(monkeypatch, aligned=1)
-    _patch_fuel(monkeypatch, "FUELED", ratio=None)
-    decision_dict, _ = _evaluate()
-    assert decision_dict["verdict_state"] == "PASS"
-
-
-def test_standard_fuel_ratio_floor_reason_names_the_real_ratio():
-    # gate["pass"] must be False (not just tier=None) when the floor blocks
-    # an otherwise-passing setup -- confirms the caller's `if gate["pass"]:`
-    # branch (the ONLY place evaluate_15m_decision() checks this) can't
-    # silently fall through to TAKE_STANDARD. Direct _core_gate() call,
-    # no monkeypatching, to pin this down at the exact function the fix
-    # lives in.
-    fuel = {"verdict": "FUELED", "checks": {"push_volume": {"ratio": 0.9}}}
+def test_rsi_long_zone_boundaries():
+    """LONG: 62 <= r < 80. Pinned directly at _core_gate(), no monkeypatching."""
+    cross = {"votes": 2}
     htf = {"aligned": 1}
-    gate = de._core_gate(box=10.0, atr=25.0, fuel=fuel, htf=htf, session_hour=15)
-    assert gate["pass"] is False
-    assert gate["tier"] is None
-    assert "1.1" in gate["misses"][0]
+    assert de._core_gate(box=10.0, atr=25.0, cross=cross, htf=htf,
+                          rsi_4h_at_lock=62.0, side="LONG")["pass"] is True
+    assert de._core_gate(box=10.0, atr=25.0, cross=cross, htf=htf,
+                          rsi_4h_at_lock=61.9, side="LONG")["pass"] is False
+    assert de._core_gate(box=10.0, atr=25.0, cross=cross, htf=htf,
+                          rsi_4h_at_lock=79.9, side="LONG")["pass"] is True
+    assert de._core_gate(box=10.0, atr=25.0, cross=cross, htf=htf,
+                          rsi_4h_at_lock=80.0, side="LONG")["pass"] is False
 
 
-def test_htf_carry_cut_blocks_aligned_zero_for_both_fuel_states():
-    # 2026-09-10 aligned=0 cut, pinned at _core_gate() directly (no
-    # monkeypatching) -- htf_carry is folded into core_passed, so a failed
-    # carry check must yield pass=False / tier=None / a named miss, for a
-    # push that would otherwise clear everything (ratio 1.5, tight box,
-    # live hour). Both FUELED and CONFLICTED.
-    for verdict in ("FUELED", "CONFLICTED"):
-        fuel = {"verdict": verdict, "checks": {"push_volume": {"ratio": 1.5}}}
-        gate = de._core_gate(box=10.0, atr=25.0, fuel=fuel, htf={"aligned": 0}, session_hour=15)
-        assert gate["pass"] is False, verdict
-        assert gate["tier"] is None, verdict
-        assert gate["checks"]["htf_carry"] is False, verdict
-        assert "no carry fuel" in gate["misses"][0], verdict
+def test_rsi_short_zone_boundaries():
+    """SHORT: 20 < r <= 38."""
+    cross = {"votes": 2}
+    htf = {"aligned": 1}
+    assert de._core_gate(box=10.0, atr=25.0, cross=cross, htf=htf,
+                          rsi_4h_at_lock=20.0, side="SHORT")["pass"] is False
+    assert de._core_gate(box=10.0, atr=25.0, cross=cross, htf=htf,
+                          rsi_4h_at_lock=20.1, side="SHORT")["pass"] is True
+    assert de._core_gate(box=10.0, atr=25.0, cross=cross, htf=htf,
+                          rsi_4h_at_lock=38.0, side="SHORT")["pass"] is True
+    assert de._core_gate(box=10.0, atr=25.0, cross=cross, htf=htf,
+                          rsi_4h_at_lock=38.1, side="SHORT")["pass"] is False
 
-    # aligned=1 with the same push is a clean STANDARD (proves the cut is
-    # specifically the zero bucket, not a blanket tightening).
-    for verdict in ("FUELED", "CONFLICTED"):
-        fuel = {"verdict": verdict, "checks": {"push_volume": {"ratio": 1.5}}}
-        gate = de._core_gate(box=10.0, atr=25.0, fuel=fuel, htf={"aligned": 1}, session_hour=15)
-        assert gate["pass"] is True, verdict
-        assert gate["tier"] == "STANDARD", verdict
+
+def test_dead_tape_no_longer_blocks_a_take(monkeypatch):
+    """v1's dead-tape veto is retired (measured, not carried over -- see
+    module docstring). A DEAD 15m regime must NOT block an otherwise-
+    passing v2 gate."""
+    monkeypatch.setattr(de._micro_regime, "classify_regime", lambda candles: {"regime": "DEAD"})
+    monkeypatch.setattr(de._market_regime, "classify_market_regime",
+                         lambda candles: {"table": "NEUTRAL", "quality": "NEUTRAL", "policy": {"bias": None}})
+    monkeypatch.setattr(de._htf_fuel, "htf_fuel",
+                         lambda c1h, c4h, side: {"trend_1h": "BULLISH", "trend_4h": "BULLISH",
+                                                  "aligned": 2, "opposed": 0, "carry": "N/A"})
+    _patch_cross(monkeypatch, votes=2)
+    decision_dict, _ = _evaluate()
+    assert decision_dict["verdict_state"] == "TAKE"
+    assert decision_dict["micro_regime"] == "DEAD"  # still surfaced for display
+
+
+def test_counter_trend_no_longer_blocks_a_take(monkeypatch):
+    """v1's counter-trend veto is retired. A GOOD daily table against the
+    side must NOT block an otherwise-passing v2 LONG."""
+    monkeypatch.setattr(de._micro_regime, "classify_regime", lambda candles: {"regime": "TRENDING"})
+    monkeypatch.setattr(de._market_regime, "classify_market_regime",
+                         lambda candles: {"table": "GOOD", "quality": "GOOD", "policy": {"bias": "DOWN"}})
+    monkeypatch.setattr(de._htf_fuel, "htf_fuel",
+                         lambda c1h, c4h, side: {"trend_1h": "BULLISH", "trend_4h": "BULLISH",
+                                                  "aligned": 2, "opposed": 0, "carry": "N/A"})
+    _patch_cross(monkeypatch, votes=2)
+    decision_dict, _ = _evaluate()  # LONG side, DOWN-biased GOOD table
+    assert decision_dict["verdict_state"] == "TAKE"
+    assert decision_dict["market_regime_table"] == "GOOD"  # still surfaced for display
+
+
+def test_no_fuel_gate_call_exists_at_all(monkeypatch):
+    """fuel_gate.py is not imported/called anywhere in decision_engine.py
+    any more -- confirms the retirement is real, not just untested."""
+    assert not hasattr(de, "_fuel_gate")
+
+
+def test_plan_uses_t1_at_1_box_not_0_618(monkeypatch):
+    """v2's T1 anchor moved from 0.618x box to 1.0x box (CC_PACKAGE.md §1).
+    box=10 here -> T1 should sit at trigger+10, not trigger+6.18."""
+    decision_dict, _ = _take(monkeypatch)
+    assert decision_dict["t1"] == 110.0  # entry 100 + 1.0*box(10)
+    assert decision_dict["t3"] == 116.18  # entry 100 + 1.618*box(10)
+
+
+def test_management_text_has_no_tier_branching(monkeypatch):
+    decision_dict, _ = _take(monkeypatch)
+    mgmt = decision_dict["plan"]["management"]
+    assert "PREMIUM" not in mgmt
+    assert "STANDARD" not in mgmt
+    assert "50%" in mgmt

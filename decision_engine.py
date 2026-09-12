@@ -1,67 +1,73 @@
 # decision_engine.py
 # ==============================================================================
-# THE CALIBRATED GATE — replaces the old graded-conviction model entirely.
+# THE CALIBRATED GATE, v2 — Krown Cross + 4H RSI. Replaces the v1 fuel-based
+# gate entirely.
 #
-# Rebuilt 2026-08-30 per KABRODA_REBUILD_SPEC.md (Kabroda AI Brain repo),
-# Andy's direct, explicit authorization for a full replacement, not a patch:
-# "we're basically replacing what's there with this." Source of truth for the
-# numbers: CALIBRATION.md SS11-12 in that repo (1,913-trigger-break backtest,
-# 2021-2026, train/test split, corroborated against kabroda.com's own 123 real
-# VRVP locks). Source of truth for the logic: brain/engine/verdict.py,
-# reachability.py, htf_fuel.py, fuel_gate.py, market_regime.py, regime.py.
+# Rebuilt 2026-09-11 per CC_PACKAGE.md (Kabroda AI Brain repo), Andy's direct
+# lock ("lock it for cc to look at it", 22:29 CT) after a full-day audit found
+# the v1 gate's "fuel" signal (push volume vs a 24h baseline) is measured
+# using ~60 minutes of data AFTER the entry fill -- not decision-time
+# computable, confirmed in BOTH the calibration scripts and this file's own
+# fuel_gate.py (see AGENT_LOG.md, Kabroda AI Brain repo, 2026-09-11). Every
+# v1 number built on that gate (STANDARD_FUEL_RATIO_FLOOR, PROMOTED_PUSH_
+# FLOOR, the PREMIUM/STANDARD tier split) inherited the same defect. v2 uses
+# only signals knowable at the moment they're evaluated -- no volume, no
+# forward window, no bail-if-wrong mechanism needed because nothing about
+# the gate can turn out to have been wrong after the fact.
 #
-# WHAT THIS REPLACES:
-#   - The old STRONG/LEAN/NEUTRAL graded-conviction model (structure hard
-#     gate -> trend hard veto -> volatility/momentum graded -> 1H/4H booster).
-#     That model was itself a real improvement over an even older rigid gate
-#     (CONFLUENCE_RESEARCH_REPORT.md, 2026-08-27) -- but it was never
-#     backtested against real outcomes at scale. This one was: 71 of
-#     kabroda.com's own real filled trades lost money (29.8% win, -0.30R avg,
-#     -21.4R total) under the old logic.
-#   - trade_structure_analyst.py's ATR + gravity-wall stop/target snapping.
-#     The new stop/target formula (SS THE PLAN below) is pure box arithmetic --
-#     no gravity dependency. Gravity is being decoupled from the trade
-#     decision entirely (Andy's call, 2026-08-30) and becomes its own
-#     reference page, not an input here.
-#   - The old 2-consecutive-close acceptance gate AS THE ENTRY SIGNAL. The
-#     backtest evaluates on the FIRST 5m close beyond BO/BD (KABRODA_REBUILD_
-#     SPEC.md SS2) -- the 4-condition gate (which includes real volume
-#     confirmation) is the false-breakout filter now, not a close count.
-#     Deploying the gate behind the old 2-close requirement would mean
-#     running something that was never actually backtested.
+# THE v2 GATE (CC_PACKAGE.md §1, CANON.md §8) -- FOUR conditions, all must
+# pass (source: d1_meas_base.build_base() + d1_meas6_combo.py, Kabroda AI
+# Brain repo, CC-verified 2026-09-11 by directly running the measurement
+# scripts, not just reading the printout -- n=136, avgR +0.5216 leg-1 /
+# +0.6709 with SPLIT management, all 5 years positive, reproduced exactly):
+#   1. reachability  -- box <= 0.55x daily ATR(14)              (reachability.py)
+#   2. HTF aligned>=1 -- the OLD 9/21 EMA read (>=1 of 1H/4H backs the side).
+#                        Real and load-bearing -- the n=136 population is
+#                        built on TOP of this pre-filter, not independent of
+#                        it (found while auditing the evidence package;
+#                        CC_PACKAGE.md's own system paragraph omits this --
+#                        flagged, not yet corrected there).      (htf_fuel.py)
+#   3. Krown Cross votes==2 -- a SEPARATE, stricter 21/55 EMA stack + 6-bar
+#                        slope, BOTH 1H and 4H must agree with the side.
+#                        Not redundant with #2 -- the 9/21 and 21/55 pairs
+#                        can and do disagree on some crosses.    (htf_fuel.py)
+#   4. 4H RSI(14) Wilder in the control zone AT LOCK (LONG 62-80, SHORT
+#                        20-38) -- evaluated once at the 13:00 UTC lock and
+#                        frozen (battlebox_pipeline.py), NOT recomputed at
+#                        cross/fill time. This is a deliberate asymmetry
+#                        in the measured system (Krown Cross uses "current"
+#                        candles at cross time; RSI uses the frozen lock
+#                        read) -- do not "simplify" it into computing RSI
+#                        fresh at cross time, that changes what was measured.
 #
-# THE CORE GATE (§2):
-#   1. reachability -- box <= 0.55x daily ATR(14)          (reachability.py)
-#   2. fuel         -- 5M push volume FUELED or CONFLICTED  (fuel_gate.py)
-#   3. HTF carry    -- >=1 of {1H, 4H} trend backs the side, but ONLY required
-#                      on the FUELED path. Rebuilt 2026-09-06 per
-#                      GATE_REBUILD_SPEC.md §1 (Kabroda AI Brain repo):
-#                      STANDARD's fuel-CONFLICTED path carries no HTF
-#                      qualifier -- verified against the real 80-row
-#                      CONFLICTED corpus (calibration_data/replay_verdict.csv),
-#                      profitable at HTF=0/1/2 alike, majority at HTF=1.
-#                      Gating it on carry would have thrown out real,
-#                      validated performance.                (htf_fuel.py)
-#   4. session hour -- not a dead-tape hour                  (DEAD_HOURS below)
+# WHAT v1 HAD THAT v2 DROPS:
+#   - Fuel (fuel_gate.py) as a decision input. Retired with receipts -- see
+#     the header comment above. fuel_gate.py itself is untouched (same
+#     treatment as the Gravity Map / mtf_confluence_scanner.py: a real tool,
+#     just not a decision input any more) in case something else reads it.
+#   - The PREMIUM/STANDARD tier split, STANDARD_FUEL_RATIO_FLOOR,
+#     PROMOTED_PUSH_FLOOR. All fuel-derived, all gone. One gate, one
+#     population, one TAKE outcome now.
+#   - The dead-hour / dead-tape / counter-trend veto stack. Measured
+#     2026-09-11 against the REAL n=136 v2 candidate (not the old fuel-era
+#     base) -- brain/audit_evidence/d0_veto_stack_on_candidate.py: counter-
+#     trend never fires on this population (n=0); dead-hour has only 4
+#     samples, too few to read either direction; dead-tape vetoes 26 real
+#     trades averaging +0.35R (still solidly positive) to raise the kept-
+#     108's avgR from +0.52 to +0.57 -- a real but modest frequency-for-
+#     selectivity tradeoff, not the clear anti-filter the v1 vetoes were.
+#     CC's call (documented CANON.md §8, reversible): skip it, the added
+#     complexity doesn't clearly earn its keep here. market_regime.py and
+#     micro_regime.py are still called and surfaced on the decision dict
+#     for display/diagnostic purposes (same "kept, not a decision input"
+#     treatment) -- just no longer vetoes.
+#   - The old 2-consecutive-close acceptance gate AS THE ENTRY SIGNAL
+#     (unchanged from v1's own header note, still true): the gate evaluates
+#     on the FIRST 5m close beyond BO/BD, not a close count.
 #
-# HARD VETOES cap the result below TAKE even if the gate passes:
-#   - ghost push (NO_FUEL)
-#   - DEAD 15m regime (no participation)                     (micro_regime.py)
-#   - counter-trend on a GOOD daily table                    (market_regime.py)
-#
-# The old 4th hard veto -- 15M momentum divergence against the side, sourced
-# from mtf_confluence_scanner.py -- was REMOVED 2026-09-06 per
-# GATE_REBUILD_SPEC.md §2 / Andy's explicit call: it predates the 2026-08-30
-# rebuild, never validated against backtest data, and couldn't even fire on
-# real fills (trade_plan_engine.py, the only call site that places real
-# orders, already passed confluence_15m=None). mtf_confluence_scanner.py
-# itself is untouched -- it keeps running for its other, non-decision uses
-# (the Gravity Map treatment: real tool, just not a decision input).
-#
-# THREE OUTCOMES ONLY -- no grades, no score, no "HOLD FIRE", no
-# ALMOST/NEEDS-CONFIRMATION limbo (removed 2026-09-06, same spec: the real
-# corpus showed that population outperforming what the gate already took):
-#   TAKE_PREMIUM / TAKE_STANDARD / PASS
+# ONE OUTCOME NOW, NOT THREE: TAKE / PASS. No PREMIUM, no STANDARD -- there
+# is one population, sized and managed the same way for every trade
+# (executor_sizing.py's banded rule already doesn't care about tier).
 #
 # No LLM call anywhere in this file. No prose generation beyond a plain-
 # English headline built from the same booleans that decided the outcome.
@@ -74,7 +80,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from harness.unified_audit_writer import gauge as _gauge
 
-import fuel_gate as _fuel_gate
 import htf_fuel as _htf_fuel
 import market_regime as _market_regime
 import micro_regime as _micro_regime
@@ -84,63 +89,22 @@ GaugeTuple = Tuple[str, str, Optional[float], Optional[str]]
 
 _LONG, _SHORT = "LONG", "SHORT"
 
-# KABRODA_REBUILD_SPEC.md §2.4 / CALIBRATION.md §12: <12 UTC -> 32% T1-reach,
-# 18-21 UTC -> 42%. 12-18 UTC is fine. Andy-locked MEDIUM operating point.
-DEAD_HOURS = set(range(0, 12)) | {18, 19, 20}
+# 4H RSI(14) Wilder control zones (CC_PACKAGE.md §1, d1_meas6_combo.py's
+# rsi4_at()). Evaluated against `levels["rsi_4h_at_lock"]` -- frozen at the
+# 13:00 UTC lock by battlebox_pipeline.py, see this file's header comment.
+RSI_ZONE_LONG = (62, 80)   # 62 <= r < 80
+RSI_ZONE_SHORT = (20, 38)  # 20 <  r <= 38
 
-# STANDARD fuel-quality floor (2026-09-09, Andy-approved). Backtest finding:
-# STANDARD's fuel-CONFLICTED-or-thin population (push ratio < ~1.0x the 24h
-# baseline) is where the tier's real losses concentrate; above this floor it
-# is solidly profitable. PREMIUM is untouched -- it already requires FUELED
-# (ratio >= VOL_FUELED = 0.8) specifically, a separate, stricter condition.
-# This does NOT replace that -- it's an additional floor on the STANDARD
-# path only, since STANDARD's gate otherwise accepts CONFLICTED (any ratio
-# down to VOL_THIN) as well as sub-PREMIUM FUELED reads.
-#
-# 1.1, not 1.0: a real walk-forward (fit 2021-2023, freeze, verify on
-# 2024-2026 the fit never saw) independently picked 1.1 as the strongest
-# threshold, on BOTH the fit window (best avgR of any threshold 0.8-1.3)
-# and the full 2021-2026 period (best absolute sumR of the same range,
-# +118.2R vs +93.3R with no floor at all). CORRECTION 2026-09-09 (later
-# same day): an earlier version of this comment cited "2025 is a real
-# losing year at exactly 1.0" as the specific reason for 1.1 over 1.0 --
-# that check itself had a bug (replay_v3_5yr.py was using PREMIUM's zone
-# stop for STANDARD trades too, not STANDARD's real r30 stop shipped
-# 2026-09-08). Fixed and rechecked: with the correct stop, 2025 is
-# positive even at 1.0. The "1.0 fails" claim is retracted -- 1.1 is kept
-# anyway because it's still the genuine full-period and fit-window
-# optimum, not because 1.0 is broken. Full trail: Kabroda AI Brain repo
-# AGENT_LOG.md, 2026-09-09 19:55 CT and the correction that follows it.
-STANDARD_FUEL_RATIO_FLOOR = 1.1
-
-# PROMOTED_PUSH_FLOOR -- a STRICTER push-ratio bar that applies ONLY when a
-# NO_PLAN morning (no anticipated direction at lock) is re-evaluated on a
-# later real cross and would otherwise promote to a live trade
-# (trade_plan.py::advance_no_plan, the poll-NO_PLAN path). It does NOT touch
-# the normal gate, WAITING plans, the radar, or lock-time evaluation.
-#
-# Why a separate, higher floor here: the 5-year forensic
-# (Kabroda AI Brain repo, brain/calibration/anticipate_replay.py +
-# anticipate_replay_real.py, 2026-09-10) found the 122 "promoted" trades net
-# +0.39R and are positive every year -- BUT bimodal on push strength. Below
-# ~1.8x baseline they are a coin flip that nets ~0R over the whole corpus
-# (real-classifier run: ratio<1.8 = 47 trades, +0.7R total, ~37% win); at
-# 1.8x+ they are a real edge (71 trades, +45.9R, ~74% win). "No direction at
-# lock" is a mild negative signal that a strong push overrides and a weak one
-# does not. Account sim (banded_promoted_floor.py): drawdown-in-R is identical
-# with or without this floor (5.9R either way -- it is NOT a risk cut); the
-# effect is +0.386 -> +0.42 average R per trade at account maturity, i.e.
-# fewer, higher-probability promotions and a quieter "surprise ARMED" email
-# stream. Andy-approved 2026-09-10 (1.8, not 2.0: 2.0 gives back a small
-# positive sub-population for no drawdown benefit). Independently reproduced
-# by DeepSeek (AGENT_LOG.md 2026-09-10 11:10 CT) incl. under the real
-# market_regime/micro_regime BBWP classifiers.
-PROMOTED_PUSH_FLOOR = 1.8
-
-# §6 management rule -- Andy's fib convention: anchor 0 = BD, 1.0 = BO.
-T1_BOX, T2_BOX, T3_BOX = 0.618, 1.0, 1.618
-STOP_BUFFER_BOX = 0.12      # swept 2026-08-29, robust train/test (Brain repo)
-SUBTRIG_BOX = 0.15          # runner stop after T1
+# §6 management rule (v2) -- Andy's fib convention: anchor 0 = BD, 1.0 = BO.
+# T1 moved 0.618 -> 1.0 box (CC_PACKAGE.md §1: measured better on both legs
+# of the SPLIT management than the v1 0.618 anchor). No more T2/BE-at-T2 --
+# the SPLIT rule never moves the stop, so T2_BOX is kept only as the price
+# level t1 already sits at (T1_BOX_V2 == 1.0 == the old T2_BOX) for any
+# caller that still reads a "t2" key; nothing acts on it as a management
+# trigger any more.
+T1_BOX, T2_BOX, T3_BOX = 1.0, 1.0, 1.618
+STOP_BUFFER_BOX = 0.12      # unchanged from v1 -- same STOP_BUFFER_BOX/formula
+SUBTRIG_BOX = 0.15          # runner stop after T1 (diagnostic only, see below)
 
 
 def _plan_for_side(side: str, bo: float, bd: float, r30_high: float, r30_low: float) -> Dict[str, Any]:
@@ -163,107 +127,60 @@ def _plan_for_side(side: str, bo: float, bd: float, r30_high: float, r30_low: fl
         "t1": round(float(t1), 2), "t2": round(float(t2), 2), "t3": round(float(t3), 2),
         # subtrig_stop: a GateLog-only diagnostic value (logged via
         # kabroda_mas_flow.py/trade_plan_engine.py for the forward-
-        # incubation record) -- NOT the real management rule anymore.
-        # It traces to the pre-audit fixed-runner-stop concept
-        # (superseded 2026-09-07: the audited rule keeps the ORIGINAL
-        # stop through T1, moves to breakeven at T2 for PREMIUM only --
-        # see executor_live_engine.py). Kept computed/logged so GateLog
-        # rows don't silently lose a column the Brain repo may still
-        # read, but nothing in the live management path acts on it.
+        # incubation record) -- NOT the real management rule anymore, and
+        # predates v2 too. Kept computed/logged so GateLog rows don't
+        # silently lose a column the Brain repo may still read, but nothing
+        # in the live management path acts on it.
         "subtrig_stop": round(float(subtrig_stop), 2),
         "box": round(box, 2),
-        # Tier isn't known yet at this call (computed downstream by
-        # _core_gate()) -- kept tier-neutral and accurate rather than
-        # guessing. See MANAGEMENT_TEXT in trade_plan.py / CLAUDE.md's
-        # "Calibrated Gate" section for the full, tier-specific rule this
-        # describes; TradePlan.management is the authoritative text
-        # actually emailed, not this field.
+        # v2: ONE management rule for every trade, no tier branching --
+        # SPLIT 50/50 (CC_PACKAGE.md §1): 50% off at T1, 50% rides to T3,
+        # stop never moves either leg. t2 == t1 now (see T1_BOX/T2_BOX
+        # comment above); not displayed separately to avoid implying two
+        # different prices exist.
         "management": (
-            f"Take 50% off at T1 {round(t1, 2):,.0f}, stop stays at the original "
-            f"level. PREMIUM only: stop moves to breakeven at T2 {round(t2, 2):,.0f}. "
-            f"STANDARD: stop stays original through T3 {round(t3, 2):,.0f}. Either "
-            "way, the runner (50%) exits at T3 or its stop."
+            f"50% off at T1 {round(t1, 2):,.0f}, stop stays at the original level. "
+            f"The other 50% rides to T3 {round(t3, 2):,.0f} or the same stop -- "
+            "it never moves."
         ),
     }
 
 
-def _core_gate(*, box: float, atr: float, fuel: Dict[str, Any],
-                htf: Dict[str, Any], session_hour: Optional[int]) -> Dict[str, Any]:
+def _core_gate(*, box: float, atr: float, cross: Dict[str, Any],
+                htf: Dict[str, Any], rsi_4h_at_lock: Optional[float],
+                side: str) -> Dict[str, Any]:
+    """v2's 4-condition gate (CC_PACKAGE.md §1, CANON.md §8) -- see this
+    file's header comment for the full rationale and evidence."""
     reach = _reachability.reachability(box, atr)
-    fuel_verdict = fuel.get("verdict")
-    fueled = fuel_verdict == "FUELED"
-    conflicted = fuel_verdict == "CONFLICTED"
-    fuel_ok = fueled or conflicted
     aligned = htf.get("aligned") or 0
-    # HTF carry: at least one of {1H, 4H} must back the direction, for BOTH
-    # fuel states.
-    #
-    # 2026-09-06 -> 2026-09-10: this used to waive the carry check entirely
-    # for CONFLICTED fuel ("htf_ok = True if conflicted else aligned >= 1"),
-    # on an 80-row sample showing HTF=0 CONFLICTED at +0.44R avg. The full
-    # corrected 5-year corpus does not hold that up: the aligned=0
-    # population is 154 trades, +0.08R avg, 51% win, 36% full-stop, and a
-    # walk-forward (fit 2021-2023 / verify 2024-2026) exposed it as overfit
-    # -- fit window +20.3R / 66% win, held-out window -7.9R / 37% win. The
-    # winners are the tell: aligned=0 winners average +0.90R vs +1.23R for
-    # aligned>=1 (same loser size) -- without a higher-timeframe trend the
-    # runner has nothing to carry it. Andy-approved cut, 2026-09-10.
-    # Full trail: Kabroda AI Brain repo AGENT_LOG.md 2026-09-10 + the
-    # `aligned=0` section of LIVE_SYSTEM_STATE.md.
     htf_ok = aligned >= 1
-    hour_ok = session_hour is None or session_hour not in DEAD_HOURS
+    votes = cross.get("votes") or 0
+    cross_ok = votes >= 2
 
-    checks = {"reachability": reach["ok"], "fuel": fuel_ok, "htf_carry": htf_ok, "session_hour": hour_ok}
+    rsi_lo, rsi_hi = RSI_ZONE_LONG if side == _LONG else RSI_ZONE_SHORT
+    if rsi_4h_at_lock is None:
+        rsi_ok = False
+    elif side == _LONG:
+        rsi_ok = rsi_lo <= rsi_4h_at_lock < rsi_hi
+    else:
+        rsi_ok = rsi_lo < rsi_4h_at_lock <= rsi_hi
+
+    checks = {"reachability": reach["ok"], "htf_aligned": htf_ok,
+              "krown_cross": cross_ok, "rsi_4h_zone": rsi_ok}
     misses: List[str] = []
     if not reach["ok"]:
         misses.append(reach["note"])
-    if not fuel_ok:
-        misses.append(f"5M push volume not FUELED or CONFLICTED (fuel = {fuel_verdict or 'unknown'})")
     if not htf_ok:
-        misses.append("neither 1H nor 4H backs the direction (no carry fuel)")
-    if not hour_ok:
-        misses.append(f"{session_hour:02d}:00 UTC is a dead-tape hour")
+        misses.append("neither 1H nor 4H backs the direction (no carry)")
+    if not cross_ok:
+        misses.append(f"Krown Cross votes={votes}/2 (need both 1H and 4H)")
+    if not rsi_ok:
+        rsi_text = f"{rsi_4h_at_lock:.1f}" if rsi_4h_at_lock is not None else "unavailable"
+        misses.append(f"4H RSI at lock ({rsi_text}) outside the {rsi_lo}-{rsi_hi} control zone")
 
-    core_passed = not misses  # the original 4-condition gate, unchanged by the floor below
-    ratio = reach.get("ratio")
-    # PREMIUM still requires FUELED specifically (not just fuel-condition-
-    # passing) plus both HTF timeframes plus a tight box -- unchanged from
-    # before this rebuild. CONFLICTED can only ever earn STANDARD.
-    premium = bool(core_passed and fueled and aligned == 2 and ratio is not None and ratio <= _reachability.PREMIUM_BOX_ATR)
-
-    # STANDARD's additional fuel-quality floor -- see STANDARD_FUEL_RATIO_FLOOR's
-    # own comment for the evidence and why 1.1, not the originally-proposed 1.0.
-    # Reads the SAME push_volume.ratio already computed by fuel_gate.py and
-    # already logged to GateLog as fuel_push_ratio (below, via evaluate_15m_
-    # decision()'s own dict) -- no new measurement, no new data, no latency.
-    push_ratio = (fuel.get("checks", {}) or {}).get("push_volume", {}).get("ratio")
-    standard_ok = core_passed and push_ratio is not None and push_ratio >= STANDARD_FUEL_RATIO_FLOOR
-
-    # `passed` (returned as "pass") must reflect whether a REAL tier was
-    # actually assigned, not just the original 4-condition gate -- the only
-    # caller (evaluate_15m_decision()) branches on gate["pass"] alone and
-    # falls through to TAKE_STANDARD whenever it's True, so a core-gate-passed-
-    # but-no-tier-assigned case must report pass=False or it would silently
-    # take the trade anyway, defeating the whole point of this floor.
-    if premium:
-        tier = "PREMIUM"
-        passed = True
-    elif standard_ok:
-        tier = "STANDARD"
-        passed = True
-    else:
-        tier = None
-        passed = False
-        if core_passed:
-            # The 4-condition gate passed but didn't clear the stricter
-            # STANDARD-only floor -- name it, per KABRODA_REBUILD_SPEC.md §9
-            # ("log every detail," every PASS names its specific reason).
-            ratio_text = f"{push_ratio}" if push_ratio is not None else "unavailable"
-            misses.append(
-                f"push volume below the {STANDARD_FUEL_RATIO_FLOOR}x-baseline floor "
-                f"for standard tier (ratio = {ratio_text})"
-            )
-    return {"pass": passed, "tier": tier, "checks": checks, "misses": misses, "reach": reach, "htf_aligned": aligned}
+    passed = not misses
+    return {"pass": passed, "checks": checks, "misses": misses, "reach": reach,
+            "htf_aligned": aligned, "krown_cross_votes": votes, "rsi_4h_at_lock": rsi_4h_at_lock}
 
 
 def evaluate_15m_decision(
@@ -296,17 +213,21 @@ def evaluate_15m_decision(
     daily: Optional[Dict[str, Any]] = None
     micro: Optional[Dict[str, Any]] = None
     htf: Optional[Dict[str, Any]] = None
-    fuel: Optional[Dict[str, Any]] = None
+    cross: Optional[Dict[str, Any]] = None
 
     def _result(state: str, side: Optional[str], headline: str, gate: Optional[Dict[str, Any]],
                 plan: Optional[Dict[str, Any]], gauges: List[GaugeTuple]) -> Tuple[Dict[str, Any], List[GaugeTuple]]:
-        is_take = state in ("TAKE_PREMIUM", "TAKE_STANDARD")
+        is_take = state == "TAKE"
         d: Dict[str, Any] = {
             "approval_status": "APPROVED" if is_take else "STAND_DOWN",
             "conviction": state,          # kept for CampaignLog schema compatibility
             "verdict_state": state,
             "side": side,
-            "tier": (gate or {}).get("tier"),
+            # v2 has no tier -- kept as a key (always None) so any consumer
+            # still reading decision.get("tier") gets a clean None instead of
+            # a KeyError while Phase 3 removes the remaining tier-branching
+            # code in trade_plan.py/executor_live_engine.py/templates.
+            "tier": None,
             "tactical_brief": headline,
             "bias": side or "NEUTRAL",
             "entry_price": (plan or {}).get("entry", 0.0),
@@ -317,23 +238,26 @@ def evaluate_15m_decision(
             "formatted_newsletter_md": "",
             "gate": gate,
             "plan": plan,
-            # The REAL, validated regime classification (KABRODA_REBUILD_SPEC.md /
-            # CALIBRATION.md, Kabroda AI Brain repo) -- already computed for the
-            # counter-trend/dead-tape vetoes below, now actually surfaced for
-            # display instead of being silently discarded after the veto check.
+            # market_regime.py/micro_regime.py are no longer decision inputs
+            # in v2 (see this file's header comment) but stay computed and
+            # surfaced for display -- same "real tool, not a decision input"
+            # treatment as the Gravity Map.
             "market_regime_table":   (daily or {}).get("table"),
             "market_regime_quality": (daily or {}).get("quality"),
             "micro_regime":          (micro or {}).get("regime"),
-            # Raw diagnostic values (2026-08-31, SS9a forward-test log) --
-            # already computed above for the gate's own checks/gauges, just
-            # not previously surfaced on decision_dict itself. Purely
-            # additive: no formula, threshold, or verdict changes here.
-            "fuel_verdict":   (fuel or {}).get("verdict"),
-            "fuel_push_ratio": ((fuel or {}).get("checks", {}).get("push_volume", {}) or {}).get("ratio"),
+            # fuel_gate.py is retired from the decision entirely (v1's fuel
+            # signal used ~60min of post-fill data -- not decision-time
+            # computable, see header comment). Keys kept, always None, for
+            # any consumer/schema still reading them.
+            "fuel_verdict":   None,
+            "fuel_push_ratio": None,
             "trend_1h": (htf or {}).get("trend_1h"),
             "trend_4h": (htf or {}).get("trend_4h"),
             "htf_aligned": (htf or {}).get("aligned"),
             "htf_opposed": (htf or {}).get("opposed"),
+            # v2's own gate signals, newly surfaced.
+            "krown_cross_votes": (cross or {}).get("votes"),
+            "rsi_4h_at_lock": (gate or {}).get("rsi_4h_at_lock"),
         }
         return d, gauges
 
@@ -359,17 +283,17 @@ def evaluate_15m_decision(
                         "Price is inside the box -- no trigger crossed yet. Waiting for BO/BD.",
                         None, None, base_gauges)
 
+    # market_regime.py/micro_regime.py: no longer vetoes in v2 (see header
+    # comment + CANON.md §8's veto-stack measurement), still computed for
+    # display -- same treatment as the Gravity Map.
     micro = _micro_regime.classify_regime(candles_15m)
     daily = _market_regime.classify_market_regime(candles_1d)
     htf = _htf_fuel.htf_fuel(candles_1h, candles_4h, side)
-    trigger_price = bo if side == _LONG else bd
-    fuel = _fuel_gate.evaluate_fuel_gate(
-        candles_5m, trigger_price, side,
-        fuel_1h=htf.get("trend_1h"), fuel_4h=htf.get("trend_4h"),
-    )
+    cross = _htf_fuel.krown_cross_votes(candles_1h, candles_4h, side)
+    rsi_4h_at_lock = levels.get("rsi_4h_at_lock")
+    rsi_4h_at_lock = float(rsi_4h_at_lock) if rsi_4h_at_lock is not None else None
 
     plan = _plan_for_side(side, bo, bd, r30_high, r30_low) if box > 0 else None
-    reach = _reachability.reachability(box, atr)
 
     gauges = base_gauges + [g for g in [
         _gauge("15M", "regime", micro.get("regime")),
@@ -377,64 +301,25 @@ def evaluate_15m_decision(
         _gauge("1D", "market_quality", daily.get("quality")),
         _gauge("1H", "trend", htf.get("trend_1h")),
         _gauge("4H", "trend", htf.get("trend_4h")),
-        _gauge("15M", "fuel_verdict", fuel.get("verdict")),
-        _gauge("15M", "fuel_push_ratio", (fuel.get("checks", {}).get("push_volume", {}) or {}).get("ratio")),
+        _gauge("1H", "krown_cross", cross.get("cross_1h")),
+        _gauge("4H", "krown_cross", cross.get("cross_4h")),
+        _gauge("4H", "rsi_at_lock", rsi_4h_at_lock),
     ] if g]
 
-    # --- hard vetoes -- cap below TAKE regardless of the gate ---
-    daily_bias = (daily.get("policy") or {}).get("bias")
-    counter_trend = bool(
-        daily.get("quality") == "GOOD" and daily_bias and
-        ((daily_bias == "UP" and side == _SHORT) or (daily_bias == "DOWN" and side == _LONG))
-    )
-    dead_tape = micro.get("regime") == "DEAD"
-    fuel_verdict = fuel.get("verdict")
-    no_fuel = fuel_verdict == "NO_FUEL"
-
-    def _veto_gate(veto_reason: str) -> Dict[str, Any]:
-        # Same shape as _core_gate()'s return, even though a veto short-
-        # circuits before the 4-condition check -- KABRODA_REBUILD_SPEC.md §9
-        # ("log every detail"): reachability/fuel/htf are still knowable here
-        # and must not go missing from the record just because a veto fired.
-        # htf_carry mirrors _core_gate() exactly (aligned>=1 for BOTH fuel
-        # states since the 2026-09-10 aligned=0 cut) -- this is diagnostic
-        # only (the veto already forced pass=False), but it must not drift
-        # from the real gate's own rule.
-        return {"pass": False, "tier": None, "reach": reach, "htf_aligned": htf.get("aligned"),
-                "checks": {"reachability": reach["ok"], "fuel": fuel_verdict in ("FUELED", "CONFLICTED"),
-                           "htf_carry": (htf.get("aligned") or 0) >= 1,
-                           "session_hour": session_hour_utc is None or session_hour_utc not in DEAD_HOURS},
-                "misses": [veto_reason]}
-
-    if dead_tape:
-        return _result("PASS", side, f"{side}: 15M regime is DEAD -- no participation. Stand aside.",
-                        _veto_gate("dead 15m tape"), plan, gauges)
-    if counter_trend:
-        return _result("PASS", side,
-                        f"{side} against a {daily_bias} daily trend on a good table -- don't fight it.",
-                        _veto_gate("counter-trend on a GOOD daily table"), plan, gauges)
-    if no_fuel:
-        return _result("PASS", side, f"{side}: ghost push -- no real volume behind the move. Stand down.",
-                        _veto_gate("ghost push (NO_FUEL)"), plan, gauges)
-
-    gate = _core_gate(box=box, atr=atr, fuel=fuel, htf=htf, session_hour=session_hour_utc)
+    gate = _core_gate(box=box, atr=atr, cross=cross, htf=htf,
+                       rsi_4h_at_lock=rsi_4h_at_lock, side=side)
     gauges = gauges + [g for g in [
         _gauge("15M", "gate_reachability_ok", gate["checks"]["reachability"]),
-        _gauge("15M", "gate_fuel_ok", gate["checks"]["fuel"]),
-        _gauge("15M", "gate_htf_carry_ok", gate["checks"]["htf_carry"]),
-        _gauge("15M", "gate_session_hour_ok", gate["checks"]["session_hour"]),
+        _gauge("15M", "gate_htf_aligned_ok", gate["checks"]["htf_aligned"]),
+        _gauge("15M", "gate_krown_cross_ok", gate["checks"]["krown_cross"]),
+        _gauge("15M", "gate_rsi_zone_ok", gate["checks"]["rsi_4h_zone"]),
         _gauge("15M", "gate_box_atr_ratio", (gate["reach"] or {}).get("ratio")),
-        _gauge("15M", "gate_tier", gate["tier"]),
     ] if g]
 
     if gate["pass"]:
-        if gate["tier"] == "PREMIUM":
-            headline = (f"{side}: PREMIUM -- tight box, 5M fuel, BOTH higher timeframes carrying. "
-                        "Size up, hold the runner to T3.")
-            return _result("TAKE_PREMIUM", side, headline, gate, plan, gauges)
-        headline = (f"{side}: box in reach, fuel live, a higher timeframe backs it. "
-                    "Standard trade -- take it, normal size, runner to T3.")
-        return _result("TAKE_STANDARD", side, headline, gate, plan, gauges)
+        headline = (f"{side}: Krown Cross both timeframes, 4H RSI in the control zone, box in reach. "
+                    "Take it -- 50% off at T1, the rest rides to T3, stop never moves.")
+        return _result("TAKE", side, headline, gate, plan, gauges)
 
     headline = f"{side}: PASS -- " + "; ".join(gate["misses"])
     return _result("PASS", side, headline, gate, plan, gauges)

@@ -63,3 +63,39 @@ def htf_fuel(candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]],
         "carry": "STRONG" if aligned == 2 else ("SOME" if aligned == 1 else "NONE"),
         "note": f"1H {t1h} / 4H {t4h} - {aligned}/2 back the {side}",
     }
+
+
+# ==============================================================================
+# KROWN CROSS — the v2 gate's trend condition (Kabroda AI Brain repo,
+# CC_PACKAGE.md 2026-09-11, d1_meas6_combo.py::cross_state()). A SEPARATE,
+# stricter EMA pair from timeframe_trend()'s 9/21 above -- deliberately not a
+# parameter change to that function, since v2's measured population requires
+# BOTH the 9/21 aligned>=1 read (still evaluated below, unchanged) AND this
+# 21/55 read to agree; the two pairs can and do disagree on some crosses.
+# "Krown Cross" is the trading library's own name for this dominant-trend
+# definition (RESEARCH_BRIEFS.md-adjacent, Kabroda AI Brain repo).
+# ==============================================================================
+
+def krown_cross_state(tf_candles: List[Dict[str, Any]], want_bullish: bool) -> bool:
+    """True if this timeframe's 21/55 EMA stack + 6-bar fast-EMA slope both
+    agree with `want_bullish`. Unlike timeframe_trend(), this has no NEUTRAL
+    state -- it's a single boolean "does this vote for the side" (matches
+    d1_meas6_combo.py's cross_state() exactly: `(e21[-1]>e55[-1])==want_bull
+    and (e21[-1]>e21[-6])==want_bull`)."""
+    closes = [float(c["close"]) for c in tf_candles or []]
+    e21 = _calc_ema_series(closes, 21)
+    e55 = _calc_ema_series(closes, 55)
+    if not e21 or not e55 or len(e21) < 7:
+        return False
+    return (e21[-1] > e55[-1]) == want_bullish and (e21[-1] > e21[-6]) == want_bullish
+
+
+def krown_cross_votes(candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]],
+                       side: str) -> Dict[str, Any]:
+    """votes==2 (both 1H and 4H krown_cross_state agree with `side`) is the
+    v2 gate's trend condition. votes in {0, 1, 2}."""
+    want_bullish = side == _LONG
+    s1 = krown_cross_state(candles_1h, want_bullish)
+    s4 = krown_cross_state(candles_4h, want_bullish)
+    votes = int(s1) + int(s4)
+    return {"votes": votes, "cross_1h": s1, "cross_4h": s4}
