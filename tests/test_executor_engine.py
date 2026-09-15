@@ -28,6 +28,7 @@ import trade_plan_engine as tpe
 import executor_plan_builder
 import executor_accounts as ea
 import executor_control as ec
+import htf_fuel
 
 
 def _clean_db_files():
@@ -75,6 +76,12 @@ def env(monkeypatch):
             symbol=symbol, date_key=date_key, session_id=session_id,
             status="WAITING", direction="LONG", trigger_price=100.0,
             stop_price=95.0, t1=112.0, t2=120.0, t3=132.0,
+            # v2 (2026-09-11): advance_waiting_plan() re-checks the real
+            # Krown Cross + RSI gate at the cross now (_confirm_v2_gate_at_
+            # cross()) -- rsi_4h_at_lock must be in-zone for a plan to ever
+            # reach FILLED. box (t2-trigger) = 20 here; run_polls()'s
+            # fake_atr (40.0) keeps box/atr = 0.5, reachable.
+            rsi_4h_at_lock=70.0,
             commit_after=now - timedelta(minutes=5),
         )
         defaults.update(kwargs)
@@ -112,7 +119,12 @@ def env(monkeypatch):
             return []
 
         def fake_atr(candles_1d):
-            return 0.0
+            # v2: box (t2-trigger, 20 by make_plan()'s defaults) / 40.0 =
+            # 0.5, reachable (<=0.55) -- this file tests the executor hook
+            # downstream of a real FILLED plan, not the gate itself (that's
+            # tests/test_trade_plan_engine.py's job), so the gate is always
+            # made to pass here (see the htf_fuel monkeypatches below).
+            return 40.0
 
         sleeps = {"n": 0}
 
@@ -127,6 +139,8 @@ def env(monkeypatch):
         monkeypatch.setattr(tpe.market_data, "fetch_live_daily", fake_daily)
         monkeypatch.setattr(tpe.market_data, "_calc_daily_atr14", fake_atr)
         monkeypatch.setattr(tpe.asyncio, "sleep", fake_sleep)
+        monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {"aligned": 2})
+        monkeypatch.setattr(htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": 2})
 
         async def main():
             try:
