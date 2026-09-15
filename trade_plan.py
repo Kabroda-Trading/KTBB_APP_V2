@@ -55,28 +55,32 @@ import fuel_gate
 
 import stop_planner as sp
 
-FUEL_REQUIREMENT_TEXT = (
-    "push must read FUELED or CONFLICTED at the cross (median-based push-"
-    "volume ratio >= 0.8x prior-24h baseline, or a real-but-conflicted "
-    "push) -- FUELED earns PREMIUM sizing if HTF/box also qualify, "
-    "CONFLICTED still fills as a real STANDARD trade. NO_FUEL (a ghost "
-    "push, no real volume) is the only fuel-based veto."
+# v2 (2026-09-11): fuel is retired from the gate entirely (decision_engine.py's
+# own header comment) -- this constant used to describe the fuel-based
+# FUELED/CONFLICTED/NO_FUEL veto and PREMIUM/STANDARD split. Replaced with
+# the real v2 gate requirement, same four conditions decision_engine.py's
+# _core_gate() checks. render_brief()'s old "FUEL RULE" section reads this
+# under a renamed "GATE" label -- see that function.
+GATE_REQUIREMENT_TEXT = (
+    "at the cross: box must still be <=0.55x daily ATR14, >=1 of {1H, 4H} must "
+    "back the direction (the old 9/21 EMA read), Krown Cross (21/55 EMA stack + "
+    "6-bar slope) must agree on BOTH 1H and 4H, and the 4H RSI(14) read frozen "
+    "at this morning's lock must sit in the control zone for this side "
+    "(62-80 LONG / 20-38 SHORT). All four or no trade -- there is no partial "
+    "credit and no tier."
 )
+# Kept as an alias so any caller still reading the old name gets the new text
+# rather than a NameError while the rest of the codebase catches up.
+FUEL_REQUIREMENT_TEXT = GATE_REQUIREMENT_TEXT
 
-# 2026-09-07 (Domain 2 build, DeepSeek's live-email review, Kabroda AI
-# Brain repo AGENT_LOG.md 09:30/09:50 CT): CORRECTED. This constant used
-# to describe the pre-audit 30%-at-T1/70%-runner rule ("not tier-
-# dependent, not stop-to-breakeven") -- stale the moment GATE_REBUILD_
-# SPEC.md/CLEAN_REPORT.md validated the real, tier-differentiated 50/50
-# rule that executor_live_engine.py now implements for real money. Do
-# not let this drift from that rule again -- it's the one thing every
-# component (executor, this text, the old ledger_closing_engine.py which
-# is now itself marked deprecated) must agree on.
+# v2 (2026-09-11): one management rule for every trade, no tier branching --
+# SPLIT 50/50 (CC_PACKAGE.md §1): half off at T1, half rides to T3, stop
+# never moves either leg. Replaces the old tier-differentiated 50/50 + PREMIUM
+# BE-at-T2 rule -- see decision_engine.py's _plan_for_side() for the matching
+# per-plan text; this is the module-level default used before a plan is built.
 MANAGEMENT_TEXT = (
-    "50% off at T1, stop stays at the original level, 50% rides toward "
-    "T3. PREMIUM only: at T2, the stop moves to breakeven (mechanical, "
-    "unconditional -- not a judgment call). STANDARD: the stop never "
-    "moves before T3 or the original stop."
+    "50% off at T1, stop stays at the original level. The other 50% rides to "
+    "T3 or the same stop -- it never moves."
 )
 
 COMMIT_OFFSET_MINUTES = 45  # anchor_time + 45min = 08:45 CT / 09:45 ET (the open-window rule)
@@ -792,7 +796,6 @@ def render_brief(plan: Dict[str, Any]) -> str:
         )
 
     direction = plan.get("direction")
-    tier = plan.get("tier")
     trigger = plan.get("trigger_price")
     stop = plan.get("stop_price")
     stop_basis = plan.get("stop_basis")
@@ -801,16 +804,13 @@ def render_brief(plan: Dict[str, Any]) -> str:
     commit_str = commit_after.strftime("%H:%M UTC") if isinstance(commit_after, datetime.datetime) else str(commit_after)
     verb = "BUY" if direction == "LONG" else "SELL"
 
-    if tier is None:
-        tier_line = "Tier: TBD — stamped at the cross once the fuel check confirms (size and T2 handling, not the entry itself)"
-    else:
-        tier_line = f"Tier: {tier} ({'stop moves to breakeven at T2' if tier == 'PREMIUM' else 'stop stays at the original level throughout'})"
-
+    # v2 (2026-09-11): no more tier line -- there is no tier left to be
+    # "TBD" about (the old line promised a stamp-at-cross event that no
+    # longer happens). plan.get("tier") is always None now; not printed.
     alignment_line = build_alignment_email_line(plan)
 
     lines = [
         f"TRADE PLAN — {date_key} — {symbol} — STATUS: {plan.get('status')}",
-        tier_line,
     ]
     if alignment_line:
         lines.append(alignment_line)
@@ -823,21 +823,17 @@ def render_brief(plan: Dict[str, Any]) -> str:
         f"  ORDER 1 (trigger/stop-entry): {verb} {trigger:,.2f}",
         f"  STOP: {stop:,.2f} — {stop_basis}",
         f"  T1: {t1:,.2f} (take 50%, stop stays at the original level)   "
-        f"T2: {t2:,.2f}{' (PREMIUM: stop to breakeven here)' if tier == 'PREMIUM' else ''}   "
-        f"T3: {t3:,.2f} (runner exits here or at the stop)",
+        f"T3: {t3:,.2f} (the other 50% rides here or to the stop -- it never moves)",
         "",
         f"  IF ALREADY BROKEN OUT AT COMMIT TIME: do not chase. Switch to "
         f"ORDER 2 — a limit at the line ({trigger:,.2f}); most breaks retest "
         f"the line before continuing.",
         "",
-        f"  FUEL RULE: {plan.get('fuel_requirement')}. A ghost push (NO_FUEL, "
-        f"no real volume) VETOES — stand down, wait for the retest. A "
-        f"CONFLICTED push still fills, as a real STANDARD trade.",
+        f"  GATE: {plan.get('fuel_requirement')}",
         "",
         f"  MANAGEMENT: {plan.get('management')}",
         "",
-        "  ONE TRADE TODAY. Re-entry exists only under the fuel-gated "
-        "wick-fake rule.",
+        "  ONE TRADE TODAY.",
     ]
     return "\n".join(lines)
 
@@ -1005,7 +1001,8 @@ def advance_waiting_plan(
     gate = _confirm_v2_gate_at_cross(plan, candles_1h, candles_4h, daily_atr14)
     if not gate["pass"]:
         reason = "; ".join(gate["misses"]) or "gate declined"
-        return {"status": "DONE", "last_transition_reason": f"cross confirmed but the gate declined -- {reason}"}
+        return {**updates, "status": "DONE",
+                "last_transition_reason": f"cross confirmed but the gate declined -- {reason}"}
 
     updates["status"] = "FILLED"
     updates["fill_time"] = now_utc

@@ -35,9 +35,21 @@
 #      event, so it is deliberately not built (the request itself allowed
 #      skipping FILLED detection rather than fabricating it).
 #   3. VETOED -- cross happened, fuel failed: short "stand down" notice.
+#      v2 (2026-09-11): TradePlan.status is never actually set to "VETOED"
+#      any more -- the fuel-gated VETOED-then-retest state was retired along
+#      with fuel itself (trade_plan.py's advance_waiting_plan() now goes
+#      straight WAITING -> FILLED/DONE, no middle state to retry). build_
+#      vetoed_email() and this branch are unreachable from the real state
+#      machine today, kept only as tested-but-dormant code in case a future
+#      v2-native retry design needs it (same treatment as check_reentry_
+#      eligibility()/advance_reentry_plan() in trade_plan.py). A cross the
+#      v2 gate declines is a DONE, not a VETOED -- see #4, the vetoed_cross_
+#      side/opposite_side framing there.
 #   4. DONE -- one-line "no trade today" / "session complete", from
-#      whatever prior status (no fill, a vetoed retest exhausted, a filled
-#      trade's management concluded, a re-entry resolved).
+#      whatever prior status (no fill, a filled trade's management
+#      concluded, a re-entry resolved) -- including a real cross the v2
+#      gate declined, framed as the VETOED-style call it actually is via
+#      the vetoed_cross_side/opposite_side fields (see build_done_email()).
 #
 # NOT emailed (not in the request): STOPPED, REENTRY_ARMED. Real, logged
 # state transitions -- just not ones Andy asked to be paged for.
@@ -54,8 +66,10 @@ import trade_plan as tp
 
 
 def _symbol_compact(symbol: str) -> str:
-    """BTC/USDT -> BTCUSDT, matching the subject-line format in the
-    request's own example ("KABRODA ARMED - BTCUSDT LONG @ 79062 - PREMIUM")."""
+    """BTC/USDT -> BTCUSDT, matching the subject-line format in Andy's
+    original request ("KABRODA ARMED - BTCUSDT LONG @ 79062"; the request's
+    own example had a trailing "- PREMIUM" tier tag, dropped in v2 -- see
+    build_armed_email()'s own comment)."""
     return (symbol or "").replace("/", "")
 
 
@@ -97,13 +111,19 @@ def build_lock_email(plan: Dict[str, Any]) -> Tuple[str, str]:
 
 
 def build_armed_email(plan: Dict[str, Any]) -> Tuple[str, str]:
+    # v2 (2026-09-11): no more tier -- the subject used to end "- PREMIUM"/
+    # "- STANDARD" (plan.get("tier") or "STANDARD"), which meant every real
+    # v2 trade (tier is always None now) silently showed a fabricated
+    # "STANDARD" tag implying a tier split that no longer exists. Found
+    # 2026-09-15 auditing this file for exactly the class of stale-leftover
+    # text Andy flagged (render_brief()/FUEL_REQUIREMENT_TEXT/MANAGEMENT_TEXT
+    # had the same bug, fixed the same day in trade_plan.py) -- dropped.
     symbol = _symbol_compact(plan.get("symbol", ""))
     direction = plan.get("direction") or "?"
     trigger = plan.get("trigger_price")
-    tier = plan.get("tier") or "STANDARD"
     reentry_note = " (RE-ENTRY)" if plan.get("reentry_used") else ""
     trig_str = f"{trigger:.0f}" if trigger else "?"
-    subject = f"KABRODA ARMED{reentry_note} - {symbol} {direction} @ {trig_str} - {tier}"
+    subject = f"KABRODA ARMED{reentry_note} - {symbol} {direction} @ {trig_str}"
     body = (
         tp.render_brief(plan)
         + f"\n\n  {'RE-ENTRY: this is the second-break entry, one attempt max.' if plan.get('reentry_used') else 'Place/confirm your order now.'}"
@@ -146,7 +166,14 @@ def build_done_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     if opposite_side:
         opposite_trigger = plan.get("opposite_trigger")
         trig_str = f"{opposite_trigger:.0f}" if opposite_trigger else "?"
-        subject = f"KABRODA VETOED - {symbol} {opposite_side} @ {trig_str} - counter-trend"
+        # v2 (2026-09-15): was hardcoded "- counter-trend" -- a real, always-
+        # wrong claim now that the counter-trend veto is retired (decision_
+        # engine.py's own header comment: measured n=0 on the v2 population,
+        # cut). The real gate miss could be anything (Krown Cross votes, RSI
+        # zone, reachability, no HTF carry) -- "stand down" matches the
+        # vetoed_cross_side branch below rather than naming a mechanism that
+        # no longer exists; `reason` in the body carries the real one.
+        subject = f"KABRODA VETOED - {symbol} {opposite_side} @ {trig_str} - stand down"
         body = (
             f"The opposite side crossed and the full gate ran on it -- {reason}.\n\n"
             f"This system only trades the anticipated side ({plan.get('direction')}); "

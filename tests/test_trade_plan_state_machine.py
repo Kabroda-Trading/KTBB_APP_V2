@@ -3,10 +3,22 @@ Unit coverage for trade_plan.py's intraday state machine
 (KABRODA_COM_TRADE_PLAN_SPEC.md SS5/SS7/SS8): advance_waiting_plan,
 mirror_campaign_outcome, check_reentry_eligibility.
 
-Pure-function coverage -- each function takes plain dicts/lists and returns
-a plain dict of field updates (or None), so candle sequences are hand-built
-to land on specific fuel_gate.py verdicts (NO_PUSH/FUELED/CONFLICTED) via
-its documented ratio math (median push volume / prior baseline).
+Rewritten 2026-09-15 for v2 (Krown Cross + 4H RSI gate, no fuel). v1's fuel-
+based tests (FUELED/CONFLICTED/NO_FUEL verdicts via fuel_gate.py, tier
+stamping, VETOED-then-retest) exercised behavior that no longer exists --
+advance_waiting_plan() now checks `live_price` directly against the trigger
+(no more fuel_gate.evaluate_fuel_gate() call at all) and re-checks the real
+4-condition v2 gate via _confirm_v2_gate_at_cross() once touched. The
+opposite-trigger-break detection and check_wide_stop_or_t1()/
+mirror_campaign_outcome() tests are unchanged -- neither was ever fuel-
+specific.
+
+check_reentry_eligibility()/advance_reentry_plan() are RETIRED in v2 (SS8
+re-entry-after-wick-fake had no v2-consistent replacement signal -- see
+trade_plan_engine.py's own header comment, "no leg 2" reasoning). The
+functions still exist in trade_plan.py, unreachable from trade_plan_engine.py,
+kept in case a future v2-native re-entry design is built -- their tests stay
+as pure-function coverage of code that still exists, just isn't called live.
 """
 import datetime
 import os
@@ -23,8 +35,9 @@ SESSION_EXPIRES = NOW + datetime.timedelta(hours=6)
 
 def _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, baseline_n=250, push_n=6,
              trigger=100.0, touched=True):
-    """Baseline bars sit on the near side of trigger, push bars beyond it
-    (or, if touched=False, both sides stay near/below -- producing NO_PUSH)."""
+    """v2 no longer reads candles_5m for the touch check (live_price decides
+    that directly) -- kept only because advance_waiting_plan()'s signature
+    still accepts candles_5m for call-site compatibility. Content is inert."""
     near = 95.0 if side == "LONG" else 105.0
     beyond = 105.0 if side == "LONG" else 95.0
     candles = [{"close": near, "volume": baseline_vol} for _ in range(baseline_n)]
@@ -43,7 +56,13 @@ def _plan(status="WAITING", direction="LONG", trigger=100.0, commit_after=COMMIT
     return d
 
 
-# ------------------------------------------------------------------ advance_waiting_plan
+def _pass_gate(monkeypatch, votes=2, aligned=2):
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {"aligned": aligned})
+    monkeypatch.setattr(_htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": votes})
+
+
+# ------------------------------------------------------------------ advance_waiting_plan: touch / opposite-break (unchanged by v2)
 
 def test_advance_waiting_held_before_commit_after():
     plan = _plan(commit_after=NOW + datetime.timedelta(minutes=30))
@@ -53,28 +72,19 @@ def test_advance_waiting_held_before_commit_after():
 
 def test_advance_waiting_no_touch_returns_none():
     plan = _plan()
-    candles = _candles(side="LONG", touched=False)
-    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=95.0)
+    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, _candles(), live_price=95.0)
     assert result is None
 
 
 # P0 regression (2026-09-01, confirmed live -- Kabroda AI Brain repo
 # AGENT_LOG.md "CONFIRMED P0: state machine missed a live cross"): a
-# LONG-anticipated plan (trend-aligned with a GOOD daily table) sat
-# WAITING forever, with zero detection, while price broke DOWN through
-# the OPPOSITE trigger (a real, confirmed 5m close below BD, per Andy's
-# own chart) -- a genuine counter-trend move the daily-bias heuristic
-# didn't anticipate. NO_PUSH on the LONG side was silently treated as
-# "nothing happened," when in fact the market had already moved through
-# the untracked side.
+# LONG-anticipated plan sat WAITING forever while price broke DOWN through
+# the OPPOSITE trigger -- a real, expected scenario the anticipation
+# heuristic doesn't cover on its own.
 
 def test_advance_waiting_detects_opposite_side_break_p0():
-    # trigger=100 (LONG, anticipated), t2=110 -> box=10 -> opposite
-    # (SHORT) trigger = 90. Price broke down to 85, well through 90 --
-    # candles never approach 100 at all (LONG side reads NO_PUSH).
     plan = _plan(direction="LONG", trigger=100.0, t2=110.0)
-    candles = [{"close": 85.0, "volume": 10.0} for _ in range(30)]
-    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=85.0)
+    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, _candles(), live_price=85.0)
     assert result is not None
     assert result["status"] == "DONE"
     assert "OPPOSITE trigger" in result["last_transition_reason"]
@@ -83,11 +93,8 @@ def test_advance_waiting_detects_opposite_side_break_p0():
 
 
 def test_advance_waiting_opposite_break_short_side():
-    # Mirror: SHORT-anticipated plan (trigger=90), t2=80 -> box=10 ->
-    # opposite (LONG) trigger = 100. Price broke UP to 105.
     plan = _plan(direction="SHORT", trigger=90.0, t2=80.0)
-    candles = [{"close": 105.0, "volume": 10.0} for _ in range(30)]
-    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=105.0)
+    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, _candles(), live_price=105.0)
     assert result["status"] == "DONE"
     assert "OPPOSITE trigger" in result["last_transition_reason"]
     assert "100.00" in result["last_transition_reason"]
@@ -95,182 +102,105 @@ def test_advance_waiting_opposite_break_short_side():
 
 
 def test_advance_waiting_neither_side_touched_still_returns_none():
-    # Sanity: genuinely no movement on either side must still return None,
-    # not be swept up by the new opposite-side check.
     plan = _plan(direction="LONG", trigger=100.0, t2=110.0)
-    candles = [{"close": 95.0, "volume": 10.0} for _ in range(30)]  # between 90 and 100
-    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=95.0)
+    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, _candles(), live_price=95.0)
     assert result is None
 
 
 def test_advance_waiting_opposite_check_safe_without_t2():
-    # A plan missing t2 (shouldn't happen on a real row, but must not
-    # crash) -- falls back to the original None-on-NO_PUSH behavior.
     plan = _plan(direction="LONG", trigger=100.0)  # no t2
-    candles = [{"close": 85.0, "volume": 10.0} for _ in range(30)]
-    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=85.0)
+    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, _candles(), live_price=85.0)
     assert result is None
 
 
-def test_advance_waiting_fueled_cross_fills():
-    plan = _plan(direction="LONG", trigger=100.0)
-    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)  # ratio 1.0 -> FUELED
-    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=100.0)
+# ------------------------------------------------------------------ advance_waiting_plan: gate re-check at the real cross (v2)
+
+def test_advance_waiting_fills_when_gate_passes(monkeypatch):
+    _pass_gate(monkeypatch, votes=2, aligned=2)
+    plan = _plan(direction="LONG", trigger=100.0, t2=110.0, rsi_4h_at_lock=70.0)
+    result = tp.advance_waiting_plan(
+        plan, NOW, SESSION_EXPIRES, _candles(), live_price=100.0,
+        candles_1h=[{}], candles_4h=[{}], daily_atr14=40.0,  # box=10 -> ratio=0.25
+    )
     assert result is not None
     assert result["status"] == "FILLED"
     assert result["fill_price"] == 100.0
     assert result["fill_time"] == NOW
     assert result["cross_time"] == NOW
-    assert result["fuel_at_cross"] == "FUELED"
     assert result["entry_mode"] == "TRIGGER_AT_LEVEL"  # live_price == trigger, not beyond it
-    assert result["faked_first"] is False  # clean first-cross fill, not a retest
-    assert "filled" in result["last_transition_reason"]
+    assert result["faked_first"] is False
+    assert "gate passed" in result["last_transition_reason"]
 
 
-def test_advance_waiting_fueled_cross_stamps_tier_when_none(monkeypatch):
-    # 2026-08-31 fix: a pre-cross-anticipated plan (tier=None at generation)
-    # gets its tier stamped at the real cross, once HTF/box-ATR data is
-    # actually available.
-    import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
-    })
-    plan = _plan(direction="LONG", trigger=100.0, tier=None, t2=110.0)  # box=10, atr=25 -> ratio=0.4 -> PREMIUM
-    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)
+def test_advance_waiting_done_when_gate_declines(monkeypatch):
+    _pass_gate(monkeypatch, votes=1, aligned=2)  # Krown Cross short one vote
+    plan = _plan(direction="LONG", trigger=100.0, t2=110.0, rsi_4h_at_lock=70.0)
     result = tp.advance_waiting_plan(
-        plan, NOW, SESSION_EXPIRES, candles, live_price=100.0,
-        candles_1h=[{}], candles_4h=[{}], daily_atr14=25.0,
+        plan, NOW, SESSION_EXPIRES, _candles(), live_price=100.0,
+        candles_1h=[{}], candles_4h=[{}], daily_atr14=40.0,
     )
-    assert result["status"] == "FILLED"
-    assert result["tier"] == "PREMIUM"
+    assert result is not None
+    assert result["status"] == "DONE"
+    assert "Krown Cross" in result["last_transition_reason"]
+    assert result["cross_time"] == NOW  # preserved even on the decline path
 
 
-def test_advance_waiting_fueled_cross_never_overrides_existing_tier(monkeypatch):
-    import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
-    })
-    plan = _plan(direction="LONG", trigger=100.0, tier="STANDARD", t2=110.0)  # already known, from the post-cross path
-    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)
-    result = tp.advance_waiting_plan(
-        plan, NOW, SESSION_EXPIRES, candles, live_price=100.0,
-        candles_1h=[{}], candles_4h=[{}], daily_atr14=25.0,
-    )
-    assert "tier" not in result  # never re-decided
-
-
-def test_advance_waiting_fueled_cross_no_tier_stamp_without_1h4h_data():
-    # Missing candles_1h/4h/daily_atr14 -- must not crash, tier stays
-    # unset (matches pre-fix behavior for any caller not yet passing them).
-    plan = _plan(direction="LONG", trigger=100.0, tier=None)
-    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)
-    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=100.0)
-    assert result["status"] == "FILLED"
-    assert "tier" not in result
-
-
-def test_advance_waiting_fueled_cross_already_broken_out_uses_retest_mode():
+def test_advance_waiting_no_gate_recheck_without_1h4h_data_returns_none():
+    # Missing candles_1h/4h/daily_atr14 -- can't re-check the gate this poll,
+    # must return None (try again next poll), not guess FILLED or DONE.
     plan = _plan(direction="LONG", trigger=100.0)
-    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)
-    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=104.0)
+    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, _candles(), live_price=100.0)
+    assert result is None
+
+
+def test_advance_waiting_already_broken_out_uses_retest_mode(monkeypatch):
+    _pass_gate(monkeypatch, votes=2, aligned=2)
+    plan = _plan(direction="LONG", trigger=100.0, t2=110.0, rsi_4h_at_lock=70.0)
+    result = tp.advance_waiting_plan(
+        plan, NOW, SESSION_EXPIRES, _candles(), live_price=104.0,
+        candles_1h=[{}], candles_4h=[{}], daily_atr14=40.0,
+    )
     assert result["entry_mode"] == "RETEST_LIMIT_AT_LINE"
 
 
-def test_advance_waiting_thin_volume_no_opposition_is_conflicted_and_fills():
-    # 2026-09-07 fix (Kabroda AI Brain repo AGENT_LOG.md, DeepSeek's live-
-    # email review): thin volume ALONE (no HTF opposition, no HTF data
-    # even supplied) produces CONFLICTED, not NO_FUEL -- fuel_gate.py's
-    # own verdict formula requires opposition or divergence for NO_FUEL,
-    # neither of which this call can produce without HTF candles. The
-    # live gate (decision_engine.py) admits CONFLICTED as a real STANDARD
-    # trade -- this path must agree, not silently veto a tradeable cross.
-    plan = _plan(direction="LONG", trigger=100.0)
-    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=2.0, touched=True)  # ratio 0.2 -> thin
-    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=100.0)
-    assert result is not None
+def test_advance_waiting_entry_mode_not_recomputed_once_set(monkeypatch):
+    _pass_gate(monkeypatch, votes=2, aligned=2)
+    plan = _plan(direction="LONG", trigger=100.0, t2=110.0, rsi_4h_at_lock=70.0,
+                 entry_mode="TRIGGER_AT_LEVEL")
+    result = tp.advance_waiting_plan(
+        plan, NOW, SESSION_EXPIRES, _candles(), live_price=104.0,
+        candles_1h=[{}], candles_4h=[{}], daily_atr14=40.0,
+    )
+    assert "entry_mode" not in result  # already set on the plan -- not re-decided
+
+
+def test_advance_waiting_short_side_fills(monkeypatch):
+    _pass_gate(monkeypatch, votes=2, aligned=2)
+    plan = _plan(direction="SHORT", trigger=100.0, t2=90.0, rsi_4h_at_lock=30.0)
+    result = tp.advance_waiting_plan(
+        plan, NOW, SESSION_EXPIRES, _candles(side="SHORT"), live_price=100.0,
+        candles_1h=[{}], candles_4h=[{}], daily_atr14=40.0,
+    )
     assert result["status"] == "FILLED"
-    assert result["fuel_at_cross"] == "CONFLICTED"
-    assert result["entry_mode"] is not None
+    assert result["fill_price"] == 100.0
 
 
-def test_advance_waiting_conflicted_cross_stamps_standard_never_premium(monkeypatch):
-    # CONFLICTED can never earn PREMIUM, even with both HTFs carrying and
-    # a tight box -- only FUELED can (decision_engine.py's own boundary,
-    # _stamp_tier_at_cross() must agree). Updated 2026-09-09 for
-    # STANDARD_FUEL_RATIO_FLOOR (1.1): with aligned=2/opposed=0 here, the
-    # ONLY way fuel_gate.py's real verdict formula reaches CONFLICTED at
-    # all is via a thin/low ratio (vol_ok False or None) -- opposing==0
-    # with ratio>=0.8 always reads FUELED, never CONFLICTED. That thin
-    # ratio now also always fails the STANDARD floor, so this exact
-    # fixture (thin push, perfect HTF) now correctly lands on DONE, not
-    # FILLED -- it never reaches PREMIUM either way, which is still the
-    # thing being proven.
-    import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
-    })
-    plan = _plan(direction="LONG", trigger=100.0, tier=None, t2=110.0)  # box=10, atr=25 -> ratio=0.4 -> would be PREMIUM if FUELED
-    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=2.0, touched=True)  # thin -> CONFLICTED, ratio 0.2 < floor
+def test_advance_waiting_legacy_vetoed_status_still_gets_checked(monkeypatch):
+    # A row left over from before v2 (status=="VETOED", no more code path
+    # writes this) is treated the same as WAITING -- there's nothing left
+    # to distinguish them by (see advance_waiting_plan()'s own docstring).
+    _pass_gate(monkeypatch, votes=2, aligned=2)
+    plan = _plan(status="VETOED", direction="LONG", trigger=100.0, t2=110.0, rsi_4h_at_lock=70.0)
     result = tp.advance_waiting_plan(
-        plan, NOW, SESSION_EXPIRES, candles, live_price=100.0,
-        candles_1h=[{}], candles_4h=[{}], daily_atr14=25.0,
+        plan, NOW, SESSION_EXPIRES, _candles(), live_price=100.0,
+        candles_1h=[{}], candles_4h=[{}], daily_atr14=40.0,
     )
-    assert result["status"] == "DONE"
-    assert result.get("tier") != "PREMIUM"
-    assert "1.1" in result["last_transition_reason"]
-
-
-def test_advance_waiting_real_no_fuel_ghost_push_still_vetoes(monkeypatch):
-    # A genuine ghost push -- thin volume AND HTF opposition -- is the
-    # one fuel state that still VETOES. Requires real HTF candles/data to
-    # even be detectable (see the 2026-09-07 fix comment in trade_plan.py
-    # on why the plain thin-volume-only case above no longer does).
-    import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BEARISH", "trend_4h": "BEARISH", "aligned": 0, "opposed": 2,
-    })
-    plan = _plan(direction="LONG", trigger=100.0)
-    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=2.0, touched=True)  # thin + opposed -> NO_FUEL
-    result = tp.advance_waiting_plan(
-        plan, NOW, SESSION_EXPIRES, candles, live_price=100.0,
-        candles_1h=[{}], candles_4h=[{}], daily_atr14=25.0,
-    )
-    assert result is not None
-    assert result["status"] == "VETOED"
-    assert result["fuel_at_cross"] == "NO_FUEL"
-    assert result["entry_mode"] is not None
-
-
-def test_advance_vetoed_second_cross_fueled_fills():
-    plan = _plan(status="VETOED", direction="LONG", trigger=100.0, entry_mode="TRIGGER_AT_LEVEL")
-    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)
-    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=100.0)
     assert result["status"] == "FILLED"
-    assert result["faked_first"] is True  # first cross wicked back (VETOED) before this retest filled
-    assert "second" in result["last_transition_reason"]
-    # entry_mode already set on the plan -- must not be re-decided/overwritten
-    assert "entry_mode" not in result
-
-
-def test_advance_vetoed_second_cross_still_no_fuel_done(monkeypatch):
-    import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BEARISH", "trend_4h": "BEARISH", "aligned": 0, "opposed": 2,
-    })
-    plan = _plan(status="VETOED", direction="LONG", trigger=100.0, entry_mode="TRIGGER_AT_LEVEL")
-    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=2.0, touched=True)
-    result = tp.advance_waiting_plan(
-        plan, NOW, SESSION_EXPIRES, candles, live_price=100.0,
-        candles_1h=[{}], candles_4h=[{}], daily_atr14=25.0,
-    )
-    assert result["status"] == "DONE"
-    assert "no energy" in result["last_transition_reason"]
 
 
 def test_advance_waiting_session_expiry_no_cross_done():
     plan = _plan(commit_after=NOW - datetime.timedelta(hours=1))
-    candles = _candles(side="LONG", touched=False)
-    result = tp.advance_waiting_plan(plan, SESSION_EXPIRES, SESSION_EXPIRES, candles, live_price=95.0)
+    result = tp.advance_waiting_plan(plan, SESSION_EXPIRES, SESSION_EXPIRES, _candles(touched=False), live_price=95.0)
     assert result == {"status": "DONE", "last_transition_reason": "session ended, trigger never crossed"}
 
 
@@ -280,15 +210,7 @@ def test_advance_ignores_non_waiting_vetoed_statuses():
         assert tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, _candles(), live_price=100.0) is None
 
 
-def test_advance_waiting_short_side_fueled():
-    plan = _plan(direction="SHORT", trigger=100.0)
-    candles = _candles(side="SHORT", baseline_vol=10.0, push_vol=10.0, touched=True)
-    result = tp.advance_waiting_plan(plan, NOW, SESSION_EXPIRES, candles, live_price=100.0)
-    assert result["status"] == "FILLED"
-    assert result["fill_price"] == 100.0
-
-
-# ------------------------------------------------------------------ check_wide_stop_or_t1
+# ------------------------------------------------------------------ check_wide_stop_or_t1 (unchanged by v2)
 
 def _c1m(l, h):
     return {"l": l, "h": h, "ts": 0}
@@ -334,7 +256,7 @@ def test_wide_stop_short_side():
     assert tp.check_wide_stop_or_t1(plan, candles) == "T1_FIRST"
 
 
-# ------------------------------------------------------------------ mirror_campaign_outcome
+# ------------------------------------------------------------------ mirror_campaign_outcome (unchanged by v2)
 
 def test_mirror_ignores_non_filled_plan():
     plan = _plan(status="WAITING")
@@ -348,20 +270,12 @@ def test_mirror_ignores_still_open_campaign():
 
 
 def test_mirror_refuses_reentry_fills_even_with_a_terminal_campaign():
-    # Regression: CampaignLog has no re-entry concept and is almost always
-    # already terminal (from the ORIGINAL fill's own stop-out) by the time
-    # a re-entry fills -- mirroring it here would silently close the
-    # re-entry out on a stale, unrelated verdict.
     plan = _plan(status="FILLED", reentry_used=True)
     assert tp.mirror_campaign_outcome(plan, "CLOSED_LOSS") is None
     assert tp.mirror_campaign_outcome(plan, "CLOSED_WIN") is None
 
 
 def test_mirror_never_produces_stopped():
-    # CampaignLog's own tighter (r30) stop firing is NOT TradePlan's wide-
-    # stop wick-fake -- see the 2026-08-31 CORRECTION in trade_plan.py.
-    # mirror_campaign_outcome() must map every terminal CampaignLog status
-    # to DONE, never STOPPED -- only check_wide_stop_or_t1() can do that.
     plan = _plan(status="FILLED")
     for campaign_status in ("CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY"):
         result = tp.mirror_campaign_outcome(plan, campaign_status)
@@ -369,7 +283,12 @@ def test_mirror_never_produces_stopped():
         assert campaign_status in result["last_transition_reason"]
 
 
-# ------------------------------------------------------------------ check_reentry_eligibility
+# ------------------------------------------------------------------ check_reentry_eligibility / advance_reentry_plan / resolve_reentry_fill
+# RETIRED from the live flow (trade_plan_engine.py no longer calls any of
+# these -- see that file's own header comment), kept as pure-function
+# coverage of code that still exists in trade_plan.py unreachable, in case
+# a v2-native re-entry design is built on top of it later. Unchanged by v2
+# since none of it ever depended on tier.
 
 def test_reentry_armed_when_fuel_still_fueled():
     plan = _plan(status="STOPPED")
@@ -396,8 +315,6 @@ def test_reentry_done_when_not_stopped():
     assert result["status"] == "DONE"
     assert "not eligible" in result["last_transition_reason"]
 
-
-# ------------------------------------------------------------------ advance_reentry_plan
 
 def test_reentry_advance_ignores_non_armed_status():
     for status in ("WAITING", "VETOED", "FILLED", "STOPPED", "DONE", "NO_PLAN"):
@@ -432,16 +349,12 @@ def test_reentry_advance_fueled_cross_fills():
 
 
 def test_reentry_advance_unfueled_cross_goes_straight_to_done():
-    # "One attempt max" -- unlike advance_waiting_plan, an unfueled re-entry
-    # cross does NOT arm a second retest watch.
     plan = _plan(status="REENTRY_ARMED", direction="LONG", trigger=100.0)
     candles = _candles(side="LONG", baseline_vol=10.0, push_vol=2.0, touched=True)  # thin
     result = tp.advance_reentry_plan(plan, NOW, SESSION_EXPIRES, candles)
     assert result["status"] == "DONE"
     assert result["reentry_used"] is True
 
-
-# ------------------------------------------------------------------ resolve_reentry_fill
 
 def test_resolve_reentry_ignores_non_reentry_plans():
     plan = _plan(status="FILLED", reentry_used=False)
@@ -473,8 +386,5 @@ def test_resolve_reentry_session_expired_becomes_done():
 
 
 def test_resolve_reentry_does_not_handle_wide_stop_first():
-    # WIDE_STOP_FIRST is deliberately routed elsewhere (the same STOPPED
-    # transition every FILLED plan gets) -- this function must not produce
-    # a transition for it, to avoid a second, conflicting STOPPED path.
     plan = _plan(status="FILLED", reentry_used=True)
     assert tp.resolve_reentry_fill(plan, "WIDE_STOP_FIRST", NOW, SESSION_EXPIRES) is None

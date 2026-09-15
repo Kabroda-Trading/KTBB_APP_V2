@@ -1,8 +1,13 @@
 """
-Unit coverage for trade_plan.py (KABRODA_COM_TRADE_PLAN_SPEC.md SS3/SS4).
-Pure-function module (build_trade_plan/render_brief take plain data, no
-DB/network) -- straightforward to test with hand-constructed decision
-dicts and precisely known expected outputs.
+Unit coverage for trade_plan.py (KABRODA_COM_TRADE_PLAN_SPEC.md SS3/SS4) -- v2.
+
+Rewritten 2026-09-15 for the v2 rebuild (Krown Cross + 4H RSI gate, no tier,
+no fuel, SPLIT 50/50 management with no BE-move -- see decision_engine.py's
+own header comment). v1's tests (PREMIUM/STANDARD tier stamping,
+STANDARD_FUEL_RATIO_FLOOR, PROMOTED_PUSH_FLOOR, fuel-based FILLED/VETOED)
+exercised behavior that no longer exists. Pure-function module (build_trade_
+plan/render_brief take plain data, no DB/network) -- straightforward to test
+with hand-constructed decision dicts and precisely known expected outputs.
 """
 import datetime
 import os
@@ -21,17 +26,12 @@ def _flat_candles(price=100.0, n=10):
     return [{"open": price, "high": price + 1, "low": price - 1, "close": price} for _ in range(n)]
 
 
-def _take_decision(side="LONG", tier="STANDARD", entry=100.0, t1=112.0, t2=120.0, t3=132.0,
-                    fuel_push_ratio=2.0):
-    # fuel_push_ratio default 2.0 -> clears both STANDARD_FUEL_RATIO_FLOOR (1.1)
-    # and PROMOTED_PUSH_FLOOR (1.8); tests exercising the promoted floor pass an
-    # explicit value.
+def _take_decision(side="LONG", entry=100.0, t1=112.0, t2=120.0, t3=132.0):
     return {
-        "verdict_state": "TAKE_PREMIUM" if tier == "PREMIUM" else "TAKE_STANDARD",
-        "side": side, "tier": tier,
+        "verdict_state": "TAKE",
+        "side": side, "tier": None,
         "entry_price": entry, "stop_loss": entry - 20.0 if side == "LONG" else entry + 20.0,
         "t1": t1, "t2": t2, "t3": t3,
-        "fuel_push_ratio": fuel_push_ratio,
         "tactical_brief": "gate approved",
     }
 
@@ -57,52 +57,37 @@ def test_no_plan_on_pass_state_carries_the_gate_reason():
 
 
 def test_waiting_plan_on_take_long_with_good_rr():
-    # Entry 100, wide flat candles below entry give a fallback stop at
-    # 1.5xATR = 3.0 below entry -> stop=97. T1=112 -> risk=3, reward=12,
-    # ratio=4.0 -- comfortably passes the 1:1 floor.
-    # Tier is PREMIUM specifically (2026-09-08 tier-specific-stop change):
-    # this test is about stop_planner.py's own fallback mechanism, which is
-    # PREMIUM's unchanged real stop -- STANDARD now uses a different
-    # (r30-based) formula entirely, and this test's deliberately unrealistic
-    # r30/value-area fixture (155-170, nowhere near the flat 100-price
-    # candles) exists specifically to force stop_planner's fallback path,
-    # not to exercise STANDARD's own stop. See test_tier_specific_stop.py
-    # for STANDARD's real stop behavior.
-    decision = _take_decision(side="LONG", tier="PREMIUM", entry=100.0, t1=112.0, t2=120.0, t3=132.0)
+    # v2: ONE stop formula for every trade -- r30 edge -+ STOP_BUFFER_BOX*box,
+    # no more PREMIUM zone-stop / STANDARD split. entry 100, t2=120 -> box=20
+    # (t2 = trigger + T2_BOX*box, T2_BOX=1.0 in v2) -> stop = 99 - 0.12*20 = 96.6.
+    decision = _take_decision(side="LONG", entry=100.0, t1=112.0, t2=120.0, t3=132.0)
     plan = tp.build_trade_plan(
         symbol="BTC/USDT", date_key="2026-08-31", session_id="us_ny_futures",
         decision_dict=decision, anchor_time=ANCHOR, candles_24h=_flat_candles(price=150.0),
-        r30_high=160.0, r30_low=155.0, f24_vah=170.0, f24_val=165.0, daily_atr14=2.0,
+        r30_high=101.0, r30_low=99.0, f24_vah=170.0, f24_val=165.0, daily_atr14=2.0,
     )
     assert plan["status"] == "WAITING"
     assert plan["direction"] == "LONG"
-    assert plan["tier"] == "PREMIUM"
+    assert plan["tier"] is None
     assert plan["trigger_price"] == 100.0
-    assert plan["stop_price"] == pytest.approx(97.0)  # 100 - 1.5*2.0
+    assert plan["stop_price"] == pytest.approx(96.6)
     assert plan["entry_mode"] is None  # decided at commit, not at generation
     assert plan["rr_floor_ok"] is True
     assert plan["rr_ratio"] > 1.0
     assert plan["t1"] == 112.0 and plan["t2"] == 120.0 and plan["t3"] == 132.0
-    # 2026-09-07 correction: MANAGEMENT_TEXT now describes the audited
-    # rule (50/50, tier-differentiated T2 breakeven for PREMIUM only) --
-    # see trade_plan.py's own comment on why the old 30/70 text was stale.
-    assert "50%" in plan["management"] and "breakeven" in plan["management"].lower()
-    assert "PREMIUM" in plan["management"] and "STANDARD" in plan["management"]
+    assert "50%" in plan["management"]
+    assert "PREMIUM" not in plan["management"] and "STANDARD" not in plan["management"]
 
 
-def test_no_plan_when_core_zone_stop_kills_rr():
-    # A swing low FAR below entry forces a wide stop, killing R:R to T1.
-    entry, t1 = 100.0, 101.0  # T1 is very close -- easy to blow the floor
-    candles = (
-        [{"open": 98, "high": 99, "low": 97, "close": 98} for _ in range(3)]
-        + [{"open": 60, "high": 61, "low": 60, "close": 60.5}]  # confirmed swing low far below entry
-        + [{"open": 98, "high": 99, "low": 97, "close": 98} for _ in range(3)]
-    )
-    decision = _take_decision(side="LONG", tier="STANDARD", entry=entry, t1=t1, t2=110.0, t3=120.0)
+def test_no_plan_when_r30_stop_kills_rr():
+    # v2 has no candles-driven zone stop any more -- an r30_low far below
+    # entry is now what forces a wide stop and kills R:R to a close T1.
+    entry, t1, t2 = 100.0, 101.0, 110.0
+    decision = _take_decision(side="LONG", entry=entry, t1=t1, t2=t2, t3=120.0)
     plan = tp.build_trade_plan(
         symbol="BTC/USDT", date_key="2026-08-31", session_id="us_ny_futures",
-        decision_dict=decision, anchor_time=ANCHOR, candles_24h=candles,
-        r30_high=105.0, r30_low=103.0, f24_vah=110.0, f24_val=108.0, daily_atr14=2.0,
+        decision_dict=decision, anchor_time=ANCHOR, candles_24h=_flat_candles(),
+        r30_high=101.0, r30_low=50.0, f24_vah=110.0, f24_val=108.0, daily_atr14=2.0,
     )
     assert plan["status"] == "NO_PLAN"
     assert "R:R" in plan["no_plan_reason"]
@@ -121,16 +106,20 @@ def test_no_plan_when_atr_unavailable():
 
 
 def test_short_side_waiting_plan():
-    decision = _take_decision(side="SHORT", tier="PREMIUM", entry=100.0, t1=88.0, t2=80.0, t3=68.0)
+    # r30_high/r30_low sit sensibly around entry now (v2 always uses the r30
+    # formula directly, no ATR-fallback zone stop to paper over a mismatched
+    # fixture) -- entry 100, r30_high=105 -> stop = 105 + 0.12*20 = 107.4.
+    decision = _take_decision(side="SHORT", entry=100.0, t1=88.0, t2=80.0, t3=68.0)
     plan = tp.build_trade_plan(
         symbol="BTC/USDT", date_key="2026-08-31", session_id="us_ny_futures",
-        decision_dict=decision, anchor_time=ANCHOR, candles_24h=_flat_candles(price=50.0),
-        r30_high=55.0, r30_low=52.0, f24_vah=58.0, f24_val=53.0, daily_atr14=2.0,
+        decision_dict=decision, anchor_time=ANCHOR, candles_24h=_flat_candles(price=100.0),
+        r30_high=105.0, r30_low=95.0, f24_vah=110.0, f24_val=90.0, daily_atr14=2.0,
     )
     assert plan["status"] == "WAITING"
     assert plan["direction"] == "SHORT"
-    assert plan["tier"] == "PREMIUM"
+    assert plan["tier"] is None
     assert plan["stop_price"] > plan["trigger_price"]  # SHORT stop sits above entry
+    assert plan["stop_price"] == pytest.approx(107.4)
 
 
 def test_render_brief_no_plan():
@@ -178,7 +167,7 @@ def test_no_plan_carries_locked_levels_for_the_lock_email():
     # no-trade morning.
     plan = tp.build_trade_plan(
         symbol="BTC/USDT", date_key="2026-08-31", session_id="us_ny_futures",
-        decision_dict=_pass_decision("counter-trend on a GOOD daily table"),
+        decision_dict=_pass_decision("gate declined"),
         anchor_time=ANCHOR, candles_24h=_flat_candles(),
         r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
         breakout_trigger=65500.0, breakdown_trigger=64200.0,
@@ -202,166 +191,155 @@ def test_render_brief_no_plan_shows_levels_when_available():
 def test_render_brief_waiting_plan_has_every_number():
     plan = {
         "date_key": "2026-08-31", "symbol": "BTC/USDT", "status": "WAITING",
-        "direction": "LONG", "tier": "PREMIUM",
-        "trigger_price": 79062.43, "stop_price": 78573.37, "stop_basis": "beyond sweep wick low",
+        "direction": "LONG", "tier": None,
+        "trigger_price": 79062.43, "stop_price": 78573.37, "stop_basis": "r30 edge",
         "t1": 79650.0, "t2": 80100.0, "t3": 80800.0,
         "commit_after": ANCHOR + datetime.timedelta(minutes=45),
-        "fuel_requirement": tp.FUEL_REQUIREMENT_TEXT,
+        "fuel_requirement": tp.GATE_REQUIREMENT_TEXT,
         "management": tp.MANAGEMENT_TEXT,
     }
     text = tp.render_brief(plan)
     assert "79,062.43" in text
     assert "78,573.37" in text
     assert "79,650.00" in text
-    assert "80,100.00" in text
     assert "80,800.00" in text
     assert "BUY" in text
-    assert "PREMIUM" in text
     assert "ORDER 2" in text  # retest-limit fallback always mentioned
+    # v2: no tier line, no PREMIUM/STANDARD language anywhere in the brief.
+    assert "Tier" not in text
+    assert "PREMIUM" not in text and "STANDARD" not in text
 
 
-def test_render_brief_tbd_tier_before_the_cross():
-    # 2026-08-31 fix: a pre-cross-anticipated plan has tier=None until the
-    # real cross stamps it -- must not print "Tier: None".
+def test_render_brief_has_no_tier_line_at_all():
+    # v2 (2026-09-15): the old "Tier: TBD" line promised a stamp-at-cross
+    # event that no longer happens -- dropped entirely, not replaced.
     plan = {
         "date_key": "2026-08-31", "symbol": "BTC/USDT", "status": "WAITING",
         "direction": "LONG", "tier": None,
-        "trigger_price": 100.0, "stop_price": 95.0, "stop_basis": "beyond sweep wick low",
+        "trigger_price": 100.0, "stop_price": 95.0, "stop_basis": "r30 edge",
         "t1": 110.0, "t2": 120.0, "t3": 130.0,
         "commit_after": ANCHOR + datetime.timedelta(minutes=45),
-        "fuel_requirement": tp.FUEL_REQUIREMENT_TEXT,
+        "fuel_requirement": tp.GATE_REQUIREMENT_TEXT,
         "management": tp.MANAGEMENT_TEXT,
     }
     text = tp.render_brief(plan)
-    assert "Tier: None" not in text
-    assert "TBD" in text
+    assert "Tier" not in text
+    assert "TBD" not in text
+    assert "None" not in text
 
 
-# ------------------------------------------------------------------ classify_alignment() / the email alignment-tier line (2026-09-06)
+# ------------------------------------------------------------------ classify_alignment() / the email alignment-tier line (v2: HTF-only, no fuel)
 
-def test_classify_alignment_fully_aligned_and_fueled():
-    assert tp.classify_alignment("FUELED", 2) == "FULLY ALIGNED / fuel FUELED"
+def test_classify_alignment_fully_aligned():
+    assert tp.classify_alignment("FUELED", 2) == "FULLY ALIGNED"
 
 
 def test_classify_alignment_partial():
-    assert tp.classify_alignment("FUELED", 1) == "PARTIAL / fuel FUELED"
+    assert tp.classify_alignment("FUELED", 1) == "PARTIAL"
 
 
 def test_classify_alignment_conflicted_htf():
-    assert tp.classify_alignment("FUELED", 0) == "CONFLICTED / fuel FUELED"
+    assert tp.classify_alignment("FUELED", 0) == "CONFLICTED"
 
 
-def test_classify_alignment_conflicted_fuel():
-    assert tp.classify_alignment("CONFLICTED", 2) == "FULLY ALIGNED / fuel CONFLICTED"
+def test_classify_alignment_ignores_fuel_verdict_entirely():
+    # v2: fuel is retired -- the fuel_verdict argument is accepted for call-
+    # site compatibility only and never changes the result.
+    for raw in ("FUELED", "CONFLICTED", "NO_FUEL", "NO_PUSH", None, "anything"):
+        assert tp.classify_alignment(raw, 2) == "FULLY ALIGNED"
 
 
-def test_classify_alignment_unlisted_fuel_states_map_to_neutral():
-    # fuel_verdict can be NO_FUEL/NO_PUSH/UNKNOWN per GateLog's own column
-    # comment -- DeepSeek's plain-word scheme only wants three buckets.
-    for raw in ("NO_FUEL", "NO_PUSH", "UNKNOWN", "something-undocumented"):
-        assert tp.classify_alignment(raw, 2) == "FULLY ALIGNED / fuel NEUTRAL"
-
-
-def test_classify_alignment_none_when_either_input_missing():
-    assert tp.classify_alignment(None, 2) is None
+def test_classify_alignment_none_when_htf_aligned_missing():
     assert tp.classify_alignment("FUELED", None) is None
     assert tp.classify_alignment(None, None) is None
 
 
-# ------------------------------------------------------------------ build_alignment_email_line() (Andy's wording spec, 2026-09-06 15:30 CT)
+# ------------------------------------------------------------------ build_alignment_email_line() (v2: HTF-only, no "Fuel <word> |" lead-in)
 
 def test_alignment_email_line_fully_aligned_shows_lead_and_trends():
     plan = {"fuel_verdict": "FUELED", "htf_aligned": 2, "trend_1h": "BULLISH", "trend_4h": "BULLISH"}
     line = tp.build_alignment_email_line(plan)
     assert "as of session lock" in line
-    assert "Fuel FUELED | 1H trend BULLISH | 4H trend BULLISH -> FULLY ALIGNED" in line
+    assert "1H trend BULLISH | 4H trend BULLISH | FULLY ALIGNED" in line
+    assert "Fuel" not in line
     assert f"{tp._T3_RATE_FULLY_ALIGNED_PCT}%" in line
     assert f"{tp._T3_RATE_PARTIAL_ALIGNED_PCT}%" in line
     assert "how far the trade can run, not whether it wins" in line
-    # (4) no sizing/gate language anywhere near it
     assert "sizing" not in line.lower()
     assert "gate" not in line.lower()
 
 
 def test_alignment_email_line_partial_uses_partial_stat_wording():
-    plan = {"fuel_verdict": "FUELED", "htf_aligned": 1}
+    plan = {"htf_aligned": 1}
     line = tp.build_alignment_email_line(plan)
-    assert "-> PARTIAL" in line
+    assert "PARTIAL" in line
     assert "Partially-aligned setups reached T3" in line
 
 
 def test_alignment_email_line_conflicted_uses_conflicted_wording():
-    plan = {"fuel_verdict": "CONFLICTED", "htf_aligned": 0}
+    plan = {"htf_aligned": 0}
     line = tp.build_alignment_email_line(plan)
-    assert "-> CONFLICTED" in line
+    assert "CONFLICTED" in line
     assert "Conflicted setups have historically run less far" in line
 
 
 def test_alignment_email_line_omits_trend_bits_when_unavailable():
-    # No trend_1h/trend_4h on the plan at all (e.g. a real row from before
-    # these columns existed) -- must not print "1H trend None".
-    plan = {"fuel_verdict": "FUELED", "htf_aligned": 2}
+    # No trend_1h/trend_4h on the plan at all -- must not print "1H trend None".
+    plan = {"htf_aligned": 2}
     line = tp.build_alignment_email_line(plan)
     assert "1H trend" not in line
     assert "4H trend" not in line
-    assert "Fuel FUELED -> FULLY ALIGNED" in line
+    assert "FULLY ALIGNED" in line
 
 
-def test_alignment_email_line_none_when_unavailable():
+def test_alignment_email_line_none_when_htf_aligned_missing():
     assert tp.build_alignment_email_line({}) is None
-    assert tp.build_alignment_email_line({"fuel_verdict": "FUELED"}) is None
-    assert tp.build_alignment_email_line({"htf_aligned": 2}) is None
+    assert tp.build_alignment_email_line({"trend_1h": "BULLISH"}) is None
 
 
 def test_render_brief_includes_alignment_line_when_available():
     plan = {
         "date_key": "2026-08-31", "symbol": "BTC/USDT", "status": "WAITING",
-        "direction": "LONG", "tier": "PREMIUM",
-        "trigger_price": 79062.43, "stop_price": 78573.37, "stop_basis": "beyond sweep wick low",
+        "direction": "LONG", "tier": None,
+        "trigger_price": 79062.43, "stop_price": 78573.37, "stop_basis": "r30 edge",
         "t1": 79650.0, "t2": 80100.0, "t3": 80800.0,
         "commit_after": ANCHOR + datetime.timedelta(minutes=45),
-        "fuel_requirement": tp.FUEL_REQUIREMENT_TEXT, "management": tp.MANAGEMENT_TEXT,
-        "fuel_verdict": "FUELED", "htf_aligned": 2, "trend_1h": "BULLISH", "trend_4h": "BULLISH",
+        "fuel_requirement": tp.GATE_REQUIREMENT_TEXT, "management": tp.MANAGEMENT_TEXT,
+        "htf_aligned": 2, "trend_1h": "BULLISH", "trend_4h": "BULLISH",
     }
     text = tp.render_brief(plan)
     assert "as of session lock" in text
-    assert "Fuel FUELED | 1H trend BULLISH | 4H trend BULLISH -> FULLY ALIGNED" in text
+    assert "1H trend BULLISH | 4H trend BULLISH | FULLY ALIGNED" in text
     assert "how far the trade can run, not whether it wins" in text
 
 
 def test_render_brief_omits_alignment_line_when_unavailable():
-    # No fuel_verdict/htf_aligned on the plan dict at all (e.g. a plan
-    # dict built before this feature existed, or a TradePlan row's own
-    # __dict__, which never carries these transient-only keys) -- must
-    # not print "Setup strength: None" or crash.
     plan = {
         "date_key": "2026-08-31", "symbol": "BTC/USDT", "status": "WAITING",
-        "direction": "LONG", "tier": "PREMIUM",
-        "trigger_price": 100.0, "stop_price": 95.0, "stop_basis": "beyond sweep wick low",
+        "direction": "LONG", "tier": None,
+        "trigger_price": 100.0, "stop_price": 95.0, "stop_basis": "r30 edge",
         "t1": 110.0, "t2": 120.0, "t3": 130.0,
         "commit_after": ANCHOR + datetime.timedelta(minutes=45),
-        "fuel_requirement": tp.FUEL_REQUIREMENT_TEXT, "management": tp.MANAGEMENT_TEXT,
+        "fuel_requirement": tp.GATE_REQUIREMENT_TEXT, "management": tp.MANAGEMENT_TEXT,
     }
     text = tp.render_brief(plan)
     assert "Setup strength" not in text
 
 
-def test_build_trade_plan_carries_fuel_verdict_and_htf_aligned_transiently():
-    decision = _take_decision(side="LONG", tier="PREMIUM")
-    decision["fuel_verdict"] = "FUELED"
+def test_build_trade_plan_carries_htf_aligned_transiently():
+    decision = _take_decision(side="LONG")
     decision["htf_aligned"] = 2
     plan = tp.build_trade_plan(
         symbol="BTC/USDT", date_key="2026-08-31", session_id="us_ny_futures",
         decision_dict=decision, anchor_time=ANCHOR, candles_24h=_flat_candles(),
         r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
     )
-    assert plan["fuel_verdict"] == "FUELED"
     assert plan["htf_aligned"] == 2
+    assert plan["fuel_verdict"] is None  # always None now -- fuel is retired
 
 
 # ------------------------------------------------------------------ build_trade_plan(): pre-cross path
-# (2026-08-31, WAITING-visibility fix -- Andy found via the live site,
-# Kabroda AI Brain AGENT_LOG.md. anticipate_setup() itself is covered in
+# (2026-08-31, WAITING-visibility fix. anticipate_setup() itself is covered in
 # tests/test_anticipate_setup.py; these isolate build_trade_plan()'s own
 # NEW branch logic by monkeypatching anticipate_setup directly.)
 
@@ -418,79 +396,85 @@ def test_precross_still_respects_rr_floor(monkeypatch):
     monkeypatch.setattr(tp, "anticipate_setup", lambda *a, **k: {
         "viable": True, "side": "LONG", "reason": "anticipating LONG -- test",
     })
-    # A confirmed swing low far below entry forces a wide stop, same
-    # mechanism test_no_plan_when_core_zone_stop_kills_rr already covers
-    # for the post-cross path -- must apply identically pre-cross.
-    candles = (
-        [{"open": 98, "high": 99, "low": 97, "close": 98} for _ in range(3)]
-        + [{"open": 60, "high": 61, "low": 60, "close": 60.5}]
-        + [{"open": 98, "high": 99, "low": 97, "close": 98} for _ in range(3)]
-    )
-    kwargs = _precross_kwargs(candles_24h=candles)
+    kwargs = _precross_kwargs()
     kwargs["breakout_trigger"], kwargs["breakdown_trigger"] = 100.0, 99.0  # tight box -> T1 close, easy to blow the floor
+    kwargs["r30_low"] = 50.0  # far below entry -> wide r30 stop kills R:R, same mechanism as the post-cross path
     plan = tp.build_trade_plan(**kwargs)
     assert plan["status"] == "NO_PLAN"
     assert "R:R" in plan["no_plan_reason"]
     assert plan["direction"] == "LONG"  # still recorded, per the existing post-cross behavior
 
 
-# ------------------------------------------------------------------ _stamp_tier_at_cross / advance_waiting_plan tier stamping
+# ------------------------------------------------------------------ _confirm_v2_gate_at_cross() -- replaces _stamp_tier_at_cross()
 
-def test_stamp_tier_at_cross_premium(monkeypatch):
+def test_confirm_v2_gate_passes_when_all_four_conditions_met(monkeypatch):
     import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
-    })
-    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0}  # box=10, atr=25 -> ratio=0.4 -> PREMIUM boundary
-    tier = tp._stamp_tier_at_cross(plan, [{}], [{}], daily_atr14=25.0)
-    assert tier == "PREMIUM"
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {"aligned": 2})
+    monkeypatch.setattr(_htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": 2})
+    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0, "rsi_4h_at_lock": 70.0}  # box=10, atr=25 -> ratio=0.4
+    gate = tp._confirm_v2_gate_at_cross(plan, [{}], [{}], daily_atr14=25.0)
+    assert gate["pass"] is True
+    assert gate["misses"] == []
 
 
-def test_stamp_tier_at_cross_standard_when_htf_not_fully_aligned(monkeypatch):
+def test_confirm_v2_gate_fails_when_htf_not_aligned(monkeypatch):
     import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "NEUTRAL", "aligned": 1, "opposed": 0,
-    })
-    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0}
-    tier = tp._stamp_tier_at_cross(plan, [{}], [{}], daily_atr14=25.0)
-    assert tier == "STANDARD"
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {"aligned": 0})
+    monkeypatch.setattr(_htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": 2})
+    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0, "rsi_4h_at_lock": 70.0}
+    gate = tp._confirm_v2_gate_at_cross(plan, [{}], [{}], daily_atr14=25.0)
+    assert gate["pass"] is False
+    assert any("carry" in m for m in gate["misses"])
 
 
-def test_stamp_tier_at_cross_standard_when_box_too_wide_for_premium(monkeypatch):
+def test_confirm_v2_gate_fails_when_krown_cross_not_both(monkeypatch):
     import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
-    })
-    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 150.0}  # box=50, atr=25 -> ratio=2.0
-    tier = tp._stamp_tier_at_cross(plan, [{}], [{}], daily_atr14=25.0)
-    assert tier == "STANDARD"
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {"aligned": 2})
+    monkeypatch.setattr(_htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": 1})
+    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0, "rsi_4h_at_lock": 70.0}
+    gate = tp._confirm_v2_gate_at_cross(plan, [{}], [{}], daily_atr14=25.0)
+    assert gate["pass"] is False
+    assert any("Krown Cross" in m for m in gate["misses"])
 
 
-def test_stamp_tier_at_cross_returns_none_when_no_htf_carry(monkeypatch):
-    # 2026-09-10 aligned=0 cut (Andy-approved): this parallel tier path must
-    # reach the same verdict as decision_engine.py::_core_gate -- neither 1H
-    # nor 4H backing the direction is no tier at all, for both fuel states,
-    # even with a push that clears the STANDARD floor.
+def test_confirm_v2_gate_fails_when_rsi_outside_zone(monkeypatch):
     import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "NEUTRAL", "trend_4h": "NEUTRAL", "aligned": 0, "opposed": 0,
-    })
-    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0}
-    for verdict in ("FUELED", "CONFLICTED"):
-        tier = tp._stamp_tier_at_cross(
-            plan, [{}], [{}], daily_atr14=25.0, fuel_verdict=verdict, push_ratio=1.5,
-        )
-        assert tier is None, verdict
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {"aligned": 2})
+    monkeypatch.setattr(_htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": 2})
+    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0, "rsi_4h_at_lock": 50.0}
+    gate = tp._confirm_v2_gate_at_cross(plan, [{}], [{}], daily_atr14=25.0)
+    assert gate["pass"] is False
+    assert any("RSI" in m for m in gate["misses"])
 
 
-# ------------------------------------------------------------------ advance_no_plan (2026-09-02, Andy's poll-routing decision)
-# Exact contract (Kabroda AI Brain repo AGENT_LOG.md, 15:45/15:50 CT): no
-# cross -> silence; real TAKE -> FILLED; real fail (a cross happened, gate
-# declined) -> DONE with a VETOED-framed email, "no repeated attempts."
-# (The original contract also carved out ALMOST as a third, deferred
-# outcome -- retired 2026-09-06 along with the verdict_state itself, see
-# GATE_REBUILD_SPEC.md: the gate commits on every cross now, no more
-# "might still resolve later" limbo.)
+def test_confirm_v2_gate_fails_when_rsi_missing(monkeypatch):
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {"aligned": 2})
+    monkeypatch.setattr(_htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": 2})
+    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0}  # no rsi_4h_at_lock key at all
+    gate = tp._confirm_v2_gate_at_cross(plan, [{}], [{}], daily_atr14=25.0)
+    assert gate["pass"] is False
+
+
+def test_confirm_v2_gate_fails_when_box_too_wide(monkeypatch):
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {"aligned": 2})
+    monkeypatch.setattr(_htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": 2})
+    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 150.0, "rsi_4h_at_lock": 70.0}  # box=50, atr=25 -> ratio=2.0
+    gate = tp._confirm_v2_gate_at_cross(plan, [{}], [{}], daily_atr14=25.0)
+    assert gate["pass"] is False
+
+
+def test_confirm_v2_gate_short_side_rsi_zone(monkeypatch):
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {"aligned": 2})
+    monkeypatch.setattr(_htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": 2})
+    plan = {"direction": "SHORT", "trigger_price": 100.0, "t2": 90.0, "rsi_4h_at_lock": 30.0}
+    gate = tp._confirm_v2_gate_at_cross(plan, [{}], [{}], daily_atr14=25.0)
+    assert gate["pass"] is True
+
+
+# ------------------------------------------------------------------ advance_no_plan (v2: no tier, no PROMOTED_PUSH_FLOOR)
 
 NOW = datetime.datetime(2026, 9, 2, 15, 0, 0, tzinfo=datetime.timezone.utc)
 
@@ -505,12 +489,9 @@ def _declined_decision(side="SHORT", reason="counter-trend on a GOOD daily table
     }
 
 
-def test_advance_no_plan_on_real_take_goes_to_filled_standard_uses_the_r30_stop():
-    # 2026-09-10 audit fix: a NO_PLAN promotion now applies the tier-specific
-    # stop like the other two fill paths -- STANDARD gets the r30-based stop,
-    # not PREMIUM's tighter 24h-zone stop. entry 100, box 20 (t2=120),
-    # r30_low 99 -> stop = 99 - 0.12*20 = 96.6.
-    decision = _take_decision(side="LONG", tier="STANDARD", entry=100.0, t1=112.0, t2=120.0, t3=132.0)
+def test_advance_no_plan_on_real_take_goes_to_filled_with_the_r30_stop():
+    # entry 100, box 20 (t2=120), r30_low 99 -> stop = 99 - 0.12*20 = 96.6.
+    decision = _take_decision(side="LONG", entry=100.0, t1=112.0, t2=120.0, t3=132.0)
     updates = tp.advance_no_plan(
         decision, candles_24h=_flat_candles(price=100.0),
         r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
@@ -519,40 +500,22 @@ def test_advance_no_plan_on_real_take_goes_to_filled_standard_uses_the_r30_stop(
     assert updates is not None
     assert updates["status"] == "FILLED"
     assert updates["direction"] == "LONG"
-    assert updates["tier"] == "STANDARD"
+    assert updates["tier"] is None
     assert updates["trigger_price"] == 100.0
     assert updates["t1"] == 112.0 and updates["t2"] == 120.0 and updates["t3"] == 132.0
-    assert updates["stop_price"] == pytest.approx(96.6)   # r30_low - 0.12*box
+    assert updates["stop_price"] == pytest.approx(96.6)
     assert updates["stop_price_r30"] == pytest.approx(96.6)
     assert "r30" in updates["stop_basis"]
     assert updates["cross_time"] == NOW
-    assert updates["fuel_at_cross"] == "FUELED"  # a TAKE verdict already implies fuel=FUELED
+    assert updates["fuel_at_cross"] is None  # fuel is retired -- never fabricated
     assert updates["fill_time"] == NOW
-    assert updates["fill_price"] == 100.0  # the trigger, not a "live price" -- matches advance_waiting_plan()'s own convention
+    assert updates["fill_price"] == 100.0  # the trigger, not a "live price"
     assert updates["entry_mode"] == "RETEST_LIMIT_AT_LINE"
     assert updates["faked_first"] is False
     assert "real cross" in updates["last_transition_reason"]
 
 
-def test_advance_no_plan_premium_promotion_keeps_the_zone_stop():
-    # PREMIUM is unchanged by the audit fix -- it keeps stop_planner.py's
-    # 24h-zone stop (here it snaps to r30_low 99 with the 0.125xATR buffer
-    # -> 98.75), NOT the r30-formula stop STANDARD now uses (96.6).
-    decision = _take_decision(side="LONG", tier="PREMIUM", entry=100.0, t1=112.0, t2=120.0, t3=132.0)
-    updates = tp.advance_no_plan(
-        decision, candles_24h=_flat_candles(price=100.0),
-        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
-        now_utc=NOW,
-    )
-    assert updates is not None and updates["tier"] == "PREMIUM"
-    assert updates["stop_price"] == pytest.approx(98.75)     # stop_planner zone stop, not the r30 formula
-    assert updates["stop_price"] != pytest.approx(96.6)
-    assert updates["stop_price_r30"] == pytest.approx(96.6)  # r30 candidate still stored for audit
-    assert "r30" not in updates["stop_basis"]
-
-
 def test_advance_no_plan_returns_none_when_no_cross_yet():
-    # _pass_decision()'s side=None IS the "still inside the box" case.
     decision = _pass_decision("Price is inside the box -- no trigger crossed yet.")
     updates = tp.advance_no_plan(
         decision, candles_24h=_flat_candles(),
@@ -563,9 +526,6 @@ def test_advance_no_plan_returns_none_when_no_cross_yet():
 
 
 def test_advance_no_plan_on_real_fail_goes_to_done_with_vetoed_framing():
-    # THE gap caught before this ever shipped: an earlier draft only
-    # handled the TAKE case and silently did nothing here, which would
-    # have violated the agreed contract ("fail -> VETOED + email").
     decision = _declined_decision(side="SHORT", reason="counter-trend on a GOOD daily table")
     updates = tp.advance_no_plan(
         decision, candles_24h=_flat_candles(),
@@ -591,130 +551,36 @@ def test_advance_no_plan_returns_none_when_atr_unavailable():
 
 
 def test_advance_no_plan_returns_none_when_rr_floor_fails():
-    entry, t1 = 100.0, 101.0  # T1 very close -- easy to blow the floor
-    candles = (
-        [{"open": 98, "high": 99, "low": 97, "close": 98} for _ in range(3)]
-        + [{"open": 60, "high": 61, "low": 60, "close": 60.5}]  # confirmed swing low far below entry
-        + [{"open": 98, "high": 99, "low": 97, "close": 98} for _ in range(3)]
-    )
-    decision = _take_decision(side="LONG", tier="STANDARD", entry=entry, t1=t1, t2=110.0, t3=120.0)
+    decision = _take_decision(side="LONG", entry=100.0, t1=101.0, t2=110.0, t3=120.0)
     updates = tp.advance_no_plan(
-        decision, candles_24h=candles,
-        r30_high=105.0, r30_low=103.0, f24_vah=110.0, f24_val=108.0, daily_atr14=2.0,
+        decision, candles_24h=_flat_candles(),
+        r30_high=101.0, r30_low=50.0, f24_vah=110.0, f24_val=108.0, daily_atr14=2.0,
         now_utc=NOW,
     )
     assert updates is None
 
 
-# --- PROMOTED_PUSH_FLOOR (2026-09-10, Andy-approved): a NO_PLAN morning promotes
-#     only on a strong push. Stricter than, and additional to, the 1.1 STANDARD
-#     floor; applies ONLY to advance_no_plan(), never to a WAITING plan.
+# ------------------------------------------------------------------ advance_waiting_plan end-to-end (v2: no fuel verdict, gate re-check)
 
-def test_advance_no_plan_take_below_promoted_push_floor_goes_to_done_not_filled():
-    import decision_engine as de
-    assert de.PROMOTED_PUSH_FLOOR == 1.8
-    # A clean TAKE in every other respect (good R:R, stop plannable) -- only the
-    # push is weak (1.5x, clears the 1.1 STANDARD floor but not the 1.8 promoted floor).
-    decision = _take_decision(side="LONG", tier="STANDARD", entry=100.0, t1=112.0, t2=120.0, t3=132.0,
-                              fuel_push_ratio=1.5)
-    updates = tp.advance_no_plan(
-        decision, candles_24h=_flat_candles(price=100.0),
-        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
-        now_utc=NOW,
-    )
-    assert updates is not None
-    assert updates["status"] == "DONE"          # not FILLED
-    assert updates["vetoed_cross_side"] == "LONG"
-    assert updates["vetoed_cross_trigger"] == 100.0
-    assert "1.8" in updates["last_transition_reason"]
-    assert "1.5" in updates["last_transition_reason"]
-
-
-def test_advance_no_plan_take_at_promoted_push_floor_boundary_fills():
-    # >= is inclusive -- exactly 1.8 promotes.
-    decision = _take_decision(side="LONG", tier="STANDARD", fuel_push_ratio=1.8)
-    updates = tp.advance_no_plan(
-        decision, candles_24h=_flat_candles(price=100.0),
-        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
-        now_utc=NOW,
-    )
-    assert updates is not None
-    assert updates["status"] == "FILLED"
-
-
-def test_advance_no_plan_missing_push_ratio_does_not_block_promotion():
-    # push_ratio None (older decision_dict / not measured) -> fail-open, same
-    # backward-compatible stance as _stamp_tier_at_cross's push_ratio handling.
-    decision = _take_decision(side="LONG", tier="STANDARD", fuel_push_ratio=None)
-    updates = tp.advance_no_plan(
-        decision, candles_24h=_flat_candles(price=100.0),
-        r30_high=101.0, r30_low=99.0, f24_vah=105.0, f24_val=95.0, daily_atr14=2.0,
-        now_utc=NOW,
-    )
-    assert updates is not None
-    assert updates["status"] == "FILLED"
-
-
-def test_stamp_tier_at_cross_returns_none_when_push_ratio_below_floor(monkeypatch):
-    # 2026-09-09 STANDARD_FUEL_RATIO_FLOOR (1.1): HTF=1 (never PREMIUM-eligible
-    # here) but push_ratio below the floor -> no tier at all, not STANDARD.
-    import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "NEUTRAL", "aligned": 1, "opposed": 0,
-    })
-    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0}
-    tier = tp._stamp_tier_at_cross(plan, [{}], [{}], daily_atr14=25.0, fuel_verdict="FUELED", push_ratio=0.95)
-    assert tier is None
-
-
-def test_stamp_tier_at_cross_push_ratio_at_floor_boundary_qualifies(monkeypatch):
-    import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "NEUTRAL", "aligned": 1, "opposed": 0,
-    })
-    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0}
-    tier = tp._stamp_tier_at_cross(plan, [{}], [{}], daily_atr14=25.0, fuel_verdict="FUELED", push_ratio=1.1)
-    assert tier == "STANDARD"
-
-
-def test_stamp_tier_at_cross_premium_ignores_the_standard_floor(monkeypatch):
-    # A push_ratio below the STANDARD floor must not block PREMIUM -- PREMIUM
-    # only ever needed FUELED (>=0.8), never the stricter 1.1 floor.
-    import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
-    })
-    plan = {"direction": "LONG", "trigger_price": 100.0, "t2": 110.0}  # box=10, atr=25 -> PREMIUM boundary
-    tier = tp._stamp_tier_at_cross(plan, [{}], [{}], daily_atr14=25.0, fuel_verdict="FUELED", push_ratio=0.85)
-    assert tier == "PREMIUM"
-
-
-def test_advance_waiting_plan_goes_done_not_filled_when_cross_fails_the_standard_floor(monkeypatch):
+def test_advance_waiting_plan_goes_done_not_filled_when_gate_fails_at_cross(monkeypatch):
     # End-to-end: the pre-cross anticipate_setup() path (tier=None at
-    # generation) hits a real cross that clears the core gate (FUELED,
-    # counted as a real push) but not the new STANDARD floor, and isn't
-    # PREMIUM-eligible either (HTF=1) -- must land on DONE, never FILLED,
-    # or the whole point of the floor is defeated by this second code path.
-    import fuel_gate as _fuel_gate
+    # generation) hits a real touch, but Krown Cross only has 1 vote at the
+    # cross -- must land on DONE, never FILLED.
     import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_fuel_gate, "evaluate_fuel_gate", lambda c5m, trig, side, **kw: {
-        "verdict": "FUELED", "checks": {"push_volume": {"ratio": 0.9}},
-    })
-    monkeypatch.setattr(tp, "fuel_gate", _fuel_gate)
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "NEUTRAL", "aligned": 1, "opposed": 0,
-    })
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {"aligned": 2})
+    monkeypatch.setattr(_htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": 1})
 
     base = {"symbol": "BTC/USDT", "date_key": "2026-08-31", "session_id": "us_ny_futures",
             "commit_after": ANCHOR, "fuel_requirement": "", "management": "",
             "breakout_trigger": 100.0, "breakdown_trigger": 80.0,
-            "r30_high": 105.0, "r30_low": 95.0,
+            "r30_high": 105.0, "r30_low": 95.0, "rsi_4h_at_lock": 70.0,
             "fuel_verdict": None, "htf_aligned": None, "trend_1h": None, "trend_4h": None}
     plan = tp._build_waiting_plan(
         base, "LONG", 100.0, 112.0, 120.0, 132.0, 105.0, 95.0, 110.0, 90.0, 2.0,
         _flat_candles(price=100.0), tier=None, generation_reason="pre-cross anticipated",
     )
     assert plan["tier"] is None
+    assert plan["rsi_4h_at_lock"] == 70.0
 
     now = ANCHOR + datetime.timedelta(hours=1)
     updates = tp.advance_waiting_plan(
@@ -725,6 +591,33 @@ def test_advance_waiting_plan_goes_done_not_filled_when_cross_fails_the_standard
     )
     assert updates is not None
     assert updates["status"] == "DONE"
-    assert "1.1" in updates["last_transition_reason"]
-    assert "0.9" in updates["last_transition_reason"]
+    assert "Krown Cross" in updates["last_transition_reason"]
     assert "tier" not in updates  # never got a tier -- confirms it didn't fall through to FILLED
+
+
+def test_advance_waiting_plan_fills_when_gate_passes_at_cross(monkeypatch):
+    import htf_fuel as _htf_fuel
+    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {"aligned": 2})
+    monkeypatch.setattr(_htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": 2})
+
+    base = {"symbol": "BTC/USDT", "date_key": "2026-08-31", "session_id": "us_ny_futures",
+            "commit_after": ANCHOR, "fuel_requirement": "", "management": "",
+            "breakout_trigger": 100.0, "breakdown_trigger": 80.0,
+            "r30_high": 105.0, "r30_low": 95.0, "rsi_4h_at_lock": 70.0,
+            "fuel_verdict": None, "htf_aligned": None, "trend_1h": None, "trend_4h": None}
+    plan = tp._build_waiting_plan(
+        base, "LONG", 100.0, 112.0, 120.0, 132.0, 105.0, 95.0, 110.0, 90.0, 2.0,
+        _flat_candles(price=100.0), tier=None, generation_reason="pre-cross anticipated",
+    )
+
+    now = ANCHOR + datetime.timedelta(hours=1)
+    updates = tp.advance_waiting_plan(
+        plan, now, session_expires_at=None,
+        candles_5m=[{"close": 101.0, "volume": 1.0} for _ in range(300)], live_price=101.0,
+        candles_1h=_flat_candles(price=100.0, n=30), candles_4h=_flat_candles(price=100.0, n=30),
+        daily_atr14=40.0,  # box=20 -> ratio=0.5, within the 0.55 reachability ceiling
+    )
+    assert updates is not None
+    assert updates["status"] == "FILLED"
+    assert updates["fill_price"] == 100.0
+    assert updates["faked_first"] is False

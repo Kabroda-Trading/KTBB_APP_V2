@@ -16,7 +16,7 @@ import trade_plan_notify as tpn
 def _plan(status, **extra):
     d = {
         "id": 42, "symbol": "BTC/USDT", "date_key": "2026-08-31", "status": status,
-        "direction": "LONG", "tier": "PREMIUM",
+        "direction": "LONG", "tier": None,  # v2: always None, no tier split
         "trigger_price": 79062.43, "stop_price": 78573.37, "stop_basis": "beyond sweep wick low",
         "t1": 79650.0, "t2": 80100.0, "t3": 80800.0,
         "commit_after": None, "fuel_requirement": tp.FUEL_REQUIREMENT_TEXT,
@@ -115,8 +115,11 @@ def test_lock_email_no_direction_is_the_standing_by_variant():
 # ------------------------------------------------------------------ build_armed_email
 
 def test_armed_email_format():
+    # v2: no tier suffix -- see build_armed_email()'s own comment (found and
+    # fixed 2026-09-15, the same class of stale-tier leftover as render_
+    # brief()/MANAGEMENT_TEXT).
     subject, body = tpn.build_armed_email(_plan("FILLED"))
-    assert subject == "KABRODA ARMED - BTCUSDT LONG @ 79062 - PREMIUM"
+    assert subject == "KABRODA ARMED - BTCUSDT LONG @ 79062"
     assert "Place/confirm your order now." in body
     assert "Plan ID: 42" in body
 
@@ -127,11 +130,6 @@ def test_armed_email_reentry_note():
     assert "RE-ENTRY: this is the second-break entry" in body
 
 
-def test_armed_email_falls_back_to_standard_when_tier_missing():
-    subject, _ = tpn.build_armed_email(_plan("FILLED", tier=None))
-    assert "STANDARD" in subject
-
-
 # ------------------------------------------------------------------ alignment tier line (2026-09-06)
 # DeepSeek's queued ask: "when the system says put a trade on, the email
 # should say how strong the setup is." fuel_verdict/htf_aligned are real
@@ -140,9 +138,9 @@ def test_armed_email_falls_back_to_standard_when_tier_missing():
 # correlation numbers were computed against, not a fresh cross-time one.
 
 def test_armed_email_shows_alignment_line_when_present():
-    subject, body = tpn.build_armed_email(_plan("FILLED", fuel_verdict="FUELED", htf_aligned=2, trend_1h="BULLISH", trend_4h="BULLISH"))
+    subject, body = tpn.build_armed_email(_plan("FILLED", htf_aligned=2, trend_1h="BULLISH", trend_4h="BULLISH"))
     assert "as of session lock" in body
-    assert "Fuel FUELED | 1H trend BULLISH | 4H trend BULLISH -> FULLY ALIGNED" in body
+    assert "1H trend BULLISH | 4H trend BULLISH | FULLY ALIGNED" in body
 
 
 def test_armed_email_omits_alignment_line_when_absent():
@@ -154,9 +152,9 @@ def test_armed_email_omits_alignment_line_when_absent():
 
 
 def test_lock_email_waiting_shows_alignment_line_when_present():
-    mail = tpn.build_lock_email(_plan("WAITING", fuel_verdict="CONFLICTED", htf_aligned=1))
+    mail = tpn.build_lock_email(_plan("WAITING", htf_aligned=1))
     _, body = mail
-    assert "Fuel CONFLICTED -> PARTIAL" in body
+    assert "PARTIAL" in body
 
 
 # ------------------------------------------------------------------ build_vetoed_email
@@ -188,13 +186,18 @@ def test_done_email_opposite_break_is_framed_as_vetoed():
     # 2026-09-01 P0 follow-up: an opposite-trigger break with a full-gate
     # verdict attached must read as the VETOED call it actually is, not a
     # generic "nothing happened" DONE.
+    # v2 (2026-09-15): subject used to hardcode "- counter-trend" -- a real,
+    # always-wrong claim now that the counter-trend veto is retired
+    # (decision_engine.py's header comment: n=0 on the v2 population, cut).
+    # Now generic "- stand down", matching the vetoed_cross_side branch --
+    # the real miss reason lives in the body via `reason`.
     plan = _plan(
         "DONE", direction="LONG",
-        last_transition_reason="opposite side crossed -- full gate ran: SHORT against a UP daily trend on a good table.",
-        opposite_side="SHORT", opposite_trigger=77751.2, gate_headline="SHORT against a UP daily trend...",
+        last_transition_reason="opposite side crossed -- full gate ran: SHORT: PASS -- Krown Cross votes=0/2 (need both 1H and 4H).",
+        opposite_side="SHORT", opposite_trigger=77751.2, gate_headline="SHORT: PASS -- Krown Cross votes=0/2...",
     )
     subject, body = tpn.build_done_email(plan)
-    assert subject == "KABRODA VETOED - BTCUSDT SHORT @ 77751 - counter-trend"
+    assert subject == "KABRODA VETOED - BTCUSDT SHORT @ 77751 - stand down"
     assert "full gate ran" in body
     assert "anticipated side (LONG)" in body
     assert "Plan ID: 42" in body
