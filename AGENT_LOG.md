@@ -4140,3 +4140,73 @@ Process note, unrelated to the gate work: found and restored a deleted AGENT_LOG
 Next: trade_plan.py's tier-dependent stop/management logic (Phase 3), unless Andy wants Phase 2 (entry-timing check in executor_live_engine.py) first -- the two don't have a hard ordering dependency on each other, both just depend on Phase 1 being done, which it now is for the core gate.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-15 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — PHASE 3 done: v2's full test suite is green (587 passed, only the 5 pre-existing unrelated test_dashboard_fixes.py errors remain). "Finish the 79 tests or formally shelve" (CC_HANDOFF_SITE_INTEGRATION.md §6) is resolved: finished, not shelved.
+STATUS: resolved — v2 (Krown Cross + 4H RSI gate) is now a complete, fully-tested lineage, ready to be lineage #2 in the three-lineage evaluation plan (CC_HANDOFF_SITE_INTEGRATION.md).
+
+Finished trade_plan.py/trade_plan_engine.py's v2 rewrite (started 2026-09-11,
+"PHASE 3 (in progress)" commit) and the four test files it broke:
+test_trade_plan.py (43/43), test_trade_plan_state_machine.py (41/41),
+test_trade_plan_notify.py (25/25), test_trade_plan_engine.py (22/22, the
+last file, rewritten this session). Full pytest tests/ is green.
+
+Three real bugs found and fixed along the way (not just test updates —
+each would have shown Andy something actively wrong or silently broken
+a real trade):
+
+1. trade_plan_notify.py::build_armed_email() still appended "- {tier}" to
+   every ARMED email subject, falling back to a fabricated "STANDARD"
+   whenever tier is None — which is always, under v2. Every real ARMED
+   email would have shown a tier that doesn't exist any more. Dropped the
+   suffix. Same audit also caught build_done_email()'s opposite-side veto
+   branch hardcoding "- counter-trend" regardless of the real gate miss —
+   that veto category is retired in v2 (n=0 measured on the real
+   population, decision_engine.py's header comment) — now reads "- stand
+   down" like its sibling branch, real reason still in the body.
+
+2. tests/test_executor_engine.py's fixture hardcoded fake_atr()=0.0 and
+   never mocked htf_fuel — under v2, advance_waiting_plan() re-checks the
+   real 4-condition gate at every cross (candles_1h/4h/daily_atr14 all
+   required now), so every WAITING plan in that file sat WAITING forever
+   instead of reaching FILLED. All 9 tests in the file are about the
+   executor hook downstream of a FILLED plan (multi-account sizing, kill
+   switch, live-mode gating), not the gate itself, so fixed by making the
+   fixture's gate pass unconditionally rather than hand-tuning per test.
+
+3. tests/test_tier_specific_stop.py and tests/test_tier_stop_end_to_end.py
+   tested v1's PREMIUM-zone-stop-vs-STANDARD-r30-stop branching end to
+   end. Confirmed via grep that stop_planner.plan_stop() has zero real
+   call sites left anywhere in the codebase (only comments reference it
+   now) — this isn't dormant-but-real code like check_reentry_eligibility()
+   is, the mechanism itself is gone. Deleted both files rather than
+   rewrite them into something that no longer tests real behavior.
+
+Also fixed tests/test_anticipate_setup.py (3 tests asserting the retired
+DEAD_HOUR/DEAD_TAPE vetoes — inverted to confirm they no longer block
+viability, matching anticipate_setup()'s own docstring).
+
+App boots clean end to end on live data (TestClient + real exchange
+calls): gate evaluates for real, GateLog/TradePlan rows write correctly.
+
+One item still open from the Phase 3 rebuild, not addressed this pass:
+trade_plan_engine.py's module-header comment and trade_plan_notify.py's
+own header still describe a VETOED email event — confirmed via grep that
+nothing in the live v2 state machine ever sets TradePlan.status="VETOED"
+any more (advance_waiting_plan() goes straight WAITING -> FILLED/DONE).
+build_vetoed_email()/the VETOED branch in notification_for_transition()
+are dead code, same "kept, not deleted, in case a future design needs it"
+treatment as check_reentry_eligibility() — I updated trade_plan_notify.py's
+header comment to say so explicitly but left the function/branch itself
+alone (test_trade_plan_notify.py still exercises it directly as tested-
+but-dormant coverage). Flagging in case Phase 1's site-wide dead-machinery
+sweep wants to remove it outright instead — genuinely either call is fine,
+this is a note not a question.
+
+Next: per Andy's phased-rebuild go-ahead, Phase 1 (strip the rest of v1's
+dead fuel/tier machinery site-wide — templates, radar display, the
+ledger_closing_engine.py 30/70 shadow sim) and Phase 2 (the shared,
+profile-switchable D1/D2/D3 core per CC_HANDOFF_SITE_INTEGRATION.md) are
+the remaining prerequisites before the three-lineage DRY_RUN evaluation
+can actually start.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
