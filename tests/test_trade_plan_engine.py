@@ -5,12 +5,32 @@ and synthetic candle sequences, exercising the real production code path
 (not a reimplementation), matching tests/test_runner_mechanic.py's
 established harness pattern for ledger_closing_engine.py.
 
-Includes a dedicated regression test for a bug caught during design (not
-in shipped code): treating a STOPPED row's NO_PUSH fuel read as "not
-fueled" would prematurely resolve every wick-fake to DONE the very next
-poll, since price is rarely still beyond the trigger the instant after a
-stop-out. The loop must leave the row untouched until price actually
-returns to the trigger.
+Rewritten 2026-09-15 for v2 (Krown Cross + 4H RSI gate, no fuel -- see
+decision_engine.py's own header comment). v1's fuel-based tests (FUELED/
+CONFLICTED/NO_FUEL verdicts, PREMIUM/STANDARD tier stamping, PROMOTED_
+PUSH_FLOOR, VETOED-then-retest, the counter-trend veto) exercised behavior
+that no longer exists in the real gate -- decision_engine.py's DEAD_HOURS
+constant is gone entirely too (dead-hour vetoing was measured and cut, see
+that file's header comment), so the old `monkeypatch.setattr(decision_
+engine, "DEAD_HOURS", set())` lines in several of these tests would now
+raise AttributeError on their own, independent of anything else.
+
+Also rewritten for this session's trade_plan_engine.py change: a STOPPED
+row now resolves UNCONDITIONALLY to DONE on the next poll (SS8's fuel-
+gated re-entry-after-wick-fake has no v2-consistent replacement signal --
+see that file's own header comment, "no leg 2" reasoning) -- there is no
+more NO_PUSH-stays-STOPPED / FUELED-recross-becomes-REENTRY_ARMED / thin-
+recross-becomes-DONE distinction to test, one test covers it.
+
+check_reentry_eligibility()/advance_reentry_plan() (trade_plan.py) are
+themselves unreachable from the STOPPED branch now, but advance_reentry_
+plan() is STILL wired up in trade_plan_engine.py's REENTRY_ARMED branch --
+nothing sets that status any more in v2, but if a row already has it
+(e.g. legacy data), the loop still runs the old fuel_gate.evaluate_fuel_
+gate()-based logic for real. test_reentry_armed_fueled_cross_fills_via_loop
+below is kept as coverage of that still-wired, still-real (just currently
+unreachable) path -- same "real code, not deleted" treatment trade_plan.py's
+own header comments give this function elsewhere.
 """
 import os
 
@@ -51,31 +71,56 @@ class _StopLoop(Exception):
     while-True after a fixed number of iterations."""
 
 
-def _c5m(close, volume):
-    return {"close": close, "volume": volume}
+def _c5m(close):
+    return {"close": close}
+
+
+def _beyond_trigger_candles(trigger, is_long, n=30):
+    """Confirmed 5m closes already beyond the trigger. v2's advance_waiting_
+    plan()/decision_engine.py read live_price/side straight off
+    candles_5m[-1]["close"] -- no volume/push math involved any more (fuel
+    is retired, see decision_engine.py's own header comment), so these are
+    just plain closes on the correct side of the level."""
+    near = trigger - 5.0 if is_long else trigger + 5.0
+    beyond = trigger + 5.0 if is_long else trigger - 5.0
+    return ([_c5m(near)] * (n - 6)) + ([_c5m(beyond)] * 6)
+
+
+def _inside_box_candles(trigger, is_long, n=60):
+    """Price never reaches the trigger -- no cross, side stays None."""
+    near = trigger - 5.0 if is_long else trigger + 5.0
+    return [_c5m(near)] * n
 
 
 def _fueled_5m_candles(trigger, is_long, baseline_vol=10.0, push_vol=10.0, baseline_n=250, push_n=6):
-    """ratio = push_vol/baseline_vol -- 1.0 here, comfortably >= VOL_FUELED (0.8)."""
+    """v1-shaped candles (close + volume) for fuel_gate.evaluate_fuel_gate()
+    -- ratio = push_vol/baseline_vol, 1.0 here, comfortably >= VOL_FUELED
+    (0.8). fuel_gate.py itself is untouched by the v2 gate rebuild (same
+    "real tool, not a decision input any more" treatment as the Gravity
+    Map) and is still the ONLY thing test_reentry_armed_fueled_cross_
+    fills_via_loop below exercises -- the sole remaining live (if currently
+    unreachable) caller of it, trade_plan.py's advance_reentry_plan()."""
     near = trigger - 5.0 if is_long else trigger + 5.0
     beyond = trigger + 5.0 if is_long else trigger - 5.0
-    return ([_c5m(near, baseline_vol)] * baseline_n) + ([_c5m(beyond, push_vol)] * push_n)
-
-
-def _thin_5m_candles(trigger, is_long, baseline_vol=10.0, push_vol=2.0, baseline_n=250, push_n=6):
-    near = trigger - 5.0 if is_long else trigger + 5.0
-    beyond = trigger + 5.0 if is_long else trigger - 5.0
-    return ([_c5m(near, baseline_vol)] * baseline_n) + ([_c5m(beyond, push_vol)] * push_n)
-
-
-def _no_push_5m_candles(trigger, is_long, baseline_vol=10.0, n=256):
-    """Price never crosses the trigger -- fuel_gate.measure_push_volume's NO_PUSH case."""
-    near = trigger - 5.0 if is_long else trigger + 5.0
-    return [_c5m(near, baseline_vol)] * n
+    return ([{"close": near, "volume": baseline_vol}] * baseline_n) + ([{"close": beyond, "volume": push_vol}] * push_n)
 
 
 def _c1m(l, h, ts=0):
     return {"l": l, "h": h, "ts": ts}
+
+
+def _gate_pass(monkeypatch, votes=2, aligned=2):
+    """Same helper pattern as tests/test_trade_plan_state_machine.py's own
+    _pass_gate() -- patches the real htf_fuel module functions, which both
+    trade_plan.py's _confirm_v2_gate_at_cross() (a local `import htf_fuel`)
+    and decision_engine.py's `_htf_fuel` module-level import see, since
+    they're the same module object. Covers every test in this file that
+    needs the real v2 gate (reachability + HTF aligned>=1 + Krown Cross
+    votes==2 + RSI-at-lock in zone) to actually pass at a real cross."""
+    monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
+        "aligned": aligned, "trend_1h": "BULLISH", "trend_4h": "BULLISH", "opposed": 0,
+    })
+    monkeypatch.setattr(htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": votes})
 
 
 @pytest.fixture
@@ -180,7 +225,7 @@ def poll_env(monkeypatch):
             return candles_5m_by_symbol.get(symbol, [])  # reuse the 5m fixture data -- content doesn't matter for these tests
 
         async def fake_daily(symbol, limit=60):
-            return []  # unused directly -- fake_atr below controls the value tier-stamping sees
+            return []  # unused directly -- fake_atr below controls the value the gate sees
 
         def fake_atr(candles_1d):
             return daily_atr14
@@ -284,127 +329,72 @@ def _capture_emails(monkeypatch):
     return sent
 
 
-def test_waiting_fueled_cross_sends_armed_email_via_loop(poll_env, monkeypatch):
+def test_waiting_cross_sends_armed_email_via_loop(poll_env, monkeypatch):
+    _gate_pass(monkeypatch)
     sent = _capture_emails(monkeypatch)
     poll_env["make_plan"](
-        status="WAITING", direction="LONG", trigger_price=100.0,
-        stop_price=90.0, stop_basis="beyond sweep wick low", t1=112.0, t2=120.0, t3=132.0,
+        status="WAITING", direction="LONG", trigger_price=100.0, t2=110.0,
+        stop_price=90.0, stop_basis="beyond sweep wick low", t1=112.0, t3=132.0,
+        rsi_4h_at_lock=70.0,
     )
-    candles = _fueled_5m_candles(100.0, is_long=True)
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+    candles = _beyond_trigger_candles(100.0, is_long=True)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=40.0)  # box=10, atr=40 -> ratio=0.25
 
     assert len(sent) == 1
     assert sent[0][0].startswith("KABRODA ARMED")
 
 
-def test_waiting_fueled_cross_armed_email_carries_the_locked_alignment_reading(poll_env, monkeypatch):
-    # 2026-09-06 -- fuel_verdict/htf_aligned are real, persisted TradePlan
-    # columns now (set once at lock, never recomputed at the cross). This
-    # confirms they actually survive the real WAITING->FILLED transition
-    # through the loop's own update path and reach the sent ARMED email --
-    # not just that render_brief() can format them in isolation.
+def test_waiting_cross_armed_email_carries_the_locked_alignment_reading(poll_env, monkeypatch):
+    # htf_aligned/trend_1h/trend_4h are real, persisted TradePlan columns
+    # (set once at lock, never recomputed at the cross). This confirms they
+    # actually survive the real WAITING->FILLED transition through the
+    # loop's own update path and reach the sent ARMED email -- not just
+    # that render_brief() can format them in isolation. v2 (2026-09-15):
+    # the email body used to lead with "Fuel <verdict> -> <tier word>" --
+    # fuel is retired, so it's just the HTF trend reads + the tier word now
+    # (build_alignment_email_line()'s own comment).
+    _gate_pass(monkeypatch)
     sent = _capture_emails(monkeypatch)
     poll_env["make_plan"](
-        status="WAITING", direction="LONG", trigger_price=100.0,
-        stop_price=90.0, stop_basis="beyond sweep wick low", t1=112.0, t2=120.0, t3=132.0,
-        fuel_verdict="FUELED", htf_aligned=2,
+        status="WAITING", direction="LONG", trigger_price=100.0, t2=110.0,
+        stop_price=90.0, stop_basis="beyond sweep wick low", t1=112.0, t3=132.0,
+        rsi_4h_at_lock=70.0, htf_aligned=2, trend_1h="BULLISH", trend_4h="BULLISH",
     )
-    candles = _fueled_5m_candles(100.0, is_long=True)
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+    candles = _beyond_trigger_candles(100.0, is_long=True)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=40.0)
 
     assert len(sent) == 1
     subject, body = sent[0]
     assert subject.startswith("KABRODA ARMED")
-    assert "Fuel FUELED -> FULLY ALIGNED" in body
+    assert "1H trend BULLISH | 4H trend BULLISH | FULLY ALIGNED" in body
 
 
-def test_waiting_thin_conflicted_cross_now_sends_done_email_not_armed(poll_env, monkeypatch):
-    # 2026-09-07 fix (Kabroda AI Brain repo AGENT_LOG.md, DeepSeek's live-
-    # email review): thin volume with no HTF opposition is CONFLICTED, not
-    # NO_FUEL. That classification is still correct and still tested here.
-    # SUPERSEDED 2026-09-09 (STANDARD_FUEL_RATIO_FLOOR = 1.1, Andy-approved
-    # after an independent walk-forward -- AGENT_LOG.md, Kabroda AI Brain
-    # repo, 19:55 CT): a thin push (ratio 0.2 here) being CONFLICTED no
-    # longer means it ARMS -- STANDARD now additionally requires the push
-    # to clear 1.1x baseline, which a thin push structurally never can.
-    # This exact scenario now correctly sends a DONE email, not ARMED --
-    # the opposite of what this test asserted before the floor shipped,
-    # and that reversal is the point of the floor.
-    #
-    # 2026-09-10: rising 1H/4H candles supplied so aligned >= 1 (BULLISH
-    # backing a LONG cross) -- this keeps the test isolated to the FUEL
-    # FLOOR after the aligned=0 cut shipped. Without HTF carry the plan
-    # would now DONE for "no carry fuel" instead, a different rule.
+def test_waiting_cross_gate_declines_sends_done_email_not_armed(poll_env, monkeypatch):
+    # v2: no more FUELED/CONFLICTED/NO_FUEL verdicts and no more VETOED-
+    # then-retest state (trade_plan.py's advance_waiting_plan() docstring)
+    # -- a real cross the 4-condition gate declines (here: no HTF carry)
+    # goes straight WAITING -> DONE, framed as a stand-down, never ARMED.
+    # Replaces three now-obsolete v1 tests: thin/CONFLICTED-push-doesn't-
+    # arm, FUELED-but-no-HTF-carry-doesn't-arm, and a real ghost push
+    # sending a VETOED email (VETOED is no longer a status anything writes
+    # -- trade_plan_notify.py's own header comment).
     sent = _capture_emails(monkeypatch)
+    monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {"aligned": 0})
+    monkeypatch.setattr(htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": 2})
     poll_env["make_plan"](
-        status="WAITING", direction="LONG", trigger_price=100.0,
-        stop_price=90.0, stop_basis="beyond sweep wick low", t1=112.0, t2=120.0, t3=132.0,
+        status="WAITING", direction="LONG", trigger_price=100.0, t2=110.0,
+        stop_price=90.0, stop_basis="beyond sweep wick low", t1=112.0, t3=132.0,
+        rsi_4h_at_lock=70.0,
     )
-    candles = _thin_5m_candles(100.0, is_long=True)
-    bullish_htf = [{"close": 100.0 + i} for i in range(40)]  # steadily rising -> BULLISH
-    poll_env["run_polls"](
-        candles_5m_by_symbol={"BTC/USDT": candles},
-        candles_1h_by_symbol={"BTC/USDT": bullish_htf},
-        candles_4h_by_symbol={"BTC/USDT": bullish_htf},
-        polls=1, daily_atr14=25.0,
-    )
+    candles = _beyond_trigger_candles(100.0, is_long=True)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=40.0)
 
     assert len(sent) == 1
     assert sent[0][0].startswith("KABRODA DONE")
     plan = poll_env["get_plan"]()
     assert plan.status == "DONE"
-    assert plan.tier is None   # never qualified for a tier at all
-    assert "1.1" in plan.last_transition_reason
-
-
-def test_waiting_fueled_cross_with_no_htf_carry_sends_done_not_armed(poll_env, monkeypatch):
-    # 2026-09-10 aligned=0 cut, end-to-end through the loop: a clean FUELED
-    # push that clears the 1.1 STANDARD floor (ratio ~1.6 here) but with
-    # neither 1H nor 4H backing the LONG cross (flat HTF candles -> aligned
-    # 0) must DONE for "no carry fuel", not FILL. This is the WAITING->cross
-    # path (_stamp_tier_at_cross), the parallel to decision_engine's gate.
-    sent = _capture_emails(monkeypatch)
-    poll_env["make_plan"](
-        status="WAITING", direction="LONG", trigger_price=100.0,
-        stop_price=90.0, stop_basis="beyond sweep wick low", t1=112.0, t2=120.0, t3=132.0,
-    )
-    candles = _fueled_5m_candles(100.0, is_long=True, push_vol=16.0)  # ratio 1.6, clears the floor
-    flat_htf = [{"close": 100.0} for _ in range(40)]  # no trend -> aligned 0
-    poll_env["run_polls"](
-        candles_5m_by_symbol={"BTC/USDT": candles},
-        candles_1h_by_symbol={"BTC/USDT": flat_htf},
-        candles_4h_by_symbol={"BTC/USDT": flat_htf},
-        polls=1, daily_atr14=25.0,
-    )
-
-    assert len(sent) == 1
-    assert sent[0][0].startswith("KABRODA DONE")
-    plan = poll_env["get_plan"]()
-    assert plan.status == "DONE"
-    assert plan.tier is None
-    assert "carry fuel" in plan.last_transition_reason
-
-
-def test_waiting_real_no_fuel_ghost_push_sends_vetoed_email_via_loop(poll_env, monkeypatch):
-    # A genuine ghost push -- thin volume AND real HTF opposition -- is
-    # the one fuel state that still VETOES. Monotonically declining 1H/4H
-    # candles produce a real BEARISH read (htf_fuel.py's 9/21 EMA stack),
-    # opposing a LONG cross.
-    sent = _capture_emails(monkeypatch)
-    poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0)
-    candles = _thin_5m_candles(100.0, is_long=True)
-    bearish_htf = [{"close": 200.0 - i} for i in range(40)]  # steadily declining -> BEARISH
-    poll_env["run_polls"](
-        candles_5m_by_symbol={"BTC/USDT": candles},
-        candles_1h_by_symbol={"BTC/USDT": bearish_htf},
-        candles_4h_by_symbol={"BTC/USDT": bearish_htf},
-        polls=1,
-    )
-
-    assert len(sent) == 1
-    assert sent[0][0].startswith("KABRODA VETOED")
-    plan = poll_env["get_plan"]()
-    assert plan.status == "VETOED"
+    assert plan.tier is None   # v2 has no tier at all
+    assert "carry" in plan.last_transition_reason
 
 
 def test_waiting_session_expiry_sends_done_email_via_loop(poll_env, monkeypatch):
@@ -414,7 +404,7 @@ def test_waiting_session_expiry_sends_done_email_via_loop(poll_env, monkeypatch)
     # fetch_live_5m returns empty (same as a real "market data unavailable"
     # skip) -- supply real (untouched) candles so the expiry branch is
     # actually reached, matching how a live poll would look.
-    candles = _no_push_5m_candles(100.0, is_long=True)
+    candles = _inside_box_candles(100.0, is_long=True)
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
 
     assert len(sent) == 1
@@ -458,7 +448,7 @@ def test_waiting_opposite_side_break_sends_done_email_via_loop(poll_env, monkeyp
     # this specifically exercises the plain fallback path.
     sent = _capture_emails(monkeypatch)
     poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0, t2=110.0)
-    candles = [{"close": 85.0, "volume": 10.0} for _ in range(30)]  # opposite (SHORT) trigger = 90, broken
+    candles = [{"close": 85.0} for _ in range(30)]  # opposite (SHORT) trigger = 90, broken
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
 
     row = poll_env["get_plan"]()
@@ -468,11 +458,15 @@ def test_waiting_opposite_side_break_sends_done_email_via_loop(poll_env, monkeyp
     assert sent[0][0].startswith("KABRODA DONE")
 
 
-def test_waiting_opposite_side_break_full_gate_sends_vetoed_email_via_loop(poll_env, monkeypatch):
+def test_waiting_opposite_side_break_full_gate_sends_done_email_via_loop(poll_env, monkeypatch):
     # 2026-09-01 P0 follow-up: with a real SessionLock available, the
     # opposite-break enrichment runs the ACTUAL, unmodified gate and Andy
-    # gets the real verdict -- reproducing the incident's own resolution
-    # (a confirmed counter-trend veto, not a missed trade).
+    # gets the real verdict -- not just "wrong side, no plan." v2 (2026-
+    # 09-15): the counter-trend veto this test used to exercise is retired
+    # (decision_engine.py's own header comment: measured n=0 on the real
+    # v2 population, cut) -- market_regime/micro_regime are still computed
+    # and surfaced on GateLog for display, but no longer decide pass/fail,
+    # so the real miss here is "no HTF carry" instead.
     sent = _capture_emails(monkeypatch)
     monkeypatch.setattr(market_regime, "classify_market_regime", lambda candles: {
         "table": "TRENDING_UP", "quality": "GOOD", "policy": {"bias": "UP"},
@@ -481,6 +475,7 @@ def test_waiting_opposite_side_break_full_gate_sends_vetoed_email_via_loop(poll_
     monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
         "trend_1h": "BEARISH", "trend_4h": "NEUTRAL", "aligned": 0, "opposed": 1,
     })
+    monkeypatch.setattr(htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": 0})
 
     poll_env["make_lock"](levels={
         "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
@@ -488,13 +483,13 @@ def test_waiting_opposite_side_break_full_gate_sends_vetoed_email_via_loop(poll_
     })
     poll_env["make_gate_log"](state="PASS")  # the stale lock-time placeholder, must get overwritten
     poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0, t2=110.0)
-    candles = [{"close": 85.0, "volume": 10.0} for _ in range(30)]  # closes below BD=90 -> real side=SHORT
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+    candles = [{"close": 85.0} for _ in range(30)]  # closes below BD=90 -> real side=SHORT
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=20.0)  # box=10, atr=20 -> ratio=0.5, reachable
 
     row = poll_env["get_plan"]()
     assert row.status == "DONE"
     assert "full gate ran" in row.last_transition_reason
-    assert "counter-trend" in row.last_transition_reason.lower() or "UP daily trend" in row.last_transition_reason
+    assert "no carry" in row.last_transition_reason.lower()
     assert len(sent) == 1
     assert sent[0][0].startswith("KABRODA VETOED")
     assert "SHORT" in sent[0][0]
@@ -503,9 +498,9 @@ def test_waiting_opposite_side_break_full_gate_sends_vetoed_email_via_loop(poll_
     # log (GateLog, exported via /api/export/gate-log.csv) must reflect
     # this real, detected verdict -- not stay frozen at the lock-time PASS.
     gate_row = poll_env["get_gate_log"]()
-    assert gate_row.state == "PASS"  # decision_engine's own verdict_state for a vetoed cross
+    assert gate_row.state == "PASS"  # decision_engine's own verdict_state for a declined cross
     assert gate_row.side == "SHORT"
-    assert "counter-trend" in gate_row.headline.lower() or "UP daily trend" in gate_row.headline
+    assert "carry" in gate_row.headline.lower()
     assert gate_row.daily_regime_table == "TRENDING_UP"
     assert gate_row.daily_regime_quality == "GOOD"
 
@@ -518,56 +513,25 @@ def test_waiting_own_cross_syncs_gate_log_via_loop(poll_env, monkeypatch):
         "table": "TRENDING_UP", "quality": "GOOD", "policy": {"bias": "UP"},
     })
     monkeypatch.setattr(micro_regime, "classify_regime", lambda candles: {"regime": "TRENDING"})
-    monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
-    })
+    _gate_pass(monkeypatch)
 
     poll_env["make_lock"](levels={
         "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
         "range30m_high": 100.0, "range30m_low": 90.0,
+        "rsi_4h_at_lock": 70.0,
     })
     poll_env["make_gate_log"](state="PASS")
-    poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0, t2=110.0)
-    candles = _fueled_5m_candles(100.0, is_long=True)  # real fill on the anticipated (LONG) side
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+    poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0, t2=110.0, rsi_4h_at_lock=70.0)
+    candles = _beyond_trigger_candles(100.0, is_long=True)  # real fill on the anticipated (LONG) side
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=20.0)
 
     row = poll_env["get_plan"]()
     assert row.status == "FILLED"
 
     gate_row = poll_env["get_gate_log"]()
     assert gate_row.side == "LONG"
-    assert gate_row.state in ("TAKE_PREMIUM", "TAKE_STANDARD", "PASS")
+    assert gate_row.state == "TAKE"  # v2: one real-trade outcome, not TAKE_PREMIUM/TAKE_STANDARD
     assert gate_row.daily_regime_table == "TRENDING_UP"
-
-
-def _fueled_5m_ohlc_candles(trigger, is_long, baseline_vol=10.0, push_vol=20.0, baseline_n=250, push_n=6, near_offset=2.0):
-    # push_vol 20 -> ratio ~2.0: clears STANDARD_FUEL_RATIO_FLOOR (1.1) AND
-    # PROMOTED_PUSH_FLOOR (1.8, the NO_PLAN-promotion-only bar shipped
-    # 2026-09-10). Both NO_PLAN-promotion callers of this helper need a push
-    # that promotes; a fuel-quality-boundary test would set its own value.
-    # push_vol default bumped 10.0 -> 16.0 2026-09-09 (ratio ~1.0 -> ~1.6):
-    # this name means "unambiguously fueled," and ~1.0 now sits right at
-    # STANDARD_FUEL_RATIO_FLOOR's (1.1) boundary -- callers that want to
-    # test the floor itself should pass push_vol explicitly, not rely on
-    # this default.
-    """Same shape/fuel math as _fueled_5m_candles(), but with full OHLC --
-    advance_no_plan() feeds these into stop_planner.py's swing/sweep
-    detection (_find_swing_points/_find_sweep_wicks), which needs open/
-    high/low, not just close/volume like the WAITING-path tests above
-    only ever needed (advance_waiting_plan()'s FILLED transition doesn't
-    call stop_planner -- the stop was already planned at lock). near_offset
-    defaults tight (2.0, not _fueled_5m_candles()'s 5.0) so the swing-low/
-    high stop_planner finds off the "near" baseline stays close enough to
-    entry to clear the R:R floor against a real box-derived T1 -- confirmed
-    against stop_planner.plan_stop()/rr_floor_ok() directly before picking
-    this value."""
-    near = trigger - near_offset if is_long else trigger + near_offset
-    beyond = trigger + 5.0 if is_long else trigger - 5.0
-
-    def flat(price, volume):
-        return {"open": price, "high": price + 0.5, "low": price - 0.5, "close": price, "volume": volume}
-
-    return ([flat(near, baseline_vol)] * baseline_n) + ([flat(beyond, push_vol)] * push_n)
 
 
 # ------------------------------------------------------------------ NO_PLAN poll routing (2026-09-02, Andy's decision)
@@ -578,35 +542,30 @@ def _fueled_5m_ohlc_candles(trigger, is_long, baseline_vol=10.0, push_vol=20.0, 
 # trade_plan.advance_no_plan() both run for real).
 
 def test_no_plan_real_cross_promotes_to_filled_and_sends_armed_email(poll_env, monkeypatch):
-    import decision_engine
-    monkeypatch.setattr(decision_engine, "DEAD_HOURS", set())  # test-time robustness against real wall-clock hour
     sent = _capture_emails(monkeypatch)
     monkeypatch.setattr(market_regime, "classify_market_regime", lambda candles: {
         "table": "TRENDING_UP", "quality": "GOOD", "policy": {"bias": "UP"},
     })
     monkeypatch.setattr(micro_regime, "classify_regime", lambda candles: {"regime": "TRENDING"})
-    monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "NEUTRAL", "aligned": 1, "opposed": 0,
-    })
+    _gate_pass(monkeypatch)
 
     poll_env["make_lock"](levels={
         "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
-        # range30m_low 97 (not 90): a NO_PLAN promotion now applies STANDARD's
-        # r30 stop (100 - box*0.12 off r30_low), and the old 90 put that stop
+        # range30m_low 97 (not 90): a NO_PLAN promotion applies v2's one r30
+        # stop (100 - box*0.12 off r30_low), and the old 90 put that stop
         # too far for the 1:1 R:R floor -- the audit-fix behavior, not a bug.
         "range30m_high": 100.0, "range30m_low": 97.0,
-        "f24_vah": 105.0, "f24_val": 85.0,
+        "rsi_4h_at_lock": 70.0,
     })
     poll_env["make_gate_log"](state="PASS")  # the stale lock-time NO_PLAN placeholder, must get overwritten
     poll_env["make_plan"](status="NO_PLAN", direction=None, trigger_price=None)
-    candles = _fueled_5m_ohlc_candles(100.0, is_long=True)  # real fueled break through BO -> LONG
+    candles = _beyond_trigger_candles(100.0, is_long=True)  # real break through BO -> LONG
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=20.0)  # box=10, atr=20 -> ratio=0.5, reachable
 
     row = poll_env["get_plan"]()
     assert row.status == "FILLED"
     assert row.direction == "LONG"
-    assert row.tier == "STANDARD"  # only 1/2 HTF aligned -- not PREMIUM
-    assert row.fuel_at_cross == "FUELED"
+    assert row.tier is None  # v2 has no tier at all
     assert row.fill_price == 100.0
     assert "real cross" in row.last_transition_reason
 
@@ -618,7 +577,7 @@ def test_no_plan_real_cross_promotes_to_filled_and_sends_armed_email(poll_env, m
     # break/own-cross paths -- GateLog must reflect the real promotion,
     # not stay frozen at the lock-time NO_PLAN/PASS placeholder.
     gate_row = poll_env["get_gate_log"]()
-    assert gate_row.state in ("TAKE_PREMIUM", "TAKE_STANDARD")
+    assert gate_row.state == "TAKE"
     assert gate_row.side == "LONG"
 
 
@@ -629,45 +588,12 @@ def test_no_plan_stays_no_plan_when_gate_still_says_no(poll_env, monkeypatch):
         "range30m_high": 100.0, "range30m_low": 90.0,
     })
     poll_env["make_plan"](status="NO_PLAN", direction=None, trigger_price=None)
-    candles = [{"close": 95.0, "volume": 10.0} for _ in range(30)]  # still inside the box -- no cross
+    candles = [{"close": 95.0} for _ in range(30)]  # still inside the box -- no cross
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
 
     row = poll_env["get_plan"]()
     assert row.status == "NO_PLAN"  # unchanged -- still silently waiting
     assert sent == []  # no email for a non-event
-
-
-def test_no_plan_weak_push_cross_does_not_promote_and_sends_done(poll_env, monkeypatch):
-    # PROMOTED_PUSH_FLOOR (1.8, shipped 2026-09-10): a NO_PLAN morning re-
-    # evaluated on a real cross that clears the full gate but with only a
-    # moderate push (ratio ~1.5 here -- clears the 1.1 STANDARD floor, not the
-    # 1.8 promoted floor) resolves to DONE, not FILLED. The 5-year forensic
-    # showed these weak-push promotions are a coin flip that nets ~0R.
-    import decision_engine
-    monkeypatch.setattr(decision_engine, "DEAD_HOURS", set())
-    sent = _capture_emails(monkeypatch)
-    monkeypatch.setattr(market_regime, "classify_market_regime", lambda candles: {
-        "table": "TRENDING_UP", "quality": "GOOD", "policy": {"bias": "UP"},
-    })
-    monkeypatch.setattr(micro_regime, "classify_regime", lambda candles: {"regime": "TRENDING"})
-    monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "NEUTRAL", "aligned": 1, "opposed": 0,
-    })
-    poll_env["make_lock"](levels={
-        "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
-        "range30m_high": 100.0, "range30m_low": 90.0,
-        "f24_vah": 105.0, "f24_val": 85.0,
-    })
-    poll_env["make_gate_log"](state="PASS")
-    poll_env["make_plan"](status="NO_PLAN", direction=None, trigger_price=None)
-    candles = _fueled_5m_ohlc_candles(100.0, is_long=True, push_vol=15.0)  # ratio ~1.5: gate yes, promote no
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=20.0)
-
-    row = poll_env["get_plan"]()
-    assert row.status == "DONE"
-    assert "1.8" in row.last_transition_reason
-    assert len(sent) == 1
-    assert sent[0][0].startswith("KABRODA VETOED")  # vetoed-framed DONE, not ARMED
 
 
 def test_no_plan_wick_through_still_forming_candle_does_not_trigger_evaluation(poll_env, monkeypatch):
@@ -690,7 +616,7 @@ def test_no_plan_wick_through_still_forming_candle_does_not_trigger_evaluation(p
 
     now = _time.time()
     def c(open_ts, close):
-        return {"time": int(open_ts), "open": close, "high": close, "low": close, "close": close, "volume": 10.0}
+        return {"time": int(open_ts), "close": close}
     candles = (
         [c(now - 300 * (i + 2), 95.0) for i in range(50)][::-1]  # confirmed history, inside the box (near BD)
         + [c(now, 89.0)]  # still-forming candle, CURRENT price wicked below BD -- NOT yet confirmed
@@ -703,43 +629,37 @@ def test_no_plan_wick_through_still_forming_candle_does_not_trigger_evaluation(p
 
 
 def test_no_plan_confirmed_close_through_trigger_does_trigger_evaluation(poll_env, monkeypatch):
-    # The other half of DeepSeek's spec: once that same candle's window has
+    # The other half of the P0 fix: once that same candle's window has
     # genuinely elapsed (a real, confirmed close beyond the trigger), the
     # cross MUST still be detected -- confirmed_5m_closes() only strips a
-    # truly still-forming trailing candle, never a real closed one.
+    # truly still-forming trailing candle, never a real closed one. v2:
+    # fuel is gone, so this now just needs the real 4-condition gate to
+    # pass on the confirmed cross (a SHORT here, for variety).
     import time as _time
-    import decision_engine
-    monkeypatch.setattr(decision_engine, "DEAD_HOURS", set())
     sent = _capture_emails(monkeypatch)
     monkeypatch.setattr(market_regime, "classify_market_regime", lambda candles: {
         "table": "TRENDING_UP", "quality": "GOOD", "policy": {"bias": "DOWN"},
     })
     monkeypatch.setattr(micro_regime, "classify_regime", lambda candles: {"regime": "TRENDING"})
-    monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BEARISH", "trend_4h": "NEUTRAL", "aligned": 1, "opposed": 0,
-    })
+    _gate_pass(monkeypatch)
     poll_env["make_lock"](levels={
         "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
         # range30m_high 94 (not 100): a SHORT NO_PLAN promotion applies
-        # STANDARD's r30 stop (r30_high + 0.12*box above the BD entry); the
+        # v2's one r30 stop (r30_high + 0.12*box above the BD entry); the
         # old 100 put that stop past the 1:1 R:R floor for T1 -- the
-        # 2026-09-10 audit-fix behavior, consistent with the other fill paths.
+        # audit-fix behavior, consistent with the other fill paths.
         "range30m_high": 94.0, "range30m_low": 90.0,
-        "f24_vah": 105.0, "f24_val": 85.0,
+        "rsi_4h_at_lock": 30.0,
     })
     poll_env["make_gate_log"](state="PASS")
     poll_env["make_plan"](status="NO_PLAN", direction=None, trigger_price=None)
 
     now = _time.time()
-    def c(open_ts, close, vol=10.0):
-        return {"time": int(open_ts), "open": close, "high": close + 0.5, "low": close - 0.5, "close": close, "volume": vol}
+    def c(open_ts, close):
+        return {"time": int(open_ts), "close": close}
     candles = (
         [c(now - 300 * (i + 8), 92.0) for i in range(250)][::-1]  # baseline, near BD
-        # vol 20.0 -> ratio ~2.0: clears STANDARD_FUEL_RATIO_FLOOR (1.1) AND
-        # PROMOTED_PUSH_FLOOR (1.8, NO_PLAN-promotion-only, shipped 2026-09-10).
-        # This test is about confirmed-close detection timing, not fuel quality,
-        # so it needs an unambiguously-strong push that actually promotes.
-        + [c(now - 300 * (i + 2), 85.0, vol=20.0) for i in range(6)][::-1]  # fueled push through BD, CONFIRMED closes
+        + [c(now - 300 * (i + 2), 85.0) for i in range(6)][::-1]  # real, CONFIRMED closes through BD
     )
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=20.0)
 
@@ -751,21 +671,18 @@ def test_no_plan_confirmed_close_through_trigger_does_trigger_evaluation(poll_en
 def test_no_plan_real_cross_declined_by_gate_becomes_done_with_vetoed_email(poll_env, monkeypatch):
     # THE gap caught before this ever shipped: an earlier draft only
     # handled the TAKE case above and silently did nothing for a real
-    # cross the gate declines -- the agreed contract (Kabroda AI Brain
-    # AGENT_LOG.md, 15:45/15:50 CT) requires "fail -> VETOED + email with
-    # reason," not silence. This reproduces exactly that: a real cross
-    # through BD, but the daily table is GOOD+UP, so SHORT hits the
-    # counter-trend hard veto.
-    import decision_engine
-    monkeypatch.setattr(decision_engine, "DEAD_HOURS", set())
+    # cross the gate declines -- the agreed contract requires "fail ->
+    # VETOED + email with reason," not silence. v2 (2026-09-15): the
+    # specific miss here is "no HTF carry" -- the counter-trend veto this
+    # test used to exercise is retired (decision_engine.py's header
+    # comment, n=0 measured on the real v2 population).
     sent = _capture_emails(monkeypatch)
     monkeypatch.setattr(market_regime, "classify_market_regime", lambda candles: {
         "table": "TRENDING_UP", "quality": "GOOD", "policy": {"bias": "UP"},
     })
     monkeypatch.setattr(micro_regime, "classify_regime", lambda candles: {"regime": "TRENDING"})
-    monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BEARISH", "trend_4h": "NEUTRAL", "aligned": 0, "opposed": 1,
-    })
+    monkeypatch.setattr(htf_fuel, "htf_fuel", lambda c1h, c4h, side: {"aligned": 0})
+    monkeypatch.setattr(htf_fuel, "krown_cross_votes", lambda c1h, c4h, side: {"votes": 2})
 
     poll_env["make_lock"](levels={
         "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
@@ -773,17 +690,12 @@ def test_no_plan_real_cross_declined_by_gate_becomes_done_with_vetoed_email(poll
     })
     poll_env["make_gate_log"](state="PASS")
     poll_env["make_plan"](status="NO_PLAN", direction=None, trigger_price=None)
-    candles = _fueled_5m_ohlc_candles(90.0, is_long=False)  # real fueled break through BD -> SHORT, but counter-trend
+    candles = _beyond_trigger_candles(90.0, is_long=False)  # real break through BD -> SHORT, no HTF carry
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=20.0)
 
     row = poll_env["get_plan"]()
     assert row.status == "DONE"
-    # vetoed_cross_side/vetoed_cross_trigger are transient, in-memory-only
-    # fields (not TradePlan columns -- same "never persisted" pattern as
-    # opposite_side/opposite_trigger elsewhere in this file), so they don't
-    # survive get_plan()'s fresh query; verified instead via the email
-    # they drove and the persisted last_transition_reason/GateLog below.
-    assert "counter-trend" in row.last_transition_reason.lower() or "UP daily trend" in row.last_transition_reason
+    assert "carry" in row.last_transition_reason.lower()
 
     assert len(sent) == 1
     assert sent[0][0].startswith("KABRODA VETOED")
@@ -797,7 +709,7 @@ def test_no_plan_real_cross_declined_by_gate_becomes_done_with_vetoed_email(poll
 def test_no_plan_session_expired_no_cross_becomes_done_without_email(poll_env, monkeypatch):
     sent = _capture_emails(monkeypatch)
     poll_env["make_plan"](status="NO_PLAN", direction=None, trigger_price=None, date_key="2020-01-01")
-    poll_env["run_polls"](polls=1)  # no candles/lock needed -- expiry check comes first, same as STOPPED's own expiry test
+    poll_env["run_polls"](polls=1)  # no candles/lock needed -- expiry check comes first, same as STOPPED's own test
 
     row = poll_env["get_plan"]()
     assert row.status == "DONE"
@@ -808,32 +720,16 @@ def test_no_plan_session_expired_no_cross_becomes_done_without_email(poll_env, m
     assert sent == []
 
 
-def test_waiting_fueled_cross_fills_via_loop(poll_env):
-    poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0)
-    candles = _fueled_5m_candles(100.0, is_long=True)
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+def test_waiting_cross_fills_via_loop(poll_env, monkeypatch):
+    _gate_pass(monkeypatch)
+    poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0, t2=110.0, rsi_4h_at_lock=70.0)
+    candles = _beyond_trigger_candles(100.0, is_long=True)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=40.0)
 
     row = poll_env["get_plan"]()
     assert row.status == "FILLED"
     assert row.fill_price == 100.0
     assert row.entry_mode in ("TRIGGER_AT_LEVEL", "RETEST_LIMIT_AT_LINE")
-
-
-def test_waiting_fueled_cross_stamps_tier_via_loop(poll_env, monkeypatch):
-    # 2026-08-31 fix: a plan generated pre-cross (tier=None) gets a real
-    # tier stamped through the actual monitoring loop, not just the pure
-    # function in isolation.
-    import htf_fuel as _htf_fuel
-    monkeypatch.setattr(_htf_fuel, "htf_fuel", lambda c1h, c4h, side: {
-        "trend_1h": "BULLISH", "trend_4h": "BULLISH", "aligned": 2, "opposed": 0,
-    })
-    poll_env["make_plan"](status="WAITING", direction="LONG", trigger_price=100.0, tier=None, t2=110.0)
-    candles = _fueled_5m_candles(100.0, is_long=True)
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1, daily_atr14=25.0)
-
-    row = poll_env["get_plan"]()
-    assert row.status == "FILLED"
-    assert row.tier == "PREMIUM"  # box=10 (t2-trigger), atr=25 -> ratio=0.4, both HTF aligned
 
 
 def test_reentry_armed_fueled_cross_fills_via_loop(poll_env):
@@ -908,44 +804,16 @@ def test_reentry_filled_t1_reached_resolves_done_without_campaign_via_loop(poll_
     assert "documented gap" in row.last_transition_reason
 
 
-def test_stopped_no_push_stays_stopped_not_prematurely_done(poll_env):
-    """Regression: NO_PUSH must NOT be treated as 'fuel gone' -- the row
-    must be left alone to wait for a real cross, not resolved to DONE."""
+def test_stopped_always_resolves_to_done_via_loop(poll_env):
+    # v2 (2026-09-11): SS8's fuel-gated re-entry-after-wick-fake is retired
+    # -- trade_plan_engine.py's STOPPED branch now resolves unconditionally
+    # to DONE on the very next poll, no candle data even consulted (there
+    # is no more NO_PUSH-stays-STOPPED / FUELED-recross-becomes-REENTRY_
+    # ARMED / thin-recross-becomes-DONE distinction to make -- replaces
+    # four now-obsolete v1 tests that each exercised one of those branches).
     poll_env["make_plan"](status="STOPPED", direction="LONG", trigger_price=100.0, reentry_used=False)
-    candles = _no_push_5m_candles(100.0, is_long=True)  # price never returns to the trigger
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
-
-    row = poll_env["get_plan"]()
-    assert row.status == "STOPPED"  # unchanged -- not DONE
-
-
-def test_stopped_fueled_recross_becomes_reentry_armed_via_loop(poll_env):
-    poll_env["make_plan"](status="STOPPED", direction="LONG", trigger_price=100.0, reentry_used=False)
-    candles = _fueled_5m_candles(100.0, is_long=True)
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
-
-    row = poll_env["get_plan"]()
-    assert row.status == "REENTRY_ARMED"
-
-
-def test_stopped_thin_recross_becomes_done_via_loop(poll_env):
-    poll_env["make_plan"](status="STOPPED", direction="LONG", trigger_price=100.0, reentry_used=False)
-    candles = _thin_5m_candles(100.0, is_long=True)
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+    poll_env["run_polls"](polls=1)
 
     row = poll_env["get_plan"]()
     assert row.status == "DONE"
-
-
-def test_stopped_session_expired_no_cross_becomes_done_via_loop(poll_env):
-    # A date_key far in the past -- _compute_session_expires_at derives a
-    # boundary that's already well behind "now" for any session.
-    poll_env["make_plan"](
-        status="STOPPED", direction="LONG", trigger_price=100.0,
-        reentry_used=False, date_key="2020-01-01",
-    )
-    poll_env["run_polls"](polls=1)  # no candles needed -- expiry check comes first
-
-    row = poll_env["get_plan"]()
-    assert row.status == "DONE"
-    assert "session ended" in row.last_transition_reason
+    assert "not part of v2" in row.last_transition_reason
