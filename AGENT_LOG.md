@@ -4650,3 +4650,74 @@ mechanism. Not started, not asked for in either work order -- flagging
 for scoping, not building unilaterally.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-15 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — Rulings C and D shipped: TRAVELER's own email hook, and DRY_RUN ledger compounding for both lineages. This completes CC's part of the evaluation harness.
+
+Both shipped in order (C first, then D), same reporting bar.
+
+### Ruling C — TRAVELER email hook
+- `traveler_plan_notify.py` (new): mirrors `trade_plan_notify.py`'s exact
+  pattern -- same transport, three events (LOCK/ARMED/DONE), every
+  subject/body tagged TRAVELER and marked DRY_RUN/simulation so it's never
+  mistaken for a v2 signal. LOCK always fires the same shape (no lock-time
+  gate to evaluate); ARMED fires on the confirmed-close pullback fill;
+  DONE covers both TERCILE_SKIPPED and DONE.
+- **Interpretive judgment call, flagging explicitly**: the spec named
+  exactly "LOCK/ARMED/DONE" as three events. TERCILE_SKIPPED is a
+  DIFFERENT literal DB status than "DONE" -- I folded it into the
+  DONE-family notification anyway, since leaving a real, confirmed cross
+  that got RSI-excluded completely silent would reproduce the exact
+  "DAY-4 EMAIL FAILURE" anti-pattern that made v2's own LOCK email
+  always-fire in the first place, and matches v2's own precedent
+  (`build_done_email()`'s opposite_side/vetoed_cross_side handling) of
+  emailing a real-but-declined cross rather than staying silent. If
+  TERCILE_SKIPPED should instead stay silent, that's a one-line removal
+  in `notification_for_traveler_transition()`.
+- Wired: `kabroda_mas_flow.py`'s `_inject_traveler_plan_to_database()`
+  (LOCK, right after commit) and `traveler_plan_engine.py`'s `_apply()`
+  (ARMED/DONE via a new `_notify_traveler_transition()`).
+- Tests: 11 unit + 4 real end-to-end integration tests (real pullback
+  fill -> ARMED, real tercile-skip -> DONE, real opposite-trigger break ->
+  DONE, non-required transition -> no email).
+
+### Ruling D — DRY_RUN ledger compounding
+- `executor_accounts.py::record_trade_result()` gained `is_simulation:
+  bool = False` -- backward compatible, LIVE's own call site untouched.
+  True prefixes the audit message "[SIMULATION]" and stamps
+  `detail_json["is_simulation"]`. No new DB column: an account's own
+  `mode` already disambiguates real vs. DRY_RUN everywhere else in the
+  UI, so a redundant boolean would duplicate that fact, not add one.
+- `dry_run_split_engine.py` and `traveler_plan_engine.py`'s own
+  `_advance_e1_order()` both now call this on every terminal closure,
+  same `realized_pnl_r * risk_dollars_used` formula the real LIVE path
+  uses.
+- Tests: 3 unit tests (default-false, true-labels-the-row,
+  still-compounds-risk_last_usd) + 2 real integration tests proving both
+  loops actually move `risk_last_usd`/`last_trade_pnl_usd` and write a
+  `[SIMULATION]`-tagged audit row on a real close.
+
+### Flagged, not resolved
+An account graduating from DRY_RUN (used for evaluation) to LIVE will
+carry whatever `risk_last_usd` the simulation compounded it to --
+`set_account_mode()`'s own LIVE-gate checks that a real sizing choice was
+saved, but does NOT check for or reset a simulation-inflated
+`risk_last_usd`. Recommend verifying/resetting it as a deliberate step
+before flipping any evaluated account to LIVE. Not fixed here -- a real,
+consequential decision for Andy/DeepSeek, not mine to make unilaterally.
+
+### Test/boot summary
+Full `pytest tests/`: 683 passed (up from 663 before this pair of
+rulings -- exactly the 20 new tests), same 5 pre-existing unrelated
+`test_dashboard_fixes.py` errors. Boot check clean on both.
+
+### Status
+This completes everything CC's part of the evaluation harness needs:
+profiles settable per account (Ruling A), both lineages simulating
+management to a real close in DRY_RUN (Ruling B), emails for both
+lineages (Ruling C), and honest, non-flat ledgers (Ruling D). Per Andy's
+own framing: CC's part goes quiet here -- the evaluation chain (DRY_RUN
+trades accumulating, weekly Brain ingestion/side-by-side, Andy's pick)
+takes over from this point.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
