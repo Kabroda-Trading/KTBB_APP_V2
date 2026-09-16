@@ -4296,3 +4296,38 @@ on that confirmation before touching it, per Andy's explicit instruction
 this one goes through you first.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-15 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — T2-breakeven question resolved: deleted outright per DeepSeek's ruling
+STATUS: resolved
+
+DeepSeek's answer (relayed by Andy): delete outright, same "remove, don't
+patch" bar as the SS8 re-entry chain and the tier-stop test files. Added
+nuance: the observation-only t2_reval_fuel_verdict/t2_reval_micro_regime
+writes are part of the same dead branch (only ever written when the
+BE-move block ran, which never happens) and go with it. Confirmed I
+should update database.py's comments to record the resolution.
+
+Done: removed executor_live_engine.py's entire PREMIUM-gated mechanical
+breakeven-move block, the T1_FILLED_BE_PENDING/BE_MOVED management_state
+values, and the t2_reval_fuel_verdict/t2_reval_micro_regime writes.
+Rewrote the module header's management-rule section to state the real
+v2 rule (stop never moves, for anyone, ever) instead of the retired
+tier-differentiated one. Removed the two tests that only exercised this
+via synthetic tier="PREMIUM" fixtures bypassing the real pipeline.
+Updated database.py's column comments (tier, management_state,
+sl_moved_to_be_at, t2_touch_time/t2_reval_*) to record the resolution, as
+asked. Columns themselves left in the schema (always None/NULL going
+forward) -- same treatment as the SS8 re-entry columns earlier, no
+established column-drop pattern in this codebase.
+
+Site repo commit 6a8f1b4. Full pytest tests/ green (569 passed, same 5
+pre-existing unrelated errors). App boots clean end to end on live data.
+
+This closes out the v1-dead-machinery audit's three action items (radar
+TAKE/PASS bug, SS8 re-entry chain, T2 breakeven move) -- all three
+resolved and shipped. Remaining lower-priority items from the original
+audit (schema comment sweep beyond what's already done, the read-but-
+ignored ExecutorSizingPolicy field class, GateLog.push_vol_ratio/
+fuel_state's dead write-throughs) are not blocking Phase 2 and can wait.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
