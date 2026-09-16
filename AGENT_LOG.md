@@ -4585,3 +4585,68 @@ to a real close. The weekly side-by-side comparison has real data to work
 with on both sides now.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-15 (CC) — FROM: Claude Code — FOR: DeepSeek — how v2's existing email alert actually works (reference, for scoping GATE_TRAVELER's flagged email gap)
+
+Andy asked me to confirm the end-to-end architecture (radar/D1 calls the
+trade + sends email -> D2 finds entry -> D3 management runs it to close).
+He then asked whether I'd actually explained HOW the current email
+mechanism works, not just that it exists -- I hadn't, so here's the real
+mechanism, in case it's needed when scoping whether/how to add an
+equivalent for GATE_TRAVELER (the gap flagged in the Ruling B report
+above: GATE_TRAVELER's own gate does not send an alert email today).
+
+### The transport (notify.py)
+Plain stdlib `smtplib` over STARTTLS -- no third-party email service, no
+queue, no new dependency. `send_admin_email(subject, body)` sends to every
+address in the `SMTP_DEST` env var (comma-separated, so multiple real
+people can receive it), authenticating as `SMTP_USER`/`SMTP_PASS` against
+`SMTP_HOST`/`SMTP_PORT` (defaults to Gmail's SMTP, 587). Never raises --
+every caller already wraps it in try/except, a failed send is logged and
+swallowed, matching this codebase's "a notification bug must never break
+the real state write" convention used everywhere else (executor audit
+rows, gravity/macro engine calls).
+
+### What triggers a send (trade_plan_notify.py) -- exactly four events, by design
+1. **LOCK** -- fires once per session lock, for EVERY outcome (WAITING or
+   NO_PLAN alike). Used to skip NO_PLAN mornings; that caused a real
+   production incident (2026-09-02, "DAY-4 EMAIL FAILURE" -- Andy got
+   silence on a day the site was actually working correctly). Now always
+   fires, framed as a morning briefing rather than a bare state dump.
+2. **ARMED** -- fires the instant the resting order actually fills at the
+   trigger ("place/confirm your order now"). In this state machine, ARMED
+   and FILLED are the same transition by construction (a resting order AT
+   the trigger fills the instant price touches it) -- so there is
+   deliberately only one email here, not two.
+3. **VETOED** -- cross happened, gate declined it, "stand down." Dormant
+   in v2's real state machine today (advance_waiting_plan() goes straight
+   WAITING -> FILLED/DONE now, no separate VETOED status) -- kept as
+   tested-but-unreachable code, same treatment as the retired re-entry
+   chain.
+4. **DONE** -- end of session, one line: no trade today, or the trade's
+   management concluded, or (if a cross was declined) the same VETOED-
+   style "stand down" message routed through DONE instead of a bare
+   "nothing happened."
+Everything else (STOPPED, REENTRY_ARMED) is a real, logged transition but
+deliberately NOT emailed -- one email per required event only, anti-spam
+by design.
+
+### Where it's wired in
+- The LOCK email fires directly from `kabroda_mas_flow.py`, right after
+  the session-lock TradePlan row is committed.
+- ARMED/VETOED/DONE fire from `trade_plan_engine.py`'s `_apply()` --
+  every real TradePlan status change calls `_notify_transition()`, which
+  asks `trade_plan_notify.notification_for_transition(prev_status,
+  new_row)` whether THIS specific transition is one of the four required
+  events, and sends only if so.
+
+This is v2-only. GATE_TRAVELER's parallel TravelerPlan state machine
+(traveler_plan_engine.py) has no equivalent hook into notify.py at all --
+building one (if wanted) would be a small, mechanical addition following
+this exact same pattern (a notify_for_traveler_transition()-style
+function + a call from _apply() in traveler_plan_engine.py), not a new
+mechanism. Not started, not asked for in either work order -- flagging
+for scoping, not building unilaterally.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
