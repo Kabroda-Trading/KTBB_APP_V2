@@ -235,6 +235,33 @@ def round_price_to_precision(price: float, precision: int) -> str:
 # 10% of balance IS the risk amount, not a position-value allocation).
 # ------------------------------------------------------------------
 
+# Phase 2 (2026-09-15, CC_WORK_ORDER_PHASE2.md step 5) -- GATE_TRAVELER's
+# F_A sizing gate: RSI-4h-at-lock (DP0) EXTREME -> full size, else half.
+# lab_cf_arms_execute.py:14,44,151 verbatim: ">=80 LONG / <=20 SHORT -> 1.0,
+# else 0.5". A SIZING multiplier only -- never a taken/skip decision (that's
+# gate_traveler.py::tercile_skip(), a different mechanism on the same RSI
+# value; the handoff's own explicit correction: do not conflate the two).
+F_A_EXTREME_MULTIPLIER = 1.0
+F_A_DEFAULT_MULTIPLIER = 0.5
+F_A_LONG_EXTREME_THRESHOLD = 80.0
+F_A_SHORT_EXTREME_THRESHOLD = 20.0
+
+
+def f_a_multiplier(rsi_4h_at_lock: Optional[float], side: str) -> float:
+    """F_A: 1.0 if RSI-4h-at-lock is EXTREME for `side` (>=80 LONG, <=20
+    SHORT), else 0.5. No RSI value -> 0.5 (the non-extreme default, same
+    "missing data doesn't get the favorable case" convention as the
+    tercile skip -- lab_cf_arms_execute.py's own `if rsi0 is None: return
+    F_MULT`)."""
+    if rsi_4h_at_lock is None:
+        return F_A_DEFAULT_MULTIPLIER
+    if side == "LONG" and rsi_4h_at_lock >= F_A_LONG_EXTREME_THRESHOLD:
+        return F_A_EXTREME_MULTIPLIER
+    if side == "SHORT" and rsi_4h_at_lock <= F_A_SHORT_EXTREME_THRESHOLD:
+        return F_A_EXTREME_MULTIPLIER
+    return F_A_DEFAULT_MULTIPLIER
+
+
 def compute_stake(
     *,
     risk_last_usd: float,
@@ -251,6 +278,7 @@ def compute_stake(
     consecutive_losses: int = 0,
     derisk_n: Optional[int] = None,
     derisk_factor: Optional[float] = None,
+    sizing_multiplier: Optional[float] = None,
 ) -> Tuple[float, Dict[str, Any]]:
     """Returns (stake_usd, detail) -- detail is both the audit payload
     and exactly what the wizard's preview panel renders, so it records
@@ -263,6 +291,15 @@ def compute_stake(
          (percent-of-balance modes); else risk_last_usd (FIXED/ROLLING modes
          -- the rolled current baseline, advanced elsewhere by
          executor_accounts.record_trade_result() via compute_next_risk()).
+      1b. sizing_multiplier (Phase 2, CC_WORK_ORDER_PHASE2.md step 5 -- GATE_
+         TRAVELER's F_A gate): multiplies the base immediately after step 1,
+         BEFORE tier/derisk/caps -- `banded_risk(balance) x F_A` per the
+         study's own layer order (lab_cf_arms_execute.py: "multipliers scale
+         band risk DOWN only"). None/1.0 is a no-op, preserving today's
+         exact behavior for every non-GATE_TRAVELER caller. This is a
+         DOLLAR-ledger-only scale -- it never touches the R-multiple math
+         (qty/stop_distance downstream are computed from the resulting
+         stake_usd same as always; nothing here recomputes R).
       2. tier switch: REPLACES the base with tier_flat_usd once
          account_balance_usd >= tier_threshold_usd, evaluated fresh
          against the live balance every call -- reverting below the
@@ -301,6 +338,10 @@ def compute_stake(
         detail["band"] = (int(account_balance_usd // band_step_usd)
                           if account_balance_usd >= band_step_usd else 0)
     stake = base
+
+    if sizing_multiplier is not None and sizing_multiplier != 1.0:
+        stake = stake * sizing_multiplier
+        detail["sizing_multiplier"] = sizing_multiplier
 
     if tier_threshold_usd is not None and tier_flat_usd is not None:
         if account_balance_usd is None:

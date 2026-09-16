@@ -27,15 +27,19 @@ import executor_sizing
 def write_audit(
     db: Session, event_type: str, message: str,
     account_id: Optional[int] = None, trade_plan_id: Optional[int] = None,
+    traveler_plan_id: Optional[int] = None,
     executor_order_id: Optional[int] = None, executor_mechanism_test_id: Optional[int] = None,
     actor: Optional[str] = None, detail: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Public -- the one place any caller (this module, executor_engine.py,
     executor_mechanism_test.py, or main.py's admin routes) writes an
     ExecutorAuditLog row, so no caller ever needs to construct one by
-    hand."""
+    hand. traveler_plan_id (Phase 2, 2026-09-15): a SEPARATE field from
+    trade_plan_id, not an overload of it -- TravelerPlan/TradePlan have
+    independent id sequences and could collide on the same integer."""
     db.add(ExecutorAuditLog(
-        account_id=account_id, trade_plan_id=trade_plan_id, executor_order_id=executor_order_id,
+        account_id=account_id, trade_plan_id=trade_plan_id, traveler_plan_id=traveler_plan_id,
+        executor_order_id=executor_order_id,
         executor_mechanism_test_id=executor_mechanism_test_id,
         event_type=event_type, actor=actor or "system", message=message,
         detail_json=json.dumps(detail, default=str) if detail else None,
@@ -108,6 +112,60 @@ def set_account_mode(db: Session, account: ExecutorAccount, new_mode: str, by: s
         db, "MODE_CHANGED", f"account {account.id} mode changed {old_mode} -> {new_mode}",
         account_id=account.id, actor=by, detail={"old_mode": old_mode, "new_mode": new_mode},
     )
+    return account
+
+
+_VALID_GATE_PROFILES = ("GATE_V2", "GATE_TRAVELER")
+_VALID_MGMT_PROFILES = ("MGMT_SPLIT", "MGMT_E1_STACK")
+DEFAULT_GATE_PROFILE = "GATE_V2"
+DEFAULT_MGMT_PROFILE = "MGMT_SPLIT"
+
+
+def gate_profile_of(account: ExecutorAccount) -> str:
+    """account.gate_profile is nullable (Phase 2, 2026-09-15) -- every real
+    call site should go through this rather than reading the column
+    directly, so a brand-new or never-touched account reads as today's
+    exact v2 behavior (GATE_V2), not None."""
+    return account.gate_profile or DEFAULT_GATE_PROFILE
+
+
+def mgmt_profile_of(account: ExecutorAccount) -> str:
+    """Same reasoning as gate_profile_of() -- default MGMT_SPLIT."""
+    return account.mgmt_profile or DEFAULT_MGMT_PROFILE
+
+
+def set_account_profile(
+    db: Session, account: ExecutorAccount,
+    gate_profile: Optional[str] = None, mgmt_profile: Optional[str] = None,
+    by: str = "system",
+) -> ExecutorAccount:
+    """Phase 2 (CC_WORK_ORDER_PHASE2.md step 1) -- the per-account strategy
+    profile setter, same validation/audit shape as set_account_mode()
+    above. Either field may be omitted (None) to leave it unchanged --
+    callers can set gate and management profiles independently. Read AT
+    ORDER TIME by executor_plan_builder.py via gate_profile_of()/
+    mgmt_profile_of() above, not just at go-live -- mirrors the sizing-
+    policy read pattern (get_or_init_sizing_policy() is also read fresh
+    per order, not cached at go-live)."""
+    if gate_profile is not None and gate_profile not in _VALID_GATE_PROFILES:
+        raise ValueError(f"gate_profile must be one of {_VALID_GATE_PROFILES}, got {gate_profile!r}")
+    if mgmt_profile is not None and mgmt_profile not in _VALID_MGMT_PROFILES:
+        raise ValueError(f"mgmt_profile must be one of {_VALID_MGMT_PROFILES}, got {mgmt_profile!r}")
+
+    old_gate, old_mgmt = gate_profile_of(account), mgmt_profile_of(account)
+    if gate_profile is not None:
+        account.gate_profile = gate_profile
+    if mgmt_profile is not None:
+        account.mgmt_profile = mgmt_profile
+    new_gate, new_mgmt = gate_profile_of(account), mgmt_profile_of(account)
+
+    if new_gate != old_gate or new_mgmt != old_mgmt:
+        write_audit(
+            db, "PROFILE_CHANGED",
+            f"account {account.id} profile changed gate {old_gate}->{new_gate}, mgmt {old_mgmt}->{new_mgmt}",
+            account_id=account.id, actor=by,
+            detail={"old_gate": old_gate, "new_gate": new_gate, "old_mgmt": old_mgmt, "new_mgmt": new_mgmt},
+        )
     return account
 
 

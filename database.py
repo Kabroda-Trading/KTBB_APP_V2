@@ -475,6 +475,17 @@ def init_db():
     except Exception:
         pass
 
+    # Phase 2 (2026-09-15, CC_WORK_ORDER_PHASE2.md step 1) -- per-account
+    # gate/management profile columns. See ExecutorAccount's own comment
+    # above for why these are nullable with a code-side (not DB-level)
+    # default.
+    for _col in ["gate_profile VARCHAR", "mgmt_profile VARCHAR"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE executor_accounts ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- GATE_LOG SS9a MIGRATIONS (2026-08-31 -- see the GateLog class
     # docstring above for what each column is and why) ---
     for _col in [
@@ -515,6 +526,12 @@ def init_db():
     try:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE executor_audit_log ADD COLUMN executor_mechanism_test_id INTEGER"))
+    except Exception:
+        pass
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE executor_audit_log ADD COLUMN traveler_plan_id INTEGER"))
     except Exception:
         pass
 
@@ -619,6 +636,28 @@ def init_db():
         "t1_leg_r FLOAT", "runner_r FLOAT", "realized_pnl_r FLOAT",
         "closed_at TIMESTAMP", "close_reason VARCHAR",
         "t2_touch_time TIMESTAMP", "t2_reval_fuel_verdict VARCHAR", "t2_reval_micro_regime VARCHAR",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE executor_orders ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
+    # --- PHASE 2 (2026-09-15, CC_WORK_ORDER_PHASE2.md steps 1+6) -- profile
+    # snapshot + MGMT_E1_STACK exit-trigger-state ingestion columns. See
+    # ExecutorOrder's own comments above for what each column is. ---
+    for _col in [
+        "gate_profile_used VARCHAR", "mgmt_profile_used VARCHAR", "sizing_multiplier_used FLOAT",
+        "exit_reason VARCHAR", "exit_price FLOAT", "exit_time TIMESTAMP", "exit_fee_usd FLOAT",
+        "c5_fired BOOLEAN", "bbwp_fired BOOLEAN", "traveler_plan_id INTEGER",
+        # NOTE: the (traveler_plan_id, account_id) UNIQUE constraint declared
+        # on the ORM model is NOT retroactively added to an existing table by
+        # this simple ADD COLUMN pattern (same gap as every other column
+        # added here since the table's original create -- this codebase has
+        # no ALTER TABLE ADD CONSTRAINT precedent). Enforced for any brand-
+        # new database created via create_all(); on an existing production
+        # DB the idempotency check in executor_plan_builder.py's own
+        # duplicate-order query is what actually matters at runtime.
     ]:
         try:
             with engine.begin() as conn:
@@ -1034,6 +1073,72 @@ class TradePlan(Base):
     # writes a plain-English reason here.
     last_transition_reason = Column(String, nullable=True)
 
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
+# TRAVELER PLAN (Phase 2, 2026-09-15, CC_WORK_ORDER_PHASE2.md) -- GATE_
+# TRAVELER's own D1/D2 plan object, the parallel to TradePlan above for the
+# traveler-candidate lineage. Created alongside TradePlan at the SAME
+# session lock (kabroda_mas_flow.py), watching the SAME BO/BD/r30/rsi-at-
+# lock levels, but with GATE_TRAVELER's own taken-gate (pullback-fill +
+# tercile-skip on RSI-4h-at-lock -- CC_HANDOFF_SITE_INTEGRATION.md §2-D1,
+# rulings logged fcfb19a/74344cd in the Kabroda AI Brain repo) instead of
+# v1/v2's Krown-Cross/RSI-zone/fuel gate.
+#
+# A SEPARATE table and a SEPARATE polling loop (traveler_plan_engine.py,
+# not trade_plan_engine.py) on purpose, not a mode flag bolted onto
+# TradePlan: (1) the fill mechanism is genuinely different -- pullback-fill
+# is the first 5m bar AFTER the cross bar whose CLOSE comes back to/through
+# the trigger (recipe_assembled.py::pullback_fill(), confirmed 2026-09-15),
+# a later, differently-priced event than v1/v2's touch/confirmed-close
+# fill; (2) the taken/journey-end window can span MULTIPLE DAYS (opposite-
+# trigger confirmed close or cross+7d, journey_recipes.py:190,225-226) --
+# unlike TradePlan, which is scoped to and expires with its own single
+# session, a WAITING_PULLBACK row here must keep being polled across
+# session/day boundaries until the pullback fills, the opposite trigger
+# breaks, or the 7-day cap passes. date_key/session_id below are for
+# audit/join back to the SAME SessionLock/TradePlan row this was created
+# alongside -- the polling loop itself does NOT scope by "is this session
+# still today," only by this row's own status and journey_cap_at/
+# opposite_trigger fields.
+# ---------------------------------------------------------
+class TravelerPlan(Base):
+    __tablename__ = "traveler_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True, nullable=False)
+    date_key = Column(String, index=True, nullable=False)
+    session_id = Column(String, nullable=False)
+
+    # WAITING_CROSS -> TERCILE_SKIPPED (terminal) | WAITING_PULLBACK
+    #               -> FILLED -> STOPPED | DONE (terminal)
+    #               -> DONE (terminal -- journey ended with no pullback fill)
+    # See traveler_plan_engine.py for the full transition table.
+    status = Column(String, default="WAITING_CROSS", nullable=False)
+    direction = Column(String, nullable=True)          # LONG | SHORT, set at the cross
+
+    breakout_trigger = Column(Float, nullable=True)
+    breakdown_trigger = Column(Float, nullable=True)
+    r30_high = Column(Float, nullable=True)              # needed at the cross to compute the r30-edge stop
+    r30_low = Column(Float, nullable=True)
+    box = Column(Float, nullable=True)                  # bo - bd, frozen at lock
+    stop_price = Column(Float, nullable=True)           # r30 edge -+ 0.12*box -- SAME formula as v1/v2 (decision_engine.STOP_BUFFER_BOX)
+    t1_price = Column(Float, nullable=True)             # trigger +- 1.0*box -- E1's full-exit target
+    rsi_4h_at_lock = Column(Float, nullable=True)        # same frozen lock-time value TradePlan.rsi_4h_at_lock carries
+
+    cross_time = Column(DateTime, nullable=True)
+    cross_price = Column(Float, nullable=True)           # the confirmed cross bar's own close (audit only -- NOT the fill price)
+    tercile_skipped = Column(Boolean, nullable=True)     # the HARD taken-gate filter -- see gate_traveler.py::tercile_skip()
+
+    fill_time = Column(DateTime, nullable=True)
+    fill_price = Column(Float, nullable=True)            # the pullback bar's CLOSE -- the real GATE_TRAVELER fill price
+
+    journey_cap_at = Column(DateTime, nullable=True)     # cross_time + 7d (journey_recipes.py JOURNEY_CAP)
+    opposite_trigger = Column(Float, nullable=True)      # the untaken side's trigger -- a confirmed close through it ends the journey early
+
+    last_transition_reason = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -1910,6 +2015,20 @@ class ExecutorAccount(Base):
     # check falsely reject every real trade.
     margin_mode = Column(String, nullable=False, default="ISOLATION")
     leverage_baseline = Column(Integer, nullable=False, default=10)
+    # Phase 2 (2026-09-15, CC_WORK_ORDER_PHASE2.md step 1): per-account
+    # strategy profile -- which D1 gate and D3 management run for this
+    # account's real orders. Nullable with a code-side default (see
+    # executor_accounts.set_account_profile()'s docstring) rather than a
+    # DB-level default, matching this file's own documented lesson from
+    # the max_margin_pct_of_balance incident above (a nullable column with
+    # no DB default is safe for existing rows; the ORM/call sites treat
+    # None as GATE_V2/MGMT_SPLIT explicitly rather than relying on a
+    # database default to paper over it). Read AT ORDER TIME
+    # (executor_plan_builder.py), not just at go-live -- same pattern as
+    # ExecutorSizingPolicy. Existing accounts are unaffected until this is
+    # explicitly set: None reads as today's exact v2 behavior.
+    gate_profile = Column(String, nullable=True)   # GATE_V2 (default) | GATE_TRAVELER
+    mgmt_profile = Column(String, nullable=True)   # MGMT_SPLIT (default) | MGMT_E1_STACK
     # max_margin_pct_of_balance removed 2026-09-07 (stagnant sweep item 6,
     # Andy's explicit call): no route anywhere ever let anyone set it, and
     # no consumer in the real margin/liquidation-safety path ever read it
@@ -2037,6 +2156,15 @@ class ExecutorOrder(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     trade_plan_id = Column(Integer, nullable=False, index=True)   # trade_plans.id
+    # Phase 2 (2026-09-15): set only for a GATE_TRAVELER-sourced order --
+    # trade_plan_id above is STILL populated too, pointing at the SAME-
+    # session TradePlan row TravelerPlan was created alongside (audit/join
+    # convenience across GateLog/TradePlan-keyed reporting), even though
+    # that TradePlan's own v2 gate is not what decided this order. NULL for
+    # every v1/v2 order (the entire pre-Phase-2 population) -- the
+    # (traveler_plan_id, account_id) unique constraint below is a no-op for
+    # those rows (NULLs are never equal to each other in a unique index).
+    traveler_plan_id = Column(Integer, nullable=True, index=True)   # traveler_plans.id
     account_id = Column(Integer, nullable=False, index=True)      # executor_accounts.id
     mode = Column(String, nullable=False)   # snapshot of account.mode at decision time
 
@@ -2061,6 +2189,28 @@ class ExecutorOrder(Base):
     # table), folded into liquidation_price_estimate above. See
     # executor_sizing.py/executor_plan_builder.py's own headers.
     maintenance_margin_rate_used = Column(Float, nullable=True)
+
+    # Phase 2 (2026-09-15, CC_WORK_ORDER_PHASE2.md steps 1+6) -- snapshot of
+    # the account's profile AT ORDER TIME (executor_accounts.gate_profile_of()/
+    # mgmt_profile_of()), same denormalized-audit-snapshot treatment as every
+    # other field on this row -- the account's live setting can change later,
+    # this row records what actually decided THIS order. sizing_multiplier_
+    # used records F_A (or 1.0 for MGMT_SPLIT orders, which don't have one) --
+    # the ingestion spec's "profile labels + sizing preset actually used."
+    gate_profile_used = Column(String, nullable=True)
+    mgmt_profile_used = Column(String, nullable=True)
+    sizing_multiplier_used = Column(Float, nullable=True)
+    # MGMT_E1_STACK exit-trigger-state-at-exit (ingestion spec step 6) --
+    # raw facts only, no R/avgR computed here (the Brain computes that from
+    # these + the price/timestamp fields already above). exit_reason in
+    # (STOP, C5_EXIT, BBWP_EXIT, T1, TIME) -- see executor_live_engine.py's
+    # MGMT_E1_STACK branch for the exact per-bar walk that sets these.
+    exit_reason = Column(String, nullable=True)
+    exit_price = Column(Float, nullable=True)
+    exit_time = Column(DateTime, nullable=True)
+    exit_fee_usd = Column(Float, nullable=True)
+    c5_fired = Column(Boolean, nullable=True)
+    bbwp_fired = Column(Boolean, nullable=True)
 
     # WOULD_PLACE | REJECTED | SKIPPED_KILL_SWITCH | SKIPPED_ACCOUNT_INACTIVE
     # | SKIPPED_ALREADY_IN_TRADE | ERROR
@@ -2142,6 +2292,10 @@ class ExecutorOrder(Base):
 
     __table_args__ = (
         UniqueConstraint("trade_plan_id", "account_id", name="uq_executor_order_plan_account"),
+        # Phase 2: same idempotency guarantee for GATE_TRAVELER orders, keyed
+        # off traveler_plan_id instead -- a no-op constraint for every row
+        # where traveler_plan_id is NULL (all v1/v2 orders).
+        UniqueConstraint("traveler_plan_id", "account_id", name="uq_executor_order_traveler_account"),
     )
 
 
@@ -2157,6 +2311,7 @@ class ExecutorAuditLog(Base):
     occurred_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False, index=True)
     account_id = Column(Integer, nullable=True, index=True)      # executor_accounts.id
     trade_plan_id = Column(Integer, nullable=True)                # trade_plans.id
+    traveler_plan_id = Column(Integer, nullable=True)              # traveler_plans.id (Phase 2, 2026-09-15)
     executor_order_id = Column(Integer, nullable=True)            # executor_orders.id
     executor_mechanism_test_id = Column(Integer, nullable=True)   # executor_mechanism_tests.id
 
@@ -2164,7 +2319,7 @@ class ExecutorAuditLog(Base):
     # | T1_PARTIAL_DETECTED | SL_MOVED_TO_BREAKEVEN | KILL_SWITCH_ENGAGED
     # | KILL_SWITCH_RELEASED | RISK_STATE_UPDATED | CREDENTIAL_SET
     # | CREDENTIAL_ROTATED | ACCOUNT_CREATED | ACCOUNT_DEACTIVATED
-    # | MODE_CHANGED | ERROR | LIVE_ORDERS_ENABLED | LIVE_ORDERS_DISABLED
+    # | MODE_CHANGED | PROFILE_CHANGED | ERROR | LIVE_ORDERS_ENABLED | LIVE_ORDERS_DISABLED
     # | TEST_MECHANISM_STARTED | TEST_MECHANISM_BLOCKED | TEST_ORDER_PLACED
     # | TEST_ORDER_FILL_CONFIRMED | TEST_INITIAL_TPSL_SET | TEST_PARTIAL_CLOSED
     # | TEST_SL_MOVED_TO_BREAKEVEN | TEST_POSITION_FLASH_CLOSED

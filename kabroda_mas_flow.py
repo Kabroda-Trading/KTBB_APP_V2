@@ -41,6 +41,7 @@ from database import (
     DecisionJournal,
     GateLog,
     TradePlan,
+    TravelerPlan,
 )
 
 
@@ -233,6 +234,25 @@ def run_mas_analysis(
         _inject_trade_plan_to_database(symbol, session_id, date_key, plan_fields)
     except Exception as _tp_err:
         print(f"[TRADE PLAN] Non-critical failure -- MAS unaffected: {_tp_err}")
+
+    # 6c. Traveler Plan (Phase 2, CC_WORK_ORDER_PHASE2.md) -- GATE_TRAVELER's
+    # own D1/D2 plan object, created alongside TradePlan above from the SAME
+    # locked levels. Independent of what decision_dict says (GATE_TRAVELER
+    # doesn't use v1/v2's Krown-Cross/RSI-zone/fuel gate at all -- its own
+    # taken-gate is pullback-fill + tercile-skip, evaluated later by
+    # traveler_plan_engine.py at the real cross). Non-blocking, same
+    # reasoning as 6b: additive, a failure here must never affect the SSOT
+    # writes above.
+    try:
+        if bo and bd and bo > bd:
+            _inject_traveler_plan_to_database(
+                symbol, session_id, date_key,
+                breakout_trigger=bo, breakdown_trigger=bd,
+                r30_high=levels.get("range30m_high", 0.0), r30_low=levels.get("range30m_low", 0.0),
+                rsi_4h_at_lock=levels.get("rsi_4h_at_lock"),
+            )
+    except Exception as _trav_err:
+        print(f"[TRAVELER PLAN] Non-critical failure -- MAS unaffected: {_trav_err}")
 
     # 7. Forward-audit record — frozen at decision time (non-blocking).
     try:
@@ -642,6 +662,50 @@ def _inject_trade_plan_to_database(
             print(f"[TRADE PLAN] Lock-email notification failed: {_notify_err}")
     except Exception as e:
         print(f"TRADE PLAN DATABASE INJECTION ERROR: {e}")
+    finally:
+        db.close()
+
+
+def _inject_traveler_plan_to_database(
+    symbol: str, session_id: str, date_key: str,
+    breakout_trigger: float, breakdown_trigger: float,
+    r30_high: float, r30_low: float, rsi_4h_at_lock: Optional[float],
+) -> None:
+    """Create-only upsert for TravelerPlan -- same anti-flip-flop reasoning
+    as _inject_trade_plan_to_database() above (a restart-recovery re-run of
+    run_mas_analysis() must never overwrite a row the polling loop may
+    already have advanced). Unconditional WAITING_CROSS write whenever real
+    levels exist -- GATE_TRAVELER has no lock-time gate to evaluate (its
+    only gate, pullback-fill + tercile-skip, is evaluated at the real cross
+    by traveler_plan_engine.py), so there's no NO_PLAN-equivalent state
+    here at all."""
+    db = SessionLocal()
+    try:
+        existing = (
+            db.query(TravelerPlan)
+            .filter(
+                TravelerPlan.symbol == symbol,
+                TravelerPlan.session_id == session_id,
+                TravelerPlan.date_key == date_key,
+            )
+            .first()
+        )
+        if existing is not None:
+            print(f"|| TRAVELER PLAN || Row already exists for {symbol} | {session_id} | {date_key} -- not re-generated.")
+            return
+
+        row = TravelerPlan(
+            symbol=symbol, session_id=session_id, date_key=date_key,
+            status="WAITING_CROSS",
+            breakout_trigger=breakout_trigger, breakdown_trigger=breakdown_trigger,
+            r30_high=r30_high, r30_low=r30_low,
+            rsi_4h_at_lock=rsi_4h_at_lock,
+        )
+        db.add(row)
+        db.commit()
+        print(f"|| TRAVELER PLAN || WAITING_CROSS plan written for {symbol} | {session_id} | {date_key}.")
+    except Exception as e:
+        print(f"TRAVELER PLAN DATABASE INJECTION ERROR: {e}")
     finally:
         db.close()
 

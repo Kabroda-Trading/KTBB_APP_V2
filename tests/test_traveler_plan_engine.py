@@ -1,0 +1,262 @@
+"""
+Integration coverage for traveler_plan_engine.py's monitoring loop -- runs
+the ACTUAL run_traveler_plan_loop() coroutine against monkeypatched
+exchange calls, same harness style as tests/test_trade_plan_engine.py.
+Exercises the real production code path end to end: WAITING_CROSS ->
+WAITING_PULLBACK -> FILLED -> the executor hook (a real GATE_TRAVELER
+account) -> MGMT_E1_STACK's own poll closing the resulting order.
+"""
+import os
+
+os.environ["DATABASE_URL"] = "sqlite:///./kabroda_test_traveler_plan_engine.db"
+
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import asyncio
+import datetime as dt
+from datetime import timezone, timedelta
+
+import pytest
+from cryptography.fernet import Fernet
+
+import database
+from database import SessionLocal, TravelerPlan, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorSizingPolicy
+import traveler_plan_engine as tpe
+import executor_accounts as ea
+
+
+def _clean_db_files():
+    for path in ["kabroda_test_traveler_plan_engine.db", "kabroda_test_traveler_plan_engine.db-journal",
+                 "kabroda_test_traveler_plan_engine.db-shm", "kabroda_test_traveler_plan_engine.db-wal"]:
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+
+
+class _StopLoop(Exception):
+    pass
+
+
+def _c5m(close, ts, high=None, low=None):
+    return {"close": close, "high": high if high is not None else close, "low": low if low is not None else close, "time": ts}
+
+
+@pytest.fixture
+def poll_env(monkeypatch):
+    monkeypatch.setenv("EXECUTOR_CREDENTIAL_KEY", Fernet.generate_key().decode("utf-8"))
+    _clean_db_files()
+    database.init_db()
+    db = SessionLocal()
+    for model in (TravelerPlan, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorSizingPolicy):
+        db.query(model).delete()
+    db.commit()
+    db.close()
+
+    DEFAULT_DATE_KEY = (dt.datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    def make_plan(symbol="BTC/USDT", date_key=None, session_id="us_ny_futures", **kwargs):
+        date_key = date_key or DEFAULT_DATE_KEY
+        db = SessionLocal()
+        defaults = dict(
+            symbol=symbol, date_key=date_key, session_id=session_id,
+            status="WAITING_CROSS", breakout_trigger=100.0, breakdown_trigger=90.0,
+            r30_high=100.0, r30_low=90.0, rsi_4h_at_lock=55.0,
+        )
+        defaults.update(kwargs)
+        row = TravelerPlan(**defaults)
+        db.add(row)
+        db.commit()
+        db.close()
+
+    def make_traveler_account(gate_profile="GATE_TRAVELER", mgmt_profile="MGMT_E1_STACK", risk_last_usd=100.0):
+        db = SessionLocal()
+        account = ea.create_account(db, user_id=1, label="traveler_test_account")
+        db.flush()
+        ea.set_account_profile(db, account, gate_profile=gate_profile, mgmt_profile=mgmt_profile, by="test")
+        state = ea.get_or_init_risk_state(db, account)
+        state.risk_last_usd = risk_last_usd
+        db.commit()
+        account_id = account.id
+        db.close()
+        return account_id
+
+    def run_polls(candles_5m_by_symbol=None, candles_1h_by_symbol=None, candles_4h_by_symbol=None, polls=1):
+        candles_5m_by_symbol = candles_5m_by_symbol or {}
+        candles_1h_by_symbol = candles_1h_by_symbol or {}
+        candles_4h_by_symbol = candles_4h_by_symbol or {}
+
+        async def fake_5m(symbol, limit=310):
+            return candles_5m_by_symbol.get(symbol, [])
+
+        async def fake_1h(symbol, limit=100):
+            return candles_1h_by_symbol.get(symbol, [])
+
+        async def fake_4h(symbol, limit=100):
+            return candles_4h_by_symbol.get(symbol, [])
+
+        sleeps = {"n": 0}
+
+        async def fake_sleep(seconds):
+            sleeps["n"] += 1
+            if sleeps["n"] >= polls:
+                raise _StopLoop()
+
+        monkeypatch.setattr(tpe.market_data, "fetch_live_5m", fake_5m)
+        monkeypatch.setattr(tpe.market_data, "fetch_live_1h", fake_1h)
+        monkeypatch.setattr(tpe.market_data, "fetch_live_4h", fake_4h)
+        monkeypatch.setattr(tpe.asyncio, "sleep", fake_sleep)
+
+        async def main():
+            try:
+                await tpe.run_traveler_plan_loop()
+            except _StopLoop:
+                pass
+
+        asyncio.run(main())
+
+    def get_plan(symbol="BTC/USDT"):
+        db = SessionLocal()
+        row = db.query(TravelerPlan).filter(TravelerPlan.symbol == symbol).first()
+        db.close()
+        return row
+
+    def get_orders(traveler_plan_id=None):
+        db = SessionLocal()
+        q = db.query(ExecutorOrder)
+        if traveler_plan_id is not None:
+            q = q.filter_by(traveler_plan_id=traveler_plan_id)
+        rows = q.all()
+        db.expunge_all()
+        db.close()
+        return rows
+
+    yield {
+        "make_plan": make_plan, "make_traveler_account": make_traveler_account,
+        "run_polls": run_polls, "get_plan": get_plan, "get_orders": get_orders,
+    }
+
+    db = SessionLocal()
+    for model in (TravelerPlan, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorSizingPolicy):
+        db.query(model).delete()
+    db.commit()
+    db.close()
+    _clean_db_files()
+
+
+def test_waiting_cross_advances_to_waiting_pullback_on_a_real_cross(poll_env):
+    poll_env["make_plan"]()
+    candles = [_c5m(95.0, 1700000000 + i * 300) for i in range(5)] + [_c5m(105.0, 1700000000 + 5 * 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "WAITING_PULLBACK"
+    assert row.direction == "LONG"
+    assert row.tercile_skipped is False
+
+
+def test_waiting_cross_no_cross_yet_stays_waiting(poll_env):
+    poll_env["make_plan"]()
+    candles = [_c5m(95.0, 1700000000 + i * 300) for i in range(5)]  # never crosses
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "WAITING_CROSS"
+
+
+def test_waiting_pullback_fills_and_fires_the_executor_hook_for_a_gate_traveler_account(poll_env):
+    # BTC-scale prices with a realistic, tight box (0.6% of price) -- a
+    # toy 100/90-style box (10% of price) fails the liquidation-vs-stop
+    # safety check at the default 10x leverage baseline (the stop distance
+    # exceeds a real leverage's liquidation buffer), which is a test-data
+    # realism issue, not a code bug -- found while writing this test.
+    account_id = poll_env["make_traveler_account"]()
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_PULLBACK", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    candles = [
+        _c5m(50100.0, ct),              # cross bar itself -- skipped
+        _c5m(50050.0, ct + 300),        # still above trigger
+        _c5m(49900.0, ct + 600),        # pullback fill
+    ]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "FILLED"
+    assert row.fill_price == 49900.0
+
+    orders = poll_env["get_orders"](traveler_plan_id=row.id)
+    assert len(orders) == 1
+    order = orders[0]
+    assert order.account_id == account_id
+    assert order.decision == "WOULD_PLACE"
+    assert order.gate_profile_used == "GATE_TRAVELER"
+    assert order.mgmt_profile_used == "MGMT_E1_STACK"
+    assert order.entry_fill_price == 49900.0
+    assert order.stop_price == 49664.0
+    assert order.t1_price == 50300.0
+    assert order.management_state == "ENTRY_FILLED_ORDERS_PLACED"
+    # F_A: rsi_4h_at_lock=55.0 is not extreme for LONG (needs >=80) -> 0.5
+    assert order.sizing_multiplier_used == pytest.approx(0.5)
+    assert order.qty == pytest.approx((100.0 * 0.5) / abs(49900.0 - 49664.0))
+
+
+def test_waiting_pullback_ignores_non_gate_traveler_accounts(poll_env):
+    poll_env["make_traveler_account"](gate_profile="GATE_V2", mgmt_profile="MGMT_SPLIT")
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_PULLBACK", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0,
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    candles = [_c5m(50100.0, ct), _c5m(49900.0, ct + 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "FILLED"
+    assert poll_env["get_orders"](traveler_plan_id=row.id) == []  # GATE_V2 account never acts on a TravelerPlan fill
+
+
+def test_mgmt_e1_stack_poll_closes_the_order_on_a_real_stop_touch(poll_env):
+    account_id = poll_env["make_traveler_account"]()
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_PULLBACK", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    fill_candles = [_c5m(50100.0, ct), _c5m(49900.0, ct + 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": fill_candles}, polls=1)
+    row = poll_env["get_plan"]()
+    assert row.status == "FILLED"
+
+    # Second poll cycle: price drops through the stop (49664).
+    walk_candles = [
+        _c5m(49900.0, ct + 300),
+        _c5m(49600.0, ct + 600, high=49700.0, low=49500.0),  # stop touched via low
+    ]
+    flat_htf = [{"close": 50000.0} for _ in range(20)]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": walk_candles},
+        candles_1h_by_symbol={"BTC/USDT": flat_htf}, candles_4h_by_symbol={"BTC/USDT": flat_htf},
+        polls=1,
+    )
+
+    orders = poll_env["get_orders"]()
+    assert len(orders) == 1
+    order = orders[0]
+    assert order.management_state == "CLOSED_STOP"
+    assert order.exit_reason == "STOP"
+    assert order.exit_price == 49664.0
+    assert order.realized_pnl_r == pytest.approx(-1.0)

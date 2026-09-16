@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 
 import executor_accounts
 import executor_sizing
-from database import ExecutorAccount, ExecutorOrder, ExecutorRiskState, TradePlan
+from database import ExecutorAccount, ExecutorOrder, ExecutorRiskState, TradePlan, TravelerPlan
 
 
 _FALLBACK_MMR_UNVERIFIED = 0.01
@@ -165,6 +165,116 @@ async def _query_real_balance(account: ExecutorAccount) -> Dict[str, Any]:
         }
 
 
+async def _size_and_check_order(
+    db: Session, base: Dict[str, Any], symbol: str, direction: str,
+    entry_price: Optional[float], stop_price: Optional[float],
+    account: ExecutorAccount, risk_state: ExecutorRiskState,
+    sizing_multiplier: Optional[float] = None,
+) -> Dict[str, Any]:
+    """The shared core of both build_hypothetical_order() (TradePlan/v1/v2)
+    and build_hypothetical_traveler_order() (TravelerPlan/GATE_TRAVELER)
+    below -- sizing, leverage/margin verification, and the liquidation-vs-
+    stop safety check are IDENTICAL regardless of which lineage's plan
+    object supplied entry/stop/direction; only the caller-side idempotency
+    checks (keyed on a different plan id) differ. `base` already carries
+    trade_plan_id/traveler_plan_id/account_id/mode/symbol/direction --
+    this function only ADDS to it, never removes keys, so a caller's early-
+    return dict shape stays consistent whether this runs or not.
+
+    sizing_multiplier: Phase 2's F_A gate (GATE_TRAVELER only) -- passed
+    straight through to compute_stake(), None/1.0 for every v1/v2 caller
+    (no behavior change there).
+    """
+    if not entry_price or not stop_price or not direction:
+        return {**base, "decision": "ERROR", "decision_reason": "plan is missing entry/stop/direction -- cannot size"}
+
+    policy = executor_accounts.get_or_init_sizing_policy(db, account)
+
+    # Only pay for the extra exchange call when the policy actually needs
+    # the live balance -- FIXED/ROLLING-only accounts (no percent-of-
+    # balance base, no percent cap, no balance-tiered switch) never query
+    # it. compute_stake() itself still runs unconditionally; it degrades
+    # to the existing risk_last_usd-based math when none of those
+    # optional params are set.
+    balance_usd: Optional[float] = None
+    balance_source = "not queried -- policy does not use account balance"
+    if (policy.base_risk_pct is not None or policy.cap_pct is not None
+            or policy.tier_threshold_usd is not None or policy.band_step_usd is not None):
+        balance_state = await _query_real_balance(account)
+        balance_usd = balance_state["balance_usd"]
+        balance_source = balance_state["source"]
+
+    try:
+        stake_usd, stake_detail = executor_sizing.compute_stake(
+            risk_last_usd=risk_state.risk_last_usd,
+            base_risk_pct=policy.base_risk_pct,
+            account_balance_usd=balance_usd,
+            tier_threshold_usd=policy.tier_threshold_usd,
+            tier_flat_usd=policy.tier_flat_usd,
+            band_step_usd=policy.band_step_usd,
+            band_risk_per_step_usd=policy.band_risk_per_step_usd,
+            band_below_pct=policy.band_below_pct,
+            band_max_risk_usd=policy.band_max_risk_usd,
+            cap_abs_usd=policy.cap_abs_usd,
+            cap_pct=policy.cap_pct,
+            consecutive_losses=risk_state.consecutive_losses,
+            derisk_n=policy.derisk_n,
+            derisk_factor=policy.derisk_factor,
+            sizing_multiplier=sizing_multiplier,
+        )
+        stake_detail = {**stake_detail, "balance_source": balance_source}
+        qty = executor_sizing.compute_qty(stake_usd, entry_price, stop_price)
+    except ValueError as e:
+        return {**base, "decision": "ERROR", "decision_reason": f"sizing failed: {e}"}
+
+    exchange_state = await _query_real_leverage_and_margin_mode(account, symbol)
+    leverage = exchange_state["leverage"]
+    margin_mode = exchange_state["margin_mode"]
+
+    notional = entry_price * qty
+    mmr_state = await _query_real_maintenance_margin_rate(account, symbol, notional)
+
+    liq_ok, liq_detail, liq_price = executor_sizing.check_leverage_is_safe(
+        entry_price, stop_price, direction, leverage, maintenance_margin_rate=mmr_state["mmr"])
+    margin_required = notional / leverage
+
+    result = {
+        **base,
+        "entry_price": entry_price, "stop_price": stop_price,
+        "risk_dollars_used": stake_usd,
+        "stake_calculation_detail": stake_detail,
+        "stop_distance": abs(entry_price - stop_price),
+        "qty": qty, "leverage_used": leverage,
+        "margin_required_usd": margin_required,
+        "maintenance_margin_rate_used": mmr_state["mmr"],
+        "liquidation_price_estimate": liq_price,
+        "liquidation_check_passed": liq_ok,
+        "liquidation_check_detail": liq_detail,
+    }
+    if sizing_multiplier is not None:
+        result["sizing_multiplier_used"] = sizing_multiplier
+    if margin_mode != account.margin_mode:
+        return {
+            **result, "decision": "REJECTED",
+            "decision_reason": (
+                f"real exchange margin mode ({margin_mode}) does not match configured "
+                f"({account.margin_mode}) -- {exchange_state['source']}; fix the mismatch before trading"
+            ),
+        }
+    if not liq_ok:
+        return {
+            **result, "decision": "REJECTED",
+            "decision_reason": f"{liq_detail} (leverage {exchange_state['source']}; mmr {mmr_state['source']})",
+        }
+    return {
+        **result, "decision": "WOULD_PLACE",
+        "decision_reason": (
+            f"leverage {leverage}x, {exchange_state['source']}; "
+            f"mmr {mmr_state['mmr']}, {mmr_state['source']}; {liq_detail}"
+        ),
+    }
+
+
 async def build_hypothetical_order(
     db: Session, trade_plan_row: TradePlan, account: ExecutorAccount, risk_state: ExecutorRiskState,
 ) -> Dict[str, Any]:
@@ -174,6 +284,7 @@ async def build_hypothetical_order(
         "mode": account.mode,
         "symbol": trade_plan_row.symbol,
         "direction": trade_plan_row.direction,
+        "t1_price": trade_plan_row.t1, "t2_price": trade_plan_row.t2, "t3_price": trade_plan_row.t3,
     }
 
     tradeable, reason = executor_accounts.is_account_tradeable(db, account)
@@ -209,91 +320,71 @@ async def build_hypothetical_order(
             }
 
     entry_price = trade_plan_row.fill_price or trade_plan_row.trigger_price
-    stop_price = trade_plan_row.stop_price
-    direction = trade_plan_row.direction
-    if not entry_price or not stop_price or not direction:
-        return {**base, "decision": "ERROR", "decision_reason": "trade plan is missing entry/stop/direction -- cannot size"}
+    return await _size_and_check_order(
+        db, base, trade_plan_row.symbol, trade_plan_row.direction,
+        entry_price, trade_plan_row.stop_price, account, risk_state,
+    )
 
-    policy = executor_accounts.get_or_init_sizing_policy(db, account)
 
-    # Only pay for the extra exchange call when the policy actually needs
-    # the live balance -- FIXED/ROLLING-only accounts (no percent-of-
-    # balance base, no percent cap, no balance-tiered switch) never query
-    # it. compute_stake() itself still runs unconditionally; it degrades
-    # to the existing risk_last_usd-based math when none of those
-    # optional params are set.
-    balance_usd: Optional[float] = None
-    balance_source = "not queried -- policy does not use account balance"
-    if (policy.base_risk_pct is not None or policy.cap_pct is not None
-            or policy.tier_threshold_usd is not None or policy.band_step_usd is not None):
-        balance_state = await _query_real_balance(account)
-        balance_usd = balance_state["balance_usd"]
-        balance_source = balance_state["source"]
+async def build_hypothetical_traveler_order(
+    db: Session, traveler_plan_row: TravelerPlan, account: ExecutorAccount, risk_state: ExecutorRiskState,
+) -> Dict[str, Any]:
+    """GATE_TRAVELER's counterpart to build_hypothetical_order() above --
+    same sizing/leverage/liquidation core (_size_and_check_order()), fed
+    from TravelerPlan instead of TradePlan. Idempotency is keyed on
+    traveler_plan_id, a SEPARATE column/constraint from trade_plan_id (see
+    database.py's ExecutorOrder docstring) -- deliberately NOT reusing
+    trade_plan_id for this, since TravelerPlan and TradePlan have
+    independent id sequences and could collide on the same integer.
 
-    try:
-        stake_usd, stake_detail = executor_sizing.compute_stake(
-            risk_last_usd=risk_state.risk_last_usd,
-            base_risk_pct=policy.base_risk_pct,
-            account_balance_usd=balance_usd,
-            tier_threshold_usd=policy.tier_threshold_usd,
-            tier_flat_usd=policy.tier_flat_usd,
-            band_step_usd=policy.band_step_usd,
-            band_risk_per_step_usd=policy.band_risk_per_step_usd,
-            band_below_pct=policy.band_below_pct,
-            band_max_risk_usd=policy.band_max_risk_usd,
-            cap_abs_usd=policy.cap_abs_usd,
-            cap_pct=policy.cap_pct,
-            consecutive_losses=risk_state.consecutive_losses,
-            derisk_n=policy.derisk_n,
-            derisk_factor=policy.derisk_factor,
-        )
-        stake_detail = {**stake_detail, "balance_source": balance_source}
-        qty = executor_sizing.compute_qty(stake_usd, entry_price, stop_price)
-    except ValueError as e:
-        return {**base, "decision": "ERROR", "decision_reason": f"sizing failed: {e}"}
-
-    exchange_state = await _query_real_leverage_and_margin_mode(account, trade_plan_row.symbol)
-    leverage = exchange_state["leverage"]
-    margin_mode = exchange_state["margin_mode"]
-
-    notional = entry_price * qty
-    mmr_state = await _query_real_maintenance_margin_rate(account, trade_plan_row.symbol, notional)
-
-    liq_ok, liq_detail, liq_price = executor_sizing.check_leverage_is_safe(
-        entry_price, stop_price, direction, leverage, maintenance_margin_rate=mmr_state["mmr"])
-    margin_required = notional / leverage
-
-    result = {
-        **base,
-        "entry_price": entry_price, "stop_price": stop_price,
-        "t1_price": trade_plan_row.t1, "t2_price": trade_plan_row.t2, "t3_price": trade_plan_row.t3,
-        "risk_dollars_used": stake_usd,
-        "stake_calculation_detail": stake_detail,
-        "stop_distance": abs(entry_price - stop_price),
-        "qty": qty, "leverage_used": leverage,
-        "margin_required_usd": margin_required,
-        "maintenance_margin_rate_used": mmr_state["mmr"],
-        "liquidation_price_estimate": liq_price,
-        "liquidation_check_passed": liq_ok,
-        "liquidation_check_detail": liq_detail,
+    F_A (CC_WORK_ORDER_PHASE2.md step 5) is computed here, from THIS row's
+    own rsi_4h_at_lock/direction, and passed through as compute_stake()'s
+    sizing_multiplier -- a dollar-ledger-only scale, per that function's
+    own docstring.
+    """
+    base = {
+        "trade_plan_id": traveler_plan_row.id,  # audit/join convenience only -- see database.py's own comment on this
+        "traveler_plan_id": traveler_plan_row.id,
+        "account_id": account.id,
+        "mode": account.mode,
+        "symbol": traveler_plan_row.symbol,
+        "direction": traveler_plan_row.direction,
+        "t1_price": traveler_plan_row.t1_price, "t2_price": None, "t3_price": None,  # E1 has no T2/T3 -- full exit at T1
     }
-    if margin_mode != account.margin_mode:
-        return {
-            **result, "decision": "REJECTED",
-            "decision_reason": (
-                f"real exchange margin mode ({margin_mode}) does not match configured "
-                f"({account.margin_mode}) -- {exchange_state['source']}; fix the mismatch before trading"
-            ),
-        }
-    if not liq_ok:
-        return {
-            **result, "decision": "REJECTED",
-            "decision_reason": f"{liq_detail} (leverage {exchange_state['source']}; mmr {mmr_state['source']})",
-        }
-    return {
-        **result, "decision": "WOULD_PLACE",
-        "decision_reason": (
-            f"leverage {leverage}x, {exchange_state['source']}; "
-            f"mmr {mmr_state['mmr']}, {mmr_state['source']}; {liq_detail}"
-        ),
-    }
+
+    tradeable, reason = executor_accounts.is_account_tradeable(db, account)
+    if not tradeable:
+        decision = "SKIPPED_KILL_SWITCH" if "kill switch" in reason else "SKIPPED_ACCOUNT_INACTIVE"
+        return {**base, "decision": decision, "decision_reason": reason}
+
+    dup = db.query(ExecutorOrder).filter_by(account_id=account.id, traveler_plan_id=traveler_plan_row.id).first()
+    if dup is not None:
+        return {**base, "decision": "SKIPPED_ALREADY_IN_TRADE", "decision_reason": "an order already exists for this exact traveler plan + account"}
+
+    # One-trade-at-a-time per account, same reasoning as build_hypothetical_
+    # order() above -- checked against this bot's own WOULD_PLACE record
+    # for any OTHER traveler plan that isn't DONE/STOPPED/FILLED-and-closed
+    # yet. TravelerPlan has no post-fill status of its own (D3 management
+    # lives on the ExecutorOrder row itself, same as v1/v2) -- FILLED is
+    # its own terminal D1/D2 state, so "still open" here means the ORDER's
+    # own management_state hasn't reached a CLOSED_* terminal value yet.
+    other_would_places = db.query(ExecutorOrder).filter(
+        ExecutorOrder.account_id == account.id,
+        ExecutorOrder.decision == "WOULD_PLACE",
+        ExecutorOrder.traveler_plan_id.isnot(None),
+        ExecutorOrder.traveler_plan_id != traveler_plan_row.id,
+    ).all()
+    _open_states = ("PENDING_ENTRY", "ENTRY_FILLED_ORDERS_PLACED", "ENTRY_FILLED_UNPROTECTED", "T1_FILLED")
+    for other in other_would_places:
+        if (other.management_state or "PENDING_ENTRY") in _open_states:
+            return {
+                **base, "decision": "SKIPPED_ALREADY_IN_TRADE",
+                "decision_reason": f"account already has an active order from traveler_plan_id={other.traveler_plan_id}",
+            }
+
+    f_a = executor_sizing.f_a_multiplier(traveler_plan_row.rsi_4h_at_lock, traveler_plan_row.direction)
+    return await _size_and_check_order(
+        db, base, traveler_plan_row.symbol, traveler_plan_row.direction,
+        traveler_plan_row.fill_price, traveler_plan_row.stop_price, account, risk_state,
+        sizing_multiplier=f_a,
+    )

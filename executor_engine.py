@@ -38,7 +38,7 @@ from sqlalchemy.orm import Session
 import executor_accounts
 import executor_control
 import executor_plan_builder
-from database import ExecutorAccount, ExecutorAuditLog, ExecutorOrder, TradePlan
+from database import ExecutorAccount, ExecutorAuditLog, ExecutorOrder, TradePlan, TravelerPlan
 
 _ORDER_COLUMNS = set(ExecutorOrder.__table__.columns.keys())
 
@@ -53,6 +53,13 @@ def _audit_event_type(order_dict: Dict[str, Any]) -> str:
 
 
 async def _process_account(db: Session, trade_plan_row: TradePlan, account: ExecutorAccount) -> None:
+    # Phase 2 (2026-09-15): this is v1/v2's own gate firing (the TradePlan
+    # row's FILLED transition) -- a GATE_TRAVELER account does not act on
+    # it at all, it has its own independent fill event (TravelerPlan's own
+    # FILLED, via process_traveler_fill() below). Byte-for-byte unchanged
+    # for every account still on the default GATE_V2 profile.
+    if executor_accounts.gate_profile_of(account) != executor_accounts.DEFAULT_GATE_PROFILE:
+        return
     risk_state = executor_accounts.get_or_init_risk_state(db, account)
 
     # Can raise (a bug here must not corrupt the DB) -- now also makes a
@@ -71,6 +78,13 @@ async def _process_account(db: Session, trade_plan_row: TradePlan, account: Exec
     # and safety checks never differ by mode ("no AI improvisation").
     # Only LIVE goes on to place a real order below.
     order_dict["tier"] = trade_plan_row.tier
+    # Phase 2 (2026-09-15): read the account's profile choice AT ORDER TIME,
+    # same as sizing (get_or_init_sizing_policy() above is also read fresh
+    # per order, not cached at go-live) -- snapshot it onto the order row so
+    # the Brain's ingestion sees which profile actually decided this order,
+    # not just the account's current (possibly later-changed) setting.
+    order_dict["gate_profile_used"] = executor_accounts.gate_profile_of(account)
+    order_dict["mgmt_profile_used"] = executor_accounts.mgmt_profile_of(account)
     filtered = {k: v for k, v in order_dict.items() if k in _ORDER_COLUMNS}
     order = ExecutorOrder(**filtered)
     db.add(order)
@@ -138,3 +152,74 @@ async def process_fill(db: Session, trade_plan_row: TradePlan) -> None:
         except Exception as e:
             print(f"|| EXECUTOR || account {account.id} ({account.label}) failed for "
                   f"trade_plan {trade_plan_row.id}: {e}")
+
+
+async def _process_traveler_account(db: Session, traveler_plan_row: TravelerPlan, account: ExecutorAccount) -> None:
+    """GATE_TRAVELER's counterpart to _process_account() above -- fires on
+    TravelerPlan's own FILLED transition (traveler_plan_engine.py), never
+    on TradePlan's. Skips every account NOT explicitly set to GATE_
+    TRAVELER, symmetric to _process_account()'s own skip for GATE_V2."""
+    if executor_accounts.gate_profile_of(account) != "GATE_TRAVELER":
+        return
+    risk_state = executor_accounts.get_or_init_risk_state(db, account)
+
+    order_dict = await executor_plan_builder.build_hypothetical_traveler_order(db, traveler_plan_row, account, risk_state)
+
+    if account.mode == "PAPER":
+        raise NotImplementedError("PAPER execution is not built yet")
+
+    order_dict["tier"] = None   # GATE_TRAVELER has no tier concept
+    order_dict["gate_profile_used"] = executor_accounts.gate_profile_of(account)
+    order_dict["mgmt_profile_used"] = executor_accounts.mgmt_profile_of(account)
+    # DRY_RUN never gets a real exchange fill-confirmation callback (unlike
+    # v1/v2's LIVE path, check_entry_fill_and_place_exits()) -- the
+    # TravelerPlan's own pullback fill (already confirmed, real market
+    # data) IS the entry fill, known at order-creation time. Sets
+    # management_state to a real, watchable state immediately so
+    # traveler_plan_engine.py's MGMT_E1_STACK poll (mgmt_e1_stack.py) picks
+    # it up on the very next cycle, rather than sitting at PENDING_ENTRY
+    # forever (the pre-existing gap for v1/v2's own DRY_RUN orders, which
+    # this file does not attempt to fix -- flagged separately, out of this
+    # step's scope).
+    if order_dict.get("decision") == "WOULD_PLACE":
+        order_dict["entry_fill_price"] = traveler_plan_row.fill_price
+        order_dict["entry_fill_time"] = traveler_plan_row.fill_time
+        order_dict["management_state"] = "ENTRY_FILLED_ORDERS_PLACED"
+    filtered = {k: v for k, v in order_dict.items() if k in _ORDER_COLUMNS}
+    order = ExecutorOrder(**filtered)
+    db.add(order)
+    db.flush()  # populate order.id for the audit row below
+
+    db.add(ExecutorAuditLog(
+        account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order.id,
+        event_type=_audit_event_type(order_dict), actor="system",
+        message=f"{order_dict.get('decision')}: {order_dict.get('decision_reason')}",
+        detail_json=json.dumps(order_dict, default=str),
+    ))
+
+    if account.mode == "LIVE" and order_dict.get("decision") == "WOULD_PLACE":
+        # Deliberately NOT wired to real order placement yet, even if both
+        # safety gates below would otherwise pass -- CC_WORK_ORDER_PHASE2.md's
+        # evaluation harness runs GATE_TRAVELER in DRY_RUN only (the site
+        # produces the data, the Brain evaluates, Andy picks a winner and
+        # signs off per account BEFORE any LIVE switch -- CC_HANDOFF_SITE_
+        # INTEGRATION.md §5). Building a real-money placement path for an
+        # as-yet-unevaluated lineage is out of this step's scope; refusing
+        # loudly (audited) rather than silently no-op'ing, so this is never
+        # mistaken for "it just didn't fire."
+        executor_accounts.write_audit(
+            db, "ERROR",
+            f"LIVE-mode GATE_TRAVELER account {account.id} skipped real order placement -- "
+            f"GATE_TRAVELER real-money execution is not built yet (DRY_RUN-only evaluation phase, "
+            f"CC_WORK_ORDER_PHASE2.md) (traveler_plan_id={traveler_plan_row.id})",
+            account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order.id, actor="system")
+
+
+async def process_traveler_fill(db: Session, traveler_plan_row: TravelerPlan) -> None:
+    accounts = db.query(ExecutorAccount).filter_by(is_active=True).all()
+    for account in accounts:
+        try:
+            await _process_traveler_account(db, traveler_plan_row, account)
+        except Exception as e:
+            print(f"|| EXECUTOR || account {account.id} ({account.label}) failed for "
+                  f"traveler_plan {traveler_plan_row.id}: {e}")

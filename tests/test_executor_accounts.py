@@ -694,3 +694,79 @@ def test_set_account_mode_same_mode_is_a_harmless_noop(db):
     # No spurious MODE_CHANGED row for a no-op transition.
     rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="MODE_CHANGED").all()
     assert len(rows) == 0
+
+
+# ------------------------------------------------------------------ set_account_profile / gate_profile_of / mgmt_profile_of (Phase 2, 2026-09-15)
+
+def test_gate_profile_of_defaults_to_v2_when_never_set(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    assert account.gate_profile is None   # the raw column -- confirms the default is code-side, not a DB default
+    assert ea.gate_profile_of(account) == "GATE_V2" == ea.DEFAULT_GATE_PROFILE
+
+
+def test_mgmt_profile_of_defaults_to_split_when_never_set(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    assert account.mgmt_profile is None
+    assert ea.mgmt_profile_of(account) == "MGMT_SPLIT" == ea.DEFAULT_MGMT_PROFILE
+
+
+def test_set_account_profile_sets_gate_and_mgmt_independently(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    ea.set_account_profile(db, account, gate_profile="GATE_TRAVELER", by="andy@kabroda.com")
+    db.commit()
+    assert ea.gate_profile_of(account) == "GATE_TRAVELER"
+    assert ea.mgmt_profile_of(account) == "MGMT_SPLIT"  # untouched -- omitted param leaves it alone
+
+    ea.set_account_profile(db, account, mgmt_profile="MGMT_E1_STACK", by="andy@kabroda.com")
+    db.commit()
+    assert ea.gate_profile_of(account) == "GATE_TRAVELER"  # still set from the first call
+    assert ea.mgmt_profile_of(account) == "MGMT_E1_STACK"
+
+
+def test_set_account_profile_rejects_unknown_gate_profile(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    with pytest.raises(ValueError, match="gate_profile must be one of"):
+        ea.set_account_profile(db, account, gate_profile="GATE_BOGUS", by="andy@kabroda.com")
+
+
+def test_set_account_profile_rejects_unknown_mgmt_profile(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    with pytest.raises(ValueError, match="mgmt_profile must be one of"):
+        ea.set_account_profile(db, account, mgmt_profile="MGMT_BOGUS", by="andy@kabroda.com")
+
+
+def test_set_account_profile_writes_audit_row_on_real_change(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    ea.set_account_profile(db, account, gate_profile="GATE_TRAVELER", mgmt_profile="MGMT_E1_STACK", by="andy@kabroda.com")
+    db.commit()
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="PROFILE_CHANGED").all()
+    assert len(rows) == 1
+    assert "GATE_V2->GATE_TRAVELER" in rows[0].message
+    assert "MGMT_SPLIT->MGMT_E1_STACK" in rows[0].message
+
+
+def test_set_account_profile_no_change_writes_no_audit_row(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    # Explicitly re-setting to the same (default) values is a no-op.
+    ea.set_account_profile(db, account, gate_profile="GATE_V2", mgmt_profile="MGMT_SPLIT", by="andy@kabroda.com")
+    db.commit()
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="PROFILE_CHANGED").all()
+    assert len(rows) == 0
+
+
+def test_set_account_profile_omitting_both_is_a_harmless_noop(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    ea.set_account_profile(db, account, by="andy@kabroda.com")
+    db.commit()
+    assert ea.gate_profile_of(account) == "GATE_V2"
+    assert ea.mgmt_profile_of(account) == "MGMT_SPLIT"
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="PROFILE_CHANGED").all()
+    assert len(rows) == 0

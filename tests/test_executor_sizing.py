@@ -465,3 +465,79 @@ def test_compute_stake_banded_needs_both_band_params_or_it_is_not_banded():
         risk_last_usd=123.0, account_balance_usd=50_000.0, band_step_usd=10_000.0)
     assert stake == pytest.approx(123.0)
     assert "band" not in detail
+
+
+# ------------------------------------------------------------------ Phase 2 (2026-09-15): F_A sizing gate (GATE_TRAVELER)
+
+def test_f_a_multiplier_long_extreme_is_full_size():
+    assert es.f_a_multiplier(85.0, "LONG") == es.F_A_EXTREME_MULTIPLIER == 1.0
+
+
+def test_f_a_multiplier_long_exactly_at_threshold_is_full_size():
+    assert es.f_a_multiplier(80.0, "LONG") == 1.0  # >=80, boundary inclusive
+
+
+def test_f_a_multiplier_long_not_extreme_is_half_size():
+    assert es.f_a_multiplier(65.0, "LONG") == es.F_A_DEFAULT_MULTIPLIER == 0.5
+
+
+def test_f_a_multiplier_short_extreme_is_full_size():
+    assert es.f_a_multiplier(15.0, "SHORT") == 1.0
+
+
+def test_f_a_multiplier_short_exactly_at_threshold_is_full_size():
+    assert es.f_a_multiplier(20.0, "SHORT") == 1.0  # <=20, boundary inclusive
+
+
+def test_f_a_multiplier_short_not_extreme_is_half_size():
+    assert es.f_a_multiplier(35.0, "SHORT") == 0.5
+
+
+def test_f_a_multiplier_none_rsi_is_half_size():
+    # Missing data does NOT get the favorable (extreme/full-size) case --
+    # same "missing data never gets the favorable outcome" convention as
+    # gate_traveler.py's tercile_skip().
+    assert es.f_a_multiplier(None, "LONG") == 0.5
+    assert es.f_a_multiplier(None, "SHORT") == 0.5
+
+
+def test_compute_stake_sizing_multiplier_scales_banded_base_down():
+    # banded_risk(50000) with step=10000/per_step=1000 -> band 5 -> $5,000
+    # base; F_A=0.5 -> $2,500 final, BEFORE any tier/derisk/caps.
+    stake, detail = es.compute_stake(
+        risk_last_usd=100.0, account_balance_usd=50_000.0,
+        band_step_usd=10_000.0, band_risk_per_step_usd=1_000.0,
+        sizing_multiplier=0.5,
+    )
+    assert detail["base"] == pytest.approx(5000.0)
+    assert stake == pytest.approx(2500.0)
+    assert detail["sizing_multiplier"] == 0.5
+
+
+def test_compute_stake_sizing_multiplier_1_0_is_a_no_op():
+    with_mult, detail = es.compute_stake(risk_last_usd=100.0, sizing_multiplier=1.0)
+    without_mult, _ = es.compute_stake(risk_last_usd=100.0)
+    assert with_mult == pytest.approx(without_mult) == pytest.approx(100.0)
+    assert "sizing_multiplier" not in detail
+
+
+def test_compute_stake_sizing_multiplier_none_is_a_no_op():
+    stake, detail = es.compute_stake(risk_last_usd=100.0, sizing_multiplier=None)
+    assert stake == pytest.approx(100.0)
+    assert "sizing_multiplier" not in detail
+
+
+def test_compute_stake_sizing_multiplier_composes_before_caps():
+    # base=$5,000, F_A full-size (1.0 -- no scale-down) would be capped at
+    # $2,000 abs; F_A=0.5 halves the base to $2,500 BEFORE the cap, so the
+    # cap still binds at $2,000 either way here -- confirms multiplier
+    # really runs before the cap step, not after (which would give $1,250).
+    stake, detail = es.compute_stake(
+        risk_last_usd=100.0, account_balance_usd=50_000.0,
+        band_step_usd=10_000.0, band_risk_per_step_usd=1_000.0,
+        sizing_multiplier=0.5, cap_abs_usd=2000.0,
+    )
+    assert detail["base"] == pytest.approx(5000.0)
+    assert detail["stake_before_cap"] == pytest.approx(2500.0)
+    assert stake == pytest.approx(2000.0)
+    assert detail["cap_binding"] == "abs"
