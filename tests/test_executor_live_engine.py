@@ -317,63 +317,17 @@ def test_entry_not_yet_filled_makes_no_state_change(db, monkeypatch):
     assert order.entry_status == "NEW"
 
 
-# ------------------------------------------------------------------ poll_open_position -- T2 breakeven
-
-def test_premium_be_move_only_at_t2_touch_not_before(db, monkeypatch):
-    account = _ready_account(db)
-    plan = _trade_plan(db, tier="PREMIUM")
-    order = _order_row(db, account, plan, tier="PREMIUM", management_state="T1_FILLED_BE_PENDING",
-                        t1_status="FILLED", t1_fill_price=106.18, t1_leg_r=0.309,
-                        entry_fill_price=100.0, position_id="pos1")
-
-    modify_calls = []
-    async def _fake_modify(self, **kw):
-        modify_calls.append(kw)
-        return _tpsl_response()
-
-    # Price short of T2 (110) -- no BE move.
-    _install(monkeypatch,
-              get_position=_async(_one_position_response()),
-              get_trading_pairs=_async(_trading_pairs_response()),
-              modify_position_tp_sl_order=_fake_modify)
-    monkeypatch.setattr(market_data, "fetch_live_5m", _async(_fake_candles(105.0)))
-    _run(ele.poll_open_position(db, account, plan, order))
-    assert len(modify_calls) == 0
-    assert order.management_state == "T1_FILLED_BE_PENDING"
-    assert order.sl_moved_to_be_at is None
-
-    # Price now at/through T2 -- exactly one BE call.
-    monkeypatch.setattr(market_data, "fetch_live_5m", _async(_fake_candles(111.0)))
-    monkeypatch.setattr(market_data, "fetch_live_15m", _async(_fake_candles(111.0)))
-    import fuel_gate, micro_regime
-    monkeypatch.setattr(fuel_gate, "evaluate_fuel_gate", lambda *a, **kw: {"verdict": "FUELED"})
-    monkeypatch.setattr(micro_regime, "classify_regime", lambda *a, **kw: {"regime": "TRENDING"})
-    _run(ele.poll_open_position(db, account, plan, order))
-    assert len(modify_calls) == 1
-    assert modify_calls[0]["sl_price"] == "100.0"
-    assert order.management_state == "BE_MOVED"
-    assert order.sl_moved_to_be_at is not None
-    assert order.t2_reval_fuel_verdict == "FUELED"
-    assert order.t2_reval_micro_regime == "TRENDING"
-
-
-def test_standard_never_moves_stop_at_t2(db, monkeypatch):
-    account = _ready_account(db)
-    plan = _trade_plan(db, tier="STANDARD")
-    order = _order_row(db, account, plan, tier="STANDARD", management_state="T1_FILLED",
-                        t1_status="FILLED", t1_fill_price=106.18, t1_leg_r=0.309,
-                        entry_fill_price=100.0, position_id="pos1")
-
-    _install(monkeypatch,
-              get_order_detail=_async(_order_detail_response(status="FILLED")),
-              get_position=_async(_one_position_response()))
-    # No market_data patch needed -- STANDARD's management_state is
-    # "T1_FILLED", not "T1_FILLED_BE_PENDING", so the T2 branch's own
-    # condition (tier == PREMIUM and state == T1_FILLED_BE_PENDING) is
-    # never true; modify_position_tp_sl_order must never be called.
-    _run(ele.poll_open_position(db, account, plan, order))
-    assert order.management_state == "T1_FILLED"   # unchanged, no BE state exists for STANDARD
-
+# poll_open_position -- T2 breakeven: test_premium_be_move_only_at_t2_
+# touch_not_before / test_standard_never_moves_stop_at_t2 REMOVED 2026-09-15
+# (Andy/DeepSeek's "delete outright" ruling, CC_QUESTION_T2_BREAKEVEN.md,
+# Kabroda AI Brain repo) -- the PREMIUM-only mechanical breakeven-move-at-T2
+# branch they tested is deleted from executor_live_engine.py entirely
+# (order_row.tier can never be "PREMIUM" under the v2 gate, and the deleted
+# tests only ever exercised it via synthetic fixtures that bypassed the
+# real pipeline -- see executor_live_engine.py's own header comment, "THE
+# MANAGEMENT RULE, v2"). No replacement test needed: the stop never moves
+# for anyone now, which is already covered by every other test in this
+# file NOT asserting a BE move.
 
 # ------------------------------------------------------------------ poll_open_position -- closure & R math
 

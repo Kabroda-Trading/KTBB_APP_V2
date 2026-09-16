@@ -2078,16 +2078,20 @@ class ExecutorOrder(Base):
     # to track a real managed trade end-to-end. Copied off TradePlan.tier at
     # entry placement (TradePlan stays authoritative -- see class docstring
     # above). v2 (2026-09-11): TradePlan.tier is always None now (tiers
-    # retired), so this always copies None too -- executor_live_engine.py's
-    # PREMIUM-only break-even-at-T2 branch below (management_state ==
-    # "T1_FILLED_BE_PENDING") can never fire for a real v2 trade as a
-    # result. Open question for the Brain: is "no BE move, ever" the
-    # intended v2/traveler rule, or does this need a new v2-native trigger?
-    # Flagged to DeepSeek 2026-09-15, not yet resolved -- see AGENT_LOG.md.
+    # retired), so this always copies None too. RESOLVED 2026-09-15
+    # (CC_QUESTION_T2_BREAKEVEN.md, Kabroda AI Brain repo -- DeepSeek's
+    # ruling "delete outright"): the PREMIUM-only break-even-at-T2 branch
+    # this fed (management_state == "T1_FILLED_BE_PENDING") is deleted from
+    # executor_live_engine.py -- the stop never moves for anyone under v2 or
+    # the traveler candidate (CC_PACKAGE.md §1: "stop never moves... NO BE
+    # stop (measured harmful)"). `tier` itself is left in the schema
+    # (always None going forward) rather than dropped -- no live callers
+    # left, informational only.
     tier = Column(String, nullable=True)
     # PENDING_ENTRY | ENTRY_FILLED_ORDERS_PLACED | T1_FILLED |
-    # T1_FILLED_BE_PENDING | BE_MOVED | CLOSED_STOP_BEFORE_T1 |
-    # CLOSED_RUNNER_STOP | CLOSED_T3 | CLOSED_ERROR
+    # CLOSED_STOP_BEFORE_T1 | CLOSED_RUNNER_STOP | CLOSED_T3 | CLOSED_ERROR
+    # (T1_FILLED_BE_PENDING | BE_MOVED retired 2026-09-15 with the PREMIUM
+    # BE-move branch above -- see that comment)
     management_state = Column(String, nullable=True, default="PENDING_ENTRY")
     position_id = Column(String, nullable=True)   # Bitunix position id, read off get_position after entry fill
 
@@ -2099,7 +2103,7 @@ class ExecutorOrder(Base):
     sl_exchange_order_id = Column(String, nullable=True)   # set_position_tpsl's own orderId; re-set on the BE move
     sl_price_current = Column(Float, nullable=True)
     sl_set_at = Column(DateTime, nullable=True)
-    sl_moved_to_be_at = Column(DateTime, nullable=True)   # non-null only for PREMIUM once T2 is touched
+    sl_moved_to_be_at = Column(DateTime, nullable=True)   # always None now -- the PREMIUM BE-move that set this was deleted 2026-09-15 (CC_QUESTION_T2_BREAKEVEN.md); older rows may still hold a real timestamp
 
     t1_exchange_order_id = Column(String, nullable=True)
     t1_status = Column(String, nullable=True)
@@ -2125,9 +2129,13 @@ class ExecutorOrder(Base):
     # AskUserQuestion resolution, 2026-09-06): logged at the real T2 touch
     # for PREMIUM trades so the Brain repo can eventually validate a real
     # "pull early if dead" rule against real outcomes -- never read by any
-    # decision logic in this build. The mechanical BE move at T2 (verified
-    # against the real 31-trade premium corpus: +1.50R, zero cost on
-    # T3-bound trades) is unconditional and does not depend on these.
+    # decision logic in this build. RETIRED 2026-09-15 along with the
+    # PREMIUM BE-move branch that was the only thing that ever wrote these
+    # (CC_QUESTION_T2_BREAKEVEN.md, Kabroda AI Brain repo -- DeepSeek's
+    # ruling: "they're part of the same dead branch... they go with it").
+    # Always None for any trade going forward; a future T2-reval-observation
+    # feature, if wanted, is a fresh design decision through the study
+    # chain, not a resurrection of this code.
     t2_touch_time = Column(DateTime, nullable=True)
     t2_reval_fuel_verdict = Column(String, nullable=True)
     t2_reval_micro_regime = Column(String, nullable=True)

@@ -15,19 +15,31 @@
 # and runs them unattended via a background loop instead of one manual
 # click at a time.
 #
-# THE AUDITED MANAGEMENT RULE (CLEAN_REPORT.md §2, verified against the
-# real 128-trade corpus, NOT the stale 30/70 rule in ledger_closing_
-# engine.py -- see that module's own deprecated-marker comment):
+# THE MANAGEMENT RULE, v2 (2026-09-15 resolution -- CC_QUESTION_T2_
+# BREAKEVEN.md, Kabroda AI Brain repo, DeepSeek's ruling "delete outright"):
 #   Entry: resting LIMIT at the trigger, 50% now / 50% runner.
-#   T1 (0.618x box): take 50%, stop stays at the original level.
-#   T2 (1.0x box, decision_engine.py's own box multiple -- see that
-#       file's header for the T1/T2/T3=0.618/1.0/1.618 formula, CLAUDE.md
-#       rule #1, must-never-change): PREMIUM moves the stop to breakeven,
-#       mechanically, unconditionally -- verified against the real
-#       31-trade premium corpus: 13 touched T2, 10 rode on to T3 at zero
-#       cost, 3 stopped after T2 for +1.50R saved. STANDARD's stop never
-#       moves at T2.
-#   T3 (1.618x box) or the runner's stop: the runner exits, both tiers.
+#   T1 (1.0x box, v2's box multiple -- decision_engine.py's own header):
+#       take 50%, stop stays at the original level.
+#   T3 (1.618x box) or the runner's stop: the runner exits.
+#   THE STOP NEVER MOVES, for anyone, at any point (CC_PACKAGE.md §1,
+#   locked 2026-09-11: "stop never moves... NO BE stop (measured harmful)").
+#
+# v1's PREMIUM-only mechanical breakeven-move at T2 (CLEAN_REPORT.md §2,
+# verified against a real 31-trade premium corpus: 13 touched T2, 10 rode
+# on to T3 at zero cost, 3 stopped after T2 for +1.50R saved) was already
+# confirmed dead code before this resolution -- order_row.tier can never
+# be "PREMIUM" under the v2 gate (decision_engine.py retired the tier
+# split entirely, 2026-09-11) -- and is now deleted outright per Andy/
+# DeepSeek's explicit call, not left dormant: v2's own locked spec already
+# states "no BE move, ever" as a measured result, and the traveler
+# candidate's E1 exit is a full exit at T1 with no partial/runner leg for
+# a BE move to apply to at all -- neither lineage has a use for this
+# mechanism, so there's nothing to keep dormant "in case." The T1_FILLED_
+# BE_PENDING/BE_MOVED management_state values and the t2_reval_fuel_
+# verdict/t2_reval_micro_regime observation-only columns went with it (per
+# DeepSeek's ruling: they were only ever written inside this same dead
+# branch). A future T2-reval-observation feature, if wanted, is a fresh
+# design decision through the study chain, not a resurrection of this.
 #
 # MAKER-ONLY IS MECHANICALLY ENFORCED HERE, not just placement discipline
 # (CLEAN_REPORT.md §4: taker fees turn +42R into -0.5R). Every LIMIT order
@@ -36,15 +48,6 @@
 # POST_ONLY are the real enum values). No caller in this codebase used
 # this before; every resting limit placed so far (including the proven
 # T1 ladder test) defaulted to GTC.
-#
-# POST-T2 "SMART" RE-EVALUATION (pull the runner early if the move looks
-# dead) is explicitly NOT built here -- GATE_REBUILD_SPEC.md's own
-# language for it has no validated criteria behind it (the +5.32R premium
-# number is the UNCONDITIONAL mechanical BE move, not a reval). This
-# module only LOGS the reval inputs (t2_reval_fuel_verdict/
-# t2_reval_micro_regime) at the real T2 touch, as a live-audit-loop
-# observation for the Brain repo to eventually validate a real rule
-# against -- it never reads them back to change the mechanical action.
 #
 # "NO AI IMPROVISATION MID-TRADE": the full order layout (stop + T1 + T3)
 # is placed ONCE, atomically, right after entry fill confirmation. The
@@ -368,57 +371,19 @@ async def poll_open_position(db: Session, account: ExecutorAccount, trade_plan_r
             order_row.t1_fill_price = order_row.t1_price
             order_row.t1_fill_time = datetime.datetime.utcnow()
             order_row.t1_leg_r = 0.5 * _r_multiple(order_row.t1_fill_price, order_row.entry_fill_price, order_row.stop_price)
-            order_row.management_state = "T1_FILLED_BE_PENDING" if order_row.tier == "PREMIUM" else "T1_FILLED"
+            order_row.management_state = "T1_FILLED"
             executor_accounts.write_audit(
                 db, "T1_PARTIAL_DETECTED", f"T1 filled at {order_row.t1_fill_price}, locked {order_row.t1_leg_r:+.4f}R",
                 account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order_row.id, actor="system", detail=t1_resp)
 
-    # PREMIUM-only: mechanical breakeven move at the real T2 touch.
-    # Observation-only reval inputs logged alongside -- never read back
-    # to change this unconditional action (see module header).
-    if order_row.tier == "PREMIUM" and order_row.management_state == "T1_FILLED_BE_PENDING":
-        live_price = await _current_live_price(order_row.symbol)
-        touched_t2 = live_price is not None and (
-            live_price >= order_row.t2_price if order_row.direction == _LONG else live_price <= order_row.t2_price
-        )
-        if touched_t2:
-            order_row.t2_touch_time = datetime.datetime.utcnow()
-            try:
-                import fuel_gate, htf_fuel, micro_regime
-                candles_5m = await market_data.fetch_live_5m(order_row.symbol, limit=300)
-                candles_15m = await market_data.fetch_live_15m(order_row.symbol, limit=300)
-                # 2026-09-07 END_TO_END_AUDIT.md Seam C fix: this is the same
-                # missing-HTF-argument bug class caught in trade_plan.py
-                # (commit 7a4ae95) -- without fuel_1h/fuel_4h,
-                # evaluate_fuel_gate() can never return NO_FUEL, which would
-                # silently bias this OBSERVATION field (the whole point of
-                # which is an honest record of what the reval would have
-                # said) away from ever showing a ghost push. Still never
-                # read back into the mechanical BE decision -- observation
-                # only, per the module header.
-                candles_1h = await market_data.fetch_live_1h(order_row.symbol, limit=100)
-                candles_4h = await market_data.fetch_live_4h(order_row.symbol, limit=100)
-                htf = htf_fuel.htf_fuel(candles_1h, candles_4h, order_row.direction)
-                fuel = fuel_gate.evaluate_fuel_gate(
-                    candles_5m, order_row.entry_price, order_row.direction,
-                    fuel_1h=htf.get("trend_1h"), fuel_4h=htf.get("trend_4h"),
-                )
-                order_row.t2_reval_fuel_verdict = fuel.get("verdict")
-                order_row.t2_reval_micro_regime = micro_regime.classify_regime(candles_15m).get("regime")
-            except Exception as e:
-                print(f"|| EXECUTOR LIVE || T2 reval observation failed (non-critical, does not affect the mechanical BE move): {e}")
-
-            pair = await _get_pair_precision(client, symbol)
-            be_str = executor_sizing.round_price_to_precision(order_row.entry_fill_price, pair["quote_precision"])
-            resp = await client.modify_position_tp_sl_order(
-                symbol=symbol, position_id=order_row.position_id, sl_price=be_str, sl_stop_type="LAST_PRICE")
-            order_row.sl_exchange_order_id = resp["data"]["orderId"]
-            order_row.sl_price_current = float(be_str)
-            order_row.sl_moved_to_be_at = datetime.datetime.utcnow()
-            order_row.management_state = "BE_MOVED"
-            executor_accounts.write_audit(
-                db, "SL_MOVED_TO_BREAKEVEN", f"PREMIUM T2 touched at {live_price} -- stop moved to breakeven {be_str} (mechanical, unconditional)",
-                account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order_row.id, actor="system", detail=resp)
+    # PREMIUM-only mechanical breakeven-move-at-T2 block (T1_FILLED_BE_
+    # PENDING/BE_MOVED states, the t2_reval_fuel_verdict/t2_reval_micro_
+    # regime observation logging) DELETED 2026-09-15 -- see the module
+    # header's "THE MANAGEMENT RULE, v2" note. Andy/DeepSeek's explicit
+    # "delete outright" ruling (CC_QUESTION_T2_BREAKEVEN.md, Kabroda AI
+    # Brain repo): the stop never moves for anyone now, full stop, so
+    # there's no dormant-but-real mechanism left to keep. Full text
+    # preserved in git history.
 
     # Closure detection: position gone = the trade is over. Classify the
     # cause from T1/T3 fill evidence, not from inspecting the stop's own
