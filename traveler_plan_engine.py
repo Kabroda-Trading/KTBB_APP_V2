@@ -37,7 +37,8 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
-from database import SessionLocal, ExecutorOrder, TravelerPlan
+from database import SessionLocal, ExecutorAccount, ExecutorOrder, TravelerPlan
+import executor_accounts
 import gate_traveler
 import mgmt_e1_stack
 import market_data
@@ -178,6 +179,22 @@ async def _advance_e1_order(db, order: ExecutorOrder, now_utc: datetime) -> None
         order.realized_pnl_r = (result["exit_price"] - order.entry_price) * sgn / r_basis
     print(f"|| MGMT_E1_STACK || order {order.id} ({symbol}): CLOSED_{result['exit_reason']} "
           f"at {result['exit_price']:,.2f}")
+
+    # Ruling D (DeepSeek, relayed by Andy 2026-09-15): feed the SAME
+    # ledger-compounding path a real closed LIVE trade uses (executor_
+    # live_engine.py's own poll_open_position() call), symmetrically with
+    # dry_run_split_engine.py's own MGMT_SPLIT walk -- a DRY_RUN account's
+    # risk_last_usd/consecutive_losses now actually compound instead of
+    # sitting flat for the whole evaluation period. is_simulation=True
+    # labels the audit row -- see record_trade_result()'s own docstring.
+    if order.realized_pnl_r is not None:
+        account = db.query(ExecutorAccount).filter_by(id=order.account_id).first()
+        if account is not None:
+            pnl_usd = order.realized_pnl_r * (order.risk_dollars_used or 0.0)
+            executor_accounts.record_trade_result(
+                db, account, pnl_usd, trade_plan_id=order.trade_plan_id,
+                recorded_by="system_dry_run_traveler", is_simulation=True,
+            )
 
 
 async def run_traveler_plan_loop():

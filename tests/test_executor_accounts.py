@@ -588,6 +588,46 @@ def test_record_trade_result_writes_audit(db):
     assert rows[0].trade_plan_id == 7
 
 
+# ------------------------------------------------------------------ record_trade_result is_simulation labeling (Ruling D, 2026-09-15)
+
+def test_record_trade_result_defaults_to_not_simulation(db):
+    account = ea.create_account(db, user_id=1, label="live_account")
+    db.commit()
+    ea.record_trade_result(db, account, pnl_usd=10.0, trade_plan_id=1, recorded_by="system")
+    db.commit()
+    row = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="TRADE_RESULT_RECORDED").first()
+    assert row.detail_json is not None
+    assert '"is_simulation": false' in row.detail_json
+    assert not row.message.startswith("[SIMULATION]")
+
+
+def test_record_trade_result_is_simulation_true_labels_the_audit_row(db):
+    account = ea.create_account(db, user_id=1, label="dry_run_eval_account")
+    db.commit()
+    ea.record_trade_result(db, account, pnl_usd=-5.0, trade_plan_id=2, recorded_by="system_dry_run_split", is_simulation=True)
+    db.commit()
+    row = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="TRADE_RESULT_RECORDED").first()
+    assert row.message.startswith("[SIMULATION]")
+    assert '"is_simulation": true' in row.detail_json
+
+
+def test_record_trade_result_is_simulation_still_compounds_risk_last_usd(db):
+    # The whole point of Ruling D -- a DRY_RUN account's ledger must
+    # actually move, not just get a differently-labeled audit row.
+    account = ea.create_account(db, user_id=1, label="dry_run_eval_account_2")
+    db.commit()
+    policy = ea.get_or_init_sizing_policy(db, account)
+    policy.roll_in_pct = 0.5
+    db.commit()
+    state_before = ea.get_or_init_risk_state(db, account)
+    starting = state_before.risk_last_usd
+    ea.record_trade_result(db, account, pnl_usd=100.0, is_simulation=True)
+    db.commit()
+    state_after = ea.get_or_init_risk_state(db, account)
+    assert state_after.risk_last_usd != starting
+    assert state_after.last_trade_pnl_usd == 100.0
+
+
 # ------------------------------------------------------------------ set_account_mode (2026-09-07)
 # Before this existed, NOTHING in the codebase could ever set an account's
 # mode to LIVE -- create_account() hardcodes DRY_RUN and nothing else ever

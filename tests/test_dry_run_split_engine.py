@@ -214,6 +214,40 @@ def test_dry_run_split_loop_stop_before_t1_is_a_clean_full_loss(env):
     assert order.closed_at is not None
 
 
+def test_dry_run_split_loop_compounds_the_account_ledger_on_close(env):
+    # Ruling D: the DRY_RUN walk must feed record_trade_result() so the
+    # account's own ledger actually moves instead of sitting flat for the
+    # whole evaluation period, labeled as simulation in the audit trail.
+    account_id = env["make_account"]()
+    db = SessionLocal()
+    account = db.query(ExecutorAccount).filter_by(id=account_id).first()
+    policy = ea.get_or_init_sizing_policy(db, account)
+    policy.roll_in_pct = 0.5
+    db.commit()
+    starting_risk = ea.get_or_init_risk_state(db, account).risk_last_usd
+    db.close()
+
+    plan_id = env["make_filled_plan"]()
+    env["process_the_fill"](plan_id)
+
+    ct = 1700000000
+    runner_bar = [
+        _c5m(50350.0, ct + 300, high=50400.0, low=50200.0),   # T1 touched
+        _c5m(50950.0, ct + 600, high=51000.0, low=50800.0),   # T3 touched -- a real winner
+    ]
+    env["run_polls"](candles_5m_by_symbol={"BTC/USDT": runner_bar}, polls=1)
+
+    db = SessionLocal()
+    state = ea.get_or_init_risk_state(db, db.query(ExecutorAccount).filter_by(id=account_id).first())
+    assert state.risk_last_usd != starting_risk
+    assert state.last_trade_pnl_usd is not None and state.last_trade_pnl_usd > 0
+
+    audit_row = db.query(ExecutorAuditLog).filter_by(account_id=account_id, event_type="TRADE_RESULT_RECORDED").first()
+    assert audit_row is not None
+    assert audit_row.message.startswith("[SIMULATION]")
+    db.close()
+
+
 def test_dry_run_split_loop_ignores_gate_traveler_accounts(env):
     env["make_account"](gate_profile="GATE_TRAVELER", mgmt_profile="MGMT_E1_STACK")
     # A GATE_TRAVELER account never acts on a TradePlan fill at all

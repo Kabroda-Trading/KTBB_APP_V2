@@ -435,6 +435,7 @@ def update_sizing_policy(db: Session, account: ExecutorAccount, changes: Dict[st
 def record_trade_result(
     db: Session, account: ExecutorAccount, pnl_usd: float,
     trade_plan_id: Optional[int] = None, recorded_by: Optional[str] = None,
+    is_simulation: bool = False,
 ) -> ExecutorRiskState:
     """MANUAL STOPGAP -- confirmed by direct grep that TradePlan (what the
     executor hooks into) and CampaignLog (the only table with a real R-
@@ -444,7 +445,21 @@ def record_trade_result(
     ExecutorRiskState.last_trade_pnl_usd (otherwise permanently NULL) and
     to consecutive_losses. A future closed-position monitor becomes a new
     CALLER of this exact function -- same schema, zero migration -- it
-    does not replace it."""
+    does not replace it.
+
+    is_simulation (Ruling D, DeepSeek, relayed by Andy 2026-09-15): the
+    two candle-only DRY_RUN walks (dry_run_split_engine.py's MGMT_SPLIT,
+    traveler_plan_engine.py's MGMT_E1_STACK) call this SAME function so a
+    DRY_RUN account's own ledger actually compounds instead of sitting
+    permanently flat -- the stagnant-surface bug class this codebase has
+    hit before (see update_risk_state()'s own "Base $ class" comment
+    above). Tagged here, not via a new column: an account's own `mode` is
+    already the ground truth for "is this real money" everywhere else in
+    the UI, and a DRY_RUN account's ledger numbers are ALWAYS simulation
+    by construction (no other path can move them) -- a redundant boolean
+    on ExecutorRiskState would duplicate that fact, not add one. The audit
+    trail is where the explicit label lives, for anyone reviewing WHY a
+    number moved. No new DB columns."""
     state = get_or_init_risk_state(db, account)
     policy = get_or_init_sizing_policy(db, account)
 
@@ -460,10 +475,15 @@ def record_trade_result(
 
     state.consecutive_losses = 0 if pnl_usd > 0 else state.consecutive_losses + 1
 
+    label = "[SIMULATION] " if is_simulation else ""
     write_audit(
-        db, "TRADE_RESULT_RECORDED", f"trade result recorded for account {account.id}: pnl_usd={pnl_usd}",
+        db, "TRADE_RESULT_RECORDED", f"{label}trade result recorded for account {account.id}: pnl_usd={pnl_usd}",
         account_id=account.id, trade_plan_id=trade_plan_id, actor=recorded_by,
-        detail={"pnl_usd": pnl_usd, "trade_plan_id": trade_plan_id, "risk_last_usd_after": state.risk_last_usd, "consecutive_losses_after": state.consecutive_losses},
+        detail={
+            "pnl_usd": pnl_usd, "trade_plan_id": trade_plan_id,
+            "risk_last_usd_after": state.risk_last_usd, "consecutive_losses_after": state.consecutive_losses,
+            "is_simulation": is_simulation,
+        },
     )
     return state
 

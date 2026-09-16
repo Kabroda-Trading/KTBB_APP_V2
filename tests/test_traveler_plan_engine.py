@@ -263,6 +263,50 @@ def test_mgmt_e1_stack_poll_closes_the_order_on_a_real_stop_touch(poll_env):
     assert order.realized_pnl_r == pytest.approx(-1.0)
 
 
+def test_mgmt_e1_stack_closure_compounds_the_account_ledger(poll_env):
+    # Ruling D: MGMT_E1_STACK's own DRY_RUN walk must feed record_trade_
+    # result() symmetrically with dry_run_split_engine.py's own MGMT_SPLIT
+    # walk, labeled as simulation in the audit trail.
+    account_id = poll_env["make_traveler_account"]()
+    db = SessionLocal()
+    account = db.query(ExecutorAccount).filter_by(id=account_id).first()
+    policy = ea.get_or_init_sizing_policy(db, account)
+    policy.roll_in_pct = 0.5
+    db.commit()
+    starting_risk = ea.get_or_init_risk_state(db, account).risk_last_usd
+    db.close()
+
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_PULLBACK", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    fill_candles = [_c5m(50100.0, ct), _c5m(49900.0, ct + 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": fill_candles}, polls=1)
+
+    # T1 (50300) touched -- a real winner.
+    walk_candles = [_c5m(49900.0, ct + 300), _c5m(50350.0, ct + 600, high=50400.0, low=50200.0)]
+    flat_htf = [{"close": 50000.0} for _ in range(20)]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": walk_candles},
+        candles_1h_by_symbol={"BTC/USDT": flat_htf}, candles_4h_by_symbol={"BTC/USDT": flat_htf},
+        polls=1,
+    )
+
+    db = SessionLocal()
+    state = ea.get_or_init_risk_state(db, db.query(ExecutorAccount).filter_by(id=account_id).first())
+    assert state.risk_last_usd != starting_risk
+    assert state.last_trade_pnl_usd is not None and state.last_trade_pnl_usd > 0
+
+    audit_row = db.query(ExecutorAuditLog).filter_by(account_id=account_id, event_type="TRADE_RESULT_RECORDED").first()
+    assert audit_row is not None
+    assert audit_row.message.startswith("[SIMULATION]")
+    db.close()
+
+
 # ------------------------------------------------------------------ Ruling C: TRAVELER's own email notifications
 # (DeepSeek, relayed by Andy 2026-09-15 -- traveler_plan_notify.py, the
 # same "one email per required transition" pattern trade_plan_notify.py
