@@ -4210,3 +4210,89 @@ the remaining prerequisites before the three-lineage DRY_RUN evaluation
 can actually start.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-15 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — Phase 1 audit + first two fixes: a real live radar bug found and fixed, the dead SS8 re-entry chain removed
+STATUS: open — one item (executor_live_engine.py's PREMIUM-only BE-move-at-T2) handed to DeepSeek/Andy as a question, not resolved here
+
+Per Andy's direction (read CC_SYSTEM_BRIEF.md, CC_HANDOFF_SITE_INTEGRATION.md,
+CC_PACKAGE.md in full first, then audit before changing site code): ran a
+full read-only inventory of every remaining piece of v1 dead machinery in
+kabroda.com, then fixed the two items Andy explicitly approved acting on
+now, holding a third for a written question (see below).
+
+### 1. Fixed: the radar could never show a real TAKE as valid
+
+market_radar.py and templates/market_radar.html still checked for
+"TAKE_PREMIUM"/"TAKE_STANDARD" in ~10 places (is_valid, _STATE_COLOR,
+score_pct/sort_weight, the actionable/highlight checks in both the
+pre-session full-grid view and the live overlay, the TF-stack mini-
+display's plan rendering). decision_engine.py's v2 gate has returned only
+"TAKE"/"PASS" since 2026-09-11 -- every one of these checks was silently
+always-false on a real TAKE day, with zero test coverage to catch it (no
+test_market_radar.py exists). This is exactly the "stagnant surface"
+class CC_SYSTEM_BRIEF.md's audit section warned about. All fixed to
+compare against "TAKE" directly.
+
+Found a second, more serious instance of the same bug class in the same
+sweep: ledger_closing_engine.py's _backfill_gate_log() filtered on
+GateLog.state.in_(["TAKE_PREMIUM", "TAKE_STANDARD"]) -- since v2 only
+ever writes "TAKE", this silently stopped backfilling
+first_target_hit/stopped_first/mgmt_label/faked_first for every real v2
+trade's forward-test record since 2026-09-11. This is the data the Brain
+reads via /api/export/gate-log.csv to confirm live results track the
+backtest -- a real gap in the record, not cosmetic. Fixed (kept the old
+strings too, for any still-pending historical row).
+
+kabroda_mas_flow.py's GateLog.veto assignment had the same stale-
+vocabulary pattern (two conditions that had degenerated to always-false/
+always-true) -- simplified to the one real signal that was actually doing
+the work. Plus a batch of stale docstrings/comments (database.py column
+comments, decision_engine.py's own docstring, main.py) fixed alongside.
+
+Site repo commit df75f3c. Full pytest tests/ green (571 passed, only the
+5 pre-existing unrelated test_dashboard_fixes.py errors).
+
+### 2. Removed: SS8's fuel-gated re-entry-after-wick-fake chain
+
+check_reentry_eligibility()/advance_reentry_plan()/resolve_reentry_fill()
+in trade_plan.py, plus trade_plan_engine.py's REENTRY_ARMED branch and its
+entry in the polling status filter. This one had a stated future ("kept
+in case a v2-native re-entry design is built on it later"), but tracing
+the actual call graph confirmed it's been fully dead since the 2026-09-11
+v2 rewrite, not just unreachable-in-spirit: trade_plan_engine.py's
+STOPPED branch resolves unconditionally to DONE since that date, so
+check_reentry_eligibility() (the only thing that could ever set
+REENTRY_ARMED) has not been called from anywhere in production since
+then -- which makes the other two dead by construction too. Same "remove,
+don't patch" bar as the tier-specific-stop test files deleted earlier
+this session. Full text preserved in git history if a future v2.x design
+wants to reference the old approach.
+
+16 now-uncoverable pure-function tests removed (15 from
+test_trade_plan_state_machine.py, 1 from test_trade_plan_engine.py); one
+test needed a real behavior-change update (a reentry_used=True FILLED row
+now just stays FILLED forever via this path instead of resolving at T1 --
+an accepted, documented gap for state that can no longer be created new;
+confirmed zero such rows exist in the live DB).
+
+Site repo commit a595f83. Full pytest tests/ green (571 passed, same 5
+pre-existing errors). App boots clean end to end on live data both times.
+
+### 3. Handed to DeepSeek, not resolved here: executor_live_engine.py's PREMIUM-only breakeven-at-T2 move
+
+Same audit found this branch (lines 371, 379-421) is ALSO fully dead now
+(order_row.tier can never be "PREMIUM" -- traced the same tier=None
+provenance chain as everywhere else). Andy said this one specifically
+should go to DeepSeek rather than being decided here, since deleting a
+real (if dead) management mechanism outright is a bigger call than fixing
+a display bug or removing already-fully-dead code with no stated future.
+Wrote CC_QUESTION_T2_BREAKEVEN.md (this repo, root) with my own reading:
+CC_PACKAGE.md §1 already states v2's rule explicitly ("stop never moves,"
+"NO BE stop (measured harmful)"), and the traveler candidate's E1 exit is
+a full exit at T1 (no partial/runner leg for a BE move to even apply to)
+-- so I believe neither lineage needs this mechanism at all, and the dead
+branch can be deleted outright once confirmed. Not deleted yet -- waiting
+on that confirmation before touching it, per Andy's explicit instruction
+this one goes through you first.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
