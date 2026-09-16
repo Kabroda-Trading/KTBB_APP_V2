@@ -106,6 +106,25 @@ async def _apply(db, row: TravelerPlan, updates, symbol: str) -> None:
     if row.status != prev_status:
         print(f"|| TRAVELER PLAN || {symbol} {row.session_id} {row.date_key}: "
               f"{prev_status} -> {row.status} -- {updates.get('last_transition_reason')}")
+        _notify_traveler_transition(prev_status, row, symbol)
+
+
+def _notify_traveler_transition(prev_status: str, row: TravelerPlan, symbol: str) -> None:
+    """Ruling C (DeepSeek, relayed by Andy 2026-09-15): ARMED/DONE emails
+    for GATE_TRAVELER -- same non-blocking, own-try/except pattern as
+    trade_plan_engine.py's own _notify_transition() for v2 (an occasional
+    blocking SMTP round-trip inside this 60s-cadence loop is an accepted
+    cost, same as that module)."""
+    try:
+        import notify
+        import traveler_plan_notify
+
+        mail = traveler_plan_notify.notification_for_traveler_transition(prev_status, row.__dict__)
+        if mail:
+            subject, body = mail
+            notify.send_admin_email(subject, body)
+    except Exception as e:
+        print(f"|| TRAVELER PLAN || Notification failed for {symbol}: {e}")
 
 
 async def _notify_executor(db, row: TravelerPlan, symbol: str) -> None:

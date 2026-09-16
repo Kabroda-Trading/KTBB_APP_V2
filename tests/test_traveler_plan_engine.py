@@ -24,6 +24,7 @@ import database
 from database import SessionLocal, TravelerPlan, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorSizingPolicy
 import traveler_plan_engine as tpe
 import executor_accounts as ea
+import notify
 
 
 def _clean_db_files():
@@ -260,3 +261,82 @@ def test_mgmt_e1_stack_poll_closes_the_order_on_a_real_stop_touch(poll_env):
     assert order.exit_reason == "STOP"
     assert order.exit_price == 49664.0
     assert order.realized_pnl_r == pytest.approx(-1.0)
+
+
+# ------------------------------------------------------------------ Ruling C: TRAVELER's own email notifications
+# (DeepSeek, relayed by Andy 2026-09-15 -- traveler_plan_notify.py, the
+# same "one email per required transition" pattern trade_plan_notify.py
+# already uses for v1/v2, tagged TRAVELER throughout.)
+
+def _capture_emails(monkeypatch):
+    sent = []
+    def fake_send(subject, body):
+        sent.append((subject, body))
+        return True
+    monkeypatch.setattr(notify, "send_admin_email", fake_send)
+    return sent
+
+
+def test_waiting_pullback_fill_sends_a_traveler_armed_email_via_loop(poll_env, monkeypatch):
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_traveler_account"]()
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_PULLBACK", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    candles = [_c5m(50100.0, ct), _c5m(49900.0, ct + 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    assert len(sent) == 1
+    assert sent[0][0].startswith("KABRODA TRAVELER ARMED")
+    assert "49,900" in sent[0][0] or "49900" in sent[0][0]
+
+
+def test_waiting_cross_tercile_skipped_sends_a_traveler_done_email_via_loop(poll_env, monkeypatch):
+    sent = _capture_emails(monkeypatch)
+    ct = 1700000000
+    # rsi_4h_at_lock=45.0 is below FULL_D1_CUTS["LONG"] lo (51.49) -- tercile-skipped.
+    poll_env["make_plan"](rsi_4h_at_lock=45.0)
+    candles = [_c5m(95.0, ct + i * 300) for i in range(5)] + [_c5m(105.0, ct + 5 * 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "TERCILE_SKIPPED"
+    assert len(sent) == 1
+    assert sent[0][0].startswith("KABRODA TRAVELER DONE")
+    assert "tercile-skipped" in sent[0][1]
+
+
+def test_waiting_pullback_opposite_break_sends_a_traveler_done_email_via_loop(poll_env, monkeypatch):
+    sent = _capture_emails(monkeypatch)
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_PULLBACK", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0,
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    candles = [_c5m(49650.0, ct + 300)]   # closes BELOW the opposite trigger (49700) -- journey invalidated
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "DONE"
+    assert len(sent) == 1
+    assert sent[0][0].startswith("KABRODA TRAVELER DONE")
+    assert "opposite trigger" in sent[0][1]
+
+
+def test_waiting_cross_to_waiting_pullback_sends_no_email_via_loop(poll_env, monkeypatch):
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_plan"]()
+    candles = [_c5m(95.0, 1700000000 + i * 300) for i in range(5)] + [_c5m(105.0, 1700000000 + 5 * 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "WAITING_PULLBACK"
+    assert sent == []

@@ -704,6 +704,26 @@ def _inject_traveler_plan_to_database(
         db.add(row)
         db.commit()
         print(f"|| TRAVELER PLAN || WAITING_CROSS plan written for {symbol} | {session_id} | {date_key}.")
+
+        # Ruling C (DeepSeek, relayed by Andy 2026-09-15): TRAVELER's own
+        # LOCK briefing email -- GATE_TRAVELER has no lock-time gate (see
+        # this function's own docstring), so unlike v2's four-disposition
+        # lock email this is always the same shape: levels + "watching for
+        # a cross." Same non-blocking, own-try/except pattern as the
+        # TradePlan LOCK email above -- a notify failure must never affect
+        # the already-committed plan write.
+        try:
+            import notify
+            import traveler_plan_notify
+            mail_fields = {
+                "id": row.id, "symbol": symbol,
+                "breakout_trigger": breakout_trigger, "breakdown_trigger": breakdown_trigger,
+                "r30_high": r30_high, "r30_low": r30_low, "rsi_4h_at_lock": rsi_4h_at_lock,
+            }
+            subject, body = traveler_plan_notify.build_traveler_lock_email(mail_fields)
+            notify.send_admin_email(subject, body)
+        except Exception as _notify_err:
+            print(f"[TRAVELER PLAN] Lock-email notification failed: {_notify_err}")
     except Exception as e:
         print(f"TRAVELER PLAN DATABASE INJECTION ERROR: {e}")
     finally:
