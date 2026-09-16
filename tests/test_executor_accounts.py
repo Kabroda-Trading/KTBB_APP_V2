@@ -770,3 +770,58 @@ def test_set_account_profile_omitting_both_is_a_harmless_noop(db):
     assert ea.mgmt_profile_of(account) == "MGMT_SPLIT"
     rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="PROFILE_CHANGED").all()
     assert len(rows) == 0
+
+
+# ------------------------------------------------------------------ set_account_profile LIVE-mode gate (Ruling A, 2026-09-15 22:10 CT)
+
+def _live_account(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    ea.set_credentials(db, account, "key1", "secret1", set_by="andy@kabroda.com")
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "preset_name": "fixed_dollar"}, updated_by="andy@kabroda.com")
+    ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm=ea.LIVE_TRADING_CONFIRM_PHRASE)
+    db.commit()
+    return account
+
+
+def test_set_account_profile_on_live_account_refuses_without_confirm_phrase(db):
+    account = _live_account(db)
+    with pytest.raises(ValueError, match="confirm phrase must be exactly"):
+        ea.set_account_profile(db, account, gate_profile="GATE_TRAVELER", by="andy@kabroda.com")
+    assert ea.gate_profile_of(account) == "GATE_V2"  # unchanged
+
+
+def test_set_account_profile_on_live_account_refuses_with_wrong_confirm_phrase(db):
+    account = _live_account(db)
+    with pytest.raises(ValueError, match="confirm phrase must be exactly"):
+        ea.set_account_profile(db, account, gate_profile="GATE_TRAVELER", by="andy@kabroda.com", confirm="wrong phrase")
+
+
+def test_set_account_profile_on_live_account_succeeds_with_correct_confirm_phrase(db):
+    account = _live_account(db)
+    ea.set_account_profile(
+        db, account, gate_profile="GATE_TRAVELER", mgmt_profile="MGMT_E1_STACK",
+        by="andy@kabroda.com", confirm=ea.LIVE_TRADING_CONFIRM_PHRASE,
+    )
+    db.commit()
+    assert ea.gate_profile_of(account) == "GATE_TRAVELER"
+    assert ea.mgmt_profile_of(account) == "MGMT_E1_STACK"
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="PROFILE_CHANGED").all()
+    assert len(rows) == 1
+
+
+def test_set_account_profile_on_live_account_setting_same_values_needs_no_confirm(db):
+    # Re-affirming the CURRENT profile (a harmless no-op) must not demand
+    # the confirm phrase -- only a REAL change is gated, same "is_real_
+    # change" guard the audit-row logic already uses.
+    account = _live_account(db)
+    ea.set_account_profile(db, account, gate_profile="GATE_V2", mgmt_profile="MGMT_SPLIT", by="andy@kabroda.com")
+    db.commit()
+    assert ea.gate_profile_of(account) == "GATE_V2"
+
+
+def test_set_account_profile_dry_run_account_needs_no_confirm_phrase(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    ea.set_account_profile(db, account, gate_profile="GATE_TRAVELER", by="andy@kabroda.com")
+    db.commit()
+    assert ea.gate_profile_of(account) == "GATE_TRAVELER"

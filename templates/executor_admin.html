@@ -259,6 +259,9 @@ async function loadAccounts() {
                     <span class="badge ${a.mode === 'LIVE' ? 'badge-danger' : 'badge-ok'}" style="margin-left:4px;">${escapeHtml(a.mode)}</span>
                     ${a.kill_switch_engaged ? '<span class="badge badge-danger" style="margin-left:4px;">KILL SWITCH ENGAGED</span>' : '<span class="badge badge-ok" style="margin-left:4px;">ACTIVE</span>'}
                     ${a.has_credentials ? '' : '<span class="badge badge-warn" style="margin-left:4px;">NO CREDENTIALS SET</span>'}
+                    ${(a.gate_profile !== 'GATE_V2' || a.mgmt_profile !== 'MGMT_SPLIT')
+                        ? `<span class="badge badge-warn" style="margin-left:4px;">${escapeHtml(a.gate_profile)} / ${escapeHtml(a.mgmt_profile)}</span>`
+                        : ''}
                 </div>
                 <div>
                     ${a.kill_switch_engaged
@@ -420,8 +423,34 @@ async function loadAccounts() {
                 <p class="empty" style="margin-top:6px;">Manual entry for OUT-OF-BAND trades only -- real Executor-managed trades (Domain 2) record this automatically on close.</p>
             </div>
 
+            <div class="setup-step" id="strategyProfile-${a.id}" style="border-color:#3730a3; background:rgba(55,48,163,0.08);">
+                <div class="setup-step-title" style="color:#a5b4fc;"><span class="setup-step-num">4</span> Strategy Profile</div>
+                <p class="empty" style="padding:0 0 8px;">Which gate and management run this account's real orders. Default (GATE_V2 / MGMT_SPLIT) is today's live system, unchanged -- switch only for a deliberate DRY_RUN evaluation of the traveler candidate.</p>
+                <div class="risk-form">
+                    <label>Gate (D1)
+                        <select id="profileGate-${a.id}">
+                            <option value="GATE_V2">GATE_V2 -- Krown Cross + 4H RSI (today's live gate)</option>
+                            <option value="GATE_TRAVELER">GATE_TRAVELER -- pullback-fill + tercile-skip (evaluation candidate)</option>
+                        </select>
+                    </label>
+                    <label>Management (D3)
+                        <select id="profileMgmt-${a.id}">
+                            <option value="MGMT_SPLIT">MGMT_SPLIT -- 50% at T1 / 50% to T3, stop never moves (today's live management)</option>
+                            <option value="MGMT_E1_STACK">MGMT_E1_STACK -- full exit at T1 or on C5/BBWP momentum-decay (evaluation candidate)</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="risk-form" id="profileLiveConfirmRow-${a.id}" style="display:none;">
+                    <label>Type exactly: CONFIRM ENABLE LIVE TRADING<input type="text" id="profileLiveConfirm-${a.id}"></label>
+                </div>
+                <div class="risk-form" style="margin-top:8px;">
+                    <button class="btn btn-ok" onclick="saveAccountProfile(${a.id})" style="align-self:flex-end;">SAVE STRATEGY PROFILE</button>
+                </div>
+                <p class="empty" id="profileSaveResult-${a.id}" style="margin-top:6px; display:none;"></p>
+            </div>
+
             <div class="setup-step go-live-step" id="goLive-${a.id}">
-                <div class="setup-step-title" style="color:#fbbf24;"><span class="setup-step-num">4</span> Go Live</div>
+                <div class="setup-step-title" style="color:#fbbf24;"><span class="setup-step-num">5</span> Go Live</div>
                 <div id="goLiveBody-${a.id}"><p class="empty">Loading...</p></div>
             </div>
 
@@ -456,8 +485,50 @@ async function loadAccounts() {
         }
         loadTinyTestForAccount(a.id, a.has_credentials);
         loadSizingPolicy(a.id);
+        renderStrategyProfileSection(a.id, a);
         renderGoLiveSection(a.id, a);
     }
+}
+
+// ------------------------------------------------------------------ Strategy Profile (Phase 2 Ruling A, 2026-09-15 22:10 CT)
+// The activation mechanism for GATE_TRAVELER/MGMT_E1_STACK -- without this,
+// no account could ever be switched onto the new profiles at all. Mirrors
+// the Go Live section's own LIVE-mode confirm-phrase pattern exactly
+// (executor_accounts.set_account_profile()'s own docstring: a LIVE account
+// needs the SAME friction as going live in the first place; DRY_RUN
+// switches freely).
+
+function renderStrategyProfileSection(accountId, account) {
+    const gateSel = document.getElementById(`profileGate-${accountId}`);
+    const mgmtSel = document.getElementById(`profileMgmt-${accountId}`);
+    const confirmRow = document.getElementById(`profileLiveConfirmRow-${accountId}`);
+    if (!gateSel || !mgmtSel) return;
+    gateSel.value = account.gate_profile || "GATE_V2";
+    mgmtSel.value = account.mgmt_profile || "MGMT_SPLIT";
+    // The confirm phrase is only ever needed on a REAL change to a LIVE
+    // account (server-side is the real gate; this just avoids showing an
+    // input nobody needs on a DRY_RUN account).
+    confirmRow.style.display = account.mode === "LIVE" ? "flex" : "none";
+}
+
+async function saveAccountProfile(accountId) {
+    const gate_profile = document.getElementById(`profileGate-${accountId}`).value;
+    const mgmt_profile = document.getElementById(`profileMgmt-${accountId}`).value;
+    const confirmEl = document.getElementById(`profileLiveConfirm-${accountId}`);
+    const confirm_ = confirmEl ? confirmEl.value : undefined;
+    const resp = await api(`/api/executor/accounts/${accountId}/profile`, {
+        method: "POST", body: JSON.stringify({ gate_profile, mgmt_profile, confirm: confirm_ }),
+    });
+    const resultEl = document.getElementById(`profileSaveResult-${accountId}`);
+    resultEl.style.display = "block";
+    if (!resp.ok) {
+        resultEl.textContent = resp.error || "failed to save strategy profile";
+        resultEl.style.color = "#fca5a5";
+        return;
+    }
+    resultEl.textContent = `Saved: ${resp.account.gate_profile} / ${resp.account.mgmt_profile}`;
+    resultEl.style.color = "#6ee7b7";
+    loadAccounts();
 }
 
 // ------------------------------------------------------------------ Go Live (2026-09-07)

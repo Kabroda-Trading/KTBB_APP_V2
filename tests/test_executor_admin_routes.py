@@ -275,6 +275,62 @@ def test_only_admin_can_engage_global_kill_switch(env):
     assert resp.status_code == 403
 
 
+# ------------------------------------------------------------------ strategy profile (Phase 2 Ruling A, 2026-09-15 22:10 CT)
+
+def test_profile_route_non_owner_non_admin_gets_403(env):
+    client = _login("exec_other@kabroda.com", "otherpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/profile", json={"gate_profile": "GATE_TRAVELER"})
+    assert resp.status_code == 403
+
+
+def test_profile_route_owner_can_set_on_a_dry_run_account_with_no_confirm(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post(
+        f"/api/executor/accounts/{env['account_id']}/profile",
+        json={"gate_profile": "GATE_TRAVELER", "mgmt_profile": "MGMT_E1_STACK"},
+    )
+    assert resp.status_code == 200
+    account = resp.json()["account"]
+    assert account["gate_profile"] == "GATE_TRAVELER"
+    assert account["mgmt_profile"] == "MGMT_E1_STACK"
+
+
+def test_profile_route_defaults_visible_on_a_fresh_account(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.get("/api/executor/accounts")
+    assert resp.status_code == 200
+    account = resp.json()["accounts"][0]
+    assert account["gate_profile"] == "GATE_V2"
+    assert account["mgmt_profile"] == "MGMT_SPLIT"
+
+
+def test_profile_route_rejects_unknown_gate_profile_with_400(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/profile", json={"gate_profile": "GATE_BOGUS"})
+    assert resp.status_code == 400
+
+
+def test_profile_route_on_live_account_requires_confirm_phrase(env):
+    admin_client = _login("exec_admin@kabroda.com", "adminpass123")
+    owner_client = _login("exec_owner@kabroda.com", "ownerpass123")
+    aid = env["account_id"]
+    owner_client.post(f"/api/executor/accounts/{aid}/credentials", json={"api_key": "k", "api_secret": "s"})
+    owner_client.post(f"/api/executor/accounts/{aid}/sizing-policy", json={"preset_name": "fixed_dollar", "base_risk_usd": 100.0})
+    live_resp = owner_client.post(f"/api/executor/accounts/{aid}/mode", json={"mode": "LIVE", "confirm": "CONFIRM ENABLE LIVE TRADING"})
+    assert live_resp.status_code == 200
+    assert live_resp.json()["account"]["mode"] == "LIVE"
+
+    no_confirm = owner_client.post(f"/api/executor/accounts/{aid}/profile", json={"gate_profile": "GATE_TRAVELER"})
+    assert no_confirm.status_code == 400
+
+    with_confirm = owner_client.post(
+        f"/api/executor/accounts/{aid}/profile",
+        json={"gate_profile": "GATE_TRAVELER", "confirm": "CONFIRM ENABLE LIVE TRADING"},
+    )
+    assert with_confirm.status_code == 200
+    assert with_confirm.json()["account"]["gate_profile"] == "GATE_TRAVELER"
+
+
 # ------------------------------------------------------------------ credential handling never echoes the secret
 
 def test_credential_set_response_never_contains_the_secret(env):

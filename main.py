@@ -1307,6 +1307,17 @@ class ExecutorModeChangeRequest(BaseModel):
     confirm: Optional[str] = None
 
 
+class ExecutorProfileChangeRequest(BaseModel):
+    """Phase 2 Ruling A (AGENT_LOG.md, Kabroda AI Brain repo, 2026-09-15
+    22:10 CT) -- either field omitted leaves it unchanged (independent
+    gate/management selection, same as executor_accounts.set_account_
+    profile()'s own signature). confirm is only checked when the account
+    is already LIVE and this is a real change -- see that function."""
+    gate_profile: Optional[str] = None
+    mgmt_profile: Optional[str] = None
+    confirm: Optional[str] = None
+
+
 class ExecutorRiskStateUpdateRequest(BaseModel):
     risk_last_usd: Optional[float] = None
     risk_floor_usd: Optional[float] = None
@@ -1387,6 +1398,11 @@ def _serialize_account(account: "_ExecutorAccount") -> Dict[str, Any]:
         "assumed_balance_usd": account.assumed_balance_usd,
         "has_credentials": bool(account.api_key_encrypted),
         "credential_set_at": account.credential_set_at.isoformat() if account.credential_set_at else None,
+        # Phase 2 (2026-09-15): the RESOLVED profile (gate_profile_of()/
+        # mgmt_profile_of(), never the raw nullable column) -- a brand-new
+        # or never-touched account reads as today's exact v2 behavior.
+        "gate_profile": _executor_accounts.gate_profile_of(account),
+        "mgmt_profile": _executor_accounts.mgmt_profile_of(account),
     }
 
 
@@ -1512,6 +1528,34 @@ async def api_executor_set_account_mode(account_id: int, request: Request, body:
         return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
     try:
         _executor_accounts.set_account_mode(db, account, body.mode, by=ctx.get("email") or "unknown", confirm=body.confirm)
+    except ValueError as e:
+        db.rollback()
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    db.commit()
+    return JSONResponse({"ok": True, "account": _serialize_account(account)})
+
+
+@app.post("/api/executor/accounts/{account_id}/profile")
+async def api_executor_set_account_profile(account_id: int, request: Request, body: ExecutorProfileChangeRequest, db: Session = Depends(get_db)):
+    """Phase 2 Ruling A (AGENT_LOG.md, Kabroda AI Brain repo, 2026-09-15
+    22:10 CT) -- the activation mechanism for GATE_TRAVELER/MGMT_E1_STACK.
+    Without this route, no account could ever be switched onto the new
+    profiles at all -- direct DB edits would violate the audited-action
+    bar every other account mutation in this file follows. The LIVE-mode
+    confirm-phrase check lives in set_account_profile() itself, not
+    duplicated here -- same "one place owns the phrase" precedent as the
+    mode-change route above."""
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    try:
+        _executor_accounts.set_account_profile(
+            db, account, gate_profile=body.gate_profile, mgmt_profile=body.mgmt_profile,
+            by=ctx.get("email") or "unknown", confirm=body.confirm,
+        )
     except ValueError as e:
         db.rollback()
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)

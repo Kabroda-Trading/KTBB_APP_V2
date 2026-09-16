@@ -55,6 +55,10 @@ def create_account(db: Session, user_id: int, label: str, exchange: str = "bitun
 
 
 _VALID_MODES = ("DRY_RUN", "LIVE")   # PAPER excluded -- unimplemented in executor_engine.py, no PAPER accounts exist
+# Shared with set_account_profile() below (Phase 2, 2026-09-15 Ruling A) --
+# a LIVE account's profile change needs the same friction as going LIVE in
+# the first place, one phrase, one source of truth.
+LIVE_TRADING_CONFIRM_PHRASE = "CONFIRM ENABLE LIVE TRADING"
 
 
 def set_account_mode(db: Session, account: ExecutorAccount, new_mode: str, by: str, confirm: Optional[str] = None) -> ExecutorAccount:
@@ -103,9 +107,8 @@ def set_account_mode(db: Session, account: ExecutorAccount, new_mode: str, by: s
                 "(it's still running the untouched default). Go to step 3, pick an option, and click "
                 "SAVE SIZING POLICY first -- selecting an option and previewing it is not the same as saving it."
             )
-        required = "CONFIRM ENABLE LIVE TRADING"
-        if confirm != required:
-            raise ValueError(f"confirm phrase must be exactly {required!r}")
+        if confirm != LIVE_TRADING_CONFIRM_PHRASE:
+            raise ValueError(f"confirm phrase must be exactly {LIVE_TRADING_CONFIRM_PHRASE!r}")
 
     account.mode = new_mode
     write_audit(
@@ -137,29 +140,46 @@ def mgmt_profile_of(account: ExecutorAccount) -> str:
 def set_account_profile(
     db: Session, account: ExecutorAccount,
     gate_profile: Optional[str] = None, mgmt_profile: Optional[str] = None,
-    by: str = "system",
+    by: str = "system", confirm: Optional[str] = None,
 ) -> ExecutorAccount:
-    """Phase 2 (CC_WORK_ORDER_PHASE2.md step 1) -- the per-account strategy
-    profile setter, same validation/audit shape as set_account_mode()
-    above. Either field may be omitted (None) to leave it unchanged --
-    callers can set gate and management profiles independently. Read AT
-    ORDER TIME by executor_plan_builder.py via gate_profile_of()/
-    mgmt_profile_of() above, not just at go-live -- mirrors the sizing-
-    policy read pattern (get_or_init_sizing_policy() is also read fresh
-    per order, not cached at go-live)."""
+    """Phase 2 (CC_WORK_ORDER_PHASE2.md step 1; LIVE-mode gate added per
+    Ruling A, AGENT_LOG.md Kabroda AI Brain repo 2026-09-15 22:10 CT) --
+    the per-account strategy profile setter, same validation/audit shape
+    as set_account_mode() above. Either field may be omitted (None) to
+    leave it unchanged -- callers can set gate and management profiles
+    independently. Read AT ORDER TIME by executor_plan_builder.py via
+    gate_profile_of()/mgmt_profile_of() above, not just at go-live --
+    mirrors the sizing-policy read pattern (get_or_init_sizing_policy() is
+    also read fresh per order, not cached at go-live).
+
+    Ruling A: an account already in LIVE mode requires the SAME
+    credentials+confirm gate set_account_mode() uses for DRY_RUN->LIVE --
+    changing what a live account trades is as consequential as flipping it
+    live in the first place. DRY_RUN accounts switch profiles freely, no
+    confirm phrase needed (same safety-direction reasoning as LIVE->
+    DRY_RUN mode changes needing no confirm)."""
     if gate_profile is not None and gate_profile not in _VALID_GATE_PROFILES:
         raise ValueError(f"gate_profile must be one of {_VALID_GATE_PROFILES}, got {gate_profile!r}")
     if mgmt_profile is not None and mgmt_profile not in _VALID_MGMT_PROFILES:
         raise ValueError(f"mgmt_profile must be one of {_VALID_MGMT_PROFILES}, got {mgmt_profile!r}")
 
     old_gate, old_mgmt = gate_profile_of(account), mgmt_profile_of(account)
+    new_gate = gate_profile if gate_profile is not None else old_gate
+    new_mgmt = mgmt_profile if mgmt_profile is not None else old_mgmt
+    is_real_change = new_gate != old_gate or new_mgmt != old_mgmt
+
+    if account.mode == "LIVE" and is_real_change:
+        if not account.api_key_encrypted or not account.api_secret_encrypted:
+            raise ValueError("cannot change profile on a LIVE account -- no credentials set")
+        if confirm != LIVE_TRADING_CONFIRM_PHRASE:
+            raise ValueError(f"confirm phrase must be exactly {LIVE_TRADING_CONFIRM_PHRASE!r}")
+
     if gate_profile is not None:
         account.gate_profile = gate_profile
     if mgmt_profile is not None:
         account.mgmt_profile = mgmt_profile
-    new_gate, new_mgmt = gate_profile_of(account), mgmt_profile_of(account)
 
-    if new_gate != old_gate or new_mgmt != old_mgmt:
+    if is_real_change:
         write_audit(
             db, "PROFILE_CHANGED",
             f"account {account.id} profile changed gate {old_gate}->{new_gate}, mgmt {old_mgmt}->{new_mgmt}",
