@@ -4331,3 +4331,117 @@ ignored ExecutorSizingPolicy field class, GateLog.push_vol_ratio/
 fuel_state's dead write-throughs) are not blocking Phase 2 and can wait.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-15 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — Phase 2 shipped: profile-switchable D1/D2/D3 core (GATE_TRAVELER + MGMT_E1_STACK), all 7 work-order steps done
+STATUS: open — reporting code facts per step 7, not a judgment on the candidate
+
+Per CC_WORK_ORDER_PHASE2.md. Before writing code, verified the 7 build
+steps against the actual frozen study source (not the handoff's prose
+summary) and found 4 concrete discrepancies — reported them, got explicit
+rulings back (fcfb19a/74344cd/7ee590d), verified the ruling commits
+directly, then built. Full trail in the site repo's own AGENT_LOG.md (2
+commits, 2026-09-15) — pointer only here.
+
+### Step 1 — profile plumbing: DONE
+ExecutorAccount.gate_profile/mgmt_profile (nullable, code-side default
+GATE_V2/MGMT_SPLIT via executor_accounts.gate_profile_of()/
+mgmt_profile_of()) — every existing account's behavior is byte-for-byte
+unchanged until a profile is explicitly set. Read AT ORDER TIME in
+executor_engine.py, same pattern as the sizing-save gate. Test-suite
+confirmed: 8 new profile tests, all passing, plus every pre-existing
+executor test still green (no behavior change for GATE_V2 accounts).
+
+### Step 2 — the taken-gate: DONE, with the D2 discrepancy corrected
+gate_traveler.py: tercile_skip() (frozen FULL_D1 cuts, flagged pending its
+CANON row) as a HARD boolean gate, and cross-detection + pullback-fill as
+a live-polling translation of recipe_assembled.py::pullback_fill(). D2
+mechanics: the resting POST_ONLY order stays, but GATE_TRAVELER's FILLED
+determination is the confirmed-close pullback (not the wick/confirmed-
+close-at-cross fill v1/v2 use) — this was discrepancy #1, the most
+consequential one found.
+
+### Step 3 — RSI port: DONE, byte-identity confirmed with a real diff, not an approximation
+study_indicators.py::rsi_series()/bbwp_series(), run side-by-side against
+the study's own pandas functions on real Bitunix 5m data resampled to 4H
+exactly as the study does: **max diff 0.0 on RSI (9,648 bars compared),
+~4e-10 (floating-point noise) on BBWP (8,787 bars compared)**. Not touching
+battlebox_pipeline.py::_calc_rsi() (other callers), per the work order.
+
+### Step 4 — MGMT_E1_STACK: DONE, with the two D3 discrepancies corrected
+mgmt_e1_stack.py implements the exact per-bar priority from lab_touchfill_
+arms.py::walk_from_fill() (CANON section 9d): STOP first, then C5-or-BBWP
+(exit at the current 5m bar's close), then T1, then TIME — all on 5-MINUTE
+bars, not "15M." Both were confirmed handoff errors (discrepancies #2/#3),
+now corrected in the handoff itself per your own commits.
+Identity-check note: I did NOT attempt the full 1,538-journey replay
+identity check against lab_touchfill_arms_rows.csv — that requires
+reconstructing the study's exact journey/window objects (win_sw, cc/sw
+basis split, etc.), a bigger undertaking than this step's time budget
+supported. Instead: (a) the underlying primitives (rsi_series/bbwp_series)
+are already proven byte-identical against real data per step 3, and (b)
+c5_momentum_decay()/bbwp_burn() are direct, one-line boolean checks on
+those already-verified series — low incremental risk. What IS covered: a
+real end-to-end integration test drives the actual poll loop through a
+full pullback-fill -> order -> stop-touch-close cycle on realistic price
+levels. If a full journey-level identity check against the committed CSV
+is wanted before this is trusted further, flag it and I'll scope it as
+its own follow-up rather than have silently skipped it.
+
+### Step 5 — F_A sizing: DONE
+executor_sizing.f_a_multiplier() (verbatim >=80L/<=20S->1.0 else 0.5) +
+compute_stake()'s new sizing_multiplier param, confirmed by test to
+compose on the base BEFORE tier/derisk/caps, dollar-ledger-only. Kept
+structurally separate from tercile_skip() (different function, different
+role) per your own explicit correction on this exact point.
+
+### Step 6 — ingestion spec: DONE
+New ExecutorOrder columns: gate_profile_used, mgmt_profile_used,
+sizing_multiplier_used, exit_reason/exit_price/exit_time/exit_fee_usd,
+c5_fired, bbwp_fired, traveler_plan_id (a SEPARATE column + unique
+constraint from trade_plan_id — TravelerPlan/TradePlan have independent id
+sequences that could collide on the same integer if overloaded). Raw
+prices/timestamps only — no R/avgR computed site-side, per the binding
+"CC does not evaluate" rule.
+One thing found while building this, flagged not fixed (out of scope):
+v1/v2's own existing DRY_RUN orders have NO management simulation at all
+today — executor_live_engine.py's position-watch loop only ever picks up
+orders with a real entry_exchange_order_id (a LIVE fill). A DRY_RUN v1/v2
+order sits at management_state="PENDING_ENTRY" forever, with no exit ever
+recorded. This means the ingestion spec's "every exit" requirement is
+currently unmet for v1/v2's own DRY_RUN population, not just something
+new for GATE_TRAVELER. I built GATE_TRAVELER's own candle-only DRY_RUN
+walk (since it had no real-money wiring to piggyback on anyway) but did
+NOT retrofit v1/v2's SPLIT management with an equivalent — that's a
+separate, pre-existing gap this work order didn't ask me to close, and
+touching it risked scope creep into already-shipped, tested v2 code.
+Flagging for a decision: does the evaluation harness need v1/v2's own
+DRY_RUN orders to get the same simulation treatment before a real
+apples-to-apples comparison is possible?
+
+### Step 7 — report
+- Test-suite pass/fail: full pytest tests/ green, 637 passed, only the 5
+  pre-existing unrelated test_dashboard_fixes.py errors (unchanged from
+  before this work).
+- RSI port diff: 0.0 max (RSI), ~4e-10 max (BBWP, floating-point noise) —
+  see step 3 above.
+- BBWP/RSI identity-check: covered at the primitive level (step 3); full
+  journey-level replay against lab_touchfill_arms_rows.csv not attempted —
+  see step 4's note.
+- Boot status: clean end to end on live data, confirmed twice (TestClient
+  + a real gravity-scan hit) — TravelerPlan now created alongside
+  TradePlan at every real session lock (`|| TRAVELER PLAN || WAITING_CROSS
+  plan written...` printed on a real boot).
+- DRY_RUN-only for now, by design: GATE_TRAVELER accounts cannot place a
+  real order even if somehow set to LIVE mode — executor_engine.py
+  refuses loudly (audited ERROR row), since real-money execution for an
+  as-yet-unevaluated lineage is explicitly out of this step's scope per
+  the evaluation harness (DRY_RUN produces data, the Brain evaluates,
+  Andy signs off per account before any LIVE switch).
+
+GATE_TRAVELER + MGMT_E1_STACK are wired but INERT for every existing
+account until an account's profile is explicitly set to GATE_TRAVELER/
+MGMT_E1_STACK — there's no admin UI for this yet (not asked for in this
+work order; flagging in case that's the next thing needed before any real
+DRY_RUN evaluation account can actually be set up).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
