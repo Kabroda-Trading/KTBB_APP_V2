@@ -22,15 +22,15 @@ see that file's own header comment, "no leg 2" reasoning) -- there is no
 more NO_PUSH-stays-STOPPED / FUELED-recross-becomes-REENTRY_ARMED / thin-
 recross-becomes-DONE distinction to test, one test covers it.
 
-check_reentry_eligibility()/advance_reentry_plan() (trade_plan.py) are
-themselves unreachable from the STOPPED branch now, but advance_reentry_
-plan() is STILL wired up in trade_plan_engine.py's REENTRY_ARMED branch --
-nothing sets that status any more in v2, but if a row already has it
-(e.g. legacy data), the loop still runs the old fuel_gate.evaluate_fuel_
-gate()-based logic for real. test_reentry_armed_fueled_cross_fills_via_loop
-below is kept as coverage of that still-wired, still-real (just currently
-unreachable) path -- same "real code, not deleted" treatment trade_plan.py's
-own header comments give this function elsewhere.
+check_reentry_eligibility()/advance_reentry_plan()/resolve_reentry_fill()
+(trade_plan.py) and the REENTRY_ARMED branch this file used to test via
+test_reentry_armed_fueled_cross_fills_via_loop were DELETED 2026-09-15
+(Andy-approved, v1-dead-machinery audit) -- confirmed genuinely
+unreachable (nothing has set TradePlan.status="REENTRY_ARMED" since the
+2026-09-11 STOPPED-always-resolves-to-DONE change, which made check_
+reentry_eligibility() -- the only thing that could ever set it -- dead on
+arrival). Removed rather than kept as dormant coverage, since there is no
+code left for it to cover.
 """
 import os
 
@@ -90,19 +90,6 @@ def _inside_box_candles(trigger, is_long, n=60):
     """Price never reaches the trigger -- no cross, side stays None."""
     near = trigger - 5.0 if is_long else trigger + 5.0
     return [_c5m(near)] * n
-
-
-def _fueled_5m_candles(trigger, is_long, baseline_vol=10.0, push_vol=10.0, baseline_n=250, push_n=6):
-    """v1-shaped candles (close + volume) for fuel_gate.evaluate_fuel_gate()
-    -- ratio = push_vol/baseline_vol, 1.0 here, comfortably >= VOL_FUELED
-    (0.8). fuel_gate.py itself is untouched by the v2 gate rebuild (same
-    "real tool, not a decision input any more" treatment as the Gravity
-    Map) and is still the ONLY thing test_reentry_armed_fueled_cross_
-    fills_via_loop below exercises -- the sole remaining live (if currently
-    unreachable) caller of it, trade_plan.py's advance_reentry_plan()."""
-    near = trigger - 5.0 if is_long else trigger + 5.0
-    beyond = trigger + 5.0 if is_long else trigger - 5.0
-    return ([{"close": near, "volume": baseline_vol}] * baseline_n) + ([{"close": beyond, "volume": push_vol}] * push_n)
 
 
 def _c1m(l, h, ts=0):
@@ -732,17 +719,6 @@ def test_waiting_cross_fills_via_loop(poll_env, monkeypatch):
     assert row.entry_mode in ("TRIGGER_AT_LEVEL", "RETEST_LIMIT_AT_LINE")
 
 
-def test_reentry_armed_fueled_cross_fills_via_loop(poll_env):
-    poll_env["make_plan"](status="REENTRY_ARMED", direction="LONG", trigger_price=100.0, reentry_used=False)
-    candles = _fueled_5m_candles(100.0, is_long=True)
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
-
-    row = poll_env["get_plan"]()
-    assert row.status == "FILLED"
-    assert row.reentry_used is True
-    assert row.reentry_fill_price == 100.0
-
-
 def test_filled_wide_stop_wicked_becomes_stopped_via_loop(poll_env):
     poll_env["make_plan"](
         status="FILLED", direction="LONG", trigger_price=100.0,
@@ -789,7 +765,19 @@ def test_reentry_filled_ignores_stale_campaign_and_keeps_polling_via_loop(poll_e
     assert row.status == "FILLED"  # unchanged -- not wrongly closed via the stale CampaignLog
 
 
-def test_reentry_filled_t1_reached_resolves_done_without_campaign_via_loop(poll_env):
+def test_reentry_filled_t1_reached_stays_filled_now_that_resolve_reentry_fill_is_gone(poll_env):
+    # v2 (2026-09-15): resolve_reentry_fill() -- the only thing that used to
+    # resolve a reentry_used=True FILLED plan to DONE at T1 ("documented
+    # gap, not guessed") -- was deleted along with the rest of the dead SS8
+    # re-entry chain (confirmed unreachable; see trade_plan.py's own
+    # comment where the functions used to be). mirror_campaign_outcome()'s
+    # own reentry_used guard now means a plan in this state (impossible to
+    # create new -- nothing sets reentry_used=True any more -- but a
+    # hypothetical pre-rebuild leftover row could still carry the flag)
+    # simply stays FILLED forever via this path instead of ever resolving.
+    # Accepted, documented gap for a state that can no longer be reached by
+    # any current code path (the live DB has zero such rows as of this
+    # audit) -- not worth a new resolution mechanism for dead state.
     poll_env["make_plan"](
         status="FILLED", direction="LONG", trigger_price=100.0,
         stop_price=90.0, t1=112.0, fill_time=poll_env["now"] - timedelta(minutes=5),
@@ -800,8 +788,7 @@ def test_reentry_filled_t1_reached_resolves_done_without_campaign_via_loop(poll_
     poll_env["run_polls"](candles_1m_by_symbol={"BTC/USDT": candles_1m}, polls=1)
 
     row = poll_env["get_plan"]()
-    assert row.status == "DONE"
-    assert "documented gap" in row.last_transition_reason
+    assert row.status == "FILLED"
 
 
 def test_stopped_always_resolves_to_done_via_loop(poll_env):

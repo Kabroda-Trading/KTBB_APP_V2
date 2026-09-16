@@ -13,19 +13,21 @@
 # engine.py's r30-based stop_loss anywhere), and fuel_gate.py (already
 # ported from Brain, SS7).
 #
-# management text: the AUDITED rule (2026-09-07 correction -- see
-# MANAGEMENT_TEXT's own comment below): 50% off at T1, stop stays
-# original, 50% runner to T3; PREMIUM only moves the stop to breakeven,
-# mechanically, at T2. This is what executor_live_engine.py (Domain 2)
-# implements for real money -- ledger_closing_engine.py's OLDER 30/70
-# rule is deprecated, not the reference anymore. Do not let this text
-# drift from executor_live_engine.py's real behavior without the same
-# check that caught this drift in the first place.
+# management text: v2 (2026-09-11 rebuild, see MANAGEMENT_TEXT's own
+# comment below): SPLIT 50/50, stop never moves either leg, no tier, no
+# BE-move at T2 for anyone. v1's PREMIUM-only mechanical BE-move at T2 is
+# still literally in executor_live_engine.py but has been unreachable
+# since the v2 rewrite (tier is always None now) -- open question flagged
+# to DeepSeek 2026-09-15 (AGENT_LOG.md): is "no BE move, ever" the intended
+# v2/traveler rule, or does this need a new v2-native trigger? Do not let
+# this text drift from executor_live_engine.py's real behavior once that's
+# resolved, same as the check that caught the original drift.
 #
-# Intraday state machine design (2026-08-31): TradePlan's own monitoring
-# only covers the PRE-FILL, fuel-gated entry logic (WAITING/VETOED/FILLED)
-# -- that's genuinely new, CampaignLog's own fill detection (ledger_
-# closing_engine.py Phase 1) is price-only, no fuel gating. POST-fill
+# Intraday state machine design (2026-08-31, gate mechanism updated 2026-
+# 09-11 for v2): TradePlan's own monitoring only covers the PRE-FILL gated
+# entry logic (WAITING/VETOED/FILLED) -- that's genuinely new, CampaignLog's
+# own fill detection (ledger_closing_engine.py Phase 1) is price-only, no
+# gate check at all. POST-fill
 # management (T1 partial/runner-stop/T3) is NOT re-implemented a second
 # time here -- mirror_campaign_outcome() below watches CampaignLog's own
 # already-verified terminal status for the same session instead. Don't
@@ -50,8 +52,6 @@ from __future__ import annotations
 
 import datetime
 from typing import Any, Dict, List, Optional, Tuple
-
-import fuel_gate
 
 import stop_planner as sp
 
@@ -1078,8 +1078,11 @@ def mirror_campaign_outcome(
     CampaignLog is almost always already terminal from that unrelated
     event. Mirroring it here would silently close the re-entry out using
     a stale verdict -- a real bug, caught before any live re-entry ever
-    exercised this path. resolve_reentry_fill() is the re-entry
-    counterpart.
+    exercised this path. The guard is left in place even though the SS8
+    re-entry chain that used to set reentry_used=True is now removed (see
+    the module's own re-entry-retirement note below) -- it's cheap
+    protection for any pre-rebuild row that might still carry the flag,
+    not load-bearing for anything new.
     """
     if plan.get("status") != "FILLED":
         return None
@@ -1094,102 +1097,23 @@ def mirror_campaign_outcome(
     }
 
 
-def resolve_reentry_fill(
-    plan: Dict[str, Any],
-    wide_stop_verdict: Optional[str],
-    now_utc: datetime.datetime,
-    session_expires_at: Optional[datetime.datetime],
-) -> Optional[Dict[str, Any]]:
-    """T1_FIRST / NEITHER_YET resolution for a re-entry-sourced FILLED plan
-    (plan["reentry_used"] is True) -- mirror_campaign_outcome() refuses
-    these (see its own docstring), so they need a distinct resolution.
-
-    WIDE_STOP_FIRST is deliberately NOT handled here -- the caller routes
-    that to the same STOPPED transition every FILLED plan gets;
-    check_reentry_eligibility()'s own reentry_used guard already finalizes
-    a second stop-out to DONE on the very next poll ("one attempt max"),
-    so no separate path is needed for it in this function.
-    """
-    if plan.get("status") != "FILLED" or not plan.get("reentry_used"):
-        return None
-    if wide_stop_verdict == "T1_FIRST":
-        return {
-            "status": "DONE",
-            "last_transition_reason": (
-                "re-entry reached T1 -- full runner/T3 outcome isn't "
-                "tracked for re-entry fills (documented gap, not guessed)"
-            ),
-        }
-    if session_expires_at and now_utc >= session_expires_at:
-        return {"status": "DONE", "last_transition_reason": "session ended, re-entry outcome unresolved"}
-    return None
-
-
-def check_reentry_eligibility(plan: Dict[str, Any], fuel_still_fueled: bool) -> Dict[str, Any]:
-    """SS8: after a STOPPED (wick-fake) outcome, one re-entry is allowed IF
-    the fuel gate still reads FUELED.
-
-    RESOLVED (2026-08-31, DeepSeek/Andy, AGENT_LOG.md): SS8's "if the wide
-    stop is available, re-entry is not used" means SURVIVED THE DAY, not
-    existed at plan time -- every FILLED plan had an R:R-valid wide stop,
-    but that stop can still be wicked through (measured: 1/39 gate-
-    approved fake sessions hit the 24h core-zone stop within 2h). STOPPED
-    is exactly that event now that check_wide_stop_or_t1() derives it from
-    TradePlan's own stop_price (not CampaignLog's tighter r30 stop -- see
-    that function's docstring), so REENTRY_ARMED is genuinely reachable
-    here, not dead code.
-    """
-    if plan.get("status") != "STOPPED":
-        return {"status": "DONE", "last_transition_reason": "not eligible for re-entry check"}
-    if plan.get("reentry_used"):
-        return {"status": "DONE", "last_transition_reason": "re-entry already used"}
-    if fuel_still_fueled:
-        return {"status": "REENTRY_ARMED", "last_transition_reason": "fuel still FUELED -- one re-entry armed"}
-    return {"status": "DONE", "last_transition_reason": "fuel not FUELED after stop -- no re-entry, done"}
-
-
-def advance_reentry_plan(
-    plan: Dict[str, Any],
-    now_utc: datetime.datetime,
-    session_expires_at: Optional[datetime.datetime],
-    candles_5m: List[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
-    """SS8: the one re-entry attempt itself, once check_reentry_eligibility()
-    has set REENTRY_ARMED. Deliberately NOT advance_waiting_plan() reused --
-    re-entry has no commit_after gate (the open-window rule already applied
-    hours earlier, to the original plan) and no VETOED-retry loop ("one
-    attempt max," SS8's own words): an unfueled re-entry cross goes
-    straight to DONE, it does not arm a second retest watch.
-    """
-    if plan.get("status") != "REENTRY_ARMED":
-        return None
-    if session_expires_at and now_utc >= session_expires_at:
-        return {"status": "DONE", "reentry_used": True,
-                "last_transition_reason": "session ended, re-entry window closed"}
-
-    side = "LONG" if plan.get("direction") == "LONG" else "SHORT"
-    trigger = plan.get("trigger_price")
-    fuel = fuel_gate.evaluate_fuel_gate(candles_5m, trigger, side)
-    verdict = fuel.get("verdict")
-
-    if verdict == "NO_PUSH":
-        return None  # not touched yet
-
-    if verdict == "FUELED":
-        return {
-            "status": "FILLED",
-            "reentry_used": True,
-            "reentry_cross_time": now_utc,
-            "reentry_fill_price": trigger,
-            "fill_time": now_utc,
-            "fill_price": trigger,
-            "cross_time": now_utc,
-            "fuel_at_cross": verdict,
-            "last_transition_reason": "re-entry cross fueled -- filled (one attempt used)",
-        }
-
-    return {
-        "status": "DONE",
-        "reentry_used": True,
-        "last_transition_reason": f"re-entry cross unfueled ({verdict}) -- one attempt used, done",
-    }
+# SS8's fuel-gated re-entry-after-wick-fake (resolve_reentry_fill(),
+# check_reentry_eligibility(), advance_reentry_plan()) REMOVED 2026-09-15
+# (Andy-approved, v1-dead-machinery audit) -- confirmed fully unreachable:
+# trade_plan_engine.py's STOPPED branch resolves unconditionally to DONE
+# now (v2, 2026-09-11, "no leg 2" -- see that file's own header comment),
+# so check_reentry_eligibility() (the only thing that could ever set
+# REENTRY_ARMED) was never called from anywhere in production, which made
+# advance_reentry_plan() and resolve_reentry_fill() unreachable in turn.
+# This was genuinely dead code, not just an unused-but-real utility (unlike
+# fuel_gate.py itself, kept for other reasons) -- Andy's "remove, don't
+# patch" bar for machinery a rewrite makes unreachable. If a v2-native
+# re-entry design is ever built, it needs a new v2-consistent eligibility
+# signal (there is no fuel to check "still worth it" against any more) --
+# this is a fresh design, not a resurrection of these three functions.
+# Full text preserved in git history (this file, pre-2026-09-15).
+#
+# TradePlan.reentry_used/reentry_cross_time/reentry_fill_price columns are
+# left in the schema (nothing currently sets them, and mirror_campaign_
+# outcome() above still guards on reentry_used defensively) -- a later
+# schema cleanup, not done here.

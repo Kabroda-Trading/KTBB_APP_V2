@@ -1,10 +1,13 @@
 # trade_plan_engine.py
 # ==============================================================================
 # TRADE PLAN INTRADAY MONITOR
-# KABRODA_COM_TRADE_PLAN_SPEC.md SS5/SS7/SS8 -- the async driver for
+# KABRODA_COM_TRADE_PLAN_SPEC.md SS5/SS7 -- the async driver for
 # trade_plan.py's pure state-machine functions (advance_waiting_plan,
-# advance_reentry_plan, check_wide_stop_or_t1, mirror_campaign_outcome,
-# check_reentry_eligibility). Same relationship ledger_closing_engine.py
+# check_wide_stop_or_t1, mirror_campaign_outcome). SS8's re-entry
+# functions (advance_reentry_plan/check_reentry_eligibility) were removed
+# from trade_plan.py entirely 2026-09-15 (confirmed unreachable -- see the
+# STOPPED routing note below, unchanged since 2026-09-11). Same relationship
+# ledger_closing_engine.py
 # has to CampaignLog's Phase 1/2 logic -- kept in its OWN file, not inside
 # trade_plan.py, so trade_plan.py stays the pure, dependency-free,
 # easily-tested module its own header describes ("no DB/network").
@@ -42,7 +45,6 @@
 #                        tells these two DONE cases apart via whether
 #                        vetoed_cross_side is set.
 #   WAITING / VETOED -> advance_waiting_plan()   (5m candles + live price)
-#   REENTRY_ARMED     -> advance_reentry_plan()   (5m candles)
 #   FILLED            -> check_wide_stop_or_t1() first -- TradePlan's OWN
 #                        wide stop, scanned against 1m candles since
 #                        fill_time. Only a WIDE_STOP_FIRST verdict can move
@@ -62,11 +64,14 @@
 #                        and inventing a new v2-consistent re-entry
 #                        condition here would be a real design decision
 #                        nobody has actually made yet. A STOPPED plan
-#                        resolves straight to DONE now; check_reentry_
-#                        eligibility()/advance_reentry_plan() are unreachable
-#                        (kept in trade_plan.py, not deleted, in case a
-#                        future v2.x re-entry design gets built on top of
-#                        the new gate instead of fuel).
+#                        resolves straight to DONE now. check_reentry_
+#                        eligibility()/advance_reentry_plan() (the only
+#                        callers of which were this file's now-removed
+#                        REENTRY_ARMED branch) were confirmed unreachable
+#                        and deleted from trade_plan.py 2026-09-15 (Andy-
+#                        approved, v1-dead-machinery audit) -- a future
+#                        v2.x re-entry design needs a fresh eligibility
+#                        signal, not a resurrection of the fuel-based one.
 # ==============================================================================
 
 import asyncio
@@ -324,14 +329,6 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
             return
         await _apply(db, row, updates, symbol)
 
-    elif row.status == "REENTRY_ARMED":
-        candles_5m = market_data.confirmed_5m_closes(await market_data.fetch_live_5m(symbol, limit=310))
-        if not candles_5m:
-            return
-        plan_dict = {"status": row.status, "direction": row.direction, "trigger_price": row.trigger_price}
-        updates = tp.advance_reentry_plan(plan_dict, now_utc, session_expires_at, candles_5m)
-        await _apply(db, row, updates, symbol)
-
     elif row.status == "FILLED":
         if row.fill_time is None or row.stop_price is None or row.t1 is None:
             return  # incomplete row -- nothing safe to check yet
@@ -351,17 +348,13 @@ async def _advance_one(db, row: TradePlan, now_utc: datetime) -> None:
             print(f"|| TRADE PLAN || {symbol} {row.session_id} {row.date_key}: STOPPED -- {row.last_transition_reason}")
             return
 
-        if row.reentry_used:
-            # A re-entry fill has no CampaignLog equivalent to mirror --
-            # see mirror_campaign_outcome()'s and resolve_reentry_fill()'s
-            # own docstrings.
-            updates = tp.resolve_reentry_fill(plan_dict, verdict, now_utc, session_expires_at)
-            await _apply(db, row, updates, symbol)
-            return
-
         # T1_FIRST or NEITHER_YET on the ORIGINAL fill: the wide-stop
         # question is settled (or moot) for now -- defer to CampaignLog's
         # own already-verified terminal status for the rest of management.
+        # (row.reentry_used can no longer become True -- the only function
+        # that ever set it, advance_reentry_plan(), was removed 2026-09-15;
+        # mirror_campaign_outcome() still guards on it defensively for any
+        # pre-rebuild row that might still carry the flag.)
         campaign = (
             db.query(CampaignLog)
             .filter(
@@ -479,8 +472,13 @@ async def run_trade_plan_loop():
         now_utc = datetime.now(timezone.utc)
         db = SessionLocal()
         try:
+            # REENTRY_ARMED removed 2026-09-15 -- nothing can produce that
+            # status any more (check_reentry_eligibility() was deleted, the
+            # only thing that ever set it). VETOED stays -- see trade_plan.py's
+            # advance_waiting_plan() docstring on why a pre-rebuild row still
+            # sitting at that status needs to keep being polled.
             rows = db.query(TradePlan).filter(
-                TradePlan.status.in_(["WAITING", "VETOED", "FILLED", "STOPPED", "REENTRY_ARMED", "NO_PLAN"])
+                TradePlan.status.in_(["WAITING", "VETOED", "FILLED", "STOPPED", "NO_PLAN"])
             ).all()
             for row in rows:
                 try:

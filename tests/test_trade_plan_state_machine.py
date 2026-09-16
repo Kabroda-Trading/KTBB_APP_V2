@@ -1,7 +1,7 @@
 """
 Unit coverage for trade_plan.py's intraday state machine
-(KABRODA_COM_TRADE_PLAN_SPEC.md SS5/SS7/SS8): advance_waiting_plan,
-mirror_campaign_outcome, check_reentry_eligibility.
+(KABRODA_COM_TRADE_PLAN_SPEC.md SS5/SS7): advance_waiting_plan,
+mirror_campaign_outcome.
 
 Rewritten 2026-09-15 for v2 (Krown Cross + 4H RSI gate, no fuel). v1's fuel-
 based tests (FUELED/CONFLICTED/NO_FUEL verdicts via fuel_gate.py, tier
@@ -13,12 +13,14 @@ opposite-trigger-break detection and check_wide_stop_or_t1()/
 mirror_campaign_outcome() tests are unchanged -- neither was ever fuel-
 specific.
 
-check_reentry_eligibility()/advance_reentry_plan() are RETIRED in v2 (SS8
-re-entry-after-wick-fake had no v2-consistent replacement signal -- see
-trade_plan_engine.py's own header comment, "no leg 2" reasoning). The
-functions still exist in trade_plan.py, unreachable from trade_plan_engine.py,
-kept in case a future v2-native re-entry design is built -- their tests stay
-as pure-function coverage of code that still exists, just isn't called live.
+check_reentry_eligibility()/advance_reentry_plan()/resolve_reentry_fill()
+(SS8's fuel-gated re-entry-after-wick-fake) were DELETED from trade_plan.py
+2026-09-15 (Andy-approved, v1-dead-machinery audit) -- confirmed genuinely
+unreachable (trade_plan_engine.py's STOPPED branch has resolved
+unconditionally to DONE since 2026-09-11, so nothing has called
+check_reentry_eligibility() since then), not just unused-but-real like
+fuel_gate.py itself. Their pure-function test coverage is removed along
+with them, not kept -- there is no code left for it to cover.
 """
 import datetime
 import os
@@ -281,110 +283,3 @@ def test_mirror_never_produces_stopped():
         result = tp.mirror_campaign_outcome(plan, campaign_status)
         assert result["status"] == "DONE"
         assert campaign_status in result["last_transition_reason"]
-
-
-# ------------------------------------------------------------------ check_reentry_eligibility / advance_reentry_plan / resolve_reentry_fill
-# RETIRED from the live flow (trade_plan_engine.py no longer calls any of
-# these -- see that file's own header comment), kept as pure-function
-# coverage of code that still exists in trade_plan.py unreachable, in case
-# a v2-native re-entry design is built on top of it later. Unchanged by v2
-# since none of it ever depended on tier.
-
-def test_reentry_armed_when_fuel_still_fueled():
-    plan = _plan(status="STOPPED")
-    result = tp.check_reentry_eligibility(plan, fuel_still_fueled=True)
-    assert result["status"] == "REENTRY_ARMED"
-
-
-def test_reentry_done_when_fuel_not_fueled():
-    plan = _plan(status="STOPPED")
-    result = tp.check_reentry_eligibility(plan, fuel_still_fueled=False)
-    assert result["status"] == "DONE"
-
-
-def test_reentry_done_when_already_used():
-    plan = _plan(status="STOPPED", reentry_used=True)
-    result = tp.check_reentry_eligibility(plan, fuel_still_fueled=True)
-    assert result["status"] == "DONE"
-    assert "already used" in result["last_transition_reason"]
-
-
-def test_reentry_done_when_not_stopped():
-    plan = _plan(status="FILLED")
-    result = tp.check_reentry_eligibility(plan, fuel_still_fueled=True)
-    assert result["status"] == "DONE"
-    assert "not eligible" in result["last_transition_reason"]
-
-
-def test_reentry_advance_ignores_non_armed_status():
-    for status in ("WAITING", "VETOED", "FILLED", "STOPPED", "DONE", "NO_PLAN"):
-        plan = _plan(status=status)
-        assert tp.advance_reentry_plan(plan, NOW, SESSION_EXPIRES, _candles()) is None
-
-
-def test_reentry_advance_session_expiry_no_cross():
-    plan = _plan(status="REENTRY_ARMED", direction="LONG", trigger=100.0)
-    result = tp.advance_reentry_plan(plan, SESSION_EXPIRES, SESSION_EXPIRES, _candles(touched=False))
-    assert result["status"] == "DONE"
-    assert result["reentry_used"] is True
-    assert "window closed" in result["last_transition_reason"]
-
-
-def test_reentry_advance_no_touch_returns_none():
-    plan = _plan(status="REENTRY_ARMED", direction="LONG", trigger=100.0)
-    result = tp.advance_reentry_plan(plan, NOW, SESSION_EXPIRES, _candles(side="LONG", touched=False))
-    assert result is None
-
-
-def test_reentry_advance_fueled_cross_fills():
-    plan = _plan(status="REENTRY_ARMED", direction="LONG", trigger=100.0)
-    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=10.0, touched=True)  # ratio 1.0 -> FUELED
-    result = tp.advance_reentry_plan(plan, NOW, SESSION_EXPIRES, candles)
-    assert result["status"] == "FILLED"
-    assert result["reentry_used"] is True
-    assert result["reentry_fill_price"] == 100.0
-    assert result["reentry_cross_time"] == NOW
-    assert result["fill_price"] == 100.0
-    assert "one attempt used" in result["last_transition_reason"]
-
-
-def test_reentry_advance_unfueled_cross_goes_straight_to_done():
-    plan = _plan(status="REENTRY_ARMED", direction="LONG", trigger=100.0)
-    candles = _candles(side="LONG", baseline_vol=10.0, push_vol=2.0, touched=True)  # thin
-    result = tp.advance_reentry_plan(plan, NOW, SESSION_EXPIRES, candles)
-    assert result["status"] == "DONE"
-    assert result["reentry_used"] is True
-
-
-def test_resolve_reentry_ignores_non_reentry_plans():
-    plan = _plan(status="FILLED", reentry_used=False)
-    assert tp.resolve_reentry_fill(plan, "T1_FIRST", NOW, SESSION_EXPIRES) is None
-
-
-def test_resolve_reentry_ignores_non_filled_status():
-    plan = _plan(status="STOPPED", reentry_used=True)
-    assert tp.resolve_reentry_fill(plan, "T1_FIRST", NOW, SESSION_EXPIRES) is None
-
-
-def test_resolve_reentry_t1_first_is_done_with_documented_gap():
-    plan = _plan(status="FILLED", reentry_used=True)
-    result = tp.resolve_reentry_fill(plan, "T1_FIRST", NOW, SESSION_EXPIRES)
-    assert result["status"] == "DONE"
-    assert "documented gap" in result["last_transition_reason"]
-
-
-def test_resolve_reentry_neither_yet_keeps_polling():
-    plan = _plan(status="FILLED", reentry_used=True)
-    assert tp.resolve_reentry_fill(plan, "NEITHER_YET", NOW, SESSION_EXPIRES) is None
-
-
-def test_resolve_reentry_session_expired_becomes_done():
-    plan = _plan(status="FILLED", reentry_used=True)
-    result = tp.resolve_reentry_fill(plan, "NEITHER_YET", SESSION_EXPIRES, SESSION_EXPIRES)
-    assert result["status"] == "DONE"
-    assert "unresolved" in result["last_transition_reason"]
-
-
-def test_resolve_reentry_does_not_handle_wide_stop_first():
-    plan = _plan(status="FILLED", reentry_used=True)
-    assert tp.resolve_reentry_fill(plan, "WIDE_STOP_FIRST", NOW, SESSION_EXPIRES) is None
