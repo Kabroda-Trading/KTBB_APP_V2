@@ -147,6 +147,36 @@ def set_account_mode(db: Session, account: ExecutorAccount, new_mode: str, by: s
     return account
 
 
+def set_assumed_balance(db: Session, account: ExecutorAccount, assumed_balance_usd: Optional[float], by: str = "system") -> ExecutorAccount:
+    """CC_WORK_ORDER_ASSUMED_BALANCE.md (2026-09-16) -- ExecutorAccount.
+    assumed_balance_usd existed in the schema with no way to ever write it:
+    display-only in the admin UI (executor_admin.html, rendered as "not
+    set"), read-only in main.py's account serializer, and the ONLY balance
+    fallback executor_plan_builder.py's _query_real_balance() uses when an
+    account has no credentials (or a live balance query fails) --
+    executor_sizing.py's banded_risk() raises ValueError("banded_risk
+    requires a balance") the instant it needs one and gets None. A DRY_RUN
+    evaluation account has no exchange to query at all, so without this
+    setter, banded sizing could never compute for it -- exactly the error
+    Andy hit on the eval_traveler account. Same validation/audit shape as
+    set_account_mode()/set_account_profile() above -- never touches
+    credentials or mode, valid for every mode (a LIVE account can also use
+    this as its own plan-builder fallback if a live balance query fails)."""
+    old_value = account.assumed_balance_usd
+    if assumed_balance_usd is not None and assumed_balance_usd <= 0:
+        raise ValueError("assumed_balance_usd must be a positive number, or null to clear")
+    if assumed_balance_usd == old_value:
+        return account
+    account.assumed_balance_usd = assumed_balance_usd
+    write_audit(
+        db, "ASSUMED_BALANCE_SET",
+        f"account {account.id} assumed_balance_usd changed {old_value} -> {assumed_balance_usd}",
+        account_id=account.id, actor=by,
+        detail={"old_assumed_balance_usd": old_value, "new_assumed_balance_usd": assumed_balance_usd},
+    )
+    return account
+
+
 _VALID_GATE_PROFILES = ("GATE_V2", "GATE_TRAVELER")
 _VALID_MGMT_PROFILES = ("MGMT_SPLIT", "MGMT_E1_STACK")
 DEFAULT_GATE_PROFILE = "GATE_V2"

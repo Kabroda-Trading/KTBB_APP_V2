@@ -811,6 +811,88 @@ def test_set_account_mode_same_mode_is_a_harmless_noop(db):
     assert len(rows) == 0
 
 
+# ------------------------------------------------------------------ set_assumed_balance (CC_WORK_ORDER_ASSUMED_BALANCE.md, 2026-09-16)
+
+def test_set_assumed_balance_sets_a_new_value(db):
+    account = ea.create_account(db, user_id=1, label="eval_traveler")
+    db.commit()
+    assert account.assumed_balance_usd is None
+    ea.set_assumed_balance(db, account, 25000.0, by="andy@kabroda.com")
+    db.commit()
+    assert account.assumed_balance_usd == 25000.0
+
+
+def test_set_assumed_balance_updates_an_existing_value(db):
+    account = ea.create_account(db, user_id=1, label="eval_traveler")
+    ea.set_assumed_balance(db, account, 25000.0, by="andy@kabroda.com")
+    db.commit()
+    ea.set_assumed_balance(db, account, 50000.0, by="andy@kabroda.com")
+    db.commit()
+    assert account.assumed_balance_usd == 50000.0
+
+
+def test_set_assumed_balance_null_clears_it(db):
+    account = ea.create_account(db, user_id=1, label="eval_traveler")
+    ea.set_assumed_balance(db, account, 25000.0, by="andy@kabroda.com")
+    db.commit()
+    ea.set_assumed_balance(db, account, None, by="andy@kabroda.com")
+    db.commit()
+    assert account.assumed_balance_usd is None
+
+
+def test_set_assumed_balance_rejects_zero(db):
+    account = ea.create_account(db, user_id=1, label="eval_traveler")
+    db.commit()
+    with pytest.raises(ValueError, match="positive number"):
+        ea.set_assumed_balance(db, account, 0.0, by="andy@kabroda.com")
+
+
+def test_set_assumed_balance_rejects_negative(db):
+    account = ea.create_account(db, user_id=1, label="eval_traveler")
+    db.commit()
+    with pytest.raises(ValueError, match="positive number"):
+        ea.set_assumed_balance(db, account, -100.0, by="andy@kabroda.com")
+
+
+def test_set_assumed_balance_writes_audit_row_on_real_change(db):
+    account = ea.create_account(db, user_id=1, label="eval_traveler")
+    db.commit()
+    ea.set_assumed_balance(db, account, 25000.0, by="andy@kabroda.com")
+    db.commit()
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="ASSUMED_BALANCE_SET").all()
+    assert len(rows) == 1
+    assert rows[0].detail_json is not None
+    assert "25000" in rows[0].detail_json
+
+
+def test_set_assumed_balance_no_change_writes_no_audit_row(db):
+    account = ea.create_account(db, user_id=1, label="eval_traveler")
+    ea.set_assumed_balance(db, account, 25000.0, by="andy@kabroda.com")
+    db.commit()
+    ea.set_assumed_balance(db, account, 25000.0, by="andy@kabroda.com")
+    db.commit()
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="ASSUMED_BALANCE_SET").all()
+    assert len(rows) == 1   # only the first, real change
+
+
+def test_set_assumed_balance_never_touches_mode_or_credentials(db):
+    account = ea.create_account(db, user_id=1, label="eval_traveler")
+    ea.set_credentials(db, account, "key1", "secret1", set_by="andy@kabroda.com")
+    db.commit()
+    ea.set_assumed_balance(db, account, 25000.0, by="andy@kabroda.com")
+    db.commit()
+    assert account.mode == "DRY_RUN"
+    assert account.api_key_encrypted is not None
+
+
+def test_set_assumed_balance_allowed_on_a_live_account(db):
+    account = _live_account(db)
+    ea.set_assumed_balance(db, account, 100000.0, by="andy@kabroda.com")
+    db.commit()
+    assert account.assumed_balance_usd == 100000.0
+    assert account.mode == "LIVE"
+
+
 # ------------------------------------------------------------------ set_account_profile / gate_profile_of / mgmt_profile_of (Phase 2, 2026-09-15)
 
 def test_gate_profile_of_defaults_to_v2_when_never_set(db):

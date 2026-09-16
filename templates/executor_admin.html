@@ -271,7 +271,13 @@ async function loadAccounts() {
             </div>
             <div style="font-size:11px; color:#64748b; margin-top:8px; font-family:'JetBrains Mono';">
                 margin: ${escapeHtml(a.margin_mode)} @ ${a.leverage_baseline}x baseline
-                &middot; assumed balance: ${a.assumed_balance_usd !== null ? '$' + a.assumed_balance_usd : 'not set'}
+            </div>
+            <div class="risk-form" style="margin-top:4px; align-items:center;">
+                <label style="font-size:11px; color:#64748b;">Assumed balance ($) -- the sizing fallback used when no live exchange balance is available (every DRY_RUN account, or a failed live query)
+                    <input type="number" step="0.01" min="0" id="assumedBalance-${a.id}" value="${a.assumed_balance_usd !== null && a.assumed_balance_usd !== undefined ? a.assumed_balance_usd : ''}" style="width:120px;">
+                </label>
+                <button class="btn" onclick="saveAssumedBalance(${a.id})">SAVE ASSUMED BALANCE</button>
+                <span id="assumedBalanceResult-${a.id}" style="display:none; font-size:11px; align-self:center;"></span>
             </div>
 
             <div class="setup-step ${a.has_credentials ? 'setup-step-done' : ''}">
@@ -527,6 +533,29 @@ async function saveAccountProfile(accountId) {
         return;
     }
     resultEl.textContent = `Saved: ${resp.account.gate_profile} / ${resp.account.mgmt_profile}`;
+    resultEl.style.color = "#6ee7b7";
+    loadAccounts();
+}
+
+// ------------------------------------------------------------------ Assumed balance (CC_WORK_ORDER_ASSUMED_BALANCE.md, 2026-09-16)
+// The sizing fallback used when an account has no exchange balance to
+// query (every DRY_RUN evaluation account) -- was display-only before
+// this, no way for anyone to actually set it.
+
+async function saveAssumedBalance(accountId) {
+    const raw = document.getElementById(`assumedBalance-${accountId}`).value;
+    const assumed_balance_usd = raw === "" ? null : parseFloat(raw);
+    const resp = await api(`/api/executor/accounts/${accountId}/assumed-balance`, {
+        method: "POST", body: JSON.stringify({ assumed_balance_usd }),
+    });
+    const resultEl = document.getElementById(`assumedBalanceResult-${accountId}`);
+    resultEl.style.display = "inline";
+    if (!resp.ok) {
+        resultEl.textContent = resp.error || "failed to save assumed balance";
+        resultEl.style.color = "#fca5a5";
+        return;
+    }
+    resultEl.textContent = "Saved.";
     resultEl.style.color = "#6ee7b7";
     loadAccounts();
 }

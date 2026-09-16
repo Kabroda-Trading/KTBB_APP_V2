@@ -331,6 +331,52 @@ def test_profile_route_on_live_account_requires_confirm_phrase(env):
     assert with_confirm.json()["account"]["gate_profile"] == "GATE_TRAVELER"
 
 
+# ------------------------------------------------------------------ assumed balance (CC_WORK_ORDER_ASSUMED_BALANCE.md, 2026-09-16)
+
+def test_assumed_balance_route_non_owner_non_admin_gets_403(env):
+    client = _login("exec_other@kabroda.com", "otherpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/assumed-balance", json={"assumed_balance_usd": 25000.0})
+    assert resp.status_code == 403
+
+
+def test_assumed_balance_route_owner_can_set_it(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/assumed-balance", json={"assumed_balance_usd": 25000.0})
+    assert resp.status_code == 200
+    assert resp.json()["account"]["assumed_balance_usd"] == 25000.0
+
+
+def test_assumed_balance_route_null_clears_it(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    aid = env["account_id"]
+    client.post(f"/api/executor/accounts/{aid}/assumed-balance", json={"assumed_balance_usd": 25000.0})
+    resp = client.post(f"/api/executor/accounts/{aid}/assumed-balance", json={"assumed_balance_usd": None})
+    assert resp.status_code == 200
+    assert resp.json()["account"]["assumed_balance_usd"] is None
+
+
+def test_assumed_balance_route_rejects_zero_or_negative_with_400(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    aid = env["account_id"]
+    assert client.post(f"/api/executor/accounts/{aid}/assumed-balance", json={"assumed_balance_usd": 0.0}).status_code == 400
+    assert client.post(f"/api/executor/accounts/{aid}/assumed-balance", json={"assumed_balance_usd": -50.0}).status_code == 400
+
+
+def test_assumed_balance_route_allowed_on_a_live_account_no_confirm_needed(env):
+    admin_client = _login("exec_admin@kabroda.com", "adminpass123")
+    owner_client = _login("exec_owner@kabroda.com", "ownerpass123")
+    aid = env["account_id"]
+    owner_client.post(f"/api/executor/accounts/{aid}/credentials", json={"api_key": "k", "api_secret": "s"})
+    owner_client.post(f"/api/executor/accounts/{aid}/sizing-policy", json={"preset_name": "fixed_dollar", "base_risk_usd": 100.0})
+    live_resp = owner_client.post(f"/api/executor/accounts/{aid}/mode", json={"mode": "LIVE", "confirm": "CONFIRM ENABLE LIVE TRADING"})
+    assert live_resp.status_code == 200
+
+    resp = owner_client.post(f"/api/executor/accounts/{aid}/assumed-balance", json={"assumed_balance_usd": 100000.0})
+    assert resp.status_code == 200
+    assert resp.json()["account"]["assumed_balance_usd"] == 100000.0
+    assert resp.json()["account"]["mode"] == "LIVE"
+
+
 # ------------------------------------------------------------------ credential handling never echoes the secret
 
 def test_credential_set_response_never_contains_the_secret(env):

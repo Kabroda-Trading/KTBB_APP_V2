@@ -1321,6 +1321,11 @@ class ExecutorProfileChangeRequest(BaseModel):
     confirm: Optional[str] = None
 
 
+class ExecutorAssumedBalanceRequest(BaseModel):
+    """CC_WORK_ORDER_ASSUMED_BALANCE.md (2026-09-16) -- null clears it."""
+    assumed_balance_usd: Optional[float] = None
+
+
 class ExecutorRiskStateUpdateRequest(BaseModel):
     risk_last_usd: Optional[float] = None
     risk_floor_usd: Optional[float] = None
@@ -1559,6 +1564,29 @@ async def api_executor_set_account_profile(account_id: int, request: Request, bo
             db, account, gate_profile=body.gate_profile, mgmt_profile=body.mgmt_profile,
             by=ctx.get("email") or "unknown", confirm=body.confirm,
         )
+    except ValueError as e:
+        db.rollback()
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    db.commit()
+    return JSONResponse({"ok": True, "account": _serialize_account(account)})
+
+
+@app.post("/api/executor/accounts/{account_id}/assumed-balance")
+async def api_executor_set_assumed_balance(account_id: int, request: Request, body: ExecutorAssumedBalanceRequest, db: Session = Depends(get_db)):
+    """CC_WORK_ORDER_ASSUMED_BALANCE.md (2026-09-16) -- the fallback balance
+    source executor_plan_builder.py uses for an account with no
+    credentials (every DRY_RUN evaluation account) or a failed live
+    balance query. Was display-only before this route existed -- direct DB
+    edits would violate the audited-action bar every other account
+    mutation in this file follows."""
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    try:
+        _executor_accounts.set_assumed_balance(db, account, body.assumed_balance_usd, by=ctx.get("email") or "unknown")
     except ValueError as e:
         db.rollback()
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
