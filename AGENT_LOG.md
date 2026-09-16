@@ -4505,3 +4505,83 @@ blocker from the Phase 2 report. Moving to Ruling B next (v1/v2's own
 DRY_RUN MGMT_SPLIT management simulation) — not started yet.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-15 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — Ruling B shipped: v1/v2's own DRY_RUN orders now get a real MGMT_SPLIT management simulation
+
+Both rulings from your 22:10 CT scoping are now shipped (A then B, as ordered).
+
+### What shipped
+Before this, a DRY_RUN v1/v2 ExecutorOrder sat at
+`management_state="PENDING_ENTRY"` (the DB default) forever --
+executor_live_engine.py's `run_executor_position_loop()` only ever polls
+orders with a real `entry_exchange_order_id` (a LIVE fill), so no exit was
+ever recorded for v1/v2's own DRY_RUN population. This made the
+apples-to-apples DRY_RUN comparison against GATE_TRAVELER impossible --
+v2's side never produced any outcome data at all.
+
+- `mgmt_split_dry_run.py` (new): pure-function candle walk for MGMT_SPLIT,
+  same priority as `poll_open_position()`'s real rule -- STOP-before-T1 is
+  a clean, un-blended -1R (checked first); after T1 fills (50% off), the
+  stop never moves (the T2 breakeven move was deleted outright 2026-09-15)
+  and the runner closes at T3 or the original stop, whichever wick touches
+  first, same-bar tie resolved STOP-first. Zero dependency on
+  executor_live_engine.py -- duplicates the R-multiple formula rather than
+  cross-importing, same convention traveler_plan_engine.py already uses.
+- `dry_run_split_engine.py` (new): the async driver, mirrors traveler_
+  plan_engine.py's own relationship to mgmt_e1_stack.py exactly -- a
+  completely separate 60s loop, registered in main.py's lifespan(), scoped
+  to `mode=="DRY_RUN"` + `mgmt_profile_used=="MGMT_SPLIT"` orders only.
+  Same "console print, no audit row, no record_trade_result() call"
+  convention already established for GATE_TRAVELER's own DRY_RUN walk.
+- `executor_engine.py::_process_account()`: DRY_RUN + MGMT_SPLIT orders
+  now get `entry_fill_price`/`entry_fill_time`/`management_state` set
+  immediately at creation, same treatment `_process_traveler_account()`
+  already gives GATE_TRAVELER's own DRY_RUN order (the TradePlan's own
+  FILLED transition IS the entry fill -- no real exchange confirmation
+  will ever arrive for DRY_RUN to wait for). Gated strictly on
+  `mode=="DRY_RUN"` -- LIVE's own real order-placement branch is
+  completely untouched.
+- No new DB columns needed -- every field used already existed on
+  ExecutorOrder from the original v1/v2 LIVE design or the Phase 2
+  ingestion-spec columns.
+
+### Test results
+- 11 new pure-function tests: STOP-before-T1, T1-then-T3, T1-then-runner-
+  stop (confirms the stop stays at the ORIGINAL level, never moves), a
+  same-poll T1+closure catch-up (both land in one call), SHORT-side
+  mirroring, same-bar STOP/T1 priority.
+- 5 new integration tests running the REAL `process_fill()`/
+  `run_dry_run_split_loop()` chain end to end: entry-fill snapshot on
+  creation, T1->T3 close, stop-before-T1, a GATE_TRAVELER account produces
+  no SPLIT work, a LIVE order is correctly left alone by this loop's own
+  query filter.
+- Full `pytest tests/`: 663 passed (up from 647 -- exactly the 16 new
+  tests), same 5 pre-existing unrelated test_dashboard_fixes.py errors.
+
+### Boot status
+Clean. The new "MGMT_SPLIT DRY_RUN MONITOR" loop initializes and
+registers in scheduler_health_registry alongside the existing loops.
+
+### Flagged, not resolved
+Same open design question GATE_TRAVELER's own DRY_RUN walk already
+raised: this loop does not call `executor_accounts.record_trade_result()`,
+so a DRY_RUN account's dollar-ledger (consecutive_losses/risk_last_usd)
+never compounds off simulated candle-walk trades for EITHER lineage.
+Kept symmetric with the already-shipped precedent rather than resolved
+unilaterally for only one of the two -- if the evaluation harness wants
+DRY_RUN sizing to compound across a sequence of simulated trades, that's
+a shared follow-up covering both lineages, not a SPLIT-only fix.
+
+Also flagged separately to Andy directly this session (worth relaying):
+GATE_TRAVELER's own D1/D2 gate does not yet send an alert email the way
+v2's does today -- Phase 2 only built the D1/D2/D3 mechanics, not a
+parallel notification. Not started, not asked for in either work order.
+
+Both rulings A and B are now shipped end to end: an account can be set to
+GATE_TRAVELER/MGMT_E1_STACK via the admin UI, and BOTH v2/MGMT_SPLIT and
+GATE_TRAVELER/MGMT_E1_STACK now run a real DRY_RUN management simulation
+to a real close. The weekly side-by-side comparison has real data to work
+with on both sides now.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
