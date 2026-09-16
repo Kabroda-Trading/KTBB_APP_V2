@@ -325,8 +325,8 @@ def _notify_candidate_closed(c: CampaignLog) -> None:
 
 def _backfill_gate_log(db, now_utc: datetime) -> None:
     """KABRODA_REBUILD_SPEC.md §9 -- fills in what actually happened for each
-    TAKE_PREMIUM/TAKE_STANDARD gate_log row once its matching CampaignLog
-    record resolves. Deliberately reuses CampaignLog's already-verified
+    real-TAKE gate_log row once its matching CampaignLog record resolves.
+    Deliberately reuses CampaignLog's already-verified
     close-detection instead of re-scanning candles from scratch -- every
     15M decision (TAKE or PASS) already upserts a CampaignLog row
     (_inject_brief_to_database, unconditional), so matching by
@@ -347,8 +347,15 @@ def _backfill_gate_log(db, now_utc: datetime) -> None:
     resolve on the same timeline (a re-entry can still be open after
     CampaignLog has long since closed, or vice versa).
     """
+    # v2 (2026-09-15, found during the v1-dead-machinery audit): decision_
+    # engine.py's v2 gate has written GateLog.state == "TAKE" (no tier split)
+    # since 2026-09-11 -- this filter still only matched the old TAKE_
+    # PREMIUM/TAKE_STANDARD strings, so it silently stopped backfilling
+    # EVERY new TAKE from that date forward (a real gap in the Brain's
+    # forward-test log, not just cosmetic). "TAKE_PREMIUM"/"TAKE_STANDARD"
+    # kept in the filter for any older row that hasn't resolved yet.
     pending = db.query(GateLog).filter(
-        GateLog.state.in_(["TAKE_PREMIUM", "TAKE_STANDARD"]),
+        GateLog.state.in_(["TAKE", "TAKE_PREMIUM", "TAKE_STANDARD"]),
         GateLog.backfilled_at.is_(None),
     ).all()
     if not pending:

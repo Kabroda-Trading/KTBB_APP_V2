@@ -194,9 +194,9 @@ def evaluate_15m_decision(
     session_hour_utc: Optional[int] = None,
 ) -> Tuple[Dict[str, Any], List[GaugeTuple]]:
     """Returns (decision_dict, gauge_readings). decision_dict has the
-    ExecutiveBrief field names plus `verdict_state` (TAKE_PREMIUM/
-    TAKE_STANDARD/PASS), `side`, `tier`, `gate` (full detail dict for
-    the DB log). Callers do
+    ExecutiveBrief field names plus `verdict_state` (TAKE/PASS), `side`,
+    `tier` (always None -- v2 has no tier split), `gate` (full detail dict
+    for the DB log). Callers do
     ExecutiveBrief(**{k: v for k, v in decision_dict.items() if k in ExecutiveBrief.__fields__})."""
 
     bo = float(levels.get("breakout_trigger") or 0)

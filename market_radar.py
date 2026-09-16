@@ -80,8 +80,8 @@ def _get_tf_system_verdicts(symbol_norm: str) -> dict:
             if c15m:
                 result["15M"] = {
                     "status":   c15m.mas_approval_status or "PENDING",
-                    "state":    c15m.conviction,    # TAKE_PREMIUM/TAKE_STANDARD/PASS
-                    "tier":     c15m.tier,          # PREMIUM/STANDARD/None
+                    "state":    c15m.conviction,    # TAKE/PASS now (v2); older rows may still say TAKE_PREMIUM/TAKE_STANDARD
+                    "tier":     c15m.tier,          # always None now (v2 retired tiers); older rows may still say PREMIUM/STANDARD
                     "headline": c15m.mas_executive_brief,  # the real reason, plain English
                     "bias":     c15m.bias,
                     "entry":    c15m.entry_price,
@@ -205,19 +205,25 @@ def _make_indicator_string(levels):
 # Legacy-shaped compatibility fields, kept only until the §8 radar rebuild
 # lands (KABRODA_REBUILD_SPEC.md) -- score_pct/grade/color_code are explicitly
 # on the CUT list (§11.1: "0-100 score_pct as the verdict -- non-monotonic
-# with outcome"), not a real signal. They're mapped here so the current
-# frontend doesn't break while the new three-outcome headline card (TAKE
-# PREMIUM/TAKE STANDARD/PASS) is still being built.
+# with outcome"), not a real signal. Mapped here so the current frontend
+# doesn't break.
+#
+# v2 (2026-09-15, found during the v1-dead-machinery audit): this dict and
+# the function below it were still keyed on "TAKE_PREMIUM"/"TAKE_STANDARD" --
+# decision_engine.py's v2 gate has returned only "TAKE"/"PASS" since
+# 2026-09-11 (one outcome, no tier split -- see that file's own header
+# comment), so every one of these checks was silently False on a real TAKE.
+# The radar could never mark a genuine setup as valid, green, or actionable
+# -- it fell through to the gray/PASS display every time, with no test
+# coverage to catch it (there is no test_market_radar.py). Fixed.
 _STATE_COLOR = {
-    "TAKE_PREMIUM": "GREEN", "TAKE_STANDARD": "GREEN", "PASS": "GRAY",
+    "TAKE": "GREEN", "PASS": "GRAY",
 }
 
 
 def _legacy_briefing(state: str, side: Optional[str], headline: str) -> str:
-    if state == "TAKE_PREMIUM":
-        return f"🟢🟢 TAKE — PREMIUM ({side}) — {headline}"
-    if state == "TAKE_STANDARD":
-        return f"🟢 TAKE — STANDARD ({side}) — {headline}"
+    if state == "TAKE":
+        return f"🟢 TAKE ({side}) — {headline}"
     return f"⚪ PASS — {headline}"
 
 
@@ -262,7 +268,7 @@ async def _build_dossier(symbol: str, price: float, levels: dict, context: dict)
     state = decision["verdict_state"]
     side = decision.get("side")
     favored = decision["bias"]
-    is_valid = state in ("TAKE_PREMIUM", "TAKE_STANDARD")
+    is_valid = state == "TAKE"
 
     plan = {
         "valid": is_valid, "bias": favored, "tier": decision.get("tier"), "state": state,
@@ -280,9 +286,9 @@ async def _build_dossier(symbol: str, price: float, levels: dict, context: dict)
 
     return {
         "favored": favored,
-        "verdict_state": state,          # TAKE_PREMIUM/TAKE_STANDARD/PASS -- the real answer
+        "verdict_state": state,          # TAKE/PASS -- the real answer
         "grade": state,                  # legacy field name, same value -- see module note above
-        "score_pct": 100 if state == "TAKE_PREMIUM" else (75 if state == "TAKE_STANDARD" else 0),
+        "score_pct": 100 if state == "TAKE" else 0,
         "color_code": _STATE_COLOR.get(state, "GRAY"),
         "briefing": _legacy_briefing(state, side, decision["tactical_brief"]),
         "checks": [], "diagnostic_ledger": {"reason": decision["tactical_brief"], "gate": decision.get("gate")},
@@ -401,8 +407,8 @@ async def scan_sector():
         # gate state, levels, briefing, full context) is untouched.
         try:
             # dossier["grade"] is the real calibrated-gate state from
-            # decision_engine.py (TAKE_PREMIUM/TAKE_STANDARD/PASS,
-            # 2026-09-06 three-outcome rebuild) -- written as-is, no remapping needed.
+            # decision_engine.py (TAKE/PASS, v2 rebuild 2026-09-11) -- written
+            # as-is, no remapping needed.
             decision_type = dossier.get("grade", "PASS")
 
             with SessionLocal() as db:

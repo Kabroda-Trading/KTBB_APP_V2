@@ -915,10 +915,12 @@
             // string only — rawKey stays unchanged so the TradingView
             // "COPY TO HUD" payload keeps its 9-field format
             // (bias|status|entry|stop|tp1|tp2|tp3|macro|micro).
+            // v2 (2026-09-15, found during the v1-dead-machinery audit): the
+            // TAKE_PREMIUM/TAKE_STANDARD renames below were dead -- d.key can
+            // only ever contain "TAKE" or "PASS" now (decision_engine.py's v2
+            // gate has no tier split, see that file's own header comment).
             let visualKey = d.key
                 ? d.key.replace(/\|/g, " | ")
-                        .replace(/TAKE_PREMIUM/g, 'TAKE: PREMIUM')
-                        .replace(/TAKE_STANDARD/g, 'TAKE: STANDARD')
                 : "-- DATA MISSING --";
             document.getElementById('hudPayload').innerHTML = visualKey;
 
@@ -986,10 +988,9 @@
             // 2026-09-06 rebuild: masStatus is either the official CampaignLog
             // verdict (APPROVED/STAND_DOWN) or, in the full-grid path where no
             // CampaignLog row exists yet, the live calibrated-gate state
-            // straight from decision_engine.py (TAKE_PREMIUM/TAKE_STANDARD/
-            // PASS) -- same source of truth, shown as text either way, not
-            // just a border color.
-            const masColor  = masStatus === 'APPROVED' || masStatus === 'TAKE_PREMIUM' || masStatus === 'TAKE_STANDARD' ? '#22c55e'
+            // straight from decision_engine.py (TAKE/PASS, v2) -- same source
+            // of truth, shown as text either way, not just a border color.
+            const masColor  = masStatus === 'APPROVED' || masStatus === 'TAKE' ? '#22c55e'
                             : masStatus === 'STAND_DOWN' || masStatus === 'PASS' ? '#94a3b8'
                             : '#64748b';
             const masBadge  = masStatus
@@ -1025,15 +1026,19 @@
             dailyRegime = dailyRegime || '—';  // guard .startsWith() below against null/undefined
 
             function mas15mRow(data) {
-                const state = data.state;  // TAKE_PREMIUM/TAKE_STANDARD/PASS
-                const isTake = state === 'TAKE_PREMIUM' || state === 'TAKE_STANDARD';
-                const color = state === 'TAKE_PREMIUM' ? '#22c55e'
-                            : state === 'TAKE_STANDARD' ? '#22c55e'
-                            : state === 'PASS'          ? '#64748b'
+                // v2 (2026-09-15, found during the v1-dead-machinery audit):
+                // state can only ever be "TAKE" or "PASS" now (decision_
+                // engine.py's v2 gate has no tier split) -- the TAKE_PREMIUM/
+                // TAKE_STANDARD checks below were silently always false, so
+                // isTake was always false and the plan (entry/stop/T1-T3)
+                // never rendered here even on a real TAKE day. Fixed.
+                const state = data.state;  // TAKE/PASS
+                const isTake = state === 'TAKE';
+                const color = state === 'TAKE' ? '#22c55e'
+                            : state === 'PASS' ? '#64748b'
                             : '#334155';
-                const stampText = state === 'TAKE_PREMIUM' ? '🟢🟢 TAKE — PREMIUM'
-                                 : state === 'TAKE_STANDARD' ? '🟢 TAKE — STANDARD'
-                                 : state === 'PASS'          ? '⚪ PASS'
+                const stampText = state === 'TAKE' ? '🟢 TAKE'
+                                 : state === 'PASS' ? '⚪ PASS'
                                  : (data.status || 'PENDING');
                 const badge = `<span class="tf-label" style="border-color:${color}; color:${color}; font-weight:800;">${stampText}</span>`;
                 const bias  = data.bias ? `<span style="color:${color}; font-weight:700;"> ${data.bias}</span>` : '';
@@ -1211,9 +1216,12 @@
                 // "different logic," just an earlier or later read of the
                 // identical source of truth.
                 const _masStatus = window.radarMemory[t.symbol].mas_status;
+                // v2 (2026-09-15, found during the v1-dead-machinery audit):
+                // t.grade can only ever be "TAKE" or "PASS" now -- the
+                // TAKE_PREMIUM/TAKE_STANDARD check was silently always false.
                 const actionable = _masStatus
                     ? (_masStatus === 'APPROVED')
-                    : (t.grade === 'TAKE_PREMIUM' || t.grade === 'TAKE_STANDARD');
+                    : (t.grade === 'TAKE');
                 row.className = `radar-row-c ${actionable ? 'rrc-active' : 'rrc-down'}`;
                 row.setAttribute('data-symbol', t.symbol);
 
@@ -1267,7 +1275,10 @@
                 // 2026-08-30 rebuild: full-grid path has no cached mas_status,
                 // reads the live calibrated-gate state directly -- same
                 // source of truth as the snapshot path, just always live here.
-                const actionable = (t.grade === 'TAKE_PREMIUM' || t.grade === 'TAKE_STANDARD');
+                // v2 (2026-09-15): t.grade can only ever be "TAKE" or "PASS"
+                // now -- the TAKE_PREMIUM/TAKE_STANDARD check was silently
+                // always false (found during the v1-dead-machinery audit).
+                const actionable = (t.grade === 'TAKE');
 
                 const rowHtml = _buildRow(
                     t.symbol, t.price, bo, bd,

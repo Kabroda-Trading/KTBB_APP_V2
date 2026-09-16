@@ -742,14 +742,17 @@ class CampaignLog(Base):
     # --- MAS UPGRADE COLUMNS ---
     mas_executive_brief = Column(String, nullable=True)
     mas_approval_status = Column(String, default="PENDING", nullable=False)
-    # conviction: TAKE_PREMIUM/TAKE_STANDARD/PASS -- the calibrated
-    # gate's real state (decision_engine.py). mas_approval_
-    # status alone (APPROVED/STAND_DOWN) collapses TAKE_PREMIUM and
-    # TAKE_STANDARD into the same value; this is the finer read, needed by
-    # anything (the Brain project's read API) that wants the real state, not
-    # just approved-or-not.
+    # conviction: TAKE/PASS -- the calibrated gate's real state (decision_
+    # engine.py, v2 rebuild 2026-09-11). Rows written before that rebuild may
+    # still hold the old TAKE_PREMIUM/TAKE_STANDARD/PASS values (v1's
+    # committed historical record, evaluated as-is rather than migrated --
+    # see CANON.md/AGENT_LOG.md, Kabroda AI Brain repo, 2026-09-15). mas_
+    # approval_status alone (APPROVED/STAND_DOWN) collapses either tier value
+    # into the same value; this is the finer read, needed by anything (the
+    # Brain project's read API) that wants the real state, not just approved-
+    # or-not.
     conviction = Column(String, nullable=True)
-    tier = Column(String, nullable=True)  # PREMIUM | STANDARD | None (2026-08-30 rebuild)
+    tier = Column(String, nullable=True)  # always None now (v2 retired tiers, 2026-09-11); older rows may hold PREMIUM | STANDARD
     formatted_newsletter = Column(String, nullable=True)
     target_hit = Column(String, nullable=True)   # T1 | T2 | T3 | STOP — the target the trade CLOSED AT
     structure_reasoning = Column(String, nullable=True)  # JSON: Trade Structure Analyst audit trail
@@ -929,7 +932,8 @@ class CampaignLog(Base):
 # (tier-dependent, stop-to-breakeven); caught as a real spec/code mismatch
 # and corrected in the Brain repo (commit d8a33ce) rather than silently
 # picking one. This table's own status vocabulary — NO_PLAN | WAITING |
-# ARMED | VETOED | FILLED | STOPPED | REENTRY_ARMED | DONE — is unrelated
+# ARMED | VETOED | FILLED | STOPPED | DONE (REENTRY_ARMED retired 2026-09-15,
+# unreachable since the SS8 re-entry chain was deleted) — is unrelated
 # to CampaignLog.status (PENDING/CLOSED_WIN/CLOSED_LOSS/...); don't conflate
 # the two state machines.
 # ---------------------------------------------------------
@@ -943,7 +947,7 @@ class TradePlan(Base):
 
     status = Column(String, default="NO_PLAN", nullable=False)
     direction = Column(String, nullable=True)     # LONG | SHORT | None (NO_PLAN)
-    tier = Column(String, nullable=True)           # PREMIUM | STANDARD | None
+    tier = Column(String, nullable=True)           # always None now (v2 retired tiers, 2026-09-11); older rows may hold PREMIUM | STANDARD
 
     # 2026-09-06 (DeepSeek's queued ask, Kabroda AI Brain repo AGENT_LOG.md,
     # 12:45 CT): persists the SAME lock-time gate reading GateLog.fuel_state/
@@ -981,27 +985,25 @@ class TradePlan(Base):
     trigger_price = Column(Float, nullable=True)
     commit_after = Column(DateTime, nullable=True)  # anchor_time + 45min (08:45 CT / 09:45 ET open-window rule)
 
-    # Execution stop -- as of 2026-09-08, TIER-SPECIFIC (Andy's explicit,
-    # informed decision to ship the backtest finding directly -- Kabroda AI
-    # Brain repo AGENT_LOG.md, same date, includes the honest caveat this
-    # went live without the out-of-sample check normally required first).
-    # PREMIUM: still stop_planner.py's 24h core-zone stop, unchanged.
-    # STANDARD: decision_engine.py's own r30-based formula, now used as a
-    # REAL execution stop for this tier specifically (previously that
-    # formula was ONLY the risk-bookkeeping stop, never sent to the
-    # exchange -- see stop_price_r30 immediately below and trade_plan.py's
-    # _build_waiting_plan()/advance_waiting_plan() for the full mechanism).
-    # NOT CampaignLog.stop_loss (a third, separate, unchanged r30-based
-    # field -- see the table docstring above).
+    # Execution stop. v1 (2026-09-08 through 2026-09-11) had this TIER-
+    # SPECIFIC: PREMIUM used stop_planner.py's 24h core-zone stop, STANDARD
+    # used decision_engine.py's r30-based formula as a real execution stop.
+    # v2 (2026-09-11 rebuild) retired the tier split entirely -- ONE stop
+    # formula for every trade now (r30 edge -+ STOP_BUFFER_BOX*box), the
+    # same one that used to be STANDARD-only; stop_planner.py's plan_stop()
+    # (the zone stop) has zero real call sites left anywhere in the codebase
+    # (confirmed 2026-09-15). NOT CampaignLog.stop_loss (a third, separate,
+    # unchanged r30-based field -- see the table docstring above).
     stop_price = Column(Float, nullable=True)
     stop_basis = Column(String, nullable=True)
     stop_dist_atr = Column(Float, nullable=True)
-    # The r30-based candidate, computed and stored on EVERY plan regardless
-    # of tier (cheap, pure formula) -- when tier isn't known yet at
-    # generation (the pre-cross anticipate_setup() path), this is what
-    # advance_waiting_plan() reads back and swaps into stop_price if the
-    # real cross confirms STANDARD. For an already-PREMIUM plan this is
-    # just a stored-for-audit alternative, never used as the real stop.
+    # v2: identical to stop_price now (both are the same r30-based formula) --
+    # kept as its own column for audit/comparison purposes and because it's
+    # still computed and returned separately by trade_plan.py's _build_
+    # waiting_plan()/advance_waiting_plan(). Predates v2: under v1 this was
+    # the candidate that got swapped into stop_price only if the real cross
+    # confirmed STANDARD (tier unknown at generation); no longer a
+    # meaningful distinction now that there's only one formula.
     stop_price_r30 = Column(Float, nullable=True)
 
     t1 = Column(Float, nullable=True)
@@ -1787,8 +1789,8 @@ class GateLog(Base):
     micro_regime = Column(String, nullable=True)
     veto = Column(String, nullable=True)           # which hard veto fired, if any
     gate_pass = Column(Boolean, nullable=True)
-    gate_tier = Column(String, nullable=True)       # PREMIUM | STANDARD | None
-    state = Column(String, nullable=False)          # TAKE_PREMIUM | TAKE_STANDARD | PASS
+    gate_tier = Column(String, nullable=True)       # always None now (v2 retired tiers); older rows may hold PREMIUM | STANDARD
+    state = Column(String, nullable=False)          # TAKE | PASS now (v2); older rows may hold TAKE_PREMIUM | TAKE_STANDARD | PASS
     headline = Column(String, nullable=True)
     entry = Column(Float, nullable=True)
     stop = Column(Float, nullable=True)
@@ -2073,9 +2075,15 @@ class ExecutorOrder(Base):
 
     # --- STAGE 2/3 REAL EXECUTION (2026-09-07) -- executor_live_engine.py.
     # tier/management_state didn't exist before this: Stage 1 never needed
-    # to track a real managed trade end-to-end. GATE_REBUILD_SPEC.md §1's
-    # tier (PREMIUM/STANDARD), copied off TradePlan.tier at entry placement
-    # (TradePlan stays authoritative -- see class docstring above).
+    # to track a real managed trade end-to-end. Copied off TradePlan.tier at
+    # entry placement (TradePlan stays authoritative -- see class docstring
+    # above). v2 (2026-09-11): TradePlan.tier is always None now (tiers
+    # retired), so this always copies None too -- executor_live_engine.py's
+    # PREMIUM-only break-even-at-T2 branch below (management_state ==
+    # "T1_FILLED_BE_PENDING") can never fire for a real v2 trade as a
+    # result. Open question for the Brain: is "no BE move, ever" the
+    # intended v2/traveler rule, or does this need a new v2-native trigger?
+    # Flagged to DeepSeek 2026-09-15, not yet resolved -- see AGENT_LOG.md.
     tier = Column(String, nullable=True)
     # PENDING_ENTRY | ENTRY_FILLED_ORDERS_PLACED | T1_FILLED |
     # T1_FILLED_BE_PENDING | BE_MOVED | CLOSED_STOP_BEFORE_T1 |

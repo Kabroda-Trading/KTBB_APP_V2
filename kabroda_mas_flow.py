@@ -55,7 +55,7 @@ class ExecutiveBrief(BaseModel):
     graded coded decision layer (2026-08-27) and the calibrated-gate rebuild
     (2026-08-30, KABRODA_REBUILD_SPEC.md) that replaced it."""
     approval_status: str = Field(description="'APPROVED' or 'STAND_DOWN' (REJECTED/WAITING_FOR_15M are legacy LLM-era values, no longer produced)")
-    conviction: str = Field(default="PASS", description="TAKE_PREMIUM/TAKE_STANDARD/PASS — the calibrated gate's three-outcome verdict (2026-09-06 rebuild). approval_status is derived from this (TAKE_* -> APPROVED, PASS -> STAND_DOWN).")
+    conviction: str = Field(default="PASS", description="TAKE/PASS — the calibrated gate's verdict (v2 rebuild, 2026-09-11; the tier split from the 2026-09-06 three-outcome version is retired). approval_status is derived from this (TAKE -> APPROVED, PASS -> STAND_DOWN).")
     tactical_brief: str = Field(description="Short, deterministic reason string (the matched confirmation legs, or the stand-down reason). No LLM prose generated here anymore.")
     bias: str = Field(description="'LONG', 'SHORT', or 'NEUTRAL'")
     entry_price: float = Field(description="The exact trigger entry price.")
@@ -65,7 +65,7 @@ class ExecutiveBrief(BaseModel):
     t3: float = Field(description="Target 3 — pre-computed, copy exactly.")
     formatted_newsletter_md: str = Field(description="Complete brief in Markdown: all ## sections from THE BIGGER PICTURE through THE OTHER SIDE.")
     side: Optional[str] = Field(default=None, description="LONG/SHORT/None — the calibrated gate's candidate side (2026-08-30 rebuild).")
-    tier: Optional[str] = Field(default=None, description="PREMIUM/STANDARD/None — the calibrated gate's tier (2026-08-30 rebuild).")
+    tier: Optional[str] = Field(default=None, description="Always None -- v2's gate (2026-09-11 rebuild) retired the PREMIUM/STANDARD tier split entirely.")
 
 
 # IntelAuditReport removed 2026-08-30 -- schema for the removed Intel Auditor.
@@ -678,9 +678,15 @@ def _inject_gate_log(
             box_atr_ratio=reach.get("ratio"),
             trigger_hour_utc=evaluated_at.hour,
             hour_ok=checks.get("session_hour"),
-            veto=None if decision_dict.get("verdict_state") in ("TAKE_PREMIUM", "TAKE_STANDARD") else (
-                (decision_dict.get("tactical_brief") or "")[:200] if gate.get("tier") is None and gate.get("misses") else None
-            ),
+            # v2 (2026-09-15, found during the v1-dead-machinery audit): this
+            # used to branch on verdict_state in ("TAKE_PREMIUM", "TAKE_
+            # STANDARD") and gate.get("tier") is None -- both dead checks now
+            # (decision_engine.py's v2 gate returns only "TAKE"/"PASS" and its
+            # gate dict never has a "tier" key at all, so both conditions were
+            # trivially always-false/always-true respectively). The only real
+            # signal was always gate.get("misses"): non-empty on a declined
+            # gate, empty on a TAKE -- simplified to say that directly.
+            veto=(decision_dict.get("tactical_brief") or "")[:200] if gate.get("misses") else None,
             gate_pass=gate.get("pass"),
             gate_tier=gate.get("tier"),
             daily_regime_table=decision_dict.get("market_regime_table"),
