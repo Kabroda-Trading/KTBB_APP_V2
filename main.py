@@ -31,6 +31,7 @@ import kabroda_mas_flow
 import ledger_closing_engine
 import trade_plan_engine
 import traveler_plan_engine
+import dry_run_split_engine
 # mtf_confluence_scanner import removed 2026-09-07 (stagnant sweep) -- never
 # actually called in this file; the "mtf_confluence_scanner" string at the
 # dependency-graph metadata route below is a plain literal, not a reference
@@ -59,6 +60,7 @@ scheduler_health_registry = {
     "ledger_closing": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "trade_plan": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "traveler_plan": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
+    "dry_run_split": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
 }
 
 
@@ -618,6 +620,7 @@ async def lifespan(app: FastAPI):
     app.state.ledger_task           = asyncio.create_task(ledger_closing_engine.run_ledger_audit_loop())
     app.state.trade_plan_task       = asyncio.create_task(trade_plan_engine.run_trade_plan_loop())
     app.state.traveler_plan_task    = asyncio.create_task(traveler_plan_engine.run_traveler_plan_loop())
+    app.state.dry_run_split_task    = asyncio.create_task(dry_run_split_engine.run_dry_run_split_loop())
     import executor_live_engine
     app.state.executor_live_task    = asyncio.create_task(executor_live_engine.run_executor_position_loop())
     app.state.senior_analyst_task   = asyncio.create_task(run_senior_analyst_scheduler())

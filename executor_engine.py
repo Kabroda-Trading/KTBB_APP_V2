@@ -85,6 +85,31 @@ async def _process_account(db: Session, trade_plan_row: TradePlan, account: Exec
     # not just the account's current (possibly later-changed) setting.
     order_dict["gate_profile_used"] = executor_accounts.gate_profile_of(account)
     order_dict["mgmt_profile_used"] = executor_accounts.mgmt_profile_of(account)
+
+    # Ruling B (DeepSeek, relayed by Andy 2026-09-15, AGENT_LOG.md both
+    # repos): before this, a DRY_RUN order sat at management_state=
+    # "PENDING_ENTRY" (the DB default) forever -- nothing ever advanced it,
+    # since run_executor_position_loop() only polls orders with a real
+    # entry_exchange_order_id (a LIVE fill). This function only ever runs
+    # on trade_plan_row's own FILLED transition, so the entry fill is
+    # ALREADY known (trade_plan_row.fill_price/fill_time) -- no real
+    # exchange confirmation will ever arrive for DRY_RUN to wait for. Same
+    # immediate-fill treatment _process_traveler_account() already gives
+    # GATE_TRAVELER's own DRY_RUN order below. Sets management_state to a
+    # real, watchable state so dry_run_split_engine.py's candle walk
+    # (mgmt_split_dry_run.py) picks it up on the next 60s cycle instead of
+    # leaving it inert. LIVE is completely untouched by this block -- it
+    # only ever fires for DRY_RUN, and only for MGMT_SPLIT (the only
+    # management profile v1/v2 orders use today; a hypothetical GATE_V2 +
+    # MGMT_E1_STACK combination is a pre-existing, separate edge case from
+    # Ruling A's independently-selectable profile dropdowns, not something
+    # this step resolves).
+    if (account.mode == "DRY_RUN" and order_dict.get("decision") == "WOULD_PLACE"
+            and order_dict["mgmt_profile_used"] == "MGMT_SPLIT"):
+        order_dict["entry_fill_price"] = trade_plan_row.fill_price
+        order_dict["entry_fill_time"] = trade_plan_row.fill_time
+        order_dict["management_state"] = "ENTRY_FILLED_ORDERS_PLACED"
+
     filtered = {k: v for k, v in order_dict.items() if k in _ORDER_COLUMNS}
     order = ExecutorOrder(**filtered)
     db.add(order)
