@@ -4445,3 +4445,63 @@ work order; flagging in case that's the next thing needed before any real
 DRY_RUN evaluation account can actually be set up).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-15 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — Ruling A shipped: admin strategy-profile UI (build order was A then B; this is A)
+
+Per Andy's relayed "Public Transit Status Check" message with your two rulings
+and the explicit build order "A first... then B" — Ruling A is done.
+
+### What shipped
+Extended the existing executor account admin surface (NOT a new panel) with
+a per-account gate/management profile selector, exactly as scoped:
+- `templates/executor_admin.html`: new "Step 4: Strategy Profile" block
+  (renumbers old Step 4 "Go Live" to Step 5) — gate dropdown
+  (GATE_V2/GATE_TRAVELER), management dropdown (MGMT_SPLIT/MGMT_E1_STACK),
+  an explicit "SAVE STRATEGY PROFILE" button (no autosave — mirrors the
+  sizing-save pattern), a profile badge on the account card header shown
+  only when non-default.
+- `executor_accounts.py::set_account_profile()`: writes a PROFILE_CHANGED
+  audit row (who/when/from/to) on every real change; no-op changes write no
+  audit row (mirrors set_account_mode()'s own no-op short-circuit).
+- LIVE-mode gate: a LIVE account requires the exact same credentials+confirm
+  gate set_account_mode() uses. Extracted `LIVE_TRADING_CONFIRM_PHRASE` as a
+  shared module-level constant so both functions reference one string, not
+  two copies that could drift.
+- `main.py`: new `POST /api/executor/accounts/{id}/profile` route, mirrors
+  the existing `/mode` route's owner-or-admin check and error handling
+  exactly. `gate_profile`/`mgmt_profile` added to `_serialize_account()`.
+- The selector writes the same `ExecutorAccount.gate_profile`/`mgmt_profile`
+  columns that order-time reads consume (executor_engine.py's
+  `_process_account()` guard, executor_plan_builder.py's F_A lookup) — one
+  source of truth, no separate config path.
+
+### Tests
+- `tests/test_executor_accounts.py`: 60/60 passing, including new LIVE-gate
+  tests (`_live_account()` helper going through the real
+  credentials->sizing->mode(LIVE) sequence, then exercising refuse-without-
+  confirm / refuse-with-wrong-confirm / succeed-with-correct-confirm /
+  same-values-needs-no-confirm / DRY_RUN-needs-no-confirm).
+- `tests/test_executor_admin_routes.py`: 5 new HTTP-level route tests —
+  403 for non-owner/non-admin, DRY_RUN save with no confirm phrase (200),
+  defaults visible on a fresh account (GATE_V2/MGMT_SPLIT), 400 on an
+  unknown gate_profile value, and the LIVE confirm-phrase pair (400 with no
+  confirm / missing, 200 with the exact phrase) driven through the real
+  credentials/sizing-policy/mode(LIVE) routes first, not faked.
+- Full `pytest tests/`: 647 passed, only the 5 pre-existing unrelated
+  `test_dashboard_fixes.py` errors (same as before this change — verified,
+  not assumed).
+
+### Boot status
+Clean. `TestClient` login + `GET /admin/executor` -> 200, page contains
+"Strategy Profile" and "saveAccountProfile". No new warnings beyond the
+pre-existing `datetime.utcnow()` deprecation noise already present
+throughout this codebase.
+
+### What this unblocks
+An account can now actually be switched to GATE_TRAVELER/MGMT_E1_STACK
+(previously wired but INERT — no way to set it). This was the flagged
+blocker from the Phase 2 report. Moving to Ruling B next (v1/v2's own
+DRY_RUN MGMT_SPLIT management simulation) — not started yet.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
