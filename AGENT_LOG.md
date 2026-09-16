@@ -4721,3 +4721,62 @@ trades accumulating, weekly Brain ingestion/side-by-side, Andy's pick)
 takes over from this point.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-16 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — Two items shipped: the risk-state-reset-on-LIVE-flip fix, and CC_WORK_ORDER_ASSUMED_BALANCE.md
+
+### Item 1 — risk_last_usd/consecutive_losses reset on DRY_RUN->LIVE flip
+Per your ruling on the simulation-inflated-ledger risk I flagged when
+shipping Ruling D. One real correction to the ruling as literally worded:
+it said "reset risk_last_usd to NULL" -- verified against
+ExecutorRiskState's own column (`nullable=False, default=100.0`) -- a
+literal NULL write violates the schema and would fail outright on
+Postgres. Implemented instead as a reset to the account's own configured
+`risk_floor_usd` (the schema's existing "clean baseline" value,
+`compute_next_risk()` already floors every real compounding step there).
+No new column, no nullability change. Flagging this rather than silently
+reconciling it, per the standing "results-as-measured, report mismatches"
+rule.
+
+`set_account_mode()`: on a real DRY_RUN->LIVE transition only (never
+LIVE->DRY_RUN, never a same-mode no-op), resets `risk_last_usd` to
+`risk_floor_usd` and `consecutive_losses` to 0, writes a
+`RISK_STATE_RESET_ON_LIVE_FLIP` audit row (old/new values, who/when).
+4 new tests: reset happens + audit row written on DRY_RUN->LIVE,
+LIVE->DRY_RUN leaves a real compounding history untouched, same-mode
+no-op resets nothing.
+
+### Item 2 — CC_WORK_ORDER_ASSUMED_BALANCE.md
+All three cited facts verified against current code before building
+(database.py:2048's exact column, executor_admin.html's exact display-only
+line, main.py's exact read-only serializer line) -- all confirmed
+accurate, nothing needed correcting.
+
+- `executor_accounts.py::set_assumed_balance()`: same validation/audit
+  shape as `set_account_mode()`/`set_account_profile()` -- rejects <= 0
+  (null clears it), writes `ASSUMED_BALANCE_SET` only on a real change,
+  never touches credentials or mode, works on every account mode.
+- `main.py`: new `POST /api/executor/accounts/{id}/assumed-balance` route,
+  mirrors the profile route's auth pattern exactly.
+- `templates/executor_admin.html`: the static "not set" text replaced
+  with an editable input + explicit SAVE button (no autosave, matching
+  the profile/sizing save convention), visible for every account mode.
+- 9 unit tests + 5 HTTP route tests.
+
+Confirmed: both eval accounts (12 eval_traveler, and whatever eval_v2
+becomes) can now get a real balance through the admin UI, no DB stopgap
+needed. Checked the plan-builder/sizing path for anything assuming a
+single eval account -- found nothing; `_query_real_balance()`/
+`build_hypothetical_order()`/`build_hypothetical_traveler_order()` all
+read `assumed_balance_usd` fresh per account, per order.
+
+### Test/boot summary
+Full `pytest tests/`: 701 passed (up from 683 -- exactly the 18 new tests
+across both items), same 5 pre-existing unrelated
+`test_dashboard_fixes.py` errors. Boot check clean, UI verified present
+via a live `TestClient` hit.
+
+Pushed to `origin/main` (GitHub) -- Render should pick this up on its next
+auto-deploy, same as the earlier 30-commit push today.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
