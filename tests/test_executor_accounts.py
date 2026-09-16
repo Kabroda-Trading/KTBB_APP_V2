@@ -719,6 +719,81 @@ def test_set_account_mode_live_to_dry_run_needs_no_confirm_phrase(db):
     assert events.count("MODE_CHANGED") == 2
 
 
+# ------------------------------------------------------------------ risk-state reset on DRY_RUN->LIVE flip
+# (2026-09-16, DeepSeek's ruling on the simulation-inflated-ledger risk
+# flagged in Ruling D -- simulated DRY_RUN P&L must never carry into a
+# real-money account's compounding/derisk state.)
+
+def test_set_account_mode_dry_run_to_live_resets_risk_state(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    ea.set_credentials(db, account, "key1", "secret1", set_by="andy@kabroda.com")
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "preset_name": "fixed_dollar"}, updated_by="andy@kabroda.com")
+    state = ea.get_or_init_risk_state(db, account)
+    state.risk_last_usd = 850.0   # simulate DRY_RUN compounding having moved it well off the floor
+    state.consecutive_losses = 3
+    state.risk_floor_usd = 100.0
+    db.commit()
+
+    ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
+    db.commit()
+
+    state = ea.get_or_init_risk_state(db, account)
+    assert state.risk_last_usd == 100.0   # reset to risk_floor_usd, not left at the simulated value
+    assert state.consecutive_losses == 0
+
+
+def test_set_account_mode_dry_run_to_live_writes_risk_reset_audit_row(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    ea.set_credentials(db, account, "key1", "secret1", set_by="andy@kabroda.com")
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "preset_name": "fixed_dollar"}, updated_by="andy@kabroda.com")
+    db.commit()
+
+    ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
+    db.commit()
+
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="RISK_STATE_RESET_ON_LIVE_FLIP").all()
+    assert len(rows) == 1
+    assert "risk_last_usd" in rows[0].message
+
+
+def test_set_account_mode_live_to_dry_run_does_not_reset_risk_state(db):
+    # Safety-DECREASING direction -- a real, already-earned LIVE compounding
+    # history must never be wiped just by stepping back to DRY_RUN.
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    ea.set_credentials(db, account, "key1", "secret1", set_by="andy@kabroda.com")
+    ea.update_sizing_policy(db, account, {"base_risk_usd": 100.0, "preset_name": "fixed_dollar"}, updated_by="andy@kabroda.com")
+    ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
+    db.commit()
+    state = ea.get_or_init_risk_state(db, account)
+    state.risk_last_usd = 425.0
+    state.consecutive_losses = 2
+    db.commit()
+
+    ea.set_account_mode(db, account, "DRY_RUN", by="andy@kabroda.com")
+    db.commit()
+
+    state = ea.get_or_init_risk_state(db, account)
+    assert state.risk_last_usd == 425.0
+    assert state.consecutive_losses == 2
+    # Exactly 1 -- from this test's own earlier DRY_RUN->LIVE flip above,
+    # never a second one from this LIVE->DRY_RUN step.
+    assert db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="RISK_STATE_RESET_ON_LIVE_FLIP").count() == 1
+
+
+def test_set_account_mode_same_mode_noop_does_not_reset_risk_state(db):
+    account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    db.commit()
+    state = ea.get_or_init_risk_state(db, account)
+    state.risk_last_usd = 250.0
+    db.commit()
+
+    ea.set_account_mode(db, account, "DRY_RUN", by="andy@kabroda.com")
+    db.commit()
+
+    state = ea.get_or_init_risk_state(db, account)
+    assert state.risk_last_usd == 250.0
+
+
 def test_set_account_mode_rejects_unknown_mode(db):
     account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
     db.commit()

@@ -110,6 +110,35 @@ def set_account_mode(db: Session, account: ExecutorAccount, new_mode: str, by: s
         if confirm != LIVE_TRADING_CONFIRM_PHRASE:
             raise ValueError(f"confirm phrase must be exactly {LIVE_TRADING_CONFIRM_PHRASE!r}")
 
+    # 2026-09-16 -- DeepSeek's ruling (Kabroda AI Brain repo AGENT_LOG.md)
+    # on the "simulation-inflated risk_last_usd" risk CC flagged when
+    # shipping Ruling D (DRY_RUN ledger compounding): a DRY_RUN->LIVE flip
+    # must reset the account's own compounding state, so simulated
+    # evaluation P&L can never carry into real-money derisk/sizing math.
+    # The ruling's own wording said "reset risk_last_usd to NULL" -- verified
+    # against ExecutorRiskState's own column (risk_last_usd is nullable=
+    # False, defaulted 100.0), a literal NULL write would violate the schema
+    # and fail outright on Postgres. Implemented instead as a reset to the
+    # account's own configured risk_floor_usd -- the schema's existing
+    # "clean baseline" value, same one compute_next_risk() already floors
+    # every real compounding step at. No new column, no nullability change.
+    # Flagged back to DeepSeek/Andy rather than silently reconciled.
+    if old_mode == "DRY_RUN" and new_mode == "LIVE":
+        state = get_or_init_risk_state(db, account)
+        old_risk_last, old_losses = state.risk_last_usd, state.consecutive_losses
+        state.risk_last_usd = state.risk_floor_usd
+        state.consecutive_losses = 0
+        write_audit(
+            db, "RISK_STATE_RESET_ON_LIVE_FLIP",
+            f"account {account.id} risk state reset on DRY_RUN->LIVE flip: "
+            f"risk_last_usd {old_risk_last} -> {state.risk_last_usd}, consecutive_losses {old_losses} -> 0",
+            account_id=account.id, actor=by,
+            detail={
+                "old_risk_last_usd": old_risk_last, "new_risk_last_usd": state.risk_last_usd,
+                "old_consecutive_losses": old_losses,
+            },
+        )
+
     account.mode = new_mode
     write_audit(
         db, "MODE_CHANGED", f"account {account.id} mode changed {old_mode} -> {new_mode}",
