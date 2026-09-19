@@ -38,6 +38,19 @@
         .plan-state-detail { color: var(--white); font-size: 13px; }
         .plan-state-reason { color: #b8a68f; font-size: 12px; margin-top: 8px; }
         .plan-state-asof { color: #6b5a47; font-size: 11px; margin-top: 6px; }
+        /* CC_WORK_ORDER_RADAR_PLAN_PANEL.md (2026-09-19) -- entry/stop/T1/T2/T3
+           levels + copy buttons, direction-aware coloring reusing .d-val/
+           .c-GREEN/.c-RED/.c-YELLOW and .mini-copy from the cockpit's own
+           "03. THE SETUP" panel (copyVal() below, unchanged). */
+        .plan-state-levels { display: flex; flex-wrap: wrap; gap: 6px 24px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #334155; }
+        .plan-state-level { display: flex; align-items: center; gap: 2px; }
+        .plan-state-level-label { color: #6b5a47; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px; }
+        .plan-state-fill { color: var(--green); font-size: 12px; margin-top: 8px; font-weight: 700; }
+        /* GATE_TRAVELER's own status vocabulary -- st-filled/st-done above
+           are shared with TradePlan already; these three are traveler-only. */
+        .plan-state-badge.st-waiting_cross, .plan-state-badge.st-waiting_pullback { background: var(--yellow); color: #1a1208; }
+        .plan-state-badge.st-tercile_skipped { background: var(--gray); color: #140d09; }
+        .traveler-state-panel { display: none; border: 1px solid var(--border); background: var(--panel); border-radius: 6px; padding: 12px 20px; margin-bottom: 24px; font-family: 'JetBrains Mono'; opacity: 0.9; }
 
         .radar-grid { display: grid; gap: 12px; }
 
@@ -396,7 +409,25 @@
                 <span id="planStateDetail" class="plan-state-detail"></span>
             </div>
             <div id="planStateReason" class="plan-state-reason"></div>
+            <div id="planStateLevels" class="plan-state-levels" style="display:none;">
+                <div class="plan-state-level" id="planLevelEntryRow"><span class="plan-state-level-label">Entry</span><span id="planLevelEntry" class="d-val">--</span><button class="mini-copy" onclick="copyVal('planLevelEntry')" title="Copy">📋</button></div>
+                <div class="plan-state-level" id="planLevelStopRow"><span class="plan-state-level-label">Stop</span><span id="planLevelStop" class="d-val">--</span><button class="mini-copy" onclick="copyVal('planLevelStop')" title="Copy">📋</button></div>
+                <div class="plan-state-level" id="planLevelT1Row"><span class="plan-state-level-label">T1</span><span id="planLevelT1" class="d-val">--</span><button class="mini-copy" onclick="copyVal('planLevelT1')" title="Copy">📋</button></div>
+                <div class="plan-state-level" id="planLevelT2Row"><span class="plan-state-level-label">T2</span><span id="planLevelT2" class="d-val">--</span><button class="mini-copy" onclick="copyVal('planLevelT2')" title="Copy">📋</button></div>
+                <div class="plan-state-level" id="planLevelT3Row"><span class="plan-state-level-label">T3</span><span id="planLevelT3" class="d-val">--</span><button class="mini-copy" onclick="copyVal('planLevelT3')" title="Copy">📋</button></div>
+            </div>
+            <div id="planStateFill" class="plan-state-fill" style="display:none;"></div>
             <div id="planStateAsOf" class="plan-state-asof"></div>
+        </div>
+
+        <div id="travelerStatePanel" class="traveler-state-panel">
+            <div class="plan-state-row">
+                <span style="color:#6b5a47; font-size:11px; text-transform:uppercase; letter-spacing:1px;">Traveler (evaluation, DRY_RUN)</span>
+                <span id="travelerStateBadge" class="plan-state-badge"></span>
+                <span id="travelerStateDetail" class="plan-state-detail"></span>
+            </div>
+            <div id="travelerStateReason" class="plan-state-reason"></div>
+            <div id="travelerStateAsOf" class="plan-state-asof"></div>
         </div>
 
         <div id="loading" style="display:none; text-align:center; padding:80px; color:#0ea5e9; font-family:'JetBrains Mono';">
@@ -1391,6 +1422,26 @@
             return new Date(hasZone ? isoStr : isoStr + "Z");
         }
 
+        // CC_WORK_ORDER_RADAR_PLAN_PANEL.md -- shared number formatting with
+        // the rest of the radar (toLocaleString, 2dp).
+        function _fmtLevel(v) {
+            return (v === null || v === undefined) ? null : Number(v).toLocaleString(undefined, {maximumFractionDigits: 2});
+        }
+
+        // Shows/hides one level row and fills its value + direction-aware
+        // color class -- null means "not set on this plan" (e.g. T2), not
+        // an error, so the row just hides rather than showing "--".
+        function _setLevelRow(rowId, valId, value, colorClass) {
+            const rowEl = document.getElementById(rowId);
+            const valEl = document.getElementById(valId);
+            if (value === null || value === undefined) {
+                if (rowEl) rowEl.style.display = 'none';
+                return;
+            }
+            if (rowEl) rowEl.style.display = 'flex';
+            if (valEl) { valEl.textContent = _fmtLevel(value); valEl.className = 'd-val ' + colorClass; }
+        }
+
         function renderPlanState(row) {
             const panel = document.getElementById('planStatePanel');
             if (!row) { panel.style.display = 'none'; return; }
@@ -1402,10 +1453,45 @@
             const bits = [];
             if (row.direction) bits.push(row.direction);
             if (row.tier) bits.push(row.tier);
-            if (row.trigger_price) bits.push('@ ' + Number(row.trigger_price).toLocaleString(undefined, {maximumFractionDigits: 2}));
+            if (row.trigger_price) bits.push('@ ' + _fmtLevel(row.trigger_price));
             document.getElementById('planStateDetail').textContent = bits.join(' · ');
 
             document.getElementById('planStateReason').textContent = row.last_transition_reason || '';
+
+            // Levels block -- entry/stop/T1/T2/T3, direction-aware coloring
+            // (LONG: entry green/stop red; SHORT: mirrored), same c-GREEN/
+            // c-RED/c-YELLOW convention the cockpit's own setup panel uses.
+            const levelsEl = document.getElementById('planStateLevels');
+            const hasLevels = row.trigger_price != null || row.stop_price != null;
+            if (hasLevels) {
+                const isLong = row.direction === 'LONG';
+                const isShort = row.direction === 'SHORT';
+                const entryColor = isLong ? 'c-GREEN' : (isShort ? 'c-RED' : 'c-GRAY');
+                const stopColor = isLong ? 'c-RED' : (isShort ? 'c-GREEN' : 'c-GRAY');
+                _setLevelRow('planLevelEntryRow', 'planLevelEntry', row.trigger_price, entryColor);
+                _setLevelRow('planLevelStopRow', 'planLevelStop', row.stop_price, stopColor);
+                _setLevelRow('planLevelT1Row', 'planLevelT1', row.t1, 'c-YELLOW');
+                _setLevelRow('planLevelT2Row', 'planLevelT2', row.t2, 'c-GRAY');
+                _setLevelRow('planLevelT3Row', 'planLevelT3', row.t3, 'c-GRAY');
+                levelsEl.style.display = 'flex';
+            } else {
+                levelsEl.style.display = 'none';
+            }
+
+            // Fill line -- fill_time + the fill price. trade_plan.py's own
+            // FILLED transitions always set fill_price = trigger (the
+            // resting-order mechanism fills AT the trigger by construction,
+            // verified directly in trade_plan.py -- not an approximation),
+            // so trigger_price IS the fill price here; no separate field
+            // needed from the API.
+            const fillEl = document.getElementById('planStateFill');
+            if (row.status === 'FILLED' && row.fill_time) {
+                fillEl.textContent = 'Filled ' + _parseServerTimestamp(row.fill_time).toLocaleString()
+                    + (row.trigger_price != null ? ' @ ' + _fmtLevel(row.trigger_price) : '');
+                fillEl.style.display = 'block';
+            } else {
+                fillEl.style.display = 'none';
+            }
 
             const staleness = row.seconds_since_update != null ? Math.round(row.seconds_since_update) + 's ago' : 'unknown';
             document.getElementById('planStateAsOf').textContent =
@@ -1427,10 +1513,57 @@
             }
         }
 
+        // CC_WORK_ORDER_RADAR_PLAN_PANEL.md work item 2 -- the compact
+        // TravelerPlan panel. Deliberately no copy buttons here (unlike the
+        // v2 levels above): GATE_TRAVELER is DRY_RUN-only by design (the
+        // executor refuses real order placement for it), so this is
+        // comparison/observability during the evaluation, not a "take this
+        // trade" workflow -- adding copy buttons would imply otherwise.
+        function renderTravelerState(row) {
+            const panel = document.getElementById('travelerStatePanel');
+            if (!row) { panel.style.display = 'none'; return; }
+
+            const badge = document.getElementById('travelerStateBadge');
+            badge.textContent = row.status;
+            badge.className = 'plan-state-badge st-' + row.status.toLowerCase();
+
+            const bits = [];
+            if (row.direction) bits.push(row.direction);
+            if (row.cross_price != null) bits.push('cross @ ' + _fmtLevel(row.cross_price));
+            if (row.status === 'FILLED' && row.fill_price != null) bits.push('filled @ ' + _fmtLevel(row.fill_price));
+            document.getElementById('travelerStateDetail').textContent = bits.join(' · ');
+
+            document.getElementById('travelerStateReason').textContent = row.last_transition_reason || '';
+
+            const staleness = row.seconds_since_update != null ? Math.round(row.seconds_since_update) + 's ago' : 'unknown';
+            const parts = ['live · updated ' + staleness];
+            if (row.cross_time) parts.push('cross ' + _parseServerTimestamp(row.cross_time).toLocaleString());
+            if (row.status === 'FILLED' && row.fill_time) parts.push('filled ' + _parseServerTimestamp(row.fill_time).toLocaleString());
+            if (row.journey_cap_at) parts.push('journey cap ' + _parseServerTimestamp(row.journey_cap_at).toLocaleDateString());
+            document.getElementById('travelerStateAsOf').textContent = parts.join(' · ');
+
+            panel.style.display = 'block';
+        }
+
+        async function pollTravelerState() {
+            try {
+                const data = await fetch('/api/admin/traveler-plan-status').then(r => r.ok ? r.json() : null);
+                if (!data || !data.ok || !data.rows || !data.rows.length) {
+                    document.getElementById('travelerStatePanel').style.display = 'none';
+                    return;
+                }
+                renderTravelerState(data.rows[0]);
+            } catch (e) {
+                console.warn('[RADAR] Traveler Plan live-state poll failed:', e);
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             forceScan();
             pollPlanState();
             setInterval(pollPlanState, 45000);
+            pollTravelerState();
+            setInterval(pollTravelerState, 45000);
         });
     </script>
 </body>

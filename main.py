@@ -1228,6 +1228,59 @@ async def api_admin_trade_plan_status(request: Request, db: Session = Depends(ge
     return JSONResponse({"ok": True, "date_key": today, "server_time": now_utc.isoformat(), "rows": out})
 
 
+@app.get("/api/admin/traveler-plan-status")
+async def api_admin_traveler_plan_status(request: Request, db: Session = Depends(get_db)):
+    """CC_WORK_ORDER_RADAR_PLAN_PANEL.md work item 2 -- the GATE_TRAVELER
+    counterpart to /api/admin/trade-plan-status above. Same read-only,
+    admin-only, staleness-indicator pattern. Status + levels only -- no
+    management-walk detail (the traveler journey's D3 internals stay in
+    the executor admin, per the work order's own scope note).
+
+    Deliberately NOT scoped to today's date_key, unlike the TradePlan
+    query above -- TravelerPlan's own design allows a WAITING_PULLBACK
+    journey to span up to 7 days (traveler_plan_engine.py's own header:
+    "a row can poll across multiple days, unlike TradePlan's WAITING"). A
+    literal date_key == today filter would go blank on day 2+ of an
+    active, still-live journey -- a real case in production as of
+    2026-09-19 (TravelerPlan id 2, crossed 09-18, still WAITING_PULLBACK
+    on 09-19). Returns the single most-recently-touched row instead, which
+    is always the current journey regardless of which day it started."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+
+    from database import TravelerPlan as _TravelerPlan
+    row = db.query(_TravelerPlan).order_by(_TravelerPlan.id.desc()).first()
+
+    now_utc = datetime.now(timezone.utc)
+
+    def _seconds_stale(dt):
+        if dt is None:
+            return None
+        d = dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+        return round((now_utc - d).total_seconds(), 1)
+
+    out = []
+    if row is not None:
+        out.append({
+            "id": row.id, "symbol": row.symbol, "session_id": row.session_id, "date_key": row.date_key,
+            "status": row.status, "direction": row.direction,
+            "breakout_trigger": row.breakout_trigger, "breakdown_trigger": row.breakdown_trigger,
+            "stop_price": row.stop_price, "t1_price": row.t1_price,
+            "cross_time": row.cross_time.isoformat() if row.cross_time else None,
+            "cross_price": row.cross_price,
+            "tercile_skipped": row.tercile_skipped,
+            "fill_time": row.fill_time.isoformat() if row.fill_time else None,
+            "fill_price": row.fill_price,
+            "journey_cap_at": row.journey_cap_at.isoformat() if row.journey_cap_at else None,
+            "last_transition_reason": row.last_transition_reason,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            "seconds_since_update": _seconds_stale(row.updated_at),
+        })
+
+    return JSONResponse({"ok": True, "server_time": now_utc.isoformat(), "rows": out})
+
+
 # ==============================================================================
 # EXECUTOR BOT ADMIN API -- Andy's request, design settled over a multi-day
 # conversation with DeepSeek (Kabroda AI Brain repo AGENT_LOG.md,
