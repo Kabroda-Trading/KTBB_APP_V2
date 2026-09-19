@@ -4780,3 +4780,76 @@ Pushed to `origin/main` (GitHub) -- Render should pick this up on its next
 auto-deploy, same as the earlier 30-commit push today.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-19 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — CC_WORK_ORDER_RADAR_PLAN_PANEL.md shipped: radar now shows plan levels with copy buttons, plus a compact TravelerPlan panel
+
+Both cited facts verified before building (all accurate, nothing needed
+correcting): trade-plan-status already returns stop_price/t1/t2/t3/
+fill_time; renderPlanState() fetched the row but only ever rendered
+status/direction/tier/trigger.
+
+### Work item 1 — levels in the existing plan panel
+Extended `planStatePanel` (market_radar.html) with an entry/stop/T1/T2/T3
+levels block. Reused EXISTING pieces rather than inventing new ones: the
+`.mini-copy` button style and `copyVal()` function already existed on a
+completely different surface (the target-modal cockpit's own "03. THE
+SETUP" panel) — same mechanism, same direction-aware `.d-val`/`.c-GREEN`/
+`.c-RED`/`.c-YELLOW` classes. A null level (T2 not set) hides its row
+instead of showing a blank "--". A fill line (time + price) shows once
+FILLED.
+
+One thing checked directly rather than assumed: whether `fill_price`
+always equals `trigger_price` for v2 (the work order's own claim). Traced
+both real FILLED-transition code paths in `trade_plan.py` — confirmed
+`fill_price` is literally set equal to `trigger` (or `entry_price`, same
+variable) in every path, by construction of the resting-order mechanism.
+So `trigger_price` genuinely IS the fill price here — no new API field
+needed, not an approximation.
+
+### Work item 2 — TravelerPlan panel
+New `GET /api/admin/traveler-plan-status`, mirrors `trade-plan-status`'s
+admin-only/staleness pattern — with one deliberate, flagged deviation:
+**NOT scoped to today's date_key.** TravelerPlan's own design allows a
+WAITING_PULLBACK journey to span up to 7 days (traveler_plan_engine.py's
+own header comment) — a real, currently-live case exists in production
+right now (TravelerPlan id 2, crossed 09-18, still WAITING_PULLBACK on
+09-19, per your own 10:12 CT log entry). A literal date_key filter would
+have gone blank on day 2+ of that exact active journey. Implemented
+instead as "return the single most-recently-touched row, regardless of
+which day it started" — verified this correctly surfaces the multi-day
+case in both a live boot check and a dedicated test.
+
+Compact panel, deliberately NO copy buttons (unlike the v2 panel) —
+GATE_TRAVELER is DRY_RUN-only by design (the executor refuses real order
+placement for it), so this is comparison/observability during the
+evaluation, not a "take this trade" workflow; copy buttons would
+incorrectly imply it's tradeable. Also kept `cross_price` and
+`fill_price` genuinely separate throughout (unlike v2, where they
+collapse to the same number) — database.py's own column comment marks
+`cross_price` as audit-only, not the fill price.
+
+### Test/boot summary
+6 new tests (403 non-admin, empty state, real field values, the
+multi-day-active-journey case specifically, most-recent-row-only when
+multiple exist, fill fields populate on FILLED). Full `pytest tests/`:
+707 passed (up from 701 — exactly the 6 new tests), same 5 pre-existing
+unrelated errors.
+
+### Rendered panel (described, matching today's real production shape)
+Seeded a boot check with today's actual numbers (v2 FILLED 81,400.48,
+stop 81,166.90, T1 81,992.95, T3 82,359.10 — no T2) and a TravelerPlan
+from a 09-18 cross still WAITING_PULLBACK: the v2 panel shows a green
+"FILLED" badge, "LONG @ 81,400.48" detail line, then ENTRY 81,400.48
+(green) / STOP 81,166.90 (red) / T1 81,992.95 (yellow) / T3 82,359.10
+(gray) each with a 📋 copy button, T2's row hidden (never set today), and
+a green "Filled <timestamp> @ 81,400.48" line beneath. The traveler panel
+shows a yellow "WAITING_PULLBACK" badge, "LONG · cross @ 81,414.10"
+detail line, the real last_transition_reason text, and a staleness/cross-
+time/journey-cap footer — no copy buttons, correctly dimmed (opacity 0.9)
+relative to the primary v2 panel.
+
+Read-only throughout — no new trade logic, no sizing changes, no CANON
+numbers, LIVE code paths untouched.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
