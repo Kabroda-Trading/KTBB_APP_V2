@@ -259,6 +259,7 @@ async function loadAccounts() {
                     <span class="badge ${a.mode === 'LIVE' ? 'badge-danger' : 'badge-ok'}" style="margin-left:4px;">${escapeHtml(a.mode)}</span>
                     ${a.kill_switch_engaged ? '<span class="badge badge-danger" style="margin-left:4px;">KILL SWITCH ENGAGED</span>' : '<span class="badge badge-ok" style="margin-left:4px;">ACTIVE</span>'}
                     ${a.has_credentials ? '' : '<span class="badge badge-warn" style="margin-left:4px;">NO CREDENTIALS SET</span>'}
+                    ${a.sizing_confirmed ? '' : '<span class="badge badge-warn" style="margin-left:4px;" title="Real order placement is blocked until a sizing preset is explicitly saved (Step 3 below) -- this is not just a display default.">SIZING NOT CONFIRMED</span>'}
                     ${(a.gate_profile !== 'GATE_V2' || a.mgmt_profile !== 'MGMT_SPLIT')
                         ? `<span class="badge badge-warn" style="margin-left:4px;">${escapeHtml(a.gate_profile)} / ${escapeHtml(a.mgmt_profile)}</span>`
                         : ''}

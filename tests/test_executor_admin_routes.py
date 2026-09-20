@@ -304,6 +304,39 @@ def test_profile_route_defaults_visible_on_a_fresh_account(env):
     assert account["mgmt_profile"] == "MGMT_SPLIT"
 
 
+# ------------------------------------------------------------------ sizing_confirmed (P0-2, CC_WORK_ORDER_LIVE_DAY_2026-09-19.md)
+# account 11 (dawson_bitu) is a real, live example: still steady_grow
+# since its 09-06 init, silently blocking every real order it would
+# otherwise place (executor_engine.py's own LIVE-mode gate), with nothing
+# in the UI ever telling Andy this is why -- this field/badge fixes that.
+
+def test_sizing_confirmed_false_on_a_fresh_account(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.get("/api/executor/accounts")
+    assert resp.status_code == 200
+    account = resp.json()["accounts"][0]
+    assert account["sizing_confirmed"] is False
+
+
+def test_sizing_confirmed_true_after_a_real_preset_save(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    aid = env["account_id"]
+    save_resp = client.post(f"/api/executor/accounts/{aid}/sizing-policy", json={"preset_name": "stair_step_bands", "band_step_usd": 10000.0, "band_risk_per_step_usd": 1000.0})
+    assert save_resp.status_code == 200
+
+    resp = client.get("/api/executor/accounts")
+    account = resp.json()["accounts"][0]
+    assert account["sizing_confirmed"] is True
+
+
+def test_sizing_confirmed_stays_false_for_steady_grow_or_conservative(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    aid = env["account_id"]
+    client.post(f"/api/executor/accounts/{aid}/sizing-policy", json={"preset_name": "steady_grow"})
+    resp = client.get("/api/executor/accounts")
+    assert resp.json()["accounts"][0]["sizing_confirmed"] is False
+
+
 def test_profile_route_rejects_unknown_gate_profile_with_400(env):
     client = _login("exec_owner@kabroda.com", "ownerpass123")
     resp = client.post(f"/api/executor/accounts/{env['account_id']}/profile", json={"gate_profile": "GATE_BOGUS"})

@@ -1447,9 +1447,19 @@ class TinyTestPlaceT1T3LimitsRequest(BaseModel):
     qty_pct: float = 0.50
 
 
-def _serialize_account(account: "_ExecutorAccount") -> Dict[str, Any]:
+def _serialize_account(account: "_ExecutorAccount", db: Session) -> Dict[str, Any]:
     # Credential fields are NEVER included, on purpose -- not even a
     # masked/truncated form.
+    # P0-2 (CC_WORK_ORDER_LIVE_DAY_2026-09-19.md): sizing_confirmed exposes
+    # the SAME real gate set_account_mode()'s own DRY_RUN->LIVE check
+    # already enforces (policy.preset_name not in (None, "steady_grow",
+    # "conservative")) -- account 11 (dawson_bitu) is a real, live example
+    # today: still steady_grow since its 09-06 init, silently blocking
+    # every real order it would otherwise place, with nothing in the UI
+    # ever telling Andy this is why. Read-only flag, no new gate -- the
+    # real enforcement already lives in executor_engine.py/set_account_
+    # mode(); this just stops it from being invisible.
+    policy = _executor_accounts.get_or_init_sizing_policy(db, account)
     return {
         "id": account.id, "user_id": account.user_id, "label": account.label,
         "exchange": account.exchange, "mode": account.mode, "is_active": account.is_active,
@@ -1464,6 +1474,7 @@ def _serialize_account(account: "_ExecutorAccount") -> Dict[str, Any]:
         # or never-touched account reads as today's exact v2 behavior.
         "gate_profile": _executor_accounts.gate_profile_of(account),
         "mgmt_profile": _executor_accounts.mgmt_profile_of(account),
+        "sizing_confirmed": policy.preset_name not in (None, "steady_grow", "conservative"),
     }
 
 
@@ -1486,7 +1497,7 @@ async def api_executor_list_accounts(request: Request, db: Session = Depends(get
     accounts = db.query(_ExecutorAccount).filter(
         _ExecutorAccount.user_id == ctx["user"].id
     ).order_by(_ExecutorAccount.id).all()
-    return JSONResponse({"ok": True, "accounts": [_serialize_account(a) for a in accounts]})
+    return JSONResponse({"ok": True, "accounts": [_serialize_account(a, db) for a in accounts]})
 
 
 @app.post("/api/executor/accounts")
@@ -1510,7 +1521,7 @@ async def api_executor_create_account(request: Request, body: ExecutorCreateAcco
         target_user_id = body.user_id
     account = _executor_accounts.create_account(db, user_id=target_user_id, label=body.label, exchange=body.exchange, created_by=ctx.get("email"))
     db.commit()
-    return JSONResponse({"ok": True, "account": _serialize_account(account)})
+    return JSONResponse({"ok": True, "account": _serialize_account(account, db)})
 
 
 @app.post("/api/executor/accounts/{account_id}/credentials")
@@ -1593,7 +1604,7 @@ async def api_executor_set_account_mode(account_id: int, request: Request, body:
         db.rollback()
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
     db.commit()
-    return JSONResponse({"ok": True, "account": _serialize_account(account)})
+    return JSONResponse({"ok": True, "account": _serialize_account(account, db)})
 
 
 @app.post("/api/executor/accounts/{account_id}/profile")
@@ -1621,7 +1632,7 @@ async def api_executor_set_account_profile(account_id: int, request: Request, bo
         db.rollback()
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
     db.commit()
-    return JSONResponse({"ok": True, "account": _serialize_account(account)})
+    return JSONResponse({"ok": True, "account": _serialize_account(account, db)})
 
 
 @app.post("/api/executor/accounts/{account_id}/assumed-balance")
@@ -1644,7 +1655,7 @@ async def api_executor_set_assumed_balance(account_id: int, request: Request, bo
         db.rollback()
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
     db.commit()
-    return JSONResponse({"ok": True, "account": _serialize_account(account)})
+    return JSONResponse({"ok": True, "account": _serialize_account(account, db)})
 
 
 @app.post("/api/executor/accounts/{account_id}/kill-switch")
@@ -1657,7 +1668,7 @@ async def api_executor_engage_kill_switch(account_id: int, request: Request, bod
         return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
     _executor_accounts.engage_kill_switch(db, account, reason=body.reason or "manual", by=ctx.get("email") or "unknown")
     db.commit()
-    return JSONResponse({"ok": True, "account": _serialize_account(account)})
+    return JSONResponse({"ok": True, "account": _serialize_account(account, db)})
 
 
 @app.post("/api/executor/accounts/{account_id}/kill-switch/release")
@@ -1670,7 +1681,7 @@ async def api_executor_release_kill_switch(account_id: int, request: Request, db
         return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
     _executor_accounts.release_kill_switch(db, account, by=ctx.get("email") or "unknown")
     db.commit()
-    return JSONResponse({"ok": True, "account": _serialize_account(account)})
+    return JSONResponse({"ok": True, "account": _serialize_account(account, db)})
 
 
 @app.post("/api/executor/global-kill-switch")
