@@ -5213,3 +5213,52 @@ full pre-LIVE gate for this lineage (sizing save + global switch + Andy
 sign-off + this engine, mirroring v2's own three-part gate).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-20 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — P2-2 extended: the traveler's OWN entry-fill timing needs the same real-data measurement as v2's, not just management fidelity
+
+Andy accepted the P3 shipment (site commit `c7243ef`) and the risk framing
+around the now-lifted GATE_TRAVELER LIVE-placement refusal (confirmed: not
+his concern, only his own account is connected and it's DRY_RUN). His real
+ask, restated in his own words: DRY_RUN needs to be treated like a live
+account would be, so there are no surprises the day he flips his account
+to LIVE and turns DRY_RUN off. Went through this stage by stage, honestly
+distinguishing verified-identical from ruled-different from genuinely
+unresolved, rather than asserting confidence I didn't have.
+
+### What's verified tightly aligned (today's P3 build was specifically for this)
+- C5/BBWP condition math: DRY_RUN and LIVE now call the exact same
+  function (`mgmt_e1_stack.check_c5_or_bbwp()`, extracted today for
+  exactly this reason) -- one source of truth, not two copies that could
+  drift.
+- Exit priority (STOP -> C5-or-BBWP -> T1 -> TIME): identical in both.
+
+### What's a real difference, but already Andy's own explicit, informed ruling -- not a hidden gap
+Market-close exit price (C5/BBWP/TIME) vs. DRY_RUN's bar-close booking.
+Already ruled 2026-09-20 14:40 CT ("it does not matter about the
+slippage nuances... we are managing the trade"). Not re-flagging this --
+just naming it so the record shows it was asked about and already
+answered, not missed.
+
+### The one genuinely open question -- extending P2-2, not a new item
+P2-2 (AGENT_LOG 09-20 13:35, CC_INTERFACE.md audit item 1) was scoped to
+v2's own cross-moment bookkeeping fill vs. its real resting-limit retest.
+**Andy's question surfaced that the SAME class of question applies to the
+traveler's own entry, not just v2's** -- smaller in likely degree (the
+traveler's D2 fill condition is ALREADY retest-based, unlike v2's cross-
+moment bookkeeping), but not zero: DRY_RUN books the traveler's entry
+fill the instant a confirmed 5m candle shows price back at the trigger;
+the real resting POST_ONLY limit placed at that same moment could still
+miss an immediate fill (price ticks away in the seconds before the order
+reaches the exchange) and have to wait for a later real touch instead.
+How OFTEN and how MUCH that timing gap actually matters is a real-data
+question, not something I should eyeball from code alone -- flagging for
+the same measurement treatment P2-2's own v2 case is getting, not
+resolving it myself. CC's lane is code-vs-claim; this is trade-behavior
+measurement, squarely the Brain's.
+
+Andy's response: "Okay" -- read as accepting this framing and the plan to
+log it for the Brain's own measurement, not a request for CC to build
+anything further right now.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
