@@ -5139,3 +5139,77 @@ comment-only diff; the directly relevant test files
 (test_traveler_plan_engine.py, test_executor_engine.py) pass clean.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-20 (CC) — FROM: Claude Code — FOR: Andy + DeepSeek — P3 shipped: the live MGMT_E1_STACK engine is built, tested, and the GATE_TRAVELER LIVE-placement refusal is now lifted (site commit c7243ef)
+
+**Read the full conversation between Andy and DeepSeek first (CC_INTERFACE.md's BRAIN SPEC section, the two Andy-confirmed items at 14:40/14:50 CT) — built exactly to that spec, went through Plan Mode with Andy before writing any code given the stakes.**
+
+### The one thing to know before anything else
+This commit REPLACES the code-level refusal that was the only thing
+preventing a real GATE_TRAVELER order from placing. **No account is
+currently configured as gate_profile=GATE_TRAVELER + mode=LIVE** (per the
+full AGENT_LOG trail: account 12/eval_traveler is DRY_RUN; accounts 1 and
+11 are GATE_V2, not GATE_TRAVELER) — so nothing trades differently the
+moment this deploys. But the moment ANY account IS set to that exact
+combination through the existing admin UI (Ruling A's profile selector +
+the existing Go Live button — no new UI was built or needed), it will
+start placing real orders on its very next real fill. **The admin UI never
+separately restricted the profile+mode combination** — the refusal I just
+removed was the only thing standing in front of it. Flagging this clearly
+so the "go live" moment is a deliberate one, not a surprise from a toggle
+someone flips for an unrelated reason.
+
+### What shipped
+New `executor_live_e1_engine.py` — the real live execution engine for
+MGMT_E1_STACK, built exactly to the spec: entry stays a resting POST_ONLY
+limit; on fill, places ONLY the exchange stop + a full-qty resting T1
+limit (no T3, no half-qty split); all other exits (C5, BBWP, TIME) are
+dynamic, market-close via `close_position()` (the same call already
+live-proven in the mechanism-test ladder) with an immediate T1-limit
+cancel; priority STOP > C5-or-BBWP > T1 > TIME, detected via the same
+closure-first poll convention `poll_open_position()` already uses.
+`executor_engine.py::_process_traveler_account()`'s refusal is replaced
+with a real call, gated by the exact same two-layer safety check (global
+Live Orders switch + confirmed sizing preset) v2's own path already uses.
+
+**Added beyond your explicit spec, flagged rather than silently folded
+in:** the entry's own resting limit gets P0-1's cancel-on-expiry
+protection too (TravelerPlan.status in DONE/TERCILE_SKIPPED, or
+journey_cap_at) — already required by CC_INTERFACE.md's own standing
+audit item 3 ("any new order type added later must inherit this
+guarantee"), just not itemized in your own a-j scenario list.
+
+Two small, verified-safe refactors made this possible: `mgmt_e1_stack.py`
+now exposes `check_c5_or_bbwp()` as its own function (the ONE shared
+source of truth for the condition math, used by both DRY_RUN and this new
+LIVE engine — your own audit item 6, "same rules... across DRY_RUN and
+LIVE") and `MGMT_E1_TERMINAL_STATES` as a public constant (was private,
+duplicated only in traveler_plan_engine.py). Both existing test suites for
+those modules pass unchanged — pure refactors, zero behavior change.
+
+### Test/boot summary
+21 new tests (`tests/test_executor_live_e1_engine.py`) covering every
+scenario in your spec plus the cancel-on-expiry addition: normal T1 fill,
+C5 fire, BBWP fire, exchange-side STOP with orphaned-T1 cleanup, TIME
+exit, a genuine race (C5 fires but T1 actually filled first — reconciled
+correctly, never double-booked), a cancel-call failure and an unconfirmed
+successList both retrying rather than assuming success, the engine-
+selection guard proven from both directions (an E1 order can never reach
+the SPLIT engine's query and vice versa), exit-price honesty (approximated
+via last-known live price, flagged as such, never fabricated as exact),
+and the full cancel-on-expiry suite. Full `pytest tests/`: 737 passed (up
+from 716 — exactly the 21 new tests), same 5 pre-existing unrelated
+errors. Boot check clean — the new loop initializes alongside every
+existing one.
+
+### Closed the loop
+`CC_INTERFACE.md`'s HARD PRE-LIVE BLOCKER section is now marked DONE with
+this commit hash, per its own stated closing condition. Also noted there:
+`PRODUCTION_READINESS.md` is still the stale v2-only doc — recommend the
+parallel GATE_TRAVELER pre-live checklist mentioned in that section now
+that this is actually built, so there's one clear place documenting the
+full pre-LIVE gate for this lineage (sizing save + global switch + Andy
+sign-off + this engine, mirroring v2's own three-part gate).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
