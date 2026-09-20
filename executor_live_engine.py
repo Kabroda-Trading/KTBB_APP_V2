@@ -570,6 +570,14 @@ async def run_executor_position_loop() -> None:
                 ExecutorOrder.management_state.isnot(None),
                 ~ExecutorOrder.management_state.in_(_TERMINAL_STATES),
                 ExecutorOrder.entry_exchange_order_id.isnot(None),
+                # P3 (2026-09-20): defensive exclusion -- this module's own
+                # management code (check_entry_fill_and_place_exits() etc.)
+                # is hard-coded to MGMT_SPLIT's shape (half-qty T1, t3_price
+                # required) and must NEVER run for an E1/traveler-linked
+                # order (executor_live_e1_engine.py owns those). Mirrors
+                # dry_run_split_engine.py's own identical exclusion for the
+                # DRY_RUN side of this same split.
+                ExecutorOrder.traveler_plan_id.is_(None),
             ).all()
             for order_row in open_orders:
                 try:

@@ -46,8 +46,11 @@ import market_data
 # E1 has no partial T1 leg (full exit at whichever trigger fires first) --
 # same f"CLOSED_{exit_reason}" naming convention executor_live_engine.py's
 # own close_reason -> management_state mapping already uses, just E1's own
-# outcome set (STOP/C5_EXIT/BBWP_EXIT/T1/TIME) instead of SPLIT's.
-_MGMT_E1_TERMINAL_STATES = ("CLOSED_STOP", "CLOSED_C5_EXIT", "CLOSED_BBWP_EXIT", "CLOSED_T1", "CLOSED_TIME", "CLOSED_ERROR")
+# outcome set (STOP/C5_EXIT/BBWP_EXIT/T1/TIME) instead of SPLIT's. P3
+# (2026-09-20): promoted to mgmt_e1_stack.MGMT_E1_TERMINAL_STATES, the one
+# shared source both this DRY_RUN walk and executor_live_e1_engine.py's
+# real one use -- see that constant's own docstring.
+_MGMT_E1_TERMINAL_STATES = mgmt_e1_stack.MGMT_E1_TERMINAL_STATES
 
 _POLL_SECONDS = 60
 

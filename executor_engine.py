@@ -223,37 +223,38 @@ async def _process_traveler_account(db: Session, traveler_plan_row: TravelerPlan
     ))
 
     if account.mode == "LIVE" and order_dict.get("decision") == "WOULD_PLACE":
-        # Deliberately NOT wired to real order placement yet, even if both
-        # safety gates below would otherwise pass -- CC_WORK_ORDER_PHASE2.md's
-        # evaluation harness runs GATE_TRAVELER in DRY_RUN only (the site
-        # produces the data, the Brain evaluates, Andy picks a winner and
-        # signs off per account BEFORE any LIVE switch -- CC_HANDOFF_SITE_
-        # INTEGRATION.md §5). Building a real-money placement path for an
-        # as-yet-unevaluated lineage is out of this step's scope; refusing
-        # loudly (audited) rather than silently no-op'ing, so this is never
-        # mistaken for "it just didn't fire."
-        #
-        # *** DO NOT REMOVE THIS REFUSAL WITHOUT READING Kabroda AI Brain
-        # repo's CC_INTERFACE.md "HARD PRE-LIVE BLOCKER" section FIRST. ***
-        # Traced and confirmed 2026-09-20: if this refusal is lifted before
-        # a real MGMT_E1_STACK live engine exists, a real fill would reach
-        # executor_live_engine.py::check_entry_fill_and_place_exits(), which
-        # is hard-coded to MGMT_SPLIT's shape -- it would place T1 at HALF
-        # qty (wrong; E1 is a 100% single exit) and then CRASH placing T3
-        # (order_row.t3_price is always None for a traveler order --
-        # round_price_to_precision(None, ...) raises decimal.InvalidOperation).
-        # The exception is caught, so the position lands in
-        # ENTRY_FILLED_UNPROTECTED (real position, wrong-sized T1, no T3, no
-        # C5/BBWP exit, manual-intervention alert) rather than crashing the
-        # process outright -- but that is still a real, mismanaged position,
-        # not a safe outcome. This gate stays until a genuine MGMT_E1_STACK
-        # live execution path is built, reviewed, and tested.
-        executor_accounts.write_audit(
-            db, "ERROR",
-            f"LIVE-mode GATE_TRAVELER account {account.id} skipped real order placement -- "
-            f"GATE_TRAVELER real-money execution is not built yet (DRY_RUN-only evaluation phase, "
-            f"CC_WORK_ORDER_PHASE2.md) (traveler_plan_id={traveler_plan_row.id})",
-            account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order.id, actor="system")
+        # P3 (CC_INTERFACE.md HARD PRE-LIVE BLOCKER, Kabroda AI Brain repo,
+        # 2026-09-20 -- Brain spec delivered + Andy-confirmed 14:40/14:50 CT):
+        # wired to real order placement now that executor_live_e1_engine.py
+        # exists. Before this, the refusal here was the ONLY thing
+        # preventing a real fill from reaching executor_live_engine.py's
+        # own check_entry_fill_and_place_exits() -- which is hard-coded to
+        # MGMT_SPLIT's shape and would place a wrong-sized T1 then crash on
+        # T3 (order_row.t3_price is always None for a traveler order). The
+        # new engine places ONLY the exchange stop + a full-qty resting T1
+        # limit, with all other exits (C5/BBWP/TIME) dynamic and market-
+        # close, per the Brain's own spec. Same two-layer safety gate
+        # _process_account() already enforces for v2, mirrored exactly.
+        if not executor_control.is_live_orders_enabled(db):
+            executor_accounts.write_audit(
+                db, "ERROR",
+                f"LIVE-mode GATE_TRAVELER account {account.id} skipped real order placement -- "
+                f"global Live Orders switch is OFF (traveler_plan_id={traveler_plan_row.id})",
+                account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order.id, actor="system")
+            return
+        policy = executor_accounts.get_or_init_sizing_policy(db, account)
+        if policy.preset_name in (None, "steady_grow", "conservative"):
+            executor_accounts.write_audit(
+                db, "ERROR",
+                f"LIVE-mode GATE_TRAVELER account {account.id} skipped real order placement -- "
+                f"no sizing choice has ever been explicitly saved (still the untouched default) -- "
+                f"go to Sizing Policy and click SAVE before this account can trade again "
+                f"(traveler_plan_id={traveler_plan_row.id})",
+                account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order.id, actor="system")
+            return
+        db.flush()
+        import executor_live_e1_engine
+        await executor_live_e1_engine.place_traveler_entry_order(db, account, traveler_plan_row, order)
 
 
 async def process_traveler_fill(db: Session, traveler_plan_row: TravelerPlan) -> None:

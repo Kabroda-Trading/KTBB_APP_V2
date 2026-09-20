@@ -35,7 +35,7 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import study_indicators as si
 
@@ -43,6 +43,15 @@ _LONG = "LONG"
 
 BBWP_BURN_THRESHOLD = 70.0
 C5_LOOKBACK_BARS = 6
+
+# P3 (2026-09-20, executor_live_e1_engine.py): the ONE shared vocabulary for
+# MGMT_E1_STACK's terminal management_state values, used by BOTH the DRY_RUN
+# walk (traveler_plan_engine.py) and the live execution engine
+# (executor_live_e1_engine.py) -- CC_INTERFACE.md audit item 6 ("same rules,
+# same vocabulary, same state names" across DRY_RUN and LIVE). Was private
+# and defined only in traveler_plan_engine.py before this; promoted here so
+# there is one source, not two copies that could drift.
+MGMT_E1_TERMINAL_STATES = ("CLOSED_STOP", "CLOSED_C5_EXIT", "CLOSED_BBWP_EXIT", "CLOSED_T1", "CLOSED_TIME", "CLOSED_ERROR")
 
 
 def advance(
@@ -94,17 +103,7 @@ def advance(
     # close, the instant either condition is observed true. Freshly
     # recomputed each poll from the 1H/4H closes since entry -- cheap at
     # live candle-window sizes (the site's own limit=100 fetches).
-    h1_closes = [float(c["close"]) for c in candles_1h]
-    h4_closes = [float(c["close"]) for c in candles_4h]
-    rsi_1h = si.rsi_series(h1_closes, period=si.RSI_PERIOD)
-    rsi_4h = si.rsi_series(h4_closes, period=si.RSI_PERIOD)
-    bbwp_4h = si.bbwp_series(h4_closes, period=si.BBWP_PERIOD, lookback=si.BBWP_LOOKBACK)
-
-    c5_hit = (
-        (len(rsi_1h) > 0 and si.c5_momentum_decay(rsi_1h, len(rsi_1h) - 1, C5_LOOKBACK_BARS))
-        or (len(rsi_4h) > 0 and si.c5_momentum_decay(rsi_4h, len(rsi_4h) - 1, C5_LOOKBACK_BARS))
-    )
-    bbwp_hit = len(bbwp_4h) > 0 and si.bbwp_burn(bbwp_4h, len(bbwp_4h) - 1, BBWP_BURN_THRESHOLD)
+    c5_hit, bbwp_hit = check_c5_or_bbwp(candles_1h, candles_4h)
     if c5_hit or bbwp_hit:
         last = since_entry[-1]
         return {
@@ -135,6 +134,27 @@ def advance(
             "c5_fired": False, "bbwp_fired": False,
         }
     return None
+
+
+def check_c5_or_bbwp(candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]]) -> Tuple[bool, bool]:
+    """The C5_T-M_EXIT / BBWP_BURN_70 condition check, extracted from
+    advance() (P3, 2026-09-20) so it has ONE implementation shared by both
+    the DRY_RUN walk (this module's own advance(), below) and the live
+    execution engine (executor_live_e1_engine.py) -- CC_INTERFACE.md audit
+    item 6. Pure function, no behavior change from what advance() already
+    did inline. Returns (c5_hit, bbwp_hit)."""
+    h1_closes = [float(c["close"]) for c in candles_1h]
+    h4_closes = [float(c["close"]) for c in candles_4h]
+    rsi_1h = si.rsi_series(h1_closes, period=si.RSI_PERIOD)
+    rsi_4h = si.rsi_series(h4_closes, period=si.RSI_PERIOD)
+    bbwp_4h = si.bbwp_series(h4_closes, period=si.BBWP_PERIOD, lookback=si.BBWP_LOOKBACK)
+
+    c5_hit = (
+        (len(rsi_1h) > 0 and si.c5_momentum_decay(rsi_1h, len(rsi_1h) - 1, C5_LOOKBACK_BARS))
+        or (len(rsi_4h) > 0 and si.c5_momentum_decay(rsi_4h, len(rsi_4h) - 1, C5_LOOKBACK_BARS))
+    )
+    bbwp_hit = len(bbwp_4h) > 0 and si.bbwp_burn(bbwp_4h, len(bbwp_4h) - 1, BBWP_BURN_THRESHOLD)
+    return bool(c5_hit), bool(bbwp_hit)
 
 
 def _epoch_to_dt(epoch: float) -> datetime.datetime:
