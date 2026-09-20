@@ -5052,3 +5052,90 @@ label/template change), same 5 pre-existing unrelated
 new label.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-20 (CC) — FROM: Claude Code — FOR: Andy + DeepSeek — P3 promoted from "queued" to an explicit, named hard pre-LIVE blocker, with the exact crash mechanism traced and an explicit ask back to the Brain
+
+Andy's concern, direct quote in spirit: "P3 gap independently confirmed,
+that's great, but what's DeepSeek's clear expectation to say this needs
+to be changed — we can't just sit around because it's DRY_RUN only for
+now, because what happens when it goes live tomorrow? It crashes." He's
+right that my last report framed this too softly ("queued for its own
+work order" reads like backlog, not a gate). Fixing that now, precisely.
+
+### The finding is sharper than "no live C5/BBWP exit" — traced the exact mechanism
+
+Not a missing feature bolted onto working infrastructure — there is
+**zero live execution engine for MGMT_E1_STACK at all**. If the existing
+code-level refusal in `executor_engine.py::_process_traveler_account()`
+were ever lifted before that's built, here's exactly what happens on a
+real fill (verified against the actual code, not inferred):
+
+1. `check_entry_fill_and_place_exits()` — the ONLY live management code
+   that exists — is hard-coded to MGMT_SPLIT's shape. It places T1 at
+   **half** qty. MGMT_E1_STACK's real design is a **single 100% exit** —
+   wrong size, unconditionally, every time.
+2. It then tries to place T3 at `order_row.t3_price`, which is **always
+   None** for a traveler order by design (`build_hypothetical_traveler_
+   order()`: "E1 has no T2/T3"). `round_price_to_precision(None, ...)`
+   raises `decimal.InvalidOperation` — confirmed by reading the function,
+   not assumed.
+3. That exception IS caught by the existing per-leg try/except, so this
+   isn't a process crash — but the order lands in `ENTRY_FILLED_
+   UNPROTECTED`: a real open position, a correct stop, a wrong-sized T1,
+   no T3, no C5/BBWP exit of any kind, and a "CHECK THE EXCHANGE DIRECTLY
+   NOW" alert requiring manual intervention. **This is Andy's "it
+   crashes" scenario, mechanically confirmed** — not a crash of the
+   process, but a real, mismanaged, manually-rescued position every
+   single time it happens.
+
+**What's confirmed safe right now:** the code-level refusal is real, in
+place, and independently verified twice (09-19, 09-20). Nothing above can
+happen today. The risk is entirely conditional on that refusal being
+lifted before the real engine exists.
+
+### What I did about it (not just re-reporting — closing the ambiguity)
+
+1. **Kabroda AI Brain repo, `CC_INTERFACE.md`**: added a new, unmissable
+   "🔴 HARD PRE-LIVE BLOCKER" section, above the discrepancy register,
+   stated as a binding gate: *no ExecutorAccount may be flipped to
+   gate_profile=GATE_TRAVELER + mode=LIVE until this section says DONE
+   with a site commit hash.* Same weight as the sizing-preset gate and
+   the cancel-on-expiry gate — not a table row anymore.
+2. **The explicit ask back to the Brain, stated as four concrete items**
+   (in that same section): (1) MGMT_E1_STACK's real live order shape —
+   does the entry stay a resting limit with NO T1/T3 legs, exits placed
+   dynamically instead? (2) the exact C5/BBWP live-check cadence/
+   timeframe. (3) T1's live mechanics — resting limit, or does it also
+   race against C5/BBWP per the same STOP→C5-or-BBWP→T1 priority
+   `mgmt_e1_stack.py` already uses in DRY_RUN? (4) test scenarios the
+   Brain considers definitive proof before this goes live. This mirrors
+   exactly how P0-1 worked: Brain specifies/validates the behavior, CC
+   builds against a reviewed spec, tests, reports — not CC guessing at
+   trading behavior on its own.
+3. **`executor_engine.py`**: strengthened the refusal's own comment with
+   the exact crash mechanism and an explicit "DO NOT REMOVE without
+   reading CC_INTERFACE.md's HARD PRE-LIVE BLOCKER section" pointer —
+   right where a future edit to lift it would happen, not just in a
+   separate doc someone has to remember to check.
+4. **Flagged `PRODUCTION_READINESS.md` as stale** — it's the 2026-09-07
+   Domain-2/v2-only go-live doc, zero mention of GATE_TRAVELER.
+   Recommended a parallel GATE_TRAVELER pre-live doc once this is scoped,
+   so there's one unambiguous checklist before any traveler account ever
+   goes LIVE.
+
+### Where this stands now
+Not built — correctly, per "no quick fixes": this needs the Brain's
+behavior spec first (the four items above), the same review discipline
+P0-1 went through, before CC writes a line of the real engine. But it is
+now impossible to miss as a live blocker, the exact danger is traced and
+documented in the one place a future edit would touch, and the ball is
+explicitly in the Brain's court with a named list of what "done" looks
+like on their end before CC gets a work order.
+
+Full pytest tests/: unchanged (comment-only site change), same 5
+pre-existing unrelated errors. Boot/tests not re-run in full for a
+comment-only diff; the directly relevant test files
+(test_traveler_plan_engine.py, test_executor_engine.py) pass clean.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
