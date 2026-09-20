@@ -232,6 +232,22 @@ async def _process_traveler_account(db: Session, traveler_plan_row: TravelerPlan
         # as-yet-unevaluated lineage is out of this step's scope; refusing
         # loudly (audited) rather than silently no-op'ing, so this is never
         # mistaken for "it just didn't fire."
+        #
+        # *** DO NOT REMOVE THIS REFUSAL WITHOUT READING Kabroda AI Brain
+        # repo's CC_INTERFACE.md "HARD PRE-LIVE BLOCKER" section FIRST. ***
+        # Traced and confirmed 2026-09-20: if this refusal is lifted before
+        # a real MGMT_E1_STACK live engine exists, a real fill would reach
+        # executor_live_engine.py::check_entry_fill_and_place_exits(), which
+        # is hard-coded to MGMT_SPLIT's shape -- it would place T1 at HALF
+        # qty (wrong; E1 is a 100% single exit) and then CRASH placing T3
+        # (order_row.t3_price is always None for a traveler order --
+        # round_price_to_precision(None, ...) raises decimal.InvalidOperation).
+        # The exception is caught, so the position lands in
+        # ENTRY_FILLED_UNPROTECTED (real position, wrong-sized T1, no T3, no
+        # C5/BBWP exit, manual-intervention alert) rather than crashing the
+        # process outright -- but that is still a real, mismanaged position,
+        # not a safe outcome. This gate stays until a genuine MGMT_E1_STACK
+        # live execution path is built, reviewed, and tested.
         executor_accounts.write_audit(
             db, "ERROR",
             f"LIVE-mode GATE_TRAVELER account {account.id} skipped real order placement -- "
