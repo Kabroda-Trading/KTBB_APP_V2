@@ -1478,16 +1478,27 @@
                 levelsEl.style.display = 'none';
             }
 
-            // Fill line -- fill_time + the fill price. trade_plan.py's own
-            // FILLED transitions always set fill_price = trigger (the
-            // resting-order mechanism fills AT the trigger by construction,
-            // verified directly in trade_plan.py -- not an approximation),
-            // so trigger_price IS the fill price here; no separate field
-            // needed from the API.
+            // Fill line -- fill_time + the fill price. This is the SITE'S
+            // OWN bookkeeping fill (trade_plan.py's FILLED transition sets
+            // fill_price = trigger at the cross-confirm moment -- the same
+            // convention the 5-year backtest/study corpus uses), NOT
+            // necessarily when a real LIVE resting order actually fills. A
+            // real order rests behind price after confirmation and only
+            // fills on an actual retest, which can be hours or days later
+            // (no timeout -- LIVE_SYSTEM_STATE.md). CC_INTERFACE.md audit
+            // item 1 / the P2-2 discrepancy Andy independently identified
+            // 2026-09-20: a real example, 09-19's book shows FILLED
+            // 14:10:20 @ 81,400.48, but the first real retest was the
+            // 18:00 UTC bar, ~3h50m later. Labeled "(bookkeeping)" so this
+            // is never mistaken for a confirmed real exchange fill --
+            // whether to change the underlying CONVENTION (not this label)
+            // is still pending Andy's ruling (P2-2), not this file's call.
             const fillEl = document.getElementById('planStateFill');
             if (row.status === 'FILLED' && row.fill_time) {
-                fillEl.textContent = 'Filled ' + _parseServerTimestamp(row.fill_time).toLocaleString()
-                    + (row.trigger_price != null ? ' @ ' + _fmtLevel(row.trigger_price) : '');
+                fillEl.innerHTML = 'Filled ' + _parseServerTimestamp(row.fill_time).toLocaleString()
+                    + (row.trigger_price != null ? ' @ ' + _fmtLevel(row.trigger_price) : '')
+                    + ' <span style="color:#6b5a47; font-weight:400;" '
+                    + 'title="Site bookkeeping fill (cross-confirm moment, same convention the backtest uses) -- a real LIVE resting order only fills on an actual retest, which can be later.">(bookkeeping)</span>';
                 fillEl.style.display = 'block';
             } else {
                 fillEl.style.display = 'none';
