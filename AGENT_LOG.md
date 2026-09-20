@@ -4853,3 +4853,109 @@ Read-only throughout — no new trade logic, no sizing changes, no CANON
 numbers, LIVE code paths untouched.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-19 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — CC_WORK_ORDER_LIVE_DAY_2026-09-19.md: P0-1 and P0-2 shipped, P1 confirmed already done, P2 explicitly flagged as not CC's lane
+
+Andy asked for a full review/audit before implementation, not a quick
+patch — read the work order in full, read the full cited AGENT_LOG trail
+(10:19/10:33/13:42/13:48/18:52 CT), then traced the actual code paths
+directly before writing anything. Two real findings came out of that
+audit that change how P0-1 needed to be built — reporting both rather
+than silently building against the work order's literal prose.
+
+### P0-1 — cancel a real resting entry order at plan expiry (shipped)
+
+**Finding, verified by tracing trade_plan_engine.py directly, not
+assumed:** the work order's own framing says a FILLED plan "goes DONE
+site-side" at session close. That is not what the code does. The FILLED
+branch (`_advance_one()`) never checks `session_expires_at` at all — a
+FILLED-but-never-really-filled plan's own path to DONE runs entirely
+through `check_wide_stop_or_t1()` and `mirror_campaign_outcome()`, which
+defers to CampaignLog's OWN shadow simulation (`ledger_closing_engine.py`
+— the OLD, deprecated 30/70 tracker, still running but not the source of
+truth). That simulation can run until the NEXT session's 8:30 AM ET open
+— confirmed directly in `ledger_closing_engine.py`'s own comment: "the 3
+PM ET session_expires_at does NOT close filled trades — it is the Phase 1
+entry-window boundary only" — up to ~17.5 hours after the session the
+order belonged to actually closed. Waiting on `TradePlan.status == DONE`
+alone would let a real resting order sit for most of a day past its own
+session — directly contradicting the thing this fix exists to prevent.
+
+**What shipped instead:** `_plan_has_expired()` checks BOTH signals,
+OR'd — `TradePlan.status == "DONE"` (a real, often-earlier signal, e.g. a
+WIDE_STOP_FIRST early invalidation) OR `now_utc >= session_expires_at`
+(the real, deterministic backstop, independent of CampaignLog entirely).
+Wired into `check_entry_fill_and_place_exits()`'s existing "still
+resting" branch — no new poll loop, no new query, reuses the exact tick
+that already checks fill status.
+
+**Race-safety** (the property that actually matters here): a real fill
+can land between the "still resting" check and the cancel reaching the
+exchange. `cancel_orders()`'s successList/failureList is checked (never
+a bare top-level "ok" — same discipline `executor_mechanism_test.py`'s
+own cancel calls already use), and a fresh `get_order_detail()` confirms
+the real final state before committing to `CLOSED_EXPIRED`. A real fill
+found there is handed back untouched to the normal fill path — a filled,
+unprotected position is far more dangerous than a stray resting order, so
+a fill is never discarded to force a clean cancel. A cancel-call
+exception or an unconfirmed successList never assumes success either —
+both just retry next tick.
+
+**Second finding, flagged rather than forced:** the work order also asked
+to extend `executor_mechanism_test.py` with a live cancel-on-expiry case.
+That module is deliberately, explicitly isolated from real TradePlan/
+ExecutorOrder rows — its own header: "structurally impossible to alias
+with a real trade in any existing dashboard/report." Extending it to
+exercise THIS fix's logic would require touching real ExecutorOrder rows
+there, breaking that isolation on purpose-built safety boundary. The raw
+exchange mechanics this fix depends on (`cancel_orders` + `get_order_detail`
+against a resting LIMIT order) are already live-proven by the existing
+`cancel_resting_t1_limit()` mechanism test — same two API calls, already
+verified live. What's actually new here is this fix's own decision logic
+(the two-signal expiry check, the race-handling), which 6 new mocked
+tests cover directly (expired-session cancel, plan-already-DONE cancel
+before session close even applies, the fill-race hand-off, cancel-not-
+confirmed retry, cancel-call-failure retry, CLOSED_EXPIRED terminal). If
+a live, real-money confirmation of this exact path is still wanted,
+that's a new, separate live-verification action — not a bolt-on to a
+module whose isolation is load-bearing.
+
+### P0-2 — surface the blocked sizing preset (shipped)
+
+Account 11 is a real, live example: still `steady_grow` since its 09-06
+init, silently refused by `executor_engine.py`'s own real LIVE-mode gate,
+with nothing in the UI ever saying why. New `sizing_confirmed` field on
+the account serializer (same exact check the real gate already enforces
+— read-only, no new gate), a "SIZING NOT CONFIRMED" badge next to the
+existing "NO CREDENTIALS SET" one. 3 new tests.
+
+### P1 — confirmed already shipped, not re-done
+
+- P1-1 (radar plan-levels panel): shipped 2026-09-19 earlier today
+  (`CC_WORK_ORDER_RADAR_PLAN_PANEL.md`), unchanged by today's audit.
+- P1-2 (assumed-balance): confirmed shipped 2026-09-16
+  (`CC_WORK_ORDER_ASSUMED_BALANCE.md`) — the input/API/audit path exists;
+  both eval accounts already carry `assumed_balance_usd = 1000` per your
+  own 18:52 CT verification. Nothing further needed here.
+
+### P2 — explicitly not CC's lane, flagging rather than doing unilaterally
+
+- P2-1 (D2b late-fill-vs-outcome follow-up): "optional, LAB" per the work
+  order's own framing — a study task for the Brain, not site code.
+- P2-2 (DRY_RUN fill-semantics ruling): the work order itself frames this
+  as "decide consciously... document the ruling in CANON or LIVE_SYSTEM_
+  STATE" — a DeepSeek/Andy decision + a CANON-repo documentation task,
+  matching this whole engagement's standing division of labor ("CC does
+  NOT evaluate... implements; DeepSeek/the Brain evaluates and owns
+  CANON"). Not touched.
+
+### Test/boot summary
+Full `pytest tests/`: 716 passed (up from 707 — exactly the 9 new tests:
+6 for P0-1, 3 for P0-2), same 5 pre-existing unrelated
+`test_dashboard_fixes.py` errors. Boot check clean on both commits.
+
+Committed as two separate commits (P0-1, P0-2) per the standing "small
+dedicated commits" discipline.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
