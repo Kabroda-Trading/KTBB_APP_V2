@@ -5262,3 +5262,51 @@ log it for the Brain's own measurement, not a request for CC to build
 anything further right now.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-20 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — P2-2 extension CORRECTED: the traveler gap is entry-placement timing, not fill mechanics; Andy's wick-vs-close explanation was right and narrows the open question
+
+Andy walked through how he understands real limit-order fills work: once a
+breakout cross confirms, the exchange rests a limit order at the trigger, and
+it fills on ANY wick touch afterward -- it does not wait for a close below to
+fill. Re-verified this against the actual code rather than taking my own prior
+framing (previous entry, this file, same date) as settled.
+
+### Andy is correct, and both engines already do the fill this way
+`executor_live_e1_engine.py:291-293` and `executor_live_engine.py:312-314`
+both detect the entry fill purely via the exchange's own reported order status
+(`get_order_detail()` -> `status == "FILLED"`). Neither has any candle-close
+requirement in the fill check itself -- the exchange's own matching engine
+handles the wick-touch fill natively; my code only polls for the result.
+Verified directly, not assumed.
+
+### The real difference is WHEN the resting order gets placed, not how it fills
+- **v2** (`trade_plan.py:962`): `touched = live_price >= trigger` (LONG) --
+  a live-ticker wick/touch check, no candle-close wait. The resting order
+  goes out essentially the instant price first reaches the trigger. This
+  matches Andy's description almost exactly, modulo network/poll latency
+  (P2-2's original scope).
+- **The traveler** (`gate_traveler.py:195-199`,
+  `advance_waiting_pullback()`): `close = float(c["close"]); filled = close
+  <= trigger` -- requires a full CONFIRMED 5m candle CLOSE back at the
+  trigger before the plan ever reaches FILLED and fires
+  `_notify_executor()` (`traveler_plan_engine.py:97-99`), which is what
+  places the real order at all. This is deliberate, not an oversight --
+  it's DeepSeek's own frozen `recipe_assembled.py::pullback_fill()`, the
+  exact "no chase" filter the traveler's 5-year backtest was measured
+  against. Making it wick-based instead would mean trading a mechanism
+  that was never the one backtested.
+
+### Corrected, narrower P2-2 extension
+Not "does the traveler wait for a close to fill" -- it doesn't, once placed.
+The real open question is the latency between "the confirming 5m candle
+closes" and "the poll loop notices and gets the resting order onto the
+exchange" -- during which price can tick further away before the order is
+even live, pushing the real fill to a later real touch at a possibly
+different price than DRY_RUN's bar-close booking. Same class of gap as
+P2-2's original v2 case, smaller in likely magnitude (seconds-to-low-minutes,
+bounded by poll cadence), not the "hours" framing implied by a missed-close
+scenario. Flagging this corrected, narrower version for the same Brain-side
+measurement treatment -- still not something to resolve from code alone.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
