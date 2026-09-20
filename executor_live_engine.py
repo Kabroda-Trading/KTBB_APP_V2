@@ -84,7 +84,7 @@ _LONG, _SHORT = "LONG", "SHORT"
 # a partial-protection failure gets a loud alert and stops here, not a
 # repeated automatic retry every 30s. See check_entry_fill_and_place_
 # exits()'s own comment on this.
-_TERMINAL_STATES = ("CLOSED_STOP_BEFORE_T1", "CLOSED_RUNNER_STOP", "CLOSED_T3", "CLOSED_ERROR", "ENTRY_FILLED_UNPROTECTED")
+_TERMINAL_STATES = ("CLOSED_STOP_BEFORE_T1", "CLOSED_RUNNER_STOP", "CLOSED_T3", "CLOSED_ERROR", "ENTRY_FILLED_UNPROTECTED", "CLOSED_EXPIRED")
 # 2026-09-05 real doc-vs-reality gap (executor_mechanism_test.py's own
 # comment): get_position's real `side` field is "BUY"/"SELL", not
 # "LONG"/"SHORT" as Bitunix's docs claim.
@@ -192,6 +192,111 @@ def _find_open_position(pos_resp: Dict[str, Any], symbol: str, direction: str) -
     return matches[0] if matches else None
 
 
+def _plan_has_expired(trade_plan_row: TradePlan) -> bool:
+    """P0-1 (CC_WORK_ORDER_LIVE_DAY_2026-09-19.md): two independent real
+    signals the site already computes, OR'd together -- either is
+    sufficient reason a real resting entry order should never keep
+    sitting on the exchange:
+      (a) the plan's own status already reached DONE (e.g. an early
+          WIDE_STOP_FIRST invalidation -- trade_plan_engine.py's FILLED
+          branch, check_wide_stop_or_t1() -- or CampaignLog's own eventual
+          resolution via mirror_campaign_outcome()).
+      (b) the trading session itself has closed (_compute_session_
+          expires_at) -- a real, deterministic backstop, independent of
+          (a).
+
+    A real discrepancy found auditing this work order, flagged here and
+    in AGENT_LOG.md rather than silently reconciled: the work order's own
+    prose says a FILLED plan "goes DONE site-side" at session close.
+    Traced directly in trade_plan_engine.py -- that is NOT what happens.
+    The FILLED branch never checks session_expires_at at all; (a) above
+    is bounded only by CampaignLog's shadow simulation, which can run
+    until the NEXT session's 8:30 AM ET open (~17.5h after session close,
+    ledger_closing_engine.py's own _next_session_open_utc()) before
+    CLOSED_AT_EXPIRY resolves it. Relying on (a) alone would let a real
+    resting order sit for most of a day after the session it belonged to
+    already closed -- the exact outcome Andy explicitly does not want
+    ("a random limit order floating around out there is a big no-no").
+    (b) is the real, session-bound cutoff this fix actually needs; (a) is
+    still checked too since it is a real, often-earlier signal."""
+    if trade_plan_row.status == "DONE":
+        return True
+    from kabroda_mas_flow import _compute_session_expires_at
+    session_expires_at = _compute_session_expires_at(trade_plan_row.session_id, trade_plan_row.date_key)
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    return now_utc >= session_expires_at
+
+
+async def _cancel_expired_entry_order(
+    db: Session, account: ExecutorAccount, client: "executor_bitunix_client.BitunixClient",
+    symbol: str, trade_plan_row: TradePlan, order_row: ExecutorOrder,
+) -> None:
+    """P0-1 (CC_WORK_ORDER_LIVE_DAY_2026-09-19.md): cancels a real resting
+    entry LIMIT order whose parent plan has already expired (see
+    _plan_has_expired() above) -- the entry never filled, and the setup
+    it was created for is over. Race-safe: the caller already just
+    confirmed via get_order_detail() that this order was NOT FILLED as of
+    that check, but a real fill could still land in the moments between
+    that check and this cancel call landing on the exchange -- so
+    cancel_orders' own successList/failureList is checked (never trust a
+    bare top-level "ok", same discipline as executor_mechanism_test.py's
+    own cancel calls, its docstring's own explicit warning), and a FRESH
+    get_order_detail() confirms the actual final state before this
+    function commits to CLOSED_EXPIRED. A real fill found here is handed
+    back to the normal fill path -- management_state is left untouched,
+    so the very next tick's check_entry_fill_and_place_exits() call picks
+    it up and protects the position exactly as it always would have. A
+    filled, unprotected real position is far more dangerous than a stray
+    resting order, so this never discards a fill just to force a clean
+    cancel."""
+    try:
+        cancel_resp = await client.cancel_orders(symbol, [order_row.entry_exchange_order_id])
+    except Exception as e:
+        executor_accounts.write_audit(
+            db, "ERROR", f"cancel_orders call failed for expired entry order {order_row.id}: {e}",
+            account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order_row.id, actor="system")
+        return   # try again next tick -- never assume cancelled on a call failure
+
+    detail_resp = await client.get_order_detail(order_id=order_row.entry_exchange_order_id)
+    if detail_resp.get("code") not in (0, None):
+        executor_accounts.write_audit(
+            db, "ERROR",
+            f"get_order_detail returned a real API error confirming the cancel for order {order_row.id}: "
+            f"code={detail_resp.get('code')} msg={detail_resp.get('msg')!r} -- CHECK THE EXCHANGE DIRECTLY",
+            account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order_row.id, actor="system", detail=detail_resp)
+        return
+    real_status = (detail_resp.get("data") or {}).get("status")
+
+    if real_status == "FILLED":
+        executor_accounts.write_audit(
+            db, "ERROR",
+            f"cancel-on-expiry raced with a real fill on order {order_row.id} -- cancel not applied, "
+            f"handing off to the normal fill-confirmation path instead",
+            account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order_row.id, actor="system", detail=detail_resp)
+        return
+
+    success_ids = {e.get("orderId") for e in (cancel_resp.get("data") or {}).get("successList") or []}
+    if order_row.entry_exchange_order_id not in success_ids and real_status != "CANCELED":
+        executor_accounts.write_audit(
+            db, "ERROR",
+            f"cancel_orders did not report orderId={order_row.entry_exchange_order_id} in successList for "
+            f"expired order {order_row.id}, and get_order_detail shows status={real_status!r} -- "
+            f"CHECK THE EXCHANGE DIRECTLY, will retry next tick",
+            account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order_row.id, actor="system", detail=cancel_resp)
+        return
+
+    order_row.management_state = "CLOSED_EXPIRED"
+    order_row.entry_status = real_status
+    order_row.close_reason = "EXPIRED"
+    order_row.closed_at = datetime.datetime.utcnow()
+    executor_accounts.write_audit(
+        db, "ORDER_CANCELLED_ON_EXPIRY",
+        f"real resting entry order {order_row.entry_exchange_order_id} cancelled -- the parent plan "
+        f"(trade_plan_id={trade_plan_row.id}) expired before the entry ever filled",
+        account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order_row.id, actor="system",
+        detail={"cancel_response": cancel_resp, "order_detail": detail_resp})
+
+
 async def check_entry_fill_and_place_exits(db: Session, account: ExecutorAccount, trade_plan_row: TradePlan, order_row: ExecutorOrder) -> None:
     """ONE on-demand check per tick (never a blocking poll loop -- this
     runs from the shared background loop, see run_executor_position_loop
@@ -207,7 +312,15 @@ async def check_entry_fill_and_place_exits(db: Session, account: ExecutorAccount
     status = data.get("status")
     order_row.entry_status = status
     if status != "FILLED":
-        return   # still resting -- re-checked next tick, no state change
+        # P0-1 (CC_WORK_ORDER_LIVE_DAY_2026-09-19.md): still resting -- but
+        # if the parent plan has already expired, a real order must never
+        # just keep sitting on the exchange waiting for a retest that no
+        # longer matters to the site. See _plan_has_expired()'s own header
+        # for the real trigger conditions and the discrepancy found
+        # auditing the work order's original framing.
+        if _plan_has_expired(trade_plan_row):
+            await _cancel_expired_entry_order(db, account, client, symbol, trade_plan_row, order_row)
+        return   # still resting (or just cancelled above) -- re-checked next tick
 
     pos_resp = await client.get_position(symbol)
     position = _find_open_position(pos_resp, symbol, order_row.direction)

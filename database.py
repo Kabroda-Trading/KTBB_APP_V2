@@ -2273,7 +2273,7 @@ class ExecutorOrder(Base):
     realized_pnl_r = Column(Float, nullable=True)
 
     closed_at = Column(DateTime, nullable=True)
-    close_reason = Column(String, nullable=True)   # STOP_BEFORE_T1 | RUNNER_STOP | T3 | MANUAL
+    close_reason = Column(String, nullable=True)   # STOP_BEFORE_T1 | RUNNER_STOP | T3 | MANUAL | EXPIRED (2026-09-19, P0-1)
 
     # Live-audit-loop OBSERVATION ONLY (GATE_REBUILD_SPEC.md §3 item 3 /
     # AskUserQuestion resolution, 2026-09-06): logged at the real T2 touch
@@ -2323,6 +2323,7 @@ class ExecutorAuditLog(Base):
     # | RISK_STATE_RESET_ON_LIVE_FLIP (2026-09-16, DeepSeek's ruling on the
     # simulation-inflated-ledger risk flagged in Ruling D)
     # | ASSUMED_BALANCE_SET (2026-09-16, CC_WORK_ORDER_ASSUMED_BALANCE.md)
+    # | ORDER_CANCELLED_ON_EXPIRY (2026-09-19, CC_WORK_ORDER_LIVE_DAY_2026-09-19.md P0-1)
     # | TEST_MECHANISM_STARTED | TEST_MECHANISM_BLOCKED | TEST_ORDER_PLACED
     # | TEST_ORDER_FILL_CONFIRMED | TEST_INITIAL_TPSL_SET | TEST_PARTIAL_CLOSED
     # | TEST_SL_MOVED_TO_BREAKEVEN | TEST_POSITION_FLASH_CLOSED

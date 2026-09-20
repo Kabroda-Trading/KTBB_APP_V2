@@ -73,12 +73,30 @@ def _ready_account(db, label="andy_bitunix_live"):
     return account
 
 
-def _trade_plan(db, direction="LONG", tier="STANDARD"):
-    plan = TradePlan(symbol="BTC/USDT", date_key="2026-09-07", session_id="us_ny_futures", status="FILLED",
+def _trade_plan(db, direction="LONG", tier="STANDARD", date_key="2026-09-07", status="FILLED"):
+    plan = TradePlan(symbol="BTC/USDT", date_key=date_key, session_id="us_ny_futures", status=status,
                       direction=direction, tier=tier, trigger_price=100.0, stop_price=90.0, t1=106.18, t2=110.0, t3=116.18)
     db.add(plan)
     db.flush()
     return plan
+
+
+# A date_key far enough in the future that _compute_session_expires_at()
+# never treats it as expired, regardless of when this suite actually runs
+# -- P0-1's cancel-on-expiry check (executor_live_engine.py::
+# _plan_has_expired()) must never fire for these existing, unrelated
+# tests. Computed, not a hardcoded future year, so it never itself
+# becomes "the past" the way this file's own "2026-09-07" default already
+# has relative to whenever this suite is actually run.
+_FAR_FUTURE_DATE_KEY = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3650)).strftime("%Y-%m-%d")
+# A date_key unambiguously in the past -- for P0-1's own expired-plan tests.
+_FAR_PAST_DATE_KEY = "2020-01-01"
+
+
+def _cancel_orders_response(order_id="entry-order-1", success=True):
+    if success:
+        return {"code": 0, "data": {"successList": [{"orderId": order_id}], "failureList": []}, "msg": "Success"}
+    return {"code": 0, "data": {"successList": [], "failureList": [{"orderId": order_id, "errorCode": "40001", "errorMsg": "order not found"}]}, "msg": "Success"}
 
 
 def _order_row(db, account, trade_plan, tier="STANDARD", direction="LONG", management_state="PENDING_ENTRY", **overrides):
@@ -122,7 +140,7 @@ def _tpsl_response(order_id="tpsl1"):
 
 def _install(monkeypatch, **fakes):
     for name in ("get_position", "get_trading_pairs", "place_order", "get_order_detail",
-                 "set_position_tpsl", "modify_position_tp_sl_order"):
+                 "set_position_tpsl", "modify_position_tp_sl_order", "cancel_orders"):
         fake = fakes.get(name)
         if fake is None:
             async def _unexpected(self, *a, __name=name, **kw):
@@ -309,12 +327,127 @@ def test_entry_filled_unprotected_is_terminal_loop_stops_touching_it(db):
 
 def test_entry_not_yet_filled_makes_no_state_change(db, monkeypatch):
     account = _ready_account(db)
-    plan = _trade_plan(db)
+    plan = _trade_plan(db, date_key=_FAR_FUTURE_DATE_KEY)   # not expired -- see P0-1 tests below for that case
     order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
     _install(monkeypatch, get_order_detail=_async(_order_detail_response(status="NEW")))
     _run(ele.check_entry_fill_and_place_exits(db, account, plan, order))
     assert order.management_state == "PENDING_ENTRY"
     assert order.entry_status == "NEW"
+
+
+# ------------------------------------------------------------------ P0-1: cancel-on-expiry (CC_WORK_ORDER_LIVE_DAY_2026-09-19.md)
+# Andy's explicit no-go: "a random limit order floating around out there
+# is a big no-no in trading." A real resting entry order must never keep
+# sitting on the exchange once the parent plan it was created for has
+# expired (session close) or already resolved to DONE.
+
+def test_expired_session_cancels_the_resting_entry_order(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _trade_plan(db, date_key=_FAR_PAST_DATE_KEY)   # session closed long ago
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
+    _install(monkeypatch,
+             get_order_detail=_async_seq([
+                 _order_detail_response(status="NEW"),        # first check: still resting
+                 _order_detail_response(status="CANCELED"),   # confirms the cancel landed
+             ]),
+             cancel_orders=_async(_cancel_orders_response(order_id="entry-order-1")))
+    _run(ele.check_entry_fill_and_place_exits(db, account, plan, order))
+
+    assert order.management_state == "CLOSED_EXPIRED"
+    assert order.close_reason == "EXPIRED"
+    assert order.closed_at is not None
+    db.flush()   # SessionLocal is autoflush=False -- must flush before querying write_audit()'s pending row
+    rows = db.query(ExecutorAuditLog).filter_by(executor_order_id=order.id, event_type="ORDER_CANCELLED_ON_EXPIRY").all()
+    assert len(rows) == 1
+
+
+def test_plan_already_done_cancels_the_resting_entry_order_even_before_session_close(db, monkeypatch):
+    # An early WIDE_STOP_FIRST invalidation can mark the plan DONE well
+    # before session close -- the real order must still be cancelled, not
+    # just left resting until the session boundary passes too.
+    account = _ready_account(db)
+    plan = _trade_plan(db, date_key=_FAR_FUTURE_DATE_KEY, status="DONE")
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
+    _install(monkeypatch,
+             get_order_detail=_async_seq([
+                 _order_detail_response(status="NEW"),
+                 _order_detail_response(status="CANCELED"),
+             ]),
+             cancel_orders=_async(_cancel_orders_response(order_id="entry-order-1")))
+    _run(ele.check_entry_fill_and_place_exits(db, account, plan, order))
+
+    assert order.management_state == "CLOSED_EXPIRED"
+
+
+def test_cancel_race_with_a_real_fill_hands_off_to_the_normal_fill_path(db, monkeypatch):
+    # The most important safety property of this whole mechanism: if the
+    # order actually filled in the moments between the "still resting"
+    # check and the cancel landing, that fill must NEVER be discarded --
+    # a filled, unprotected real position is far more dangerous than a
+    # stray resting order.
+    account = _ready_account(db)
+    plan = _trade_plan(db, date_key=_FAR_PAST_DATE_KEY)
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
+    _install(monkeypatch,
+             get_order_detail=_async_seq([
+                 _order_detail_response(status="NEW"),      # still resting at the top-of-tick check
+                 _order_detail_response(status="FILLED"),   # raced -- actually filled before the cancel landed
+             ]),
+             cancel_orders=_async(_cancel_orders_response(order_id="entry-order-1")))
+    _run(ele.check_entry_fill_and_place_exits(db, account, plan, order))
+
+    # management_state is untouched -- still PENDING_ENTRY, so the very
+    # next tick's normal FILLED branch picks it up and protects the
+    # position exactly as it always would have.
+    assert order.management_state == "PENDING_ENTRY"
+    db.flush()   # SessionLocal is autoflush=False -- must flush before querying write_audit()'s pending row
+    rows = db.query(ExecutorAuditLog).filter_by(executor_order_id=order.id, event_type="ERROR").all()
+    assert any("raced with a real fill" in (r.message or "") for r in rows)
+
+
+def test_cancel_not_confirmed_in_success_list_retries_next_tick(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _trade_plan(db, date_key=_FAR_PAST_DATE_KEY)
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
+    _install(monkeypatch,
+             get_order_detail=_async_seq([
+                 _order_detail_response(status="NEW"),
+                 _order_detail_response(status="NEW"),   # cancel not actually confirmed by the exchange
+             ]),
+             cancel_orders=_async(_cancel_orders_response(order_id="entry-order-1", success=False)))
+    _run(ele.check_entry_fill_and_place_exits(db, account, plan, order))
+
+    assert order.management_state == "PENDING_ENTRY"   # unchanged -- never assume cancelled
+    db.flush()   # SessionLocal is autoflush=False -- must flush before querying write_audit()'s pending row
+    rows = db.query(ExecutorAuditLog).filter_by(executor_order_id=order.id, event_type="ERROR").all()
+    assert any("did not report" in (r.message or "") for r in rows)
+
+
+def test_cancel_orders_call_failure_retries_next_tick_never_assumes_cancelled(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _trade_plan(db, date_key=_FAR_PAST_DATE_KEY)
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
+
+    async def _raise(self, *a, **kw):
+        raise ConnectionError("simulated network failure")
+
+    _install(monkeypatch,
+             get_order_detail=_async(_order_detail_response(status="NEW")),
+             cancel_orders=_raise)
+    _run(ele.check_entry_fill_and_place_exits(db, account, plan, order))
+
+    assert order.management_state == "PENDING_ENTRY"
+    db.flush()   # SessionLocal is autoflush=False -- must flush before querying write_audit()'s pending row
+    rows = db.query(ExecutorAuditLog).filter_by(executor_order_id=order.id, event_type="ERROR").all()
+    assert any("cancel_orders call failed" in (r.message or "") for r in rows)
+
+
+def test_closed_expired_is_terminal_loop_stops_touching_it(db):
+    account = _ready_account(db)
+    plan = _trade_plan(db)
+    order = _order_row(db, account, plan, management_state="CLOSED_EXPIRED")
+    _run(ele.poll_open_position(db, account, plan, order))   # must not raise, must not act
+    assert order.management_state == "CLOSED_EXPIRED"
 
 
 # poll_open_position -- T2 breakeven: test_premium_be_move_only_at_t2_
