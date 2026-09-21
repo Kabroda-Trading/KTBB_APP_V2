@@ -5388,3 +5388,31 @@ The 2026-09-14 erratum (`journey_layer_spec.md:78-84`) says the ledger's own DP0
 Items 1 and 2 done. Item 3 (BBWP on Bitunix): feed design goes to the Brain for verification before code, as you said. Item 4 starts with: TIME leg, C5 re-anchor (both wait on a CANON decision / identity test), the D1 second-RSI proposal above, and the DRY_RUN-vs-LIVE shared-state sweep.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-21 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — Brain answers checked against the study files: DP0 = cross CONFIRMED (16/16) and it exposes a larger live D1 gap; flag 4 is contradicted by the artifacts; and the measured stack's entry/window structure differs from what the live traveler does
+STATUS: open. No code changed in this entry.
+
+### 0. Citation nit on the item-2 verification
+The 09-21 verification cites `executor_engine.py:107` for the phantom-fill gate ("DRY_RUN + MGMT_SPLIT"). That is v2's pre-existing block. The traveler-side fix is `executor_engine.py:217` (`account.mode == "DRY_RUN"`, no MGMT_SPLIT condition). Harmless, but the line that was read is the neighbouring one.
+
+### 1. DP0 = the CROSS, confirmed-only: independently verified, 16 of 16
+Ran the site's own `battlebox_pipeline._calc_rsi` on `bars_4H.csv` rows with `epoch + 14400 <= cross_time` for 16 journeys spread across 2022-2026 and compared to `journey_ledger.csv` DP0 `rsi_4h`. Result: **16/16 match to two decimals**. The open-time convention (`epoch < cross`, look-ahead) matches 0/16. Closed bars as of the LOCK match only 7/16. So (a) DP0 is the cross and (b) `wilder_rsi_site` and `_calc_rsi` agree, both verified here, not just accepted.
+Consequence, and it is larger than the forming-bar issue: live freezes `rsi_4h_at_lock` at the 13:00 lock, but the cross often comes hours or days later. In the sample the at-lock value differs from the measured value in 9 of 16 journeys, by up to ~30 points (2023-09-18_SHORT: cross 09-21, ledger 45.03, at-lock closed-bar 75.82; 2023-12-28_LONG: 55.74 vs 49.91; 2024-10-23_LONG: 40.04 vs 33.52). The traveler's tercile skip (`gate_traveler.py:125`) and F_A (`executor_sizing.f_a_multiplier` on `rsi_4h_at_lock`) therefore read a different number than the one their cuts and thresholds were fit on, on most journeys where the cross is not at the lock.
+Fix (item 4, not built): compute RSI at the cross moment from closed 4H bars only, store it on the TravelerPlan (new column), feed the skip and F_A from it. Short history yields None, never 50.0; None means "not skipped" and F_A 0.5, the study's own convention (`lab_walkforward_execute.py:95-97`). v2's `rsi_4h_at_lock` stays untouched, as the Brain says.
+
+### 2. Flag 4 ("the measured candidate does not carry the tercile skip") is contradicted by the artifacts
+The composite stack behind +0.1439 / n=1,538 has exactly the journey IDs of the walk-forward `A_RECIPE_FULL` and `B_ENTRY_ONLY` arms (1,538 each, set-equal), and zero overlap with the 773 `SKIPPED_BY_FILTER` journeys (358 LONG t1, 415 SHORT t3). `lab_walkforward_execute.py:147-149` defines `taken = pullback and not skipped`. So the shipped stack trades only skip-passed journeys, and the live skip is faithful to the measured population. The row that failed (`lab_walkforward_p_eval.csv`: pooled avgR 0.0097 vs 0.0722 floor, maxDD 1.00 vs 0.80 cap) is the assembled recipe with its TIGHTEN/SPLIT management, not the skip. What I could NOT find is an arm that isolates the skip's marginal value on the E1+F_A+C5+BBWP stack (`T0_NO_GATE` isolates the pullback gate). If one exists, please point at it.
+
+### 3. The measured stack does not enter where the live traveler enters (most important; hedged)
+From the source that produced the numbers, not from prose:
+- `lab_composite_stack.py:99-134`: the walk window is `win_sw`, which starts at the CROSS (`journey_recipes.py:228-230`, `i0 = bisect_left(times5, ct)`); entry and R basis are the TRIGGER (`trig = j["entry"]`, `journey_recipes.py:217-219,270`, `R = |trigger - stop|`); C5/BBWP windows are `h1.loc[t0:w_end]` with `t0` = cross. `lab_cf_arms_execute.py:49-63` (`walk_e1`) is the same.
+- The pullback is used only to SELECT which journeys count (`lab_walkforward_execute.py:147-149`). `recipe_assembled.py:211` says "Entry = that close" but `pullback_fill()` returns only the bar time.
+So the measured +0.1439 scores each journey that LATER had a pullback close as if it had entered at the trigger at the cross, walking stop/T1/C5 from the cross. The live traveler enters at the pullback bar's CLOSE, after the fact, and walks from there. They differ in entry time, entry price and R basis, walk window (a T1, STOP or C5 that happened between the cross and the pullback is booked in the measurement and cannot exist live), and the selection conditions on a future event.
+DRY_RUN R is therefore not on the measured basis either. The 09-21 trade: site books -0.0697R (basis: fill 85,278.6); on the study's basis (entry = trigger 85,422.1, stop 84,471.02, exit 85,222.3) it is (85,222.3 - 85,422.1) / 951.08 = -0.2101R before fees.
+The touch-fill study (`lab_touchfill_p_eval.csv`) did measure walks from real fills: TF_CROSS $499,520.26 / 37.69% maxDD (wick-touch resting limit at the trigger, i.e. the v2-style entry) against BASELINE $544,721.62 / 30.88% and BASELINE_BB70 $649,797.53 / 29.58%; T0_NO_GATE $3,651,340.46 / 38.12% (context only); TF_LOCK ruin. I found NO arm for the traveler's actual live entry: close-confirmed pullback, entry at that close, walk from the fill, E1 + F_A + C5 + BBWP. That arm is what would make the DRY_RUN evaluation comparable to anything. Brain lane, read-only. I read these scripts and did not re-run them; if there is a from-pullback-fill walk I missed, point at it and I will retract this.
+
+### 4. Where this leaves the work order
+Item 1 and 2 done. Ready to build (only needs Andy's nod): RSI-at-cross (section 1). Waiting on the Brain: the live-equivalent arm (section 3), the D1 confirmed-bars re-measurement, item 3's feed design. Nothing here is live-affecting today (no GATE_TRAVELER+LIVE account, switch OFF), but section 3 decides whether the DRY_RUN record can be compared to +0.1439 at all.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
