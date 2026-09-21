@@ -113,6 +113,17 @@ def _normalize_symbol(symbol: str) -> str:
 # database.py has no dependency back on market_data.py, so this is safe, but
 # keeping it a runtime import avoids widening this module's blast radius.
 # ---------------------------------------------------------------------------
+def _candle_values_differ(stored: tuple, fresh: tuple) -> bool:
+    for a, b in zip(stored, fresh):
+        if a is None or b is None:
+            if a is not b:
+                return True
+            continue
+        if abs(a - b) > 1e-9 * max(1.0, abs(b)):
+            return True
+    return False
+
+
 def _persist_candles(symbol: str, timeframe: str, rows: List[Dict[str, Any]]) -> None:
     if not rows:
         return
@@ -124,7 +135,10 @@ def _persist_candles(symbol: str, timeframe: str, rows: List[Dict[str, Any]]) ->
         db = SessionLocal()
         try:
             existing = (
-                db.query(CandleHistory.timestamp)
+                db.query(
+                    CandleHistory.timestamp, CandleHistory.open, CandleHistory.high,
+                    CandleHistory.low, CandleHistory.close, CandleHistory.volume,
+                )
                 .filter(
                     CandleHistory.symbol == symbol,
                     CandleHistory.timeframe == timeframe,
@@ -133,23 +147,36 @@ def _persist_candles(symbol: str, timeframe: str, rows: List[Dict[str, Any]]) ->
                 )
                 .all()
             )
-            existing_ts = {t for (t,) in existing}
-            new_rows = [
-                CandleHistory(
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    timestamp=ts,
-                    open=r["open"],
-                    high=r["high"],
-                    low=r["low"],
-                    close=r["close"],
-                    volume=r["volume"],
-                )
-                for r, ts in zip(rows, timestamps)
-                if ts not in existing_ts
-            ]
+            stored = {t: (o, h, l, c, v) for (t, o, h, l, c, v) in existing}
+            new_rows = []
+            refreshed = 0
+            for r, ts in zip(rows, timestamps):
+                fresh = (r["open"], r["high"], r["low"], r["close"], r["volume"])
+                prior = stored.get(ts)
+                if prior is None:
+                    new_rows.append(CandleHistory(
+                        symbol=symbol, timeframe=timeframe, timestamp=ts,
+                        open=r["open"], high=r["high"], low=r["low"], close=r["close"], volume=r["volume"],
+                    ))
+                elif _candle_values_differ(prior, fresh):
+                    # A bar is first seen while still forming, so its stored
+                    # close is a mid-bar snapshot; insert-only left that
+                    # snapshot in place forever (2026-09-21 audit). Refresh
+                    # it whenever a later fetch carries different values, so
+                    # the row converges on the bar's final OHLCV -- and any
+                    # early-stored bar inside the fetched window self-heals.
+                    db.query(CandleHistory).filter(
+                        CandleHistory.symbol == symbol,
+                        CandleHistory.timeframe == timeframe,
+                        CandleHistory.timestamp == ts,
+                    ).update({
+                        "open": r["open"], "high": r["high"], "low": r["low"],
+                        "close": r["close"], "volume": r["volume"],
+                    })
+                    refreshed += 1
             if new_rows:
                 db.bulk_save_objects(new_rows)
+            if new_rows or refreshed:
                 db.commit()
         finally:
             db.close()

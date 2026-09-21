@@ -206,7 +206,15 @@ async def _process_traveler_account(db: Session, traveler_plan_row: TravelerPlan
     # forever (the pre-existing gap for v1/v2's own DRY_RUN orders, which
     # this file does not attempt to fix -- flagged separately, out of this
     # step's scope).
-    if order_dict.get("decision") == "WOULD_PLACE":
+    # DRY_RUN only (2026-09-21 audit, mirrors _process_account()'s own
+    # `account.mode == "DRY_RUN"` gate above). This block used to be
+    # ungated because LIVE was refused here at the time it was written; once
+    # P3 lifted the refusal it kept stamping the DRY_RUN booking (fill price,
+    # fill time, ENTRY_FILLED_ORDERS_PLACED) onto LIVE rows -- a fill that had
+    # not happened, and a row the simulated E1 walk could then drive to a
+    # terminal state while a real position was still open. A LIVE row's fill
+    # comes from the exchange (executor_live_e1_engine.py), never from here.
+    if account.mode == "DRY_RUN" and order_dict.get("decision") == "WOULD_PLACE":
         order_dict["entry_fill_price"] = traveler_plan_row.fill_price
         order_dict["entry_fill_time"] = traveler_plan_row.fill_time
         order_dict["management_state"] = "ENTRY_FILLED_ORDERS_PLACED"

@@ -589,3 +589,88 @@ def test_forming_1h_dip_does_not_fire_a_live_c5_market_close(db, monkeypatch):
     assert close_calls == [], "a forming-bar dip must never reach close_position()"
     assert order.management_state == "ENTRY_FILLED_ORDERS_PLACED"
     assert order.c5_fired in (None, False)
+
+
+# ---- 2026-09-21 audit: LIVE rows must never carry the DRY_RUN fill booking, and the
+# simulated E1 walk must never select a LIVE order ---------------------------------
+
+import executor_engine
+import executor_plan_builder
+import traveler_plan_engine
+
+
+def _would_place_dict(plan, account):
+    return {
+        "trade_plan_id": plan.id, "traveler_plan_id": plan.id, "account_id": account.id,
+        "mode": account.mode, "symbol": plan.symbol, "direction": plan.direction,
+        "entry_price": 100.0, "stop_price": 90.0, "t1_price": 106.18,
+        "qty": 0.01, "risk_dollars_used": 100.0,
+        "decision": "WOULD_PLACE", "decision_reason": "test",
+    }
+
+
+def _traveler_account(db, mode, label):
+    account = ea.create_account(db, user_id=1, label=label)
+    db.flush()
+    ea.set_account_profile(db, account, "GATE_TRAVELER", "MGMT_E1_STACK", by="test")   # before LIVE: that guard refuses LIVE accounts without credentials
+    account.mode = mode
+    db.commit()
+    return account
+
+
+def _filled_plan(db):
+    plan = _traveler_plan(db, status="FILLED")
+    plan.fill_price = 99.0
+    plan.fill_time = datetime.datetime(2026, 9, 21, 14, 0, tzinfo=datetime.timezone.utc)
+    db.flush()
+    return plan
+
+
+def test_live_traveler_row_does_not_inherit_the_dry_run_fill_booking(db, monkeypatch):
+    account = _traveler_account(db, "LIVE", "live_no_phantom")
+    plan = _filled_plan(db)
+    assert ec.is_live_orders_enabled(db) is False   # switch OFF: no exchange call can happen here
+
+    async def _fake_build(db_, plan_, account_, risk_):
+        return _would_place_dict(plan_, account_)
+    monkeypatch.setattr(executor_plan_builder, "build_hypothetical_traveler_order", _fake_build)
+
+    _run(executor_engine._process_traveler_account(db, plan, account))
+    order = db.query(ExecutorOrder).filter_by(account_id=account.id, traveler_plan_id=plan.id).one()
+    assert order.entry_fill_price is None
+    assert order.entry_fill_time is None
+    assert order.management_state != "ENTRY_FILLED_ORDERS_PLACED"
+
+
+def test_dry_run_traveler_row_still_books_the_fill_immediately(db, monkeypatch):
+    account = _traveler_account(db, "DRY_RUN", "dry_still_books")
+    plan = _filled_plan(db)
+
+    async def _fake_build(db_, plan_, account_, risk_):
+        return _would_place_dict(plan_, account_)
+    monkeypatch.setattr(executor_plan_builder, "build_hypothetical_traveler_order", _fake_build)
+
+    _run(executor_engine._process_traveler_account(db, plan, account))
+    order = db.query(ExecutorOrder).filter_by(account_id=account.id, traveler_plan_id=plan.id).one()
+    assert order.entry_fill_price == 99.0
+    assert order.entry_fill_time is not None
+    assert order.management_state == "ENTRY_FILLED_ORDERS_PLACED"
+
+
+def test_simulated_e1_walk_selects_only_dry_run_orders(db):
+    dry_acct = _traveler_account(db, "DRY_RUN", "walk_dry")
+    live_acct = _traveler_account(db, "LIVE", "walk_live")
+    p_dry, p_live, p_done = _filled_plan(db), _filled_plan(db), _filled_plan(db)
+    o_dry = _order_row(db, dry_acct, p_dry, management_state="ENTRY_FILLED_ORDERS_PLACED", mode="DRY_RUN",
+                       entry_fill_time=datetime.datetime(2026, 9, 21, 14, 0))
+    # A real, filled LIVE order: entry_fill_time is set by the live engine at
+    # the real fill -- exactly what would let the simulated walk start
+    # driving it if the query did not filter on mode.
+    _order_row(db, live_acct, p_live, management_state="ENTRY_FILLED_ORDERS_PLACED", mode="LIVE",
+               entry_exchange_order_id="real-1", position_id="pos1",
+               entry_fill_time=datetime.datetime(2026, 9, 21, 14, 0))
+    _order_row(db, dry_acct, p_done, management_state="CLOSED_T1", mode="DRY_RUN")
+    db.commit()
+
+    selected = traveler_plan_engine._open_dry_run_e1_orders(db)
+    assert [o.id for o in selected] == [o_dry.id]

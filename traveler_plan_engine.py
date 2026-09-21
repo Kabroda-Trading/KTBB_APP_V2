@@ -143,6 +143,24 @@ async def _notify_executor(db, row: TravelerPlan, symbol: str) -> None:
         print(f"|| EXECUTOR || Traveler hook failed for {symbol}: {e}")
 
 
+def _open_dry_run_e1_orders(db) -> list:
+    """The orders this SIMULATED walk drives: DRY_RUN only, same
+    `mode == "DRY_RUN"` filter dry_run_split_engine.py's own query carries.
+    2026-09-21 audit: this query had no mode filter, so once a LIVE traveler
+    order existed (P3) it was selected here too -- and after its real fill
+    the live engine sets entry_fill_time, which is all _advance_e1_order()
+    needs to start simulating exits on a real position and mark the row
+    terminal, at which point the live loop stops managing it. LIVE orders
+    belong to executor_live_e1_engine.py alone."""
+    return db.query(ExecutorOrder).filter(
+        ExecutorOrder.mode == "DRY_RUN",
+        ExecutorOrder.traveler_plan_id.isnot(None),
+        ExecutorOrder.management_state.isnot(None),
+        ~ExecutorOrder.management_state.in_(_MGMT_E1_TERMINAL_STATES),
+        ExecutorOrder.decision == "WOULD_PLACE",
+    ).all()
+
+
 async def _advance_e1_order(db, order: ExecutorOrder, now_utc: datetime) -> None:
     symbol = order.symbol
     candles_5m = market_data.confirmed_5m_closes(await market_data.fetch_live_5m(symbol, limit=2016))  # ~7 days
@@ -226,13 +244,7 @@ async def run_traveler_plan_loop():
 
             # MGMT_E1_STACK's own D3 walk, same 60s cycle -- see this file's
             # own header for why it lives here, not executor_live_engine.py.
-            open_e1_orders = db.query(ExecutorOrder).filter(
-                ExecutorOrder.traveler_plan_id.isnot(None),
-                ExecutorOrder.management_state.isnot(None),
-                ~ExecutorOrder.management_state.in_(_MGMT_E1_TERMINAL_STATES),
-                ExecutorOrder.decision == "WOULD_PLACE",
-            ).all()
-            for order in open_e1_orders:
+            for order in _open_dry_run_e1_orders(db):
                 try:
                     await _advance_e1_order(db, order, now_utc)
                     db.commit()
