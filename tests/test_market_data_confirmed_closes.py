@@ -80,3 +80,28 @@ def test_confirmed_5m_closes_only_ever_drops_the_trailing_candle():
     candles = [_candle(700, 100.0), _candle(1000, 200.0), _candle(1300, 300.0)]
     result = md.confirmed_5m_closes(candles, now_ts=1601.0)  # the LAST candle's window (1300+300) has now elapsed
     assert len(result) == 3
+
+
+# ---- confirmed_closes(): the timeframe-generic form (2026-09-21) ---------------
+
+def test_confirmed_closes_1h_drops_still_forming_last_candle():
+    candles = [_candle(0, 100.0), _candle(3600, 101.0)]
+    result = md.confirmed_closes(candles, 3600, now_ts=3600 + 1800)  # 30 min into the 1h bar
+    assert len(result) == 1 and result[0]["close"] == 100.0
+
+
+def test_confirmed_closes_1h_keeps_last_candle_once_its_hour_elapsed():
+    candles = [_candle(0, 100.0), _candle(3600, 101.0)]
+    assert len(md.confirmed_closes(candles, 3600, now_ts=3600 + 3600)) == 2
+
+
+def test_confirmed_closes_4h_drops_still_forming_last_candle():
+    candles = [_candle(0, 100.0), _candle(14400, 101.0)]
+    assert len(md.confirmed_closes(candles, 14400, now_ts=14400 + 3600)) == 1
+    assert len(md.confirmed_closes(candles, 14400, now_ts=14400 + 14400)) == 2
+
+
+def test_confirmed_closes_empty_and_untimed_pass_through():
+    assert md.confirmed_closes([], 3600, now_ts=1.0) == []
+    untimed = [{"close": 1.0}, {"close": 2.0}]
+    assert md.confirmed_closes(untimed, 3600, now_ts=1.0) == untimed

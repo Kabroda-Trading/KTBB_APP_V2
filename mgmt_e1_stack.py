@@ -37,6 +37,7 @@ from __future__ import annotations
 import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+import market_data
 import study_indicators as si
 
 _LONG = "LONG"
@@ -66,9 +67,10 @@ def advance(
     "entry_fill_time"} (a plain dict, not the ORM row -- same pure-
     function convention as this codebase's other state-machine modules).
 
-    candles_5m/candles_1h/candles_4h: confirmed closes (caller strips the
-    still-forming trailing candle -- market_data.confirmed_5m_closes()),
-    covering from entry_fill_time through now.
+    candles_5m: confirmed closes (caller strips the still-forming trailing
+    candle -- market_data.confirmed_5m_closes()), covering from
+    entry_fill_time through now. candles_1h/candles_4h: may include the
+    still-forming trailing candle -- check_c5_or_bbwp() strips it itself.
 
     Returns None if still open (keep polling), or a dict with exit_price/
     exit_time/exit_reason/c5_fired/bbwp_fired once resolved.
@@ -103,7 +105,7 @@ def advance(
     # close, the instant either condition is observed true. Freshly
     # recomputed each poll from the 1H/4H closes since entry -- cheap at
     # live candle-window sizes (the site's own limit=100 fetches).
-    c5_hit, bbwp_hit = check_c5_or_bbwp(candles_1h, candles_4h)
+    c5_hit, bbwp_hit = check_c5_or_bbwp(candles_1h, candles_4h, now_ts=now_utc.timestamp())
     if c5_hit or bbwp_hit:
         last = since_entry[-1]
         return {
@@ -136,15 +138,24 @@ def advance(
     return None
 
 
-def check_c5_or_bbwp(candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]]) -> Tuple[bool, bool]:
+def check_c5_or_bbwp(
+    candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]], now_ts: Optional[float] = None,
+) -> Tuple[bool, bool]:
     """The C5_T-M_EXIT / BBWP_BURN_70 condition check, extracted from
     advance() (P3, 2026-09-20) so it has ONE implementation shared by both
     the DRY_RUN walk (this module's own advance(), below) and the live
     execution engine (executor_live_e1_engine.py) -- CC_INTERFACE.md audit
-    item 6. Pure function, no behavior change from what advance() already
-    did inline. Returns (c5_hit, bbwp_hit)."""
-    h1_closes = [float(c["close"]) for c in candles_1h]
-    h4_closes = [float(c["close"]) for c in candles_4h]
+    item 6. Returns (c5_hit, bbwp_hit).
+
+    2026-09-21: strips a still-forming trailing 1H/4H candle HERE, not in
+    the callers. The frozen walk evaluates C5/BBWP on bar CLOSES only
+    (lab_touchfill_arms.py: bins labeled by close time), but the live fetches
+    return ccxt's in-progress bar as their last row -- both callers passed it
+    through unstripped, and a 5-minute dip mid-hour fired a real C5 exit
+    (AGENT_LOG 2026-09-21 10:15). Enforcing it inside the one shared
+    function means no caller can forget it. now_ts defaults to wall-clock."""
+    h1_closes = [float(c["close"]) for c in market_data.confirmed_closes(candles_1h, 3600, now_ts)]
+    h4_closes = [float(c["close"]) for c in market_data.confirmed_closes(candles_4h, 14400, now_ts)]
     rsi_1h = si.rsi_series(h1_closes, period=si.RSI_PERIOD)
     rsi_4h = si.rsi_series(h4_closes, period=si.RSI_PERIOD)
     bbwp_4h = si.bbwp_series(h4_closes, period=si.BBWP_PERIOD, lookback=si.BBWP_LOOKBACK)

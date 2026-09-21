@@ -211,15 +211,28 @@ def confirmed_5m_closes(candles_5m: List[Dict[str, Any]], now_ts: Optional[float
     one trailing candle -- every earlier candle in the list is already a
     real historical bar with a real close, untouched.
     """
-    if not candles_5m:
-        return candles_5m
+    return confirmed_closes(candles_5m, 300, now_ts)
+
+
+def confirmed_closes(candles: List[Dict[str, Any]], interval_seconds: int, now_ts: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Timeframe-generic form of confirmed_5m_closes(): strips a trailing
+    STILL-FORMING candle of any interval (1h = 3600, 4h = 14400, ...).
+
+    2026-09-21: fetch_live_1h()/fetch_live_4h() return ccxt's in-progress
+    bar as their last row exactly like fetch_live_5m() does, and nothing
+    stripped it -- so C5 ran on a live-price "close" mid-bar, an input the
+    backtest (bar closes only) never used, and fired a real DRY_RUN exit on
+    a 5-minute dip (AGENT_LOG 2026-09-21 10:15). A candle is confirmed once
+    now_ts >= candle["time"] (open time, seconds) + interval_seconds.
+    """
+    if not candles:
+        return candles
     if now_ts is None:
         now_ts = time.time()
-    last = candles_5m[-1]
-    candle_open = last.get("time")
-    if candle_open is not None and now_ts < candle_open + 300:
-        return candles_5m[:-1]
-    return candles_5m
+    candle_open = candles[-1].get("time")
+    if candle_open is not None and now_ts < candle_open + interval_seconds:
+        return candles[:-1]
+    return candles
 
 
 async def fetch_live_15m(symbol: str, limit: int = 300) -> List[Dict[str, Any]]:

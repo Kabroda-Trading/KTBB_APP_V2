@@ -539,3 +539,53 @@ def test_market_close_exit_price_uses_last_known_live_price_not_fabricated(db, m
     db.flush()
     row = db.query(ExecutorAuditLog).filter_by(executor_order_id=order.id, event_type="POSITION_CLOSED").first()
     assert "approximated" in (row.message or "")
+
+
+# ---- 2026-09-21: the live poll must not act on a forming-bar dip -----------------
+# check_c5_or_bbwp is deliberately NOT patched here -- the strip lives inside
+# it, so patching it would hide exactly the regression this guards. The 1H
+# series' last bar is the CURRENT (still-forming) hour with a sharp dip; the
+# confirmed bars are a clean rise, so a correct poll leaves the position
+# alone. close_position is recorded (not left un-faked): a per-leg
+# try/except inside the poll would swallow an AssertionError and hide it.
+
+def _rising_bars(interval, n=41, forming_dip=0.0):
+    import time as _t
+    now = _t.time()
+    last_open = int(now // interval) * interval          # bar containing "now" = forming
+    closes = [100.0]
+    for i in range(n - 2):
+        closes.append(closes[-1] + (-0.5 if i % 4 == 3 else 1.5))
+    closes.append(closes[-1] - forming_dip if forming_dip else closes[-1] + 1.5)
+    return [{"close": c, "time": last_open - (len(closes) - 1 - i) * interval} for i, c in enumerate(closes)]
+
+
+def test_forming_1h_dip_does_not_fire_a_live_c5_market_close(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
+    close_calls = []
+
+    async def _recording_close(self, *a, **kw):
+        close_calls.append(1)
+        return _close_position_response()
+
+    _install(monkeypatch,
+             get_position=_async(_one_position_response()),
+             close_position=_recording_close,
+             get_order_detail=_async(_order_detail_response(status="NEW", order_id="t1-1")))
+
+    async def _fake_1h(symbol, limit=200):
+        return _rising_bars(3600, forming_dip=6.0)
+
+    async def _fake_4h(symbol, limit=200):
+        return _rising_bars(14400)
+
+    monkeypatch.setattr(e1e.market_data, "fetch_live_1h", _fake_1h)
+    monkeypatch.setattr(e1e.market_data, "fetch_live_4h", _fake_4h)
+
+    _run(e1e.poll_traveler_position(db, account, plan, order))
+    assert close_calls == [], "a forming-bar dip must never reach close_position()"
+    assert order.management_state == "ENTRY_FILLED_ORDERS_PLACED"
+    assert order.c5_fired in (None, False)

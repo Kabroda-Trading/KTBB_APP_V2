@@ -156,3 +156,67 @@ def test_no_bars_since_entry_returns_none():
     order = _order()
     candles_5m = [_bar(100.0, ENTRY_EPOCH - 300)]  # before entry, not after
     assert e1.advance(order, candles_5m, [], [], NOW) is None
+
+
+# ---- 2026-09-21: forming-bar strip (AGENT_LOG 2026-09-21 10:15) ----------------
+# A rising series (real RSI, with genuine down bars so RSI is defined) whose
+# LAST bar is a sharp dip: including it gives C5 True (67.77 < 91.51),
+# confirmed-only gives False (91.97 vs 90.74, still rising) -- the exact
+# shape of the 09-21 live exit, where a 5-minute dip inside a forming 1H bar
+# fired a C5 exit the backtest (bar closes only) would never have produced.
+_BASE_OPEN = 1_800_000_000 - (1_800_000_000 % 14400)
+
+
+def _rising_then_dip(interval, dip=6.0, n_up=40):
+    closes = [100.0]
+    for i in range(n_up - 1):
+        closes.append(closes[-1] + (-0.5 if i % 4 == 3 else 1.5))
+    closes.append(closes[-1] - dip)
+    return [{"close": c, "time": _BASE_OPEN + i * interval} for i, c in enumerate(closes)]
+
+
+def _clean_rising(interval, n=40):
+    # Every bar sits well before _BASE_OPEN, so it is confirmed at any now_ts
+    # the tests use, and n=40 ends on an up-step (RSI still rising -> no C5).
+    closes = [100.0]
+    for i in range(n - 1):
+        closes.append(closes[-1] + (-0.5 if i % 4 == 3 else 1.5))
+    return [{"close": c, "time": _BASE_OPEN - (n - i) * interval} for i, c in enumerate(closes)]
+
+
+def test_check_c5_ignores_a_forming_1h_bar_dip():
+    h1 = _rising_then_dip(3600)
+    h4 = _clean_rising(14400)
+    mid_hour = h1[-1]["time"] + 1800
+    assert e1.check_c5_or_bbwp(h1, h4, now_ts=mid_hour) == (False, False)
+
+
+def test_check_c5_fires_once_that_1h_bar_is_confirmed():
+    h1 = _rising_then_dip(3600)
+    h4 = _clean_rising(14400)
+    after_close = h1[-1]["time"] + 3600
+    c5, bbwp = e1.check_c5_or_bbwp(h1, h4, now_ts=after_close)
+    assert c5 is True and bbwp is False
+
+
+def test_check_c5_ignores_a_forming_4h_bar_dip():
+    h1 = _clean_rising(3600)
+    h4 = _rising_then_dip(14400)
+    assert e1.check_c5_or_bbwp(h1, h4, now_ts=h4[-1]["time"] + 3600) == (False, False)
+    assert e1.check_c5_or_bbwp(h1, h4, now_ts=h4[-1]["time"] + 14400)[0] is True
+
+
+def test_advance_does_not_exit_on_a_forming_1h_bar_dip():
+    # End to end through advance(): fill, a confirmed 5m bar after it, and a
+    # forming 1H dip -- must stay open (None), not book a C5_EXIT.
+    h1 = _rising_then_dip(3600)
+    h4 = _clean_rising(14400)
+    fill = datetime.datetime.fromtimestamp(h1[-1]["time"] + 60, tz=datetime.timezone.utc)
+    now = fill + datetime.timedelta(minutes=10)
+    m5 = [_bar(100.0, fill.timestamp() + 60, high=100.5, low=99.5)]
+    order = _order(entry_fill_time=fill)
+    assert e1.advance(order, m5, h1, h4, now) is None
+    # ...and once that hour is over the same series does decay-exit.
+    later = datetime.datetime.fromtimestamp(h1[-1]["time"] + 3600 + 60, tz=datetime.timezone.utc)
+    result = e1.advance(order, m5, h1, h4, later)
+    assert result is not None and result["exit_reason"] == "C5_EXIT"
