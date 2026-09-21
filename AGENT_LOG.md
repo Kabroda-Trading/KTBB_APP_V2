@@ -5366,3 +5366,25 @@ Shared trade-model notes field map matches code: stop = r30 edge -/+ 0.12 x box 
 Item 1 done. Next, in order: item 2 (candle_history upsert; clear phantom fill fields on LIVE rows), item 3 (BBWP on Bitunix per Andy's Option A), item 4 (the clean D1/D2/D3 audit, which now has findings 2-4 above as its starting list). Items 3's feed design and finding 3's exact semantics both want a Brain confirmation before code; item 2 does not.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-21 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — Work-order item 2 SHIPPED (site 621d00d) and it found a defect in MY P3 work that the 09-20 record calls safe; D1 nuance verified
+STATUS: open
+
+### The defect (mine, P3): the simulated E1 walk could drive a LIVE order
+- `traveler_plan_engine.py` (DRY_RUN E1 walk) selected open orders with NO mode filter: `traveler_plan_id NOT NULL, management_state non-terminal, decision == WOULD_PLACE`. `dry_run_split_engine.py`'s equivalent query has always carried `mode == "DRY_RUN"`; my Phase 2 copy dropped it (LIVE was refused then, so it looked unreachable) and P3 never re-audited it when the refusal came out.
+- `executor_engine._process_traveler_account` stamped the DRY_RUN booking (`entry_fill_price`, `entry_fill_time`, `ENTRY_FILLED_ORDERS_PLACED`) onto EVERY WOULD_PLACE traveler row, LIVE included; v2's equivalent block is gated `account.mode == "DRY_RUN"`. This is the "phantom fill price" from finding 3b this morning, but it was worse than a data-integrity issue.
+- The failure it would have caused: after a REAL fill, `executor_live_e1_engine` sets `entry_fill_time` (line 310) and that is all `_advance_e1_order` needs to start simulating STOP/C5/T1/TIME on the row. It could write `CLOSED_*`, an exit price and a realized R onto a real, open position, and once terminal the live loop's non-terminal query would stop managing it: exchange stop and T1 limit still resting, but no C5/BBWP/TIME exit and no expiry handling. Not reachable in prod today (no GATE_TRAVELER+LIVE account, global switch OFF), but it would have fired on the first live traveler order.
+- Fix: the walk selects `mode == "DRY_RUN"` only (extracted as `_open_dry_run_e1_orders`), and pre-population is DRY_RUN-only. 8 new tests (3 for these two, 5 for candle_history); each was verified to FAIL with its fix reverted, and the DRY_RUN control test still passes when the LIVE gate is reverted. Full suite 754 passed, same 5 pre-existing `test_dashboard_fixes.py` errors.
+- Also in 621d00d: `market_data._persist_candles` is now a real upsert (it refreshes a stored bar whenever a later fetch carries different OHLCV, so early-stored bars self-heal inside the fetched window) instead of insert-only. Bars stored before this deploy that fall outside the 5m/1h/4h fetch windows are not repaired; treat candle_history closes older than the fix as first-sight snapshots.
+
+### Correction to my own 09-20 record
+My P3 entry said the engine-selection guard was "proven from both directions." That was true for SPLIT vs E1 only. E1-DRY_RUN vs E1-LIVE was unguarded, and neither my 21 tests nor the Brain's 15:34 source verification exercised it (both checked the live engine against the spec, not the OTHER engine's query against LIVE rows). Two P3 defects found in one day (this and the forming-bar strip) mean "engine DONE" in GATE_TRAVELER_PRE_LIVE.md condition 1 was overstated on more than one axis. Recommend it stays reopened until item 4's live-path audit has been done end to end, and that the audit look for a third: any query, state name or field that both a DRY_RUN and a LIVE path read.
+
+### D1 nuance: verified, and it points at a live-side gap
+The 2026-09-14 erratum (`journey_layer_spec.md:78-84`) says the ledger's own DP0 columns are close-time-sliced (`journey_ledger.py:631`, `wilder_rsi_site(c4)` via `closes_upto`), with open-time slicing (`closes_upto_open`) used only for the gate-(a) reproduction. So the traveler's tercile skip and F_A were measured on a no-look-ahead RSI. Live feeds both from `rsi_4h_at_lock`, computed at `battlebox_pipeline.py:653` from `fetch_live_4h` with the partial 4H bar included, and the same value also feeds v2's RSI zone, which was measured on the open-time convention. One shared value serves two systems measured on two conventions. Proposal for item 4 (NOT changed): freeze a second value at the lock, close-time <= lock, for the traveler's tercile skip and F_A, and leave v2's value untouched. Needs from the Brain: (a) DP0's time reference (lock or cross) and (b) confirmation that `wilder_rsi_site` matches `battlebox_pipeline._calc_rsi` numerically. My recommendation on the D1 confirmed-bars re-measurement: green-light it. It is read-only, and it now has to answer for both conventions.
+
+### Status
+Items 1 and 2 done. Item 3 (BBWP on Bitunix): feed design goes to the Brain for verification before code, as you said. Item 4 starts with: TIME leg, C5 re-anchor (both wait on a CANON decision / identity test), the D1 second-RSI proposal above, and the DRY_RUN-vs-LIVE shared-state sweep.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
