@@ -5310,3 +5310,37 @@ scenario. Flagging this corrected, narrower version for the same Brain-side
 measurement treatment -- still not something to resolve from code alone.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-21 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — CC audit of the 09-21 entries and Brain docs: the forming-bar and BBWP findings are CONFIRMED (my own P3 engine has the same violation), plus four findings the docs do not yet carry
+STATUS: open
+
+No code changed in this audit. Every item below was checked against source; where I could not verify something, it says so.
+
+### 1. Forming-bar contract violation: CONFIRMED, and it is in my P3 engine too
+- `market_data.py:246-285`: `fetch_live_1h`/`fetch_live_4h` never strip the trailing forming bar; `confirmed_5m_closes()` is 5m-only (hard-coded 300s).
+- `mgmt_e1_stack.py:69-70` states the contract (callers pass confirmed closes). `traveler_plan_engine.py:151-152` violates it.
+- **`executor_live_e1_engine.py:555-556` (CC, P3, c7243ef) has the identical unstripped fetch.** The Brain spec (CC_INTERFACE.md BRAIN SPEC item 2) said "BBWP on 4H closes ... from confirmed candles only." I built to the existing DRY_RUN fetch pattern instead of re-reading that spec line, and my 21 tests use synthetic candles so never exercised the fetch. The Brain's 09-20 15:34 verification checked engine structure against the spec and did not catch it either. Nothing is trading live (no GATE_TRAVELER+LIVE account, global switch OFF), so no real order was affected.
+- Independent reproduction (Kraken 1H via the site's own `fetch_live_1h` + `study_indicators`), 09-21 14:00 UTC bar: forming bar at 85,222.3 -> RSI 79.92 vs 80.19 six bars back -> C5 True (by 0.27 RSI pts). Stripped (through the 13:00 confirmed bar) -> 83.59 vs 62.32 -> False. The 14:00 bar's own FINAL close -> 84.95 vs 80.19 -> False. Conclusion matches the 10:15 entry. The specific figures in that entry (74.85 vs "83.59 six bars earlier") do not reproduce: 83.59 is the 13:00 bar's RSI, not the value six bars back. Conclusion unaffected.
+
+### 2. BBWP: correction to the proposed fix
+Raising the fetch limit will not work. Live Kraken returns at most 721 4H bars even at limit=1000 (verified 2026-09-21), and `bbwp_series` needs 863+ (period 96 + lookback 768) for a defined value: every value is None at 721 as well as at 200. BBWP needs a different data source (design decision, not a mechanical fix). Note the backtest used Bitunix bars (`calibration_data/bitunix`) while the site derives signals from Kraken. Consequence: until BBWP is live-capable the DRY_RUN traveler runs E1+C5 only, not the validated E1+F_A+C5+BBWP stack, so its record is not evidence for the shipped stack.
+
+### 3. Four findings not yet in any doc
+a. **Entry price (corrects my own 09-20 framing).** The traveler's real entry limit is placed at `traveler_plan_row.fill_price` = the confirming 5m bar's CLOSE (`executor_plan_builder.py:386-388` -> order `entry_price` -> `executor_live_e1_engine.py:177`), NOT at the trigger. Spec item 1 and the header comment at `executor_live_e1_engine.py:25` both say "at the trigger"; both are wrong about the price actually used. The order is placed within one poll (up to ~60s) after that close. For a LONG, a POST_ONLY buy at that price is marketable if the market has already ticked at/below it and would be rejected (handled: CLOSED_ERROR + admin email; existing comments at `executor_live_engine.py:149,345` treat rejection as "no orderId"), so LIVE skips a trade DRY_RUN booked; if it instead rests, it fills only if price comes back to it. LIVE therefore only holds trades where price kept weakening after the pullback close, while DRY_RUN books every one at the close. That is a selection difference, not just the "latency-class" gap I described on 09-20 (the code lines I cited then were accurate; the mechanism I drew from them was incomplete). How often it happens is unmeasured; rejection behaviour is inferred from the codebase's own comments, not tested live. Has D2b's entry variants covered "limit at the confirming-bar close, placed after it"? I have not read D2b and do not claim it does or does not.
+b. **Phantom fill price on LIVE rows.** `executor_engine.py:209-212` pre-populates `entry_fill_price`/`entry_fill_time` from the DRY_RUN booking for every WOULD_PLACE traveler order, LIVE included, and nothing clears them if the entry never fills (CLOSED_EXPIRED / CLOSED_ERROR). A LIVE row can carry a fill that never happened. Downstream effect on Brain exports not verified.
+c. **candle_history stores first-sight snapshots.** `market_data.py:116-157` inserts only timestamps not yet stored and never updates, so each bar keeps whatever close it had when first fetched (near its open for a bar polled from the start). This fits the 10:10 observation ("13:00 row = Kraken's 12:00 close") better than a "mislabeled timestamp" reading. Mechanism verified from code (CC built it, Unified Audit System Phase 1); prod rows not queried. Audit reproductions that read closes from candle_history are unreliable.
+d. **Pre-fill cancel premise.** The 11:30 entry describes cancelling "while the entry limit rests (WAITING_PULLBACK)". In code no order exists in WAITING_PULLBACK: the order is created only in `process_traveler_fill`, whose only caller is `traveler_plan_engine._notify_executor` on the FILLED transition (grep-verified). For the traveler the pre-fill exhaustion check is a skip at the FILLED transition (no cancel machinery), plus optionally the placement-to-fill window. Andy's Saturday example (resting limit from the cross, filled on a wick) describes v2's mechanism, not the traveler's. The P4 spec should be written against the traveler's real flow.
+
+### 4. Doc status the Brain owns
+- CC_INTERFACE.md discrepancy register has no 09-21 items (they exist only in AGENT_LOG).
+- GATE_TRAVELER_PRE_LIVE.md: condition 1 ("Engine DONE") is overstated until the strip fix lands; condition 5 cites 2 journeys, but all 3 live C5 exits are contaminated, so the valid DRY_RUN record is 0 journeys.
+- EVALUATION_PROTOCOL.md vocabulary mismatch flagged 09-20 is unchanged (file untouched since 12:53).
+- AGENT_LOG append-only integrity checked: 0 lines deleted since 09-19.
+
+### 5. Proposed order (awaiting Andy's go-ahead; nothing started)
+1. CC: strip forming 1H/4H bars in BOTH walks + a test using a real forming-bar case (mechanical, urgent).
+2. CC: candle_history upsert; clear the phantom fill fields on LIVE rows.
+3. Andy/Brain decision: BBWP data source. Brain measurement + Andy ruling before any change to the entry price mechanism (3a).
+4. Brain: reopen GATE_TRAVELER_PRE_LIVE.md conditions 1 and 5; add these items to the CC_INTERFACE.md register.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
