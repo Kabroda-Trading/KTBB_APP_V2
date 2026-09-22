@@ -5416,3 +5416,30 @@ The touch-fill study (`lab_touchfill_p_eval.csv`) did measure walks from real fi
 Item 1 and 2 done. Ready to build (only needs Andy's nod): RSI-at-cross (section 1). Waiting on the Brain: the live-equivalent arm (section 3), the D1 confirmed-bars re-measurement, item 3's feed design. Nothing here is live-affecting today (no GATE_TRAVELER+LIVE account, switch OFF), but section 3 decides whether the DRY_RUN record can be compared to +0.1439 at all.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-21 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — D1 RSI-at-cross SHIPPED (site 9f20298), against CC_WORK_ORDER_D1_RSI_AT_CROSS.md's own acceptance checklist
+STATUS: open
+
+Read the work order and both verification entries (03:09/03:16 UTC) before building -- built to the spec as written, no deviation.
+
+### Acceptance checklist, self-checked against the shipped diff
+- Skip gate reads cross-moment RSI, not rsi_4h_at_lock: `gate_traveler.py::advance_waiting_cross()` computes `rsi_4h_at_cross = rsi_at_cross(candles_4h, cross_time_epoch)` and passes it to `tercile_skip()`; the plan dict no longer carries `rsi_4h_at_lock` at all (removed from `traveler_plan_engine.py`'s WAITING_CROSS branch).
+- F_A reads cross-moment RSI (or None -> 0.5): `executor_plan_builder.py` now calls `f_a_multiplier(traveler_plan_row.rsi_4h_at_cross, ...)`.
+- Closed-bar cutoff `epoch + 14400 <= cross_time`, no forming bar: `rsi_at_cross()`'s own filter; a dedicated test constructs a forming bar at the cross and asserts it changes nothing.
+- None path, no 50.0: gated at `< MIN_RSI_4H_BARS` (15) before the Wilder loop runs at all, so `_calc_rsi`'s own 50.0 branch is never reachable through this path.
+- v2's `rsi_4h_at_lock` and its readers: untouched -- `decision_engine.py`/`trade_plan.py`/`battlebox_pipeline.py` not touched by this commit.
+- Plan payload exposes the new value: `main.py`'s traveler-plan-status route now returns both `rsi_4h_at_lock` and `rsi_4h_at_cross`, labeled which one the skip/F_A actually read.
+- Tests: cross-before-any-4H-close (`test_rsi_at_cross_below_minimum_bars_is_none_not_fifty`), cross-at-exactly-a-bar-close (covered by the `n=15`/`n=16` cases in the byte-identity sweep, plus the forming-bar-exclusion test), short-history None (same test), v2 field untouched (no v2 file in the diff; `rsi_4h_at_lock` kept as its own DB column and payload key).
+
+### Verification method
+`rsi_at_cross()` is checked for byte-identity against `battlebox_pipeline._calc_rsi()` directly (not re-derived independently) across 6 bar counts (14/15/16/20/40/97) on a deterministic non-monotonic series. `gate_traveler.py`'s own cross/skip tests were rewritten to feed real 4H candle series (tuned via direct search against `rsi_at_cross()` itself, asserted to land in the intended zone by a dedicated test) rather than a plan-level RSI float, since that field no longer exists in the flow. `traveler_plan_engine.py`'s F_A test previously used a value (0.5) that is ALSO `f_a_multiplier`'s own default for `None` -- it would have kept passing even if the wiring were silently broken; added a second test that sets `rsi_4h_at_lock` to an extreme in the WRONG direction and `rsi_4h_at_cross` to the real extreme, so a real regression (reading the wrong column) fails loudly.
+
+Three mutation checks, each reverting one piece of the fix: (1) `rsi_at_cross` forced to return a fixed value regardless of input -- 6 tests fail; (2) F_A wiring reverted to `rsi_4h_at_lock` -- the new extreme-value test fails; (3) the closed-bar filter disabled -- the forming-bar test fails. All three restored after.
+
+Full suite: 761 passed (up from 754 -- 7 net new), same 5 pre-existing `test_dashboard_fixes.py` errors. Boot check clean.
+
+### Nothing else in the work order was actioned
+Item 3 (BBWP on Bitunix) and the touch-fill-basis re-measurement (my 09-21 finding, section 3) are still with the Brain, per the division of labor. Not started.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
