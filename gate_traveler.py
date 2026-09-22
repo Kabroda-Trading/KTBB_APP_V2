@@ -54,21 +54,75 @@ JOURNEY_CAP_SECONDS = 7 * 24 * 3600   # journey_recipes.py:190
 # arms.py -- NOT YET a CANON.md row (see module header).
 FULL_D1_CUTS = {"LONG": (51.49, 61.27), "SHORT": (40.45, 48.56)}
 
+# D1 RSI-AT-CROSS (2026-09-21, Andy-approved, CC_WORK_ORDER_D1_RSI_AT_CROSS.md):
+# below this many closed 4H bars, RSI is undefined -- the study's own
+# convention (lab_walkforward_execute.py:95-97), never a fabricated 50.0.
+# Same threshold battlebox_pipeline._calc_rsi() uses internally (period+1).
+MIN_RSI_4H_BARS = 15
 
-def tercile_skip(rsi_4h_at_lock: Optional[float], side: str,
+
+def rsi_at_cross(candles_4h: Optional[List[Dict[str, Any]]], cross_time_epoch: Optional[float]) -> Optional[float]:
+    """RSI-4h at the CROSS moment, closed 4H bars only -- the actual DP0
+    convention the traveler's tercile skip and F_A were measured on
+    (journey_ledger.py:623-631 `closes_upto` + replay_site.py:236-258
+    `wilder_rsi_site`; independently reproduced 2803/2803 to 2dp by two
+    separate implementations, AGENT_LOG.md 2026-09-21/22). This is a
+    DIFFERENT value from v2's `rsi_4h_at_lock` (frozen at the 13:00 lock,
+    still-forming bar included) -- that field and its readers are untouched
+    by this function.
+
+    A 4H bar counts as closed at the cross when its OPEN time + 4h has
+    already elapsed: `bar["time"] + 14400 <= cross_time_epoch`. This also
+    naturally excludes a still-forming bar (its window hasn't elapsed
+    either), so no separate strip is needed here.
+
+    Classic Wilder RSI(14), SMA-seeded -- battlebox_pipeline._calc_rsi()'s
+    own formula, duplicated (not imported) per this module's own no-DB/
+    network convention and that function's own "other callers" note
+    (verified byte-identical against it directly, tests/test_gate_
+    traveler.py). Returns None below MIN_RSI_4H_BARS closes."""
+    if not candles_4h or cross_time_epoch is None:
+        return None
+    closes = [
+        float(c["close"]) for c in candles_4h
+        if c.get("time") is not None and c["time"] + 14400 <= cross_time_epoch
+    ]
+    if len(closes) < MIN_RSI_4H_BARS:
+        return None
+    period = MIN_RSI_4H_BARS - 1
+    gains, losses = [], []
+    for i in range(1, len(closes)):
+        change = closes[i] - closes[i - 1]
+        gains.append(change if change > 0 else 0.0)
+        losses.append(abs(change) if change < 0 else 0.0)
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(closes) - 1):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
+def tercile_skip(rsi_4h_at_cross: Optional[float], side: str,
                   cuts: Optional[Dict[str, Any]] = None) -> bool:
     """The HARD taken-gate filter (recipe_assembled.py::tercile_skip() /
     lab_walkforward_execute.py::skipped(), verbatim rule): LONG skips
     tercile-1 (rsi < lo), SHORT skips tercile-3 (rsi > hi). No RSI value
     available -> NOT skipped (counted, disclosed -- same convention the
-    study itself uses, never silently drops a journey for missing data)."""
-    if rsi_4h_at_lock is None:
+    study itself uses, never silently drops a journey for missing data).
+    2026-09-21: takes the cross-moment RSI (rsi_at_cross()), not the
+    lock-time one -- see this module's header and CC_WORK_ORDER_D1_RSI_
+    AT_CROSS.md for why the two differ."""
+    if rsi_4h_at_cross is None:
         return False
     cuts = cuts or FULL_D1_CUTS
     lo, hi = cuts[side]
     if side == _LONG:
-        return rsi_4h_at_lock < lo
-    return rsi_4h_at_lock > hi
+        return rsi_4h_at_cross < lo
+    return rsi_4h_at_cross > hi
 
 
 def _confirmed_side(candles_5m: List[Dict[str, Any]], bo: float, bd: float) -> Optional[str]:
@@ -90,11 +144,19 @@ def advance_waiting_cross(
     plan: Dict[str, Any],
     candles_5m: List[Dict[str, Any]],
     now_utc: datetime.datetime,
+    candles_4h: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """WAITING_CROSS -> TERCILE_SKIPPED (terminal, no trade) | WAITING_PULLBACK.
 
     candles_5m: confirmed 5m closes (caller strips the still-forming
     trailing candle first, same as trade_plan.py's own callers).
+    candles_4h: raw (unstripped) 4H candles covering well before the cross
+    -- rsi_at_cross() does its own closed-bar filtering against the cross
+    timestamp determined below, so this does NOT need market_data.
+    confirmed_closes() applied first. Optional: if omitted or a fetch
+    failed, rsi_4h_at_cross is None and the tercile skip treats that
+    exactly like genuinely-insufficient history (not skipped) -- a
+    transient fetch gap is not worth inventing a retry-the-cross state for.
     Returns None if no cross yet (stay WAITING_CROSS), or a dict of field
     updates once a cross is confirmed either way.
     """
@@ -122,7 +184,8 @@ def advance_waiting_cross(
         if cross_time_epoch is not None else now_utc
     )
 
-    skipped = tercile_skip(plan.get("rsi_4h_at_lock"), side)
+    rsi_4h_at_cross = rsi_at_cross(candles_4h, cross_time_epoch)
+    skipped = tercile_skip(rsi_4h_at_cross, side)
 
     updates: Dict[str, Any] = {
         "direction": side,
@@ -133,13 +196,14 @@ def advance_waiting_cross(
         "cross_price": cross_price,
         "opposite_trigger": opposite_trigger,
         "journey_cap_at": cross_time + datetime.timedelta(seconds=JOURNEY_CAP_SECONDS),
+        "rsi_4h_at_cross": rsi_4h_at_cross,
         "tercile_skipped": skipped,
     }
     if skipped:
         updates["status"] = "TERCILE_SKIPPED"
         updates["last_transition_reason"] = (
             f"{side} cross confirmed at {cross_price:,.2f} -- tercile-skipped "
-            f"(RSI-4h-at-lock {plan.get('rsi_4h_at_lock')}) -- not taken, no trade"
+            f"(RSI-4h-at-cross {rsi_4h_at_cross}) -- not taken, no trade"
         )
     else:
         updates["status"] = "WAITING_PULLBACK"

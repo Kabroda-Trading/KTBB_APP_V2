@@ -45,6 +45,20 @@ def _c5m(close, ts, high=None, low=None):
     return {"close": close, "high": high if high is not None else close, "low": low if low is not None else close, "time": ts}
 
 
+def _h4_long_skip(cross_epoch, closed_bars=20):
+    # 2026-09-21 (CC_WORK_ORDER_D1_RSI_AT_CROSS.md): the tercile skip now
+    # reads gate_traveler.rsi_at_cross(candles_4h, cross_time), not a plan-
+    # level rsi_4h_at_lock field -- same tuned parameters as tests/
+    # test_gate_traveler.py's LONG_SKIP_H4 (verified there -> ~46.87, below
+    # FULL_D1_CUTS["LONG"][0]=51.49), just re-anchored to this test's own
+    # cross epoch (the construction is translation-invariant).
+    start = cross_epoch - (closed_bars + 2) * 14400
+    closes = [100.0]
+    for i in range(closed_bars - 1):
+        closes.append(closes[-1] + (0.1 if i % 2 else -0.1))
+    return [{"close": c, "time": start + i * 14400} for i, c in enumerate(closes)]
+
+
 @pytest.fixture
 def poll_env(monkeypatch):
     monkeypatch.setenv("EXECUTOR_CREDENTIAL_KEY", Fernet.generate_key().decode("utf-8"))
@@ -178,7 +192,7 @@ def test_waiting_pullback_fills_and_fires_the_executor_hook_for_a_gate_traveler_
     poll_env["make_plan"](
         status="WAITING_PULLBACK", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
-        stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
+        stop_price=49664.0, t1_price=50300.0, rsi_4h_at_cross=55.0,
         cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
         journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
     )
@@ -204,9 +218,37 @@ def test_waiting_pullback_fills_and_fires_the_executor_hook_for_a_gate_traveler_
     assert order.stop_price == 49664.0
     assert order.t1_price == 50300.0
     assert order.management_state == "ENTRY_FILLED_ORDERS_PLACED"
-    # F_A: rsi_4h_at_lock=55.0 is not extreme for LONG (needs >=80) -> 0.5
+    # F_A (2026-09-21: reads rsi_4h_at_cross, not rsi_4h_at_lock -- CC_WORK_
+    # ORDER_D1_RSI_AT_CROSS.md): 55.0 is not extreme for LONG (needs >=80) -> 0.5
     assert order.sizing_multiplier_used == pytest.approx(0.5)
     assert order.qty == pytest.approx((100.0 * 0.5) / abs(49900.0 - 49664.0))
+
+
+def test_waiting_pullback_fill_f_a_reads_rsi_4h_at_cross_not_at_lock(poll_env):
+    # 2026-09-21 (CC_WORK_ORDER_D1_RSI_AT_CROSS.md): a real positive check,
+    # not just the "not extreme" default from the test above -- 0.5 is ALSO
+    # what f_a_multiplier(None, ...) returns, so that test alone would still
+    # pass even if F_A silently stopped reading anything at all. Setting
+    # rsi_4h_at_lock to an EXTREME value here (which must NOT drive F_A) and
+    # rsi_4h_at_cross to the SAME extreme (which must) proves the wiring
+    # points at the right column, not just that the not-extreme path works.
+    poll_env["make_traveler_account"]()
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_PULLBACK", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0,
+        rsi_4h_at_lock=10.0,     # extreme in the WRONG direction if this were read -- must be ignored
+        rsi_4h_at_cross=85.0,    # >= F_A_LONG_EXTREME_THRESHOLD (80) -> 1.0
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    candles = [_c5m(50100.0, ct), _c5m(49900.0, ct + 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    order = poll_env["get_orders"]()[0]
+    assert order.sizing_multiplier_used == pytest.approx(1.0)
+    assert order.qty == pytest.approx((100.0 * 1.0) / abs(49900.0 - 49664.0))
 
 
 def test_waiting_pullback_ignores_non_gate_traveler_accounts(poll_env):
@@ -343,10 +385,14 @@ def test_waiting_pullback_fill_sends_a_traveler_armed_email_via_loop(poll_env, m
 def test_waiting_cross_tercile_skipped_sends_a_traveler_done_email_via_loop(poll_env, monkeypatch):
     sent = _capture_emails(monkeypatch)
     ct = 1700000000
-    # rsi_4h_at_lock=45.0 is below FULL_D1_CUTS["LONG"] lo (51.49) -- tercile-skipped.
-    poll_env["make_plan"](rsi_4h_at_lock=45.0)
-    candles = [_c5m(95.0, ct + i * 300) for i in range(5)] + [_c5m(105.0, ct + 5 * 300)]
-    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+    cross_epoch = ct + 5 * 300
+    poll_env["make_plan"]()
+    candles = [_c5m(95.0, ct + i * 300) for i in range(5)] + [_c5m(105.0, cross_epoch)]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": candles},
+        candles_4h_by_symbol={"BTC/USDT": _h4_long_skip(cross_epoch)},
+        polls=1,
+    )
 
     row = poll_env["get_plan"]()
     assert row.status == "TERCILE_SKIPPED"

@@ -338,7 +338,9 @@ async def build_hypothetical_traveler_order(
     independent id sequences and could collide on the same integer.
 
     F_A (CC_WORK_ORDER_PHASE2.md step 5) is computed here, from THIS row's
-    own rsi_4h_at_lock/direction, and passed through as compute_stake()'s
+    own rsi_4h_at_cross/direction (2026-09-21: was rsi_4h_at_lock -- see
+    CC_WORK_ORDER_D1_RSI_AT_CROSS.md; that field is the measured DP0 basis,
+    rsi_4h_at_lock is v2-only now), and passed through as compute_stake()'s
     sizing_multiplier -- a dollar-ledger-only scale, per that function's
     own docstring.
     """
@@ -382,7 +384,7 @@ async def build_hypothetical_traveler_order(
                 "decision_reason": f"account already has an active order from traveler_plan_id={other.traveler_plan_id}",
             }
 
-    f_a = executor_sizing.f_a_multiplier(traveler_plan_row.rsi_4h_at_lock, traveler_plan_row.direction)
+    f_a = executor_sizing.f_a_multiplier(traveler_plan_row.rsi_4h_at_cross, traveler_plan_row.direction)
     return await _size_and_check_order(
         db, base, traveler_plan_row.symbol, traveler_plan_row.direction,
         traveler_plan_row.fill_price, traveler_plan_row.stop_price, account, risk_state,

@@ -595,6 +595,15 @@ def init_db():
         except Exception:
             pass
 
+    # --- D1 RSI-AT-CROSS (2026-09-21, Andy-approved, CC_WORK_ORDER_D1_RSI_AT_CROSS.md)
+    # -- see TravelerPlan.rsi_4h_at_cross's own comment. ---
+    for _col in ["rsi_4h_at_cross FLOAT"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE traveler_plans ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- TIER-SPECIFIC STOP (2026-09-08) -- see TradePlan.stop_price_r30's
     # own comment for the full mechanism (Andy's explicit decision to ship
     # the backtest finding directly). ---
@@ -1126,7 +1135,8 @@ class TravelerPlan(Base):
     box = Column(Float, nullable=True)                  # bo - bd, frozen at lock
     stop_price = Column(Float, nullable=True)           # r30 edge -+ 0.12*box -- SAME formula as v1/v2 (decision_engine.STOP_BUFFER_BOX)
     t1_price = Column(Float, nullable=True)             # trigger +- 1.0*box -- E1's full-exit target
-    rsi_4h_at_lock = Column(Float, nullable=True)        # same frozen lock-time value TradePlan.rsi_4h_at_lock carries
+    rsi_4h_at_lock = Column(Float, nullable=True)        # same frozen lock-time value TradePlan.rsi_4h_at_lock carries -- audit/display only, NOT read by the skip or F_A (see rsi_4h_at_cross)
+    rsi_4h_at_cross = Column(Float, nullable=True)       # 2026-09-21: closed-4H-bars-at-the-cross RSI, the actual DP0/measured-basis value -- gate_traveler.py::rsi_at_cross(). The tercile skip and F_A read THIS field, not rsi_4h_at_lock (CC_WORK_ORDER_D1_RSI_AT_CROSS.md)
 
     cross_time = Column(DateTime, nullable=True)
     cross_price = Column(Float, nullable=True)           # the confirmed cross bar's own close (audit only -- NOT the fill price)

@@ -72,9 +72,15 @@ async def _advance_one(db, row: TravelerPlan, now_utc: datetime) -> None:
             "status": row.status,
             "breakout_trigger": row.breakout_trigger, "breakdown_trigger": row.breakdown_trigger,
             "r30_high": row.r30_high, "r30_low": row.r30_low,
-            "rsi_4h_at_lock": row.rsi_4h_at_lock,
         }
-        updates = gate_traveler.advance_waiting_cross(plan_dict, candles_5m, now_utc)
+        # D1 RSI-AT-CROSS (2026-09-21): raw (unstripped) 4H candles -- gate_
+        # traveler.rsi_at_cross() does its own closed-bar filtering against
+        # the cross timestamp it determines internally. limit=200 is far
+        # more than MIN_RSI_4H_BARS (15) needs; a fetch failure (empty list)
+        # is handled by rsi_at_cross() itself (-> None -> not skipped), not
+        # a reason to delay cross detection on the already-confirmed 5m data.
+        candles_4h = await market_data.fetch_live_4h(symbol, limit=200)
+        updates = gate_traveler.advance_waiting_cross(plan_dict, candles_5m, now_utc, candles_4h=candles_4h)
         await _apply(db, row, updates, symbol)
 
     elif row.status == "WAITING_PULLBACK":

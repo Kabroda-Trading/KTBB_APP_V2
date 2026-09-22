@@ -1272,6 +1272,8 @@ async def api_admin_traveler_plan_status(request: Request, db: Session = Depends
             "stop_price": row.stop_price, "t1_price": row.t1_price,
             "cross_time": row.cross_time.isoformat() if row.cross_time else None,
             "cross_price": row.cross_price,
+            "rsi_4h_at_lock": row.rsi_4h_at_lock,   # v2-style audit/display value only -- NOT what the skip/F_A read
+            "rsi_4h_at_cross": row.rsi_4h_at_cross,  # the measured-basis value the skip and F_A actually use
             "tercile_skipped": row.tercile_skipped,
             "fill_time": row.fill_time.isoformat() if row.fill_time else None,
             "fill_price": row.fill_price,
