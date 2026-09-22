@@ -5461,3 +5461,103 @@ Brain lane, not CC's -- no site code involved in building or running this varian
 CC will read the result once it lands, same as any other measurement.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-22 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — Audit of lab_confirming_close.py: ONE real bug found (wrong trigger column), quantified and NOT sign-flipping; one live-fidelity gap (T1 anchor); code hygiene notes
+STATUS: open. No Brain script touched or committed by CC -- read-only audit, one throwaway diagnostic copy, deleted after use (never committed).
+
+Andy asked for this checked carefully, not rubber-stamped, given the result (-0.1093,
+negative every year) is the kind of finding that could change a real decision. Read
+lab_confirming_close.py and lab_confirming_close_results.md line by line against the
+site source and the study's own committed conventions -- not just the write-up.
+
+### Finding 1 (real bug, confirmed, quantified): wrong trigger column
+`lab_confirming_close.py` reads `trig = sr.csv_bo / sr.csv_bd` (lines ~249-250) for
+the pullback-confirm search, R, and T1 -- but `sweep_README.md:22-26` has a section
+literally titled "Two level sets in the CSV (do not confuse)": `replay_bo/replay_bd`
+("SITE-convention levels... the journey measurement uses these") vs `csv_bo/csv_bd`
+("the corpus builder's levels from locks_bitunix.csv... **Reference columns only**").
+Verified directly: `sw.bo == sw.replay_bo` and `sw.bd == sw.replay_bd` on 100% of
+3,158 rows; `csv_bo/csv_bd` differ from `bo/bd` on 3,142/3,158 rows (median 64.73pts,
+p90 473.79, max 6181.8 per the README's own disclosed stat). The script's own earlier
+call, `journeys = _ra._jr.build_journeys(...)`, already computes the CORRECT
+`j["entry"]/j["stop"]/j["box"]` from `bo/bd` (`journey_recipes.py:214-217`) -- the
+per-journey loop then discards those fields and re-derives trig/stop/box from a
+freshly-fetched `sr` row using `csv_bo/csv_bd` instead. This looks like boilerplate
+inherited from `lab_touchfill_arms.py`'s OWN CC-harness arms (TF_LOCK/TF_CROSS),
+where `csv_bo/csv_bd` IS the documented, correct basis for THAT population
+(`journey_recipes_README.md`: "CC_HARNESS ... locks_bitunix.csv bo/bd == sweep
+csv_bo/csv_bd") -- not a deliberate choice for this script's own stated population
+("same 2,803 sweep journeys" -- the sweep basis is `bo/bd`, not `csv_bo/csv_bd`).
+The accepted +0.1439 stack is NOT affected -- `lab_composite_stack.py` reads
+`j["entry"]/j["stop"]/j["R"]/j["box"]` directly (`jmap.get(...)`, correct basis
+throughout); this bug is isolated to the new script.
+
+**Quantified, not just flagged:** ran a throwaway diagnostic copy of the script (one
+line changed: `trig = float(j["entry"])` instead of `sr.csv_bo/csv_bd`), output to
+distinctly-named temp files, deleted after reading -- nothing committed, no tracked
+file touched.
+
+| | taken n | avgR (taken) | outcome mix (C5/STOP/T1/TIME/BBWP) |
+|---|---|---|---|
+| As committed (csv_bo/csv_bd) | 1,577 | −0.1093 | 1004/300/190/68/15 |
+| Diagnostic fix (bo/bd) | 1,579 | −0.1104 | 1022/305/168/71/13 |
+
+166/2,803 journeys change trig_state (taken/skip/no-confirm) between the two, and
+82/1,495 both-taken journeys change outcome -- a real per-journey effect, not a
+no-op. **The aggregate barely moves (−0.1093 vs −0.1104) and stays negative in every
+year under both.** So the qualitative finding -- the live entry basis is negative
+under the full stack -- looks robust to this bug. The bug is still real and needs
+fixing in the official artifact (a wrong "reference-only" column feeding a
+decision-grade number is not something to leave in place because it happened not to
+matter this time; a later variant could be more sensitive to it), but Andy should
+not read this as "the whole result might reverse" -- my own check says it won't.
+
+### Finding 2 (live-fidelity gap, not a script bug, needs a decision): T1 anchor
+The script computes `t1 = entry_px + sgn*T1_BOX*box` -- anchored to the FILL price,
+consistently with how it anchors R/STOP/C5/BBWP/TIME to `entry_px` throughout. But
+the live site does NOT do this: verified directly (`gate_traveler.py:194`,
+`traveler_plan_engine.py:185`, `executor_plan_builder.py:354`,
+`executor_live_e1_engine.py:332-335`) that `t1_price` is computed ONCE at the cross
+from the TRIGGER (`t1 = trigger + sgn*T1_BOX*box`) and never recomputed after the
+pullback fill -- the real exchange T1 limit sits at that frozen, trigger-anchored
+price. Since a LONG's pullback close is by definition `<= trigger` (and a SHORT's
+`>= trigger`), the script's entry-anchored T1 sits systematically CLOSER to entry
+than the site's real, trigger-anchored T1 in both directions -- easier to hit in
+the simulation than on the real site. This biases the reported result toward LOOKING
+BETTER than true live behavior (more T1 hits than the real mechanism would produce),
+not worse. I did not diagnostic-run this one (the direction is unambiguous from the
+formulas and verified site behavior; a re-run is Brain's call, same as finding 1).
+Recommend: fix in the same pass as finding 1, OR treat as a disclosed, one-directional
+caveat if Andy wants the current number to stand pending a fuller re-run.
+
+### Code hygiene (no effect on the result, just needs a cleanup pass before this is
+treated as a template for future arms)
+- `walk_from_fill()` (lines ~198-207) is a dead placeholder that raises `SystemExit`
+  and is never called -- `walk_with_box()` is what actually runs.
+- Line ~260: `pb = find_pullback_confirm(...) if False else None` immediately
+  followed by `pb = find_pullback_confirm(...)` again -- a no-op leftover, correct
+  value is what's used, just messy.
+- `rsi_series()` (line 80) has a similar `if False else` no-op -- computes the right
+  (adjust=False, matching the study's own convention) value either way.
+
+### What this is NOT
+Not a claim that the negative result was invented or massaged to look a certain way
+-- if anything, someone trying to make the traveler system "work" would have gone
+the other direction. This reads as a genuine copy-paste inheritance from an adjacent
+script's own (correct, for its own population) convention, not caught before the
+run. Flagging with full citations and a quantified check, per standing practice --
+not rubber-stamping a number just because the headline direction (negative) happens
+to support the concern that prompted building this arm in the first place.
+
+### Recommendation
+Both findings are Brain-lane fixes (study code, not site code) -- routed back, not
+actioned by CC. Suggest: fix both (trigger column + T1 anchor) in one corrected
+re-run, republish `lab_confirming_close_results.md` with the corrected numbers next
+to the originally-reported ones (both on the record, per this file's own no-verdicts
+convention), and only then does Andy weigh a ruling on the entry-basis question.
+Given my own check, I would be surprised if the corrected number changes the
+direction -- but "surprised" is not "verified," and finding 2 in particular
+(T1 anchor) has NOT been quantified, only reasoned about.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
