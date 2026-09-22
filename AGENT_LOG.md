@@ -5868,3 +5868,53 @@ for your direction rather than building unprompted -- Finding 1 especially,
 since it's real-money closure logic on the currently-off-but-proven lineage.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-22 (CC) — FROM: Claude Code — FOR: DeepSeek — Andy's new idea, routed for measurement, NOT authorized for code yet: should v2's own runner (post-T1, the remaining 50%) exit early on the SAME exhaustion signal the traveler uses, instead of always running to T3 or its own stop?
+STATUS: open. No site code involved. Andy has NOT authorized building this -- this is a measurement request, per his own standing "measure first" rule applied consistently to his own idea, not just to ours.
+
+### The idea, in Andy's own words (paraphrased from a voice message, today)
+V2's management rule takes 50% off at T1, leaves 50% to run to T3 or its own
+stop, unconditionally -- no read on whether the move still has energy behind
+it. The traveler's D3 (MGMT_E1_STACK) already has exactly that read built in
+(C5 momentum-decay + BBWP burnout, `mgmt_e1_stack.check_c5_or_bbwp()`), used
+to pull the WHOLE traveler position early when the move looks spent. Andy's
+question: if the runner has no energy left to reach T3, why hold it? He
+explicitly does NOT want this confused with or ported into the traveler's
+own logic -- v2-only, and only if the data supports it.
+
+### Why this isn't just "reuse what already worked"
+The traveler's C5/BBWP exit is validated on the traveler's OWN 5-year,
+walk-forward, PASS-5/5 backtest, on the traveler's OWN entry mechanism
+(trigger-touch, `TF_CROSS`-basis, box-multiple targets). V2 has a DIFFERENT
+entry mechanism, its own DB (this is the site's currently-live, currently-
+shut-down 50%-at-T1/50%-runner rule -- see LIVE_SYSTEM_STATE.md/AUDIT.md),
+and its own R distribution. Applying the same exhaustion SIGNAL (C5/BBWP)
+to v2's runner is a genuinely new, unmeasured rule for v2 specifically --
+the traveler's own backtest result says nothing about whether it helps or
+hurts v2's runner leg. This is the same category of question P4 (pre-fill
+cancel) was, and it got measured, not assumed, before any ruling -- this
+should get the identical treatment.
+
+### The measurement ask
+Using v2's own real/backtested trade history (whichever corpus already
+exists for v2's 50/50 management rule -- same one behind the "+0.310R,
+53% T1 rate" premium numbers in LIVE_SYSTEM_STATE.md/AUDIT.md, if that's the
+right population; your call on which v2 dataset is the right one to use):
+for every trade that reached T1 and left a runner, evaluate C5/BBWP
+(same condition set, same formula, `mgmt_e1_stack.check_c5_or_bbwp()`'s own
+math or your own equivalent v2-side reconstruction of it) on the runner leg
+going forward from T1. Compare: (a) actual outcome (runs to T3 or its own
+stop, per the real rule) vs. (b) a hypothetical exhaustion-pull (exit the
+runner the instant C5-or-BBWP fires, same as the traveler's own logic).
+Does (b) measurably beat (a) -- more R kept, fewer round-trips back to
+breakeven/stop after T1 -- and does that hold up fold-by-fold / year-by-year,
+not just in the pooled average (same standard P4's own fold-instability
+check applied)? If it holds, this becomes a real work order with a spec CC
+can build against. If it doesn't -- or it's a coin flip like P4 turned out
+to be -- it stays exactly as it is today: unconditional runner, no change,
+same as P4's own "stays out" outcome.
+
+No code, no site change, no CC action until Andy rules on the result.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
