@@ -5677,3 +5677,80 @@ it here myself, the same way item 1 was logged, so there's a single unambiguous
 source for both.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-22 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — Item 3 SHIPPED (BBWP on Bitunix, site 6d6741d), against Andy's own ruling and a self-checked acceptance list
+STATUS: open
+
+Went through Plan Mode, given the stakes (BBWP moves from "never fires" to
+"can genuinely close a real position"). Andy's own ruling (09-21 14:06 CT,
+CC_INTERFACE.md): "compute the live BBWP leg on Bitunix data... drop the dead
+Kraken-based BBWP path." Andy separately asked (this session) whether
+Bitunix's real history goes back far enough -- verified live before building
+anything: walked the API backward 8 pages / 1,600 bars with zero sign of a
+wall, reaching 266+ days. 864 confirmed bars (128 days) is comfortably
+available immediately, no ramp-up needed.
+
+### What "Bitunix data" actually required, found before writing code
+`calibration_data/bitunix/bars_4H.csv` (the Brain repo's own corpus file) is
+a STATIC snapshot, last real data 2026-09-11 -- 11 days stale as of build
+time. Routing to this file literally would not have fixed anything for a
+live system. The real fix is a live feed from the Bitunix EXCHANGE itself
+(the same venue the site already trades on) -- confirmed live: `GET https://
+fapi.bitunix.com/api/v1/futures/market/kline` is public, no auth, and every
+field including the timestamp comes back as a JSON string (would raise
+TypeError on the first real poll if missed) and a malformed request returns
+HTTP 200 with a non-zero `code` and `data: None` (a bare except-and-empty
+would silently recreate the exact "dead forever" failure this work exists to
+fix, on a different feed). Both found by testing the live endpoint directly,
+not from the docs, which don't mention either.
+
+### Self-check against the design
+1. BBWP's own feed, separate from C5: `check_c5_or_bbwp()` gained
+   `candles_4h_bbwp` (Bitunix); `candles_4h` (Kraken) keeps feeding C5's own
+   4H leg unchanged -- verified by inspection, the old `bbwp_4h = si.
+   bbwp_series(h4_closes, ...)` line reading Kraken data is DELETED, not
+   supplemented, per Andy's own wording.
+2. Non-coupling: neither caller's `if candles_1h and candles_4h:` gate grew a
+   third clause -- a bad Bitunix poll degrades only `bbwp_hit` to False for
+   that poll, C5 keeps working off Kraken exactly as before.
+3. Pagination assembles enough real history in ~5 requests, well under
+   Bitunix's own 10 req/sec/ip limit; partial results from earlier pages are
+   kept on any later failure, never discarded.
+4. Both call sites (`traveler_plan_engine.py` DRY_RUN walk,
+   `executor_live_e1_engine.py` LIVE poll) thread the new feed through.
+5. Tests: 15 new (11 for the new fetcher's pagination/parsing/failure-
+   handling, 2 for `check_c5_or_bbwp`'s real math -- one proving BBWP fires
+   through the real formula on its own feed, one proving it can no longer
+   fire from the retired Kraken-fed path even when that data would satisfy
+   the old formula -- plus 2 end-to-end tests, one per call site, that
+   deliberately do NOT mock the condition check, so they're the ones that
+   would actually catch a forgotten wiring connection). Each was verified to
+   fail with its specific fix undone: the pagination boundary, the retired
+   Kraken path, and the wiring at the live call site were each independently
+   broken and confirmed to fail the relevant new test, then restored.
+6. Full suite: 777 passed (up from 762 -- the 15 new tests, exact count),
+   same 5 pre-existing unrelated `test_dashboard_fixes.py` errors. Boot check
+   clean.
+7. Live confirmation, not just mocked tests: called the real function
+   against the actual exchange just now -- 1,000 real bars, BBWP's last
+   value is 38.99 (a real, defined number), not null. The 4-layer stack
+   (E1 + F_A + C5 + BBWP) is live-capable for the first time.
+
+### One simplification, disclosed rather than silently made
+The plan's observability note suggested an `ExecutorAuditLog` "ERROR" row on
+sustained (multi-poll) insufficient history, in addition to a log line. I
+shipped only the log line (`fetch_bitunix_4h` prints a warning whenever it
+returns fewer than the 865-bar floor). Adding a stateful consecutive-failure
+counter would need new state this account-agnostic, two-call-site function
+has no natural home for, for a condition that -- given 266+ days of real
+history just confirmed -- should only ever fire on a genuine, real-time
+outage. Flagging this rather than treating the plan as fully executed silently.
+
+### Status
+Both standing work-order items (1: forming-bar strip, 3: BBWP on Bitunix) are
+now shipped. Next, per Andy's own request this session: the full code audit
+against CC_INTERFACE.md's standing checklist (6 items) plus the D2 restore's
+8 acceptance checks -- starting that now.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
