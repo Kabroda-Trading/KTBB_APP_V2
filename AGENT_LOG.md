@@ -5942,3 +5942,86 @@ assumed from those docs alone -- same standard as everything else logged in
 this file today.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-22 (CC) — FROM: Claude Code — FOR: DeepSeek — SHIPPED: today's audit Finding 1 resolved -- v2's orphaned T1/T3 exit orders now cancelled on both stop-driven closure paths
+STATUS: resolved. Site commit `bf4db1e`, pushed to `origin/main`.
+
+Ports the traveler engine's already-proven `_cancel_orphaned_t1()` pattern
+into v2's own `executor_live_engine.py`, per Andy's explicit authorization
+("let's go ahead and clean up the V2 Crown project as well... we could
+probably follow the same concept as the traveler candidate because we don't
+want to have that stuff floating") and today's own audit report above
+(FINDING 1).
+
+New `_cancel_orphaned_exit_orders(db, account, client, symbol, trade_plan_row,
+order_row, order_ids)` -- accepts a LIST of order ids (not a single one),
+filters falsy/None ids, no-ops on an empty list. Wired into both real
+closure branches in `poll_open_position()`, before the terminal
+`management_state` is set:
+- `STOP_BEFORE_T1` -- cancels BOTH resting orders in one batch call
+  (`[t1_exchange_order_id, t3_exchange_order_id]`), matching
+  `executor_mechanism_test.py::cancel_concurrent_limits()`'s own
+  already-live-tested 2-id batch shape -- a stronger precedent than the
+  traveler's own single-order case, not a new pattern.
+- `RUNNER_STOP` -- cancels T3 only (T1 already filled).
+- The `T3` branch (T3 fills normally) is untouched -- no cancellation
+  needed, and the existing `test_t1_then_t3_blended_r` now doubles as a
+  regression guard (its own `_install()` would raise `AssertionError` if a
+  cancel call were ever mistakenly wired into that path).
+- Same race-safety shape as the traveler's version: a `cancel_orders`
+  exception is logged as an ERROR audit row and never blocks finalizing the
+  trade's own closure (an orphaned reduce-only limit on an already-flat
+  position carries no new exposure); `successList` is checked per
+  REQUESTED id, naming exactly which id(s) are missing if any aren't
+  reported back.
+- The exchange-side stop itself (`set_position_tpsl`) is explicitly out of
+  scope, same as the traveler's design -- a position-tied conditional
+  order, not an independently resting one.
+- No `t1_status`/`t3_status` "CANCELLED" value is written after a
+  successful cancel, matching the traveler's own choice -- those fields
+  stop being read once `management_state` is terminal.
+
+**A real gap in my own test design, caught before shipping, not after:**
+after wiring the fix in, the 3 existing tests that hit these branches
+(`test_full_stop_before_t1_is_exactly_minus_one_r`,
+`test_t1_then_runner_stop_blended_r`,
+`test_close_calls_record_trade_result_automatically`) all still PASSED
+without any `cancel_orders` mock installed -- which should be impossible
+under this suite's own "any unmocked BitunixClient method raises
+AssertionError" convention (the same convention Finding 1 itself was
+proven with). Root cause: `_cancel_orphaned_exit_orders()`'s own
+`try/except Exception` catches that AssertionError exactly like it would
+catch a real network failure, logs an unasserted ERROR row, and returns
+normally -- the test's other assertions never notice. Fixed by installing
+proper success mocks in those 3 tests (so they no longer silently produce
+a spurious ERROR row) and proving the wiring for real with 7 new tests
+using explicit call-recording (a `_recording_async` helper), not just
+"the test didn't crash":
+`test_stop_before_t1_cancels_both_orphaned_limits`,
+`test_runner_stop_cancels_only_orphaned_t3_not_t1`,
+`test_stop_before_t1_cancel_orders_exception_still_finalizes_close`,
+`test_runner_stop_cancel_orders_exception_still_finalizes_close`,
+`test_stop_before_t1_cancel_not_in_success_list_logs_missing_ids`,
+`test_runner_stop_cancel_not_in_success_list_logs_missing_t3`,
+`test_stop_before_t1_partial_cancel_success_logs_only_the_missing_id`.
+
+**Verification, against the plan's own checklist:**
+- `pytest tests/test_executor_live_engine.py -q` -- 25/25 passed.
+- Mutation check: commented out both call sites, confirmed exactly the 7
+  new tests fail and the other 18 stay green; restored, confirmed clean
+  (3 occurrences of `_cancel_orphaned_exit_orders`: 1 def + 2 call sites).
+- Full `pytest tests/` -- 784 passed (up from 777), same 5 pre-existing
+  unrelated `test_dashboard_fixes.py` errors, nothing new.
+- `TestClient(main.app)` boot check -- clean 200 boot, same pre-existing
+  unrelated `ModuleNotFoundError: No module named 'ccxt'`.
+- `git status --short` (excluding `CC_HANDOFF.md`) -- exactly the two
+  files the plan named: `executor_live_engine.py`,
+  `tests/test_executor_live_engine.py`.
+
+FINDING 2 (traveler radar missing the DRY_RUN bookkeeping caveat) remains
+open, not yet actioned -- no explicit go-ahead from Andy on that specific
+item yet. FINDING 3 (stale radar comment) was already fixed same-day,
+commit `4f6b0a6`.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
