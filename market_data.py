@@ -4,7 +4,11 @@
 # Extracted from battlebox_pipeline.py to break the circular import chain:
 #   battlebox_pipeline → gravity_engine → mtf_confluence_scanner → battlebox_pipeline
 # This module has ZERO dependencies on battlebox_pipeline, gravity_engine,
-# or any other root-level module — it only depends on ccxt and Python stdlib.
+# or any other root-level module — it only depends on ccxt, aiohttp, and
+# Python stdlib (aiohttp added 2026-09-22 for fetch_bitunix_4h() below --
+# a third-party library, not a root-level module, so the real concern this
+# header protects against -- a circular import through this project's own
+# code -- still doesn't apply).
 # ==============================================================================
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ import time
 import weakref
 from typing import Any, Dict, List, Optional
 
+import aiohttp
 import ccxt.async_support as ccxt
 
 # ---------------------------------------------------------------------------
@@ -344,6 +349,117 @@ async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]
         return result
     except Exception:
         return []
+
+
+# ---------------------------------------------------------------------------
+# BITUNIX 4H FEED — BBWP-only (2026-09-22, CC_INTERFACE.md item 3, Andy
+# ruling 2026-09-21 14:06 CT: "compute the live BBWP leg on Bitunix data...
+# drop the dead Kraken-based BBWP path"). Kraken's ~721-bar depth cannot
+# satisfy bbwp_series()'s 864-confirmed-bar floor (BBWP_PERIOD 96 +
+# BBWP_LOOKBACK 768), so BBWP has been structurally dead (always False)
+# since it shipped. Bitunix's own public kline endpoint has 260+ days of
+# real history (verified live), so this feed is usable immediately, no
+# ramp-up. BBWP-ONLY: do NOT repurpose this as a general 4H feed for C5 --
+# nobody has ruled on moving C5 off Kraken; check_c5_or_bbwp() keeps C5 on
+# the existing Kraken-sourced candles_4h and uses this feed for BBWP only.
+#
+# A duplicated BASE_URL (not an import of executor_bitunix_client) on
+# purpose -- that module is per-account/credentialed and this is a public,
+# credential-free endpoint; importing it would be a new, real cross-module
+# dependency this module's own header explicitly disclaims. Small stable
+# constant, same "duplicate rather than couple" convention this codebase
+# already uses elsewhere (e.g. executor_live_e1_engine.py's own duplicated
+# helpers).
+# ---------------------------------------------------------------------------
+_BITUNIX_BASE_URL = "https://fapi.bitunix.com"
+_BITUNIX_KLINE_PATH = "/api/v1/futures/market/kline"
+BITUNIX_BBWP_MIN_BARS = 865  # BBWP_PERIOD(96)+BBWP_LOOKBACK(768)=864 CONFIRMED
+                              # closes needed; confirmed_closes() strips one
+                              # possibly-forming bar first, so the raw fetch
+                              # floor is 865, not 864.
+
+
+async def _bitunix_kline_page(
+    session: aiohttp.ClientSession, symbol: str, interval: str, limit: int,
+    end_time_ms: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """One page of Bitunix's public kline endpoint. Returns the raw `data`
+    rows (still string-typed, still descending) on success, or [] on ANY
+    failure -- network exception, a non-zero `code`, or a malformed body.
+    Verified live (2026-09-22): a malformed request returns HTTP 200 with
+    `{"code": 2, "data": None, "msg": "must not be null"}` -- a bare
+    `except Exception` around a naive `for row in resp["data"]` would let
+    the resulting TypeError degrade this to zero bars silently forever,
+    recreating the exact "silently dead" failure this feed exists to fix,
+    just on a different exchange. Checking `code` explicitly and logging
+    loudly is the whole point."""
+    params: Dict[str, Any] = {"symbol": symbol, "interval": interval, "limit": limit}
+    if end_time_ms is not None:
+        params["endTime"] = end_time_ms
+    try:
+        async with session.get(_BITUNIX_BASE_URL + _BITUNIX_KLINE_PATH, params=params,
+                                timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            body = await resp.json()
+    except Exception as e:
+        print(f"[BITUNIX_4H] page request failed (network): {e}")
+        return []
+    if body.get("code") not in (0, None) or body.get("data") is None:
+        print(f"[BITUNIX_4H] page request failed (code={body.get('code')} msg={body.get('msg')!r})")
+        return []
+    return body["data"]
+
+
+async def fetch_bitunix_4h(symbol: str, target_bars: int = 900) -> List[Dict[str, Any]]:
+    """Live 4H candles from Bitunix itself (BBWP's own feed only -- see the
+    module note above). Paginates backward via `endTime` (verified live:
+    the boundary is exact -- the bar AT endTime is excluded, so re-using
+    the prior page's own oldest `time` as the next page's `endTime` produces
+    no duplicates and no gaps) until `target_bars` raw bars are assembled, a
+    page comes back shorter than the requested page size (history
+    exhausted), or a page fails (partial results are kept, never discarded --
+    real, already-fetched bars are worth more than an all-or-nothing retry).
+    Returns ascending by time, same convention as every fetch_live_* above.
+    Never raises -- a total failure returns []."""
+    bitunix_symbol = (symbol or "").replace("/", "").upper()
+    page_size = 200  # Bitunix's own documented max per request
+    all_rows: List[Dict[str, Any]] = []
+    end_time_ms: Optional[int] = None
+    try:
+        async with aiohttp.ClientSession() as session:
+            while len(all_rows) < target_bars:
+                page = await _bitunix_kline_page(session, bitunix_symbol, "4h", page_size, end_time_ms)
+                if not page:
+                    break
+                all_rows.extend(page)
+                oldest_ms = int(page[-1]["time"])
+                if end_time_ms is not None and oldest_ms >= end_time_ms:
+                    break  # safety: never spin if the exchange doesn't move backward
+                end_time_ms = oldest_ms
+                if len(page) < page_size:
+                    break  # short page -- history exhausted
+    except Exception as e:
+        print(f"[BITUNIX_4H] fetch failed: {e}")
+    if not all_rows:
+        return []
+    seen_ms = set()
+    result = []
+    for r in all_rows:
+        ms = int(r["time"])
+        if ms in seen_ms:
+            continue
+        seen_ms.add(ms)
+        result.append({
+            "time": ms // 1000,
+            "open": float(r["open"]), "high": float(r["high"]),
+            "low": float(r["low"]), "close": float(r["close"]),
+            "volume": float(r["baseVol"]),
+        })
+    result.sort(key=lambda c: c["time"])  # descending -> ascending
+    if len(result) < BITUNIX_BBWP_MIN_BARS:
+        print(f"[BITUNIX_4H] only {len(result)} bars fetched (need {BITUNIX_BBWP_MIN_BARS} for BBWP) -- "
+              f"BBWP will stay undefined this poll")
+    _persist_candles(_normalize_symbol(symbol), "4H_BITUNIX", result)
+    return result
 
 
 # ---------------------------------------------------------------------------

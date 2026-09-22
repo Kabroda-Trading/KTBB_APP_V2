@@ -30,10 +30,38 @@ def _bar(close, ts, high=None, low=None):
 
 
 def _flat_1h4h(n=20, price=100.0):
-    """RSI-neutral (flat closes -> no C5 momentum decay) and BBWP-cold
-    (constant closes -> zero std -> never > 70) candle series -- the
-    'nothing else fires' baseline for isolating one condition per test."""
+    """RSI-neutral (flat closes -> no C5 momentum decay) candle series --
+    the 'nothing else fires' baseline for isolating one condition per test.
+    2026-09-22: no longer BBWP-relevant on its own -- BBWP now reads its own
+    separate candles_4h_bbwp feed (see check_c5_or_bbwp()'s docstring); this
+    fixture is far too short for BBWP_PERIOD/BBWP_LOOKBACK regardless."""
     return [{"close": price} for _ in range(n)]
+
+
+def _bbwp_burn_candles_4h(n_total=865):
+    """A real (not monkeypatched) 4H series, long enough for BBWP_PERIOD(96)+
+    BBWP_LOOKBACK(768)=864, constructed to drive a genuine bbwp_burn() True
+    through the real math: ~150 bars of high volatility set a high 768-bar
+    rolling-max; a long low-volatility grind keeps recent std well under it;
+    a 90-bar burst pushes recent std back up near that peak; a smaller final
+    move eases it off (the 'falling' half of bbwp_burn's condition). Verified
+    directly: bbwp[-1]=95.229... > 70 and < bbwp[-2]=96.511... -> True."""
+    closes = [100.0]
+    for i in range(150):
+        closes.append(closes[-1] + (12.0 if i % 2 == 0 else -11.0))
+    n_phase2 = n_total - len(closes) - 90 - 1
+    for i in range(n_phase2):
+        closes.append(closes[-1] + (0.4 if i % 2 == 0 else -0.3))
+    for i in range(90):
+        closes.append(closes[-1] + (40.0 if i % 2 == 0 else -39.0))
+    closes.append(closes[-1] + 4.0)
+    # 865 4H bars spans ~144 days -- these must END safely BEFORE `now_ts`
+    # (NOW, 6h after ENTRY_TIME) or check_c5_or_bbwp's own confirmed_closes()
+    # strip discards the last bar and shifts which close bbwp[-1]/bbwp[-2]
+    # actually land on, silently invalidating the verified values above.
+    last_open = int(NOW.timestamp()) - 14400 - 1
+    n = len(closes)
+    return [{"close": c, "time": last_open - (n - 1 - i) * 14400} for i, c in enumerate(closes)]
 
 
 def _decaying_rsi_candles():
@@ -90,12 +118,10 @@ def test_bbwp_exit_fires_when_only_bbwp_condition_true():
     order = _order()
     candles_5m = [_bar(100.0, ENTRY_EPOCH + 300)]
     flat = _flat_1h4h()  # no C5 (flat RSI)
-    # A 4H series that spikes volatility then contracts -- period=96/
-    # lookback=768 in study_indicators defaults are too long for a tiny
-    # test fixture, so this test uses mgmt_e1_stack's own BBWP_BURN_THRESHOLD
-    # via a monkeypatched short bbwp series instead of trying to hand-build
-    # 96+768 bars; see test_bbwp_exit_via_direct_series_injection below for
-    # the real, non-monkeypatched version.
+    # A cheap smoke test via a monkeypatched bbwp_series -- proves advance()'s
+    # own dispatch/priority wiring around a BBWP_EXIT, not the real math (see
+    # test_bbwp_exit_fires_through_the_real_math_on_its_own_bitunix_feed
+    # below for a real, non-monkeypatched, correctly-fed version of this).
     import study_indicators as si
     real_bbwp = si.bbwp_series
     try:
@@ -106,6 +132,40 @@ def test_bbwp_exit_fires_when_only_bbwp_condition_true():
     assert result["exit_reason"] == "BBWP_EXIT"
     assert result["bbwp_fired"] is True
     assert result["c5_fired"] is False
+
+
+def test_bbwp_exit_fires_through_the_real_math_on_its_own_bitunix_feed():
+    # 2026-09-22 (CC_INTERFACE.md item 3): the real, non-monkeypatched test
+    # the dangling comment above used to promise but never delivered (grep
+    # confirmed no such test existed anywhere in this file before today).
+    # candles_4h (Kraken, C5's own leg) stays flat/no-signal; the real BBWP
+    # trigger arrives ONLY via candles_4h_bbwp (Bitunix's own feed) -- this
+    # proves the two feeds are genuinely wired to the right legs, not just
+    # that BBWP_EXIT can be dispatched at all.
+    order = _order()
+    candles_5m = [_bar(100.0, ENTRY_EPOCH + 300)]
+    flat = _flat_1h4h()
+    bbwp_feed = _bbwp_burn_candles_4h()
+    result = e1.advance(order, candles_5m, flat, flat, NOW, candles_4h_bbwp=bbwp_feed)
+    assert result["exit_reason"] == "BBWP_EXIT"
+    assert result["bbwp_fired"] is True
+    assert result["c5_fired"] is False
+
+
+def test_bbwp_never_fires_from_the_old_kraken_fed_candles_4h_anymore():
+    # The regression guard, at the check_c5_or_bbwp() level directly (not
+    # advance()) so it isolates exactly one claim: candles_4h (Kraken, C5's
+    # own leg) is ITSELF a real bbwp-triggering series -- proving the
+    # retired Kraken-fed BBWP path is genuinely gone, not just supplemented,
+    # per Andy's own wording ("drop the dead Kraken-based BBWP path"). This
+    # series ALSO happens to trigger C5 (real RSI decay is present in it
+    # too) -- c5_hit is allowed to be True or False here, that's not this
+    # test's claim; bbwp_hit is what must stay False with candles_4h_bbwp
+    # omitted entirely (a transient Bitunix-feed gap), never falling back
+    # to candles_4h.
+    bbwp_triggering = _bbwp_burn_candles_4h()
+    _c5_hit, bbwp_hit = e1.check_c5_or_bbwp(bbwp_triggering, bbwp_triggering, now_ts=NOW.timestamp())
+    assert bbwp_hit is False
 
 
 def test_t1_fires_when_neither_stop_nor_c5_nor_bbwp():

@@ -176,6 +176,10 @@ async def _advance_e1_order(db, order: ExecutorOrder, now_utc: datetime) -> None
     candles_4h = await market_data.fetch_live_4h(symbol, limit=200)
     if not candles_1h or not candles_4h:
         return  # can't check C5/BBWP this poll -- try again next cycle, never guess
+    # BBWP's own feed (Bitunix, CC_INTERFACE.md item 3) -- deliberately NOT
+    # inside the guard above; a bad Bitunix poll must never block the
+    # Kraken-fed C5 check (see mgmt_e1_stack.check_c5_or_bbwp()'s docstring).
+    candles_4h_bbwp = await market_data.fetch_bitunix_4h(symbol)
 
     traveler_plan = db.query(TravelerPlan).filter_by(id=order.traveler_plan_id).first()
     journey_cap_at = _as_utc(traveler_plan.journey_cap_at) if traveler_plan else None
@@ -185,7 +189,8 @@ async def _advance_e1_order(db, order: ExecutorOrder, now_utc: datetime) -> None
         "stop_price": order.stop_price, "t1_price": order.t1_price,
         "entry_fill_time": _as_utc(order.entry_fill_time),
     }
-    result = mgmt_e1_stack.advance(order_dict, candles_5m, candles_1h, candles_4h, now_utc, journey_cap_at)
+    result = mgmt_e1_stack.advance(order_dict, candles_5m, candles_1h, candles_4h, now_utc, journey_cap_at,
+                                    candles_4h_bbwp=candles_4h_bbwp)
     if result is None:
         return
 

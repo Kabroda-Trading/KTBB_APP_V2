@@ -45,6 +45,31 @@ def _c5m(close, ts, high=None, low=None):
     return {"close": close, "high": high if high is not None else close, "low": low if low is not None else close, "time": ts}
 
 
+def _bbwp_burn_candles_4h():
+    """2026-09-22 (CC_INTERFACE.md item 3): a real (not monkeypatched) 4H
+    series, long enough for BBWP_PERIOD(96)+BBWP_LOOKBACK(768)=864, that
+    drives a genuine bbwp_burn() True through the real math -- same
+    construction as tests/test_mgmt_e1_stack.py's own _bbwp_burn_candles_4h()
+    (verified there: bbwp[-1]=95.229... > 70 and < bbwp[-2]=96.511...),
+    duplicated rather than cross-imported (this codebase's own convention
+    for test fixtures shared in spirit but not literally shared modules).
+    Anchored to REAL wall-clock "now" (not a fixed epoch): the live loop's
+    own now_utc = datetime.now(timezone.utc), so the last bar must end
+    safely before THAT, not before some fixture's own fixed `ct`."""
+    closes = [100.0]
+    for i in range(150):
+        closes.append(closes[-1] + (12.0 if i % 2 == 0 else -11.0))
+    n_phase2 = 865 - len(closes) - 90 - 1
+    for i in range(n_phase2):
+        closes.append(closes[-1] + (0.4 if i % 2 == 0 else -0.3))
+    for i in range(90):
+        closes.append(closes[-1] + (40.0 if i % 2 == 0 else -39.0))
+    closes.append(closes[-1] + 4.0)
+    last_open = int(dt.datetime.now(timezone.utc).timestamp()) - 14400 - 60
+    n = len(closes)
+    return [{"close": c, "time": last_open - (n - 1 - i) * 14400} for i, c in enumerate(closes)]
+
+
 def _h4_long_skip(cross_epoch, closed_bars=20):
     # 2026-09-21 (CC_WORK_ORDER_D1_RSI_AT_CROSS.md): the tercile skip now
     # reads gate_traveler.rsi_at_cross(candles_4h, cross_time), not a plan-
@@ -98,10 +123,12 @@ def poll_env(monkeypatch):
         db.close()
         return account_id
 
-    def run_polls(candles_5m_by_symbol=None, candles_1h_by_symbol=None, candles_4h_by_symbol=None, polls=1):
+    def run_polls(candles_5m_by_symbol=None, candles_1h_by_symbol=None, candles_4h_by_symbol=None,
+                  candles_4h_bitunix_by_symbol=None, polls=1):
         candles_5m_by_symbol = candles_5m_by_symbol or {}
         candles_1h_by_symbol = candles_1h_by_symbol or {}
         candles_4h_by_symbol = candles_4h_by_symbol or {}
+        candles_4h_bitunix_by_symbol = candles_4h_bitunix_by_symbol or {}
 
         async def fake_5m(symbol, limit=310):
             return candles_5m_by_symbol.get(symbol, [])
@@ -111,6 +138,9 @@ def poll_env(monkeypatch):
 
         async def fake_4h(symbol, limit=100):
             return candles_4h_by_symbol.get(symbol, [])
+
+        async def fake_bitunix_4h(symbol, target_bars=900):
+            return candles_4h_bitunix_by_symbol.get(symbol, [])
 
         sleeps = {"n": 0}
 
@@ -122,6 +152,7 @@ def poll_env(monkeypatch):
         monkeypatch.setattr(tpe.market_data, "fetch_live_5m", fake_5m)
         monkeypatch.setattr(tpe.market_data, "fetch_live_1h", fake_1h)
         monkeypatch.setattr(tpe.market_data, "fetch_live_4h", fake_4h)
+        monkeypatch.setattr(tpe.market_data, "fetch_bitunix_4h", fake_bitunix_4h)
         monkeypatch.setattr(tpe.asyncio, "sleep", fake_sleep)
 
         async def main():
@@ -335,6 +366,44 @@ def test_mgmt_e1_stack_poll_closes_the_order_on_a_real_stop_touch(poll_env):
     assert order.exit_reason == "STOP"
     assert order.exit_price == 49664.0
     assert order.realized_pnl_r == pytest.approx(-1.0)
+
+
+def test_mgmt_e1_stack_poll_closes_the_order_on_a_real_bbwp_exit(poll_env):
+    # 2026-09-22 (CC_INTERFACE.md item 3): end-to-end proof that the DRY_RUN
+    # walk's own BBWP leg is genuinely wired to the Bitunix feed -- not just
+    # that mgmt_e1_stack.advance() dispatches a BBWP_EXIT correctly (that's
+    # already covered directly in tests/test_mgmt_e1_stack.py). The Kraken-
+    # sourced HTF candles here carry NO real signal (flat); the real trigger
+    # arrives ONLY via candles_4h_bitunix_by_symbol.
+    account_id = poll_env["make_traveler_account"]()
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_TOUCH", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    fill_candles = [_c5m(50100.0, ct), _c5m(49900.0, ct + 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": fill_candles}, polls=1)
+    assert poll_env["get_plan"]().status == "FILLED"
+
+    walk_candles = [_c5m(49900.0, ct + 300), _c5m(49950.0, ct + 600)]  # no STOP, no T1 touch
+    flat_htf = [{"close": 50000.0} for _ in range(20)]                # no C5 signal on Kraken
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": walk_candles},
+        candles_1h_by_symbol={"BTC/USDT": flat_htf}, candles_4h_by_symbol={"BTC/USDT": flat_htf},
+        candles_4h_bitunix_by_symbol={"BTC/USDT": _bbwp_burn_candles_4h()},
+        polls=1,
+    )
+
+    orders = poll_env["get_orders"]()
+    assert len(orders) == 1
+    order = orders[0]
+    assert order.management_state == "CLOSED_BBWP_EXIT"
+    assert order.exit_reason == "BBWP_EXIT"
+    assert order.bbwp_fired is True
+    assert order.c5_fired is False
 
 
 def test_mgmt_e1_stack_closure_compounds_the_account_ledger(poll_env):

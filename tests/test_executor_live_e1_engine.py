@@ -166,6 +166,28 @@ def _fake_candles(n=20, price=100.0):
     return [{"close": price} for _ in range(n)]
 
 
+def _bbwp_burn_candles_4h():
+    """2026-09-22 (CC_INTERFACE.md item 3): a real (not monkeypatched) 4H
+    series long enough for BBWP_PERIOD(96)+BBWP_LOOKBACK(768)=864 that
+    drives a genuine bbwp_burn() True -- same construction as tests/
+    test_mgmt_e1_stack.py's own helper (verified there: bbwp[-1]=95.229...
+    > 70 and < bbwp[-2]=96.511...), duplicated per this codebase's own
+    test-fixture convention. Anchored to real wall-clock "now" since
+    poll_traveler_position() calls fetch_live_1h/4h with no fixed clock."""
+    closes = [100.0]
+    for i in range(150):
+        closes.append(closes[-1] + (12.0 if i % 2 == 0 else -11.0))
+    n_phase2 = 865 - len(closes) - 90 - 1
+    for i in range(n_phase2):
+        closes.append(closes[-1] + (0.4 if i % 2 == 0 else -0.3))
+    for i in range(90):
+        closes.append(closes[-1] + (40.0 if i % 2 == 0 else -39.0))
+    closes.append(closes[-1] + 4.0)
+    last_open = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - 14400 - 60
+    n = len(closes)
+    return [{"close": c, "time": last_open - (n - 1 - i) * 14400} for i, c in enumerate(closes)]
+
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -323,7 +345,7 @@ def test_c5_fires_before_t1_market_closes_and_cancels_t1(db, monkeypatch):
     plan = _traveler_plan(db)
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h: (True, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
     _install(monkeypatch,
              get_position=_async_seq([_one_position_response(), _no_position_response()]),
              close_position=_async(_close_position_response()),
@@ -338,6 +360,7 @@ def test_c5_fires_before_t1_market_closes_and_cancels_t1(db, monkeypatch):
 
     monkeypatch.setattr(e1e.market_data, "fetch_live_1h", _fake_1h)
     monkeypatch.setattr(e1e.market_data, "fetch_live_4h", _fake_4h)
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_4h", _fake_4h)
     monkeypatch.setattr(e1e, "_current_live_price", lambda symbol: asyncio.sleep(0, result=104.5))
 
     _run(e1e.poll_traveler_position(db, account, plan, order))
@@ -352,7 +375,7 @@ def test_bbwp_fires_before_t1_market_closes_and_cancels_t1(db, monkeypatch):
     plan = _traveler_plan(db)
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h: (False, True))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (False, True))
     _install(monkeypatch,
              get_position=_async_seq([_one_position_response(), _no_position_response()]),
              close_position=_async(_close_position_response()),
@@ -364,11 +387,45 @@ def test_bbwp_fires_before_t1_market_closes_and_cancels_t1(db, monkeypatch):
 
     monkeypatch.setattr(e1e.market_data, "fetch_live_1h", _fake_candles_fn)
     monkeypatch.setattr(e1e.market_data, "fetch_live_4h", _fake_candles_fn)
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_4h", _fake_candles_fn)
     monkeypatch.setattr(e1e, "_current_live_price", lambda symbol: asyncio.sleep(0, result=95.5))
 
     _run(e1e.poll_traveler_position(db, account, plan, order))
     assert order.management_state == "CLOSED_BBWP_EXIT"
     assert order.bbwp_fired is True
+
+
+def test_bbwp_fires_through_the_real_math_on_its_own_bitunix_feed(db, monkeypatch):
+    # 2026-09-22 (CC_INTERFACE.md item 3): unlike the test above, this does
+    # NOT mock check_c5_or_bbwp -- it is the one test that would actually
+    # catch a forgotten `candles_4h_bbwp=` at this module's own call site.
+    # candles_1h/candles_4h (Kraken) stay flat/no-signal; the real BBWP
+    # trigger arrives ONLY via fetch_bitunix_4h.
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
+    _install(monkeypatch,
+             get_position=_async_seq([_one_position_response(), _no_position_response()]),
+             close_position=_async(_close_position_response()),
+             get_order_detail=_async(_order_detail_response(status="NEW", order_id="t1-1")),
+             cancel_orders=_async(_cancel_orders_response(order_id="t1-1")))
+
+    async def _fake_flat(symbol, limit=200):
+        return _fake_candles()
+
+    async def _fake_bitunix(symbol, target_bars=900):
+        return _bbwp_burn_candles_4h()
+
+    monkeypatch.setattr(e1e.market_data, "fetch_live_1h", _fake_flat)
+    monkeypatch.setattr(e1e.market_data, "fetch_live_4h", _fake_flat)
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_4h", _fake_bitunix)
+    monkeypatch.setattr(e1e, "_current_live_price", lambda symbol: asyncio.sleep(0, result=95.5))
+
+    _run(e1e.poll_traveler_position(db, account, plan, order))
+    assert order.management_state == "CLOSED_BBWP_EXIT"
+    assert order.bbwp_fired is True
+    assert order.c5_fired is False
 
 
 # ------------------------------------------------------------------ (d) STOP fires first (exchange-side)
@@ -395,7 +452,7 @@ def test_time_exit_market_closes_and_cancels_t1(db, monkeypatch):
     plan = _traveler_plan(db, journey_cap_at=_FAR_PAST)
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h: (False, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (False, False))
     _install(monkeypatch,
              get_position=_async_seq([_one_position_response(), _no_position_response()]),
              close_position=_async(_close_position_response()),
@@ -407,6 +464,7 @@ def test_time_exit_market_closes_and_cancels_t1(db, monkeypatch):
 
     monkeypatch.setattr(e1e.market_data, "fetch_live_1h", _fake_candles_fn)
     monkeypatch.setattr(e1e.market_data, "fetch_live_4h", _fake_candles_fn)
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_4h", _fake_candles_fn)
     monkeypatch.setattr(e1e, "_current_live_price", lambda symbol: asyncio.sleep(0, result=101.0))
 
     _run(e1e.poll_traveler_position(db, account, plan, order))
@@ -420,7 +478,7 @@ def test_c5_fires_but_t1_actually_filled_first_reconciled_as_t1(db, monkeypatch)
     plan = _traveler_plan(db)
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h: (True, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
     _install(monkeypatch,
              get_position=_async_seq([_one_position_response(), _no_position_response()]),
              close_position=_async(_close_position_response()),
@@ -432,6 +490,7 @@ def test_c5_fires_but_t1_actually_filled_first_reconciled_as_t1(db, monkeypatch)
 
     monkeypatch.setattr(e1e.market_data, "fetch_live_1h", _fake_candles_fn)
     monkeypatch.setattr(e1e.market_data, "fetch_live_4h", _fake_candles_fn)
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_4h", _fake_candles_fn)
 
     _run(e1e.poll_traveler_position(db, account, plan, order))
     # Reconciled as a genuine T1 fill, NOT double-booked as a C5 exit.
@@ -466,7 +525,7 @@ def test_close_position_call_failure_retries_next_tick(db, monkeypatch):
     plan = _traveler_plan(db)
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h: (True, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
 
     async def _raise(self, *a, **kw):
         raise ConnectionError("simulated network failure")
@@ -478,6 +537,7 @@ def test_close_position_call_failure_retries_next_tick(db, monkeypatch):
 
     monkeypatch.setattr(e1e.market_data, "fetch_live_1h", _fake_candles_fn)
     monkeypatch.setattr(e1e.market_data, "fetch_live_4h", _fake_candles_fn)
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_4h", _fake_candles_fn)
 
     _run(e1e.poll_traveler_position(db, account, plan, order))
     assert order.management_state == "ENTRY_FILLED_ORDERS_PLACED"   # untouched -- retry next tick
@@ -520,7 +580,7 @@ def test_market_close_exit_price_uses_last_known_live_price_not_fabricated(db, m
     plan = _traveler_plan(db)
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h: (True, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
     _install(monkeypatch,
              get_position=_async_seq([_one_position_response(), _no_position_response()]),
              close_position=_async(_close_position_response()),
@@ -532,6 +592,7 @@ def test_market_close_exit_price_uses_last_known_live_price_not_fabricated(db, m
 
     monkeypatch.setattr(e1e.market_data, "fetch_live_1h", _fake_candles_fn)
     monkeypatch.setattr(e1e.market_data, "fetch_live_4h", _fake_candles_fn)
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_4h", _fake_candles_fn)
     monkeypatch.setattr(e1e, "_current_live_price", lambda symbol: asyncio.sleep(0, result=103.25))
 
     _run(e1e.poll_traveler_position(db, account, plan, order))
@@ -584,6 +645,7 @@ def test_forming_1h_dip_does_not_fire_a_live_c5_market_close(db, monkeypatch):
 
     monkeypatch.setattr(e1e.market_data, "fetch_live_1h", _fake_1h)
     monkeypatch.setattr(e1e.market_data, "fetch_live_4h", _fake_4h)
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_4h", _fake_4h)
 
     _run(e1e.poll_traveler_position(db, account, plan, order))
     assert close_calls == [], "a forming-bar dip must never reach close_position()"

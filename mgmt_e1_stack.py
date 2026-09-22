@@ -62,6 +62,7 @@ def advance(
     candles_4h: List[Dict[str, Any]],
     now_utc: datetime.datetime,
     journey_cap_at: Optional[datetime.datetime] = None,
+    candles_4h_bbwp: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """order: {"direction", "entry_price", "stop_price", "t1_price",
     "entry_fill_time"} (a plain dict, not the ORM row -- same pure-
@@ -71,6 +72,10 @@ def advance(
     candle -- market_data.confirmed_5m_closes()), covering from
     entry_fill_time through now. candles_1h/candles_4h: may include the
     still-forming trailing candle -- check_c5_or_bbwp() strips it itself.
+    candles_4h_bbwp (2026-09-22, CC_INTERFACE.md item 3): BBWP's OWN feed
+    (Bitunix, via market_data.fetch_bitunix_4h()) -- C5's own 4H leg keeps
+    reading candles_4h (Kraken) exactly as before. See check_c5_or_bbwp()'s
+    own docstring for why these are deliberately different feeds.
 
     Returns None if still open (keep polling), or a dict with exit_price/
     exit_time/exit_reason/c5_fired/bbwp_fired once resolved.
@@ -105,7 +110,8 @@ def advance(
     # close, the instant either condition is observed true. Freshly
     # recomputed each poll from the 1H/4H closes since entry -- cheap at
     # live candle-window sizes (the site's own limit=100 fetches).
-    c5_hit, bbwp_hit = check_c5_or_bbwp(candles_1h, candles_4h, now_ts=now_utc.timestamp())
+    c5_hit, bbwp_hit = check_c5_or_bbwp(candles_1h, candles_4h, now_ts=now_utc.timestamp(),
+                                        candles_4h_bbwp=candles_4h_bbwp)
     if c5_hit or bbwp_hit:
         last = since_entry[-1]
         return {
@@ -140,6 +146,7 @@ def advance(
 
 def check_c5_or_bbwp(
     candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]], now_ts: Optional[float] = None,
+    candles_4h_bbwp: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[bool, bool]:
     """The C5_T-M_EXIT / BBWP_BURN_70 condition check, extracted from
     advance() (P3, 2026-09-20) so it has ONE implementation shared by both
@@ -153,17 +160,34 @@ def check_c5_or_bbwp(
     return ccxt's in-progress bar as their last row -- both callers passed it
     through unstripped, and a 5-minute dip mid-hour fired a real C5 exit
     (AGENT_LOG 2026-09-21 10:15). Enforcing it inside the one shared
-    function means no caller can forget it. now_ts defaults to wall-clock."""
+    function means no caller can forget it. now_ts defaults to wall-clock.
+
+    candles_4h_bbwp (2026-09-22, CC_INTERFACE.md item 3, Andy ruling
+    2026-09-21 14:06 CT): BBWP's OWN feed -- Bitunix, via market_data.
+    fetch_bitunix_4h() -- DIFFERENT from candles_4h (Kraken), which keeps
+    feeding C5's own 4H leg exactly as before. Two different feeds for two
+    different legs, on purpose: Kraken's ~721-bar depth cannot satisfy
+    BBWP's 864-confirmed-bar floor (BBWP_PERIOD 96 + BBWP_LOOKBACK 768), so
+    BBWP was structurally dead (always False) on Kraken data; Bitunix has
+    the real depth. C5 has never needed more than ~15 bars, so there is no
+    reason cited anywhere to move it too -- doing so would be an unruled
+    scope change. Deliberately NOT folded into the same `if candles_1h and
+    candles_4h:` gate either caller uses: a bad Bitunix poll must never
+    block the Kraken-fed C5 check -- only bbwp_hit degrades to False for
+    that one poll. omitted/None -> bbwp_hit is False (not skipped, not an
+    error) -- same "missing data never gets the favorable case" convention
+    used throughout this codebase, never a crash on a transient feed gap."""
     h1_closes = [float(c["close"]) for c in market_data.confirmed_closes(candles_1h, 3600, now_ts)]
     h4_closes = [float(c["close"]) for c in market_data.confirmed_closes(candles_4h, 14400, now_ts)]
     rsi_1h = si.rsi_series(h1_closes, period=si.RSI_PERIOD)
     rsi_4h = si.rsi_series(h4_closes, period=si.RSI_PERIOD)
-    bbwp_4h = si.bbwp_series(h4_closes, period=si.BBWP_PERIOD, lookback=si.BBWP_LOOKBACK)
 
     c5_hit = (
         (len(rsi_1h) > 0 and si.c5_momentum_decay(rsi_1h, len(rsi_1h) - 1, C5_LOOKBACK_BARS))
         or (len(rsi_4h) > 0 and si.c5_momentum_decay(rsi_4h, len(rsi_4h) - 1, C5_LOOKBACK_BARS))
     )
+    h4_bbwp_closes = [float(c["close"]) for c in market_data.confirmed_closes(candles_4h_bbwp or [], 14400, now_ts)]
+    bbwp_4h = si.bbwp_series(h4_bbwp_closes, period=si.BBWP_PERIOD, lookback=si.BBWP_LOOKBACK)
     bbwp_hit = len(bbwp_4h) > 0 and si.bbwp_burn(bbwp_4h, len(bbwp_4h) - 1, BBWP_BURN_THRESHOLD)
     return bool(c5_hit), bool(bbwp_hit)
 

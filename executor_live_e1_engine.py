@@ -554,8 +554,12 @@ async def poll_traveler_position(db: Session, account: ExecutorAccount, traveler
     # it fills, no separate check needed here.
     candles_1h = await market_data.fetch_live_1h(symbol, limit=200)
     candles_4h = await market_data.fetch_live_4h(symbol, limit=200)
+    # BBWP's own feed (Bitunix, CC_INTERFACE.md item 3) -- fetched
+    # regardless of the Kraken candles above; a bad Bitunix poll must never
+    # block the Kraken-fed C5 check (see check_c5_or_bbwp()'s own docstring).
+    candles_4h_bbwp = await market_data.fetch_bitunix_4h(symbol)
     if candles_1h and candles_4h:
-        c5_hit, bbwp_hit = mgmt_e1_stack.check_c5_or_bbwp(candles_1h, candles_4h)
+        c5_hit, bbwp_hit = mgmt_e1_stack.check_c5_or_bbwp(candles_1h, candles_4h, candles_4h_bbwp=candles_4h_bbwp)
         if c5_hit or bbwp_hit:
             await _market_close_traveler_order(
                 db, account, client, symbol, traveler_plan_row, order_row,
