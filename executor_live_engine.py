@@ -452,6 +452,52 @@ async def _current_live_price(symbol: str) -> Optional[float]:
     return float(candles[-1]["close"])
 
 
+async def _cancel_orphaned_exit_orders(
+    db: Session, account: ExecutorAccount, client: "executor_bitunix_client.BitunixClient",
+    symbol: str, trade_plan_row: TradePlan, order_row: ExecutorOrder, order_ids: List[str],
+) -> None:
+    """Cancels now-orphaned resting exit LIMIT(s) (T1 and/or T3) after the
+    position closed some other way (the exchange-side stop) -- the
+    no-floating-orders rule (CC_INTERFACE.md audit item 5) applies to exit
+    legs too, mirroring executor_live_e1_engine.py's own _cancel_orphaned_
+    t1() exactly (2026-09-22 audit finding: this had no v2 equivalent at
+    all). A failure here is logged loudly but does not block finalizing the
+    trade's own closure -- an orphaned reduce-only limit on an already-flat
+    position creates no new exposure, so it is a cleanup item, not a safety
+    blocker, but it must never be silently left.
+
+    Accepts a LIST so the STOP_BEFORE_T1 caller can cancel T1 and T3 in ONE
+    batch call -- matches executor_mechanism_test.py::cancel_concurrent_
+    limits()'s own already-live-tested 2-id batch shape, not two separate
+    calls. Safe to call with T3 alongside T1 in that branch without a
+    fresh T3-specific status check: T3's price is strictly farther from
+    entry than T1's in the same direction (0.618x vs 1.618x box), so T3's
+    resting LIMIT cannot have filled without T1's filling first (same-
+    direction price-time priority) -- and T1's own fill status was just
+    freshly re-checked via a real get_order_detail() call earlier in this
+    same tick. No gap even in a same-tick whipsaw: if T1 had actually
+    filled, that fresh check would already have routed control to the
+    T1_FILLED branch instead of STOP_BEFORE_T1 at all."""
+    order_ids = [oid for oid in order_ids if oid]
+    if not order_ids:
+        return
+    try:
+        cancel_resp = await client.cancel_orders(symbol, order_ids)
+    except Exception as e:
+        executor_accounts.write_audit(
+            db, "ERROR", f"cancel_orders call failed for orphaned exit order(s) {order_ids} on order {order_row.id}: {e}",
+            account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order_row.id, actor="system")
+        return
+    success_ids = {e.get("orderId") for e in (cancel_resp.get("data") or {}).get("successList") or []}
+    missing = [oid for oid in order_ids if oid not in success_ids]
+    if missing:
+        executor_accounts.write_audit(
+            db, "ERROR",
+            f"cancel_orders did not report orderId(s) {missing} in successList for order {order_row.id} -- "
+            f"likely already filled/cancelled by the exchange when the position closed; CHECK THE EXCHANGE if this recurs",
+            account_id=account.id, trade_plan_id=trade_plan_row.id, executor_order_id=order_row.id, actor="system", detail=cancel_resp)
+
+
 async def poll_open_position(db: Session, account: ExecutorAccount, trade_plan_row: TradePlan, order_row: ExecutorOrder) -> None:
     """The per-tick watcher for one real managed trade. Dispatches on
     management_state; never re-decides direction/size/targets, only
@@ -509,6 +555,12 @@ async def poll_open_position(db: Session, account: ExecutorAccount, trade_plan_r
         return   # still open, nothing more to do this tick
 
     if order_row.t1_status != "FILLED":
+        # 2026-09-22 audit fix: T1 and T3 were both placed at fill time and
+        # neither has filled (T1's status was just freshly confirmed above)
+        # -- both are now orphaned on the exchange. Cancel before finalizing.
+        await _cancel_orphaned_exit_orders(
+            db, account, client, symbol, trade_plan_row, order_row,
+            [order_row.t1_exchange_order_id, order_row.t3_exchange_order_id])
         order_row.realized_pnl_r = -1.0
         order_row.close_reason = "STOP_BEFORE_T1"
     else:
@@ -527,6 +579,11 @@ async def poll_open_position(db: Session, account: ExecutorAccount, trade_plan_r
             # here (see header) -- approximated at the last known stop
             # level, flagged as such in the audit row rather than assumed
             # silently correct.
+            # 2026-09-22 audit fix: T3 (just freshly confirmed above as not
+            # FILLED) is now orphaned on the exchange -- T1 is already
+            # filled, so only T3 needs cancelling here.
+            await _cancel_orphaned_exit_orders(
+                db, account, client, symbol, trade_plan_row, order_row, [order_row.t3_exchange_order_id])
             exit_price = order_row.sl_price_current if order_row.sl_price_current is not None else order_row.stop_price
             order_row.runner_r = 0.5 * _r_multiple(exit_price, order_row.entry_fill_price, order_row.stop_price)
             order_row.close_reason = "RUNNER_STOP"

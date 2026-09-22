@@ -99,6 +99,38 @@ def _cancel_orders_response(order_id="entry-order-1", success=True):
     return {"code": 0, "data": {"successList": [], "failureList": [{"orderId": order_id, "errorCode": "40001", "errorMsg": "order not found"}]}, "msg": "Success"}
 
 
+def _cancel_orders_response_multi(order_ids, missing=()):
+    # 2026-09-22 audit fix (v2 orphaned T1/T3 cancel): a batch response
+    # covering N ids in one call, matching executor_mechanism_test.py::
+    # cancel_concurrent_limits()'s own already-live-tested 2-id shape.
+    # `missing` lets a test simulate a genuine partial success/failure
+    # within the same batch call.
+    success = [oid for oid in order_ids if oid not in missing]
+    failure = [{"orderId": oid, "errorCode": "40001", "errorMsg": "order not found"} for oid in missing]
+    return {"code": 0, "data": {"successList": [{"orderId": oid} for oid in success], "failureList": failure}, "msg": "Success"}
+
+
+def _recording_async(value=None, exc=None):
+    """Like _async(), but records every call's (args, kwargs) on the
+    returned list -- for asserting exactly which order_ids a mocked
+    BitunixClient method was called with, not just that SOME call happened.
+    Needed because _cancel_orphaned_exit_orders() (like the traveler
+    engine's own _cancel_orphaned_t1()) catches ANY exception from the real
+    call internally and logs an audit row rather than raising -- so
+    _install()'s own "unmocked method raises AssertionError" self-test
+    trick is silently swallowed for this call and proves nothing on its
+    own; an explicit recorded call is the only real proof of the wiring."""
+    calls = []
+
+    async def _fake(self, *a, **kw):
+        calls.append((a, kw))
+        if exc is not None:
+            raise exc
+        return value
+
+    return _fake, calls
+
+
 def _order_row(db, account, trade_plan, tier="STANDARD", direction="LONG", management_state="PENDING_ENTRY", **overrides):
     fields = dict(
         trade_plan_id=trade_plan.id, account_id=account.id, mode="LIVE",
@@ -473,7 +505,16 @@ def test_full_stop_before_t1_is_exactly_minus_one_r(db, monkeypatch):
 
     _install(monkeypatch,
               get_order_detail=_async(_order_detail_response(status="NEW")),   # T1 never filled
-              get_position=_async(_no_position_response()))                    # position now flat -- stopped out
+              get_position=_async(_no_position_response()),                   # position now flat -- stopped out
+              # 2026-09-22 audit fix: both T1 and T3 are now orphaned --
+              # a real success response here so this stays a clean happy
+              # path (see test_stop_before_t1_cancels_both_orphaned_limits
+              # below for the actual proof of what cancel_orders was called
+              # with; without SOME mock here this would silently swallow
+              # _install()'s auto-raised AssertionError as a "cancel
+              # failed" case and pollute this test with an unasserted
+              # ERROR audit row).
+              cancel_orders=_async(_cancel_orders_response_multi(["t1-1", "t3-1"])))
     _run(ele.poll_open_position(db, account, plan, order))
 
     assert order.close_reason == "STOP_BEFORE_T1"
@@ -493,7 +534,11 @@ def test_t1_then_runner_stop_blended_r(db, monkeypatch):
 
     _install(monkeypatch,
               get_order_detail=_async(_order_detail_response(status="NEW")),   # T3 never filled
-              get_position=_async(_no_position_response()))                    # flat -- runner stopped
+              get_position=_async(_no_position_response()),                   # flat -- runner stopped
+              # 2026-09-22 audit fix: only T3 is orphaned here (T1 already
+              # filled) -- see test_runner_stop_cancels_only_orphaned_t3_
+              # not_t1 below for the actual proof.
+              cancel_orders=_async(_cancel_orders_response(order_id="t3-1")))
     _run(ele.poll_open_position(db, account, plan, order))
 
     expected_t1_leg = 0.5 * (106.18 - 100.0) / 10.0
@@ -504,6 +549,15 @@ def test_t1_then_runner_stop_blended_r(db, monkeypatch):
 
 
 def test_t1_then_t3_blended_r(db, monkeypatch):
+    # No cancel_orders mock installed here on purpose: T3 fills NORMALLY in
+    # this scenario, so neither of the 2026-09-22 audit-fix call sites
+    # should ever be reached. This test doubles as a regression guard --
+    # if the cancel call were ever mistakenly wired into the normal-T3-fill
+    # path, _install()'s own "should not have been called" auto-raise would
+    # fire (and, per the note on the other two tests above, get silently
+    # swallowed as a caught exception -- so this guard is soft, not a hard
+    # failure signal on its own; the real proof that this path is excluded
+    # lives in the two dedicated cancel-site tests below).
     account = _ready_account(db)
     plan = _trade_plan(db, tier="STANDARD")
     order = _order_row(db, account, plan, tier="STANDARD", management_state="T1_FILLED",
@@ -522,6 +576,169 @@ def test_t1_then_t3_blended_r(db, monkeypatch):
     assert order.t3_fill_price == 116.18
     assert order.realized_pnl_r == pytest.approx(expected_t1_leg + expected_runner)
     assert order.management_state == "CLOSED_T3"
+
+
+# ------------------------------------------------------------------ 2026-09-22 audit fix: orphaned T1/T3 cancel-on-closure
+# (CC_INTERFACE.md audit item 5, "no floating orders" -- found via today's
+# full checklist audit: neither closure branch ever cancelled the resting
+# T1/T3 limit(s) left behind when the exchange-side stop closed the
+# position first. Mirrors executor_live_e1_engine.py's own already-shipped
+# _cancel_orphaned_t1() test coverage.)
+
+def test_stop_before_t1_cancels_both_orphaned_limits(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _trade_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1",
+                        t1_exchange_order_id="t1-1", t3_exchange_order_id="t3-1")
+    fake_cancel, calls = _recording_async(_cancel_orders_response_multi(["t1-1", "t3-1"]))
+
+    _install(monkeypatch,
+              get_order_detail=_async(_order_detail_response(status="NEW")),
+              get_position=_async(_no_position_response()),
+              cancel_orders=fake_cancel)
+    _run(ele.poll_open_position(db, account, plan, order))
+
+    assert len(calls) == 1
+    (symbol, order_ids), _kw = calls[0]
+    assert symbol == "BTCUSDT"
+    assert set(order_ids) == {"t1-1", "t3-1"}
+    assert order.close_reason == "STOP_BEFORE_T1"
+    assert order.realized_pnl_r == -1.0
+    assert order.management_state == "CLOSED_STOP_BEFORE_T1"
+
+
+def test_runner_stop_cancels_only_orphaned_t3_not_t1(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _trade_plan(db, tier="STANDARD")
+    order = _order_row(db, account, plan, tier="STANDARD", management_state="T1_FILLED",
+                        t1_status="FILLED", t1_fill_price=106.18, t1_leg_r=0.5 * (106.18 - 100.0) / 10.0,
+                        entry_fill_price=100.0, position_id="pos1",
+                        t1_exchange_order_id="t1-1", t3_exchange_order_id="t3-1", sl_price_current=90.0)
+    fake_cancel, calls = _recording_async(_cancel_orders_response(order_id="t3-1"))
+
+    _install(monkeypatch,
+              get_order_detail=_async(_order_detail_response(status="NEW")),
+              get_position=_async(_no_position_response()),
+              cancel_orders=fake_cancel)
+    _run(ele.poll_open_position(db, account, plan, order))
+
+    assert len(calls) == 1
+    (symbol, order_ids), _kw = calls[0]
+    assert order_ids == ["t3-1"]   # T1 (already filled) must NOT be in this call
+    assert order.management_state == "CLOSED_RUNNER_STOP"
+
+
+def test_stop_before_t1_cancel_orders_exception_still_finalizes_close(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _trade_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1",
+                        t1_exchange_order_id="t1-1", t3_exchange_order_id="t3-1")
+    fake_cancel, calls = _recording_async(exc=ConnectionError("network blip"))
+
+    _install(monkeypatch,
+              get_order_detail=_async(_order_detail_response(status="NEW")),
+              get_position=_async(_no_position_response()),
+              cancel_orders=fake_cancel)
+    _run(ele.poll_open_position(db, account, plan, order))
+
+    assert len(calls) == 1   # the attempt was made
+    assert order.close_reason == "STOP_BEFORE_T1"
+    assert order.realized_pnl_r == -1.0
+    assert order.management_state == "CLOSED_STOP_BEFORE_T1"   # finalized anyway -- never blocked
+    audit_row = db.query(ExecutorAuditLog).filter_by(
+        account_id=account.id, executor_order_id=order.id, event_type="ERROR").first()
+    assert audit_row is not None
+    assert "cancel_orders call failed" in audit_row.message
+
+
+def test_runner_stop_cancel_orders_exception_still_finalizes_close(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _trade_plan(db, tier="STANDARD")
+    order = _order_row(db, account, plan, tier="STANDARD", management_state="T1_FILLED",
+                        t1_status="FILLED", t1_fill_price=106.18, t1_leg_r=0.5 * (106.18 - 100.0) / 10.0,
+                        entry_fill_price=100.0, position_id="pos1",
+                        t1_exchange_order_id="t1-1", t3_exchange_order_id="t3-1", sl_price_current=90.0)
+    fake_cancel, calls = _recording_async(exc=ConnectionError("network blip"))
+
+    _install(monkeypatch,
+              get_order_detail=_async(_order_detail_response(status="NEW")),
+              get_position=_async(_no_position_response()),
+              cancel_orders=fake_cancel)
+    _run(ele.poll_open_position(db, account, plan, order))
+
+    assert len(calls) == 1
+    assert order.management_state == "CLOSED_RUNNER_STOP"
+    audit_row = db.query(ExecutorAuditLog).filter_by(
+        account_id=account.id, executor_order_id=order.id, event_type="ERROR").first()
+    assert audit_row is not None
+    assert "cancel_orders call failed" in audit_row.message
+
+
+def test_stop_before_t1_cancel_not_in_success_list_logs_missing_ids(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _trade_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1",
+                        t1_exchange_order_id="t1-1", t3_exchange_order_id="t3-1")
+    # Both ids missing from successList entirely (an empty batch response).
+    _install(monkeypatch,
+              get_order_detail=_async(_order_detail_response(status="NEW")),
+              get_position=_async(_no_position_response()),
+              cancel_orders=_async({"code": 0, "data": {"successList": [], "failureList": []}, "msg": "Success"}))
+    _run(ele.poll_open_position(db, account, plan, order))
+
+    assert order.management_state == "CLOSED_STOP_BEFORE_T1"   # finalized regardless
+    audit_row = db.query(ExecutorAuditLog).filter_by(
+        account_id=account.id, executor_order_id=order.id, event_type="ERROR").first()
+    assert audit_row is not None
+    assert "t1-1" in audit_row.message and "t3-1" in audit_row.message
+
+
+def test_runner_stop_cancel_not_in_success_list_logs_missing_t3(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _trade_plan(db, tier="STANDARD")
+    order = _order_row(db, account, plan, tier="STANDARD", management_state="T1_FILLED",
+                        t1_status="FILLED", t1_fill_price=106.18, t1_leg_r=0.5 * (106.18 - 100.0) / 10.0,
+                        entry_fill_price=100.0, position_id="pos1",
+                        t1_exchange_order_id="t1-1", t3_exchange_order_id="t3-1", sl_price_current=90.0)
+    _install(monkeypatch,
+              get_order_detail=_async(_order_detail_response(status="NEW")),
+              get_position=_async(_no_position_response()),
+              cancel_orders=_async({"code": 0, "data": {"successList": [], "failureList": []}, "msg": "Success"}))
+    _run(ele.poll_open_position(db, account, plan, order))
+
+    assert order.management_state == "CLOSED_RUNNER_STOP"
+    audit_row = db.query(ExecutorAuditLog).filter_by(
+        account_id=account.id, executor_order_id=order.id, event_type="ERROR").first()
+    assert audit_row is not None
+    assert "t3-1" in audit_row.message
+    assert "t1-1" not in audit_row.message   # T1 was never in this call's own id list at all
+
+
+def test_stop_before_t1_partial_cancel_success_logs_only_the_missing_id(db, monkeypatch):
+    # A genuine partial result within ONE 2-id batch call: t1-1 succeeds,
+    # t3-1 doesn't. The first place a 2-id batch cancel runs inside a fully
+    # unattended poll loop (executor_mechanism_test.py's own 2-id precedent
+    # is a manually-driven pre-flight tool) -- worth its own explicit case.
+    account = _ready_account(db)
+    plan = _trade_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1",
+                        t1_exchange_order_id="t1-1", t3_exchange_order_id="t3-1")
+    _install(monkeypatch,
+              get_order_detail=_async(_order_detail_response(status="NEW")),
+              get_position=_async(_no_position_response()),
+              cancel_orders=_async(_cancel_orders_response_multi(["t1-1", "t3-1"], missing=["t3-1"])))
+    _run(ele.poll_open_position(db, account, plan, order))
+
+    assert order.management_state == "CLOSED_STOP_BEFORE_T1"
+    audit_row = db.query(ExecutorAuditLog).filter_by(
+        account_id=account.id, executor_order_id=order.id, event_type="ERROR").first()
+    assert audit_row is not None
+    assert "t3-1" in audit_row.message
+    assert "t1-1" not in audit_row.message   # t1-1 succeeded -- must not be named as missing
 
 
 def test_close_calls_record_trade_result_automatically(db, monkeypatch):
