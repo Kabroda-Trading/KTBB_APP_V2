@@ -5754,3 +5754,117 @@ against CC_INTERFACE.md's standing checklist (6 items) plus the D2 restore's
 8 acceptance checks -- starting that now.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-22 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — Full code audit against CC_INTERFACE.md's standing checklist (6 items) + the D2 restore's 8 acceptance checks: one serious finding (v2, not the traveler), three minor ones, everything else verified clean
+STATUS: open
+
+Split across two independent investigations (both against current HEAD,
+after today's D2 restore + item 1 + item 3 shipments) plus my own direct
+re-verification of the D2 restore's 8 acceptance checks and the two most
+load-bearing findings below. Every claim below was checked against source or
+a real test run myself, not accepted from a report.
+
+### D2 restore's 8 acceptance checks: all 8 still hold
+Re-verified directly against current `gate_traveler.py`/`executor_live_e1_
+engine.py`/`executor_plan_builder.py` (post item-1/item-3 changes, which
+touched adjacent files but not these): entry price == trigger, wick-only fill
+condition, single placement at the cross, cancel-on-expiry intact, T1/stop/R
+formulas unchanged, DRY_RUN/LIVE share one fill_price basis, `rsi_4h_at_cross`
+wiring untouched. Full suite (777 passed, same 5 pre-existing unrelated
+errors) covers the "tests green" check.
+
+### FINDING 1 (serious) — v2's T1/T3 exit legs are never cancelled when a stop closes the position first
+`executor_live_engine.py::poll_open_position()`'s two stop-driven closure
+branches -- `STOP_BEFORE_T1` (lines 511-513) and `RUNNER_STOP` (523-532) --
+detect the position is already flat and write bookkeeping (realized_pnl_r,
+close_reason), but neither branch calls `client.cancel_orders()` on the
+resting T1/T3 reduce-only LIMIT orders that were placed alongside the stop.
+**Confirmed, not inferred:** `tests/test_executor_live_engine.py`'s own
+`_install()` helper makes ANY unmocked `BitunixClient` method raise
+`AssertionError`; I ran `test_full_stop_before_t1_is_exactly_minus_one_r`,
+`test_t1_then_runner_stop_blended_r`, and `test_t1_then_t3_blended_r`
+directly just now -- all three pass, and none of them installs
+`cancel_orders`. That is only possible if these real closure paths never
+call it, for any of v2's three ways to end a trade. Practical effect: if the
+stop fires before T1, BOTH resting orders (T1 and T3, placed together at
+fill time) are left on the exchange with zero cancellation attempt. If T1
+fills and the runner's stop later fires, the resting T3 is left the same way.
+
+This is the exact class of bug the traveler engine was explicitly built to
+avoid (`executor_live_e1_engine.py`'s own `_cancel_orphaned_t1()`, which
+cites this standing rule by name in its header) -- v2, the PROVEN lineage,
+has no equivalent. The one live pre-flight test on record for this
+(`Kabroda AI Brain/PRODUCTION_READINESS.md`/`AGENT_LOG.md`) only exercised
+the happy path where T1 and T3 both fill as planned -- it never tested
+STOP_BEFORE_T1 or RUNNER_STOP, live or mocked, so there is no empirical
+record either way of what actually happens to the leftover order on Bitunix
+-- the site code doesn't rely on or verify any exchange-side auto-cleanup,
+it simply never attempts a cancel.
+
+**Not yet fixed.** This touches v2's real-money closure logic; per this
+session's own standing practice for anything touching live trading behavior,
+I'm reporting it and awaiting direction rather than building it unprompted.
+
+### FINDING 2 (minor, cosmetic) — the traveler's radar panel is missing the DRY_RUN bookkeeping caveat v2's own panel already has
+`templates/market_radar.html`'s `renderTravelerState()` (lines 1544, 1552)
+shows `'filled @ ' + price` / `'filled ' + time` with no caveat -- confirmed
+directly, no `(bookkeeping)` text or tooltip anywhere in that function.
+`renderPlanState()` (v2's own panel) already carries this caveat (shipped
+02d3554, P2-2's own site-side fix). The traveler's ARMED email already has
+the equivalent language ("no real order was placed... simulation fill") --
+this is a real inconsistency between the email and the radar, not a design
+choice. P2-2's underlying ruling (label vs. switch to resting-limit
+semantics) is confirmed still genuinely open in both AGENT_LOG.md and
+CC_INTERFACE.md's own register, through the most recent entries -- not
+stale on my end, this checklist item is accurately describing live state.
+
+### FINDING 3 (trivial, safe to fix immediately) — a stale comment in market_radar.html
+Lines 1529-1531: "GATE_TRAVELER is DRY_RUN-only by design (the executor
+refuses real order placement for it)" -- false since site commit `c7243ef`
+(2026-09-20, P3's own refusal-removal). Confirmed directly against
+`executor_engine.py:182-265`: a LIVE-mode GATE_TRAVELER account with the
+global switch on and a saved sizing preset places a real order today. The
+comment's practical conclusion (no copy buttons on that panel) still holds
+since no account is actually flipped LIVE, but its stated reason is wrong
+and would mislead a future reader into treating DRY_RUN-only as a structural
+guarantee it no longer is.
+
+### Everything else: VERIFIED CLEAN, with exact evidence
+- **Exit order classes (checklist item 2):** planned exits are genuinely
+  LIMIT/POST_ONLY, contingency exits genuinely MARKET (`close_position()`),
+  for both lineages -- confirmed at every real call site. Today's BBWP
+  change reuses the SAME market-close function C5 already used
+  (`_market_close_traveler_order()`); it did not introduce a second exit path.
+- **Radar/exchange state vocabulary (item 6):** every real status string
+  either engine can produce has a live, non-stale UI branch -- re-grepped
+  the whole repo for `WAITING_PULLBACK`/`pullback`, zero hits, the rename is
+  clean. One real gap noted (Finding 3) and one pre-existing, symmetric
+  (not new, not a regression) limitation: DRY_RUN rows don't surface
+  `management_state` or exit price in the admin UI for either lineage --
+  worth a future ticket, not urgent.
+- **Cancel-on-expiry (item 3), entry orders:** both v2's and the traveler's
+  entry-order cancel-on-expiry are real, race-safe (successList-verified,
+  never discards a real fill that raced the cancel), and symmetric.
+- **The traveler's T1 leg (item 3/5):** genuinely cancelled in all four
+  contingency branches (STOP/C5/BBWP/TIME), each with its own passing test.
+  One narrow, already-tested, already-disclosed deviation from the literal
+  spec wording: a T1-cancel-call FAILURE (not the normal path) logs an ERROR
+  and finalizes anyway rather than retrying, reasoned in the code as safe
+  since a reduce-only order can't open new exposure with no position behind
+  it -- that specific Bitunix behavior isn't independently confirmed live.
+  Noting it, not currently asking for a fix.
+- **Sizing gate (item 4):** identical gate, identical line shape, for both
+  lineages -- did not drift when the traveler's LIVE path was built later.
+  The admin UI badge reads the exact same check, not a separate approximation.
+- **`fetch_bitunix_4h()` (today's item-3 shipment):** confirmed it places no
+  order and touches no `ExecutorAccount` -- correctly needs neither a
+  cancel-on-expiry path nor a sizing gate; today's two shipments don't touch
+  items 3/4/5 at all beyond that.
+
+### Recommendation
+Finding 3: fixing now, zero risk (comment-only). Findings 1 and 2: reporting
+for your direction rather than building unprompted -- Finding 1 especially,
+since it's real-money closure logic on the currently-off-but-proven lineage.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
