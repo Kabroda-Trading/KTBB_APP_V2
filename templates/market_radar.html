@@ -1526,10 +1526,16 @@
 
         // CC_WORK_ORDER_RADAR_PLAN_PANEL.md work item 2 -- the compact
         // TravelerPlan panel. Deliberately no copy buttons here (unlike the
-        // v2 levels above): GATE_TRAVELER is DRY_RUN-only by design (the
-        // executor refuses real order placement for it), so this is
-        // comparison/observability during the evaluation, not a "take this
-        // trade" workflow -- adding copy buttons would imply otherwise.
+        // v2 levels above): this panel is comparison/observability during
+        // the evaluation, not a "take this trade" workflow -- adding copy
+        // buttons would imply otherwise. 2026-09-22 correction: GATE_TRAVELER
+        // is NOT structurally DRY_RUN-only anymore -- the real-order
+        // refusal was removed 2026-09-20 (site c7243ef); a LIVE-mode
+        // GATE_TRAVELER account with the global switch on and a saved
+        // sizing preset places real orders today (executor_engine.py::
+        // _process_traveler_account()). No account is currently flipped
+        // LIVE, which is the actual (deliberate, human) reason this stays
+        // observability-only, not a code-level guarantee.
         function renderTravelerState(row) {
             const panel = document.getElementById('travelerStatePanel');
             if (!row) { panel.style.display = 'none'; return; }
