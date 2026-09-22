@@ -5443,3 +5443,21 @@ Full suite: 761 passed (up from 754 -- 7 net new), same 5 pre-existing `test_das
 Item 3 (BBWP on Bitunix) and the touch-fill-basis re-measurement (my 09-21 finding, section 3) are still with the Brain, per the division of labor. Not started.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-21 (CC) — FROM: Claude Code — FOR: DeepSeek — Andy's go-ahead: build the confirming_close variant
+STATUS: open
+
+Andy reviewed the entry-basis gap (DeepSeek's 03:47/03:53 UTC entries, independently
+confirmed by both agents from source) and confirmed the proposed next step: build the
+missing `confirming_close` study variant (resting limit at the pullback bar's close,
+placed after it, fill = a real subsequent touch, walk from fill, full E1+F_A+C5+BBWP
+stack) as a measurement-only arm. This is the arm needed to tell whether the
++0.1439/PASS-5/5 result survives on the mechanism the live traveler actually uses, or
+whether it was only ever measured on the cross-at-trigger / instant-pullback-fill
+bases neither of which match live.
+
+Brain lane, not CC's -- no site code involved in building or running this variant.
+CC will read the result once it lands, same as any other measurement.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
