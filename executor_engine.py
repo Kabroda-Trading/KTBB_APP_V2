@@ -198,7 +198,7 @@ async def _process_traveler_account(db: Session, traveler_plan_row: TravelerPlan
     order_dict["mgmt_profile_used"] = executor_accounts.mgmt_profile_of(account)
     # DRY_RUN never gets a real exchange fill-confirmation callback (unlike
     # v1/v2's LIVE path, check_entry_fill_and_place_exits()) -- the
-    # TravelerPlan's own pullback fill (already confirmed, real market
+    # TravelerPlan's own trigger touch fill (already confirmed, real market
     # data) IS the entry fill, known at order-creation time. Sets
     # management_state to a real, watchable state immediately so
     # traveler_plan_engine.py's MGMT_E1_STACK poll (mgmt_e1_stack.py) picks

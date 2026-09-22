@@ -8,17 +8,17 @@
 # journey window, no session-expiry scoping).
 #
 # Per-status routing, once per 60s poll cycle:
-#   WAITING_CROSS     -> gate_traveler.advance_waiting_cross() (5m candles) --
-#                        no cross yet -> silent; cross confirmed -> either
-#                        TERCILE_SKIPPED (terminal, no trade) or
-#                        WAITING_PULLBACK.
-#   WAITING_PULLBACK  -> gate_traveler.advance_waiting_pullback() (5m candles
-#                        since cross_time) -- opposite trigger breaks first ->
-#                        DONE; pullback fills -> FILLED (fires the executor
-#                        hook for GATE_TRAVELER accounts); 7-day journey cap
-#                        passes with neither -> DONE. NOT scoped to "is the
-#                        session still today" -- a row can poll across
-#                        multiple days, unlike TradePlan's WAITING.
+#   WAITING_CROSS  -> gate_traveler.advance_waiting_cross() (5m candles) --
+#                     no cross yet -> silent; cross confirmed -> either
+#                     TERCILE_SKIPPED (terminal, no trade) or WAITING_TOUCH.
+#   WAITING_TOUCH  -> gate_traveler.advance_waiting_touch() (5m candles since
+#                     cross_time) -- a resting limit sits at the trigger;
+#                     opposite trigger breaks first -> DONE; a wick touches
+#                     the trigger -> FILLED (fires the executor hook for
+#                     GATE_TRAVELER accounts); 7-day journey cap passes with
+#                     neither -> DONE. NOT scoped to "is the session still
+#                     today" -- a row can poll across multiple days, unlike
+#                     TradePlan's WAITING.
 #   FILLED / TERCILE_SKIPPED / DONE -> terminal, not polled (see the query
 #                        filter in run_traveler_plan_loop() below).
 #
@@ -83,7 +83,7 @@ async def _advance_one(db, row: TravelerPlan, now_utc: datetime) -> None:
         updates = gate_traveler.advance_waiting_cross(plan_dict, candles_5m, now_utc, candles_4h=candles_4h)
         await _apply(db, row, updates, symbol)
 
-    elif row.status == "WAITING_PULLBACK":
+    elif row.status == "WAITING_TOUCH":
         # A multi-day window (up to 7 days from the cross) -- limit=310 5m
         # candles (~26h) may not cover the whole span on a late poll after a
         # gap, but every poll only needs candles since the LAST time this row
@@ -99,7 +99,7 @@ async def _advance_one(db, row: TravelerPlan, now_utc: datetime) -> None:
             "opposite_trigger": row.opposite_trigger,
             "cross_time": _as_utc(row.cross_time), "journey_cap_at": _as_utc(row.journey_cap_at),
         }
-        updates = gate_traveler.advance_waiting_pullback(plan_dict, candles_wide, now_utc)
+        updates = gate_traveler.advance_waiting_touch(plan_dict, candles_wide, now_utc)
         if updates and updates.get("status") == "FILLED":
             await _apply(db, row, updates, symbol)
             await _notify_executor(db, row, symbol)
@@ -238,7 +238,7 @@ async def run_traveler_plan_loop():
         db = SessionLocal()
         try:
             rows = db.query(TravelerPlan).filter(
-                TravelerPlan.status.in_(["WAITING_CROSS", "WAITING_PULLBACK"])
+                TravelerPlan.status.in_(["WAITING_CROSS", "WAITING_TOUCH"])
             ).all()
             for row in rows:
                 try:

@@ -75,7 +75,7 @@ _FAR_FUTURE = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
 _FAR_PAST = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
 
 
-def _traveler_plan(db, direction="LONG", status="WAITING_PULLBACK", journey_cap_at=None):
+def _traveler_plan(db, direction="LONG", status="WAITING_TOUCH", journey_cap_at=None):
     plan = TravelerPlan(
         symbol="BTC/USDT", date_key="2026-09-20", session_id="us_ny_futures", status=status,
         direction=direction, breakout_trigger=100.0, breakdown_trigger=90.0,

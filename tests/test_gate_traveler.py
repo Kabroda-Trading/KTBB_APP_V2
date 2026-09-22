@@ -1,8 +1,8 @@
 """Unit coverage for gate_traveler.py -- GATE_TRAVELER's D1 (tercile skip)
-and D2 (cross detection + pullback fill) pure functions. Hand-computed
-scenarios, matching recipe_assembled.py::pullback_fill()/tercile_skip()
-semantics verbatim (confirmed against the frozen source directly, Kabroda
-AI Brain repo, 2026-09-15 -- see gate_traveler.py's own header)."""
+and D2 (cross detection + trigger touch fill) pure functions. Hand-computed
+scenarios, matching the measured basis verbatim (TF_CROSS arm / d1_meas_base.py:
+44-61's wick-touch harness; D2 restored 2026-09-22, CC_WORK_ORDER_D2_RESTORE_
+TRIGGER_LIMIT.md -- see gate_traveler.py's own header)."""
 import datetime
 import os
 import sys
@@ -112,17 +112,17 @@ def test_advance_waiting_cross_no_cross_yet_returns_none():
 
 
 def test_advance_waiting_cross_ignores_non_waiting_status():
-    plan = _cross_plan(status="WAITING_PULLBACK")
+    plan = _cross_plan(status="WAITING_TOUCH")
     candles = [{"close": 105.0, "time": 1000}] * 10
     assert gt.advance_waiting_cross(plan, candles, NOW, candles_4h=LONG_IN_ZONE_H4) is None
 
 
-def test_advance_waiting_cross_long_not_skipped_goes_to_waiting_pullback():
+def test_advance_waiting_cross_long_not_skipped_goes_to_waiting_touch():
     plan = _cross_plan()
     candles = [{"close": 95.0}] * 5 + [{"close": 105.0, "time": CROSS_EPOCH}]
     result = gt.advance_waiting_cross(plan, candles, NOW, candles_4h=LONG_IN_ZONE_H4)
     assert result is not None
-    assert result["status"] == "WAITING_PULLBACK"
+    assert result["status"] == "WAITING_TOUCH"
     assert result["direction"] == "LONG"
     assert result["box"] == 10.0
     assert result["opposite_trigger"] == 90.0
@@ -153,7 +153,7 @@ def test_advance_waiting_cross_no_4h_candles_is_not_skipped():
     plan = _cross_plan()
     candles = [{"close": 95.0}] * 5 + [{"close": 105.0, "time": CROSS_EPOCH}]
     result = gt.advance_waiting_cross(plan, candles, NOW, candles_4h=None)
-    assert result["status"] == "WAITING_PULLBACK"
+    assert result["status"] == "WAITING_TOUCH"
     assert result["rsi_4h_at_cross"] is None
 
 
@@ -161,7 +161,7 @@ def test_advance_waiting_cross_short_side():
     plan = _cross_plan()
     candles = [{"close": 105.0}] * 5 + [{"close": 85.0, "time": CROSS_EPOCH}]
     result = gt.advance_waiting_cross(plan, candles, NOW, candles_4h=SHORT_IN_ZONE_H4)
-    assert result["status"] == "WAITING_PULLBACK"
+    assert result["status"] == "WAITING_TOUCH"
     assert result["direction"] == "SHORT"
     assert result["opposite_trigger"] == 100.0
     # stop = r30_high + 0.12*box = 100 + 1.2 = 101.2
@@ -176,12 +176,16 @@ def test_advance_waiting_cross_bad_levels_returns_none():
     assert gt.advance_waiting_cross(plan, candles, NOW) is None
 
 
-# ------------------------------------------------------------------ advance_waiting_pullback
+# ------------------------------------------------------------------ advance_waiting_touch
+# (2026-09-22 D2 restore: entry limit AT THE TRIGGER, wick-touch fill --
+# CC_WORK_ORDER_D2_RESTORE_TRIGGER_LIMIT.md. Was advance_waiting_pullback(),
+# a confirmed-close basis measured -0.1056R/negative-every-year once properly
+# re-run -- the regression this restores.)
 
-def _pullback_plan(**extra):
+def _touch_plan(**extra):
     cross_time = NOW - datetime.timedelta(hours=2)
     d = {
-        "status": "WAITING_PULLBACK", "direction": "LONG",
+        "status": "WAITING_TOUCH", "direction": "LONG",
         "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
         "opposite_trigger": 90.0,
         "cross_time": cross_time,
@@ -191,80 +195,86 @@ def _pullback_plan(**extra):
     return d
 
 
-def _c(close, ts):
-    return {"close": close, "time": ts}
+def _c(close, ts, low=None, high=None):
+    return {"close": close, "low": low if low is not None else close,
+            "high": high if high is not None else close, "time": ts}
 
 
-def test_advance_waiting_pullback_ignores_non_waiting_status():
-    plan = _pullback_plan(status="FILLED")
-    assert gt.advance_waiting_pullback(plan, [], NOW) is None
+def test_advance_waiting_touch_ignores_non_waiting_status():
+    plan = _touch_plan(status="FILLED")
+    assert gt.advance_waiting_touch(plan, [], NOW) is None
 
 
-def test_advance_waiting_pullback_no_bars_after_cross_yet_returns_none():
-    plan = _pullback_plan()
+def test_advance_waiting_touch_no_bars_after_cross_yet_returns_none():
+    plan = _touch_plan()
     ct = plan["cross_time"].timestamp()
     candles = [_c(105.0, ct)]  # the cross bar itself, not after it
-    assert gt.advance_waiting_pullback(plan, candles, NOW) is None
+    assert gt.advance_waiting_touch(plan, candles, NOW) is None
 
 
-def test_advance_waiting_pullback_fills_on_first_close_back_at_trigger():
-    plan = _pullback_plan()
+def test_advance_waiting_touch_fills_on_first_wick_touch_of_trigger():
+    # The load-bearing test for the restore: the CLOSE stays on the far side
+    # of the trigger the whole way (a close-based check would never fire),
+    # but the bar's own LOW wicks through -- proving the fill is genuinely
+    # wick-driven, and that fill_price is the TRIGGER, not the wick's own
+    # low (99.5) or the bar's own close (102.0).
+    plan = _touch_plan()
     ct = plan["cross_time"].timestamp()
     candles = [
-        _c(105.0, ct),           # cross bar -- skipped (win[1:])
-        _c(103.0, ct + 300),     # still above trigger -- no fill
-        _c(99.5, ct + 600),      # back at/through trigger (<=100) -- FILL
-        _c(101.0, ct + 900),     # irrelevant, fill already happened
+        _c(105.0, ct),                                  # cross bar -- skipped
+        _c(103.0, ct + 300),                             # still above trigger -- no fill
+        _c(102.0, ct + 600, low=99.5, high=103.0),       # close stays above trigger; the WICK touches -- FILL
+        _c(101.0, ct + 900),                             # irrelevant, fill already happened
     ]
-    result = gt.advance_waiting_pullback(plan, candles, NOW)
+    result = gt.advance_waiting_touch(plan, candles, NOW)
     assert result["status"] == "FILLED"
-    assert result["fill_price"] == 99.5
+    assert result["fill_price"] == 100.0
     assert result["fill_time"] == datetime.datetime.fromtimestamp(ct + 600, tz=datetime.timezone.utc)
 
 
-def test_advance_waiting_pullback_short_side_fills_on_close_back_up_to_trigger():
-    plan = _pullback_plan(direction="SHORT", breakout_trigger=100.0, breakdown_trigger=90.0, opposite_trigger=100.0)
+def test_advance_waiting_touch_short_side_fills_on_wick_touch_of_trigger():
+    plan = _touch_plan(direction="SHORT", breakout_trigger=100.0, breakdown_trigger=90.0, opposite_trigger=100.0)
     ct = plan["cross_time"].timestamp()
     candles = [
         _c(85.0, ct),
         _c(87.0, ct + 300),
-        _c(90.5, ct + 600),  # back at/through trigger (>=90) -- FILL
+        _c(89.0, ct + 600, low=88.0, high=90.5),   # close stays below trigger; the WICK (high) touches -- FILL
     ]
-    result = gt.advance_waiting_pullback(plan, candles, NOW)
+    result = gt.advance_waiting_touch(plan, candles, NOW)
     assert result["status"] == "FILLED"
-    assert result["fill_price"] == 90.5
+    assert result["fill_price"] == 90.0
 
 
-def test_advance_waiting_pullback_no_fill_yet_returns_none():
-    plan = _pullback_plan()
+def test_advance_waiting_touch_no_fill_yet_returns_none():
+    plan = _touch_plan()
     ct = plan["cross_time"].timestamp()
-    candles = [_c(105.0, ct), _c(106.0, ct + 300), _c(108.0, ct + 600)]  # never comes back
-    assert gt.advance_waiting_pullback(plan, candles, NOW) is None
+    candles = [_c(105.0, ct), _c(106.0, ct + 300), _c(108.0, ct + 600)]  # never comes back, no wick touch either
+    assert gt.advance_waiting_touch(plan, candles, NOW) is None
 
 
-def test_advance_waiting_pullback_opposite_trigger_breaks_first_ends_journey():
-    plan = _pullback_plan()
+def test_advance_waiting_touch_opposite_trigger_breaks_first_ends_journey():
+    plan = _touch_plan()
     ct = plan["cross_time"].timestamp()
-    candles = [_c(105.0, ct), _c(89.0, ct + 300)]  # closes below the opposite (90) trigger before any pullback
-    result = gt.advance_waiting_pullback(plan, candles, NOW)
+    candles = [_c(105.0, ct), _c(89.0, ct + 300)]  # closes below the opposite (90) trigger before any touch
+    result = gt.advance_waiting_touch(plan, candles, NOW)
     assert result["status"] == "DONE"
     assert "opposite trigger" in result["last_transition_reason"]
 
 
-def test_advance_waiting_pullback_journey_cap_reached_with_no_fill():
-    plan = _pullback_plan(journey_cap_at=NOW - datetime.timedelta(minutes=1))  # already passed
+def test_advance_waiting_touch_journey_cap_reached_with_no_fill():
+    plan = _touch_plan(journey_cap_at=NOW - datetime.timedelta(minutes=1))  # already passed
     ct = plan["cross_time"].timestamp()
-    candles = [_c(105.0, ct), _c(106.0, ct + 300)]  # never pulls back, opposite never breaks
-    result = gt.advance_waiting_pullback(plan, candles, NOW)
+    candles = [_c(105.0, ct), _c(106.0, ct + 300)]  # never touches, opposite never breaks
+    result = gt.advance_waiting_touch(plan, candles, NOW)
     assert result["status"] == "DONE"
     assert "7-day journey cap" in result["last_transition_reason"]
 
 
-def test_advance_waiting_pullback_not_yet_capped_returns_none():
-    plan = _pullback_plan()  # cap is 7 days out, not reached
+def test_advance_waiting_touch_not_yet_capped_returns_none():
+    plan = _touch_plan()  # cap is 7 days out, not reached
     ct = plan["cross_time"].timestamp()
     candles = [_c(105.0, ct), _c(106.0, ct + 300)]
-    assert gt.advance_waiting_pullback(plan, candles, NOW) is None
+    assert gt.advance_waiting_touch(plan, candles, NOW) is None
 
 
 # ------------------------------------------------------------------ rsi_at_cross (2026-09-21)

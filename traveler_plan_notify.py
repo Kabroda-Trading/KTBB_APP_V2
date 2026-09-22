@@ -25,13 +25,13 @@
 #      evaluate") -- every plan starts WAITING_CROSS unconditionally, so
 #      unlike v2's four-disposition-code lock email, this is always the
 #      same shape: levels + "watching for a cross either way."
-#   2. ARMED -- fires on the WAITING_PULLBACK -> FILLED transition (the
-#      confirmed-close pullback fill, gate_traveler.py's own
-#      advance_waiting_pullback()) -- "this is a simulation-only fill,"
-#      matching v2's own ARMED-is-the-fill-instant framing (no separate
-#      FILLED email here either, same anti-duplicate reasoning v2 uses).
+#   2. ARMED -- fires on the WAITING_TOUCH -> FILLED transition (the
+#      trigger touch fill, gate_traveler.py's own advance_waiting_touch())
+#      -- "this is a simulation-only fill," matching v2's own ARMED-is-the-
+#      fill-instant framing (no separate FILLED email here either, same
+#      anti-duplicate reasoning v2 uses).
 #   3. DONE -- fires on WAITING_CROSS -> TERCILE_SKIPPED (a real cross
-#      happened, RSI zone excluded it) AND on WAITING_PULLBACK -> DONE
+#      happened, RSI zone excluded it) AND on WAITING_TOUCH -> DONE
 #      (opposite trigger broke first, or the 7-day journey cap passed with
 #      no fill). One line each, using the real last_transition_reason
 #      gate_traveler.py already writes -- never a fabricated reason.
@@ -82,16 +82,16 @@ def build_traveler_lock_email(plan: Dict[str, Any]) -> Tuple[str, str]:
         "No pre-committed direction -- watching for a confirmed close beyond "
         "either trigger. A cross that gets excluded (RSI tercile) or "
         "invalidated sends a short stand-down email; a taken cross sends an "
-        "ARMED email at the pullback fill.\n\n"
+        "ARMED email at the trigger touch fill.\n\n"
         f"  Plan ID: {plan.get('id')}"
     )
     return subject, body
 
 
 def build_traveler_armed_email(plan: Dict[str, Any]) -> Tuple[str, str]:
-    """Fires on the confirmed-close pullback fill (WAITING_PULLBACK ->
-    FILLED) -- the same instant v2's own ARMED fires on its own resting-
-    order fill. Simulation-only: no real order was placed."""
+    """Fires on the trigger touch fill (WAITING_TOUCH -> FILLED) -- the
+    same instant v2's own ARMED fires on its own resting-order fill.
+    Simulation-only: no real order was placed."""
     symbol = _symbol_compact(plan.get("symbol", ""))
     direction = plan.get("direction") or "?"
     fill_price = plan.get("fill_price")
@@ -100,7 +100,7 @@ def build_traveler_armed_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     subject = f"KABRODA TRAVELER ARMED - {symbol} {direction} @ {_fmt(fill_price, ',.0f')}"
     body = (
         "TRAVELER (evaluation lineage, DRY_RUN only -- no real order was placed)\n\n"
-        f"{symbol} {direction} pullback fill confirmed at {_fmt(fill_price)}.\n"
+        f"{symbol} {direction} trigger touch fill confirmed at {_fmt(fill_price)}.\n"
         f"  Stop: {_fmt(stop)}\n"
         f"  T1:   {_fmt(t1)}\n\n"
         "This is a simulation fill for the evaluation harness -- no action needed.\n\n"
@@ -129,7 +129,7 @@ def notification_for_traveler_transition(prev_status: str, plan: Dict[str, Any])
     """Given the status BEFORE this poll's update and the plan dict AFTER
     it, decide which (if any) email fires -- called once per real
     transition (the caller already gates on prev_status != new status).
-    WAITING_CROSS -> WAITING_PULLBACK is a real, logged transition but not
+    WAITING_CROSS -> WAITING_TOUCH is a real, logged transition but not
     one of the three required events -- returns None, same as v2's own
     non-emailed intermediate transitions."""
     status = plan.get("status")

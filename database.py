@@ -1091,23 +1091,24 @@ class TradePlan(Base):
 # TRAVELER's own D1/D2 plan object, the parallel to TradePlan above for the
 # traveler-candidate lineage. Created alongside TradePlan at the SAME
 # session lock (kabroda_mas_flow.py), watching the SAME BO/BD/r30/rsi-at-
-# lock levels, but with GATE_TRAVELER's own taken-gate (pullback-fill +
-# tercile-skip on RSI-4h-at-lock -- CC_HANDOFF_SITE_INTEGRATION.md §2-D1,
-# rulings logged fcfb19a/74344cd in the Kabroda AI Brain repo) instead of
-# v1/v2's Krown-Cross/RSI-zone/fuel gate.
+# lock levels, but with GATE_TRAVELER's own taken-gate (trigger-touch-fill +
+# tercile-skip on RSI-4h-at-cross -- CC_HANDOFF_SITE_INTEGRATION.md §2-D1,
+# rulings logged fcfb19a/74344cd in the Kabroda AI Brain repo; D2 restored
+# 2026-09-22, CC_WORK_ORDER_D2_RESTORE_TRIGGER_LIMIT.md, see gate_traveler.py's
+# own header) instead of v1/v2's Krown-Cross/RSI-zone/fuel gate.
 #
 # A SEPARATE table and a SEPARATE polling loop (traveler_plan_engine.py,
 # not trade_plan_engine.py) on purpose, not a mode flag bolted onto
-# TradePlan: (1) the fill mechanism is genuinely different -- pullback-fill
-# is the first 5m bar AFTER the cross bar whose CLOSE comes back to/through
-# the trigger (recipe_assembled.py::pullback_fill(), confirmed 2026-09-15),
-# a later, differently-priced event than v1/v2's touch/confirmed-close
-# fill; (2) the taken/journey-end window can span MULTIPLE DAYS (opposite-
-# trigger confirmed close or cross+7d, journey_recipes.py:190,225-226) --
-# unlike TradePlan, which is scoped to and expires with its own single
-# session, a WAITING_PULLBACK row here must keep being polled across
-# session/day boundaries until the pullback fills, the opposite trigger
-# breaks, or the 7-day cap passes. date_key/session_id below are for
+# TradePlan: (1) the fill mechanism is genuinely different -- a resting
+# limit sits AT THE TRIGGER after the cross and fills on ANY SUBSEQUENT
+# WICK TOUCH (gate_traveler.py::advance_waiting_touch(), restored 2026-09-22
+# to match the measured basis, TF_CROSS +0.1160R taken-only/PASS 5/5); (2) the
+# taken/journey-end window can span MULTIPLE DAYS (opposite-trigger confirmed
+# close or cross+7d, journey_recipes.py:190,225-226) -- unlike TradePlan,
+# which is scoped to and expires with its own single session, a
+# WAITING_TOUCH row here must keep being polled across session/day
+# boundaries until the trigger touch fills, the opposite trigger breaks, or
+# the 7-day cap passes. date_key/session_id below are for
 # audit/join back to the SAME SessionLock/TradePlan row this was created
 # alongside -- the polling loop itself does NOT scope by "is this session
 # still today," only by this row's own status and journey_cap_at/
@@ -1121,9 +1122,9 @@ class TravelerPlan(Base):
     date_key = Column(String, index=True, nullable=False)
     session_id = Column(String, nullable=False)
 
-    # WAITING_CROSS -> TERCILE_SKIPPED (terminal) | WAITING_PULLBACK
+    # WAITING_CROSS -> TERCILE_SKIPPED (terminal) | WAITING_TOUCH
     #               -> FILLED -> STOPPED | DONE (terminal)
-    #               -> DONE (terminal -- journey ended with no pullback fill)
+    #               -> DONE (terminal -- journey ended with no trigger touch fill)
     # See traveler_plan_engine.py for the full transition table.
     status = Column(String, default="WAITING_CROSS", nullable=False)
     direction = Column(String, nullable=True)          # LONG | SHORT, set at the cross
@@ -1143,7 +1144,7 @@ class TravelerPlan(Base):
     tercile_skipped = Column(Boolean, nullable=True)     # the HARD taken-gate filter -- see gate_traveler.py::tercile_skip()
 
     fill_time = Column(DateTime, nullable=True)
-    fill_price = Column(Float, nullable=True)            # the pullback bar's CLOSE -- the real GATE_TRAVELER fill price
+    fill_price = Column(Float, nullable=True)            # the resting limit's own trigger price -- the real GATE_TRAVELER fill price
 
     journey_cap_at = Column(DateTime, nullable=True)     # cross_time + 7d (journey_recipes.py JOURNEY_CAP)
     opposite_trigger = Column(Float, nullable=True)      # the untaken side's trigger -- a confirmed close through it ends the journey early

@@ -239,7 +239,7 @@ def run_mas_analysis(
     # own D1/D2 plan object, created alongside TradePlan above from the SAME
     # locked levels. Independent of what decision_dict says (GATE_TRAVELER
     # doesn't use v1/v2's Krown-Cross/RSI-zone/fuel gate at all -- its own
-    # taken-gate is pullback-fill + tercile-skip, evaluated later by
+    # taken-gate is trigger-touch-fill + tercile-skip, evaluated later by
     # traveler_plan_engine.py at the real cross). Non-blocking, same
     # reasoning as 6b: additive, a failure here must never affect the SSOT
     # writes above.
@@ -676,7 +676,7 @@ def _inject_traveler_plan_to_database(
     run_mas_analysis() must never overwrite a row the polling loop may
     already have advanced). Unconditional WAITING_CROSS write whenever real
     levels exist -- GATE_TRAVELER has no lock-time gate to evaluate (its
-    only gate, pullback-fill + tercile-skip, is evaluated at the real cross
+    only gate, trigger-touch-fill + tercile-skip, is evaluated at the real cross
     by traveler_plan_engine.py), so there's no NO_PLAN-equivalent state
     here at all."""
     db = SessionLocal()

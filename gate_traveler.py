@@ -1,17 +1,32 @@
 # gate_traveler.py
 # ==============================================================================
-# GATE_TRAVELER -- D1 (does the taken-gate open?) + D2 (pullback fill) for
+# GATE_TRAVELER -- D1 (does the taken-gate open?) + D2 (trigger-touch entry) for
 # the traveler-candidate lineage. Pure functions only, no DB/network (same
 # small-single-purpose-module convention as trade_plan.py) -- the caller
 # (traveler_plan_engine.py) owns all persistence.
 #
+# D2 RESTORED 2026-09-22 (CC_WORK_ORDER_D2_RESTORE_TRIGGER_LIMIT.md, Kabroda AI
+# Brain repo, Andy ruling 07:49 CT): the 2026-09-15 build (see below) entered at
+# the CLOSE of the first confirmed 5m bar back at/through the trigger after the
+# cross -- a real, measured regression (re-verified `lab_confirming_close.py`:
+# -0.1056R, negative every year) that drifted from the project's own founding
+# audit (AUDIT.md section 2: "Trigger-fill (touch of BO/BD) -- KEEP -- the
+# mid-box and deep pullback limit entries LOSE on both exchanges") and
+# LIVE_SYSTEM_STATE.md Domain 2 ("Resting POST_ONLY LIMIT at the trigger price,
+# placed after the confirmed cross"). The ORIGINAL, profitable D2 core -- and
+# what this file now implements -- is: after the confirmed cross (D1, unchanged
+# below), a resting limit sits AT THE TRIGGER; it fills on ANY SUBSEQUENT WICK
+# TOUCH (high/low), no close-back condition. Measured basis: `lab_touchfill_
+# arms.py`'s TF_CROSS arm / `d1_meas_base.py:44-61`'s wick-touch harness,
+# +0.1160R taken-only / +0.0744R pooled, PASS 5/5, positive every year
+# 2022-2026. See `advance_waiting_touch()` below.
+#
 # Built 2026-09-15 per CC_WORK_ORDER_PHASE2.md steps 2+3, against the
 # frozen source (not the handoff's prose, which had 4 confirmed errors --
 # see AGENT_LOG.md both repos, rulings fcfb19a/74344cd/7ee590d):
-#   - pullback_fill semantics: `recipe_assembled.py::pullback_fill()`
-#     (Kabroda AI Brain repo) -- first 5m bar AFTER the cross bar (the cross
-#     bar itself is skipped) whose CLOSE comes back to/through the trigger.
-#     Entry = that bar's close. Confirmed-close basis, NOT wick-touch.
+#   - entry/fill semantics: see the 2026-09-22 restore note above -- this
+#     bullet originally cited `recipe_assembled.py::pullback_fill()`'s
+#     confirmed-close basis, which is the regression that was reverted.
 #   - tercile skip: `recipe_assembled.py::tercile_skip()` / `lab_walkforward_
 #     execute.py::skipped()` -- LONG skips the lowest RSI-4h-at-lock
 #     tercile, SHORT skips the highest. The walk-forward protocol re-fits
@@ -146,7 +161,7 @@ def advance_waiting_cross(
     now_utc: datetime.datetime,
     candles_4h: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """WAITING_CROSS -> TERCILE_SKIPPED (terminal, no trade) | WAITING_PULLBACK.
+    """WAITING_CROSS -> TERCILE_SKIPPED (terminal, no trade) | WAITING_TOUCH.
 
     candles_5m: confirmed 5m closes (caller strips the still-forming
     trailing candle first, same as trade_plan.py's own callers).
@@ -206,29 +221,38 @@ def advance_waiting_cross(
             f"(RSI-4h-at-cross {rsi_4h_at_cross}) -- not taken, no trade"
         )
     else:
-        updates["status"] = "WAITING_PULLBACK"
+        updates["status"] = "WAITING_TOUCH"
         updates["last_transition_reason"] = (
-            f"{side} cross confirmed at {cross_price:,.2f} -- watching for the pullback fill"
+            f"{side} cross confirmed at {cross_price:,.2f} -- resting limit at "
+            f"{trigger:,.2f}, watching for a trigger touch"
         )
     return updates
 
 
-def advance_waiting_pullback(
+def advance_waiting_touch(
     plan: Dict[str, Any],
     candles_5m: List[Dict[str, Any]],
     now_utc: datetime.datetime,
 ) -> Optional[Dict[str, Any]]:
-    """WAITING_PULLBACK -> FILLED | DONE (opposite trigger broke, or the
-    7-day journey cap passed with no pullback fill).
+    """WAITING_TOUCH -> FILLED | DONE (opposite trigger broke, or the
+    7-day journey cap passed with no trigger touch).
+
+    2026-09-22 restore (CC_WORK_ORDER_D2_RESTORE_TRIGGER_LIMIT.md): the resting
+    limit sits AT THE TRIGGER (placed once, at the cross); it fills on ANY
+    SUBSEQUENT WICK TOUCH (high/low), no close-back condition -- matching
+    `lab_touchfill_arms.py`'s TF_CROSS arm / `d1_meas_base.py:44-61`'s
+    wick-touch harness (the measured, positive-every-year basis), not the
+    2026-09-15 build's confirmed-close `pullback_fill()` semantics (measured
+    -0.1056R, negative every year, once properly re-run -- the regression
+    this restores).
 
     candles_5m: confirmed 5m closes covering AT LEAST the window from just
     after cross_time through now (the caller fetches a wide-enough window,
-    same as trade_plan_engine.py's own candle fetch pattern). Only bars
-    strictly AFTER cross_time are considered for the pullback condition --
-    the cross bar itself is excluded (recipe_assembled.py::pullback_fill()'s
-    `win[1:]`).
+    same as trade_plan_engine.py's own candle fetch pattern), each carrying
+    real high/low fields. Only bars strictly AFTER cross_time are considered
+    -- the cross bar itself is excluded.
     """
-    if plan.get("status") != "WAITING_PULLBACK":
+    if plan.get("status") != "WAITING_TOUCH":
         return None
     direction = plan.get("direction")
     is_long = direction == _LONG
@@ -243,7 +267,10 @@ def advance_waiting_pullback(
     after_cross.sort(key=lambda c: c["time"])
 
     # Journey end #1: the OPPOSITE trigger gets a confirmed close beyond it
-    # first -- the setup is invalidated, no pullback fill happens.
+    # first -- the setup is invalidated, no trigger touch fill happens. Stays
+    # CONFIRMED-CLOSE based (matches journey_recipes.py::first_cross_after(),
+    # the measured basis's own journey-invalidation condition) -- only the
+    # entry's OWN fill condition below is wick-based, not this one.
     for c in after_cross:
         close = float(c["close"])
         opposite_broken = (close < opposite_trigger) if is_long else (close > opposite_trigger)
@@ -251,32 +278,34 @@ def advance_waiting_pullback(
             return {
                 "status": "DONE",
                 "last_transition_reason": (
-                    f"opposite trigger ({opposite_trigger:,.2f}) broke before any pullback fill -- "
+                    f"opposite trigger ({opposite_trigger:,.2f}) broke before any trigger touch fill -- "
                     f"journey ended, not taken"
                 ),
             }
 
-    # The pullback fill itself: first bar whose close is back at/through
-    # the trigger (recipe_assembled.py::pullback_fill(), verbatim).
+    # The trigger touch fill itself: first bar whose WICK (high/low) touches
+    # the resting limit's own price -- no close-back condition. fill_price is
+    # the trigger (the resting limit's own price), never the touching bar's
+    # own high/low/close value.
     for c in after_cross:
-        close = float(c["close"])
-        filled = (close <= trigger) if is_long else (close >= trigger)
+        lo, hi = float(c["low"]), float(c["high"])
+        filled = (lo <= trigger) if is_long else (hi >= trigger)
         if filled:
             fill_time_epoch = c["time"]
             fill_time = datetime.datetime.fromtimestamp(fill_time_epoch, tz=datetime.timezone.utc)
             return {
                 "status": "FILLED",
                 "fill_time": fill_time,
-                "fill_price": close,
-                "last_transition_reason": f"pullback fill at {close:,.2f}",
+                "fill_price": trigger,
+                "last_transition_reason": f"trigger touch fill at {trigger:,.2f}",
             }
 
-    # Journey end #2: the 7-day cap passed with no pullback fill and no
+    # Journey end #2: the 7-day cap passed with no trigger touch fill and no
     # opposite-trigger break either -- disclosed as a real, common outcome
     # (matching the study's own "no-touch journeys, 0R, disclosed" convention).
     if journey_cap_at is not None and now_utc >= journey_cap_at:
         return {
             "status": "DONE",
-            "last_transition_reason": "7-day journey cap reached with no pullback fill -- not taken",
+            "last_transition_reason": "7-day journey cap reached with no trigger touch fill -- not taken",
         }
     return None

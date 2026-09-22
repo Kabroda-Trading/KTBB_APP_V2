@@ -1240,12 +1240,12 @@ async def api_admin_traveler_plan_status(request: Request, db: Session = Depends
     the executor admin, per the work order's own scope note).
 
     Deliberately NOT scoped to today's date_key, unlike the TradePlan
-    query above -- TravelerPlan's own design allows a WAITING_PULLBACK
+    query above -- TravelerPlan's own design allows a WAITING_TOUCH
     journey to span up to 7 days (traveler_plan_engine.py's own header:
     "a row can poll across multiple days, unlike TradePlan's WAITING"). A
     literal date_key == today filter would go blank on day 2+ of an
     active, still-live journey -- a real case in production as of
-    2026-09-19 (TravelerPlan id 2, crossed 09-18, still WAITING_PULLBACK
+    2026-09-19 (TravelerPlan id 2, crossed 09-18, still WAITING_TOUCH
     on 09-19). Returns the single most-recently-touched row instead, which
     is always the current journey regardless of which day it started."""
     ctx = get_user_context(request, db)

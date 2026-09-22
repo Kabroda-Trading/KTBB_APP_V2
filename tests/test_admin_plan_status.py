@@ -72,12 +72,12 @@ def _login(email, password):
 def _make_plan(db, **kwargs):
     defaults = dict(
         symbol="BTC/USDT", date_key="2026-09-18", session_id="us_ny_futures",
-        status="WAITING_PULLBACK", direction="LONG",
+        status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=81414.10, breakdown_trigger=80000.0,
         stop_price=81100.0, t1_price=82000.0,
         cross_time=dt.datetime(2026, 9, 18, 14, 5, 0), cross_price=81414.10,
         journey_cap_at=dt.datetime(2026, 9, 25, 14, 5, 0),
-        last_transition_reason="LONG cross confirmed at 81,414.10 -- watching for the pullback fill",
+        last_transition_reason="LONG cross confirmed at 81,414.10 -- resting limit at 81,414.10, watching for a trigger touch",
     )
     defaults.update(kwargs)
     row = TravelerPlan(**defaults)
@@ -107,7 +107,7 @@ def test_traveler_plan_status_returns_real_fields(env):
     resp = client.get("/api/admin/traveler-plan-status")
     assert resp.status_code == 200
     row = resp.json()["rows"][0]
-    assert row["status"] == "WAITING_PULLBACK"
+    assert row["status"] == "WAITING_TOUCH"
     assert row["direction"] == "LONG"
     assert row["breakout_trigger"] == 81414.10
     assert row["stop_price"] == 81100.0
@@ -123,19 +123,19 @@ def test_traveler_plan_status_surfaces_a_multi_day_active_journey(env):
     # The real case this endpoint exists to handle correctly: a journey
     # that crossed on an EARLIER date_key and is still active today --
     # NOT scoped to today's date_key (unlike TradePlan's own endpoint),
-    # since traveler_plan_engine.py's own design allows a WAITING_PULLBACK
+    # since traveler_plan_engine.py's own design allows a WAITING_TOUCH
     # journey to span up to 7 days.
-    _make_plan(env["db"], date_key="2026-09-15", status="WAITING_PULLBACK")
+    _make_plan(env["db"], date_key="2026-09-15", status="WAITING_TOUCH")
     client = _login("radar_admin@kabroda.com", "adminpass123")
     resp = client.get("/api/admin/traveler-plan-status")
     row = resp.json()["rows"][0]
     assert row["date_key"] == "2026-09-15"
-    assert row["status"] == "WAITING_PULLBACK"
+    assert row["status"] == "WAITING_TOUCH"
 
 
 def test_traveler_plan_status_returns_the_most_recent_row_only(env):
     _make_plan(env["db"], date_key="2026-09-15", status="DONE", last_transition_reason="older, concluded journey")
-    newer = _make_plan(env["db"], date_key="2026-09-18", status="WAITING_PULLBACK", last_transition_reason="newer, active journey")
+    newer = _make_plan(env["db"], date_key="2026-09-18", status="WAITING_TOUCH", last_transition_reason="newer, active journey")
     client = _login("radar_admin@kabroda.com", "adminpass123")
     resp = client.get("/api/admin/traveler-plan-status")
     body = resp.json()
@@ -148,7 +148,7 @@ def test_traveler_plan_status_shows_fill_fields_when_filled(env):
     _make_plan(
         env["db"], status="FILLED",
         fill_time=dt.datetime(2026, 9, 18, 15, 0, 0), fill_price=81400.0,
-        last_transition_reason="pullback fill at 81,400.00",
+        last_transition_reason="trigger touch fill at 81,400.00",
     )
     client = _login("radar_admin@kabroda.com", "adminpass123")
     resp = client.get("/api/admin/traveler-plan-status")

@@ -3,7 +3,7 @@ Integration coverage for traveler_plan_engine.py's monitoring loop -- runs
 the ACTUAL run_traveler_plan_loop() coroutine against monkeypatched
 exchange calls, same harness style as tests/test_trade_plan_engine.py.
 Exercises the real production code path end to end: WAITING_CROSS ->
-WAITING_PULLBACK -> FILLED -> the executor hook (a real GATE_TRAVELER
+WAITING_TOUCH -> FILLED -> the executor hook (a real GATE_TRAVELER
 account) -> MGMT_E1_STACK's own poll closing the resulting order.
 """
 import os
@@ -161,13 +161,13 @@ def poll_env(monkeypatch):
     _clean_db_files()
 
 
-def test_waiting_cross_advances_to_waiting_pullback_on_a_real_cross(poll_env):
+def test_waiting_cross_advances_to_waiting_touch_on_a_real_cross(poll_env):
     poll_env["make_plan"]()
     candles = [_c5m(95.0, 1700000000 + i * 300) for i in range(5)] + [_c5m(105.0, 1700000000 + 5 * 300)]
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
 
     row = poll_env["get_plan"]()
-    assert row.status == "WAITING_PULLBACK"
+    assert row.status == "WAITING_TOUCH"
     assert row.direction == "LONG"
     assert row.tercile_skipped is False
 
@@ -181,7 +181,7 @@ def test_waiting_cross_no_cross_yet_stays_waiting(poll_env):
     assert row.status == "WAITING_CROSS"
 
 
-def test_waiting_pullback_fills_and_fires_the_executor_hook_for_a_gate_traveler_account(poll_env):
+def test_waiting_touch_fills_and_fires_the_executor_hook_for_a_gate_traveler_account(poll_env):
     # BTC-scale prices with a realistic, tight box (0.6% of price) -- a
     # toy 100/90-style box (10% of price) fails the liquidation-vs-stop
     # safety check at the default 10x leverage baseline (the stop distance
@@ -190,7 +190,7 @@ def test_waiting_pullback_fills_and_fires_the_executor_hook_for_a_gate_traveler_
     account_id = poll_env["make_traveler_account"]()
     ct = 1700000000
     poll_env["make_plan"](
-        status="WAITING_PULLBACK", direction="LONG",
+        status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
         stop_price=49664.0, t1_price=50300.0, rsi_4h_at_cross=55.0,
         cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
@@ -199,13 +199,13 @@ def test_waiting_pullback_fills_and_fires_the_executor_hook_for_a_gate_traveler_
     candles = [
         _c5m(50100.0, ct),              # cross bar itself -- skipped
         _c5m(50050.0, ct + 300),        # still above trigger
-        _c5m(49900.0, ct + 600),        # pullback fill
+        _c5m(49900.0, ct + 600),        # wick touches the trigger (low <= 50000) -- FILL
     ]
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
 
     row = poll_env["get_plan"]()
     assert row.status == "FILLED"
-    assert row.fill_price == 49900.0
+    assert row.fill_price == 50000.0   # the trigger, not the touching bar's own close (49900.0)
 
     orders = poll_env["get_orders"](traveler_plan_id=row.id)
     assert len(orders) == 1
@@ -214,17 +214,49 @@ def test_waiting_pullback_fills_and_fires_the_executor_hook_for_a_gate_traveler_
     assert order.decision == "WOULD_PLACE"
     assert order.gate_profile_used == "GATE_TRAVELER"
     assert order.mgmt_profile_used == "MGMT_E1_STACK"
-    assert order.entry_fill_price == 49900.0
+    assert order.entry_fill_price == 50000.0
     assert order.stop_price == 49664.0
     assert order.t1_price == 50300.0
     assert order.management_state == "ENTRY_FILLED_ORDERS_PLACED"
     # F_A (2026-09-21: reads rsi_4h_at_cross, not rsi_4h_at_lock -- CC_WORK_
     # ORDER_D1_RSI_AT_CROSS.md): 55.0 is not extreme for LONG (needs >=80) -> 0.5
     assert order.sizing_multiplier_used == pytest.approx(0.5)
-    assert order.qty == pytest.approx((100.0 * 0.5) / abs(49900.0 - 49664.0))
+    assert order.qty == pytest.approx((100.0 * 0.5) / abs(50000.0 - 49664.0))
 
 
-def test_waiting_pullback_fill_f_a_reads_rsi_4h_at_cross_not_at_lock(poll_env):
+def test_waiting_touch_fills_on_a_wick_only_touch_through_the_full_loop(poll_env):
+    # The unit-level proof lives in test_gate_traveler.py; this exercises the
+    # SAME wick-only scenario (close stays on the far side of the trigger,
+    # only the wick touches it) through the REAL production loop end to end
+    # -- proving the fill actually threads through to a real order at the
+    # trigger price, not just that the pure function returns the right dict.
+    account_id = poll_env["make_traveler_account"]()
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_TOUCH", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0, rsi_4h_at_cross=55.0,
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    candles = [
+        _c5m(50100.0, ct),                                          # cross bar -- skipped
+        _c5m(50200.0, ct + 300, low=49950.0, high=50250.0),         # close stays ABOVE trigger; the WICK (low) touches -- FILL
+    ]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "FILLED"
+    assert row.fill_price == 50000.0   # the trigger -- never the wick's own low (49950.0) or the bar's close (50200.0)
+
+    orders = poll_env["get_orders"](traveler_plan_id=row.id)
+    assert len(orders) == 1
+    order = orders[0]
+    assert order.account_id == account_id
+    assert order.entry_fill_price == 50000.0
+
+
+def test_waiting_touch_fill_f_a_reads_rsi_4h_at_cross_not_at_lock(poll_env):
     # 2026-09-21 (CC_WORK_ORDER_D1_RSI_AT_CROSS.md): a real positive check,
     # not just the "not extreme" default from the test above -- 0.5 is ALSO
     # what f_a_multiplier(None, ...) returns, so that test alone would still
@@ -235,7 +267,7 @@ def test_waiting_pullback_fill_f_a_reads_rsi_4h_at_cross_not_at_lock(poll_env):
     poll_env["make_traveler_account"]()
     ct = 1700000000
     poll_env["make_plan"](
-        status="WAITING_PULLBACK", direction="LONG",
+        status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
         stop_price=49664.0, t1_price=50300.0,
         rsi_4h_at_lock=10.0,     # extreme in the WRONG direction if this were read -- must be ignored
@@ -248,14 +280,14 @@ def test_waiting_pullback_fill_f_a_reads_rsi_4h_at_cross_not_at_lock(poll_env):
 
     order = poll_env["get_orders"]()[0]
     assert order.sizing_multiplier_used == pytest.approx(1.0)
-    assert order.qty == pytest.approx((100.0 * 1.0) / abs(49900.0 - 49664.0))
+    assert order.qty == pytest.approx((100.0 * 1.0) / abs(50000.0 - 49664.0))
 
 
-def test_waiting_pullback_ignores_non_gate_traveler_accounts(poll_env):
+def test_waiting_touch_ignores_non_gate_traveler_accounts(poll_env):
     poll_env["make_traveler_account"](gate_profile="GATE_V2", mgmt_profile="MGMT_SPLIT")
     ct = 1700000000
     poll_env["make_plan"](
-        status="WAITING_PULLBACK", direction="LONG",
+        status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
         stop_price=49664.0, t1_price=50300.0,
         cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
@@ -273,7 +305,7 @@ def test_mgmt_e1_stack_poll_closes_the_order_on_a_real_stop_touch(poll_env):
     account_id = poll_env["make_traveler_account"]()
     ct = 1700000000
     poll_env["make_plan"](
-        status="WAITING_PULLBACK", direction="LONG",
+        status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
         stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
         cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
@@ -320,7 +352,7 @@ def test_mgmt_e1_stack_closure_compounds_the_account_ledger(poll_env):
 
     ct = 1700000000
     poll_env["make_plan"](
-        status="WAITING_PULLBACK", direction="LONG",
+        status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
         stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
         cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
@@ -363,12 +395,12 @@ def _capture_emails(monkeypatch):
     return sent
 
 
-def test_waiting_pullback_fill_sends_a_traveler_armed_email_via_loop(poll_env, monkeypatch):
+def test_waiting_touch_fill_sends_a_traveler_armed_email_via_loop(poll_env, monkeypatch):
     sent = _capture_emails(monkeypatch)
     poll_env["make_traveler_account"]()
     ct = 1700000000
     poll_env["make_plan"](
-        status="WAITING_PULLBACK", direction="LONG",
+        status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
         stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
         cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
@@ -379,7 +411,7 @@ def test_waiting_pullback_fill_sends_a_traveler_armed_email_via_loop(poll_env, m
 
     assert len(sent) == 1
     assert sent[0][0].startswith("KABRODA TRAVELER ARMED")
-    assert "49,900" in sent[0][0] or "49900" in sent[0][0]
+    assert "50,000" in sent[0][0] or "50000" in sent[0][0]   # the trigger, not the touching bar's own close
 
 
 def test_waiting_cross_tercile_skipped_sends_a_traveler_done_email_via_loop(poll_env, monkeypatch):
@@ -401,11 +433,11 @@ def test_waiting_cross_tercile_skipped_sends_a_traveler_done_email_via_loop(poll
     assert "tercile-skipped" in sent[0][1]
 
 
-def test_waiting_pullback_opposite_break_sends_a_traveler_done_email_via_loop(poll_env, monkeypatch):
+def test_waiting_touch_opposite_break_sends_a_traveler_done_email_via_loop(poll_env, monkeypatch):
     sent = _capture_emails(monkeypatch)
     ct = 1700000000
     poll_env["make_plan"](
-        status="WAITING_PULLBACK", direction="LONG",
+        status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
         stop_price=49664.0, t1_price=50300.0,
         cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
@@ -421,12 +453,12 @@ def test_waiting_pullback_opposite_break_sends_a_traveler_done_email_via_loop(po
     assert "opposite trigger" in sent[0][1]
 
 
-def test_waiting_cross_to_waiting_pullback_sends_no_email_via_loop(poll_env, monkeypatch):
+def test_waiting_cross_to_waiting_touch_sends_no_email_via_loop(poll_env, monkeypatch):
     sent = _capture_emails(monkeypatch)
     poll_env["make_plan"]()
     candles = [_c5m(95.0, 1700000000 + i * 300) for i in range(5)] + [_c5m(105.0, 1700000000 + 5 * 300)]
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
 
     row = poll_env["get_plan"]()
-    assert row.status == "WAITING_PULLBACK"
+    assert row.status == "WAITING_TOUCH"
     assert sent == []

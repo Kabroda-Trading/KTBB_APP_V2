@@ -75,14 +75,14 @@ def test_done_email_tercile_skipped_uses_the_real_reason():
 
 
 def test_done_email_opposite_trigger_break_uses_the_real_reason():
-    plan = _plan("DONE", last_transition_reason="opposite trigger (49,700.00) broke before any pullback fill -- journey ended, not taken")
+    plan = _plan("DONE", last_transition_reason="opposite trigger (49,700.00) broke before any trigger touch fill -- journey ended, not taken")
     subject, body = tpn.build_traveler_done_email(plan)
     assert subject == "KABRODA TRAVELER DONE - BTCUSDT - stand down"
     assert "opposite trigger" in body
 
 
 def test_done_email_journey_cap_uses_the_real_reason():
-    plan = _plan("DONE", last_transition_reason="7-day journey cap reached with no pullback fill -- not taken")
+    plan = _plan("DONE", last_transition_reason="7-day journey cap reached with no trigger touch fill -- not taken")
     _, body = tpn.build_traveler_done_email(plan)
     assert "7-day journey cap" in body
 
@@ -90,7 +90,7 @@ def test_done_email_journey_cap_uses_the_real_reason():
 # ------------------------------------------------------------------ notification_for_traveler_transition dispatch
 
 def test_dispatch_filled_to_armed():
-    mail = tpn.notification_for_traveler_transition("WAITING_PULLBACK", _plan("FILLED"))
+    mail = tpn.notification_for_traveler_transition("WAITING_TOUCH", _plan("FILLED"))
     assert mail is not None
     assert mail[0].startswith("KABRODA TRAVELER ARMED")
 
@@ -102,13 +102,13 @@ def test_dispatch_tercile_skipped_to_done_family():
 
 
 def test_dispatch_done():
-    mail = tpn.notification_for_traveler_transition("WAITING_PULLBACK", _plan("DONE"))
+    mail = tpn.notification_for_traveler_transition("WAITING_TOUCH", _plan("DONE"))
     assert mail is not None
     assert mail[0].startswith("KABRODA TRAVELER DONE")
 
 
-def test_dispatch_waiting_cross_to_waiting_pullback_produces_no_email():
+def test_dispatch_waiting_cross_to_waiting_touch_produces_no_email():
     # A real, logged transition, but not one of the three required events --
     # same "not everything gets emailed" philosophy as v2's own STOPPED/
     # REENTRY_ARMED transitions.
-    assert tpn.notification_for_traveler_transition("WAITING_CROSS", _plan("WAITING_PULLBACK")) is None
+    assert tpn.notification_for_traveler_transition("WAITING_CROSS", _plan("WAITING_TOUCH")) is None
