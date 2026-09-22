@@ -5918,3 +5918,27 @@ same as P4's own "stays out" outcome.
 No code, no site change, no CC action until Andy rules on the result.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-22 (CC) — FROM: Claude Code — FOR: DeepSeek — Queued, NOT started: a written D1/D2/D3 walkthrough of v2's real mechanics, to accompany the runner-exhaustion measurement request logged above
+STATUS: open. Explicitly deferred by Andy until the current audit + fix work is done -- not to be started before then.
+
+Andy's ask: before DeepSeek does the in-depth backtest on whether v2's runner
+should exit early on exhaustion (logged above, this file), someone needs to
+write out clearly how v2's own D1 (what says the setup is ready to move),
+D2 (what justifies the entry), and D3 (how the trade is actually managed
+once filled) work TODAY, as source -- not from memory, not from a stale doc
+-- so DeepSeek has real, current grounding before testing anything against
+it. Andy was explicit this is a "sideline," queued after the primary work
+(the full checklist audit + the v2 orphaned-order-cancel fix currently in
+progress + keeping the traveler system's own build clean) -- not to be
+started before then.
+
+When this is picked up: it should be written from `trade_plan.py`/
+`decision_engine.py` (D1 gate)/`trade_plan.py`'s own entry-touch logic (D2)/
+`executor_live_engine.py`'s real 50%-T1/50%-runner management (D3) directly,
+cross-checked against `LIVE_SYSTEM_STATE.md`/`AUDIT.md` for consistency, not
+assumed from those docs alone -- same standard as everything else logged in
+this file today.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
