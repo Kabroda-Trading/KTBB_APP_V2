@@ -5561,3 +5561,65 @@ direction -- but "surprised" is not "verified," and finding 2 in particular
 (T1 anchor) has NOT been quantified, only reasoned about.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-22 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — D2 restore SHIPPED (site 3f33bf7), against CC_WORK_ORDER_D2_RESTORE_TRIGGER_LIMIT.md's own 8 acceptance checks
+STATUS: open
+
+Went through Plan Mode first, given the stakes (real entry-mechanism behavior) --
+a validation pass (independent agent) re-verified every citation and traced every
+data-flow claim in the work order before I wrote any code, including the v2
+precedent for order-placement timing and the "no code change needed" claim for
+three downstream files. Andy also asked, separately, for stale naming to be
+cleaned up as part of this pass rather than patched around -- done: WAITING_PULLBACK
+renamed to WAITING_TOUCH everywhere it appeared (code, comments, templates, tests),
+not left sitting next to logic that no longer does what the name says.
+
+### Self-check against the work order's 8 acceptance checks
+1. Entry limit price == trigger (site convention bo/bd), not any pullback/
+   confirming-bar close: YES -- `gate_traveler.py::advance_waiting_touch()` books
+   `"fill_price": trigger` on a wick touch; `fill_price` is the sole source
+   `executor_plan_builder.py`/`executor_live_e1_engine.py` read as entry_price,
+   verified by tracing the chain, not assumed.
+2. Fill condition == exchange touch (wick), no 5m-close condition anywhere in the
+   entry path: YES -- the fill check is `lo <= trigger`/`hi >= trigger` on the
+   bar's own high/low; no close comparison remains in the fill block. Opposite-
+   trigger invalidation (a DIFFERENT condition, journey-end not entry) stays
+   close-based on purpose -- matches the measured basis's own `first_cross_after()`.
+3. Limit placed once, after the confirmed cross, not re-placed/re-priced at
+   pullback closes: YES -- unchanged architecturally; the real order still only
+   gets placed once the simulated touch is detected (verified this matches v2's
+   own long-proven precedent, not a new gap).
+4. Never-touched journeys expire via the existing CLOSED_EXPIRED path: YES --
+   untouched, no new cancel logic added or needed.
+5. T1/stop/R unchanged from current live values: YES -- verified by inspection,
+   zero changes to `gate_traveler.py`'s stop/t1/box formulas.
+6. DRY_RUN books the same basis as LIVE: YES -- both read the identical
+   `fill_price` field; no separate DRY_RUN-only fill logic exists for this.
+7. Existing tests updated; suite green; boot check clean: 762 passed (up from
+   761), same 5 pre-existing unrelated `test_dashboard_fixes.py` errors. Two new
+   load-bearing tests (unit + full-loop) prove the fill is wick-driven, not
+   close-driven, by constructing a candle whose CLOSE stays on the far side of
+   the trigger while its wick touches -- close-based logic would show no fill at
+   all on that candle. Verified each fails with the fix reverted (ran the actual
+   pre-fix code against them, confirmed failure, restored).
+8. `rsi_4h_at_cross` skip/F_A wiring (commit 9f20298) untouched: YES -- zero
+   changes to that code path; one existing test (`f_a_reads_rsi_4h_at_cross_not_
+   at_lock`) re-run unchanged and still passes with the new entry price.
+
+### Incidental fix, not separately requested
+Entry and T1 now share one anchor (both the trigger) where before `fill_price`
+(pullback close) and `t1_price` (trigger, frozen at cross) were two different
+values -- closes the "two anchors" live-fidelity gap flagged in my own 09-21
+audit finding 4, without any separate work order.
+
+### Disclosed, not fixed (out of scope, flagged per standing practice)
+The traveler's touch detection is confirmed-5m-candle granularity (waits for a
+candle to close, then checks its high/low) -- not tick-level like v2's own
+`live_price` check. Bounded latency (~5m + one 60s poll cycle) between a real
+wick touch and real order placement. Inherent to DRY_RUN's own candle-driven
+design (no tick feed exists to simulate against), pre-exists this change, and
+this work order didn't ask to fix it -- naming it so it's a known, accepted
+characteristic, not a silent gap.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
