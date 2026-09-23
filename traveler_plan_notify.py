@@ -125,6 +125,70 @@ def build_traveler_done_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     return subject, body
 
 
+# 2026-09-23 -- the ONE post-fill D3 event this module covers. MGMT_E1_STACK
+# (mgmt_e1_stack.py::advance()) is a single full-exit design -- no partial
+# T1 leg, no runner -- so there is exactly one terminal management event per
+# journey, never a sequence; this is not a feed of several events, just the
+# one closure. Andy's own ask, radar-rebuild-around-Traveler-communication
+# work: the same closure information the radar panel now also shows.
+_EXIT_REASON_LABELS = {
+    "STOP": "stop hit",
+    "C5_EXIT": "momentum-decay exhaustion (C5) exit",
+    "BBWP_EXIT": "BBWP volatility-burnout exit",
+    "T1": "target hit (T1)",
+    "TIME": "journey time-cap exit",
+}
+
+
+def build_traveler_management_event_email(order: Dict[str, Any], is_live: bool) -> Tuple[str, str]:
+    """`order` is a plain dict of the closing ExecutorOrder's own fields --
+    symbol, direction, exit_reason, exit_price, realized_pnl_r, and
+    traveler_plan_id (for the footer, matching this module's other builders'
+    "Plan ID" convention -- the TravelerPlan's id, not the ExecutorOrder's
+    own). `is_live` distinguishes real money from the DRY_RUN evaluation
+    harness, same caveat convention this file's other builders already use.
+    `order.get("approximated")` (bool) adds the LIVE-only caveat for a
+    market-close contingency exit (C5/BBWP/TIME) whose price isn't an
+    independently confirmed exchange fill -- STOP and T1 are real fills on
+    both lineages and never carry this caveat. The caller computes
+    `approximated` (exit_reason in {"C5_EXIT","BBWP_EXIT","TIME"} AND
+    is_live) rather than this function re-deriving it, so there is exactly
+    one place in the codebase that maps exit reasons to the approximated
+    flag -- see executor_live_e1_engine.py::_finalize_traveler_close()'s own
+    `approximated` parameter, the authoritative source this mirrors."""
+    symbol = _symbol_compact(order.get("symbol", ""))
+    direction = order.get("direction") or "?"
+    exit_reason = order.get("exit_reason") or "?"
+    reason_label = _EXIT_REASON_LABELS.get(exit_reason, exit_reason)
+    exit_price = order.get("exit_price")
+    r = order.get("realized_pnl_r")
+
+    subject = f"KABRODA TRAVELER CLOSED - {symbol} {direction} - {reason_label} @ {_fmt(exit_price, ',.0f')}"
+
+    lineage_line = (
+        "TRAVELER (real order, live money)" if is_live else
+        "TRAVELER (evaluation lineage, DRY_RUN only -- bookkeeping close, no real order)"
+    )
+
+    approx_note = ""
+    if is_live and order.get("approximated"):
+        approx_note = (
+            "\n\nNote: this exit price is approximated at the last known live price at close "
+            "time, not an independently confirmed exchange fill -- market-close contingency "
+            "exits (C5/BBWP/TIME) can't get a guaranteed fill price the way a resting-limit "
+            "T1 or the exchange's own stop trigger can."
+        )
+
+    body = (
+        f"{lineage_line}\n\n"
+        f"{symbol} {direction} closed: {reason_label}.\n"
+        f"  Exit price: {_fmt(exit_price)}\n"
+        f"  Realized:   {_fmt(r, '+.4f')}R{approx_note}\n\n"
+        f"  Plan ID: {order.get('traveler_plan_id')}"
+    )
+    return subject, body
+
+
 def notification_for_traveler_transition(prev_status: str, plan: Dict[str, Any]) -> Optional[Tuple[str, str]]:
     """Given the status BEFORE this poll's update and the plan dict AFTER
     it, decide which (if any) email fires -- called once per real

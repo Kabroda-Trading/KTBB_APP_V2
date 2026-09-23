@@ -87,6 +87,77 @@ def test_done_email_journey_cap_uses_the_real_reason():
     assert "7-day journey cap" in body
 
 
+# ------------------------------------------------------------------ build_traveler_management_event_email (2026-09-23)
+
+def _order(**extra):
+    d = {
+        "symbol": "BTC/USDT", "direction": "LONG", "exit_reason": "T1",
+        "exit_price": 106.18, "realized_pnl_r": 1.0, "traveler_plan_id": 42,
+        "approximated": False,
+    }
+    d.update(extra)
+    return d
+
+
+def test_management_event_email_dry_run_shape():
+    subject, body = tpn.build_traveler_management_event_email(_order(exit_reason="STOP", exit_price=90.0, realized_pnl_r=-1.0), is_live=False)
+    assert subject == "KABRODA TRAVELER CLOSED - BTCUSDT LONG - stop hit @ 90"
+    assert "DRY_RUN only" in body
+    assert "bookkeeping close, no real order" in body
+    assert "90.00" in body
+    assert "-1.0000R" in body
+    assert "Plan ID: 42" in body
+
+
+def test_management_event_email_live_shape():
+    subject, body = tpn.build_traveler_management_event_email(_order(), is_live=True)
+    assert subject == "KABRODA TRAVELER CLOSED - BTCUSDT LONG - target hit (T1) @ 106"
+    assert "real order, live money" in body
+    assert "106.18" in body
+    assert "+1.0000R" in body
+
+
+def test_management_event_email_every_exit_reason_gets_a_human_label():
+    labels = {
+        "STOP": "stop hit",
+        "C5_EXIT": "momentum-decay exhaustion (C5) exit",
+        "BBWP_EXIT": "BBWP volatility-burnout exit",
+        "T1": "target hit (T1)",
+        "TIME": "journey time-cap exit",
+    }
+    for reason, label in labels.items():
+        _, body = tpn.build_traveler_management_event_email(_order(exit_reason=reason), is_live=True)
+        assert label in body
+
+
+def test_management_event_email_unknown_exit_reason_falls_back_to_the_raw_value():
+    _, body = tpn.build_traveler_management_event_email(_order(exit_reason="SOMETHING_NEW"), is_live=True)
+    assert "SOMETHING_NEW" in body   # never a fabricated label for a reason this module doesn't recognize
+
+
+def test_management_event_email_approximated_caveat_only_when_flagged_and_live():
+    # Validated mapping (Plan-agent pass, 2026-09-23): approximated only
+    # ever applies on LIVE, and this function trusts the caller's flag
+    # rather than re-deriving it -- so even a DRY_RUN order incorrectly
+    # passed approximated=True must NOT show the caveat (is_live=False
+    # gates it, matching "DRY_RUN never approximates" being structurally
+    # true regardless of what a caller passes).
+    _, live_approx = tpn.build_traveler_management_event_email(_order(exit_reason="C5_EXIT", approximated=True), is_live=True)
+    assert "approximated" in live_approx.lower()
+
+    _, live_not_approx = tpn.build_traveler_management_event_email(_order(exit_reason="STOP", approximated=False), is_live=True)
+    assert "approximated" not in live_not_approx.lower()
+
+    _, dry_run_even_if_flagged = tpn.build_traveler_management_event_email(_order(exit_reason="C5_EXIT", approximated=True), is_live=False)
+    assert "approximated" not in dry_run_even_if_flagged.lower()
+
+
+def test_management_event_email_handles_missing_values_without_crashing():
+    order = _order(exit_price=None, realized_pnl_r=None)
+    subject, body = tpn.build_traveler_management_event_email(order, is_live=True)
+    assert "?" in body   # _fmt()'s own None-safe placeholder, not a crash
+
+
 # ------------------------------------------------------------------ notification_for_traveler_transition dispatch
 
 def test_dispatch_filled_to_armed():

@@ -24,7 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import database
-from database import SessionLocal, UserModel, TravelerPlan, ExecutorAccount
+from database import SessionLocal, UserModel, TravelerPlan, ExecutorAccount, ExecutorOrder
 import auth
 import executor_accounts as ea
 from main import app
@@ -94,6 +94,26 @@ def _make_account(db, user_id, mode="DRY_RUN", gate_profile=None, is_active=True
     account.is_active = is_active
     db.commit()
     return account
+
+
+def _make_order(db, traveler_plan_id, account_id, mode="DRY_RUN", **kwargs):
+    defaults = dict(
+        # trade_plan_id is NOT NULL on this table even for a traveler-only
+        # order -- reusing traveler_plan_id as the value, same convention
+        # tests/test_executor_live_e1_engine.py's own _order_row() helper
+        # already uses for this exact reason.
+        trade_plan_id=traveler_plan_id,
+        traveler_plan_id=traveler_plan_id, account_id=account_id, mode=mode,
+        symbol="BTC/USDT", direction="LONG", entry_price=81414.10, stop_price=81100.0,
+        t1_price=82000.0, qty=0.01, risk_dollars_used=100.0,
+        decision="WOULD_PLACE", management_state="ENTRY_FILLED_ORDERS_PLACED",
+        gate_profile_used="GATE_TRAVELER", mgmt_profile_used="MGMT_E1_STACK",
+    )
+    defaults.update(kwargs)
+    row = ExecutorOrder(**defaults)
+    db.add(row)
+    db.commit()
+    return row
 
 
 def test_traveler_plan_status_requires_admin(env):
@@ -235,3 +255,128 @@ def test_traveler_plan_status_any_account_live_false_for_inactive_live_traveler_
     resp = client.get("/api/admin/traveler-plan-status")
     row = resp.json()["rows"][0]
     assert row["any_account_live"] is False
+
+
+# 2026-09-23 -- the D3 management detail this route now also surfaces
+# (Andy's own ask, radar-rebuild-around-Traveler-communication work).
+# `mgmt_*` fields are sourced from ONE ExecutorOrder linked to the current
+# journey, preferring a LIVE-mode order over a DRY_RUN one -- these tests
+# specifically prove that preference, not just that the fields populate at
+# all, since a naive "last inserted" pick was the real risk a validation
+# pass flagged before this shipped.
+
+def test_traveler_plan_status_mgmt_fields_none_when_no_order_exists(env):
+    _make_plan(env["db"])
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/traveler-plan-status")
+    row = resp.json()["rows"][0]
+    for field in ("mgmt_mode", "mgmt_state", "mgmt_entry_fill_price", "mgmt_entry_fill_time",
+                  "mgmt_exit_reason", "mgmt_exit_price", "mgmt_exit_time", "mgmt_realized_pnl_r",
+                  "mgmt_c5_fired", "mgmt_bbwp_fired"):
+        assert row[field] is None
+    assert row["mgmt_exit_approximated"] is False
+
+
+def test_traveler_plan_status_mgmt_fields_populate_for_a_dry_run_only_journey(env):
+    plan = _make_plan(env["db"])
+    admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()
+    account = _make_account(env["db"], admin_user.id, mode="DRY_RUN", gate_profile="GATE_TRAVELER")
+    _make_order(
+        env["db"], plan.id, account.id, mode="DRY_RUN",
+        management_state="CLOSED_STOP", exit_reason="STOP", exit_price=81100.0,
+        exit_time=dt.datetime(2026, 9, 18, 15, 0, 0), realized_pnl_r=-1.0,
+        c5_fired=False, bbwp_fired=False,
+    )
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/traveler-plan-status")
+    row = resp.json()["rows"][0]
+    assert row["mgmt_mode"] == "DRY_RUN"
+    assert row["mgmt_state"] == "CLOSED_STOP"
+    assert row["mgmt_exit_reason"] == "STOP"
+    assert row["mgmt_exit_price"] == 81100.0
+    assert row["mgmt_realized_pnl_r"] == -1.0
+    # DRY_RUN is never approximated, even for a reason that WOULD be
+    # approximated on LIVE -- confirmed with a C5_EXIT case below too.
+    assert row["mgmt_exit_approximated"] is False
+
+
+def test_traveler_plan_status_mgmt_exit_approximated_true_only_for_live_contingency_exits(env):
+    plan = _make_plan(env["db"])
+    admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()
+    account = _make_account(env["db"], admin_user.id, mode="LIVE", gate_profile="GATE_TRAVELER")
+    _make_order(
+        env["db"], plan.id, account.id, mode="LIVE",
+        management_state="CLOSED_C5_EXIT", exit_reason="C5_EXIT", exit_price=81900.0,
+        realized_pnl_r=0.85, c5_fired=True, bbwp_fired=False,
+    )
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/traveler-plan-status")
+    row = resp.json()["rows"][0]
+    assert row["mgmt_mode"] == "LIVE"
+    assert row["mgmt_exit_approximated"] is True
+
+
+def test_traveler_plan_status_mgmt_exit_approximated_false_for_live_stop_and_t1(env):
+    plan = _make_plan(env["db"])
+    admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()
+    account = _make_account(env["db"], admin_user.id, mode="LIVE", gate_profile="GATE_TRAVELER")
+    for reason in ("STOP", "T1"):
+        env["db"].query(ExecutorOrder).delete()
+        env["db"].commit()
+        _make_order(
+            env["db"], plan.id, account.id, mode="LIVE",
+            management_state=f"CLOSED_{reason}", exit_reason=reason, exit_price=82000.0,
+            realized_pnl_r=1.0,
+        )
+        client = _login("radar_admin@kabroda.com", "adminpass123")
+        resp = client.get("/api/admin/traveler-plan-status")
+        row = resp.json()["rows"][0]
+        assert row["mgmt_exit_approximated"] is False, f"reason={reason} should not be approximated"
+
+
+def test_traveler_plan_status_mgmt_prefers_live_order_over_dry_run_order(env):
+    """The real risk a validation pass flagged before this shipped:
+    ExecutorOrder's unique constraint is (traveler_plan_id, account_id),
+    not just traveler_plan_id -- multiple accounts can each have their own
+    order against the same journey by design. A blind order_by(id.desc())
+    could silently flip between accounts; this proves the route always
+    prefers the LIVE row regardless of insertion order."""
+    plan = _make_plan(env["db"])
+    admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()
+    dry_account = _make_account(env["db"], admin_user.id, mode="DRY_RUN", gate_profile="GATE_TRAVELER")
+    live_account = _make_account(env["db"], admin_user.id, mode="LIVE", gate_profile="GATE_TRAVELER")
+
+    # DRY_RUN order inserted SECOND (higher id) -- if the route ever
+    # regresses to a blind id-desc pick, this is exactly the case that
+    # would silently flip to the wrong (DRY_RUN) account.
+    _make_order(
+        env["db"], plan.id, live_account.id, mode="LIVE",
+        management_state="CLOSED_T1", exit_reason="T1", exit_price=82000.0, realized_pnl_r=1.0,
+    )
+    _make_order(
+        env["db"], plan.id, dry_account.id, mode="DRY_RUN",
+        management_state="CLOSED_STOP", exit_reason="STOP", exit_price=81100.0, realized_pnl_r=-1.0,
+    )
+
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/traveler-plan-status")
+    row = resp.json()["rows"][0]
+    assert row["mgmt_mode"] == "LIVE"
+    assert row["mgmt_exit_reason"] == "T1"
+    assert row["mgmt_realized_pnl_r"] == 1.0
+
+
+def test_traveler_plan_status_mgmt_falls_back_to_most_recent_dry_run_when_no_live_order(env):
+    plan = _make_plan(env["db"])
+    admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()
+    account = _make_account(env["db"], admin_user.id, mode="DRY_RUN", gate_profile="GATE_TRAVELER")
+    _make_order(
+        env["db"], plan.id, account.id, mode="DRY_RUN",
+        management_state="ENTRY_FILLED_ORDERS_PLACED",
+    )
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/traveler-plan-status")
+    row = resp.json()["rows"][0]
+    assert row["mgmt_mode"] == "DRY_RUN"
+    assert row["mgmt_state"] == "ENTRY_FILLED_ORDERS_PLACED"
+    assert row["mgmt_exit_reason"] is None  # still open, no exit yet

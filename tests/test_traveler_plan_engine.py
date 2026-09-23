@@ -450,6 +450,196 @@ def test_mgmt_e1_stack_closure_compounds_the_account_ledger(poll_env):
     db.close()
 
 
+# ------------------------------------------------------------------ 2026-09-23: D3 audit-write parity fix + management-event email
+# (Andy's own ask, radar-rebuild-around-Traveler-communication work: "the
+# same thing on the radar" also communicated by email. The LIVE engine
+# always wrote a real ExecutorAuditLog row on close; this DRY_RUN walk
+# never did before this fix -- these tests prove both the audit write and
+# the email now fire, and that a bug in the new email code can never roll
+# back the real closure bookkeeping that already committed.)
+
+def test_mgmt_e1_stack_closure_writes_an_executor_audit_log_row(poll_env):
+    account_id = poll_env["make_traveler_account"]()
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_TOUCH", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    fill_candles = [_c5m(50100.0, ct), _c5m(49900.0, ct + 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": fill_candles}, polls=1)
+
+    walk_candles = [
+        _c5m(49900.0, ct + 300),
+        _c5m(49600.0, ct + 600, high=49700.0, low=49500.0),  # stop touched via low
+    ]
+    flat_htf = [{"close": 50000.0} for _ in range(20)]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": walk_candles},
+        candles_1h_by_symbol={"BTC/USDT": flat_htf}, candles_4h_by_symbol={"BTC/USDT": flat_htf},
+        polls=1,
+    )
+
+    orders = poll_env["get_orders"]()
+    assert len(orders) == 1
+    order = orders[0]
+
+    db = SessionLocal()
+    audit_row = db.query(ExecutorAuditLog).filter_by(
+        account_id=account_id, executor_order_id=order.id, event_type="POSITION_CLOSED").first()
+    db.close()
+    assert audit_row is not None
+    assert audit_row.traveler_plan_id == order.traveler_plan_id
+    assert "CLOSED_STOP" not in audit_row.message  # message uses the bare exit_reason ("STOP"), not the CLOSED_ prefix
+    assert "STOP" in audit_row.message
+    assert "-1.0000" in audit_row.message  # a full stop-out, real formatted R
+
+
+def test_mgmt_e1_stack_closure_sends_a_management_event_email(poll_env, monkeypatch):
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_traveler_account"]()
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_TOUCH", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    fill_candles = [_c5m(50100.0, ct), _c5m(49900.0, ct + 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": fill_candles}, polls=1)
+    sent.clear()  # drop the ARMED email from the fill above -- only the closure email matters here
+
+    walk_candles = [
+        _c5m(49900.0, ct + 300),
+        _c5m(49600.0, ct + 600, high=49700.0, low=49500.0),
+    ]
+    flat_htf = [{"close": 50000.0} for _ in range(20)]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": walk_candles},
+        candles_1h_by_symbol={"BTC/USDT": flat_htf}, candles_4h_by_symbol={"BTC/USDT": flat_htf},
+        polls=1,
+    )
+
+    assert len(sent) == 1
+    subject, body = sent[0]
+    assert subject.startswith("KABRODA TRAVELER CLOSED")
+    assert "stop hit" in body
+    assert "DRY_RUN only" in body  # this lineage's own caveat, never mistaken for a real order
+    assert "-1.0000" in body
+
+
+def test_mgmt_e1_stack_closure_email_failure_never_blocks_the_real_bookkeeping(poll_env, monkeypatch):
+    """The single most important correctness rule for this change: a bug
+    in the new email-dispatch code must never roll back the closure's own
+    real DB writes (management_state, the audit row, record_trade_result())
+    that already committed for this tick."""
+    def _boom(subject, body):
+        raise RuntimeError("SMTP exploded")
+    monkeypatch.setattr(notify, "send_admin_email", _boom)
+
+    account_id = poll_env["make_traveler_account"]()
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_TOUCH", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    fill_candles = [_c5m(50100.0, ct), _c5m(49900.0, ct + 300)]
+    # The ARMED email at fill time also goes through the now-boomed
+    # send_admin_email -- proving _notify_traveler_transition()'s own
+    # pre-existing try/except already tolerates this too, not just the
+    # new dispatch this test is really about.
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": fill_candles}, polls=1)
+    assert poll_env["get_plan"]().status == "FILLED"
+
+    walk_candles = [
+        _c5m(49900.0, ct + 300),
+        _c5m(49600.0, ct + 600, high=49700.0, low=49500.0),
+    ]
+    flat_htf = [{"close": 50000.0} for _ in range(20)]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": walk_candles},
+        candles_1h_by_symbol={"BTC/USDT": flat_htf}, candles_4h_by_symbol={"BTC/USDT": flat_htf},
+        polls=1,
+    )
+
+    orders = poll_env["get_orders"]()
+    assert len(orders) == 1
+    order = orders[0]
+    assert order.management_state == "CLOSED_STOP"
+    assert order.realized_pnl_r == pytest.approx(-1.0)
+
+    db = SessionLocal()
+    audit_row = db.query(ExecutorAuditLog).filter_by(
+        account_id=account_id, executor_order_id=order.id, event_type="POSITION_CLOSED").first()
+    ledger_row = db.query(ExecutorAuditLog).filter_by(
+        account_id=account_id, event_type="TRADE_RESULT_RECORDED").first()
+    db.close()
+    assert audit_row is not None       # the new write_audit() call, unaffected by the email exception
+    assert ledger_row is not None      # record_trade_result(), which runs AFTER the email dispatch, still ran
+
+
+def test_mgmt_e1_stack_closure_audit_write_handles_none_realized_pnl_r(poll_env):
+    """r_basis (and therefore realized_pnl_r) is None whenever entry_price/
+    stop_price is FALSY on the order -- note this is a truthiness check
+    (`order.entry_price and order.stop_price`), not an is-None check, so
+    the real gap is a price of exactly 0.0, not None (mgmt_e1_stack.
+    advance() itself hard-requires entry/stop to be not-None just to
+    detect any closure at all, per its own guard -- confirmed directly --
+    so None can never reach this far; 0.0 can, since it's falsy but not
+    None). Uses a T1-touch scenario (T1 detection doesn't read stop_price
+    at all) with stop_price=0.0 to reach exactly this real edge case. The
+    new write_audit() call must use _fmt_r()'s None-safe formatting, not a
+    bare f"{value:+.4f}" spec, or this raises TypeError and (per the test
+    above) would silently swallow the whole audit write."""
+    poll_env["make_traveler_account"]()
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_TOUCH", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    fill_candles = [_c5m(50100.0, ct), _c5m(49900.0, ct + 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": fill_candles}, polls=1)
+
+    # Force the real edge case directly on the row: stop_price=0.0 (falsy,
+    # but not None -- advance() still processes normally; r_basis's own
+    # truthiness check treats it as missing).
+    db = SessionLocal()
+    order = db.query(ExecutorOrder).first()
+    order.stop_price = 0.0
+    db.commit()
+    order_id = order.id
+    db.close()
+
+    # T1 (50300) touched via the high wick -- STOP (0.0) can never touch.
+    walk_candles = [_c5m(49900.0, ct + 300), _c5m(50350.0, ct + 600, high=50400.0, low=50200.0)]
+    flat_htf = [{"close": 50000.0} for _ in range(20)]
+    # Must not raise -- this call itself is the real assertion.
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": walk_candles},
+        candles_1h_by_symbol={"BTC/USDT": flat_htf}, candles_4h_by_symbol={"BTC/USDT": flat_htf},
+        polls=1,
+    )
+
+    db = SessionLocal()
+    order = db.query(ExecutorOrder).filter_by(id=order_id).first()
+    assert order.realized_pnl_r is None
+    assert order.management_state == "CLOSED_T1"  # the closure itself still completed
+    audit_row = db.query(ExecutorAuditLog).filter_by(
+        executor_order_id=order_id, event_type="POSITION_CLOSED").first()
+    db.close()
+    assert audit_row is not None
+    assert "?R" in audit_row.message  # _fmt_r()'s own None-safe placeholder, not a crash
+
+
 # ------------------------------------------------------------------ Ruling C: TRAVELER's own email notifications
 # (DeepSeek, relayed by Andy 2026-09-15 -- traveler_plan_notify.py, the
 # same "one email per required transition" pattern trade_plan_notify.py

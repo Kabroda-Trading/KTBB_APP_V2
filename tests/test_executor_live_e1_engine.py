@@ -330,6 +330,113 @@ def test_normal_t1_fill_closes_100_percent_and_records_result(db, monkeypatch):
     assert len(rows) == 1
 
 
+def test_normal_t1_fill_sends_a_management_event_email(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    _install(monkeypatch,
+             get_position=_async(_no_position_response()),
+             get_order_detail=_async(_order_detail_response(status="FILLED", order_id="t1-1")))
+    _run(e1e.poll_traveler_position(db, account, plan, order))
+
+    assert len(sent) == 1
+    subject, body = sent[0]
+    assert subject.startswith("KABRODA TRAVELER CLOSED")
+    assert "target hit (T1)" in body
+    assert "real order, live money" in body   # LIVE, not the DRY_RUN caveat
+    assert "approximated" not in body.lower()  # T1 is a real resting-limit fill, never approximated
+
+
+def test_stop_exit_email_has_no_approximated_caveat(db, monkeypatch):
+    # Validated mapping (Plan-agent pass, 2026-09-23): approximated is
+    # exit_reason in {C5_EXIT, BBWP_EXIT, TIME} on LIVE only -- STOP fills
+    # at its own exchange trigger, same non-flagged convention v2 already
+    # uses for STOP_BEFORE_T1. Getting this wrong would mislabel a real,
+    # reliable exit price as an approximation.
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    _install(monkeypatch,
+             get_position=_async(_no_position_response()),
+             get_order_detail=_async(_order_detail_response(status="NEW", order_id="t1-1")),
+             cancel_orders=_async(_cancel_orders_response(order_id="t1-1")))
+    _run(e1e.poll_traveler_position(db, account, plan, order))
+
+    assert len(sent) == 1
+    subject, body = sent[0]
+    assert "stop hit" in body
+    assert "approximated" not in body.lower()
+
+
+def test_c5_exit_email_has_the_approximated_caveat(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
+    _install(monkeypatch,
+             get_position=_async_seq([_one_position_response(), _no_position_response()]),
+             close_position=_async(_close_position_response()),
+             get_order_detail=_async(_order_detail_response(status="NEW", order_id="t1-1")),
+             cancel_orders=_async(_cancel_orders_response(order_id="t1-1")))
+
+    async def _fake_1h(symbol, limit=200):
+        return _fake_candles()
+
+    async def _fake_4h(symbol, limit=200):
+        return _fake_candles()
+
+    monkeypatch.setattr(e1e.market_data, "fetch_live_1h", _fake_1h)
+    monkeypatch.setattr(e1e.market_data, "fetch_live_4h", _fake_4h)
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_4h", _fake_4h)
+    monkeypatch.setattr(e1e, "_current_live_price", lambda symbol: asyncio.sleep(0, result=104.5))
+
+    _run(e1e.poll_traveler_position(db, account, plan, order))
+
+    assert len(sent) == 1
+    subject, body = sent[0]
+    assert "momentum-decay exhaustion (C5) exit" in body
+    assert "approximated" in body.lower()
+
+
+def test_management_event_email_failure_never_blocks_the_real_bookkeeping(db, monkeypatch):
+    """The single most important correctness rule for this change (Plan-
+    agent validation, 2026-09-23): a bug in the new email-dispatch code
+    must never roll back the closure's own real DB writes (management_
+    state, the audit row, record_trade_result()) that already committed
+    for this tick -- run_executor_live_e1_loop() commits once per order
+    per tick and rolls back the WHOLE tick on any uncaught exception."""
+    def _boom(subject, body):
+        raise RuntimeError("SMTP exploded")
+    monkeypatch.setattr("notify.send_admin_email", _boom)
+
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
+    _install(monkeypatch,
+             get_position=_async(_no_position_response()),
+             get_order_detail=_async(_order_detail_response(status="FILLED", order_id="t1-1")))
+    # Must not raise -- this call itself is the real assertion.
+    _run(e1e.poll_traveler_position(db, account, plan, order))
+
+    assert order.management_state == "CLOSED_T1"
+    assert order.realized_pnl_r == pytest.approx((106.18 - 100.0) / 10.0)
+    db.flush()
+    audit_rows = db.query(ExecutorAuditLog).filter_by(executor_order_id=order.id, event_type="POSITION_CLOSED").all()
+    ledger_rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="TRADE_RESULT_RECORDED").all()
+    assert len(audit_rows) == 1     # the pre-existing write_audit() call, unaffected by the email exception
+    assert len(ledger_rows) == 1    # record_trade_result(), which runs BEFORE the email dispatch, still ran
+
+
 def test_closed_states_are_terminal_loop_stops_touching_them(db):
     account = _ready_account(db)
     plan = _traveler_plan(db)

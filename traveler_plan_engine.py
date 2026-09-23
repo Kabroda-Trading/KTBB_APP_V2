@@ -55,6 +55,18 @@ _MGMT_E1_TERMINAL_STATES = mgmt_e1_stack.MGMT_E1_TERMINAL_STATES
 _POLL_SECONDS = 60
 
 
+def _fmt_r(value: Optional[float]) -> str:
+    """Same None-safe formatting traveler_plan_notify.py's own _fmt()
+    helper uses for a realized-R value -- written locally rather than
+    importing that module's helper, matching this file's own established
+    self-contained-helper style (see _as_utc() below). 2026-09-23: DRY_RUN's
+    own realized_pnl_r CAN be None (when entry_price/stop_price are both
+    missing, r_basis never computes) -- unlike LIVE's _r_multiple(), which
+    never returns None -- so a bare f"{value:+.4f}" format spec on this
+    value would raise TypeError on that edge case."""
+    return f"{value:+.4f}" if value is not None else "?"
+
+
 def _as_utc(dt):
     if dt is None:
         return None
@@ -137,6 +149,35 @@ def _notify_traveler_transition(prev_status: str, row: TravelerPlan, symbol: str
         print(f"|| TRAVELER PLAN || Notification failed for {symbol}: {e}")
 
 
+def _notify_traveler_management_event(order: ExecutorOrder) -> None:
+    """The one post-fill D3 email MGMT_E1_STACK ever produces -- a single
+    full-exit design (no partial T1 leg, no runner), so there is exactly
+    one terminal management event per journey, never a sequence (see
+    mgmt_e1_stack.py's own header). Same non-blocking, own-try/except
+    pattern as _notify_traveler_transition() above -- deliberately NOT the
+    style of executor_live_e1_engine.py's own two unguarded `import notify`
+    sites (those are early-failure paths where a retry is wanted). A bug
+    in this new email code must never roll back the real closure
+    bookkeeping (management_state, the audit row, record_trade_result())
+    that has already committed for this tick -- see run_traveler_plan_loop()
+    below, which commits per-order and would otherwise roll back the whole
+    tick on any uncaught exception here."""
+    try:
+        import notify
+        import traveler_plan_notify
+
+        order_dict = {
+            "symbol": order.symbol, "direction": order.direction,
+            "exit_reason": order.exit_reason, "exit_price": order.exit_price,
+            "realized_pnl_r": order.realized_pnl_r, "traveler_plan_id": order.traveler_plan_id,
+            "approximated": False,  # DRY_RUN never approximates -- candle-sourced, deterministic (mgmt_e1_stack.py)
+        }
+        subject, body = traveler_plan_notify.build_traveler_management_event_email(order_dict, is_live=False)
+        notify.send_admin_email(subject, body)
+    except Exception as e:
+        print(f"|| MGMT_E1_STACK || Management-event notification failed for order {order.id}: {e}")
+
+
 async def _notify_executor(db, row: TravelerPlan, symbol: str) -> None:
     """GATE_TRAVELER's executor hook -- fires once, on the real FILLED
     transition, same 'bot = hands, brain stays in the plan row' treatment
@@ -211,6 +252,26 @@ async def _advance_e1_order(db, order: ExecutorOrder, now_utc: datetime) -> None
         order.realized_pnl_r = (result["exit_price"] - order.entry_price) * sgn / r_basis
     print(f"|| MGMT_E1_STACK || order {order.id} ({symbol}): CLOSED_{result['exit_reason']} "
           f"at {result['exit_price']:,.2f}")
+
+    # 2026-09-23 audit-write parity fix: executor_live_e1_engine.py's own
+    # _finalize_traveler_close() has always written a real ExecutorAuditLog
+    # row on every LIVE close; this DRY_RUN walk never did -- confirmed via
+    # grep, zero write_audit() calls anywhere in this file before this fix,
+    # meaning every DRY_RUN closure (the only kind that exists today -- no
+    # traveler account is currently LIVE) was invisible in the audit trail.
+    # Uses order.account_id directly (the raw FK already on the row)
+    # rather than querying the ExecutorAccount object -- that object is
+    # only actually needed below, for record_trade_result(). This also
+    # fires the new management-event email (Andy's own ask: "the same
+    # thing on the radar" also communicated by email) -- unconditionally,
+    # not gated behind the realized_pnl_r check below, so a missing R
+    # doesn't silently suppress either the audit row or the email.
+    executor_accounts.write_audit(
+        db, "POSITION_CLOSED",
+        f"traveler trade closed (bookkeeping): {order.exit_reason}, realized {_fmt_r(order.realized_pnl_r)}R",
+        account_id=order.account_id, traveler_plan_id=order.traveler_plan_id,
+        executor_order_id=order.id, actor="system")
+    _notify_traveler_management_event(order)
 
     # Ruling D (DeepSeek, relayed by Andy 2026-09-15): feed the SAME
     # ledger-compounding path a real closed LIVE trade uses (executor_

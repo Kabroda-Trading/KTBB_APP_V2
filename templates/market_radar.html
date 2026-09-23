@@ -434,6 +434,10 @@
                 <span id="travelerStateDetail" class="plan-state-detail"></span>
             </div>
             <div id="travelerStateReason" class="plan-state-reason"></div>
+            <!-- 2026-09-23 -- the D3 management detail (Andy's own ask,
+                 radar-rebuild-around-Traveler-communication work). Hidden
+                 until an ExecutorOrder exists for this journey. -->
+            <div id="travelerStateMgmt" class="plan-state-reason" style="display:none;"></div>
             <div id="travelerStateAsOf" class="plan-state-asof"></div>
         </div>
 
@@ -1547,6 +1551,19 @@
         // `any_account_live` check (any active ExecutorAccount actually
         // running GATE_TRAVELER in LIVE mode) and showing a LIVE badge only
         // when that's genuinely true, instead of a fixed label either way.
+        // 2026-09-23 -- human labels for MGMT_E1_STACK's fixed 5-value
+        // exit-reason set, mirroring traveler_plan_notify.py's own
+        // _EXIT_REASON_LABELS dict exactly (kept in sync by hand -- both
+        // are small, fixed, rarely-changing maps; not worth a shared
+        // JSON asset for five entries).
+        const _MGMT_EXIT_LABELS = {
+            STOP: 'stop hit',
+            C5_EXIT: 'momentum-decay exhaustion (C5) exit',
+            BBWP_EXIT: 'BBWP volatility-burnout exit',
+            T1: 'target hit (T1)',
+            TIME: 'journey time-cap exit',
+        };
+
         function renderTravelerState(row) {
             const panel = document.getElementById('travelerStatePanel');
             if (!row) { panel.style.display = 'none'; return; }
@@ -1575,6 +1592,39 @@
             document.getElementById('travelerStateDetail').textContent = bits.join(' · ');
 
             document.getElementById('travelerStateReason').textContent = row.last_transition_reason || '';
+
+            // 2026-09-23 -- D3 management detail (the single terminal
+            // event MGMT_E1_STACK ever produces per journey -- no partial
+            // T1 leg, see mgmt_e1_stack.py's own header, so this is never
+            // a scrolling feed, just one more line). mgmt_state is null
+            // until an ExecutorOrder actually exists for this journey.
+            const mgmtEl = document.getElementById('travelerStateMgmt');
+            if (row.mgmt_state) {
+                const mgmtBits = [];
+                // Real exchange entry fill -- shown for LIVE only. For
+                // DRY_RUN this always equals the bookkeeping fill_price
+                // already shown above (both trace to the same TravelerPlan.
+                // fill_price) -- showing it twice would be redundant, not
+                // new information.
+                if (row.mgmt_mode === 'LIVE' && row.mgmt_entry_fill_price != null) {
+                    mgmtBits.push('entry @ ' + _fmtLevel(row.mgmt_entry_fill_price) + ' (real)');
+                }
+                if (row.mgmt_exit_reason) {
+                    const reasonLabel = _MGMT_EXIT_LABELS[row.mgmt_exit_reason] || row.mgmt_exit_reason;
+                    const rTxt = row.mgmt_realized_pnl_r != null
+                        ? (row.mgmt_realized_pnl_r >= 0 ? '+' : '') + row.mgmt_realized_pnl_r.toFixed(4) + 'R'
+                        : '?R';
+                    const modeCaveat = row.mgmt_mode === 'DRY_RUN' ? ' (DRY_RUN — simulated)'
+                        : (row.mgmt_exit_approximated ? ' (approximated)' : '');
+                    mgmtBits.push('closed: ' + reasonLabel + ' @ ' + _fmtLevel(row.mgmt_exit_price) + ', ' + rTxt + modeCaveat);
+                } else {
+                    mgmtBits.push(row.mgmt_mode === 'LIVE' ? 'position open (LIVE)' : 'position open (DRY_RUN — simulated)');
+                }
+                mgmtEl.textContent = 'D3: ' + mgmtBits.join(' · ');
+                mgmtEl.style.display = 'block';
+            } else {
+                mgmtEl.style.display = 'none';
+            }
 
             const staleness = row.seconds_since_update != null ? Math.round(row.seconds_since_update) + 's ago' : 'unknown';
             const parts = ['live · updated ' + staleness];

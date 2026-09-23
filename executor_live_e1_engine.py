@@ -428,6 +428,40 @@ async def _finalize_traveler_close(
     pnl_usd = order_row.realized_pnl_r * (order_row.risk_dollars_used or 0.0)
     executor_accounts.record_trade_result(db, account, pnl_usd, trade_plan_id=order_row.trade_plan_id, recorded_by="system")
 
+    # 2026-09-23 -- the new management-event email (Andy's own ask: "the
+    # same thing on the radar" also communicated by email). Wrapped in its
+    # OWN try/except, deliberately NOT this file's own two unguarded
+    # `import notify` sites above (those are early-failure paths where a
+    # retry is wanted) -- a bug in this new email code must never roll
+    # back the real closure bookkeeping (management_state, the audit row
+    # above, record_trade_result()) that has already committed for this
+    # tick; run_executor_live_e1_loop() commits once per order per tick and
+    # rolls back the WHOLE tick on any uncaught exception.
+    try:
+        import notify
+        import traveler_plan_notify
+
+        # Reuses this function's OWN `approximated` parameter directly --
+        # an earlier draft recomputed it from exit_reason here, which was
+        # redundant (this function already receives the authoritative
+        # value from its callers, per-exit-reason, one line up in every
+        # real call site) and risked a second source of truth drifting
+        # from the first. main.py's own read-side derivation for the
+        # radar (`/api/admin/traveler-plan-status`) still computes this
+        # the same way from exit_reason, since it has no `order_row` this
+        # function's caller already resolved it from -- that one IS the
+        # right place for it, this one is not.
+        order_dict = {
+            "symbol": order_row.symbol, "direction": order_row.direction,
+            "exit_reason": exit_reason, "exit_price": exit_price,
+            "realized_pnl_r": order_row.realized_pnl_r, "traveler_plan_id": traveler_plan_row.id,
+            "approximated": approximated,
+        }
+        subject, body = traveler_plan_notify.build_traveler_management_event_email(order_dict, is_live=True)
+        notify.send_admin_email(subject, body)
+    except Exception as e:
+        print(f"|| EXECUTOR LIVE E1 || Management-event notification failed for order {order_row.id}: {e}")
+
 
 async def _market_close_traveler_order(
     db: Session, account: ExecutorAccount, client: "executor_bitunix_client.BitunixClient",

@@ -1216,9 +1216,36 @@ async def api_admin_trade_plan_status(request: Request, db: Session = Depends(ge
 async def api_admin_traveler_plan_status(request: Request, db: Session = Depends(get_db)):
     """CC_WORK_ORDER_RADAR_PLAN_PANEL.md work item 2 -- the GATE_TRAVELER
     counterpart to /api/admin/trade-plan-status above. Same read-only,
-    admin-only, staleness-indicator pattern. Status + levels only -- no
-    management-walk detail (the traveler journey's D3 internals stay in
-    the executor admin, per the work order's own scope note).
+    admin-only, staleness-indicator pattern.
+
+    2026-09-23: the original "Status + levels only -- no management-walk
+    detail, D3 internals stay in the executor admin" scope note (this
+    docstring's own prior text) is deliberately REVERSED here, not an
+    oversight -- Andy's own ask, part of the strategic site audit's radar-
+    rebuild-around-Traveler-communication work: the D3 close (the single
+    terminal management event MGMT_E1_STACK ever produces -- no partial
+    T1 leg, see mgmt_e1_stack.py's own header) now also shows on this same
+    panel, via the `mgmt_*` fields below. Extending this one route rather
+    than adding a second admin route over the same object: this codebase
+    has exactly one admin status route per entity today, and the real
+    "stays in the executor admin" destination the old note meant is
+    `/api/executor/orders` (a different audience -- login-only, per-
+    account), not a second admin-only route for this same panel/poll
+    cadence.
+
+    `mgmt_*` fields are sourced from ONE ExecutorOrder linked to this
+    TravelerPlan -- preferring a LIVE-mode order if one exists for this
+    journey, else the most recent DRY_RUN order, NEVER a blind "last
+    inserted" pick. This matters because ExecutorOrder's real unique
+    constraint is (traveler_plan_id, account_id), not just traveler_plan_id
+    -- multiple accounts can each get their own order against the same
+    journey by design (executor_engine.py::process_traveler_fill() loops
+    every active account), so a naive order_by(id.desc()).first() could
+    silently flip between accounts. Same class of radar-mislead risk this
+    route already fixed once (any_account_live, 2026-09-22) -- mirrored
+    here, not reinvented. All mgmt_* fields are None when no ExecutorOrder
+    exists yet for this journey (graceful degradation, matching this
+    route's own existing style elsewhere).
 
     Deliberately NOT scoped to today's date_key, unlike the TradePlan
     query above -- TravelerPlan's own design allows a WAITING_TOUCH
@@ -1243,6 +1270,7 @@ async def api_admin_traveler_plan_status(request: Request, db: Session = Depends
 
     from database import TravelerPlan as _TravelerPlan
     from database import ExecutorAccount as _ExecutorAccount
+    from database import ExecutorOrder as _ExecutorOrder
     row = db.query(_TravelerPlan).order_by(_TravelerPlan.id.desc()).first()
 
     # 2026-09-22 audit Finding 2 follow-up (Andy's own question: will the
@@ -1270,6 +1298,51 @@ async def api_admin_traveler_plan_status(request: Request, db: Session = Depends
 
     out = []
     if row is not None:
+        # 2026-09-23 -- the D3 management detail this route now also
+        # surfaces (see this route's own docstring for the full "why").
+        # Prefer a LIVE-mode order for this journey; only fall back to the
+        # most recent DRY_RUN order if no LIVE one exists. Never a blind
+        # order_by(id.desc()).first() across both modes -- see docstring.
+        mgmt_order = (
+            db.query(_ExecutorOrder)
+            .filter(_ExecutorOrder.traveler_plan_id == row.id, _ExecutorOrder.mode == "LIVE")
+            .order_by(_ExecutorOrder.id.desc()).first()
+            or db.query(_ExecutorOrder)
+            .filter(_ExecutorOrder.traveler_plan_id == row.id, _ExecutorOrder.mode == "DRY_RUN")
+            .order_by(_ExecutorOrder.id.desc()).first()
+        )
+        if mgmt_order is not None:
+            mgmt_fields = {
+                "mgmt_mode": mgmt_order.mode,
+                "mgmt_state": mgmt_order.management_state,
+                "mgmt_entry_fill_price": mgmt_order.entry_fill_price,
+                "mgmt_entry_fill_time": mgmt_order.entry_fill_time.isoformat() if mgmt_order.entry_fill_time else None,
+                "mgmt_exit_reason": mgmt_order.exit_reason,
+                "mgmt_exit_price": mgmt_order.exit_price,
+                "mgmt_exit_time": mgmt_order.exit_time.isoformat() if mgmt_order.exit_time else None,
+                "mgmt_realized_pnl_r": mgmt_order.realized_pnl_r,
+                "mgmt_c5_fired": mgmt_order.c5_fired,
+                "mgmt_bbwp_fired": mgmt_order.bbwp_fired,
+                # Computed here, not a stored column -- exit_reason alone
+                # fully and permanently determines this (the fixed 5-value
+                # MGMT_E1_STACK mapping: STOP/T1 are always real fills on
+                # both lineages; C5_EXIT/BBWP_EXIT/TIME are only ever
+                # approximated on LIVE, via _market_close_traveler_order()'s
+                # own approximated=True -- DRY_RUN's own exit price is
+                # always candle-sourced and deterministic, never approximated).
+                "mgmt_exit_approximated": (
+                    mgmt_order.mode == "LIVE" and mgmt_order.exit_reason in ("C5_EXIT", "BBWP_EXIT", "TIME")
+                ),
+            }
+        else:
+            mgmt_fields = {
+                "mgmt_mode": None, "mgmt_state": None,
+                "mgmt_entry_fill_price": None, "mgmt_entry_fill_time": None,
+                "mgmt_exit_reason": None, "mgmt_exit_price": None, "mgmt_exit_time": None,
+                "mgmt_realized_pnl_r": None, "mgmt_c5_fired": None, "mgmt_bbwp_fired": None,
+                "mgmt_exit_approximated": False,
+            }
+
         out.append({
             "id": row.id, "symbol": row.symbol, "session_id": row.session_id, "date_key": row.date_key,
             "status": row.status, "direction": row.direction,
@@ -1287,6 +1360,7 @@ async def api_admin_traveler_plan_status(request: Request, db: Session = Depends
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
             "seconds_since_update": _seconds_stale(row.updated_at),
             "any_account_live": any_account_live,
+            **mgmt_fields,
         })
 
     return JSONResponse({"ok": True, "server_time": now_utc.isoformat(), "rows": out})
