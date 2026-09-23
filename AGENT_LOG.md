@@ -6157,3 +6157,55 @@ trade_plan_engine.py) real evaluators") -- it was never propagated back into `CL
 Both sections corrected to name all three call sites.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-23 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: doc rewrite step 1 -- Strategic Direction stated at the top of CLAUDE.md/AGENTS.md, V2_RETIREMENT_MAP.md added
+STATUS: open (this is step 1 of a multi-step project; no code removed yet). Site commit `75fa020`, pushed to `origin/main`.
+
+Andy relayed this morning (voice) the retirement/audit plan he and DeepSeek had already
+worked out in the Brain repo's AGENT_LOG.md (2026-09-22 20:35 UTC through 2026-09-23
+08:53 CT, read in full, not summarized) -- retire V2 Crown, dial in on the Traveler,
+then a full strategic site audit around it. He then asked me to use subagents to
+verify/audit at an overview level before going deep. Did both:
+
+1. **Corrected a stale claim first**: DeepSeek's 08:53 CT entry listed 3 "standing work
+   orders" (D2 restore, D1 RSI-at-cross, BBWP routing) as blocking the V2 work. All
+   three are already shipped (commits `3f33bf7`/`9f20298`/`6d6741d`, all 2026-09-22,
+   verified via git not memory) -- logged the correction to the Brain repo, simplifying
+   the sequencing from 3 steps to 2.
+2. **Dispatched two overview-level audit agents**: one independently re-derived every
+   headline number behind the retirement decision from raw committed data (found the
+   qualitative findings all hold up; found two real arithmetic/citation issues in the
+   Brain's own committed docs, logged there, neither changes the ruling); one mapped the
+   whole site into V2-only / traveler-only / shared-protected, specifically to protect
+   Andy's rule against removing anything V2-side the traveler still depends on.
+3. **Shipped step 1** (this entry): a new "Strategic Direction" section at the very top
+   of `CLAUDE.md` (read before anything else), a matching pointer in `AGENTS.md`, and
+   `V2_RETIREMENT_MAP.md` -- the dependency map itself, committed as a real artifact
+   with file:line citations, not left as log prose.
+
+**A genuinely useful finding from the dependency sweep**: V2 can already be turned off
+*operationally*, right now, with zero code deletion -- `/api/executor/accounts/{id}/
+profile` already lets any account flip to `GATE_TRAVELER`/`MGMT_E1_STACK`. This splits
+the retirement into two phases (operational flip, already built and reversible; then
+the real code/table/route/template cleanup) instead of one irreversible event.
+
+**What's confirmed genuinely SHARED and protected from removal** (full detail,
+`V2_RETIREMENT_MAP.md`): `session_manager.py`/`sse_engine.py`/`battlebox_pipeline.py`
+(the session-lock SSOT), `kabroda_mas_flow.py::run_mas_analysis()` (one function writes
+both `TradePlan` AND `TravelerPlan`), the whole executor account/order/sizing stack
+(`ExecutorOrder` has both a `trade_plan_id` and `traveler_plan_id` column on the SAME
+table), and `templates/market_radar.html` (one shared template, one shared CSS badge
+class, two shared JS formatting helpers used by both panels).
+
+"The Calibrated Gate" section further down `CLAUDE.md` is deliberately left describing
+current live behavior (with a banner pointing to the new direction) rather than
+rewritten now -- it would just go stale again the moment V2 code actually changes in
+the next phase, which is exactly the failure this file already demonstrated once
+yesterday.
+
+Not yet done: the actual removal/cleanup (phase B), the radar rebuild around traveler
+communication, the whole-site dashboard/page cleanup pass. Will scope and propose that
+as its own plan before touching any removal code, per standing practice for anything
+this size and this hard to reverse.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
