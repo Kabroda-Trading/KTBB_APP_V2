@@ -3359,139 +3359,16 @@ async def get_system_trades(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-@app.get("/api/v1/system/parameters")
-async def get_system_parameters(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-        
-    source_param = request.query_params.get("source")
-    
-    try:
-        daily_cap = float(os.getenv("AGENT_DAILY_BUDGET_USD", "10.00"))
-        now_str = datetime.utcnow().isoformat()
-        
-        parameters = [
-            {
-                "name": "daily_budget_limit_usd",
-                "value": str(daily_cap),
-                "description": "Daily agent execution budget USD limit",
-                "last_updated": now_str,
-                "source": "budget"
-            },
-            {
-                "name": "bbwp_high_threshold",
-                "value": "95",
-                "description": "BBWP high volatility expansion threshold",
-                "last_updated": now_str,
-                "source": "gravity"
-            },
-            {
-                "name": "bbwp_low_threshold",
-                "value": "5",
-                "description": "BBWP volatility compression threshold",
-                "last_updated": now_str,
-                "source": "gravity"
-            },
-            {
-                "name": "pmarp_extreme_low",
-                "value": "2",
-                "description": "PMARP extreme low percentile threshold",
-                "last_updated": now_str,
-                "source": "gravity"
-            },
-            {
-                "name": "pmarp_extreme_high",
-                "value": "98",
-                "description": "PMARP extreme high percentile threshold",
-                "last_updated": now_str,
-                "source": "gravity"
-            }
-        ]
-        
-        if source_param:
-            parameters = [p for p in parameters if p["source"].lower() == source_param.lower()]
-            
-        dependencies = [
-            {
-                "name": "gravity_engine",
-                "depends_on": "battlebox_pipeline",
-                "relationship_type": "data_feed"
-            },
-            {
-                "name": "mtf_confluence_scanner",
-                "depends_on": "market_data",
-                "relationship_type": "data_cache"
-            },
-            {
-                "name": "ledger_closing_engine",
-                "depends_on": "CampaignLog",
-                "relationship_type": "database_trigger"
-            }
-        ]
-        
-        return JSONResponse({
-            "ok": True,
-            "parameters": parameters,
-            "dependencies": dependencies
-        })
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.get("/api/v1/system/errors")
-async def get_system_errors(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-        
-    severity = request.query_params.get("severity")
-    valid_severities = {"info", "warning", "critical", "error", "debug"}
-    if severity and severity.lower() not in valid_severities:
-        return JSONResponse({"ok": False, "error": "Invalid severity level"}, status_code=400)
-        
-    try:
-        # Retrieve logs from SystemAuditLog where ran_successfully == False
-        query = db.query(SystemAuditLog).filter(SystemAuditLog.ran_successfully == False)
-        err_logs = query.order_by(SystemAuditLog.id.desc()).limit(100).all()
-        
-        errors_list = []
-        for e in err_logs:
-            err_type = "critical" if "CRITICAL" in e.audit_md.upper() else "error"
-            errors_list.append({
-                "id": e.id,
-                "timestamp": e.created_at.isoformat() if e.created_at else datetime.utcnow().isoformat(),
-                "error_type": err_type,
-                "message": e.audit_md,
-                "stack_trace": "Traceback info not stored",
-                "resolved": False
-            })
-            
-        if severity:
-            errors_list = [e for e in errors_list if e["error_type"].lower() == severity.lower()]
-            
-        # Alert history: filter for critical errors
-        alert_history = [e for e in errors_list if e["error_type"] == "critical"]
-        
-        # Health summary
-        system_ok = len(errors_list) == 0
-        health_summary = {
-            "system_ok": system_ok,
-            "overall_health_score": 100 if system_ok else max(0, 100 - len(errors_list) * 5)
-        }
-        
-        return JSONResponse({
-            "ok": True,
-            "errors": errors_list,
-            "alert_history": alert_history,
-            "health_summary": health_summary
-        })
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+# GET /api/v1/system/parameters and GET /api/v1/system/errors removed
+# 2026-09-23 -- Andy's call during the strategic site audit. Both were
+# already dead in practice, unrelated to V2/Traveler: parameters returned
+# hardcoded literals never wired to any real config source; errors read
+# SystemAuditLog, which has had zero live writers since the Performance
+# Auditor was archived (always reported "all systems operational"
+# regardless of real state). Their frontend tabs (Parameters, Errors) and
+# every dedicated test in tests/test_e2e.py were removed in the same pass
+# -- see suite_dashboard.html's own removal comment and V2_RETIREMENT_MAP.md
+# for the full dashboard tab-by-tab audit this followed.
 
 
 class AnalysisRequest(BaseModel):

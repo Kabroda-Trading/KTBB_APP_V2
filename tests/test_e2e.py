@@ -180,86 +180,15 @@ class KabrodaE2ETestSuite(unittest.TestCase):
             self.assertIn(metric, metrics)
 
 
-    # --- F3: Parameter Registry API (/api/v1/system/parameters) ---
-
-    def test_f3_parameters_happy(self):
-        """F3: GET /api/v1/system/parameters returns 200 and contains registry data."""
-        res = self.admin_client.get("/api/v1/system/parameters")
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertIn("parameters", data)
-        self.assertIn("dependencies", data)
-
-    def test_f3_parameters_fields(self):
-        """F3: registry items have fields name, value, description, last_updated, and source."""
-        res = self.admin_client.get("/api/v1/system/parameters")
-        self.assertEqual(res.status_code, 200)
-        params = res.json().get("parameters", [])
-        if params:
-            for field in ["name", "value", "description", "last_updated", "source"]:
-                self.assertIn(field, params[0])
-
-    def test_f3_parameters_dependencies(self):
-        """F3: parameter dependencies array contains correct metadata fields."""
-        res = self.admin_client.get("/api/v1/system/parameters")
-        self.assertEqual(res.status_code, 200)
-        deps = res.json().get("dependencies", [])
-        if deps:
-            for field in ["name", "depends_on", "relationship_type"]:
-                self.assertIn(field, deps[0])
-
-    def test_f3_parameters_filter_source(self):
-        """F3: registry supports source query filtering."""
-        res = self.admin_client.get("/api/v1/system/parameters?source=gravity")
-        self.assertEqual(res.status_code, 200)
-        self.assertIsInstance(res.json().get("parameters"), list)
-
-    def test_f3_parameters_is_not_empty(self):
-        """F3: parameters returns a non-null payload format."""
-        res = self.admin_client.get("/api/v1/system/parameters")
-        self.assertEqual(res.status_code, 200)
-        self.assertIsNotNone(res.json())
-
-
-    # --- F4: Error Registry API (/api/v1/system/errors) ---
-
-    def test_f4_errors_happy(self):
-        """F4: GET /api/v1/system/errors returns 200 with logs and health summary."""
-        res = self.admin_client.get("/api/v1/system/errors")
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertIn("errors", data)
-        self.assertIn("alert_history", data)
-        self.assertIn("health_summary", data)
-
-    def test_f4_errors_details(self):
-        """F4: error items contain detailed stacktrace and resolution details."""
-        res = self.admin_client.get("/api/v1/system/errors")
-        self.assertEqual(res.status_code, 200)
-        errors = res.json().get("errors", [])
-        if errors:
-            for field in ["id", "timestamp", "error_type", "message", "stack_trace", "resolved"]:
-                self.assertIn(field, errors[0])
-
-    def test_f4_errors_alert_history(self):
-        """F4: alert history logs external notification triggers."""
-        res = self.admin_client.get("/api/v1/system/errors")
-        self.assertEqual(res.status_code, 200)
-        self.assertIsInstance(res.json().get("alert_history"), list)
-
-    def test_f4_errors_health_summary(self):
-        """F4: health summary evaluates system_ok flags."""
-        res = self.admin_client.get("/api/v1/system/errors")
-        self.assertEqual(res.status_code, 200)
-        summary = res.json().get("health_summary", {})
-        self.assertIn("system_ok", summary)
-
-    def test_f4_errors_filter_severity(self):
-        """F4: error registry filters logs by severity levels."""
-        res = self.admin_client.get("/api/v1/system/errors?severity=critical")
-        self.assertEqual(res.status_code, 200)
-        self.assertIsInstance(res.json().get("errors"), list)
-
+    # --- F3 (Parameter Registry) and F4 (Error Registry) removed 2026-09-23
+    # -- Andy's call during the strategic site audit. Both backing routes
+    # (/api/v1/system/parameters, /api/v1/system/errors) were already dead
+    # in practice, unrelated to V2/Traveler: parameters returned hardcoded
+    # literals never wired to real config, and errors read SystemAuditLog,
+    # which has had zero live writers since the Performance Auditor was
+    # archived (always reported "all systems operational" regardless of
+    # real state). See main.py's own removal comment and V2_RETIREMENT_MAP.md
+    # for the dashboard tab-by-tab audit this followed.
 
     # --- F5: AI Analysis API (/api/v1/system/analysis) ---
 
@@ -315,17 +244,9 @@ class KabrodaE2ETestSuite(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertIn("Live System", res.text)
 
-    def test_f6_dashboard_renders_parameters(self):
-        """F6: dashboard view contains the Parameters registry tab container."""
-        res = self.admin_client.get("/suite/dashboard")
-        self.assertEqual(res.status_code, 200)
-        self.assertIn("Parameters", res.text)
-
-    def test_f6_dashboard_renders_errors(self):
-        """F6: dashboard view contains the Errors log tab container."""
-        res = self.admin_client.get("/suite/dashboard")
-        self.assertEqual(res.status_code, 200)
-        self.assertIn("Errors", res.text)
+    # test_f6_dashboard_renders_parameters/_errors removed 2026-09-23 along
+    # with the F3/F4 routes and tabs themselves -- see the removal comment
+    # further up this file.
 
     def test_f6_dashboard_renders_analysis(self):
         """F6: dashboard view contains the AI Reports tab container."""
@@ -478,71 +399,8 @@ class KabrodaE2ETestSuite(unittest.TestCase):
         self.assertIsNotNone(metrics.get("net_r"))
 
 
-    # --- F3: Parameter Registry API (/api/v1/system/parameters) ---
-
-    def test_f3_parameters_unauthenticated(self):
-        """F3: unauthenticated parameters queries return 401."""
-        res = self.anon_client.get("/api/v1/system/parameters")
-        self.assertEqual(res.status_code, 401)
-
-    def test_f3_parameters_basic_user_denied(self):
-        """F3: basic user queries for parameters return 403."""
-        res = self.basic_client.get("/api/v1/system/parameters")
-        self.assertEqual(res.status_code, 403)
-
-    def test_f3_parameters_empty_db(self):
-        """F3: empty parameter registry returns empty arrays."""
-        res = self.admin_client.get("/api/v1/system/parameters")
-        self.assertEqual(res.status_code, 200)
-        self.assertIsInstance(res.json().get("parameters"), list)
-
-    def test_f3_parameters_invalid_source_param(self):
-        """F3: filtering parameters by nonexistent source returns empty list."""
-        res = self.admin_client.get("/api/v1/system/parameters?source=nonexistent")
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(len(res.json().get("parameters")), 0)
-
-    def test_f3_parameters_duplicate_registry(self):
-        """F3: multiple registry definitions return distinct latest records."""
-        res = self.admin_client.get("/api/v1/system/parameters")
-        self.assertEqual(res.status_code, 200)
-
-
-    # --- F4: Error Registry API (/api/v1/system/errors) ---
-
-    def test_f4_errors_unauthenticated(self):
-        """F4: unauthenticated error queries return 401."""
-        res = self.anon_client.get("/api/v1/system/errors")
-        self.assertEqual(res.status_code, 401)
-
-    def test_f4_errors_basic_user_denied(self):
-        """F4: basic user queries for errors return 403."""
-        res = self.basic_client.get("/api/v1/system/errors")
-        self.assertEqual(res.status_code, 403)
-
-    def test_f4_errors_empty_db(self):
-        """F4: empty error registry returns empty logs structure and healthy summary."""
-        # Clean up any error rows from prior tests to avoid test pollution
-        db = SessionLocal()
-        db.query(SystemAuditLog).filter(SystemAuditLog.ran_successfully == False).delete()
-        db.commit()
-        db.close()
-        res = self.admin_client.get("/api/v1/system/errors")
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertEqual(len(data.get("errors")), 0)
-        self.assertTrue(data.get("health_summary", {}).get("system_ok"))
-
-    def test_f4_errors_invalid_severity(self):
-        """F4: error queries with invalid severity parameters return 400."""
-        res = self.admin_client.get("/api/v1/system/errors?severity=invalid")
-        self.assertEqual(res.status_code, 400)
-
-    def test_f4_errors_extreme_records(self):
-        """F4: excessive logs are paginated/limited correctly."""
-        res = self.admin_client.get("/api/v1/system/errors")
-        self.assertEqual(res.status_code, 200)
-        self.assertLessEqual(len(res.json().get("errors")), 100)
+    # Tier-2 F3/F4 boundary tests removed 2026-09-23 along with the routes
+    # themselves -- see the Tier-1 removal comment further up this file.
 
 
     # --- F5: AI Analysis API (/api/v1/system/analysis) ---
@@ -645,48 +503,12 @@ class KabrodaE2ETestSuite(unittest.TestCase):
     # TIER 3: CROSS-FEATURE COMBINATIONS (8 Tests)
     # =========================================================================
 
-    def test_t3_cross_error_to_state(self):
-        """F1+F4: inserting a system error immediately updates state and health summaries."""
-        # 1. Clean up any error rows from prior tests
-        db = SessionLocal()
-        db.query(SystemAuditLog).filter(SystemAuditLog.ran_successfully == False).delete()
-        db.commit()
-        db.close()
-        # Verify health status is healthy after cleanup
-        res1 = self.admin_client.get("/api/v1/system/errors")
-        self.assertEqual(res1.status_code, 200)
-        self.assertTrue(res1.json().get("health_summary", {}).get("system_ok"))
-
-        # 2. Insert error
-        db = SessionLocal()
-        db.add(SystemAuditLog(
-            symbol="BTC/USDT",
-            date_key="2026-07-15",
-            audit_md="CRITICAL: API connection lost.",
-            ran_successfully=False
-        ))
-        db.commit()
-        db.close()
-
-        # 3. Verify health status is updated
-        res2 = self.admin_client.get("/api/v1/system/errors")
-        self.assertEqual(res2.status_code, 200)
-        self.assertFalse(res2.json().get("health_summary", {}).get("system_ok"))
-
-        # 4. Verify state recent_errors reflects it
-        res3 = self.admin_client.get("/api/v1/system/state")
-        self.assertEqual(res3.status_code, 200)
-        self.assertGreater(len(res3.json().get("recent_errors")), 0)
-
-    def test_t3_cross_parameter_update_reflected_in_state(self):
-        """F1+F3: updating a parameter in registry modifies state engine configuration view."""
-        # Verify that parameters change is reflected in system parameters and state views
-        res = self.admin_client.get("/api/v1/system/parameters")
-        self.assertEqual(res.status_code, 200)
-        
-        # Verify that macro_engine state telemetry pulls from parameter registry
-        state_res = self.admin_client.get("/api/v1/system/state")
-        self.assertEqual(state_res.status_code, 200)
+    # test_t3_cross_error_to_state/_cross_parameter_update_reflected_in_state
+    # removed 2026-09-23 -- their primary subjects (/api/v1/system/errors,
+    # /api/v1/system/parameters) are gone (see the F3/F4 removal comment
+    # further up this file). The one still-relevant check either test made
+    # in passing -- /api/v1/system/state's own recent_errors field reflecting
+    # a real SystemAuditLog row -- stays covered by test_f1_state_excessive_errors.
 
     def test_t3_cross_trade_outcome_updates_metrics(self):
         """F2+F6: inserting a closed trade (win/loss) updates both history metrics and dashboard overview totals."""
@@ -842,14 +664,13 @@ class KabrodaE2ETestSuite(unittest.TestCase):
     # =========================================================================
 
     def test_t4_scenario_admin_audit_flow(self):
-        """Scenario 1: Admin logs in, verifies system state, checks errors, runs diagnostic AI, and views dashboard recommendations."""
+        """Scenario 1: Admin logs in, verifies system state, runs diagnostic AI,
+        and views dashboard recommendations. (Step "checks errors" against
+        /api/v1/system/errors removed 2026-09-23 along with that route --
+        see the F3/F4 removal comment further up this file.)"""
         # 1. Get system state
         state = self.admin_client.get("/api/v1/system/state")
         self.assertEqual(state.status_code, 200)
-
-        # 2. Get system errors
-        errors = self.admin_client.get("/api/v1/system/errors")
-        self.assertEqual(errors.status_code, 200)
 
         # 3. Run Diagnostic AI analysis
         analysis = self.admin_client.post("/api/v1/system/analysis", json={"query": "full diagnostic audit"})
@@ -898,25 +719,10 @@ class KabrodaE2ETestSuite(unittest.TestCase):
         analysis = self.admin_client.post("/api/v1/system/analysis", json={"query": "evaluate recent win"})
         self.assertEqual(analysis.status_code, 200)
 
-    def test_t4_scenario_parameter_tuning_flow(self):
-        """Scenario 3: Fetch active parameter configuration, modify threshold param, verify active configuration updates, and assert dashboard updates."""
-        # 1. Fetch current parameters
-        res_params = self.admin_client.get("/api/v1/system/parameters")
-        self.assertEqual(res_params.status_code, 200)
-
-        # 2. Modify parameter in DB
-        db = SessionLocal()
-        # Mock parameter update
-        db.commit()
-        db.close()
-
-        # 3. Verify updated config in system state
-        res_state = self.admin_client.get("/api/v1/system/state")
-        self.assertEqual(res_state.status_code, 200)
-
-        # 4. Assert dashboard UI shows updated parameter
-        res_dash = self.admin_client.get("/suite/dashboard")
-        self.assertEqual(res_dash.status_code, 200)
+    # test_t4_scenario_parameter_tuning_flow removed 2026-09-23 -- its
+    # primary subject (/api/v1/system/parameters) is gone (see the F3/F4
+    # removal comment further up this file); its own "modify parameter"
+    # step was already a no-op with no real assertion behind it.
 
     def test_t4_scenario_user_onboarding_and_access_validation(self):
         """Scenario 4: Admin creates basic user, basic user logs in, is blocked from API endpoints, but can access Human Dashboard UI."""
@@ -947,7 +753,13 @@ class KabrodaE2ETestSuite(unittest.TestCase):
         basic_user_client.get("/logout")
 
     def test_t4_scenario_scheduler_failure_alert_flow(self):
-        """Scenario 5: Simulate scheduler loop failure, verify state health flags reflect failure, error logs record stacktrace, and dashboard displays alerts."""
+        """Scenario 5: Simulate scheduler loop failure, verify state health flags
+        reflect failure. Steps 3-4 (the removed /api/v1/system/errors route +
+        Errors tab dashboard check) were removed 2026-09-23 along with that
+        route/tab -- see the F3/F4 removal comment further up this file.
+        This trimmed test's remaining coverage overlaps with, but is distinct
+        from, test_f1_state_excessive_errors (that one bulk-checks truncation
+        at 50 rows; this one checks a single CRITICAL-tagged real error)."""
         # 1. Simulate scheduler error by logging it
         db = SessionLocal()
         db.add(SystemAuditLog(
@@ -967,19 +779,6 @@ class KabrodaE2ETestSuite(unittest.TestCase):
         # Check that at least one runner has an error status, or that recent_errors is populated
         recent_errors = state.json().get("recent_errors", [])
         self.assertGreater(len(recent_errors), 0)
-
-        # 3. Error logs record traceback
-        errors = self.admin_client.get("/api/v1/system/errors")
-        self.assertEqual(errors.status_code, 200)
-        err_list = errors.json().get("errors", [])
-        self.assertTrue(any("scheduler loop crashed" in err.get("message", "") for err in err_list))
-
-        # 4. Dashboard UI renders alert warning (data loaded via JS, check for error tab container)
-        dash = self.admin_client.get("/suite/dashboard")
-        self.assertEqual(dash.status_code, 200)
-        # Error data is loaded via JS from /api/v1/system/errors, not server-rendered
-        # Verify the dashboard HTML contains the Errors tab container
-        self.assertIn("loadErrors", dash.text)
 
 
 if __name__ == "__main__":

@@ -102,11 +102,15 @@
         <div class="tab-bar">
             <button class="tab-btn active" data-tab="overview">Overview</button>
             <button class="tab-btn" data-tab="live-system">Live System</button>
-            <button class="tab-btn" data-tab="parameters">Parameters</button>
-            <button class="tab-btn" data-tab="errors">Errors</button>
             <button class="tab-btn" data-tab="analysis">Analysis</button>
-            <button class="tab-btn" data-tab="signal-accuracy">Signal Accuracy</button>
         </div>
+        <!-- Parameters/Errors/Signal Accuracy tabs removed 2026-09-23 --
+             Andy's call during the strategic site audit. All three backed
+             onto already-dead routes (deleted 2026-08-17) or a table with
+             zero live writers since the Performance Auditor was archived
+             -- unrelated to V2/Traveler. See main.py's own removal comment
+             for the two routes and V2_RETIREMENT_MAP.md for the full
+             dashboard tab-by-tab audit this followed. -->
 
         <!-- ── TAB: OVERVIEW ─────────────────────────────── -->
         <div class="tab-content active" id="tab-overview">
@@ -358,94 +362,6 @@
 
         </div>
 
-        <!-- ── TAB: PARAMETERS ──────────────────────────── -->
-        <div class="tab-content" id="tab-parameters">
-            <div class="table-section">
-                <div class="table-header">System Parameters</div>
-                <div class="table-wrap">
-                    <table>
-                        <thead><tr>
-                            <th>Name</th>
-                            <th>Value</th>
-                            <th>Description</th>
-                            <th>Source</th>
-                            <th>Last Updated</th>
-                        </tr></thead>
-                        <tbody id="paramsBody">
-                            <tr><td colspan="5" class="empty-state">Loading parameters…</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="table-section">
-                <div class="table-header">Dependency Map</div>
-                <div class="table-wrap">
-                    <table>
-                        <thead><tr>
-                            <th>Component</th>
-                            <th>Depends On</th>
-                            <th>Relationship</th>
-                        </tr></thead>
-                        <tbody id="depsBody">
-                            <tr><td colspan="3" class="empty-state">Loading dependencies…</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- ── TAB: ERRORS ──────────────────────────────── -->
-        <div class="tab-content" id="tab-errors">
-            <div class="chart-row row-1-1" style="margin-bottom:18px;">
-                <div class="chart-card">
-                    <div class="chart-title">System Health</div>
-                    <div class="chart-sub" id="healthSummary">Loading health status…</div>
-                    <div style="display:flex; gap:20px; margin-top:12px;">
-                        <div><span style="font-family:'JetBrains Mono',monospace; font-size:22px; font-weight:800; color:#5e8c66;" id="healthScore">—</span><div style="font-size:9px; color:#6b5345; letter-spacing:1px; text-transform:uppercase;">Health Score</div></div>
-                        <div><span style="font-family:'JetBrains Mono',monospace; font-size:22px; font-weight:800; color:#c9a24a;" id="healthStatus">—</span><div style="font-size:9px; color:#6b5345; letter-spacing:1px; text-transform:uppercase;">System Status</div></div>
-                    </div>
-                </div>
-                <div class="chart-card">
-                    <div class="chart-title">Alert History</div>
-                    <div class="chart-sub">Critical alerts requiring attention</div>
-                    <div id="alertHistory" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#8c4a3a; padding:8px 0;">Loading alerts…</div>
-                </div>
-            </div>
-            <div class="chart-row row-1-1" style="margin-bottom:18px;">
-                <div class="chart-card">
-                    <div class="chart-title">Signal Degradation Alerts</div>
-                    <div class="chart-sub">Signals flagged by the adaptive tuning loop</div>
-                    <div id="signalAlertsContainer" style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:8px 0;">
-                        <div style="color:#6b5345;">Loading signal alerts…</div>
-                    </div>
-                </div>
-                <div class="chart-card">
-                    <div class="chart-title">Signal Weights</div>
-                    <div class="chart-sub">Accuracy-based weight adjustments (A/B experiment)</div>
-                    <div id="signalWeightsContainer" style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:8px 0;">
-                        <div style="color:#6b5345;">Loading signal weights…</div>
-                    </div>
-                </div>
-            </div>
-            <div class="table-section">
-                <div class="table-header">Error Log</div>
-                <div class="table-wrap">
-                    <table>
-                        <thead><tr>
-                            <th>ID</th>
-                            <th>Timestamp</th>
-                            <th>Type</th>
-                            <th>Message</th>
-                            <th>Resolved</th>
-                        </tr></thead>
-                        <tbody id="errorsBody">
-                            <tr><td colspan="5" class="empty-state">Loading error log…</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
         <!-- ── TAB: ANALYSIS ────────────────────────────── -->
         <div class="tab-content" id="tab-analysis">
             <div class="chart-row row-1-1" style="margin-bottom:18px;">
@@ -466,32 +382,11 @@
                     <div id="recentReports" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6b5345; padding:8px 0;">Loading reports…</div>
                 </div>
             </div>
-            <div class="chart-row row-1-1" style="margin-bottom:18px;">
-                <div class="chart-card">
-                    <div class="chart-title">Accuracy Report</div>
-                    <div class="chart-sub">Weekly signal accuracy trends & flagged signals</div>
-                    <div id="accuracyReportContainer" style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:8px 0;">
-                        <div style="color:#6b5345;">Loading accuracy report…</div>
-                    </div>
-                    <button onclick="triggerAccuracyReport()"
-                            style="background:#5e8c66; border:none; color:#0f172a; font-family:'JetBrains Mono',monospace;
-                                   font-size:11px; font-weight:700; padding:8px 18px; border-radius:6px;
-                                   cursor:pointer; letter-spacing:1px; margin-top:8px;">
-                        ▶ GENERATE REPORT
-                    </button>
-                </div>
-                <div class="chart-card">
-                    <div class="chart-title">Flagging Engine</div>
-                    <div class="chart-sub">Manual trigger for signal health check</div>
-                    <button onclick="triggerFlaggingTick()"
-                            style="background:#c8813a; border:none; color:#0f172a; font-family:'JetBrains Mono',monospace;
-                                   font-size:11px; font-weight:700; padding:8px 18px; border-radius:6px;
-                                   cursor:pointer; letter-spacing:1px; margin-top:12px;">
-                        ▶ RUN FLAGGING TICK
-                    </button>
-                    <div id="flaggingResult" style="margin-top:10px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#c9a880;"></div>
-                </div>
-            </div>
+            <!-- "Accuracy Report" / "Flagging Engine" cards removed
+                 2026-09-23 -- both called routes deleted 2026-08-17
+                 (/api/v1/system/accuracy-report(/trigger), /api/v1/system/
+                 flagging/trigger), same dead-route family as the removed
+                 Signal Accuracy tab. See main.py's own removal comment. -->
 
             {% if is_admin %}
             <!-- ── AUDIT-AI & DATA EXPORT ─────────────────────── -->
@@ -540,70 +435,9 @@
             {% endif %}
         </div>
 
-        <!-- ── TAB: SIGNAL ACCURACY ────────────────────────── -->
-        <div class="tab-content" id="tab-signal-accuracy">
-            <div class="chart-row row-1-1" style="margin-bottom:18px;">
-                <div class="chart-card">
-                    <div class="chart-title">Signal Accuracy Dashboard</div>
-                    <div class="chart-sub">Tracks every signal prediction vs actual outcome</div>
-                    <div style="display:flex; gap:12px; margin-top:12px; flex-wrap:wrap;">
-                        <button onclick="triggerSignalAccuracy()"
-                                style="background:#c8813a; border:none; color:#0f172a; font-family:'JetBrains Mono',monospace;
-                                       font-size:12px; font-weight:700; padding:10px 24px; border-radius:6px;
-                                       cursor:pointer; letter-spacing:1px;">
-                            ▶ RUN ACCURACY CHECK
-                        </button>
-                        <select id="saSignalFilter" onchange="loadSignalAccuracy()"
-                                style="background:#1a120e; border:1px solid #4d3526; color:#c9a880;
-                                       font-family:'JetBrains Mono',monospace; font-size:11px;
-                                       padding:8px 12px; border-radius:6px;">
-                            <option value="">All Signals</option>
-                            <option value="jewel_gate">JEWEL Gate</option>
-                            <option value="jewel_exit_warning">JEWEL Exit Warning</option>
-                            <option value="energy_grade">Energy Grade</option>
-                            <option value="kinematic_grade">Kinematic Grade</option>
-                            <option value="confluence_score">Confluence Score</option>
-                            <option value="macro_bias">Macro Bias</option>
-                            <option value="bbwp_state">BBWP State</option>
-                            <option value="pmarp_state">PMARP State</option>
-                            <option value="campaign_energy_grade">Campaign Energy</option>
-                        </select>
-                    </div>
-                    <div id="saResult" style="margin-top:14px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#c9a880;"></div>
-                </div>
-                <div class="chart-card">
-                    <div class="chart-title">Accuracy Summary</div>
-                    <div class="chart-sub">Last 7 days — grouped by signal type</div>
-                    <div id="saSummary" style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:8px 0;">
-                        <div style="color:#6b5345;">Loading signal data…</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Signal accuracy table -->
-            <div class="chart-card" style="margin-top:12px;">
-                <div class="chart-title">Signal Performance</div>
-                <div class="chart-sub">Signal → Value → Accuracy</div>
-                <div style="overflow-x:auto; margin-top:8px;">
-                    <table id="saTable" style="width:100%; border-collapse:collapse; font-family:'JetBrains Mono',monospace; font-size:11px;">
-                        <thead>
-                            <tr style="border-bottom:1px solid #4d3526;">
-                                <th style="padding:8px 12px; text-align:left; color:#8c6a4a;">Signal</th>
-                                <th style="padding:8px 12px; text-align:left; color:#8c6a4a;">Value</th>
-                                <th style="padding:8px 12px; text-align:right; color:#8c6a4a;">Total</th>
-                                <th style="padding:8px 12px; text-align:right; color:#8c6a4a;">Correct</th>
-                                <th style="padding:8px 12px; text-align:right; color:#8c6a4a;">Incorrect</th>
-                                <th style="padding:8px 12px; text-align:right; color:#8c6a4a;">Neutral</th>
-                                <th style="padding:8px 12px; text-align:right; color:#8c6a4a;">Accuracy</th>
-                            </tr>
-                        </thead>
-                        <tbody id="saTableBody">
-                            <tr><td colspan="7" style="padding:20px; text-align:center; color:#6b5345;">Run accuracy check to populate data</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
+        <!-- Signal Accuracy tab removed 2026-09-23 -- every route it called
+             (RUN ACCURACY CHECK, the signal filter) was deleted 2026-08-17;
+             see main.py's own removal comment above tab-analysis. -->
 
     </div>  <!-- ── end dash-wrap ── -->
 
@@ -1209,43 +1043,9 @@
         }
     }
 
-    // ── PARAMETERS TAB ────────────────────────────────────
-    async function loadParameters() {
-        try {
-            const r = await fetch('/api/v1/system/parameters');
-            if (!r.ok) throw new Error('Status ' + r.status);
-            const d = await r.json();
-            if (!d.ok) throw new Error(d.error || 'Unknown error');
-
-            const paramsBody = document.getElementById('paramsBody');
-            if (!d.parameters || !d.parameters.length) {
-                paramsBody.innerHTML = '<tr><td colspan="5" class="empty-state">No parameters registered.</td></tr>';
-            } else {
-                paramsBody.innerHTML = d.parameters.map(p => `<tr>
-                    <td style="color:#f2e3cf;font-weight:800;">${p.name || '—'}</td>
-                    <td style="color:#c9a24a;font-weight:800;">${p.value || '—'}</td>
-                    <td>${p.description || '—'}</td>
-                    <td>${p.source || '—'}</td>
-                    <td>${p.last_updated ? p.last_updated.slice(0,19).replace('T',' ') : '—'}</td>
-                </tr>`).join('');
-            }
-
-            const depsBody = document.getElementById('depsBody');
-            if (!d.dependencies || !d.dependencies.length) {
-                depsBody.innerHTML = '<tr><td colspan="3" class="empty-state">No dependencies registered.</td></tr>';
-            } else {
-                depsBody.innerHTML = d.dependencies.map(dp => `<tr>
-                    <td style="color:#f2e3cf;font-weight:800;">${dp.name || '—'}</td>
-                    <td>${dp.depends_on || '—'}</td>
-                    <td>${dp.relationship_type || '—'}</td>
-                </tr>`).join('');
-            }
-        } catch (e) {
-            console.error('Failed to load parameters:', e);
-            document.getElementById('paramsBody').innerHTML = '<tr><td colspan="5" class="empty-state" style="color:#8c4a3a;">Failed to load.</td></tr>';
-            document.getElementById('depsBody').innerHTML = '<tr><td colspan="3" class="empty-state" style="color:#8c4a3a;">Failed to load.</td></tr>';
-        }
-    }
+    // loadParameters() removed 2026-09-23 along with the Parameters tab
+    // and its backing route (/api/v1/system/parameters, already dead --
+    // hardcoded data, never wired to real config).
 
     // loadSessionEnergy()/setFuel() removed 2026-08-30 -- read
     // /api/v1/system/session-energy, itself removed alongside
@@ -1306,52 +1106,9 @@
     }
 
 
-    // ── ERRORS TAB ───────────────────────────────────────
-    async function loadErrors() {
-        try {
-            const r = await fetch('/api/v1/system/errors');
-            if (!r.ok) throw new Error('Status ' + r.status);
-            const d = await r.json();
-            if (!d.ok) throw new Error(d.error || 'Unknown error');
-
-            // Health summary
-            const hs = d.health_summary || {};
-            document.getElementById('healthScore').textContent = hs.overall_health_score ?? '—';
-            document.getElementById('healthStatus').textContent = hs.system_ok ? 'OK' : 'ISSUES';
-            document.getElementById('healthStatus').style.color = hs.system_ok ? '#5e8c66' : '#8c4a3a';
-            document.getElementById('healthSummary').textContent = hs.system_ok
-                ? 'All systems operational.'
-                : `${(d.errors || []).length} error(s) detected.`;
-
-            // Alert history
-            const alerts = d.alert_history || [];
-            document.getElementById('alertHistory').innerHTML = alerts.length
-                ? alerts.map(a => `<div style="padding:4px 0; border-bottom:1px solid #3a2820;">${a.message ? a.message.slice(0,80) : 'Unknown alert'}</div>`).join('')
-                : '<div style="color:#6b5345;">No critical alerts.</div>';
-
-            // Error log
-            const errBody = document.getElementById('errorsBody');
-            if (!d.errors || !d.errors.length) {
-                errBody.innerHTML = '<tr><td colspan="5" class="empty-state">No errors recorded.</td></tr>';
-            } else {
-                errBody.innerHTML = d.errors.map(e => {
-                    const typeCls = e.error_type === 'critical' ? 's-failed' : (e.error_type === 'warning' ? 's-waiting' : '');
-                    return `<tr>
-                        <td>${e.id || '—'}</td>
-                        <td>${e.timestamp ? e.timestamp.slice(0,19).replace('T',' ') : '—'}</td>
-                        <td><span class="${typeCls}">${e.error_type || '—'}</span></td>
-                        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${e.message ? e.message.slice(0,100) : '—'}</td>
-                        <td>${e.resolved ? '✅' : '❌'}</td>
-                    </tr>`;
-                }).join('');
-            }
-        } catch (e) {
-            console.error('Failed to load errors:', e);
-            document.getElementById('healthScore').textContent = 'ERR';
-            document.getElementById('healthStatus').textContent = 'ERR';
-            document.getElementById('errorsBody').innerHTML = '<tr><td colspan="5" class="empty-state" style="color:#8c4a3a;">Failed to load.</td></tr>';
-        }
-    }
+    // loadErrors() removed 2026-09-23 along with the Errors tab and its
+    // backing route (/api/v1/system/errors, already dead -- SystemAuditLog
+    // has had zero live writers since the Performance Auditor was archived).
 
     // ── ANALYSIS TAB ──────────────────────────────────────
     async function triggerAnalysis() {
@@ -1415,280 +1172,33 @@
             loadAudits().catch(e => console.error("loadAudits failed", e)),
             loadLiveSystem().catch(e => console.error("loadLiveSystem failed", e)),
             loadHeartbeat().catch(e => console.error("loadHeartbeat failed", e)),
-            loadParameters().catch(e => console.error("loadParameters failed", e)),
-            loadErrors().catch(e => console.error("loadErrors failed", e)),
             loadRecentReports().catch(e => console.error("loadRecentReports failed", e)),
-            loadSignalAccuracy().catch(e => console.error("loadSignalAccuracy failed", e)),
         ]);
     }
 
-    // ── SIGNAL ACCURACY TAB ────────────────────────────────
-    async function triggerSignalAccuracy() {
-        const result = document.getElementById('saResult');
-        result.textContent = 'Running accuracy check…';
-        result.style.color = '#c9a880';
-        try {
-            const r = await fetch('/api/v1/system/signal-accuracy/trigger', { method: 'POST' });
-            const d = await r.json();
-            if (d.ok) {
-                result.innerHTML = `<span style="color:#5e8c66;">✓ Captured ${d.result.total} new signals</span>`;
-            } else {
-                result.innerHTML = `<span style="color:#8c4a3a;">✗ ${d.error || 'Unknown error'}</span>`;
-            }
-        } catch (e) {
-            result.innerHTML = `<span style="color:#8c4a3a;">✗ Request failed: ${e.message}</span>`;
-        }
-        loadSignalAccuracy();
-    }
-
-    async function loadSignalAccuracy() {
-        const signalName = document.getElementById('saSignalFilter')?.value || '';
-        const params = new URLSearchParams({ days: '7' });
-        if (signalName) params.set('signal_name', signalName);
-
-        try {
-            const r = await fetch('/api/v1/system/signal-accuracy?' + params.toString());
-            if (!r.ok) throw new Error('Status ' + r.status);
-            const d = await r.json();
-
-            // Summary card
-            const summary = document.getElementById('saSummary');
-            if (!d.stats || !d.stats.length) {
-                summary.innerHTML = '<div style="color:#6b5345;">No signal data yet. Run an accuracy check above.</div>';
-            } else {
-                const totalSignals = d.stats.reduce((s, x) => s + x.total, 0);
-                const totalCorrect = d.stats.reduce((s, x) => s + x.correct, 0);
-                const overallPct = totalSignals > 0 ? (totalCorrect / totalSignals * 100).toFixed(1) : '—';
-                const best = d.stats.reduce((a, b) => a.accuracy_pct > b.accuracy_pct ? a : b, d.stats[0]);
-                const worst = d.stats.reduce((a, b) => a.accuracy_pct < b.accuracy_pct ? a : b, d.stats[0]);
-
-                summary.innerHTML = `
-                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:8px;">
-                        <div style="background:#1a120e; border:1px solid #4d3526; border-radius:6px; padding:12px; text-align:center;">
-                            <div style="color:#8c6a4a; font-size:10px; letter-spacing:1px;">TOTAL SIGNALS</div>
-                            <div style="color:#c9a880; font-size:22px; font-weight:700; margin-top:4px;">${totalSignals}</div>
-                        </div>
-                        <div style="background:#1a120e; border:1px solid #4d3526; border-radius:6px; padding:12px; text-align:center;">
-                            <div style="color:#8c6a4a; font-size:10px; letter-spacing:1px;">OVERALL ACCURACY</div>
-                            <div style="color:${overallPct >= 50 ? '#5e8c66' : '#8c4a3a'}; font-size:22px; font-weight:700; margin-top:4px;">${overallPct}%</div>
-                        </div>
-                        <div style="background:#1a120e; border:1px solid #4d3526; border-radius:6px; padding:12px; text-align:center;">
-                            <div style="color:#8c6a4a; font-size:10px; letter-spacing:1px;">BEST / WORST</div>
-                            <div style="color:#5e8c66; font-size:13px; font-weight:600; margin-top:4px;">${best.signal_name}: ${best.accuracy_pct}%</div>
-                            <div style="color:#8c4a3a; font-size:13px; font-weight:600;">${worst.signal_name}: ${worst.accuracy_pct}%</div>
-                        </div>
-                    </div>
-                `;
-            }
-
-            // Table
-            const tbody = document.getElementById('saTableBody');
-            if (!d.stats || !d.stats.length) {
-                tbody.innerHTML = '<tr><td colspan="7" style="padding:20px; text-align:center; color:#6b5345;">No signal data yet.</td></tr>';
-            } else {
-                tbody.innerHTML = d.stats.map(s => {
-                    const pct = s.accuracy_pct;
-                    const color = pct >= 60 ? '#5e8c66' : pct >= 40 ? '#c9a880' : '#8c4a3a';
-                    return `<tr style="border-bottom:1px solid #2a1e18;">
-                        <td style="padding:8px 12px; color:#c9a880;">${s.signal_name}</td>
-                        <td style="padding:8px 12px; color:#8c6a4a;">${s.signal_value || '—'}</td>
-                        <td style="padding:8px 12px; text-align:right; color:#c9a880;">${s.total}</td>
-                        <td style="padding:8px 12px; text-align:right; color:#5e8c66;">${s.correct}</td>
-                        <td style="padding:8px 12px; text-align:right; color:#8c4a3a;">${s.incorrect}</td>
-                        <td style="padding:8px 12px; text-align:right; color:#6b5345;">${s.neutral}</td>
-                        <td style="padding:8px 12px; text-align:right; color:${color}; font-weight:700;">${pct}%</td>
-                    </tr>`;
-                }).join('');
-            }
-        } catch (e) {
-            document.getElementById('saSummary').innerHTML = '<div style="color:#8c4a3a;">Failed to load signal data.</div>';
-        }
-    }
+    // Signal Accuracy tab functions (triggerSignalAccuracy/loadSignalAccuracy)
+    // removed 2026-09-23 along with the tab and its backing routes
+    // (/api/v1/system/signal-accuracy(/trigger), already dead 2026-08-17).
 
     document.addEventListener('DOMContentLoaded', initDashboard);
 
     // =========================================================================
-    // PHASE 2: ADAPTIVE SIGNAL TUNING LOOP — Dashboard Functions
+    // PHASE 2: ADAPTIVE SIGNAL TUNING LOOP — removed 2026-09-23
     // =========================================================================
+    // _parseServerTimestamp/loadSignalAlerts/resolveAlert/loadSignalWeights/
+    // loadAccuracyReport/triggerAccuracyReport/triggerFlaggingTick all
+    // removed together -- every route they called (/api/v1/system/alerts
+    // (+/resolve), /signal-weights, /accuracy-report(/trigger), /flagging/
+    // trigger) was already deleted 2026-08-17, and their DOM containers
+    // (signalAlertsContainer/signalWeightsContainer/accuracyReportContainer/
+    // flaggingResult) lived in the Errors/Analysis tab content removed in
+    // the same pass. See main.py's own removal comment and
+    // V2_RETIREMENT_MAP.md for the full dashboard audit this followed.
 
-    // 2026-09-09, root-cause fix (same class as executor_admin.html's
-    // 2026-09-06 fix, market_radar.html's Trade Plan panel): server
-    // timestamps here are naive datetime.isoformat() (no "Z"), which JS
-    // parses as LOCAL time, not UTC -- understating real local time by the
-    // viewer's UTC offset. Every timestamp this page renders is confirmed
-    // UTC at the source.
-    function _parseServerTimestamp(isoStr) {
-        if (!isoStr) return null;
-        const hasZone = /[Zz]$/.test(isoStr) || /[+-]\d{2}:?\d{2}$/.test(isoStr);
-        return new Date(hasZone ? isoStr : isoStr + "Z");
-    }
-
-    async function loadSignalAlerts() {
-        const container = document.getElementById('signalAlertsContainer');
-        try {
-            const r = await fetch('/api/v1/system/alerts');
-            if (!r.ok) throw new Error('Status ' + r.status);
-            const d = await r.json();
-
-            if (!d.alerts || !d.alerts.length) {
-                container.innerHTML = '<div style="color:#5e8c66;">✓ No signal degradation alerts</div>';
-                return;
-            }
-
-            container.innerHTML = d.alerts.map(a => {
-                const severityColor = a.severity === 'CRITICAL' ? '#8c4a3a' : '#c9a24a';
-                const pathLabel = a.experiment_path === 'AUTO' ? 'AUTO' : 'FLAG';
-                return `<div style="border-left:3px solid ${severityColor}; padding:8px 12px; margin-bottom:8px; background:#1a120e; border-radius:4px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span style="color:${severityColor}; font-weight:700;">${a.alert_type}</span>
-                        <span style="color:#6b5345; font-size:10px;">${a.created_at ? _parseServerTimestamp(a.created_at).toLocaleString() : ''}</span>
-                    </div>
-                    <div style="color:#c9a880; margin-top:4px;">${a.message}</div>
-                    <div style="display:flex; gap:12px; margin-top:4px; font-size:10px; color:#6b5345;">
-                        <span>Accuracy: ${a.accuracy_pct}%</span>
-                        <span>Samples: ${a.sample_count}</span>
-                        <span>Path: ${pathLabel}</span>
-                        <span style="cursor:pointer; color:#c9a24a;" onclick="resolveAlert(${a.id})">[Resolve]</span>
-                    </div>
-                </div>`;
-            }).join('');
-        } catch (e) {
-            container.innerHTML = '<div style="color:#8c4a3a;">Failed to load signal alerts.</div>';
-        }
-    }
-
-    async function resolveAlert(alertId) {
-        try {
-            const r = await fetch(`/api/v1/system/alerts/${alertId}/resolve`, { method: 'POST' });
-            const d = await r.json();
-            if (d.ok) loadSignalAlerts();
-        } catch (e) {
-            console.error('Resolve alert failed:', e);
-        }
-    }
-
-    async function loadSignalWeights() {
-        const container = document.getElementById('signalWeightsContainer');
-        try {
-            const r = await fetch('/api/v1/system/signal-weights');
-            if (!r.ok) throw new Error('Status ' + r.status);
-            const d = await r.json();
-
-            if (!d.weights || !d.weights.length) {
-                container.innerHTML = '<div style="color:#6b5345;">No signal weights yet. Run a flagging tick.</div>';
-                return;
-            }
-
-            container.innerHTML = d.weights.map(w => {
-                const weightColor = w.weight >= 1.0 ? '#5e8c66' : w.weight >= 0.5 ? '#c9a24a' : '#8c4a3a';
-                const quarantineBadge = w.is_quarantined ? '<span style="color:#8c4a3a; font-size:9px; margin-left:6px;">[QUARANTINED]</span>' : '';
-                return `<div style="display:flex; justify-content:space-between; padding:6px 8px; border-bottom:1px solid #2a1e18;">
-                    <span style="color:#c9a880;">${w.signal_name}${w.signal_value ? ': ' + w.signal_value : ''}${quarantineBadge}</span>
-                    <span style="color:${weightColor}; font-weight:700;">${w.weight.toFixed(2)}x</span>
-                </div>`;
-            }).join('');
-        } catch (e) {
-            container.innerHTML = '<div style="color:#8c4a3a;">Failed to load signal weights.</div>';
-        }
-    }
-
-    async function loadAccuracyReport() {
-        const container = document.getElementById('accuracyReportContainer');
-        try {
-            const r = await fetch('/api/v1/system/accuracy-report');
-            if (!r.ok) throw new Error('Status ' + r.status);
-            const d = await r.json();
-
-            if (!d.report || !d.report.report_data) {
-                container.innerHTML = '<div style="color:#6b5345;">No accuracy report yet. Generate one above.</div>';
-                return;
-            }
-
-            const data = d.report.report_data;
-            const overall = data.overall || {};
-            const top5 = data.top_5 || [];
-            const bottom5 = data.bottom_5 || [];
-            const flagged = data.flagged_signals || {};
-
-            let html = `<div style="margin-bottom:8px; color:#c9a880; font-size:11px;">${data.summary || ''}</div>`;
-
-            if (top5.length) {
-                html += '<div style="color:#5e8c66; font-size:10px; font-weight:700; margin-top:8px;">TOP PERFORMERS</div>';
-                html += top5.map(s => `<div style="display:flex; justify-content:space-between; padding:3px 0; font-size:10px;">
-                    <span style="color:#c9a880;">${s.signal_name}${s.signal_value ? ': ' + s.signal_value : ''}</span>
-                    <span style="color:#5e8c66;">${s.accuracy_pct}% (${s.sample_count})</span>
-                </div>`).join('');
-            }
-
-            if (bottom5.length) {
-                html += '<div style="color:#8c4a3a; font-size:10px; font-weight:700; margin-top:8px;">BOTTOM PERFORMERS</div>';
-                html += bottom5.map(s => `<div style="display:flex; justify-content:space-between; padding:3px 0; font-size:10px;">
-                    <span style="color:#c9a880;">${s.signal_name}${s.signal_value ? ': ' + s.signal_value : ''}</span>
-                    <span style="color:#8c4a3a;">${s.accuracy_pct}% (${s.sample_count})</span>
-                </div>`).join('');
-            }
-
-            if (flagged.total_flagged) {
-                html += '<div style="color:#c9a24a; font-size:10px; font-weight:700; margin-top:8px;">FLAGGED FOR REVIEW</div>';
-                html += `<div style="display:flex; justify-content:space-between; font-size:10px; padding:3px 0;">
-                    <span style="color:#c9a880;">${flagged.total_flagged} signals flagged</span>
-                    <span style="color:#8c4a3a;">${flagged.critical || 0} critical</span>
-                    <span style="color:#c9a24a;">${flagged.warnings || 0} warnings</span>
-                </div>`;
-                if (flagged.signals && flagged.signals.length) {
-                    html += `<div style="font-size:10px; color:#6b5345; margin-top:2px;">${flagged.signals.join(', ')}</div>`;
-                }
-            }
-
-            container.innerHTML = html;
-        } catch (e) {
-            container.innerHTML = '<div style="color:#8c4a3a;">Failed to load accuracy report.</div>';
-        }
-    }
-
-    async function triggerAccuracyReport() {
-        const container = document.getElementById('accuracyReportContainer');
-        container.innerHTML = '<div style="color:#c9a880;">Generating report…</div>';
-        try {
-            const r = await fetch('/api/v1/system/accuracy-report/trigger', { method: 'POST' });
-            const d = await r.json();
-            if (d.ok) {
-                container.innerHTML = '<div style="color:#5e8c66;">✓ Report generated</div>';
-            } else {
-                container.innerHTML = `<div style="color:#8c4a3a;">✗ ${d.error || 'Failed'}</div>`;
-            }
-        } catch (e) {
-            container.innerHTML = `<div style="color:#8c4a3a;">✗ ${e.message}</div>`;
-        }
-        loadAccuracyReport();
-    }
-
-    async function triggerFlaggingTick() {
-        const result = document.getElementById('flaggingResult');
-        result.textContent = 'Running flagging tick…';
-        result.style.color = '#c9a880';
-        try {
-            const r = await fetch('/api/v1/system/flagging/trigger', { method: 'POST' });
-            const d = await r.json();
-            if (d.ok) {
-                result.innerHTML = `<span style="color:#5e8c66;">✓ ${d.result.alerts_created} alerts, ${d.result.weights_adjusted} weights adjusted</span>`;
-            } else {
-                result.innerHTML = `<span style="color:#8c4a3a;">✗ ${d.error || 'Unknown error'}</span>`;
-            }
-        } catch (e) {
-            result.innerHTML = `<span style="color:#8c4a3a;">✗ Request failed: ${e.message}</span>`;
-        }
-        loadSignalAlerts();
-        loadSignalWeights();
-    }
-
-    // Override initDashboard to also load Phase 2 data
+    // Override initDashboard to also load audit suggestions + Live System polling
     const _origInit = initDashboard;
     initDashboard = function() {
         if (_origInit) _origInit();
-        loadSignalAlerts();
-        loadSignalWeights();
-        loadAccuracyReport();
         loadAuditSuggestions();
         // Polling for Live System tab data
         setInterval(loadHeartbeat, 60000);
