@@ -6357,3 +6357,101 @@ medium addition with no new domain logic needed (the granular state already
 exists on `ExecutorOrder`).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-23 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: D3 live-management-event feed (radar + email) -- roadmap step 2b
+STATUS: resolved. Site commit `c047ed6`, pushed to `origin/main`.
+
+Andy's own ask: "even as the executor is D3 being managed... it would really
+be putting that same thing on the radar... hey, it's exhaustion, trade is
+going to be removed... closing the trade at [price]" -- and the same event
+emailed. Given the scale (touches the LIVE engine's real closure path), this
+went through the full Plan Mode workflow: an Explore pass, then a Plan-agent
+validation pass, both reading live source directly before any code was
+written.
+
+**Scoped down from "build an events feed" to "one more detail line," correctly**:
+MGMT_E1_STACK (mgmt_e1_stack.py::advance()) is a single full-exit design --
+no partial T1 leg like v2 has -- so there's genuinely only ONE terminal D3
+event per journey, never a sequence. Building a scrolling feed would have
+been solving a problem this system doesn't actually have.
+
+**A real gap fixed as part of this, not a separate ticket**: the LIVE engine
+has always written a real ExecutorAuditLog row on every close
+(`_finalize_traveler_close()`); the DRY_RUN engine (the only kind that
+exists today -- no traveler account is currently LIVE) never did --
+confirmed via grep, zero `write_audit` calls anywhere in `traveler_plan_
+engine.py` before this fix. Every DRY_RUN closure was invisible in the
+audit trail until now.
+
+**The Plan-agent validation caught two real bugs before any code was
+written**, both confirmed by mutation test after implementation (revert
+each -> exactly the corresponding new test fails, nothing else):
+1. The "approximated" exit-price caveat is NOT `exit_reason != "T1"` as
+   first proposed -- the real, deliberate mapping is `approximated <=>
+   mode=="LIVE" AND exit_reason in {C5_EXIT, BBWP_EXIT, TIME}`. STOP is
+   never approximated (a TP/SL trigger fills at its own exchange trigger,
+   same convention v2 already uses for STOP_BEFORE_T1). Getting this wrong
+   would have mislabeled a real, reliable exit price as an approximation.
+2. Picking "the current journey's order" via a blind `order_by(id.desc())
+   .first()` is wrong: `ExecutorOrder`'s real unique constraint is
+   `(traveler_plan_id, account_id)`, not just `traveler_plan_id` --
+   multiple accounts can each get their own order against one journey by
+   design (`executor_engine.py::process_traveler_fill()` loops every
+   active account). Now prefers a LIVE-mode order over DRY_RUN, mirroring
+   the `any_account_live` precedent (2026-09-22) rather than reinventing
+   the same class of radar-mislead risk that fix already closed once.
+
+**Also caught during implementation, before shipping** (not by the
+validation pass -- found while actually writing the tests): DRY_RUN's
+`realized_pnl_r` can be `None` -- specifically via a price of exactly 0.0
+(falsy, not `None`; `mgmt_e1_stack.advance()` itself hard-requires entry/
+stop to be not-`None`, so a real `None` can never reach this far, but 0.0
+can slip through and still make the R-calc's own truthiness check treat it
+as missing) -- and a bare format spec on that value would raise
+`TypeError`, silently swallowing the whole audit write (and, per finding
+below, the whole closure). Fixed with a local `_fmt_r()` None-safe helper,
+mutation-verified: reverting to a bare format spec causes a real crash
+that rolls back the ENTIRE closure detection for that tick, not just the
+audit write -- a more serious failure mode than originally scoped, caught
+by actually running the mutation rather than reasoning about it abstractly.
+
+**The single most important correctness rule, from the validation pass**:
+both new email dispatch call sites (DRY_RUN, LIVE) are wrapped in their OWN
+try/except, deliberately not sharing one with the surrounding unguarded
+code -- both loops commit per-order and roll back the WHOLE tick on any
+uncaught exception, so a bug in the new email code must never roll back
+the already-real closure bookkeeping. Mutation-verified on both sides.
+
+Extends `/api/admin/traveler-plan-status` (not a new route -- exactly one
+admin route per entity exists in this codebase today) with `mgmt_*`
+fields; extends the radar's `renderTravelerState()` with a D3 detail line,
+correctly skipping the redundant entry-fill display for DRY_RUN (always
+identical to the already-shown bookkeeping `fill_price`) and showing it
+only for LIVE, where it's genuinely new information.
+
+**Independently re-verified before committing** (this touches the LIVE
+engine's real closure path) -- a separate subagent re-confirmed both
+validated risks are correctly implemented (not just tested, actually
+traced through every real call site), ran its own mutation check on the
+LIVE-preference query, and caught one harmless style redundancy (a
+duplicate local recomputation of `approximated` inside
+`_finalize_traveler_close()` that shadowed its own already-correct
+parameter) -- fixed in this same commit.
+
+**One incidental, pre-existing finding, not part of this change**: the
+same verification pass found `tests/test_admin_plan_status.py`'s `env`
+fixture cleans `TravelerPlan`/`UserModel` but never `ExecutorAccount`/
+`ExecutorOrder` -- causes order-dependent failures if that file runs after
+certain others in a non-alphabetical order. Confirmed via `git stash` to
+already exist on baseline code, unrelated to today's change, and doesn't
+affect the real suite (which runs alphabetically and passes clean). Noting
+for a future cleanup pass, not fixed here (out of scope for this change).
+
+20 new tests across 4 files, each mutation-verified individually. 805
+tests pass (was 785), same 5 pre-existing unrelated `test_dashboard_
+fixes.py` errors, clean boot.
+
+**Roadmap status**: step 2 (email list + D3 event feed) fully done. Next:
+step 3 -- the actual V2 code/route/table removal per `V2_RETIREMENT_MAP.md`.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
