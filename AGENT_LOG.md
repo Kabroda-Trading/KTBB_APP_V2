@@ -6025,3 +6025,69 @@ item yet. FINDING 3 (stale radar comment) was already fixed same-day,
 commit `4f6b0a6`.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-22 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: today's audit Finding 2 resolved, plus a real gap Andy's own question surfaced that Finding 2 itself didn't cover
+STATUS: resolved. Site commit `c5b3813`, pushed to `origin/main`.
+
+Andy's own question, asked directly rather than just accepting the finding
+as reported: "is [fixing this] going to mess up code later when we go
+live... how easy is this documented to when it says okay we're going to go
+live and we can easily go through and clean things up." Checking that
+question properly (not just answering from the earlier audit's own framing)
+surfaced something more concrete than Finding 2 as originally scoped:
+
+**The real go-live risk wasn't Finding 2's missing caveat -- it was the
+traveler radar panel's header hardcoding the literal text "Traveler
+(evaluation, DRY_RUN)".** Confirmed directly: GATE_TRAVELER stopped being
+structurally DRY_RUN-only 2026-09-20 (`c7243ef`) -- a LIVE-mode account with
+this profile places real orders today -- and `/api/admin/traveler-plan-
+status` had ZERO field anywhere reflecting real account mode. That label
+would have kept reading "DRY_RUN" the instant an account was actually
+flipped LIVE, with nothing in the code to catch it -- exactly the kind of
+future mess-up Andy was asking about.
+
+**Fixed with a real, freshly-queried check, not a manual edit that would
+need remembering at go-live time:** the route now includes
+`any_account_live` (any active `ExecutorAccount` with `gate_profile ==
+"GATE_TRAVELER"` and `mode == "LIVE"`, read-only, same thin-surface pattern
+the rest of Stage 1 already uses). The radar shows a LIVE badge only when
+that's genuinely true, and shows nothing extra otherwise -- self-updating,
+no future site edit required when an account is actually flipped LIVE. This
+directly answers Andy's question: nothing else needs to be "cleaned up" at
+go-live time for this panel, because the mode display is no longer a static
+label at all.
+
+**Finding 2 itself, shipped alongside:** the traveler panel's "filled @
+price" / "filled time" now carry the same "(bookkeeping)" caveat v2's own
+panel already has (`renderPlanState()`), so a bookkeeping fill (the
+gate-abstraction's own trigger-touch record, set by `gate_traveler.py`'s
+`advance_waiting_touch()`) is never mistaken for a confirmed real exchange
+fill. Distinguishing point worth logging clearly, since it's the direct
+answer to the "will this need redoing" half of Andy's question: THIS
+ambiguity is structural and mode-independent -- the gap between a gate's
+own bookkeeping fill and a real resting order's actual exchange fill exists
+in DRY_RUN today and stays exactly as true after go-live (same reasoning
+already documented for v2's own identical caveat, `renderPlanState()`'s own
+code comment, unchanged since it shipped). So unlike the LIVE badge, this
+one needed no dynamic wiring at all -- it's permanent, static text, and
+correctly so.
+
+**Verification:** 4 new tests proving `any_account_live` actually
+discriminates on mode, profile, AND is_active (not just "any account
+exists") -- `test_traveler_plan_status_any_account_live_true_for_live_
+traveler_account`, `..._false_for_live_v2_account` (proves the profile
+filter works, not just mode), `..._false_for_dry_run_traveler_account`
+(proves the mode filter works, not just profile), `..._false_for_inactive_
+live_traveler_account`. Mutation-verified: reverting the profile filter
+specifically breaks the "false for live v2 account" test and only that
+test; reverting the whole check to always-False breaks only the "true"
+test -- confirms each filter clause is independently load-bearing, not
+redundant. Full suite 789 passed (up from 784), same 5 pre-existing
+unrelated `test_dashboard_fixes.py` errors. Clean app boot.
+
+Today's full-checklist audit is now fully closed out: Finding 1 (v2
+orphaned exit orders) resolved earlier today, Finding 2 (this entry)
+resolved, Finding 3 (stale radar comment) resolved same day as found.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
