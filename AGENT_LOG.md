@@ -6209,3 +6209,70 @@ as its own plan before touching any removal code, per standing practice for anyt
 this size and this hard to reverse.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-23 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: Macro War Room removed entirely; dashboard tab-by-tab audit + D3 live-event feasibility scoping complete
+STATUS: open (Macro War Room done; the rest is scoped, awaiting sequencing sign-off before execution). Site commit `2a23575`, pushed to `origin/main`.
+
+Andy's follow-up voice message added three things to track: (1) an admin-manageable
+email distribution list (currently there is none -- `notify.py`'s `SMTP_DEST` is one
+shared, comma-separated env var, not a DB-backed, per-person list anyone but a Render
+admin can edit); (2) live D3 management events (exhaustion, closes) surfaced on the
+radar AND by email, not just the existing morning LOCK/ARMED/DONE emails; (3) a real
+answer on whether the dashboard is still accurate, plus his own page-by-page calls
+(Macro War Room: remove; Gravity Map: keep; Indicators: leave alone).
+
+**Dispatched two more overview-level agents** (same discipline as this morning):
+
+1. **D3 live-event feasibility** — genuinely good news: `ExecutorOrder.management_state`
+   already has distinct, queryable terminal states per exit type (`CLOSED_C5_EXIT`,
+   `CLOSED_BBWP_EXIT`, `CLOSED_T1`, `CLOSED_STOP`, `CLOSED_TIME`), with real
+   price/time/flag columns alongside -- not folded into one generic CLOSED. One clean
+   hook point per engine (DRY_RUN: `traveler_plan_engine.py::_advance_e1_order()`
+   ~line 204-213; LIVE: `executor_live_e1_engine.py::_finalize_traveler_close()`
+   lines 401-429, already covers all 5 exit types). The email pattern
+   (`traveler_plan_notify.py`) extends cleanly. DRY_RUN/LIVE is already a real per-row
+   field (`ExecutorOrder.mode`) at this point, avoiding a repeat of the pre-fill
+   bookkeeping-label trap this project has hit twice before. What's actually missing is
+   presentation, not domain logic: no route exposes any of this today (the existing
+   traveler-status route stops at FILLED, by design), and there's no "recent events
+   feed" pattern anywhere in this codebase yet -- every route returns a current-state
+   snapshot, not a stream. Verdict: small-to-medium addition, ~4-6 files, no new DB
+   columns needed for the state/detail itself.
+
+2. **Dashboard accuracy audit** (`/suite/dashboard`, 6 tabs) -- tab-by-tab, with real
+   causes, most unrelated to V2/Traveler at all:
+   - **Signal Accuracy**: BROKEN, has been for over a month -- its 8 backing routes
+     were deleted 2026-08-17 (main.py's own comment says so). Recommend delete outright.
+   - **Errors**: BROKEN, misleadingly so -- reads `SystemAuditLog`, which has had zero
+     live writers since the Performance Auditor was archived; always reports "all
+     systems operational" regardless of real state.
+   - **Parameters**: fabricated -- hardcoded Python literals, never wired to real data.
+   - **Live System**: genuinely accurate today AND already Traveler-aware
+     (`scheduler_health_registry` includes `traveler_plan`/`executor_live_e1` tasks
+     alongside the V2 ones) -- the one tab that survives V2 retirement untouched.
+   - **Overview**: mixes `CampaignLog` (V2-only, will silently freeze, not crash, once
+     V2 stops writing it), `ExecutorOrder` (shared, survives, already the more honest
+     number per the route's own comment), and `AgentRunLog` (already dead, zero live
+     callers outside `_archive/`).
+   - **Analysis**: same pattern -- will keep running every 12h post-retirement but
+     produce a permanent false "0 trades, all stable" instead of an honest no-data
+     state, unless rewired to `ExecutorOrder`/`TravelerPlan`-based sources (which don't
+     currently have an aggregate rollup built at all -- a real, separate gap).
+   - **Macro War Room**: confirmed SAFE TO REMOVE ENTIRELY -- its two halves were
+     `CampaignLog`-fed (V2-only) and a Gravity KPI grid that duplicates the standalone
+     Gravity Map page; nothing else depends on its route/template/trigger call.
+
+**Shipped this entry**: Macro War Room removed -- route, template, nav link, two
+updated historical comments. 789 tests pass (unchanged), clean boot, the removed route
+now correctly 404s.
+
+**Not yet done, scoped and awaiting sequencing**: the email-subscriber-list feature
+(new DB table + admin UI + `notify.py` change), the D3 live-event feed (radar + email),
+deleting the two other already-broken dashboard tabs (Signal Accuracy, Errors,
+Parameters -- unrelated to V2, safe to remove independently), rewiring Overview/
+Analysis to survive V2 retirement, the actual V2 code/route/table removal per
+`V2_RETIREMENT_MAP.md`, and the radar rebuild around traveler communication. Bringing
+Andy a full sequenced roadmap for all of this before executing any more of it, given
+the scale.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
