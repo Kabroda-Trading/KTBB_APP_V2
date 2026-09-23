@@ -468,7 +468,9 @@ def run_mas_analysis(
 # direction was to retire this rather than re-enable it: interactive Q&A is
 # Kabroda AI Brain's job now, a dedicated tool, not a second, smaller one
 # living inside kabroda.com. POST /api/research/chat-mas (main.py) and the
-# chat box in templates/macro_war_room.html are both removed too.
+# chat box that used to live in the Macro War Room page are both removed
+# too (that page itself was removed entirely 2026-09-23 -- Andy's call
+# during the strategic site audit, see main.py's own removal comment).
 
 
 # audit_foreign_intel_pipeline() removed 2026-08-30 -- the Intel Auditor.

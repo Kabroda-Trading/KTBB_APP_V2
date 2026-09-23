@@ -803,40 +803,20 @@ async def save_lti_protocol(request: Request, db: Session = Depends(get_db)):
     return JSONResponse({"ok": False, "error": "KULTI is being rebuilt."}, status_code=410)
 
 
-@app.get("/suite/macro-war-room")
-async def macro_war_room_page(request: Request, symbol: str = "BTC/USDT", db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    
-    db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
-    latest_log = db.query(CampaignLog).filter(CampaignLog.symbol == db_sym, CampaignLog.is_canonical == True).order_by(CampaignLog.id.desc()).first()
-    
-    if latest_log and not latest_log.mas_executive_brief and latest_log.mas_approval_status == 'PENDING':
-        # Dedup simplified 2026-08-28: the outer condition (no brief written
-        # yet AND status still PENDING) is already the correct, sufficient
-        # gate on CampaignLog -- the canonical record -- so the old inner
-        # check against MacroNarrativeLog's senior_analyst rows (which
-        # stopped being written this session) was redundant on top of it.
-        lock_record = db.query(SessionLock).filter(
-            SessionLock.symbol == db_sym,
-            SessionLock.session_id == latest_log.session_id,
-            SessionLock.date_key == latest_log.date_key
-        ).first()
-
-        if lock_record:
-            pkt = json.loads(lock_record.packet_data)
-            asyncio.create_task(
-                asyncio.to_thread(
-                    kabroda_mas_flow.run_mas_analysis,
-                    symbol=db_sym,
-                    session_id=latest_log.session_id,
-                    date_key=latest_log.date_key,
-                    battlebox_payload=pkt
-                )
-            )
-    
-    ctx["mas_log"] = latest_log
-    return _template_or_fallback(request, templates, "macro_war_room.html", ctx)
+# Macro War Room page (GET /suite/macro-war-room) removed 2026-09-23 -- Andy's
+# call during the strategic site audit ("there's really no reason to have any
+# of that kind of stuff anymore"). Confirmed safe by a dedicated dependency
+# check before removal: its two halves were the "CCO Desk" brief panel
+# (100% CampaignLog/V2-lineage data, would have gone stale the moment V2's
+# decision path stops writing that table) and a client-side Gravity KPI grid
+# that already duplicates templates/gravity_map.html (which stays -- Andy's
+# own call, "a usable tool on its own"). The run_mas_analysis() trigger this
+# route used to fire was a REDUNDANT third call path -- battlebox_pipeline.py
+# (on every fresh lock) and the Senior Analyst restart-recovery scheduler
+# already fire the same shared function; removing this route's own call site
+# does not affect TradePlan or TravelerPlan creation at all. Nothing else
+# referenced this route or its template (grepped, including tests/ -- zero
+# hits). Full trail: AGENT_LOG.md 2026-09-23, V2_RETIREMENT_MAP.md.
 
 # --- NARRATIVE / JEWEL DATA ENDPOINT ---
 @app.get("/api/narrative/latest")
@@ -1084,8 +1064,9 @@ async def api_live_price():
 # decision input) and recalculated targets with a third, different formula
 # from both the old and new measured-move math. See kabroda_mas_flow.py for
 # the removed audit_foreign_intel_pipeline()/IntelAuditReport/
-# INTEL_AUDITOR_SYSTEM_PROMPT and templates/macro_war_room.html for the
-# removed UI panel that called this route.
+# INTEL_AUDITOR_SYSTEM_PROMPT for the removed audit pipeline (the UI panel
+# that called this route lived in the Macro War Room page, itself removed
+# 2026-09-23 -- see this file's own removal comment further up).
 
 # --- AGENT COST INFRASTRUCTURE (PHASE 1) ---
 
