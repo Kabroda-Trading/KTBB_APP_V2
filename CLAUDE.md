@@ -4,6 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## Strategic Direction (2026-09-23, current — read this before anything else)
+
+**The Traveler (`GATE_TRAVELER`/`MGMT_E1_STACK`) is becoming Kabroda's sole live decision system. V2 Crown (`GATE_V2`/`MGMT_SPLIT` — `decision_engine.py`'s gate) is authorized for retirement.** Andy's ruling, `Kabroda AI Brain` repo `AGENT_LOG.md` 2026-09-23 08:40 CT, expanded into a full strategic site audit at 08:47 CT the same day. This is not a guess or a preference — it's measured: on the identical 5-year corpus (`locks_2021_2026.csv`, 2,056 locks), V2 Crown's extra selectivity (Krown Cross votes==2, RSI-at-lock zone) takes fewer trades at a *lower* avgR than the simpler v3 baseline it descends from (202 trades/+0.292R vs 601 trades/+0.35R), and the Traveler's own trade set contains essentially all of both within their shared date range (v3: 502/601 = 84%, all 99 "missing" predate the Traveler's 2022-05-17 corpus start; V2 Crown: 160/202 = 79%, same explanation) — independently re-verified from raw committed data, not taken on the log's word (`AGENT_LOG.md` 2026-09-23, both repos). A separately-routed measurement (should V2's runner pull early on the same exhaustion signal the Traveler uses?) also came back a coin-flip and stays out, same P4 precedent. None of this indicts V2 Crown as broken — it just never earned its added complexity once measured head-to-head against what replaced it.
+
+**What this means in practice, right now:**
+- Do not build new V2 Crown features, retune its gate constants, or treat "The Calibrated Gate" section below as describing the strategic future — it describes what's still *live in code today*, not where this is going. It stays accurate as a description of current behavior until Phase B (below) actually removes it; do not let it silently go stale the way it already did once (see that section's own 2026-09-22 correction note) — if V2 code changes during the retirement, this file changes the same day.
+- **Retirement is two phases, not one event.** Phase A (operational, already fully built, reversible in one click): confirm no `ExecutorAccount` is left on `GATE_V2`/`MGMT_SPLIT` — the `/api/executor/accounts/{id}/profile` switch (`main.py:1640`) already lets any account flip to `GATE_TRAVELER`/`MGMT_E1_STACK` with zero code change. Phase B (the real cleanup): actual code/table/route/template removal, the radar rebuilt around Traveler communication (copy-paste buttons mirroring Traveler plan fields, email content mirrored on the radar, executor toggle flows), and a whole-site cleanup pass — sequenced carefully against `V2_RETIREMENT_MAP.md` (repo root), documenting as it goes per Andy's explicit instruction, so nothing gets removed that the Traveler still depends on.
+- **`V2_RETIREMENT_MAP.md` is the load-bearing reference for Phase B** — a from-source dependency map classifying every file/table/route/template as V2-only (removal candidate), Traveler-only (keep), or shared/protected (do NOT remove — this is the bucket Andy explicitly warned about: "we wouldn't want to remove anything that is being run through V2 but then being fed into the Traveler system"). The shared list includes things that look V2-adjacent but aren't: `session_manager.py`/`sse_engine.py`/`battlebox_pipeline.py` (the session-lock SSOT both systems read from), `kabroda_mas_flow.py::run_mas_analysis()` (one function that writes both `TradePlan` AND `TravelerPlan`), the whole executor account/order/sizing stack (`ExecutorOrder` has both a `trade_plan_id` and a `traveler_plan_id` column on the same table), and `templates/market_radar.html` (one template, one shared CSS badge class and shared JS formatting helpers used by both panels). Re-verify against current source before removing anything from the V2-only list — that map is a planning snapshot, not a standing guarantee.
+- Standing traveler work orders are not blocked by any of this and should proceed normally — none of them touch V2's file set (confirmed 2026-09-23, `AGENT_LOG.md` both repos).
+
+---
+
 ## Reading DeepSeek/Antigravity's Conversation History
 
 The user also works on this project through Antigravity (running DeepSeek), a separate agent from Claude Code. That agent's conversations persist permanently to disk as JSONL transcripts, and Claude Code can read them directly to get up to speed on work that happened outside this session — no need to ask the user to re-explain what DeepSeek already did.
@@ -60,7 +72,9 @@ After 30 minutes, `sse_engine.py` computes two permanent levels for the session:
 
 These two triggers are the **Single Source of Truth (SSOT)** for the entire session. They are frozen into a `SessionLock` database record and never recomputed. Every downstream calculation — targets, stops, the calibrated gate — derives from them.
 
-### The Calibrated Gate — v1 (2026-08-30 → 2026-09-10, RETIRED) then v2 (rebuilt 2026-09-11, CURRENT)
+### The Calibrated Gate — v1 (2026-08-30 → 2026-09-10, RETIRED) then v2 (rebuilt 2026-09-11, CURRENT, itself authorized for retirement 2026-09-23 — see "Strategic Direction" at the top of this file)
+
+**This whole section describes what's still live in code today, not the strategic direction.** V2 Crown (everything below) is authorized for retirement in favor of the Traveler — see the top of this file and `V2_RETIREMENT_MAP.md` before building anything new on top of this gate.
 
 The site's original target formula (1×/1.618×/2.618× of the bo–bd distance, "Measured Move") was never backtested against real outcomes at scale, and when it finally was — a 1,913-trigger-break backtest, 2021–2026, `Kabroda AI Brain` repo — it lost money on kabroda.com's own real filled trades (71 trades, 29.8% win, −0.30R avg, −21.4R total). Andy authorized a full replacement, not a patch.
 
