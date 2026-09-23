@@ -6091,3 +6091,69 @@ orphaned exit orders) resolved earlier today, Finding 2 (this entry)
 resolved, Finding 3 (stale radar comment) resolved same day as found.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-09-22 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: CLAUDE.md's "Calibrated Gate" section corrected -- it was describing the retired v1 gate as current, 11 days after v2 shipped
+STATUS: resolved. Site commit (this entry's own commit, see the one immediately after this in the log).
+
+**How this was found:** while writing the queued v2 D1/D2/D3 walkthrough for DeepSeek
+(`Kabroda AI Brain` repo, `V2_D1_D2_D3_MECHANICS.md` -- see the entry below), I read
+`decision_engine.py`/`stop_planner.py`/`executor_live_engine.py` directly rather than
+working from `CLAUDE.md`'s own prose, and found they describe a completely different,
+already-shipped architecture than what `CLAUDE.md`'s "Calibrated Gate" section said.
+Reported to Andy immediately, not folded in silently; Andy's direction: "keep this clean
+and be sure it's run through a clean audit."
+
+**The gap:** `CLAUDE.md` was last touched 2026-09-10 (commit `3a0c99e`). v2's gate
+rebuild shipped the very next day (2026-09-11, commit `90c09e2`, "PHASE 1: decision_
+engine.py v2 gate... Retires fuel, PREMIUM/STANDARD tiers..."), and the T2-breakeven
+management mechanism was deleted outright 2026-09-15 (commit `6a8f1b4`). `CLAUDE.md`
+never got updated for either -- it kept describing fuel-gating, a PREMIUM/STANDARD tier
+split, T1=0.618x box, and a PREMIUM-only breakeven-at-T2 move as CURRENT, for 11 days
+after all of that was retired. A real production bug happened in this exact window
+(the radar silently displayed every real TAKE as PASS/gray/inactionable from 09-11 to
+09-15, commit `df75f3c`) -- this wasn't a hypothetical drift risk, it already cost a
+real incident while the doc sat stale.
+
+**Fixed:** rewrote "The Calibrated Gate" section in full -- v1 (2026-08-30->09-10) kept
+as clearly-labeled history, v2 (2026-09-11, current) described accurately: 4 conditions
+(reachability, HTF aligned>=1, Krown Cross votes==2, RSI-at-lock-in-zone), no tier, no
+fuel, T1=1.0x/T3=1.618x box, ONE stop formula for every trade
+(`stop_planner.py::plan_stop()` confirmed to have no live call site left at all), stop
+never moves for anyone at any point (the old T2-BE mechanism confirmed dead code then
+deleted outright, per `CC_QUESTION_T2_BREAKEVEN.md`'s ruling, cited verbatim). Also
+corrected the `CampaignLog Lifecycle` paragraph (was still describing the retired
+PREMIUM-BE rule as "what executor_live_engine.py implements for real money") and "What
+Must Never Be Changed" items 1 and 5 (stale formulas/constants).
+
+**Run through a clean audit, per Andy's instruction** -- dispatched an independent
+subagent to verify every numeric constant, formula, and citation in the corrected
+sections against live source, not trust my own rewrite. Found 3 real gaps, all fixed
+before this shipped:
+1. The T2-breakeven-deletion citation named the wrong commit (`df75f3c`, which only
+   touches `market_radar.py`/`kabroda_mas_flow.py`/etc. -- the real deletion commit is
+   `6a8f1b4`, 11 minutes later the same evening). Verified independently via `git show
+   --stat` on both before fixing.
+2. `GateLog`'s real column names are `gate_tier`/`fuel_state`/`push_vol_ratio`
+   (`database.py:1896-1908`) -- I'd written `fuel_verdict`/`fuel_push_ratio`, which are
+   either wrong or belong to a different table (`TradePlan.fuel_verdict` is real, but a
+   separate column on a separate table). Verified directly against `database.py` before
+   fixing.
+3. (Bonus, caught by the same audit while cross-checking, not in my original edit
+   scope) "What Must Never Be Changed" item 3 still said the gate "includes real volume
+   confirmation" -- stale v1 language my own edit pass had missed since I'd only
+   touched items 1 and 5. Fixed.
+
+**A related, pre-existing "two places" staleness found and fixed in the same pass** (not
+from the subagent audit of this section -- found independently while cross-checking the
+new D1/D2/D3 doc, see below, which had the identical bug): both "The Calibrated Gate"
+and "The Decision Layer" sections claimed `decision_engine.evaluate_15m_decision()` is
+called from exactly two places (`kabroda_mas_flow.run_mas_analysis()` and `market_radar.
+_build_dossier()`). There is a real THIRD call site, `trade_plan_engine.py::
+_run_full_gate()` (`trade_plan_engine.py:99-146`), shared by the opposite-break
+enrichment path and the NO_PLAN-promotion path. `market_radar.py`'s own code comment
+(line 254-256) already flagged this exact gap ("one of the two (now three, with
+trade_plan_engine.py) real evaluators") -- it was never propagated back into `CLAUDE.md`.
+Both sections corrected to name all three call sites.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
