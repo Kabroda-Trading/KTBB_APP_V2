@@ -45,7 +45,7 @@ import lti_engine
 
 from datetime import datetime, timezone, timedelta
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, DecisionJournal, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalPerformanceLog, GravityMemory
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, DecisionJournal, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalPerformanceLog, GravityMemory, EmailSubscriber
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -2557,7 +2557,62 @@ async def admin_roster_page(request: Request, db: Session = Depends(get_db)):
     ctx["users"] = users
     ctx["latest_daily_digest"] = db.query(DailyAuditLog).order_by(DailyAuditLog.id.desc()).first()
     ctx["recent_suggestions"] = db.query(AuditSuggestionLog).order_by(AuditSuggestionLog.logged_at.desc()).limit(9).all()
+    # 2026-09-23 -- the admin-manageable email distribution list
+    # (notify.py::send_admin_email() reads these same rows directly).
+    ctx["email_subscribers"] = db.query(EmailSubscriber).order_by(EmailSubscriber.id.desc()).all()
     return _template_or_fallback(request, templates, "admin.html", ctx)
+
+@app.post("/admin/add-email-subscriber")
+async def admin_add_email_subscriber(request: Request, db: Session = Depends(get_db)):
+    """2026-09-23 -- adds a real recipient to notify.py's DB-backed
+    distribution list, additive to the existing SMTP_DEST env var (see
+    that module's own header). No site login required for someone to be
+    on this list -- deliberately no FK to UserModel."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"): return JSONResponse({"ok": False, "error": "Unauthorized"})
+    payload = await request.json()
+    email = (payload.get("email") or "").strip().lower()
+    label = (payload.get("label") or "").strip() or None
+    if not email or "@" not in email:
+        return JSONResponse({"ok": False, "error": "A valid email address is required"})
+    existing = db.query(EmailSubscriber).filter(EmailSubscriber.email == email).first()
+    if existing:
+        if existing.is_active:
+            return JSONResponse({"ok": False, "error": "That address is already on the list"})
+        # Re-adding a previously-removed address reactivates the same row
+        # rather than violating the unique constraint with a duplicate.
+        existing.is_active = True
+        existing.label = label or existing.label
+        existing.added_by = ctx.get("email")
+        existing.added_at = datetime.utcnow()
+        db.commit()
+        return JSONResponse({"ok": True})
+    db.add(EmailSubscriber(email=email, label=label, is_active=True, added_by=ctx.get("email")))
+    db.commit()
+    return JSONResponse({"ok": True})
+
+@app.post("/admin/delete-email-subscriber")
+async def admin_delete_email_subscriber(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"): return JSONResponse({"ok": False, "error": "Unauthorized"})
+    payload = await request.json()
+    sub_id = payload.get("subscriber_id")
+    try:
+        sub_id_int = int(sub_id) if sub_id is not None else None
+    except (TypeError, ValueError):
+        # A non-numeric subscriber_id used to raise straight into the
+        # catch-all HTML 500 handler -- admin.html's JS does `await
+        # res.json()` on the response, which would then throw on the HTML
+        # body instead of surfacing this specific message. Caught here
+        # 2026-09-23 so a bad id is a clean JSON error like every other
+        # validation failure in this route/its sibling add route.
+        return JSONResponse({"ok": False, "error": "subscriber_id must be a number"})
+    sub = db.query(EmailSubscriber).filter(EmailSubscriber.id == sub_id_int).first() if sub_id_int else None
+    if not sub:
+        return JSONResponse({"ok": False, "error": "Subscriber not found"})
+    db.delete(sub)
+    db.commit()
+    return JSONResponse({"ok": True})
 
 @app.get("/admin/export-audit-ledger")
 async def export_audit_ledger(request: Request, start_date: str = None, end_date: str = None, db: Session = Depends(get_db)):

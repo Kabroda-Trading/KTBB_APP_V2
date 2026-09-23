@@ -141,6 +141,61 @@
         </table>
     </div>
 
+    <!-- 2026-09-23 -- Email Distribution List, admin-manageable recipients
+         for the real trade-communication emails (notify.py's own
+         send_admin_email() reads these same rows, additive to the
+         existing SMTP_DEST env var -- see that module's header). -->
+    <div class="roster-card">
+        <div class="card-header">
+            <span class="card-title">Email Distribution List</span>
+            <div style="display:flex; gap:10px; align-items:center;">
+                <span class="card-title">{{ email_subscribers|length }} SUBSCRIBERS</span>
+                <button class="btn-test" onclick="openAddSubscriber()">+ ADD EMAIL</button>
+            </div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Email</th>
+                    <th>Label</th>
+                    <th>Added By</th>
+                    <th>Added</th>
+                    <th style="text-align:right">Command</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in email_subscribers %}
+                <tr>
+                    <td style="color:#f2e3cf; font-weight:600;">{{ s.email }}</td>
+                    <td><span class="user-meta">{{ s.label or '—' }}</span></td>
+                    <td><span class="user-meta">{{ s.added_by or '—' }}</span></td>
+                    <td><span class="user-meta">{{ s.added_at.strftime('%Y-%m-%d') if s.added_at else '—' }}</span></td>
+                    <td style="text-align:right; white-space:nowrap;">
+                        <button class="btn-action btn-delete" onclick="deleteSubscriber({{ s.id }}, '{{ s.email }}')">REMOVE</button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" style="color:#64748b; text-align:center;">No subscribers yet -- SMTP_DEST's own address(es) still receive every email regardless.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div id="addSubscriberModal" class="modal-overlay">
+        <div class="modal">
+            <h3>Add Email Subscriber</h3>
+            <p style="color:#94a3b8; font-size:14px;">They'll start receiving the same trade-communication emails Andy gets -- no site login required.</p>
+
+            <input type="email" id="newSubEmail" class="inp-pass" placeholder="Email address">
+            <input type="text" id="newSubLabel" class="inp-pass" placeholder="Label (optional, e.g. a name)">
+
+            <div class="modal-actions">
+                <button class="btn-action" onclick="closeAddSubscriber()">CANCEL</button>
+                <button class="btn-save" onclick="submitAddSubscriber()">ADD</button>
+            </div>
+        </div>
+    </div>
+
 
 
 
@@ -278,6 +333,60 @@
                 const data = await res.json();
                 if (data.ok) {
                     alert("SUCCESS. Account created.");
+                    window.location.reload();
+                } else {
+                    alert("ERROR: " + data.error);
+                }
+            } catch (e) {
+                alert("System Failure.");
+            }
+        }
+
+        // --- EMAIL DISTRIBUTION LIST LOGIC (2026-09-23) ---
+        const addSubscriberModal = document.getElementById('addSubscriberModal');
+
+        function openAddSubscriber() {
+            document.getElementById('newSubEmail').value = '';
+            document.getElementById('newSubLabel').value = '';
+            addSubscriberModal.classList.add('active');
+        }
+
+        function closeAddSubscriber() {
+            addSubscriberModal.classList.remove('active');
+        }
+
+        async function submitAddSubscriber() {
+            const email = document.getElementById('newSubEmail').value.trim();
+            const label = document.getElementById('newSubLabel').value.trim();
+            if (!email || !email.includes('@')) return alert("Enter a valid email address.");
+
+            try {
+                const res = await fetch('/admin/add-email-subscriber', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ email, label })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    window.location.reload();
+                } else {
+                    alert("ERROR: " + data.error);
+                }
+            } catch (e) {
+                alert("System Failure.");
+            }
+        }
+
+        async function deleteSubscriber(subscriberId, email) {
+            if (!confirm("Remove " + email + " from the email list?")) return;
+            try {
+                const res = await fetch('/admin/delete-email-subscriber', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ subscriber_id: subscriberId })
+                });
+                const data = await res.json();
+                if (data.ok) {
                     window.location.reload();
                 } else {
                     alert("ERROR: " + data.error);

@@ -2516,4 +2516,26 @@ class ExecutorMechanismTest(Base):
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class EmailSubscriber(Base):
+    """Admin-manageable recipients for Kabroda's real trade-communication
+    emails (lock/ARMED/DONE, and later the D3 management-event emails) --
+    2026-09-23, part of the strategic site audit's radar-rebuild-around-
+    Traveler-communication work. Additive to notify.py's existing SMTP_DEST
+    env var, not a replacement -- notify.send_admin_email() sends to the
+    UNION of both, deduped, so Andy's own env-var address keeps receiving
+    mail with zero config change, and anyone added here rides along on the
+    exact same emails without needing a site login (this is a distribution
+    list, not a UserModel account -- deliberately no FK to users.id, since
+    someone can be on this list without ever logging into the site, and a
+    site login carries no email-list membership either way)."""
+    __tablename__ = "email_subscribers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, nullable=False, unique=True, index=True)
+    label = Column(String, nullable=True)          # optional display name, e.g. "Dawson"
+    is_active = Column(Boolean, nullable=False, default=True)   # soft-disable without losing the row
+    added_by = Column(String, nullable=True)         # admin's own email, audit trail
+    added_at = Column(DateTime, default=datetime.datetime.utcnow)
 
