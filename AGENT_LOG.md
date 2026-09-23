@@ -6276,3 +6276,43 @@ Andy a full sequenced roadmap for all of this before executing any more of it, g
 the scale.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-23 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: three dead dashboard tabs removed (Parameters, Errors, Signal Accuracy) -- roadmap step 1 done
+STATUS: resolved. Site commit `28821ac`, pushed to `origin/main`. Andy's go-ahead: "let's just go on down through it and just check the boxes off as we go... use the agents for accountability... in the processes, or to do research, or to test other variables."
+
+Turned out bigger than "delete 3 tabs" once actually traced: two of the three tabs'
+backing routes (`/api/v1/system/parameters`, `/api/v1/system/errors`) still existed in
+`main.py` (the other 6 dead routes were already deleted 2026-08-17), and ~26 test
+functions in `tests/test_e2e.py` depended on them -- including some whose NAMES matched
+"parameters"/"errors" but whose bodies tested something else entirely
+(`test_f7_analysis_loop_reads_parameters` reads the analysis loop's own
+`parameters_evaluated` field, nothing to do with the Parameters route;
+`test_f1_state_excessive_errors` tests `/api/v1/system/state`'s own truncation, nothing
+to do with the Errors route) -- both correctly identified and left untouched by reading
+each test's actual body, not grep-matching by name. Two integration-scenario tests
+(`test_t4_scenario_admin_audit_flow`, `test_t4_scenario_scheduler_failure_alert_flow`)
+were trimmed rather than deleted, keeping their still-valid steps.
+
+Also found and removed two dead cards (Accuracy Report, Flagging Engine) embedded
+INSIDE the Analysis tab, which is otherwise being kept -- same dead-route family, but
+physically living in a tab that stays. The Analysis tab's genuinely live content (Run
+Analysis, Recent Reports, Audit-AI & Data Export) is untouched.
+
+**Independently re-verified before committing** (Andy's explicit ask this session) --
+a separate subagent re-ran the full diff, `py_compile`, the full test suite, and a
+fresh `TestClient` boot check from scratch, not trusting this session's own numbers.
+Confirmed byte-for-byte: 764 passed (down from 789, exactly the 25 removed test
+functions, 0 added), same 5 pre-existing unrelated `test_dashboard_fixes.py` errors,
+both routes now 404, clean boot. One cosmetic finding (an orphaned "TAB: PARAMETERS"
+HTML comment with zero functional effect) fixed in the same commit.
+
+Noted, not blocking: `PROJECT.md`/`TEST_INFRA.md` still describe the removed routes as
+live -- predates this change, a pre-existing documentation gap, not introduced today.
+
+**Roadmap status**: step 1 (dead-tab cleanup) done. Next: step 2 -- the email
+subscriber list (new admin-manageable recipient list, currently just one shared
+`SMTP_DEST` env var) and the D3 live-event feed (radar + email for real-time
+management events), both scoped yesterday as genuinely buildable, new/additive
+features with no existing code at risk.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
