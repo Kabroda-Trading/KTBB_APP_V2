@@ -50,6 +50,12 @@
            are shared with TradePlan already; these three are traveler-only. */
         .plan-state-badge.st-waiting_cross, .plan-state-badge.st-waiting_touch { background: var(--yellow); color: #1a1208; }
         .plan-state-badge.st-tercile_skipped { background: var(--gray); color: #140d09; }
+        /* 2026-09-22 -- real account mode indicator, not a status. Hidden
+           by default (DRY_RUN is the deliberate, expected default and
+           needs no shouting badge); shown only when any_account_live
+           comes back true from the server, so this can never go stale
+           the way the old hardcoded "DRY_RUN" header text could have. */
+        .plan-state-badge.mode-live { background: var(--red); color: #1a0d0a; }
         .traveler-state-panel { display: none; border: 1px solid var(--border); background: var(--panel); border-radius: 6px; padding: 12px 20px; margin-bottom: 24px; font-family: 'JetBrains Mono'; opacity: 0.9; }
 
         .radar-grid { display: grid; gap: 12px; }
@@ -422,7 +428,8 @@
 
         <div id="travelerStatePanel" class="traveler-state-panel">
             <div class="plan-state-row">
-                <span style="color:#6b5a47; font-size:11px; text-transform:uppercase; letter-spacing:1px;">Traveler (evaluation, DRY_RUN)</span>
+                <span style="color:#6b5a47; font-size:11px; text-transform:uppercase; letter-spacing:1px;">Traveler (evaluation)</span>
+                <span id="travelerStateMode" class="plan-state-badge mode-live" style="display:none;" title="A GATE_TRAVELER account is currently set to LIVE -- this journey can place real orders.">LIVE</span>
                 <span id="travelerStateBadge" class="plan-state-badge"></span>
                 <span id="travelerStateDetail" class="plan-state-detail"></span>
             </div>
@@ -1533,12 +1540,19 @@
         // refusal was removed 2026-09-20 (site c7243ef); a LIVE-mode
         // GATE_TRAVELER account with the global switch on and a saved
         // sizing preset places real orders today (executor_engine.py::
-        // _process_traveler_account()). No account is currently flipped
-        // LIVE, which is the actual (deliberate, human) reason this stays
-        // observability-only, not a code-level guarantee.
+        // _process_traveler_account()). The header used to hardcode the
+        // text "DRY_RUN", which would have gone silently stale the moment
+        // an account was actually flipped LIVE -- fixed same day (audit
+        // Finding 2 follow-up) by having the server report a real
+        // `any_account_live` check (any active ExecutorAccount actually
+        // running GATE_TRAVELER in LIVE mode) and showing a LIVE badge only
+        // when that's genuinely true, instead of a fixed label either way.
         function renderTravelerState(row) {
             const panel = document.getElementById('travelerStatePanel');
             if (!row) { panel.style.display = 'none'; return; }
+
+            const modeEl = document.getElementById('travelerStateMode');
+            modeEl.style.display = row.any_account_live ? 'inline-block' : 'none';
 
             const badge = document.getElementById('travelerStateBadge');
             badge.textContent = row.status;
@@ -1547,7 +1561,17 @@
             const bits = [];
             if (row.direction) bits.push(row.direction);
             if (row.cross_price != null) bits.push('cross @ ' + _fmtLevel(row.cross_price));
-            if (row.status === 'FILLED' && row.fill_price != null) bits.push('filled @ ' + _fmtLevel(row.fill_price));
+            // "(bookkeeping)" caveat -- audit Finding 2. This fill_price is
+            // TravelerPlan's own gate-abstraction bookkeeping value (the
+            // trigger price at the wick-touch cross-confirm moment, same
+            // convention v2's own already-caveated panel above uses), NOT
+            // necessarily when a real resting order actually fills on the
+            // exchange. Unlike the LIVE badge above, this ambiguity is
+            // permanent and mode-independent -- it exists in DRY_RUN today
+            // and stays true after go-live too, so this caveat never goes
+            // stale and needs no further update when a real account flips
+            // LIVE (see AGENT_LOG.md 2026-09-22 for the full reasoning).
+            if (row.status === 'FILLED' && row.fill_price != null) bits.push('filled @ ' + _fmtLevel(row.fill_price) + ' (bookkeeping)');
             document.getElementById('travelerStateDetail').textContent = bits.join(' · ');
 
             document.getElementById('travelerStateReason').textContent = row.last_transition_reason || '';
@@ -1555,7 +1579,7 @@
             const staleness = row.seconds_since_update != null ? Math.round(row.seconds_since_update) + 's ago' : 'unknown';
             const parts = ['live · updated ' + staleness];
             if (row.cross_time) parts.push('cross ' + _parseServerTimestamp(row.cross_time).toLocaleString());
-            if (row.status === 'FILLED' && row.fill_time) parts.push('filled ' + _parseServerTimestamp(row.fill_time).toLocaleString());
+            if (row.status === 'FILLED' && row.fill_time) parts.push('filled ' + _parseServerTimestamp(row.fill_time).toLocaleString() + ' (bookkeeping)');
             if (row.journey_cap_at) parts.push('journey cap ' + _parseServerTimestamp(row.journey_cap_at).toLocaleDateString());
             document.getElementById('travelerStateAsOf').textContent = parts.join(' · ');
 

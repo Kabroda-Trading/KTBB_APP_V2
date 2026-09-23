@@ -1247,13 +1247,37 @@ async def api_admin_traveler_plan_status(request: Request, db: Session = Depends
     active, still-live journey -- a real case in production as of
     2026-09-19 (TravelerPlan id 2, crossed 09-18, still WAITING_TOUCH
     on 09-19). Returns the single most-recently-touched row instead, which
-    is always the current journey regardless of which day it started."""
+    is always the current journey regardless of which day it started.
+
+    2026-09-22: each row also carries `any_account_live` -- a real,
+    freshly-queried check (not a cached/hardcoded assumption) of whether
+    any active ExecutorAccount is actually running GATE_TRAVELER in LIVE
+    mode right now. Added so the radar panel can show a genuine LIVE
+    indicator instead of a fixed "DRY_RUN" label that would have gone
+    stale the moment an account was flipped LIVE (audit Finding 2
+    follow-up, AGENT_LOG.md same date)."""
     ctx = get_user_context(request, db)
     if not ctx.get("is_admin"):
         return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
 
     from database import TravelerPlan as _TravelerPlan
+    from database import ExecutorAccount as _ExecutorAccount
     row = db.query(_TravelerPlan).order_by(_TravelerPlan.id.desc()).first()
+
+    # 2026-09-22 audit Finding 2 follow-up (Andy's own question: will the
+    # radar mislead once we go live?): GATE_TRAVELER stopped being
+    # structurally DRY_RUN-only 2026-09-20 (c7243ef) -- a LIVE-mode account
+    # with this profile places real orders today. The panel used to
+    # hardcode "DRY_RUN" in its header with no way to know if that was
+    # still true. Real, cheap, read-only check instead of a fixed label:
+    # is any active account actually running GATE_TRAVELER in LIVE mode
+    # right now? Same thin-surface pattern as the rest of this route --
+    # read DB state only, no exchange call.
+    any_account_live = db.query(_ExecutorAccount).filter(
+        _ExecutorAccount.is_active == True,
+        _ExecutorAccount.gate_profile == "GATE_TRAVELER",
+        _ExecutorAccount.mode == "LIVE",
+    ).first() is not None
 
     now_utc = datetime.now(timezone.utc)
 
@@ -1281,6 +1305,7 @@ async def api_admin_traveler_plan_status(request: Request, db: Session = Depends
             "last_transition_reason": row.last_transition_reason,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
             "seconds_since_update": _seconds_stale(row.updated_at),
+            "any_account_live": any_account_live,
         })
 
     return JSONResponse({"ok": True, "server_time": now_utc.isoformat(), "rows": out})

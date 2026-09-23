@@ -24,8 +24,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 import database
-from database import SessionLocal, UserModel, TravelerPlan
+from database import SessionLocal, UserModel, TravelerPlan, ExecutorAccount
 import auth
+import executor_accounts as ea
 from main import app
 
 
@@ -86,6 +87,15 @@ def _make_plan(db, **kwargs):
     return row
 
 
+def _make_account(db, user_id, mode="DRY_RUN", gate_profile=None, is_active=True):
+    account = ea.create_account(db, user_id=user_id, label="radar_test_acct")
+    account.mode = mode
+    account.gate_profile = gate_profile
+    account.is_active = is_active
+    db.commit()
+    return account
+
+
 def test_traveler_plan_status_requires_admin(env):
     client = _login("radar_nonadmin@kabroda.com", "plainpass123")
     resp = client.get("/api/admin/traveler-plan-status")
@@ -117,6 +127,7 @@ def test_traveler_plan_status_returns_real_fields(env):
     assert row["fill_price"] is None
     assert row["journey_cap_at"] is not None
     assert "seconds_since_update" in row
+    assert row["any_account_live"] is False  # no accounts exist at all yet
 
 
 def test_traveler_plan_status_surfaces_a_multi_day_active_journey(env):
@@ -160,3 +171,67 @@ def test_traveler_plan_status_shows_fill_fields_when_filled(env):
     # journey -- confirms the endpoint never conflates the two fields the
     # way v2's trigger_price/fill_price collapse to the same value.
     assert row["cross_price"] == 81414.10
+
+
+# 2026-09-22 audit Finding 2 follow-up -- Andy's own question ("will the
+# radar mislead once we go live?") surfaced that the panel's header
+# hardcoded "DRY_RUN" with no real check behind it. `any_account_live` is
+# a genuine, freshly-queried read of ExecutorAccount state, not a fixed
+# label -- these tests prove it actually discriminates on mode, profile,
+# AND is_active, not just "does any account exist."
+
+def test_traveler_plan_status_any_account_live_false_with_no_accounts(env):
+    _make_plan(env["db"])
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/traveler-plan-status")
+    row = resp.json()["rows"][0]
+    assert row["any_account_live"] is False
+
+
+def test_traveler_plan_status_any_account_live_true_for_live_traveler_account(env):
+    _make_plan(env["db"])
+    admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()
+    _make_account(env["db"], admin_user.id, mode="LIVE", gate_profile="GATE_TRAVELER")
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/traveler-plan-status")
+    row = resp.json()["rows"][0]
+    assert row["any_account_live"] is True
+
+
+def test_traveler_plan_status_any_account_live_false_for_live_v2_account(env):
+    # A LIVE account running the OTHER profile (v2/GATE_V2, gate_profile
+    # None per its own documented default) must NOT false-positive the
+    # traveler panel's LIVE badge -- proves the profile filter is doing
+    # real work, not just the mode filter.
+    _make_plan(env["db"])
+    admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()
+    _make_account(env["db"], admin_user.id, mode="LIVE", gate_profile=None)
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/traveler-plan-status")
+    row = resp.json()["rows"][0]
+    assert row["any_account_live"] is False
+
+
+def test_traveler_plan_status_any_account_live_false_for_dry_run_traveler_account(env):
+    # A GATE_TRAVELER account that exists but is still DRY_RUN must not
+    # light up the LIVE badge -- proves the mode filter, not just the
+    # profile filter, is doing real work.
+    _make_plan(env["db"])
+    admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()
+    _make_account(env["db"], admin_user.id, mode="DRY_RUN", gate_profile="GATE_TRAVELER")
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/traveler-plan-status")
+    row = resp.json()["rows"][0]
+    assert row["any_account_live"] is False
+
+
+def test_traveler_plan_status_any_account_live_false_for_inactive_live_traveler_account(env):
+    # A LIVE GATE_TRAVELER account that's been deactivated must not still
+    # light up the badge.
+    _make_plan(env["db"])
+    admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()
+    _make_account(env["db"], admin_user.id, mode="LIVE", gate_profile="GATE_TRAVELER", is_active=False)
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/traveler-plan-status")
+    row = resp.json()["rows"][0]
+    assert row["any_account_live"] is False
