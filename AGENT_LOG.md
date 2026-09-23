@@ -6316,3 +6316,44 @@ management events), both scoped yesterday as genuinely buildable, new/additive
 features with no existing code at risk.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-23 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: admin-manageable email distribution list -- roadmap step 2a
+STATUS: resolved. Site commit `d12cef0`, pushed to `origin/main`.
+
+New `EmailSubscriber` table + two admin routes (add/remove) + a new admin.html
+section + `notify.py::send_admin_email()` now sends to the UNION of `SMTP_DEST`'s
+addresses and every active `EmailSubscriber` row, deduped case-insensitively,
+queried fresh on every send (no caching, no restart needed for an add/remove to
+take effect). Purely additive -- `SMTP_DEST` keeps working exactly as before; this
+is a second recipient source merged in, not a replacement. No site login required
+to be on the list (deliberately no FK to `UserModel` -- list membership and a site
+account are two different things, matching Andy's own framing: add someone to get
+the emails, separately from whether they'd ever log into the executor).
+
+20 new tests, two independent mutation checks (mine on the merge logic, a separate
+verification agent's on the reactivation logic -- both confirmed the tests actually
+fail when the corresponding behavior is broken, with a full restore-and-reverify
+after). 785 tests pass (was 764), same 5 pre-existing unrelated
+`test_dashboard_fixes.py` errors, clean boot with the new table auto-created via
+`create_all()` (no `ALTER TABLE` needed, genuinely new table).
+
+**Independently re-verified before committing** (Andy's standing instruction this
+session -- "use the agents for accountability... in the processes"): a separate
+subagent traced `_db_subscriber_recipients()`'s exception-safety by hand (confirmed
+it truly cannot raise, not just per its docstring), confirmed the dedup preserves
+first-seen casing, and ran its own mutation test on the reactivation logic
+(disabled the `if existing:` branch, watched `test_add_email_subscriber_
+reactivates_a_previously_removed_row` fail with a real `IntegrityError` on the
+unique constraint, then restored and reverified). Found one real, non-blocking
+nitpick: `admin_delete_email_subscriber`'s `int(subscriber_id)` had no try/except,
+so a non-numeric id fell through to the generic HTML 500 handler instead of a clean
+JSON error the admin.html JS could actually parse. Fixed in this same commit, with
+its own new test, since it was a one-line, zero-risk correction -- not left for a
+follow-up.
+
+**Roadmap status**: step 2a (email list) done. Next: step 2b -- the D3 live-event
+feed (radar + email for real-time management events), already scoped as a small-to-
+medium addition with no new domain logic needed (the granular state already
+exists on `ExecutorOrder`).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
