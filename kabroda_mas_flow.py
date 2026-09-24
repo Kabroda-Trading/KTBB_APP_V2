@@ -265,16 +265,17 @@ def _compute_session_expires_at(session_id: str, date_key: str) -> datetime:
     per owner specification. pytz.localize() handles DST automatically so the
     UTC offset is correct year-round (EDT = UTC-4, EST = UTC-5).
 
-    DEFERRED-DEAD as of 2026-09-24 (V2 Crown retirement, Step 3e): this
-    function's only remaining caller in THIS file (_inject_brief_to_
-    database()) is removed in the same edit pass as the V2 decision block
-    above. But trade_plan_engine.py still imports this function at MODULE
-    LEVEL (`from kabroda_mas_flow import _compute_session_expires_at`),
-    and that file is V2-only but scheduled for deletion in Step 3f, not
-    this one. Deleting this function (or _NY_TZ/_SESSION_CLOSE_ET below)
-    now would break trade_plan_engine.py's import before its own
-    scheduled removal. Leave all three exactly as-is until Step 3f
-    deletes their last real caller.
+    DEFERRED-DEAD as of 2026-09-24 (V2 Crown retirement): this function's
+    only remaining caller in THIS file (_inject_brief_to_database()) was
+    removed in Step 3e along with the V2 decision block above.
+    trade_plan_engine.py (Step 3e's original reason to defer this) is
+    itself now deleted (Step 3f-i), but executor_live_engine.py:224 still
+    imports this function lazily (`from kabroda_mas_flow import
+    _compute_session_expires_at`) -- that file is V2-only but scheduled
+    for deletion in Step 3f-ii, not yet done. Leave this function (and
+    _NY_TZ/_SESSION_CLOSE_ET below) exactly as-is until 3f-ii deletes its
+    last real caller -- re-verified 2026-09-24, don't assume this comment
+    is still accurate without grepping again first.
     """
     close_h, close_m = _SESSION_CLOSE_ET.get(session_id, (15, 0))
     date = datetime.strptime(date_key, "%Y-%m-%d")
@@ -298,10 +299,11 @@ def _inject_traveler_plan_to_database(
     breakout_trigger: float, breakdown_trigger: float,
     r30_high: float, r30_low: float, rsi_4h_at_lock: Optional[float],
 ) -> None:
-    """Create-only upsert for TravelerPlan -- same anti-flip-flop reasoning
-    as _inject_trade_plan_to_database() above (a restart-recovery re-run of
-    run_mas_analysis() must never overwrite a row the polling loop may
-    already have advanced). Unconditional WAITING_CROSS write whenever real
+    """Create-only upsert for TravelerPlan -- anti-flip-flop: a restart-
+    recovery re-run of run_mas_analysis() must never overwrite a row the
+    polling loop may already have advanced (the same reasoning the now-
+    deleted V2 TradePlan writer used to share this docstring with).
+    Unconditional WAITING_CROSS write whenever real
     levels exist -- GATE_TRAVELER has no lock-time gate to evaluate (its
     only gate, trigger-touch-fill + tercile-skip, is evaluated at the real cross
     by traveler_plan_engine.py), so there's no NO_PLAN-equivalent state

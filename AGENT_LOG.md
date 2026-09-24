@@ -7024,3 +7024,71 @@ Next: 3f -- the main deletion pass, now also carrying the four deferred
 executor-stack edits.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-24 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: main V2 deletion pass, sub-cluster 3f-i of 3f-v -- roadmap step 3, sub-step 3f
+STATUS: resolved.
+
+**A fresh full re-verification pass** (direct grep against current
+source, not the retirement map's own file/test lists) found the map's
+inventory incomplete in real, non-cosmetic ways and surfaced one genuine
+ordering hazard. Split 3f into five sub-clusters (3f-i..3f-v, see the
+local plan file for the full breakdown); this entry covers 3f-i, the
+fully self-contained V2 decision-layer cluster.
+
+**Deleted (zero live importers outside this cluster, confirmed via
+grep)**: `decision_engine.py`, `htf_fuel.py`, `market_regime.py`,
+`micro_regime.py`, `reachability.py`, `fuel_gate.py` (zero importers at
+all), `stop_planner.py`, `trade_plan.py`, `trade_plan_notify.py`,
+`trade_plan_engine.py`, `market_radar.py` (replaced by
+`traveler_radar.py` in Step 1).
+
+**Real gaps the retirement map's glob-based test list missed** (found by
+grepping each module's actual importers, not trusting the name pattern):
+`tests/test_anticipate_setup.py` and `tests/test_executor_engine.py`
+(confirmed 100% V2-only via grep -- every test in the latter uses
+`TradePlan`, zero `TravelerPlan` reference anywhere). A THIRD gap only
+surfaced by actually running the suite after deleting: `tests/
+test_notify_trade_plan_endpoint.py` tested the removed `/api/admin/
+test-notify-trade-plan` route via HTTP calls, not Python imports -- my
+import-based grep sweep structurally couldn't see it. Lesson for the
+remaining sub-clusters: grep for the route STRING too, not just module
+imports, before assuming a file list is complete.
+
+**`main.py` routes removed**: `/api/radar/snapshot`, `/api/radar/scan`,
+`/api/admin/trade-plan-status`, and **`/api/admin/test-notify-trade-
+plan`** (a 4th real gap -- not in the retirement map's named route list;
+fired `trade_plan_notify.py` test emails from a `TradePlan` row).
+Removed the now-dead `import market_radar` module-level import.
+
+**Real ordering hazard found and avoided**: `harness/audit_writer.py`/
+`harness/unified_audit_writer.py` looked orphaned (their kabroda_mas_
+flow.py call sites died in 3e) but `ledger_closing_engine.py` (3f-iii,
+not yet done) still has 8 live, non-blocking lazy imports of
+`backfill_outcome()`/`backfill_decision_outcome()` from them. Deferred
+both to 3f-iii instead of deleting now -- wouldn't have crashed anything
+(try/except-wrapped) but would've left a silent failure gap.
+
+**A second, similar hazard, re-verified rather than assumed**:
+`kabroda_mas_flow.py`'s `_compute_session_expires_at()`/`_NY_TZ`/
+`_SESSION_CLOSE_ET` were deferred in 3e specifically because
+`trade_plan_engine.py` imported them at module level. That file is now
+gone, but before deleting these three I re-grepped and found
+`executor_live_engine.py:224` (3f-ii, not yet done) has its own live lazy
+import of the same function -- updated the DEFERRED-DEAD comment to cite
+the real current reason instead of leaving it pointing at a file that no
+longer exists.
+
+**Verification**: full suite 567 passed (731 - 159 cluster tests - 5
+newly-found gap = 567, arithmetic confirmed exact), clean `python -c
+"import main"`, a real `TestClient` boot confirming `/suite/radar` (200)
+and `/api/radar/traveler-snapshot` (200) still work while `/api/radar/
+snapshot` and `/api/radar/scan` now 404, clean shutdown.
+
+**Roadmap status**: 3f-i of 3f-v done. Next: 3f-ii (executor_engine.py/
+executor_plan_builder.py/executor_live_engine.py/dry_run_split_engine.py/
+mgmt_split_dry_run.py cluster) -- this one has a real test-coverage gap
+to backfill BEFORE deleting (build_hypothetical_traveler_order()'s kill-
+switch/inactive-account gating has zero direct test coverage anywhere;
+see the plan file's 3f-ii section for the full evidence).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

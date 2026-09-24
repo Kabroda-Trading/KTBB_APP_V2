@@ -24,7 +24,10 @@ from pydantic import BaseModel
 # --- CORE IMPORTS ---
 import auth
 import battlebox_pipeline
-import market_radar
+# market_radar module-level import removed 2026-09-24 (V2 Crown
+# retirement, Step 3f-i) -- the file itself is deleted (replaced by
+# traveler_radar.py, Step 1); main.py's last two call sites
+# (/api/radar/snapshot, /api/radar/scan) are removed in the same pass.
 import traveler_radar
 import gravity_engine
 import gravity_math
@@ -851,136 +854,12 @@ async def api_gravity_scan(symbol: str = "BTC/USDT"):
 # wants zero of anywhere near the 15M decision. Gone, not archived-in-place.
 
 
-@app.get("/api/radar/snapshot")
-async def api_radar_snapshot(db: Session = Depends(get_db)):
-    """
-    Phase 1 of the two-phase radar render. Pure DB reads — zero exchange I/O.
-    Returns: locked session levels + MAS status. Target response time: < 100ms.
-    Called before POST /api/radar/scan so the UI can render structural truth
-    instantly while live MTF data loads in the background.
-
-    2026-08-30: MtfReading and JewelSnapshotLog reads removed -- both tables'
-    only writers (the old confluence vote-tally / JEWEL system) are retired.
-    mtf_cached / jewel_gate_open below are always empty now; kept as response
-    keys (not removed from the JSON shape) so nothing downstream that reads
-    this endpoint breaks on a missing key, but there is nothing left to
-    populate them and there won't be again.
-
-    2026-08-30 (later): `today` fixed to use the session's own date_key
-    (anchored to the 13:00 UTC lock) instead of raw UTC calendar midnight --
-    the two disagree for 13 hours every single day (00:00-13:00 UTC), during
-    which this route was missing the still-active SessionLock entirely and
-    showing "not locked" for a session that really was. See market_radar.py's
-    _current_session_date_key() for the full writeup (found and fixed there
-    first, then found here too).
-    """
-    today = session_manager.resolve_current_session(datetime.now(timezone.utc), "AUTO")["date_key"]
-    symbol_norm = "BTC/USDT"
-    symbol_raw  = "BTCUSDT"
-
-    # 1. Today's session lock — locked levels are the SSOT
-    lock = db.query(SessionLock).filter(
-        SessionLock.symbol == symbol_norm,
-        SessionLock.session_id == "us_ny_futures",
-        SessionLock.date_key == today,
-    ).first()
-
-    levels = {}
-    price = 0.0
-    confluence_scan = {}
-    if lock:
-        try:
-            pkt = json.loads(lock.packet_data)
-            levels = pkt.get("levels", {})
-            price = float(levels.get("anchor_price") or 0)
-            # Already computed once at lock and stored -- no live fetch needed,
-            # keeps this endpoint's "Phase 1, zero exchange I/O" contract intact.
-            confluence_scan = pkt.get("context", {}).get("confluence_scan", {})
-        except Exception:
-            pass
-
-    mtf_cached: dict = {}
-    jewel_gate_open = None
-
-    # 2. Today's MAS verdict — for the status badge and cockpit pre-population
-    campaign = db.query(CampaignLog).filter(
-        CampaignLog.symbol == symbol_norm,
-        CampaignLog.date_key == today,
-        CampaignLog.is_canonical == True,
-    ).order_by(CampaignLog.id.desc()).first()
-
-    mas_status = campaign.mas_approval_status if campaign else None
-    conviction = campaign.conviction if campaign else None
-    plan = None
-    if campaign and campaign.entry_price:
-        plan = {
-            "bias":        campaign.bias,
-            "entry_price": campaign.entry_price,
-            "stop_loss":   campaign.stop_loss,
-            "t1":          campaign.t1,
-            "t2":          campaign.t2,
-            "t3":          campaign.t3,
-        }
-
-    # 5. TF system verdicts (15M only -- 1H/4H retired) and which-TF-today decision
-    tf_verdicts = market_radar._get_tf_system_verdicts(symbol_norm)
-    tf_today    = market_radar._which_tf_today(tf_verdicts)
-
-    # 6. Daily regime (the real, validated read -- market_regime.py, from the
-    # most recent GateLog row) + weekly 200 SMA position (real, separate,
-    # live infrastructure -- battlebox_pipeline._fetch_weekly_200sma(), still
-    # read from the audit row). The old daily_regime heuristic
-    # (_compute_daily_regime(), EMA-slope + 200SMA-position guessing) is
-    # removed -- kabroda.com now shows what was actually calibrated and
-    # tested, not a separate, never-validated label (Andy's call, 2026-08-30).
-    daily_regime = "—"
-    weekly_200sma_position = "—"
-    from database import SessionAuditLog as _SAL, GateLog as _GL
-    audit_row = db.query(_SAL).filter(
-        _SAL.symbol == symbol_norm,
-    ).order_by(_SAL.id.desc()).first()
-    if audit_row:
-        weekly_200sma_position = getattr(audit_row, "weekly_200sma_position", None) or "—"
-    gate_row = db.query(_GL).filter(
-        _GL.symbol == symbol_norm,
-        _GL.daily_regime_table.isnot(None),
-    ).order_by(_GL.id.desc()).first()
-    if gate_row:
-        daily_regime = gate_row.daily_regime_table
-        if gate_row.daily_regime_quality:
-            daily_regime = f"{daily_regime} ({gate_row.daily_regime_quality})"
-
-    return JSONResponse({
-        "ok":                    True,
-        "locked":                lock is not None,
-        "symbol":                symbol_raw,
-        "price":                 price,
-        "levels":                levels,
-        "mtf_cached":            mtf_cached,
-        "jewel_gate_open":       jewel_gate_open,
-        "mas_status":            mas_status,
-        "conviction":            conviction,  # TAKE/PASS (calibrated gate, v2)
-        "plan":                  plan,
-        "tf_verdicts":           tf_verdicts,
-        "tf_today":              tf_today,
-        "daily_regime":          daily_regime,
-        "weekly_200sma_position": weekly_200sma_position,
-        "confluence_scan":       confluence_scan,  # real 21/55 EMA + BBWP/PMARP + divergence per timeframe
-        # 2026-09-01 (Kabroda AI Brain AGENT_LOG.md, "deploy verified +
-        # backfill row written by the Brain", residual item 1): this
-        # endpoint is Phase 1 BY DESIGN -- pure DB reads, zero exchange
-        # I/O, <100ms (see its own docstring) -- `price`/`plan`/
-        # `tf_verdicts` above are the 8:00 lock snapshot, not live. That
-        # was previously silent, which read as staleness rather than
-        # design. Made explicit here instead of changing the contract:
-        # live price is POST /api/radar/scan; live TradePlan intraday
-        # state (the real dual-sided detection + full gate) is GET
-        # /api/admin/trade-plan-status (admin session).
-        "price_as_of":           "lock",
-        "lock_time_utc":         (datetime.fromtimestamp(lock.lock_time, tz=timezone.utc).isoformat() if lock else None),
-        "live_price_endpoint":   "/api/radar/scan",
-        "live_state_endpoint":   "/api/admin/trade-plan-status",
-    })
+# /api/radar/snapshot removed 2026-09-24 (V2 Crown retirement, Step 3f-i) --
+# the old Phase-1-of-two-phase-render endpoint (CampaignLog verdict + TF
+# system verdicts + market_radar.py daily-regime helpers). Replaced by
+# GET /api/radar/traveler-snapshot (Step 1, already live) -- this route's
+# own docstring pointed callers at /api/radar/scan/"/api/admin/trade-plan-
+# status" as its live-data companions, both also removed in this same pass.
 
 
 @app.get("/api/radar/traveler-snapshot")
@@ -1070,98 +949,13 @@ async def api_admin_test_notify(request: Request, db: Session = Depends(get_db))
     })
 
 
-@app.post("/api/admin/test-notify-trade-plan")
-async def api_admin_test_notify_trade_plan(
-    request: Request, plan_id: int, event: str = "lock", db: Session = Depends(get_db)
-):
-    """
-    Fires one real Trade Plan email (trade_plan_notify.py) built from an
-    ACTUAL TradePlan row, so its real formatting can be verified before
-    relying on it live -- the plan-specific test fire Andy's build
-    request asked for, as an alternative to extending /api/admin/test-
-    notify with synthetic content. Admin only.
-
-    event: one of "lock" | "armed" | "vetoed" | "done" -- picks which
-    builder in trade_plan_notify.py to use against the real row. "lock"
-    now always sends regardless of the row's actual status (2026-09-02 --
-    see trade_plan_notify.py's module header for why the old WAITING-only
-    gate was reversed).
-    """
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
-
-    from database import TradePlan as _TradePlan
-    row = db.query(_TradePlan).filter(_TradePlan.id == plan_id).first()
-    if row is None:
-        return JSONResponse({"ok": False, "error": f"No TradePlan row with id={plan_id}"}, status_code=404)
-
-    import notify
-    import trade_plan_notify
-    builders = {
-        "lock": trade_plan_notify.build_lock_email,
-        "armed": trade_plan_notify.build_armed_email,
-        "vetoed": trade_plan_notify.build_vetoed_email,
-        "done": trade_plan_notify.build_done_email,
-    }
-    builder = builders.get(event)
-    if builder is None:
-        return JSONResponse({"ok": False, "error": f"Unknown event '{event}' -- use one of {list(builders)}"}, status_code=400)
-
-    mail = builder(row.__dict__)
-    if mail is None:
-        return JSONResponse({"ok": False, "error": f"'{event}' email does not apply to this row's current status ({row.status})"})
-
-    subject, body = mail
-    ok = await asyncio.to_thread(notify.send_admin_email, subject, body)
-    return JSONResponse({"ok": ok, "subject": subject, "plan_id": plan_id, "event": event})
-
-
-@app.get("/api/admin/trade-plan-status")
-async def api_admin_trade_plan_status(request: Request, db: Session = Depends(get_db)):
-    """P0 diagnostic (2026-09-01, Kabroda AI Brain AGENT_LOG.md, 'CONFIRMED
-    P0: state machine missed a live cross'): TradePlan's real intraday
-    state was invisible everywhere -- /api/radar/snapshot's `plan` field
-    reads CampaignLog (lock-time only, never updated intraday), and
-    nothing public ever surfaced TradePlan.status/last_transition_reason
-    at all. This is read-only visibility into the real row while the
-    root cause is investigated -- includes a staleness indicator
-    (seconds since the row last changed) per DeepSeek's own remediation
-    item #3, so a frozen row is now detectable instead of silently
-    assumed current. Admin only.
-    """
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
-
-    from database import TradePlan as _TradePlan
-    today = session_manager.resolve_current_session(datetime.now(timezone.utc), "AUTO")["date_key"]
-    rows = db.query(_TradePlan).filter(_TradePlan.date_key == today).order_by(_TradePlan.id.desc()).all()
-
-    now_utc = datetime.now(timezone.utc)
-
-    def _seconds_stale(dt):
-        if dt is None:
-            return None
-        d = dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
-        return round((now_utc - d).total_seconds(), 1)
-
-    out = []
-    for r in rows:
-        out.append({
-            "id": r.id, "symbol": r.symbol, "session_id": r.session_id,
-            "status": r.status, "direction": r.direction, "tier": r.tier,
-            "trigger_price": r.trigger_price, "stop_price": r.stop_price,
-            "t1": r.t1, "t2": r.t2, "t3": r.t3,
-            "cross_time": r.cross_time.isoformat() if r.cross_time else None,
-            "fuel_at_cross": r.fuel_at_cross,
-            "fill_time": r.fill_time.isoformat() if r.fill_time else None,
-            "last_transition_reason": r.last_transition_reason,
-            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-            "seconds_since_update": _seconds_stale(r.updated_at),
-        })
-
-    return JSONResponse({"ok": True, "date_key": today, "server_time": now_utc.isoformat(), "rows": out})
+# /api/admin/test-notify-trade-plan and /api/admin/trade-plan-status
+# removed 2026-09-24 (V2 Crown retirement, Step 3f-i) -- both were
+# TradePlan-only diagnostics (one fired trade_plan_notify.py test emails
+# from a real row, the other surfaced TradePlan's intraday state machine
+# for admin visibility). Their Traveler-native counterpart,
+# /api/admin/traveler-plan-status, already covers the same "live plan
+# state for admin visibility" need and is untouched below.
 
 
 @app.get("/api/admin/traveler-plan-status")
@@ -2670,15 +2464,14 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
 # /api/dmr/live removed 2026-08-30 -- returned battlebox_pipeline.py's entire
 # unfiltered get_live_battlebox() payload, but had zero frontend callers
 # (grepped every template/JS, nothing fetches it) and zero test coverage.
-# Andy's call: archive it. market_radar.py's own routes (/api/radar/snapshot,
-# /api/radar/scan) are the real, live consumers of battlebox_pipeline.py now.
+# Andy's call: archive it.
 
-@app.post("/api/radar/scan")
-async def run_radar_scan(request: Request):
-    print("[RADAR] scan endpoint called")
-    results = await market_radar.scan_sector()
-    print(f"[RADAR] returning {len(results)} results")
-    return {"ok": True, "results": results}
+# /api/radar/scan removed 2026-09-24 (V2 Crown retirement, Step 3f-i) --
+# market_radar.py's own live-MTF-rescan endpoint, the "Phase 2" companion
+# to the also-removed /api/radar/snapshot. The Traveler's own polling
+# engine IS the live state (traveler_plan_engine.py), so there's no
+# separate on-demand rescan concept for it -- GET /api/radar/traveler-
+# snapshot (Step 1) reads that live state directly instead.
 
 # /api/research/run removed 2026-08-30 -- see the /suite/research-lab
 # removal note above.
