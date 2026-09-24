@@ -1,9 +1,11 @@
 # mgmt_e1_stack.py
 # ==============================================================================
 # MGMT_E1_STACK -- D3 management for the traveler-candidate lineage. Pure
-# functions only (same convention as gate_traveler.py/trade_plan.py), the
-# caller (executor_live_engine.py's DRY_RUN walk) owns persistence and
-# candle fetching.
+# functions only (same convention as gate_traveler.py), the caller
+# (traveler_plan_engine.py's DRY_RUN walk, executor_live_e1_engine.py's
+# LIVE poll) owns persistence and candle fetching. (2026-09-24, V2 Crown
+# retirement: this comment used to cite executor_live_engine.py/
+# trade_plan.py, both deleted -- corrected to the real callers.)
 #
 # Built 2026-09-15 per CC_WORK_ORDER_PHASE2.md step 4, against the frozen
 # source -- `lab_touchfill_arms.py::walk_from_fill()` (Kabroda AI Brain

@@ -7289,3 +7289,79 @@ update "What Must Never Be Changed," update "The Decision Layer"
 section). This is the last sub-step of the whole V2 retirement.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-24 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: full CLAUDE.md pass, sub-cluster 3f-v of 3f-v -- roadmap step 3, sub-step 3f-v (LAST SUB-STEP) — V2 CROWN RETIREMENT COMPLETE
+STATUS: resolved.
+
+**This is the last sub-step of the whole V2 Crown retirement roadmap
+(3a through 3f-v).** No DB tables were dropped -- per this file's own
+"no migration framework, leave the table" convention, dropping was
+always optional, not required, and none of the tables (`CampaignLog`/
+`GateLog`/`DecisionJournal`/`SessionAuditLog`/`DecisionGaugeReading`)
+needed it: they're already write-frozen (their only writers are
+deleted) and documented as such.
+
+**CLAUDE.md rewritten** to stop describing retired V2 Crown machinery
+as live:
+- "Strategic Direction" header updated from "authorized for
+  retirement" (future) to "fully retired" (done) -- lists every deleted
+  file/table by name as the completion record.
+- "The Calibrated Gate" section retitled to explicit HISTORY status
+  ("every file this section names is deleted") rather than silently
+  left describing live code -- kept as historical record (old `GateLog`
+  rows, git archaeology) per this project's own "measured backtest
+  results are worth preserving, not silently deleting" discipline.
+- "The Decision Layer" section rewritten around what's ACTUALLY live
+  now: `gate_traveler.py` (D1/D2, one real call site --
+  `traveler_plan_engine.py` -- a genuine architectural simplification
+  over V2's old "three call sites must never disagree" fragility) and
+  `mgmt_e1_stack.py` (D3, single full-exit, STOP > C5/BBWP > T1 > TIME
+  priority order, promoted to one shared module so DRY_RUN and LIVE
+  never drift on vocabulary).
+- **"What Must Never Be Changed" fully rewritten** around the
+  Traveler's real invariants (trigger-touch-fill entry, the frozen
+  tercile cuts, no reachability check for this lineage, the exit
+  priority order, the stop/T1 formula now living in `gate_traveler.py`,
+  the session lock, `_inject_traveler_plan_to_database()`'s CREATE-ONLY
+  semantics -- explicitly the OPPOSITE convention from the retired V2
+  upsert, so a future reader doesn't copy the wrong pattern --
+  `mas_completed_at`'s unconditional-set rule from 3d, Class 0 KDE
+  weighting, symbol normalization).
+- Fixed several smaller staleness items found while touching adjacent
+  text: `ANTHROPIC_API_KEY`'s comment (still described the long-gone
+  6-agent CrewAI crew; confirmed via grep nothing live still calls
+  `agent_core._call_agent()` at all -- the env var is effectively
+  vestigial today, flagged rather than silently left describing dead
+  functionality), `GATE_LOG_EXPORT_API_KEY`'s comment (pointed at the
+  deleted gate-log.csv route instead of its real traveler-log.csv
+  reuse), the test-suite count (170+ from 2026-08-31 -- actually 513
+  now), "Background Tasks" (still described the deleted Ledger Closing
+  Loop as one of only "two" tasks, when there are several more that
+  section never mentioned either).
+- Also fixed a stale comment inside `mgmt_e1_stack.py` itself (cited
+  the deleted `executor_live_engine.py`/`trade_plan.py` as its
+  convention-sharing peers and DRY_RUN-walk caller; corrected to the
+  real files).
+
+**Verification**: full suite 513 passed (unchanged -- doc-only changes
+plus one comment fix), clean `python -c "import main"`.
+
+**Roadmap status: V2 Crown retirement (Step 3, sub-steps 3a-3f-v) is
+now fully complete.** Andy's 2026-09-23 ruling is fully executed: the
+Traveler is Kabroda's sole live decision system, V2 Crown's code no
+longer exists in the repository. Summary of the whole pass across both
+AGENT_LOGs, 2026-09-23 through 2026-09-24: 3a (Traveler forward-test
+export) → 3b (Audit-AI retirement) → 3c (executor_mechanism_test.py
+retirement) → 3d (Senior Analyst dedup fix, a real completion-marker
+column, not the naive existence-check swap first proposed) → 3e
+(kabroda_mas_flow.py's V2 block + main.py's dead background tasks,
+with a real scope correction moving most of the originally-planned
+executor-stack edits into 3f once re-verification showed they were
+still load-bearing) → 3f-i through 3f-v (the actual bulk deletion,
+sequenced into five sub-clusters once the combined blast radius proved
+too large for one commit, each with its own re-verification pass that
+found real gaps the original retirement map missed). Every sub-step
+ran the full test suite, a real boot check, and (where correctness-
+critical) mutation testing before being called done.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
