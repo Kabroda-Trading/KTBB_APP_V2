@@ -427,16 +427,24 @@ def test_credential_set_response_never_contains_the_secret(env):
 
 # ------------------------------------------------------------------ kill-switch toggle reflected in a subsequent dry run
 
-def test_kill_switch_toggle_reflected_in_next_plan_build(env):
+def test_kill_switch_toggle_reflected_in_next_traveler_plan_build(env):
+    # V2 vehicle (build_hypothetical_order()/TradePlan) removed 2026-09-24
+    # (V2 Crown retirement, Step 3f-ii) along with build_hypothetical_
+    # order() itself -- ported to the Traveler vehicle rather than just
+    # deleted, since this test's real subject (does a kill-switch toggle
+    # via the real admin ROUTE actually get picked up by the NEXT plan
+    # build on the same account object) has no other coverage anywhere;
+    # tests/test_executor_plan_builder_traveler.py's own kill-switch test
+    # only exercises ea.engage_kill_switch() directly, not this route.
     import asyncio
     import executor_plan_builder
-    from database import TradePlan
+    from database import TravelerPlan
 
     db = env["db"]
-    plan = TradePlan(
+    plan = TravelerPlan(
         symbol="BTC/USDT", date_key="2026-09-04", session_id="us_ny_futures", status="FILLED",
-        direction="LONG", tier="STANDARD", trigger_price=100.0, fill_price=100.0,
-        stop_price=95.0, t1=112.0, t2=120.0, t3=132.0,
+        direction="LONG", fill_price=100.0, stop_price=95.0, t1_price=112.0,
+        rsi_4h_at_cross=80.0,  # LONG extreme -- F_A=1.0, isolates this test's real subject
     )
     db.add(plan)
     account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
@@ -447,9 +455,9 @@ def test_kill_switch_toggle_reflected_in_next_plan_build(env):
     # would block the TestClient's OWN db session (a different thread)
     # from writing -- SQLite single-writer locking, not an app bug.
 
-    before = asyncio.run(executor_plan_builder.build_hypothetical_order(db, plan, account, state))
+    before = asyncio.run(executor_plan_builder.build_hypothetical_traveler_order(db, plan, account, state))
     assert before["decision"] == "WOULD_PLACE"
-    db.commit()  # build_hypothetical_order() now also lazy-inits an
+    db.commit()  # build_hypothetical_traveler_order() also lazy-inits an
     # ExecutorSizingPolicy row (flush(), not commit()) -- same open-write-
     # transaction/SQLite-single-writer-lock hazard the comment above
     # already documents, must be closed before the TestClient's own
@@ -460,7 +468,7 @@ def test_kill_switch_toggle_reflected_in_next_plan_build(env):
     assert resp.status_code == 200
 
     db.refresh(account)
-    after = asyncio.run(executor_plan_builder.build_hypothetical_order(db, plan, account, state))
+    after = asyncio.run(executor_plan_builder.build_hypothetical_traveler_order(db, plan, account, state))
     assert after["decision"] == "SKIPPED_KILL_SWITCH"
 
 

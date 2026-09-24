@@ -7092,3 +7092,81 @@ switch/inactive-account gating has zero direct test coverage anywhere;
 see the plan file's 3f-ii section for the full evidence).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-24 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: executor-stack V2 deletion, sub-cluster 3f-ii of 3f-v -- roadmap step 3, sub-step 3f
+STATUS: resolved.
+
+**Backfilled a real, confirmed test-coverage gap BEFORE deleting anything
+(not after)**: `build_hypothetical_traveler_order()` -- the function
+actually live in production today for the Traveler system -- had ZERO
+real test coverage anywhere in the repo. Every place it was referenced
+in tests (`tests/test_executor_live_e1_engine.py`), it was monkeypatched
+out entirely rather than called for real. Meanwhile `tests/
+test_executor_plan_builder.py` (20 tests) exhaustively covered the
+SHARED sizing/leverage/liquidation core (`_size_and_check_order()`,
+confirmed zero V2-specific branches) but only ever exercised it through
+the V2 wrapper. Deleting that file without backfilling first would have
+been a severe, silent coverage regression for genuinely safety-critical
+code (real-money liquidation math), not just the narrower kill-switch
+gap first identified.
+
+**Backfill shipped**: new `tests/test_executor_plan_builder_traveler.py`
+(21 tests) -- ports every scenario from the V2 file (normal WOULD_PLACE,
+liquidation rejection, kill-switch/inactive-account skips, already-in-
+trade idempotency, real-exchange leverage/margin/MMR queries, sizing
+policy wizard wiring) onto `build_hypothetical_traveler_order()` +
+`TravelerPlan`, plus one Traveler-only test for the F_A sizing multiplier
+(no V2 equivalent exists). 2 kill-switch/inactive-account assertions
+mutation-verified (removing the `is_account_tradeable()` check makes
+both fail). Also ported `test_executor_admin_routes.py`'s
+`test_kill_switch_toggle_reflected_in_next_plan_build` (proves a kill-
+switch toggle via the REAL admin route is picked up by the next plan
+build on the same account object -- broader than the direct-call test
+above) to `test_kill_switch_toggle_reflected_in_next_traveler_plan_build`.
+
+**A second real gap found while backfilling**: `tests/
+test_executor_live_e1_engine.py` (a KEPT, Traveler-native file) had an
+"(h) engine-selection guard" section -- two tests proving the Traveler
+engine's and the old SPLIT engine's polling queries never cross-
+contaminate on the same `ExecutorOrder` table. Once there's only one
+engine, that premise is moot, not just broken by the import going away
+-- removed both tests with an explanatory comment rather than leaving a
+dangling `import executor_live_engine`.
+
+**Deleted**: `executor_live_engine.py`, `dry_run_split_engine.py`,
+`mgmt_split_dry_run.py` + their test files (`tests/
+test_executor_live_engine.py`, `tests/test_dry_run_split_engine.py`,
+`tests/test_mgmt_split_dry_run.py`), `tests/test_executor_plan_
+builder.py` (fully superseded by the backfill above).
+`executor_engine.py`: removed `_process_account()`/`process_fill()` +
+the lazy `import executor_live_engine` inside it, and the now-dead
+`TradePlan` import. `executor_plan_builder.py`: removed
+`build_hypothetical_order()` + the now-dead `TradePlan` import; updated
+`_size_and_check_order()`'s docstring (no longer shared with a second
+lineage). `process_traveler_fill()`/`_process_traveler_account()`/
+`build_hypothetical_traveler_order()`/`_size_and_check_order()` all
+untouched otherwise.
+
+**A real test-isolation bug found and fixed while verifying the new
+file**: the new backfill test file passed in isolation but failed in
+the full suite (`risk_dollars_used` came back 1000.0 instead of the
+expected 50.0) -- a leftover `ExecutorSizingPolicy` row from an earlier
+test (any file; the SQLite engine is cached module-globally across the
+whole pytest session, a pre-existing repo-wide quirk) survived because
+my fixture's cleanup list omitted that table, and got picked up by a
+later test's account whose autoincrement id happened to be reused.
+Fixed by adding `ExecutorSizingPolicy` to the cleanup list.
+
+**Verification**: full suite 524 passed (567 - 62 deleted-file tests -
+2 obsolete guard tests + 21 new tests = 524, arithmetic confirmed exact
+via `git show HEAD:<file> | grep -c "^def test_"` on each deleted file
+before removing it), clean boot (plain import + real `TestClient`
+context-manager lifespan cycle), `/admin/executor` still renders (200)
+with the panel-less page from 3c intact.
+
+**Roadmap status**: 3f-ii of 3f-v done. Next: 3f-iii
+(`ledger_closing_engine.py` + `harness/audit_writer.py`/`harness/
+unified_audit_writer.py`, deferred here from 3f-i for the same
+"last real caller" reasoning).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

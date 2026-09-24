@@ -650,34 +650,14 @@ def test_close_position_call_failure_retries_next_tick(db, monkeypatch):
     assert order.management_state == "ENTRY_FILLED_ORDERS_PLACED"   # untouched -- retry next tick
 
 
-# ------------------------------------------------------------------ (h) engine-selection guard
-
-def test_e1_order_never_reaches_the_split_engines_query(db):
-    import executor_live_engine
-    account = _ready_account(db)
-    plan = _traveler_plan(db)
-    order = _order_row(db, account, plan, management_state="PENDING_ENTRY", entry_exchange_order_id="e1-order")
-    matches = db.query(ExecutorOrder).filter(
-        ExecutorOrder.management_state.isnot(None),
-        ~ExecutorOrder.management_state.in_(executor_live_engine._TERMINAL_STATES),
-        ExecutorOrder.entry_exchange_order_id.isnot(None),
-        ExecutorOrder.traveler_plan_id.is_(None),
-    ).all()
-    assert order not in matches
-
-
-def test_split_order_never_reaches_the_e1_engines_query(db):
-    account = _ready_account(db)
-    plan = _traveler_plan(db)   # unused by the split order, just needs a valid TradePlan-shaped row id
-    order = _order_row(db, account, plan, management_state="PENDING_ENTRY", entry_exchange_order_id="split-order",
-                        traveler_plan_id=None, mgmt_profile_used="MGMT_SPLIT")
-    matches = db.query(ExecutorOrder).filter(
-        ExecutorOrder.management_state.isnot(None),
-        ~ExecutorOrder.management_state.in_(e1e._E1_LIVE_TERMINAL_STATES),
-        ExecutorOrder.entry_exchange_order_id.isnot(None),
-        ExecutorOrder.traveler_plan_id.isnot(None),
-    ).all()
-    assert order not in matches
+# (h) engine-selection guard -- test_e1_order_never_reaches_the_split_
+# engines_query()/test_split_order_never_reaches_the_e1_engines_query()
+# removed 2026-09-24 (V2 Crown retirement, Step 3f-ii) along with
+# executor_live_engine.py (the V2/SPLIT engine) itself -- both tests
+# existed only to prove the two live engines' polling queries never
+# cross-contaminate on the same ExecutorOrder table. Once there's only
+# one engine, that premise is moot, not just broken by the import going
+# away.
 
 
 # ------------------------------------------------------------------ (i) exit price honesty

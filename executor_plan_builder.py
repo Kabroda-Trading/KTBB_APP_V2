@@ -1,15 +1,18 @@
 # executor_plan_builder.py
 # ==============================================================================
-# EXECUTOR PLAN BUILDER -- reads an already-FILLED TradePlan row + an
+# EXECUTOR PLAN BUILDER -- reads an already-FILLED TravelerPlan row + an
 # account's own risk state, and computes the hypothetical order that
 # account would place. Writes nothing itself -- the caller (executor_
 # engine.py) owns persistence. Not a pure function anymore as of
 # 2026-09-05 (it makes one real, read-only exchange call to verify
 # leverage/margin mode when credentials are set -- see below), but still
 # never mutates the DB or the exchange. This is the layer
-# that never re-decides the trade: direction/entry/stop/T1/T2/T3 all come
-# straight off the TradePlan row, verbatim. Stage 1 of the Bitunix
-# executor bot.
+# that never re-decides the trade: direction/entry/stop/T1 all come
+# straight off the TravelerPlan row, verbatim (E1 has no T2/T3 -- single
+# full-exit design). Originally Stage 1 of the Bitunix executor bot for
+# v1/v2's own TradePlan lineage too (build_hypothetical_order(), removed
+# 2026-09-24, V2 Crown retirement) -- see build_hypothetical_traveler_
+# order()'s own docstring for what carried over vs. what didn't.
 #
 # 2026-09-05: now queries the REAL leverage/margin mode from the exchange
 # before every computation (async), rather than trusting a stored
@@ -33,7 +36,7 @@ from sqlalchemy.orm import Session
 
 import executor_accounts
 import executor_sizing
-from database import ExecutorAccount, ExecutorOrder, ExecutorRiskState, TradePlan, TravelerPlan
+from database import ExecutorAccount, ExecutorOrder, ExecutorRiskState, TravelerPlan
 
 
 _FALLBACK_MMR_UNVERIFIED = 0.01
@@ -171,19 +174,20 @@ async def _size_and_check_order(
     account: ExecutorAccount, risk_state: ExecutorRiskState,
     sizing_multiplier: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """The shared core of both build_hypothetical_order() (TradePlan/v1/v2)
-    and build_hypothetical_traveler_order() (TravelerPlan/GATE_TRAVELER)
-    below -- sizing, leverage/margin verification, and the liquidation-vs-
-    stop safety check are IDENTICAL regardless of which lineage's plan
-    object supplied entry/stop/direction; only the caller-side idempotency
-    checks (keyed on a different plan id) differ. `base` already carries
+    """The shared sizing/leverage/liquidation core for
+    build_hypothetical_traveler_order() (TravelerPlan/GATE_TRAVELER)
+    below -- previously also shared with the now-deleted V2 wrapper,
+    build_hypothetical_order() (TradePlan/v1/v2, removed 2026-09-24, V2
+    Crown retirement). `base` already carries
     trade_plan_id/traveler_plan_id/account_id/mode/symbol/direction --
     this function only ADDS to it, never removes keys, so a caller's early-
     return dict shape stays consistent whether this runs or not.
 
-    sizing_multiplier: Phase 2's F_A gate (GATE_TRAVELER only) -- passed
-    straight through to compute_stake(), None/1.0 for every v1/v2 caller
-    (no behavior change there).
+    sizing_multiplier: Phase 2's F_A gate -- passed straight through to
+    compute_stake(). Always a real float from build_hypothetical_
+    traveler_order() (executor_sizing.f_a_multiplier() never returns
+    None); the None default here just means "no multiplier" for any
+    other/future caller.
     """
     if not entry_price or not stop_price or not direction:
         return {**base, "decision": "ERROR", "decision_reason": "plan is missing entry/stop/direction -- cannot size"}
@@ -275,63 +279,18 @@ async def _size_and_check_order(
     }
 
 
-async def build_hypothetical_order(
-    db: Session, trade_plan_row: TradePlan, account: ExecutorAccount, risk_state: ExecutorRiskState,
-) -> Dict[str, Any]:
-    base = {
-        "trade_plan_id": trade_plan_row.id,
-        "account_id": account.id,
-        "mode": account.mode,
-        "symbol": trade_plan_row.symbol,
-        "direction": trade_plan_row.direction,
-        "t1_price": trade_plan_row.t1, "t2_price": trade_plan_row.t2, "t3_price": trade_plan_row.t3,
-    }
-
-    tradeable, reason = executor_accounts.is_account_tradeable(db, account)
-    if not tradeable:
-        decision = "SKIPPED_KILL_SWITCH" if "kill switch" in reason else "SKIPPED_ACCOUNT_INACTIVE"
-        return {**base, "decision": decision, "decision_reason": reason}
-
-    # Idempotency: an order already exists for this EXACT (trade_plan_id,
-    # account_id) pair -- the DB's own unique constraint would refuse a
-    # second insert anyway; check here first for a clean decision/reason
-    # instead of relying on a caller catching an IntegrityError.
-    dup = db.query(ExecutorOrder).filter_by(account_id=account.id, trade_plan_id=trade_plan_row.id).first()
-    if dup is not None:
-        return {**base, "decision": "SKIPPED_ALREADY_IN_TRADE", "decision_reason": "an order already exists for this exact trade plan + account"}
-
-    # One-trade-at-a-time per account (Andy's methodology: one trade at a
-    # time). Stage 1 has no real position/fill tracking to check against
-    # (documented non-goal), so this checks against this bot's OWN
-    # would-place record for any OTHER trade plan that isn't DONE yet --
-    # an approximation, not a guarantee, until Stage 2/3 add real fill
-    # detection.
-    other_would_places = db.query(ExecutorOrder).filter(
-        ExecutorOrder.account_id == account.id,
-        ExecutorOrder.decision == "WOULD_PLACE",
-        ExecutorOrder.trade_plan_id != trade_plan_row.id,
-    ).all()
-    for other in other_would_places:
-        other_plan = db.query(TradePlan).filter_by(id=other.trade_plan_id).first()
-        if other_plan is not None and other_plan.status != "DONE":
-            return {
-                **base, "decision": "SKIPPED_ALREADY_IN_TRADE",
-                "decision_reason": f"account already has an active order from trade_plan_id={other.trade_plan_id}",
-            }
-
-    entry_price = trade_plan_row.fill_price or trade_plan_row.trigger_price
-    return await _size_and_check_order(
-        db, base, trade_plan_row.symbol, trade_plan_row.direction,
-        entry_price, trade_plan_row.stop_price, account, risk_state,
-    )
+# build_hypothetical_order() (TradePlan/v1/v2) removed 2026-09-24 (V2
+# Crown retirement, Step 3f-ii) -- its only real caller,
+# executor_engine.py's _process_account(), was deleted in the same pass.
+# See build_hypothetical_traveler_order() below for GATE_TRAVELER's own
+# counterpart, unaffected by this retirement.
 
 
 async def build_hypothetical_traveler_order(
     db: Session, traveler_plan_row: TravelerPlan, account: ExecutorAccount, risk_state: ExecutorRiskState,
 ) -> Dict[str, Any]:
-    """GATE_TRAVELER's counterpart to build_hypothetical_order() above --
-    same sizing/leverage/liquidation core (_size_and_check_order()), fed
-    from TravelerPlan instead of TradePlan. Idempotency is keyed on
+    """GATE_TRAVELER's plan builder -- sizing/leverage/liquidation core
+    (_size_and_check_order()), fed from TravelerPlan. Idempotency is keyed on
     traveler_plan_id, a SEPARATE column/constraint from trade_plan_id (see
     database.py's ExecutorOrder docstring) -- deliberately NOT reusing
     trade_plan_id for this, since TravelerPlan and TradePlan have
