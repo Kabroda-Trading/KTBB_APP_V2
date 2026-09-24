@@ -7170,3 +7170,53 @@ unified_audit_writer.py`, deferred here from 3f-i for the same
 "last real caller" reasoning).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-24 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: ledger_closing_engine + harness audit-writer deletion, sub-cluster 3f-iii of 3f-v -- roadmap step 3, sub-step 3f
+STATUS: resolved.
+
+**Deleted**: `ledger_closing_engine.py`, `harness/audit_writer.py`,
+`harness/unified_audit_writer.py` (both deferred here from 3f-i once a
+real ordering hazard was found -- `ledger_closing_engine.py` still had 8
+live, non-blocking calls into them), plus their test files (`tests/
+test_gate_log_backfill.py`, `tests/test_runner_mechanic.py`).
+
+**One more real gap found via fresh re-verification, not assumed from
+the earlier research**: `harness/test_audit_safety.py` -- a standalone
+diagnostic script (also pytest-collectable, though it lives outside
+`tests/` and so was never counted in this session's `pytest tests/`
+totals) that directly imports the real `harness.audit_writer` module in
+2 of its 4 tests to prove its internal try/except swallows DB errors.
+Not on any prior file list (it wasn't in `tests/`, so an import-grep
+scoped to that directory alone would have missed it too). Its entire
+purpose is moot once the module it safety-tests is gone -- deleted in
+the same commit, and `harness/README.md`'s "What's built" table updated
+to remove the now-dead `audit_writer.py` row and note that `session_
+audit_log`/`trials_log` are write-frozen (still readable by the other
+harness modules, just never getting a new row again).
+
+**A tangential finding, flagged not acted on** (outside this step's
+declared scope, same treatment as the `POST /api/v1/system/analysis`
+orphan flagged earlier this session): `bold-hubble/monitoring/
+exhaustion_monitor.py`'s only real caller anywhere in the repo was
+`ledger_closing_engine.py` (confirmed via grep -- `executor_live_e1_
+engine.py` does NOT import it, despite superficially looking like the
+same kind of shared utility). Now fully orphaned. Left in place --
+worth a future cleanup pass, not part of this one.
+
+**CLAUDE.md's "CampaignLog Lifecycle" section rewritten to past tense**
+(was explicitly in this sub-step's scope, not deferred to the later
+full-file pass) -- it still described `ledger_closing_engine.py`'s 30/70
+rule and `tests/test_runner_mechanic.py` as live, present-tense code;
+both are now deleted. Rewritten to state plainly that this whole section
+is retired V2 history.
+
+**Verification**: full suite 512 passed (524 - 6 - 6, exact), clean
+boot (plain import + real `TestClient` lifespan cycle), `/suite/
+dashboard` still renders (200).
+
+**Roadmap status**: 3f-iii of 3f-v done. Next: 3f-iv
+(`executor_accounts.py`'s `GATE_V2`/`MGMT_SPLIT` trim +
+`templates/executor_admin.html` rewiring, now safe since
+`executor_engine.py:61`'s `DEFAULT_GATE_PROFILE` read is gone).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

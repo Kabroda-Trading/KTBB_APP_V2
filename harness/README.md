@@ -47,8 +47,20 @@ A TANGLED subgroup at N=8 is DIRECTIONAL_OBSERVATION even when the stream reache
 | `tier_labels.py` | Four-tier label logic; `pct_with_n()` formatting; shared by all modules | Built |
 | `binomial_checkpoint.py` | N-milestone statistical tests (30/50/100); logs each run to `trials_log` | Built |
 | `snapshot_report.py` | FLAG block detection; reads from `session_audit_log` and `trials_log` | Built |
-| `audit_writer.py` | `write_decision_record()` + `backfill_outcome()` — writes to `session_audit_log` only | Built |
 | `deferred_tests.py` | Stubs for all N-gated tests with gates documented | Stubs only |
+
+`audit_writer.py` (and its own `test_audit_safety.py` diagnostic) and
+`unified_audit_writer.py` removed 2026-09-24 (V2 Crown retirement, Step
+3f-iii) along with `ledger_closing_engine.py`, their last real caller —
+both were entirely `decision_engine.py`-verdict-shaped
+(`CampaignLog`/`GateLog`/`SessionAuditLog`/`DecisionGaugeReading`
+writers), with no Traveler equivalent needed (see CLAUDE.md's "kabroda.com
+is the recorder, the Brain is the auditor" division of labor — the
+Traveler's own forward-test audit is `GET /api/export/traveler-log.csv`).
+`session_audit_log`/`trials_log` are now write-frozen historical data —
+`query_layer.py`/`join_logic.py`/`baseline.py`/`binomial_checkpoint.py`/
+`snapshot_report.py` above still read them fine, they just never get a
+new row again.
 
 ---
 
