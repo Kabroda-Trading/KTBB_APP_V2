@@ -6455,3 +6455,89 @@ fixes.py` errors, clean boot.
 step 3 -- the actual V2 code/route/table removal per `V2_RETIREMENT_MAP.md`.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-23 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: new public Traveler-native radar data source (`traveler_radar.py` + `GET /api/radar/traveler-snapshot`) -- roadmap step 3, sub-step 1 of 3
+STATUS: open. Not yet committed/pushed -- see next entry once the commit lands.
+
+Roadmap step 3 (V2 Crown code/route/table removal) is itself now planned as
+three sequenced sub-steps, approved via Plan Mode this session: (1) rebuild
+the public radar page on Traveler data BEFORE deleting anything, so a
+working replacement exists before the old thing goes away; (2) rewire the
+3 of 5 `/api/dashboard/*` routes that read `CampaignLog` directly; (3) the
+actual file/table/route/background-task deletion. This entry covers the
+backend half of sub-step 1.
+
+**Research first, three parallel Explore agents** (subagents re-enabled by
+Andy mid-session after a temporary account-wide hourly rate limit lifted --
+his prior "don't use subagents for this part" was specific to that limit,
+confirmed by his explicit "Yes to using subagents again"), cross-checked
+against the already-shipped `V2_RETIREMENT_MAP.md`: (a) the full Traveler
+data shape/lifecycle (`gate_traveler.py`, `traveler_plan_engine.py`,
+`mgmt_e1_stack.py`, `TravelerPlan`/`ExecutorOrder` schemas); (b) the full
+V2 decision/display surface (`decision_engine.py`'s exact return shape,
+`market_radar.py` function-by-function, `kabroda_mas_flow.py::
+run_mas_analysis()`'s exact V2-only vs Traveler-only line ranges, `GateLog`/
+`DecisionJournal` writers/readers); (c) the remaining radar frontend JS
+(`renderFullGrid`/`updateMtfOverlay`/`forceScan`/`renderTravelerState`) and
+the dashboard's `CampaignLog` dependency (3 of 5 `/api/dashboard/*` routes).
+
+**The one real, unavoidable finding driving the whole rebuild**: V2's old
+`/api/radar/snapshot` showed a speculative directional plan (entry/stop/
+T1/T2/T3) for a "favored" side BEFORE any cross happened. The Traveler is
+symmetrical by design -- `TravelerPlan.direction`/`stop_price`/`t1_price`
+are genuinely `NULL` until a confirmed 5m close actually breaks BO or BD
+(`gate_traveler.py`). There is no honest way to keep showing a pre-cross
+directional dossier once V2 is gone -- confirmed this is a hard data
+constraint, not a design preference to litigate.
+
+**What shipped (backend only so far)**: `traveler_radar.py`, a standalone
+module with zero import of `decision_engine.py` or `market_radar.py` (so
+Step 3's later deletion of `market_radar.py` needs no surgery here) --
+`get_public_traveler_snapshot(db)` reads today's `SessionLock` for levels,
+today's `TravelerPlan` by the real write-side key `(symbol, session_id,
+date_key)` (NOT the admin route's `order_by(id.desc())` shortcut, which
+only works today because the site is single-symbol -- `market_radar.py`'s
+own `TARGETS = ["BTCUSDT"]`, confirmed), and the linked `ExecutorOrder` via
+the exact same LIVE-preferred-over-DRY_RUN selection
+`/api/admin/traveler-plan-status` already uses (never a blind
+`order_by(id.desc())` across modes -- `ExecutorOrder`'s real unique
+constraint is `(traveler_plan_id, account_id)`, so multiple accounts can
+each hold their own order against one journey). New route `GET /api/radar/
+traveler-snapshot` in `main.py`, public/no-login (same precedent as every
+other `/api/radar/*` route, main.py:761-771's own "let anyone use the
+radar" comment) -- ships ALONGSIDE the old `/api/radar/snapshot`+`/api/
+radar/scan` (not replacing them yet), so there's no gap between old and new.
+
+`price` deliberately stays the lock-time anchor price (same "price_as_of:
+lock" honesty convention the old route already documented) rather than a
+new live-exchange fetch -- the existing public `/api/live-price` endpoint
+already covers live ticking with its own single-candle fetch; no need to
+duplicate that fetch inside this new module.
+
+**9 new tests** (`tests/test_traveler_radar.py`), 2 mutation-verified by
+hand (temporarily reintroducing the exact bug each guard prevents, confirm
+the right test fails, then restore): (1) removing the `date_key` filter
+(simulating the admin route's "most recent row" shortcut) makes a stale
+2020-01-01 test journey leak into today's response -- caught; (2)
+collapsing the LIVE-preferred `ExecutorOrder` selection to a blind
+`order_by(id.desc())` flips the result to the wrong (DRY_RUN, lower-id-but-
+inserted-second-in-the-test) account -- caught. Full suite: 823 passed
+(was 814), same 5 pre-existing unrelated `test_dashboard_fixes.py` errors
+(confirmed via `git stash` to already exist on baseline `afd9e39`, a broken
+test fixture inserting a `CampaignLog` row with no `session_id` --
+unrelated to this change, not fixed here, out of scope). Clean import/boot
+check, plus a live `uvicorn` server hit with real `curl` against the new
+route (unlocked/no-plan case returned the expected shape).
+
+**Still open, not yet done**: the frontend half of sub-step 1 --
+`templates/market_radar.html` still needs `planStatePanel` removed,
+`renderSnapshotGrid()`/`_buildRow()`/`updateMtfOverlay()`/`renderFullGrid()`
+reworked to consume the new route instead of `snap.mas_status`/`snap.plan`,
+the cockpit's "03. THE SETUP" panel reshaped for no-T2/T3 single-exit, and
+`buildMissionKey9()`'s 9-field payload updated to repeat T1 into the tp2/
+tp3 slots (matching V2's own already-established T2==T1 back-compat
+convention, not inventing a new key shape). Full plan:
+`C:\Users\Shadow\.claude\plans\ticklish-brewing-sunbeam.md` (Claude Code's
+local plan-mode file, not in this repo).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

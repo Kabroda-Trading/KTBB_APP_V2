@@ -25,6 +25,7 @@ from pydantic import BaseModel
 import auth
 import battlebox_pipeline
 import market_radar
+import traveler_radar
 import gravity_engine
 import gravity_math
 import kabroda_mas_flow
@@ -1034,6 +1035,24 @@ async def api_radar_snapshot(db: Session = Depends(get_db)):
         "live_price_endpoint":   "/api/radar/scan",
         "live_state_endpoint":   "/api/admin/trade-plan-status",
     })
+
+
+@app.get("/api/radar/traveler-snapshot")
+async def api_radar_traveler_snapshot(db: Session = Depends(get_db)):
+    """Step 1 of the V2 Crown retirement + radar rebuild (CLAUDE.md
+    "Strategic Direction", V2_RETIREMENT_MAP.md) -- the Traveler-native
+    replacement for this file's own /api/radar/snapshot above. Public, no
+    login, same as every other /api/radar/* route (main.py:761-771's own
+    "let anyone use the radar" precedent) -- pure DB reads via
+    traveler_radar.py, zero decision_engine.py/CampaignLog dependency.
+
+    Ships alongside the old /api/radar/snapshot + /api/radar/scan (not a
+    replacement of them yet) so the rebuilt radar frontend has a working
+    data source to cut over to before V2's routes are deleted in that
+    plan's Step 3 -- see traveler_radar.py's own module docstring for the
+    full reasoning, including why a pre-cross request gets levels-only
+    with `plan: null` rather than a speculative directional dossier."""
+    return JSONResponse(traveler_radar.get_public_traveler_snapshot(db))
 
 
 @app.get("/api/live-price")
