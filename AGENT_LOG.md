@@ -6571,3 +6571,77 @@ earlier arithmetic. Standing discipline (verify every claim, including my
 own) working as intended.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-23 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: radar frontend rebuilt around the Traveler (`templates/market_radar.html`) -- roadmap step 3 sub-step 1 of 3 COMPLETE
+STATUS: resolved.
+
+Completes sub-step 1 (backend shipped in the two entries above, commit
+`8473ea6`). This entry is the frontend half.
+
+**Removed entirely**: the V2-only "Trade Plan" panel (`#planStatePanel`,
+`renderPlanState()`, `pollPlanState()`, `_setLevelRow()`) -- dead once
+`trade_plan_engine.py`/`/api/admin/trade-plan-status` go in Step 3.
+`_fmtLevel()`/`_parseServerTimestamp()` stay (shared with
+`renderTravelerState()`, which is untouched -- already correct, already
+Traveler-native). Also removed: `forceScan()`, `renderSnapshotGrid()`,
+`updateMtfOverlay()`, `renderFullGrid()`, `_buildTfStack()` -- the old V2
+two-phase (`/api/radar/snapshot` DB read + `POST /api/radar/scan` live
+gate re-run) render model and the 4H/1H regime strip it fed (GateLog/
+CampaignLog-sourced, no Traveler equivalent).
+
+**Added**: `loadTravelerRadar()`, a single-phase render against the new
+`GET /api/radar/traveler-snapshot` -- there's no live "re-run the gate"
+concept without `decision_engine.py`; the Traveler's own polling loop
+(`traveler_plan_engine.py`) already IS the live state, so one GET covers
+both the structural and live read. `_travelerStatusBadge(plan)` maps the
+Traveler's real status/mgmt fields to a label+color (WATCHING/SKIPPED/
+ARMED/LIVE/CLOSED/DONE) -- `_buildRow()` was changed to just render
+whatever label/color it's given instead of pattern-matching V2's old
+APPROVED/STAND_DOWN/TAKE/PASS strings itself.
+
+**The cockpit's "03. THE SETUP" panel reshaped**: dropped the T1/runner
+50-50 split-volume box and TARGET 2/3 rows entirely -- MGMT_E1_STACK is a
+single full-exit design (100% at T1 or 100% at stop/C5/BBWP/TIME, never a
+partial leg), so there's one position size and one target, not a
+scale-out pair. `buildMissionKey9()`'s 9-field TradingView payload keeps
+its field count (an external Pine Script hard-requires exactly 9,
+`array.size(parts) >= 9`) but repeats T1 into the tp2/tp3 slots -- the
+same back-compat convention V2 itself already uses for its own T2==T1.
+
+**The one behavior change, made honest rather than papered over**: entry/
+stop/T1 only populate once a real cross has happened
+(`plan.direction && plan.stop_price != null && plan.t1_price != null`) --
+pre-cross, the cockpit shows levels-only with dashes, never a speculative
+guess. This is the same finding from the backend entries above, now
+actually visible on the page.
+
+**Verification** (no browser tool available in this environment, so
+verified every layer that could be checked without one, per this
+project's "say so explicitly rather than claiming success" standard for
+untestable UI claims): (1) extracted the `<script>` block and ran `node
+--check` -- valid syntax; (2) extracted `_travelerStatusBadge()` and
+`buildMissionKey9()` verbatim and ran them under Node against 7 sample
+plan states (no plan, all 5 real statuses, a closed-after-fill case) --
+every label/color came back correct; (3) booted a real `uvicorn` server,
+fetched the actual `/suite/radar` page (HTTP 200, correct size) and
+grepped the rendered HTML for zero dangling references to any removed
+function/element and confirmed the new function names are present; (4)
+full Python suite, 814 passed, same 5 pre-existing unrelated
+`test_dashboard_fixes.py` errors, unaffected by a template-only change.
+Actual visual/interactive verification in a real browser (Andy clicking
+through cross/fill/close states) is still open and should happen before
+this is trusted as fully done, not just code-correct.
+
+**A real mistake caught and corrected while re-running the suite for
+this entry**: the "new Traveler radar data source" entry above claimed
+"823 tests pass (was 814)" -- wrong arithmetic (mislabeled 814, this
+session's own post-D3 baseline, as the pre-existing number instead of the
+real one, 805). See the correction entry between that one and this one.
+Real number, confirmed twice now: 814.
+
+**Roadmap status**: sub-step 1 of 3 (radar rebuild) DONE. Next: sub-step 2
+-- rewire the 3 of 5 `/api/dashboard/*` routes that read `CampaignLog`
+directly (`overview`, `accuracy`, `mas-history`). Full plan:
+`ticklish-brewing-sunbeam.md` (Claude Code's local plan-mode file).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

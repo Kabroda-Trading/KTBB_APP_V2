@@ -404,26 +404,8 @@
                 <h2 class="radar-title">Market Radar <span style="font-size:14px; background:#1e293b; padding:4px 8px; border-radius:4px; vertical-align:middle; color:#94a3b8;">v15</span></h2>
             </div>
             <div style="display: flex; align-items: center;">
-                <button id="scanBtn" class="btn-scan" onclick="forceScan()">REFRESH INTEL</button>
+                <button id="scanBtn" class="btn-scan" onclick="loadTravelerRadar()">REFRESH INTEL</button>
             </div>
-        </div>
-
-        <div id="planStatePanel" class="plan-state-panel">
-            <div class="plan-state-row">
-                <span style="color:#6b5a47; font-size:11px; text-transform:uppercase; letter-spacing:1px;">Trade Plan</span>
-                <span id="planStateBadge" class="plan-state-badge"></span>
-                <span id="planStateDetail" class="plan-state-detail"></span>
-            </div>
-            <div id="planStateReason" class="plan-state-reason"></div>
-            <div id="planStateLevels" class="plan-state-levels" style="display:none;">
-                <div class="plan-state-level" id="planLevelEntryRow"><span class="plan-state-level-label">Entry</span><span id="planLevelEntry" class="d-val">--</span><button class="mini-copy" onclick="copyVal('planLevelEntry')" title="Copy">📋</button></div>
-                <div class="plan-state-level" id="planLevelStopRow"><span class="plan-state-level-label">Stop</span><span id="planLevelStop" class="d-val">--</span><button class="mini-copy" onclick="copyVal('planLevelStop')" title="Copy">📋</button></div>
-                <div class="plan-state-level" id="planLevelT1Row"><span class="plan-state-level-label">T1</span><span id="planLevelT1" class="d-val">--</span><button class="mini-copy" onclick="copyVal('planLevelT1')" title="Copy">📋</button></div>
-                <div class="plan-state-level" id="planLevelT2Row"><span class="plan-state-level-label">T2</span><span id="planLevelT2" class="d-val">--</span><button class="mini-copy" onclick="copyVal('planLevelT2')" title="Copy">📋</button></div>
-                <div class="plan-state-level" id="planLevelT3Row"><span class="plan-state-level-label">T3</span><span id="planLevelT3" class="d-val">--</span><button class="mini-copy" onclick="copyVal('planLevelT3')" title="Copy">📋</button></div>
-            </div>
-            <div id="planStateFill" class="plan-state-fill" style="display:none;"></div>
-            <div id="planStateAsOf" class="plan-state-asof"></div>
         </div>
 
         <div id="travelerStatePanel" class="traveler-state-panel">
@@ -506,33 +488,21 @@
                             <div><span id="pStp" class="d-val c-RED">--</span><button class="mini-copy" onclick="copyVal('pStp')">📋</button></div>
                         </div>
 
-                        <div class="data-row" style="margin-bottom: 6px;">
+                        <div class="data-row" style="margin-bottom: 12px;">
                             <span style="color:#94a3b8; font-size:12px;">POSITION SIZE (COINS)</span>
                             <div><span id="pSiz" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pSiz')">📋</button></div>
                         </div>
-                        <div class="data-row" style="margin-top: -6px; margin-bottom: 12px; padding-left: 10px; border-left: 2px solid #334155; border-bottom: 2px solid #334155; padding-bottom: 12px;">
-                            <div style="display: flex; flex-direction: column; width: 100%; gap: 6px;">
-                                <div style="display: flex; justify-content: space-between; align-items: center;">
-                                    <span style="color:#eab308; font-size:11px; font-family:'JetBrains Mono';">↳ SELL AT TARGET 1</span>
-                                    <div><span id="pT1Vol" class="d-val" style="color:#eab308; font-size:14px;">--</span><button class="mini-copy" onclick="copyVal('pT1Vol')">📋</button></div>
-                                </div>
-                                <div style="display: flex; justify-content: space-between; align-items: center;">
-                                    <span style="color:#0ea5e9; font-size:11px; font-family:'JetBrains Mono';">↳ RUNNER (KEEP)</span>
-                                    <div><span id="pRunVol" class="d-val" style="color:#0ea5e9; font-size:14px;">--</span><button class="mini-copy" onclick="copyVal('pRunVol')">📋</button></div>
-                                </div>
-                            </div>
-                        </div>
+                        <!-- 2026-09-23 radar rebuild: no T1/runner split, no
+                             TARGET 2/3 -- MGMT_E1_STACK (the Traveler's
+                             management engine) is a single full-exit design,
+                             100% at T1 or 100% at stop/C5/BBWP/TIME, never a
+                             partial leg (see mgmt_e1_stack.py's own header).
+                             The old split-volume box and TARGET 2/3 rows
+                             were V2/MGMT_SPLIT-only concepts that don't
+                             exist for the Traveler. -->
                         <div class="data-row" style="margin-top:12px;">
                             <span style="color:#94a3b8; font-size:12px;">TARGET 1</span>
                             <div><span id="pT1" class="d-val c-YELLOW">--</span><button class="mini-copy" onclick="copyVal('pT1')">📋</button></div>
-                        </div>
-                        <div class="data-row">
-                            <span style="color:#94a3b8; font-size:12px;">TARGET 2</span>
-                            <div><span id="pT2" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT2')">📋</button></div>
-                        </div>
-                        <div class="data-row">
-                            <span style="color:#94a3b8; font-size:12px;">TARGET 3</span>
-                            <div><span id="pT3" class="d-val">--</span><button class="mini-copy" onclick="copyVal('pT3')">📋</button></div>
                         </div>
 
                         <div style="background: #020617; border: 1px solid #334155; padding: 15px; border-radius: 4px; margin-top: 20px;">
@@ -966,17 +936,18 @@
                 : "-- DATA MISSING --";
             document.getElementById('hudPayload').innerHTML = visualKey;
 
-            // GAP-1: trade card suppressed when SA verdict is STAND_DOWN, regardless of
-            // whether the radar pre-check or JEWEL gate shows a valid setup.
-            const planActive = d.plan.valid && d.mas_status !== 'STAND_DOWN';
+            // 2026-09-23 radar rebuild: the old STAND_DOWN/mas_status check
+            // was V2-only (Senior Analyst verdict) -- d.mas_status is never
+            // set on Traveler-sourced data, so this simplifies to the plan's
+            // own validity (set by loadTravelerRadar() only once direction/
+            // stop/t1 are known post-cross -- see traveler_radar.py).
+            const planActive = d.plan.valid;
             if(planActive) {
                 document.getElementById('pEnt').innerText = d.plan.entry.toFixed(2);
                 document.getElementById('pStp').innerText = d.plan.stop.toFixed(2);
                 document.getElementById('pT1').innerText = d.plan.targets[0].toFixed(2);
-                document.getElementById('pT2').innerText = d.plan.targets[1].toFixed(2);
-                document.getElementById('pT3').innerText = d.plan.targets[2].toFixed(2);
             } else {
-                ['pEnt','pStp','pT1','pT2','pT3'].forEach(id => document.getElementById(id).innerText = '--');
+                ['pEnt','pStp','pT1'].forEach(id => document.getElementById(id).innerText = '--');
             }
             recalc();
         }
@@ -991,7 +962,11 @@
             const riskAmt = bal * (riskPct / 100);
             document.getElementById('valLoss').innerText = "$" + riskAmt.toFixed(2);
 
-            const _planActive = activeData.plan.valid && activeData.mas_status !== 'STAND_DOWN';
+            // 2026-09-23 radar rebuild: no T1/runner split any more --
+            // MGMT_E1_STACK is a single full-exit design (mgmt_e1_stack.py),
+            // 100% at T1 or 100% at stop/C5/BBWP/TIME, so there's just one
+            // position size, not a scale-out/runner pair.
+            const _planActive = activeData.plan.valid;
             if(_planActive) {
                 const dist = Math.abs(activeData.plan.entry - activeData.plan.stop);
                 if(dist > 0) {
@@ -1000,43 +975,28 @@
 
                     const psEl = document.getElementById('valPosSize');
                     if (psEl) psEl.innerText = totalContracts.toFixed(4);
-
-                    // 2026-09-07 fix: was 0.40/0.60, a third stale split predating
-                    // the audit (CLEAN_REPORT.md/GATE_REBUILD_SPEC.md), matching
-                    // neither the old 30/70 rule nor anything else. The audited
-                    // rule (executor_live_engine.py, Domain 2) is 50/50 for both
-                    // tiers -- T1 takes 50%, the runner is the other 50%.
-                    const scalePct = 0.50;  // sell 50% at T1
-                    const runPct   = 0.50;  // runner 50% to T3 (or its stop)
-
-                    document.getElementById('pT1Vol').innerText = (totalContracts * scalePct).toFixed(4);
-                    document.getElementById('pRunVol').innerText = (totalContracts * runPct).toFixed(4);
                 }
             } else {
                 document.getElementById('pSiz').innerText = '--';
                 const psEl = document.getElementById('valPosSize');
                 if (psEl) psEl.innerText = '--';
-                document.getElementById('pT1Vol').innerText = '--';
-                document.getElementById('pRunVol').innerText = '--';
             }
         }
 
         // ================================================================
-        // ROW BUILDER — shared by Phase 1 snapshot and Phase 2 full render
+        // ROW BUILDER — the single BTCUSDT row, driven by loadTravelerRadar()
         // ================================================================
-        function _buildRow(sym, price, bo, bd, rowClass, cockpitEnabled, masStatus) {
+        function _buildRow(sym, price, bo, bd, rowClass, cockpitEnabled, badgeLabel, badgeColor) {
             const base        = (sym || '').replace('USDT', '');
 
-            // 2026-09-06 rebuild: masStatus is either the official CampaignLog
-            // verdict (APPROVED/STAND_DOWN) or, in the full-grid path where no
-            // CampaignLog row exists yet, the live calibrated-gate state
-            // straight from decision_engine.py (TAKE/PASS, v2) -- same source
-            // of truth, shown as text either way, not just a border color.
-            const masColor  = masStatus === 'APPROVED' || masStatus === 'TAKE' ? '#22c55e'
-                            : masStatus === 'STAND_DOWN' || masStatus === 'PASS' ? '#94a3b8'
-                            : '#64748b';
-            const masBadge  = masStatus
-                ? `<div class="rrc-badge" style="border-color:${masColor}; color:${masColor}; font-size:10px;">${masStatus}</div>`
+            // 2026-09-23 rebuild: badgeLabel/badgeColor are computed by the
+            // caller (_travelerStatusBadge() below) from the Traveler's own
+            // status/mgmt fields -- this function just renders whatever
+            // label/color it's given, rather than pattern-matching V2's old
+            // APPROVED/STAND_DOWN/TAKE/PASS strings itself.
+            const masColor = badgeColor || '#64748b';
+            const masBadge = badgeLabel
+                ? `<div class="rrc-badge" style="border-color:${masColor}; color:${masColor}; font-size:10px;">${badgeLabel}</div>`
                 : '';
             const cockpitClass = cockpitEnabled ? 'rrc-cockpit-active' : 'rrc-cockpit-muted';
 
@@ -1057,295 +1017,31 @@
         }
 
         // ================================================================
-        // TF STACK BUILDER — 15M decisive state + regime strip below each row.
-        // 2026-08-30 rebuild: the independent 4H/1H trading system is retired
-        // (Andy's call — "clean up the radar back to just the fifteen minute"),
-        // so the 4H/1H rows, their COPY/COCKPIT buttons, and the candidate-
-        // memory seeding that fed them are gone, not just hidden.
+        // TRAVELER RADAR — single-phase render (2026-09-23 rebuild,
+        // replacing the old V2 two-phase snapshot/live-scan model). There
+        // is no live "re-run the gate" concept without decision_engine.py
+        // -- the Traveler's own polling loop (traveler_plan_engine.py) IS
+        // the live state, so one GET to /api/radar/traveler-snapshot is
+        // both the structural read and the live read. The 4H/1H TF-stack
+        // strip (_buildTfStack, _get_tf_system_verdicts) is gone with it --
+        // that read GateLog/CampaignLog-sourced daily_regime/tf_verdicts,
+        // both V2-only concepts with no Traveler equivalent.
         // ================================================================
-        function _buildTfStack(sym, tfVerdicts, tfToday, dailyRegime, weeklyPos) {
-            const tv15m = (tfVerdicts && tfVerdicts['15M']) || {};
-            dailyRegime = dailyRegime || '—';  // guard .startsWith() below against null/undefined
-
-            function mas15mRow(data) {
-                // v2 (2026-09-15, found during the v1-dead-machinery audit):
-                // state can only ever be "TAKE" or "PASS" now (decision_
-                // engine.py's v2 gate has no tier split) -- the TAKE_PREMIUM/
-                // TAKE_STANDARD checks below were silently always false, so
-                // isTake was always false and the plan (entry/stop/T1-T3)
-                // never rendered here even on a real TAKE day. Fixed.
-                const state = data.state;  // TAKE/PASS
-                const isTake = state === 'TAKE';
-                const color = state === 'TAKE' ? '#22c55e'
-                            : state === 'PASS' ? '#64748b'
-                            : '#334155';
-                const stampText = state === 'TAKE' ? '🟢 TAKE'
-                                 : state === 'PASS' ? '⚪ PASS'
-                                 : (data.status || 'PENDING');
-                const badge = `<span class="tf-label" style="border-color:${color}; color:${color}; font-weight:800;">${stampText}</span>`;
-                const bias  = data.bias ? `<span style="color:${color}; font-weight:700;"> ${data.bias}</span>` : '';
-                let plan = '';
-                if (isTake) {
-                    const entry = data.entry ? `<span style="color:#475569;"> · Entry <b style="color:#94a3b8;">$${fmt(data.entry)}</b></span>` : '';
-                    const stop  = data.stop  ? `<span style="color:#475569;"> · Stop <b style="color:#ef4444;">$${fmt(data.stop)}</b></span>`   : '';
-                    const t1    = data.t1    ? `<span style="color:#475569;"> · T1 <b style="color:#eab308;">$${fmt(data.t1)}</b></span>`       : '';
-                    const t2    = data.t2    ? `<span style="color:#475569;"> · T2 <b style="color:#eab308;">$${fmt(data.t2)}</b></span>`       : '';
-                    const t3    = data.t3    ? `<span style="color:#475569;"> · T3 <b style="color:#eab308;">$${fmt(data.t3)}</b></span>`       : '';
-                    plan = `${entry}${stop}${t1}${t2}${t3}`;
-                }
-                const reason = data.headline
-                    ? `<div class="tf-reason" style="color:#94a3b8; font-size:11px; margin-top:4px;">${data.headline}</div>` : '';
-                return `<div class="tf-row">${badge}${bias}${plan}</div>${reason}`;
-            }
-
-            // 2026-08-30: real, calibrated regime labels (market_regime.py --
-            // Kaufman Efficiency Ratio + ADX + fakeout-rate, backtested
-            // against 1,913 trades), not the old, never-validated DAILY_BULL/
-            // BEAR/RECOVERY/DISTRIBUTION guess.
-            const regimeColor = dailyRegime.startsWith('TRENDING_UP')      ? '#22c55e'
-                              : dailyRegime.startsWith('TRENDING_DOWN')    ? '#ef4444'
-                              : dailyRegime.startsWith('CHOP')             ? '#f97316'
-                              : dailyRegime.startsWith('DEAD')             ? '#ef4444'
-                              : dailyRegime.startsWith('VOLATILE_NO_TREND')? '#eab308'
-                              : dailyRegime.startsWith('MIXED')            ? '#94a3b8'
-                              : '#475569';
-            const regimePart = (dailyRegime && dailyRegime !== '—')
-                ? `Regime: <b style="color:${regimeColor};">${dailyRegime}</b>` : '';
-            const weeklyPart = (weeklyPos && weeklyPos !== '—')
-                ? ` | Weekly 200 SMA: <b style="color:#475569;">${weeklyPos}</b>` : '';
-            const regimeBar  = (regimePart || weeklyPart)
-                ? `<div class="tf-regime-bar">${regimePart}${weeklyPart}</div>` : '';
-
-            return `<div class="tf-stack" data-tf-symbol="${sym}">${mas15mRow(tv15m)}${regimeBar}</div>`;
+        function _travelerStatusBadge(plan) {
+            if (!plan) return { label: 'WATCHING', color: '#64748b', active: false };
+            if (plan.mgmt_exit_reason) return { label: 'CLOSED', color: '#94a3b8', active: false };
+            if (plan.status === 'FILLED') return { label: (plan.direction || '') + ' LIVE', color: '#22c55e', active: true };
+            if (plan.status === 'WAITING_TOUCH') return { label: (plan.direction || '') + ' ARMED', color: '#eab308', active: true };
+            if (plan.status === 'TERCILE_SKIPPED') return { label: 'SKIPPED', color: '#94a3b8', active: false };
+            if (plan.status === 'DONE') return { label: 'DONE', color: '#64748b', active: false };
+            return { label: 'WATCHING', color: '#64748b', active: false };  // WAITING_CROSS
         }
 
-        // ================================================================
-        // PHASE 1 — render locked DB levels instantly (no exchange calls)
-        // ================================================================
-        function renderSnapshotGrid(snap) {
-            const grid = document.getElementById('radarTargetGrid');
-            window.radarMemory = {};
-
-            if (!snap.locked) { grid.innerHTML = ''; return; }
-
-            const levels  = snap.levels || {};
-            const bo      = levels.breakout_trigger  || 0;
-            const bd      = levels.breakdown_trigger || 0;
-            // snap.mtf_cached (main.py) is permanently {} as of 2026-08-30 --
-            // kept in the API response for shape-compatibility only, not read
-            // here anymore (confluence_direction/score/energy_status/
-            // scanned_at all gone with the old confluence vote-tally).
-            const price   = snap.price || 0;
-
-            // Seed radarMemory so the cockpit can open, TAKE day or PASS day
-            // alike (2026-08-31 fix -- see below). Andy's own words: the
-            // cockpit should give "the details we're looking for just for
-            // uniformity," clickable the same way regardless of whether
-            // there's an active plan today.
-            const lvl = snap.levels || {};
-            window.radarMemory[snap.symbol] = {
-                symbol:             snap.symbol,
-                price:              price,
-                levels:             lvl,
-                indicator_string:   `${bo},${bd},${lvl.daily_resistance||0},${lvl.daily_support||0},${lvl.range30m_high||0},${lvl.range30m_low||0}`,
-                grade:              snap.mas_status || snap.conviction || 'PENDING',
-                mas_status:         snap.mas_status || null,
-                // Mission key needs exactly 9 fields (see buildMissionKey9) -- the
-                // macro/micro slots used to reuse mtf.confluence_direction, retired
-                // 2026-08-30 alongside the rest of the old confluence vote-tally;
-                // 'NEUTRAL' is a static placeholder, not a live read.
-                key:                (snap.mas_status === 'APPROVED' && snap.plan)
-                    ? buildMissionKey9(snap.plan.bias, 'SA_APPROVED', snap.plan.entry_price, snap.plan.stop_loss, snap.plan.t1, snap.plan.t2, snap.plan.t3, 'NEUTRAL', 'NEUTRAL')
-                    : '',
-                diagnostic_ledger:  {},
-                // snap.plan is null on a PASS/no-trade day (main.py only
-                // populates it from an APPROVED CampaignLog) -- fall back to
-                // a well-formed, inactive plan object (same shape market_
-                // radar.py's _build_dossier() always returns) so the cockpit
-                // still opens and shows real levels/context, just with
-                // dashes where entry/stop/targets would be.
-                plan: snap.plan ? {
-                    valid:   true,
-                    bias:    snap.plan.bias,
-                    entry:   snap.plan.entry_price,
-                    stop:    snap.plan.stop_loss,
-                    targets: [snap.plan.t1 || 0, snap.plan.t2 || 0, snap.plan.t3 || 0],
-                } : {
-                    valid: false, bias: 'NEUTRAL', entry: 0, stop: 0, targets: [0, 0, 0],
-                },
-            };
-
-            // 2026-08-31 fix: this used to be !!(snap.plan && snap.plan.
-            // entry_price) -- false on every PASS/no-trade day, which is
-            // MOST days by design (KABRODA_REBUILD_SPEC.md SS8.4: ~8 of 29
-            // trigger-breaks a month are TAKE). The button then sat
-            // `disabled` until Phase 2's updateMtfOverlay() force-enabled it
-            // a few seconds later -- clicking in that window (or before
-            // noticing the muted style) did nothing, which is what this was
-            // reported as. Andy wants uniform access to the cockpit's
-            // detail view regardless of TAKE/PASS, so it's just always
-            // enabled now -- matches what renderFullGrid() (below) already
-            // does for the no-snapshot-yet path.
-            const cockpitEnabled = true;
-            const rowClass       = 'rrc-active';
-
-            // Build the row then inject a SYNCING overlay badge
-            let rowHtml = _buildRow(
-                snap.symbol, price, bo, bd, rowClass, cockpitEnabled, snap.mas_status
-            );
-
-            rowHtml = rowHtml.replace(
-                `<div class="rrc-actions">`,
-                `<div class="rrc-badge syncing-badge" style="border-color:#334155;color:#475569;font-size:10px;">SYNCING LIVE…</div><div class="rrc-actions">`
-            );
-
-            const tfHtml = _buildTfStack(
-                snap.symbol,
-                snap.tf_verdicts || null,
-                snap.tf_today    || null,
-                snap.daily_regime || '—',
-                snap.weekly_200sma_position || '—'
-            );
-            // Flatten bottom corners on radar-row-c when TF stack follows it
-            const rowCapped = rowHtml.replace('class="radar-row-c ', 'class="radar-row-c radar-row-c-capped ');
-            grid.innerHTML = `<div class="radar-entry">${rowCapped}${tfHtml}</div>`;
+        function _travelerIndicatorString(lvl) {
+            return `${lvl.breakout_trigger||0},${lvl.breakdown_trigger||0},${lvl.daily_resistance||0},${lvl.daily_support||0},${lvl.range30m_high||0},${lvl.range30m_low||0}`;
         }
 
-        // ================================================================
-        // PHASE 2 — overlay live MTF data onto Phase 1 rows in-place
-        // ================================================================
-        function updateMtfOverlay(liveData) {
-            if (!liveData || !liveData.ok) return;
-
-            liveData.results.forEach(t => {
-                // GAP-2: merge Phase 2 scan over Phase 1 snapshot — preserve SA verdict
-                // and SA plan (CampaignLog) so they are not overwritten by radar data.
-                const _prev = window.radarMemory[t.symbol] || {};
-                window.radarMemory[t.symbol] = Object.assign({}, _prev, t, {
-                    mas_status: _prev.mas_status !== undefined ? _prev.mas_status : (t.mas_status || null),
-                    plan:       _prev.plan || t.plan,
-                    key:        (_prev.mas_status === 'APPROVED' && _prev.key) ? _prev.key : t.key,
-                });
-
-                const row = document.querySelector(`.radar-row-c[data-symbol="${t.symbol}"]`);
-                if (!row) return;
-                if (t.status === 'CALIBRATING') return;
-
-                // mtf_brief-driven direction/energy badges removed 2026-08-30 --
-                // t.mtf_brief no longer exists (market_radar.py's radar_item
-                // dropped it with the rest of the old confluence vote-tally).
-
-                // Remove SYNCING badge
-                const syncBadge = row.querySelector('.syncing-badge');
-                if (syncBadge) syncBadge.remove();
-
-                // Update price
-                const priceEl = row.querySelector('.rrc-sym-price');
-                if (priceEl && t.price) priceEl.textContent = `$${fmt(t.price)}`;
-
-                // Enable cockpit button with full live data
-                const cockpitBtn = row.querySelector('.rrc-cockpit');
-                if (cockpitBtn) {
-                    cockpitBtn.disabled  = false;
-                    cockpitBtn.className = 'rrc-cockpit rrc-cockpit-active';
-                }
-
-                // 2026-08-30 rebuild: row border driven by the SA verdict
-                // (mas_status) when available; falls back to the live radar
-                // state (the same calibrated-gate call, called fresh on every
-                // scan) when no SA verdict exists yet (pre-session). Both
-                // paths read the same real decision, so this fallback isn't
-                // "different logic," just an earlier or later read of the
-                // identical source of truth.
-                const _masStatus = window.radarMemory[t.symbol].mas_status;
-                // v2 (2026-09-15, found during the v1-dead-machinery audit):
-                // t.grade can only ever be "TAKE" or "PASS" now -- the
-                // TAKE_PREMIUM/TAKE_STANDARD check was silently always false.
-                const actionable = _masStatus
-                    ? (_masStatus === 'APPROVED')
-                    : (t.grade === 'TAKE');
-                row.className = `radar-row-c ${actionable ? 'rrc-active' : 'rrc-down'}`;
-                row.setAttribute('data-symbol', t.symbol);
-
-                // Update or inject TF stack with live Phase 2 data
-                if (t.tf_verdicts) {
-                    const tfEl = document.querySelector(`.tf-stack[data-tf-symbol="${t.symbol}"]`);
-                    const newTfHtml = _buildTfStack(
-                        t.symbol, t.tf_verdicts,
-                        t.tf_today    || null,
-                        t.daily_regime || '—',
-                        t.weekly_200sma_position || '—'
-                    );
-                    if (tfEl) {
-                        tfEl.outerHTML = newTfHtml;
-                    } else {
-                        // No TF stack yet (no Phase 1 lock) — inject after the radar row
-                        row.insertAdjacentHTML('afterend', newTfHtml);
-                        row.classList.add('radar-row-c-capped');
-                    }
-                }
-            });
-        }
-
-        // ================================================================
-        // FULL GRID RENDER — used when Phase 1 has no locked data
-        // ================================================================
-        function renderFullGrid(results) {
-            const grid = document.getElementById('radarTargetGrid');
-            let html   = '';
-
-            results.forEach(t => {
-                if (t.status === 'CALIBRATING') {
-                    html += `
-                    <div class="radar-row-c rrc-calib" data-symbol="${t.symbol}">
-                        <div class="rrc-sym">
-                            <div class="rrc-sym-name">${(t.symbol || '').replace('USDT', '')}</div>
-                            <div class="rrc-sym-price" style="color:#0ea5e9;">CALIBRATING</div>
-                        </div>
-                        <div class="rrc-badge" style="border-color:#334155; color:#64748b;">ENGINE CALIBRATING</div>
-                        <div class="rrc-energy" style="border-color:#334155; color:#64748b;">LOCKS AT 30M</div>
-                        <div class="rrc-actions">
-                            <button class="rrc-cockpit rrc-cockpit-muted" disabled>STANDBY</button>
-                        </div>
-                    </div>`;
-                    return;
-                }
-
-                const lvl    = t.levels || {};
-                const bo     = lvl.breakout_trigger  || 0;
-                const bd     = lvl.breakdown_trigger || 0;
-                // 2026-08-30 rebuild: full-grid path has no cached mas_status,
-                // reads the live calibrated-gate state directly -- same
-                // source of truth as the snapshot path, just always live here.
-                // v2 (2026-09-15): t.grade can only ever be "TAKE" or "PASS"
-                // now -- the TAKE_PREMIUM/TAKE_STANDARD check was silently
-                // always false (found during the v1-dead-machinery audit).
-                const actionable = (t.grade === 'TAKE');
-
-                const rowHtml = _buildRow(
-                    t.symbol, t.price, bo, bd,
-                    actionable ? 'rrc-active' : 'rrc-down',
-                    true, t.grade || null
-                ).replace('class="radar-row-c ', 'class="radar-row-c radar-row-c-capped ');
-                const tfHtml = _buildTfStack(
-                    t.symbol,
-                    t.tf_verdicts || null,
-                    t.tf_today    || null,
-                    t.daily_regime || '—',
-                    t.weekly_200sma_position || '—'
-                );
-                html += `<div class="radar-entry">${rowHtml}${tfHtml}</div>`;
-            });
-
-            grid.innerHTML = html;
-        }
-
-        // ================================================================
-        // MAIN SCAN — two-phase render
-        // Phase 1 (~50ms):  GET /api/radar/snapshot  — DB only, renders instantly
-        // Phase 2 (~3-5s):  POST /api/radar/scan     — live Kraken MTF, updates badges
-        // ================================================================
-        async function forceScan() {
+        async function loadTravelerRadar() {
             const btn    = document.getElementById('scanBtn');
             const grid   = document.getElementById('radarTargetGrid');
             const loader = document.getElementById('loading');
@@ -1354,68 +1050,89 @@
             grid.style.display = 'none';
             loader.style.display = 'block';
 
-            let snapRendered = false;
-
-            // === PHASE 1: Instant DB snapshot ===
             try {
-                const snap = await fetch('/api/radar/snapshot').then(r => r.json());
-                if (snap.ok && snap.locked) {
-                    renderSnapshotGrid(snap);
-                    loader.style.display = 'none';
-                    grid.style.display   = 'grid';
-                    btn.disabled         = false;  // unlock — user can read locked levels now
-                    snapRendered         = true;
-                }
-            } catch (e) {
-                console.warn('[RADAR] Snapshot failed:', e);
-            }
+                const snap = await fetch('/api/radar/traveler-snapshot').then(r => r.json());
+                window.radarMemory = {};
 
-            // === PHASE 2: Live MTF scan (runs regardless — updates snapshot or does full render) ===
-            // The old jewelGateOpen fetch (/api/narrative/latest, jData.jewel) was
-            // removed 2026-08-30 -- that endpoint's "jewel" field is permanently
-            // null now (JewelSnapshotLog's only writer, jewel_specialist.py, is
-            // archived), so it was one dead HTTP round-trip per scan for a value
-            // nothing reads anymore.
-            try {
-                const scanData = await fetch('/api/radar/scan', { method: 'POST' }).then(r => r.json());
+                if (!snap.ok || !snap.locked) {
+                    const sym = snap.symbol || 'BTCUSDT';
+                    grid.innerHTML = `
+                    <div class="radar-row-c rrc-calib" data-symbol="${sym}">
+                        <div class="rrc-sym">
+                            <div class="rrc-sym-name">${sym.replace('USDT', '')}</div>
+                            <div class="rrc-sym-price" style="color:#0ea5e9;">CALIBRATING</div>
+                        </div>
+                        <div class="rrc-badge" style="border-color:#334155; color:#64748b;">ENGINE CALIBRATING</div>
+                        <div class="rrc-actions">
+                            <button class="rrc-cockpit rrc-cockpit-muted" disabled>STANDBY</button>
+                        </div>
+                    </div>`;
+                    return;
+                }
 
-                if (snapRendered) {
-                    updateMtfOverlay(scanData);
-                } else {
-                    // No Phase 1 data — first load of the day or pre-market
-                    window.radarMemory = {};
-                    if (scanData.ok) scanData.results.forEach(t => { window.radarMemory[t.symbol] = t; });
-                    renderFullGrid(scanData.results || []);
-                    loader.style.display = 'none';
-                    grid.style.display   = 'grid';
-                }
+                const lvl  = snap.levels || {};
+                const plan = snap.plan;
+                const badge = _travelerStatusBadge(plan);
+
+                // Direction/stop/T1 are genuinely unknown before a real cross
+                // -- gate_traveler.py's TravelerPlan.direction/stop_price/
+                // t1_price are NULL until a confirmed 5m close breaks BO or
+                // BD. No speculative pre-cross dossier (unlike V2's old
+                // decision_engine.py-driven plan) -- planValid gates the
+                // cockpit's SETUP panel on real data actually existing.
+                const planValid = !!(plan && plan.direction && plan.stop_price != null && plan.t1_price != null);
+                // Entry = the trigger itself (bo for LONG, bd for SHORT) --
+                // same convention V2 already used (CLAUDE.md), and always
+                // equal to plan.fill_price once FILLED (TravelerPlan's own
+                // fill_price is "the resting limit's own trigger price").
+                const entry = planValid ? (plan.direction === 'LONG' ? lvl.breakout_trigger : lvl.breakdown_trigger) : 0;
+
+                window.radarMemory[snap.symbol] = {
+                    symbol: snap.symbol,
+                    price: snap.price,
+                    levels: lvl,
+                    indicator_string: _travelerIndicatorString(lvl),
+                    mas_status: null,
+                    // Mission key needs exactly 9 fields (buildMissionKey9) --
+                    // no T2/T3 exist for the Traveler (MGMT_E1_STACK is a
+                    // single full-exit design), so tp2/tp3 repeat tp1, the
+                    // same back-compat convention V2 itself already uses for
+                    // its own T2==T1 (CLAUDE.md's "Calibrated Gate" section).
+                    key: planValid
+                        ? buildMissionKey9(plan.direction, plan.status, entry, plan.stop_price, plan.t1_price, plan.t1_price, plan.t1_price, 'NEUTRAL', 'NEUTRAL')
+                        : '',
+                    diagnostic_ledger: {},
+                    plan: planValid ? {
+                        valid: true,
+                        bias: plan.direction,
+                        entry: entry,
+                        stop: plan.stop_price,
+                        targets: [plan.t1_price, plan.t1_price, plan.t1_price],
+                    } : {
+                        valid: false, bias: 'NEUTRAL', entry: 0, stop: 0, targets: [0, 0, 0],
+                    },
+                };
+
+                const rowHtml = _buildRow(snap.symbol, snap.price, lvl.breakout_trigger, lvl.breakdown_trigger,
+                    badge.active ? 'rrc-active' : 'rrc-down', true, badge.label, badge.color);
+                grid.innerHTML = `<div class="radar-entry">${rowHtml}</div>`;
             } catch (e) {
-                console.warn('[RADAR] Live scan failed:', e);
-                if (!snapRendered) {
-                    loader.style.display = 'none';
-                    grid.style.display   = 'grid';
-                    grid.innerHTML = `<div style="color:#ef4444;padding:20px;font-family:'JetBrains Mono';font-size:12px;">LIVE SCAN FAILED. Check server logs.</div>`;
-                }
-                // If Phase 1 rendered, user already has locked data — silent failure is acceptable
+                console.warn('[RADAR] Traveler snapshot failed:', e);
+                grid.innerHTML = `<div style="color:#ef4444;padding:20px;font-family:'JetBrains Mono';font-size:12px;">RADAR LOAD FAILED. Check server logs.</div>`;
             } finally {
+                loader.style.display = 'none';
+                grid.style.display   = 'grid';
                 btn.disabled = false;
             }
         }
 
         // ================================================================
-        // TRADE PLAN LIVE STATE (2026-09-01 -- radar/email parity)
-        // Polls GET /api/admin/trade-plan-status independently of
-        // forceScan() above -- that button-driven flow only fires once on
-        // load (or on manual click), which is exactly the "radar shows one
-        // thing, email says another" gap Andy flagged. This panel is the
-        // SAME state the email is built from (trade_plan_engine.py's real,
-        // stateful, one-way transitions), not a second independent gate
-        // read: /api/radar/scan recomputes the gate fresh with NO memory of
-        // a cross that already happened and retraced -- exactly the kind
-        // of round-trip that made day 3 confusing. Admin-session only
-        // (same as the endpoint itself); a 403 just hides the panel rather
-        // than erroring, since a non-admin viewer was never going to see
-        // TradePlan detail anyway.
+        // TIMESTAMP/NUMBER FORMATTING HELPERS -- shared by
+        // renderTravelerState() below. The V2 "Trade Plan" panel that used
+        // to justify this section's original header comment (polling
+        // /api/admin/trade-plan-status independently of the main grid load)
+        // is gone -- see the removal note further down, right before
+        // renderTravelerState().
         // ================================================================
         // 2026-09-09, root-cause fix (Andy's real incident: the Trade Plan
         // panel's "cross 1:34:59 PM" looked wrong -- a naive-UTC display bug,
@@ -1439,101 +1156,12 @@
             return (v === null || v === undefined) ? null : Number(v).toLocaleString(undefined, {maximumFractionDigits: 2});
         }
 
-        // Shows/hides one level row and fills its value + direction-aware
-        // color class -- null means "not set on this plan" (e.g. T2), not
-        // an error, so the row just hides rather than showing "--".
-        function _setLevelRow(rowId, valId, value, colorClass) {
-            const rowEl = document.getElementById(rowId);
-            const valEl = document.getElementById(valId);
-            if (value === null || value === undefined) {
-                if (rowEl) rowEl.style.display = 'none';
-                return;
-            }
-            if (rowEl) rowEl.style.display = 'flex';
-            if (valEl) { valEl.textContent = _fmtLevel(value); valEl.className = 'd-val ' + colorClass; }
-        }
-
-        function renderPlanState(row) {
-            const panel = document.getElementById('planStatePanel');
-            if (!row) { panel.style.display = 'none'; return; }
-
-            const badge = document.getElementById('planStateBadge');
-            badge.textContent = row.status;
-            badge.className = 'plan-state-badge st-' + row.status.toLowerCase();
-
-            const bits = [];
-            if (row.direction) bits.push(row.direction);
-            if (row.tier) bits.push(row.tier);
-            if (row.trigger_price) bits.push('@ ' + _fmtLevel(row.trigger_price));
-            document.getElementById('planStateDetail').textContent = bits.join(' · ');
-
-            document.getElementById('planStateReason').textContent = row.last_transition_reason || '';
-
-            // Levels block -- entry/stop/T1/T2/T3, direction-aware coloring
-            // (LONG: entry green/stop red; SHORT: mirrored), same c-GREEN/
-            // c-RED/c-YELLOW convention the cockpit's own setup panel uses.
-            const levelsEl = document.getElementById('planStateLevels');
-            const hasLevels = row.trigger_price != null || row.stop_price != null;
-            if (hasLevels) {
-                const isLong = row.direction === 'LONG';
-                const isShort = row.direction === 'SHORT';
-                const entryColor = isLong ? 'c-GREEN' : (isShort ? 'c-RED' : 'c-GRAY');
-                const stopColor = isLong ? 'c-RED' : (isShort ? 'c-GREEN' : 'c-GRAY');
-                _setLevelRow('planLevelEntryRow', 'planLevelEntry', row.trigger_price, entryColor);
-                _setLevelRow('planLevelStopRow', 'planLevelStop', row.stop_price, stopColor);
-                _setLevelRow('planLevelT1Row', 'planLevelT1', row.t1, 'c-YELLOW');
-                _setLevelRow('planLevelT2Row', 'planLevelT2', row.t2, 'c-GRAY');
-                _setLevelRow('planLevelT3Row', 'planLevelT3', row.t3, 'c-GRAY');
-                levelsEl.style.display = 'flex';
-            } else {
-                levelsEl.style.display = 'none';
-            }
-
-            // Fill line -- fill_time + the fill price. This is the SITE'S
-            // OWN bookkeeping fill (trade_plan.py's FILLED transition sets
-            // fill_price = trigger at the cross-confirm moment -- the same
-            // convention the 5-year backtest/study corpus uses), NOT
-            // necessarily when a real LIVE resting order actually fills. A
-            // real order rests behind price after confirmation and only
-            // fills on an actual retest, which can be hours or days later
-            // (no timeout -- LIVE_SYSTEM_STATE.md). CC_INTERFACE.md audit
-            // item 1 / the P2-2 discrepancy Andy independently identified
-            // 2026-09-20: a real example, 09-19's book shows FILLED
-            // 14:10:20 @ 81,400.48, but the first real retest was the
-            // 18:00 UTC bar, ~3h50m later. Labeled "(bookkeeping)" so this
-            // is never mistaken for a confirmed real exchange fill --
-            // whether to change the underlying CONVENTION (not this label)
-            // is still pending Andy's ruling (P2-2), not this file's call.
-            const fillEl = document.getElementById('planStateFill');
-            if (row.status === 'FILLED' && row.fill_time) {
-                fillEl.innerHTML = 'Filled ' + _parseServerTimestamp(row.fill_time).toLocaleString()
-                    + (row.trigger_price != null ? ' @ ' + _fmtLevel(row.trigger_price) : '')
-                    + ' <span style="color:#6b5a47; font-weight:400;" '
-                    + 'title="Site bookkeeping fill (cross-confirm moment, same convention the backtest uses) -- a real LIVE resting order only fills on an actual retest, which can be later.">(bookkeeping)</span>';
-                fillEl.style.display = 'block';
-            } else {
-                fillEl.style.display = 'none';
-            }
-
-            const staleness = row.seconds_since_update != null ? Math.round(row.seconds_since_update) + 's ago' : 'unknown';
-            document.getElementById('planStateAsOf').textContent =
-                'live · updated ' + staleness + (row.cross_time ? ' · cross ' + _parseServerTimestamp(row.cross_time).toLocaleTimeString() : '');
-
-            panel.style.display = 'block';
-        }
-
-        async function pollPlanState() {
-            try {
-                const data = await fetch('/api/admin/trade-plan-status').then(r => r.ok ? r.json() : null);
-                if (!data || !data.ok || !data.rows || !data.rows.length) {
-                    document.getElementById('planStatePanel').style.display = 'none';
-                    return;
-                }
-                renderPlanState(data.rows[0]);
-            } catch (e) {
-                console.warn('[RADAR] Trade Plan live-state poll failed:', e);
-            }
-        }
+        // renderPlanState()/pollPlanState()/_setLevelRow() removed
+        // 2026-09-23 (V2 Crown retirement, radar rebuild around the
+        // Traveler) -- this was the V2-only "Trade Plan" panel
+        // (/api/admin/trade-plan-status), gone along with trade_plan_
+        // engine.py. _fmtLevel()/_parseServerTimestamp() above stay --
+        // renderTravelerState() below still uses both.
 
         // CC_WORK_ORDER_RADAR_PLAN_PANEL.md work item 2 -- the compact
         // TravelerPlan panel. Deliberately no copy buttons here (unlike the
@@ -1650,9 +1278,8 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            forceScan();
-            pollPlanState();
-            setInterval(pollPlanState, 45000);
+            loadTravelerRadar();
+            setInterval(loadTravelerRadar, 45000);  // same cadence as the two state polls below
             pollTravelerState();
             setInterval(pollTravelerState, 45000);
         });

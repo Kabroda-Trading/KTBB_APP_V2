@@ -141,6 +141,12 @@ def get_public_traveler_snapshot(db: Session) -> Dict[str, Any]:
             "breakdown_trigger": levels.get("breakdown_trigger"),
             "range30m_high": levels.get("range30m_high"),
             "range30m_low": levels.get("range30m_low"),
+            # daily_resistance/daily_support: same shared SessionLock levels
+            # blob (sse_engine.py), not Traveler- or V2-specific -- kept here
+            # so the radar frontend's existing "COPY TRIGGERS" button (6
+            # chart levels: bo/bd/daily S+R/range30m H+L) still has all 6.
+            "daily_resistance": levels.get("daily_resistance"),
+            "daily_support": levels.get("daily_support"),
         },
         "plan": None,
     }

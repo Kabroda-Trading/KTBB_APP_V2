@@ -65,7 +65,8 @@ def env():
     _clean_db_files()
 
 
-def _make_lock(db, date_key=TODAY_KEY, bo=81414.10, bd=80000.0, r30_high=81300.0, r30_low=80100.0, anchor_price=80700.0):
+def _make_lock(db, date_key=TODAY_KEY, bo=81414.10, bd=80000.0, r30_high=81300.0, r30_low=80100.0,
+               anchor_price=80700.0, daily_resistance=82000.0, daily_support=79000.0):
     row = SessionLock(
         symbol="BTC/USDT", session_id="us_ny_futures", date_key=date_key,
         lock_time=int(time.time()),
@@ -73,6 +74,7 @@ def _make_lock(db, date_key=TODAY_KEY, bo=81414.10, bd=80000.0, r30_high=81300.0
             "breakout_trigger": bo, "breakdown_trigger": bd,
             "range30m_high": r30_high, "range30m_low": r30_low,
             "anchor_price": anchor_price,
+            "daily_resistance": daily_resistance, "daily_support": daily_support,
         }}),
     )
     db.add(row)
@@ -141,6 +143,8 @@ def test_locked_no_plan_yet_shows_levels_only(env):
     assert body["locked"] is True
     assert body["levels"]["breakout_trigger"] == 81414.10
     assert body["levels"]["breakdown_trigger"] == 80000.0
+    assert body["levels"]["daily_resistance"] == 82000.0
+    assert body["levels"]["daily_support"] == 79000.0
     assert body["price"] == 80700.0
     assert body["price_as_of"] == "lock"
     assert body["plan"] is None
