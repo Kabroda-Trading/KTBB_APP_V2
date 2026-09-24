@@ -260,8 +260,8 @@ async function loadAccounts() {
                     ${a.kill_switch_engaged ? '<span class="badge badge-danger" style="margin-left:4px;">KILL SWITCH ENGAGED</span>' : '<span class="badge badge-ok" style="margin-left:4px;">ACTIVE</span>'}
                     ${a.has_credentials ? '' : '<span class="badge badge-warn" style="margin-left:4px;">NO CREDENTIALS SET</span>'}
                     ${a.sizing_confirmed ? '' : '<span class="badge badge-warn" style="margin-left:4px;" title="Real order placement is blocked until a sizing preset is explicitly saved (Step 3 below) -- this is not just a display default.">SIZING NOT CONFIRMED</span>'}
-                    ${(a.gate_profile !== 'GATE_V2' || a.mgmt_profile !== 'MGMT_SPLIT')
-                        ? `<span class="badge badge-warn" style="margin-left:4px;">${escapeHtml(a.gate_profile)} / ${escapeHtml(a.mgmt_profile)}</span>`
+                    ${(a.gate_profile !== 'GATE_TRAVELER' || a.mgmt_profile !== 'MGMT_E1_STACK')
+                        ? `<span class="badge badge-warn" style="margin-left:4px;" title="GATE_V2/MGMT_SPLIT were retired 2026-09-24 (V2 Crown retirement) -- this account still has an old profile value stored from before that. Set it to GATE_TRAVELER/MGMT_E1_STACK below.">${escapeHtml(a.gate_profile)} / ${escapeHtml(a.mgmt_profile)}</span>`
                         : ''}
                 </div>
                 <div>
@@ -432,18 +432,16 @@ async function loadAccounts() {
 
             <div class="setup-step" id="strategyProfile-${a.id}" style="border-color:#3730a3; background:rgba(55,48,163,0.08);">
                 <div class="setup-step-title" style="color:#a5b4fc;"><span class="setup-step-num">4</span> Strategy Profile</div>
-                <p class="empty" style="padding:0 0 8px;">Which gate and management run this account's real orders. Default (GATE_V2 / MGMT_SPLIT) is today's live system, unchanged -- switch only for a deliberate DRY_RUN evaluation of the traveler candidate.</p>
+                <p class="empty" style="padding:0 0 8px;">Which gate and management run this account's real orders. GATE_TRAVELER / MGMT_E1_STACK is the sole live system since the 2026-09-24 V2 Crown retirement -- the old GATE_V2 / MGMT_SPLIT gate no longer exists in the code at all. This step now only matters for an account whose profile still literally reads GATE_V2 / MGMT_SPLIT (a real value stored before that retirement, flagged by the warning badge above) -- save here to move it onto the current system.</p>
                 <div class="risk-form">
                     <label>Gate (D1)
                         <select id="profileGate-${a.id}">
-                            <option value="GATE_V2">GATE_V2 -- Krown Cross + 4H RSI (today's live gate)</option>
-                            <option value="GATE_TRAVELER">GATE_TRAVELER -- trigger-touch-fill + tercile-skip (evaluation candidate)</option>
+                            <option value="GATE_TRAVELER">GATE_TRAVELER -- trigger-touch-fill + tercile-skip (the only live gate)</option>
                         </select>
                     </label>
                     <label>Management (D3)
                         <select id="profileMgmt-${a.id}">
-                            <option value="MGMT_SPLIT">MGMT_SPLIT -- 50% at T1 / 50% to T3, stop never moves (today's live management)</option>
-                            <option value="MGMT_E1_STACK">MGMT_E1_STACK -- full exit at T1 or on C5/BBWP momentum-decay (evaluation candidate)</option>
+                            <option value="MGMT_E1_STACK">MGMT_E1_STACK -- full exit at T1 or on C5/BBWP momentum-decay (the only live management)</option>
                         </select>
                     </label>
                 </div>
@@ -506,8 +504,15 @@ function renderStrategyProfileSection(accountId, account) {
     const mgmtSel = document.getElementById(`profileMgmt-${accountId}`);
     const confirmRow = document.getElementById(`profileLiveConfirmRow-${accountId}`);
     if (!gateSel || !mgmtSel) return;
-    gateSel.value = account.gate_profile || "GATE_V2";
-    mgmtSel.value = account.mgmt_profile || "MGMT_SPLIT";
+    // account.gate_profile/mgmt_profile come from the server already
+    // resolved (gate_profile_of()/mgmt_profile_of(), never null) -- these
+    // fallbacks are defensive only. GATE_TRAVELER/MGMT_E1_STACK is the
+    // only <option> either <select> has since 2026-09-24's V2 Crown
+    // retirement; an old account whose raw value still literally reads
+    // GATE_V2/MGMT_SPLIT won't match either dropdown's single option,
+    // which is fine -- saving this form moves it onto the current one.
+    gateSel.value = account.gate_profile || "GATE_TRAVELER";
+    mgmtSel.value = account.mgmt_profile || "MGMT_E1_STACK";
     // The confirm phrase is only ever needed on a REAL change to a LIVE
     // account (server-side is the real gate; this just avoids showing an
     // input nobody needs on a DRY_RUN account).

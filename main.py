@@ -1028,9 +1028,17 @@ async def api_admin_traveler_plan_status(request: Request, db: Session = Depends
     # is any active account actually running GATE_TRAVELER in LIVE mode
     # right now? Same thin-surface pattern as the rest of this route --
     # read DB state only, no exchange call.
+    # gate_profile.is_(None) included alongside the exact-string match --
+    # a real gap found 2026-09-24 (V2 Crown retirement, Step 3f-iv):
+    # executor_accounts.gate_profile_of()'s own fallback for a NULL
+    # column flipped from GATE_V2 to GATE_TRAVELER (the only profile
+    # left), but this raw SQL filter never went through that function --
+    # a never-explicitly-configured LIVE account (gate_profile still
+    # NULL) is a real GATE_TRAVELER account by that resolution, but NULL
+    # never matches an exact "GATE_TRAVELER" string filter in SQL.
     any_account_live = db.query(_ExecutorAccount).filter(
         _ExecutorAccount.is_active == True,
-        _ExecutorAccount.gate_profile == "GATE_TRAVELER",
+        or_(_ExecutorAccount.gate_profile == "GATE_TRAVELER", _ExecutorAccount.gate_profile.is_(None)),
         _ExecutorAccount.mode == "LIVE",
     ).first() is not None
 

@@ -296,8 +296,10 @@ def test_profile_route_defaults_visible_on_a_fresh_account(env):
     resp = client.get("/api/executor/accounts")
     assert resp.status_code == 200
     account = resp.json()["accounts"][0]
-    assert account["gate_profile"] == "GATE_V2"
-    assert account["mgmt_profile"] == "MGMT_SPLIT"
+    # 2026-09-24 (V2 Crown retirement, Step 3f-iv): defaults flipped from
+    # GATE_V2/MGMT_SPLIT -- neither exists as a valid profile anymore.
+    assert account["gate_profile"] == "GATE_TRAVELER"
+    assert account["mgmt_profile"] == "MGMT_E1_STACK"
 
 
 # ------------------------------------------------------------------ sizing_confirmed (P0-2, CC_WORK_ORDER_LIVE_DAY_2026-09-19.md)
@@ -348,6 +350,16 @@ def test_profile_route_on_live_account_requires_confirm_phrase(env):
     live_resp = owner_client.post(f"/api/executor/accounts/{aid}/mode", json={"mode": "LIVE", "confirm": "CONFIRM ENABLE LIVE TRADING"})
     assert live_resp.status_code == 200
     assert live_resp.json()["account"]["mode"] == "LIVE"
+
+    # 2026-09-24 (Step 3f-iv): a fresh account already defaults to
+    # GATE_TRAVELER, so requesting it again below would be a no-op that
+    # never reaches the confirm-phrase gate at all -- force the raw
+    # column back to the retired GATE_V2 value first so the request is a
+    # real change, same migration-scenario reasoning as
+    # tests/test_executor_accounts.py's own profile tests.
+    account = env["db"].query(ExecutorAccount).filter_by(id=aid).first()
+    account.gate_profile = "GATE_V2"
+    env["db"].commit()
 
     no_confirm = owner_client.post(f"/api/executor/accounts/{aid}/profile", json={"gate_profile": "GATE_TRAVELER"})
     assert no_confirm.status_code == 400

@@ -177,22 +177,40 @@ def set_assumed_balance(db: Session, account: ExecutorAccount, assumed_balance_u
     return account
 
 
-_VALID_GATE_PROFILES = ("GATE_V2", "GATE_TRAVELER")
-_VALID_MGMT_PROFILES = ("MGMT_SPLIT", "MGMT_E1_STACK")
-DEFAULT_GATE_PROFILE = "GATE_V2"
-DEFAULT_MGMT_PROFILE = "MGMT_SPLIT"
+# GATE_V2/MGMT_SPLIT trimmed 2026-09-24 (V2 Crown retirement, Step 3f-iv)
+# -- decision_engine.py/executor_engine.py's _process_account()/
+# executor_plan_builder.py's build_hypothetical_order() are all deleted,
+# so GATE_V2/MGMT_SPLIT can no longer be legitimately assigned to any
+# account (re-verified zero ExecutorAccount rows still on GATE_V2 before
+# this change, per Andy's own Phase A confirmation earlier in this
+# retirement). DEFAULT_GATE_PROFILE/DEFAULT_MGMT_PROFILE flipped to
+# GATE_TRAVELER/MGMT_E1_STACK, not just left pointing at the retired
+# values with a "stale meaning" caveat -- a real, deliberate behavior
+# change: gate_profile_of()/mgmt_profile_of()'s only real callers now
+# (_process_traveler_account(), executor_plan_builder.py's Traveler
+# builder) always operate on a GATE_TRAVELER account already (checked at
+# the top of _process_traveler_account()), so a fallback of GATE_V2/
+# MGMT_SPLIT for a never-touched account was already wrong the moment
+# GATE_V2 stopped existing, not just stale-but-harmless -- a fresh
+# account's orders would have been mislabeled mgmt_profile_used=
+# "MGMT_SPLIT" in their own audit trail forever, despite always running
+# E1_STACK logic in practice.
+_VALID_GATE_PROFILES = ("GATE_TRAVELER",)
+_VALID_MGMT_PROFILES = ("MGMT_E1_STACK",)
+DEFAULT_GATE_PROFILE = "GATE_TRAVELER"
+DEFAULT_MGMT_PROFILE = "MGMT_E1_STACK"
 
 
 def gate_profile_of(account: ExecutorAccount) -> str:
     """account.gate_profile is nullable (Phase 2, 2026-09-15) -- every real
     call site should go through this rather than reading the column
-    directly, so a brand-new or never-touched account reads as today's
-    exact v2 behavior (GATE_V2), not None."""
+    directly, so a brand-new or never-touched account reads as
+    GATE_TRAVELER (the only profile left, 2026-09-24), not None."""
     return account.gate_profile or DEFAULT_GATE_PROFILE
 
 
 def mgmt_profile_of(account: ExecutorAccount) -> str:
-    """Same reasoning as gate_profile_of() -- default MGMT_SPLIT."""
+    """Same reasoning as gate_profile_of() -- default MGMT_E1_STACK."""
     return account.mgmt_profile or DEFAULT_MGMT_PROFILE
 
 

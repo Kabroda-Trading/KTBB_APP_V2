@@ -315,7 +315,18 @@ def test_waiting_touch_fill_f_a_reads_rsi_4h_at_cross_not_at_lock(poll_env):
 
 
 def test_waiting_touch_ignores_non_gate_traveler_accounts(poll_env):
-    poll_env["make_traveler_account"](gate_profile="GATE_V2", mgmt_profile="MGMT_SPLIT")
+    # GATE_V2/MGMT_SPLIT are no longer valid choices set_account_profile()
+    # accepts (2026-09-24, V2 Crown retirement, Step 3f-iv) -- simulate
+    # the real remaining scenario this test proves against instead: an
+    # account whose raw column still literally holds the old GATE_V2
+    # value from before that retirement (this repo has no migration
+    # framework, so old rows are never rewritten), bypassing
+    # set_account_profile()'s validation the same way a raw DB read would.
+    account_id = poll_env["make_traveler_account"]()
+    db = SessionLocal()
+    db.query(ExecutorAccount).filter_by(id=account_id).update({"gate_profile": "GATE_V2", "mgmt_profile": "MGMT_SPLIT"})
+    db.commit()
+    db.close()
     ct = 1700000000
     poll_env["make_plan"](
         status="WAITING_TOUCH", direction="LONG",

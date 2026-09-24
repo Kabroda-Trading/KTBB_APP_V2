@@ -895,18 +895,23 @@ def test_set_assumed_balance_allowed_on_a_live_account(db):
 
 # ------------------------------------------------------------------ set_account_profile / gate_profile_of / mgmt_profile_of (Phase 2, 2026-09-15)
 
-def test_gate_profile_of_defaults_to_v2_when_never_set(db):
+def test_gate_profile_of_defaults_to_traveler_when_never_set(db):
+    # 2026-09-24 (V2 Crown retirement, Step 3f-iv): default flipped from
+    # GATE_V2 -- GATE_V2 no longer exists as a valid profile at all
+    # (decision_engine.py/executor_engine.py's V2 path are both deleted).
     account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
     db.commit()
     assert account.gate_profile is None   # the raw column -- confirms the default is code-side, not a DB default
-    assert ea.gate_profile_of(account) == "GATE_V2" == ea.DEFAULT_GATE_PROFILE
+    assert ea.gate_profile_of(account) == "GATE_TRAVELER" == ea.DEFAULT_GATE_PROFILE
 
 
-def test_mgmt_profile_of_defaults_to_split_when_never_set(db):
+def test_mgmt_profile_of_defaults_to_e1_stack_when_never_set(db):
+    # 2026-09-24 (V2 Crown retirement, Step 3f-iv): default flipped from
+    # MGMT_SPLIT, same reasoning as gate_profile_of() above.
     account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
     db.commit()
     assert account.mgmt_profile is None
-    assert ea.mgmt_profile_of(account) == "MGMT_SPLIT" == ea.DEFAULT_MGMT_PROFILE
+    assert ea.mgmt_profile_of(account) == "MGMT_E1_STACK" == ea.DEFAULT_MGMT_PROFILE
 
 
 def test_set_account_profile_sets_gate_and_mgmt_independently(db):
@@ -915,7 +920,7 @@ def test_set_account_profile_sets_gate_and_mgmt_independently(db):
     ea.set_account_profile(db, account, gate_profile="GATE_TRAVELER", by="andy@kabroda.com")
     db.commit()
     assert ea.gate_profile_of(account) == "GATE_TRAVELER"
-    assert ea.mgmt_profile_of(account) == "MGMT_SPLIT"  # untouched -- omitted param leaves it alone
+    assert ea.mgmt_profile_of(account) == "MGMT_E1_STACK"  # untouched -- omitted param leaves it alone, and that's now the default anyway
 
     ea.set_account_profile(db, account, mgmt_profile="MGMT_E1_STACK", by="andy@kabroda.com")
     db.commit()
@@ -938,7 +943,17 @@ def test_set_account_profile_rejects_unknown_mgmt_profile(db):
 
 
 def test_set_account_profile_writes_audit_row_on_real_change(db):
+    # GATE_TRAVELER/MGMT_E1_STACK are now the DEFAULT (2026-09-24, Step
+    # 3f-iv) -- a fresh account already reads as both, so setting them
+    # again would be a no-op, not a "real change." Simulate the real
+    # migration scenario instead: an account whose raw DB columns still
+    # literally hold the old GATE_V2/MGMT_SPLIT strings (set before this
+    # trim, before GATE_V2 stopped being a valid choice -- this repo has
+    # no migration framework, so old rows are never rewritten) being
+    # explicitly moved onto the only profile left.
     account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
+    account.gate_profile = "GATE_V2"
+    account.mgmt_profile = "MGMT_SPLIT"
     db.commit()
     ea.set_account_profile(db, account, gate_profile="GATE_TRAVELER", mgmt_profile="MGMT_E1_STACK", by="andy@kabroda.com")
     db.commit()
@@ -952,7 +967,7 @@ def test_set_account_profile_no_change_writes_no_audit_row(db):
     account = ea.create_account(db, user_id=1, label="andy_bitunix_main")
     db.commit()
     # Explicitly re-setting to the same (default) values is a no-op.
-    ea.set_account_profile(db, account, gate_profile="GATE_V2", mgmt_profile="MGMT_SPLIT", by="andy@kabroda.com")
+    ea.set_account_profile(db, account, gate_profile="GATE_TRAVELER", mgmt_profile="MGMT_E1_STACK", by="andy@kabroda.com")
     db.commit()
     rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="PROFILE_CHANGED").all()
     assert len(rows) == 0
@@ -963,8 +978,8 @@ def test_set_account_profile_omitting_both_is_a_harmless_noop(db):
     db.commit()
     ea.set_account_profile(db, account, by="andy@kabroda.com")
     db.commit()
-    assert ea.gate_profile_of(account) == "GATE_V2"
-    assert ea.mgmt_profile_of(account) == "MGMT_SPLIT"
+    assert ea.gate_profile_of(account) == "GATE_TRAVELER"
+    assert ea.mgmt_profile_of(account) == "MGMT_E1_STACK"
     rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="PROFILE_CHANGED").all()
     assert len(rows) == 0
 
@@ -981,20 +996,37 @@ def _live_account(db):
 
 
 def test_set_account_profile_on_live_account_refuses_without_confirm_phrase(db):
+    # 2026-09-24 (Step 3f-iv): a fresh account already defaults to
+    # GATE_TRAVELER, so re-asserting the same value on purpose here would
+    # be a no-op, not a real change needing the confirm gate at all --
+    # start it on the raw old value instead, same migration-scenario
+    # reasoning as test_set_account_profile_writes_audit_row_on_real_
+    # change() above, to keep this test actually exercising a real change.
     account = _live_account(db)
+    account.gate_profile = "GATE_V2"
+    db.commit()
     with pytest.raises(ValueError, match="confirm phrase must be exactly"):
         ea.set_account_profile(db, account, gate_profile="GATE_TRAVELER", by="andy@kabroda.com")
     assert ea.gate_profile_of(account) == "GATE_V2"  # unchanged
 
 
 def test_set_account_profile_on_live_account_refuses_with_wrong_confirm_phrase(db):
+    # Same "start from the old raw value" reasoning as the test above --
+    # a fresh account already defaults to GATE_TRAVELER, so requesting it
+    # again would be a no-op that never even reaches the confirm-phrase
+    # gate (is_real_change would be False).
     account = _live_account(db)
+    account.gate_profile = "GATE_V2"
+    db.commit()
     with pytest.raises(ValueError, match="confirm phrase must be exactly"):
         ea.set_account_profile(db, account, gate_profile="GATE_TRAVELER", by="andy@kabroda.com", confirm="wrong phrase")
 
 
 def test_set_account_profile_on_live_account_succeeds_with_correct_confirm_phrase(db):
     account = _live_account(db)
+    account.gate_profile = "GATE_V2"
+    account.mgmt_profile = "MGMT_SPLIT"
+    db.commit()
     ea.set_account_profile(
         db, account, gate_profile="GATE_TRAVELER", mgmt_profile="MGMT_E1_STACK",
         by="andy@kabroda.com", confirm=ea.LIVE_TRADING_CONFIRM_PHRASE,
@@ -1009,11 +1041,14 @@ def test_set_account_profile_on_live_account_succeeds_with_correct_confirm_phras
 def test_set_account_profile_on_live_account_setting_same_values_needs_no_confirm(db):
     # Re-affirming the CURRENT profile (a harmless no-op) must not demand
     # the confirm phrase -- only a REAL change is gated, same "is_real_
-    # change" guard the audit-row logic already uses.
+    # change" guard the audit-row logic already uses. GATE_TRAVELER/
+    # MGMT_E1_STACK are the CURRENT profile for a fresh account since
+    # 2026-09-24's default flip (Step 3f-iv) -- re-affirming those,
+    # not the retired GATE_V2/MGMT_SPLIT, is what "same values" means now.
     account = _live_account(db)
-    ea.set_account_profile(db, account, gate_profile="GATE_V2", mgmt_profile="MGMT_SPLIT", by="andy@kabroda.com")
+    ea.set_account_profile(db, account, gate_profile="GATE_TRAVELER", mgmt_profile="MGMT_E1_STACK", by="andy@kabroda.com")
     db.commit()
-    assert ea.gate_profile_of(account) == "GATE_V2"
+    assert ea.gate_profile_of(account) == "GATE_TRAVELER"
 
 
 def test_set_account_profile_dry_run_account_needs_no_confirm_phrase(db):

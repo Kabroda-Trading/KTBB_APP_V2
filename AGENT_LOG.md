@@ -7220,3 +7220,72 @@ dashboard` still renders (200).
 `executor_engine.py:61`'s `DEFAULT_GATE_PROFILE` read is gone).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-24 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: executor_accounts.py GATE_V2/MGMT_SPLIT trim + executor_admin.html rewiring, sub-cluster 3f-iv of 3f-v -- roadmap step 3, sub-step 3f
+STATUS: resolved.
+
+**Re-verified before touching anything**: `DEFAULT_GATE_PROFILE`'s only
+external reader (`executor_engine.py:61`) was confirmed gone (deleted in
+3f-ii). **A real error in the retirement map's own text, caught by this
+re-verification, not assumed**: it claimed `DEFAULT_GATE_PROFILE`'s
+"only reader" was that external call site -- false. `executor_accounts.
+gate_profile_of()` itself reads it internally as its own NULL-column
+fallback, meaning simply "removing" the constant (as literally
+instructed) would have broken that function with a `NameError`. The
+actual fix was to flip its VALUE (GATE_V2 -> GATE_TRAVELER), not delete
+the constant.
+
+**A second, larger correction to the plan's own reasoning, found via the
+same re-verification discipline**: the plan explicitly said
+`DEFAULT_MGMT_PROFILE="MGMT_SPLIT"` "must stay... only its meaning goes
+stale, not the constant itself." Traced this through and found it
+wrong: `_process_traveler_account()` (the only remaining caller of
+`mgmt_profile_of()`) always operates on a confirmed GATE_TRAVELER
+account, so a `mgmt_profile=NULL` account's orders would get
+permanently mislabeled `mgmt_profile_used="MGMT_SPLIT"` in their own
+audit trail forever, despite always running E1_STACK logic in practice.
+Flipped `DEFAULT_MGMT_PROFILE` to `MGMT_E1_STACK` too, in the same
+coordinated change as the gate default.
+
+**Shipped**: `_VALID_GATE_PROFILES`/`_VALID_MGMT_PROFILES` trimmed to
+single-value tuples (`GATE_TRAVELER`, `MGMT_E1_STACK`); both DEFAULT_*
+constants flipped as above. `templates/executor_admin.html`: warn-badge
+comparison flipped polarity (now correctly flags an account still
+stuck on the old raw GATE_V2/MGMT_SPLIT string, instead of the inverted
+"always warns" state the retirement map worried about); dropdown
+`<option>` lists trimmed to the single remaining choice each; step 4's
+description text and JS fallback defaults updated to match.
+
+**A THIRD real bug found and fixed, this one pre-existing and unrelated
+to the plan's own text** -- `/api/admin/traveler-plan-status`'s
+`any_account_live` check filtered on the raw SQL column
+(`gate_profile == "GATE_TRAVELER"`), never through `gate_profile_of()`.
+Once the Python-level default flipped, a brand-new LIVE account that's
+never had its profile explicitly set (`gate_profile` still NULL) is a
+real GATE_TRAVELER account by that resolution, but NULL never matches
+an exact string filter in SQL -- it would have been invisible to this
+check. Fixed with an `or_(... == "GATE_TRAVELER", ....is_(None))`
+filter; mutation-verified (reverting to the bare equality check makes a
+new test for exactly this scenario fail).
+
+**Test fixes, all following the same "simulate an old account via a raw
+column write, bypassing set_account_profile()'s now-stricter
+validation" pattern** since GATE_V2/MGMT_SPLIT are no longer valid
+`set_account_profile()` inputs: 5 tests in `tests/
+test_executor_accounts.py`, 2 in `tests/test_executor_admin_routes.py`,
+1 in `tests/test_traveler_plan_engine.py`, 1 rewritten (+1 new) in
+`tests/test_admin_plan_status.py` for the any_account_live fix above.
+
+**Verification**: full suite 513 passed (512 + 1 new test, exact),
+clean boot (plain import + real `TestClient` lifespan cycle),
+`/admin/executor` rendered with zero literal "GATE_V2" string anywhere
+on the page, JS harness (`node tests/executor_admin_js_harness.js`)
+re-run clean against the real template script block.
+
+**Roadmap status**: 3f-iv of 3f-v done. Next: 3f-v -- optional DB table
+cleanup (per this repo's "leave the table" convention) + the full
+CLAUDE.md pass (retire "The Calibrated Gate" section to past tense,
+update "What Must Never Be Changed," update "The Decision Layer"
+section). This is the last sub-step of the whole V2 retirement.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

@@ -219,17 +219,40 @@ def test_traveler_plan_status_any_account_live_true_for_live_traveler_account(en
 
 
 def test_traveler_plan_status_any_account_live_false_for_live_v2_account(env):
-    # A LIVE account running the OTHER profile (v2/GATE_V2, gate_profile
-    # None per its own documented default) must NOT false-positive the
-    # traveler panel's LIVE badge -- proves the profile filter is doing
-    # real work, not just the mode filter.
+    # A LIVE account running the OTHER, now-retired profile must NOT
+    # false-positive the traveler panel's LIVE badge -- proves the
+    # profile filter is doing real work, not just the mode filter.
+    # 2026-09-24 (V2 Crown retirement, Step 3f-iv): gate_profile=None no
+    # longer means "the other profile" -- executor_accounts.
+    # gate_profile_of()'s own default flipped from GATE_V2 to
+    # GATE_TRAVELER (the only profile left), and the route's own filter
+    # was fixed in the same pass to treat NULL as GATE_TRAVELER too (a
+    # real gap that fix uncovered). The remaining "other profile" this
+    # test can still exercise is an account whose raw column literally
+    # holds the old GATE_V2 string from before that retirement (no
+    # migration framework in this repo -- old rows are never rewritten).
+    _make_plan(env["db"])
+    admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()
+    _make_account(env["db"], admin_user.id, mode="LIVE", gate_profile="GATE_V2")
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/traveler-plan-status")
+    row = resp.json()["rows"][0]
+    assert row["any_account_live"] is False
+
+
+def test_traveler_plan_status_any_account_live_true_for_a_never_configured_live_account(env):
+    # The real gap 2026-09-24's fix (see the test above) closed: a
+    # brand-new account that's never had its profile explicitly set
+    # (gate_profile still NULL) IS a real GATE_TRAVELER account by
+    # gate_profile_of()'s own resolution -- it must count as live too,
+    # not just an account with the string explicitly set.
     _make_plan(env["db"])
     admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()
     _make_account(env["db"], admin_user.id, mode="LIVE", gate_profile=None)
     client = _login("radar_admin@kabroda.com", "adminpass123")
     resp = client.get("/api/admin/traveler-plan-status")
     row = resp.json()["rows"][0]
-    assert row["any_account_live"] is False
+    assert row["any_account_live"] is True
 
 
 def test_traveler_plan_status_any_account_live_false_for_dry_run_traveler_account(env):
