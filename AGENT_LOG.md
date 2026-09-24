@@ -6553,3 +6553,21 @@ sub-step 1 (`templates/market_radar.html` rework) still open -- see the
 previous entry's "Still open" section for the full remaining scope.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-23 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — CORRECTION to a wrong test-count claim in the "new public Traveler-native radar data source" entry above
+STATUS: resolved. Self-caught, not externally flagged.
+
+That entry claimed "823 tests pass (was 814)". That arithmetic was wrong --
+I mislabeled the pre-existing baseline as 814 (actually this session's
+running total AFTER the D3 feature, per that entry's own correct "805
+tests pass (was 785)" line) instead of the real prior baseline, 805.
+Caught while re-running the full suite during the frontend half of this
+same sub-step: the real, measured total with the 9 new `test_traveler_
+radar.py` tests included is **814 passed** (805 + 9 = 814, confirmed via
+`git stash -u` against the exact pre-traveler_radar commit), not 823.
+Nothing about the actual shipped code or tests was wrong -- only that one
+written-down number, caught by re-verifying rather than trusting my own
+earlier arithmetic. Standing discipline (verify every claim, including my
+own) working as intended.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
