@@ -2558,6 +2558,83 @@ async def export_gate_log_csv(request: Request, since: Optional[str] = None, sym
     )
 
 
+@app.get("/api/export/traveler-log.csv")
+async def export_traveler_log_csv(request: Request, since: Optional[str] = None, symbol: Optional[str] = None, db: Session = Depends(get_db)):
+    """The Traveler-native counterpart to /api/export/gate-log.csv above,
+    built 2026-09-23 (V2 Crown retirement) -- GateLog becomes fully dead
+    once decision_engine.py is gone (it's the ONLY thing that ever wrote
+    it), and it was the Kabroda AI Brain's only forward-test pull
+    mechanism. Andy's explicit ruling: ship this FIRST, before GateLog is
+    actually deleted, so the Brain never loses its forward-test data
+    source -- not an after-the-fact backfill.
+
+    Auth: same pattern as gate-log.csv -- X-API-Key header must match
+    GATE_LOG_EXPORT_API_KEY. Deliberately reuses that same env var rather
+    than adding a new one: the name becomes a minor legacy misnomer once
+    GateLog itself is gone, but that's a one-line comment, not worth an
+    operational change (a new Render env var) during this transition.
+    Params: since=YYYY-MM-DD (date_key >= this), symbol=BTC/USDT -- both
+    optional, same as gate-log.csv.
+
+    Shape: one flat row per TravelerPlan, every TravelerPlan column (in
+    declaration order) plus mgmt_-prefixed columns from its linked
+    ExecutorOrder -- TravelerPlan has no P&L/exit field of its own, that
+    lifecycle lives entirely on ExecutorOrder (see traveler_radar.py's own
+    module docstring for the same fact). Order selection prefers a
+    LIVE-mode order over DRY_RUN per plan, resolved in one batch query
+    (not one extra round-trip per row) -- the same rule
+    /api/admin/traveler-plan-status and /api/dashboard/mas-history already
+    use, never a blind "last inserted" pick.
+    """
+    api_key = request.headers.get("X-API-Key", "")
+    expected_key = os.getenv("GATE_LOG_EXPORT_API_KEY", "")
+    if not expected_key or not hmac.compare_digest(api_key, expected_key):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+
+    from database import TravelerPlan as _TravelerPlanExport
+    query = db.query(_TravelerPlanExport)
+    if since:
+        query = query.filter(_TravelerPlanExport.date_key >= since)
+    if symbol:
+        query = query.filter(_TravelerPlanExport.symbol == symbol)
+    plans = query.order_by(_TravelerPlanExport.date_key.asc(), _TravelerPlanExport.id.asc()).all()
+
+    plan_ids = [p.id for p in plans]
+    order_by_plan = {}
+    for o in db.query(_ExecutorOrder).filter(
+        _ExecutorOrder.traveler_plan_id.in_(plan_ids)
+    ).order_by(_ExecutorOrder.id.desc()).all():
+        existing = order_by_plan.get(o.traveler_plan_id)
+        if existing is None or (o.mode == "LIVE" and existing.mode != "LIVE"):
+            order_by_plan[o.traveler_plan_id] = o
+
+    plan_columns = [c.name for c in _TravelerPlanExport.__table__.columns]
+    mgmt_columns = ["mgmt_mode", "mgmt_management_state", "mgmt_entry_fill_price",
+                     "mgmt_entry_fill_time", "mgmt_exit_reason", "mgmt_exit_price",
+                     "mgmt_exit_time", "mgmt_realized_pnl_r", "mgmt_c5_fired", "mgmt_bbwp_fired"]
+    columns = plan_columns + mgmt_columns
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(columns)
+    for plan in plans:
+        row = [getattr(plan, col) for col in plan_columns]
+        order = order_by_plan.get(plan.id)
+        if order is not None:
+            row += [order.mode, order.management_state, order.entry_fill_price,
+                    order.entry_fill_time, order.exit_reason, order.exit_price,
+                    order.exit_time, order.realized_pnl_r, order.c5_fired, order.bbwp_fired]
+        else:
+            row += [None] * len(mgmt_columns)
+        writer.writerow(row)
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=traveler_log_export.csv"},
+    )
+
+
 @app.get("/api/agents/cost")
 async def api_agents_cost(request: Request, db: Session = Depends(get_db)):
     """Returns 24h and 7-day agent spend summary. Admin only."""

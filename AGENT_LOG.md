@@ -6723,3 +6723,61 @@ entries above for the exact `run_mas_analysis()` keep/delete boundaries).
 Full plan: `ticklish-brewing-sunbeam.md` (Claude Code's local plan file).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-23 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: Traveler forward-test export -- roadmap step 3, sub-step 3a of 3f
+STATUS: resolved.
+
+Started the actual V2 deletion pass (step 3). Two independent Explore-agent
+research passes first re-verified `V2_RETIREMENT_MAP.md` against live
+source (not trusting its own "planning snapshot" caveat) and found it
+under-specified in real ways: `executor_engine.py`/`executor_plan_builder.py`
+each have V2-only functions embedded in otherwise-shared files (confirmed
+dead-code cascade, one level deep, once `trade_plan_engine.py` is gone);
+the Senior Analyst dedup check's suggested fix ("swap to SessionLock
+existence") is actually wrong -- `SessionLock` is created BEFORE
+`run_mas_analysis()` even runs, so existence answers "was this locked,"
+not "did the analysis finish," collapsing the exact distinction the
+restart-recovery logic depends on; and a live "Audit-AI" dashboard
+surface (suggestions panel, diagnostic-vault export, Analysis tab's "Run
+Analysis" button + its 12h scheduler) turned out to be entirely
+CampaignLog-sourced and still actively used today, not dead weight.
+
+**Three real product decisions surfaced, put to Andy directly rather than
+guessed at** (this touches live, user-facing features on a real trading
+system): (1) Audit-AI dashboard surface -- **retire entirely**, not
+rebuilt against Traveler data. (2) `GateLog` deletion cuts off the Brain's
+only forward-test pull with no Traveler-side replacement existing yet --
+**build the replacement first**, ship before GateLog goes away, not
+after. (3) `executor_mechanism_test.py` (standalone SPLIT-flavored manual
+diagnostic, no Traveler analog) -- **retire alongside V2**.
+
+Re-planned Step 3 as six sequenced sub-steps (3a-3f) matching Steps 1-2's
+own rhythm -- full detail in `ticklish-brewing-sunbeam.md`. This entry
+covers 3a.
+
+**Shipped**: `GET /api/export/traveler-log.csv`, mirroring
+`/api/export/gate-log.csv`'s exact pattern (same auth, reusing
+`GATE_LOG_EXPORT_API_KEY` rather than adding a new Render env var; same
+`since`/`symbol` params). One flat row per `TravelerPlan`, every column in
+declaration order, plus `mgmt_`-prefixed columns from its linked
+`ExecutorOrder` (LIVE-preferred over DRY_RUN, resolved in one batch query
+across all matching plans -- not one extra round-trip per row, same
+pattern already used in `/api/dashboard/mas-history`). 8 new tests
+(`tests/test_traveler_log_export.py`), 1 mutation-verified (the LIVE-
+preference selection -- a naive "last seen wins" regression is caught,
+confirmed by reverting to it and watching the right test fail). Full
+suite: 828 passed (820 + 8), clean boot.
+
+**A genuinely interesting, separate finding from the research pass, NOT
+acted on**: `POST /api/v1/system/analysis` (no-suffix) is the only writer
+of `SystemAnalysisReport`, has zero frontend caller, and has apparently
+never been reachable from the live UI -- meaning the "Recent Reports"
+list and single-report view (both DO have live callers) have always read
+from a table nothing could ever add to. Unrelated to CampaignLog/V2
+entirely. Flagged for Andy as a separate, pre-existing oddity worth
+mentioning sometime, explicitly out of scope for this retirement.
+
+**Roadmap status**: 3a of 3f done. Next: 3b, retiring the Audit-AI
+surface (routes, background scheduler, dashboard UI, 3 DB tables).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
