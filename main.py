@@ -3017,59 +3017,51 @@ async def run_radar_scan(request: Request):
 
 @app.get("/api/dashboard/overview")
 async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)):
+    """2026-09-23 rebuild (V2 Crown retirement, CLAUDE.md "Strategic
+    Direction"): total_sessions/fill_rate/win_rate/net_r used to read
+    CampaignLog (V2's own session-lock shadow simulation, itself being
+    retired). Repointed to TravelerPlan/ExecutorOrder -- the current live
+    system -- rather than kept pointed at a table about to stop being
+    written. `approved_rate` is renamed `fill_rate`: the Traveler has no
+    lock-time gate/verdict at all (gate_traveler.py's own header -- every
+    plan starts WAITING_CROSS unconditionally), so "approved" has no
+    Traveler meaning; "% of sessions that actually reached a real fill" is
+    the honest equivalent. `executor_realized_pnl_r`/`executor_closed_trades`
+    below are untouched -- already ExecutorOrder-sourced, already correct,
+    kept as the separate "every real order, any lineage" figure."""
     ctx = get_user_context(request, db)
     if not ctx.get("is_logged_in"):
         return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
     try:
         from sqlalchemy import func
-        total      = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.is_canonical == True, CampaignLog.session_timeframe == "15M").scalar() or 0
-        approved   = db.query(func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.mas_approval_status == "APPROVED", CampaignLog.is_canonical == True, CampaignLog.session_timeframe == "15M").scalar() or 0
-        approved_rate = round(approved / total * 100, 1) if total > 0 else 0.0
-        
-        resolved_statuses = ["CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY"]
-        total_resolved = db.query(func.count(CampaignLog.id)).filter(
-            CampaignLog.symbol == "BTC/USDT",
-            CampaignLog.status.in_(resolved_statuses),
-            CampaignLog.is_canonical == True,
-            CampaignLog.session_timeframe == "15M",
-        ).scalar() or 0
-        
-        wins = db.query(func.count(CampaignLog.id)).filter(
-            CampaignLog.symbol == "BTC/USDT",
-            CampaignLog.status.in_(resolved_statuses),
-            CampaignLog.realized_pnl > 0.0,
-            CampaignLog.is_canonical == True,
-            CampaignLog.session_timeframe == "15M",
-        ).scalar() or 0
-        
-        win_rate = round(wins / total_resolved * 100, 1) if total_resolved > 0 else 0.0
-        
-        # Net R: real sum of realized_pnl, not a win/loss COUNT. A win/loss count
-        # (old: wins - losses) silently assumed every trade is a clean +-1R, which
-        # is exactly the assumption CLAUDE.md rule 5 and the 2026-07-04/05
-        # _frac_r() fix both explicitly reject -- stops are ATR/wall-adjusted, so
-        # realized R is rarely a clean 1.0. CLOSED_AT_EXPIRY included: it is a
-        # real filled outcome with a real fractional realized_pnl, not a "no
-        # trade" (that's EXPIRED, which stays excluded via the status filter).
-        net_r_raw = db.query(func.sum(CampaignLog.realized_pnl)).filter(
-            CampaignLog.symbol == "BTC/USDT",
-            CampaignLog.is_canonical == True,
-            CampaignLog.session_timeframe == "15M",
-            CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY"]),
-            CampaignLog.realized_pnl.isnot(None),
-        ).scalar()
-        net_r = round(float(net_r_raw or 0.0), 4)
-        # 2026-09-07, PRODUCTION_READINESS.md Adjustment 2 (Kabroda AI
-        # Brain repo): net_r above is CampaignLog's own session-lock
-        # simulation -- still legitimate for radar-vs-backtest drift
-        # tracking (kept, relabeled below), but it runs under the
-        # deprecated 30/70 rule (ledger_closing_engine.py) and is NOT
-        # what real money actually does under the live executor. This is
-        # the one, real source of truth for that: ExecutorOrder.
-        # realized_pnl_r, summed across every real closed position
-        # (CLOSED_* management_state, per executor_live_engine.py). "No
-        # two disagreeing performance numbers visible anywhere" -- both
-        # are shown, clearly and separately labeled, never merged.
+        from database import TravelerPlan as _TravelerPlan
+
+        total = db.query(func.count(_TravelerPlan.id)).filter(
+            _TravelerPlan.symbol == "BTC/USDT").scalar() or 0
+        filled = db.query(func.count(_TravelerPlan.id)).filter(
+            _TravelerPlan.symbol == "BTC/USDT", _TravelerPlan.status == "FILLED").scalar() or 0
+        fill_rate = round(filled / total * 100, 1) if total > 0 else 0.0
+
+        # Win rate / net R: TravelerPlan has no P&L field of its own -- the
+        # post-fill lifecycle (exit_reason/realized_pnl_r) lives entirely on
+        # the linked ExecutorOrder (see traveler_radar.py's own module
+        # docstring for the same fact). Real sum of realized_pnl_r, not a
+        # win/loss COUNT -- same "stops aren't a clean +-1R" reasoning
+        # CLAUDE.md rule 5 already established for the retired CampaignLog
+        # version of this KPI.
+        resolved_r = [r for (r,) in db.query(_ExecutorOrder.realized_pnl_r).filter(
+            _ExecutorOrder.traveler_plan_id.isnot(None),
+            _ExecutorOrder.realized_pnl_r.isnot(None),
+        ).all()]
+        win_rate = round(sum(1 for r in resolved_r if r > 0) / len(resolved_r) * 100, 1) if resolved_r else 0.0
+        net_r = round(sum(resolved_r), 4)
+
+        # "No two disagreeing performance numbers visible anywhere" --
+        # net_r above (Traveler-linked orders only, DRY_RUN+LIVE combined,
+        # the evaluation harness's own running total) and this figure
+        # (every real ExecutorOrder, any lineage) are shown separately,
+        # never merged, same principle the pre-retirement CampaignLog/
+        # executor split already established.
         executor_r_raw = db.query(func.sum(_ExecutorOrder.realized_pnl_r)).filter(
             _ExecutorOrder.realized_pnl_r.isnot(None),
         ).scalar()
@@ -3085,9 +3077,7 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
             AgentRunLog.created_at >= since_7d).first()
         total_tok = (tok[0] or 0) + (tok[1] or 0)
         cache_hit_rate = round((tok[1] or 0) / total_tok * 100, 1) if total_tok > 0 else 0.0
-        # newsletter_count removed 2026-08-30 -- NewsletterLog orphaned since
-        # publisher_crew.py was archived; also never read by the frontend.
-        return JSONResponse({"ok": True, "total_sessions": total, "approved_rate": approved_rate,
+        return JSONResponse({"ok": True, "total_sessions": total, "fill_rate": fill_rate,
             "win_rate": win_rate, "net_r": net_r, "spend_7d": spend_7d,
             "cache_hit_rate": cache_hit_rate,
             "executor_realized_pnl_r": executor_realized_pnl_r, "executor_closed_trades": executor_closed_trades})
@@ -3097,6 +3087,19 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
 
 @app.get("/api/dashboard/accuracy")
 async def api_dashboard_accuracy(request: Request, db: Session = Depends(get_db)):
+    """2026-09-23 (V2 Crown retirement): `grade_accuracy` (4H/1H
+    CampaignLog.kinematic_grade vs. outcome) removed outright, not given a
+    Traveler equivalent -- the 4H/1H independent candidate system it
+    measured was already retired under V2 itself (2026-08-30, "clean up
+    the radar back to just the fifteen minute"), and the Traveler has no
+    "grade" concept at all. Fabricating a replacement for a system that no
+    longer exists would be worse than removing the chart -- same call this
+    project already made for the Signal Accuracy tab (site commit
+    `28821ac`). `confluence_accuracy` (DecisionJournal-sourced) is
+    untouched here -- it doesn't read CampaignLog -- but DecisionJournal
+    itself is V2-only (V2_RETIREMENT_MAP.md) and will need the same
+    treatment once that table is actually deleted in a later step; not
+    done here to keep this change scoped to the CampaignLog dependency."""
     ctx = get_user_context(request, db)
     if not ctx.get("is_logged_in"):
         return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
@@ -3119,30 +3122,13 @@ async def api_dashboard_accuracy(request: Request, db: Session = Depends(get_db)
                              "incorrect_pct": round(c["incorrect"]/total*100,1) if total else 0,
                              "total": total}
             return result
-        # Real 4H/1H CampaignLog data, not DecisionJournal.kinematic_grade (that
-        # field is the 15M radar-scan-level signal, unrelated to the 4H/1H
-        # candidate system -- this panel was labeled "4H Outcome vs. Session
-        # Bias" but was actually showing 15M data under a 4H title. "Correct"
-        # here means the resolved 4H/1H candidate closed net-positive R, same
-        # win definition audit_ai.py's H7 uses. N is still thin (record-only,
-        # unvalidated system) -- shown per-grade in the UI, not hidden.
-        grade_rows_4h1h = db.query(CampaignLog.kinematic_grade, CampaignLog.realized_pnl).filter(
-            CampaignLog.symbol == "BTC/USDT",
-            CampaignLog.session_timeframe.in_(["4H", "1H"]),
-            CampaignLog.is_canonical == True,
-            CampaignLog.kinematic_grade.isnot(None),
-            CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY"]),
-            CampaignLog.realized_pnl.isnot(None),
-        ).all()
-        grade_rows = [(g, (pnl or 0) > 0, 1) for g, pnl in grade_rows_4h1h]
         conf_rows = db.query(DecisionJournal.confluence_score,
             DecisionJournal.outcome_direction_correct, func.count(DecisionJournal.id)).filter(
             DecisionJournal.symbol == "BTC/USDT",
             DecisionJournal.outcome_direction_correct.isnot(None),
             DecisionJournal.confluence_score.isnot(None)
         ).group_by(DecisionJournal.confluence_score, DecisionJournal.outcome_direction_correct).all()
-        return JSONResponse({"ok": True, "grade_accuracy": _build_accuracy(grade_rows),
-                             "confluence_accuracy": _build_accuracy(conf_rows)})
+        return JSONResponse({"ok": True, "confluence_accuracy": _build_accuracy(conf_rows)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -3174,45 +3160,76 @@ async def api_dashboard_costs(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/api/dashboard/mas-history")
 async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_db)):
+    """2026-09-23 rebuild (V2 Crown retirement): repointed from CampaignLog
+    (mas_approval_status/entry_price/stop_loss/t1/realized_pnl) to
+    TravelerPlan/ExecutorOrder. `approval_counts` -> `status_counts`: the
+    Traveler has no APPROVED/REJECTED verdict, only its own 5-value status
+    enum (WAITING_CROSS/TERCILE_SKIPPED/WAITING_TOUCH/FILLED/DONE, see
+    gate_traveler.py). `trades` now carries direction/exit_reason instead
+    of bias/mas_approval_status -- each row's mgmt detail comes from its
+    linked ExecutorOrder, preferring a LIVE-mode order over DRY_RUN (same
+    rule traveler_radar.py/the admin traveler-plan-status route already
+    use), resolved in one query rather than one extra round-trip per row."""
     ctx = get_user_context(request, db)
     if not ctx.get("is_logged_in"):
         return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
     try:
         from sqlalchemy import func
-        approval_rows = db.query(CampaignLog.mas_approval_status,
-            func.count(CampaignLog.id)).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.is_canonical == True, CampaignLog.session_timeframe == "15M").group_by(CampaignLog.mas_approval_status).all()
-        approval_counts = {row[0]: row[1] for row in approval_rows}
-        # Real realized_pnl sum, not a hardcoded +-1.0 per win/loss -- same fix
-        # as the overview KPI's net_r, see comment there. CLOSED_AT_EXPIRY
-        # included (real fractional outcome), EXPIRED (unfilled, no trade) stays
-        # excluded via the status filter.
-        effective_closed_at = func.coalesce(CampaignLog.closed_at, CampaignLog.updated_at, CampaignLog.created_at)
-        pnl_rows = db.query(effective_closed_at.label("closed_at"), CampaignLog.date_key,
-            CampaignLog.status, CampaignLog.realized_pnl).filter(
-            CampaignLog.symbol == "BTC/USDT",
-            CampaignLog.is_canonical == True,
-            CampaignLog.session_timeframe == "15M",
-        ).order_by(effective_closed_at).all()
+        from database import TravelerPlan as _TravelerPlan
+
+        status_rows = db.query(_TravelerPlan.status, func.count(_TravelerPlan.id)).filter(
+            _TravelerPlan.symbol == "BTC/USDT").group_by(_TravelerPlan.status).all()
+        status_counts = {row[0]: row[1] for row in status_rows}
+
+        # Cumulative R across every resolved (closed) Traveler-linked
+        # order, ordered by exit time -- real realized_pnl_r sum, not a
+        # hardcoded +-1.0, same principle the retired CampaignLog version
+        # of this KPI already established.
+        closed_orders = db.query(_ExecutorOrder.exit_time, _ExecutorOrder.realized_pnl_r).filter(
+            _ExecutorOrder.traveler_plan_id.isnot(None),
+            _ExecutorOrder.realized_pnl_r.isnot(None),
+        ).order_by(_ExecutorOrder.exit_time).all()
         cumulative = 0.0
         pnl_series = []
-        for row in pnl_rows:
-            if row.status not in ("CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY") or row.realized_pnl is None:
-                continue
-            cumulative += row.realized_pnl
-            pnl_series.append({"date": row.date_key, "cumulative": round(cumulative, 4)})
-        trades = db.query(CampaignLog).filter(CampaignLog.symbol == "BTC/USDT", CampaignLog.is_canonical == True, CampaignLog.session_timeframe == "15M").order_by(CampaignLog.id.desc()).limit(50).all()
-        trades_data = []
-        for t in trades:
-            if t.status in ("CLOSED_WIN", "CLOSED_LOSS", "CLOSED_AT_EXPIRY") and t.realized_pnl is not None:
-                r_pnl = f"{t.realized_pnl:+.4f}R"
-            else:
-                r_pnl = None
-            trades_data.append({
-                "date_key": t.date_key, "bias": t.bias, "mas_approval_status": t.mas_approval_status,
-                "status": t.status, "entry_price": t.entry_price, "stop_loss": t.stop_loss,
-                "t1": t.t1, "realized_pnl": r_pnl
+        for exit_time, r in closed_orders:
+            cumulative += r
+            pnl_series.append({
+                "date": exit_time.strftime("%Y-%m-%d") if exit_time else None,
+                "cumulative": round(cumulative, 4),
             })
-        return JSONResponse({"ok": True, "approval_counts": approval_counts,
+
+        plans = db.query(_TravelerPlan).filter(
+            _TravelerPlan.symbol == "BTC/USDT").order_by(_TravelerPlan.id.desc()).limit(50).all()
+        plan_ids = [p.id for p in plans]
+        # One query for every linked order, LIVE-preferred per plan --
+        # ordered id-desc so the first order seen per plan_id is already
+        # its most recent, then upgraded to a LIVE row if one exists,
+        # mirroring the admin traveler-plan-status route's own selection
+        # without an extra query per row.
+        order_by_plan = {}
+        for o in db.query(_ExecutorOrder).filter(
+            _ExecutorOrder.traveler_plan_id.in_(plan_ids)
+        ).order_by(_ExecutorOrder.id.desc()).all():
+            existing = order_by_plan.get(o.traveler_plan_id)
+            if existing is None or (o.mode == "LIVE" and existing.mode != "LIVE"):
+                order_by_plan[o.traveler_plan_id] = o
+
+        trades_data = []
+        for p in plans:
+            order = order_by_plan.get(p.id)
+            entry_price = None
+            if p.direction == "LONG":
+                entry_price = p.breakout_trigger
+            elif p.direction == "SHORT":
+                entry_price = p.breakdown_trigger
+            r_pnl = f"{order.realized_pnl_r:+.4f}R" if (order and order.realized_pnl_r is not None) else None
+            trades_data.append({
+                "date_key": p.date_key, "direction": p.direction, "status": p.status,
+                "entry_price": entry_price, "stop_price": p.stop_price, "t1_price": p.t1_price,
+                "exit_reason": order.exit_reason if order else None,
+                "realized_pnl": r_pnl,
+            })
+        return JSONResponse({"ok": True, "status_counts": status_counts,
                              "pnl_series": pnl_series, "trades": trades_data})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)

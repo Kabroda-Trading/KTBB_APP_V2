@@ -66,6 +66,18 @@
         .s-closed_at_expiry      { color: #a67c3a; font-weight: 800; }
         .s-expired               { color: #6b5345; }
         .s-mas_error             { color: #8c4a3a; font-weight: 800; }
+        /* 2026-09-23 -- TravelerPlan.status + ExecutorOrder.exit_reason,
+           both lowercased, for the rebuilt trade-history table. */
+        .s-filled                { color: #5e8c66; font-weight: 800; }
+        .s-waiting_touch         { color: #a67c3a; font-weight: 800; }
+        .s-waiting_cross         { color: #6b5345; }
+        .s-tercile_skipped       { color: #94a3b8; }
+        .s-done                  { color: #6b5345; }
+        .s-t1                    { color: #5e8c66; font-weight: 800; }
+        .s-stop                  { color: #8c4a3a; font-weight: 800; }
+        .s-c5_exit               { color: #a67c3a; font-weight: 800; }
+        .s-bbwp_exit             { color: #a67c3a; font-weight: 800; }
+        .s-time                  { color: #6b5345; }
 
         .empty-state { text-align: center; padding: 44px 20px; color: #5a3d2c; font-family: 'Playfair Display', serif; font-style: italic; font-size: 14px; }
 
@@ -119,17 +131,17 @@
                 <div class="kpi-val" id="k-sessions">—</div>
                 <div class="kpi-lbl">Total Sessions</div>
             </div>
-            <div class="kpi-card kpi-cognac">
+            <div class="kpi-card kpi-cognac" title="% of sessions where a real cross+trigger touch actually happened (TravelerPlan reached FILLED). The Traveler has no lock-time approval verdict -- every session starts WAITING_CROSS unconditionally (gate_traveler.py).">
                 <div class="kpi-val" id="k-approved">—</div>
-                <div class="kpi-lbl">Approved Rate</div>
+                <div class="kpi-lbl">Fill Rate</div>
             </div>
             <div class="kpi-card kpi-green">
                 <div class="kpi-val" id="k-winrate">—</div>
                 <div class="kpi-lbl">Win Rate</div>
             </div>
-            <div class="kpi-card kpi-gold" title="DEPRECATED SIMULATION -- NOT real trading P&amp;L. This is CampaignLog's session-lock backtest-tracking number, still run under the retired 30/70 management rule. Kept for radar-vs-backtest drift comparison only. See Real Executor P&amp;L for what actually happened to real money.">
+            <div class="kpi-card kpi-gold" title="The Traveler evaluation harness's own running total -- sum of realized_pnl_r across every Traveler-linked ExecutorOrder, DRY_RUN and LIVE combined. Not exclusively real money while no account is LIVE yet. See Real Executor P&amp;L (all lineages) for the separate all-orders figure.">
                 <div class="kpi-val" id="k-netr">—</div>
-                <div class="kpi-lbl">Net R (Radar Sim, Deprecated)</div>
+                <div class="kpi-lbl">Net R (Traveler Evaluation)</div>
             </div>
             <div class="kpi-card kpi-green" title="The one real number: sum of realized_pnl_r across every position executor_live_engine.py has actually closed on the real exchange, under the audited 50/50 tier-differentiated management rule.">
                 <div class="kpi-val" id="k-executor-pnl">—</div>
@@ -148,24 +160,26 @@
         <!-- ── ROW 2: PnL + Approval ─────────────────────── -->
         <div class="chart-row row-2-1">
             <div class="chart-card">
-                <div class="chart-title">Cumulative Performance (Radar Sim, Deprecated)</div>
-                <div class="chart-sub">CampaignLog's session-lock backtest-tracking sim (30/70 rule, retired) — NOT real trading P&amp;L. See the Real Executor P&amp;L KPI above for actual results.</div>
+                <div class="chart-title">Cumulative Performance (Traveler Evaluation)</div>
+                <div class="chart-sub">Sum of realized_pnl_r across every Traveler-linked ExecutorOrder, DRY_RUN + LIVE combined — see the Real Executor P&amp;L KPI above for the separate all-lineage figure.</div>
                 <canvas id="chartPnL" height="90"></canvas>
             </div>
             <div class="chart-card">
-                <div class="chart-title">MAS Approval Distribution</div>
+                <div class="chart-title">Traveler Status Distribution</div>
                 <div class="chart-sub">All sessions since system deployment</div>
                 <canvas id="chartApproval"></canvas>
             </div>
         </div>
 
-        <!-- ── ROW 3: Grade + Confluence ─────────────────── -->
+        <!-- ── ROW 3: Confluence ──────────────────────────── -->
+        <!-- "Directional Accuracy by Kinematic Grade" card removed
+             2026-09-23 (V2 Crown retirement) -- it measured the 4H/1H
+             independent candidate system, already retired under V2 itself
+             (2026-08-30) with no Traveler equivalent (the Traveler has no
+             "grade" concept at all). Same call already made for the
+             Signal Accuracy tab, site commit 28821ac: remove a genuinely
+             dead metric rather than fabricate a replacement. -->
         <div class="chart-row row-1-1">
-            <div class="chart-card">
-                <div class="chart-title">Directional Accuracy by Kinematic Grade</div>
-                <div class="chart-sub">4H/1H candidate outcome vs. kinematic_grade — record-only system, N is thin</div>
-                <canvas id="chartGrade" height="160"></canvas>
-            </div>
             <div class="chart-card">
                 <div class="chart-title">Accuracy by Confluence Score</div>
                 <div class="chart-sub">Score 0–3 (aligned timeframes at entry) vs. outcome</div>
@@ -258,9 +272,9 @@
                 <table>
                     <thead><tr>
                         <th>Date</th>
-                        <th>Bias</th>
-                        <th>MAS Status</th>
-                        <th>Trade Outcome</th>
+                        <th>Direction</th>
+                        <th>Status</th>
+                        <th>Exit Reason</th>
                         <th>Entry</th>
                         <th>Stop</th>
                         <th>T1</th>
@@ -517,7 +531,7 @@
             if (!d.ok) throw new Error(d.error || "Unknown error");
 
             document.getElementById('k-sessions').textContent = d.total_sessions;
-            document.getElementById('k-approved').textContent = d.approved_rate + '%';
+            document.getElementById('k-approved').textContent = d.fill_rate + '%';
             document.getElementById('k-winrate').textContent  = d.win_rate + '%';
 
             const netrEl = document.getElementById('k-netr');
@@ -585,15 +599,17 @@
                 }
             });
 
-            // Approval donut
-            const ap = d.approval_counts;
+            // Traveler status donut -- gate_traveler.py's real 5-value
+            // status enum (2026-09-23 rebuild, replacing V2's own
+            // APPROVED/REJECTED/WAITING_FOR_15M/MAS_ERROR set).
+            const sc = d.status_counts;
             new Chart(document.getElementById('chartApproval'), {
                 type: 'doughnut',
                 data: {
-                    labels: ['Approved', 'Rejected', 'Waiting', 'Error/Other'],
+                    labels: ['Filled', 'Waiting Touch', 'Watching (pre-cross)', 'Skipped', 'Done (no trade)'],
                     datasets: [{
-                        data: [ap.APPROVED||0, ap.REJECTED||0, ap.WAITING_FOR_15M||0, (ap.MAS_ERROR||0)+(ap.PENDING||0)],
-                        backgroundColor: [C.green, C.red, C.amber, C.muted],
+                        data: [sc.FILLED||0, sc.WAITING_TOUCH||0, sc.WAITING_CROSS||0, sc.TERCILE_SKIPPED||0, sc.DONE||0],
+                        backgroundColor: [C.green, C.amber, C.muted, C.gold, C.red],
                         borderColor:     C.panel,
                         borderWidth:     3,
                     }]
@@ -617,16 +633,16 @@
                 const pnlStr = t.realized_pnl || '—';
                 const pnlCls = t.realized_pnl ? (t.realized_pnl.startsWith('+') ? 's-win' : (t.realized_pnl.startsWith('-') ? 's-loss' : '')) : '';
                 const st  = (t.status || '').toLowerCase();
-                const mas = (t.mas_approval_status || '').toLowerCase();
+                const exitReason = (t.exit_reason || '').toLowerCase();
                 const fmt = v => v ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
                 return `<tr>
                     <td>${t.date_key || '—'}</td>
-                    <td style="color:#f2e3cf;font-weight:800;">${t.bias || '—'}</td>
-                    <td><span class="s-${mas}">${t.mas_approval_status || '—'}</span></td>
+                    <td style="color:#f2e3cf;font-weight:800;">${t.direction || '—'}</td>
                     <td><span class="s-${st}">${t.status || '—'}</span></td>
+                    <td><span class="s-${exitReason}">${t.exit_reason || '—'}</span></td>
                     <td>${fmt(t.entry_price)}</td>
-                    <td>${fmt(t.stop_loss)}</td>
-                    <td>${fmt(t.t1)}</td>
+                    <td>${fmt(t.stop_price)}</td>
+                    <td>${fmt(t.t1_price)}</td>
                     <td class="${pnlCls}">${pnlStr}</td>
                 </tr>`;
             }).join('');
@@ -646,28 +662,10 @@
             const d = await r.json();
             if (!d.ok) throw new Error(d.error || "Unknown error");
 
-            // Grade accuracy -- N shown in the label itself, not hidden, since
-            // this is now thin, record-only 4H/1H data (see main.py comment).
-            const ga = d.grade_accuracy;
-            const grades = Object.keys(ga);
-            new Chart(document.getElementById('chartGrade'), {
-                type: 'bar',
-                data: {
-                    labels: grades.map(g => `${g} (N=${ga[g].total})`),
-                    datasets: [
-                        { label: 'Correct %',   data: grades.map(g => ga[g].correct_pct),   backgroundColor: C.cognac, borderRadius: 4 },
-                        { label: 'Incorrect %', data: grades.map(g => ga[g].incorrect_pct), backgroundColor: C.muted,  borderRadius: 4 },
-                    ]
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: true,
-                    plugins: { legend: { labels: { color: C.leather } }, tooltip: tooltipDefaults },
-                    scales: {
-                        x: { ...scalesXY.x },
-                        y: { ...scalesXY.y, max: 100, ticks: { color: C.leather, callback: v => v + '%' } },
-                    }
-                }
-            });
+            // "Grade accuracy" (4H/1H CampaignLog.kinematic_grade) removed
+            // 2026-09-23 (V2 Crown retirement) -- see main.py's
+            // /api/dashboard/accuracy docstring for why this was removed
+            // outright rather than given a Traveler equivalent.
 
             // Confluence accuracy
             const ca = d.confluence_accuracy;
@@ -692,7 +690,6 @@
             });
         } catch (e) {
             console.error("Failed to load accuracy:", e);
-            document.getElementById('chartGrade').parentElement.innerHTML = `<div style="padding:40px; color:#8c4a3a; font-family:'JetBrains Mono',monospace; font-size:12px; text-align:center;">Failed to load grade accuracy.</div>`;
             document.getElementById('chartConfluence').parentElement.innerHTML = `<div style="padding:40px; color:#8c4a3a; font-family:'JetBrains Mono',monospace; font-size:12px; text-align:center;">Failed to load confluence accuracy.</div>`;
         }
     }

@@ -6645,3 +6645,81 @@ directly (`overview`, `accuracy`, `mas-history`). Full plan:
 `ticklish-brewing-sunbeam.md` (Claude Code's local plan-mode file).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-23 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: dashboard rewired around the Traveler -- roadmap step 3 sub-step 2 of 3 COMPLETE
+STATUS: resolved.
+
+3 of 5 `/api/dashboard/*` routes read `CampaignLog` directly
+(`overview`/`accuracy`/`mas-history`) and would have gone dark/wrong once
+it stops being written in Step 3. Repointed all three to TravelerPlan/
+ExecutorOrder now, ahead of that deletion, matching sub-step 1's own
+sequencing principle (working replacement before the old thing goes away).
+
+**`/api/dashboard/overview`**: `total_sessions` -> `TravelerPlan` count.
+`approved_rate` renamed `fill_rate` -- the Traveler has no lock-time
+approval verdict at all (`gate_traveler.py`'s own header: every plan
+starts `WAITING_CROSS` unconditionally), so "% filled" is the honest
+equivalent, not a same-named metric with silently different meaning.
+`win_rate`/`net_r` now read `ExecutorOrder.realized_pnl_r` for
+Traveler-linked orders only (`traveler_plan_id IS NOT NULL`) -- real sum,
+not a win/loss count, same "stops aren't a clean +-1R" principle CLAUDE.md
+rule 5 already established for the retired version of this KPI.
+`executor_realized_pnl_r`/`executor_closed_trades` (all lineages, already
+`ExecutorOrder`-sourced) untouched, kept as the separate figure.
+
+**`/api/dashboard/mas-history`**: `approval_counts` -> `status_counts`
+(the Traveler's real 5-value status enum: WAITING_CROSS/TERCILE_SKIPPED/
+WAITING_TOUCH/FILLED/DONE). Trade table now carries direction/exit_reason
+per row instead of bias/mas_approval_status, each resolved via ONE batch
+query across all 50 plans (not 50 extra round-trips) that still correctly
+prefers a LIVE-mode order over DRY_RUN per plan -- same rule
+`traveler_radar.py`/the admin traveler-plan-status route already use,
+mutation-verified (a naive "last seen wins" regression, tested by
+reverting to it, is caught by a new dedicated test).
+
+**`/api/dashboard/accuracy`**: `grade_accuracy` (4H/1H
+`CampaignLog.kinematic_grade` vs. outcome) removed outright, not given a
+Traveler equivalent -- the 4H/1H independent candidate system it measured
+was already retired under V2 itself (2026-08-30), and the Traveler has no
+"grade" concept at all. Fabricating a replacement for a system that no
+longer exists would be worse than removing the chart -- same call already
+made for the Signal Accuracy tab (commit `28821ac`). `confluence_accuracy`
+(DecisionJournal-sourced) untouched -- doesn't read CampaignLog, so out of
+this step's scope -- flagged in the route's own docstring that
+DecisionJournal is itself V2-only and will need the same treatment once
+Step 3 actually deletes that table.
+
+**`templates/suite_dashboard.html`**: KPI labels/tooltips, the PnL chart
+title/subtitle, the status doughnut (now 5 categories, new colors), the
+trade-history table headers/columns, and the CSS status-color classes all
+updated to match. The dead "Directional Accuracy by Kinematic Grade" chart
+removed from the page entirely, mirroring the backend removal.
+
+**A real, pre-existing bug fixed as a side effect, not a separate
+ticket**: `tests/test_dashboard_fixes.py`'s fixture had a `NOT NULL
+constraint failed: campaign_logs.session_id` bug (5 tests erroring on
+every full-suite run, confirmed present on baseline `cdc9dd3` via `git
+stash` before touching anything). Patching the old CampaignLog fixture in
+isolation would have been wasted effort given these exact routes were
+about to stop reading that table anyway -- rewrote the whole fixture to
+seed TravelerPlan/ExecutorOrder instead, which fixes the bug as a natural
+consequence of the real work rather than a bolt-on patch.
+
+**Verification**: `node --check` on the extracted script block (Jinja
+`{{ }}` expressions substituted first, since they aren't valid raw JS);
+a full `TestClient` run doing a real login, a real Jinja render of
+`/suite/dashboard`, and real calls to all 3 rewritten routes -- confirmed
+zero dangling references to any removed field/id and all new labels
+present; a mutation test on the new batched LIVE-preference selection
+(confirmed real, see above); full suite 820 passed, 0 errors -- up from
+814 passed + 5 pre-existing errors (those 5 are now genuinely fixed, not
+carried forward as still-broken); clean boot check.
+
+**Roadmap status**: sub-step 2 of 3 (dashboard rewiring) DONE. Next:
+sub-step 3 -- the actual V2 file/table/route/background-task deletion,
+per `V2_RETIREMENT_MAP.md` and this session's independently-verified
+line-range map (see the two "Map V2 decision/display surface" research
+entries above for the exact `run_mas_analysis()` keep/delete boundaries).
+Full plan: `ticklish-brewing-sunbeam.md` (Claude Code's local plan file).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
