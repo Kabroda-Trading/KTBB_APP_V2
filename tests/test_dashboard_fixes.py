@@ -18,8 +18,6 @@ from database import (
     UserModel,
     TravelerPlan,
     ExecutorOrder,
-    AgentRunLog,
-    DecisionJournal,
 )
 import auth
 import executor_accounts as ea
@@ -38,9 +36,10 @@ def clean_db_files():
 def setup_test_db():
     # 2026-09-23 rebuild (V2 Crown retirement): this fixture used to seed
     # CampaignLog rows -- rewritten to seed TravelerPlan/ExecutorOrder,
-    # matching what /api/dashboard/overview, /api/dashboard/accuracy, and
-    # /api/dashboard/mas-history actually read now. See main.py's own
-    # docstrings on those three routes for the full "why" of the rebuild.
+    # matching what /api/dashboard/overview and /api/dashboard/mas-history
+    # actually read now. See main.py's own docstrings on those routes for
+    # the full "why" of the rebuild. (/api/dashboard/accuracy itself was
+    # removed 2026-09-24 -- see below.)
     clean_db_files()
     init_db()
 
@@ -113,37 +112,12 @@ def setup_test_db():
         _order(p3, "T1", 92000.0, 0.5, datetime.utcnow()),
     ])
 
-    r1 = AgentRunLog(
-        agent_name="MSA",
-        status="SUCCESS",
-        model="claude-sonnet-4-6",
-        triggered_by="scheduler",
-        estimated_cost_usd=None,
-        created_at=datetime.utcnow() - timedelta(days=1),
-        input_tokens=100,
-        output_tokens=50,
-        cache_read_tokens=10
-    )
-    r2 = AgentRunLog(
-        agent_name="K Kult",
-        status="SUCCESS",
-        model="claude-sonnet-4-6",
-        triggered_by="scheduler",
-        estimated_cost_usd=0.05,
-        created_at=None,
-        input_tokens=200,
-        output_tokens=100,
-        cache_read_tokens=25
-    )
-    db.add_all([r1, r2])
-
-    # DecisionJournal rows -- confluence_accuracy is untouched by the V2
-    # retirement (it doesn't read CampaignLog), kept as its own real data.
-    dj1 = DecisionJournal(symbol="BTC/USDT", decision_type="MAS_APPROVED", source="mas_flow",
-                          confluence_score=2, outcome_direction_correct=True)
-    dj2 = DecisionJournal(symbol="BTC/USDT", decision_type="MAS_APPROVED", source="mas_flow",
-                          confluence_score=2, outcome_direction_correct=False)
-    db.add_all([dj1, dj2])
+    # AgentRunLog (r1/r2) and DecisionJournal (dj1/dj2) fixture rows removed
+    # 2026-09-24 -- they only backed test_api_dashboard_accuracy/
+    # test_api_dashboard_costs_admin/test_api_dashboard_costs_basic_forbidden,
+    # all removed in the same pass along with the routes they tested
+    # (/api/dashboard/accuracy, /api/dashboard/costs -- both had gone
+    # permanently dead, see main.py's own removal notes).
 
     db.commit()
     db.close()
@@ -175,29 +149,13 @@ def test_api_dashboard_overview(basic_client):
     assert data["win_rate"] == 66.7    # 2 of 3 resolved orders positive
     assert data["net_r"] == 1.0        # +1.5 - 1.0 + 0.5
 
-def test_api_dashboard_accuracy(basic_client):
-    response = basic_client.get("/api/dashboard/accuracy")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["ok"] is True
-    # grade_accuracy removed outright 2026-09-23 (V2 Crown retirement) --
-    # see main.py's own docstring on this route for why. confluence_accuracy
-    # is untouched, real DecisionJournal data.
-    assert "grade_accuracy" not in data
-    assert "2" in data["confluence_accuracy"]
-    assert data["confluence_accuracy"]["2"]["total"] == 2
-
-def test_api_dashboard_costs_admin(admin_client):
-    response = admin_client.get("/api/dashboard/costs")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["ok"] is True
-    assert "days" in data
-    assert "agents" in data
-
-def test_api_dashboard_costs_basic_forbidden(basic_client):
-    response = basic_client.get("/api/dashboard/costs")
-    assert response.status_code == 403
+# test_api_dashboard_accuracy/test_api_dashboard_costs_admin/
+# test_api_dashboard_costs_basic_forbidden removed 2026-09-24 -- tested
+# /api/dashboard/accuracy and /api/dashboard/costs, both removed from
+# main.py in the same pass (confluence_accuracy had gone permanently
+# frozen once DecisionJournal's writer was deleted in 3e; costs had been
+# reading $0.00 forever, AgentRunLog's only writer had zero live callers
+# since 2026-08-17). See main.py's own removal notes on each route.
 
 def test_api_dashboard_mas_history(basic_client):
     response = basic_client.get("/api/dashboard/mas-history")

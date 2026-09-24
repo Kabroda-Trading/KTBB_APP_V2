@@ -9,7 +9,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/site.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- marked.js removed 2026-09-24 -- its only caller, openAuditModal(),
+         is removed in the same pass (its whole "Internal System Audits"
+         feature is gone). -->
     <style>
         .dash-wrap { max-width: 1400px; margin: 0 auto; padding: 40px 24px 80px; }
 
@@ -114,7 +116,9 @@
         <div class="tab-bar">
             <button class="tab-btn active" data-tab="overview">Overview</button>
             <button class="tab-btn" data-tab="live-system">Live System</button>
-            <button class="tab-btn" data-tab="analysis">Analysis</button>
+            <!-- "Analysis" tab button removed 2026-09-24 -- its content
+                 (tab-analysis) is removed in the same pass, see that div's
+                 own former location for the full removal note. -->
         </div>
         <!-- Parameters/Errors/Signal Accuracy tabs removed 2026-09-23 --
              Andy's call during the strategic site audit. All three backed
@@ -143,19 +147,15 @@
                 <div class="kpi-val" id="k-netr">—</div>
                 <div class="kpi-lbl">Net R (Traveler Evaluation)</div>
             </div>
-            <div class="kpi-card kpi-green" title="The one real number: sum of realized_pnl_r across every position executor_live_engine.py has actually closed on the real exchange, under the audited 50/50 tier-differentiated management rule.">
+            <div class="kpi-card kpi-green" title="The one real number: sum of realized_pnl_r across every position executor_live_e1_engine.py has actually closed on the real exchange, under the audited MGMT_E1_STACK single-full-exit management rule.">
                 <div class="kpi-val" id="k-executor-pnl">—</div>
                 <div class="kpi-lbl">Real Executor P&amp;L (<span id="k-executor-trades">0</span> closed)</div>
             </div>
-            <div class="kpi-card kpi-red">
-                <div class="kpi-val" id="k-spend">—</div>
-                <div class="kpi-lbl">7-Day Agent Spend</div>
-            </div>
-            <div class="kpi-card kpi-muted" title="Near-zero is structurally expected, not a bug: Anthropic's prompt cache has a 5-minute window, and most Kabroda agents (Senior Analyst, interpreters, auditor) fire once per session -- there's rarely a second call to the same system prompt within 5 minutes for it to hit. Reads mainly come from same-run retries and the live SA chat.">
-                <div class="kpi-val" id="k-cache">—</div>
-                <div class="kpi-lbl">Cache Hit Rate</div>
-            </div>
         </div>
+        <!-- "7-Day Agent Spend"/"Cache Hit Rate" KPI cards removed 2026-09-24
+             -- both read AgentRunLog, whose only writer (agent_core._call_
+             agent()) has had zero live callers since the 6-agent CrewAI crew
+             was retired 2026-08-17. Been showing $0.00/frozen data since. -->
 
         <!-- ── ROW 2: PnL + Approval ─────────────────────── -->
         <div class="chart-row row-2-1">
@@ -171,98 +171,39 @@
             </div>
         </div>
 
-        <!-- ── ROW 3: Confluence ──────────────────────────── -->
         <!-- "Directional Accuracy by Kinematic Grade" card removed
              2026-09-23 (V2 Crown retirement) -- it measured the 4H/1H
              independent candidate system, already retired under V2 itself
              (2026-08-30) with no Traveler equivalent (the Traveler has no
              "grade" concept at all). Same call already made for the
              Signal Accuracy tab, site commit 28821ac: remove a genuinely
-             dead metric rather than fabricate a replacement. -->
-        <div class="chart-row row-1-1">
-            <div class="chart-card">
-                <div class="chart-title">Accuracy by Confluence Score</div>
-                <div class="chart-sub">Score 0–3 (aligned timeframes at entry) vs. outcome</div>
-                <canvas id="chartConfluence" height="160"></canvas>
-            </div>
-        </div>
+             dead metric rather than fabricate a replacement.
 
-        <!-- ── ROW 4: Costs ──────────────────────────────── -->
-        <!-- "JEWEL Gate vs. Trade Outcome" card removed 2026-08-30 -- backed
-             /api/dashboard/jewel, already removed from main.py. -->
-        <div class="chart-row row-1-1">
-            <div class="chart-card" id="costCard" {% if not is_admin %}style="display: none;"{% endif %}>
-                <div class="chart-title">
-                    Agent Cost — 7-Day Stack
-                    <span class="admin-badge">Admin</span>
-                </div>
-                <div class="chart-sub">Daily spend by agent — $10.00 daily budget ceiling</div>
-                <canvas id="chartCost" height="160"></canvas>
-            </div>
-        </div>
+             "Accuracy by Confluence Score" card removed 2026-09-24 --
+             DecisionJournal-sourced, and DecisionJournal's only writer was
+             deleted in the V2 Crown retirement's own 3e sub-step -- had
+             been showing permanently frozen data since.
 
-        {% if is_admin %}
-        <!-- ── AGENT COST MONITOR (detail) ──────────────────── -->
-        <div class="chart-card" style="margin-bottom:18px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <div class="chart-title" style="margin-bottom:0;">Agent Cost Monitor <span class="admin-badge">Admin</span></div>
-                <div style="display:flex; gap:10px; align-items:center;">
-                    <span id="budgetPctLabel" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#8a6f57;">Loading…</span>
-                </div>
-                <!-- "RUN TEST CALL" button removed 2026-08-30 -- fired a real,
-                     paid LLM call for no operational reason. Andy's call: no
-                     LLM tied to Kabroda's cost path, period. -->
-            </div>
+             "JEWEL Gate vs. Trade Outcome" card removed 2026-08-30 -- backed
+             /api/dashboard/jewel, already removed from main.py.
 
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
-                <div style="background:#1a120e; border:1px solid #4d3526; border-radius:6px; padding:12px;">
-                    <div style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">24H Spend</div>
-                    <div id="todaySpend" style="font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:800; color:#f2e3cf; margin-top:4px;">—</div>
-                    <div id="todayBudget" style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#6b5345; margin-top:2px;">of $— daily cap</div>
-                </div>
-                <div style="background:#1a120e; border:1px solid #4d3526; border-radius:6px; padding:12px;">
-                    <div style="color:#8a6f57; font-size:9px; text-transform:uppercase; letter-spacing:1px;">7-Day Spend</div>
-                    <div id="weekSpend" style="font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:800; color:#f2e3cf; margin-top:4px;">—</div>
-                    <div id="weekCalls" style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#6b5345; margin-top:2px;">— total calls</div>
-                </div>
-            </div>
+             "Agent Cost — 7-Day Stack" card and the "Agent Cost Monitor"
+             (detail) panel removed 2026-09-24 -- both AgentRunLog-sourced,
+             whose only writer (agent_core._call_agent()) has had zero live
+             callers since the 6-agent CrewAI crew was retired 2026-08-17;
+             had been showing $0.00 since. /api/dashboard/costs and
+             /api/agents/cost removed from main.py in the same pass.
 
-            <div style="background:#1a120e; border-radius:4px; height:6px; overflow:hidden; margin-bottom:16px;">
-                <div id="budgetBar" style="height:100%; width:0%; background:#c8813a; transition:width 0.3s;"></div>
-            </div>
+             "Internal System Audits" table-section removed 2026-09-24 --
+             SystemAuditLog has had zero writers since the old Performance
+             Auditor was archived 2026-08-17 (see main.py's removal note on
+             run_weekly_scheduler(), a confirmed no-op since that same day);
+             had been permanently showing "no system audits yet" with a
+             message promising the next Sunday's run would populate it,
+             which could never happen. /api/dashboard/audits removed from
+             main.py in the same pass.
 
-            <div style="overflow-x:auto;">
-                <table style="width:100%; border-collapse:collapse; font-family:'JetBrains Mono',monospace; font-size:10px;">
-                    <thead>
-                        <tr style="border-bottom:1px solid #4d3526;">
-                            <th style="padding:6px 8px; text-align:left; color:#8a6f57;">Agent</th>
-                            <th style="padding:6px 8px; text-align:left; color:#8a6f57;">Trigger</th>
-                            <th style="padding:6px 8px; text-align:left; color:#8a6f57;">Status</th>
-                            <th style="padding:6px 8px; text-align:right; color:#8a6f57;">In</th>
-                            <th style="padding:6px 8px; text-align:right; color:#8a6f57;">Out</th>
-                            <th style="padding:6px 8px; text-align:right; color:#8a6f57;">CR</th>
-                            <th style="padding:6px 8px; text-align:right; color:#8a6f57;">Cost</th>
-                            <th style="padding:6px 8px; text-align:right; color:#8a6f57;">Time</th>
-                        </tr>
-                    </thead>
-                    <tbody id="costTableBody">
-                        <tr><td colspan="8" style="padding:20px; text-align:center; color:#6b5345;">Loading…</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {% endif %}
-
-        <!-- ── INTERNAL SYSTEM AUDITS ───────────────────────── -->
-        <div class="table-section" id="auditSection">
-            <div class="table-header" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" onclick="toggleAuditList()">
-                <span>Internal System Audits</span>
-                <span id="auditChevron" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#8a6f57; letter-spacing:1px;">▼ LOADING</span>
-            </div>
-            <div id="auditList"></div>
-        </div>
-
-        <!-- Newsletter Archive table removed 2026-08-30 -- backed
+             Newsletter Archive table removed 2026-08-30 -- backed
              /api/dashboard/newsletters, already removed from main.py. -->
 
         <!-- ── TRADE HISTORY TABLE ───────────────────────── -->
@@ -376,70 +317,31 @@
 
         </div>
 
-        <!-- ── TAB: ANALYSIS ────────────────────────────── -->
-        <div class="tab-content" id="tab-analysis">
-            <!-- "Run Analysis" card and "Audit-AI & Data Export" card
-                 removed 2026-09-23 (V2 Crown retirement, Andy's explicit
-                 "retire entirely" ruling) -- both were 100% CampaignLog-
-                 sourced (via /api/v1/system/analysis/trigger and
-                 /api/v1/system/audit-suggestions + /admin/export-audit-
-                 ledger, all removed from main.py in the same pass). "Recent
-                 Reports" below is a SEPARATE, unrelated feature (reads
-                 SystemAnalysisReport, no CampaignLog/V2 dependency) --
-                 kept, now alone in this row (same single-child-in-row-1-1
-                 pattern already used elsewhere on this page, e.g. the
-                 Agent Cost card below). -->
-            <div class="chart-row row-1-1" style="margin-bottom:18px;">
-                <div class="chart-card">
-                    <div class="chart-title">Recent Reports</div>
-                    <div class="chart-sub">Last 5 analysis reports</div>
-                    <div id="recentReports" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6b5345; padding:8px 0;">Loading reports…</div>
-                </div>
-            </div>
-            <!-- "Accuracy Report" / "Flagging Engine" cards removed
-                 2026-09-23 -- both called routes deleted 2026-08-17
-                 (/api/v1/system/accuracy-report(/trigger), /api/v1/system/
-                 flagging/trigger), same dead-route family as the removed
-                 Signal Accuracy tab. See main.py's own removal comment. -->
-        </div>
+        <!-- tab-analysis removed 2026-09-24, completing a pattern already
+             underway: "Run Analysis" and "Audit-AI & Data Export" were
+             removed 2026-09-23 (V2 Crown retirement), and "Accuracy
+             Report"/"Flagging Engine" were removed 2026-09-23 too (dead
+             routes since 2026-08-17) -- leaving "Recent Reports" as the
+             tab's only remaining content. That card read SystemAnalysisReport
+             via /api/v1/system/analysis/recent, but the only route that
+             ever wrote to that table was removed 2026-09-23 -- the list
+             could only ever be empty. With its last card gone, the tab
+             itself (button + content) is removed rather than left as an
+             empty page in the nav. See main.py's own removal notes for
+             the full route history.
 
-        <!-- Signal Accuracy tab removed 2026-09-23 -- every route it called
+        Signal Accuracy tab removed 2026-09-23 -- every route it called
              (RUN ACCURACY CHECK, the signal filter) was deleted 2026-08-17;
              see main.py's own removal comment above tab-analysis. -->
 
     </div>  <!-- ── end dash-wrap ── -->
 
-    <!-- ── AUDIT READER MODAL (id kept as nlModal -- originally shared with
-         the now-removed newsletter reader, openAuditModal() is its only
-         caller now) ──────────────────────────────────────────────────── -->
-    <div id="nlModal" style="display:none; position:fixed; inset:0;
-         background:rgba(20,13,9,0.96); backdrop-filter:blur(6px);
-         z-index:9999; overflow-y:auto; padding:40px 20px;">
-        <div style="max-width:820px; margin:0 auto; position:relative;
-                    background:#251a14; border:1px solid #4d3526;
-                    border-radius:8px; padding:36px 40px 48px;">
-            <button onclick="closeNlModal()"
-                    style="position:absolute; top:16px; right:16px;
-                           background:rgba(140,74,58,0.1); border:1px solid #8c4a3a;
-                           color:#8c4a3a; font-family:'JetBrains Mono',monospace;
-                           font-size:11px; font-weight:700; padding:6px 14px;
-                           border-radius:4px; cursor:pointer; letter-spacing:1px;">
-                ✕ CLOSE
-            </button>
-            <div id="nlModalMeta"
-                 style="font-family:'JetBrains Mono',monospace; font-size:10px;
-                        color:#6b5345; text-transform:uppercase; letter-spacing:1.5px;
-                        margin-bottom:14px;"></div>
-            <h2 id="nlModalHeadline"
-                style="font-family:'Playfair Display',serif; font-size:22px;
-                       font-weight:700; color:#f2e3cf; margin:0 0 24px;
-                       line-height:1.3; padding-bottom:16px;
-                       border-bottom:1px solid #4d3526;"></h2>
-            <div id="nlModalBody"
-                 style="color:#c9a880; font-family:'Inter',sans-serif;
-                        font-size:14px; line-height:1.85; white-space:pre-wrap;"></div>
-        </div>
-    </div>
+    <!-- nlModal (audit reader modal) removed 2026-09-24 -- its only caller,
+         openAuditModal(), was itself only reachable from the now-removed
+         "Internal System Audits" list. Originally shared with an even
+         earlier newsletter reader (removed 2026-08-30); fully orphaned now
+         that both its callers are gone. closeNlModal()/the Escape-key
+         listener removed in the same pass. -->
 
     <script>
     // ── ESPRESSO EXECUTIVE CHART PALETTE ──────────────────
@@ -494,15 +396,17 @@
 
             // 2026-09-07, PRODUCTION_READINESS.md Adjustment 2: the one
             // real performance number -- ExecutorOrder.realized_pnl_r,
-            // never merged with the deprecated CampaignLog sim above.
+            // never merged with net_r above (that's the Traveler evaluation
+            // harness's own separate running total, CampaignLog is gone).
             const execPnlEl = document.getElementById('k-executor-pnl');
             const execR = d.executor_realized_pnl_r ?? 0;
             execPnlEl.textContent = (execR >= 0 ? '+' : '') + execR + 'R';
             execPnlEl.style.color = execR > 0 ? C.green : (execR < 0 ? C.red : C.cream);
             document.getElementById('k-executor-trades').textContent = d.executor_closed_trades ?? 0;
 
-            document.getElementById('k-spend').textContent = '$' + d.spend_7d;
-            document.getElementById('k-cache').textContent = d.cache_hit_rate + '%';
+            // k-spend/k-cache (AgentRunLog-sourced) removed 2026-09-24 along
+            // with the spend_7d/cache_hit_rate fields themselves -- see
+            // main.py's /api/dashboard/overview removal note.
 
             const now = new Date();
             document.getElementById('tsLabel').textContent =
@@ -514,8 +418,6 @@
             document.getElementById('k-winrate').textContent  = 'ERR';
             document.getElementById('k-netr').textContent     = 'ERR';
             document.getElementById('k-netr').style.color     = C.red;
-            document.getElementById('k-spend').textContent    = 'ERR';
-            document.getElementById('k-cache').textContent    = 'ERR';
             document.getElementById('tsLabel').textContent    = 'Load Error';
             document.getElementById('tsLabel').style.color    = C.red;
         }
@@ -608,136 +510,12 @@
         }
     }
 
-    // ── ACCURACY CHARTS ───────────────────────────────────
-    async function loadAccuracy() {
-        try {
-            const r = await fetch('/api/dashboard/accuracy');
-            if (!r.ok) throw new Error("Status " + r.status);
-            const d = await r.json();
-            if (!d.ok) throw new Error(d.error || "Unknown error");
-
-            // "Grade accuracy" (4H/1H CampaignLog.kinematic_grade) removed
-            // 2026-09-23 (V2 Crown retirement) -- see main.py's
-            // /api/dashboard/accuracy docstring for why this was removed
-            // outright rather than given a Traveler equivalent.
-
-            // Confluence accuracy
-            const ca = d.confluence_accuracy;
-            const scores = Object.keys(ca).sort((a,b) => Number(a)-Number(b));
-            new Chart(document.getElementById('chartConfluence'), {
-                type: 'bar',
-                data: {
-                    labels: scores.map(s => 'Score ' + s),
-                    datasets: [
-                        { label: 'Correct %',   data: scores.map(s => ca[s].correct_pct),   backgroundColor: C.green,  borderRadius: 4 },
-                        { label: 'Incorrect %', data: scores.map(s => ca[s].incorrect_pct), backgroundColor: C.muted,   borderRadius: 4 },
-                    ]
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: true,
-                    plugins: { legend: { labels: { color: C.leather } }, tooltip: tooltipDefaults },
-                    scales: {
-                        x: { ...scalesXY.x },
-                        y: { ...scalesXY.y, max: 100, ticks: { color: C.leather, callback: v => v + '%' } },
-                    }
-                }
-            });
-        } catch (e) {
-            console.error("Failed to load accuracy:", e);
-            document.getElementById('chartConfluence').parentElement.innerHTML = `<div style="padding:40px; color:#8c4a3a; font-family:'JetBrains Mono',monospace; font-size:12px; text-align:center;">Failed to load confluence accuracy.</div>`;
-        }
-    }
-
-    // ── AGENT COSTS (ADMIN ONLY) ──────────────────────────
-    const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
-
-    async function loadCosts() {
-        if (!IS_ADMIN) {
-            document.getElementById('costCard').style.display = 'none';
-            return;
-        }
-        try {
-            const r = await fetch('/api/dashboard/costs');
-            if (!r.ok) throw new Error("Status " + r.status);
-            const d = await r.json();
-            if (!d.ok) throw new Error(d.error || "Unknown error");
-
-            const palette = [C.cognac, C.green, C.gold, C.amber, C.muted, C.red];
-            new Chart(document.getElementById('chartCost'), {
-                type: 'bar',
-                data: {
-                    labels: d.days,
-                    datasets: d.agents.map((ag, i) => ({
-                        label: ag.name,
-                        data:  ag.values,
-                        backgroundColor: palette[i % palette.length],
-                        borderRadius: 2,
-                    }))
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: true,
-                    plugins: { legend: { labels: { color: C.leather } }, tooltip: tooltipDefaults },
-                    scales: {
-                        x: { stacked: true, ...scalesXY.x },
-                        y: { stacked: true, ...scalesXY.y, ticks: { color: C.leather, callback: v => '$' + v.toFixed(3) } },
-                    }
-                }
-            });
-        } catch (e) {
-            console.error("Failed to load costs:", e);
-            document.getElementById('chartCost').parentElement.innerHTML = `<div style="padding:40px; color:#8c4a3a; font-family:'JetBrains Mono',monospace; font-size:12px; text-align:center;">Failed to load cost data.</div>`;
-        }
-    }
-
-    // ── AGENT COST MONITOR (detail) ────────────────────────
-    async function loadCostData() {
-        if (!document.getElementById('costTableBody')) return;
-        try {
-            const res = await fetch('/api/agents/cost');
-            const data = await res.json();
-            if (!data.ok) return;
-
-            const t = data.today;
-            const w = data.seven_day;
-            const pct = t.budget_pct || 0;
-
-            document.getElementById('todaySpend').textContent = '$' + t.total_usd.toFixed(4);
-            document.getElementById('todayBudget').textContent = 'of $' + t.budget_usd.toFixed(2) + ' daily cap';
-            document.getElementById('weekSpend').textContent = '$' + w.total_usd.toFixed(4);
-
-            const weekCalls = Object.values(w.by_agent || {}).reduce((s, a) => s + a.calls, 0);
-            document.getElementById('weekCalls').textContent = weekCalls + ' total calls';
-
-            document.getElementById('budgetPctLabel').textContent = pct.toFixed(1) + '% of daily budget';
-
-            const bar = document.getElementById('budgetBar');
-            bar.style.width = Math.min(pct, 100) + '%';
-            bar.style.background = pct >= 90 ? '#8c4a3a' : pct >= 70 ? '#a67c3a' : '#c8813a';
-
-            const tbody = document.getElementById('costTableBody');
-            const calls = data.last_10_calls || [];
-            if (calls.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" style="padding:20px; text-align:center; color:#6b5345;">No calls logged yet. Run a test call.</td></tr>';
-                return;
-            }
-            tbody.innerHTML = calls.map(r => {
-                const sc = r.status === 'SUCCESS' ? '#5e8c66' : r.status === 'BUDGET_BLOCKED' ? '#a67c3a' : '#8c4a3a';
-                const cr = r.cache_read_tokens > 0 ? `<span style="color:#5e8c66">${r.cache_read_tokens}</span>` : '0';
-                return `<tr style="border-bottom:1px solid #2a1e18;">
-                    <td style="padding:6px 8px; color:#c9a880;">${r.agent_name}</td>
-                    <td style="padding:6px 8px; color:#6b5345;">${r.triggered_by}</td>
-                    <td style="padding:6px 8px; color:${sc}; font-weight:700;">${r.status}</td>
-                    <td style="padding:6px 8px; text-align:right; color:#c9a880;">${r.input_tokens}</td>
-                    <td style="padding:6px 8px; text-align:right; color:#c9a880;">${r.output_tokens}</td>
-                    <td style="padding:6px 8px; text-align:right;">${cr}</td>
-                    <td style="padding:6px 8px; text-align:right; color:#c9a24a;">$${r.estimated_cost_usd.toFixed(6)}</td>
-                    <td style="padding:6px 8px; text-align:right; color:#6b5345; font-size:9px;">${(r.created_at || '').replace(' UTC','')}</td>
-                </tr>`;
-            }).join('');
-        } catch (e) {
-            console.error('Cost load failed:', e);
-        }
-    }
+    // loadAccuracy()/loadCosts()/loadCostData()/IS_ADMIN removed 2026-09-24
+    // -- their backing routes (/api/dashboard/accuracy, /api/dashboard/
+    // costs, /api/agents/cost) and the chart/panel cards that called them
+    // (Accuracy by Confluence Score, Agent Cost -- 7-Day Stack, Agent Cost
+    // Monitor) are all removed in the same pass. See main.py's own removal
+    // notes on each route for why each had gone permanently dead.
 
     // runTestCall() removed 2026-08-30 -- fired POST /api/agents/test-call,
     // a real paid LLM call with no operational purpose. Route removed too.
@@ -752,109 +530,12 @@
     // removed from main.py (JewelSnapshotLog's only writer, jewel_specialist.py,
     // is archived, nothing populates it anymore).
 
-    // ── INTERNAL SYSTEM AUDITS ────────────────────────────
-    window.auditArchive = {};
-    let auditListVisible = true;
-
-    function toggleAuditList() {
-        const list     = document.getElementById('auditList');
-        const chevron  = document.getElementById('auditChevron');
-        auditListVisible = !auditListVisible;
-        list.style.display   = auditListVisible ? 'block' : 'none';
-        const count = Object.keys(window.auditArchive).length;
-        chevron.textContent  = auditListVisible
-            ? `▼ ${count} REPORT${count !== 1 ? 'S' : ''}`
-            : `▶ ${count} REPORT${count !== 1 ? 'S' : ''} (COLLAPSED)`;
-    }
-
-    async function loadAudits() {
-        const list    = document.getElementById('auditList');
-        const chevron = document.getElementById('auditChevron');
-
-        try {
-            const r = await fetch('/api/dashboard/audits');
-            const d = await r.json();
-
-            if (!d.ok || !d.audits.length) {
-                list.innerHTML = `<div style="padding:20px 0; color:#5a3d2c; font-family:'Playfair Display',serif; font-style:italic; font-size:14px; text-align:center;">No system audits yet. The first will appear after the next Sunday 23:00 UTC scheduler run.</div>`;
-                chevron.textContent = '▼ 0 REPORTS';
-                return;
-            }
-
-            window.auditArchive = {};
-            d.audits.forEach(a => { window.auditArchive[a.id] = a; });
-
-            const count = d.audits.length;
-            chevron.textContent = `▼ ${count} REPORT${count !== 1 ? 'S' : ''}`;
-
-            list.innerHTML = d.audits.map((a, idx) => {
-                // First non-empty line as preview title
-                const firstLine = (a.audit_md || '')
-                    .split('\n')
-                    .map(l => l.trim())
-                    .find(l => l.length > 0) || 'System Audit';
-                const preview = firstLine.replace(/^[0-9]+\.\s*/, '').slice(0, 90);
-                const isLast  = idx === count - 1;
-
-                return `
-                <div onclick="openAuditModal(${a.id})"
-                     style="display:flex; align-items:center; gap:16px; padding:14px 20px;
-                            background:#251a14; border:1px solid #4d3526;
-                            border-top:${idx === 0 ? '1px solid #4d3526' : 'none'};
-                            border-radius:${idx === 0 ? '0 0 0 0' : '0'};
-                            ${isLast ? 'border-radius:0 0 8px 8px;' : ''}
-                            cursor:pointer; transition:background 0.15s;"
-                     onmouseover="this.style.background='#2d1e15'"
-                     onmouseout="this.style.background='#251a14'">
-                    <div style="font-family:'JetBrains Mono',monospace; font-size:10px;
-                                color:#6b5345; min-width:90px; letter-spacing:1px;">
-                        ${a.date_key}
-                    </div>
-                    <div style="flex:1; font-family:'Inter',sans-serif; font-size:13px;
-                                color:#c9a880; overflow:hidden; text-overflow:ellipsis;
-                                white-space:nowrap;">
-                        ${preview}
-                    </div>
-                    <div style="font-family:'JetBrains Mono',monospace; font-size:11px;
-                                color:#6b5345;">›</div>
-                </div>`;
-            }).join('');
-
-        } catch(e) {
-            list.innerHTML = `<div style="padding:20px; color:#8c4a3a; font-family:'JetBrains Mono',monospace; font-size:12px;">Failed to load audits.</div>`;
-            chevron.textContent = '▼ ERROR';
-        }
-    }
-
-    function openAuditModal(id) {
-        const a = window.auditArchive[id];
-        if (!a) return;
-        
-        const parts = [
-            'SYSTEM AUDIT',
-            a.date_key || '—',
-            a.created_at ? a.created_at.slice(0, 16).replace('T', ' ') + ' UTC' : ''
-        ].filter(Boolean);
-        document.getElementById('nlModalMeta').textContent = parts.join('  ·  ');
-        document.getElementById('nlModalHeadline').textContent = 'Systemic Adviser Report — ' + (a.date_key || '');
-        document.getElementById('nlModalBody').innerHTML       = marked.parse(a.audit_md || '(No content)');
-        document.getElementById('nlModal').style.display       = 'block';
-        document.body.style.overflow = 'hidden';
-    }
-
-    // loadNewsletters()/openNlModal()/window.nlArchive removed 2026-08-30 --
-    // called /api/dashboard/newsletters, already removed from main.py
-    // (NewsletterLog orphaned since publisher_crew archived). #nlModal itself
-    // stays -- openAuditModal() below reuses it for the audit reader.
-
-    function closeNlModal() {
-        document.getElementById('nlModal').style.display = 'none';
-        document.body.style.overflow = 'auto';
-    }
-
-    document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') closeNlModal();
-    });
+    // toggleAuditList()/loadAudits()/openAuditModal()/closeNlModal()/the
+    // Escape-key listener/window.auditArchive removed 2026-09-24 --
+    // "Internal System Audits" (its whole card + #nlModal reader) is
+    // removed in the same pass. loadNewsletters()/openNlModal()/
+    // window.nlArchive, this modal's original owner, were already removed
+    // 2026-08-30.
 
     // ── TAB SWITCHING ────────────────────────────────────
     document.addEventListener('click', function(e) {
@@ -1005,29 +686,12 @@
     // backing route (/api/v1/system/errors, already dead -- SystemAuditLog
     // has had zero live writers since the Performance Auditor was archived).
 
-    // ── ANALYSIS TAB ──────────────────────────────────────
-    // triggerAnalysis() removed 2026-09-23 (V2 Crown retirement, Audit-AI
-    // surface retirement) -- called /api/v1/system/analysis/trigger, also
-    // removed from main.py in the same pass.
-
-    async function loadRecentReports() {
-        try {
-            const r = await fetch('/api/v1/system/analysis/recent');
-            if (!r.ok) throw new Error('Status ' + r.status);
-            const d = await r.json();
-            const container = document.getElementById('recentReports');
-            if (!d.reports || !d.reports.length) {
-                container.innerHTML = '<div style="color:#6b5345;">No reports yet. Trigger an analysis above.</div>';
-            } else {
-                container.innerHTML = d.reports.map(rp => `<div style="padding:6px 0; border-bottom:1px solid #3a2820; display:flex; justify-content:space-between;">
-                    <span>${rp.query || 'Analysis'}</span>
-                    <span style="color:#6b5345;">${rp.status || '—'}</span>
-                </div>`).join('');
-            }
-        } catch (e) {
-            document.getElementById('recentReports').innerHTML = '<div style="color:#6b5345;">No reports yet.</div>';
-        }
-    }
+    // "ANALYSIS TAB" section removed 2026-09-24 -- triggerAnalysis() was
+    // already removed 2026-09-23; loadRecentReports() (called /api/v1/
+    // system/analysis/recent) removed now too, along with the whole
+    // Analysis tab it belonged to (its only remaining card). See
+    // templates' own tab-analysis removal note and main.py's route
+    // removal note for the full history.
 
     // ── INIT ──────────────────────────────────────────────
     // exportStartDate/exportEndDate init removed 2026-09-23 along with the
@@ -1036,13 +700,8 @@
         await Promise.all([
             loadOverview().catch(e => console.error("loadOverview failed", e)),
             loadMasHistory().catch(e => console.error("loadMasHistory failed", e)),
-            loadAccuracy().catch(e => console.error("loadAccuracy failed", e)),
-            loadCosts().catch(e => console.error("loadCosts failed", e)),
-            loadCostData().catch(e => console.error("loadCostData failed", e)),
-            loadAudits().catch(e => console.error("loadAudits failed", e)),
             loadLiveSystem().catch(e => console.error("loadLiveSystem failed", e)),
             loadHeartbeat().catch(e => console.error("loadHeartbeat failed", e)),
-            loadRecentReports().catch(e => console.error("loadRecentReports failed", e)),
         ]);
     }
 
@@ -1073,7 +732,8 @@
         if (_origInit) _origInit();
         // Polling for Live System tab data
         setInterval(loadHeartbeat, 60000);
-        setInterval(loadCostData, 30000);
+        // setInterval(loadCostData, ...) removed 2026-09-24 -- loadCostData()
+        // itself is gone, see the "AGENT COSTS" removal note above.
     };
     </script>
 </body>

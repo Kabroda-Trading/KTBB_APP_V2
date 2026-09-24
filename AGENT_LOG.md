@@ -7365,3 +7365,86 @@ ran the full test suite, a real boot check, and (where correctness-
 critical) mutation testing before being called done.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-24 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: dashboard dead-feature cleanup (post-V2-retirement follow-up)
+STATUS: resolved.
+
+**Not part of the V2 Crown retirement roadmap itself -- a separate,
+Andy-requested follow-up after reviewing the live dashboard post-
+retirement.** Andy flagged several sections that "we don't use anymore"
+(confluence score, agent cost, "internal audit systems," Recent
+Reports) and asked me to confirm and clean up. Verified each against
+source before touching anything, per this project's own discipline:
+
+- **Confluence score** ("Accuracy by Confluence Score" chart) --
+  confirmed: DecisionJournal-sourced, and DecisionJournal's only writer
+  (`_inject_decision_journal()`) was deleted in this session's own V2
+  retirement (3e sub-step). Frozen data since. Removed
+  `/api/dashboard/accuracy`, the chart card, `loadAccuracy()`.
+- **Agent cost** (both "Agent Cost -- 7-Day Stack" chart and "Agent Cost
+  Monitor" detail panel, plus the "7-Day Agent Spend"/"Cache Hit Rate"
+  KPI cards on the same tab, plus `/api/agents/cost` used by a THIRD,
+  separate panel -- found while investigating, not in Andy's original
+  list) -- confirmed: `AgentRunLog`'s only writer,
+  `agent_core._call_agent()`, has had zero live callers since the
+  6-agent CrewAI crew was retired 2026-08-17. Showing $0.00 for over a
+  month. Removed `/api/dashboard/costs`, `/api/agents/cost`,
+  `spend_7d`/`cache_hit_rate` from `/api/dashboard/overview`, all three
+  UI pieces, `loadCosts()`/`loadCostData()`/`IS_ADMIN`, and the
+  now-unused `agent_core` import from `main.py` (module itself
+  untouched).
+- **"Internal audit systems"** -- confirmed: `SystemAuditLog` has had
+  zero writers since the old Performance Auditor was archived
+  2026-08-17. Deeper than the dashboard card: `run_weekly_scheduler()`
+  itself has been a confirmed complete no-op since that same day (both
+  things it fired were disabled/archived) -- a background task that
+  woke up every Sunday 23:00 UTC, updated its own status dict, ran zero
+  real code, and slept another week, for over a month. Removed the
+  scheduler function, `_seconds_until_sunday_2300()` (its only caller),
+  its `app.state.weekly_task` boot wiring + shutdown cancel, and
+  `/api/dashboard/audits` + the "Internal System Audits" card +
+  `loadAudits()`/`toggleAuditList()`/`openAuditModal()`/`closeNlModal()`
+  + the now-orphaned `#nlModal` audit-reader modal + the marked.js CDN
+  script tag (its only consumer). Also found and cleaned 5 MORE
+  permanently-dead `scheduler_health_registry` entries beyond "weekly"
+  itself -- "jewel"/"daily_4h1h_audit" (archived 2026-08-17) and
+  "ledger_closing"/"trade_plan"/"dry_run_split" (deleted in this
+  session's own earlier 3e sub-step but never cleaned from this dict) --
+  all six were stuck permanently at their initial PENDING value,
+  showing six non-existent schedulers on the Active Runners table
+  forever.
+- **Recent Reports** (Analysis tab) -- already flagged earlier this
+  session as a real, pre-existing, unrelated-to-V2 orphan: the only
+  route that ever wrote to `SystemAnalysisReport` was removed 2026-09-23
+  (Audit-AI retirement), leaving this card unable to ever show real
+  data. Removed `GET /api/v1/system/analysis/recent` and `GET
+  /api/v1/system/analysis/{analysis_id}`, `loadRecentReports()`, and --
+  since this card was the Analysis tab's last remaining content -- the
+  whole tab (button + content div), rather than leave an empty page in
+  the nav.
+
+**Two small drive-by fixes caught while touching adjacent code**: a
+stale `executor_live_engine.py` reference in a KPI card's tooltip
+(deleted module; the real executor is `executor_live_e1_engine.py`),
+and a stale "never merged with the deprecated CampaignLog sim" comment
+(CampaignLog is fully deleted now, not "deprecated").
+
+**Verification**: full suite 510 passed (513 - 3 removed tests, exact),
+clean boot (plain import + real `TestClient` lifespan cycle), a
+logged-in dashboard render confirmed every dead element/function/route
+genuinely gone (checked actual element IDs and route status codes, not
+prose strings -- an earlier naive string-search check falsely flagged
+these as still-present because my own removal COMMENTS mention their
+names, a false alarm caught and corrected before relying on it),
+`/health` and `/api/v1/system/state` both confirmed showing only the 6
+real remaining schedulers.
+
+**On the separate "V2 in some emails" question**: checked every live
+email-building function in the codebase (`traveler_plan_notify.py`'s 4
+builders). None contain "V2"/"GATE_V2"/"MGMT_SPLIT" anywhere -- the old
+V2-flavored `trade_plan_notify.py` was deleted in this session's own
+retirement. Any V2 email Andy saw was almost certainly sent before the
+retirement (already in his inbox), not a live bug -- nothing found to
+fix here.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

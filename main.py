@@ -45,28 +45,33 @@ import executor_live_e1_engine
 # to this module. Real usage lives only in market_radar.py (dossier display,
 # not a decision input -- see decision_engine.py's own removal-note comment).
 import session_monitor
-import agent_core
+# agent_core import removed 2026-09-24 -- its only real (non-comment)
+# caller in this file, /api/agents/cost, is removed in the same pass.
+# The module itself is untouched (still importable, still has real
+# functions), just no longer imported here.
 import session_manager
 import lti_engine
 
 from datetime import datetime, timezone, timedelta
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, DecisionJournal, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, SystemAnalysisReport, SignalPerformanceLog, GravityMemory, EmailSubscriber
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, SessionLocal, MacroNarrativeLog, DecisionJournal, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, SignalPerformanceLog, GravityMemory, EmailSubscriber
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Removed 2026-09-24: "jewel"/"daily_4h1h_audit" (their schedulers were
+# archived 2026-08-17, no task has created either since) and "weekly"/
+# "ledger_closing"/"trade_plan"/"dry_run_split" (their schedulers were
+# deleted outright in the V2 Crown retirement, 2026-09-24) -- all six
+# were permanently stuck at their initial PENDING value forever, since
+# nothing anywhere in the codebase still wrote to them (confirmed via
+# grep before removing each). Left the Active Runners dashboard table
+# showing six schedulers that no longer exist, indefinitely "PENDING."
 scheduler_health_registry = {
     "senior_analyst": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
-    "jewel": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
-    "weekly": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
-    "daily_4h1h_audit": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "outcome_tracker": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "monthly_lti": {"last_run": None, "next_run": None, "status": "DISABLED", "error_count": 0, "last_error": None},
     "gravity_engine": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
-    "ledger_closing": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
-    "trade_plan": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "traveler_plan": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
-    "dry_run_split": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "executor_live_e1": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
 }
 
@@ -87,16 +92,6 @@ def _seconds_until_utc(hour: int, minute: int = 0) -> float:
     target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if target <= now:
         target += timedelta(days=1)
-    return (target - now).total_seconds()
-
-
-def _seconds_until_sunday_2300() -> float:
-    """Seconds from now until next Sunday at 23:00 UTC."""
-    now = datetime.now(timezone.utc)
-    days_ahead = (6 - now.weekday()) % 7   # Monday=0, Sunday=6
-    target = now.replace(hour=23, minute=0, second=0, microsecond=0) + timedelta(days=days_ahead)
-    if target <= now:
-        target += timedelta(weeks=1)
     return (target - now).total_seconds()
 
 
@@ -315,56 +310,17 @@ async def run_senior_analyst_scheduler() -> None:
 # archived, its only purpose was feeding this scheduler.
 
 
-async def run_weekly_scheduler() -> None:
-    """
-    Sunday 23:00 UTC: Elliott Wave Specialist runs first, then Performance Auditor.
-    Sleeps 1h after firing to avoid re-triggering within the same Sunday window.
-    """
-    print("[SCHEDULER] Weekly scheduler starting (Elliott Wave + Performance Auditor)...")
-    while True:
-        try:
-            seconds = _seconds_until_sunday_2300()
-            next_run_dt = datetime.now(timezone.utc) + timedelta(seconds=seconds)
-            scheduler_health_registry["weekly"]["next_run"] = next_run_dt.isoformat()
-            scheduler_health_registry["weekly"]["status"] = "WAITING"
-
-            print(f"[SCHEDULER] Weekly: next run in {seconds / 3600:.1f}h (Sunday 23:00 UTC)")
-            await asyncio.sleep(seconds)
-
-            scheduler_health_registry["weekly"]["status"] = "EXECUTING"
-
-            date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-            since_week = datetime.utcnow() - timedelta(days=7)
-
-            # Elliott Wave Specialist (LLM interpretation layer, elliott_wave_
-            # specialist.py) disabled 2026-08-17, same pass and same reason as
-            # run_mas_analysis() in kabroda_mas_flow.py -- part of "the agents"
-            # costing daily money. NOTE: this is the LLM interpreter only --
-            # kabroda_macro_engine.py's actual deterministic ZigZag wave-pivot
-            # detection is a separate subprocess on its own 24h schedule,
-            # untouched, out of scope for this rebuild (REBUILD_PLAN.md).
-
-            # Performance Auditor + Audit-AI (H1-H6, harness/audit_runner.py)
-            # archived 2026-08-17 -- Kabroda Audit AUDIT_FINDINGS.md confirmed
-            # both record-only; performance_auditor's one live-reaching path
-            # (SystemAuditLog -> Senior Analyst context) was already explicitly
-            # non-binding ("do not apply as rules"). Modules moved to _archive/.
-
-            scheduler_health_registry["weekly"]["last_run"] = datetime.now(timezone.utc).isoformat()
-            scheduler_health_registry["weekly"]["status"] = "WAITING"
-
-            # Sleep 1h to clear the Sunday 23:00 UTC window before recalculating next fire
-            await asyncio.sleep(3600)
-
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            print(f"[SCHEDULER] Weekly outer error: {e}")
-            scheduler_health_registry["weekly"]["error_count"] += 1
-            scheduler_health_registry["weekly"]["last_error"] = str(e)
-            scheduler_health_registry["weekly"]["status"] = "ERROR"
-            await asyncio.sleep(300)
+# run_weekly_scheduler() removed 2026-09-24 -- it had been a complete
+# no-op since 2026-08-17: both things it fired (the Elliott Wave
+# Specialist LLM interpreter and the Performance Auditor/Audit-AI H1-H6
+# suite) were disabled/archived that day, leaving a background task that
+# woke up every Sunday 23:00 UTC, updated its own status to EXECUTING,
+# ran zero real code, set status back to WAITING, and slept another week
+# -- confirmed via direct read of the function body before removing it,
+# not assumed. `_seconds_until_sunday_2300()` (its only caller) removed
+# with it. `scheduler_health_registry["weekly"]` entry removed below.
+# kabroda_macro_engine.py's own deterministic ZigZag wave-pivot detection
+# is unaffected -- always a separate 24h subprocess, never driven by this.
 
 
 # run_daily_4h1h_audit_scheduler (audit_ai.py, H7-H16) archived 2026-08-17 --
@@ -579,7 +535,9 @@ async def lifespan(app: FastAPI):
     app.state.senior_analyst_task   = asyncio.create_task(run_senior_analyst_scheduler())
     # jewel_task (run_jewel_scheduler) removed 2026-08-30 -- see that
     # function's old location for the removal note.
-    app.state.weekly_task           = asyncio.create_task(run_weekly_scheduler())
+    # weekly_task (run_weekly_scheduler) removed 2026-09-24 -- see that
+    # function's own removal note (it had been a confirmed no-op since
+    # 2026-08-17).
     # KULTI LTI scheduler pulled 2026-07-08 -- see WORK_LOG.md. The design mixed
     # trading-system paradigms (confluence-count tiers, borrowed JEWEL vocabulary,
     # N-based validation thinking) into what should be a from-first-principles
@@ -601,7 +559,6 @@ async def lifespan(app: FastAPI):
     app.state.traveler_plan_task.cancel()
     app.state.executor_live_e1_task.cancel()
     app.state.senior_analyst_task.cancel()
-    app.state.weekly_task.cancel()
     app.state.outcome_tracker_task.cancel()
     app.state.monitor_task.cancel()
 
@@ -2105,21 +2062,17 @@ async def export_traveler_log_csv(request: Request, since: Optional[str] = None,
     )
 
 
-@app.get("/api/agents/cost")
-async def api_agents_cost(request: Request, db: Session = Depends(get_db)):
-    """Returns 24h and 7-day agent spend summary. Admin only."""
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
-    summary = await asyncio.to_thread(agent_core.get_cost_summary)
-    return JSONResponse(summary)
-
-
 # /api/agents/test-call removed 2026-08-30 -- fired a real, paid
 # agent_core._call_agent() invocation for no operational purpose (an old
 # "Phase 1 infrastructure test" button). Andy's call: no LLM tied to
-# Kabroda's cost path, period. /api/agents/cost (above) stays -- it only
-# reads existing cost-log rows, doesn't generate new spend.
+# Kabroda's cost path, period.
+#
+# /api/agents/cost removed 2026-09-24 -- its only caller was the dashboard's
+# now-removed "Agent Cost Monitor" panel. agent_core.get_cost_summary()
+# (AgentRunLog-sourced) had been reading permanently empty/frozen data
+# since 2026-08-17 -- agent_core._call_agent(), AgentRunLog's only writer,
+# has had zero live callers since the 6-agent CrewAI crew was retired
+# that same day.
 
 
 @app.get("/indicators")
@@ -2545,93 +2498,32 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
         executor_closed_trades = db.query(func.count(_ExecutorOrder.id)).filter(
             _ExecutorOrder.realized_pnl_r.isnot(None),
         ).scalar() or 0
-        since_7d = (datetime.now(timezone.utc) - timedelta(days=7)).replace(tzinfo=None)
-        spend_raw = db.query(func.sum(AgentRunLog.estimated_cost_usd)).filter(
-            AgentRunLog.created_at >= since_7d).scalar()
-        spend_7d = round(spend_raw or 0.0, 4)
-        tok = db.query(func.sum(AgentRunLog.input_tokens), func.sum(AgentRunLog.cache_read_tokens)).filter(
-            AgentRunLog.created_at >= since_7d).first()
-        total_tok = (tok[0] or 0) + (tok[1] or 0)
-        cache_hit_rate = round((tok[1] or 0) / total_tok * 100, 1) if total_tok > 0 else 0.0
+        # spend_7d/cache_hit_rate (AgentRunLog-sourced) removed 2026-09-24 --
+        # AgentRunLog's only writer, agent_core._call_agent(), has had zero
+        # live callers since the 6-agent CrewAI crew was retired 2026-08-17;
+        # this had been showing permanently frozen/zero data ever since,
+        # same dead-metric family as the removed Agent Cost dashboard cards.
         return JSONResponse({"ok": True, "total_sessions": total, "fill_rate": fill_rate,
-            "win_rate": win_rate, "net_r": net_r, "spend_7d": spend_7d,
-            "cache_hit_rate": cache_hit_rate,
+            "win_rate": win_rate, "net_r": net_r,
             "executor_realized_pnl_r": executor_realized_pnl_r, "executor_closed_trades": executor_closed_trades})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-@app.get("/api/dashboard/accuracy")
-async def api_dashboard_accuracy(request: Request, db: Session = Depends(get_db)):
-    """2026-09-23 (V2 Crown retirement): `grade_accuracy` (4H/1H
-    CampaignLog.kinematic_grade vs. outcome) removed outright, not given a
-    Traveler equivalent -- the 4H/1H independent candidate system it
-    measured was already retired under V2 itself (2026-08-30, "clean up
-    the radar back to just the fifteen minute"), and the Traveler has no
-    "grade" concept at all. Fabricating a replacement for a system that no
-    longer exists would be worse than removing the chart -- same call this
-    project already made for the Signal Accuracy tab (site commit
-    `28821ac`). `confluence_accuracy` (DecisionJournal-sourced) is
-    untouched here -- it doesn't read CampaignLog -- but DecisionJournal
-    itself is V2-only (V2_RETIREMENT_MAP.md) and will need the same
-    treatment once that table is actually deleted in a later step; not
-    done here to keep this change scoped to the CampaignLog dependency."""
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    try:
-        from sqlalchemy import func
-        def _build_accuracy(rows):
-            acc = {}
-            for key, correct, count in rows:
-                k = str(key)
-                if k not in acc:
-                    acc[k] = {"correct": 0, "incorrect": 0}
-                if correct:
-                    acc[k]["correct"] += count
-                else:
-                    acc[k]["incorrect"] += count
-            result = {}
-            for k, c in acc.items():
-                total = c["correct"] + c["incorrect"]
-                result[k] = {"correct_pct": round(c["correct"]/total*100,1) if total else 0,
-                             "incorrect_pct": round(c["incorrect"]/total*100,1) if total else 0,
-                             "total": total}
-            return result
-        conf_rows = db.query(DecisionJournal.confluence_score,
-            DecisionJournal.outcome_direction_correct, func.count(DecisionJournal.id)).filter(
-            DecisionJournal.symbol == "BTC/USDT",
-            DecisionJournal.outcome_direction_correct.isnot(None),
-            DecisionJournal.confluence_score.isnot(None)
-        ).group_by(DecisionJournal.confluence_score, DecisionJournal.outcome_direction_correct).all()
-        return JSONResponse({"ok": True, "confluence_accuracy": _build_accuracy(conf_rows)})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.get("/api/dashboard/costs")
-async def api_dashboard_costs(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
-    try:
-        from collections import defaultdict
-        since_7d = (datetime.now(timezone.utc) - timedelta(days=7)).replace(tzinfo=None)
-        rows = db.query(AgentRunLog).filter(
-            AgentRunLog.created_at >= since_7d, AgentRunLog.status == "SUCCESS").all()
-        daily = defaultdict(lambda: defaultdict(float))
-        all_agents = set()
-        for row in rows:
-            created_at = row.created_at or datetime.utcnow()
-            day = created_at.strftime("%m/%d")
-            daily[day][row.agent_name] += (row.estimated_cost_usd or 0.0)
-            all_agents.add(row.agent_name)
-        days_list = [(datetime.utcnow() - timedelta(days=i)).strftime("%m/%d") for i in range(6, -1, -1)]
-        agents_sorted = sorted(all_agents)
-        return JSONResponse({"ok": True, "days": days_list,
-            "agents": [{"name": ag, "values": [round(daily[d][ag], 5) for d in days_list]} for ag in agents_sorted]})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+# /api/dashboard/accuracy and /api/dashboard/costs removed 2026-09-24 --
+# both had gone fully dead: `grade_accuracy` was already removed outright
+# 2026-09-23 (see the git history of this comment's old location for that
+# reasoning), which left /api/dashboard/accuracy computing only
+# confluence_accuracy -- DecisionJournal-sourced, and DecisionJournal's
+# only writer (_inject_decision_journal(), kabroda_mas_flow.py) was
+# deleted in the V2 Crown retirement's own 3e sub-step, so that chart had
+# been showing permanently frozen data since. /api/dashboard/costs read
+# AgentRunLog, whose only writer (agent_core._call_agent()) has had zero
+# live callers since the 6-agent CrewAI crew was retired 2026-08-17 --
+# that chart had been showing $0.00 for over a month. Andy's call, live
+# on the dashboard: pull dead metrics rather than leave them looking
+# active. Confirmed via grep: neither route had a caller anywhere except
+# templates/suite_dashboard.html, both removed from it in the same pass.
 
 
 @app.get("/api/dashboard/mas-history")
@@ -2721,26 +2613,13 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
 # publication" rules out directly, not just incidentally dead.
 
 
-@app.get("/api/dashboard/audits")
-async def api_dashboard_audits(request: Request, db: Session = Depends(get_db)):
-    """Returns the last 5 SystemAuditLog rows for the Dashboard audit viewer."""
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    try:
-        rows = db.query(SystemAuditLog).order_by(SystemAuditLog.id.desc()).limit(5).all()
-        data = [
-            {
-                "id":         r.id,
-                "date_key":   r.date_key,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "audit_md":   r.audit_md or "",
-            }
-            for r in rows
-        ]
-        return JSONResponse({"ok": True, "audits": data})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+# /api/dashboard/audits removed 2026-09-24 -- the "Internal System Audits"
+# dashboard viewer, reading the last 5 SystemAuditLog rows. That table has
+# had zero writers since the old Performance Auditor was archived
+# 2026-08-17 (see run_weekly_scheduler()'s own removal note, same commit)
+# -- the viewer had been permanently showing "no system audits yet" since
+# then, with a message promising the next Sunday's scheduler run would
+# populate it, which could never happen once that run became a no-op.
 
 
 @app.get("/api/health/audit-heartbeat")
@@ -2918,74 +2797,17 @@ async def get_system_state(request: Request, db: Session = Depends(get_db)):
 # POST /api/v1/system/analysis (no suffix) removed 2026-09-23 (V2 Crown
 # retirement, Audit-AI surface retirement) -- CampaignLog-sourced (30-day
 # win rate/PnL) and, separately, confirmed to have zero frontend caller
-# anywhere in this repo -- the live "Recent Reports" list below
-# (/api/v1/system/analysis/recent) and single-report view read from
-# SystemAnalysisReport, but this was the ONLY route that ever wrote to
-# that table, so it was already unreachable from any real UI before this
+# anywhere in this repo -- it was the ONLY route that ever wrote to
+# SystemAnalysisReport, so the "Recent Reports" list and single-report
+# view below were already unreachable from any real UI before that
 # removal. AnalysisRequest (its now-unused request-body Pydantic model)
 # removed with it.
-
-@app.get("/api/v1/system/analysis/recent")
-async def get_recent_analysis_reports(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-
-    try:
-        reports = db.query(SystemAnalysisReport).order_by(
-            SystemAnalysisReport.id.desc()
-        ).limit(5).all()
-
-        return JSONResponse({
-            "ok": True,
-            "reports": [
-                {
-                    "analysis_id": r.analysis_id,
-                    "query": r.query,
-                    "status": r.status,
-                    "error_message": r.error_message,
-                    "created_at": r.created_at.isoformat() if r.created_at else None
-                }
-                for r in reports
-            ]
-        })
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.get("/api/v1/system/analysis/{analysis_id}")
-async def get_system_analysis_by_id(analysis_id: str, request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-        
-    try:
-        report = db.query(SystemAnalysisReport).filter(SystemAnalysisReport.analysis_id == analysis_id).first()
-        if not report:
-            return JSONResponse({"ok": False, "error": "Analysis not found"}, status_code=404)
-            
-        parsed_report = {}
-        if report.report_json:
-            parsed_report = json.loads(report.report_json)
-            if "findings" not in parsed_report:
-                parsed_report["findings"] = parsed_report.get("summary", "System stable.")
-                
-        return JSONResponse({
-            "ok": True,
-            "analysis_id": report.analysis_id,
-            "query": report.query,
-            "status": report.status,
-            "error_message": report.error_message,
-            "report": parsed_report,
-            "created_at": report.created_at.isoformat() if report.created_at else None
-        })
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
+#
+# GET /api/v1/system/analysis/recent and GET /api/v1/system/analysis/
+# {analysis_id} removed 2026-09-24, completing the cleanup -- with the
+# writer already gone since 2026-09-23, both routes could only ever
+# return an empty list / 404, and the dashboard's "Recent Reports" card
+# that called the first one is removed in the same pass.
 
 # POST /api/v1/system/analysis/trigger removed 2026-09-23 (V2 Crown
 # retirement, Audit-AI surface retirement) -- this was the live dashboard's
