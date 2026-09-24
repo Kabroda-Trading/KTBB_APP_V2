@@ -6541,3 +6541,15 @@ convention, not inventing a new key shape). Full plan:
 local plan-mode file, not in this repo).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-23 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: new public Traveler-native radar data source (commit `8473ea6`)
+STATUS: open. Backend half of sub-step 1 only -- the previous entry's own
+"STATUS: open. Not yet committed/pushed" line went stale the moment this
+landed, since the log entry and the code shipped in the same commit this
+time (a one-off deviation from this session's usual two-commit rhythm --
+feature commit, then a separate "AGENT_LOG: shipped" commit -- restored
+here). Pushed to `origin/main` (`afd9e39..8473ea6`). Frontend half of
+sub-step 1 (`templates/market_radar.html` rework) still open -- see the
+previous entry's "Still open" section for the full remaining scope.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
