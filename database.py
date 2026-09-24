@@ -690,6 +690,16 @@ def init_db():
         except Exception:
             pass
 
+    # --- SENIOR ANALYST DEDUP FIX (2026-09-24, V2 Crown retirement) --
+    # see SessionLock.mas_completed_at's own comment for the full
+    # reasoning. ---
+    for _col in ["mas_completed_at DATETIME"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE session_locks ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -749,8 +759,23 @@ class SessionLock(Base):
     session_id = Column(String, index=True, nullable=False)
     date_key = Column(String, index=True, nullable=False)
     lock_time = Column(Integer, nullable=False)
-    
-    packet_data = Column(String, nullable=False) 
+
+    packet_data = Column(String, nullable=False)
+
+    # 2026-09-24 (V2 Crown retirement) -- the real completion-marker
+    # main.py's Senior Analyst scheduler dedup check needs. NULL until
+    # kabroda_mas_flow.py::run_mas_analysis() runs to completion for this
+    # row's (symbol, session_id, date_key); set unconditionally at the
+    # end of that function, independent of whether a tradeable plan was
+    # actually produced. Deliberately NOT the same signal as "this row
+    # exists" -- SessionLock is created by battlebox_pipeline.py BEFORE
+    # run_mas_analysis() is even invoked, so existence alone can't tell
+    # the restart-recovery logic "was this locked" from "did the
+    # analysis pipeline finish" (see main.py's dedup call sites for the
+    # full reasoning -- this replaced a CampaignLog.is_canonical check
+    # that stopped being valid once CampaignLog's own writer, V2's
+    # decision_engine.py, was retired).
+    mas_completed_at = Column(DateTime, nullable=True)
 
 # ---------------------------------------------------------
 # MISSION LEDGER (AUTOMATED TRADE TRACKER + MAS ORCHESTRATION)

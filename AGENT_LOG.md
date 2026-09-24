@@ -6902,3 +6902,49 @@ existence swap the original retirement map suggested -- see the earlier
 research-pass entries above for why that's wrong).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-24 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: Senior Analyst dedup fix -- roadmap step 3, sub-step 3d of 3f
+STATUS: resolved.
+
+The retirement map's own suggested fix for this ("swap `CampaignLog.
+is_canonical` for `SessionLock` existence") is wrong, confirmed by this
+session's own research pass (two entries back): `SessionLock` is created
+BEFORE `run_mas_analysis()` even runs (`battlebox_pipeline.py`), so
+existence alone answers "was this locked," not "did the analysis
+pipeline finish" -- collapsing exactly the restart-recovery distinction
+`_fire_senior_analyst()` depends on. A real 2026-09-19 production case
+already exercised this exact gap once (a journey crossed on an earlier
+date_key, still active) -- a naive swap would have silently regressed it.
+
+**Shipped**: new nullable `SessionLock.mas_completed_at` column (`database.py`,
+same raw-`ALTER TABLE` pattern every other schema addition here uses).
+`kabroda_mas_flow.py::run_mas_analysis()` sets it unconditionally right
+before its `return` -- deliberately independent of whether the V2 block
+or the Traveler injection block (6c) actually produced a plan, so it
+means "the pipeline ran," not "a plan was written" (a day where 6c's own
+`bo and bd and bo > bd` check is false would otherwise falsely loop-retry
+forever, the same class of bug already hit once with `MacroNarrativeLog`).
+Wrapped in the same non-blocking try/except pattern every other write in
+that function already uses. Both `main.py` dedup call sites rewired from
+`CampaignLog.is_canonical==True` to `SessionLock.mas_completed_at.isnot(
+None)`.
+
+**5 new tests** (`tests/test_senior_analyst_dedup.py`), covering the real
+three-state distinction a bare existence check can't make (no lock / locked-
+but-not-completed / completed) plus the write side itself -- the last one
+mocks only `market_data`'s network fetches (fast, deterministic) and lets
+`decision_engine.py`/`trade_plan.py`/the Traveler injection all run for
+real against the resulting empty-candle input, which degrades gracefully
+to a real STAND_DOWN/WAITING_CROSS decision rather than crashing -- more
+useful signal than mocking everything down to a trivial no-op. **2 real
+mutation tests**: reverting the read side to a bare existence check makes
+the restart-recovery test silently skip a session that never actually
+completed; disabling the write makes the completion test fail. Full suite
+731 passed (726 + 5), clean boot.
+
+**Roadmap status**: 3d of 3f done. Next: 3e -- the surgical edits to
+shared files (`kabroda_mas_flow.py`'s V2 block, `executor_engine.py`,
+`executor_plan_builder.py`, `executor_accounts.py`,
+`templates/executor_admin.html`, `main.py`'s `lifespan()`).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

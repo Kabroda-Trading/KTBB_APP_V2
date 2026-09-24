@@ -146,14 +146,20 @@ async def _fire_senior_analyst(date_key: str) -> None:
     """
     db = SessionLocal()
     try:
-        # Dedup source switched 2026-08-28: MacroNarrativeLog's senior_analyst
-        # rows stopped being written this session (narrative text had been
-        # permanently empty since the LLM step was removed) -- CampaignLog is
-        # the real, canonical "did this already run" signal.
-        existing_brief = db.query(CampaignLog).filter(
-            CampaignLog.symbol == "BTC/USDT",
-            CampaignLog.date_key == date_key,
-            CampaignLog.is_canonical == True,
+        # Dedup source switched 2026-08-28 (MacroNarrativeLog -> CampaignLog),
+        # then again 2026-09-24 (V2 Crown retirement): CampaignLog.is_canonical
+        # is only ever set by decision_engine.py's own V2 write path, which is
+        # being retired -- SessionLock.mas_completed_at is the real, canonical
+        # "did this already run" signal now. Deliberately NOT a bare
+        # SessionLock-existence check -- SessionLock is created BEFORE
+        # run_mas_analysis() even runs (battlebox_pipeline.py), so existence
+        # alone can't distinguish "locked" from "analysis pipeline finished"
+        # (see SessionLock.mas_completed_at's own comment for the full
+        # reasoning this replaces).
+        existing_brief = db.query(SessionLock).filter(
+            SessionLock.symbol == "BTC/USDT",
+            SessionLock.date_key == date_key,
+            SessionLock.mas_completed_at.isnot(None),
         ).first()
         if existing_brief:
             print(f"[SCHEDULER] Senior Analyst already ran for {date_key} — skipping")
@@ -246,12 +252,15 @@ async def run_senior_analyst_scheduler() -> None:
         print(f"[SCHEDULER] Boot check: looking for today's Senior Analyst brief ({date_key})...")
         db = SessionLocal()
         try:
-            # Dedup source switched 2026-08-28 -- see _fire_senior_analyst()'s
-            # matching comment above.
-            existing = db.query(CampaignLog).filter(
-                CampaignLog.symbol == "BTC/USDT",
-                CampaignLog.date_key == date_key,
-                CampaignLog.is_canonical == True,
+            # Dedup source switched 2026-08-28, then 2026-09-24 -- see
+            # _fire_senior_analyst()'s matching comment above for the full
+            # reasoning (SessionLock.mas_completed_at, not a bare existence
+            # check, not CampaignLog.is_canonical -- that table's only
+            # writer is being retired).
+            existing = db.query(SessionLock).filter(
+                SessionLock.symbol == "BTC/USDT",
+                SessionLock.date_key == date_key,
+                SessionLock.mas_completed_at.isnot(None),
             ).first()
         finally:
             db.close()
